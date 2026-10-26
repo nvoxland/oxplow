@@ -11,7 +11,7 @@ use super::actions::{page_form, run_page_action, submit_page_form, PageActionCal
 use super::open_runs::PageRuns;
 use super::runner::{RunRequest, RunTarget};
 use super::test_support::fixture;
-use crate::extensions::LensContext;
+use crate::extensions::ViewContext;
 
 async fn titles(svc: &crate::Services) -> Vec<String> {
     let r = svc
@@ -62,7 +62,7 @@ async fn a_page_action_runs_with_the_runs_params_and_a_row_action_on_its_row() {
             RunRequest {
                 target: RunTarget::Page("acme/acts".into()),
                 params: BTreeMap::new(),
-                ctx: LensContext::default(),
+                ctx: ViewContext::default(),
                 viewer: Actor::Human,
             },
             "w",
@@ -111,7 +111,7 @@ async fn a_page_action_reads_the_first_loaders_row() {
             RunRequest {
                 target: RunTarget::Page("acme/session".into()),
                 params: BTreeMap::new(),
-                ctx: LensContext::default(),
+                ctx: ViewContext::default(),
                 viewer: Actor::Human,
             },
             "w",
@@ -136,7 +136,7 @@ async fn a_form_node_starts_from_its_defaults_and_submits() {
             RunRequest {
                 target: RunTarget::Page("acme/new-item".into()),
                 params: BTreeMap::new(),
-                ctx: LensContext::default(),
+                ctx: ViewContext::default(),
                 viewer: Actor::Human,
             },
             "w",

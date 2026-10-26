@@ -1,7 +1,7 @@
 import { afterEach, expect, mock, test } from "bun:test";
 import { cleanup, createEvent, fireEvent, render, waitFor } from "@testing-library/react";
 
-import type { Lens, LensAction, LensPart, LensRun } from "../tauri-bridge/generated/bindings.js";
+import type { Lens, PageAction, LensPart, LensRun } from "../tauri-bridge/generated/bindings.js";
 import { LENS_ROW_DRAG_MIME } from "../dragMimes.js";
 
 // A document's sections and a dashboard's tiles are other lenses (or
@@ -209,8 +209,8 @@ test("a part that declares a param the page's row has no value for is left out",
 // A dashboard whose rows are its tiles (`tile:`): one tile per row after
 // its static ones, which drag to reorder, right-click and take keys.
 
-const action = (over: Partial<LensAction>): LensAction =>
-  ({ id: "x", label: "X", command: "oxplow.dashboard.update_item", input: {}, row: true, group: null, form: false, fixed: [], choices: {}, then: "open", when: null, primary: false, drag: false, bulk: false, key: null, edit: false, editField: null, ...over }) as LensAction;
+const action = (over: Partial<PageAction>): PageAction =>
+  ({ id: "x", label: "X", command: "oxplow.dashboard.update_item", input: {}, row: true, group: null, form: false, fixed: [], choices: {}, then: "open", when: null, primary: false, drag: false, bulk: false, key: null, edit: false, editField: null, ...over }) as PageAction;
 const reorder = action({ id: "reorder", label: "Reorder", command: "oxplow.dashboard.reorder_items", drag: true, input: { dashboard: "{{param.id}}", order: "{{order.id}}" } });
 const remove = action({ id: "remove", label: "Remove", command: "oxplow.dashboard.remove_item", key: "Delete", input: { item: "{{row.id}}" } });
 const editText = action({ id: "edit-text", label: "Save", edit: true, fixed: ["item"], editField: "text", input: { item: "{{row.id}}", text: "{{row.text}}" } });
@@ -221,7 +221,7 @@ const tileRows = [
   ["dti2", null, null, null, "SELECT 42 AS answer", "number", null],
   ["dti3", null, null, null, null, null, "Section"],
 ];
-const tiled = (actions: LensAction[]): LensRun =>
+const tiled = (actions: PageAction[]): LensRun =>
   ({
     lens: {
       ...base,

@@ -1,17 +1,17 @@
 import { expect, test } from "../../support/fixtures.js";
 import { openFromLauncher } from "../../support/ui.js";
 
-/// Settings → AI is foundation lenses: a provider is added through a form
+/// Settings → AI is the foundation Settings page's AI section: a provider is added through a form
 /// whose key field is a secret, a role is bound to it from its row, and
 /// Remove asks first.
 test("a provider is added, a role bound to it, and the provider removed", async ({ page }) => {
   await page.goto("/");
   await openFromLauncher(page, "Settings: AI");
   // With no provider the list has nothing to show: it folds into the "Nothing found" line.
-  const providers = page.getByTestId("lens-part-ai-providers");
-  const form = page.getByTestId("lens-part-ai-provider-form");
-  const roles = page.getByTestId("lens-part-ai-roles");
-  await expect(page.getByTestId("lens-document-nothing-found")).toContainText("AI providers");
+  const providers = page.locator('[data-node="ai-providers"]');
+  const form = page.locator('[data-node="ai-provider-form"]');
+  const roles = page.locator('[data-node="ai-roles"]');
+  await expect(page.getByTestId("page-nothing-found")).toContainText("AI providers");
 
   await form.getByTestId("lens-form-fields-id").fill("or");
   await form.getByTestId("lens-form-fields-kind").selectOption("openrouter");
@@ -39,5 +39,5 @@ test("a provider is added, a role bound to it, and the provider removed", async 
   await providers.getByRole("row", { name: /or\b/ }).click({ button: "right" });
   await page.getByTestId("menu-item-lens-action-remove").click();
   await page.getByTestId("lens-action-confirm-run").click();
-  await expect(page.getByTestId("lens-document-nothing-found")).toContainText("AI providers");
+  await expect(page.getByTestId("page-nothing-found")).toContainText("AI providers");
 });

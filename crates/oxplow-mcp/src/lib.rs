@@ -819,6 +819,7 @@ mod tests {
         deploy_sources(&services).await;
         services.client_reports.report(
             oxplow_app::client_reports::TabReport {
+                runs: Vec::new(),
                 client: "window".into(),
                 focused: true,
                 visible: true,

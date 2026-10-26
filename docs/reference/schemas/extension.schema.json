@@ -64,14 +64,6 @@
             "$ref": "#/definitions/IntentExample"
           },
           "default": []
-        },
-        "prompts": {
-          "description": "Questions it helps answer, offered to the person with an Ask\nbutton (the catalog; pages for a ref of `about`'s kind).",
-          "type": "array",
-          "items": {
-            "$ref": "#/definitions/IntentPrompt"
-          },
-          "default": []
         }
       },
       "additionalProperties": false,
@@ -366,26 +358,6 @@
       "additionalProperties": false,
       "required": [
         "name"
-      ]
-    },
-    "IntentPrompt": {
-      "description": "A question an extension helps answer. `about` is a ref kind\n(`commit`, `file`, `effort`): a page for a ref of that kind suggests it.",
-      "type": "object",
-      "properties": {
-        "prompt": {
-          "type": "string"
-        },
-        "about": {
-          "type": [
-            "string",
-            "null"
-          ],
-          "default": null
-        }
-      },
-      "additionalProperties": false,
-      "required": [
-        "prompt"
       ]
     },
     "ExportFile": {
@@ -2371,7 +2343,7 @@
         "Activity",
         "Knowledge",
         "Data",
-        "Lenses",
+        "Dashboards",
         "System"
       ]
     },

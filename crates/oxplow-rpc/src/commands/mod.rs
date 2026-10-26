@@ -30,7 +30,6 @@ pub mod extensions;
 pub mod git;
 pub mod hooks;
 pub mod lsp;
-pub mod notes;
 pub mod page_refs;
 pub mod page_visit;
 pub mod pages;

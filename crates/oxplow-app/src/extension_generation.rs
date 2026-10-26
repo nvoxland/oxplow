@@ -127,10 +127,6 @@ impl PreparedExtensionDatabase {
             page_rows(extension, &mut pages, &mut page_answers, &mut page_params);
         }
         let listed = snapshot.extensions().iter().map(extension_row).collect();
-        let prompts = crate::prompt_catalog::prompt_catalog(snapshot.extensions())
-            .into_iter()
-            .map(prompt_row)
-            .collect();
         let config_keys = oxplow_config::keys::config_keys()
             .into_iter()
             .map(|k| oxplow_db::catalog_listing_store::ConfigKeyRow {
@@ -159,7 +155,6 @@ impl PreparedExtensionDatabase {
                 page_answers,
                 page_params,
                 extensions: listed,
-                prompts,
                 config_keys,
             },
             capabilities,
@@ -267,19 +262,6 @@ fn variant_name(value: &impl serde::Serialize) -> String {
     match serde_json::to_value(value) {
         Ok(serde_json::Value::String(name)) => name,
         _ => String::new(),
-    }
-}
-
-fn prompt_row(
-    p: crate::prompt_catalog::CatalogPrompt,
-) -> oxplow_db::catalog_listing_store::PromptRow {
-    let crate::prompt_catalog::PromptSource::Extension(source) = p.source;
-    let source_kind = "extension";
-    oxplow_db::catalog_listing_store::PromptRow {
-        source_kind: source_kind.to_string(),
-        source,
-        prompt: p.prompt,
-        about: p.about,
     }
 }
 

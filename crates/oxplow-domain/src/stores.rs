@@ -14,7 +14,7 @@ use crate::comment::CommentThread;
 use crate::hook::{AgentStatus, AgentTurn};
 use crate::ids::{AgentSessionId, AgentTurnId, CommentId, StreamId, ThreadId};
 use crate::stream::Stream;
-use crate::thread::{Thread, ThreadNote};
+use crate::thread::Thread;
 use crate::DomainError;
 
 #[async_trait]
@@ -79,13 +79,6 @@ pub trait AgentSessionStore: Send + Sync {
         thread: &ThreadId,
     ) -> Result<Vec<AgentSession>, DomainError>;
     async fn open(&self, new: &NewAgentSession) -> Result<AgentSession, DomainError>;
-}
-
-#[async_trait]
-pub trait ThreadNoteStore: Send + Sync {
-    // Written by `oxplow.knowledge.add_note` / `update_note`
-    // (`oxplow_db::thread_note_store`).
-    async fn list_for_thread(&self, thread: &ThreadId) -> Result<Vec<ThreadNote>, DomainError>;
 }
 
 #[async_trait]

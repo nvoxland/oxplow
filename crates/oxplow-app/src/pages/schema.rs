@@ -21,9 +21,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::extensions::{
     holds_one_row, parse_actions, shape_problem, typed, AlertFile, LauncherCategory, Lens,
-    LensAction, LensAlert, LensChart, LensCode, LensColumn, LensContext, LensCustom, LensDiff,
-    LensEditor, LensEmbed, LensForm, LensGroup, LensHunks, LensMarkdown, LensParam, LensProvenance,
-    LensSteps, LensTerminal, LensTimeline, LensTree, LensViz, ParamRole, Renders, TileSize,
+    LensChart, LensCode, LensCustom, LensDiff, LensEditor, LensEmbed, LensForm, LensGroup,
+    LensHunks, LensMarkdown, LensSteps, LensTerminal, LensTimeline, LensTree, LensViz, PageAction,
+    PageAlert, PageColumn, PageParam, PageProvenance, ParamRole, Renders, TileSize, ViewContext,
 };
 
 /// A loaded page.
@@ -46,7 +46,7 @@ pub struct Page {
     pub keywords: Option<String>,
     /// Its params, typed, each with its role (`resource` names what it
     /// shows, in its URI's `?`; `filter` and `selection` ride in the `#`).
-    pub params: Vec<LensParam>,
+    pub params: Vec<PageParam>,
     /// The resources it renders (`oxplow/commit`); empty: a route.
     #[serde(rename = "for")]
     pub renders: Vec<String>,
@@ -59,8 +59,8 @@ pub struct Page {
     pub needs: Vec<String>,
     /// Its whole-page actions (a row action goes on the viz node that
     /// shows the row).
-    pub actions: Vec<LensAction>,
-    pub alert: Option<LensAlert>,
+    pub actions: Vec<PageAction>,
+    pub alert: Option<PageAlert>,
     /// The MCP tool it is also offered as, namespaced.
     pub tool: Option<String>,
     pub answers: Vec<PageAnswer>,
@@ -69,7 +69,7 @@ pub struct Page {
     pub view: Node,
     /// A second tree drawn in the page's rail.
     pub rail: Option<Node>,
-    pub origin: LensProvenance,
+    pub origin: PageProvenance,
 }
 
 impl Page {
@@ -155,7 +155,7 @@ pub struct LoaderDecl {
     pub loader: Loader,
     /// Column metadata its nodes default to, and the row columns it
     /// declares (what an embed or a slot mount may take by name).
-    pub columns: Vec<LensColumn>,
+    pub columns: Vec<PageColumn>,
     /// The models a `command` loader reads, so it runs again when they
     /// change (a `sql` loader's are what its query read).
     pub reads: Vec<String>,
@@ -282,7 +282,7 @@ struct PageFile {
     #[serde(default)]
     keywords: Option<String>,
     #[serde(default)]
-    params: Vec<LensParam>,
+    params: Vec<PageParam>,
     #[serde(default, rename = "for")]
     renders: Option<Renders>,
     #[serde(default)]
@@ -337,7 +337,7 @@ struct LoaderFile {
     #[serde(default)]
     rows: Option<Vec<serde_yaml::Mapping>>,
     #[serde(default)]
-    columns: Vec<LensColumn>,
+    columns: Vec<PageColumn>,
     #[serde(default)]
     reads: Vec<String>,
     #[serde(default)]
@@ -353,7 +353,7 @@ struct LoaderFile {
 struct VizFile {
     viz: LensViz,
     #[serde(default)]
-    columns: Vec<LensColumn>,
+    columns: Vec<PageColumn>,
     #[serde(default)]
     empty: Option<String>,
     #[serde(default)]
@@ -431,7 +431,7 @@ pub fn parse_page(
 ) -> Result<Page, String> {
     let file: PageFile = serde_yaml::from_str(text).map_err(|e| e.to_string())?;
     let id = format!("{extension}/{slug}");
-    let origin = LensProvenance {
+    let origin = PageProvenance {
         extension: extension.to_string(),
         source: None,
         running: rel.to_string(),
@@ -714,7 +714,7 @@ fn sql_params(sql: &str) -> Vec<String> {
 
 fn parse_loaders(
     data: serde_yaml::Mapping,
-    params: &[LensParam],
+    params: &[PageParam],
 ) -> Result<Vec<LoaderDecl>, String> {
     let names: Vec<String> = data
         .keys()
@@ -755,7 +755,7 @@ fn parse_loaders(
          -> Result<(), String> {
             match arg {
                 ArgSource::Param { param } => {
-                    if !params.iter().any(|p| &p.name == param) && !LensContext::supplies(param) {
+                    if !params.iter().any(|p| &p.name == param) && !ViewContext::supplies(param) {
                         return Err(format!(
                             "loader `{name}`: param `{param}` isn't one of the page's"
                         ));
@@ -905,8 +905,8 @@ struct NodeCtx<'a> {
     extension: &'a str,
     page_id: &'a str,
     title: &'a str,
-    params: &'a [LensParam],
-    origin: &'a LensProvenance,
+    params: &'a [PageParam],
+    origin: &'a PageProvenance,
     ids: &'a mut Ids,
 }
 

@@ -141,3 +141,22 @@ test("a focus on a node not drawn yet lands once it registers", () => {
   registry.register("late", el);
   expect(scrolled).toEqual(["late"]);
 });
+
+// A stack's titled sections with nothing to show fold into one "Nothing
+// found" line, as a lens document's parts do: no rows, no error, not a
+// form, nothing to press above its rows.
+test("a stack folds its empty titled sections into one Nothing found line", () => {
+  const page = fakePage(
+    node.stack("stack", [
+      node.viz("full", "full", { columns: [{ key: "id" }] }, { title: "Full" }),
+      node.viz("none", "none", { columns: [{ key: "id" }] }, { title: "Providers" }),
+      node.viz("also", "also", { columns: [{ key: "id" }] }, { title: "Roles" }),
+      node.viz("add", "none", { columns: [{ key: "id" }], actions: [fakeAction({ id: "add" })] }, { title: "With Add" }),
+      node.viz("form", null, { viz: "form" }, { title: "Form" }),
+    ]),
+  );
+  const run = fakeRun(page, { loaders: { full: loader(["id"], [["a"]]), none: loader(["id"], []), also: loader(["id"], []) } });
+  const { container, getByTestId } = render(<PageTree run={run} runId="run-1" />);
+  expect(nodeIds(container)).toEqual(["stack", "full", "add", "form"]);
+  expect(getByTestId("page-nothing-found").textContent).toBe("Nothing found: Providers, Roles.");
+});

@@ -1,9 +1,8 @@
 import { desktopBridge } from "./api.js";
-import { windowStorage } from "./shellStorage.js";
+import { getUiClientId } from "./uiClientId.js";
+export { getUiClientId } from "./uiClientId.js";
 
 export type UiLogLevel = "debug" | "info" | "warn" | "error";
-
-const CLIENT_ID_KEY = "oxplow-ui-client-id";
 
 let uninstall: (() => void) | null = null;
 
@@ -367,18 +366,6 @@ export function uninstallUiLogging(): void {
 
 export function logUi(level: UiLogLevel, message: string, context?: Record<string, unknown>): void {
   void sendUiLog(level, message, context);
-}
-
-export function getUiClientId(): string {
-  try {
-    const existing = windowStorage.getItem(CLIENT_ID_KEY);
-    if (existing) return existing;
-    const id = globalThis.crypto?.randomUUID?.() ?? `client-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    windowStorage.setItem(CLIENT_ID_KEY, id);
-    return id;
-  } catch {
-    return `client-${Date.now()}`;
-  }
 }
 
 async function sendUiLog(level: UiLogLevel, message: string, context?: Record<string, unknown>): Promise<void> {

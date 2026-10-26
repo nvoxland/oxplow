@@ -9,7 +9,7 @@ import type { BookmarkScope } from "./bookmarks.js";
 import type { AskTarget } from "../components/Prompts/askTarget.js";
 import { chipsFor } from "../components/decorators.js";
 import { useDecorations } from "../components/useDecorations.js";
-import type { PinnedTile } from "../components/Dashboard/PinToDashboard.js";
+import type { PagePin } from "../pages/PagePinMenu.js";
 import { ActionButtons } from "../kit/ActionButtons.js";
 import type { PageAction } from "../kit/actions.js";
 import type { TabRef } from "./tabState.js";
@@ -84,7 +84,7 @@ export interface PageProps {
   actions?: readonly PageAction[];
   /** What the page would add to a dashboard: the nav bar's Pin to
    *  Dashboard. */
-  pin?: { tile: PinnedTile; onOpenPage(ref: TabRef): void };
+  pin?: { tile: PagePin; onOpenPage(ref: TabRef): void };
   /** Page body. */
   children: ReactNode;
   /** Optional backlinks. When the active page has a nav bar (which it

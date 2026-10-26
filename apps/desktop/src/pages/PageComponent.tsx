@@ -13,9 +13,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type MutableRefObject } from "react";
 
 import type { Stream } from "../api.js";
-import { PinToDashboard } from "../components/Dashboard/PinToDashboard.js";
 import { EmptyState } from "../components/Prompts/EmptyState.js";
-import { SaveAsLens } from "../components/SaveAsLens.js";
+import { SaveViewForm } from "./SaveViewForm.js";
 import { ComponentFrame, CustomBadge, noteStyle, useComponentBundle, type BridgeHost } from "../lens/ComponentFrame.js";
 import { pageData, type FrameAction, type PageInit, type ShownRows } from "../lens/componentBridge.js";
 import { useFrameForms } from "../lens/frameForms.js";
@@ -23,7 +22,7 @@ import { useHostedView } from "../lens/hostedView.js";
 import { usePageRunsStore, usePageRunWith, type PageRuns, type RunHandle, type RunState } from "../pageRuns.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { remoteBaseUrl } from "../tauri-bridge/transport.js";
-import type { LensChart, LensViz, Node, PageRun } from "../tauri-bridge/generated/bindings.js";
+import type { Node, PageRun } from "../tauri-bridge/generated/bindings.js";
 import { NodeRegistryContext, PageTree } from "./PageTree.js";
 
 /** How long a frame may take to say `ready`. */
@@ -251,17 +250,8 @@ export function useInlineView(store: PageRuns, streamId: string | null, threadId
   return { shown, showView };
 }
 
-/** What an inline page that is one viz over one `sql` loader keeps as a
- *  lens (Save as Lens) or a tile (Pin to Dashboard); null: it isn't. */
-export function inlineLensSpec(run: PageRun): { query: string; viz: LensViz; chart: LensChart | null } | null {
-  const view = run.page.view;
-  const first = run.page.loaders[0];
-  if (view.kind !== "viz" || !first || first.loader.kind !== "sql" || view.from !== first.name) return null;
-  return { query: first.loader.sql, viz: view.lens.viz, chart: view.lens.chart ?? null };
-}
-
 /** The inline page under a component page: the kit draws its run, live,
- *  with Save as Lens and Pin to Dashboard above it. */
+ *  with Save as Page above it. A saved page can be pinned as an embed. */
 export function ShownView({
   specYaml,
   stream,
@@ -277,19 +267,15 @@ export function ShownView({
 }) {
   const store = usePageRunsStore();
   const state = usePageRunWith(store, { specYaml, params: {}, streamId, threadId });
-  const spec = state.run ? inlineLensSpec(state.run) : null;
+  const [saving, setSaving] = useState(false);
   return (
     <div data-testid="custom-page-spec" style={specStyle}>
-      {spec && onOpenPage ? (
+      {state.run && onOpenPage ? (
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginBottom: 8 }}>
-          <PinToDashboard
-            tile={{ kind: "query", sql: spec.query, display: spec.viz, optionsJson: JSON.stringify(spec.chart ? { size: "wide", chart: spec.chart } : { size: "wide" }) }}
-            testId="custom-page-pin"
-            onOpenPage={onOpenPage}
-          />
-          <SaveAsLens query={spec.query} viz={spec.viz} chart={spec.chart} stream={stream} onOpenPage={onOpenPage} />
+          <button type="button" data-testid="explore-save-open" onClick={() => setSaving(true)}>Save as Page</button>
         </div>
       ) : null}
+      {saving && state.run && onOpenPage ? <SaveViewForm kind="page" specYaml={specYaml} initialTitle={state.run.page.title} onClose={() => setSaving(false)} onSaved={(uri) => onOpenPage({ id: uri })} /> : null}
       {state.error ? <p className="ox-error">{state.error}</p> : null}
       {state.run ? (
         // Its nodes are its own page's: nothing in the host lands on them.

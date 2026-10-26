@@ -26,11 +26,25 @@ export interface PageRailProps {
   onOpenPage?(ref: TabRef, opts?: { newTab?: boolean }): void;
 }
 
+/** A page whose view is a switch: its sections (each child, by its
+ *  title), the param that picks one and the one in view. Null for any
+ *  other page. */
+export function switchSections(run: PageRun): { param: string; sections: { id: string; title: string }[]; current: string | null } | null {
+  const view = run.page.view;
+  if (view.kind !== "switch") return null;
+  return {
+    param: view.param,
+    sections: view.children.map((c) => ({ id: c.id, title: c.title ?? c.id })),
+    current: run.tree.children[0]?.id ?? null,
+  };
+}
+
 export function PageRail({ run, runId, onApply, picked = NO_PICKED, outOfDate = false, streamId = null, onOpenPage }: PageRailProps) {
   // A resource param is what the page is, a selection what a row picked:
-  // neither is an input.
+  // neither is an input. A switch's param is its sections, drawn as links.
   // No role is a resource, as the server reads it.
-  const filters = run.page.params.filter((p) => p.role === "filter");
+  const sw = switchSections(run);
+  const filters = run.page.params.filter((p) => p.role === "filter" && p.name !== sw?.param);
   // A filter's `options_from` names a page here, not a lens.
   const reads = usePageReads();
   const options = useMemo(() => pageOptionsSource(reads), [reads]);
@@ -42,6 +56,26 @@ export function PageRail({ run, runId, onApply, picked = NO_PICKED, outOfDate = 
       : undefined;
   return (
     <>
+      {sw ? (
+        // The page's sections, each a link to it; the one in view marked.
+        <RailGroup title={run.page.title} testId="page-sections">
+          <nav aria-label={run.page.title} className="ox-contents">
+            {sw.sections.map((o) => (
+              <button
+                key={o.id}
+                type="button"
+                className="ox-contents-item"
+                data-testid={`page-section-${o.id}`}
+                aria-current={o.id === sw.current ? "page" : undefined}
+                data-active={o.id === sw.current ? "true" : undefined}
+                onClick={() => onApply(sw.param, o.id)}
+              >
+                {o.title}
+              </button>
+            ))}
+          </nav>
+        </RailGroup>
+      ) : null}
       {filters.length > 0 ? (
         <RailGroup title="Filters" action={reset} testId="page-rail-filters">
           <OptionsSourceContext.Provider value={options}>

@@ -38,7 +38,7 @@ test("deleting an item asks first, then it's gone from the board", async ({ page
   await page.goto("/");
   await openFromLauncher(page, "Board");
   await page.getByTestId("lens-board").getByText("Card to delete").click();
-  await page.getByTestId("lens-part-info").getByTestId("lens-detail").click({ button: "right" });
+  await page.locator('[data-node="info"]').getByTestId("lens-detail").click({ button: "right" });
   await page.getByTestId("menu-item-lens-action-delete").click();
   // Asked, and nothing is gone until the person confirms.
   await expect(page.getByTestId("lens-action-confirm-run")).toBeVisible();

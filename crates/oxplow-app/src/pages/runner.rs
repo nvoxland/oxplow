@@ -15,9 +15,18 @@ use oxplow_domain::{Actor, DomainError};
 use serde::{Deserialize, Serialize};
 
 use super::schema::{ArgSource, Loader, LoaderDecl, Node, NodeKind, Page};
+
+#[path = "result_budget.rs"]
+mod result_budget;
+use result_budget::ResultBudget;
+
+/// Combined serialized loader-result budget for one returned run, including
+/// embeds and slot mounts. Page definitions, params and tree metadata are
+/// outside this result budget.
+pub(super) const MAX_RESULT_BYTES: usize = 5 * 1024 * 1024;
 use crate::extensions::{
-    bind_params, evaluate_alert, resolve_param_values, stream_head, AlertState, LensContext,
-    PageSlot, SlotAt, SlotEdge,
+    bind_params, evaluate_alert, resolve_param_values, stream_head, AlertState, PageSlot, SlotAt,
+    SlotEdge, ViewContext,
 };
 
 /// How deep embeds and page loaders may nest before a run stops: a cycle
@@ -39,7 +48,7 @@ pub struct RunRequest {
     /// The values the caller gives: its URI's `?` and `#` params.
     pub params: BTreeMap<String, SqlCell>,
     /// The stream and thread it is viewed from.
-    pub ctx: LensContext,
+    pub ctx: ViewContext,
     /// Who views it: a command loader runs as them.
     pub viewer: Actor,
 }
@@ -110,6 +119,14 @@ pub struct Draft {
 
 type Memo = HashMap<String, LoaderRun>;
 
+/// Data shared by recursive page execution: memoized work and admission
+/// into the retained run's result budget. Borrowed-page loaders share the
+/// memo while supplying their own transient budget.
+struct RunData<'a> {
+    memo: &'a mut Memo,
+    budget: &'a mut ResultBudget,
+}
+
 impl<'a> PageRunner<'a> {
     /// The runner over `svc`'s data, finding pages in its project.
     pub fn of(svc: &'a crate::Services) -> Self {
@@ -175,8 +192,19 @@ impl<'a> PageRunner<'a> {
             RunTarget::Spec(page) => page.as_ref().clone(),
         };
         let mut memo = seed;
-        self.run_page(page, req.params, &req.ctx, &req.viewer, &mut memo, 0)
-            .await
+        let mut budget = ResultBudget::new(MAX_RESULT_BYTES);
+        self.run_page(
+            page,
+            req.params,
+            &req.ctx,
+            &req.viewer,
+            RunData {
+                memo: &mut memo,
+                budget: &mut budget,
+            },
+            0,
+        )
+        .await
     }
 
     fn find(&self, id: &str) -> Result<Page, DomainError> {
@@ -196,12 +224,13 @@ impl<'a> PageRunner<'a> {
         &'r self,
         page: Page,
         supplied: BTreeMap<String, SqlCell>,
-        ctx: &'r LensContext,
+        ctx: &'r ViewContext,
         viewer: &'r Actor,
-        memo: &'r mut Memo,
+        data: RunData<'r>,
         depth: usize,
     ) -> BoxFuture<'r, Result<PageRun, DomainError>> {
         Box::pin(async move {
+            let RunData { memo, budget } = data;
             if depth > MAX_DEPTH {
                 return Err(DomainError::Invalid(format!(
                     "page `{}` nests more than {MAX_DEPTH} pages deep",
@@ -215,20 +244,34 @@ impl<'a> PageRunner<'a> {
                 if skipped.contains(&decl.name) {
                     continue;
                 }
-                let run = self
+                let mut run = self
                     .run_loader(&page, decl, &params, &loaders, ctx, viewer, memo, depth)
                     .await;
+                // Downstream SQL temp tables and flowing params only see
+                // admitted rows, never a result beyond this run's budget.
+                if budget.admit(&mut run.result)? {
+                    // A dependent memo key must distinguish this admitted
+                    // prefix from the full result (and other prefixes).
+                    run.key = format!(
+                        "{}:budget:{}:{}",
+                        run.key,
+                        run.result.columns.len(),
+                        run.result.rows.len()
+                    );
+                }
                 loaders.insert(decl.name.clone(), run);
             }
             let tree = self
                 .resolve(
-                    &page, &page.view, &params, &loaders, ctx, viewer, memo, depth,
+                    &page, &page.view, &params, &loaders, ctx, viewer, memo, budget, depth,
                 )
                 .await;
             let rail = match &page.rail {
                 Some(r) => Some(
-                    self.resolve(&page, r, &params, &loaders, ctx, viewer, memo, depth)
-                        .await,
+                    self.resolve(
+                        &page, r, &params, &loaders, ctx, viewer, memo, budget, depth,
+                    )
+                    .await,
                 ),
                 None => None,
             };
@@ -266,7 +309,7 @@ impl<'a> PageRunner<'a> {
         &self,
         page: &Page,
         supplied: &BTreeMap<String, SqlCell>,
-        ctx: &LensContext,
+        ctx: &ViewContext,
     ) -> Result<BTreeMap<String, SqlCell>, DomainError> {
         let mut params =
             resolve_param_values(&format!("page {}", page.id), &page.params, supplied, ctx)?;
@@ -286,7 +329,7 @@ impl<'a> PageRunner<'a> {
         decl: &LoaderDecl,
         params: &BTreeMap<String, SqlCell>,
         earlier: &BTreeMap<String, LoaderRun>,
-        ctx: &LensContext,
+        ctx: &ViewContext,
         viewer: &Actor,
         memo: &mut Memo,
         depth: usize,
@@ -366,8 +409,23 @@ impl<'a> PageRunner<'a> {
                             .into_iter()
                             .map(|(k, v)| (k, SqlCell::from(v)))
                             .collect();
+                        // The source page is transient: only the selected
+                        // loader is retained by this page. Bound that work
+                        // independently, then charge its returned copy when
+                        // this page admits it.
+                        let mut transient = ResultBudget::new(MAX_RESULT_BYTES);
                         match self
-                            .run_page(other, params, ctx, viewer, memo, depth + 1)
+                            .run_page(
+                                other,
+                                params,
+                                ctx,
+                                viewer,
+                                RunData {
+                                    memo,
+                                    budget: &mut transient,
+                                },
+                                depth + 1,
+                            )
                             .await
                         {
                             Ok(run) => run
@@ -387,6 +445,14 @@ impl<'a> PageRunner<'a> {
             }
             Loader::Rows { columns, rows } => Ok(table(columns.clone(), rows.clone())),
         };
+        // Bound each memo entry too, before it is cloned into the cache.
+        // The shared run budget separately charges every retained copy.
+        let outcome = outcome.and_then(|mut result| {
+            ResultBudget::new(MAX_RESULT_BYTES)
+                .admit(&mut result)
+                .map_err(|e| e.to_string())?;
+            Ok(result)
+        });
         let run = match outcome {
             Ok(result) => LoaderRun {
                 result,
@@ -456,9 +522,10 @@ impl<'a> PageRunner<'a> {
         node: &'r Node,
         params: &'r BTreeMap<String, SqlCell>,
         loaders: &'r BTreeMap<String, LoaderRun>,
-        ctx: &'r LensContext,
+        ctx: &'r ViewContext,
         viewer: &'r Actor,
         memo: &'r mut Memo,
+        budget: &'r mut ResultBudget,
         depth: usize,
     ) -> BoxFuture<'r, RunNode> {
         Box::pin(async move {
@@ -479,7 +546,7 @@ impl<'a> PageRunner<'a> {
                     for c in children {
                         let NodeKind::Slot { name } = &c.kind else {
                             let r = self
-                                .resolve(page, c, params, loaders, ctx, viewer, memo, depth)
+                                .resolve(page, c, params, loaders, ctx, viewer, memo, budget, depth)
                                 .await;
                             resolved.push(r);
                             continue;
@@ -492,7 +559,9 @@ impl<'a> PageRunner<'a> {
                         };
                         for mount in self.mounts(&page.id, name) {
                             let r = self
-                                .run_mount(page, &mount, params, loaders, ctx, viewer, memo, depth)
+                                .run_mount(
+                                    page, &mount, params, loaders, ctx, viewer, memo, budget, depth,
+                                )
                                 .await;
                             match &mount.at {
                                 Some(SlotAt::Edge(SlotEdge::Start)) => start.push(r),
@@ -524,7 +593,9 @@ impl<'a> PageRunner<'a> {
                 NodeKind::Slot { name } => {
                     for mount in self.mounts(&page.id, name) {
                         let r = self
-                            .run_mount(page, &mount, params, loaders, ctx, viewer, memo, depth)
+                            .run_mount(
+                                page, &mount, params, loaders, ctx, viewer, memo, budget, depth,
+                            )
                             .await;
                         out.children.push(r);
                     }
@@ -532,7 +603,7 @@ impl<'a> PageRunner<'a> {
                 NodeKind::Switch { param, children } => {
                     if let Some(c) = in_view(param, children, params) {
                         let r = self
-                            .resolve(page, c, params, loaders, ctx, viewer, memo, depth)
+                            .resolve(page, c, params, loaders, ctx, viewer, memo, budget, depth)
                             .await;
                         out.children.push(r);
                     }
@@ -544,12 +615,24 @@ impl<'a> PageRunner<'a> {
                     Err(e) => out.error = Some(e.to_string()),
                     Ok(child) => {
                         let flowed = flow_params(&child, given, params, loaders, &page.loaders);
+                        let remaining = budget.remaining();
                         match self
-                            .run_page(child, flowed, ctx, viewer, memo, depth + 1)
+                            .run_page(
+                                child,
+                                flowed,
+                                ctx,
+                                viewer,
+                                RunData { memo, budget },
+                                depth + 1,
+                            )
                             .await
                         {
                             Ok(run) => out.embed = Some(Box::new(run)),
-                            Err(e) => out.error = Some(e.to_string()),
+                            Err(e) => {
+                                // A failed embed retains no loader results.
+                                budget.restore(remaining);
+                                out.error = Some(e.to_string());
+                            }
                         }
                     }
                 },
@@ -590,9 +673,10 @@ impl PageRunner<'_> {
         mount: &PageSlot,
         params: &BTreeMap<String, SqlCell>,
         loaders: &BTreeMap<String, LoaderRun>,
-        ctx: &LensContext,
+        ctx: &ViewContext,
         viewer: &Actor,
         memo: &mut Memo,
+        budget: &mut ResultBudget,
         depth: usize,
     ) -> RunNode {
         let mut out = RunNode {
@@ -605,12 +689,23 @@ impl PageRunner<'_> {
             Err(e) => out.error = Some(e.to_string()),
             Ok(child) => {
                 let flowed = flow_params(&child, &BTreeMap::new(), params, loaders, &host.loaders);
+                let remaining = budget.remaining();
                 match self
-                    .run_page(child, flowed, ctx, viewer, memo, depth + 1)
+                    .run_page(
+                        child,
+                        flowed,
+                        ctx,
+                        viewer,
+                        RunData { memo, budget },
+                        depth + 1,
+                    )
                     .await
                 {
                     Ok(run) => out.embed = Some(Box::new(run)),
-                    Err(e) => out.error = Some(e.to_string()),
+                    Err(e) => {
+                        budget.restore(remaining);
+                        out.error = Some(e.to_string());
+                    }
                 }
             }
         }
@@ -620,7 +715,7 @@ impl PageRunner<'_> {
 
 /// The stream a run reads metrics over: its `stream_id` param, else the
 /// viewer's.
-fn stream_of(params: &BTreeMap<String, SqlCell>, ctx: &LensContext) -> Option<i64> {
+fn stream_of(params: &BTreeMap<String, SqlCell>, ctx: &ViewContext) -> Option<i64> {
     match params.get("stream_id") {
         Some(SqlCell::Int(id)) => Some(*id),
         _ => ctx.stream_id,

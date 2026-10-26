@@ -147,13 +147,16 @@ export interface QuickOpenBuild {
 /// here — tasks/wiki/notes/comments stay project-wide).
 export function buildQuickOpenResults(input: {
   query: string;
-  pages: PageDirectoryEntry[];
+  /** The page directory; null while the extensions load — then nothing
+   *  shows, so a quick Enter can't take a hit over the page it names. */
+  pages: PageDirectoryEntry[] | null;
   commands: CommandEntry[];
   files: WorkspaceIndexedFile[];
   siteHits: SearchHit[];
   currentStreamId?: string | null;
 }): QuickOpenBuild {
   const q = input.query.trim().toLowerCase();
+  if (input.pages === null) return { results: [], truncated: 0 };
   if (!q) {
     return { results: input.pages.map((entry) => ({ kind: "page" as const, entry })), truncated: 0 };
   }

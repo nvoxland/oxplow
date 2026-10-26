@@ -1,0 +1,20 @@
+manifest: 2
+name: session-history
+description: Earlier prompts from a thread on its New Session page.
+engine: ">=0.7"
+version: 0.1.0
+intent:
+  purpose: >-
+    Remind whoever opens a session what the thread has worked on: its
+    earlier prompts, newest first, as a section of the New Session page
+    right after "Start a new session". It reads recorded turns and writes nothing.
+  origin: null
+  examples:
+    - name: thread-history
+      input: { page: thread-history, params: { thread_id: 1 } }
+      expect: no rows for a thread with no recorded prompts
+# A section of a core page, placed by the page's stable section ids
+# (`start`, `earlier`), so it stays put as the page changes.
+ui:
+  slots:
+    - { slot: oxplow-foundation/new-session.sections, page: thread-history, title: Earlier prompts, at: { after: start } }

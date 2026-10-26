@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
-use crate::ids::{NoteId, StreamId, ThreadId};
+use crate::ids::{StreamId, ThreadId};
 use crate::time::Timestamp;
 
 /// The colour a person marks a thread's tab with (`oxplow.thread.mark`):
@@ -49,17 +49,6 @@ impl ThreadMark {
     pub fn parse(s: &str) -> Option<ThreadMark> {
         ThreadMark::ALL.into_iter().find(|m| m.as_str() == s)
     }
-}
-
-/// A note on a thread: the per-thread capture pad an agent writes as it
-/// works (`oxplow.knowledge.add_note`). Its ref is `oxplow:oxplow/thread_note?id=not<n>`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
-pub struct ThreadNote {
-    pub id: NoteId,
-    pub thread_id: ThreadId,
-    pub body: String,
-    pub author: String,
-    pub created_at: Timestamp,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]

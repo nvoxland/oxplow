@@ -10,7 +10,7 @@ import { humanize } from "../kit/humanize.js";
 import { RailGroup } from "../kit/RailGroup.js";
 import { fileRef, settingsRef } from "../tabs/pageRefs.js";
 import type { TabRef } from "../tabs/tabState.js";
-import type { LensParam, LensProvenance } from "../tauri-bridge/generated/bindings.js";
+import type { PageParam, PageProvenance } from "../tauri-bridge/generated/bindings.js";
 
 /** The row a click picked for a selection param: its value and what the
  *  row showed, labelled as its columns are. */
@@ -27,7 +27,7 @@ export function RailSelection({
   testPrefix,
 }: {
   /** The page's selection params. */
-  params: LensParam[];
+  params: PageParam[];
   values: Record<string, SqlCell>;
   picked: Record<string, PickedRow>;
   onApply(name: string, value: SqlCell): void;
@@ -68,7 +68,7 @@ export function RailAbout({
   onOpenPage,
   testPrefix,
 }: {
-  origin: LensProvenance;
+  origin: PageProvenance;
   /** Its source changed after the deployment that runs. */
   outOfDate: boolean;
   onOpenPage(ref: TabRef): void;

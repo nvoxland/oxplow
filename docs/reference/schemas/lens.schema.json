@@ -27,14 +27,14 @@
     "params": {
       "type": "array",
       "items": {
-        "$ref": "#/definitions/LensParam"
+        "$ref": "#/definitions/PageParam"
       },
       "default": []
     },
     "columns": {
       "type": "array",
       "items": {
-        "$ref": "#/definitions/LensColumn"
+        "$ref": "#/definitions/PageColumn"
       },
       "default": []
     },
@@ -444,7 +444,7 @@
         }
       ]
     },
-    "LensParam": {
+    "PageParam": {
       "description": "A value the viewer (or an agent) can set when running the lens,\nbound into the query as `:name`.",
       "type": "object",
       "properties": {
@@ -618,7 +618,7 @@
         }
       ]
     },
-    "LensColumn": {
+    "PageColumn": {
       "description": "How one result column is shown.",
       "type": "object",
       "properties": {
@@ -1636,7 +1636,7 @@
         "Activity",
         "Knowledge",
         "Data",
-        "Lenses",
+        "Dashboards",
         "System"
       ]
     },

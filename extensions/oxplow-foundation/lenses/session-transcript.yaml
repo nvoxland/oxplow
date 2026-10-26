@@ -1,5 +1,5 @@
 title: Session transcript
-description: What happened in an agent session, oldest first, 50 a page — each turn's prompt and answer, how many tool calls it made and whether it was a subagent's hand-back, with the thread's notes where they fall. Reopen the session if you closed it, or resume its conversation in a new session, from here.
+description: What happened in an agent session, oldest first, 50 a page — each turn's prompt and answer, how many tool calls it made and whether it was a subagent's hand-back. Reopen the session if you closed it, or resume its conversation in a new session, from here.
 params:
   - { name: session, label: Session (`ses3`) }
   - { name: turn, role: filter, label: Start at turn (`trn7`), default: "" }
@@ -16,12 +16,6 @@ query: |
            (SELECT count(*) FROM v_tool_call c WHERE c.turn_id = t.id) AS tool_calls
     FROM v_agent_turn t
     WHERE t.agent_session_id = (SELECT id FROM s)
-    UNION ALL
-    SELECT n.uri, n.created_at, 'note', NULL, n.body, '', 0
-    FROM v_thread_note n, s
-    WHERE n.thread_id = s.thread_id
-      AND n.created_at >= s.opened_at
-      AND n.created_at <= coalesce(s.closed_at, '9999')
   )
   SELECT i.uri, i.at, i.kind, i.ended_at, i.prompt, i.answer, i.tool_calls,
          s.thread_id AS thread_id, s.harness AS harness, s.resume_session_id AS conversation,

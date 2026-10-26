@@ -31,6 +31,7 @@ import { dirUri, fileLinesUri, fileUri, identityOf, isOxplowScheme, linkTarget, 
 import { extensionWikilinkRef, resourceInfo, useExtensionRefTitle, useResources } from "../../resources.js";
 import { attachPanZoom, loadMermaid } from "./mermaidRender.js";
 import { CopyCodeButton } from "./CopyCodeButton.js";
+import { InlineView } from "./InlineView.js";
 import { followLink, linkMenu, type OpenRef } from "./links.js";
 
 // Mermaid + svg-pan-zoom load lazily inside mermaidRender, so this module
@@ -775,6 +776,10 @@ export function MarkdownView({ body, maxHeight, style, className }: MarkdownView
             // other code block carries a Copy of its text.
             const code = node?.children?.[0];
             const classes = code && "properties" in code ? (code.properties?.className as string[] | undefined) : undefined;
+            if (classes?.includes("language-oxplow-page")) {
+              const source = code && "children" in code ? code.children.map((child) => "value" in child ? child.value : "").join("") : "";
+              return <InlineView specYaml={source} />;
+            }
             if (classes?.includes("language-mermaid")) return <pre {...props}>{children}</pre>;
             return (
               <div className="oxplow-md-code">

@@ -32,14 +32,13 @@
 //! the wiki watcher's initial scan and the commit indexer's boot
 //! pass already hit those paths. This module only covers the
 //! kinds whose data lives entirely in SQLite (work items, efforts,
-//! findings, thread notes, handoffs).
+//! findings, handoffs).
 
 use std::sync::Arc;
 
 use oxplow_db::page_ref_projections::{finding_edges, note_edges};
 use oxplow_db::{
     SourceSlice, SqliteCodeQualityStore, SqliteEffortStore, SqliteHandoffStore, SqlitePageRefStore,
-    SqliteThreadNoteStore,
 };
 use oxplow_domain::vocabulary::VocabularyHandle;
 
@@ -50,7 +49,6 @@ pub struct BackfillCounts {
     pub work_items: usize,
     pub efforts: usize,
     pub findings: usize,
-    pub notes: usize,
     pub handoffs: usize,
 }
 
@@ -191,7 +189,6 @@ pub struct Sources {
     pub db: oxplow_db::Database,
     pub efforts: Arc<SqliteEffortStore>,
     pub findings: Arc<SqliteCodeQualityStore>,
-    pub thread_notes: Arc<SqliteThreadNoteStore>,
     pub handoffs: Arc<SqliteHandoffStore>,
 }
 
@@ -205,7 +202,6 @@ pub async fn run(
         db,
         efforts,
         findings: findings_store,
-        thread_notes,
         handoffs,
     } = sources;
     let mut counts = BackfillCounts::default();
@@ -253,18 +249,6 @@ pub async fn run(
     match efforts.effort_slices().await {
         Ok(slices) => counts.efforts = write_batched(&page_refs, "effort", slices).await,
         Err(e) => tracing::warn!(?e, "page-ref backfill: reading the effort slices failed"),
-    }
-
-    // 2. Thread notes — one source per row, parsed from its body.
-    if let Ok(rows) = thread_notes.list_all_for_backfill().await {
-        let slices = rows
-            .into_iter()
-            .map(|(uri, body)| {
-                let edges = note_edges(kinds, &uri, &body);
-                slice(uri, None, edges)
-            })
-            .collect();
-        counts.notes = write_batched(&page_refs, "notes", slices).await;
     }
 
     // 2b. Handoffs — one source per row, parsed from its body, as a note.
@@ -392,7 +376,6 @@ mod tests {
                 db: db.clone(),
                 efforts: Arc::new(SqliteEffortStore::new(db.clone())),
                 findings: findings_store,
-                thread_notes: Arc::new(SqliteThreadNoteStore::new(db.clone())),
                 handoffs: Arc::new(SqliteHandoffStore::new(db.clone())),
             },
         )
@@ -584,7 +567,6 @@ mod tests {
                 db: db.clone(),
                 efforts: Arc::new(SqliteEffortStore::new(db.clone())),
                 findings: Arc::new(SqliteCodeQualityStore::new(db.clone())),
-                thread_notes: Arc::new(SqliteThreadNoteStore::new(db.clone())),
                 handoffs: Arc::new(SqliteHandoffStore::new(db.clone())),
             },
         )

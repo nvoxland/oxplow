@@ -88,6 +88,12 @@ pages are THE shell.
 
 ## Renderers
 
+`PageTree` passes fill height through stack and selected switch containers
+when their visible descendants contain a filling viz. Keep that flex chain
+intact: the agent-session page stacks approvals above its terminal, and a
+collapsed terminal cannot activate or resume its session (`useShown`). The
+browser regression checks usable terminal height before and after reload.
+
 A URI names a thing; a **page** is one **renderer** of it. A tab's id is
 the URI it shows, and nothing in the desktop keeps a list of page kinds.
 Which page draws a URI comes from declarations
@@ -206,6 +212,12 @@ moved into the project DB and started fresh again) — see the decision in [reso
 
 ## Page files
 
+The catalog's runtime publication listener also invalidates every open
+page run. Reloading only the extension metadata leaves runs with no SQL
+loaders (a dashboard of embeds or a markdown page) on their old definition
+after deploy. The existing listener sends `page_runs.notify_everything()`
+before `ExtensionsChanged`; it does not add another event-bus listener.
+
 The unit replacing a lens plus its `pages:` entry (being built: they load
 beside lenses and run nothing yet; the lens runtime is deleted once
 oxplow's own extensions move over). A page is `pages/<slug>.yaml` in an
@@ -233,7 +245,8 @@ extension, three parts (`crates/oxplow-app/src/pages/schema.rs`):
   (another page's `loader`, with `params`) or `rows` (inline). A loader's
   name is a plain identifier, never a model's (`v_*`, `m_*`).
 - **Show Definition** is foundation's hidden `definition` page (params
-  `of`, the page id, and `params`, its params as JSON text): the page's
+  `of`, the page id, or `spec`, an inline view's exact YAML, and `params`,
+  its params as JSON text): the page's
   extension, file and deployment, its node tree from
   `oxplow.page.definition` (each node's parent, page, file and loader;
   embeds and slot mounts included) and its YAML as written.
@@ -255,6 +268,33 @@ components are the lens ones. The YAML only binds: logic is SQL or a read
 command. An **inline page** (`parse_inline_page`: a markdown
 ` ```oxplow-page ` block, an agent's one-off) only reads: no `command`
 loaders, no actions, forms, terminals, editors, components or slots.
+
+The shared Rust metadata types are `PageParam`, `PageColumn`, `PageAction`,
+`PageAlert` and `PageProvenance`; the viewer's runtime context is
+`ViewContext`. Both page files and the remaining legacy lens runtime use
+these types while the runtime migration is in progress. `Lens` and
+`LensRun` still name the legacy configuration and run adapters.
+
+**Ephemeral views** (`oxplow/view?id=…`) route directly to `EphemeralView`
+and the same `PageHost`. `open_page` returns the exact `specYaml` with
+the run. The subscription store retains it for daemon reconnects, and the
+tab keeps it under `view.specYaml` in its entry's history state. On a
+restart the daemon uses the restored source if its in-memory view is
+gone; nothing creates a persistent answer record. View params still live
+in the URI's `#`, and inline source keeps its read-only restrictions.
+
+Every page host offers **Show definition** in its standard actions.
+An inline view also offers **Save to wiki…** and **Save as Page…**. The
+forms live in the rail (Enter submits, Escape cancels). Saving to wiki
+runs `oxplow.knowledge.write_page` with an `oxplow-page` fence, so the
+saved page remains live. Saving as a page runs
+`oxplow.extension.write_page { extension, page, spec, deploy: true }`,
+then opens that page; the extension defaults to app preference
+`pages.extension`, else `my-pages`, and a successful save remembers it.
+Title edits preserve the YAML document's comments and key order.
+Refused writes keep the form and source for retry. A component's shown
+inline page (Explore Data) offers Save as Page for any valid node tree,
+including inline rows and multiple loaders.
 
 **Running one** (`pages/runner.rs`, `PageRunner::run`): params resolve as
 a lens's do (supplied, else the viewer's context, else the default;
@@ -311,7 +351,13 @@ with a daemon restart. It opens as a tab of the caller's thread when a
 window is open (`tabs.write/open`; `opened`, else `why`) and returns the
 page's text.
 
-**Open runs** (`pages/open_runs.rs`, `Services.page_runs`): a window opens
+**Open runs** (`pages/open_runs.rs`, `Services.page_runs`): Interest starts
+before the first loader read: an invalidation revision is captured before execution
+and checked under the same fence as insertion. Model/measure invalidations which
+reach the run's actual reads retry its initial execution; catalog-wide changes also
+retry. Unrelated writes (including records from its own command loaders) do not
+starve opening. A later change finds the published run. This closes the query/registration gap without a timed missed-event cache.
+A window opens
 a run (`open_page { page | specYaml, params, streamId, threadId, client }`
 → `{ runId, run }`) and closes it (`close_page`); a pick, filter or
 switch is `set_page_params`, Refresh `rerun_page`. The change loop
@@ -323,15 +369,40 @@ read a changed model or measure — a command loader's are its `reads` —
 then emits `OxplowEvent::PageRunChanged { runId, seq, loaders, tree }`
 for each that changed: the loaders whose rows differ (an embed's as
 `<embed>/<loader>`), never the rows. The window fetches what changed in
-one `fetch_page_runs` batch and drops a reply older than a `seq` it
-applied (`apps/desktop/src/pageRuns.ts`: runs shared by key, closed
+one `fetch_page_runs` batch, whose entries are `{ run, seq }` captured
+under the same lock. It drops replies older than the actual snapshot
+sequence it applied, not the triggering notice's sequence. Direct
+parameter/refresh operations fence fetch replies at both start and finish;
+an overlapping reply reconciles from a fresh snapshot instead of replacing
+newer state (`apps/desktop/src/pageRuns.ts`: runs shared by key, closed
 250 ms after the last host lets go, every run opened again after a
-reconnect). Runs belong to their window's `client` and go with it
-(`keep_only_clients`). A model change keeps the loaders it didn't reach:
+reconnect). The window's run store publishes its whole live roster with
+`runIds()` / `subscribeRunIds`, including panel and markdown subscriptions.
+`TabReport.runs` carries that roster, and its heartbeat reads the ids again
+instead of repeating a cached list. Reports use a single-flight writer:
+while one is in flight, only the newest pending snapshot is retained, so
+an older HTTP report cannot arrive after a newer roster and close its runs.
+Runs belong to their window's `client`; reports prune only that client's
+previously acknowledged runs which are now absent. The event socket's
+`client` query param names the same stable id used by logs and reports
+(`uiClientId.ts`, independent of the API/transport import graph), and its
+disconnect and client expiry reclaim owned runs. A reconnect clears the
+old roster and reopens its held runs; stale open replies are fenced out and
+closed instead of resurrecting old ids. A model change keeps the loaders it didn't reach:
 the re-run is seeded (`PageRunner::run_seeded`) with every loader run —
 embeds' and mounts' too — that read none of the changed models or
 measures and reads no loader that did (`runner::unreached`), so only the
-rest query again. A param change or Refresh runs the page whole.
+rest query again. A param change or Refresh runs the page whole. Per-run request revisions fence
+asynchronous completions: a slow older refresh cannot replace newer params or rows.
+The desired request is recorded before execution so concurrent invalidation uses it.
+
+Each returned run has a shared **5 MiB serialized loader-result budget**, including
+embeds, rail trees and slot mounts. Admission preserves a prefix of whole rows,
+marks cropped results `truncated`, and keeps read/coverage provenance. Downstream
+loaders see only admitted rows. Memo entries are independently bounded and every
+retained copy counts against the shared budget. This bounds loader results, not
+page definitions, params or tree metadata; metadata which cannot fit produces a
+bounded diagnostic rather than silently losing provenance.
 
 **Actions** (`pages/actions.rs`, `run_page_action { runId, node?, action,
 row?, input?, drop?, confirmed }`): pressed on an open run. A whole-page
@@ -358,10 +429,7 @@ draws a tab from its page file first (`pages/pageFiles.ts`):
 `<extension>/<slug>`), `chooseRenderer` a resource URI's among the page
 files' `for` / `accepts` / `#oxplow.renderer=` / `default`
 (`rendererFor` works over a page file or a `pages:` entry alike). A
-`pages:` entry draws a tab only when no page file does, or when the file
-needs what the host can't draw yet (`drawsAsFile` is false: a form, a
-`component` node, a `custom` viz, a lazy tree, an `expand` column, an
-`options_from` param or an action that opens a form), or when an enabled
+`pages:` entry draws a tab only when no page file does, or when an enabled
 extension still mounts a *lens* into its slots (`hasLensMounts`: a
 `ui.slots` entry at `<page>.<name>` or at its `pages:` lens's
 `<lens>.<name>` — a page file's slot shows only mounted pages) — that
@@ -1275,6 +1343,13 @@ can differ, a scope or chip change replaces the entry, and a reload or a
 bookmark keeps it.
 
 ## Every tab holds a Page
+
+When a page is current in one tab and also appears in another tab's Back
+history, the current entry supplies its mounted body and navigation
+context. The hidden history copy must not win the body's deduplication:
+its links would navigate the older tab's current entry instead. The
+Dashboards browser test covers creating a page, reopening the index and
+following its link back to that existing page.
 
 Every tab is a session tab, whatever it shows (a wiki page, a file, a
 diff, a work item, a lens, a commit, an agent session, a web page, …). The

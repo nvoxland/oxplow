@@ -13,14 +13,14 @@ use oxplow_domain::DomainError;
 
 use super::runner::{PageRun, RunNode};
 use super::schema::{Node, NodeKind, Page};
-use crate::extensions::{LensContext, LensRun};
+use crate::extensions::{LensRun, ViewContext};
 
 /// `run` as text.
 pub async fn page_text(
     svc: &crate::Services,
     root: &Path,
     run: &PageRun,
-    ctx: &LensContext,
+    ctx: &ViewContext,
 ) -> Result<String, DomainError> {
     let mut out = format!("# {}\n", run.page.title);
     write_tree(svc, root, run, &run.tree, "", 2, ctx, &mut out).await?;
@@ -73,7 +73,7 @@ fn write_tree<'r>(
     at: &'r RunNode,
     prefix: &'r str,
     level: usize,
-    ctx: &'r LensContext,
+    ctx: &'r ViewContext,
     out: &'r mut String,
 ) -> BoxFuture<'r, Result<(), DomainError>> {
     Box::pin(async move {

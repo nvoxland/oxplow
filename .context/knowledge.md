@@ -77,6 +77,16 @@ RPCs `write_wiki_page_body`, `upsert_wiki_page`, `delete_wiki_page`,
 `decide_tool`) refuses an agent's Write/Edit into `.oxplow/wiki/` for
 every thread, pointing at the command (`write_guard::wiki_page_reason`).
 
+## Thread notes were removed
+
+Thread notes are no longer a separate knowledge store or agent tool. V112
+removes `thread_note` and its search rows and page-ref edges; the
+`oxplow.knowledge.add_note` / `update_note` commands, `v_thread_note`, and
+the thread-notes page are gone. Durable understanding belongs in wiki pages;
+what an agent did remains in its turns, efforts, decisions and handoffs.
+The `session-history` example mounts earlier prompts from `v_agent_turn` on
+New Session without introducing another writable record.
+
 ## Hand edits converge
 
 A person editing the file (or anything else changing it) converges

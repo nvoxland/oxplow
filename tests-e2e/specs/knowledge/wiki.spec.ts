@@ -19,13 +19,13 @@ test("a written page renders, and a task link in it opens the task", async ({ pa
   await page.goto("/");
   await searchLauncher(page, "wombat plan");
   await page.getByTestId("launcher-hit-oxplow:oxplow/wiki?slug=wombat-plan").click();
-  const wiki = page.locator('[data-testid="page-lens"]:visible');
+  const wiki = page.locator('[data-testid="page-file"]:visible');
   await expect(wiki).toContainText("First do");
   // The link shows the task's title (the body keeps its id).
   const link = wiki.locator(`[data-ref-title][href="${created.result.uri}"]`);
   await expect(link).toHaveText("Wombat follow-up");
   await link.click();
-  await expect(page.getByTestId("lens-part-state")).toBeVisible();
+  await expect(page.locator('[data-node="state"]')).toBeVisible();
   await expect(page.locator("body")).toContainText("Wombat follow-up");
 });
 
@@ -64,7 +64,7 @@ test("a wiki page is edited in place and saved, and a new page is made by its fi
   await page.goto("/");
   await searchLauncher(page, "ferret notes");
   await page.getByTestId("launcher-hit-oxplow:oxplow/wiki?slug=ferret-notes").click();
-  const body = page.locator('[data-testid="lens-part-body"]:visible');
+  const body = page.locator('[data-node="body"]:visible');
   const save = body.getByRole("button", { name: "Save" });
   await expect(body).toContainText("They steal socks.");
   await expect(save).toBeDisabled();
@@ -75,7 +75,7 @@ test("a wiki page is edited in place and saved, and a new page is made by its fi
   await save.click();
   await expect(save).toBeDisabled();
   await page.reload();
-  await expect(page.locator('[data-testid="lens-part-body"]:visible')).toContainText("Also keys.");
+  await expect(page.locator('[data-node="body"]:visible')).toContainText("Also keys.");
 });
 
 // In the editor a bare link shows its page's title, as the viewer does,
@@ -87,7 +87,7 @@ test("a wiki link in the editor shows its page's title", async ({ page, daemon }
   await page.goto("/");
   await searchLauncher(page, "otter notes");
   await page.getByTestId("launcher-hit-oxplow:oxplow/wiki?slug=otter-notes").click();
-  const body = page.locator('[data-testid="lens-part-body"]:visible');
+  const body = page.locator('[data-node="body"]:visible');
   const href = "oxplow:oxplow/wiki?slug=otter-den";
   await expect(body.locator(`[data-ref-title][href="${href}"]`)).toHaveText("Otter den");
   await expect(body.locator(`a[href="${href}"]:not([data-ref-title])`)).toBeHidden();
@@ -102,7 +102,7 @@ test("[[ completes a link to a wiki page", async ({ page, daemon }) => {
   await page.goto("/");
   await searchLauncher(page, "badger notes");
   await page.getByTestId("launcher-hit-oxplow:oxplow/wiki?slug=badger-notes").click();
-  const body = page.locator('[data-testid="lens-part-body"]:visible');
+  const body = page.locator('[data-node="body"]:visible');
   await expect(body).toContainText("Start here.");
   await body.locator(".ProseMirror").click();
   await page.keyboard.press("ControlOrMeta+End");
@@ -118,7 +118,7 @@ test("[[ completes a link to a wiki page", async ({ page, daemon }) => {
   // The page's file keeps the wikilink a person would have typed.
   await expect.poll(() => readFileSync(join(daemon.project, ".oxplow", "wiki", "badger-notes.md"), "utf8")).toContain("See [[badger-sett]]");
   await page.reload();
-  await expect(page.locator('[data-testid="lens-part-body"]:visible').locator(`[data-ref-title][href="${href}"]`)).toHaveText("Badger sett");
+  await expect(page.locator('[data-node="body"]:visible').locator(`[data-ref-title][href="${href}"]`)).toHaveText("Badger sett");
 });
 
 // A selection floats the format toolbar; a page dropped from elsewhere
@@ -130,7 +130,7 @@ test("the editor formats a selection and takes a dropped page as a link", async 
   await page.goto("/");
   await searchLauncher(page, "heron notes");
   await page.getByTestId("launcher-hit-oxplow:oxplow/wiki?slug=heron-notes").click();
-  const body = page.locator('[data-testid="lens-part-body"]:visible');
+  const body = page.locator('[data-node="body"]:visible');
   await expect(body).toContainText("Start here.");
   await body.locator(".ProseMirror p", { hasText: "Start here." }).click();
   await page.keyboard.press("End");
@@ -168,7 +168,7 @@ test("a wiki page's Source view edits the stored text", async ({ page, daemon })
   await page.goto("/");
   await searchLauncher(page, "stoat notes");
   await page.getByTestId("launcher-hit-oxplow:oxplow/wiki?slug=stoat-notes").click();
-  const body = page.locator('[data-testid="lens-part-body"]:visible');
+  const body = page.locator('[data-node="body"]:visible');
   await expect(body).toContainText("See");
   await body.getByTestId("markdown-source-toggle").click();
   const source = body.getByTestId("markdown-source");

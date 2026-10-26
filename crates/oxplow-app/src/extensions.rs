@@ -32,7 +32,7 @@ pub mod replacements;
 pub mod schema;
 pub mod skills;
 use manifest_v2::{at, entry_line, item_lines, key_line, line_under, ManifestV2};
-pub use manifest_v2::{Intent, IntentExample, IntentPrompt};
+pub use manifest_v2::{Intent, IntentExample};
 pub use oxplow_domain::permissions::Permissions;
 
 /// Where an extension's source is by default, relative to a checkout
@@ -186,7 +186,7 @@ pub struct LensCustom {
 /// panel's `badge` lens shows its count, and the Alerts panel lists it.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
-pub struct LensAlert {
+pub struct PageAlert {
     #[specta(type = Option<oxplow_domain::JsNumber>)]
     pub min_rows: Option<i64>,
     pub column: Option<String>,
@@ -208,7 +208,7 @@ pub(crate) struct AlertFile {
 }
 
 impl AlertFile {
-    pub(crate) fn into_alert(self) -> Result<LensAlert, String> {
+    pub(crate) fn into_alert(self) -> Result<PageAlert, String> {
         match (&self.min_rows, &self.column) {
             (Some(_), Some(_)) => {
                 return Err("`alert` takes `min_rows` or `column`, not both".into())
@@ -220,7 +220,7 @@ impl AlertFile {
             }
             _ => {}
         }
-        Ok(LensAlert {
+        Ok(PageAlert {
             min_rows: self.min_rows,
             column: self.column,
             above: self.above,
@@ -262,7 +262,7 @@ fn fmt_number(v: f64) -> String {
 }
 
 /// Evaluate `alert` against a run's result.
-pub(crate) fn evaluate_alert(alert: &LensAlert, result: &SqlQueryResult) -> AlertState {
+pub(crate) fn evaluate_alert(alert: &PageAlert, result: &SqlQueryResult) -> AlertState {
     let count = result.rows.len() as i64;
     if let Some(min) = alert.min_rows {
         let message = match &alert.label {
@@ -776,7 +776,7 @@ pub enum LauncherCategory {
     Activity,
     Knowledge,
     Data,
-    Lenses,
+    Dashboards,
     System,
 }
 
@@ -839,7 +839,7 @@ pub struct LensLink {
 /// How one result column is shown.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct LensColumn {
+pub struct PageColumn {
     /// Result column name.
     pub key: String,
     /// Header text; defaults to `key`.
@@ -1059,7 +1059,7 @@ pub struct LensGroup {
     Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
 )]
 #[serde(deny_unknown_fields)]
-pub struct LensParam {
+pub struct PageParam {
     pub name: String,
     #[serde(default)]
     pub label: Option<String>,
@@ -1161,7 +1161,7 @@ pub struct LensParamOption {
     pub label: String,
 }
 
-impl LensParam {
+impl PageParam {
     /// Its type, as written or as it follows from `options` /
     /// `options_from`.
     pub fn kind(&self) -> ParamType {
@@ -1380,14 +1380,14 @@ fn view_problem(lens: &Lens) -> Option<String> {
 /// `params` with a document's view param (`view: <name>`) a `filter`
 /// choice when it doesn't say otherwise: its choices are the sections,
 /// filled once mounts are placed ([`fill_view_options`]).
-pub(crate) fn view_param(params: Vec<LensParam>, view: Option<&str>) -> Vec<LensParam> {
+pub(crate) fn view_param(params: Vec<PageParam>, view: Option<&str>) -> Vec<PageParam> {
     params
         .into_iter()
         .map(|p| {
             if Some(p.name.as_str()) != view {
                 return p;
             }
-            LensParam {
+            PageParam {
                 kind: Some(p.kind.unwrap_or(ParamType::Choice)),
                 role: Some(p.role.unwrap_or(ParamRole::Filter)),
                 ..p
@@ -1397,10 +1397,10 @@ pub(crate) fn view_param(params: Vec<LensParam>, view: Option<&str>) -> Vec<Lens
 }
 
 /// `params` with each one's type written out, so a page never infers it.
-pub(crate) fn typed(params: Vec<LensParam>) -> Vec<LensParam> {
+pub(crate) fn typed(params: Vec<PageParam>) -> Vec<PageParam> {
     params
         .into_iter()
-        .map(|p| LensParam {
+        .map(|p| PageParam {
             kind: Some(p.kind()),
             ..p
         })
@@ -1420,7 +1420,7 @@ fn binds(
 /// What a query binds: the values of `declared` params, and each
 /// date_range's `<name>_from` / `<name>_to`.
 pub(crate) fn bind_params(
-    declared: &[LensParam],
+    declared: &[PageParam],
     params: &BTreeMap<String, SqlCell>,
     now: time::OffsetDateTime,
 ) -> Vec<(String, SqlCell)> {
@@ -1451,9 +1451,9 @@ struct LensFile {
     #[serde(default = "default_viz")]
     viz: LensViz,
     #[serde(default)]
-    params: Vec<LensParam>,
+    params: Vec<PageParam>,
     #[serde(default)]
-    columns: Vec<LensColumn>,
+    columns: Vec<PageColumn>,
     /// Shown instead of an empty result.
     #[serde(default)]
     empty: Option<String>,
@@ -1541,7 +1541,7 @@ struct LensFile {
 /// agent are on every lens, not declared.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
-pub struct LensAction {
+pub struct PageAction {
     /// Unique within the lens; `oxplow_run_lens_action` names it.
     pub id: String,
     pub label: String,
@@ -1744,11 +1744,11 @@ fn key_problem(key: &str) -> Option<String> {
 /// `{{row.*}}` too: that row.
 pub(crate) fn parse_actions(
     raw: Vec<serde_yaml::Value>,
-    params: &[LensParam],
+    params: &[PageParam],
     grouped: bool,
     holds_one_row: bool,
-) -> Result<Vec<LensAction>, String> {
-    let mut out: Vec<LensAction> = Vec::new();
+) -> Result<Vec<PageAction>, String> {
+    let mut out: Vec<PageAction> = Vec::new();
     for v in raw {
         let f = serde_yaml::from_value::<ActionFile>(v).map_err(|e| format!("actions: {e}"))?;
         if f.id.trim().is_empty() {
@@ -1978,7 +1978,7 @@ pub(crate) fn parse_actions(
         } else {
             None
         };
-        out.push(LensAction {
+        out.push(PageAction {
             id: f.id,
             label: f.label,
             command: f.command,
@@ -2044,7 +2044,7 @@ fn edit_field(id: &str, input: &serde_json::Value, fixed: &[String]) -> Result<S
 
 /// The column a markdown editor saves: what its edit action's edited
 /// field is bound to (`{{row.<column>}}`).
-pub fn edit_column(action: &LensAction) -> Option<String> {
+pub fn edit_column(action: &PageAction) -> Option<String> {
     let field = action.edit_field.as_deref()?;
     let value = action.input.get(field)?.as_str()?;
     oxplow_domain::template::whole_placeholder(value).map(|p| p.name)
@@ -2626,7 +2626,7 @@ impl LensSlot {
 /// replaces.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
-pub struct LensProvenance {
+pub struct PageProvenance {
     /// The extension it belongs to.
     pub extension: String,
     /// Its source file, relative to the project when inside it; none when
@@ -2655,8 +2655,8 @@ pub struct Lens {
     pub description: String,
     pub query: String,
     pub viz: LensViz,
-    pub params: Vec<LensParam>,
-    pub columns: Vec<LensColumn>,
+    pub params: Vec<PageParam>,
+    pub columns: Vec<PageColumn>,
     pub empty: Option<String>,
     /// Columns a chart viz draws from.
     pub chart: Option<LensChart>,
@@ -2695,7 +2695,7 @@ pub struct Lens {
     /// fills, so that section takes the height left (set once the catalog
     /// is placed, `fill_document_fills`).
     pub fills: bool,
-    /// Launcher section; `None` = "Lenses".
+    /// Launcher section; `None` = "Dashboards".
     pub launcher_category: Option<LauncherCategory>,
     /// Not listed in the launcher.
     pub hidden: bool,
@@ -2703,14 +2703,14 @@ pub struct Lens {
     /// so nothing re-runs it for the person.
     pub refresh: bool,
     /// Commands the lens offers, as buttons or row actions (P6.B1).
-    pub actions: Vec<LensAction>,
+    pub actions: Vec<PageAction>,
     /// When the lens needs attention (its panel's badge).
-    pub alert: Option<LensAlert>,
+    pub alert: Option<PageAlert>,
     /// The capabilities (or their features) it needs (`needs:
     /// [work_items]`): without them its run says so instead of running.
     pub needs: Vec<String>,
     /// Where it comes from: the file that runs and the source to edit.
-    pub origin: LensProvenance,
+    pub origin: PageProvenance,
     /// The MCP tool it is also offered as (`tool:`), prefixed with its
     /// extension's namespace (`extension_commands::tool_name`): a call
     /// runs it and returns its text rendering.
@@ -4782,7 +4782,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                 actions,
                 alert,
                 needs: l.needs,
-                origin: LensProvenance {
+                origin: PageProvenance {
                     extension: name.to_string(),
                     source: None,
                     running: lens_rel,
@@ -5347,7 +5347,7 @@ fn parse_pages(
             Ok(p) => p,
             Err(e) => {
                 errors.push((Some(i), format!(
-                    "pages: {e} (a page is `{{ id, title, icon?, category?, keywords?, params?, count?, for?, accepts?, default?, pinned?, comments?, refresh?, lens | component, rail? }}`; a category is one of Work, Code, Git, Activity, Knowledge, Data, Lenses, System)"
+                    "pages: {e} (a page is `{{ id, title, icon?, category?, keywords?, params?, count?, for?, accepts?, default?, pinned?, comments?, refresh?, lens | component, rail? }}`; a category is one of Work, Code, Git, Activity, Knowledge, Data, Dashboards, System)"
                 )));
                 continue;
             }
@@ -5997,7 +5997,7 @@ fn lazy_tree_problem(lens: &Lens, t: &LensTree) -> Option<String> {
             .is_some()
             .then(|| "`tree.branch` is for a lazy tree (`tree.lazy: <param>`)".to_string());
     };
-    if LensContext::supplies(lazy) {
+    if ViewContext::supplies(lazy) {
         return Some(format!(
             "`tree.lazy` can't be `{lazy}`: the context supplies it"
         ));
@@ -6424,7 +6424,7 @@ fn replaceable_problem(lens: &Lens, lenses: &[Lens]) -> Option<String> {
     None
 }
 
-impl LensProvenance {
+impl PageProvenance {
     /// Whether the source changed after the deployment that runs was made
     /// from it: an edit an agent made there runs only once it is
     /// deployed. Read now, from the files; false with no deployment or no
@@ -6653,7 +6653,7 @@ pub fn find_lens(
 /// `stream_id` or `thread_id` param gets these unless it's given another
 /// value (tsk375).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct LensContext {
+pub struct ViewContext {
     pub stream_id: Option<i64>,
     pub thread_id: Option<i64>,
     /// What's active, to check a lens's needs against; `None` checks
@@ -6661,7 +6661,7 @@ pub struct LensContext {
     pub active: Option<crate::capabilities::Active>,
 }
 
-impl LensContext {
+impl ViewContext {
     /// The params the context supplies when the caller doesn't.
     const SUPPLIED: &[&str] = &["stream_id", "thread_id"];
 
@@ -6687,7 +6687,7 @@ pub async fn lens_context(
     svc: &crate::Services,
     stream: Option<oxplow_domain::StreamId>,
     thread: Option<oxplow_domain::ThreadId>,
-) -> LensContext {
+) -> ViewContext {
     use oxplow_domain::stores::{StreamStore as _, ThreadStore as _};
     let mut stream = stream;
     if stream.is_none() {
@@ -6713,7 +6713,7 @@ pub async fn lens_context(
         (None, Some(s)) => svc.threads.selected_or_first(&s).await.ok().flatten(),
         (None, None) => None,
     };
-    LensContext {
+    ViewContext {
         stream_id: stream.map(|s| s.value()),
         thread_id: thread.map(|t| t.value()),
         active: Some(
@@ -6732,7 +6732,7 @@ pub async fn run_spec(
     id: &str,
     spec: &LensSpec,
     params: BTreeMap<String, SqlCell>,
-    ctx: &LensContext,
+    ctx: &ViewContext,
 ) -> Result<LensRun, DomainError> {
     execute(layer, Lens::from_spec(id, spec), params, ctx).await
 }
@@ -6743,7 +6743,7 @@ pub async fn run_lens(
     root: &Path,
     id: &str,
     params: BTreeMap<String, SqlCell>,
-    ctx: &LensContext,
+    ctx: &ViewContext,
 ) -> Result<LensRun, DomainError> {
     layer
         .read_generation(async { run_lens_unpinned(layer, catalog, root, id, params, ctx).await })
@@ -6756,7 +6756,7 @@ async fn run_lens_unpinned(
     root: &Path,
     id: &str,
     params: BTreeMap<String, SqlCell>,
-    ctx: &LensContext,
+    ctx: &ViewContext,
 ) -> Result<LensRun, DomainError> {
     let mut lens = catalog.find_lens(root, id)?;
     let mut params = params;
@@ -6987,12 +6987,12 @@ fn explain_unsynced(
 
 /// The value of each of `lens`'s params: as supplied, else from the
 /// context (`stream_id` / `thread_id`), else its default, else NULL, each
-/// as its type binds it (`LensParam::take`). An unknown supplied name, or
+/// as its type binds it (`PageParam::take`). An unknown supplied name, or
 /// a value its param doesn't take, is refused.
 pub fn resolve_params(
     lens: &Lens,
     supplied: &BTreeMap<String, SqlCell>,
-    ctx: &LensContext,
+    ctx: &ViewContext,
 ) -> Result<BTreeMap<String, SqlCell>, DomainError> {
     resolve_param_values(&format!("lens {}", lens.id), &lens.params, supplied, ctx)
 }
@@ -7002,9 +7002,9 @@ pub fn resolve_params(
 /// refused, named by `whose` (`lens acme/x`, `page acme/y`).
 pub(crate) fn resolve_param_values(
     whose: &str,
-    declared: &[LensParam],
+    declared: &[PageParam],
     supplied: &BTreeMap<String, SqlCell>,
-    ctx: &LensContext,
+    ctx: &ViewContext,
 ) -> Result<BTreeMap<String, SqlCell>, DomainError> {
     if let Some(unknown) = supplied
         .keys()
@@ -7064,7 +7064,7 @@ pub async fn run_lens_spec(
     layer: &crate::sql_gateway::SqlGateway,
     lens: Lens,
 ) -> Result<LensRun, DomainError> {
-    execute(layer, lens, BTreeMap::new(), &LensContext::default()).await
+    execute(layer, lens, BTreeMap::new(), &ViewContext::default()).await
 }
 
 /// Each of an extension's lenses run once with default params, by slug: a
@@ -7122,7 +7122,7 @@ async fn execute(
     layer: &crate::sql_gateway::SqlGateway,
     lens: Lens,
     supplied: BTreeMap<String, SqlCell>,
-    ctx: &LensContext,
+    ctx: &ViewContext,
 ) -> Result<LensRun, DomainError> {
     let mut params = resolve_params(&lens, &supplied, ctx)?;
     // A lens's `:stream_id` is the stream its metrics (`metric_grid()`)
@@ -7645,9 +7645,9 @@ pub struct LensSpec {
     #[serde(default = "default_viz")]
     pub viz: LensViz,
     #[serde(default)]
-    pub params: Vec<LensParam>,
+    pub params: Vec<PageParam>,
     #[serde(default)]
-    pub columns: Vec<LensColumn>,
+    pub columns: Vec<PageColumn>,
     #[serde(default)]
     pub empty: Option<String>,
     #[serde(default)]
@@ -7719,7 +7719,7 @@ impl Lens {
             actions: Vec::new(),
             alert: None,
             needs: Vec::new(),
-            origin: LensProvenance::default(),
+            origin: PageProvenance::default(),
             tool: None,
         }
     }
@@ -8917,7 +8917,7 @@ empty: No items.
             dir.path(),
             "review/echo",
             BTreeMap::new(),
-            &LensContext::default(),
+            &ViewContext::default(),
         )
         .await
         .unwrap();
@@ -8936,7 +8936,7 @@ empty: No items.
             dir.path(),
             "review/echo",
             over,
-            &LensContext::default(),
+            &ViewContext::default(),
         )
         .await
         .unwrap();
@@ -8960,7 +8960,7 @@ empty: No items.
         );
         let sl = layer().await;
         let rows = |run: LensRun| serde_json::to_value(&run.result.rows).unwrap();
-        let here = LensContext {
+        let here = ViewContext {
             stream_id: Some(2),
             thread_id: Some(5),
             active: None,
@@ -8994,7 +8994,7 @@ empty: No items.
             dir.path(),
             "review/mine",
             BTreeMap::new(),
-            &LensContext::default(),
+            &ViewContext::default(),
         )
         .await
         .unwrap();
@@ -9012,7 +9012,7 @@ empty: No items.
         let f = crate::test_fixtures::services_with_effort().await;
         use oxplow_domain::stores::ThreadStore as _;
         let thread = f.svc.thread_store.get(&f.thread).await.unwrap().unwrap();
-        let expect = LensContext {
+        let expect = ViewContext {
             stream_id: Some(thread.stream_id.value()),
             thread_id: Some(f.thread.value()),
             active: Some(
@@ -9053,7 +9053,7 @@ empty: No items.
             dir.path(),
             "review/by-status",
             bad,
-            &LensContext::default(),
+            &ViewContext::default(),
         )
         .await
         .unwrap_err();
@@ -9068,7 +9068,7 @@ empty: No items.
             dir.path(),
             "review/broken",
             BTreeMap::new(),
-            &LensContext::default(),
+            &ViewContext::default(),
         )
         .await
         .unwrap_err();
@@ -9439,7 +9439,7 @@ empty: No items.
             dir.path(),
             "gh/all",
             BTreeMap::new(),
-            &LensContext::default(),
+            &ViewContext::default(),
         )
         .await
         .unwrap_err();
@@ -9508,7 +9508,7 @@ empty: No items.
             dir.path(),
             "gh/all",
             BTreeMap::new(),
-            &LensContext::default(),
+            &ViewContext::default(),
         )
         .await
         .unwrap();
@@ -11230,9 +11230,9 @@ commands:
         let errs = ext.errors.join("\n");
         assert!(errs.contains("`mode`") && errs.contains("`all`"), "{errs}");
         let supplied = BTreeMap::from([("mode".to_string(), SqlCell::Text("top".into()))]);
-        assert!(resolve_params(ok, &supplied, &LensContext::default()).is_ok());
+        assert!(resolve_params(ok, &supplied, &ViewContext::default()).is_ok());
         let supplied = BTreeMap::from([("mode".to_string(), SqlCell::Text("all".into()))]);
-        assert!(resolve_params(ok, &supplied, &LensContext::default()).is_err());
+        assert!(resolve_params(ok, &supplied, &ViewContext::default()).is_err());
     }
 
     /// A param's `type` says what it holds and how a page draws it; with
@@ -11328,7 +11328,7 @@ commands:
     /// says what an unknown value means) and NULL, as every param.
     #[test]
     fn a_dynamic_choice_takes_any_text() {
-        let p = LensParam {
+        let p = PageParam {
             name: "end".into(),
             label: None,
             default: None,
@@ -11375,7 +11375,7 @@ commands:
                     root,
                     "review/typed",
                     supplied,
-                    &LensContext::default(),
+                    &ViewContext::default(),
                 )
                 .await
             }
@@ -12387,7 +12387,7 @@ commands:
             async move {
                 let mut p = BTreeMap::new();
                 p.insert(k.to_string(), SqlCell::Int(v));
-                run_lens(sl, &cat(), &root, id, p, &LensContext::default())
+                run_lens(sl, &cat(), &root, id, p, &ViewContext::default())
                     .await
                     .unwrap()
                     .alert
@@ -12995,7 +12995,7 @@ commands:
             dir.path(),
             "review/by-status",
             BTreeMap::new(),
-            &LensContext::default(),
+            &ViewContext::default(),
         )
         .await
         .unwrap_err();

@@ -1,7 +1,7 @@
 import { afterEach, expect, mock, test } from "bun:test";
 import { cleanup, createEvent, fireEvent, render, waitFor } from "@testing-library/react";
 
-import type { Lens, LensAction, LensRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
+import type { Lens, PageAction, LensRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
 import { LENS_ROW_DRAG_MIME } from "../dragMimes.js";
 import { PageNavigationContext, type PageNavigation } from "../tabs/PageNavigationContext.js";
 
@@ -26,8 +26,8 @@ afterEach(() => {
   ran.length = 0;
 });
 
-const action = (over: Partial<LensAction>): LensAction =>
-  ({ id: "x", label: "X", command: "oxplow.work_item.transition", input: {}, row: true, group: null, form: false, fixed: [], choices: {}, then: "open", when: null, primary: false, drag: false, bulk: false, key: null, ...over }) as LensAction;
+const action = (over: Partial<PageAction>): PageAction =>
+  ({ id: "x", label: "X", command: "oxplow.work_item.transition", input: {}, row: true, group: null, form: false, fixed: [], choices: {}, then: "open", when: null, primary: false, drag: false, bulk: false, key: null, ...over }) as PageAction;
 
 const move = action({ id: "move", label: "Move", drag: true, input: { uri: "{{row.uri}}", to: "{{group.value}}" } });
 const reorder = action({ id: "reorder", label: "Reorder", command: "oxplow.work_item.reorder", drag: true, input: { uri: "{{row.uri}}", before: "{{before.uri}}", after: "{{after.uri}}" } });

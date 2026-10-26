@@ -10,7 +10,7 @@ import { LensActionRunnerContext, useLensActionRunner, type LensActionRunner } f
 import { Slideover } from "../components/Slideover.js";
 import { InlinePromptStrip } from "../components/InlinePromptStrip.js";
 import type { FormStart } from "../tauri-bridge/generated/bindings.js";
-import type { Drop, LensAction } from "../tauri-bridge/generated/bindings.js";
+import type { Drop, PageAction as DeclaredPageAction } from "../tauri-bridge/generated/bindings.js";
 import { DailyBarChart } from "../components/Analytics/DailyBarChart.js";
 import { TrendChart } from "../components/charts/TrendChart.js";
 import { Sparkline } from "../components/Sparkline.js";
@@ -248,7 +248,7 @@ function markedRecords(run: LensRun, marks: Marks): Record<string, SqlCell>[] {
 
 /** The bulk actions (`bulk: true`) the marked rows are offered: an action
  *  any of them is offered (`when`), run on those. */
-function bulkOffers(run: LensRun, marked: Record<string, SqlCell>[]): { action: LensAction; rows: Record<string, SqlCell>[] }[] {
+function bulkOffers(run: LensRun, marked: Record<string, SqlCell>[]): { action: DeclaredPageAction; rows: Record<string, SqlCell>[] }[] {
   return run.lens.actions
     .filter((a) => a.bulk)
     .map((action) => ({ action, rows: marked.filter((r) => actionOffered(action, r)) }))
@@ -341,9 +341,9 @@ export function useLensActions(run: ActionTarget, streamId: string | null, runne
   const [busy, setBusy] = useState<string | null>(null);
   // A command that asks: what it asks about, and the runs that wait on the
   // answer (one confirmation for a bulk action's runs).
-  const [pending, setPending] = useState<{ action: LensAction; presses: Press[]; details: string[] } | null>(null);
+  const [pending, setPending] = useState<{ action: DeclaredPageAction; presses: Press[]; details: string[] } | null>(null);
   // A form action pressed: its form is open until it runs or is closed.
-  const [form, setForm] = useState<{ action: LensAction; row: Record<string, SqlCell> | null } | null>(null);
+  const [form, setForm] = useState<{ action: DeclaredPageAction; row: Record<string, SqlCell> | null } | null>(null);
   const deps = {
     runLensAction: (
       id: string,
@@ -361,7 +361,7 @@ export function useLensActions(run: ActionTarget, streamId: string | null, runne
   };
   // The runs in order; a run that asks stops them, the rest waiting on
   // the person's answer. Only the last says it's done (one toast).
-  const press = async (action: LensAction, presses: Press[], confirmed: boolean) => {
+  const press = async (action: DeclaredPageAction, presses: Press[], confirmed: boolean) => {
     setBusy(action.id);
     try {
       for (let i = 0; i < presses.length; i++) {
@@ -384,14 +384,14 @@ export function useLensActions(run: ActionTarget, streamId: string | null, runne
     pending,
     form,
     closeForm: () => setForm(null),
-    run: (action: LensAction, row: Record<string, SqlCell> | null) => {
+    run: (action: DeclaredPageAction, row: Record<string, SqlCell> | null) => {
       if (action.form) setForm({ action, row });
       else void press(action, [{ row, drop: null }], false);
     },
     /** A bulk action on the marked rows, once each, in order. */
-    runMany: (action: LensAction, rows: Record<string, SqlCell>[]) => void press(action, rows.map((row) => ({ row, drop: null })), false),
+    runMany: (action: DeclaredPageAction, rows: Record<string, SqlCell>[]) => void press(action, rows.map((row) => ({ row, drop: null })), false),
     /** A drag action for each dropped row, with where it landed. */
-    runDrops: (action: LensAction, presses: Press[]) => void press(action, presses, false),
+    runDrops: (action: DeclaredPageAction, presses: Press[]) => void press(action, presses, false),
     confirm: () => {
       if (pending) void press(pending.action, pending.presses, true);
     },
@@ -1091,9 +1091,9 @@ function GroupHeading({
   group: RowGroup;
   open: boolean;
   onToggle(): void;
-  actions: LensAction[];
+  actions: DeclaredPageAction[];
   busy: string | null;
-  onAction(a: LensAction): void;
+  onAction(a: DeclaredPageAction): void;
   onOpenPage?(ref: TabRef): void;
 }) {
   const ref = group.ref;
@@ -1389,7 +1389,7 @@ export function ActionForm({
 }: {
   run: ActionTarget;
   streamId: string | null;
-  pressed: { action: LensAction; row: Record<string, SqlCell> | null };
+  pressed: { action: DeclaredPageAction; row: Record<string, SqlCell> | null };
   onClose(): void;
 }) {
   const { action, row } = pressed;

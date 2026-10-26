@@ -15,7 +15,7 @@ import { streamRowId, threadRowId } from "../../modelIds.js";
 import { windowPageRuns, type PageRuns } from "../../pageRuns.js";
 import { pageFileUri } from "../../pages/pageFiles.js";
 import { lensRef } from "../../tabs/pageRefs.js";
-import type { Extension, ExtensionPanel, LensParam, LensParamOption, PageRun, PanelScope, Reads, SqlCell } from "../../tauri-bridge/generated/bindings.js";
+import type { Extension, ExtensionPanel, PageParam, LensParamOption, PageRun, PanelScope, Reads, SqlCell } from "../../tauri-bridge/generated/bindings.js";
 
 /** A part's open page run: what its actions are pressed on and what it drew. */
 export interface OpenPanelRun {
@@ -110,7 +110,7 @@ export interface PanelChoice {
 }
 
 export function panelChoices(body: LensRun | PageRun | null, picked: Readonly<Record<string, string>>): PanelChoice[] {
-  const params: LensParam[] = !body ? [] : "lens" in body ? body.lens.params : body.page.params;
+  const params: PageParam[] = !body ? [] : "lens" in body ? body.lens.params : body.page.params;
   return params
     .filter((p) => p.options.length > 0)
     .map((p) => {

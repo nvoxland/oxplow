@@ -11,10 +11,10 @@ test("the uncommitted page lists the working tree and commits it", async ({ page
   writeFileSync(join(daemon.project, "wallaby.txt"), "hop\n");
   await page.goto("/");
   await openFromLauncher(page, "Uncommitted");
-  const body = page.locator('[data-testid="page-lens"]:visible');
+  const body = page.locator('[data-testid="page-file"]:visible');
   // The Files section's: the change analysis other extensions add lists
   // the file too, once it lands.
-  const files = body.getByTestId("lens-part-files");
+  const files = body.locator('[data-node="files"]');
   await expect(files.getByRole("button", { name: "wallaby.txt" })).toBeVisible();
 
   await body.getByTestId("lens-form-fields-message").fill("Add the wallaby file");

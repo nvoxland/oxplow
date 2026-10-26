@@ -189,7 +189,7 @@ pub fn send_op(deps: LinkDeps, work_items: WorkItemsRegistry) -> Op {
             if to == from {
                 return Err(invalid(
                     "/to_thread",
-                    "that's the sending thread: a note (`oxplow.knowledge.add_note`) is for that",
+                    "that's the sending thread: a handoff goes to another thread",
                 ));
             }
             if !open_thread(ctx, to)? {

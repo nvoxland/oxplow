@@ -65,7 +65,11 @@ pub struct RunPageInput {
 #[serde(deny_unknown_fields)]
 pub struct PageDefinitionInput {
     /// The page: `<extension>/<slug>`.
-    pub page: String,
+    #[serde(default)]
+    pub page: Option<String>,
+    /// Or the exact YAML of an ephemeral view or markdown block.
+    #[serde(default)]
+    pub spec: Option<String>,
     /// Param values by name, as for `oxplow.page.run`: which embeds and
     /// switch children it resolves to depend on them. A JSON object, or
     /// that object as a string (as a page's param carries it).
@@ -216,7 +220,7 @@ fn find_pages(svc: &Services, p: &FindPageInput) -> Result<Value, CommandError> 
             let params: Vec<Value> = page
                 .params
                 .iter()
-                .filter(|x| !crate::extensions::LensContext::supplies(&x.name))
+                .filter(|x| !crate::extensions::ViewContext::supplies(&x.name))
                 .map(|x| {
                     json!({
                         "name": x.name,
@@ -297,7 +301,7 @@ async fn context(
     invocation: &Invocation,
     stream_id: Option<String>,
     thread_id: Option<String>,
-) -> Result<crate::extensions::LensContext, CommandError> {
+) -> Result<crate::extensions::ViewContext, CommandError> {
     if let Some(stream) = &stream_id {
         check_stream_id("/stream_id", stream)?;
     }
@@ -447,7 +451,7 @@ fn show_op(services: ServicesSlot) -> Op {
                         return Err(invalid(
                             "/page",
                             "give `page` or `spec`, one of them".to_string(),
-                        ))
+                        ));
                     }
                 };
                 let run = PageRunner::of(&svc)
@@ -704,21 +708,23 @@ fn definition_op(services: ServicesSlot) -> Op {
                 let p: PageDefinitionInput = parse(input)?;
                 let svc = services.get()?;
                 let ctx = context(&svc, &invocation, p.stream_id.clone(), None).await?;
+                let label = p.page.as_deref().unwrap_or("inline view").to_string();
                 let run = PageRunner::of(&svc)
                     .run(RunRequest {
-                        target: RunTarget::Page(p.page.clone()),
+                        target: target(p.page, p.spec.clone())?,
                         params: cells(p.params),
                         ctx,
                         viewer: invocation.actor().clone(),
                     })
                     .await
-                    .map_err(|e| page_error(&p.page, e))?;
+                    .map_err(|e| page_error(&label, e))?;
                 let mut rows = Vec::new();
                 definition_rows(&run, &run.tree, "", None, 0, &mut rows);
                 let page = &run.page;
                 // The file it runs from, as written.
-                let yaml =
-                    std::fs::read_to_string(svc.layout.project_dir.join(&page.origin.running)).ok();
+                let yaml = p.spec.or_else(|| {
+                    std::fs::read_to_string(svc.layout.project_dir.join(&page.origin.running)).ok()
+                });
                 Ok(HandlerOutput {
                     result: json!({
                         "page": page.id,
@@ -1075,6 +1081,136 @@ mod show_tests {
 #[cfg(test)]
 mod definition_page_tests {
     use oxplow_db::SqlCell;
+    use oxplow_domain::{Actor, CommandError};
+    use serde_json::json;
+
+    // Comments, quoted strings and whitespace must survive Show Definition:
+    // this is the exact inline YAML, not a serialization of the parsed page.
+    const INLINE_SPEC: &str = "# authored inline, with its own comment\ntitle: 'Inline release'\ndata:\n  numbers: { sql: 'SELECT 7 AS n' }\nview:\n  id: layout\n  stack:\n    - { id: total, title: Total, viz: number, from: numbers }\n    - { id: note, markdown: 'A preserved note.' }\n";
+
+    #[tokio::test]
+    async fn an_inline_definition_preserves_its_exact_yaml_and_names_its_nodes() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        let out = f
+            .svc
+            .commands
+            .run(
+                &Actor::Human,
+                "oxplow.page.definition",
+                json!({ "spec": INLINE_SPEC }),
+                false,
+            )
+            .await
+            .unwrap();
+        let result = &out.result;
+        assert_eq!(result["page"], json!("inline"));
+        assert_eq!(result["title"], json!("Inline release"));
+        assert_eq!(result["yaml"], json!(INLINE_SPEC));
+        let nodes = result["nodes"].as_array().unwrap();
+        assert_eq!(nodes.len(), 3, "{result}");
+        assert_eq!(nodes[0]["id"], json!("layout"));
+        assert_eq!(nodes[0]["parent"], json!(null));
+        let total = nodes.iter().find(|n| n["id"] == "total").unwrap();
+        assert_eq!(total["parent"], json!("layout"));
+        assert_eq!(total["page"], json!("inline"));
+        assert_eq!(total["loader"], json!("numbers"));
+        assert_eq!(total["loader_kind"], json!("sql"));
+        assert_eq!(total["source"], json!("SELECT 7 AS n"));
+    }
+
+    #[tokio::test]
+    async fn the_definition_page_renders_an_inline_views_source_and_node_tree() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        let run = crate::pages::runner::PageRunner::of(&f.svc)
+            .run(crate::pages::runner::RunRequest {
+                target: crate::pages::runner::RunTarget::Page(
+                    "oxplow-foundation/definition".into(),
+                ),
+                // No `of`: the command loader receives null for `page`
+                // and the exact inline spec for `spec`.
+                params: [("spec".to_string(), SqlCell::Text(INLINE_SPEC.into()))].into(),
+                ctx: crate::extensions::lens_context(&f.svc, None, Some(f.thread)).await,
+                viewer: Actor::Human,
+            })
+            .await
+            .unwrap();
+        for (name, loader) in &run.loaders {
+            assert_eq!(loader.error, None, "{name}");
+        }
+        let about = &run.loaders["about"].result;
+        let title = about.columns.iter().position(|c| c == "title").unwrap();
+        assert_eq!(about.rows[0][title], SqlCell::Text("Inline release".into()));
+        let nodes = &run.loaders["nodes"].result;
+        let id = nodes.columns.iter().position(|c| c == "id").unwrap();
+        let parent = nodes.columns.iter().position(|c| c == "parent").unwrap();
+        assert!(
+            nodes.rows.iter().any(|row| {
+                row[id] == SqlCell::Text("total".into())
+                    && row[parent] == SqlCell::Text("layout".into())
+            }),
+            "{:?}",
+            nodes.rows
+        );
+        let yaml = &run.loaders["yaml"].result;
+        let text = yaml.columns.iter().position(|c| c == "text").unwrap();
+        assert_eq!(
+            yaml.rows[0][text],
+            SqlCell::Text(format!("```yaml\n{INLINE_SPEC}\n```"))
+        );
+        let text = crate::pages::text::page_text(
+            &f.svc,
+            &f.svc.layout.project_dir,
+            &run,
+            &crate::extensions::ViewContext::default(),
+        )
+        .await
+        .unwrap();
+        assert!(text.contains("Inline release"), "{text}");
+        assert!(text.contains(INLINE_SPEC), "{text}");
+        assert!(text.contains("total"), "{text}");
+    }
+
+    #[tokio::test]
+    async fn inline_definitions_require_one_target_and_refuse_acting_specs() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        for input in [
+            json!({}),
+            json!({ "page": "oxplow-foundation/commit", "spec": INLINE_SPEC }),
+        ] {
+            let error = f
+                .svc
+                .commands
+                .run(&Actor::Human, "oxplow.page.definition", input, false)
+                .await
+                .unwrap_err();
+            assert!(matches!(&error, CommandError::Invalid { .. }), "{error:?}");
+            assert!(error.to_string().contains("one of them"), "{error}");
+        }
+        for (spec, why) in [
+            (
+                "title: Acting\nactions:\n  - { id: create, label: Create, command: oxplow.work_item.create, input: { title: Hidden action } }\nview: { markdown: Preview }\n",
+                "actions",
+            ),
+            (
+                "title: Command loader\ndata:\n  tasks:\n    command: oxplow.work_item.create\n    args: { title: Hidden loader }\n    reads: [work_item]\nview: { viz: table, from: tasks }\n",
+                "not a command",
+            ),
+        ] {
+            let error = f
+                .svc
+                .commands
+                .run(
+                    &Actor::Human,
+                    "oxplow.page.definition",
+                    json!({ "spec": spec }),
+                    false,
+                )
+                .await
+                .unwrap_err();
+            assert!(matches!(&error, CommandError::Invalid { .. }), "{error:?}");
+            assert!(error.to_string().contains(why), "{error}");
+        }
+    }
 
     /// Foundation's `definition` page (Show Definition): a page's info,
     /// its node tree with each node's parent, and its YAML.
@@ -1097,7 +1233,7 @@ mod definition_page_tests {
                     ),
                 ]
                 .into(),
-                ctx: crate::extensions::LensContext::default(),
+                ctx: crate::extensions::ViewContext::default(),
                 viewer: oxplow_domain::Actor::Human,
             })
             .await

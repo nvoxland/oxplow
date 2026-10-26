@@ -2,7 +2,7 @@ import type { OpenWithProps } from "./pageMenuItems.js";
 import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import type { AskTarget } from "../components/Prompts/askTarget.js";
-import type { PinnedTile } from "../components/Dashboard/PinToDashboard.js";
+import type { PagePin } from "../pages/PagePinMenu.js";
 import { ActionButtons } from "../kit/ActionButtons.js";
 import type { PageAction } from "../kit/actions.js";
 import { PageMenu } from "./PageMenu.js";
@@ -80,7 +80,7 @@ export interface PageNavBarProps {
    *  prominent ones as buttons, the rest in the ☰ menu. */
   actions?: readonly PageAction[];
   /** What the page would add to a dashboard: a Pin to Dashboard menu. */
-  pin?: { tile: PinnedTile; onOpenPage(ref: TabRef): void; disabledReason?: string | null };
+  pin?: { tile: PagePin; onOpenPage(ref: TabRef): void; disabledReason?: string | null };
   /** The page's canonical ref (and stream): the Ask menu — Ask About
    *  This and the prompts about its kind (P6.D1/D2). Omitted, no Ask. */
   ask?: AskTarget;

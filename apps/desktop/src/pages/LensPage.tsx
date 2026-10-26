@@ -275,7 +275,6 @@ export function LensPage({ lensId, params, title: pageTitle, titleFrom, stream, 
       width={lens?.viz === "dashboard" || lens?.viz === "board" || fills ? "full" : "reading"}
       fill={fills}
       actions={actions}
-      pin={{ tile: { kind: "lens", lensId, optionsJson: JSON.stringify({ size: "wide" }) }, onOpenPage }}
       rightRail={rail}
       backlinks={linksIn.length > 0 ? { count: linksIn.length, body: <BacklinksList entries={linksIn} /> } : undefined}
       outbound={linksOut.length > 0 ? { count: linksOut.length, body: <BacklinksList entries={linksOut} /> } : undefined}

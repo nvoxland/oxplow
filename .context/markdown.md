@@ -63,8 +63,11 @@ set**, and a surface never builds its own:
   (`inlineOnly`) has none; a field with `hidePencil` keeps the shortcut
   without the button.
 - **Mermaid** fences draw as diagrams, always (pan, zoom, the
-  lightbox; in the editor, the `MermaidBlock` node view, click to edit
+  lightbox; in the editor, the `FencedBlock` node view, click to edit
   its source).
+- **`oxplow-page` fences** draw a live read-only page in either mode
+  (`InlineView`, below). In the editor, **Edit YAML** opens the original
+  fenced source; Escape or leaving the block returns to its live view.
 - **Code blocks** carry a Copy (`CopyCodeButton`, top-right on hover).
 - **GFM tables**, images with the lightbox, `.oxplow-md` typography.
 - **Headings** are `h2`/`h3` under `.oxplow-md`: a page's Contents rail
@@ -131,7 +134,7 @@ why).
   bundles on every Tiptap major.
 - **`RichTextField.tsx`** — the surface component. Configures Tiptap
   with `StarterKit` + `Markdown` (round-trip) + `Placeholder` +
-  `MermaidBlock` + `InternalLink` + **GFM tables**
+  `FencedBlock` + `InternalLink` + **GFM tables**
   (`Table`/`TableRow`/`TableHeader`/`TableCell`, all from
   `@tiptap/extension-table` since Tiptap 3, `resizable`,
   block-only so they're off when `inlineOnly`). `tiptap-markdown` ships
@@ -148,7 +151,7 @@ why).
   inherits the same typography as `MarkdownView`. Passes
   `immediatelyRender: false` to `useEditor` — the default (`true`)
   renders the initial document during React's render phase, and the
-  `MermaidBlock` React NodeView flushes via `flushSync`, which trips
+  `FencedBlock` React NodeView flushes via `flushSync`, which trips
   React's "flushSync was called from inside a lifecycle method"
   warning. Deferring the first render to a post-commit effect silences
   it; harmless here since there's no SSR. The same rule covers **every
@@ -174,11 +177,17 @@ why).
   (`knowledge/wiki.spec.ts`), the rest in unit tests.
 - **`RefTitles.tsx`** — the title widget a bare ref link gets in the
   editor ("A ref link's title in the editor").
-- **`MermaidBlock.tsx`** — extends Tiptap's `CodeBlock` (same node
+- **`FencedBlock.tsx`** — extends Tiptap's `CodeBlock` (same node
   name, `codeBlock`) with a React NodeView that paints rendered SVG
   via `renderMermaidInto` when the caret is outside, and a raw
   editable `<pre><code>` when the caret enters. Round-trips as a
   ` ```mermaid …``` ` fenced code block, so storage is unchanged.
+  Its `oxplow-page` branch draws `InlineView` in a non-editable island,
+  with a pencil to edit the YAML. Both languages remain ordinary fenced
+  code in storage, with the one `codeBlock` node registered.
+- **`InlineView.tsx`** — draws an inline spec through the shared page
+  run store and `PageTree`, without page chrome or a rail. A rejected
+  spec shows its source and the daemon's validation error under it.
 - **`InternalLink.ts`** — extends Tiptap's standard `Link` mark to
   allow oxplow URIs (the `oxplow:` scheme) through the
   URL sanitizer — Link's `isAllowedUri`, which every parse, render and
@@ -201,7 +210,7 @@ why).
 
 ## `mermaidRender.ts`
 
-Shared mermaid rendering pipeline used by `MermaidBlock` (editor
+Shared mermaid rendering pipeline used by `FencedBlock` (editor
 NodeView), `MarkdownView` (read-only bodies — it keeps its own
 parse/render/stray-sweep loop but loads mermaid and pan-zoom from
 here) and `MediaLightbox`. The one `mermaid.initialize` lives in
@@ -220,9 +229,33 @@ zero-size SVGs — the `waitForVisible` guard, originally from
 Markdown stays the on-disk format. `tiptap-markdown` parses on mount
 and serializes on save via `editor.storage.markdown.getMarkdown()`.
 Fenced code blocks round-trip; lists, headings, bold, italic, code,
-blockquotes, GFM tables — all standard. The custom `MermaidBlock`
-hijacks rendering of `language: "mermaid"` fences without changing
+blockquotes, GFM tables — all standard. The custom `FencedBlock`
+hijacks rendering of `language: "mermaid"` and `"oxplow-page"` fences without changing
 the serialized form.
+
+## Live page blocks
+
+A fence whose language is `oxplow-page` holds the same page YAML the
+daemon accepts for an inline spec. `MarkdownView` routes the fence to
+`InlineView`; `FencedBlock` does the same in the editor. The daemon parses
+and checks the spec, including read-only restrictions (no command loaders,
+actions, forms, components, editors, terminals or slot mounts), before it
+opens a run. The client does not parse YAML or substitute a separate query
+runner. Loader invalidations use the shared page subscription store, and
+unmounting a block releases its run.
+
+The block inherits its containing page's `PageViewContext` scope, including
+when that tab is hidden. A caller may supply explicit scope; outside a page
+body it falls back to the host stream and selected thread. Links use the
+containing page's navigation. A picked row
+updates the inline run and the host's view params; inline node IDs never
+register as the wiki page's own nodes.
+
+Rendering budgets: at most 64 KiB of UTF-8 source per block and four nested
+inline blocks (page markdown may itself contain page fences). A limit is
+shown inline before another run opens; result limits remain the daemon's.
+The normal reading line appears only after 150 ms. These budgets do not
+change the markdown saved on disk.
 
 ## Wikilink round-trip
 

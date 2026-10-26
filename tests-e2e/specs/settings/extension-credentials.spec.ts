@@ -10,7 +10,7 @@ test("a collector's credential is set from its row and cleared again", async ({ 
   await installExample(daemon, "github");
   await page.goto("/");
   await openFromLauncher(page, "Settings: Extensions");
-  const section = page.getByTestId("lens-part-extensions-credentials").filter({ visible: true });
+  const section = page.locator('[data-node="extensions-credentials"]').filter({ visible: true });
   const row = section.getByRole("row", { name: /GITHUB_TOKEN/ });
   await expect(row).toContainText("Not set");
 

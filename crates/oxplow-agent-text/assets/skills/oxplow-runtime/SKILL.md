@@ -1,6 +1,6 @@
 ---
 name: oxplow-runtime
-description: Oxplow efforts, all optional — how oxplow tracks your work on its own, when reporting is worth it, the effort.* commands, decisions, stating and reading claims, handoffs between threads, and the command bus. Loads on the oxplow `run_command` tool with effort.*, oxplow.handoff.* or oxplow.knowledge.add_note, and on v_effort or v_handoff.
+description: Oxplow efforts, all optional — how oxplow tracks your work on its own, when reporting is worth it, the effort.* commands, decisions, stating and reading claims, handoffs between threads, and the command bus. Loads on the oxplow `run_command` tool with effort.* or oxplow.handoff.*, and on v_effort or v_handoff.
 ---
 
 # Your work in oxplow

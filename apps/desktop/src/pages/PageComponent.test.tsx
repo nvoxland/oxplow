@@ -24,7 +24,6 @@ mock.module("../tauri-bridge/transport.js", () => ({ ...realTransport, remoteBas
 
 const { PageTree } = await import("./PageTree.js");
 const { PageHost } = await import("./PageHost.js");
-const { inlineLensSpec } = await import("./PageComponent.js");
 const { decl, fakePage, fakePageRuns, fakeRun, loader, node } = await import("./testing/fakeRun.js");
 
 afterEach(() => {
@@ -125,14 +124,4 @@ test("a page whose view is one component fills the page: its title and actions a
     fireEvent.click(fit);
   });
   await waitFor(() => expect(received).toContainEqual({ type: "action", id: "fit" }));
-});
-
-test("an inline page of one viz over one sql loader is what Save as Lens keeps; any other isn't", () => {
-  const sqlDecl = { ...decl("rows"), loader: { kind: "sql", sql: "SELECT 1 AS n", params: {} } } as never;
-  const one = fakeRun(fakePage(node.viz("rows", "rows", { viz: "number", chart: null }), { loaders: [sqlDecl] }));
-  expect(inlineLensSpec(one)).toEqual({ query: "SELECT 1 AS n", viz: "number", chart: null });
-  const inline = fakeRun(fakePage(node.viz("rows", "rows"), { loaders: [decl("rows")] }));
-  expect(inlineLensSpec(inline)).toBeNull();
-  const stacked = fakeRun(fakePage(node.stack("s", [node.viz("rows", "rows")]), { loaders: [sqlDecl] }));
-  expect(inlineLensSpec(stacked)).toBeNull();
 });

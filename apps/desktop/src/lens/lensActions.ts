@@ -5,7 +5,7 @@
 /// `.context/extensions.md`.
 import { fieldsOf, secretFields, shownFields, type Field } from "../components/SchemaForm/schemaFormModel.js";
 import { IpcCallError, needsConfirmation } from "../ipc-error.js";
-import type { CommandOutcome, Drop, FormStart, LensAction, LensRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
+import type { CommandOutcome, Drop, FormStart, PageAction, LensRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
 
 export interface LensActionDeps {
   runLensAction(
@@ -51,7 +51,7 @@ export function rowRecord(columns: string[], row: SqlCell[]): Record<string, Sql
 /** Whether row action `action` is offered on `row`: always, unless its
  *  `when` names a column, which must then be truthy there (not null, 0,
  *  `""` or false). The server refuses it on any other row too. */
-export function actionOffered(action: LensAction, row: Record<string, SqlCell>): boolean {
+export function actionOffered(action: PageAction, row: Record<string, SqlCell>): boolean {
   if (!action.when) return true;
   const v = row[action.when];
   return v !== null && v !== undefined && v !== 0 && v !== "" && v !== false;
@@ -63,7 +63,7 @@ export function actionOffered(action: LensAction, row: Record<string, SqlCell>):
  *  (`oneRow`: `when` or `{{row.*}}`) only while the result has exactly one
  *  row and, if it has a `when`, that column is truthy on it. The server
  *  reads and checks the same row when it runs. */
-export function offeredWholeLens(action: LensAction, result: Pick<LensRun["result"], "columns" | "rows">): boolean {
+export function offeredWholeLens(action: PageAction, result: Pick<LensRun["result"], "columns" | "rows">): boolean {
   if (action.row || action.group || action.edit) return false;
   if (!action.oneRow) return true;
   if (result.rows.length !== 1) return false;
@@ -78,7 +78,7 @@ export interface ActionTarget {
 }
 
 export async function performLensAction(
-  action: LensAction,
+  action: PageAction,
   run: ActionTarget,
   row: Record<string, SqlCell> | null,
   streamId: string | null,
@@ -107,7 +107,7 @@ export async function performLensAction(
  *  (the lens's page closes). A page the
  *  result can't name is the action's failure. */
 export async function openAfterAction(
-  action: Pick<LensAction, "label" | "command" | "then">,
+  action: Pick<PageAction, "label" | "command" | "then">,
   outcome: CommandOutcome,
   deps: Pick<LensActionDeps, "openAfter" | "openPage" | "closePage" | "recordError">,
 ): Promise<void> {

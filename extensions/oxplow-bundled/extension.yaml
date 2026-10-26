@@ -286,8 +286,8 @@ advisories:
       )
       SELECT 'Another thread’s open effort (“' || (SELECT title FROM v_thread WHERE id = other)
              || '”) also changed ' || group_concat(path, ', ')
-             || '. What that thread knows is in its notes (v_thread_note, thread_id = ' || other
-             || '); read them, and the handoffs to or from that thread (v_handoff), before duplicating its work. '
+             || '. Read the handoffs to or from that thread (v_handoff, thread_id = ' || other
+             || ') before duplicating its work. '
              || 'oxplow.handoff.send hands the overlap over; the work item you are on stays with this thread until a handoff of it is taken.' AS message
       FROM (SELECT other, path FROM shared ORDER BY path)
       GROUP BY other

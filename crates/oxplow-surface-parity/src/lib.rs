@@ -126,7 +126,6 @@ pub const MANIFEST: &[Capability] = &[
     model("list_streams", &["v_stream"]),
     // The work-item interface, read for the agent; the UI reads the
     // models (`v_work_item`).
-    model("list_thread_notes", &["v_thread_note"]),
     // Per-effort metric roll-up for the task-page panel (tsk250): the
     // agent gets the same numbers as prompt text via oxplow-bundled's
     // `metric-deltas` advisory (over `v_effort_metric_delta`).
@@ -193,7 +192,7 @@ pub const MANIFEST: &[Capability] = &[
     both_named("run_lens", "run_lens", "oxplow_run_lens"),
     ui(
         "run_lens_spec",
-        "a custom component's `showSpec`, drawn by the host; an agent shows a spec with `oxplow_show_lens`",
+        "a lens spec run checked for the window (a custom component now shows an inline page with `showView`, through `open_page`); an agent shows a spec with `oxplow_show_lens`",
     ),
     // A lens's actions: commands run as the lens, for whoever pressed.
     both_named("run_lens_action", "run_lens_action", "oxplow_run_lens_action"),
@@ -218,6 +217,7 @@ pub const MANIFEST: &[Capability] = &[
     agent("oxplow_show_page"),
     ui("page_text", "Copy's text on the page a window shows"),
     ui("get_page", "the page a window draws; an agent reads a page's ref with `read`"),
+    ui("page_spec", "the source YAML a window edits; agents read page definitions through `read`"),
     both_named("run_page_action", "run_page_action", "oxplow_run_page_action"),
     ui("page_form", "a form node is the person's form; an agent runs the command itself"),
     ui("submit_page_form", "a form node is the person's form; an agent runs the command itself"),
@@ -315,7 +315,6 @@ pub const MANIFEST: &[Capability] = &[
     agent("oxplow_work_next"),
     agent("oxplow_effort_summary"),
     agent("oxplow_catalog"),
-    agent("oxplow_thread_notes"),
     // ---- git ----
     agent("oxplow_vcs_status"),
     agent("oxplow_diff"),

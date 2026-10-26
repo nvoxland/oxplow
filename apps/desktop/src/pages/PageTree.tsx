@@ -19,6 +19,7 @@ import { FormSourceContext } from "../lens/formSource.js";
 import { LensActionRunnerContext } from "../lens/lensActionRunner.js";
 import { LensResultView } from "../lens/LensResultView.js";
 import { nodeById, nodeRunOf } from "../lens/nodeRun.js";
+import { foldEmpty } from "../lens/lensModel.js";
 import type { TabRef } from "../tabs/tabState.js";
 import type { Node, Page, PageRun, RunNode, SqlCell } from "../tauri-bridge/generated/bindings.js";
 import { PageActionContext, PageFormsContext, useNodeActions, useNodeForms } from "./useNodeActions.js";
@@ -29,6 +30,7 @@ import { declaredParams, namedLoader, parsePageRef, usePageReads } from "./pageR
 import { VizPagesContext, type ExpansionProps, type VizPages } from "../lens/vizPages.js";
 import { HostedViewContext } from "../lens/hostedView.js";
 import { usePageRunsStore, usePageRunWith } from "../pageRuns.js";
+import { DashboardGrid } from "./DashboardGrid.js";
 
 // --- The registry --------------------------------------------------------
 
@@ -145,7 +147,7 @@ function NodeView(props: NodeViewProps) {
     own
   );
   const title = def?.title ?? null;
-  const fills = def?.kind === "viz" && def.lens.fills;
+  const fills = fillsNode(run, at);
   return (
     <NodeFrame id={id} fill={fills}>
       {placement === "section" && title ? (
@@ -161,12 +163,20 @@ function NodeView(props: NodeViewProps) {
   );
 }
 
+/** Keep the height chain intact through stacks and the selected switch
+ * branch: terminals only start once their surface has a visible size. */
+function fillsNode(run: PageRun, at: RunNode): boolean {
+  const def = nodeById(run.page, at.id);
+  if (def?.kind === "viz") return def.lens.fills;
+  return (def?.kind === "stack" || def?.kind === "switch") && at.children.some((child) => fillsNode(run, child));
+}
+
 /** A node's root: where `#node=` lands. */
 function NodeFrame({ id, fill, children }: { id: string; fill: boolean; children: ReactNode }) {
   const registry = useContext(NodeRegistryContext);
   const ref = useCallback((el: HTMLDivElement | null) => registry?.register(id, el), [registry, id]);
   return (
-    <div data-node={id} ref={ref} style={fill ? fillStyle : undefined}>
+    <div data-node={id} data-testid={`node-${id}`} ref={ref} style={fill ? fillStyle : undefined}>
       {children}
     </div>
   );
@@ -176,9 +186,30 @@ function NodeBody(props: NodeViewProps & { def: Node; id: string }) {
   const { def, at, id } = props;
   const kids = (placement: Placement) => at.children.map((c) => <NodeView key={c.id} {...props} at={c} placement={placement} />);
   switch (def.kind) {
-    case "stack":
-      return <>{kids("section")}</>;
+    case "stack": {
+      // Titled sections with nothing to show fold into one line, as a lens
+      // document's parts do (`foldEmpty`).
+      const folded = emptySections(props.run, at);
+      const shown = at.children.filter((c) => !folded.some((f) => f.id === c.id));
+      return (
+        <>
+          {shown.map((c) => (
+            <NodeView key={c.id} {...props} at={c} placement="section" />
+          ))}
+          {folded.length > 0 ? (
+            <p data-testid="page-nothing-found" className="ox-empty-line">
+              Nothing found: {folded.map((f) => f.title).join(", ")}.
+            </p>
+          ) : null}
+        </>
+      );
+    }
     case "grid":
+      if (props.run.page.category === "Dashboards" && props.run.page.view.id === def.id && !props.run.page.origin.bundled) {
+        return <DashboardGrid page={props.run.page.id} title={props.run.page.title} tiles={at.children.map((c) => ({
+          id: c.id, size: nodeById(props.run.page, c.id)?.size ?? "small", body: <NodeView {...props} at={c} placement="tile" />,
+        }))} />;
+      }
       return (
         <TileGrid>
           {at.children.map((c) => (
@@ -241,6 +272,20 @@ function VizNode(props: NodeViewProps & { def: Node; id: string }) {
     </FormSourceContext.Provider>
     </LensActionRunnerContext.Provider>
   );
+}
+
+/** The children of stack `at` that fold away: titled, not replaceable
+ *  viz nodes whose loader ran and has nothing for them (`foldEmpty`). */
+function emptySections(run: PageRun, at: RunNode): { id: string; title: string }[] {
+  const candidates = at.children.flatMap((c) => {
+    const def = nodeById(run.page, c.id);
+    if (!def || def.kind !== "viz" || !def.title || def.replaceable || c.error) return [];
+    const lensRun = nodeRunOf(run, def);
+    const loader = def.from !== null ? run.loaders[def.from] : undefined;
+    if (!lensRun || !loader) return [];
+    return [{ id: c.id, title: def.title, run: lensRun, error: loader.error }];
+  });
+  return foldEmpty(candidates).empty.map(({ id, title }) => ({ id, title }));
 }
 
 /** What viz node `def` of `run` reads of pages: an `expand` column's

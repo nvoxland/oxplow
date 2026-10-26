@@ -8,7 +8,7 @@ afterEach(cleanup);
 const MERMAID = "Intro\n\n```mermaid\ngraph TD\n  A --> B\n```";
 
 // Wiki pages mount the field before the body loads, then hand it the real
-// value. That upstream sync creates MermaidBlock's React NodeView, which
+// value. That upstream sync creates FencedBlock's React NodeView, which
 // Tiptap 3 renders with flushSync once the editor content is mounted — so the
 // sync must not run inside React's commit phase, or React logs "flushSync was
 // called from inside a lifecycle method".

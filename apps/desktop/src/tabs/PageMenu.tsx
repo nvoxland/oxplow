@@ -9,7 +9,7 @@ import { Menu } from "lucide-react";
 import { askAssistant } from "../components/Assistant/assistantSession.js";
 import { addDisabledReason, addToContext, useSelectedThreadId } from "../contextBasket.js";
 import { ContextMenu } from "../components/ContextMenu.js";
-import { PinToDashboardMenu, type PinnedTile } from "../components/Dashboard/PinToDashboard.js";
+import { PagePinMenu, type PagePin } from "../pages/PagePinMenu.js";
 import type { AskTarget } from "../components/Prompts/askTarget.js";
 import { useRefOffers } from "../components/refCommands.js";
 import { usePopoverDismiss } from "../components/usePopoverDismiss.js";
@@ -26,7 +26,7 @@ export interface PageMenuProps {
   openWith?: OpenWithProps;
   backlinks?: { count: number; body: ReactNode };
   outbound?: { count: number; body: ReactNode };
-  pin?: { tile: PinnedTile; onOpenPage(ref: TabRef): void; disabledReason?: string | null };
+  pin?: { tile: PagePin; onOpenPage(ref: TabRef): void; disabledReason?: string | null };
   buttonStyle: CSSProperties;
 }
 
@@ -98,7 +98,7 @@ export function PageMenu({ actions, ask, label, openWith, backlinks, outbound, p
         </div>
       ) : null}
       {panel === "pin" && pin ? (
-        <PinToDashboardMenu
+        <PagePinMenu
           tile={pin.tile}
           testId="page-pin"
           onOpenPage={pin.onOpenPage}

@@ -196,8 +196,8 @@ gates"). It is made visible, all of it bundled over existing models
   alerts once.
 - The advisory **`shared-files-agent`** (turn end, to the agent, once per
   thread): another thread's open effort also changed the files, with a
-  pointer to that thread's notes (`v_thread_note`) and the handoffs to or
-  from it (`v_handoff`; `oxplow.handoff.send` hands the overlap over).
+  pointer to the handoffs to or
+  from that thread (`v_handoff`; `oxplow.handoff.send` hands the overlap over).
 
 None refuses anything. Work handed from one thread to
 another is a handoff ([agent-model.md](./agent-model.md) "Handoffs and

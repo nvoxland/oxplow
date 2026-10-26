@@ -16,8 +16,6 @@ intent:
     - name: empty-project
       input: { lens: stale-tasks }
       expect: no rows before the collector has synced
-  prompts:
-    - { prompt: "Which open tasks has nobody touched for a week?" }
 collectors:
   # Open tasks with the last moment anyone touched them: the task's own
   # update, the latest activity on a comment about it, or the latest effort

@@ -83,7 +83,7 @@ pub async fn run_lens(
 /// The viewer's context: the stream (primary when omitted) and its
 /// selected thread, bound into lenses that declare `stream_id` /
 /// `thread_id`.
-async fn context(svc: &Services, stream_id: Option<&str>) -> extensions::LensContext {
+async fn context(svc: &Services, stream_id: Option<&str>) -> extensions::ViewContext {
     let stream = stream_id.and_then(oxplow_domain::StreamId::try_from_str);
     extensions::lens_context(svc, stream, None).await
 }

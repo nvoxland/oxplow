@@ -91,7 +91,7 @@ async fn lens_run_target(
     (
         Option<String>,
         std::path::PathBuf,
-        crate::extensions::LensContext,
+        crate::extensions::ViewContext,
     ),
     CommandError,
 > {

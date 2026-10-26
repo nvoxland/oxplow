@@ -7,11 +7,31 @@ import { fakeAction, fakePageRuns, gridPage, loader, tablePage } from "./testing
 import { createPageRuns, type PageKey } from "../pageRuns.js";
 import { IpcCallError } from "../ipc-error.js";
 import type { CommandSpec, FormStart, PageRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
+import { paramOf } from "../uri/uri.js";
 
 afterEach(cleanup);
 
 const key: PageKey = { page: "acme/page", params: {}, streamId: null, threadId: null };
 const wait = (ms: number) => act(() => new Promise<void>((r) => setTimeout(r, ms)));
+
+test("every page offers Show definition with the page and the run's actual params", async () => {
+  const opened: string[] = [];
+  const { runs } = fakePageRuns({ ...tablePage(), params: { q: "recent" } });
+  const view = render(<PageHost pageKey={key} runs={runs} onOpenPage={(ref) => opened.push(ref.id)} />);
+  fireEvent.click(await view.findByTestId("action-page-definition"));
+  expect(paramOf(opened[0], "of")).toBe("acme/page");
+  expect(paramOf(opened[0], "params")).toBe('{"q":"recent"}');
+});
+
+test("an inline view offers saves without requiring a single SQL viz", async () => {
+  const yaml = "title: Snapshot\ndata: { items: { rows: [{ title: Alpha }] } }\nview: { viz: table, from: items }\n";
+  const kept: string[] = [];
+  const { runs } = fakePageRuns(gridPage());
+  const view = render(<PageHost pageKey={{ ...key, page: undefined, specYaml: yaml }} runs={runs} onSpecYaml={(source) => kept.push(source)} />);
+  await view.findByTestId("action-view-save-page");
+  expect(view.getByTestId("action-view-save-wiki").textContent).toContain("Save to wiki");
+  expect(kept).toContain(yaml);
+});
 
 test("the title is the page's label over its params and its first loader's first row", async () => {
   const { runs } = fakePageRuns(tablePage());
@@ -148,4 +168,28 @@ test("a grid page takes the full width; a table reads as a document", async () =
 test("`focus` lands on its node once the run draws it", async () => {
   const view = render(<PageHost pageKey={key} runs={fakePageRuns(tablePage()).runs} focus="items" />);
   await waitFor(() => expect(view.container.querySelector('[data-node="items"]')?.getAttribute("data-focused")).toBe("true"));
+});
+
+// A page whose view is a switch is one page of sections, as a view
+// document was: its rail links each section (the one in view marked), a
+// link sets the switch's param, and the section in view titles the body.
+test("a switch page's sections are links in its rail; the one in view titles the body", async () => {
+  const { fakePage, fakeRun, node, decl } = await import("./testing/fakeRun.js");
+  const page = fakePage(
+    node.switch("areas", "area", [
+      node.stack("overview", [node.viz("a", "items", { columns: [{ key: "id" }] }, { title: "All" })], { title: "Every Setting" }),
+      node.stack("agents", [node.viz("b", "items", { columns: [{ key: "id" }] }, { title: "Agents list" })], { title: "Agents" }),
+    ]),
+    { title: "Settings", params: [{ name: "area", role: "filter", default: "overview", type: null, options: [] } as never], loaders: [decl("items")] },
+  );
+  const run = fakeRun(page, { params: { area: "overview" }, loaders: { items: loader(["id"], [["x"]]) }, pick: { areas: "overview" } });
+  const { runs } = fakePageRuns(run);
+  const changes: Record<string, SqlCell>[] = [];
+  const view = render(<PageHost pageKey={key} runs={runs} onChange={(p) => changes.push(p)} />);
+  expect((await view.findByRole("heading", { level: 1 })).textContent).toBe("Every Setting");
+  expect(view.getByTestId("page-section-overview").getAttribute("aria-current")).toBe("page");
+  // The switch's param is the sections, not a filter.
+  expect(view.queryByTestId("lens-param-area")).toBeNull();
+  fireEvent.click(view.getByTestId("page-section-agents"));
+  expect(changes).toEqual([{ area: "agents" }]);
 });

@@ -1,11 +1,11 @@
 import { expect, test } from "bun:test";
 
 import { IpcCallError } from "../ipc-error.js";
-import type { FormStart, LensAction, LensRun } from "../tauri-bridge/generated/bindings.js";
+import type { FormStart, PageAction, LensRun } from "../tauri-bridge/generated/bindings.js";
 import { actionOffered, offeredWholeLens, copyLens, openAfterAction, performLensAction, promptField, rowRecord, type LensActionDeps } from "./lensActions.js";
 
 const run = { lens: { id: "acme/prs" }, params: { repo: "x" } } as unknown as LensRun;
-const action: LensAction = { id: "finish", label: "Finish", command: "oxplow.work_item.transition", input: {}, row: false };
+const action: PageAction = { id: "finish", label: "Finish", command: "oxplow.work_item.transition", input: {}, row: false };
 
 function deps(fail?: Error, openPage: string | null = null) {
   const log: string[] = [];
@@ -107,13 +107,13 @@ test("rowRecord maps columns to the row's values", () => {
 });
 
 test("a row action with `when` is offered only on rows where that column is truthy", () => {
-  const enable = { ...action, row: true, when: "can_enable" } as LensAction;
+  const enable = { ...action, row: true, when: "can_enable" } as PageAction;
   expect(actionOffered(enable, { can_enable: 1 })).toBe(true);
   expect(actionOffered(enable, { can_enable: 0 })).toBe(false);
   expect(actionOffered(enable, { can_enable: null })).toBe(false);
   expect(actionOffered(enable, { can_enable: "" })).toBe(false);
   expect(actionOffered(enable, {})).toBe(false);
-  expect(actionOffered({ ...action, row: true } as LensAction, {})).toBe(true);
+  expect(actionOffered({ ...action, row: true } as PageAction, {})).toBe(true);
 });
 
 // An action whose command can be undone says so: the toast offers Undo, as
@@ -180,8 +180,8 @@ test("promptField says when its field is a secret", () => {
 
 test("a whole-lens action is offered as a button; one over the lens's one row only while it has exactly one and `when` holds", () => {
   const result = (rows: Array<Array<string | number | null>>) => ({ columns: ["title", "open"], rows }) as unknown as LensRun["result"];
-  const plain: LensAction = { ...action };
-  const oneRow: LensAction = { ...action, oneRow: true, when: "open" };
+  const plain: PageAction = { ...action };
+  const oneRow: PageAction = { ...action, oneRow: true, when: "open" };
   // A row, group or edit action is not a whole-lens button.
   expect(offeredWholeLens({ ...action, row: true }, result([]))).toBe(false);
   expect(offeredWholeLens({ ...action, group: "x" }, result([]))).toBe(false);

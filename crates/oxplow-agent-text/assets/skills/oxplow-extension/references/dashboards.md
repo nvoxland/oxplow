@@ -139,7 +139,9 @@ oxplow.connect().then((component) => {
     // … draw rows into #chart, reading cells by column name …
   };
   draw(component.run);
-  component.onUpdate(draw); // the host re-runs the lens as the data moves
+  // The host re-runs the lens as the data moves: each update carries the
+  // run, `data` (every loader's rows, by name), `params` and `changed`.
+  component.onUpdate(({ run }) => draw(run));
 });
 ```
 
@@ -152,9 +154,12 @@ for a page): it runs in a sandbox, so adapt it before it will:
 - No modules (`type="module"`, `import`): plain scripts, in order.
 - No storage, cookies or tokens: state lives in the page, or in your
   extension's state through a command.
-- Data comes from the lens's run (`component.run`, `onUpdate`), or from
-  another of its `assets` lenses (`component.query`), never from rows
-  pasted into the file: pasted rows are a snapshot.
+- Data comes from what oxplow feeds it — `component.data` (each
+  loader's `{ columns, rows, truncated }` by name; a lens's own rows as
+  `rows`), `component.run` for a `viz: custom`'s own rows, and
+  `onUpdate(({ data, changed }) => …)` as they change — or from another of
+  its `assets` lenses (`component.query`), never from rows pasted into the
+  file: pasted rows are a snapshot.
 - Colours from the theme (`applyTheme`, the kit's classes), not fixed
   hex, so it reads in light and dark.
 - A library (a chart, a timeline): write TypeScript, import it, and
@@ -191,9 +196,12 @@ a bookmark and a reopened tab keep them. Never use `localStorage` or
 `sessionStorage` for it; `check` warns. Don't draw page-level buttons
 inside the frame: the bar is oxplow's. `extensions/oxplow-foundation/src/timeline/`
 is a working one. To show a query's result, don't draw a table or a chart
-yourself: `showSpec({ title, query, viz, chart? })` has oxplow draw it
-under the page, live, with Save as Lens; it resolves with the rows and
-rejects `INVALID` (`field: "/spec/query"`) for a bad query. A list beside
+yourself: `showView(yaml)` hands oxplow an inline page — `title`, a
+read-only `sql` loader under `data`, a `view` over it (JSON is YAML too:
+`JSON.stringify({ title, data: { rows: { sql } }, view: { viz, from:
+"rows" } })`) — which it draws under the page, live, with Save as Lens; it
+resolves with its first loader's rows and rejects `INVALID` (`field:
+"/data/rows/sql"`) for a query that fails. A list beside
 the page (a catalog, a picker) is a `rail: <lens slug>` on the page: its
 row's `select` sets the view param the component hears.
 `extensions/oxplow-foundation/src/explore-data/` does both.

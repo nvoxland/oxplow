@@ -57,11 +57,11 @@ test("outside a page a ref string opens through the window's opener", () => {
   const opened: string[] = [];
   setWindowRefOpener((ref) => opened.push(ref));
   const { getByTestId } = render(
-    <RouteLink to="oxplow:oxplow/thread_note?id=not3" testId="ref-link">
-      A note
+    <RouteLink to="oxplow:oxplow/handoff?id=hnd3" testId="ref-link">
+      A handoff
     </RouteLink>,
   );
   fireEvent.click(getByTestId("ref-link"));
   setWindowRefOpener(null);
-  expect(opened).toEqual(["oxplow:oxplow/thread_note?id=not3"]);
+  expect(opened).toEqual(["oxplow:oxplow/handoff?id=hnd3"]);
 });

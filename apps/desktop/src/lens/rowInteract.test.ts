@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import type { LensAction } from "../tauri-bridge/generated/bindings.js";
+import type { PageAction } from "../tauri-bridge/generated/bindings.js";
 import { chainedDrops, dragActionFor, dropBeside, dropInGroup, dropZone, keyAction, marksAfterClick, NOWHERE, shownMarks, withOrder } from "./rowInteract.js";
 
 // Marks, drops and keys are rules over rows, tested without a page.
@@ -42,8 +42,8 @@ test("a drop beside a row binds it and its neighbour on the other side, if any",
   expect(dropInGroup([], "done")).toEqual({ ...NOWHERE, group: "done" });
 });
 
-const action = (over: Partial<LensAction>): LensAction =>
-  ({ id: "x", label: "X", command: "a.b.c", input: {}, row: true, group: null, form: false, fixed: [], choices: {}, then: "open", when: null, primary: false, drag: false, bulk: false, key: null, ...over }) as LensAction;
+const action = (over: Partial<PageAction>): PageAction =>
+  ({ id: "x", label: "X", command: "a.b.c", input: {}, row: true, group: null, form: false, fixed: [], choices: {}, then: "open", when: null, primary: false, drag: false, bulk: false, key: null, ...over }) as PageAction;
 
 test("a drop runs the first drag action whose places are all there", () => {
   const move = action({ id: "move", drag: true, input: { uri: "{{row.uri}}", to: "{{group.value}}" } });

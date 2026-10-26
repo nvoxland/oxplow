@@ -1,6 +1,6 @@
 /**
  * Shared mermaid rendering pipeline. Used by `MarkdownView` (read-only
- * markdown bodies) and by the rich-text editor's `MermaidBlock` node
+ * markdown bodies) and by the rich-text editor's `FencedBlock` node
  * view, so both render diagrams identically — same pan-zoom toolbar,
  * same lightbox hook, same lazy mermaid initialization.
  *

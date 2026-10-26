@@ -2,15 +2,15 @@ import { afterEach, expect, test } from "bun:test";
 import { cleanup, fireEvent, render } from "@testing-library/react";
 
 import type { SqlCell } from "../api.js";
-import type { Lens, LensParam } from "../tauri-bridge/generated/bindings.js";
+import type { Lens, PageParam } from "../tauri-bridge/generated/bindings.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { fileRef, settingsRef } from "../tabs/pageRefs.js";
 import { LensRail, type PickedRow } from "./LensRail.js";
 
 afterEach(cleanup);
 
-const p = (over: Partial<LensParam> & { name: string }): LensParam =>
-  ({ label: null, default: null, options: [], presets: [], type: "text", role: "filter", ...over }) as LensParam;
+const p = (over: Partial<PageParam> & { name: string }): PageParam =>
+  ({ label: null, default: null, options: [], presets: [], type: "text", role: "filter", ...over }) as PageParam;
 
 const lens = {
   id: "commit-history/history",

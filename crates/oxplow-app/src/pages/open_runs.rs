@@ -9,7 +9,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use oxplow_db::SqlCell;
-use oxplow_domain::DomainError;
+use oxplow_domain::{DomainError, Timestamp};
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 
@@ -29,6 +29,15 @@ pub struct RunChange {
     pub tree: bool,
 }
 
+/// A run and the sequence of that exact snapshot, captured under one lock.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RunSnapshot {
+    pub run: PageRun,
+    #[specta(type = oxplow_domain::JsNumber)]
+    pub seq: u64,
+}
+
 /// What the change loop tells the open runs.
 #[derive(Debug, Clone)]
 enum Signal {
@@ -37,11 +46,63 @@ enum Signal {
     Everything,
 }
 
+/// Latest invalidation per dependency. Opening a page may itself record
+/// command runs: unrelated writes must not keep its first read retrying.
+#[derive(Default)]
+struct Invalidations {
+    serial: u64,
+    everything: u64,
+    models: HashMap<String, u64>,
+    measures: HashMap<String, u64>,
+}
+
+impl Invalidations {
+    fn record(&mut self, signal: &Signal) {
+        self.serial += 1;
+        match signal {
+            Signal::Everything => self.everything = self.serial,
+            Signal::Models(names) => {
+                for name in names {
+                    self.models.insert(name.clone(), self.serial);
+                }
+            }
+            Signal::Measures(names) => {
+                for name in names {
+                    self.measures.insert(name.clone(), self.serial);
+                }
+            }
+        }
+    }
+
+    fn reaches(&self, run: &PageRun, since: u64) -> bool {
+        self.everything > since
+            || reads_any(
+                run,
+                &self
+                    .models
+                    .iter()
+                    .filter(|(_, serial)| **serial > since)
+                    .map(|(name, _)| name.clone())
+                    .collect::<Vec<_>>(),
+                &self
+                    .measures
+                    .iter()
+                    .filter(|(_, serial)| **serial > since)
+                    .map(|(name, _)| name.clone())
+                    .collect::<Vec<_>>(),
+            )
+    }
+}
+
 struct OpenRun {
     req: RunRequest,
     run: PageRun,
     client: String,
     seq: u64,
+    /// A later refresh/parameter request supersedes earlier async work.
+    revision: u64,
+    opened_at: Timestamp,
+    reported: bool,
 }
 
 /// An ephemeral page an agent showed (`oxplow.page.show { spec }`): its
@@ -63,6 +124,29 @@ pub struct PageRuns {
     views: Arc<Mutex<HashMap<String, View>>>,
     /// Where the change loop's signals go once [`PageRuns::start`] ran.
     signals: Arc<Mutex<Option<tokio::sync::mpsc::UnboundedSender<Signal>>>>,
+    connections: Arc<Mutex<HashMap<String, uuid::Uuid>>>,
+    /// Register interest before the first read. Publishing a new run and
+    /// invalidation use this same fence, so neither can miss the other.
+    revision: Arc<Mutex<Invalidations>>,
+}
+
+/// One event socket's ownership of a window. A late drop from a socket
+/// replaced on reconnect cannot close the new socket's runs.
+pub struct PageClient {
+    runs: PageRuns,
+    client: String,
+    connection: uuid::Uuid,
+}
+
+impl Drop for PageClient {
+    fn drop(&mut self) {
+        let mut connections = self.runs.connections.lock();
+        if connections.get(&self.client) != Some(&self.connection) {
+            return;
+        }
+        connections.remove(&self.client);
+        self.runs.runs.lock().retain(|_, r| r.client != self.client);
+    }
 }
 
 /// How long signals gather before the open runs re-run: a burst of
@@ -70,6 +154,18 @@ pub struct PageRuns {
 const COALESCE: std::time::Duration = std::time::Duration::from_millis(100);
 
 impl PageRuns {
+    pub fn connect_client(&self, client: &str) -> PageClient {
+        let connection = uuid::Uuid::now_v7();
+        let mut connections = self.connections.lock();
+        connections.insert(client.to_string(), connection);
+        self.runs.lock().retain(|_, r| r.client != client);
+        PageClient {
+            runs: self.clone(),
+            client: client.to_string(),
+            connection,
+        }
+    }
+
     /// Re-run open runs as the change loop says models change, and tell
     /// the windows (`PageRunChanged`), for the life of `svc`.
     pub fn start(&self, svc: &Arc<crate::Services>) {
@@ -107,7 +203,12 @@ impl PageRuns {
         });
     }
 
+    fn invalidate(&self, signal: &Signal) {
+        self.revision.lock().record(signal);
+    }
+
     fn signal(&self, signal: Signal) {
+        self.invalidate(&signal);
         if let Some(tx) = self.signals.lock().as_ref() {
             let _ = tx.send(signal);
         }
@@ -141,18 +242,37 @@ impl PageRuns {
         req: RunRequest,
         client: &str,
     ) -> Result<(String, PageRun), DomainError> {
-        let run = PageRunner::of(svc).run(req.clone()).await?;
-        let id = uuid::Uuid::now_v7().to_string();
-        self.runs.lock().insert(
-            id.clone(),
-            OpenRun {
-                req,
-                run: run.clone(),
-                client: client.to_string(),
-                seq: 0,
-            },
-        );
-        Ok((id, run))
+        let connection = self.connections.lock().get(client).copied();
+        loop {
+            let observed = self.revision.lock().serial;
+            let run = PageRunner::of(svc).run(req.clone()).await?;
+            // Keep the invalidation fence until insertion: a notification
+            // either forces another read here or finds the published run.
+            let revision = self.revision.lock();
+            let connections = self.connections.lock();
+            if connections.get(client).copied() != connection {
+                return Err(DomainError::Invalid(
+                    "the window disconnected while its page opened".into(),
+                ));
+            }
+            if revision.reaches(&run, observed) {
+                continue;
+            }
+            let id = uuid::Uuid::now_v7().to_string();
+            self.runs.lock().insert(
+                id.clone(),
+                OpenRun {
+                    req,
+                    run: run.clone(),
+                    client: client.to_string(),
+                    seq: 0,
+                    revision: 0,
+                    opened_at: Timestamp::now(),
+                    reported: false,
+                },
+            );
+            return Ok((id, run));
+        }
     }
 
     /// Keep an inline page an agent showed; its id is what its uri names.
@@ -183,6 +303,13 @@ impl PageRuns {
         self.runs.lock().get(id).map(|r| r.run.clone())
     }
 
+    pub fn snapshot(&self, id: &str) -> Option<RunSnapshot> {
+        self.runs.lock().get(id).map(|r| RunSnapshot {
+            run: r.run.clone(),
+            seq: r.seq,
+        })
+    }
+
     /// The open runs' ids.
     pub fn ids(&self) -> Vec<String> {
         self.runs.lock().keys().cloned().collect()
@@ -193,6 +320,31 @@ impl PageRuns {
         self.runs.lock().retain(|_, r| clients.contains(&r.client));
     }
 
+    /// Reconcile an ordered report from one window. A new run whose
+    /// response has not reached the renderer yet has never been reported
+    /// and must survive an older roster already in flight.
+    pub fn report_client_runs(&self, client: &str, ids: &[String]) {
+        self.runs.lock().retain(|id, run| {
+            if run.client != client {
+                return true;
+            }
+            if ids.contains(id) {
+                run.reported = true;
+                return true;
+            }
+            !run.reported
+        });
+    }
+
+    /// Forget runs of expired windows. Give never-reported new opens the
+    /// same first-report grace as a window's heartbeat expiry.
+    pub fn reap_expired_clients(&self, clients: &[String], now: Timestamp) {
+        self.runs.lock().retain(|_, r| {
+            (r.reported && clients.contains(&r.client))
+                || now.unix_ms() - r.opened_at.unix_ms() <= crate::client_reports::FORGET_AFTER_MS
+        });
+    }
+
     /// Re-run `id` with `params` over its own (a pick, a filter, a switch's
     /// param).
     pub async fn set_params(
@@ -201,11 +353,7 @@ impl PageRuns {
         id: &str,
         params: BTreeMap<String, SqlCell>,
     ) -> Result<(PageRun, RunChange), DomainError> {
-        let mut req = self.request(id)?;
-        for (k, v) in params {
-            req.params.insert(k, v);
-        }
-        self.rerun_with(svc, id, req).await
+        self.rerun_with(svc, id, params, None).await
     }
 
     /// Re-run `id` as it is (Refresh).
@@ -214,39 +362,50 @@ impl PageRuns {
         svc: &crate::Services,
         id: &str,
     ) -> Result<(PageRun, RunChange), DomainError> {
-        let req = self.request(id)?;
-        self.rerun_with(svc, id, req).await
-    }
-
-    fn request(&self, id: &str) -> Result<RunRequest, DomainError> {
-        self.runs
-            .lock()
-            .get(id)
-            .map(|r| r.req.clone())
-            .ok_or_else(|| DomainError::Invalid(format!("no open page run `{id}`")))
+        self.rerun_with(svc, id, BTreeMap::new(), None).await
     }
 
     async fn rerun_with(
         &self,
         svc: &crate::Services,
         id: &str,
-        req: RunRequest,
+        params: BTreeMap<String, SqlCell>,
+        changed: Option<(&[String], &[String])>,
     ) -> Result<(PageRun, RunChange), DomainError> {
-        self.rerun_seeded(svc, id, req, HashMap::new()).await
-    }
-
-    async fn rerun_seeded(
-        &self,
-        svc: &crate::Services,
-        id: &str,
-        req: RunRequest,
-        seed: HashMap<String, super::runner::LoaderRun>,
-    ) -> Result<(PageRun, RunChange), DomainError> {
+        let (revision, req, seed) = {
+            let mut runs = self.runs.lock();
+            let open = runs
+                .get_mut(id)
+                .ok_or_else(|| DomainError::Invalid(format!("no open page run `{id}`")))?;
+            // Merge desired params, reserve this request and capture its
+            // memo under one lock. A concurrent refresh cannot reserve a
+            // newer ticket with a stale request copied before this update.
+            open.req.params.extend(params);
+            open.revision = open.revision.wrapping_add(1);
+            let seed = match changed {
+                Some((models, measures)) => super::runner::unreached(&open.run, models, measures),
+                None => HashMap::new(),
+            };
+            (open.revision, open.req.clone(), seed)
+        };
         let fresh = PageRunner::of(svc).run_seeded(req.clone(), seed).await?;
         let mut runs = self.runs.lock();
         let open = runs
             .get_mut(id)
             .ok_or_else(|| DomainError::Invalid(format!("no open page run `{id}`")))?;
+        if open.revision != revision {
+            // A newer request owns this run. A stale completion neither
+            // publishes its rows nor restores its older params.
+            return Ok((
+                open.run.clone(),
+                RunChange {
+                    run_id: id.to_string(),
+                    seq: open.seq,
+                    loaders: Vec::new(),
+                    tree: false,
+                },
+            ));
+        }
         let mut change = diff(&open.run, &fresh);
         open.seq += 1;
         change.run_id = id.to_string();
@@ -269,6 +428,8 @@ impl PageRuns {
         models: &[String],
         measures: &[String],
     ) -> Vec<RunChange> {
+        self.invalidate(&Signal::Models(models.to_vec()));
+        self.invalidate(&Signal::Measures(measures.to_vec()));
         let ids: Vec<String> = self
             .runs
             .lock()
@@ -282,6 +443,7 @@ impl PageRuns {
     /// Re-run every open run (the catalog changed, or the change loop
     /// missed something).
     pub async fn all_changed(&self, svc: &crate::Services) -> Vec<RunChange> {
+        self.invalidate(&Signal::Everything);
         let ids = self.ids();
         self.rerun_all(svc, ids).await
     }
@@ -300,22 +462,7 @@ impl PageRuns {
     ) -> Vec<RunChange> {
         let mut out = Vec::new();
         for id in ids {
-            let outcome = match changed {
-                None => self.rerun(svc, &id).await,
-                Some((models, measures)) => {
-                    let (req, seed) = {
-                        let runs = self.runs.lock();
-                        match runs.get(&id) {
-                            Some(open) => (
-                                open.req.clone(),
-                                super::runner::unreached(&open.run, models, measures),
-                            ),
-                            None => continue,
-                        }
-                    };
-                    self.rerun_seeded(svc, &id, req, seed).await
-                }
-            };
+            let outcome = self.rerun_with(svc, &id, BTreeMap::new(), changed).await;
             match outcome {
                 Ok((_, change)) if !change.loaders.is_empty() || change.tree => out.push(change),
                 Ok(_) => {}
@@ -354,22 +501,47 @@ fn embeds(node: &RunNode) -> Box<dyn Iterator<Item = &PageRun> + '_> {
     )
 }
 
-/// The loaders whose rows differ between `old` and `new` (embedded
-/// pages' as `<embed id>/<loader>`), and whether the tree changed.
+/// The loaders whose result or error differs between `old` and `new`
+/// (embedded pages' as `<embed id>/<loader>`), and whether either root's
+/// tree or embedded page changed.
 fn diff(old: &PageRun, new: &PageRun) -> RunChange {
-    let mut loaders: Vec<String> = new
+    let mut names: Vec<&str> = new
         .page
         .loaders
         .iter()
-        .filter(|d| {
-            let (a, b) = (old.loaders.get(&d.name), new.loaders.get(&d.name));
-            a.map(|r| (&r.result.columns, &r.result.rows, &r.error))
-                != b.map(|r| (&r.result.columns, &r.result.rows, &r.error))
-        })
-        .map(|d| d.name.clone())
+        .map(|decl| decl.name.as_str())
         .collect();
-    let mut tree = shape(&old.tree) != shape(&new.tree) || old.page != new.page;
-    let (old_embeds, new_embeds) = (embed_runs(&old.tree, ""), embed_runs(&new.tree, ""));
+    for decl in &old.page.loaders {
+        if !names.contains(&decl.name.as_str()) {
+            names.push(&decl.name);
+        }
+    }
+    let mut loaders: Vec<String> = names
+        .into_iter()
+        .filter(|name| {
+            let (a, b) = (old.loaders.get(*name), new.loaders.get(*name));
+            // Completeness and provenance can change while the retained
+            // cells stay identical (for example a newly truncated result).
+            a.map(|run| (&run.result, &run.error)) != b.map(|run| (&run.result, &run.error))
+        })
+        .map(str::to_string)
+        .collect();
+    let mut tree = shape(&old.tree) != shape(&new.tree)
+        || old.rail.as_ref().map(shape) != new.rail.as_ref().map(shape)
+        || old.page != new.page;
+    let mut old_embeds = embed_runs(&old.tree, "");
+    let mut new_embeds = embed_runs(&new.tree, "");
+    // Rail nodes share the page's node-id namespace: their action/fetch
+    // paths have no additional `rail/` segment.
+    if let Some(rail) = &old.rail {
+        old_embeds.extend(embed_runs(rail, ""));
+    }
+    if let Some(rail) = &new.rail {
+        new_embeds.extend(embed_runs(rail, ""));
+    }
+    tree |= old_embeds
+        .iter()
+        .any(|(path, _)| !new_embeds.iter().any(|(new_path, _)| new_path == path));
     for (path, run) in &new_embeds {
         match old_embeds.iter().find(|(p, _)| p == path) {
             Some((_, before)) => {
@@ -407,4 +579,122 @@ fn embed_runs<'r>(node: &'r RunNode, prefix: &str) -> Vec<(String, &'r PageRun)>
         out.extend(embed_runs(c, prefix));
     }
     out
+}
+
+#[cfg(test)]
+mod diff_tests {
+    use super::*;
+    use crate::pages::runner::LoaderRun;
+
+    fn fixture(slug: &str) -> PageRun {
+        let page = crate::pages::schema::parse_page(
+            "acme",
+            "acme",
+            slug,
+            "diff-test.yaml",
+            "title: Diff test\ndata:\n  value: { rows: [{ n: 1 }] }\nview: { viz: table, from: value }\nrail: { id: rail-embed, embed: { page: acme/child } }\n",
+        )
+        .unwrap();
+        let tree = RunNode {
+            id: page.view.id.clone(),
+            children: Vec::new(),
+            embed: None,
+            error: None,
+        };
+        PageRun {
+            page,
+            params: BTreeMap::new(),
+            loaders: BTreeMap::from([(
+                "value".into(),
+                LoaderRun {
+                    result: oxplow_db::SqlQueryResult {
+                        columns: vec!["n".into()],
+                        rows: vec![vec![SqlCell::Int(1)]],
+                        ..Default::default()
+                    },
+                    error: None,
+                    key: "value-key".into(),
+                },
+            )]),
+            tree,
+            rail: None,
+            alert: None,
+            badge: None,
+        }
+    }
+
+    #[test]
+    fn truncation_and_provenance_changes_notify_without_cell_changes() {
+        let old = fixture("host");
+        let changes: [fn(&mut oxplow_db::SqlQueryResult); 3] = [
+            |result| result.truncated = true,
+            |result| result.generation = Some("generation-b".into()),
+            |result| result.reads.models.push("v_work_item".into()),
+        ];
+        for change in changes {
+            let mut new = old.clone();
+            change(&mut new.loaders.get_mut("value").unwrap().result);
+            let changed = diff(&old, &new);
+            assert_eq!(changed.loaders, ["value"]);
+            assert!(!changed.tree);
+        }
+    }
+
+    #[test]
+    fn a_rail_embeds_changed_loader_uses_the_normal_node_path() {
+        let mut old = fixture("host");
+        old.rail = Some(RunNode {
+            id: "rail-embed".into(),
+            children: Vec::new(),
+            embed: Some(Box::new(fixture("child"))),
+            error: None,
+        });
+        let mut new = old.clone();
+        new.rail
+            .as_mut()
+            .unwrap()
+            .embed
+            .as_mut()
+            .unwrap()
+            .loaders
+            .get_mut("value")
+            .unwrap()
+            .result
+            .rows[0][0] = SqlCell::Int(2);
+        let changed = diff(&old, &new);
+        assert_eq!(changed.loaders, ["rail-embed/value"]);
+        assert!(!changed.tree);
+    }
+
+    #[test]
+    fn removing_an_embed_or_rail_notifies_even_when_node_ids_are_unchanged() {
+        let mut old = fixture("host");
+        old.rail = Some(RunNode {
+            id: "rail-embed".into(),
+            children: Vec::new(),
+            embed: Some(Box::new(fixture("child"))),
+            error: None,
+        });
+        let mut new = old.clone();
+        new.rail.as_mut().unwrap().embed = None;
+        assert!(diff(&old, &new).tree);
+        new.rail = None;
+        assert!(diff(&old, &new).tree);
+        // The same removal rule applies to the main tree's embeds.
+        old.tree.embed = Some(Box::new(fixture("child")));
+        new = old.clone();
+        new.tree.embed = None;
+        assert!(diff(&old, &new).tree);
+    }
+
+    #[test]
+    fn removing_a_loader_names_its_missing_result() {
+        let old = fixture("host");
+        let mut new = old.clone();
+        new.loaders.clear();
+        new.page.loaders.clear();
+        let changed = diff(&old, &new);
+        assert_eq!(changed.loaders, ["value"]);
+        assert!(changed.tree);
+    }
 }

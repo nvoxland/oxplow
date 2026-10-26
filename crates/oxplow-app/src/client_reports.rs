@@ -65,6 +65,10 @@ pub struct TabReport {
     /// The detail the shown thread's active page publishes (JSON text: a
     /// lens's `{lensId, params}`, an editor's `{path, revision, selection}`).
     pub detail_json: Option<String>,
+    /// Every live page run in this window, including panels, inline
+    /// markdown and hidden history bodies.
+    #[serde(default)]
+    pub runs: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -122,6 +126,14 @@ pub struct ClientReports {
 impl ClientReports {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Windows still reporting at `now`; expired reports are forgotten.
+    pub fn live_ids(&self, now: Timestamp) -> Vec<String> {
+        self.live(now)
+            .into_iter()
+            .map(|c| c.report.client)
+            .collect()
     }
 
     /// Take `report` as what its window shows at `now`.
@@ -274,6 +286,7 @@ mod tests {
 
     fn report(client: &str, focused: bool, shown: i64, threads: Vec<ThreadTabs>) -> TabReport {
         TabReport {
+            runs: Vec::new(),
             client: client.into(),
             focused,
             visible: true,

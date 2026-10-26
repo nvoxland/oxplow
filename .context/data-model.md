@@ -662,32 +662,16 @@ concurrent duplicate keeps the first (`ON CONFLICT DO NOTHING`). The
 same migration adds `ai_call.input_hash`. Read as `v_ai_result`; see
 [ai-providers.md](./ai-providers.md) "Recorded computations".
 
-### `thread_note` and `task_note` (`thread_note_store.rs`, `oxplow-tasks` `satellite.rs`)
-
-**`thread_note`** is a thread's capture pad: what an agent records as it
-works (a finding, why it paused) and what an Explore subagent fills in
-(`oxplow.knowledge.add_note` / `update_note`, `.context/agent-model.md`). Each
-row has `id`, `thread_id`, `body`, `author` (free-form: `agent`, `user`,
-`explore-subagent`) and `created_at`. Its ref is `thread_note:not<n>`;
-its `[[…]]` links are `page_ref` edges from `thread_note`, and each
-change logs `knowledge.note.written@3` / `deleted@3` (V31 rewrote the
-v1 rows, which named the note `task_note:not<n>`, and v1 went). `v_thread_note` reads it,
-`v_search_thread_note` indexes it (`thread_uri` on `v_thread_note`, v3, is
-where a note opens: its thread).
+### `task_note` (`oxplow-tasks` `satellite.rs`)
 
 **`task_note`** holds only the comments on oxplow's tasks
 (`oxplow.work_item.comment`; `task_id` NOT NULL), which reach
-`work_item_comment` through the task's record. The two shared one table, one of
-`task_id` / `thread_id` set, until V24 moved thread notes out, keeping
-their ids and re-kinding their `page_ref` edges; both tables continue
-past every id the shared one gave out.
-
-Thread-scoped rows (`thread_id` set, `task_id` NULL) are the per-thread
-capture pad, written by `oxplow.knowledge.add_note` / `oxplow.knowledge.update_note`
-(P8.A6). An orchestrator handing a question to an Explore subagent
-allocates an empty note first and the subagent fills in its body with
-`oxplow.knowledge.update_note`. The orchestrator reads them
-back via `oxplow_query_sql` over `v_thread_note` or `listThreadNotes(threadId)` (UI).
+`work_item_comment` through the task's record. Thread notes (`thread_note`,
+the per-thread capture pad of `oxplow.knowledge.add_note`) are gone: V112
+dropped the table with its `page_ref` edges and search rows, and with the
+commands, `v_thread_note`, `v_search_thread_note` and the `oxplow/thread_note`
+resource. What an agent leaves for the next one is an effort, a decision or
+a handoff.
 
 ### `handoff` (`handoff_store.rs`, V84)
 
@@ -1334,7 +1318,6 @@ Every stored `source_uri` / `target_uri` is a canonical URI (see
 - `oxplow/dir` — `?path=<repo-relative path>`, no trailing slash
 - `oxplow/commit` — `?sha=<full sha>`
 - `oxplow/finding` — `?id=<rowid>`
-- `oxplow/thread_note` — `?id=not<n>`
 
 V99 rewrote the stored rows from the old `(kind, id)` pairs; the boot
 backfill regenerates the derived ones. `V100__bare_ids.sql` then moved the
@@ -2431,7 +2414,7 @@ enforces identity, treating global rows' `NULL` stream as `''`).
 
 - `kind` holds a resource (`oxplow/wiki`) that `v_resource` lists as
   `searchable` (oxplow's `oxplow/work_item`, `oxplow/comment`,
-  `oxplow/thread_note`, `oxplow/wiki`, `oxplow/thread`,
+  `oxplow/wiki`, `oxplow/thread`,
   `oxplow/agent_session`, `oxplow/turn`, `oxplow/effort`,
   `oxplow/decision`, `oxplow/commit`, `oxplow/lens`, `oxplow/dashboard`; an
   extension's, P9.D3), or
@@ -2442,7 +2425,7 @@ enforces identity, treating global rows' `NULL` stream as `''`).
   renamed V164's `content_hash` — and `apply_restate_tx` writes only
   entries added, changed or gone; tsk896); core's read `v_search_work_item`
   (the active work list's items, through the interface) / `_comment` /
-  `_thread_note` / `_wiki` and the feeds for the other resources named above
+  `_wiki` and the feeds for the other resources named above
   (`models/search_<kind>.sql`; `.context/extensions.md` "Resources" says
   how a resource gets one, and the models' docs say
   what each indexes and whether archived work is included). Files are upserted by the `search.index` pump consumer from

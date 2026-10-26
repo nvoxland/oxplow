@@ -2,7 +2,7 @@ import { afterEach, expect, mock, test } from "bun:test";
 import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { useState, type ReactNode } from "react";
 
-import type { LensAction, LensRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
+import type { PageAction, LensRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
 import { PageNavigationContext, type PageNavigation, type TabEditing } from "../tabs/PageNavigationContext.js";
 import { PageCommentsContext } from "./pageComments.js";
 
@@ -52,9 +52,9 @@ const save = {
   key: null,
   edit: true,
   editField: "body",
-} as unknown as LensAction;
+} as unknown as PageAction;
 
-const runOf = (body: string, actions: LensAction[] = [save]): LensRun =>
+const runOf = (body: string, actions: PageAction[] = [save]): LensRun =>
   ({
     lens: {
       id: "x/page",

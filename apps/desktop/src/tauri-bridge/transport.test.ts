@@ -15,6 +15,7 @@ import {
   triggerRemoteResync,
   writeFrame,
   flushFrames,
+  eventsUrl,
 } from "./transport";
 import { EVENT_CHANNELS } from "./channels";
 import { SHELL_COMMANDS } from "./generated/shellCommands";
@@ -24,6 +25,18 @@ const DAEMON = "http://127.0.0.1:60331";
 /// A command only the shell can serve, and one any daemon serves.
 const SHELL_COMMAND = "set_native_menu";
 const PROJECT_COMMAND = "list_streams";
+
+test("the event socket carries the stable client identity beside its token", () => {
+  const url = new URL(eventsUrl("https://daemon.example", "private & token", "window/one"));
+  expect(url.protocol).toBe("wss:");
+  expect(url.pathname).toBe("/events");
+  expect(url.searchParams.get("token")).toBe("private & token");
+  expect(url.searchParams.get("client")).toBe("window/one");
+  const local = new URL(eventsUrl(DAEMON, null, "window-one"));
+  expect(local.protocol).toBe("ws:");
+  expect(local.searchParams.has("token")).toBe(false);
+  expect(local.searchParams.get("client")).toBe("window-one");
+});
 
 describe("resolveBase", () => {
   test("no source at all means no daemon — talk to the shell", () => {

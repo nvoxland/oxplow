@@ -30,13 +30,16 @@ import { Page } from "../tabs/Page.js";
 import { useOptionalPageNavigation, usePageTitle, useTabActions } from "../tabs/PageNavigationContext.js";
 import type { TabRef } from "../tabs/tabState.js";
 import type { Node, PageRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
-import { PageRail } from "./PageRail.js";
+import { PageRail, switchSections } from "./PageRail.js";
 import { ComponentPage, type ComponentPageHost } from "./PageComponent.js";
 import type { BridgeHost } from "../lens/ComponentFrame.js";
 import type { FrameAction } from "../lens/componentBridge.js";
 import { NodeRegistryContext, PageTree, createNodeRegistry, useNodeFocus } from "./PageTree.js";
 import { labelRow, tabLabel } from "./renderers.js";
 import { useNodeActions, useNodeForms } from "./useNodeActions.js";
+import { SaveViewForm } from "./SaveViewForm.js";
+import { definitionUri } from "./viewActions.js";
+import { PageViewContext } from "./PageViewContext.js";
 
 export interface PageHostProps {
   pageKey: PageKey;
@@ -55,12 +58,14 @@ export interface PageHostProps {
   /** The stream it runs for, whole: what a viz that needs more than its
    *  id reads (the editor: the worktree its files are under). */
   stream?: Stream | null;
+  /** Keep a shown view's exact source in its tab's history state. */
+  onSpecYaml?(yaml: string): void;
 }
 
 /** How long a page may take before it says it is reading. */
 export const LOADING_AFTER_MS = 150;
 
-export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, renders = null, stream = null }: PageHostProps) {
+export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, renders = null, stream = null, onSpecYaml }: PageHostProps) {
   const store = usePageRunsStore();
   const state = usePageRunWith(runs ?? store, pageKey);
   const { error, setParams, rerun } = state;
@@ -75,6 +80,13 @@ export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, re
   const streamId = pageKey.streamId;
   const nav = useOptionalPageNavigation();
   const page = run?.page ?? null;
+  const specYaml = state.specYaml ?? pageKey.specYaml ?? null;
+  useEffect(() => { if (specYaml) onSpecYaml?.(specYaml); }, [specYaml, onSpecYaml]);
+  const [saveAs, setSaveAs] = useState<"wiki" | "page" | null>(null);
+  const open = (uri: string) => {
+    if (nav) nav.navigate({ id: uri });
+    else onOpenPage?.({ id: uri });
+  };
   // A page whose view is one component *is* that component: it says the
   // title and the actions, which core draws.
   const whole = page?.view.kind === "component";
@@ -96,6 +108,11 @@ export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, re
   const actions = useLensActions(target, streamId, pageRunner);
   const offered = (page?.actions ?? []).filter((a) => !a.row && !a.group && !a.edit);
   const pageActions: PageAction[] = [
+    ...(page ? [{ id: "page-definition", label: "Show definition", standard: true, run: () => open(definitionUri(page.id, run!.params, specYaml)) }] : []),
+    ...(specYaml ? [
+      { id: "view-save-wiki", label: "Save to wiki…", standard: true, run: () => setSaveAs("wiki") },
+      { id: "view-save-page", label: "Save as Page…", standard: true, run: () => setSaveAs("page") },
+    ] : []),
     // A page re-runs on its own when oxplow's data changes; Refresh is for
     // one that reads outside oxplow.
     ...(page?.refresh ? [{ id: "page-refresh", label: "Refresh", standard: true, icon: "refresh-cw", run: () => void rerun() }] : []),
@@ -177,10 +194,12 @@ export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, re
       width={full ? "full" : "reading"}
       fill={fills}
       actions={pageActions}
+      pin={pageKey.page && page && onOpenPage ? { tile: { kind: "page", page: page.id, params: run!.params, title: page.title }, onOpenPage } : undefined}
       rightRail={
         run ? (
           <>
             <Contents root={body} />
+            {saveAs && specYaml ? <SaveViewForm key={saveAs} kind={saveAs} specYaml={specYaml} initialTitle={title} onClose={() => setSaveAs(null)} onSaved={open} /> : null}
             <PageRail run={run} runId={runId} onApply={apply} picked={picked} outOfDate={outOfDate} streamId={streamId} onOpenPage={onOpenPage} />
           </>
         ) : undefined
@@ -190,6 +209,7 @@ export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, re
       commentsNav={pageComments ? <CommentNavigator target={pageComments.target} /> : undefined}
     >
       <NodeRegistryContext.Provider value={registry}>
+      <PageViewContext.Provider value={{ streamId: pageKey.streamId, threadId: pageKey.threadId }}>
       <LensStreamContext.Provider value={stream}>
       <PageCommentsContext.Provider value={pageComments}>
         <div
@@ -200,7 +220,7 @@ export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, re
           style={fills ? fillStyle : undefined}
           {...(pageComments ? contextNodeProps(pageComments.target) : {})}
         >
-          {page && !fills ? <h1 className="ox-title">{title}</h1> : null}
+          {page && !fills && !(page.category === "Dashboards" && page.view.kind === "grid" && !page.origin.bundled) ? <h1 className="ox-title">{sectionTitle(run!) ?? title}</h1> : null}
           {page?.description && !fills ? <p className="ox-intro">{page.description}</p> : null}
           {actions.pending ? (
             <CommandConfirm
@@ -235,9 +255,17 @@ export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, re
         </div>
       </PageCommentsContext.Provider>
       </LensStreamContext.Provider>
+      </PageViewContext.Provider>
       </NodeRegistryContext.Provider>
     </Page>
   );
+}
+
+/** The title of the section a switch page shows, which titles its body
+ *  (as a view document's did); null for any other page. */
+function sectionTitle(run: PageRun): string | null {
+  const sw = switchSections(run);
+  return sw?.sections.find((s) => s.id === sw.current)?.title ?? null;
 }
 
 const NO_PARAMS: Record<string, SqlCell> = {};

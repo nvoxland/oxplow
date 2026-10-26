@@ -6,7 +6,7 @@
 use oxplow_config::LspServerConfig;
 use oxplow_db::SqlCell;
 
-use crate::extensions::{run_lens, LensContext};
+use crate::extensions::{run_lens, ViewContext};
 use crate::test_fixtures::services_with_effort;
 
 type Row = Vec<SqlCell>;
@@ -71,7 +71,7 @@ async fn run_as_lens(svc: &crate::Services, lens: &str, params: Vec<(&str, SqlCe
             .into_iter()
             .map(|(k, v)| (k.to_string(), v))
             .collect(),
-        &LensContext::default(),
+        &ViewContext::default(),
     )
     .await
     .unwrap();
@@ -1402,7 +1402,7 @@ async fn the_dashboard_page_adds_a_metric_tile_and_edits_its_tiles() {
         confirmed: false,
     };
     let root = fx._dir.path();
-    let ctx = LensContext::default();
+    let ctx = ViewContext::default();
     run_lens_action(
         &fx.svc,
         root,
@@ -1714,7 +1714,7 @@ async fn the_capabilities_lens_lists_the_implementations_and_choosing_one_is_a_c
         on_behalf_of: oxplow_domain::Actor::Human,
         confirmed: true,
     };
-    let ctx = crate::extensions::LensContext::default();
+    let ctx = crate::extensions::ViewContext::default();
     let root = fx.svc.layout.project_dir.clone();
     run_lens_action(&fx.svc, &root, press("use-project", choice), &ctx)
         .await
@@ -1814,7 +1814,7 @@ async fn the_context_pages_clear_empties_the_threads_basket() {
         on_behalf_of: oxplow_domain::Actor::Human,
         confirmed: false,
     };
-    run_lens_action(&fx.svc, fx._dir.path(), call, &LensContext::default())
+    run_lens_action(&fx.svc, fx._dir.path(), call, &ViewContext::default())
         .await
         .unwrap();
     assert!(run(&fx, "context-waiting", by_thread())

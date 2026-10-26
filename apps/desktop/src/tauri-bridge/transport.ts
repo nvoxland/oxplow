@@ -30,6 +30,7 @@ import { listen as tauriListen, type UnlistenFn } from "@tauri-apps/api/event";
 import { CHANNEL_ROUTING, EVENT_CHANNELS, type ListenChannel } from "./channels";
 import { SHELL_COMMANDS } from "./generated/shellCommands";
 import { shellStorage } from "../shellStorage.js";
+import { getUiClientId } from "../uiClientId.js";
 
 /// Channels multiplexed over the daemon's /events WebSocket, keyed by
 /// the wire `channel` value in each frame. Sourced from the shared
@@ -161,6 +162,14 @@ function readRemoteEndpoint(): { base: string | null; token: string | null } {
 const endpoint = readRemoteEndpoint();
 const remoteBase: string | null = endpoint.base;
 const remoteToken: string | null = endpoint.token;
+
+/** The event connection owns this window's open runs until it closes. */
+export function eventsUrl(base: string, token: string | null, client: string): string {
+  const url = new URL(`${base.replace(/^http/, "ws")}/events`);
+  if (token) url.searchParams.set("token", token);
+  url.searchParams.set("client", client);
+  return url.toString();
+}
 
 /// Headers every daemon request carries.
 function authHeaders(token: string | null): Record<string, string> {
@@ -419,8 +428,7 @@ export function handleSocketOpen(): void {
 function ensureSocket(): void {
   if (remoteBase === null || socket !== null || tokenRefused) return;
   // Browsers can't set headers on a WebSocket; the token rides the query.
-  const query = remoteToken ? `?token=${encodeURIComponent(remoteToken)}` : "";
-  const wsUrl = `${remoteBase.replace(/^http/, "ws")}/events${query}`;
+  const wsUrl = eventsUrl(remoteBase, remoteToken, getUiClientId());
   const ws = new WebSocket(wsUrl);
   socket = ws;
   ws.onmessage = (msg) => {

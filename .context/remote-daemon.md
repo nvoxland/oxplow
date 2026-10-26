@@ -10,6 +10,12 @@ developer-facing mechanics.
 
 ## Pieces
 
+The event socket carries the window's stable `client` query parameter beside
+its token. Its page-run ownership guard drops that window's runs on disconnect;
+a replacement socket takes a new generation, so late cleanup from the old socket
+cannot release new runs. An open in flight is fenced against that generation.
+Logs, tab reports and the socket use the same lightweight `uiClientId.ts` identity.
+
 - **`crates/oxplow-rpc`** — transport-neutral command cores +
   `rpc_dispatch!` registry (`dispatch(name, camelCase JSON args,
   &Services) -> JSON`). Single source of truth for the command set;

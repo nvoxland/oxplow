@@ -23,35 +23,35 @@ async function wikiWithTask(daemon: Parameters<typeof run>[0] & { thread: string
 async function openWiki(page: import("@playwright/test").Page, slug: string) {
   await searchLauncher(page, `${slug} page`);
   await page.getByTestId(`launcher-hit-oxplow:oxplow/wiki?slug=${slug}`).click();
-  await expect(page.locator('[data-testid="page-lens"]:visible')).toContainText("First do");
+  await expect(page.locator('[data-testid="page-file"]:visible')).toContainText("First do");
 }
 
 test("Cmd+[ goes back through the tab's pages and Cmd+] goes forward", async ({ page, daemon }) => {
   const ref = await wikiWithTask(daemon, "kestrel", "Kestrel follow-up");
   await page.goto("/");
   await openWiki(page, "kestrel");
-  await page.locator('[data-testid="page-lens"]:visible').locator(`[data-ref-title][href="${ref}"]`).click();
-  await expect(page.getByTestId("lens-part-state")).toBeVisible();
+  await page.locator('[data-testid="page-file"]:visible').locator(`[data-ref-title][href="${ref}"]`).click();
+  await expect(page.locator('[data-node="state"]')).toBeVisible();
 
   await page.keyboard.press("Meta+[");
-  await expect(page.locator('[data-testid="page-lens"]:visible')).toContainText("First do");
-  await expect(page.getByTestId("lens-part-state")).toBeHidden();
+  await expect(page.locator('[data-testid="page-file"]:visible')).toContainText("First do");
+  await expect(page.locator('[data-node="state"]')).toBeHidden();
 
   await page.keyboard.press("Meta+]");
-  await expect(page.getByTestId("lens-part-state")).toBeVisible();
+  await expect(page.locator('[data-node="state"]')).toBeVisible();
 });
 
 test("the active tab and its history survive a reload", async ({ page, daemon }) => {
   const ref = await wikiWithTask(daemon, "osprey", "Osprey follow-up");
   await page.goto("/");
   await openWiki(page, "osprey");
-  await page.locator('[data-testid="page-lens"]:visible').locator(`[data-ref-title][href="${ref}"]`).click();
-  await expect(page.getByTestId("lens-part-state")).toBeVisible();
+  await page.locator('[data-testid="page-file"]:visible').locator(`[data-ref-title][href="${ref}"]`).click();
+  await expect(page.locator('[data-node="state"]')).toBeVisible();
 
   await page.reload();
-  await expect(page.getByTestId("lens-part-state")).toBeVisible();
+  await expect(page.locator('[data-node="state"]')).toBeVisible();
   await page.keyboard.press("Meta+[");
-  await expect(page.locator('[data-testid="page-lens"]:visible')).toContainText("First do");
+  await expect(page.locator('[data-testid="page-file"]:visible')).toContainText("First do");
 });
 
 test("Alt+Down steps to the next file of the list it was opened from", async ({ page, daemon }) => {
@@ -80,7 +80,7 @@ test("Up and Down from a page opened from a lens follow the lens's rows as they 
   }
   await page.goto("/");
   await openFromLauncher(page, "Backlog");
-  await page.getByTestId("lens-part-items").getByText("Origin alpha").click();
+  await page.locator('[data-node="items"]').getByText("Origin alpha").click();
   await expect(page.getByTestId("page-nav-sibling-indicator").filter({ visible: true })).toContainText("1 of 3");
 
   // A row made after the page was opened is in the list the keys step.

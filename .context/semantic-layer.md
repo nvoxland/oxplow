@@ -117,7 +117,7 @@ What core publishes, by where it comes from. Each row names its models
 
 | Source | Models | Facts |
 |---|---|---|
-| work | `stream`, `thread`, `thread_note`, `task`, `task_note`, `task_link`, `effort`, `effort_file`, `decision`, `claim`, `context_read` | cycle time, steering, lifecycle |
+| work | `stream`, `thread`, `task`, `task_note`, `task_link`, `effort`, `effort_file`, `decision`, `claim`, `context_read` | cycle time, steering, lifecycle |
 | collectors | `collector` (each enabled extension's collectors with their trigger, enabled flag, state and last run: a plain view over `contribution`, `collector_run` and `contribution_health`; the machine's network and credential standing are the live `collector_state` / `collector_credential`) | — |
 | knowledge | `wiki_page`, `comment` | freshness |
 | git | `commit`, `commit_file`, `commit_work_item`, `branch`, and change analysis (`change`, `change_file`, `change_function`, `change_import`, `change_duplicate`, `change_test_file`) | churn |
@@ -643,7 +643,7 @@ What a query read is what it subscribes to.
   relays the catalog's own signal: a change to the live deployments or the
   `extensions` key; a file path is not the signal). Hosts that
   list what extensions contribute (`extensionsStore`, the launcher, the
-  prompt catalog) reload on it, on `configChanged`, and on a daemon
+  what pages answer) reload on it, on `configChanged`, and on a daemon
   reconnect (a change while it was unreachable sent nothing). Nothing else re-runs it:
   the old everything-but-two deny-list (`shouldRerunLens`) and its 750 ms
   debounce are gone; a burst of commits coalesces into one re-run
@@ -731,7 +731,6 @@ and `v_model_test` are the catalog of all of them:
 | `v_fact` | atomic measurements, joined to `measure_key` and capture context |
 | `v_effort_file` | files each effort changed, with change kind, `source` (`claimed` by an edit tool or `observed` changing in one of its thread's turns, v2) and the effort's `work_item` |
 | `v_work_item_comment` | comments on the active list's items (`v_task_note` was removed) |
-| `v_thread_note` | a thread's notes (`oxplow.knowledge.add_note`; V24) |
 | `v_handoff` | work handed from one thread to another (`oxplow.handoff.*`; V84): sender thread and session, recipient thread, work item, body, `delivered_at` (stamped at the recipient's next prompt), `state` `open` / `taken` / `declined` / `withdrawn`; `v_search_handoff` is its search feed |
 | `v_work_item_link` | typed links between the active list's items (`v_task_link` was removed) |
 | `v_agent_turn` | human prompt → agent answer, per thread (V74), with the snapshots the turn started and ended at (`start_snapshot_id`, `snapshot_id`: what the turn changed; V98/V99) |

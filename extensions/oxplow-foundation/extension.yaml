@@ -19,7 +19,7 @@ custom_components:
   # (vis-timeline, which the kit has no viz for).
   - { id: timeline, title: Timeline, bundle: dist/timeline, sql: read }
   # Explore Data: an SQL box and a viz picker over the models; oxplow draws
-  # the result under it with its own components (`showSpec`).
+  # the result under it with its own components (`showView`: an inline page).
   - { id: explore-data, title: Explore Data, bundle: dist/explore-data, sql: read, commands: [oxplow.lens.draft_with_agent] }
   # Settings → Integrations: hand-written (no build), so it lives beside the
   # built components, not in dist/.
@@ -345,13 +345,6 @@ resources:
     params: { id: { required: true, pattern: '^[!-~]+$' } }
     icon: triangle-alert
     wikilink: { prefix: finding, param: id }
-  - name: thread_note
-    label: Thread note
-    params: { id: { required: true, pattern: '^not[0-9]+$' } }
-    resolve: thread_note
-    title: body
-    searchable: search_thread_note
-    icon: file-text
   - name: agent_session
     label: Agent session
     params: { id: { required: true, pattern: '^ses[0-9]+$' } }
@@ -983,6 +976,12 @@ commands:
     scope: pages.author
     op: write_page
     example: {"extension": "my-pages", "page": "overview", "spec": "title: Overview\ndata:\n  a: { sql: \"SELECT 1 AS n\" }\nview: { viz: table, from: a }\n", "deploy": true}
+  - name: extension.new_dashboard
+    summary: "Start a new, empty dashboard. It is a page in the Dashboards launcher category whose view is an empty grid, written into `extension` (default `my-pages`, created when missing) with its name taken from the title, and deployed. Its tiles are other pages, embedded, which the person adds with Pin to Dashboard. Refused when a page by that name exists. Returns `{ page, path, deployed }`."
+    scope: pages.author
+    op: new_dashboard
+    ui: { label: "New Dashboard…", group: Pages, keywords: [dashboard, tiles, board], open_after: "oxplow:oxplow/page?page={{result.page}}" }
+    example: {"title": "Release health"}
   - name: extension.rollback
     summary: "Make an earlier deployment of an extension the one oxplow runs: `to` (a hash or its start, from `v_extension_deployment`), else the one before the active one. A bundled extension with nothing older returns to the deployment that ships with oxplow. Rolling back to one with more `permissions:` than what runs asks a person first, as a deploy does."
     scope: extensions.deploy
@@ -1109,11 +1108,6 @@ commands:
     scope: knowledge.write
     op: add_comment
     example: {"stream": "str1", "target": "oxplow:oxplow/wiki?slug=vcs-capability", "quote": "Every provider implements Vcs", "intent": "followup", "body": "This is out of date: GitProvider also implements WorkspaceFiles."}
-  - name: knowledge.add_note
-    summary: "Add a note to a thread — an agent's own (a finding, why it paused, context for whoever picks it up). An empty body allocates one for a subagent to fill in with `oxplow.knowledge.update_note`. Returns the note and `link_warnings` for `[[…]]` links that don't resolve."
-    scope: knowledge.write
-    op: add_note
-    example: {"body": "The redirect loop comes from the stale `next` parameter; see [[auth-flow]]."}
   - name: knowledge.delete_comment
     summary: "Delete a comment and its messages (`cmt12`). A person is asked first."
     scope: knowledge.write
@@ -1151,11 +1145,6 @@ commands:
     scope: knowledge.write
     op: update_comment
     example: {"comment": "cmt4", "status": "resolved"}
-  - name: knowledge.update_note
-    summary: "Replace a thread note's body (`not12`) — a subagent filling in the note it was given. An agent updates only its own thread's notes."
-    scope: knowledge.write
-    op: update_note
-    example: {"note": "not7", "body": "The redirect loop comes from the stale `next` parameter; see [[auth-flow]]."}
   - name: knowledge.verify_files
     summary: "Re-pin a page's files to now without rewriting it: `files` are the files you re-read against the page as it stands (all of the page's files when omitted). The page is the one core records; a file the page does not cite is refused."
     scope: knowledge.write

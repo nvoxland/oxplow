@@ -451,9 +451,14 @@ mod tests {
             "the watcher never came up"
         );
         assert!(!hidden_heard, "ignored at first");
-        std::fs::write(root.join(".gitignore"), "").unwrap();
         assert!(
-            heard_after(&mut rx, ".gitignore", |_| {}, |_| {}).await,
+            heard_after(
+                &mut rx,
+                ".gitignore",
+                |n| std::fs::write(root.join(".gitignore"), format!("# unignored {n}\n")).unwrap(),
+                |_| {},
+            )
+            .await,
             ".gitignore edit never announced"
         );
         assert!(
@@ -623,8 +628,19 @@ mod tests {
         )
         .await;
 
-        // Let notify settle its initial cache walk before the delete.
-        tokio::time::sleep(Duration::from_millis(300)).await;
+        // Observe a real event from this worktree before its one-shot
+        // deletion. A fixed delay can end before notify attaches its
+        // recursive watches on a loaded machine.
+        assert!(
+            heard_after(
+                &mut rx,
+                "ready.txt",
+                |n| std::fs::write(seeded_dir.join("ready.txt"), n.to_string()).unwrap(),
+                |_| {},
+            )
+            .await,
+            "the worktree watcher never came up"
+        );
 
         // Now delete the worktree dir while the watcher is live.
         std::fs::remove_dir_all(&stream.worktree_path).unwrap();

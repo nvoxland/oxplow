@@ -6,7 +6,7 @@
  * Pure: `RowsBody` connects the events to these. See
  * `.context/usability.md` "Rows: marks, drags and keys".
  */
-import type { LensAction, SqlCell } from "../tauri-bridge/generated/bindings.js";
+import type { PageAction, SqlCell } from "../tauri-bridge/generated/bindings.js";
 import { actionOffered } from "./lensActions.js";
 
 /** A row's identity while it is shown: its cells. A row whose cells
@@ -126,7 +126,7 @@ function scopesOf(input: unknown, out: Set<string> = new Set()): Set<string> {
  *  needs a group, one that names `onto` needs a row dropped on, one that
  *  names the order needs it. Before and after may be missing (a drop at
  *  an end): the server leaves them out. */
-export function dragActionFor(actions: readonly LensAction[], row: Record<string, SqlCell>, at: DropAt): LensAction | null {
+export function dragActionFor(actions: readonly PageAction[], row: Record<string, SqlCell>, at: DropAt): PageAction | null {
   return (
     actions.find((a) => {
       if (!a.drag || !actionOffered(a, row)) return false;
@@ -141,7 +141,7 @@ export function dragActionFor(actions: readonly LensAction[], row: Record<string
 }
 
 /** Whether a drop at `at` takes `onto` at all: some drag action names it. */
-export function takesOnto(actions: readonly LensAction[]): boolean {
+export function takesOnto(actions: readonly PageAction[]): boolean {
   return actions.some((a) => a.drag && scopesOf(a.input).has("onto"));
 }
 
@@ -153,6 +153,6 @@ export function chainedDrops(at: DropAt, dragged: readonly Record<string, SqlCel
 }
 
 /** The row action key `key` runs (`key:`), if any. */
-export function keyAction(actions: readonly LensAction[], key: string): LensAction | null {
+export function keyAction(actions: readonly PageAction[], key: string): PageAction | null {
   return actions.find((a) => a.row && a.key !== null && a.key !== undefined && a.key === key) ?? null;
 }

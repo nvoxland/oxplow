@@ -391,3 +391,40 @@ test("a replacement that names a page draws that page with the target's props, r
   expect(lensRuns).toEqual([]);
   await waitFor(() => expect(usage).toEqual([{ kind: "replacement", key: "x/work_item.board", streamId: "str1" }]));
 });
+
+// The host page's params are more than the replacement page takes: it is
+// run with only those it declares (the server refuses any other).
+test("a page replacement is run with only the props its page declares", async () => {
+  const { createPageRuns } = await import("../pageRuns.js");
+  const { decl, fakePage, fakeRun, loader, node } = await import("../pages/testing/fakeRun.js");
+  const opened: unknown[] = [];
+  const page = fakePage(node.viz("cards", "cards", { columns: [{ key: "title" } as never] }), {
+    id: "x/board-page",
+    extension: "x",
+    slug: "board-page",
+    params: [{ name: "scope" } as never],
+    loaders: [decl("cards")],
+  });
+  const runs = createPageRuns({
+    open: async (key) => {
+      opened.push(key);
+      return { runId: "run-1", run: fakeRun(page, { loaders: { cards: loader(["title"], [["their card"]]) } }) };
+    },
+    close: async () => {},
+    fetch: async () => ({}),
+    setParams: async () => Promise.reject(new Error("no")),
+    rerun: async () => Promise.reject(new Error("no")),
+    onChange: () => () => {},
+    onReconnect: () => () => {},
+  });
+  const ext = replacing("x");
+  ext.ui.replacements[0] = { ...ext.ui.replacements[0]!, lensId: "", pageId: "x/board-page" } as never;
+  (ext as unknown as { pageFiles: unknown[] }).pageFiles = [page];
+  extensions = [ext];
+  const view = render(
+    <Replaceable target="work_item.board" props={{ ...PROPS, author: "ann" }} streamId="str1" runs={runs} fallback={<div data-testid="core-board">oxplow's board</div>} />,
+  );
+  const replaced = await waitFor(() => view.getByTestId("replacement-work_item.board"));
+  await waitFor(() => expect(replaced.textContent).toContain("their card"));
+  expect(opened).toEqual([{ page: "x/board-page", params: { scope: "all" }, streamId: "str1", threadId: null }]);
+});

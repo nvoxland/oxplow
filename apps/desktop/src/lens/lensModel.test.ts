@@ -177,7 +177,7 @@ describe("lensDirectoryEntries", () => {
     expect(entries).toHaveLength(1);
     expect(entries[0]!.id).toBe("oxplow:oxplow/lens?lens=review/waiting");
     expect(entries[0]!.label).toBe("Waiting on me");
-    expect(entries[0]!.category).toBe("Lenses");
+    expect(entries[0]!.category).toBe("Dashboards");
     expect(entries[0]!.ref.id).toBe("oxplow:oxplow/lens?lens=review/waiting");
     expect(entries[0]!.keywords).toContain("review");
     expect(entries[0]!.keywords).toContain("Blocked tasks");
@@ -387,7 +387,7 @@ describe("launcher entries", () => {
     ]);
     expect(entries.map((e) => [e.ref.id, e.category])).toEqual([
       ["oxplow:oxplow/lens?lens=x/a", "Activity"],
-      ["oxplow:oxplow/lens?lens=x/c", "Lenses"],
+      ["oxplow:oxplow/lens?lens=x/c", "Dashboards"],
     ]);
   });
 });
@@ -449,7 +449,7 @@ test("mergeDirectory slots lens entries into their categories, keeping category 
   const e = (id: string, category: string) => ({ id, label: id, ref: { id, kind: "lens", payload: null }, category }) as never;
   const merged = mergeDirectory(
     [e("tasks", "Work"), e("git", "Git"), e("settings", "System")],
-    [e("usage", "Activity"), e("mine", "Lenses"), e("plan", "Work")],
+    [e("usage", "Activity"), e("mine", "Dashboards"), e("plan", "Work")],
   );
   expect(merged.map((m: { id: string }) => m.id)).toEqual(["tasks", "plan", "git", "usage", "mine", "settings"]);
 });

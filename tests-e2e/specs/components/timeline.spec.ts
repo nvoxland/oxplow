@@ -9,7 +9,8 @@ test("the Timeline page draws the project's activity and titles itself", async (
   const { page } = fresh;
   await page.goto("/");
   await openFromLauncher(page, "Timeline");
-  await expect(page.getByTestId("page-custom")).toBeVisible();
+  // A page file whose view is the component: the frame is the page.
+  await expect(page.locator('[data-testid="page-host"]:visible [data-testid="custom-component"]')).toBeVisible();
   const frame = page.frameLocator('[data-testid="custom-component-frame"]');
   // A fresh project has its first thread and session in the last week.
   await expect(frame.locator(".vis-item").first()).toBeVisible();

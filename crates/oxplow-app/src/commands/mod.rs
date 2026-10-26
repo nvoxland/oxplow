@@ -40,7 +40,6 @@ pub mod hint;
 pub mod lens;
 pub mod lsp;
 pub mod metric;
-pub mod note;
 pub mod op_error;
 pub mod ops;
 mod proposals;

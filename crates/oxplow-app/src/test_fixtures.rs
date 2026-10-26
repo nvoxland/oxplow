@@ -593,7 +593,7 @@ pub async fn run_as_page(
     lens: &str,
     params: &[(String, oxplow_db::SqlCell)],
 ) -> oxplow_db::SqlQueryResult {
-    run_as_page_in(svc, lens, params, crate::extensions::LensContext::default()).await
+    run_as_page_in(svc, lens, params, crate::extensions::ViewContext::default()).await
 }
 
 /// [`run_as_page`] from a viewer's context (`lens_context`).
@@ -601,7 +601,7 @@ pub async fn run_as_page_in(
     svc: &crate::Services,
     lens: &str,
     params: &[(String, oxplow_db::SqlCell)],
-    ctx: crate::extensions::LensContext,
+    ctx: crate::extensions::ViewContext,
 ) -> oxplow_db::SqlQueryResult {
     use crate::pages::runner::{PageRunner, RunRequest, RunTarget};
     let (extension, slug) = lens.split_once('/').expect("<extension>/<slug>");
@@ -1103,7 +1103,7 @@ pub async fn run_page(svc: &crate::Services, id: &str) -> crate::pages::runner::
         .run(RunRequest {
             target: RunTarget::Page(id.to_string()),
             params: Default::default(),
-            ctx: crate::extensions::LensContext::default(),
+            ctx: crate::extensions::ViewContext::default(),
             viewer: oxplow_domain::Actor::Human,
         })
         .await

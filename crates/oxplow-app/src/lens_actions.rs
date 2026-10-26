@@ -92,7 +92,7 @@ pub async fn run_lens_action(
     svc: &crate::Services,
     lens_root: &Path,
     call: LensActionCall,
-    ctx: &extensions::LensContext,
+    ctx: &extensions::ViewContext,
 ) -> Result<CommandOutcome, CommandError> {
     let call = bind_one_row(svc, lens_root, call, ctx).await?;
     svc.sql
@@ -124,7 +124,7 @@ impl Prepared {
 }
 
 /// A whole-lens action over a lens that holds one row, naming `when` or
-/// `{{row.*}}` (`LensAction::one_row`), runs on that row, which is read
+/// `{{row.*}}` (`PageAction::one_row`), runs on that row, which is read
 /// here from the lens itself — never taken from the caller, so a person's
 /// press and an agent's run bind the same row. A caller-supplied row is
 /// refused, and so is a lens that doesn't have exactly one.
@@ -132,7 +132,7 @@ async fn bind_one_row(
     svc: &crate::Services,
     lens_root: &Path,
     mut call: LensActionCall,
-    ctx: &extensions::LensContext,
+    ctx: &extensions::ViewContext,
 ) -> Result<LensActionCall, CommandError> {
     let lens = svc
         .extension_catalog
@@ -191,7 +191,7 @@ fn prepare_lens_action(
     svc: &crate::Services,
     lens_root: &Path,
     call: LensActionCall,
-    ctx: &extensions::LensContext,
+    ctx: &extensions::ViewContext,
 ) -> Result<Prepared, CommandError> {
     let LensActionCall {
         lens_id,
@@ -210,7 +210,8 @@ fn prepare_lens_action(
         .map_err(CommandError::from)?;
     let params = extensions::resolve_params(&lens, &params, ctx).map_err(CommandError::from)?;
     prepare_resolved(
-        &lens,
+        &lens.id,
+        &lens.actions,
         lens_id,
         action_id,
         &params,
@@ -222,13 +223,15 @@ fn prepare_lens_action(
     )
 }
 
-/// The command `action_id` of `lens` runs, its input bound from `params`
-/// (already resolved), `row` and `drop`, acting as `actor_id` for
-/// `on_behalf_of`: the checks a press passes (a row action on a row, a
-/// drag on a drop, `when`, a form's input) — shared by lenses and pages.
+/// The command `action_id` declared in `actions`, its input bound from
+/// resolved `params`, `row` and `drop`, acting as `actor_id` for
+/// `on_behalf_of`. `source_id` identifies the declaration in diagnostics;
+/// neither a query nor a visualization config is needed to prepare it.
+/// Row/drop/when/form checks are shared by page and lens actions.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn prepare_resolved(
-    lens: &extensions::Lens,
+    source_id: &str,
+    actions: &[extensions::PageAction],
     actor_id: &str,
     action_id: &str,
     params: &BTreeMap<String, SqlCell>,
@@ -238,21 +241,19 @@ pub(crate) fn prepare_resolved(
     on_behalf_of: Actor,
     confirmed: bool,
 ) -> Result<Prepared, CommandError> {
-    let lens_id = lens.id.as_str();
     let invalid = |field: &str, message: String| CommandError::Invalid {
         field: Some(field.into()),
         message,
     };
-    let action = lens
-        .actions
+    let action = actions
         .iter()
         .find(|a| a.id == action_id)
         .cloned()
         .ok_or_else(|| {
-            let ids: Vec<&str> = lens.actions.iter().map(|a| a.id.as_str()).collect();
+            let ids: Vec<&str> = actions.iter().map(|a| a.id.as_str()).collect();
             invalid(
                 "/action",
-                format!("lens `{lens_id}` has no action `{action_id}` (it has {ids:?})"),
+                format!("lens `{source_id}` has no action `{action_id}` (it has {ids:?})"),
             )
         })?;
     match (action.row || action.one_row, row) {
@@ -364,7 +365,7 @@ async fn subfields_for(
     lens_root: &Path,
     fields: &[crate::extensions::LensFormField],
     params: &BTreeMap<String, SqlCell>,
-    ctx: &extensions::LensContext,
+    ctx: &extensions::ViewContext,
 ) -> Result<(BTreeMap<String, Vec<Subfield>>, oxplow_db::Reads), CommandError> {
     let mut out = BTreeMap::new();
     let mut reads = Vec::new();
@@ -485,7 +486,7 @@ async fn choices_for(
     lens_root: &Path,
     choices: &BTreeMap<String, String>,
     params: &BTreeMap<String, SqlCell>,
-    ctx: &extensions::LensContext,
+    ctx: &extensions::ViewContext,
 ) -> Result<BTreeMap<String, Vec<Choice>>, CommandError> {
     let mut out = BTreeMap::new();
     for (field, lens_id) in choices {
@@ -542,7 +543,7 @@ pub async fn action_form(
     svc: &crate::Services,
     lens_root: &Path,
     call: LensActionCall,
-    ctx: &extensions::LensContext,
+    ctx: &extensions::ViewContext,
 ) -> Result<FormStart, CommandError> {
     let call = bind_one_row(svc, lens_root, call, ctx).await?;
     svc.sql
@@ -592,7 +593,7 @@ pub async fn form_start(
     lens_root: &Path,
     lens_id: &str,
     params: BTreeMap<String, SqlCell>,
-    ctx: &extensions::LensContext,
+    ctx: &extensions::ViewContext,
 ) -> Result<FormStart, CommandError> {
     svc.sql
         .read_generation(async { form_start_unpinned(svc, lens_root, lens_id, params, ctx).await })
@@ -605,7 +606,7 @@ async fn form_start_unpinned(
     lens_root: &Path,
     lens_id: &str,
     params: BTreeMap<String, SqlCell>,
-    ctx: &extensions::LensContext,
+    ctx: &extensions::ViewContext,
 ) -> Result<FormStart, CommandError> {
     let run = extensions::run_lens(
         &svc.sql,
@@ -711,7 +712,7 @@ pub async fn submit_form(
     svc: &crate::Services,
     lens_root: &Path,
     submission: FormSubmission,
-    ctx: &extensions::LensContext,
+    ctx: &extensions::ViewContext,
 ) -> Result<CommandOutcome, CommandError> {
     svc.sql
         .read_generation(async { prepare_form(svc, lens_root, submission, ctx) })
@@ -725,7 +726,7 @@ fn prepare_form(
     svc: &crate::Services,
     lens_root: &Path,
     submission: FormSubmission,
-    ctx: &extensions::LensContext,
+    ctx: &extensions::ViewContext,
 ) -> Result<Prepared, CommandError> {
     let FormSubmission {
         lens_id,
@@ -807,7 +808,7 @@ pub async fn run_component_query(
     component: &str,
     asset: &str,
     params: BTreeMap<String, SqlCell>,
-    ctx: &extensions::LensContext,
+    ctx: &extensions::ViewContext,
     version: &str,
 ) -> Result<extensions::LensRun, CommandError> {
     svc.sql
@@ -825,7 +826,7 @@ async fn run_component_query_unpinned(
     key: &str,
     asset: &str,
     params: BTreeMap<String, SqlCell>,
-    ctx: &extensions::LensContext,
+    ctx: &extensions::ViewContext,
     version: &str,
 ) -> Result<extensions::LensRun, CommandError> {
     let (ext, component) = component_of(svc, lens_root, key)?;
@@ -1422,7 +1423,7 @@ actions:
                 Actor::Human,
                 false,
             ),
-            &extensions::LensContext::default(),
+            &extensions::ViewContext::default(),
         )
         .await
         .unwrap();
@@ -1447,7 +1448,7 @@ actions:
                     &svc,
                     &root,
                     call(action, BTreeMap::new(), row, Actor::Human, false),
-                    &extensions::LensContext::default(),
+                    &extensions::ViewContext::default(),
                 )
                 .await
             }
@@ -1475,7 +1476,7 @@ actions:
                 let mut c = call(action, BTreeMap::new(), Some(row), Actor::Human, false);
                 c.lens_id = "acme/board".into();
                 c.drop = drop;
-                run_lens_action(&svc, &root, c, &extensions::LensContext::default()).await
+                run_lens_action(&svc, &root, c, &extensions::ViewContext::default()).await
             }
         };
         run(
@@ -1520,7 +1521,7 @@ actions:
             "uri": "oxplow:oxplow/work_item?id=tsk999999&provider=oxplow",
             "body": "## New\n\nThe saved text."
         }));
-        run_lens_action(&fx.svc, &root, press, &extensions::LensContext::default())
+        run_lens_action(&fx.svc, &root, press, &extensions::ViewContext::default())
             .await
             .unwrap();
         let body: String = fx
@@ -1560,7 +1561,7 @@ actions:
                 on_behalf_of: Actor::Human,
                 confirmed: false,
             };
-            async move { run_lens_action(&svc, &root, call, &extensions::LensContext::default()).await }
+            async move { run_lens_action(&svc, &root, call, &extensions::ViewContext::default()).await }
         };
         let titles = || async {
             svc.sql
@@ -1610,7 +1611,7 @@ actions:
                 on_behalf_of: Actor::Human,
                 confirmed: false,
             },
-            &extensions::LensContext::default(),
+            &extensions::ViewContext::default(),
         )
         .await
         .unwrap();
@@ -1655,7 +1656,7 @@ actions:
         let tiles = || {
             let (svc, root, params) = (svc.clone(), root.clone(), params.clone());
             async move {
-                let ctx = extensions::LensContext::default();
+                let ctx = extensions::ViewContext::default();
                 let run = extensions::run_lens(
                     &svc.sql,
                     &svc.extension_catalog,
@@ -1697,7 +1698,7 @@ actions:
                 c.lens_id = "acme/tiles".into();
                 c.input = input;
                 c.drop = drop;
-                run_lens_action(&svc, &root, c, &extensions::LensContext::default()).await
+                run_lens_action(&svc, &root, c, &extensions::ViewContext::default()).await
             }
         };
 
@@ -1853,7 +1854,7 @@ actions:
                         Actor::Human,
                         false,
                     ),
-                    &extensions::LensContext::default(),
+                    &extensions::ViewContext::default(),
                 )
                 .await
             }
@@ -1889,7 +1890,7 @@ actions:
             &fx.svc,
             &root,
             call("prompt", BTreeMap::new(), None, agent, false),
-            &extensions::LensContext::default(),
+            &extensions::ViewContext::default(),
         )
         .await
         .unwrap();
@@ -1931,7 +1932,7 @@ actions:
                 Actor::Human,
                 false,
             ),
-            &extensions::LensContext::default(),
+            &extensions::ViewContext::default(),
         )
         .await
         .unwrap();
@@ -1943,7 +1944,7 @@ actions:
         press.input = Some(
             json!({ "uri": "oxplow:oxplow/work_item?id=tsk999999&provider=oxplow", "title": "New title" }),
         );
-        run_lens_action(&fx.svc, &root, press, &extensions::LensContext::default())
+        run_lens_action(&fx.svc, &root, press, &extensions::ViewContext::default())
             .await
             .unwrap();
         let title: String = fx
@@ -1975,7 +1976,7 @@ actions:
             false,
         );
         plain.input = Some(json!({ "to": "canceled" }));
-        let err = run_lens_action(&fx.svc, &root, plain, &extensions::LensContext::default())
+        let err = run_lens_action(&fx.svc, &root, plain, &extensions::ViewContext::default())
             .await
             .unwrap_err();
         assert!(err.to_string().contains("only a form action"), "{err}");
@@ -1983,7 +1984,7 @@ actions:
             &fx.svc,
             &root,
             call("finish", BTreeMap::new(), None, Actor::Human, false),
-            &extensions::LensContext::default(),
+            &extensions::ViewContext::default(),
         )
         .await
         .unwrap_err();
@@ -2017,7 +2018,7 @@ actions:
             &root,
             "oxplow-foundation/hand-off",
             BTreeMap::from([("uri".to_string(), SqlCell::Text(me.clone()))]),
-            &extensions::LensContext::default(),
+            &extensions::ViewContext::default(),
         )
         .await
         .unwrap();
@@ -2051,7 +2052,7 @@ actions:
             &root,
             "oxplow-foundation/new-task",
             BTreeMap::new(),
-            &extensions::LensContext::default(),
+            &extensions::ViewContext::default(),
         )
         .await
         .unwrap();
@@ -2093,7 +2094,7 @@ actions:
             &root,
             "oxplow-foundation/new-stream",
             BTreeMap::new(),
-            &extensions::LensContext::default(),
+            &extensions::ViewContext::default(),
         )
         .await
         .unwrap();
@@ -2147,7 +2148,7 @@ actions:
         .unwrap();
         crate::test_fixtures::activate(&fx.svc).await;
         let params = BTreeMap::from([("uri".to_string(), SqlCell::Text(item))]);
-        let ctx = extensions::LensContext::default();
+        let ctx = extensions::ViewContext::default();
         let refused = form_start(&fx.svc, &root, "acme/leaky", params, &ctx)
             .await
             .unwrap_err()
@@ -2181,7 +2182,7 @@ actions:
             &root,
             "acme/edit",
             params.clone(),
-            &extensions::LensContext::default(),
+            &extensions::ViewContext::default(),
         )
         .await
         .unwrap();
@@ -2201,7 +2202,7 @@ actions:
                 on_behalf_of: Actor::Human,
                 confirmed: false,
             },
-            &extensions::LensContext::default(),
+            &extensions::ViewContext::default(),
         )
         .await
         .unwrap();
@@ -2303,7 +2304,7 @@ actions:
                 on_behalf_of: Actor::Human,
                 confirmed: false,
             },
-            &extensions::LensContext::default(),
+            &extensions::ViewContext::default(),
         )
         .await
         .unwrap();
@@ -2335,7 +2336,7 @@ actions:
                 on_behalf_of: Actor::Human,
                 confirmed: false,
             },
-            &extensions::LensContext::default(),
+            &extensions::ViewContext::default(),
         )
         .await
         .unwrap_err();
@@ -2549,7 +2550,7 @@ actions:
             "title: View\nquery: SELECT 1 AS n\nviz: custom\ncustom: { component: board }\n",
         )
         .unwrap();
-        let ctx = extensions::LensContext::default();
+        let ctx = extensions::ViewContext::default();
         run_component_query(
             &fx.svc,
             &root,
@@ -2566,7 +2567,7 @@ actions:
     #[tokio::test]
     async fn a_component_queries_only_its_declared_lenses() {
         let (fx, root) = component_fixture().await;
-        let ctx = extensions::LensContext::default();
+        let ctx = extensions::ViewContext::default();
         let run = run_component_query(
             &fx.svc,
             &root,

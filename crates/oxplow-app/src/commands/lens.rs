@@ -25,7 +25,7 @@ use serde_json::{json, Value};
 use super::util::{bare_id, invalid, parse, schema};
 use super::{Handler, HandlerOutput, Invocation};
 use crate::extension_catalog::ExtensionCatalog;
-use crate::extensions::{self, LensContext, LensOrigin, LensSpec};
+use crate::extensions::{self, LensOrigin, LensSpec, ViewContext};
 
 pub const SHOW: &str = "oxplow.lens.show";
 pub const KEEP: &str = "oxplow.lens.keep";
@@ -152,7 +152,7 @@ async fn check_spec_query(
 fn check_spec_shape(
     spec: &LensSpec,
     params: &BTreeMap<String, Value>,
-    lens_ctx: &LensContext,
+    lens_ctx: &ViewContext,
 ) -> Result<BTreeMap<String, SqlCell>, CommandError> {
     if let Some(problem) = extensions::spec_problem(spec) {
         return Err(invalid("/spec", problem));
@@ -265,7 +265,7 @@ fn record_answer_tx(
     let stream = thread_stream_tx(tx, thread)?
         .ok_or_else(|| invalid("/thread", format!("no thread `thr{thread}`")))?;
     let params = input.params.unwrap_or_default();
-    let lens_ctx = LensContext {
+    let lens_ctx = ViewContext {
         stream_id: Some(stream),
         thread_id: Some(thread),
         active: None,
@@ -398,7 +398,7 @@ async fn keeping_spec(
                     None => None,
                 },
             };
-            let lens_ctx = LensContext {
+            let lens_ctx = ViewContext {
                 stream_id,
                 thread_id: thread,
                 active: None,
@@ -605,7 +605,7 @@ pub async fn text_answer(
 async fn answer_run(
     svc: &crate::Services,
     id: i64,
-) -> Result<(extensions::LensRun, PathBuf, LensContext), DomainError> {
+) -> Result<(extensions::LensRun, PathBuf, ViewContext), DomainError> {
     let answer = svc
         .thread_answer_store
         .get(id)

@@ -8,17 +8,21 @@ params:
   label: Page (`<extension>/<page>`)
 - name: params
   label: Its params (JSON)
+- name: spec
+  label: Inline page YAML
 - name: stream_id
 answers:
 - {"question":"What is this page made of, and where does each part come from?","params":{"of":"oxplow-foundation/commit"}}
 data:
+  scope:
+    sql: SELECT uri_param(uri, 'id') AS stream FROM v_stream WHERE id = :stream_id
   page:
     command: oxplow.page.definition
-    args: { page: { param: of }, params: { param: params }, stream_id: { param: stream_id } }
+    args: { page: { param: of }, spec: { param: spec }, params: { param: params }, stream_id: { from: scope.stream } }
     reads: [page, extension_deployment]
   nodes:
     command: oxplow.page.definition
-    args: { page: { param: of }, params: { param: params }, stream_id: { param: stream_id } }
+    args: { page: { param: of }, spec: { param: spec }, params: { param: params }, stream_id: { from: scope.stream } }
     items: nodes
     reads: [page, extension_deployment]
   about:

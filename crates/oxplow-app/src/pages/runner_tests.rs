@@ -9,7 +9,7 @@ use oxplow_domain::Actor;
 
 use super::runner::*;
 use super::test_support::{fixture, run};
-use crate::extensions::LensContext;
+use crate::extensions::ViewContext;
 
 fn ints(run: &PageRun, loader: &str) -> Vec<i64> {
     run.loaders[loader]
@@ -109,7 +109,7 @@ async fn an_unknown_param_is_refused() {
         .run(RunRequest {
             target: RunTarget::Page("acme/numbers".into()),
             params: BTreeMap::from([("nope".to_string(), SqlCell::Int(1))]),
-            ctx: LensContext::default(),
+            ctx: ViewContext::default(),
             viewer: Actor::Human,
         })
         .await
@@ -165,4 +165,145 @@ async fn a_slot_runs_the_pages_mounted_at_it() {
     let extra = slot.children[0].embed.as_ref().expect("it ran");
     assert_eq!(extra.page.id, "beta/extra");
     assert_eq!(ints(extra, "echo"), [4], "`n` flowed from the host");
+}
+
+fn budget_page(slug: &str, yaml: &str) -> super::schema::Page {
+    super::schema::parse_page("acme", "acme", slug, "budget-test.yaml", yaml).unwrap()
+}
+
+fn result_bytes(run: &PageRun) -> usize {
+    fn nodes(node: &RunNode) -> usize {
+        node.embed.as_deref().map(result_bytes).unwrap_or(0)
+            + node.children.iter().map(nodes).sum::<usize>()
+    }
+    run.loaders
+        .values()
+        // Every admitted result is bounded, so this test-only serialization
+        // cannot allocate an arbitrary loader's original output.
+        .map(|loader| serde_json::to_vec(&loader.result).unwrap().len())
+        .sum::<usize>()
+        + nodes(&run.tree)
+        + run.rail.as_ref().map(nodes).unwrap_or(0)
+}
+
+#[tokio::test]
+async fn the_page_result_budget_omits_an_oversized_single_cell_and_marks_truncated() {
+    let (_dir, svc) = fixture().await;
+    let page = budget_page(
+        "huge-cell",
+        "title: Huge cell\ndata:\n  huge: { sql: \"SELECT hex(zeroblob(3000000)) AS payload\" }\nview: { viz: table, from: huge }\n",
+    );
+    let run = PageRunner::of(&svc)
+        .run(RunRequest {
+            target: RunTarget::Spec(std::sync::Arc::new(page)),
+            params: BTreeMap::new(),
+            ctx: ViewContext::default(),
+            viewer: Actor::Human,
+        })
+        .await
+        .unwrap();
+    let loader = &run.loaders["huge"];
+    assert!(loader.error.is_none(), "{:?}", loader.error);
+    assert_eq!(loader.result.columns, ["payload"]);
+    assert!(loader.result.rows.is_empty());
+    assert!(loader.result.truncated);
+    assert!(result_bytes(&run) <= MAX_RESULT_BYTES);
+}
+
+#[tokio::test]
+async fn downstream_loaders_read_only_rows_admitted_to_the_page_result_budget() {
+    let (_dir, svc) = fixture().await;
+    let page = budget_page(
+        "cropped-input",
+        "title: Cropped input\ndata:\n  huge:\n    sql: \"WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n WHERE x < 8) SELECT x, hex(zeroblob(500000)) AS payload FROM n\"\n  count: { sql: \"SELECT count(*) AS n FROM huge\" }\nview: { viz: number, from: count }\n",
+    );
+    let run = PageRunner::of(&svc)
+        .run(RunRequest {
+            target: RunTarget::Spec(std::sync::Arc::new(page)),
+            params: BTreeMap::new(),
+            ctx: ViewContext::default(),
+            viewer: Actor::Human,
+        })
+        .await
+        .unwrap();
+    assert!(run.loaders["huge"].error.is_none());
+    assert!(run.loaders["count"].error.is_none());
+    assert!(run.loaders["huge"].result.truncated);
+    assert_eq!(run.loaders["huge"].result.rows.len(), 5);
+    assert_eq!(ints(&run, "count"), [5]);
+    assert!(result_bytes(&run) <= MAX_RESULT_BYTES);
+}
+
+#[tokio::test]
+async fn the_page_result_budget_is_shared_by_embeds_including_memo_copies_on_rerun() {
+    let (dir, svc) = fixture().await;
+    let child = budget_page(
+        "large-child",
+        "title: Large child\ndata:\n  payload: { sql: \"SELECT hex(zeroblob(1500000)) AS payload\" }\nview: { viz: table, from: payload }\n",
+    );
+    let page = budget_page(
+        "repeated-embeds",
+        "title: Repeated embeds\nview:\n  stack:\n  - { id: first, embed: { page: acme/large-child } }\n  - { id: second, embed: { page: acme/large-child } }\nrail: { id: rail-copy, embed: { page: acme/large-child } }\n",
+    );
+    let mut runner = PageRunner::of(&svc);
+    runner.draft = Some(Draft {
+        extension: "acme".into(),
+        checkout: dir.path().to_path_buf(),
+        pages: vec![child],
+    });
+    let request = RunRequest {
+        target: RunTarget::Spec(std::sync::Arc::new(page)),
+        params: BTreeMap::new(),
+        ctx: ViewContext::default(),
+        viewer: Actor::Human,
+    };
+    let run = runner.run(request.clone()).await.unwrap();
+    let first = run.tree.children[0].embed.as_ref().unwrap();
+    let second = run.tree.children[1].embed.as_ref().unwrap();
+    let rail = run.rail.as_ref().unwrap().embed.as_ref().unwrap();
+    assert_eq!(first.loaders["payload"].result.rows.len(), 1);
+    assert!(!first.loaders["payload"].result.truncated);
+    assert!(second.loaders["payload"].result.rows.is_empty());
+    assert!(second.loaders["payload"].result.truncated);
+    assert!(rail.loaders["payload"].result.rows.is_empty());
+    assert!(rail.loaders["payload"].result.truncated);
+    assert_ne!(first.loaders["payload"].key, second.loaders["payload"].key);
+    assert!(result_bytes(&run) <= MAX_RESULT_BYTES);
+    let seed = unreached(&run, &[], &[]);
+    let rerun = runner.run_seeded(request, seed).await.unwrap();
+    assert_eq!(run, rerun);
+    assert!(result_bytes(&rerun) <= MAX_RESULT_BYTES);
+}
+
+#[tokio::test]
+async fn a_page_loader_does_not_double_charge_its_transient_source_page_results() {
+    let (dir, svc) = fixture().await;
+    let child = budget_page(
+        "large-source",
+        "title: Large source\ndata:\n  payload: { sql: \"SELECT hex(zeroblob(2000000)) AS payload\" }\nview: { viz: table, from: payload }\n",
+    );
+    let page = budget_page(
+        "borrow-large",
+        "title: Borrow large\ndata:\n  borrowed: { page: acme/large-source, loader: payload }\nview: { viz: table, from: borrowed }\n",
+    );
+    let mut runner = PageRunner::of(&svc);
+    runner.draft = Some(Draft {
+        extension: "acme".into(),
+        checkout: dir.path().to_path_buf(),
+        pages: vec![child],
+    });
+    let run = runner
+        .run(RunRequest {
+            target: RunTarget::Spec(std::sync::Arc::new(page)),
+            params: BTreeMap::new(),
+            ctx: ViewContext::default(),
+            viewer: Actor::Human,
+        })
+        .await
+        .unwrap();
+    let borrowed = &run.loaders["borrowed"];
+    assert!(borrowed.error.is_none(), "{:?}", borrowed.error);
+    assert_eq!(borrowed.result.rows.len(), 1);
+    assert!(!borrowed.result.truncated);
+    assert!(result_bytes(&run) <= MAX_RESULT_BYTES);
 }

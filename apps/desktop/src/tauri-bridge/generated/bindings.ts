@@ -256,7 +256,7 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	fetchPageRuns: (runIds: string[]) => typedError<{ [key in string]: PageRun_Serialize }, IpcError_Serialize>(__TAURI_INVOKE("fetch_page_runs", { runIds })),
+	fetchPageRuns: (runIds: string[]) => typedError<{ [key in string]: RunSnapshot_Serialize }, IpcError_Serialize>(__TAURI_INVOKE("fetch_page_runs", { runIds })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -272,6 +272,11 @@ export const commands = {
 	 *  implementation and its docs live on the core.
 	 */
 	getPage: (id: string) => typedError<Page_Serialize, IpcError_Serialize>(__TAURI_INVOKE("get_page", { id })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
+	pageSpec: (page: string) => typedError<PageSpec, IpcError_Serialize>(__TAURI_INVOKE("page_spec", { page })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -357,9 +362,9 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	assistantOpen: (stream: StreamId, thread: string | null, context: 
+	assistantOpen: (stream: StreamId, thread: string | null, context:
 /**  A page, by its URI. */
-{ kind: "page"; uri: string; label: string | null } | 
+{ kind: "page"; uri: string; label: string | null } |
 /**  Selected text, and where it came from when known. */
 { kind: "selection"; uri: string | null; text: string; label: string | null } | null) => typedError<AssistantOpened, IpcError_Serialize>(__TAURI_INVOKE("assistant_open", { stream, thread, context })),
 	/**
@@ -397,11 +402,6 @@ export const commands = {
 	 *  implementation and its docs live on the core.
 	 */
 	assistantClose: (id: string) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("assistant_close", { id })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	listThreadNotes: (threadId: ThreadId) => typedError<ThreadNote[], IpcError_Serialize>(__TAURI_INVOKE("list_thread_notes", { threadId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -502,7 +502,7 @@ export const commands = {
 	 *  storage class. `blob_hash` is only the address. [`capture_batch`]
 	 *  fills it from `blob_hash` for `oxplow` rows; `git` rows get it
 	 *  lazily ([`SqliteSnapshotStore::with_content_hasher`]).
-	 * 
+	 *
 	 *  [`capture_batch`]: SqliteSnapshotStore::capture_batch
 	 */
 	content_hash: string | null,
@@ -716,7 +716,7 @@ export const commands = {
 	updateBackgroundTask: (id: string, label: string | null, detail: string | null, progress: number | null) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("update_background_task", { id, label, detail, progress })),
 	/**
 	 *  Open an external URL in a sandboxed `WebviewWindow`.
-	 * 
+	 *
 	 *  The new window inherits
 	 *  the `external-url` capability defined in
 	 *  `apps/desktop/src-tauri/capabilities/external-url.json`, which
@@ -782,7 +782,7 @@ export const commands = {
 	 *  Replace the native menu with the calling window's snapshot. Each
 	 *  activation fires `menu:command` with `{ id: "<command-id>" }` back
 	 *  to the window that owns the menu.
-	 * 
+	 *
 	 *  The snapshot is always recorded; it is only *installed* when this
 	 *  window owns the menu bar (see [`MenuRegistry`]), so a background
 	 *  window's menu churn can't overwrite the foreground one's.
@@ -808,7 +808,7 @@ export const commands = {
 	 *  result in a **new** window. Backs File ▸ New Project… and the
 	 *  launcher's New Project button — the only two ways a folder becomes a
 	 *  project from inside the app.
-	 * 
+	 *
 	 *  Always a new window, so creating a project can never close the
 	 *  launcher or the window the user ran the command from. `path` must not
 	 *  already be a project.
@@ -838,16 +838,16 @@ export type AcceptedValues = {
  *  the file written after it commits; `providers.sync` commits each batch
  *  in its own).
  */
-export type Access = 
+export type Access =
 /**  Changes only what the person sees (open a page, find in a file). */
-"view" | 
+"view" |
 /**  Reads, changes nothing (`sql.read`). */
-"read" | 
+"read" |
 /**
  *  Changes oxplow's own records (filing and editing tasks): audited,
  *  open to any thread.
  */
-"record" | 
+"record" |
 /**
  *  Changes something outside oxplow's records — files, git, processes,
  *  the configuration: audited, and an agent's or job's run must be
@@ -859,17 +859,17 @@ export type Access =
  *  What becomes of the page a lens is on after one of its actions (or its
  *  form) ran a command whose `ui.open_after` names a page.
  */
-export type ActionThen = 
+export type ActionThen =
 /**  The page opens in this tab; Back returns to the lens's page. */
-"open" | 
+"open" |
 /**
  *  The page takes this tab and the lens's page leaves its history: Back
  *  never returns to a submitted form. A page that can't live in a tab
  *  (an agent session) closes this one and is focused.
  */
-"replace" | 
+"replace" |
 /**  Nothing opens; the lens's page stays (a form for the next entry). */
-"stay" | 
+"stay" |
 /**  The lens's page closes (it showed what the command removed). */
 "close";
 
@@ -909,21 +909,21 @@ export type Advisory = {
 };
 
 /**  Who a hint is for. */
-export type AdvisoryAudience = 
+export type AdvisoryAudience =
 /**  The coding agent: delivered on its next prompt or tool call. */
-"agent" | 
+"agent" |
 /**  A person: raised in Alerts until they dismiss it. */
 "person";
 
 /**  When core runs an advisory. */
-export type AdvisoryOn = 
+export type AdvisoryOn =
 /**
  *  After each agent tool call; results go to the agent as that call's
  *  context and are recorded as nudges.
  */
-"post-tool-use" | 
+"post-tool-use" |
 /**  On each prompt the human sends; results join the prompt's context. */
-"prompt" | 
+"prompt" |
 /**
  *  When a turn ends (its `thread.checkpoint`): what the turn left
  *  behind, delivered when the agent next hears from oxplow (the next
@@ -932,20 +932,20 @@ export type AdvisoryOn =
 "turn-end";
 
 /**  How often the same advisory may reach the agent. */
-export type AdvisoryOncePer = 
+export type AdvisoryOncePer =
 /**  Once per effort, the first time the query returns rows. */
-"effort" | 
+"effort" |
 /**
  *  Once per thread per `key` value: each row's `key` column fires
  *  once (put `:effort_id` in the key for once per effort per row).
  */
-"row" | 
+"row" |
 /**  Every time, whenever the query returns rows. */
-"turn" | 
+"turn" |
 /**  Once per thread, the first time the query returns rows. */
-"thread" | 
+"thread" |
 /**  Once per agent session on the thread (the harness's session id). */
-"session" | 
+"session" |
 /**  Once per thread per day (UTC). */
 "day";
 
@@ -965,7 +965,7 @@ export type AgentStatus = {
 	updated_at: Timestamp,
 };
 
-export type AgentStatusState = "idle" | "running" | "awaiting_user" | "stopped" | "error" | 
+export type AgentStatusState = "idle" | "running" | "awaiting_user" | "stopped" | "error" |
 /**
  *  Derived-only: the hook log says Running but no event has
  *  arrived for longer than the stall threshold. Claude Code emits
@@ -976,12 +976,12 @@ export type AgentStatusState = "idle" | "running" | "awaiting_user" | "stopped" 
 "stalled";
 
 /**  Which body of the call. */
-export type AiCallBody = 
+export type AiCallBody =
 /**
  *  What the model was asked: `{ system, prompt, json }` or `{ state,
  *  questions }`.
  */
-"request" | 
+"request" |
 /**  What it answered: `{ text }` or `{ answers }`. */
 "response";
 
@@ -999,13 +999,13 @@ export type AiProfileDecl = {
 };
 
 /**  One thing a binding may be restricted from. */
-export type AiRestriction = 
+export type AiRestriction =
 /**  Any tool: a request offering the model tools to call. */
-"tools" | 
+"tools" |
 /**  The `query_sql` tool: reading oxplow's models through SQL. */
-"sql" | 
+"sql" |
 /**  A streamed reply. */
-"streaming" | 
+"streaming" |
 /**  Image input. */
 "images";
 
@@ -1050,18 +1050,18 @@ export type AppVersion = {
  *  A value flowing into a command's arg or another page's param:
  *  declarative, never an expression.
  */
-export type ArgSource = 
+export type ArgSource =
 /**  One of the page's params. */
-({ param: string }) & { from?: never } | 
+({ param: string }) & { from?: never } |
 /**  An earlier loader's column, from its first row (`<loader>.<col>`). */
-({ from: string }) & { param?: never } | 
+({ from: string }) & { param?: never } |
 /**  A literal value. */
 unknown;
 
 /**  What the Assistant was opened on: a page, or a selection of text. */
-export type AssistantContext = 
+export type AssistantContext =
 /**  A page, by its URI. */
-{ kind: "page"; uri: string; label: string | null } | 
+{ kind: "page"; uri: string; label: string | null } |
 /**  Selected text, and where it came from when known. */
 { kind: "selection"; uri: string | null; text: string; label: string | null };
 
@@ -1096,9 +1096,9 @@ export type AssistantProblem = {
 };
 
 /**  Why the Assistant can't answer now. */
-export type AssistantProblemKind = 
+export type AssistantProblemKind =
 /**  No model is bound to the `assistant` role or to Main. */
-"no_model" | 
+"no_model" |
 /**  The model couldn't be used (its key, its provider, a restriction). */
 "model";
 
@@ -1163,13 +1163,13 @@ export type BackgroundTask = {
 	result_json: string | null,
 };
 
-export type BackgroundTaskKind = "vcs" | "code-quality" | "lsp" | "notes-resync" | "snapshot" | 
+export type BackgroundTaskKind = "vcs" | "code-quality" | "lsp" | "notes-resync" | "snapshot" |
 /**
  *  Recomputing code metrics over the whole tree (the metric baseline, tsk48).
  *  Slow and CPU-hungry — it must be visible, or "why is oxplow pegging a core?"
  *  has no answer.
  */
-"metrics" | 
+"metrics" |
 /**  A command a person ran in the background (its `CommandUi.background`). */
 "command";
 
@@ -1334,24 +1334,24 @@ export type ChangeRow = {
  *  Stored rows for the surprising files (normal ones are left out).
  *  What to analyze.
  */
-export type ChangeTarget = 
+export type ChangeTarget =
 /**  The stream's uncommitted work: HEAD → the working tree. */
-{ kind: "working"; streamId: string } | 
+{ kind: "working"; streamId: string } |
 /**
  *  One commit against its first parent. `stream_id` picks the repo
  *  (default: the primary stream's).
  */
-{ kind: "commit"; sha: string; streamId?: string | null } | 
+{ kind: "commit"; sha: string; streamId?: string | null } |
 /**
  *  An effort: its start snapshot → its end snapshot (or the working
  *  tree while it's open).
  */
-{ kind: "effort"; effortId: string } | 
+{ kind: "effort"; effortId: string } |
 /**
  *  An agent turn: its start snapshot → its end snapshot, "what changed
  *  this turn" (P2.10). A turn still running has no end: `NotFound`.
  */
-{ kind: "turn"; turnId: string } | 
+{ kind: "turn"; turnId: string } |
 /**
  *  Any two revisions, each spelled as a `rev` is (`working`,
  *  `snap:<id>`, `git:<rev>`); no base is the whole tree at `head`.
@@ -1487,19 +1487,19 @@ export type CollectorRunReport = {
 };
 
 /**  What runs a collector. */
-export type CollectorRuntime = 
+export type CollectorRuntime =
 /**
  *  A program: can reach the network and credentials, so it needs a
  *  person's approval to run.
  */
-"exec" | 
+"exec" |
 /**
  *  A sandboxed Starlark script: no I/O, so no approval — unless it
  *  calls a model (`ai_*`), which spends the person's key.
  */
-"starlark" | 
+"starlark" |
 /**  A sandboxed jq program: no I/O, so no approval. */
-"jaq" | 
+"jaq" |
 /**
  *  A provider instance's collector (`oxplow.provider.sync`): its records
  *  land in the capability's model (`v_work_item`).
@@ -1568,9 +1568,9 @@ export type CollectorSpec = {
 };
 
 /**  How a run's entities land. */
-export type CollectorSync = 
+export type CollectorSync =
 /**  Each run restates every entity (one it doesn't mention is emptied). */
-"replace" | 
+"replace" |
 /**
  *  Each run adds or updates rows by key, and removes the keys it lists
  *  under `deleted`; an entity it doesn't mention is left alone.
@@ -1589,31 +1589,31 @@ export type ColumnDecl = {
 };
 
 /**  How a column's value reads in the UI. An agent reads the raw value. */
-export type ColumnFormat = 
+export type ColumnFormat =
 /**  A timestamp's date. */
-"date" | 
+"date" |
 /**  A timestamp's date and time. */
-"datetime" | 
+"datetime" |
 /**  A timestamp as how long ago (`3 h ago`). */
-"relative" | 
+"relative" |
 /**  A byte count (`1.2 MB`). */
-"bytes" | 
+"bytes" |
 /**  Milliseconds as a duration (`1.4 s`, `3 m`). */
-"duration" | 
+"duration" |
 /**  A whole number with separators (`12,345`). */
-"integer" | 
+"integer" |
 /**  A fraction 0–1 as a percentage (`42%`). */
-"percent" | 
+"percent" |
 /**
  *  A series (a JSON array of numbers) as a small line, with its
  *  latest value.
  */
-"sparkline" | 
+"sparkline" |
 /**  A short value as a pill, in the column's `tone`. */
 "badge";
 
 /**  Declared type of an entity column. */
-export type ColumnType = "text" | "int" | "real" | "bool" | 
+export type ColumnType = "text" | "int" | "real" | "bool" |
 /**  An RFC 3339 timestamp, stored as text. */
 "time";
 
@@ -1654,22 +1654,22 @@ export type CommandExample = {
 };
 
 /**  What runs an extension's command. */
-export type CommandHandler = 
+export type CommandHandler =
 /**  A Starlark script composing commands (`entry:`). */
-{ kind: "script"; 
+{ kind: "script";
 /**  The script, relative to the extension folder. */
-entry: string } | 
+entry: string } |
 /**
  *  One operation of a scope (`scope:` + `op:`,
  *  `commands::ops`).
  */
-{ kind: "scope"; scope: string; op: string } | 
+{ kind: "scope"; scope: string; op: string } |
 /**
  *  One operation of one of the extension's providers (`provider:` +
  *  `op:`): run on the instance its input names
  *  (`commands::ProviderRouter`).
  */
-{ kind: "provider"; provider: string; op: string; 
+{ kind: "provider"; provider: string; op: string;
 /**  It returns an inverse (its declarations say). */
 undoable: boolean };
 
@@ -1858,9 +1858,9 @@ export type Comment = {
 export type CommentId = string;
 
 /**  Why the comment exists — drives what the agent acts on. */
-export type CommentIntent = 
+export type CommentIntent =
 /**  A private thinking note; the agent leaves it alone unless asked. */
-"note" | 
+"note" |
 /**  The user wants the agent to do something about this. */
 "followup";
 
@@ -1936,7 +1936,7 @@ export type ConfigurationFile = {
  *  compares: a declaration may ask more than its operation's
  *  `confirm_at_least`, never less.
  */
-export type Confirm = "never" | "always" | 
+export type Confirm = "never" | "always" |
 /**  Irreversible; presented as destructive and always confirmed. */
 "destructive";
 
@@ -2049,7 +2049,7 @@ export type CustomComponent_Serialize = {
 
 /**
  *  One dashboard (a named grid of tiles). Project-global.
- * 
+ *
  *  `settings_json` is the saved default **view** — the filter row's range,
  *  branch, and dimension filter — restored when the dashboard is next opened.
  *  Opaque JSON for the same reason `DashboardItem::options_json` is: the filter
@@ -2076,28 +2076,28 @@ export type DeclaredAt = {
 };
 
 /**  Where a decoration shows. */
-export type DecoratorPlacement = 
+export type DecoratorPlacement =
 /**  A chip in the header of a page whose ref the model lists. */
-"ref-chip" | 
+"ref-chip" |
 /**  A badge after a lens cell that links to a listed ref. */
 "row-badge";
 
 /**  Where a loaded extension's files came from. */
-export type Deployment = 
+export type Deployment =
 /**
  *  Read from its source folder: an authoring check, the CLI, a
  *  standalone load.
  */
-{ kind: "source" } | 
+{ kind: "source" } |
 /**
  *  The deployment that ships inside oxplow (a bundled extension with no
  *  deployment of its own), written to the store once per hash.
  */
-{ kind: "shipped"; hash: string } | 
+{ kind: "shipped"; hash: string } |
 /**  A deployment in the store. */
-{ kind: "deployed"; hash: string } | 
+{ kind: "deployed"; hash: string } |
 /**  Its source is here but it has no deployment yet: listed, not run. */
-{ kind: "undeployed" } | 
+{ kind: "undeployed" } |
 /**
  *  Listed as on, but neither its source nor a deployment is on this
  *  machine: listed, not run, and not an error.
@@ -2215,9 +2215,9 @@ export type Drop = {
  *  The database a check dry-runs an extension's SQL on. It always has one
  *  (P7.C6): what it declares but hasn't published stands in either way.
  */
-export type DryRun = 
+export type DryRun =
 /**  The project's own (its synced data, read-only). */
-"project" | 
+"project" |
 /**  A fresh, empty one: no usable project database. */
 "emptyDatabase";
 
@@ -2362,11 +2362,11 @@ export type EventBody = {
 };
 
 /**  Which body of the event. */
-export type EventBodyKey = "input" | "output" | 
+export type EventBodyKey = "input" | "output" |
 /**  An `agent.prompt.submitted`'s text. */
-"prompt" | 
+"prompt" |
 /**  An `agent.subagent.finished`'s last message. */
-"result" | 
+"result" |
 /**  An `agent.context.compacted`'s summary. */
 "summary";
 
@@ -2979,7 +2979,7 @@ export type FieldDecl = {
 };
 
 /**  What kind of value a declared field holds. */
-export type FieldKind = 
+export type FieldKind =
 /**  One of `values`. */
 "enum" | "text" | "number";
 
@@ -3025,7 +3025,7 @@ export type FileSnapshot = {
 	 *  storage class. `blob_hash` is only the address. [`capture_batch`]
 	 *  fills it from `blob_hash` for `oxplow` rows; `git` rows get it
 	 *  lazily ([`SqliteSnapshotStore::with_content_hasher`]).
-	 * 
+	 *
 	 *  [`capture_batch`]: SqliteSnapshotStore::capture_batch
 	 */
 	content_hash: string | null,
@@ -3084,9 +3084,9 @@ export type FormAgain = {
 };
 
 /**  What a form is for. */
-export type FormMode = 
+export type FormMode =
 /**  Gathers something new; after a submit it starts again. */
-"create" | 
+"create" |
 /**
  *  Edits what is saved: it starts from the saved values, Save is
  *  offered only when changed, and Discard puts them back.
@@ -3160,12 +3160,12 @@ export type FormulaConfig = {
 /**
  *  What oxplow watches / snapshots / indexes, on top of the always-on
  *  `.git`/`.oxplow` ignores and the repo's `.gitignore`.
- * 
+ *
  *  - `exclude`: extra paths to ignore even when `.gitignore` doesn't
  *    (e.g. a tracked-but-noisy generated file).
  *  - `include`: gitignored paths to force back in (override
  *    `.gitignore` for something oxplow should still see).
- * 
+ *
  *  Each entry is a single segment (matches any path component —
  *  `target` matches every `target/`) or a repo-relative path (matches
  *  that path exactly or as a prefix — `apps/desktop/dist`).
@@ -3223,7 +3223,7 @@ export type HarnessSettingListing = {
 
 /**
  *  What the hook subprocess sends us.
- * 
+ *
  *  The renderer / Claude Code emit JSON envelopes; the daemon receives
  *  them and lands them here. `payload_json` is the verbatim envelope
  *  minus the routing fields we hoist into typed columns.
@@ -3254,43 +3254,43 @@ export type HookEnvelope = {
  *  Discriminant for hook events: the kinds the harnesses post, plus
  *  `Interrupt`, which oxplow synthesizes.
  */
-export type HookKind = 
+export type HookKind =
 /**  Renderer/agent paste, run-command, etc. */
-"user_prompt_submit" | "pre_tool_use" | "post_tool_use" | "stop" | 
+"user_prompt_submit" | "pre_tool_use" | "post_tool_use" | "stop" |
 /**  Synthesized by oxplow when the user hits Ctrl-C / Esc in a pane. */
-"interrupt" | 
+"interrupt" |
 /**
  *  A harness process started or resumed a session (Claude's command
  *  hook, Codex's hook, the ACP client). `source: "compact"` is a
  *  compaction inside a running session, not a start.
  */
-"session_start" | 
+"session_start" |
 /**  A harness session ended — `reason: "clear"` for `/clear`. */
-"session_end" | 
+"session_end" |
 /**
  *  The harness told the person something (Claude's `Notification`):
  *  a permission prompt waits on them.
  */
-"notification" | 
+"notification" |
 /**
  *  The harness asks the person to allow a tool (Claude's
  *  `PermissionRequest`). Observed only: the answer is always `Ack`, so
  *  the harness's own dialog decides.
  */
-"permission_request" | 
+"permission_request" |
 /**
  *  The harness put a plan to the person outside a tool call (Codex's
  *  `plan` item): `tool.plan` carries it. Claude's `ExitPlanMode` is a
  *  tool call and arrives as a `PreToolUse`.
  */
-"plan_proposed" | 
+"plan_proposed" |
 /**  A subagent of the session started (Claude's `SubagentStart`). */
-"subagent_start" | 
+"subagent_start" |
 /**
  *  A subagent of the session finished (Claude's `SubagentStop`, or a
  *  hand-back).
  */
-"subagent_stop" | 
+"subagent_stop" |
 /**
  *  The harness summarized the session's context (Claude's
  *  `PostCompact`; opencode's `session.compacted`, through its bridge;
@@ -3406,11 +3406,6 @@ export type Intent = {
 	/**  The thread or effort ref that created it (`oxplow:oxplow/effort?id=eff42`), when known. */
 	origin?: string | null,
 	examples?: IntentExample[],
-	/**
-	 *  Questions it helps answer, offered to the person with an Ask
-	 *  button (the catalog; pages for a ref of `about`'s kind).
-	 */
-	prompts?: IntentPrompt[],
 };
 
 /**
@@ -3424,17 +3419,8 @@ export type IntentExample = {
 };
 
 /**
- *  A question an extension helps answer. `about` is a ref kind
- *  (`commit`, `file`, `effort`): a page for a ref of that kind suggests it.
- */
-export type IntentPrompt = {
-	prompt: string,
-	about?: string | null,
-};
-
-/**
  *  Frontend-facing error envelope.
- * 
+ *
  *  All command cores return `Result<T, IpcError>`, and the Tauri
  *  `#[tauri::command]` wrappers + the daemon's HTTP routes surface this
  *  same shape. Internal errors from the service layer are converted here
@@ -3444,7 +3430,7 @@ export type IpcError = IpcError_Serialize | IpcError_Deserialize;
 
 /**
  *  Frontend-facing error envelope.
- * 
+ *
  *  All command cores return `Result<T, IpcError>`, and the Tauri
  *  `#[tauri::command]` wrappers + the daemon's HTTP routes surface this
  *  same shape. Internal errors from the service layer are converted here
@@ -3469,7 +3455,7 @@ export type IpcError_Deserialize = {
 
 /**
  *  Frontend-facing error envelope.
- * 
+ *
  *  All command cores return `Result<T, IpcError>`, and the Tauri
  *  `#[tauri::command]` wrappers + the daemon's HTTP routes surface this
  *  same shape. Internal errors from the service layer are converted here
@@ -3492,18 +3478,18 @@ export type IpcError_Serialize = {
 	details?: string[],
 };
 
-export type ItemBody = 
+export type ItemBody =
 /**
  *  What the human sent. `context` is the oxplow block attached to it,
  *  shown behind a disclosure.
  */
-{ type: "user"; text: string; context: string | null } | { type: "agent"; text: string } | { type: "thought"; text: string } | { type: "tool"; call: ToolCall } | { type: "plan"; entries: PlanEntry[] } | 
+{ type: "user"; text: string; context: string | null } | { type: "agent"; text: string } | { type: "thought"; text: string } | { type: "tool"; call: ToolCall } | { type: "plan"; entries: PlanEntry[] } |
 /**  A permission request waiting on (or answered by) the human. */
-{ type: "permission"; requestId: string; toolCallId: string; title: string; options: PermissionOption[]; answer: PermissionAnswer | null } | 
+{ type: "permission"; requestId: string; toolCallId: string; title: string; options: PermissionOption[]; answer: PermissionAnswer | null } |
 /**  oxplow's policy rejected the call without asking the human. */
-{ type: "policy_denied"; toolCallId: string; label: string; reason: string } | 
+{ type: "policy_denied"; toolCallId: string; label: string; reason: string } |
 /**  A write the policy would deny ran without asking first. */
-{ type: "bypass"; toolCallId: string; label: string; reason: string } | 
+{ type: "bypass"; toolCallId: string; label: string; reason: string } |
 /**  Something failed: the prompt, the agent process, the protocol. */
 { type: "error"; message: string };
 
@@ -3524,12 +3510,12 @@ export type JobDecl = {
 
 export type JobOperationKind = "ai.complete_typed";
 
-export type JobReplay = 
+export type JobReplay =
 /**
  *  An attempt cut off (a restart, a lost lease) ends the job
  *  `interrupted`.
  */
-"never" | 
+"never" |
 /**
  *  The job can run again from its first request: an attempt cut off
  *  is queued again, up to `MAX_ATTEMPTS` in all, and its
@@ -3564,270 +3550,10 @@ export type KeyedDiff = {
  *  Launcher (Cmd+K) sections a lens can be listed under. Mirrors the
  *  renderer's `PageCategory`.
  */
-export type LauncherCategory = "Work" | "Code" | "Git" | "Activity" | "Knowledge" | "Data" | "Lenses" | "System";
+export type LauncherCategory = "Work" | "Code" | "Git" | "Activity" | "Knowledge" | "Data" | "Dashboards" | "System";
 
 /**  A loaded lens. */
 export type Lens = Lens_Serialize | Lens_Deserialize;
-
-/**
- *  A button on a lens: a command it runs (P6.B1, target §11.4). The
- *  command goes through the bus as `Actor::Lens` acting for whoever
- *  pressed it, so every policy — the agent policy, confirmation
- *  — applies as if they had run it themselves; a lens can offer a button
- *  but never grant a power. Copying the result and handing it to the
- *  agent are on every lens, not declared.
- */
-export type LensAction = LensAction_Serialize | LensAction_Deserialize;
-
-/**
- *  A button on a lens: a command it runs (P6.B1, target §11.4). The
- *  command goes through the bus as `Actor::Lens` acting for whoever
- *  pressed it, so every policy — the agent policy, confirmation
- *  — applies as if they had run it themselves; a lens can offer a button
- *  but never grant a power. Copying the result and handing it to the
- *  agent are on every lens, not declared.
- */
-export type LensAction_Deserialize = {
-	/**  Unique within the lens; `oxplow_run_lens_action` names it. */
-	id: string,
-	label: string,
-	/**  The command it runs (`oxplow.work_item.transition`). */
-	command: string,
-	/**
-	 *  The command's input. A string that is exactly `{{param.<name>}}`
-	 *  or `{{row.<column>}}` becomes that value (a number stays a number);
-	 *  one that contains them has them spliced in as text.
-	 */
-	input: unknown,
-	/**
-	 *  A row action: offered on each row (right-click), with `{{row.*}}`
-	 *  bound to that row. Otherwise it's a button above the result.
-	 */
-	row: boolean,
-	/**
-	 *  A group action: a button in the heading of the group whose `by`
-	 *  value (as text) this is, instead of above the result.
-	 */
-	group: string | null,
-	/**
-	 *  Opens the command's form, its fields starting from `input`, for the
-	 *  person to fill in before it runs (`lens_action_form`), instead of
-	 *  running at once.
-	 */
-	form: boolean,
-	/**
-	 *  Fields of a form action the person sees but can't change: their
-	 *  values are `input`'s, imposed again when it runs (an item's `ref`).
-	 */
-	fixed: string[],
-	/**
-	 *  A form action's fields picked from a list: each names a lens
-	 *  (`<extension>/<slug>`) run with the lens's params, whose rows are
-	 *  the choices (`value`, `label`, optional `group`).
-	 */
-	choices: { [key in string]: string },
-	/**
-	 *  What becomes of the lens's page when the command's `ui.open_after`
-	 *  names a page.
-	 */
-	then: ActionThen,
-	/**
-	 *  A row action offered only on rows whose column of this name is
-	 *  truthy (not null, 0, `""` or false): an Enable on rows that are off.
-	 */
-	when: string | null,
-	/**
-	 *  The row action a click on the row (not on a link or control in it),
-	 *  or Enter on it, runs: the one a person most often wants. The first
-	 *  `primary` action a row is offered (`when`) is the one.
-	 */
-	primary?: boolean,
-	/**
-	 *  A page action (not a row, group or edit action) that stays a button
-	 *  in the page's nav bar instead of going in its ☰ menu: what a person
-	 *  reaches for on this page (a list's New). Several may be.
-	 */
-	prominent?: boolean,
-	/**
-	 *  A page action's submenu in the page's ☰ menu: the actions (and the
-	 *  commands whose `ui.group` is the same name) under one item there.
-	 */
-	submenu?: string | null,
-	/**
-	 *  An icon oxplow draws (`extension_resources::ICONS`): alone on the
-	 *  action's button in the bar (its label the hover), beside its label
-	 *  in a menu.
-	 */
-	icon?: string | null,
-	/**
-	 *  What a drop runs: the dragged row is `{{row.*}}` (a drag action is
-	 *  a row action), and where it landed binds `{{before.*}}` (the row
-	 *  below the drop), `{{after.*}}` (the row above), `{{onto.*}}` (the
-	 *  row dropped on) and `{{group.value}}` (the group dropped in). A
-	 *  field that is exactly one of these with nothing there is left out.
-	 */
-	drag?: boolean,
-	/**
-	 *  A row action offered for every marked row at once: it runs once per
-	 *  row, in list order, asking once.
-	 */
-	bulk?: boolean,
-	/**
-	 *  A row action's key: pressed with the rows focused, it runs on the
-	 *  cursor row (or the marked rows, when `bulk`).
-	 */
-	key?: string | null,
-	/**
-	 *  The Save of a `markdown` viz's editor: a form over the first row,
-	 *  the person's text laid over `edit_field`.
-	 */
-	edit?: boolean,
-	/**
-	 *  An edit action's field the editor's text fills: the one input field
-	 *  bound exactly to a `{{row.<column>}}` and not `fixed`.
-	 */
-	editField?: string | null,
-	/**
-	 *  A whole-lens action over a lens that holds one row, that names
-	 *  `when` or `{{row.*}}`: the lens's one row. Derived at load, not
-	 *  declared: an action without `row: true` that names `when:` or
-	 *  `{{row.*}}`. It runs on the row the server reads from the lens
-	 *  itself, and only while the lens has exactly one.
-	 */
-	oneRow?: boolean,
-};
-
-/**
- *  A button on a lens: a command it runs (P6.B1, target §11.4). The
- *  command goes through the bus as `Actor::Lens` acting for whoever
- *  pressed it, so every policy — the agent policy, confirmation
- *  — applies as if they had run it themselves; a lens can offer a button
- *  but never grant a power. Copying the result and handing it to the
- *  agent are on every lens, not declared.
- */
-export type LensAction_Serialize = {
-	/**  Unique within the lens; `oxplow_run_lens_action` names it. */
-	id: string,
-	label: string,
-	/**  The command it runs (`oxplow.work_item.transition`). */
-	command: string,
-	/**
-	 *  The command's input. A string that is exactly `{{param.<name>}}`
-	 *  or `{{row.<column>}}` becomes that value (a number stays a number);
-	 *  one that contains them has them spliced in as text.
-	 */
-	input: unknown,
-	/**
-	 *  A row action: offered on each row (right-click), with `{{row.*}}`
-	 *  bound to that row. Otherwise it's a button above the result.
-	 */
-	row: boolean,
-	/**
-	 *  A group action: a button in the heading of the group whose `by`
-	 *  value (as text) this is, instead of above the result.
-	 */
-	group: string | null,
-	/**
-	 *  Opens the command's form, its fields starting from `input`, for the
-	 *  person to fill in before it runs (`lens_action_form`), instead of
-	 *  running at once.
-	 */
-	form: boolean,
-	/**
-	 *  Fields of a form action the person sees but can't change: their
-	 *  values are `input`'s, imposed again when it runs (an item's `ref`).
-	 */
-	fixed: string[],
-	/**
-	 *  A form action's fields picked from a list: each names a lens
-	 *  (`<extension>/<slug>`) run with the lens's params, whose rows are
-	 *  the choices (`value`, `label`, optional `group`).
-	 */
-	choices: { [key in string]: string },
-	/**
-	 *  What becomes of the lens's page when the command's `ui.open_after`
-	 *  names a page.
-	 */
-	then: ActionThen,
-	/**
-	 *  A row action offered only on rows whose column of this name is
-	 *  truthy (not null, 0, `""` or false): an Enable on rows that are off.
-	 */
-	when: string | null,
-	/**
-	 *  The row action a click on the row (not on a link or control in it),
-	 *  or Enter on it, runs: the one a person most often wants. The first
-	 *  `primary` action a row is offered (`when`) is the one.
-	 */
-	primary: boolean,
-	/**
-	 *  A page action (not a row, group or edit action) that stays a button
-	 *  in the page's nav bar instead of going in its ☰ menu: what a person
-	 *  reaches for on this page (a list's New). Several may be.
-	 */
-	prominent: boolean,
-	/**
-	 *  A page action's submenu in the page's ☰ menu: the actions (and the
-	 *  commands whose `ui.group` is the same name) under one item there.
-	 */
-	submenu?: string | null,
-	/**
-	 *  An icon oxplow draws (`extension_resources::ICONS`): alone on the
-	 *  action's button in the bar (its label the hover), beside its label
-	 *  in a menu.
-	 */
-	icon?: string | null,
-	/**
-	 *  What a drop runs: the dragged row is `{{row.*}}` (a drag action is
-	 *  a row action), and where it landed binds `{{before.*}}` (the row
-	 *  below the drop), `{{after.*}}` (the row above), `{{onto.*}}` (the
-	 *  row dropped on) and `{{group.value}}` (the group dropped in). A
-	 *  field that is exactly one of these with nothing there is left out.
-	 */
-	drag: boolean,
-	/**
-	 *  A row action offered for every marked row at once: it runs once per
-	 *  row, in list order, asking once.
-	 */
-	bulk: boolean,
-	/**
-	 *  A row action's key: pressed with the rows focused, it runs on the
-	 *  cursor row (or the marked rows, when `bulk`).
-	 */
-	key: string | null,
-	/**
-	 *  The Save of a `markdown` viz's editor: a form over the first row,
-	 *  the person's text laid over `edit_field`.
-	 */
-	edit: boolean,
-	/**
-	 *  An edit action's field the editor's text fills: the one input field
-	 *  bound exactly to a `{{row.<column>}}` and not `fixed`.
-	 */
-	editField: string | null,
-	/**
-	 *  A whole-lens action over a lens that holds one row, that names
-	 *  `when` or `{{row.*}}`: the lens's one row. Derived at load, not
-	 *  declared: an action without `row: true` that names `when:` or
-	 *  `{{row.*}}`. It runs on the row the server reads from the lens
-	 *  itself, and only while the lens has exactly one.
-	 */
-	oneRow: boolean,
-};
-
-/**
- *  When a lens needs attention: its row count reaches `min_rows`, or the
- *  first row's `column` goes `above` / `below` a threshold. A left-nav
- *  panel's `badge` lens shows its count, and the Alerts panel lists it.
- */
-export type LensAlert = {
-	minRows: number | null,
-	column: string | null,
-	above: number | null,
-	below: number | null,
-	/**  Badge text; else the row count or the column's name. */
-	label: string | null,
-};
 
 /**
  *  `answer` viz: the answer the first row names, and the lens it was kept
@@ -3864,55 +3590,6 @@ export type LensCode = {
 	lines?: string | null,
 	/**  Several rows' editors scroll together, each from its marked lines. */
 	sync?: boolean,
-};
-
-/**  How one result column is shown. */
-export type LensColumn = {
-	/**  Result column name. */
-	key: string,
-	/**  Header text; defaults to `key`. */
-	label?: string | null,
-	link?: LensLink | null,
-	/**
-	 *  A column of the same row holding this one's unit (`ms`, `%`,
-	 *  `lines`): a number shows as a metric value in it.
-	 */
-	unit?: string | null,
-	/**
-	 *  A column of the same row naming an icon drawn before the cell
-	 *  (`done`, `in_progress`, `epic`, `wiki`, …; the UI's fixed
-	 *  vocabulary, `lens/lensIcons.tsx` — an unknown name draws none).
-	 */
-	icon?: string | null,
-	/**
-	 *  A column of the same row naming the cell's tone: `accent`,
-	 *  `success`, `warning`, `danger` or `muted` (anything else is plain).
-	 */
-	tone?: string | null,
-	/**  Its width in pixels; the columns without one share the rest. */
-	width?: number | null,
-	/**
-	 *  How its value reads; else as the query returned it (a timestamp in
-	 *  local time, a number with its `unit`).
-	 */
-	format?: ColumnFormat | null,
-	/**
-	 *  A param of the lens: the cell's text is drawn with every
-	 *  case-insensitive occurrence of its current value marked.
-	 */
-	highlight?: string | null,
-	/**
-	 *  A param of the lens that clicking a row sets to this column's
-	 *  value, re-running what reads it (a document's other sections):
-	 *  master and detail. The row whose value it holds is drawn selected.
-	 */
-	select?: string | null,
-	/**
-	 *  A lens (`<slug>` of this extension or `<extension>/<slug>`) the row
-	 *  opens into: run with the row's values (the params it declares), its
-	 *  result drawn under the row.
-	 */
-	expand?: string | null,
 };
 
 /**  A `custom` lens's component and the props it starts with. */
@@ -4154,29 +3831,29 @@ export type LensLink = {
 };
 
 /**  A page a column value can link to. */
-export type LensLinkKind = 
+export type LensLinkKind =
 /**  `oxplow:oxplow/file?path=<path>`; the value is a repo-relative path. */
-"file" | 
+"file" |
 /**  `oxplow:oxplow/wiki?slug=<slug>`. */
-"wiki" | 
+"wiki" |
 /**  The effort's diff view; the value is an effort id. */
-"effort-diff" | 
+"effort-diff" |
 /**  A git commit; the value is a sha. */
-"commit" | 
+"commit" |
 /**  A metric's page; the value is a metric key. */
-"metric" | 
+"metric" |
 /**
  *  Any oxplow page by its tab id (`oxplow:oxplow/work_item?id=<id>&provider=oxplow`,
  *  `oxplow:oxplow/commit?sha=<sha>`, `oxplow:oxplow/page?page=git-dashboard`, …),
  *  e.g. `v_page_visit.page_id`.
  */
-"page" | 
+"page" |
 /**
  *  A file's diff within a change: the value is the path; `line`,
  *  `base` and `head` name the columns holding the line and the
  *  change's `base_revision` / `head_revision` (join `v_change`).
  */
-"diff-at" | 
+"diff-at" |
 /**
  *  Two line ranges side by side: the value is
  *  `path:start-end|peer:start-end`; `head` names a column with the
@@ -4192,54 +3869,6 @@ export type LensLinkKind =
  */
 export type LensMarkdown = {
 	text?: string | null,
-};
-
-/**
- *  A value the viewer (or an agent) can set when running the lens,
- *  bound into the query as `:name`.
- */
-export type LensParam = {
-	name: string,
-	label?: string | null,
-	/**  Used when the caller doesn't supply the param. */
-	default?: SqlCell | null,
-	/**
-	 *  The values it takes, when it's a choice: a panel shows
-	 *  them as a toggle in its header, a lens page as a select. Its
-	 *  `default` must be one; a run supplying another is refused.
-	 */
-	options?: LensParamOption[],
-	/**
-	 *  A lens whose rows are the values it takes, when it's a choice
-	 *  whose options aren't fixed (`value`, `label`, optional `group` —
-	 *  the form `choices` contract): a slug of this extension, or
-	 *  `<extension>/<slug>`; a loaded lens has the whole id. The page runs
-	 *  it with the params it declares of the page's, so an `end` picker's
-	 *  lens can leave out what `start` is. Its options aren't known at
-	 *  load, so no `default` is needed and any text is taken. Exclusive
-	 *  with `options`.
-	 */
-	options_from?: string | null,
-	/**
-	 *  What it holds, and so how a page draws it. Left out, it is a
-	 *  `choice` when it has `options` or `options_from`, else `text`; a
-	 *  loaded lens always says.
-	 */
-	type?: ParamType | null,
-	/**
-	 *  What it is to the page, and so where it rides in the page's URI:
-	 *  a `resource` (the default) names what the page shows, in the URI's
-	 *  `?`; `filter` narrows how it shows it, in the URI's `#` view. A
-	 *  `selection` follows from the columns and is never written: a param
-	 *  a column of the lens (or of a part of the page) selects, in the
-	 *  view too. A loaded lens always says.
-	 */
-	role?: ParamRole | null,
-	/**
-	 *  A `date_range`'s quick picks, of `1d 2d 3d 7d 30d 90d all`; the
-	 *  default is `1d 7d 30d all`.
-	 */
-	presets?: string[],
 };
 
 /**  One value a choice param takes, and what the viewer sees for it. */
@@ -4289,31 +3918,6 @@ export type LensPress = {
 	input?: unknown | null,
 	/**  Where a dragged row landed (a drag action, `drag: true`). */
 	drop?: Drop | null,
-};
-
-/**
- *  Where a lens comes from. An agent edits `source`, never `running`: a
- *  deployed extension runs a copy in the store that the next deploy
- *  replaces.
- */
-export type LensProvenance = {
-	/**  The extension it belongs to. */
-	extension: string,
-	/**
-	 *  Its source file, relative to the project when inside it; none when
-	 *  no source is here (an extension that ships with oxplow, or a
-	 *  deployment whose source is gone).
-	 */
-	source: string | null,
-	/**
-	 *  The file it runs from: `source` when loaded from it, else the
-	 *  deployment's copy.
-	 */
-	running: string,
-	/**  The deployment it runs, when it runs one (its hash). */
-	deployment: string | null,
-	/**  It ships with oxplow. */
-	bundled: boolean,
 };
 
 /**  The result of running a lens. */
@@ -4402,8 +4006,8 @@ export type LensSpec_Deserialize = {
 	 */
 	query?: string,
 	viz?: LensViz,
-	params?: LensParam[],
-	columns?: LensColumn[],
+	params?: PageParam[],
+	columns?: PageColumn[],
 	empty?: string | null,
 	chart?: LensChart | null,
 	tree?: LensTree | null,
@@ -4435,8 +4039,8 @@ export type LensSpec_Serialize = {
 	 */
 	query: string,
 	viz: LensViz,
-	params: LensParam[],
-	columns: LensColumn[],
+	params: PageParam[],
+	columns: PageColumn[],
 	empty: string | null,
 	chart: LensChart | null,
 	tree: LensTree | null,
@@ -4529,97 +4133,97 @@ export type LensTree = {
 };
 
 /**  How a lens renders its rows. */
-export type LensViz = 
+export type LensViz =
 /**  Rows and columns. */
-"table" | 
+"table" |
 /**
  *  One line per row: the first column (or the first `columns` entry)
  *  is the headline, the rest are secondary.
  */
-"list" | 
+"list" |
 /**  A single value: the first column of the first row. */
-"number" | 
+"number" |
 /**  The first row's text (`markdown: { text }`, else its first column), rendered as markdown; with an `edit` action, edited. */
-"markdown" | 
+"markdown" |
 /**  Bars: `chart.x` labels, `chart.y` values. */
-"bar" | 
+"bar" |
 /**
  *  A line over `chart.x` (a time or number), `chart.y` values, one
  *  line per `chart.series` value when set.
  */
-"line" | 
+"line" |
 /**
  *  Nested rectangles sized by `chart.size`, labelled by `chart.label`,
  *  grouped (and coloured) by `chart.group`.
  */
-"treemap" | 
+"treemap" |
 /**
  *  A page of sections (`sections`), wiki style: each another lens,
  *  given the params it declares from this lens's, or markdown. Other
  *  extensions add sections at `<extension>/<slug>.sections`.
  */
-"document" | 
+"document" |
 /**
  *  A grid of tiles (`tiles`), each another lens (or markdown) at a
  *  size, given the params it declares from this lens's. Other
  *  extensions add tiles at `<extension>/<slug>.tiles`.
  */
-"dashboard" | 
+"dashboard" |
 /**
  *  Rows nested by `tree.parent` (a row's parent is the row whose
  *  `tree.id` it names; none, or one not in the result, is a root),
  *  each shown as `tree.label`.
  */
-"tree" | 
+"tree" |
 /**
  *  Rows in time order (`timeline.at`), each shown as
  *  `timeline.label`, linked through `timeline.ref` when set.
  */
-"timeline" | 
+"timeline" |
 /**  The first row as label/value pairs (the displayed columns). */
-"detail" | 
+"detail" |
 /**
  *  The rows as cards in columns, one column per `group` value (its
  *  `values` first, in order, empty ones too); a card is drawn as a
  *  list row. A drag action moves a card between columns.
  */
-"board" | 
+"board" |
 /**
  *  An ordered checklist: `steps.label`, with `steps.status` (`done`,
  *  `active`, `failed`, anything else pending).
  */
-"steps" | 
+"steps" |
 /**
  *  Per row, the file `code.path` at revision `code.revision`,
  *  read-only, at full size: its `code.lines` marked and revealed, the
  *  editors side by side (scrolling together with `code.sync`).
  */
-"code" | 
+"code" |
 /**
  *  The first row's file `diff.path` between revisions `diff.from` and
  *  `diff.to`, at full size, read-only; `diff.lines` revealed on the
  *  newer side.
  */
-"diff" | 
+"diff" |
 /**
  *  The working tree's file `editor.path` (the first row's), edited at
  *  full size: its buffer shared with every tab showing it, saved
  *  through `oxplow.file.save`, `editor.lines` revealed.
  */
-"editor" | 
+"editor" |
 /**
  *  Per row, the diff of the file `hunks.path` between the revisions
  *  `hunks.from` and `hunks.to` (`working`, `snap:<id>`,
  *  `<vcs>:<rev>`), read-only.
  */
-"hunks" | 
+"hunks" |
 /**
  *  A form for command `form.command`: its fields from the command's
  *  input schema, prefilled from `form.defaults` (placeholders bound
  *  like an action's) and the query's first row, if the lens has one.
  *  Submitting runs the command as the lens.
  */
-"form" | 
+"form" |
 /**
  *  The pending proposals an agent raised, each with Approve and
  *  Decline: core's consent component. The viz reads
@@ -4628,7 +4232,7 @@ export type LensViz =
  *  `thread` (a thread ref) and `setting` (a config key) narrow the
  *  list.
  */
-"approvals" | 
+"approvals" |
 /**
  *  A terminal per row (`terminal.of`: an `oxplow/terminal` shell's URI
  *  or an `oxplow/agent_session`'s), kept running while hidden, at full
@@ -4636,21 +4240,21 @@ export type LensViz =
  *  several; an agent row's `stopped` and `conversation` say whether
  *  the person stopped it and what it is bound to.
  */
-"terminal" | 
+"terminal" |
 /**
  *  An agent's answer (`answer.uri`, the first row's: an
  *  `oxplow/answer` URI), re-run live, with Keep This until it is kept
  *  (`answer.kept`: the lens it became) — core's component for what
  *  `oxplow_show_lens` showed.
  */
-"answer" | 
+"answer" |
 /**
  *  A web page (`embed.url`, the first row's), opened in oxplow's
  *  sandboxed window: the page is a status panel with Open again, Open in
  *  Browser and Copy URL — core's component for what an `http(s)` link
  *  opens.
  */
-"embed" | 
+"embed" |
 /**
  *  The extension's own web component (`custom.component`), in
  *  a sandboxed frame; its rows are what it shows and what an agent
@@ -4671,8 +4275,8 @@ export type Lens_Deserialize = {
 	description: string,
 	query: string,
 	viz: LensViz,
-	params: LensParam[],
-	columns: LensColumn[],
+	params: PageParam[],
+	columns: PageColumn[],
 	empty: string | null,
 	/**  Columns a chart viz draws from. */
 	chart: LensChart | null,
@@ -4719,7 +4323,7 @@ export type Lens_Deserialize = {
 	 *  is placed, `fill_document_fills`).
 	 */
 	fills: boolean,
-	/**  Launcher section; `None` = "Lenses". */
+	/**  Launcher section; `None` = "Dashboards". */
 	launcherCategory: LauncherCategory | null,
 	/**  Not listed in the launcher. */
 	hidden: boolean,
@@ -4729,16 +4333,16 @@ export type Lens_Deserialize = {
 	 */
 	refresh: boolean,
 	/**  Commands the lens offers, as buttons or row actions (P6.B1). */
-	actions: LensAction_Deserialize[],
+	actions: PageAction_Deserialize[],
 	/**  When the lens needs attention (its panel's badge). */
-	alert: LensAlert | null,
+	alert: PageAlert | null,
 	/**
 	 *  The capabilities (or their features) it needs (`needs:
 	 *  [work_items]`): without them its run says so instead of running.
 	 */
 	needs: string[],
 	/**  Where it comes from: the file that runs and the source to edit. */
-	origin: LensProvenance,
+	origin: PageProvenance,
 	/**
 	 *  The MCP tool it is also offered as (`tool:`), prefixed with its
 	 *  extension's namespace (`extension_commands::tool_name`): a call
@@ -4760,8 +4364,8 @@ export type Lens_Serialize = {
 	description: string,
 	query: string,
 	viz: LensViz,
-	params: LensParam[],
-	columns: LensColumn[],
+	params: PageParam[],
+	columns: PageColumn[],
 	empty: string | null,
 	/**  Columns a chart viz draws from. */
 	chart: LensChart | null,
@@ -4808,7 +4412,7 @@ export type Lens_Serialize = {
 	 *  is placed, `fill_document_fills`).
 	 */
 	fills: boolean,
-	/**  Launcher section; `None` = "Lenses". */
+	/**  Launcher section; `None` = "Dashboards". */
 	launcherCategory: LauncherCategory | null,
 	/**  Not listed in the launcher. */
 	hidden: boolean,
@@ -4818,16 +4422,16 @@ export type Lens_Serialize = {
 	 */
 	refresh: boolean,
 	/**  Commands the lens offers, as buttons or row actions (P6.B1). */
-	actions: LensAction_Serialize[],
+	actions: PageAction_Serialize[],
 	/**  When the lens needs attention (its panel's badge). */
-	alert: LensAlert | null,
+	alert: PageAlert | null,
 	/**
 	 *  The capabilities (or their features) it needs (`needs:
 	 *  [work_items]`): without them its run says so instead of running.
 	 */
 	needs: string[],
 	/**  Where it comes from: the file that runs and the source to edit. */
-	origin: LensProvenance,
+	origin: PageProvenance,
 	/**
 	 *  The MCP tool it is also offered as (`tool:`), prefixed with its
 	 *  extension's namespace (`extension_commands::tool_name`): a call
@@ -4838,17 +4442,22 @@ export type Lens_Serialize = {
 
 export type Lifecycle = "stable" | "experimental";
 
-export type Loader = 
+export type Loader =
 /**
  *  A read-only query over the published models, binding `:param`s
  *  (the page's, and `params`: named values from earlier loaders or
  *  literals); an earlier loader reads as a table of its name.
  */
-{ kind: "sql"; sql: string; params: { [key in string]: ArgSource } } | 
+{ kind: "sql"; sql: string; params: { [key in string]: ArgSource } } |
 /**  A read-only command (`View` / `Read` access), run as the viewer. */
-{ kind: "command"; command: string; args: { [key in string]: ArgSource } } | 
+{ kind: "command"; command: string; args: { [key in string]: ArgSource };
+/**
+ *  The field of its result whose list is the rows; none: the
+ *  result itself (a list of objects, an object, a table).
+ */
+items: string | null } |
 /**  Another page's loader, run with `params`. */
-{ kind: "page"; page: string; loader: string; params: { [key in string]: ArgSource } } | 
+{ kind: "page"; page: string; loader: string; params: { [key in string]: ArgSource } } |
 /**  Rows written inline. */
 { kind: "rows"; columns: string[]; rows: SqlCell[][] };
 
@@ -4860,7 +4469,7 @@ export type LoaderDecl = {
 	 *  Column metadata its nodes default to, and the row columns it
 	 *  declares (what an embed or a slot mount may take by name).
 	 */
-	columns: LensColumn[],
+	columns: PageColumn[],
 	/**
 	 *  The models a `command` loader reads, so it runs again when they
 	 *  change (a `sql` loader's are what its query read).
@@ -4878,9 +4487,9 @@ export type LoaderDecl = {
 };
 
 /**  When a loader that reads outside the published models runs again. */
-export type LoaderRefresh = 
+export type LoaderRefresh =
 /**  `manual`: only when the person refreshes the page. */
-RefreshKeyword | 
+RefreshKeyword |
 /**  `{ every: 30s }`. */
 { every: string };
 
@@ -4934,16 +4543,16 @@ export type LspServerSource = "yaml" | "installed";
  *  A model's freshness policy beyond the default (computed on read):
  *  `on_change`, or `{ every: 1h }`.
  */
-export type Materialize = 
+export type Materialize =
 /**  A named policy: `on_change`. */
-MaterializePolicy | 
+MaterializePolicy |
 /**
  *  Stored and recomputed, whole, on a clock — `{ every: 1h }` (the
  *  collectors' grammar: minutes `15m` or hours `2h`) — whatever its
  *  inputs do: for SQL that reads the time (`'now'`), whose answer
  *  moves without a write.
  */
-({ every: string }) & { incremental?: never } | 
+({ every: string }) & { incremental?: never } |
 /**
  *  Stored, and kept by appending the rows past its watermark —
  *  `{ incremental: <column> }`, a declared INTEGER that only grows —
@@ -4952,14 +4561,14 @@ MaterializePolicy |
 ({ incremental: string }) & { every?: never };
 
 /**  The named materialization policies. */
-export type MaterializePolicy = 
+export type MaterializePolicy =
 /**  Stored in its table and recomputed, whole, when an input changes. */
 "on_change";
 
 /**  How the adapter reaches the MCP server: exactly one of the two. */
-export type McpServer = 
+export type McpServer =
 /**  A program in the folder, spoken to over its stdio. */
-({ command: string[] }) & { auth?: never; url?: never } | 
+({ command: string[] }) & { auth?: never; url?: never } |
 /**
  *  A server reached over streamable HTTP. `auth` names the
  *  credential whose value is sent as its bearer token.
@@ -5050,7 +4659,7 @@ export type MetricDefault = "on" | "off";
  *  - **`use:`** — enable an existing catalog metric by key (built-in/global),
  *    optionally overriding `target`/thresholds for this project.
  *  - **`key:`** — define a NEW spec (`sourceMeasure` + `aggregation`, or `formula`).
- * 
+ *
  *  Resolved across the three scopes into [`ResolvedSpec`]s. All non-discriminant
  *  fields are optional so both forms share one struct; validation enforces the
  *  per-form rules.
@@ -5216,51 +4825,51 @@ export type Node = Node_Serialize | Node_Deserialize;
 
 export type NodeKind = NodeKind_Serialize | NodeKind_Deserialize;
 
-export type NodeKind_Deserialize = 
+export type NodeKind_Deserialize =
 /**  Its children one after another (sections). */
-({ kind: "stack"; children: Node_Deserialize[] }) & { component?: never; from?: never; lens?: never; name?: never; page?: never; param?: never; params?: never; props?: never; text?: never } | 
+({ kind: "stack"; children: Node_Deserialize[] }) & { component?: never; from?: never; lens?: never; name?: never; page?: never; param?: never; params?: never; props?: never; text?: never } |
 /**  Its children as tiles, each at its `size`. */
-({ kind: "grid"; children: Node_Deserialize[] }) & { component?: never; from?: never; lens?: never; name?: never; page?: never; param?: never; params?: never; props?: never; text?: never } | 
+({ kind: "grid"; children: Node_Deserialize[] }) & { component?: never; from?: never; lens?: never; name?: never; page?: never; param?: never; params?: never; props?: never; text?: never } |
 /**  The one child whose id is `param`'s value. */
-({ kind: "switch"; param: string; children: Node_Deserialize[] }) & { component?: never; from?: never; lens?: never; name?: never; page?: never; params?: never; props?: never; text?: never } | 
+({ kind: "switch"; param: string; children: Node_Deserialize[] }) & { component?: never; from?: never; lens?: never; name?: never; page?: never; params?: never; props?: never; text?: never } |
 /**
  *  A loader's rows through a viz. `from` is none only for a viz that
  *  reads no rows (a form, approvals).
  */
-({ kind: "viz"; from: string | null; lens: Lens_Deserialize }) & { children?: never; component?: never; name?: never; page?: never; param?: never; params?: never; props?: never; text?: never } | 
+({ kind: "viz"; from: string | null; lens: Lens_Deserialize }) & { children?: never; component?: never; name?: never; page?: never; param?: never; params?: never; props?: never; text?: never } |
 /**
  *  Another page, inline: its params by name from this page's params
  *  and its loaders' first rows, `params` naming any explicitly.
  */
-({ kind: "embed"; page: string; params: { [key in string]: ArgSource } }) & { children?: never; component?: never; from?: never; lens?: never; name?: never; param?: never; props?: never; text?: never } | 
+({ kind: "embed"; page: string; params: { [key in string]: ArgSource } }) & { children?: never; component?: never; from?: never; lens?: never; name?: never; param?: never; props?: never; text?: never } |
 /**  Where other extensions' pages are mounted (`<page>.<name>`). */
-({ kind: "slot"; name: string }) & { children?: never; component?: never; from?: never; lens?: never; page?: never; param?: never; params?: never; props?: never; text?: never } | 
+({ kind: "slot"; name: string }) & { children?: never; component?: never; from?: never; lens?: never; page?: never; param?: never; params?: never; props?: never; text?: never } |
 /**  Static markdown. */
-({ kind: "markdown"; text: string }) & { children?: never; component?: never; from?: never; lens?: never; name?: never; page?: never; param?: never; params?: never; props?: never } | 
+({ kind: "markdown"; text: string }) & { children?: never; component?: never; from?: never; lens?: never; name?: never; page?: never; param?: never; params?: never; props?: never } |
 /**  One of the extension's custom components, given the page's data. */
 ({ kind: "component"; component: string; props: unknown | null }) & { children?: never; from?: never; lens?: never; name?: never; page?: never; param?: never; params?: never; text?: never };
 
-export type NodeKind_Serialize = 
+export type NodeKind_Serialize =
 /**  Its children one after another (sections). */
-({ kind: "stack"; children: Node_Serialize[] }) & { component?: never; from?: never; lens?: never; name?: never; page?: never; param?: never; params?: never; props?: never; text?: never } | 
+({ kind: "stack"; children: Node_Serialize[] }) & { component?: never; from?: never; lens?: never; name?: never; page?: never; param?: never; params?: never; props?: never; text?: never } |
 /**  Its children as tiles, each at its `size`. */
-({ kind: "grid"; children: Node_Serialize[] }) & { component?: never; from?: never; lens?: never; name?: never; page?: never; param?: never; params?: never; props?: never; text?: never } | 
+({ kind: "grid"; children: Node_Serialize[] }) & { component?: never; from?: never; lens?: never; name?: never; page?: never; param?: never; params?: never; props?: never; text?: never } |
 /**  The one child whose id is `param`'s value. */
-({ kind: "switch"; param: string; children: Node_Serialize[] }) & { component?: never; from?: never; lens?: never; name?: never; page?: never; params?: never; props?: never; text?: never } | 
+({ kind: "switch"; param: string; children: Node_Serialize[] }) & { component?: never; from?: never; lens?: never; name?: never; page?: never; params?: never; props?: never; text?: never } |
 /**
  *  A loader's rows through a viz. `from` is none only for a viz that
  *  reads no rows (a form, approvals).
  */
-({ kind: "viz"; from: string | null; lens: Lens_Serialize }) & { children?: never; component?: never; name?: never; page?: never; param?: never; params?: never; props?: never; text?: never } | 
+({ kind: "viz"; from: string | null; lens: Lens_Serialize }) & { children?: never; component?: never; name?: never; page?: never; param?: never; params?: never; props?: never; text?: never } |
 /**
  *  Another page, inline: its params by name from this page's params
  *  and its loaders' first rows, `params` naming any explicitly.
  */
-({ kind: "embed"; page: string; params: { [key in string]: ArgSource } }) & { children?: never; component?: never; from?: never; lens?: never; name?: never; param?: never; props?: never; text?: never } | 
+({ kind: "embed"; page: string; params: { [key in string]: ArgSource } }) & { children?: never; component?: never; from?: never; lens?: never; name?: never; param?: never; props?: never; text?: never } |
 /**  Where other extensions' pages are mounted (`<page>.<name>`). */
-({ kind: "slot"; name: string }) & { children?: never; component?: never; from?: never; lens?: never; page?: never; param?: never; params?: never; props?: never; text?: never } | 
+({ kind: "slot"; name: string }) & { children?: never; component?: never; from?: never; lens?: never; page?: never; param?: never; params?: never; props?: never; text?: never } |
 /**  Static markdown. */
-({ kind: "markdown"; text: string }) & { children?: never; component?: never; from?: never; lens?: never; name?: never; page?: never; param?: never; params?: never; props?: never } | 
+({ kind: "markdown"; text: string }) & { children?: never; component?: never; from?: never; lens?: never; name?: never; page?: never; param?: never; params?: never; props?: never } |
 /**  One of the extension's custom components, given the page's data. */
 ({ kind: "component"; component: string; props: unknown | null }) & { children?: never; from?: never; lens?: never; name?: never; page?: never; param?: never; params?: never; text?: never };
 
@@ -5291,8 +4900,6 @@ export type Node_Serialize = {
 	/**  A grid child's size. */
 	size: TileSize | null,
 } & NodeKind_Serialize;
-
-export type NoteId = string;
 
 /**
  *  How a credential is obtained by signing in: OAuth 2.1's
@@ -5366,6 +4973,11 @@ export type OpenedRun = OpenedRun_Serialize | OpenedRun_Deserialize;
 export type OpenedRun_Deserialize = {
 	runId: string,
 	run: PageRun_Deserialize,
+	/**
+	 *  Inline YAML retained by the tab, so it can reopen after a daemon
+	 *  restart and save exactly what the agent showed.
+	 */
+	specYaml: string | null,
 };
 
 /**
@@ -5375,6 +4987,11 @@ export type OpenedRun_Deserialize = {
 export type OpenedRun_Serialize = {
 	runId: string,
 	run: PageRun_Serialize,
+	/**
+	 *  Inline YAML retained by the tab, so it can reopen after a daemon
+	 *  restart and save exactly what the agent showed.
+	 */
+	specYaml: string | null,
 };
 
 /**  Who contributed it. */
@@ -5418,7 +5035,7 @@ export type OxplowConfig = {
 	 *  Keep the per-run `detail_json` drill-in payload for only the newest N
 	 *  captures **per producer**; older ones are compacted (the payload is
 	 *  nulled, the capture and all its facts stay). `0` disables the cap.
-	 * 
+	 *
 	 *  This is the knob that bounds a BUSY project: the payload is ~0.5 MB per
 	 *  coverage run, so age alone never catches up with a repo that runs tests
 	 *  dozens of times a day (tsk211). Compaction never changes a metric value
@@ -5459,11 +5076,11 @@ export type OxplowConfig = {
 	 *  Hex colour composited behind this project's app icon, so concurrent
 	 *  windows are tellable apart at a glance (`#c2410c`, `#abc`, or
 	 *  unprefixed). `None` leaves the stock icon alone.
-	 * 
+	 *
 	 *  Per-project rather than a dev-only flag: colour-coding *any* checkout is
 	 *  the general case, and "this is the dev build" is just one instance of
 	 *  it. Consumed on macOS only — see the desktop shell's `icon_tint`.
-	 * 
+	 *
 	 *  No `skip_serializing_if`: this type is a command result, and specta
 	 *  rejects conditional omission in unified mode. Absence from the written
 	 *  YAML is handled by `render_project_config`, which builds its mapping by
@@ -5576,14 +5193,14 @@ export type OxplowConfig = {
  *  refetches the affected bucket on receipt rather than trying to
  *  reconcile diffs from the payload.
  */
-export type OxplowEvent = 
+export type OxplowEvent =
 /**  Background task progress. */
-({ kind: "backgroundTasksChanged" }) & { actor?: never; agentSessionId?: never; changeKind?: never; client?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; models?: never; name?: never; op?: never; path?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } | 
+({ kind: "backgroundTasksChanged" }) & { actor?: never; agentSessionId?: never; changeKind?: never; client?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; models?: never; name?: never; op?: never; path?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
 /**
  *  The set of known language servers changed (Mason package
  *  installed or removed). Renderer refetches `list_lsp_servers`.
  */
-({ kind: "lspServersChanged" }) & { actor?: never; agentSessionId?: never; changeKind?: never; client?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; models?: never; name?: never; op?: never; path?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } | 
+({ kind: "lspServersChanged" }) & { actor?: never; agentSessionId?: never; changeKind?: never; client?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; models?: never; name?: never; op?: never; path?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
 /**
  *  Per-thread per-pane agent status changed. `state` carries the
  *  derived status so the renderer can update without a refetch
@@ -5591,25 +5208,25 @@ export type OxplowEvent =
  *  PreToolUse/PostToolUse, where the renderer used to refetch and
  *  re-derive) compute it inline before emitting.
  */
-({ kind: "agentStatusChanged"; threadId: ThreadId; 
+({ kind: "agentStatusChanged"; threadId: ThreadId;
 /**
  *  The thread's stream, so a view over every stream (the Git
  *  dashboard) files it without a lookup.
  */
-streamId: StreamId; 
+streamId: StreamId;
 /**
  *  The agent session whose status it is; `None` for activity no
  *  session claims. The renderer rolls a thread's sessions up
  *  (`rollUpAgentStatus`).
  */
-agentSessionId: AgentSessionId | null; state: AgentStatusState; 
+agentSessionId: AgentSessionId | null; state: AgentStatusState;
 /**
  *  The status detail, when meaningful to the renderer. Carries
  *  what the agent is waiting on (its question, the permission it
  *  asked) when `state` is `AwaitingUser`, so the rail dot's tooltip
  *  can show it — `None` for every other transition.
  */
-detail: string | null }) & { actor?: never; changeKind?: never; client?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; models?: never; name?: never; op?: never; path?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } | 
+detail: string | null }) & { actor?: never; changeKind?: never; client?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; models?: never; name?: never; op?: never; path?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
 /**
  *  A snapshot take recorded something new: a new snapshot (its
  *  `file_count` rows), or — `trigger: HeadMoved`, 0 files — the
@@ -5619,19 +5236,19 @@ detail: string | null }) & { actor?: never; changeKind?: never; client?: never; 
  *  `snapshot_op` row and the `snapshot.taken` / `vcs.head.moved`
  *  event in the log; this is the UI / reactor wake-up.
  */
-({ kind: "snapshotTaken"; streamId: StreamId; snapshotId: number; fileCount: number; trigger: SnapshotTrigger; threadId: ThreadId | null; turnId: number | null; effortId: EffortId | null }) & { actor?: never; agentSessionId?: never; changeKind?: never; client?: never; detail?: never; error?: never; id?: never; input?: never; instance?: never; measures?: never; models?: never; name?: never; op?: never; path?: never; scope?: never; seq?: never; signIn?: never; state?: never; title?: never; vcsEnabled?: never } | 
+({ kind: "snapshotTaken"; streamId: StreamId; snapshotId: number; fileCount: number; trigger: SnapshotTrigger; threadId: ThreadId | null; turnId: number | null; effortId: EffortId | null }) & { actor?: never; agentSessionId?: never; changeKind?: never; client?: never; detail?: never; error?: never; id?: never; input?: never; instance?: never; measures?: never; models?: never; name?: never; op?: never; path?: never; scope?: never; seq?: never; signIn?: never; state?: never; title?: never; vcsEnabled?: never } |
 /**
  *  An Assistant session changed (`assistant/`): its transcript, its
  *  status or its settings. The panel asks `assistant_snapshot { id,
  *  since }` for what changed. In memory only: no model holds it.
  */
-({ kind: "assistantChanged"; id: string; seq: number }) & { actor?: never; agentSessionId?: never; changeKind?: never; client?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; input?: never; instance?: never; measures?: never; models?: never; name?: never; op?: never; path?: never; scope?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } | 
+({ kind: "assistantChanged"; id: string; seq: number }) & { actor?: never; agentSessionId?: never; changeKind?: never; client?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; input?: never; instance?: never; measures?: never; models?: never; name?: never; op?: never; path?: never; scope?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
 /**
  *  Published models (views) changed: a commit touched a table one of
  *  them reads, directly or through other models (P4.6). A lens re-runs
  *  when a model it read is listed.
  */
-({ kind: "modelsChanged"; models: string[] }) & { actor?: never; agentSessionId?: never; changeKind?: never; client?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; path?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } | 
+({ kind: "modelsChanged"; models: string[] }) & { actor?: never; agentSessionId?: never; changeKind?: never; client?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; path?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
 /**
  *  An open page run re-ran (a model one of its loaders read changed):
  *  the loaders whose rows differ, for the window that opened it to
@@ -5639,7 +5256,7 @@ detail: string | null }) & { actor?: never; changeKind?: never; client?: never; 
  */
 {
 	kind: "pageRunChanged",
-} & RunChange | 
+} & RunChange |
 /**
  *  One or more metric samples landed in `stream_id` (unified metric
  *  substrate, tsk213). `measures` names the measure keys the write touched
@@ -5647,13 +5264,13 @@ detail: string | null }) & { actor?: never; changeKind?: never; client?: never; 
  *  list is fail-open — "unknown, refresh anyway" — which is what the
  *  low-frequency emit sites still send. See `.context/metrics.md`.
  */
-({ kind: "metricSamplesChanged"; streamId: StreamId; measures?: string[] }) & { actor?: never; agentSessionId?: never; changeKind?: never; client?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; models?: never; name?: never; op?: never; path?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } | 
+({ kind: "metricSamplesChanged"; streamId: StreamId; measures?: string[] }) & { actor?: never; agentSessionId?: never; changeKind?: never; client?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; models?: never; name?: never; op?: never; path?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
 /**
  *  `.oxplow/project.yaml` was reloaded from disk (external edit, e.g. the agent
  *  running `/oxplow:configure`). The in-memory config has been swapped;
  *  the renderer refetches `get_config`.
  */
-({ kind: "configChanged" }) & { actor?: never; agentSessionId?: never; changeKind?: never; client?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; models?: never; name?: never; op?: never; path?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } | 
+({ kind: "configChanged" }) & { actor?: never; agentSessionId?: never; changeKind?: never; client?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; models?: never; name?: never; op?: never; path?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
 /**
  *  The extension catalog may have changed: a file under the primary
  *  worktree's `.oxplow/extensions/` did, or the `extensions` config key
@@ -5661,38 +5278,38 @@ detail: string | null }) & { actor?: never; changeKind?: never; client?: never; 
  *  extensions contribute — the launcher, pages, panels, slots —
  *  reloads, and a lens re-runs its definition.
  */
-({ kind: "extensionsChanged" }) & { actor?: never; agentSessionId?: never; changeKind?: never; client?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; models?: never; name?: never; op?: never; path?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } | 
+({ kind: "extensionsChanged" }) & { actor?: never; agentSessionId?: never; changeKind?: never; client?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; models?: never; name?: never; op?: never; path?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
 /**
  *  A command running on the daemon calls a scope the window
  *  hosts (`client_host.rs`): the window does `scope`'s `op` with
  *  `input` — in `thread_id`'s tabs, or the one it shows when `None` —
  *  and answers `answer_client_call { id, … }`.
  */
-({ kind: "clientCall"; id: string; 
+({ kind: "clientCall"; id: string;
 /**
  *  The window it's for (its `register_client_host` id): only that
  *  one does it and answers.
  */
-client: string; threadId: ThreadId | null; 
+client: string; threadId: ThreadId | null;
 /**  Who ran the command (`agent:thr3`, `human`). */
-actor: string; scope: string; op: string; input: unknown }) & { agentSessionId?: never; changeKind?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; instance?: never; measures?: never; models?: never; name?: never; path?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } | 
+actor: string; scope: string; op: string; input: unknown }) & { agentSessionId?: never; changeKind?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; instance?: never; measures?: never; models?: never; name?: never; path?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
 /**
  *  `.git` directory appeared/disappeared at the project root —
  *  "is this a git workspace" flipped. Renderer hides/restores the
  *  git-aware UI on receipt.
  */
-({ kind: "workspaceContextChanged"; vcsEnabled: boolean }) & { actor?: never; agentSessionId?: never; changeKind?: never; client?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; models?: never; name?: never; op?: never; path?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never } | 
+({ kind: "workspaceContextChanged"; vcsEnabled: boolean }) & { actor?: never; agentSessionId?: never; changeKind?: never; client?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; models?: never; name?: never; op?: never; path?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never } |
 /**
  *  A worktree file changed on disk. Renderer-wide: file tree, quick
  *  open, project panel, git dashboard, uncommitted changes view all
  *  refresh in response.
  */
-({ kind: "workspaceChanged"; streamId: StreamId; changeKind: WorkspaceChangeKind; path: string }) & { actor?: never; agentSessionId?: never; client?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; models?: never; name?: never; op?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } | 
+({ kind: "workspaceChanged"; streamId: StreamId; changeKind: WorkspaceChangeKind; path: string }) & { actor?: never; agentSessionId?: never; client?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; models?: never; name?: never; op?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
 /**
  *  A ref under `.git/refs/` changed. Drives history, branch list,
  *  and ahead/behind refreshes. Coarse per stream.
  */
-({ kind: "vcsRefsChanged"; streamId: StreamId }) & { actor?: never; agentSessionId?: never; changeKind?: never; client?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; models?: never; name?: never; op?: never; path?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } | 
+({ kind: "vcsRefsChanged"; streamId: StreamId }) & { actor?: never; agentSessionId?: never; changeKind?: never; client?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; models?: never; name?: never; op?: never; path?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
 /**
  *  A non-primary stream's backing worktree was deleted out from
  *  under us (externally `rm -rf`'d, `git worktree remove`'d, etc.).
@@ -5701,7 +5318,7 @@ actor: string; scope: string; op: string; input: unknown }) & { agentSessionId?:
  *  rail row vanished. `title` carries the archived stream's display
  *  name.
  */
-({ kind: "streamOrphaned"; streamId: StreamId; title: string }) & { actor?: never; agentSessionId?: never; changeKind?: never; client?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; models?: never; name?: never; op?: never; path?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; threadId?: never; trigger?: never; turnId?: never; vcsEnabled?: never } | 
+({ kind: "streamOrphaned"; streamId: StreamId; title: string }) & { actor?: never; agentSessionId?: never; changeKind?: never; client?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; models?: never; name?: never; op?: never; path?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; threadId?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
 /**
  *  A sign-in for provider instance `instance`'s credential `name`
  *  finished (P9.B3): its token is in the keychain and the instance
@@ -5709,7 +5326,7 @@ actor: string; scope: string; op: string; input: unknown }) & { agentSessionId?:
  *  The keychain is no model, so there is nothing to re-read but the
  *  instances themselves (`v_provider_instance`).
  */
-({ kind: "credentialChanged"; instance: string; name: string; 
+({ kind: "credentialChanged"; instance: string; name: string;
 /**
  *  The sign-in this news is about, when it is about one (tsk929):
  *  a row waiting on another sign-in of the same credential
@@ -5727,7 +5344,7 @@ signIn: number | null; error: string | null }) & { actor?: never; agentSessionId
  *    always follows, so the result is never left stale);
  *  - `idle` — no agent turn is running and nothing changed (no snapshot or
  *    agent event) for that long.
- * 
+ *
  *  An event type in `force` runs at once, past them all: a moment that
  *  needs the result fresh (an effort finishing, a commit).
  */
@@ -5740,6 +5357,266 @@ export type Pacing = {
 
 /**  A loaded page. */
 export type Page = Page_Serialize | Page_Deserialize;
+
+/**
+ *  A button on a lens: a command it runs (P6.B1, target §11.4). The
+ *  command goes through the bus as `Actor::Lens` acting for whoever
+ *  pressed it, so every policy — the agent policy, confirmation
+ *  — applies as if they had run it themselves; a lens can offer a button
+ *  but never grant a power. Copying the result and handing it to the
+ *  agent are on every lens, not declared.
+ */
+export type PageAction = PageAction_Serialize | PageAction_Deserialize;
+
+/**
+ *  A button on a lens: a command it runs (P6.B1, target §11.4). The
+ *  command goes through the bus as `Actor::Lens` acting for whoever
+ *  pressed it, so every policy — the agent policy, confirmation
+ *  — applies as if they had run it themselves; a lens can offer a button
+ *  but never grant a power. Copying the result and handing it to the
+ *  agent are on every lens, not declared.
+ */
+export type PageAction_Deserialize = {
+	/**  Unique within the lens; `oxplow_run_lens_action` names it. */
+	id: string,
+	label: string,
+	/**  The command it runs (`oxplow.work_item.transition`). */
+	command: string,
+	/**
+	 *  The command's input. A string that is exactly `{{param.<name>}}`
+	 *  or `{{row.<column>}}` becomes that value (a number stays a number);
+	 *  one that contains them has them spliced in as text.
+	 */
+	input: unknown,
+	/**
+	 *  A row action: offered on each row (right-click), with `{{row.*}}`
+	 *  bound to that row. Otherwise it's a button above the result.
+	 */
+	row: boolean,
+	/**
+	 *  A group action: a button in the heading of the group whose `by`
+	 *  value (as text) this is, instead of above the result.
+	 */
+	group: string | null,
+	/**
+	 *  Opens the command's form, its fields starting from `input`, for the
+	 *  person to fill in before it runs (`lens_action_form`), instead of
+	 *  running at once.
+	 */
+	form: boolean,
+	/**
+	 *  Fields of a form action the person sees but can't change: their
+	 *  values are `input`'s, imposed again when it runs (an item's `ref`).
+	 */
+	fixed: string[],
+	/**
+	 *  A form action's fields picked from a list: each names a lens
+	 *  (`<extension>/<slug>`) run with the lens's params, whose rows are
+	 *  the choices (`value`, `label`, optional `group`).
+	 */
+	choices: { [key in string]: string },
+	/**
+	 *  What becomes of the lens's page when the command's `ui.open_after`
+	 *  names a page.
+	 */
+	then: ActionThen,
+	/**
+	 *  A row action offered only on rows whose column of this name is
+	 *  truthy (not null, 0, `""` or false): an Enable on rows that are off.
+	 */
+	when: string | null,
+	/**
+	 *  The row action a click on the row (not on a link or control in it),
+	 *  or Enter on it, runs: the one a person most often wants. The first
+	 *  `primary` action a row is offered (`when`) is the one.
+	 */
+	primary?: boolean,
+	/**
+	 *  A page action (not a row, group or edit action) that stays a button
+	 *  in the page's nav bar instead of going in its ☰ menu: what a person
+	 *  reaches for on this page (a list's New). Several may be.
+	 */
+	prominent?: boolean,
+	/**
+	 *  A page action's submenu in the page's ☰ menu: the actions (and the
+	 *  commands whose `ui.group` is the same name) under one item there.
+	 */
+	submenu?: string | null,
+	/**
+	 *  An icon oxplow draws (`extension_resources::ICONS`): alone on the
+	 *  action's button in the bar (its label the hover), beside its label
+	 *  in a menu.
+	 */
+	icon?: string | null,
+	/**
+	 *  What a drop runs: the dragged row is `{{row.*}}` (a drag action is
+	 *  a row action), and where it landed binds `{{before.*}}` (the row
+	 *  below the drop), `{{after.*}}` (the row above), `{{onto.*}}` (the
+	 *  row dropped on) and `{{group.value}}` (the group dropped in). A
+	 *  field that is exactly one of these with nothing there is left out.
+	 */
+	drag?: boolean,
+	/**
+	 *  A row action offered for every marked row at once: it runs once per
+	 *  row, in list order, asking once.
+	 */
+	bulk?: boolean,
+	/**
+	 *  A row action's key: pressed with the rows focused, it runs on the
+	 *  cursor row (or the marked rows, when `bulk`).
+	 */
+	key?: string | null,
+	/**
+	 *  The Save of a `markdown` viz's editor: a form over the first row,
+	 *  the person's text laid over `edit_field`.
+	 */
+	edit?: boolean,
+	/**
+	 *  An edit action's field the editor's text fills: the one input field
+	 *  bound exactly to a `{{row.<column>}}` and not `fixed`.
+	 */
+	editField?: string | null,
+	/**
+	 *  A whole-lens action over a lens that holds one row, that names
+	 *  `when` or `{{row.*}}`: the lens's one row. Derived at load, not
+	 *  declared: an action without `row: true` that names `when:` or
+	 *  `{{row.*}}`. It runs on the row the server reads from the lens
+	 *  itself, and only while the lens has exactly one.
+	 */
+	oneRow?: boolean,
+};
+
+/**
+ *  A button on a lens: a command it runs (P6.B1, target §11.4). The
+ *  command goes through the bus as `Actor::Lens` acting for whoever
+ *  pressed it, so every policy — the agent policy, confirmation
+ *  — applies as if they had run it themselves; a lens can offer a button
+ *  but never grant a power. Copying the result and handing it to the
+ *  agent are on every lens, not declared.
+ */
+export type PageAction_Serialize = {
+	/**  Unique within the lens; `oxplow_run_lens_action` names it. */
+	id: string,
+	label: string,
+	/**  The command it runs (`oxplow.work_item.transition`). */
+	command: string,
+	/**
+	 *  The command's input. A string that is exactly `{{param.<name>}}`
+	 *  or `{{row.<column>}}` becomes that value (a number stays a number);
+	 *  one that contains them has them spliced in as text.
+	 */
+	input: unknown,
+	/**
+	 *  A row action: offered on each row (right-click), with `{{row.*}}`
+	 *  bound to that row. Otherwise it's a button above the result.
+	 */
+	row: boolean,
+	/**
+	 *  A group action: a button in the heading of the group whose `by`
+	 *  value (as text) this is, instead of above the result.
+	 */
+	group: string | null,
+	/**
+	 *  Opens the command's form, its fields starting from `input`, for the
+	 *  person to fill in before it runs (`lens_action_form`), instead of
+	 *  running at once.
+	 */
+	form: boolean,
+	/**
+	 *  Fields of a form action the person sees but can't change: their
+	 *  values are `input`'s, imposed again when it runs (an item's `ref`).
+	 */
+	fixed: string[],
+	/**
+	 *  A form action's fields picked from a list: each names a lens
+	 *  (`<extension>/<slug>`) run with the lens's params, whose rows are
+	 *  the choices (`value`, `label`, optional `group`).
+	 */
+	choices: { [key in string]: string },
+	/**
+	 *  What becomes of the lens's page when the command's `ui.open_after`
+	 *  names a page.
+	 */
+	then: ActionThen,
+	/**
+	 *  A row action offered only on rows whose column of this name is
+	 *  truthy (not null, 0, `""` or false): an Enable on rows that are off.
+	 */
+	when: string | null,
+	/**
+	 *  The row action a click on the row (not on a link or control in it),
+	 *  or Enter on it, runs: the one a person most often wants. The first
+	 *  `primary` action a row is offered (`when`) is the one.
+	 */
+	primary: boolean,
+	/**
+	 *  A page action (not a row, group or edit action) that stays a button
+	 *  in the page's nav bar instead of going in its ☰ menu: what a person
+	 *  reaches for on this page (a list's New). Several may be.
+	 */
+	prominent: boolean,
+	/**
+	 *  A page action's submenu in the page's ☰ menu: the actions (and the
+	 *  commands whose `ui.group` is the same name) under one item there.
+	 */
+	submenu?: string | null,
+	/**
+	 *  An icon oxplow draws (`extension_resources::ICONS`): alone on the
+	 *  action's button in the bar (its label the hover), beside its label
+	 *  in a menu.
+	 */
+	icon?: string | null,
+	/**
+	 *  What a drop runs: the dragged row is `{{row.*}}` (a drag action is
+	 *  a row action), and where it landed binds `{{before.*}}` (the row
+	 *  below the drop), `{{after.*}}` (the row above), `{{onto.*}}` (the
+	 *  row dropped on) and `{{group.value}}` (the group dropped in). A
+	 *  field that is exactly one of these with nothing there is left out.
+	 */
+	drag: boolean,
+	/**
+	 *  A row action offered for every marked row at once: it runs once per
+	 *  row, in list order, asking once.
+	 */
+	bulk: boolean,
+	/**
+	 *  A row action's key: pressed with the rows focused, it runs on the
+	 *  cursor row (or the marked rows, when `bulk`).
+	 */
+	key: string | null,
+	/**
+	 *  The Save of a `markdown` viz's editor: a form over the first row,
+	 *  the person's text laid over `edit_field`.
+	 */
+	edit: boolean,
+	/**
+	 *  An edit action's field the editor's text fills: the one input field
+	 *  bound exactly to a `{{row.<column>}}` and not `fixed`.
+	 */
+	editField: string | null,
+	/**
+	 *  A whole-lens action over a lens that holds one row, that names
+	 *  `when` or `{{row.*}}`: the lens's one row. Derived at load, not
+	 *  declared: an action without `row: true` that names `when:` or
+	 *  `{{row.*}}`. It runs on the row the server reads from the lens
+	 *  itself, and only while the lens has exactly one.
+	 */
+	oneRow: boolean,
+};
+
+/**
+ *  When a lens needs attention: its row count reaches `min_rows`, or the
+ *  first row's `column` goes `above` / `below` a threshold. A left-nav
+ *  panel's `badge` lens shows its count, and the Alerts panel lists it.
+ */
+export type PageAlert = {
+	minRows: number | null,
+	column: string | null,
+	above: number | null,
+	below: number | null,
+	/**  Badge text; else the row count or the column's name. */
+	label: string | null,
+};
 
 /**
  *  A question a page answers, with the params that answer it: what an
@@ -5762,18 +5639,140 @@ export type PageAnswer = {
  *  required bundled extension only, and shrinking — a built-in component
  *  core still renders (`built_in_pages::BUILT_IN_PAGES`).
  */
-export type PageBody = { kind: "lens"; 
+export type PageBody = { kind: "lens";
 /**  `<extension>/<slug>`. */
-lens: string } | { kind: "builtIn"; 
+lens: string } | { kind: "builtIn";
 /**  A `BUILT_IN_PAGES` name. */
-name: string } | 
+name: string } |
 /**
  *  One of the extension's own custom components, filling the page
  *  body: a custom page (`.context/extensions.md` "Pages").
  */
-{ kind: "component"; 
+{ kind: "component";
 /**  `<extension>/<component id>`. */
 component: string };
+
+/**  How one result column is shown. */
+export type PageColumn = {
+	/**  Result column name. */
+	key: string,
+	/**  Header text; defaults to `key`. */
+	label?: string | null,
+	link?: LensLink | null,
+	/**
+	 *  A column of the same row holding this one's unit (`ms`, `%`,
+	 *  `lines`): a number shows as a metric value in it.
+	 */
+	unit?: string | null,
+	/**
+	 *  A column of the same row naming an icon drawn before the cell
+	 *  (`done`, `in_progress`, `epic`, `wiki`, …; the UI's fixed
+	 *  vocabulary, `lens/lensIcons.tsx` — an unknown name draws none).
+	 */
+	icon?: string | null,
+	/**
+	 *  A column of the same row naming the cell's tone: `accent`,
+	 *  `success`, `warning`, `danger` or `muted` (anything else is plain).
+	 */
+	tone?: string | null,
+	/**  Its width in pixels; the columns without one share the rest. */
+	width?: number | null,
+	/**
+	 *  How its value reads; else as the query returned it (a timestamp in
+	 *  local time, a number with its `unit`).
+	 */
+	format?: ColumnFormat | null,
+	/**
+	 *  A param of the lens: the cell's text is drawn with every
+	 *  case-insensitive occurrence of its current value marked.
+	 */
+	highlight?: string | null,
+	/**
+	 *  A param of the lens that clicking a row sets to this column's
+	 *  value, re-running what reads it (a document's other sections):
+	 *  master and detail. The row whose value it holds is drawn selected.
+	 */
+	select?: string | null,
+	/**
+	 *  A lens (`<slug>` of this extension or `<extension>/<slug>`) the row
+	 *  opens into: run with the row's values (the params it declares), its
+	 *  result drawn under the row.
+	 */
+	expand?: string | null,
+};
+
+/**
+ *  A value the viewer (or an agent) can set when running the lens,
+ *  bound into the query as `:name`.
+ */
+export type PageParam = {
+	name: string,
+	label?: string | null,
+	/**  Used when the caller doesn't supply the param. */
+	default?: SqlCell | null,
+	/**
+	 *  The values it takes, when it's a choice: a panel shows
+	 *  them as a toggle in its header, a lens page as a select. Its
+	 *  `default` must be one; a run supplying another is refused.
+	 */
+	options?: LensParamOption[],
+	/**
+	 *  A lens whose rows are the values it takes, when it's a choice
+	 *  whose options aren't fixed (`value`, `label`, optional `group` —
+	 *  the form `choices` contract): a slug of this extension, or
+	 *  `<extension>/<slug>`; a loaded lens has the whole id. The page runs
+	 *  it with the params it declares of the page's, so an `end` picker's
+	 *  lens can leave out what `start` is. Its options aren't known at
+	 *  load, so no `default` is needed and any text is taken. Exclusive
+	 *  with `options`.
+	 */
+	options_from?: string | null,
+	/**
+	 *  What it holds, and so how a page draws it. Left out, it is a
+	 *  `choice` when it has `options` or `options_from`, else `text`; a
+	 *  loaded lens always says.
+	 */
+	type?: ParamType | null,
+	/**
+	 *  What it is to the page, and so where it rides in the page's URI:
+	 *  a `resource` (the default) names what the page shows, in the URI's
+	 *  `?`; `filter` narrows how it shows it, in the URI's `#` view. A
+	 *  `selection` follows from the columns and is never written: a param
+	 *  a column of the lens (or of a part of the page) selects, in the
+	 *  view too. A loaded lens always says.
+	 */
+	role?: ParamRole | null,
+	/**
+	 *  A `date_range`'s quick picks, of `1d 2d 3d 7d 30d 90d all`; the
+	 *  default is `1d 7d 30d all`.
+	 */
+	presets?: string[],
+};
+
+/**
+ *  Where a lens comes from. An agent edits `source`, never `running`: a
+ *  deployed extension runs a copy in the store that the next deploy
+ *  replaces.
+ */
+export type PageProvenance = {
+	/**  The extension it belongs to. */
+	extension: string,
+	/**
+	 *  Its source file, relative to the project when inside it; none when
+	 *  no source is here (an extension that ships with oxplow, or a
+	 *  deployment whose source is gone).
+	 */
+	source: string | null,
+	/**
+	 *  The file it runs from: `source` when loaded from it, else the
+	 *  deployment's copy.
+	 */
+	running: string,
+	/**  The deployment it runs, when it runs one (its hash). */
+	deployment: string | null,
+	/**  It ships with oxplow. */
+	bundled: boolean,
+};
 
 /**  A run of a page. */
 export type PageRun = PageRun_Serialize | PageRun_Deserialize;
@@ -5820,6 +5819,19 @@ export type PageSlot = {
 	size: TileSize | null,
 };
 
+/**
+ *  The YAML a visual page edit starts from. Writable pages read their
+ *  primary source, including edits not yet deployed, so saving a tile
+ *  does not silently replace those edits with the deployed copy.
+ */
+export type PageSpec = {
+	page: string,
+	extension: string,
+	slug: string,
+	yaml: string,
+	writable: boolean,
+};
+
 export type PageVisit = {
 	id: string,
 	page_kind: string,
@@ -5857,7 +5869,7 @@ export type Page_Deserialize = {
 	 *  Its params, typed, each with its role (`resource` names what it
 	 *  shows, in its URI's `?`; `filter` and `selection` ride in the `#`).
 	 */
-	params: LensParam[],
+	params: PageParam[],
 	/**  The resources it renders (`oxplow/commit`); empty: a route. */
 	for: string[],
 	accepts: { [key in string]: string },
@@ -5871,8 +5883,8 @@ export type Page_Deserialize = {
 	 *  Its whole-page actions (a row action goes on the viz node that
 	 *  shows the row).
 	 */
-	actions: LensAction_Deserialize[],
-	alert: LensAlert | null,
+	actions: PageAction_Deserialize[],
+	alert: PageAlert | null,
 	/**  The MCP tool it is also offered as, namespaced. */
 	tool: string | null,
 	answers: PageAnswer[],
@@ -5881,7 +5893,7 @@ export type Page_Deserialize = {
 	view: Node_Deserialize,
 	/**  A second tree drawn in the page's rail. */
 	rail: Node_Deserialize | null,
-	origin: LensProvenance,
+	origin: PageProvenance,
 };
 
 /**  A loaded page. */
@@ -5906,7 +5918,7 @@ export type Page_Serialize = {
 	 *  Its params, typed, each with its role (`resource` names what it
 	 *  shows, in its URI's `?`; `filter` and `selection` ride in the `#`).
 	 */
-	params: LensParam[],
+	params: PageParam[],
 	/**  The resources it renders (`oxplow/commit`); empty: a route. */
 	for: string[],
 	accepts: { [key in string]: string },
@@ -5920,8 +5932,8 @@ export type Page_Serialize = {
 	 *  Its whole-page actions (a row action goes on the viz node that
 	 *  shows the row).
 	 */
-	actions: LensAction_Serialize[],
-	alert: LensAlert | null,
+	actions: PageAction_Serialize[],
+	alert: PageAlert | null,
 	/**  The MCP tool it is also offered as, namespaced. */
 	tool: string | null,
 	answers: PageAnswer[],
@@ -5930,7 +5942,7 @@ export type Page_Serialize = {
 	view: Node_Serialize,
 	/**  A second tree drawn in the page's rail. */
 	rail: Node_Serialize | null,
-	origin: LensProvenance,
+	origin: PageProvenance,
 };
 
 /**  One panel's place in the layout. */
@@ -5956,28 +5968,28 @@ export type ParamDecl = {
 };
 
 /**  What a lens param is to its page. */
-export type ParamRole = 
+export type ParamRole =
 /**
  *  Names what the page shows (its URI's `?`); a control in the
  *  page's rail whose change opens another resource.
  */
-"resource" | 
+"resource" |
 /**
  *  Narrows how the page shows it (its URI's `#` view); a control in
  *  the page's rail whose change replaces the view.
  */
-"filter" | 
+"filter" |
 /**  The row a click picked; the rail shows that row, never an input. */
 "selection";
 
 /**  What a lens param holds. */
-export type ParamType = 
+export type ParamType =
 /**  Any value; a text box. */
-"text" | 
+"text" |
 /**  One of its `options`; a select. */
-"choice" | 
+"choice" |
 /**  True or false, bound as 1 or 0; a checkbox. */
-"bool" | 
+"bool" |
 /**
  *  A span of time: a preset (`7d`, `all`) or `<from>..<to>` (dates or
  *  times, either end empty for open). Its own value is that text;
@@ -5985,9 +5997,9 @@ export type ParamType =
  *  NULL for an open end), a date's `to` the day after so the day
  *  counts.
  */
-"date_range" | 
+"date_range" |
 /**  A branch's name, NULL for every branch; a select of the branches. */
-"branch" | 
+"branch" |
 /**
  *  Text to look for, trimmed, NULL when empty; a box that applies as
  *  you type.
@@ -6256,11 +6268,11 @@ export type RecentProjectView = {
  *  What a report collector records: its parser's typed output, merged
  *  into the run (`.context/collection.md`).
  */
-export type Records = 
+export type Records =
 /**  A suite/case tree of test outcomes (a `test-run`). */
-"tests" | 
+"tests" |
 /**  Per-file instrumented/covered lines (a coverage capture). */
-"coverage" | 
+"coverage" |
 /**  Linter/analyzer findings (a `static-analysis` capture). */
 "analysis";
 
@@ -6457,22 +6469,37 @@ export type RunNode_Serialize = {
 	error: string | null,
 };
 
+/**  A run and the sequence of that exact snapshot, captured under one lock. */
+export type RunSnapshot = RunSnapshot_Serialize | RunSnapshot_Deserialize;
+
+/**  A run and the sequence of that exact snapshot, captured under one lock. */
+export type RunSnapshot_Deserialize = {
+	run: PageRun_Deserialize,
+	seq: number,
+};
+
+/**  A run and the sequence of that exact snapshot, captured under one lock. */
+export type RunSnapshot_Serialize = {
+	run: PageRun_Serialize,
+	seq: number,
+};
+
 /**  How a contribution comes to run. */
-export type RunsOn = 
+export type RunsOn =
 /**  Logged events of these types. */
-{ on: "events"; types: string[] } | 
+{ on: "events"; types: string[] } |
 /**  A schedule (`every`, a cron). */
-{ on: "schedule"; every: string } | 
+{ on: "schedule"; every: string } |
 /**  A run's reports (a report collector). */
-{ on: "run" } | 
+{ on: "run" } |
 /**  Called by name: a command, an implementation's verbs. */
-{ on: "call" } | 
+{ on: "call" } |
 /**  Read by a query: a model, a measure, a metric, a dimension. */
-{ on: "query" } | 
+{ on: "query" } |
 /**  Shown where it's mounted: a lens, a page, a slot. */
-{ on: "mount" } | 
+{ on: "mount" } |
 /**  Read by an agent: a skill, an advisory. */
-{ on: "agent" } | 
+{ on: "agent" } |
 /**  Nothing invokes it: a vocabulary entry (an event type, a ref kind). */
 { on: "declared" };
 
@@ -6558,14 +6585,14 @@ export type ServiceUse = {
 };
 
 /**  How handing a redirect to a sign-in went (`oxplow.provider.complete_sign_in`). */
-export type SignInCompletion = 
+export type SignInCompletion =
 /**  Signed in: the token is kept and the instance restarts on it. */
-{ outcome: "signed_in" } | 
+{ outcome: "signed_in" } |
 /**
  *  The sign-in ended without a token: why (what `CredentialChanged`
  *  carries too).
  */
-{ outcome: "failed"; error: string } | 
+{ outcome: "failed"; error: string } |
 /**
  *  Not this sign-in's redirect (another `state`, another path):
  *  nothing was done, and the sign-in still waits.
@@ -6583,9 +6610,9 @@ export type SkillDecl = {
 };
 
 /**  What the agent's runtime makes of it. */
-export type SkillKind = 
+export type SkillKind =
 /**  A skill the agent loads when it's relevant: `<name>/SKILL.md`. */
-"skill" | 
+"skill" |
 /**  A slash command the person runs: `/oxplow:<name>`. */
 "command";
 
@@ -6665,29 +6692,29 @@ export type SnapshotStorage = "oxplow" | "git" | "oversize" | "deleted";
  *  Why a snapshot take happened: one row of the operation log each
  *  (`snapshot_op.trigger`) and the `trigger` of `snapshot.taken`.
  */
-export type SnapshotTrigger = 
+export type SnapshotTrigger =
 /**  An agent turn ended (Stop / interrupt). */
-"turn_end" | 
+"turn_end" |
 /**  The worktree went quiet with no turn open (human edits). */
-"quiet" | 
+"quiet" |
 /**  An effort opened (its start bracket). */
-"effort_start" | 
+"effort_start" |
 /**
  *  An effort closed (its end bracket), including a restart closing
  *  an orphaned effort.
  */
-"effort_end" | 
+"effort_end" |
 /**  The boot sweep. */
-"startup" | 
+"startup" |
 /**  An explicit request (metric baseline rebuild, tests). */
-"manual" | 
+"manual" |
 /**  HEAD or a ref moved; the take drains whatever was dirty. */
-"git_refs" | 
+"git_refs" |
 /**
  *  HEAD moved on a clean tree: the latest snapshot now also is the
  *  new commit (a re-stamp, no new snapshot).
  */
-"head_moved" | 
+"head_moved" |
 /**
  *  A run's reports were recorded (coverage, analysis): the code it
  *  measured, which their captures are pinned to (tsk883).
@@ -6829,6 +6856,11 @@ export type TabReport = {
 	 *  lens's `{lensId, params}`, an editor's `{path, revision, selection}`).
 	 */
 	detail_json: string | null,
+	/**
+	 *  Every live page run in this window, including panels, inline
+	 *  markdown and hidden history bodies.
+	 */
+	runs?: string[],
 };
 
 /**
@@ -6863,7 +6895,7 @@ export type TestingConfig = {
 	 *  (tsk171). It still writes a test report (JUnit), so the
 	 *  progression lands in the effort's Tests panel, but skips coverage
 	 *  and should accept a filter.
-	 * 
+	 *
 	 *  This exists because the alternative is worse. When the only
 	 *  report-emitting command is a full instrumented run of the whole
 	 *  suite, "route every invocation through it" is unfollowable in a TDD
@@ -6935,18 +6967,6 @@ export type ThreadId = string;
  */
 export type ThreadMark = "amber" | "red" | "green" | "blue" | "violet";
 
-/**
- *  A note on a thread: the per-thread capture pad an agent writes as it
- *  works (`oxplow.knowledge.add_note`). Its ref is `oxplow:oxplow/thread_note?id=not<n>`.
- */
-export type ThreadNote = {
-	id: NoteId,
-	thread_id: ThreadId,
-	body: string,
-	author: string,
-	created_at: Timestamp,
-};
-
 export type ThreadState = {
 	selectedThreadId: ThreadId | null,
 	threads: Thread[],
@@ -7012,7 +7032,7 @@ export type ToolDiff = {
 };
 
 /**  The tool categories a connection maps its agent's tools onto. */
-export type ToolKind = "read" | "edit" | "delete" | "move" | "search" | "execute" | "think" | "fetch" | "switch_mode" | 
+export type ToolKind = "read" | "edit" | "delete" | "move" | "search" | "execute" | "think" | "fetch" | "switch_mode" |
 /**  The agent drives a child agent (Codex's collab tools). */
 "subagent" | "other";
 
@@ -7024,22 +7044,22 @@ export type TranscriptItem = {
 } & ItemBody;
 
 /**  When a collector runs by itself. */
-export type Trigger = 
+export type Trigger =
 /**  Only when someone runs it (`oxplow.collector.sync`). */
-{ kind: "manual" } | 
+{ kind: "manual" } |
 /**  Every `minutes` minutes (an exec collector once approved). */
-{ kind: "every"; minutes: number } | 
+{ kind: "every"; minutes: number } |
 /**
  *  When an event of one of these types is logged and its payload has
  *  each `filter` field equal to its value — after the consumers in
  *  the collector's `after` have handled the event.
  */
-{ kind: "on"; events: string[]; filter: { [key in string]: string }; 
+{ kind: "on"; events: string[]; filter: { [key in string]: string };
 /**
  *  When the run happens after a triggering event: at
  *  once by default.
  */
-pacing?: Pacing } | 
+pacing?: Pacing } |
 /**
  *  A report collector's: when the agent runs the project's tests or an
  *  analyzer (the `collection` reactor detects the run), if its report
@@ -7210,7 +7230,7 @@ export type WorkspaceFile = {
 /**
  *  One row of the project's `zones:` table: the globs that select files
  *  and the zone label they belong to.
- * 
+ *
  *  Zones are entirely project-defined (tsk251) — oxplow ships no rule
  *  table of its own, because a file's architectural role follows from
  *  how *this* project lays out its repo. Order in the table is

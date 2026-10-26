@@ -4,7 +4,7 @@ import type { TabRef } from "../../tabs/tabState.js";
  * Sections the launcher's "start menu" empty state groups pages under.
  * `PAGE_CATEGORY_ORDER` is the render order for those headings.
  */
-export type PageCategory = "Work" | "Code" | "Git" | "Activity" | "Knowledge" | "Data" | "Lenses" | "System";
+export type PageCategory = "Work" | "Code" | "Git" | "Activity" | "Knowledge" | "Data" | "Dashboards" | "System";
 
 export const PAGE_CATEGORY_ORDER: readonly PageCategory[] = [
   "Work",
@@ -13,7 +13,7 @@ export const PAGE_CATEGORY_ORDER: readonly PageCategory[] = [
   "Activity",
   "Knowledge",
   "Data",
-  "Lenses",
+  "Dashboards",
   "System",
 ];
 

@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { buildTabReport } from "./tabReport.js";
+import { buildTabReport, createTabReporter } from "./tabReport.js";
 import { fileRef, wikiPageRef } from "./pageRefs.js";
 import { back, emptySession, navigate, open } from "./session.js";
 
@@ -25,9 +25,11 @@ test("a window's report lists every thread's tabs, selection and history", () =>
     sessions: { thr1, thr2: emptySession() },
     titleOf: (tab) => (tab.id === "oxplow:oxplow/wiki?slug=start" ? "Start" : null),
     detail: { path: "src/a.rs" },
+    runs: ["panel-1", "markdown-1", "panel-1"],
   });
   expect(report).toEqual({
     client: "w1",
+    runs: ["markdown-1", "panel-1"],
     focused: true,
     visible: true,
     shown_thread: "thr1",
@@ -44,4 +46,46 @@ test("a window's report lists every thread's tabs, selection and history", () =>
     ],
     detail_json: '{"path":"src/a.rs"}',
   });
+});
+
+test("a window with no page runs reports an explicit empty roster", () => {
+  expect(buildTabReport({ client: "w2", focused: false, visible: true, shownThread: null, sessions: {}, titleOf: () => null, detail: null }).runs).toEqual([]);
+});
+
+const rosterReport = (runs: string[]) => buildTabReport({ client: "w1", runs, focused: true, visible: true, shownThread: null, sessions: {}, titleOf: () => null, detail: null });
+
+test("report writes are serialized and only the newest pending roster is sent", async () => {
+  const sent: string[][] = [];
+  const release: (() => void)[] = [];
+  const reporter = createTabReporter(async (report) => {
+    sent.push(report.runs);
+    await new Promise<void>((resolve) => release.push(resolve));
+  });
+  reporter.send(rosterReport(["old"]));
+  reporter.send(rosterReport(["intermediate"]));
+  reporter.send(rosterReport(["newest"]));
+  expect(sent).toEqual([["old"]]);
+  release[0]();
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(sent).toEqual([["old"], ["newest"]]);
+  release[1]();
+});
+
+test("a failed report does not block a newer pending roster or a later heartbeat", async () => {
+  const sent: string[][] = [];
+  let reject!: (error: Error) => void;
+  const reporter = createTabReporter(async (report) => {
+    sent.push(report.runs);
+    if (sent.length === 1) await new Promise<void>((_, fail) => { reject = fail; });
+  });
+  reporter.send(rosterReport(["old"]));
+  reporter.send(rosterReport(["current"]));
+  reject(new Error("temporary disconnect"));
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(sent).toEqual([["old"], ["current"]]);
+  reporter.send(rosterReport(["heartbeat"]));
+  await Promise.resolve();
+  expect(sent.at(-1)).toEqual(["heartbeat"]);
 });

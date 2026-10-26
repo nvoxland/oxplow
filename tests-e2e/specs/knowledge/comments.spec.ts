@@ -18,7 +18,7 @@ test("the Comments inbox lists a thread, shows its conversation, and resolves it
 
   await page.goto("/");
   await openFromLauncher(page, "Comments");
-  const inbox = page.locator('[data-testid="page-lens"]:visible');
+  const inbox = page.locator('[data-testid="page-file"]:visible');
   // The threads are the table; the conversation under it is a list.
   const threads = inbox.getByTestId("lens-table");
   const row = threads.getByTestId("lens-row-0");

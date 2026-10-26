@@ -1,9 +1,9 @@
 //! `lens` and `extension_listing` (V74), `page`, `page_answer` and
-//! `page_param` (V110), `catalog_prompt` and `config_key`
-//! (V85): the lenses and extensions the catalog holds, what a person can
-//! ask and what they can configure, restated whole by the app with each
-//! extension generation and read as `v_lens`, `v_extension`, `v_prompt`
-//! and `v_config_key`.
+//! `page_param` (V110) and `config_key` (V85): the lenses, pages and
+//! extensions the catalog holds, and what can be configured, restated
+//! whole by the app with each extension generation and read as `v_lens`,
+//! `v_page`, `v_extension` and `v_config_key`. What a person can ask is
+//! what pages answer (`v_page_answer`).
 
 use oxplow_domain::DomainError;
 use rusqlite::params;
@@ -102,16 +102,6 @@ pub struct ExtensionRow {
     pub shared: bool,
 }
 
-/// One question a person can ask, as `v_prompt` lists it.
-#[derive(Debug, Clone, PartialEq)]
-pub struct PromptRow {
-    /// `area` or `extension`.
-    pub source_kind: String,
-    pub source: String,
-    pub prompt: String,
-    pub about: Option<String>,
-}
-
 /// One project.yaml key, as `v_config_key` lists it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ConfigKeyRow {
@@ -129,7 +119,6 @@ pub struct CatalogListing {
     pub page_params: Vec<PageParamRow>,
     pub extensions: Vec<ExtensionRow>,
     /// In catalog order: each row's position is its index, from 1.
-    pub prompts: Vec<PromptRow>,
     pub config_keys: Vec<ConfigKeyRow>,
 }
 
@@ -271,7 +260,7 @@ fn insert_pages(conn: &rusqlite::Connection, listing: &CatalogListing) -> Result
     Ok(())
 }
 
-/// Replace every lens, page, extension, prompt and config key row.
+/// Replace every lens, page, extension and config key row.
 pub fn reset_tx(conn: &rusqlite::Connection, listing: &CatalogListing) -> Result<(), DomainError> {
     let (lenses, extensions) = (&listing.lenses, &listing.extensions);
     conn.execute("DELETE FROM lens", []).map_err(map_sql_err)?;
@@ -303,25 +292,6 @@ pub fn reset_tx(conn: &rusqlite::Connection, listing: &CatalogListing) -> Result
     }
     insert_pages(conn, listing)?;
     insert_extensions(conn, extensions)?;
-    conn.execute("DELETE FROM catalog_prompt", [])
-        .map_err(map_sql_err)?;
-    let mut prompt = conn
-        .prepare(
-            "INSERT INTO catalog_prompt (position, source_kind, source, prompt, about)
-             VALUES (?1, ?2, ?3, ?4, ?5)",
-        )
-        .map_err(map_sql_err)?;
-    for (i, p) in listing.prompts.iter().enumerate() {
-        prompt
-            .execute(params![
-                i as i64 + 1,
-                p.source_kind,
-                p.source,
-                p.prompt,
-                p.about
-            ])
-            .map_err(map_sql_err)?;
-    }
     conn.execute("DELETE FROM config_key", [])
         .map_err(map_sql_err)?;
     let mut key = conn

@@ -59,13 +59,13 @@ test("the Tasks page's scope is its tab's: it re-renders the page, a reload keep
   await expect(body()).toHaveAttribute("data-testid", "center-tab-body-oxplow:oxplow/page?page=tasks");
   // A mark on the page's element: a change of view re-renders the page,
   // it doesn't mount it again.
-  await body().getByTestId("page-lens").evaluate((el) => {
+  await body().getByTestId("page-file").evaluate((el) => {
     el.setAttribute("data-mounted-once", "yes");
   });
   await page.getByTestId("lens-param-show-value").filter({ visible: true }).click();
   await page.getByTestId("lens-param-show-edit").filter({ visible: true }).selectOption("all");
   await expect(body()).toHaveAttribute("data-testid", "center-tab-body-oxplow:oxplow/page?page=tasks#show=all");
-  await expect(body().getByTestId("page-lens")).toHaveAttribute("data-mounted-once", "yes");
+  await expect(body().getByTestId("page-file")).toHaveAttribute("data-mounted-once", "yes");
   await page.reload();
   await expect(body()).toHaveAttribute("data-testid", "center-tab-body-oxplow:oxplow/page?page=tasks#show=all");
   await expect(page.getByTestId("lens-param-show-value").filter({ visible: true })).toContainText("Everything");
@@ -84,13 +84,13 @@ test("the Tasks page lists the thread's items by state, with epics that fold", a
   await run(daemon, "oxplow.work_item.create", { title: "Standalone", thread: daemon.thread });
   await page.goto("/");
   await openFromLauncher(page, "Tasks");
-  const list = page.getByTestId("lens-part-list");
+  const list = page.locator('[data-node="list"]');
   await expect(list).toContainText("Under the epic");
   await list.locator('[data-testid^="lens-row-fold-"]').first().click();
   await expect(list).not.toContainText("Under the epic");
   await expect(list).toContainText("Standalone");
   await list.locator('[data-testid^="lens-row-"]').filter({ hasText: "Standalone" }).click({ button: "right" });
   await page.getByTestId("menu-item-lens-action-to-blocked").click();
-  await expect(page.getByTestId("lens-part-summary")).toContainText("Blocked");
-  await expect(page.getByTestId("lens-part-list")).toContainText("blocked");
+  await expect(page.locator('[data-node="summary"]')).toContainText("Blocked");
+  await expect(page.locator('[data-node="list"]')).toContainText("blocked");
 });

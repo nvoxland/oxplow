@@ -359,7 +359,7 @@ async fn the_metrics_list_has_each_metrics_trend_and_its_groups_when_sliced() {
                 &root,
                 &lens,
                 params,
-                &crate::extensions::LensContext::default(),
+                &crate::extensions::ViewContext::default(),
             )
             .await
             .unwrap();
@@ -442,7 +442,7 @@ async fn the_metric_page_reads_the_definition_the_trend_and_the_recordings() {
                 &root,
                 &lens,
                 params,
-                &crate::extensions::LensContext::default(),
+                &crate::extensions::ViewContext::default(),
             )
             .await
             .unwrap();
@@ -517,7 +517,7 @@ async fn the_metric_page_reads_the_definition_the_trend_and_the_recordings() {
             on_behalf_of: oxplow_domain::Actor::Human,
             confirmed: false,
         };
-    let ctx = crate::extensions::LensContext::default();
+    let ctx = crate::extensions::ViewContext::default();
     // Off writes the `metrics:` list.
     let listed = || {
         crate::config_service::read_config(&p.svc.config)
@@ -591,7 +591,7 @@ async fn the_lens_rows_carry_file_refs_to_the_path_and_line() {
         p.dir.path(),
         &lens.id,
         Default::default(),
-        &crate::extensions::LensContext::default(),
+        &crate::extensions::ViewContext::default(),
     )
     .await
     .unwrap();
@@ -961,7 +961,7 @@ async fn a_lens_joins_metric_facts_with_an_efforts_files() {
         p.dir.path(),
         &lens.id,
         Default::default(),
-        &crate::extensions::LensContext::default(),
+        &crate::extensions::ViewContext::default(),
     )
     .await
     .unwrap();

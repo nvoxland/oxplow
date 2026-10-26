@@ -462,6 +462,7 @@ mod tests {
     ) {
         svc.client_reports.report(
             TabReport {
+                runs: Vec::new(),
                 client: client.into(),
                 focused,
                 visible: true,
@@ -637,7 +638,7 @@ mod page_run_tests {
                 RunRequest {
                     target: RunTarget::Page("acme/numbers".into()),
                     params: [("n".to_string(), oxplow_db::SqlCell::Int(3))].into(),
-                    ctx: crate::extensions::LensContext::default(),
+                    ctx: crate::extensions::ViewContext::default(),
                     viewer: Actor::Human,
                 },
                 "w1",
@@ -647,6 +648,7 @@ mod page_run_tests {
         let id = "oxplow:oxplow/page?page=acme/numbers#n=3&node=big";
         svc.client_reports.report(
             TabReport {
+                runs: Vec::new(),
                 client: "w1".into(),
                 focused: true,
                 visible: true,

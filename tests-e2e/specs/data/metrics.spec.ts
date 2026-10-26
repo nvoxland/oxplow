@@ -19,9 +19,9 @@ test("a metric on the Metrics page opens its page with the definition", async ({
   await page.goto("/");
   await openFromLauncher(page, "Metrics");
   await page.getByRole("button", { name: "Coverage", exact: true }).filter({ visible: true }).click();
-  const header = page.locator('[data-testid="lens-part-header"]:visible');
+  const header = page.locator('[data-node="header"]:visible');
   await expect(header).toContainText("Aggregation");
   await expect(header).toContainText("Disable");
   // A fresh project has recorded nothing yet.
-  await expect(page.getByTestId("lens-document-nothing-found")).toContainText("Recordings");
+  await expect(page.getByTestId("page-nothing-found")).toContainText("Recordings");
 });

@@ -42,13 +42,9 @@ pub struct Intent {
     pub origin: Option<String>,
     #[serde(default)]
     pub examples: Vec<IntentExample>,
-    /// Questions it helps answer, offered to the person with an Ask
-    /// button (the catalog; pages for a ref of `about`'s kind).
-    #[serde(default)]
-    pub prompts: Vec<IntentPrompt>,
 }
 
-/// `intent:` as written: its examples and prompts are typed one by one
+/// `intent:` as written: its examples are typed one by one
 /// ([`intent_of`]), so a broken one is that entry's error and the rest
 /// of the extension still loads. Its schema is [`Intent`]'s.
 #[derive(Debug, Clone, PartialEq, Deserialize, schemars::JsonSchema)]
@@ -60,18 +56,6 @@ pub struct IntentFile {
     pub origin: Option<String>,
     #[serde(default)]
     pub examples: Vec<Value>,
-    #[serde(default)]
-    pub prompts: Vec<Value>,
-}
-
-/// A question an extension helps answer. `about` is a ref kind
-/// (`commit`, `file`, `effort`): a page for a ref of that kind suggests it.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct IntentPrompt {
-    pub prompt: String,
-    #[serde(default)]
-    pub about: Option<String>,
 }
 
 /// A slot mount: a lens into a core page, or among a document or
@@ -119,16 +103,6 @@ pub struct UiBlock {
     #[serde(default)]
     #[schemars(with = "Option<Vec<super::replacements::ReplacementFile>>")]
     pub replacements: Option<Value>,
-}
-
-/// A prompt an extension offers is inserted into the agent's input, never
-/// sent — and the terminal treats a pasted line break as Enter, so a
-/// multi-line prompt would send itself. One line, or this says why not.
-fn prompt_line_problem(prompt: &str) -> Option<String> {
-    prompt.contains(['\n', '\r']).then(|| {
-        "a prompt is one line (a line break pasted into the agent's input would send it)"
-            .to_string()
-    })
 }
 
 /// `extension.yaml` at `manifest: 2`, as written on disk.
@@ -406,20 +380,17 @@ fn entries<T: serde::de::DeserializeOwned>(
     (out, errors)
 }
 
-/// The manifest's intent, its examples and prompts typed one by one: a
+/// The manifest's intent, its examples typed one by one: a
 /// broken one is left out and is an error at its line.
 pub fn intent_of(m: &ManifestV2, file: &str, text: &str) -> (Option<Intent>, Vec<String>) {
     let Some(raw) = &m.intent else {
         return (None, Vec::new());
     };
-    let (examples, mut errors) = entries(&raw.examples, "intent.examples", file, text);
-    let (prompts, more) = entries(&raw.prompts, "intent.prompts", file, text);
-    errors.extend(more);
+    let (examples, errors) = entries(&raw.examples, "intent.examples", file, text);
     let intent = Intent {
         purpose: raw.purpose.clone(),
         origin: raw.origin.clone(),
         examples,
-        prompts,
     };
     (Some(intent), errors)
 }
@@ -618,24 +589,6 @@ pub fn check(m: &ManifestV2, file: &str, text: &str) -> (Vec<String>, Vec<String
                     ));
                 }
             }
-            for p in &intent.prompts {
-                let line = line_under(text, "intent", &p.prompt).or(key_line(text, "intent"));
-                if p.prompt.trim().is_empty() {
-                    errors.push(at(file, line, "`intent.prompts`: an empty prompt — write the question"));
-                }
-                if let Some(problem) = prompt_line_problem(&p.prompt) {
-                    errors.push(at(file, line, format!("`intent.prompts`: {problem}")));
-                }
-                if let Some(about) = &p.about {
-                    if let Some(why) = crate::extension_resources::resource_problem(about) {
-                        errors.push(at(
-                            file,
-                            line,
-                            format!("`intent.prompts`: `about: {about}`: {why}"),
-                        ));
-                    }
-                }
-            }
             if intent.examples.is_empty() {
                 warnings.push(at(
                     file,
@@ -773,43 +726,6 @@ mod tests {
         let text = "manifest: 2\nname: acme\nintent: { purpose: x, origin: nope, examples: [{ name: a }] }\n";
         let (errors, _) = check(&parse(text), "e/extension.yaml", text);
         assert!(errors[0].contains("is not an oxplow URI"), "{errors:?}");
-    }
-
-    /// P6.D2: `intent.prompts` are questions the extension helps answer,
-    /// each optionally about a kind of ref (what page offers it).
-    #[test]
-    fn intent_prompts_are_questions_about_a_resource() {
-        let text = "manifest: 2\nname: acme\nintent:\n  purpose: x\n  examples: [{ name: a }]\n  prompts:\n    - { prompt: 'Which PRs are waiting on me?' }\n    - { prompt: 'Who reviews this commit?', about: oxplow/commit }\n";
-        let m = parse(text);
-        let (errors, _) = check(&m, "e/extension.yaml", text);
-        assert!(errors.is_empty(), "{errors:?}");
-        let prompts = intent_of(&m, "e/extension.yaml", text).0.unwrap().prompts;
-        assert_eq!(
-            prompts[1],
-            IntentPrompt {
-                prompt: "Who reviews this commit?".into(),
-                about: Some("oxplow/commit".into())
-            }
-        );
-
-        for (entry, want) in [
-            ("{ prompt: '  ' }", "an empty prompt"),
-            // A line break pasted into a terminal is Enter: it would send.
-            ("{ prompt: \"Why?\\nAnd how?\" }", "one line"),
-            (
-                "{ prompt: x, about: nope }",
-                "a resource is `<extension>/<name>`",
-            ),
-        ] {
-            let text = format!("manifest: 2\nname: acme\nintent:\n  purpose: x\n  examples: [{{ name: a }}]\n  prompts:\n    - {entry}\n");
-            let (errors, _) = check(&parse(&text), "e/extension.yaml", &text);
-            assert!(
-                errors
-                    .iter()
-                    .any(|e| e.contains(want) && e.starts_with("e/extension.yaml:")),
-                "{entry}: {errors:?}"
-            );
-        }
     }
 
     #[test]

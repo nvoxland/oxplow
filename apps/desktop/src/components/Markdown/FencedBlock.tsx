@@ -4,6 +4,7 @@ import type { NodeViewProps } from "@tiptap/react";
 import { CodeBlock } from "@tiptap/extension-code-block";
 import { Pencil } from "lucide-react";
 import { renderMermaidInto } from "./mermaidRender.js";
+import { InlineView } from "./InlineView.js";
 import { CopyCodeButton } from "./CopyCodeButton.js";
 
 /**
@@ -134,7 +135,76 @@ function MermaidNodeView({ node, editor, getPos, selected }: NodeViewProps) {
   );
 }
 
-export const MermaidBlock = CodeBlock.extend({
+/** A live page remains a non-editable island until its YAML is opened.
+ * The editable content is still Tiptap's codeBlock, so its fence survives. */
+function PageNodeView({ node, editor, getPos }: NodeViewProps) {
+  const [editing, setEditing] = useState(false);
+  useEffect(() => {
+    if (!editing) return;
+    // ProseMirror owns events from NodeViewContent and can consume them
+    // before the React node-view's handler. Capture Escape on the editor
+    // DOM itself, before ProseMirror's bubbling keyboard handlers.
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      const pos = getPos();
+      if (pos === undefined) return;
+      const { from, to } = editor.state.selection;
+      if (from < pos || to > pos + node.nodeSize) return;
+      event.preventDefault();
+      event.stopPropagation();
+      setEditing(false);
+    };
+    const dom = editor.view.dom;
+    dom.addEventListener("keydown", escape, true);
+    return () => dom.removeEventListener("keydown", escape, true);
+  }, [editing, editor, getPos, node.nodeSize]);
+  useEffect(() => {
+    if (!editing) return;
+    const leave = () => {
+      const pos = getPos();
+      if (pos === undefined) return;
+      const { from, to } = editor.state.selection;
+      if (from < pos || to > pos + node.nodeSize) setEditing(false);
+    };
+    editor.on("selectionUpdate", leave);
+    return () => { editor.off("selectionUpdate", leave); };
+  }, [editing, editor, getPos, node.nodeSize]);
+  return (
+    <NodeViewWrapper
+      className="oxplow-rt-block oxplow-rt-page"
+      data-editing={editing ? "true" : "false"}
+      style={{ position: "relative", margin: "12px 0" }}
+      onKeyDownCapture={(event) => {
+        if (editing && event.key === "Escape") {
+          event.preventDefault();
+          event.stopPropagation();
+          setEditing(false);
+        }
+      }}
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as globalThis.Node | null)) setEditing(false);
+      }}
+    >
+      <div contentEditable={false} style={{ display: "flex", justifyContent: "flex-end" }}>
+        <button type="button" className="ox-button" title={editing ? "View page" : "Edit YAML"}
+          onMouseDown={(event) => {
+            event.preventDefault();
+            const pos = getPos();
+            if (!editing && pos !== undefined) editor.chain().focus().setTextSelection(pos + 1).run();
+            setEditing(!editing);
+          }}>
+          <Pencil size={12} /> {editing ? "View page" : "Edit YAML"}
+        </button>
+      </div>
+      <pre style={{ display: editing ? "block" : "none", whiteSpace: "pre-wrap" }}>
+        <NodeViewContent<"code"> as="code" />
+      </pre>
+      {!editing && <div contentEditable={false}><InlineView specYaml={node.textContent} /></div>}
+    </NodeViewWrapper>
+  );
+}
+
+export const FencedBlock = CodeBlock.extend({
   name: "codeBlock",
   addNodeView() {
     return ReactNodeViewRenderer((props) => {
@@ -142,6 +212,7 @@ export const MermaidBlock = CodeBlock.extend({
       if (lang === "mermaid") {
         return <MermaidNodeView {...props} />;
       }
+      if (lang === "oxplow-page") return <PageNodeView {...props} />;
       // Any other code block: its source, with the viewer's Copy.
       return (
         <NodeViewWrapper

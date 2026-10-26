@@ -14,7 +14,7 @@ runs them all, some against a real in-memory oxplow too.
 | [triage](triage/) | Data, AI and workflow state together: a collector that classifies TODO comments with a model, a durable per-TODO decision in private state, a custom board with forms, and a summary job. |
 | [effort-review](effort-review/) | A cancellable AI job over collected evidence: on each finished effort, a model reads its tests, diff coverage, changed functions and findings through a tool, the review streams and can be cancelled, and it is commented on the work item and exported as a model. |
 | [schema-review](schema-review/) | A review policy of its own: a collector's facts about migrations, joined with oxplow's test, coverage and code-analysis evidence into the effort's verdict, in place of oxplow-bundled's. |
-| [session-notes](session-notes/) | Adding to a core page: a section on the New Session page, placed after its "Start a new session" section by that section's stable id. |
+| [session-history](session-history/) | Adding a section to a core page: earlier prompts from the current thread, mounted on New Session after its start form. |
 | [commit-history](commit-history/) | A page with no code: typed params in the toolbar (a date range, a search, a switch) narrow the commits, and clicking one fills the next section with its files. |
 | [review-badges](review-badges/) | Building on another extension: an optional import of effort-review's exported model, shown as a list and on the task page, withheld with a warning when effort-review isn't there. |
 

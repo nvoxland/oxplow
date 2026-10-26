@@ -11,8 +11,8 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 
 import { subscribeOxplowEvents, unwrapResult } from "./api.js";
-import { getUiClientId } from "./logger.js";
-import { commands, type PageRun, type SqlCell } from "./tauri-bridge/generated/bindings.js";
+import { getUiClientId } from "./uiClientId.js";
+import { commands, type PageRun, type RunSnapshot, type SqlCell } from "./tauri-bridge/generated/bindings.js";
 import { onRemoteReconnect } from "./tauri-bridge/transport.js";
 
 /** What to run: a deployed page by id, or an inline page's YAML. */
@@ -36,9 +36,9 @@ export interface RunChange {
 
 /** How the store reaches the daemon (injected, so tests need none). */
 export interface PageRunsTransport {
-  open(key: PageKey): Promise<{ runId: string; run: PageRun }>;
+  open(key: PageKey): Promise<{ runId: string; run: PageRun; specYaml?: string | null }>;
   close(runId: string): Promise<void>;
-  fetch(runIds: string[]): Promise<Record<string, PageRun>>;
+  fetch(runIds: string[]): Promise<Record<string, RunSnapshot>>;
   setParams(runId: string, params: Record<string, SqlCell>): Promise<PageRun>;
   /** Run it again as it is (Refresh). */
   rerun(runId: string): Promise<PageRun>;
@@ -49,6 +49,8 @@ export interface PageRunsTransport {
 }
 
 export interface RunState {
+  /** Exact inline source, retained for tab restoration and saving. */
+  specYaml?: string | null;
   /** The open run's id (what its actions are pressed on); null until the
    *  daemon has opened it. */
   runId: string | null;
@@ -69,6 +71,11 @@ export interface RunHandle {
 }
 
 interface Entry {
+  /** Fences an old open reply after reconnect or final release. */
+  opening: number;
+  operation: number;
+  /** Current desired params; key remains the shared subscription identity. */
+  requestParams: Record<string, SqlCell>;
   key: PageKey;
   runId: Promise<string | null>;
   state: RunState;
@@ -96,27 +103,59 @@ export function keyOf(key: PageKey): string {
 export function createPageRuns(transport: PageRunsTransport) {
   const entries = new Map<string, Entry>();
   const byRunId = new Map<string, Entry>();
+  const rosterListeners = new Set<() => void>();
+  const rosterChanged = () => { for (const listener of rosterListeners) listener(); };
   const pending = new Map<string, number>();
   let flushTimer: ReturnType<typeof setTimeout> | null = null;
+  let inFlightOpens = 0;
+  const earlyChanges = new Map<string, number>();
+  let earlyOverflow = false;
+
+  const scheduleFetch = (runId: string, seq: number) => {
+    pending.set(runId, Math.max(seq, pending.get(runId) ?? 0));
+    if (flushTimer === null) flushTimer = setTimeout(() => void flush(), COALESCE_MS);
+  };
 
   const notify = (entry: Entry) => {
     for (const l of entry.listeners) l();
   };
 
   const start = (entry: Entry) => {
-    entry.runId = transport.open(entry.key).then(
-      ({ runId, run }) => {
+    const opening = ++entry.opening;
+    inFlightOpens += 1;
+    entry.runId = transport.open({ ...entry.key, params: { ...entry.requestParams } }).then(
+      ({ runId, run, specYaml }) => {
+        const earlySeq = earlyChanges.get(runId);
+        earlyChanges.delete(runId);
+        if (opening !== entry.opening) {
+          void transport.close(runId).catch(() => {});
+          return null;
+        }
         byRunId.set(runId, entry);
-        entry.state = { runId, run, error: null, stale: false };
+        const yaml = specYaml ?? entry.key.specYaml ?? null;
+        if (yaml) entry.key = { ...entry.key, specYaml: yaml };
+        entry.state = { runId, run, specYaml: yaml, error: null, stale: false };
+        // The daemon may have announced a change before its open HTTP
+        // reply reached this window. Keep notices only while opens are
+        // pending, never as a timed history of unrelated events.
+        if (earlySeq !== undefined || earlyOverflow) scheduleFetch(runId, earlySeq ?? 0);
+        rosterChanged();
         notify(entry);
         return runId;
       },
       (e: unknown) => {
+        if (opening !== entry.opening) return null;
         entry.state = { ...entry.state, error: String(e instanceof Error ? e.message : e), stale: false };
         notify(entry);
         return null;
       },
-    );
+    ).finally(() => {
+      inFlightOpens -= 1;
+      if (inFlightOpens === 0) {
+        earlyChanges.clear();
+        earlyOverflow = false;
+      }
+    });
   };
 
   const flush = async () => {
@@ -124,55 +163,90 @@ export function createPageRuns(transport: PageRunsTransport) {
     const wanted = [...pending.entries()];
     pending.clear();
     if (wanted.length === 0) return;
-    let runs: Record<string, PageRun>;
+    const operations = new Map(wanted.map(([id]) => [id, byRunId.get(id)?.operation]));
+    let runs: Record<string, RunSnapshot>;
     try {
       runs = await transport.fetch(wanted.map(([id]) => id));
     } catch {
       return;
     }
-    for (const [runId, seq] of wanted) {
+    for (const [runId] of wanted) {
       const entry = byRunId.get(runId);
-      const run = runs[runId];
-      if (!entry || !run || seq < entry.seq) continue;
-      entry.seq = seq;
-      entry.state = { runId, run, error: null, stale: false };
+      const snapshot = runs[runId];
+      if (!entry || !snapshot || snapshot.seq < entry.seq) continue;
+      if (entry.operation !== operations.get(runId)) {
+        scheduleFetch(runId, 0);
+        continue;
+      }
+      entry.seq = snapshot.seq;
+      entry.state = { ...entry.state, runId, run: snapshot.run, error: null, stale: false };
       notify(entry);
     }
   };
 
   // Stale at once: the host keeps the old run on screen, marked, until
   // the new one answers.
-  const rerunWith = async (entry: Entry, rerun: (runId: string) => Promise<PageRun>) => {
+  const rerunWith = async (entry: Entry, rerun: (runId: string) => Promise<PageRun>, params?: Record<string, SqlCell>) => {
+    const opening = entry.opening;
+    const operation = ++entry.operation;
+    const initialSeq = entry.seq;
+    const previousParams = entry.requestParams;
+    if (params) entry.requestParams = { ...entry.requestParams, ...params };
+    const current = () => opening === entry.opening && operation === entry.operation;
     entry.state = { ...entry.state, stale: true };
     notify(entry);
     const runId = await entry.runId;
+    if (!current()) return;
     if (!runId) {
       entry.state = { ...entry.state, stale: false };
+      ++entry.operation;
       notify(entry);
       return;
     }
     try {
       const run = await rerun(runId);
-      entry.state = { runId, run, error: null, stale: false };
+      if (!current() || entry.state.runId !== runId) return;
+      if (entry.seq !== initialSeq) {
+        entry.state = { ...entry.state, stale: false };
+        scheduleFetch(runId, 0);
+      } else entry.state = { ...entry.state, runId, run, error: null, stale: false };
     } catch (e) {
-      entry.state = { ...entry.state, error: String(e instanceof Error ? e.message : e), stale: false };
+      if (!current() || entry.state.runId !== runId) return;
+      if (params) entry.requestParams = previousParams;
+      if (entry.seq !== initialSeq) {
+        entry.state = { ...entry.state, stale: false };
+        scheduleFetch(runId, 0);
+      } else entry.state = { ...entry.state, error: String(e instanceof Error ? e.message : e), stale: false };
     }
+    // A fetch begun while the operation was running may have captured its
+    // precommit state too, so completion advances the fetch fence again.
+    ++entry.operation;
     notify(entry);
   };
 
   transport.onChange((change) => {
     const entry = byRunId.get(change.runId);
-    if (!entry || change.seq <= entry.seq) return;
-    pending.set(change.runId, Math.max(change.seq, pending.get(change.runId) ?? 0));
-    if (flushTimer === null) flushTimer = setTimeout(() => void flush(), COALESCE_MS);
+    if (!entry) {
+      if (inFlightOpens > 0) {
+        if (earlyChanges.has(change.runId) || earlyChanges.size < 1024) {
+          earlyChanges.set(change.runId, Math.max(change.seq, earlyChanges.get(change.runId) ?? 0));
+        } else earlyOverflow = true;
+      }
+      return;
+    }
+    if (change.seq <= entry.seq) return;
+    scheduleFetch(change.runId, change.seq);
   });
 
   transport.onReconnect(() => {
     // The daemon may have restarted and forgotten every run: open each
     // again, keeping what is shown until the new run answers.
     byRunId.clear();
+    rosterChanged();
     for (const entry of entries.values()) {
       entry.seq = 0;
+      entry.state = { ...entry.state, runId: null, stale: true };
+      notify(entry);
       start(entry);
     }
   });
@@ -186,6 +260,9 @@ export function createPageRuns(transport: PageRunsTransport) {
       entry.refs += 1;
     } else {
       entry = {
+        opening: 0,
+        operation: 0,
+        requestParams: { ...key.params },
         key,
         runId: Promise.resolve(null),
         state: NO_RUN,
@@ -205,7 +282,7 @@ export function createPageRuns(transport: PageRunsTransport) {
         mine.listeners.add(listener);
         return () => mine.listeners.delete(listener);
       },
-      setParams: (params) => rerunWith(mine, (runId) => transport.setParams(runId, params)),
+      setParams: (params) => rerunWith(mine, (runId) => transport.setParams(runId, params), params),
       rerun: () => rerunWith(mine, (runId) => transport.rerun(runId)),
       close: () => {
         if (closed) return;
@@ -215,9 +292,10 @@ export function createPageRuns(transport: PageRunsTransport) {
         mine.closeTimer = setTimeout(() => {
           if (mine.refs > 0) return;
           entries.delete(k);
+          ++mine.opening;
+          if (mine.state.runId && byRunId.delete(mine.state.runId)) rosterChanged();
           void mine.runId.then((runId) => {
             if (!runId) return;
-            byRunId.delete(runId);
             void transport.close(runId).catch(() => {});
           });
         }, CLOSE_AFTER_MS);
@@ -230,6 +308,11 @@ export function createPageRuns(transport: PageRunsTransport) {
     /** The open runs' ids (the window's tab report names them, so the
      *  daemon drops a run no window holds). */
     runIds: () => [...byRunId.keys()],
+    /** Add/remove/reconnect notices, including panels and markdown runs. */
+    subscribeRunIds: (listener: () => void) => {
+      rosterListeners.add(listener);
+      return () => { rosterListeners.delete(listener); };
+    },
   };
 }
 
@@ -282,7 +365,7 @@ export function daemonTransport(): PageRunsTransport {
     close: async (runId) => {
       unwrapResult(await commands.closePage(runId));
     },
-    fetch: async (runIds) => unwrapResult(await commands.fetchPageRuns(runIds)) as Record<string, PageRun>,
+    fetch: async (runIds) => unwrapResult(await commands.fetchPageRuns(runIds)),
     setParams: async (runId, params) => unwrapResult(await commands.setPageParams(runId, params)),
     rerun: async (runId) => unwrapResult(await commands.rerunPage(runId)),
     onChange: (handler) =>

@@ -387,10 +387,15 @@ pub async fn run_boot_orchestration(
     {
         let mut changes = state.extension_catalog.runtime_changes();
         let events = state.events.clone();
+        let page_runs = state.page_runs.clone();
         tokio::spawn(async move {
             while let Ok(()) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) =
                 changes.recv().await
             {
+                // A definition can change without any loader reading a
+                // changed model (a dashboard made only of embeds, for
+                // example). Re-resolve runs after catalog publication.
+                page_runs.notify_everything();
                 events.emit(crate::events::OxplowEvent::ExtensionsChanged);
             }
         });
@@ -408,6 +413,15 @@ pub async fn run_boot_orchestration(
         state.page_runs.clone(),
     );
     state.page_runs.start(state);
+    state.spawn_every(
+        std::time::Duration::from_secs(60),
+        std::time::Duration::from_secs(60),
+        |svc| async move {
+            let now = oxplow_domain::Timestamp::now();
+            let clients = svc.client_reports.live_ids(now);
+            svc.page_runs.reap_expired_clients(&clients, now);
+        },
+    );
 
     // Event retention (P3.11): expire old agent/test payloads and bodies
     // per `.context/data-model.md` "event_log" — a while after boot (the
@@ -455,7 +469,7 @@ pub async fn run_boot_orchestration(
     }
 
     // Page-ref graph repair: re-project every existing work item, effort,
-    // finding and thread note into `page_ref` — only when a migration or a
+    // finding and handoff into `page_ref` — only when a migration or a
     // new build may have left it drifted (`page_ref_backfill::needs_repair`).
     {
         let db = state.db.clone();
@@ -465,7 +479,6 @@ pub async fn run_boot_orchestration(
             db: state.db.clone(),
             efforts: state.effort_store.clone(),
             findings: state.code_quality_store.clone(),
-            thread_notes: state.thread_note_store.clone(),
             handoffs: state.handoff_store.clone(),
         };
         tokio::spawn(async move {

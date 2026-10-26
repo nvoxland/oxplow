@@ -1,6 +1,6 @@
 //! The models that restate what the catalog and the page-ref graph hold, so
 //! an agent reads them with `oxplow_query_sql` instead of a tool: `v_lens`,
-//! `v_extension`, `v_prompt`, `v_config_key` and `v_page_ref`.
+//! `v_extension`, `v_config_key` and `v_page_ref`.
 
 use serde_json::{json, Value};
 
@@ -272,27 +272,31 @@ async fn page_ref_edges_are_a_model_in_both_directions() {
 }
 
 /// What a person can ask and what they can configure are models too:
-/// what every enabled extension's pages answer and its `intent.prompts` in
-/// `v_prompt`, project.yaml's keys in `v_config_key`.
+/// what every enabled extension's pages answer in `v_page_answer`,
+/// project.yaml's keys in `v_config_key`.
 #[tokio::test]
-async fn prompts_and_config_keys_are_models() {
+async fn questions_and_config_keys_are_models() {
     let fx = services_with_effort().await;
     let root = fx.svc.layout.project_dir.clone();
     write(
         &root,
         "extension.yaml",
-        "manifest: 2\nname: acme\nintent:\n  purpose: Count things.\n  prompts:\n    - { prompt: Which acme things changed?, about: oxplow/file }\n",
+        "manifest: 2\nname: acme\nintent:\n  purpose: Count things.\n",
+    );
+    write(
+        &root,
+        "pages/changed.yaml",
+        "title: Changed\nanswers:\n  - { question: Which acme things changed?, about: oxplow/file }\ndata:\n  a: { sql: \"SELECT 1 AS n\" }\nview: { viz: table, from: a }\n",
     );
     crate::test_fixtures::activate(&fx.svc).await;
 
     assert_eq!(
         rows(
             &fx,
-            "SELECT source_kind, source, prompt, about FROM v_prompt WHERE source = 'acme'"
+            "SELECT p.extension, a.question, a.about FROM v_page_answer a JOIN v_page p ON p.uri = a.page_uri WHERE p.extension = 'acme'"
         )
         .await,
         vec![vec![
-            json!("extension"),
             json!("acme"),
             json!("Which acme things changed?"),
             json!("oxplow/file")
@@ -301,10 +305,10 @@ async fn prompts_and_config_keys_are_models() {
     // What oxplow's own pages say they answer is offered as foundation's.
     let ours = rows(
         &fx,
-        "SELECT DISTINCT source_kind FROM v_prompt WHERE source = 'oxplow-foundation'",
+        "SELECT DISTINCT p.extension FROM v_page_answer a JOIN v_page p ON p.uri = a.page_uri WHERE p.extension = 'oxplow-foundation'",
     )
     .await;
-    assert_eq!(ours, vec![vec![json!("extension")]]);
+    assert_eq!(ours, vec![vec![json!("oxplow-foundation")]]);
 
     let keys = rows(&fx, "SELECT key, doc <> '' FROM v_config_key ORDER BY key").await;
     let mut want: Vec<String> = oxplow_config::keys::config_keys()
@@ -323,7 +327,10 @@ async fn prompts_and_config_keys_are_models() {
     crate::extension_deploy::remove(&fx.svc, "acme")
         .await
         .unwrap();
-    assert!(rows(&fx, "SELECT 1 FROM v_prompt WHERE source = 'acme'")
-        .await
-        .is_empty());
+    assert!(rows(
+        &fx,
+        "SELECT 1 FROM v_page_answer a JOIN v_page p ON p.uri = a.page_uri WHERE p.extension = 'acme'"
+    )
+    .await
+    .is_empty());
 }

@@ -72,13 +72,8 @@ pub async fn run_page_action(
         .ok_or_else(|| invalid("/runId", format!("no open page run `{}`", call.run_id)))?;
     let prepared = match &call.node {
         None => {
-            // The page's own actions: a lens with them, over its params.
-            let lens = crate::extensions::Lens {
-                id: run.page.id.clone(),
-                actions: run.page.actions.clone(),
-                params: run.page.params.clone(),
-                ..page_lens(&run)
-            };
+            // Whole-page actions bind directly over the page's params
+            // and its first loader's row; no synthetic viz is involved.
             if call.row.is_some() {
                 return Err(invalid(
                     "/row",
@@ -130,7 +125,8 @@ pub async fn run_page_action(
                 None
             };
             prepare_resolved(
-                &lens,
+                &run.page.id,
+                &run.page.actions,
                 &run.page.id,
                 &call.action,
                 &run.params,
@@ -211,7 +207,8 @@ pub async fn run_page_action(
             };
             let actor = format!("{}#{id}", holder.page.id);
             prepare_resolved(
-                &lens_run.lens,
+                &lens_run.lens.id,
+                &lens_run.lens.actions,
                 &actor,
                 &call.action,
                 &holder.params,
@@ -224,65 +221,6 @@ pub async fn run_page_action(
         }
     };
     prepared.run(svc).await
-}
-
-/// A lens standing for the page as a whole: what its own actions run as.
-fn page_lens(run: &PageRun) -> crate::extensions::Lens {
-    use super::schema::NodeKind;
-    // Any viz node's lens carries the page's provenance and params; a page
-    // with none still has its title.
-    run.page
-        .nodes()
-        .into_iter()
-        .find_map(|n| match &n.kind {
-            NodeKind::Viz { lens, .. } => Some(lens.as_ref().clone()),
-            _ => None,
-        })
-        .unwrap_or_else(|| empty_lens(run))
-}
-
-fn empty_lens(run: &PageRun) -> crate::extensions::Lens {
-    crate::extensions::Lens {
-        id: run.page.id.clone(),
-        extension: run.page.extension.clone(),
-        slug: run.page.slug.clone(),
-        title: run.page.title.clone(),
-        description: String::new(),
-        query: String::new(),
-        viz: crate::extensions::LensViz::Table,
-        params: run.page.params.clone(),
-        columns: Vec::new(),
-        empty: None,
-        chart: None,
-        tree: None,
-        tile: None,
-        timeline: None,
-        steps: None,
-        hunks: None,
-        code: None,
-        diff: None,
-        editor: None,
-        embed: None,
-        answer: None,
-        terminal: None,
-        markdown: None,
-        form: None,
-        custom: None,
-        group: None,
-        emphasis: None,
-        depth: None,
-        parts: Vec::new(),
-        view: None,
-        fills: false,
-        launcher_category: None,
-        hidden: true,
-        refresh: false,
-        actions: Vec::new(),
-        alert: None,
-        needs: Vec::new(),
-        origin: run.page.origin.clone(),
-        tool: None,
-    }
 }
 
 /// The rows a form's choice or object field reads: page `source`
@@ -319,7 +257,7 @@ async fn page_rows(
         .run(super::runner::RunRequest {
             target: super::runner::RunTarget::Spec(std::sync::Arc::new(page)),
             params: given,
-            ctx: crate::extensions::LensContext::default(),
+            ctx: crate::extensions::ViewContext::default(),
             viewer: viewer.clone(),
         })
         .await
@@ -518,7 +456,7 @@ pub async fn page_action_form(
         .get(run_id)
         .ok_or_else(|| invalid("/runId", format!("no open page run `{run_id}`")))?;
     let (actions, params, rows): (
-        Vec<crate::extensions::LensAction>,
+        Vec<crate::extensions::PageAction>,
         BTreeMap<String, SqlCell>,
         Option<oxplow_db::SqlQueryResult>,
     ) = match node_path {

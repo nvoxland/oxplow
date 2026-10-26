@@ -16,7 +16,7 @@ import type { LensRun } from "../api.js";
 import { useLensActionRunner } from "./lensActionRunner.js";
 import { CommandConfirm } from "../components/CommandConfirm.js";
 import { Markdown } from "../components/Markdown/Markdown.js";
-import type { LensAction } from "../tauri-bridge/generated/bindings.js";
+import type { PageAction } from "../tauri-bridge/generated/bindings.js";
 import { useDraft } from "../tabs/useViewParam.js";
 import { useTabEditing } from "../tabs/PageNavigationContext.js";
 import { rowRecord } from "./lensActions.js";
@@ -40,7 +40,7 @@ export function MarkdownViz({ run, streamId }: { run: LensRun; streamId: string 
   return <MarkdownEditor run={run} streamId={streamId} action={edit} saved={text} />;
 }
 
-function MarkdownEditor({ run, streamId, action, saved }: { run: LensRun; streamId: string | null; action: LensAction; saved: string }) {
+function MarkdownEditor({ run, streamId, action, saved }: { run: LensRun; streamId: string | null; action: PageAction; saved: string }) {
   const comments = usePageComments();
   // What the person typed, this step of the tab's; null: untouched, the
   // editor shows the saved text, whatever it is now.

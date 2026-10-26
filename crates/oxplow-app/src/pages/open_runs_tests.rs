@@ -10,7 +10,7 @@ use oxplow_domain::Actor;
 use super::open_runs::PageRuns;
 use super::runner::{RunRequest, RunTarget};
 use super::test_support::fixture;
-use crate::extensions::LensContext;
+use crate::extensions::ViewContext;
 
 fn request(page: &str, params: &[(&str, SqlCell)]) -> RunRequest {
     RunRequest {
@@ -19,7 +19,7 @@ fn request(page: &str, params: &[(&str, SqlCell)]) -> RunRequest {
             .iter()
             .map(|(k, v)| (k.to_string(), v.clone()))
             .collect(),
-        ctx: LensContext::default(),
+        ctx: ViewContext::default(),
         viewer: Actor::Human,
     }
 }
@@ -39,6 +39,103 @@ async fn an_open_run_is_kept_until_it_is_closed() {
     );
     runs.close(&id);
     assert!(runs.get(&id).is_none());
+}
+
+#[tokio::test]
+async fn ordered_window_rosters_release_only_acknowledged_runs_of_their_owner() {
+    let (_dir, svc) = fixture().await;
+    let runs = PageRuns::default();
+    let (first, _) = runs
+        .open(&svc, request("acme/numbers", &[]), "one")
+        .await
+        .unwrap();
+    let (second, _) = runs
+        .open(&svc, request("acme/numbers", &[]), "one")
+        .await
+        .unwrap();
+    let (other, _) = runs
+        .open(&svc, request("acme/numbers", &[]), "two")
+        .await
+        .unwrap();
+    // The first roster may have been sent before an open's response arrived.
+    runs.report_client_runs("one", &[]);
+    assert!(runs.get(&first).is_some());
+    runs.report_client_runs("one", &[first.clone(), second.clone()]);
+    runs.report_client_runs("two", std::slice::from_ref(&other));
+    runs.report_client_runs("one", std::slice::from_ref(&second));
+    assert!(runs.get(&first).is_none());
+    assert!(runs.get(&second).is_some());
+    assert!(runs.get(&other).is_some());
+    runs.report_client_runs("one", &[]);
+    assert!(runs.get(&second).is_none());
+    assert!(runs.get(&other).is_some());
+}
+
+#[tokio::test]
+async fn event_socket_replacement_and_disconnect_release_only_the_current_owners_runs() {
+    let (_dir, svc) = fixture().await;
+    let runs = PageRuns::default();
+    let old = runs.connect_client("one");
+    let other_connection = runs.connect_client("two");
+    let (old_run, _) = runs
+        .open(&svc, request("acme/numbers", &[]), "one")
+        .await
+        .unwrap();
+    let (other, _) = runs
+        .open(&svc, request("acme/numbers", &[]), "two")
+        .await
+        .unwrap();
+    let replacement = runs.connect_client("one");
+    assert!(runs.get(&old_run).is_none());
+    let (current, _) = runs
+        .open(&svc, request("acme/numbers", &[]), "one")
+        .await
+        .unwrap();
+    drop(old);
+    assert!(
+        runs.get(&current).is_some(),
+        "a stale disconnect cannot close a reconnected window"
+    );
+    drop(replacement);
+    assert!(runs.get(&current).is_none());
+    assert!(runs.get(&other).is_some());
+    drop(other_connection);
+    assert!(runs.get(&other).is_none());
+}
+
+#[tokio::test]
+async fn expired_windows_release_runs_but_new_opens_have_time_to_report() {
+    let (_dir, svc) = fixture().await;
+    let runs = PageRuns::default();
+    let (forgotten, _) = runs
+        .open(&svc, request("acme/numbers", &[]), "gone")
+        .await
+        .unwrap();
+    let (live, _) = runs
+        .open(&svc, request("acme/numbers", &[]), "live")
+        .await
+        .unwrap();
+    let (unacknowledged, _) = runs
+        .open(&svc, request("acme/numbers", &[]), "live")
+        .await
+        .unwrap();
+    runs.report_client_runs("live", std::slice::from_ref(&live));
+    let now = oxplow_domain::Timestamp::now();
+    runs.reap_expired_clients(&[], now);
+    assert!(
+        runs.get(&forgotten).is_some(),
+        "an open can precede the window's first report"
+    );
+    let later = oxplow_domain::Timestamp::from_unix_ms(
+        now.unix_ms() + crate::client_reports::FORGET_AFTER_MS + 1_000,
+    );
+    runs.reap_expired_clients(&["live".to_string()], later);
+    assert!(runs.get(&forgotten).is_none());
+    assert!(runs.get(&live).is_some());
+    assert!(
+        runs.get(&unacknowledged).is_none(),
+        "a lost open reply expires even when the window keeps reporting"
+    );
 }
 
 /// A param change (a pick, a filter, a switch) re-runs it with the new
@@ -128,4 +225,158 @@ async fn a_model_change_re_runs_only_what_reads_it() {
         r(&after, "after"),
         "downstream of `models`, it ran again"
     );
+}
+
+/// A read can finish before its model-change notification is processed.
+/// Opening must register interest before that read, including catalog-only
+/// invalidation, rather than waiting until it knows the loader's reads.
+#[tokio::test]
+async fn changes_during_the_first_read_are_observed_before_publishing_the_run() {
+    use crate::commands::{Command, Handler, HandlerOutput};
+    use serde_json::json;
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+
+    let (_dir, svc) = fixture().await;
+    for (everything, relevant) in [(false, true), (true, true), (false, false)] {
+        let runs = PageRuns::default();
+        let observed = runs.clone();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let attempts = calls.clone();
+        let name = match (everything, relevant) {
+            (true, _) => "oxplow.test.catalog_read",
+            (false, true) => "oxplow.test.model_read",
+            (false, false) => "oxplow.test.unrelated_read",
+        };
+        let mut spec = svc
+            .commands
+            .command("oxplow.sql.query")
+            .unwrap()
+            .spec
+            .clone();
+        spec.id = name.into();
+        spec.input_schema = json!({ "type": "object" });
+        spec.output_schema = None;
+        spec.op = None;
+        svc.commands
+            .register(
+                Command::new(
+                    spec,
+                    Handler::External(Arc::new(move |_, _| {
+                        let attempt = attempts.fetch_add(1, Ordering::SeqCst) + 1;
+                        // Deterministically land a change after the loader's first
+                        // read, before the run can be installed. No sleeps or polling.
+                        if attempt == 1 || !relevant {
+                            if everything {
+                                observed.notify_everything();
+                            } else {
+                                observed.notify_models(&["v_model".into()]);
+                            }
+                        }
+                        Box::pin(async move {
+                            Ok(HandlerOutput {
+                                result: json!([{ "attempt": attempt }]),
+                                ..Default::default()
+                            })
+                        })
+                    })),
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let model = if relevant { "v_model" } else { "v_page" };
+        let yaml = format!("title: Opening\ndata: {{ read: {{ command: {name}, reads: [{model}] }} }}\nview: {{ viz: number, from: read }}\n");
+        let page =
+            super::schema::parse_page("acme", "acme", "opening", "pages/opening.yaml", &yaml)
+                .unwrap();
+        let mut req = request("acme/opening", &[]);
+        req.target = RunTarget::Spec(Arc::new(page));
+        let (id, run) = runs.open(&svc, req, "window").await.unwrap();
+        let expected = if relevant { 2 } else { 1 };
+        assert_eq!(calls.load(Ordering::SeqCst), expected);
+        assert_eq!(
+            run.loaders["read"].result.rows,
+            [vec![SqlCell::Int(expected as i64)]]
+        );
+        assert_eq!(runs.get(&id), Some(run));
+    }
+}
+
+#[tokio::test]
+async fn a_slow_model_refresh_cannot_restore_older_params_after_a_newer_request() {
+    use crate::commands::{Command, Handler, HandlerOutput};
+    use serde_json::json;
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+
+    let (_dir, svc) = fixture().await;
+    let runs = PageRuns::default();
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let release = Arc::new(tokio::sync::Notify::new());
+    let calls = Arc::new(AtomicUsize::new(0));
+    let started = entered.clone();
+    let gate = release.clone();
+    let mut spec = svc
+        .commands
+        .command("oxplow.sql.query")
+        .unwrap()
+        .spec
+        .clone();
+    spec.id = "oxplow.test.delayed_read".into();
+    spec.input_schema = json!({ "type": "object" });
+    spec.output_schema = None;
+    spec.op = None;
+    svc.commands
+        .register(
+            Command::new(
+                spec,
+                Handler::External(Arc::new(move |_, input| {
+                    let second = calls.fetch_add(1, Ordering::SeqCst) == 1;
+                    let started = started.clone();
+                    let gate = gate.clone();
+                    Box::pin(async move {
+                        if second {
+                            started.notify_one();
+                            gate.notified().await;
+                        }
+                        Ok(HandlerOutput {
+                            result: json!([{ "n": input["n"] }]),
+                            ..Default::default()
+                        })
+                    })
+                })),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    let page = super::schema::parse_page("acme", "acme", "delayed", "pages/delayed.yaml",
+        "title: Delayed\nparams: [{ name: n, default: 0 }]\ndata:\n  read:\n    command: oxplow.test.delayed_read\n    args: { n: { param: n } }\n    reads: [v_model]\nview: { viz: number, from: read }\n").unwrap();
+    let mut req = request("acme/delayed", &[]);
+    req.target = RunTarget::Spec(Arc::new(page));
+    let (id, _) = runs.open(&svc, req, "window").await.unwrap();
+    let refreshing = runs.clone();
+    let services = svc.clone();
+    let pending = tokio::spawn(async move {
+        refreshing
+            .models_changed(&services, &["v_model".into()])
+            .await
+    });
+    entered.notified().await;
+    let (newer, _) = runs
+        .set_params(&svc, &id, BTreeMap::from([("n".into(), SqlCell::Int(3))]))
+        .await
+        .unwrap();
+    release.notify_one();
+    assert!(
+        pending.await.unwrap().is_empty(),
+        "a stale refresh publishes no change"
+    );
+    assert_eq!(newer.params["n"], SqlCell::Int(3));
+    assert_eq!(runs.get(&id), Some(newer));
+    let (refreshed, _) = runs.rerun(&svc, &id).await.unwrap();
+    assert_eq!(refreshed.params["n"], SqlCell::Int(3));
 }

@@ -61,6 +61,12 @@ event stream.
 
 ### 1. Workspace watcher
 
+Watcher tests wait for an observed probe from the watched directory before
+performing a one-shot deletion. Ignore-file changes are rewritten until
+their event arrives, keeping their ignore semantics unchanged. A fixed
+settling sleep or one write followed by a wait can miss attachment on a
+loaded machine; increasing the final event timeout does not fix that race.
+
 `crates/oxplow-app/src/workspace_watch.rs` — `WorkspaceWatchRegistry`.
 One watcher per stream. Rather than registering a single recursive
 watch on the worktree root (which would force `notify_debouncer_full`

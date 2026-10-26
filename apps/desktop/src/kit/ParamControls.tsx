@@ -5,7 +5,7 @@ import { recordOpError } from "../opErrors.js";
 import { isDefaultValue, parseParamInput } from "../lens/lensModel.js";
 import { NO_READS, useRerunOnChange } from "../lens/lensRerun.js";
 import { paramKind, paramOptions, paramOptionsSql, type ParamKind, type ParamOption } from "../lens/lensParams.js";
-import type { LensParam, ParamType, Reads } from "../tauri-bridge/generated/bindings.js";
+import type { PageParam, ParamType, Reads } from "../tauri-bridge/generated/bindings.js";
 import { humanize } from "./humanize.js";
 import { Popover } from "./Popover.js";
 import { DEFAULT_RANGE_PRESETS, rangePresetLabel, splitRange } from "./rangePresets.js";
@@ -37,7 +37,7 @@ const LENS_OPTIONS: OptionsSource = {
 export const OptionsSourceContext = createContext<OptionsSource>(LENS_OPTIONS);
 
 export interface ParamRowProps {
-  param: LensParam;
+  param: PageParam;
   value: SqlCell;
   onApply(name: string, value: SqlCell): void;
   /** Reads the options of a branch or id picker; `querySql` unless a test injects one. */
@@ -147,7 +147,7 @@ export function ParamRow({ param, value, onApply, query = querySql, values = {},
 }
 
 export interface ParamListProps {
-  params: readonly LensParam[];
+  params: readonly PageParam[];
   values: Record<string, SqlCell>;
   onApply(name: string, value: SqlCell): void;
   query?: Query;
@@ -177,12 +177,12 @@ export function ParamList({ params, values, onApply, query, streamId = null }: P
 
 /** A param's type, as its lens says or as it follows from `options` /
  *  `options_from`. */
-function paramType(param: LensParam): ParamType {
+function paramType(param: PageParam): ParamType {
   return param.type ?? ((param.options?.length ?? 0) > 0 || param.options_from ? "choice" : "text");
 }
 
 /** Whether a value is the param's default (`isDefaultValue`). */
-export function isDefault(param: LensParam, value: SqlCell): boolean {
+export function isDefault(param: PageParam, value: SqlCell): boolean {
   return isDefaultValue(param, value);
 }
 
@@ -206,7 +206,7 @@ function rangeEnd(end: string): string {
 
 /** What a row says its value is; null when it has none. A dynamic choice
  *  says the raw value until its options arrive. */
-function summary(param: LensParam, type: ParamType, value: SqlCell, options: ParamOption[], listed: Option[]): string | null {
+function summary(param: PageParam, type: ParamType, value: SqlCell, options: ParamOption[], listed: Option[]): string | null {
   const t = text(value);
   if (t === "") return type === "branch" ? "All branches" : null;
   switch (type) {

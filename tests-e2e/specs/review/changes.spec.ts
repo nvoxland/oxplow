@@ -21,11 +21,11 @@ test("an effort's page names its effort, renames it, and the pickers turn it int
   await page.goto("/");
   await searchLauncher(page, "Quail fix");
   await page.getByTestId(`launcher-hit-${created.result.uri}`).click();
-  await page.getByTestId("lens-part-activity").locator("a, button").filter({ hasText: "Quail fix" }).first().click();
+  await page.locator('[data-node="activity"]').locator("a, button").filter({ hasText: "Quail fix" }).first().click();
 
-  const effort = page.getByTestId("lens-part-effort");
+  const effort = page.locator('[data-node="effort"]');
   await expect(effort).toContainText("Open");
-  await expect(page.getByTestId("lens-part-header")).toContainText("working tree");
+  await expect(page.locator('[data-node="header"]')).toContainText("working tree");
   // Nothing was described, so the description folds into the closing line.
   await expect(page.getByText(/Nothing found: Description/)).toBeVisible();
 
@@ -39,7 +39,7 @@ test("an effort's page names its effort, renames it, and the pickers turn it int
   // Picking an end leaves the effort for a plain comparison.
   await page.getByTestId("lens-param-end-value").filter({ visible: true }).click();
   await page.getByTestId("lens-param-end-edit").filter({ visible: true }).selectOption("working");
-  await expect(page.getByTestId("lens-part-effort")).toHaveCount(0);
-  await expect(page.getByTestId("lens-part-header")).toContainText("Comparison");
-  await expect(page.getByTestId("lens-part-header")).toContainText("working tree");
+  await expect(page.locator('[data-node="effort"]')).toHaveCount(0);
+  await expect(page.locator('[data-node="header"]')).toContainText("Comparison");
+  await expect(page.locator('[data-node="header"]')).toContainText("working tree");
 });

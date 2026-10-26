@@ -246,6 +246,44 @@ pub struct PageWritten {
     pub deployed: Option<Deployed>,
 }
 
+/// A new, empty dashboard: a page in the Dashboards launcher category whose
+/// view is an empty grid (tiles are embeds the app adds), named from
+/// `title`, in `extension`'s source, deployed. Refused when that page exists.
+pub async fn new_dashboard(
+    svc: &Arc<Services>,
+    extension: &str,
+    title: &str,
+    confirmed: bool,
+) -> Result<PageWritten, DeployError> {
+    let mut slug = String::new();
+    for c in title.trim().chars().flat_map(char::to_lowercase) {
+        if c.is_ascii_alphanumeric() {
+            slug.push(c);
+        } else if !slug.is_empty() && !slug.ends_with('-') {
+            slug.push('-');
+        }
+    }
+    let slug = slug.trim_end_matches('-');
+    let slug = match slug.chars().next() {
+        Some(c) if c.is_ascii_lowercase() => slug.to_string(),
+        Some(_) => format!("dashboard-{slug}"),
+        None => return Err(invalid("a dashboard needs a title".to_string()).into()),
+    };
+    let project = svc.layout.project_dir.clone();
+    let dir = crate::extensions::writable_extension_dir(&project, &project, extension)?;
+    if dir.join("pages").join(format!("{slug}.yaml")).exists() {
+        return Err(invalid(format!(
+            "`{extension}/{slug}` already exists; open it, or give the new one another title"
+        ))
+        .into());
+    }
+    let spec = format!(
+        "title: {}\nicon: layout-dashboard\ncategory: Dashboards\nview:\n  grid: []\n",
+        serde_json::Value::String(title.trim().to_string())
+    );
+    write_page(svc, extension, &slug, &spec, true, confirmed).await
+}
+
 /// Write `spec` (a page's YAML text) as `pages/<page>.yaml` in `extension`'s
 /// source in the primary checkout, creating the extension (a scaffolded
 /// manifest) when it is missing and replacing the page when it is there.
@@ -1797,6 +1835,70 @@ mod tests {
         assert!(err.to_string().contains("bundled"), "{err}");
     }
 
+    /// A new dashboard is a page in the Dashboards category with an empty
+    /// grid, named after its title, written and deployed.
+    #[tokio::test]
+    async fn a_new_dashboard_is_an_empty_grid_page_in_dashboards() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let svc = &fx.svc;
+        let out = svc
+            .commands
+            .run(
+                &Actor::Human,
+                "oxplow.extension.new_dashboard",
+                json!({ "title": "Release health!" }),
+                true,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            out.result["page"],
+            json!("my-pages/release-health"),
+            "{:?}",
+            out.result
+        );
+        let text = std::fs::read_to_string(
+            svc.layout
+                .project_dir
+                .join(".oxplow/extensions/my-pages/pages/release-health.yaml"),
+        )
+        .unwrap();
+        let page =
+            crate::pages::schema::parse_page("my-pages", "my_pages", "release-health", "x", &text)
+                .unwrap();
+        assert_eq!(page.title, "Release health!");
+        assert_eq!(
+            page.category,
+            Some(crate::extensions::LauncherCategory::Dashboards)
+        );
+        assert!(
+            matches!(&page.view.kind, crate::pages::schema::NodeKind::Grid { children } if children.is_empty()),
+            "{text}"
+        );
+        let listed = svc
+            .sql
+            .query_sql(
+                "SELECT title FROM v_page WHERE category = 'Dashboards'",
+                vec![],
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(listed.rows.len(), 1, "deployed: {:?}", listed.rows);
+        // The same title again is refused rather than replacing it.
+        let err = svc
+            .commands
+            .run(
+                &Actor::Human,
+                "oxplow.extension.new_dashboard",
+                json!({ "title": "Release health" }),
+                true,
+            )
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("already"), "{err}");
+    }
+
     /// An agent in a worktree stream may not write into an in-project
     /// source; the primary's caller may.
     #[tokio::test]
@@ -2427,7 +2529,7 @@ mod tests {
                 svc,
                 &root,
                 press(action),
-                &crate::extensions::LensContext::default(),
+                &crate::extensions::ViewContext::default(),
             )
             .await
             .unwrap_or_else(|e| panic!("{action}: {e}"));

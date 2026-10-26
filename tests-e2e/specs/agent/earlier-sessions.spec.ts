@@ -1,8 +1,4 @@
-import { cpSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-
-import { installExample, ipc, run, searchable, until } from "../../support/daemon.js";
+import { run, searchable } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
 import { newSessionPage, searchLauncher } from "../../support/ui.js";
 
@@ -82,33 +78,4 @@ test("picking a session open here shows it and keeps the New Session page", asyn
   await expect(page.getByTestId(`center-tab-body-oxplow:oxplow/agent_session?id=${id}`)).toBeVisible();
   await expect(newSessionPage(page)).toHaveCount(0);
   await expect(page.getByTestId("center-tab-oxplow:oxplow/page?page=new-session")).toHaveCount(1);
-});
-
-/// An extension adds a section to the New Session page through its
-/// sections slot, placed after "Start a new session" by that section's id,
-/// and marked as the extension's.
-test("an extension's section lands where its `at` says on the New Session page", async ({ fresh }) => {
-  const { page, daemon } = fresh;
-  await installExample(daemon, "session-notes");
-
-  // Sections with nothing to show fold into one line, so each has a row:
-  // an earlier session and a note.
-  const earlier = await run<Opened>(daemon, "oxplow.agent_session.open", {
-    thread: daemon.thread,
-    resume: "conv-placed",
-    title: "Placed work",
-  });
-  await run(daemon, "oxplow.agent_session.close", { session: earlier.result.id });
-  await run(daemon, "oxplow.knowledge.add_note", { thread: daemon.thread, body: "Remember the lexer." });
-
-  await page.goto("/");
-  const doc = newSessionPage(page);
-  await expect(doc.locator("section[data-section]")).toHaveCount(3);
-  await expect
-    .poll(() => doc.locator("section[data-section]").evaluateAll((s) => s.map((e) => e.getAttribute("data-section"))))
-    .toEqual(["start", "session-notes/thread-notes", "earlier"]);
-  const notes = doc.getByTestId("lens-part-session-notes/thread-notes");
-  await expect(notes.locator("h2")).toContainText("Notes on this thread");
-  await expect(notes.locator("[data-source]")).toHaveText("session-notes");
-  await expect(notes).toContainText("Remember the lexer.");
 });

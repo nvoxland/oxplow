@@ -63,7 +63,6 @@ pub mod terminal_store;
 pub(crate) mod test_tasks;
 pub mod thread_answer_store;
 pub mod thread_context_store;
-pub mod thread_note_store;
 pub mod thread_store;
 pub mod token_usage_store;
 pub mod tool_call_store;
@@ -140,7 +139,6 @@ pub use stream_store::SqliteStreamStore;
 pub use symbol_store::{FileSymbols, SqliteSymbolStore, SymbolCapture, SymbolRow};
 pub use terminal_store::{SqliteTerminalStore, Terminal};
 pub use thread_answer_store::{AnswerShows, SqliteThreadAnswerStore, ThreadAnswer};
-pub use thread_note_store::SqliteThreadNoteStore;
 pub use thread_store::SqliteThreadStore;
 pub use token_usage_store::{
     AgentTokenUsage, NewAgentTokenUsage, SqliteTokenUsageStore, TokenUsageTotals,

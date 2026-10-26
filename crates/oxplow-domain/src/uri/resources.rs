@@ -40,7 +40,6 @@ pub const EXTENSION: &str = "oxplow/extension";
 pub const COMMAND: &str = "oxplow/command";
 pub const CONFIG: &str = "oxplow/config";
 pub const FINDING: &str = "oxplow/finding";
-pub const THREAD_NOTE: &str = "oxplow/thread_note";
 pub const AGENT_SESSION: &str = "oxplow/agent_session";
 pub const HANDOFF: &str = "oxplow/handoff";
 pub const DASHBOARD: &str = "oxplow/dashboard";

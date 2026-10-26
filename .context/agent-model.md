@@ -250,7 +250,7 @@ Every tool foundation declares is named below
 | Ask a model | `oxplow_ai_decide` (typed questions about some text, on the `decide` role), `oxplow_ai_summarize` (on `summarize`): recorded computations paid with the person's key, as the asking thread ([ai-providers.md](./ai-providers.md)) |
 | Pages | `oxplow_show_page` (shows the person a page beside the conversation — a page with params, or a `spec` of your own kept as an ephemeral view `oxplow:oxplow/view?id=…`; returns its text and whether a window opened it), `oxplow_find_page` (the pages that answer a question, best first, each with its params; `about` a uri keeps the pages that show that kind of thing and binds its uri), `oxplow_run_page` (a page's text, each node under `[node <id>]`, or its loaders' rows; `page` or an inline `spec`), `oxplow_run_page_action` (a page's action as the page acting for you; a row action on one of the node's rows); `oxplow.page.definition` through `run_command` (what a page is made of and where each node comes from) — [pages-and-tabs.md](./pages-and-tabs.md) "Page files" |
 | Show the person | `oxplow_show_lens`, `oxplow_run_lens`, `oxplow_run_lens_action`, `oxplow_navigate` (takes them to any URI's page, switching stream when needed; by default the shown tab goes there, pushed; `replace` rewrites its entry, `new_tab` opens another) |
-| Common questions, typed | foundation pages with `tool:`: `oxplow_thread_work`, `oxplow_work_next`, `oxplow_effort_summary`, `oxplow_catalog` (each runs `oxplow.page.run` on its page, its params the tool's input: `agent_tools::ToolTarget::Page`), and the lens tool `oxplow_thread_notes` until thread notes go. Every other page is `oxplow_find_page` → `oxplow_run_page` (`effort-files`, `file-history`, `recent-commits`, `snapshots`, `thread-sessions`, `session-transcript`) |
+| Common questions, typed | foundation pages with `tool:`: `oxplow_thread_work`, `oxplow_work_next`, `oxplow_effort_summary`, `oxplow_catalog` (each runs `oxplow.page.run` on its page, its params the tool's input: `agent_tools::ToolTarget::Page`). Every other page is `oxplow_find_page` → `oxplow_run_page` (`effort-files`, `file-history`, `recent-commits`, `snapshots`, `thread-sessions`, `session-transcript`) |
 | What the person has | `oxplow_list_tabs` (the tabs each of their windows shows, per thread, stream or project: selected, on screen, stale), `oxplow_get_open_page` (the page open in a thread in the window they were in last, the others' beside it, or one listed tab: `page` is its identity, `view` its `#`; a lens re-run with their params), `oxplow_list_comments` (their anchored comments, hydrated) |
 | Wiki | `oxplow_wiki_ref_drift` (one stale ref's diff against its pin) |
 | Extension authoring | `oxplow_validate_extension`, `oxplow_preview_extension`, `oxplow_preview_collector` |
@@ -354,7 +354,7 @@ backlinks graph, both directions), plus `oxplow_search` with `resources: ["oxplo
 `oxplow_wiki_ref_drift({ slug, path })` returns one stale ref's unified diff
 (`status` drifted, unchanged, not_a_ref, no_pin, binary or no_contents).
 Writes are the `knowledge.*` commands ([knowledge.md](./knowledge.md)).
-`oxplow.effort.report`, `oxplow.knowledge.add_note` / `update_note` and
+`oxplow.effort.report` and
 `oxplow.work_item.create` / `update` check the `[[…]]` links in the text
 they keep (`oxplow_app::link_check`) and return `link_warnings`, so the
 agent fixes them in the same turn; `knowledge.write_page` refuses
@@ -1343,9 +1343,7 @@ choose its conversation.
 
 Subagent tool calls reach the hooks like any other, so their edits and
 test runs land in the thread's effort with nothing from them: there is
-no dispatch protocol or subagent skill. A subagent can leave a finding in
-a thread note (`oxplow.knowledge.add_note`, read back from
-`v_thread_note`).
+no dispatch protocol or subagent skill.
 
 **What to pick up next** is the foundation lens `oxplow-foundation/work-next`
 (the tool `oxplow_work_next` with `thread: "thr3"`) over `v_work_item`, whichever

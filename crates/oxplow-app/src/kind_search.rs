@@ -1299,33 +1299,6 @@ mod core_tests {
         change_loop(&svc);
         let out = run(
             &svc,
-            crate::commands::note::ADD,
-            serde_json::json!({ "thread": thread.id.to_string(), "body": "a note about the gadget" }),
-        )
-        .await;
-        let note: oxplow_domain::NoteId =
-            serde_json::from_value(out["note"]["id"].clone()).unwrap();
-        eventually("the note is found", || {
-            found(&svc, "gadget", Some(stream.id), "oxplow/thread_note")
-        })
-        .await;
-        let vocabulary = svc.vocabulary.clone();
-        svc.db
-            .transaction(move |tx| {
-                if let Some(e) = oxplow_db::thread_note_store::delete_note_tx(tx, note)? {
-                    oxplow_db::event_log_store::append_tx(tx, &vocabulary.current(), &e)?;
-                }
-                Ok(())
-            })
-            .await
-            .unwrap();
-        eventually("the deleted note leaves", || async {
-            entries(&svc, "oxplow/thread_note").await.is_empty()
-        })
-        .await;
-
-        let out = run(
-            &svc,
             crate::commands::comment::ADD,
             serde_json::json!({
                 "stream": stream.id.to_string(),

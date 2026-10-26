@@ -975,7 +975,7 @@ async fn component_example(
             return;
         }
     }
-    let ctx = oxplow_app::extensions::LensContext::default();
+    let ctx = oxplow_app::extensions::ViewContext::default();
     let mut queries = Vec::new();
     for q in ex
         .input
@@ -1082,7 +1082,7 @@ async fn form_example(
             &host.root,
             &format!("{}/{slug}", ext.name),
             params,
-            &oxplow_app::extensions::LensContext::default(),
+            &oxplow_app::extensions::ViewContext::default(),
         )
         .await
         .map_err(|e| e.to_string()),
@@ -1139,7 +1139,7 @@ async fn page_form_start(
             oxplow_app::pages::runner::RunRequest {
                 target: oxplow_app::pages::runner::RunTarget::Page(page.id.clone()),
                 params,
-                ctx: oxplow_app::extensions::LensContext::default(),
+                ctx: oxplow_app::extensions::ViewContext::default(),
                 viewer: oxplow_domain::Actor::Human,
             },
             "extension-test",
@@ -1194,7 +1194,7 @@ async fn lens_example(
         &host.root,
         &format!("{}/{slug}", ext.name),
         params,
-        &oxplow_app::extensions::LensContext::default(),
+        &oxplow_app::extensions::ViewContext::default(),
     )
     .await;
     let run = match run {
@@ -1270,7 +1270,7 @@ async fn run_page(
         .run(RunRequest {
             target: RunTarget::Page(id.to_string()),
             params,
-            ctx: oxplow_app::extensions::LensContext::default(),
+            ctx: oxplow_app::extensions::ViewContext::default(),
             viewer: Actor::Human,
         })
         .await
@@ -1374,7 +1374,7 @@ async fn page_example(
             &host.svc,
             &host.root,
             &run,
-            &oxplow_app::extensions::LensContext::default(),
+            &oxplow_app::extensions::ViewContext::default(),
         )
         .await
         {
@@ -3356,7 +3356,7 @@ after:
             &fixture,
             text.replace(
                 "commands: [oxplow.work_item.comment]",
-                "commands: [oxplow.knowledge.add_note]",
+                "commands: [oxplow.work_item.update]",
             ),
         )
         .unwrap();

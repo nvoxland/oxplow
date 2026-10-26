@@ -125,7 +125,7 @@ async fn a_scaffolded_collector_checks_before_its_first_sync_and_runs() {
         dir.path(),
         &lens.id,
         Default::default(),
-        &oxplow_app::extensions::LensContext::default(),
+        &oxplow_app::extensions::ViewContext::default(),
     )
     .await
     .unwrap();

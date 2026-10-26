@@ -1,0 +1,39 @@
+title: Dashboards
+description: Your dashboards — pages that arrange other pages in a grid. Create one here, or ask the agent to build one.
+icon: layout-dashboard
+category: Data
+keywords: dashboard tiles grid overview
+answers:
+- question: Which dashboards can I open?
+data:
+  dashboards:
+    sql: |
+      SELECT title, description, uri, 'dashboard' AS kind
+      FROM v_page
+      WHERE category = 'Dashboards'
+      ORDER BY title, id
+view:
+  from: dashboards
+  viz: table
+  columns:
+  - key: title
+    label: Dashboard
+    icon: kind
+    link:
+      kind: page
+      from: uri
+  - key: description
+    label: Description
+  empty: No dashboards yet. Create one here, or ask the agent to build a grid of pages for you.
+actions:
+- id: new
+  label: New dashboard…
+  command: oxplow.extension.new_dashboard
+  prominent: true
+  icon: plus
+  form: true
+  input:
+    title: ''
+    extension: my-pages
+  fixed:
+  - extension

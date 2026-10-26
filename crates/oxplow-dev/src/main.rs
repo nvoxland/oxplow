@@ -40,7 +40,6 @@ oxplow-dev wiki list                         the pages (slug, title)
 oxplow-dev wiki show <slug>
 oxplow-dev wiki write <slug> [--title T] [--file F]   body from F, else stdin
 oxplow-dev wiki delete <slug>
-oxplow-dev wiki note <body>                  a note on the acting thread (needs --thread)
 oxplow-dev wiki search <text>                pages whose slug, title or body has it
 oxplow-dev uri convert [<kind>=<extension> …] each stdin line that is an old ref, as its URI
 oxplow-dev pages convert <ext-dir> [--write]  an extension's lenses as page files: prints what
@@ -347,7 +346,6 @@ impl Tasks {
             db: db.clone(),
             vocabulary: oxplow_domain::vocabulary::VocabularyHandle::core(),
         };
-        let links_for_notes = links.clone();
         use oxplow_app::commands::work_item as w;
         for op in [
             w::transition_op(work_items.clone(), db.clone()),
@@ -378,7 +376,6 @@ impl Tasks {
             wiki: Arc::new(oxplow_app::knowledge::WikiFollow::default()),
         })
         .into_iter()
-        .chain(oxplow_app::commands::note::ops(links_for_notes))
         {
             bus.add_op(op).map_err(|e| e.to_string())?;
         }
@@ -532,11 +529,6 @@ impl Tasks {
                 // Naming the page to delete is the confirmation.
                 self.confirmed_command("oxplow.knowledge.delete_page", input)
                     .await
-            }
-            Some("note") => {
-                let mut input = Map::new();
-                input.insert("body".into(), json!(arg(1, "<body>")?));
-                self.command("oxplow.knowledge.add_note", input).await
             }
             _ => Err(format!("usage:\n{USAGE}")),
         }
@@ -842,14 +834,6 @@ mod tests {
             .unwrap_err();
         assert!(err.contains("nope/missing.rs"), "{err}");
         assert!(!dev(p, &["wiki", "list"]).await.unwrap().contains("bad"));
-        // A note goes on the thread the call acts as.
-        let noted = dev(
-            p,
-            &["--thread", "thr1", "wiki", "note", "Burrows are deep."],
-        )
-        .await
-        .unwrap();
-        assert!(noted.contains("Burrows are deep."), "{noted}");
         dev(p, &["wiki", "delete", "wombats"]).await.unwrap();
         assert!(!p.join(".oxplow/wiki/wombats.md").exists());
         assert!(dev(p, &["wiki", "list"]).await.unwrap().is_empty());

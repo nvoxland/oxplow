@@ -16,11 +16,11 @@ test("search finds a task and a wiki page, and opens them", async ({ page, daemo
   await page.goto("/");
   await searchLauncher(page, "quokka");
   await page.getByTestId(`launcher-hit-${created.result.uri}`).click();
-  await expect(page.getByTestId("lens-part-state")).toBeVisible();
+  await expect(page.locator('[data-node="state"]')).toBeVisible();
   await expect(page.locator("body")).toContainText("Quokka migration");
   await searchLauncher(page, "quokka");
   await page.getByTestId("launcher-hit-oxplow:oxplow/wiki?slug=quokka-notes").click();
-  await expect(page.locator('[data-testid="page-lens"]:visible')).toContainText("What we know.");
+  await expect(page.locator('[data-testid="page-file"]:visible')).toContainText("What we know.");
 });
 
 // tsk1030: an extension added while the page is open — the agent writes

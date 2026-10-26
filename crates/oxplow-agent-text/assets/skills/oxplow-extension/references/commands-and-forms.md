@@ -51,8 +51,9 @@
   oxplow's client library with a plain `<script
   src="/component-lib/oxplow-component.js">` before its own plain script
   (no modules: a sandboxed frame can't load them), and the script calls
-  `oxplow.connect().then((component) => …)` for `component.run`,
-  `onUpdate`, `query`, `invoke` and `navigate`. `oxplow extension new
+  `oxplow.connect().then((component) => …)` for `component.data` (each
+  loader's rows by name), `component.run` (a `viz: custom`'s own rows),
+  `onUpdate(({ data, changed }) => …)`, `query`, `invoke` and `navigate`. `oxplow extension new
   component <name>` scaffolds a working one; `docs/guide/lenses.md` has
   the reference. A component written in TypeScript or with a library is
   built at deploy: a `build:` block, with `bundle:` under its `output`

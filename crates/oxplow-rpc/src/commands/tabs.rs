@@ -12,6 +12,8 @@ use crate::error::IpcError;
 
 /// Take `report` as what its window shows now.
 pub async fn report_tabs(svc: &Services, report: TabReport) -> Result<(), IpcError> {
+    svc.page_runs
+        .report_client_runs(&report.client, &report.runs);
     svc.client_reports.report(report, Timestamp::now());
     Ok(())
 }

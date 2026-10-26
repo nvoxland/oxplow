@@ -146,6 +146,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::run_page,
             commands::generated::page_text,
             commands::generated::get_page,
+            commands::generated::page_spec,
             commands::generated::run_page_action,
             commands::generated::page_form,
             commands::generated::submit_page_form,
@@ -170,7 +171,6 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::assistant_handoff,
             commands::generated::assistant_close,
             // notes (task / thread)
-            commands::generated::list_thread_notes,
             // comments
             commands::generated::list_comments_for_target,
             commands::generated::list_comments_for_stream,
@@ -306,6 +306,14 @@ mod tests {
             routed.contains("from \"../transport\""),
             "expected to rewrite the bindings' invoke import; did tauri-specta change its header?"
         );
+        // Specta's multiline unions can leave spaces at line ends. Keep
+        // generated changes clean under git diff --check as well.
+        let routed = routed
+            .lines()
+            .map(str::trim_end)
+            .collect::<Vec<_>>()
+            .join("\n")
+            + "\n";
         std::fs::write(&target, routed).expect("write routed bindings");
         let metadata = std::fs::metadata(&target).expect("bindings written");
         assert!(metadata.len() > 0, "bindings file should not be empty");

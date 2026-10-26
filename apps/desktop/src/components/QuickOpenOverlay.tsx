@@ -228,7 +228,7 @@ export function QuickOpenOverlay({ open, initialQuery, stream, threadId, selecte
   }, [open, stream?.id, query]);
 
   // Lenses from this stream's extensions join the page directory under
-  // their `launcher.category` ("Lenses" by default), so they're both browsable (start menu) and
+  // their `launcher.category` ("Dashboards" by default), so they're both browsable (start menu) and
   // searchable — from the shared extensions store, which reloads when
   // lens files change (the agent may have just written one).
   // Their manifest `launcher:` entries join too: a ref as a page, a
@@ -274,8 +274,8 @@ export function QuickOpenOverlay({ open, initialQuery, stream, threadId, selecte
   // commands → files → body hits. The ordering + stream scoping + cap
   // accounting live in a pure helper so they're unit-testable.
   const build = useMemo(
-    () => buildQuickOpenResults({ query, pages, commands, files, siteHits, currentStreamId: stream?.id ?? null }),
-    [pages, commands, files, siteHits, query, stream?.id],
+    () => buildQuickOpenResults({ query, pages: exts === null ? null : pages, commands, files, siteHits, currentStreamId: stream?.id ?? null }),
+    [exts, pages, commands, files, siteHits, query, stream?.id],
   );
   const results: Result[] = build.results;
   const truncated = build.truncated;

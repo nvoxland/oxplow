@@ -2,6 +2,20 @@ import { ipc, run } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
 import { newSessionPage, searchLauncher } from "../../support/ui.js";
 
+test("an agent terminal has usable height when opened and restored", async ({ fresh }) => {
+  const { page } = fresh;
+  await page.goto("/");
+  await newSessionPage(page).locator('[data-node="start"]').getByRole("button", { name: "Start a new session", exact: true }).click();
+  const terminal = page.getByTestId("lens-terminal");
+  const hasSpace = async () => {
+    await expect(terminal).toBeVisible();
+    await expect.poll(async () => (await terminal.boundingBox())?.height ?? 0).toBeGreaterThan(200);
+  };
+  await hasSpace();
+  await page.reload();
+  await hasSpace();
+});
+
 /// Search offers New Agent Session…; choosing it opens the session picker
 /// rather than starting anything. On a fresh daemon: the picker is the home
 /// tab only while the thread has no session, which another spec on the
@@ -10,7 +24,7 @@ test("search offers a new agent session, which opens the picker", async ({ fresh
   const { page } = fresh;
   await page.goto("/");
   await expect(newSessionPage(page)).toBeVisible();
-  await newSessionPage(page).getByTestId("lens-part-start").getByRole("button", { name: "New Session", exact: true }).click();
+  await newSessionPage(page).locator('[data-node="start"]').getByRole("button", { name: "Start a new session", exact: true }).click();
   const tab = page.locator('[data-testid^="center-tab-oxplow:oxplow/agent_session?"]').first();
   await expect(tab).toBeVisible();
   await expect(newSessionPage(page)).toHaveCount(0);
@@ -30,8 +44,8 @@ test("an ended terminal session says so and its tab closes it", async ({ fresh }
   await run(daemon, "oxplow.agent.set_agents", { agents: ["scripted", "claude"] });
   await page.goto("/");
   await expect(newSessionPage(page)).toBeVisible();
-  await newSessionPage(page).getByTestId("lens-part-start").getByTestId("lens-form-fields-harness").selectOption("claude");
-  await newSessionPage(page).getByTestId("lens-part-start").getByRole("button", { name: "New Session", exact: true }).click();
+  await newSessionPage(page).locator('[data-node="start"]').getByTestId("lens-form-fields-harness").selectOption("claude");
+  await newSessionPage(page).locator('[data-node="start"]').getByRole("button", { name: "Start a new session", exact: true }).click();
   const tab = page.locator('[data-testid^="center-tab-oxplow:oxplow/agent_session?"]').first();
   await expect(tab).toBeVisible();
   await expect(page.getByTestId("terminal-ended")).toBeVisible();
@@ -49,8 +63,8 @@ test("a session that can't launch shows why and offers a retry", async ({ fresh 
   await run(daemon, "oxplow.agent.set_agents", { agents: ["scripted", "codex"] });
   await page.goto("/");
   await expect(newSessionPage(page)).toBeVisible();
-  await newSessionPage(page).getByTestId("lens-part-start").getByTestId("lens-form-fields-harness").selectOption("codex");
-  await newSessionPage(page).getByTestId("lens-part-start").getByRole("button", { name: "New Session", exact: true }).click();
+  await newSessionPage(page).locator('[data-node="start"]').getByTestId("lens-form-fields-harness").selectOption("codex");
+  await newSessionPage(page).locator('[data-node="start"]').getByRole("button", { name: "Start a new session", exact: true }).click();
   const ended = page.getByTestId("terminal-ended");
   await expect(ended).toContainText("Couldn't start the session");
   await expect(ended).toContainText("codex");
@@ -65,8 +79,8 @@ test("a session's tab shows its alias, and its fallback once the alias is cleare
   await run(daemon, "oxplow.agent.set_agents", { agents: ["scripted", "claude"] });
   await page.goto("/");
   await expect(newSessionPage(page)).toBeVisible();
-  await newSessionPage(page).getByTestId("lens-part-start").getByTestId("lens-form-fields-harness").selectOption("claude");
-  await newSessionPage(page).getByTestId("lens-part-start").getByRole("button", { name: "New Session", exact: true }).click();
+  await newSessionPage(page).locator('[data-node="start"]').getByTestId("lens-form-fields-harness").selectOption("claude");
+  await newSessionPage(page).locator('[data-node="start"]').getByRole("button", { name: "Start a new session", exact: true }).click();
   const tab = page.locator('[data-testid^="center-tab-oxplow:oxplow/agent_session?"]').first();
   await expect(tab).toBeVisible();
   await expect(tab).toContainText(/claude \d{4}-\d{2}-\d{2}/i);
@@ -139,9 +153,9 @@ test("a remembered choice is what new threads start with", async ({ fresh }) => 
   await run(daemon, "oxplow.agent.set_agents", { agents: ["scripted", "claude"] });
   await page.goto("/");
   await expect(newSessionPage(page)).toBeVisible();
-  await newSessionPage(page).getByTestId("lens-part-start").getByTestId("lens-form-fields-harness").selectOption("claude");
-  await newSessionPage(page).getByTestId("lens-part-start").getByTestId("lens-form-fields-remember").check();
-  await newSessionPage(page).getByTestId("lens-part-start").getByRole("button", { name: "New Session", exact: true }).click();
+  await newSessionPage(page).locator('[data-node="start"]').getByTestId("lens-form-fields-harness").selectOption("claude");
+  await newSessionPage(page).locator('[data-node="start"]').getByTestId("lens-form-fields-remember").check();
+  await newSessionPage(page).locator('[data-node="start"]').getByRole("button", { name: "Start a new session", exact: true }).click();
   await expect(page.locator('[data-testid^="center-tab-oxplow:oxplow/agent_session?"]')).toHaveCount(1);
 
   await addThread(page, daemon, "Busy");

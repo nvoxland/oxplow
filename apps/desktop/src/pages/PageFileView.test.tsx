@@ -6,14 +6,14 @@ import { getPageDetailStore } from "../tabs/openPageDetail.js";
 import { PageNavigationContext, type PageNavigation } from "../tabs/PageNavigationContext.js";
 import { extPageRef, viewParamsOf } from "../tabs/pageRefs.js";
 import type { TabRef } from "../tabs/tabState.js";
-import type { LensParam, Page, PageRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
+import type { PageParam, Page, PageRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
 import { PageFileView } from "./PageFileView.js";
 import { decl, fakePage, fakePageRuns, fakeRun, loader, node } from "./testing/fakeRun.js";
 
 afterEach(cleanup);
 
-const param = (name: string, role: LensParam["role"], over: Partial<LensParam> = {}): LensParam =>
-  ({ name, label: null, default: null, options: [], type: "text", role, presets: [], ...over }) as LensParam;
+const param = (name: string, role: PageParam["role"], over: Partial<PageParam> = {}): PageParam =>
+  ({ name, label: null, default: null, options: [], type: "text", role, presets: [], ...over }) as PageParam;
 
 const listPage: Page = fakePage(
   node.viz("items", "items", { columns: [{ key: "id", label: "Id", select: "item" } as never, { key: "title" } as never] }),

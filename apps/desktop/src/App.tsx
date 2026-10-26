@@ -43,6 +43,7 @@ import { identityOf, keyOf, paramOf, parseUri, typeOf } from "./uri/uri.js";
 import { labelReadsRow, shellView, tabLabel } from "./pages/renderers.js";
 import { chooseRenderer, chooseRoute } from "./pages/pageFiles.js";
 import { PageFileView } from "./pages/PageFileView.js";
+import { EphemeralView } from "./pages/EphemeralView.js";
 import { PersonCommandConfirm } from "./components/PersonCommandConfirm.js";
 import { RemoteConnectionBanner } from "./components/RemoteConnectionBanner.js";
 import { subscribeUiError } from "./ui-error.js";
@@ -87,7 +88,8 @@ import { classifyExternalUrl } from "./external-url-allowlist.js";
 import { installContextMenuSuppressor } from "./context-menu.js";
 import { QuickOpenOverlay } from "./components/QuickOpenOverlay.js";
 import { NON_TRACKED_KINDS } from "./components/RailHud/history.js";
-import { buildTabReport } from "./tabs/tabReport.js";
+import { buildTabReport, createTabReporter } from "./tabs/tabReport.js";
+import { windowPageRuns } from "./pageRuns.js";
 import { useTabSessions } from "./tabs/useTabSessions.js";
 import {
   activate,
@@ -1012,6 +1014,8 @@ export function App() {
   // and debounced; see tabs/tabReport.ts and tabs/openPageDetail.ts.
   const [pageDetailTick, setPageDetailTick] = useState(0);
   useEffect(() => getPageDetailStore().subscribe(() => setPageDetailTick((t) => t + 1)), []);
+  const [pageRunsTick, setPageRunsTick] = useState(0);
+  useEffect(() => windowPageRuns().subscribeRunIds(() => setPageRunsTick((t) => t + 1)), []);
   const [windowFocused, setWindowFocused] = useState(() => document.hasFocus());
   const [windowVisible, setWindowVisible] = useState(() => document.visibilityState === "visible");
   useEffect(() => {
@@ -1031,18 +1035,24 @@ export function App() {
   // a window that stops reporting (`client_reports::FORGET_AFTER_MS`), and an
   // idle window with tabs open is still there.
   const lastTabReportRef = useRef<ReturnType<typeof buildTabReport> | null>(null);
+  const tabReporter = useMemo(() => createTabReporter(reportTabs), []);
   useEffect(() => {
     const beat = setInterval(() => {
-      if (lastTabReportRef.current) void reportTabs(lastTabReportRef.current).catch(() => {});
+      if (lastTabReportRef.current) {
+        const report = { ...lastTabReportRef.current, runs: windowPageRuns().runIds() };
+        lastTabReportRef.current = report;
+        tabReporter.send(report);
+      }
     }, TAB_REPORT_HEARTBEAT_MS);
     return () => clearInterval(beat);
-  }, []);
+  }, [tabReporter]);
   useEffect(() => {
     const timer = setTimeout(() => {
       const ctx = visitContextRef.current;
       const shown = ctx.pageTabs.find((t) => t.id === effectiveCenterActive) ?? null;
       const report = buildTabReport({
         client: getUiClientId(),
+        runs: windowPageRuns().runIds(),
         focused: windowFocused,
         visible: windowVisible,
         shownThread: selectedThreadId ?? null,
@@ -1051,10 +1061,10 @@ export function App() {
         detail: shown ? getPageDetailStore().get(shown.id) : null,
       });
       lastTabReportRef.current = report;
-      void reportTabs(report).catch(() => {});
+      tabReporter.send(report);
     }, 300);
     return () => clearTimeout(timer);
-  }, [effectiveCenterActive, selectedThreadId, sessions, pageTitles, pageDetailTick, windowFocused, windowVisible]);
+  }, [effectiveCenterActive, selectedThreadId, sessions, pageTitles, pageDetailTick, pageRunsTick, windowFocused, windowVisible, tabReporter]);
 
   const closeDiffTab = (id: string) => closePageTab(id);
 
@@ -1660,6 +1670,12 @@ export function App() {
     // the declarations pick), else foundation's fallback, `resource`.
     const renderTab = (ref: TabRef, nav: SlotNav): CenterTab | null => {
       if (typeOf(ref.id) === "oxplow/page") return routeTab(ref, nav);
+      if (typeOf(ref.id) === "oxplow/view") return {
+        id: ref.id,
+        label: "View",
+        closable: true,
+        render: () => <EphemeralView view={paramOf(ref.id, "id") ?? ""} stream={stream} threadId={selectedThread?.id ?? null} onOpenPage={nav.navOpen} />,
+      };
       // A symbol opens its file at its line (openSymbol); it's never a tab.
       if (typeOf(ref.id) === "oxplow/symbol") return null;
       // Until the extensions load, nothing says what renders it.
@@ -1725,6 +1741,10 @@ export function App() {
         }
       }
     };
+    // A currently shown page owns its navigation context. The same page
+    // in an earlier tab's Back history must not claim its body first:
+    // links would otherwise navigate that earlier slot instead.
+    const currentBodies = new Set((threadSession?.tabs ?? []).map((t) => pageIdentityOf(currentEntry(t).ref.id)));
     for (const sessionTab of threadSession?.tabs ?? []) {
       // Navigation from any of the tab's bodies (a hidden back page too)
       // moves the tab.
@@ -1742,6 +1762,7 @@ export function App() {
       const slotNav: SlotNav = { slotId: currentId, navOpen, navOpenFile, navOpenDiff };
       for (const body of bodies(sessionTab)) {
         const ref = body.entry.ref;
+        if (!body.current && currentBodies.has(pageIdentityOf(ref.id))) continue;
         if (renderedTabIds.has(ref.id)) continue;
         renderedTabIds.add(ref.id);
         const tab = renderTab(ref, slotNav);

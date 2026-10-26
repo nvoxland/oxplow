@@ -649,31 +649,6 @@ mod tests {
         serde_json::to_value(&run.rows).unwrap()
     }
 
-    /// A lens the page conversion deletes with the lens runtime (no page
-    /// replaces it), run as a lens: its rows as JSON.
-    async fn run_deleted_lens(
-        f: &crate::test_fixtures::EffortFixture,
-        id: &str,
-        params: &[(&str, oxplow_db::SqlCell)],
-    ) -> serde_json::Value {
-        let layer = crate::sql_gateway::SqlGateway::new(f.svc.db.clone());
-        let params = params
-            .iter()
-            .map(|(k, v)| (k.to_string(), v.clone()))
-            .collect();
-        let run = crate::extensions::run_lens(
-            &layer,
-            &f.svc.extension_catalog,
-            f._dir.path(),
-            id,
-            params,
-            &crate::extensions::LensContext::default(),
-        )
-        .await
-        .unwrap();
-        serde_json::to_value(&run.result.rows).unwrap()
-    }
-
     /// The `runs` lens: per extension, the last week's runs, failures,
     /// denials, mean CPU and model calls, the ones needing attention first.
     #[tokio::test(flavor = "multi_thread")]
@@ -1406,7 +1381,7 @@ mod tests {
                 .unwrap();
         }
         let ctx = crate::extensions::lens_context(&f.svc, None, None).await;
-        let first = |id: &'static str, ctx: crate::extensions::LensContext| {
+        let first = |id: &'static str, ctx: crate::extensions::ViewContext| {
             let svc = f.svc.clone();
             async move {
                 let run = crate::test_fixtures::run_as_page_in(&svc, id, &[], ctx).await;
@@ -1418,7 +1393,7 @@ mod tests {
         let claims = first("oxplow-bundled/unbacked-claims", ctx).await;
         assert_eq!(claims.as_array().unwrap().len(), 1);
         assert_eq!(claims[0][0], "tests pass");
-        let elsewhere = crate::extensions::LensContext {
+        let elsewhere = crate::extensions::ViewContext {
             stream_id: Some(999),
             thread_id: None,
             active: None,
@@ -1750,9 +1725,6 @@ mod tests {
                               ('c2', 'bob', 'b@x', '2026-01-02T00:00:00Z', 'second');
                      INSERT INTO git_commit_file (sha, path, status, additions, deletions)
                        VALUES ('c1', 'a.rs', 'A', 1, 0), ('c1', 'z.rs', 'A', 1, 0), ('c2', 'a.rs', 'M', 2, 1);
-                     INSERT INTO thread_note (thread_id, body, author, created_at)
-                       VALUES ({thread}, 'older', 'agent', '2026-01-01T00:00:00Z'),
-                              ({thread}, 'newer', 'agent', '2026-01-02T00:00:00Z');
                      INSERT INTO snapshot (id, stream_id, created_at, revision, branch, tree_hash)
                        SELECT 501, stream_id, '2026-01-01T00:00:00Z', NULL, NULL, 'h1' FROM threads WHERE id = {thread};
                      INSERT INTO snapshot (id, stream_id, created_at, revision, branch, tree_hash)
@@ -1835,14 +1807,6 @@ mod tests {
         assert_eq!(col(&rows, 2), ["501", "null"]);
         assert_eq!(col(&rows, 3), ["quiet", "startup"]);
         assert_eq!(col(&rows, 4), ["1", "0"]);
-
-        let rows = run_deleted_lens(
-            &f,
-            "oxplow-foundation/thread-notes",
-            &[("thread", thread_ref.clone())],
-        )
-        .await;
-        assert_eq!(col(&rows, 3), ["newer", "older"]);
 
         let rows = run_bundled_page_with(
             &f,
@@ -1950,12 +1914,6 @@ mod tests {
                     rusqlite::params![thread, session],
                 )
                 .map_err(oxplow_db::map_sql_err)?;
-                tx.execute(
-                    "INSERT INTO thread_note (thread_id, body, author, created_at)
-                     VALUES (?1, 'a finding in between', 'agent', '2999-01-01T12:00:00.000000Z')",
-                    [thread],
-                )
-                .map_err(oxplow_db::map_sql_err)?;
                 // The session's window has to cover them.
                 tx.execute("UPDATE agent_session SET opened_at = '2998-12-31T00:00:00.000000Z'", [])
                     .map_err(oxplow_db::map_sql_err)?;
@@ -1985,17 +1943,12 @@ mod tests {
         let rows =
             run_bundled_page_with(&f, "oxplow-foundation/session-transcript", &params("", 1)).await;
         // ref, at, kind, ended_at, prompt, answer, tool_calls, …
-        assert_eq!(
-            col(&rows, 2),
-            ["turn", "note", "hand-back", "turn"],
-            "{rows}"
-        );
-        assert_eq!(col(&rows, 4)[1], "a finding in between");
-        assert_eq!(col(&rows, 6), ["2", "0", "0", "0"]);
+        assert_eq!(col(&rows, 2), ["turn", "hand-back", "turn"], "{rows}");
+        assert_eq!(col(&rows, 6), ["2", "0", "0"]);
 
         // Starting at the hand-back's turn leaves it and what follows.
         let handback = oxplow_domain::uri::build::id_of(
-            &col(&rows, 0)[2],
+            &col(&rows, 0)[1],
             oxplow_domain::uri::resources::TURN,
         )
         .unwrap();
@@ -2192,8 +2145,8 @@ mod tests {
             .unwrap();
         assert_eq!(
             prompts.rows[0][offered],
-            oxplow_db::SqlCell::Text("oxplow-foundation".into()),
-            "oxplow's own questions (its pages' answers) come first, by their extension"
+            oxplow_db::SqlCell::Text("Code".into()),
+            "oxplow's own questions (its pages' answers) are grouped by the page's category"
         );
         let page = f
             .svc
@@ -2896,7 +2849,7 @@ mod tests {
                         on_behalf_of: oxplow_domain::Actor::Human,
                         confirmed: false,
                     },
-                    &crate::extensions::LensContext::default(),
+                    &crate::extensions::ViewContext::default(),
                 )
                 .await
                 .unwrap();
@@ -2910,47 +2863,101 @@ mod tests {
         assert!(lens("go-to-bookmarks").await.as_array().unwrap().is_empty());
     }
 
-    /// The dashboards index lists the dashboards; New Dashboard's command
-    /// names the page to open once it ran.
+    /// Dashboards lists page-file dashboards, links their stored URIs and
+    /// offers the title form whose result opens the new page.
     #[tokio::test]
-    async fn the_dashboards_lens_lists_dashboards_and_creating_one_opens_it() {
+    async fn the_dashboards_page_lists_dashboard_pages_and_offers_creation() {
+        use crate::pages::runner::{RunRequest, RunTarget};
+        use crate::pages::schema::NodeKind;
+        use oxplow_db::SqlCell::Text;
+        use oxplow_domain::Actor;
+
         let f = crate::test_fixtures::services_with_effort().await;
+        // A normal page in the same personal extension is not a dashboard.
+        f.svc
+            .commands
+            .run(
+                &Actor::Human,
+                "oxplow.extension.write_page",
+                serde_json::json!({
+                    "extension": "my-pages",
+                    "page": "ordinary",
+                    "spec": "title: Ordinary page\ncategory: Data\nview: { markdown: Overview }\n",
+                    "deploy": true,
+                }),
+                true,
+            )
+            .await
+            .unwrap();
         let out = f
             .svc
             .commands
             .run(
-                &oxplow_domain::Actor::Human,
-                "oxplow.dashboard.create",
+                &Actor::Human,
+                "oxplow.extension.new_dashboard",
                 serde_json::json!({ "title": "Build health" }),
-                false,
+                true,
             )
             .await
             .unwrap();
-        let rows = run_deleted_lens(&f, "oxplow-foundation/dashboards", &[]).await;
-        assert_eq!(texts(&rows, 0), ["Build health"], "{rows}");
-        let spec = f
-            .svc
-            .commands
-            .list(&oxplow_domain::Actor::Human)
-            .into_iter()
-            .find(|s| s.id == "oxplow.dashboard.create")
+        let runs = crate::pages::open_runs::PageRuns::default();
+        let (run_id, run) = runs
+            .open(
+                &f.svc,
+                RunRequest {
+                    target: RunTarget::Page("oxplow-foundation/dashboards".into()),
+                    params: Default::default(),
+                    ctx: crate::extensions::ViewContext::default(),
+                    viewer: Actor::Human,
+                },
+                "dashboards-test",
+            )
+            .await
             .unwrap();
-        let opened = spec
+        let loader = &run.loaders["dashboards"];
+        assert!(loader.error.is_none(), "{:?}", loader.error);
+        let result = &loader.result;
+        assert_eq!(result.rows.len(), 1, "{:?}", result.rows);
+        let title = result.columns.iter().position(|c| c == "title").unwrap();
+        let uri = result.columns.iter().position(|c| c == "uri").unwrap();
+        assert_eq!(result.rows[0][title], Text("Build health".into()));
+        // Neither the index nor the ordinary page appears in its own list.
+        assert_eq!(
+            run.page.category,
+            Some(crate::extensions::LauncherCategory::Data)
+        );
+        let NodeKind::Viz { lens, .. } = &run.page.view.kind else {
+            panic!("the dashboards index must show its loader");
+        };
+        let link = lens
+            .columns
+            .iter()
+            .find(|c| c.key == "title")
+            .unwrap()
+            .link
+            .as_ref()
+            .unwrap();
+        assert_eq!(link.kind, crate::extensions::LensLinkKind::Page);
+        assert_eq!(link.from.as_deref(), Some("uri"));
+
+        let action = run.page.actions.iter().find(|a| a.id == "new").unwrap();
+        assert!(action.form && action.prominent && !action.row);
+        let form =
+            crate::pages::actions::page_action_form(&f.svc, &runs, &run_id, None, "new", None)
+                .await
+                .unwrap();
+        assert_eq!(form.command.id, "oxplow.extension.new_dashboard");
+        assert_eq!(form.values["title"], "");
+        assert_eq!(form.values["extension"], "my-pages");
+        assert_eq!(form.fixed, ["extension"]);
+        let opened = form
+            .command
             .ui
             .unwrap()
             .open_after_for(&out.result)
             .unwrap()
             .unwrap();
-        let dashboard = oxplow_domain::uri::build::id_of(
-            &texts(&rows, 1)[0],
-            oxplow_domain::uri::resources::DASHBOARD,
-        )
-        .unwrap();
-        assert_eq!(
-            opened,
-            oxplow_domain::uri::build::keyed(oxplow_domain::uri::resources::DASHBOARD, &dashboard),
-            "{rows}"
-        );
+        assert_eq!(result.rows[0][uri], Text(opened));
     }
 
     /// Finished items come newest first by when they closed, even within

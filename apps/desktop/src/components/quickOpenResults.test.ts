@@ -83,6 +83,13 @@ describe("buildQuickOpenResults", () => {
     expect(empty.results.some((r) => r.kind === "ask")).toBe(false);
   });
 
+  // A search hit answering before the pages load would be the first row,
+  // and Enter would take it in place of the page the query names.
+  test("until the pages have loaded, a query has no results to take", () => {
+    const out = buildQuickOpenResults({ query: "Files", pages: null, commands, files, siteHits: [hit("lens", "files")] });
+    expect(out.results).toEqual([]);
+  });
+
   test("empty query is launcher mode — pages only, in given order", () => {
     const out = buildQuickOpenResults({ query: "", pages, commands, files, siteHits: [] });
     expect(out.results.map((r) => r.kind)).toEqual(["page", "page"]);

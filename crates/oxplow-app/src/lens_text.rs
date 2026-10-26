@@ -71,7 +71,7 @@ pub async fn text_run(
     svc: &crate::Services,
     root: &Path,
     run: &LensRun,
-    ctx: &crate::extensions::LensContext,
+    ctx: &crate::extensions::ViewContext,
 ) -> Result<LensText, DomainError> {
     let text = text_of(svc, root, run, ctx).await?;
     Ok(LensText {
@@ -92,7 +92,7 @@ pub async fn text_of(
     svc: &crate::Services,
     root: &Path,
     run: &LensRun,
-    ctx: &crate::extensions::LensContext,
+    ctx: &crate::extensions::ViewContext,
 ) -> Result<String, DomainError> {
     Ok(render(run, &resolve(svc, root, run, ctx).await?))
 }
@@ -105,7 +105,7 @@ pub async fn resolve(
     svc: &crate::Services,
     root: &Path,
     run: &LensRun,
-    ctx: &crate::extensions::LensContext,
+    ctx: &crate::extensions::ViewContext,
 ) -> Result<Resolved, DomainError> {
     let mut out = Resolved::default();
     match run.lens.viz {
@@ -214,7 +214,7 @@ async fn run_part(
     root: &Path,
     id: &str,
     given: &BTreeMap<String, SqlCell>,
-    ctx: &crate::extensions::LensContext,
+    ctx: &crate::extensions::ViewContext,
 ) -> Result<LensRun, DomainError> {
     let child = svc.extension_catalog.find_lens(root, id)?;
     let params = given
@@ -236,7 +236,7 @@ async fn row_tile(
     tile: &crate::extensions::LensTile,
     row: &[SqlCell],
     given: &BTreeMap<String, SqlCell>,
-    ctx: &crate::extensions::LensContext,
+    ctx: &crate::extensions::ViewContext,
 ) -> Option<Result<LensRun, String>> {
     let at = |role: &Option<String>| {
         column(run, role.as_ref())
@@ -1480,7 +1480,7 @@ mod tests {
                 lens_part("agents", Some("Agents"), "x/agents"),
             ];
             l.view = Some("area".into());
-            l.params = vec![crate::extensions::LensParam {
+            l.params = vec![crate::extensions::PageParam {
                 name: "area".into(),
                 default: Some(t("overview")),
                 options: vec![
@@ -1637,7 +1637,7 @@ mod tests {
                 ],
             ],
         );
-        let ctx = crate::extensions::LensContext::default();
+        let ctx = crate::extensions::ViewContext::default();
         let resolved = resolve(&fx.svc, &root, &grid, &ctx).await.unwrap();
         assert_eq!(resolved.row_tiles.len(), 4);
         let answer = resolved.row_tiles[0].as_ref().unwrap().as_ref().unwrap();
@@ -1892,7 +1892,7 @@ mod tests {
             &fx.svc,
             &root,
             &r,
-            &crate::extensions::LensContext::default(),
+            &crate::extensions::ViewContext::default(),
         )
         .await
         .unwrap();
@@ -1979,7 +1979,7 @@ mod tests {
         std::fs::write(root.join("c.txt"), "one\ntwo\nthree\n").unwrap();
         let sha = crate::test_fixtures::commit_all(&root, "c");
         std::fs::write(root.join("c.txt"), "uno\n").unwrap();
-        let ctx = crate::extensions::LensContext::default();
+        let ctx = crate::extensions::ViewContext::default();
         let code = with(
             run(
                 LensViz::Code,
@@ -2030,7 +2030,7 @@ mod tests {
         let fx = crate::test_fixtures::services_with_effort().await;
         let root = fx.svc.layout.project_dir.clone();
         std::fs::write(root.join("e.txt"), "saved text\n").unwrap();
-        let ctx = crate::extensions::LensContext::default();
+        let ctx = crate::extensions::ViewContext::default();
         let editor = with(
             run(LensViz::Editor, None, &["path"], vec![vec![t("e.txt")]]),
             |l| {
@@ -2081,7 +2081,7 @@ mod tests {
     async fn an_embed_reads_as_a_link() {
         let fx = crate::test_fixtures::services_with_effort().await;
         let root = fx.svc.layout.project_dir.clone();
-        let ctx = crate::extensions::LensContext::default();
+        let ctx = crate::extensions::ViewContext::default();
         let embed = with(
             run(
                 LensViz::Embed,
@@ -2139,7 +2139,7 @@ mod tests {
             },
         );
         let root = fx.svc.layout.project_dir.clone();
-        let ctx = crate::extensions::LensContext::default();
+        let ctx = crate::extensions::ViewContext::default();
         let text = text_of(&fx.svc, &root, &answer, &ctx).await.unwrap();
         let shown = out.result["text"].as_str().unwrap();
         assert!(text.contains(shown), "{text}\n---\n{shown}");
@@ -2164,7 +2164,7 @@ mod tests {
             }
             r
         };
-        let ctx = crate::extensions::LensContext::default();
+        let ctx = crate::extensions::ViewContext::default();
         let none = text_of(&fx.svc, &root, &approvals(&[]), &ctx)
             .await
             .unwrap();

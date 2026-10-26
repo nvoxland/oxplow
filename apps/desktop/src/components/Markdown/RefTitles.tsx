@@ -13,7 +13,7 @@ import { BrokenLink, parseMarkdownLink, parsedLinkIconKind, refLinkNames, useRef
  * and CSS hides the link beside it (`.oxplow-ref-title:has([data-ref-title])
  * + a`, in `index.html`) — the stored text stays the slug. With the caret
  * inside the link, there's no widget: the slug shows, to edit (the rule
- * `MermaidBlock` keeps for a diagram's source). A decoration, never a mark,
+ * `FencedBlock` keeps for a diagram's source). A decoration, never a mark,
  * so nothing of it is saved.
  */
 export const RefTitles = Extension.create({

@@ -11,14 +11,15 @@ async function keeps(daemon: Parameters<typeof ipc>[0]): Promise<number> {
 }
 
 // Explore Data is oxplow-foundation's custom page: the catalog is its rail
-// (a lens), the SQL box its component, and the result oxplow draws under
-// it from the spec the component hands it, with Save as Lens beside it.
+// (a viz node picking the page's `model`), the SQL box its component, and
+// the result oxplow draws under it from the inline page the component
+// hands it, with Save as Lens beside it.
 test("explore a model, run SQL, and keep it as a lens through lens.keep", async ({ page, daemon }) => {
   await run(daemon, "oxplow.work_item.create", { title: "Echidna task", thread: daemon.thread });
   await page.goto("/");
   await openFromLauncher(page, "Explore Data");
-  await expect(page.getByTestId("page-custom")).toBeVisible();
-  await page.getByTestId("custom-page-rail").getByText("v_work_item", { exact: true }).click();
+  await expect(page.locator('[data-testid="page-host"]:visible [data-testid="custom-component"]')).toBeVisible();
+  await page.locator('[data-node="explore-catalog"]:visible').getByText("v_work_item", { exact: true }).click();
   const frame = page.frameLocator('[data-testid="custom-component-frame"]');
   // Picking a model writes its query; replace it once it's there.
   await expect(frame.getByTestId("explore-sql")).toHaveValue(/v_work_item/);

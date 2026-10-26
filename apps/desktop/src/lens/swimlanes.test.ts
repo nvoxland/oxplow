@@ -26,7 +26,6 @@ const run = (items: Item[]) => ({
 
 let invokes: Array<[string, unknown]> = [];
 let opened: Array<[string, unknown]> = [];
-let queries: string[] = [];
 let rejection: unknown = null;
 
 /** Load the page and start its script; `features` is what the work list says it can do. */
@@ -35,14 +34,12 @@ async function start(features: string[], items = ITEMS) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (globalThis as any).oxplow = {
     connect: async () => ({
-      run: run(items),
+      data: {
+        swimlanes: run(items).result,
+        features: { columns: ["features"], rows: [[JSON.stringify(features)]], truncated: false },
+      },
       applyTheme() {},
       onUpdate: () => () => {},
-      query: async (asset: string) => {
-        queries.push(asset);
-        if (asset === "features") return { result: { columns: ["features"], rows: [[JSON.stringify(features)]], truncated: false } };
-        return run(items);
-      },
       invoke: async (command: string, input: unknown) => {
         invokes.push([command, input]);
         if (rejection) throw rejection;
@@ -77,7 +74,6 @@ const drag = async (ref: string, onto: Element) => {
 beforeEach(() => {
   invokes = [];
   opened = [];
-  queries = [];
   rejection = null;
 });
 afterEach(() => {

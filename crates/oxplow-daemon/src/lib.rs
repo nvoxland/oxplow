@@ -37,7 +37,7 @@ pub use run::run_main;
 use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
-        Path as AxumPath, State,
+        Path as AxumPath, Query, State,
     },
     http::StatusCode,
     response::{IntoResponse, Response},
@@ -153,10 +153,22 @@ async fn health() -> &'static str {
 /// (tsk995): the upgrade's callback runs only after the client has its
 /// `101`, so a client that writes once its socket opens could otherwise
 /// cause an event no forwarder was there to see.
-async fn events_ws(State(state): State<DaemonState>, ws: WebSocketUpgrade) -> Response {
+#[derive(serde::Deserialize)]
+struct EventClient {
+    client: Option<String>,
+}
+
+async fn events_ws(
+    State(state): State<DaemonState>,
+    Query(client): Query<EventClient>,
+    ws: WebSocketUpgrade,
+) -> Response {
     let forwarders = subscribe(&state);
     let services = state.ctx.services.clone();
-    ws.on_upgrade(move |socket| events_stream(socket, forwarders, services))
+    let owner = client
+        .client
+        .map(|client| services.page_runs.connect_client(&client));
+    ws.on_upgrade(move |socket| events_stream(socket, forwarders, services, owner))
 }
 
 /// One channel's subscription, waiting for the socket's queue to forward
@@ -245,6 +257,7 @@ async fn events_stream(
     socket: WebSocket,
     subscriptions: [Forwarder; 3],
     services: std::sync::Arc<oxplow_app::Services>,
+    _owner: Option<oxplow_app::pages::open_runs::PageClient>,
 ) {
     let (mut sink, mut inbound) = socket.split();
     let (tx, mut rx) = tokio::sync::mpsc::channel::<String>(256);
@@ -858,6 +871,58 @@ mod tests {
             let v: serde_json::Value = serde_json::from_str(frame.to_text().unwrap()).unwrap();
             assert_eq!(v["payload"]["kind"], "backgroundTasksChanged");
         }
+    }
+
+    #[tokio::test]
+    async fn closing_an_event_socket_releases_only_its_windows_page_runs() {
+        let (svc, _dir) = services().await;
+        let daemon = run_server("127.0.0.1:0".parse().unwrap(), daemon_state(svc.clone()))
+            .await
+            .unwrap();
+        let url = |client| {
+            format!(
+                "ws://{}/events?token={UI_TOKEN}&client={client}",
+                daemon.bind_addr
+            )
+        };
+        let (mut one, _) = tokio_tungstenite::connect_async(url("one")).await.unwrap();
+        let (mut two, _) = tokio_tungstenite::connect_async(url("two")).await.unwrap();
+        let yaml =
+            "title: Open\ndata: { a: { sql: SELECT 1 AS n } }\nview: { viz: number, from: a }\n";
+        let first = oxplow_rpc::commands::pages::open_page(
+            &svc,
+            None,
+            Some(yaml.into()),
+            None,
+            None,
+            None,
+            None,
+            "one".into(),
+        )
+        .await
+        .unwrap();
+        let second = oxplow_rpc::commands::pages::open_page(
+            &svc,
+            None,
+            Some(yaml.into()),
+            None,
+            None,
+            None,
+            None,
+            "two".into(),
+        )
+        .await
+        .unwrap();
+        one.close(None).await.unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            while svc.page_runs.get(&first.run_id).is_some() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("the disconnected window's runs are released");
+        assert!(svc.page_runs.get(&second.run_id).is_some());
+        two.close(None).await.unwrap();
     }
 
     #[tokio::test]

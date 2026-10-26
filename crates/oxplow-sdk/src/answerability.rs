@@ -444,6 +444,14 @@ pub async fn check_pages(
                     i + 1,
                     answer.question
                 );
+                // A question is put into the agent's input, never sent, and
+                // the terminal treats a pasted line break as Enter: one line.
+                if answer.question.trim().is_empty() || answer.question.contains(['\n', '\r']) {
+                    out.errors.push(format!(
+                        "{at}: a question is one non-empty line (a line break pasted into the \
+                         agent's input would send it) — fix: write it on one line"
+                    ));
+                }
                 if let Some(about) = &answer.about {
                     if let Some(why) = oxplow_app::extension_resources::resource_problem(about) {
                         out.errors.push(format!(
@@ -501,7 +509,7 @@ pub async fn check_pages(
                     .run(RunRequest {
                         target: RunTarget::Spec(std::sync::Arc::new(page.clone())),
                         params,
-                        ctx: oxplow_app::extensions::LensContext::default(),
+                        ctx: oxplow_app::extensions::ViewContext::default(),
                         viewer: oxplow_domain::Actor::Human,
                     })
                     .await;

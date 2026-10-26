@@ -41,7 +41,7 @@ async fn run_page(
                 .into_iter()
                 .map(|(k, v)| (k.to_string(), v))
                 .collect(),
-            ctx: oxplow_app::extensions::LensContext::default(),
+            ctx: oxplow_app::extensions::ViewContext::default(),
             viewer: oxplow_domain::Actor::Human,
         })
         .await
@@ -590,7 +590,7 @@ async fn the_task_views_example_checks_and_its_fixtures_pass() {
                 params: [("uri".to_string(), oxplow_db::SqlCell::Text(uri.into()))]
                     .into_iter()
                     .collect(),
-                ctx: oxplow_app::extensions::LensContext::default(),
+                ctx: oxplow_app::extensions::ViewContext::default(),
                 viewer: oxplow_domain::Actor::Human,
             },
             "test",
@@ -1063,11 +1063,11 @@ async fn without_a_model_inferring_reasoning_skips_and_says_where_to_bind_one() 
     );
 }
 
-/// The session-notes example adds a section to a core page: it checks
+/// The session-history example adds a section to a core page: it checks
 /// clean, its mount is the New Session page's sections slot placed after
 /// `start`, and its example runs.
 #[tokio::test(flavor = "multi_thread")]
-async fn the_session_notes_example_adds_a_section_to_the_new_session_page() {
+async fn the_session_history_example_adds_a_section_to_the_new_session_page() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path();
     oxplow_app::vcs::GitProvider
@@ -1076,12 +1076,12 @@ async fn the_session_notes_example_adds_a_section_to_the_new_session_page() {
         .unwrap();
     let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/extensions");
     copy_dir(
-        &examples.join("session-notes"),
-        &root.join(".oxplow/extensions/session-notes"),
+        &examples.join("session-history"),
+        &root.join(".oxplow/extensions/session-history"),
     );
     let report = check(
         root,
-        "session-notes",
+        "session-history",
         &ExtensionCatalog::new(),
         None,
         None,
@@ -1090,20 +1090,22 @@ async fn the_session_notes_example_adds_a_section_to_the_new_session_page() {
     .await
     .unwrap();
     assert!(report.ok, "{}", render_findings(&report, Format::Text));
-    let tested = test_extension(root, "session-notes", false).await.unwrap();
+    let tested = test_extension(root, "session-history", false)
+        .await
+        .unwrap();
     assert_eq!(tested.errors, Vec::<String>::new());
     assert!(
-        tested.ran.contains(&"example thread-notes".to_string()),
+        tested.ran.contains(&"example thread-history".to_string()),
         "{:?}",
         tested.ran
     );
     let ext = ExtensionCatalog::new()
-        .named(root, "session-notes")
+        .named(root, "session-history")
         .unwrap();
     let mount = &ext.ui.page_slots[0];
     assert_eq!(mount.host, "oxplow-foundation/new-session");
     assert_eq!(mount.slot, "sections");
-    assert_eq!(mount.page, "session-notes/thread-notes");
+    assert_eq!(mount.page, "session-history/thread-history");
     assert_eq!(
         mount.at,
         Some(oxplow_app::extensions::SlotAt::After {
@@ -1115,6 +1117,18 @@ async fn the_session_notes_example_adds_a_section_to_the_new_session_page() {
     let svc = common::booted(root).await;
     svc.extension_activation
         .activate(svc.clone())
+        .await
+        .unwrap();
+    svc.db
+        .transaction(|tx| {
+            tx.execute(
+                "INSERT INTO agent_turn (thread_id, prompt, started_at) \
+                 VALUES (1, 'Review the page migration', '2026-10-25T00:00:00Z')",
+                (),
+            )
+            .map_err(oxplow_db::map_sql_err)?;
+            Ok(())
+        })
         .await
         .unwrap();
     let run = run_page(
@@ -1135,7 +1149,11 @@ async fn the_session_notes_example_adds_a_section_to_the_new_session_page() {
         .embed
         .as_ref()
         .unwrap_or_else(|| panic!("the mount runs after `start`: {ids:?}"));
-    assert_eq!(mounted.page.id, "session-notes/thread-notes");
+    assert_eq!(mounted.page.id, "session-history/thread-history");
+    assert_eq!(
+        mounted.loaders["thread_history"].result.rows[0][1],
+        oxplow_db::SqlCell::Text("Review the page migration".into())
+    );
 }
 
 /// The commit-history example is a page of typed params and a row that

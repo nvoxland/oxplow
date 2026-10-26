@@ -6,6 +6,8 @@ import { HostedViewContext, useHostedView } from "../lens/hostedView.js";
 import { useReplacement } from "../lens/useReplacement.js";
 import { usePageRunsStore, usePageRunWith, type PageRuns } from "../pageRuns.js";
 import { PageTree } from "../pages/PageTree.js";
+import { declaredParams } from "../pages/pageReads.js";
+import { useExtensions } from "../extensionsStore.js";
 import type { TabRef } from "../tabs/tabState.js";
 
 /**
@@ -46,7 +48,12 @@ export function Replaceable({
   // A page replacement: one run of it, its params the target's props
   // (the run is shared by key, so a fresh key object each render is fine).
   const store = usePageRunsStore();
-  const pageRun = usePageRunWith(runs ?? store, r.state === "page" ? { page: r.page, params: props, streamId, threadId: null } : null);
+  // Run with the props its page declares: a host passes more (its own
+  // params), and a page refuses a param it doesn't declare.
+  const extensions = useExtensions();
+  const replacementPage = r.state === "page" ? (extensions ?? []).flatMap((e) => (e.enabled ? (e.pageFiles ?? []) : [])).find((p) => p.id === r.page) : undefined;
+  const pageParams = replacementPage ? declaredParams(replacementPage, props) : props;
+  const pageRun = usePageRunWith(runs ?? store, r.state === "page" ? { page: r.page, params: pageParams, streamId, threadId: null } : null);
   const view = useHostedView({ keys: r.state === "replaced" || r.state === "page" ? r.replacement.view : NO_KEYS, scope: target });
   if (r.state === "pending") return null;
   if (r.state === "core") return <>{fallback}</>;

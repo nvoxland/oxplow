@@ -1536,8 +1536,8 @@ Starlark collector whose script calls an `ai_*` builtin → `ai`; an
 `ai_provider` implementation → `ai`; advisories, skills and
 implementations with skills → `agent`; a custom component's `commands`
 outside its namespace → `commands`. A script's composed commands can't be
-known before it runs, so they are checked when it runs. `intent.prompts`
-are suggestions a person picks, not agent text, and need nothing.
+known before it runs, so they are checked when it runs. A page's
+`answers:` are suggestions a person picks, not agent text, and need nothing.
 
 **Approval is the deploy** (`extension_deploy::approved`). The approved
 set is what runs: the active deployment's permissions (the running catalog
@@ -1645,7 +1645,7 @@ loaded. A lens gets into the launcher through its own `launcher.category`
 `effects`, `collectors`, `pages`, `panels`, `implementations`, `skills`,
 `resources`, `custom_components`, `event_types.types`,
 `ui.decorators`, `ui.replacements` — and the manifest's own nested lists
-(`intent.examples`, `intent.prompts`, `ui.slots`) type their entries one
+(`intent.examples`, `ui.slots`) type their entries one
 at a time: a broken entry is left out with an error at its own line
 (`manifest_v2::item_lines`, the line of each `- ` item, so a shape error
 with no name to look the entry up by lands there too), and the rest of
@@ -4824,8 +4824,8 @@ tool: open_work              # offered as <namespace>_open_work
   summary, item, files, test runs, claims, decisions as sections),
   `file_history { path, limit }` and `recent_commits { limit }` (the indexed
   log; `oxplow_vcs_log` goes past it), `snapshots { stream?, limit }` (with
-  parent, trigger and whether it ran over budget) and `thread_notes
-  { thread }`. Params take bare ids (`thr3`, `eff9`, `str1`). Each reads published `v_*` models only, so it works with
+  parent, trigger and whether it ran over budget).
+  Params take bare ids (`thr3`, `eff9`, `str1`). Each reads published `v_*` models only, so it works with
   the bundled extension off.
 - Every agent-invokable command stays reachable through `run_command`
   whether or not it's a tool: a tool is a named entry for the ones an
@@ -4890,28 +4890,22 @@ tool: open_work              # offered as <namespace>_open_work
 - **Row actions (current):** right-click a lens row → "Ask the Assistant":
   the first page the row links to, else the row as text
   `[oxplow lens <id> row: col=value, …]` (`rowAssistantContext`).
-- **The prompt catalog (current):** what a person can ask.
-  - What an extension's pages answer (`answers:` in a page file, `about`
-    makes it a question on pages for that kind of ref; see "Answerability"):
-    oxplow's own questions are foundation's pages'.
-  - An extension's are `intent.prompts: [{ prompt, about? }]` in its
-    manifest (checked: non-empty, **one line** — a pasted line break is
-    Enter in the terminal, so a multi-line prompt would send itself —
-    and `about` a declared resource, `oxplow/work_item`).
-  - `prompt_catalog::prompt_catalog(extensions)` merges them (enabled
-    extensions by name; each one's `intent.prompts`, then its pages' answers), and each extension generation
-    restates them as the model **`v_prompt`** (`catalog_prompt`, V85:
-    `position`, `source_kind` (always `extension` now), `source`, `prompt`,
-    `about`), beside **`v_config_key`** (`config_key`: project.yaml's keys
-    with their doc and value schema). An agent reads both
-    with `oxplow_query_sql`; there is no catalog RPC.
+- **What a person can ask (current):** what pages say they answer
+  (`answers:` in a page file; `about` makes it a question on pages for that
+  kind of ref; a question is **one line** — a pasted line break is Enter in
+  the terminal, so a multi-line one would send itself — checked by
+  `answerability::check_pages`; see "Answerability"). It is read as
+  **`v_page_answer`** (with `v_page`), beside **`v_config_key`**
+  (`config_key`: project.yaml's keys with their doc and value schema), with
+  `oxplow_query_sql`; there is no catalog RPC and no separate prompt list
+  (`intent.prompts`, `v_prompt` and `prompt_catalog` are gone).
   - The UI: the **Catalog** page, a foundation document lens
     (the `catalog` page, `catalog-overview`: sections
-    `catalog-prompts` — grouped by who offers each, with an Ask row action
+    `catalog-prompts` — grouped by the page's category (else its extension), with an Ask row action
     on `oxplow.agent.draft` — `catalog` over `v_model`, and
     `catalog-config-keys`, with Open Settings as a page action on
     `oxplow.window.navigate`); the nav bar ☰'s Ask (suggested prompts for
-    the page's resource, `usePromptCatalog` over `v_prompt`); and
+    the page's resource, `usePromptCatalog` over `v_page_answer`); and
     `EmptyState`'s prompts (usability.md → "Empty states").
 - **No launcher entries.** The manifest's old `launcher:` list (a URI,
   a command or a prompt) is gone: a page is a `pages:` entry or a lens; a
@@ -4985,6 +4979,10 @@ Each loads clean (`documented_examples_load_without_errors`):
   `pull_request` (`uri`, `title`, `body`; it resolves and is searchable),
   page `pr` (the `pr` lens, given `uri=<uri>`), `[[pr:12]]`. `crates/oxplow-
   sdk/tests/examples.rs` checks and tests it and opens a pull request.
+- **`session-history`** — a read-only page of the thread's earlier prompts
+  from `v_agent_turn`, mounted at `new-session.sections` after `start`.
+  `the_session_history_example_adds_a_section_to_the_new_session_page`
+  checks the example and proves the mounted loader reads a recorded prompt.
 - **`schema-review`** — a review policy of its own: a fact collector
   counting DDL per migration file (its own measure and dimension), a
   model joining those facts with core's evidence (`v_effort_file`,

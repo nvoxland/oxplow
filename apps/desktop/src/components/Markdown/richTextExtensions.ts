@@ -6,7 +6,7 @@ import { Markdown, type MarkdownStorage } from "tiptap-markdown";
 import { InternalLink } from "./InternalLink.js";
 import { RefTitles } from "./RefTitles.js";
 import { RefCompletion, type RefCompletionOptions } from "./RefCompletion.js";
-import { MermaidBlock } from "./MermaidBlock.js";
+import { FencedBlock } from "./FencedBlock.js";
 import { CommentDecorations } from "./CommentDecorations.js";
 
 // tiptap-markdown doesn't augment Tiptap 3's typed `Storage`, so
@@ -32,7 +32,7 @@ export function richTextExtensions({
 }: { inlineOnly?: boolean; placeholder?: string; refCompletion?: RefCompletionOptions } = {}): Extensions {
   return [
     StarterKit.configure({
-      // Replaced by MermaidBlock (which `extend`s CodeBlock under the
+      // Replaced by FencedBlock (which `extend`s CodeBlock under the
       // same name "codeBlock"). Avoid the duplicate name warning.
       codeBlock: false,
       // Replaced by InternalLink (StarterKit bundles Link since Tiptap 3).
@@ -47,7 +47,7 @@ export function richTextExtensions({
       blockquote: inlineOnly ? false : undefined,
       horizontalRule: inlineOnly ? false : undefined,
     }),
-    MermaidBlock,
+    FencedBlock,
     InternalLink,
     // A bare ref link shows its title, as in the viewer (decorations only).
     RefTitles,

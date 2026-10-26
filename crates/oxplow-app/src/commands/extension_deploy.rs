@@ -40,6 +40,17 @@ pub struct WritePageInput {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+pub struct NewDashboardInput {
+    /// What the dashboard is called; its page's name comes from it.
+    pub title: String,
+    /// The extension that holds it (default `my-pages`, created when
+    /// missing).
+    #[serde(default)]
+    pub extension: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct RollbackInput {
     /// The extension's name.
     pub name: String,
@@ -97,6 +108,7 @@ pub fn ops(services: ServicesSlot) -> Vec<Op> {
         deploy_op(services.clone()),
         rollback_op(services.clone()),
         write_page_op(services.clone()),
+        new_dashboard_op(services.clone()),
         enable_op(services.clone(), "enable", true),
         enable_op(services.clone(), "disable", false),
         remove_op(services.clone()),
@@ -163,6 +175,40 @@ fn write_page_op(services: ServicesSlot) -> Op {
                 )
                 .await
                 .map_err(deploy_error("oxplow.extension.write_page", &raw))?;
+                Ok(output(written))
+            })
+        })),
+    )
+}
+
+fn new_dashboard_op(services: ServicesSlot) -> Op {
+    Op::new(
+        "pages.author",
+        "new_dashboard",
+        schema::<NewDashboardInput>(),
+        false,
+        Handler::External(Arc::new(move |invocation: Invocation, input| {
+            let services = services.clone();
+            Box::pin(async move {
+                let raw = input.clone();
+                let input: NewDashboardInput = parse(input)?;
+                let svc = services.get()?;
+                let extension = input.extension.as_deref().unwrap_or("my-pages");
+                let stream = actor_stream(&svc, invocation.actor())
+                    .await?
+                    .as_deref()
+                    .and_then(oxplow_domain::StreamId::try_from_str);
+                crate::extension_deploy::refuse_draft_deploy(&svc, stream, extension)
+                    .await
+                    .map_err(domain)?;
+                let written = crate::extension_deploy::new_dashboard(
+                    &svc,
+                    extension,
+                    &input.title,
+                    invocation.confirmed,
+                )
+                .await
+                .map_err(deploy_error("oxplow.extension.new_dashboard", &raw))?;
                 Ok(output(written))
             })
         })),

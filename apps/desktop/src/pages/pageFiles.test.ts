@@ -1,11 +1,10 @@
 import { describe, expect, test } from "bun:test";
 
-import type { Extension, ExtensionPage, LensParam, Page } from "../tauri-bridge/generated/bindings.js";
+import type { Extension, ExtensionPage, PageParam, Page } from "../tauri-bridge/generated/bindings.js";
 import { fakeAction, fakePage, node } from "./testing/fakeRun.js";
 import {
   chooseRenderer,
   chooseRoute,
-  drawsAsFile,
   openWithOptions,
   pageFileOf,
   pageFileRenderers,
@@ -64,22 +63,8 @@ describe("renderers over page files", () => {
   });
 });
 
-describe("what the host can draw yet", () => {
-  test("views, tables and embeds draw; a form, a component, a lazy tree, an expand or a form action don't", () => {
-    expect(drawsAsFile(file("a", "plain"))).toBe(true);
-    expect(drawsAsFile(fakePage(node.stack("s", [node.markdown("m", "hi"), node.embed("e", "a/b")])))).toBe(true);
-    expect(drawsAsFile(fakePage(node.component("c", "a:c")))).toBe(false);
-    expect(drawsAsFile(fakePage(node.stack("s", [node.viz("f", null, { viz: "form" })])))).toBe(false);
-    expect(drawsAsFile(fakePage(node.viz("t", "t", { viz: "tree", tree: { id: "id", parent: null, label: null, lazy: "under" } })))).toBe(false);
-    expect(drawsAsFile(fakePage(node.viz("t", "t", { columns: [{ key: "a", expand: "a/b" } as never] })))).toBe(false);
-    expect(drawsAsFile(fakePage(node.viz("t", "t", { actions: [fakeAction({ id: "edit", form: true })] })))).toBe(false);
-    expect(drawsAsFile(fakePage(node.viz("t", "t"), { actions: [fakeAction({ id: "edit", form: true })] }))).toBe(false);
-    expect(drawsAsFile(fakePage(node.viz("t", "t"), { rail: node.component("c", "a:c") }))).toBe(false);
-  });
-});
-
-const param = (name: string, role: LensParam["role"], over: Partial<LensParam> = {}): LensParam =>
-  ({ name, label: null, default: null, options: [], type: "text", role, presets: [], ...over }) as LensParam;
+const param = (name: string, role: PageParam["role"], over: Partial<PageParam> = {}): PageParam =>
+  ({ name, label: null, default: null, options: [], type: "text", role, presets: [], ...over }) as PageParam;
 
 describe("a page's params from its URI", () => {
   const page = file("acme", "list", {
@@ -92,6 +77,13 @@ describe("a page's params from its URI", () => {
       q: "be",
       item: "i2",
     });
+  });
+
+  // A renderer's URI carries its resource's own params (`id`, `provider`);
+  // the page is run only with those it declares, since the server refuses
+  // any other.
+  test("a `?` param the page doesn't declare is left out", () => {
+    expect(pageRunParams(page, { project: "p1", id: "1", provider: "oxplow" }, {})).toEqual({ project: "p1" });
   });
 });
 
@@ -132,15 +124,18 @@ describe("what draws a tab", () => {
   ];
   const decls = exts2.flatMap((e) => e.pages);
 
-  test("a route: its page file, unless the host can't draw it yet and a `pages:` entry can", () => {
+  // A form, a component, a lazy tree, an expand, an options_from or a form
+  // action draws in a page file too: only a lens mounted in its slots
+  // keeps a page on its `pages:` entry.
+  test("a route: its page file — a form's too — and a `pages:` entry only for what has no file", () => {
     expect(chooseRoute(exts2, { extension: null, page: "tasks", params: {} })).toEqual({ file: tasks, declared: null });
-    expect(chooseRoute(exts2, { extension: null, page: "new-task", params: {} })).toEqual({ file: null, declared: decls[1] });
+    expect(chooseRoute(exts2, { extension: null, page: "new-task", params: {} })).toEqual({ file: formPage, declared: null });
     expect(chooseRoute(exts2, { extension: null, page: "gone", params: {} })).toEqual({ file: null, declared: null });
   });
 
-  test("a resource: its page file renderer first, a `pages:` renderer only for what has none or can't draw yet", () => {
+  test("a resource: its page file renderer first — a component's too — a `pages:` renderer only for what has none", () => {
     expect(chooseRenderer(exts2, "oxplow:oxplow/commit?sha=abc", {})).toEqual({ file: commit, declared: null });
-    expect(chooseRenderer(exts2, "oxplow:oxplow/file?path=a", {}).declared?.id).toBe("editor");
+    expect(chooseRenderer(exts2, "oxplow:oxplow/file?path=a", {})).toEqual({ file: editorFile, declared: null });
     expect(chooseRenderer(exts2, "oxplow:oxplow/lens?lens=a/b", {}).declared?.id).toBe("lens");
     expect(chooseRenderer(exts2, "oxplow:oxplow/nothing?id=1", {})).toEqual({ file: null, declared: null });
   });

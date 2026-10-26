@@ -187,7 +187,7 @@ mod tests {
             ".oxplow/extensions/late/lenses/counted.yaml",
             "title: Counted\nquery: SELECT count(*) AS n FROM v_late_counted\n",
         );
-        let ctx = crate::extensions::LensContext::default();
+        let ctx = crate::extensions::ViewContext::default();
         let run = |layer: crate::sql_gateway::SqlGateway| {
             let catalog = &catalog;
             let root = root.clone();

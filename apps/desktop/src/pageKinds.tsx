@@ -30,7 +30,6 @@ import {
   MessageSquareText,
   MessagesSquare,
   Scale,
-  StickyNote,
 } from "lucide-react";
 import type { ComponentProps, ReactElement } from "react";
 import { ICONS } from "./icons.js";
@@ -88,8 +87,6 @@ export function pageKindIconComponent(kind: string, extensions: Extension[] | nu
       return Bot;
     case "thread":
       return MessagesSquare;
-    case "thread_note":
-      return StickyNote;
     case "handoff":
       return Forward;
     case "comment":
@@ -178,8 +175,6 @@ export function pageKindLabel(kind: string, extensions: Extension[] | null = nul
       return "work item";
     case "agent_session":
       return "agent session";
-    case "thread_note":
-      return "note";
     default:
       return resourceInfo(kind)?.label ?? declaredPageOf(extensions, kind)?.title.toLowerCase() ?? kind;
   }

@@ -7,7 +7,7 @@ use oxplow_db::SqlCell;
 use oxplow_domain::Actor;
 
 use super::runner::*;
-use crate::extensions::LensContext;
+use crate::extensions::ViewContext;
 
 pub(crate) fn write(root: &Path, rel: &str, text: &str) {
     let file = root.join(rel);
@@ -263,7 +263,7 @@ pub(crate) async fn run(svc: &crate::Services, page: &str, params: &[(&str, SqlC
                 .iter()
                 .map(|(k, v)| (k.to_string(), v.clone()))
                 .collect(),
-            ctx: LensContext::default(),
+            ctx: ViewContext::default(),
             viewer: Actor::Human,
         })
         .await

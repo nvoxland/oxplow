@@ -13,6 +13,8 @@ import { activeRef, current, type Session } from "./session.js";
 import type { TabRef } from "./tabState.js";
 
 export interface TabReportInput {
+  /** All runs held anywhere in the window, not just its current tab. */
+  runs?: readonly string[];
   /** The window's renderer (`getUiClientId`). */
   client: string;
   focused: boolean;
@@ -29,6 +31,7 @@ export interface TabReportInput {
 export function buildTabReport(input: TabReportInput): TabReport {
   return {
     client: input.client,
+    runs: [...new Set(input.runs ?? [])].sort(),
     focused: input.focused,
     visible: input.visible,
     shown_thread: input.shownThread,
@@ -48,5 +51,28 @@ export function buildTabReport(input: TabReportInput): TabReport {
       active: activeRef(session)?.id ?? null,
     })),
     detail_json: input.detail ? JSON.stringify(input.detail) : null,
+  };
+}
+
+/** Reports acknowledge which runs the window still owns. Send them in
+ *  order: an old HTTP reply must not overtake a newer roster and close its
+ *  runs. While one is in flight only the latest pending snapshot matters. */
+export function createTabReporter(write: (report: TabReport) => Promise<unknown>) {
+  let pending: TabReport | null = null;
+  let running = false;
+  const drain = async () => {
+    running = true;
+    while (pending) {
+      const report = pending;
+      pending = null;
+      try { await write(report); } catch { /* A later snapshot or heartbeat repairs it. */ }
+    }
+    running = false;
+  };
+  return {
+    send(report: TabReport) {
+      pending = report;
+      if (!running) void drain();
+    },
   };
 }

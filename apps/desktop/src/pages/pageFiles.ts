@@ -2,9 +2,10 @@
 /// "Page files", "The desktop host"): a route's page by its id, a URI's
 /// renderer among the page files' `for`, the params a tab's URI gives its
 /// run, and where a change of them goes (the `?`, or the `#` replaced or
-/// pushed). What the host can't draw yet (`drawsAsFile`) still opens on its
-/// `pages:` entry's lens until those parts come.
-import type { Extension, ExtensionPage, LensParam, Node, Page, SqlCell } from "../tauri-bridge/generated/bindings.js";
+/// pushed). A page an enabled extension still mounts a lens into
+/// (`hasLensMounts`) opens on its `pages:` entry's lens until the mounts
+/// name pages.
+import type { Extension, ExtensionPage, Node, Page, SqlCell } from "../tauri-bridge/generated/bindings.js";
 import type { PagePayload } from "../tabs/pageRefs.js";
 import { isDefaultValue } from "../lens/lensModel.js";
 import { declaredPage } from "./declaredPages.js";
@@ -53,51 +54,18 @@ export function pageFileRenderers(extensions: readonly Extension[] | null): Page
   return enabledPageFiles(extensions).filter((p) => p.for.length > 0);
 }
 
-/** Whether the page host draws `page` today. A form, a custom component,
- *  a lazy tree, a row that expands, a param whose options another page
- *  reads, or an action that opens a form come with a later step: until
- *  then such a page opens on its `pages:` entry's lens. */
-export function drawsAsFile(page: Page): boolean {
-  if (page.actions.some((a) => a.form)) return false;
-  if (page.params.some((p) => hasOptionsFrom(p))) return false;
-  return drawable(page.view) && (page.rail === null || drawable(page.rail));
-}
-
-function drawable(n: Node): boolean {
-  switch (n.kind) {
-    case "stack":
-    case "grid":
-    case "switch":
-      return n.children.every(drawable);
-    case "component":
-      return false;
-    case "viz": {
-      const l = n.lens;
-      if (l.viz === "form" || l.viz === "custom" || l.form || l.custom) return false;
-      if (l.tree?.lazy) return false;
-      if (l.columns.some((c) => !!(c as { expand?: string | null }).expand)) return false;
-      if (l.actions.some((a) => a.form)) return false;
-      if (l.params.some((p) => hasOptionsFrom(p))) return false;
-      return true;
-    }
-    default:
-      return true;
-  }
-}
-
-function hasOptionsFrom(p: LensParam): boolean {
-  return !!(p as { options_from?: string | null }).options_from;
-}
-
-/** The params a tab's URI gives a page's run: its `?` params, and those
- *  of its `#` the page declares as a filter or a pick (never the shell's
+/** The params a tab's URI gives a page's run: the `?` params it declares
+ *  (a renderer's URI also carries its resource's own, `id`, `provider`,
+ *  which a page that doesn't declare them can't take), and those of its
+ *  `#` the page declares as a filter or a pick (never the shell's
  *  `oxplow.*`, a `#node=` landing or a resource param spelled in the `#`). */
 export function pageRunParams(
   page: Page,
   resource: Record<string, SqlCell>,
   view: Record<string, SqlCell>,
 ): Record<string, SqlCell> {
-  const out: Record<string, SqlCell> = { ...resource };
+  const out: Record<string, SqlCell> = {};
+  for (const p of page.params) if (p.name in resource) out[p.name] = resource[p.name] ?? null;
   for (const p of page.params) {
     if ((p.role ?? "resource") === "resource" || !(p.name in view)) continue;
     out[p.name] = view[p.name] ?? null;
@@ -146,9 +114,9 @@ export function pageViewChange(
 }
 
 /** What draws a tab: a page file, or — only for what has no page file, or
- *  one the host can't draw yet — a manifest's `pages:` entry (the lens
- *  path, removed once every page draws as a file). Both null: nothing
- *  declares it. */
+ *  one an extension still mounts a lens into — a manifest's `pages:` entry
+ *  (the lens path, removed once every page draws as a file). Both null:
+ *  nothing declares it. */
 export interface Drawer {
   file: Page | null;
   declared: ExtensionPage | null;
@@ -174,9 +142,10 @@ export function hasLensMounts(extensions: readonly Extension[], file: Page): boo
   return extensions.some((e) => e.enabled && (e.ui?.slots ?? []).some((m) => prefixes.some((p) => m.slot.startsWith(p))));
 }
 
-/** Whether the page host draws `file` in this window today. */
+/** Whether the page host draws `file` in this window today: unless a lens
+ *  is mounted into its slots, which a page file's slot can't show. */
 function drawsHere(extensions: readonly Extension[], file: Page): boolean {
-  return drawsAsFile(file) && !hasLensMounts(extensions, file);
+  return !hasLensMounts(extensions, file);
 }
 
 /** What draws a route (`oxplow:oxplow/page?page=…`). */

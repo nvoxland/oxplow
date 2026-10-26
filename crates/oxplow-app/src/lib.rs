@@ -180,7 +180,6 @@ pub mod param_pattern;
 #[cfg(test)]
 mod plan_tests;
 pub mod post_tool_reactors;
-pub mod prompt_catalog;
 pub mod providers;
 #[cfg(test)]
 mod reading_data_tests;
@@ -274,8 +273,8 @@ use oxplow_db::{
     Database, SqliteAgentNudgeStore, SqliteAgentSessionStore, SqliteAgentTurnStore,
     SqliteCodeQualityStore, SqliteCommentStore, SqliteEffortStore, SqliteEventLogStore,
     SqliteFactStore, SqlitePageRefStore, SqlitePageVisitStore, SqliteSearchStore,
-    SqliteSnapshotStore, SqliteStreamStore, SqliteThreadNoteStore, SqliteThreadStore,
-    SqliteTokenUsageStore, SqliteUsageStore, SqliteWikiPageStore, SqliteWikiPageThreadUpdateStore,
+    SqliteSnapshotStore, SqliteStreamStore, SqliteThreadStore, SqliteTokenUsageStore,
+    SqliteUsageStore, SqliteWikiPageStore, SqliteWikiPageThreadUpdateStore,
 };
 use oxplow_domain::stores::AgentStatusStore;
 use oxplow_session::{StreamService, ThreadService, WorkspaceLayout};
@@ -560,7 +559,6 @@ pub struct Services {
     /// A thread's agent sessions (`agent_session`).
     pub agent_session_store: Arc<SqliteAgentSessionStore>,
     pub task_store: Arc<SqliteTaskStore>,
-    pub thread_note_store: Arc<SqliteThreadNoteStore>,
     /// Work handed between threads (`.context/agent-model.md` "Handoffs").
     pub handoff_store: Arc<oxplow_db::SqliteHandoffStore>,
     /// The event log (`.context/data-model.md` "event_log"). Producers
@@ -1027,7 +1025,6 @@ impl Services {
         ));
         let comment_store = Arc::new(SqliteCommentStore::new(db.clone(), vocabulary.clone()));
         let task_store = Arc::new(SqliteTaskStore::new(db.clone()));
-        let thread_note_store = Arc::new(SqliteThreadNoteStore::new(db.clone()));
         let handoff_store = Arc::new(oxplow_db::SqliteHandoffStore::new(db.clone()));
         let event_log_store = Arc::new(SqliteEventLogStore::new(db.clone(), vocabulary.clone()));
         let extension_activation = Arc::new(extension_activation::ExtensionActivation::new());
@@ -1598,7 +1595,6 @@ impl Services {
                 vcs: vcs.clone(),
             },
         ))
-        .chain(commands::note::ops(link_deps.clone()))
         .chain(commands::handoff::ops(
             link_deps.clone(),
             work_items.clone(),
@@ -1930,7 +1926,6 @@ impl Services {
             thread_store,
             agent_session_store,
             task_store,
-            thread_note_store,
             handoff_store,
             event_log_store,
             sql,
@@ -2343,6 +2338,8 @@ mod tests {
                 "oxplow.extension.disable",
                 "oxplow.extension.draft_status",
                 "oxplow.extension.enable",
+                // Page YAML in the extension source; deployment owns what runs.
+                "oxplow.extension.new_dashboard",
                 "oxplow.extension.preview",
                 "oxplow.extension.remove",
                 "oxplow.extension.revoke_secret",

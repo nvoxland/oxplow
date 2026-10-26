@@ -100,7 +100,7 @@ interface PendingSelection {
  * composes them at the React level.
  *
  * Storage stays markdown. tiptap-markdown handles GFM round-trip on
- * mount and on save; the `MermaidBlock` NodeView paints rendered SVG
+ * mount and on save; the `FencedBlock` NodeView paints rendered SVG
  * over the editable fenced code, so users see the diagram unless they
  * click into it.
  *
@@ -218,7 +218,7 @@ export function RichTextField({
   const editor = useEditor({
     // Defer the first editor render out of React's render phase. With
     // the default (true), the initial document — including the
-    // MermaidBlock React NodeView, which flushes via flushSync — renders
+    // FencedBlock React NodeView, which flushes via flushSync — renders
     // synchronously during RichTextField's render, triggering React's
     // "flushSync was called from inside a lifecycle method" warning. No
     // SSR here, so deferring to a post-commit effect is invisible.
@@ -327,7 +327,7 @@ export function RichTextField({
   // has focus.
   //
   // Deferred to a microtask: the new content can create React NodeViews
-  // (MermaidBlock), which Tiptap renders with flushSync — illegal while
+  // (FencedBlock), which Tiptap renders with flushSync — illegal while
   // React is still committing this effect. Guards re-run at apply time
   // since focus or the editor itself may have changed in between.
   useEffect(() => {

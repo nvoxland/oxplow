@@ -2,7 +2,7 @@ import type { PickedRow } from "./LensRail.js";
 import { useCallback, useEffect, useId, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 
 import { listMetricDefinitions, runLensAction, type LensRun, type MetricSpec, type SqlCell } from "../api.js";
-import type { LensAction, LensPart, Reads } from "../tauri-bridge/generated/bindings.js";
+import type { PageAction, LensPart, Reads } from "../tauri-bridge/generated/bindings.js";
 import { askAssistant } from "../components/Assistant/assistantSession.js";
 import { addToContext } from "../contextBasket.js";
 import { CommandConfirm } from "../components/CommandConfirm.js";
@@ -210,7 +210,7 @@ function useMetricDefs(wanted: boolean): Map<string, MetricSpec> {
 
 /** The column an edit action saves (`{{row.<column>}}` bound to its
  *  edited field), if any. */
-function editColumn(action: LensAction): string | null {
+function editColumn(action: PageAction): string | null {
   const bound = action.editField ? (action.input as Record<string, unknown> | null)?.[action.editField] : null;
   const m = typeof bound === "string" ? /^\{\{\s*row\.([^}|\s]+)\s*\}\}$/.exec(bound) : null;
   return m ? m[1]! : null;
@@ -411,7 +411,7 @@ function RowTileBody({
   def: MetricSpec | null;
   window: { range: ReturnType<typeof resolveRange>; branch: string | null };
   /** The lens's edit action, when it saves the tiles' text. */
-  edit: LensAction | null;
+  edit: PageAction | null;
   dashboard: LensRun;
   streamId: string | null;
   onOpenPage?(ref: TabRef): void;

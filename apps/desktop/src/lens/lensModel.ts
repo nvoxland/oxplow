@@ -18,7 +18,7 @@ import {
   formatRelative,
   formatShortDateTime,
 } from "../components/format.js";
-import type { ColumnFormat, Extension, Lens, LensParam, LensPart, SlotAt, LensChart, LensLink, LensRun, LensViz, SqlCell, SqlQueryResult } from "../tauri-bridge/generated/bindings.js";
+import type { ColumnFormat, Extension, Lens, PageParam, LensPart, SlotAt, LensChart, LensLink, LensRun, LensViz, SqlCell, SqlQueryResult } from "../tauri-bridge/generated/bindings.js";
 import { PAGE_CATEGORY_ORDER, type PageDirectoryEntry } from "../components/RailHud/sections.js";
 import { diffRef, duplicateBlockRef, effortDiffRef, fileRefAt, gitCommitRef, lensRef, metricRef, wikiPageRef } from "../tabs/pageRefs.js";
 import { WORKING, parseRevision, shortRevisionLabel } from "../revision.js";
@@ -42,11 +42,11 @@ export interface DisplayColumn {
   toneIndex: number | null;
   /** Its width in pixels, when the lens fixes one. */
   width: number | null;
-  /** How its value reads (`LensColumn.format`). */
+  /** How its value reads (`PageColumn.format`). */
   format: ColumnFormat | null;
   /** The param whose current value is marked in the cell's text. */
   highlight: string | null;
-  /** The lens this column's cell opens under its row (`LensColumn.expand`). */
+  /** The lens this column's cell opens under its row (`PageColumn.expand`). */
   expand?: string | null;
 }
 
@@ -333,7 +333,7 @@ export function isTimestamp(v: SqlCell): v is string {
 /** Plain-text rendering of one cell: by its column's `format` when it
  *  has one; else a timestamp in local time, as the rest of the app shows
  *  times, and a number with its `unit` (another cell's value,
- *  `LensColumn.unit`) as a metric value (tsk1038). */
+ *  `PageColumn.unit`) as a metric value (tsk1038). */
 export function formatCell(v: SqlCell, unit?: SqlCell, format?: ColumnFormat | null): string {
   if (v === null) return "—";
   if (typeof v === "boolean") return v ? "yes" : "no";
@@ -382,7 +382,7 @@ function byFormat(v: string | number, format: ColumnFormat): string | null {
 }
 
 /** Launcher entries for every loaded lens that isn't `hidden`, under its
- *  `launcher.category` (default "Lenses"). Broken or disabled extensions
+ *  `launcher.category` (default "Dashboards"). Broken or disabled extensions
  *  contribute nothing here (their errors surface in Settings). */
 export function lensDirectoryEntries(extensions: Extension[]): PageDirectoryEntry[] {
   const out: PageDirectoryEntry[] = [];
@@ -395,7 +395,7 @@ export function lensDirectoryEntries(extensions: Extension[]): PageDirectoryEntr
         id: ref.id,
         label: lens.title,
         ref,
-        category: lens.launcherCategory ?? "Lenses",
+        category: lens.launcherCategory ?? "Dashboards",
         keywords: `lens ${ext.name} ${lens.slug} ${lens.description}`,
       });
     }
@@ -469,7 +469,7 @@ export function lensViewChange(
 
 /** A view document's view param (`view: <name>`): the one whose value
  *  names the section in view; null for any other lens. */
-export function viewParam(lens: Lens): LensParam | null {
+export function viewParam(lens: Lens): PageParam | null {
   return lens.view ? (lens.params.find((p) => p.name === lens.view) ?? null) : null;
 }
 
@@ -492,7 +492,7 @@ export function viewOptions(lens: Lens): { id: string; label: string }[] {
 /** The filters a lens page's rail offers: every param but its picks; for
  *  a view document, not its view param (the section rail) and only the
  *  ones the section in view declares (`viewed`, none until it's known). */
-export function offeredFilters(lens: Lens, viewed: Lens | null): LensParam[] {
+export function offeredFilters(lens: Lens, viewed: Lens | null): PageParam[] {
   const filters = lens.params.filter((p) => p.role !== "selection");
   if (!lens.view) return filters;
   return filters.filter((p) => p.name !== lens.view && !!viewed?.params.some((q) => q.name === p.name));
@@ -509,7 +509,7 @@ export function misplacedViewParams(lens: Lens, params: Record<string, SqlCell>)
 
 /** Whether `value` is `param`'s default: a bool by truth (its echo is
  *  0/1, a ref's `true`/`false`), anything else by its text. */
-export function isDefaultValue(param: Pick<LensParam, "type" | "options" | "default">, value: SqlCell): boolean {
+export function isDefaultValue(param: Pick<PageParam, "type" | "options" | "default">, value: SqlCell): boolean {
   const fallback = param.default ?? null;
   const type = param.type ?? ((param.options?.length ?? 0) > 0 ? "choice" : "text");
   if (type === "bool") return truthy(value) === truthy(fallback);

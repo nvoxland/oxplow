@@ -4,8 +4,8 @@
 import { createPageRuns, type PageKey, type PageRunsTransport, type RunChange } from "../../pageRuns.js";
 import type {
   Lens,
-  LensAction,
-  LensParam,
+  PageAction,
+  PageParam,
   LoaderDecl,
   LoaderRun,
   Node,
@@ -61,7 +61,7 @@ export function fakeLens(over: Partial<Lens> = {}): Lens {
   } as Lens;
 }
 
-export function fakeAction(over: Partial<LensAction> & { id: string }): LensAction {
+export function fakeAction(over: Partial<PageAction> & { id: string }): PageAction {
   return {
     label: over.id,
     command: `acme.${over.id}`,
@@ -82,7 +82,7 @@ export function fakeAction(over: Partial<LensAction> & { id: string }): LensActi
     editField: null,
     oneRow: false,
     ...over,
-  } as LensAction;
+  } as PageAction;
 }
 
 interface Common {
@@ -193,7 +193,7 @@ export function fakeRun(
 // --- The scenarios -------------------------------------------------------
 
 /** A page that is one table over one loader (a lens moved over 1:1). */
-export function tablePage(over: { actions?: LensAction[]; params?: LensParam[]; rowActions?: LensAction[] } = {}): PageRun {
+export function tablePage(over: { actions?: PageAction[]; params?: PageParam[]; rowActions?: PageAction[] } = {}): PageRun {
   const page = fakePage(
     node.viz("items", "items", {
       columns: [{ key: "id" }, { key: "title" }],
@@ -262,13 +262,14 @@ export function gridPage(): PageRun {
 export function fakePageRuns(run: PageRun, next?: (params: Record<string, SqlCell>) => PageRun | Promise<PageRun>) {
   const calls = { open: [] as PageKey[], setParams: [] as Record<string, SqlCell>[], rerun: 0 };
   let change: (c: RunChange) => void = () => {};
+  let seq = 0;
   const transport: PageRunsTransport = {
     open: async (key) => {
       calls.open.push(key);
       return { runId: "run-1", run };
     },
     close: async () => {},
-    fetch: async () => ({ "run-1": run }),
+    fetch: async () => ({ "run-1": { run, seq } }),
     setParams: async (_id, params) => {
       calls.setParams.push(params);
       return next ? next(params) : run;
@@ -283,7 +284,7 @@ export function fakePageRuns(run: PageRun, next?: (params: Record<string, SqlCel
     },
     onReconnect: () => () => {},
   };
-  return { runs: createPageRuns(transport), calls, emit: (c: RunChange) => change(c) };
+  return { runs: createPageRuns(transport), calls, emit: (c: RunChange) => { seq = Math.max(seq, c.seq); change(c); } };
 }
 
 /** A `PageRuns` store over many pages: `answer` gives each key's run (a
@@ -301,7 +302,7 @@ export function fakePageRunsBy(answer: (key: PageKey) => PageRun | Promise<PageR
       return { runId, run };
     },
     close: async () => {},
-    fetch: async (ids) => Object.fromEntries(ids.flatMap((id) => (byId.has(id) ? [[id, byId.get(id)!]] : []))),
+    fetch: async (ids) => Object.fromEntries(ids.flatMap((id) => (byId.has(id) ? [[id, { run: byId.get(id)!, seq: 0 }]] : []))),
     setParams: async (id) => byId.get(id)!,
     rerun: async (id) => byId.get(id)!,
     onChange: () => () => {},

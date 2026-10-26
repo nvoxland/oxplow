@@ -864,3 +864,47 @@ asset, parameters and stream. The renderer captures it when loading the frame
 and forwards it over local/remote RPC. The host resolves the immutable bundle
 and uses its asset allowlist; missing/foreign versions require a reload. New
 manifest assets cannot widen an old running frame's query authority.
+
+## Page definitions
+
+`report_tabs` includes all page-run ids held by its window (tabs, hidden
+history bodies, panels and inline markdown). Reports are sent in order through
+a coalescing single-flight reporter. The daemon removes omitted runs only
+after that window has reported them once: an older roster sent before a new
+open's response cannot prematurely close it. A minute maintenance tick drops
+runs of windows whose reports expired, with the first-report grace for new opens.
+Never-acknowledged runs expire after that grace even if their window is alive
+(an open reply may have been lost).
+The event socket independently owns a generation-fenced window guard, releasing
+its runs immediately on disconnect. Explicit `close_page` still releases one run.
+
+`fetch_page_runs` returns a map of run IDs to `{ run, seq }`, captured together
+under the run-store lock. The triggering notice is only a lower bound on a fetch's
+version; clients compare the returned sequence to reject older HTTP responses.
+Direct Refresh/parameter requests fence fetches at both start and completion;
+interleaved replies reconcile through another versioned snapshot.
+
+`page_spec { page }` is the window's read of the YAML it will visually edit.
+It returns the page id, extension, slug, YAML and `writable`. A writable
+page reads its current primary source, including undeployed edits; a
+bundled page reads its running file and is read-only. Saving remains the
+`oxplow.extension.write_page` command, not a filesystem RPC.
+
+`open_page` returns `specYaml` for inline and ephemeral runs. The tab keeps
+it in history; if a view's in-memory registry entry is gone after restart,
+opening that view with the retained YAML uses the ordinary inline parser.
+Without either a live view or retained YAML it returns an explicit error.
+
+`oxplow.page.definition` is a read command over the page runner. Its input
+requires exactly one of `page` (a deployed page ID) and `spec` (inline page
+YAML), plus optional `params` and `stream_id`. Inline definitions pass through
+the same `parse_inline_page` restrictions as one-off views: actions and command
+loaders are refused before a run opens. Reading a definition grants no acting
+authority.
+
+The result contains page metadata, loader declarations, flattened node rows
+(including parent, page, source file, loader kind and source), and `yaml`.
+For inline specs, `yaml` is the exact submitted text, including comments and
+formatting. For deployed pages it is the running file's text. Foundation's
+`definition` page uses the same command loaders for both targets; its `spec`
+param carries an ephemeral view's YAML when no deployed page is named.

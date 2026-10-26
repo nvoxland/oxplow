@@ -30,14 +30,6 @@ A project can choose no store for knowledge (Settings → Capabilities).
 say once that the page wasn't kept and that choosing a knowledge store in
 Settings → Capabilities keeps pages.
 
-## Folding in Explore findings
-
-If this turn dispatched Explore subagents that wrote findings into thread
-notes (`oxplow.knowledge.update_note`), read `v_thread_note` with
-`oxplow_query_sql` and fold their findings into the wiki page rather than
-discarding them. Subagent notes are otherwise invisible; the wiki is where
-they become durable.
-
 ## Diagrams
 
 Common picks: hierarchies and dependencies → `graph TD`; lifecycles →

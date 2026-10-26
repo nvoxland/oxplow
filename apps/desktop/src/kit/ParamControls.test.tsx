@@ -2,18 +2,18 @@ import { afterEach, expect, test } from "bun:test";
 import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 
 import type { SqlCell, SqlQueryResult } from "../api.js";
-import type { LensParam } from "../tauri-bridge/generated/bindings.js";
+import type { PageParam } from "../tauri-bridge/generated/bindings.js";
 import { ParamList, ParamRow } from "./ParamControls.js";
 
 afterEach(cleanup);
 
-function param(over: Partial<LensParam> & { name: string }): LensParam {
-  return { label: null, default: null, options: [], presets: [], role: "filter", ...over } as LensParam;
+function param(over: Partial<PageParam> & { name: string }): PageParam {
+  return { label: null, default: null, options: [], presets: [], role: "filter", ...over } as PageParam;
 }
 
 type Query = (sql: string) => Promise<SqlQueryResult>;
 
-function setup(p: LensParam, value: SqlCell, query?: Query) {
+function setup(p: PageParam, value: SqlCell, query?: Query) {
   const applied: [string, SqlCell][] = [];
   const view = render(<ParamRow param={p} value={value} onApply={(n, v) => applied.push([n, v])} query={query} />);
   const valueButton = () => view.getByTestId(`lens-param-${p.name}-value`);

@@ -859,18 +859,6 @@
   tests:
     - { not_null: uri }
     - { unique: uri }
-- name: search_thread_note
-  version: 6
-  description: "What site search indexes for each thread note: the `thread_note` kind's index is restated from these rows when they change."
-  columns:
-    - { name: "uri", type: "TEXT", doc: "The note's canonical ref (`oxplow:oxplow/thread_note?id=not<n>`): what a hit opens." }
-    - { name: "title", type: "TEXT", doc: "Empty: a note has no title." }
-    - { name: "body", type: "TEXT", doc: "The note's markdown." }
-    - { name: "stream_id", type: "TEXT", doc: "Its thread's stream (`str1`)." }
-    - { name: "version", type: "TEXT", doc: "Changes whenever the row's text does; a recompute reads the text of rows whose version moved only. (v4: when it was written; a note is not edited)" }
-  tests:
-    - { not_null: uri }
-    - { unique: uri }
 - name: search_work_item
   version: 4
   description: "What site search indexes for each of the active work list's items (the `work_item` kind's index is restated from these rows when they change), through the work-item interface. Deleted items, and items on archived threads or streams, aren't in it. v2: each item's comments follow its body."
@@ -1518,19 +1506,6 @@
   tests:
     - { not_null: uri }
     - { unique: uri }
-- name: prompt
-  version: 2
-  key: [position]
-  description: "What a person can ask oxplow's agent: every question one of core's areas answers and every enabled extension's `intent.prompts`, in the catalog's order (core first, then extensions by name). The Catalog page lists them with Ask; a page for a URI offers the ones `about` its kind. Restated with each extension generation."
-  columns:
-    - { name: "position", type: "INTEGER", doc: "Its place in the catalog, from 1." }
-    - { name: "source_kind", type: "TEXT", doc: "`area` (one of core's) or `extension`." }
-    - { name: "source", type: "TEXT", doc: "The area (`vcs`, `work_items`, `knowledge`, `code_intel`, `extensions`) or the extension's name." }
-    - { name: "prompt", type: "TEXT", doc: "The question, as the person would ask it." }
-    - { name: "about", type: "TEXT", doc: "The ref kind a page for one offers it on (`file`, `commit`, `effort`); NULL when it is about nothing in particular." }
-  tests:
-    - { not_null: position }
-    - { unique: position }
 - name: config_key
   version: 2
   key: [key]
@@ -1809,21 +1784,6 @@
     - { name: "delivered_at", type: "TEXT", doc: "When a prompt carried it to an agent; NULL while it waits in the basket." }
     - { name: "delivered_session_id", type: "INTEGER", doc: "The agent session whose prompt carried it (v_agent_session.id); NULL while it waits, or when the prompt came from no known session." }
     - { name: "thread_uri", type: "TEXT", doc: "Its thread's URI (`oxplow:oxplow/thread?id=thr<n>`)." }
-  tests:
-    - { not_null: id }
-    - { unique: id }
-    - { relationships: { column: thread_id, to: thread, field: id } }
-- name: thread_note
-  version: 5
-  description: "A thread's notes: the capture pad an agent writes as it works (`oxplow.knowledge.add_note`; ref `oxplow:oxplow/thread_note?id=not<n>`)."
-  columns:
-    - { name: "id", type: "INTEGER", doc: "Note id (`not<n>`)." }
-    - { name: "thread_id", type: "INTEGER", doc: "The thread it's on." }
-    - { name: "body", type: "TEXT", doc: "Markdown body." }
-    - { name: "author", type: "TEXT", doc: "Who wrote it (`agent`, `user`, …)." }
-    - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
-    - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/thread_note?id=not<id>`: its URI, the one place SQL spells it — select and join on this, never rebuild it. (v2)" }
-    - { name: "thread_uri", type: "TEXT", doc: "Its thread's URI (`oxplow:oxplow/thread?id=thr<n>`): where a note opens. (v3)" }
   tests:
     - { not_null: id }
     - { unique: id }

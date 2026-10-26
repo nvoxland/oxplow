@@ -8,19 +8,19 @@ import { promptsOf } from "./usePromptCatalog.js";
 // every Ask fills the Assistant's box and never sends.
 
 const catalog: CatalogPrompt[] = [
-  { prompt: "Which files did this effort touch?", about: "oxplow/effort", source: { kind: "area", name: "work_items" } },
-  { prompt: "Who has changed this file the most?", about: "oxplow/file", source: { kind: "area", name: "vcs" } },
+  { prompt: "Which files did this effort touch?", about: "oxplow/effort", source: { kind: "extension", name: "oxplow-foundation" } },
+  { prompt: "Who has changed this file the most?", about: "oxplow/file", source: { kind: "extension", name: "oxplow-foundation" } },
   { prompt: "Which PRs wait on me?", about: null, source: { kind: "extension", name: "gh" } },
 ];
 
 const realApi = await import("../../api.js");
-// What `v_prompt` answers, as rows.
+// What `v_page_answer` answers, as rows.
 const rows = catalog.map((p) => [p.source.kind, p.source.name, p.prompt, p.about]);
 mock.module("../../api.js", () => ({
   ...realApi,
   querySql: async (sql: string) =>
-    sql.includes("v_prompt")
-      ? { columns: ["source_kind", "source", "prompt", "about"], rows, truncated: false, reads: { models: ["v_prompt"], tables: [], measures: [] } }
+    sql.includes("v_page_answer")
+      ? { columns: ["source_kind", "source", "prompt", "about"], rows, truncated: false, reads: { models: ["v_page_answer"], tables: [], measures: [] } }
       : realApi.querySql(sql),
 }));
 const { EmptyState } = await import("./EmptyState.js");
@@ -33,7 +33,7 @@ afterEach(() => {
   dockStore.close();
 });
 
-test("v_prompt's rows are the catalog; prompts about a kind", () => {
+test("v_page_answer's rows are the catalog; prompts about a kind", () => {
   expect(promptsOf(rows)).toEqual(catalog);
   expect(promptsAbout(catalog, "oxplow/effort").map((p) => p.prompt)).toEqual(["Which files did this effort touch?"]);
 });

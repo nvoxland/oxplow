@@ -482,7 +482,7 @@ mod tests {
             .sql
             .query_sql(
                 "SELECT resource, resolve, searchable FROM v_resource \
-                 WHERE resource IN ('oxplow/work_item', 'oxplow/thread_note', 'oxplow/decision', 'oxplow/comment', 'oxplow/file', 'oxplow/event') \
+                 WHERE resource IN ('oxplow/work_item', 'oxplow/decision', 'oxplow/comment', 'oxplow/file', 'oxplow/event') \
                  ORDER BY resource",
                 vec![],
                 None,
@@ -506,11 +506,6 @@ mod tests {
                 ],
                 vec![text("oxplow/event"), text("v_event"), SqlCell::Null(())],
                 vec![text("oxplow/file"), SqlCell::Null(()), SqlCell::Null(())],
-                vec![
-                    text("oxplow/thread_note"),
-                    text("v_thread_note"),
-                    text("v_search_thread_note")
-                ],
                 vec![
                     text("oxplow/work_item"),
                     text("v_work_item"),
