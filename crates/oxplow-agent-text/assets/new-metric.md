@@ -1,5 +1,5 @@
 ---
-description: Author an oxplow metric — a durable, chartable number tracked over time (count of X, complexity, bundle size, …). Scaffolds an extension (measure + collector + dimension + metric + lens) and verifies it.
+description: Author an oxplow metric — a durable, chartable number tracked over time (count of X, complexity, bundle size, …). Scaffolds an extension (measure + collector + dimension + metric + page) and verifies it.
 ---
 
 Author a metric so oxplow tracks a number over time and charts it on the
@@ -26,7 +26,7 @@ count, high-complexity functions, `any` usage, …), just turn it on with the
 
 A metric you author is an **extension** under
 `.oxplow/extensions/<name>/`: it declares the measure, the collector, the
-dimension its facts carry, the metric and a lens that links to the files,
+dimension its facts carry, the metric and a page that links to the files,
 and it has a fixture that proves the collector. Scaffold it with the
 **`oxplow.metric.scaffold` command** (`run_command`), which writes nothing and
 returns the files:
@@ -53,7 +53,7 @@ with your file tools, then change them into what the user asked for:
 - `fixtures/basic.yaml` and the intent example — a small corpus
   (`files: { path: text }`) and the facts it must produce. Change them with
   the script; they are the proof the collector is right.
-- `lenses/<name>.yaml` — a launcher lens over `metric_findings('<metric>')`
+- `pages/<name>.yaml` — a launcher page over `metric_findings('<metric>')`
   whose `path` column links to the file at the `line` column.
 
 The trio in `extension.yaml` looks like this (all of it is generated):
@@ -91,7 +91,7 @@ copy-paste templates.
 ## 4. Verify
 
 1. `oxplow extension check <name>` — no errors and no warnings (or
-   `oxplow_validate_extension`). It dry-runs the lens, so a bad query shows here.
+   `oxplow_validate_extension`). It dry-runs the page, so a bad query shows here.
 2. `oxplow extension test <name>` — the collector runs over the fixture's
    files and must return the facts the example expects.
 3. Deploy it: `oxplow.extension.deploy { name: "<name>" }` (`run_command`). It returns once the extension is live. Then `oxplow.collector.sync { collector:
@@ -100,7 +100,7 @@ copy-paste templates.
 4. `oxplow_query_sql`: `SELECT bucket, MEASURE('<ns>.complex_functions') FROM
    metric_grid('day')` — confirm the value; slice it with `metric_grid('day',
    '<ns>.area')`.
-5. It appears on the Metrics page automatically, and the lens in the launcher
+5. It appears on the Metrics page automatically, and the page in the launcher
    (Code).
 
 Leave the new extension folder for the user to review. It stays personal until they share it (`oxplow.extension.share { name }`).

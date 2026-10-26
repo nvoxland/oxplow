@@ -96,26 +96,21 @@ const OXPLOW_SKILLS: &[SkillFiles] = &[
             "development-cycle",
             "scaffolding",
             "semantic-layer",
-            "lens-format",
-            "page-layout",
+            "page-format",
+            "loaders",
+            "view-nodes",
+            "recipes",
+            "dashboards",
+            "markdown-blocks",
             "ui-contributions",
             "commands-and-forms",
             "collectors",
             "metrics",
             "jobs-and-ai",
-            "check",
             "testing",
             "providers",
-            "lenses-in-use",
             "repair-and-sharing",
-            "reading-data",
-            "dashboards",
-            "page-format",
-            "loaders",
-            "view-nodes",
-            "markdown-blocks",
-            "dashboards-as-pages",
-            "recipes"
+            "reading-data"
         ]
     ),
     skill!("oxplow-codebase", ["code", "history"]),
@@ -165,14 +160,14 @@ mod tests {
             .unwrap();
         assert_eq!(*name, "oxplow-extension");
         assert!(
-            description.starts_with("Build oxplow lenses"),
+            description.starts_with("Build oxplow pages"),
             "{description}"
         );
         assert!(index.iter().all(|(_, d)| !d.is_empty()));
         assert!(text
             .skill_body("oxplow-extension")
             .unwrap()
-            .contains("# Building oxplow lenses"));
+            .contains("# Building oxplow pages"));
         assert_eq!(text.skill_body("nope"), None);
     }
 

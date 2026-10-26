@@ -17,7 +17,7 @@ CI runs), add a **collector** to the extension:
 - `examples/extensions/github/` in the oxplow repo is a complete, working
   example; copy its shape.
 - The entity becomes `v_<extension>_<entity>`. Join it to core views in
-  lenses.
+  pages.
 
 Rules:
 

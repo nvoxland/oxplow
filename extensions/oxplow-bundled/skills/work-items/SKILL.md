@@ -1,6 +1,6 @@
 ---
 name: work-items
-description: The project's work list — when filing a work item is worth it, the work_item.* commands (create, transition, update, link, comment), states, epics and link types, and reading items (read, the work-next lens, v_work_item). Loads on the oxplow `run_command` tool with work_item.*, and on v_work_item.
+description: The project's work list — when filing a work item is worth it, the work_item.* commands (create, transition, update, link, comment), states, epics and link types, and reading items (read, the work-next page, v_work_item). Loads on the oxplow `run_command` tool with work_item.*, and on v_work_item.
 ---
 
 # Work items

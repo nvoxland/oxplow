@@ -1,56 +1,50 @@
 ---
 name: oxplow-extension
-description: Build oxplow lenses and extensions on request: custom pages over oxplow's data (tasks, efforts, threads, comments, wiki, snapshots, metrics facts) that the user sees in the app and can share with their team. Loads when the user asks to "make/build/show me a lens/page/view/list/report of X", "a place where I can see X", "track X across threads/efforts", "what's waiting on me", or asks to change an existing lens. Teaches the semantic layer (`v_model`, `oxplow_query_sql` over `v_*` views), the `.oxplow/extensions/<name>/` file format, and the validate → oxplow_run_lens loop.
+description: Build oxplow pages and extensions on request: views over oxplow's data (tasks, efforts, threads, comments, wiki, snapshots, metrics) that the user sees in the app and can share with their team. Loads when the user asks to "make/build/show me a page/view/report/dashboard/list of X", "a place where I can see X", "track X across threads/efforts", "what's waiting on me", or asks to change an existing page. Teaches the semantic layer (`v_model`, `oxplow_query_sql`), the `.oxplow/extensions/<name>/` format, and the validate, preview, test, deploy loop.
 ---
 
+# Building oxplow pages
 
-# Building oxplow lenses
+A **page** (`pages/<slug>.yaml`) is named queries (`data:`) plus a tree of
+nodes that shows them (`view:`); it updates as the work changes. Pages live
+in **extensions**: plain-file folders at `.oxplow/extensions/<name>/` the
+user can keep and share. Scaffold with `oxplow extension new <kind> <name>
+--origin <your effort ref>` or write a page with `oxplow.extension.write_page`.
+Nothing runs a source until `oxplow.extension.deploy { name }`.
 
-A **lens** is a saved query over oxplow's data plus how to show it, opened
-as a page; it updates as the work changes. Lenses live in **extensions**:
-plain-file folders at `.oxplow/extensions/<name>/` (`extension.yaml`,
-`lenses/<slug>.yaml`) the user can keep and share with their team.
-Scaffold with `oxplow extension new <kind> <name> --origin <your effort
-ref>`, then edit; the scaffold passes `check` as written. Nothing runs a
-source: an extension is live only after `oxplow.extension.deploy { name }`.
-
-**To answer a question** with a table, chart or list, call `oxplow_show_lens`
-(an existing `lens` plus `params`, or your own `spec`) instead of pasting
-rows; build a lens file only for a lasting page.
+**Before building, look:** `oxplow_find_page { question }` finds the page
+that already answers it; `oxplow_show_page { page }` shows it. **To answer
+with a table or chart now**, `oxplow_show_page { spec }` (an inline page,
+read-only) beats pasting rows; build a file only for a lasting page.
 
 **The loop:** find the data (`v_model`, `v_model_column`, `oxplow_query_sql`:
-read the columns, never guess) → write the files → `oxplow_validate_extension`
-after every edit → `oxplow_run_lens` → run `oxplow.extension.deploy { name }`
-when a step is complete (it replaces what runs, live; never ask for a
-restart) → tell the user the title and how to open it (Cmd+P).
-Deploys run the main stream's copy; a worktree's is a draft. `check`,
-`oxplow_preview_extension`, `oxplow_run_lens` and `oxplow_show_lens` with a
-`spec` read the source and dry-run, so no deploy is needed first.
+read columns, never guess) → write the page → `oxplow_validate_extension`
+after every edit → `oxplow_run_page` (`draft: true` in a worktree) → add a
+fixture → `oxplow.extension.deploy { name }` from the main stream (it
+replaces what runs, live; never ask for a restart) → tell the user the
+title and how to open it (Cmd+P).
 
-**Open the reference for the task at hand** (a file here, or `oxplow_get_skill`
-with `name: oxplow-extension` and `reference: <name>`):
+**Open the reference for the task at hand** (a file here, or
+`oxplow_get_skill` with `name: oxplow-extension` and `reference: <name>`):
 
-- `references/development-cycle.md`: source and deployment, when to deploy, held deployments.
-- `references/scaffolding.md`: the kinds `extension new` makes, the words used exactly.
-- `references/semantic-layer.md`: finding data, URIs in SQL and scripts, models.
-- `references/lens-format.md`: manifest, lens keys, viz, params, links, styling, alerts, actions.
-- `references/page-layout.md`: where things go on a page (nav bar, body, rail) and what check warns about.
-- `references/ui-contributions.md`: slots, pages, panels, decorators, replacing a core view.
-- `references/commands-and-forms.md`: your own commands, custom components, forms.
-- `references/collectors.md`: outside or derived data, credentials, host services, `ai_*`.
-- `references/metrics.md`: measures, metrics, dimensions, fact collectors.
-- `references/jobs-and-ai.md`: model jobs with tools, `ai_profiles`.
-- `references/check.md`: what `check` covers, `oxplow_run_lens`, `questions.yaml`.
-- `references/testing.md`: `oxplow_preview_extension` and the fixture shape of every kind.
-- `references/providers.md`: external providers: testing, credentials, adapters.
-- `references/lenses-in-use.md`: `oxplow_show_lens`, changing "this lens", handing over.
-- `references/repair-and-sharing.md`: disabled contributions and repair, deploy, share.
-- `references/reading-data.md`: before reporting numbers: `truncated`, `coverage`, folds, scope.
-- `references/dashboards.md`: choosing a lens, dashboard, component or snapshot; building a dashboard; outside HTML into a component.
-- `references/page-format.md`: page files (`pages/<slug>.yaml`); the entry to loaders, nodes, recipes.
+- `references/page-format.md`: manifest, page metadata, params, answers. Start here.
+- `references/loaders.md`: `data:`: sql, command, page, rows.
+- `references/view-nodes.md`: `view:`: layout, viz, columns, actions, embed, slot.
+- `references/recipes.md`: data to page, a form, a dashboard, a slot mount.
+- `references/dashboards.md`: dashboards are pages of embeds; Pin.
+- `references/markdown-blocks.md`: `oxplow-page` blocks, `show_page`.
+- `references/testing.md`: fixtures, `given:`, `expect:`, answers, preview.
+- `references/development-cycle.md`: source, drafts, deploy, held deployments.
+- `references/ui-contributions.md`: slots, panels, renderers, decorators, replacements.
+- `references/scaffolding.md`: the kinds `extension new` makes.
+- `references/semantic-layer.md`: finding data, URIs in SQL, publishing models.
+- `references/commands-and-forms.md`: commands, forms, custom components.
+- `references/collectors.md`, `references/metrics.md`, `references/jobs-and-ai.md`, `references/providers.md`: outside data, metrics, model jobs, providers.
+- `references/repair-and-sharing.md`: disabled contributions, share.
+- `references/reading-data.md`: before reporting numbers.
 
-Rules that live in other skills: wikilinks and URIs in prose, see
-`oxplow-wiki-capture`; waiting on the person, `oxplow-runtime`; test
-commands run in the foreground, `oxplow-collection`; metrics, `oxplow-metrics`.
-A person approves an extension's `permissions:` and a new or changed
-`build:` command at deploy; your deploy that adds one becomes a proposal.
+Rules in other skills: wikilinks and URIs in prose, `oxplow-wiki-capture`;
+waiting on the person, `oxplow-runtime`; test commands run in the
+foreground, `oxplow-collection`; metrics, `oxplow-metrics`. A person
+approves an extension's `permissions:` and a new `build:` command at
+deploy; your deploy that adds one becomes a proposal.

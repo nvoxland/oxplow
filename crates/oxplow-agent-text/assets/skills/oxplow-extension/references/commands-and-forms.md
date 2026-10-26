@@ -40,11 +40,11 @@
   `ui.input` says otherwise, so name its input field `uri`. `extensions/oxplow-bundled/` (bundled) is a
   working example.
 - **`custom_components:`** (stable; not in a bundled extension) are web bundles a
-  `viz: custom` lens renders: `{ id, title?, bundle?: components/<id>,
-  assets: [lens ids], commands: [names] }`. The bundle (an `index.html`
+  component node renders: `{ id, title?, bundle?: components/<id>,
+  commands: [names] }`. The bundle (an `index.html`
   and its files, at most 256 files / 5 MiB) runs sandboxed — no network,
   no storage, no token — and reaches oxplow only by asking the host to
-  run one of its `assets` lenses, invoke one of its `commands` (a
+  invoke one of its `commands` (a
   component that declares any runs them under the extension's
   permissions, approved when it was deployed; a command that asks
   still asks) or navigate. Its `index.html` loads
@@ -52,16 +52,16 @@
   src="/component-lib/oxplow-component.js">` before its own plain script
   (no modules: a sandboxed frame can't load them), and the script calls
   `oxplow.connect().then((component) => …)` for `component.data` (each
-  loader's rows by name), `component.run` (a `viz: custom`'s own rows),
-  `onUpdate(({ data, changed }) => …)`, `query`, `invoke` and `navigate`. `oxplow extension new
-  component <name>` scaffolds a working one; `docs/guide/lenses.md` has
-  the reference. A component written in TypeScript or with a library is
+  loader's rows by name), `onUpdate(({ data, changed }) => …)`, `invoke` and `navigate`; it never
+  fetches (a page loader feeds it). `oxplow extension new
+  component <name>` scaffolds a working one; `docs/guide/pages.md` has
+  the reference; `dashboards.md` has an example. A component written in TypeScript or with a library is
   built at deploy: a `build:` block, with `bundle:` under its `output`
   (`repair-and-sharing.md`).
 
 ## Forms
 
-- **A form lens** (`viz: form`) is one command's input:
+- **A form node** (`viz: form`, no `from`) is one command's input:
   `form: { command, defaults?, fixed?, fields? }`. `defaults` takes
   `{{param.x}}`; a `query` prefills from its first row; `fixed` fields
   show their default and can't be changed (an item's `uri`); `fields`
@@ -80,13 +80,13 @@
   `unrecorded: [token]` on its `commands:` entry, or the form won't open.
   A schema field with `writeOnly: true` is masked the same way and kept
   out of the record by itself.
-- **Several forms on one page:** a document whose parts are form lenses;
-  each submits its own command.
+- **Several forms on one page:** a `stack` of form nodes; each submits its
+  own command.
 - **After a submit**, a command with `ui.open_after` opens that page;
-  `then:` on the action (or `form.then`) says what becomes of the lens's
+  `then:` on the action (or `form.then`) says what becomes of the
   page: `open` (default; Back returns), `replace` (it leaves history —
   a create form giving way to what it made), `stay` (nothing opens) or `close` (the page closes: it showed what the command removed).
-- **A form action** on any lens: `form: true` on an action opens the
+- **A form action** on any page: `form: true` on an action opens the
   command's form starting from its `input`, instead of running at once
   (a side panel; one text field alone is a prompt strip above the rows);
   `fixed` keeps fields to the bound values:

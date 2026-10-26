@@ -1,4 +1,33 @@
-# Testing the whole extension (`oxplow_preview_extension`, fixtures)
+# Checking and testing an extension
+
+## Check after every edit
+
+**Run `oxplow_validate_extension(name, stream_id)` after every edit**, not
+once at the end. It is cheap, and each message names the file and line and
+says what to change (`oxplow extension check <name>` is the same report).
+It covers: manifest errors (YAML, unknown keys, a name/folder mismatch, a
+missing `intent`, a Starlark script that doesn't parse or define
+`transform`); cross-references that don't resolve (a slot mount naming a
+page that isn't there, a command that doesn't exist or an input that doesn't
+fit it, a loader reading one declared after it); the models compiled without
+publishing (SQL errors, a `ref()` that doesn't resolve, columns that differ
+from the declared contract); and a dry run of every page's loaders with their
+default params, every advisory and every command example. It **always**
+dry-runs: a collector's entities stand in empty, so collector → model → page
+checks clean before the first sync. `ok: true` means it works; fix every
+`error`, and every `warning` unless you can say why not.
+
+Then **`oxplow_run_page { page, draft?, params? }`** returns exactly what the
+person will see. In a worktree stream pass `draft: true` (it reads your
+source over live data; its commands are the deployed ones) and your own
+`stream_id`. The source runs nothing until `oxplow.extension.deploy`.
+
+An extension's own `questions.yaml` (`{ question, skill, reaches: { sql } |
+{ command, input }, shape: { columns } }`, `skill` a markdown file in the
+extension) also runs under `oxplow extension test`: the skill must name every
+model the SQL reads and the command it runs. Prefer `answers:` on pages.
+
+## Testing the whole extension (`oxplow_preview_extension`, fixtures)
 
 **`oxplow_preview_extension(name, stream_id)`** (MCP; `oxplow extension test
    <name>` from a terminal) runs your whole extension in a throwaway
@@ -8,12 +37,12 @@
    model call answered by the fixture's `model.replies` — never a real
    provider. Run it after `oxplow_validate_extension` and before handing over.
    Its report says what it ran, the generation, what the extension
-   `contributes`, and what it can't run here (`unsupported`: pages,
-   panels, slots, decorators, replacements, skills — the app shows them).
+   `contributes`, and what it can't run here (`unsupported`: panels, decorators,
+   replacements, skills — the app shows them).
    Give each example a fixture, `fixtures/<example>.yaml`, with `input`
    and `expect` (`$any` matches anything), and `model: { replies: [...] }`
    in `input` when it calls a model:
-   - a page: `input: { page: <slug>, params? }`, with `given:` beside
+   - a page: `input: { page: <slug | ext/slug>, params? }`, with `given:` beside
      `input` — steps run first, in order, on the extension's throwaway
      database: `{ command, input?, as? }` or `{ rows: { <entity>: [..] } }`.
      `expect: { loaders: { <name>: { rows: n | $any | [ { col: val } ],
@@ -23,9 +52,12 @@
      must open with its params and no failing loader. Example:
      `given: [{ command: oxplow.work_item.create, input: { title: T } }]`,
      `input: { page: items }`, `expect: { loaders: { items: { rows: [{
-     title: T }] } } }`;
-   - a lens: `input: { lens: <slug>, params?, rows? }`, `expect: {
-     columns?, rows: n }` — `rows: { <entity>: [ {…} ] }` fills your
+     title: T }] } } }`. `answers:` double as fixtures: each runs after the
+     examples (`ran: answers`), and a page with no `expect` still has to
+     open. One throwaway oxplow serves every fixture of the extension, and
+     `given` steps mutate its database in order, so a later fixture sees what
+     an earlier one made;
+   - `rows: { <entity>: [ {…} ] }` in a page or job fixture fills your
      collectors' entities first (they start empty);
    - an event: `input: { event: { type, payload, … } }` — logged in the
      throwaway and delivered: your effects react for
@@ -44,7 +76,7 @@
      the tool's result); `cancel: true` cancels it through
      your `jobs.write/cancel` command once it has written. `expect: {
      state, result?, text?, toolCalls?, output?: [{ kind }] }`;
-   - a component: `input: { component: <id>, lens?, items?: [title],
+   - a component: `input: { component: <id>, page?, items?: [title],
      queries?: [{ asset, params? }], invokes?: [{ command, input? }] }` — what its
      frame would ask; `expect: { queries: [{ rows }], invokes: [{ ok,
      refused? }] }` (an invoke is `refused` when the command refuses it; `items` are work

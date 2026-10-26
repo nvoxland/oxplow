@@ -32,7 +32,7 @@ effects:
   (or `v_job_run.intent_key`) in the effect that publishes the answer.
 - To start one on an event, an effect composes your own `ask` command. Keep the
   prompt in one script command that composes `ask`, so the effect and a
-  lens button share it.
+  page button share it.
 - A tool only reads; the model calls it as `todos_in_file`, and with
   `sql.read` it also has `query_sql` over the `v_*` models. A job never
   writes: the effect on its end does (`scope("jobs.read", { job_run })` gives
@@ -41,8 +41,8 @@ effects:
   when running it again is harmless: an attempt a restart cuts off is
   then retried, up to three attempts, and the effect hears only the
   final end.
-- Show it running with a lens over `v_job_run_output` (`WHERE job_id = (SELECT id FROM v_job_run WHERE uri = :job_run)`):
-  it updates as the model writes. oxplow's own Job Runs lens lists every run
+- Show it running with a page over `v_job_run_output` (`WHERE job_id = (SELECT id FROM v_job_run WHERE uri = :job_run)`):
+  it updates as the model writes. oxplow's own Job Runs page lists every run
   with Cancel.
 - `examples/extensions/triage/` in the oxplow repo has one, with its
   fixtures (a tool round, a cancel); `examples/extensions/effort-review/`

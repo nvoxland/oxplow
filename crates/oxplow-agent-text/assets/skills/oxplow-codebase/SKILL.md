@@ -7,7 +7,7 @@ description: Answering questions about the project's history and code from oxplo
 
 oxplow keeps the repository's history and the language servers' view of
 the code as SQL models. Read them with `oxplow_query_sql` before `git log`
-or grep: indexed, shared with lenses, every stream. `v_model_column`
+or grep: indexed, shared with pages, every stream. `v_model_column`
 documents each column.
 
 ## History (`v_commit`, `v_commit_file`, `v_branch`, `v_tag`)

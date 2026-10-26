@@ -416,7 +416,7 @@ mod tests {
         let indexed = prompt_for(&config(), &stream(), &harness(&["prompt_context"]));
         assert!(indexed.contains("oxplow_get_skill"), "{indexed}");
         assert!(
-            indexed.contains("- oxplow-extension: Build oxplow lenses"),
+            indexed.contains("- oxplow-extension: Build oxplow pages"),
             "{indexed}"
         );
         assert!(!prompt_for(&config(), &stream(), &full()).contains("oxplow_get_skill"));

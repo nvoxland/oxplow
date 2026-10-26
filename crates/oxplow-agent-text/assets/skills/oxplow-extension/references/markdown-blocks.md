@@ -5,7 +5,7 @@ question or to live in a wiki page. It has no file and no extension.
 
 ## The block
 
-In markdown (a wiki page, a note) write a fenced block:
+In markdown (a wiki page) write a fenced block:
 
 ````markdown
 ```oxplow-page
@@ -16,9 +16,9 @@ view: { viz: table, from: t }
 ```
 ````
 
-This is the contract; the wiki renders it as the page, live, once rendering
-lands. Until then it reads as the YAML. The same YAML works as the `spec`
-of `oxplow_show_page`.
+The wiki renders the block as the page, live (a wiki page opened in the app,
+or `oxplow_run_page`'s text). In any other store it reads as the YAML. The
+same YAML works as the `spec` of `oxplow_show_page`.
 
 ## What it may not do
 
@@ -40,7 +40,7 @@ person.
   `my-pages`), where it becomes a file.
 - To save it yourself as a page, write the YAML with
   `oxplow.extension.write_page { extension, page, spec, deploy? }`
-  (`dashboards-as-pages.md`).
+  (`dashboards.md`).
 
 Prefer `oxplow_find_page` first: a page that answers the question already
 exists more often than not.
