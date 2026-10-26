@@ -148,6 +148,17 @@ view: { viz: number, from: a }
 "#,
     ),
     (
+        "headed",
+        r#"
+title: Headed
+params: [{ name: head_sha }, { name: stream_id }]
+data:
+  at: { sql: "SELECT :head_sha AS head" }
+  other: { sql: "SELECT 1 AS n" }
+view: { viz: table, from: at }
+"#,
+    ),
+    (
         "rename",
         r#"
 title: Rename

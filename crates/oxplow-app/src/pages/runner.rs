@@ -954,6 +954,17 @@ fn flow_params(
     out
 }
 
+/// The models a page param the run resolves itself reads: `head_sha`,
+/// when the page declares it, is the viewed stream's HEAD (`v_stream`), so
+/// a commit or a branch switch re-resolves it and re-runs what binds it.
+pub fn context_reads(page: &Page, param: &str) -> &'static [&'static str] {
+    if param == "head_sha" && page.params.iter().any(|p| p.name == "head_sha") {
+        &["v_stream"]
+    } else {
+        &[]
+    }
+}
+
 /// The loader runs of `run` (its embeds' and mounts' included) a change
 /// to `models` / `measures` doesn't reach, by key: a loader that read none
 /// of them and reads no loader that did.
@@ -975,6 +986,11 @@ pub fn unreached(
                 continue;
             };
             let reached = decl.reads.iter().any(|m| models.contains(m))
+                || decl.reads_params.iter().any(|p| {
+                    context_reads(&run.page, p)
+                        .iter()
+                        .any(|m| models.iter().any(|x| x == m))
+                })
                 || r.result.reads.models.iter().any(|m| models.contains(m))
                 || r.result.reads.measures.iter().any(|m| measures.contains(m))
                 || decl

@@ -102,6 +102,18 @@ async fn a_command_loaders_items_are_a_list_in_its_result() {
     assert!(err.contains("returned no `nope`"), "{err}");
 }
 
+/// A page resolves `head_sha` itself from the viewed stream: a change to
+/// `v_stream` (a commit, a branch switch) reaches the loaders that bind
+/// it, and only those.
+#[tokio::test]
+async fn a_stream_change_reaches_what_binds_head_sha() {
+    let (_dir, svc) = fixture().await;
+    let r = run(&svc, "acme/headed", &[]).await;
+    let kept = unreached(&r, &["v_stream".to_string()], &[]);
+    let keys: Vec<&String> = kept.keys().collect();
+    assert_eq!(keys, [&r.loaders["other"].key], "only `at` re-runs");
+}
+
 #[tokio::test]
 async fn an_unknown_param_is_refused() {
     let (_dir, svc) = fixture().await;
