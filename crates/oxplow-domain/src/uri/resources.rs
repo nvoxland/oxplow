@@ -27,8 +27,6 @@ pub const WORK_ITEM: &str = "oxplow/work_item";
 pub const WIKI: &str = "oxplow/wiki";
 pub const COMMENT: &str = "oxplow/comment";
 pub const EVENT: &str = "oxplow/event";
-pub const LENS: &str = "oxplow/lens";
-pub const ANSWER: &str = "oxplow/answer";
 pub const PAGE: &str = "oxplow/page";
 /// An ephemeral page an agent showed (`oxplow.page.show { spec }`): kept
 /// in memory by the daemon, opened like a page.
@@ -42,7 +40,6 @@ pub const CONFIG: &str = "oxplow/config";
 pub const FINDING: &str = "oxplow/finding";
 pub const AGENT_SESSION: &str = "oxplow/agent_session";
 pub const HANDOFF: &str = "oxplow/handoff";
-pub const DASHBOARD: &str = "oxplow/dashboard";
 pub const TERMINAL: &str = "oxplow/terminal";
 pub const SUBAGENT: &str = "oxplow/subagent";
 pub const RUN: &str = "oxplow/run";

@@ -1,7 +1,0 @@
-title: Install a language server
-description: A package from the Mason registry, by name. Installing downloads it into `.oxplow/lsp/` and registers its binary; it is yours to decide, so you confirm it.
-viz: form
-form:
-  command: oxplow.lsp.install_server
-  fields: [package]
-hidden: true

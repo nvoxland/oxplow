@@ -1,7 +1,0 @@
-title: Answers not kept
-description: How many of the thread's answers aren't kept as lenses yet.
-hidden: true
-params:
-  - { name: thread_id }
-query: SELECT count(*) AS fresh FROM v_thread_answer WHERE thread_id = :thread_id AND kept_lens IS NULL
-viz: number

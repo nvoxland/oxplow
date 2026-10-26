@@ -78,15 +78,6 @@ pub fn describe(ext: &Extension) -> Vec<Descriptor> {
         d.source = declared_at(&r.declared_at);
         out.push(d);
     }
-    for l in &ext.lenses {
-        let mut d = new(ContributionKind::Lens, &l.slug, RunsOn::Mount);
-        d.needs = l.needs.clone();
-        d.source = DeclaredAt {
-            file: l.origin.running.clone(),
-            line: None,
-        };
-        out.push(d);
-    }
     for p in &ext.page_files {
         let mut d = new(ContributionKind::Page, &p.slug, RunsOn::Mount);
         d.needs = p.needs.clone();
@@ -96,15 +87,6 @@ pub fn describe(ext: &Extension) -> Vec<Descriptor> {
         };
         out.push(d);
     }
-    // A manifest `pages:` entry with no page file (until those entries go).
-    for p in ext
-        .pages
-        .iter()
-        .filter(|p| !ext.page_files.iter().any(|f| f.slug == p.id))
-    {
-        let d = new(ContributionKind::Page, &p.id, RunsOn::Mount);
-        out.push(d);
-    }
     for p in &ext.panels {
         let local =
             p.id.strip_prefix(&format!("{}/", ext.name))
@@ -112,16 +94,8 @@ pub fn describe(ext: &Extension) -> Vec<Descriptor> {
         let d = new(ContributionKind::Panel, local, RunsOn::Mount);
         out.push(d);
     }
-    for (n, slot) in ext.ui.slots.iter().enumerate() {
-        let d = new(ContributionKind::Slot, &slot.local_id(n), RunsOn::Mount);
-        out.push(d);
-    }
     for (n, slot) in ext.ui.page_slots.iter().enumerate() {
-        let d = new(
-            ContributionKind::Slot,
-            &slot.local_id(ext.ui.slots.len() + n),
-            RunsOn::Mount,
-        );
+        let d = new(ContributionKind::Slot, &slot.local_id(n), RunsOn::Mount);
         out.push(d);
     }
     for dec in &ext.ui.decorators {
@@ -845,7 +819,7 @@ mod catalog_tests {
     fn the_reference_lists_every_kind() {
         use oxplow_domain::contribution::KINDS;
         let more = |k: ContributionKind| match k {
-            ContributionKind::Lens => "[Lenses](../guide/lenses.md)",
+            ContributionKind::Page => "[Pages](../guide/pages.md)",
             ContributionKind::Measure | ContributionKind::Metric | ContributionKind::Dimension => {
                 "[Metrics](../guide/metrics.md)"
             }
@@ -859,7 +833,7 @@ mod catalog_tests {
         let mut table = String::from("| Key | What it adds | More |\n|---|---|---|\n");
         for k in KINDS {
             let key = match k.kind {
-                ContributionKind::Lens => "`lenses/*.yaml` (files, not a key)".to_string(),
+                ContributionKind::Page => "`pages/*.yaml` (files, not a key)".to_string(),
                 _ => format!("`{}`", k.key),
             };
             table.push_str(&format!("| {key} | {} | {} |\n", k.summary, more(k.kind)));

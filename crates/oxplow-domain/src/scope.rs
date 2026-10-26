@@ -201,13 +201,6 @@ pub const SCOPES: &[Scope] = &[
         summary: "Set or clear a credential or secret an extension keeps in the OS keychain: written, never read back, kept out of every record.",
     },
     Scope {
-        id: "dashboards.write",
-        access: Access::Record,
-        host: Host::Daemon,
-        spends: false,
-        summary: "Create, rename, delete and arrange dashboards and their tiles.",
-    },
-    Scope {
         id: "deliveries.write",
         access: Access::Write,
         host: Host::Daemon,
@@ -339,27 +332,6 @@ pub const SCOPES: &[Scope] = &[
         host: Host::Daemon,
         spends: false,
         summary: "Write the project's wiki: pages, notes, comments and links.",
-    },
-    Scope {
-        id: "lenses.read",
-        access: Access::Read,
-        host: Host::Daemon,
-        spends: false,
-        summary: "Run a lens and read what it shows, as text or rows.",
-    },
-    Scope {
-        id: "lenses.show",
-        access: Access::Record,
-        host: Host::Daemon,
-        spends: false,
-        summary: "Show a lens in the thread, as a tab of it.",
-    },
-    Scope {
-        id: "lenses.write",
-        access: Access::Write,
-        host: Host::Daemon,
-        spends: false,
-        summary: "Keep or share a lens as a file in the project.",
     },
     Scope {
         id: "lsp.control",

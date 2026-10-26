@@ -316,7 +316,7 @@ async fn context(
             })
         })
         .transpose()?;
-    Ok(crate::extensions::lens_context(
+    Ok(crate::extensions::view_context(
         svc,
         stream.as_deref().and_then(StreamId::try_from_str),
         thread,
@@ -1129,7 +1129,7 @@ mod definition_page_tests {
                 // No `of`: the command loader receives null for `page`
                 // and the exact inline spec for `spec`.
                 params: [("spec".to_string(), SqlCell::Text(INLINE_SPEC.into()))].into(),
-                ctx: crate::extensions::lens_context(&f.svc, None, Some(f.thread)).await,
+                ctx: crate::extensions::view_context(&f.svc, None, Some(f.thread)).await,
                 viewer: Actor::Human,
             })
             .await

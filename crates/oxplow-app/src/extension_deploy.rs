@@ -121,7 +121,7 @@ pub struct SourceDiff {
     pub deployed_hash: Option<String>,
     pub source_hash: String,
     pub differs: bool,
-    /// Lenses and page files, by id.
+    /// Page files, by id.
     pub pages: Changes,
     /// Commands, by name (`changed` is filled too).
     pub commands: Changes,
@@ -138,14 +138,13 @@ fn definition(item: &impl Serialize) -> String {
 
 type Definitions = std::collections::BTreeMap<String, String>;
 
-/// An extension's pages (lenses and page files) and commands, each by id
+/// An extension's pages and commands, each by id
 /// with its definition.
 fn definitions(ext: &crate::extensions::Extension) -> (Definitions, Definitions) {
     let pages = ext
-        .lenses
+        .page_files
         .iter()
-        .map(|l| (l.id.clone(), definition(l)))
-        .chain(ext.page_files.iter().map(|p| (p.id.clone(), definition(p))))
+        .map(|p| (p.id.clone(), definition(p)))
         .collect();
     let commands = ext
         .commands
@@ -2508,7 +2507,7 @@ mod tests {
         let root = svc.layout.project_dir.clone();
         source(svc, "One");
         deploy(svc, "acme", true).await.unwrap();
-        let press = |action: &str| crate::lens_actions::LensActionCall {
+        let press = |action: &str| crate::viz_actions::LensActionCall {
             lens_id: "oxplow-foundation/extensions-list".into(),
             action_id: action.into(),
             params: Default::default(),
@@ -2525,7 +2524,7 @@ mod tests {
             confirmed: true,
         };
         for action in ["disable", "enable", "remove"] {
-            crate::lens_actions::run_lens_action(
+            crate::viz_actions::run_lens_action(
                 svc,
                 &root,
                 press(action),

@@ -276,23 +276,6 @@ pub fn event_uri(id: &str) -> String {
     keyed(r::EVENT, id)
 }
 
-/// A lens (`<extension>/<slug>`).
-pub fn lens_uri(id: &str) -> String {
-    keyed(r::LENS, id)
-}
-
-/// A lens with its params; one with no value is left out.
-pub fn lens_uri_with(id: &str, params: &[(&str, Option<&str>)]) -> String {
-    let mut all = vec![("lens", id)];
-    all.extend(params.iter().filter_map(|(k, v)| Some((*k, (*v)?))));
-    of(r::LENS, &all)
-}
-
-/// An agent's answer in a thread (`thread_answer.id`).
-pub fn answer_uri(id: i64) -> String {
-    keyed(r::ANSWER, &id.to_string())
-}
-
 /// A page (`tasks`, `<extension>/<id>`) with its params.
 pub fn page_uri(page: &str, params: &[(&str, &str)]) -> String {
     let mut all = vec![("page", page)];
@@ -373,11 +356,6 @@ pub fn subagent_uri(session: AgentSessionId, id: &str) -> String {
         r::SUBAGENT,
         &[("session", &session.to_string()), ("agent", id)],
     )
-}
-
-/// A user-created dashboard (`dashboard.id`).
-pub fn dashboard_uri(id: crate::DashboardId) -> String {
-    keyed(r::DASHBOARD, &id.to_string())
 }
 
 /// A terminal (`terminal.id`).

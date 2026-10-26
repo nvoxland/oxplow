@@ -652,7 +652,7 @@ impl Actor {
     }
 
     /// The `source` an event or audit row records: `human`, `agent:thr3`,
-    /// `oxplow:oxplow/lens?lens=acme/blocked`, `system`, `effect:acme/notify`.
+    /// `page:acme/blocked#rows`, `system`, `effect:acme/notify`.
     pub fn source(&self) -> String {
         match self {
             Actor::Human => "human".into(),
@@ -662,7 +662,7 @@ impl Actor {
             Actor::Agent {
                 thread_id: None, ..
             } => "agent".into(),
-            Actor::Lens { lens_id, .. } => crate::uri::build::lens_uri(lens_id),
+            Actor::Lens { lens_id, .. } => format!("page:{lens_id}"),
             // It is its contribution, by its ref.
             Actor::Component { component, .. } => {
                 let (extension, id) = component.split_once('/').unwrap_or(("", component));

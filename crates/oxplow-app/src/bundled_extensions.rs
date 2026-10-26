@@ -1380,7 +1380,7 @@ mod tests {
                 .await
                 .unwrap();
         }
-        let ctx = crate::extensions::lens_context(&f.svc, None, None).await;
+        let ctx = crate::extensions::view_context(&f.svc, None, None).await;
         let first = |id: &'static str, ctx: crate::extensions::ViewContext| {
             let svc = f.svc.clone();
             async move {
@@ -1483,7 +1483,7 @@ mod tests {
     async fn the_task_lenses_run_without_a_work_list() {
         let f = crate::test_fixtures::services_with_effort().await;
         let run = |svc: std::sync::Arc<crate::Services>| async move {
-            let ctx = crate::extensions::lens_context(&svc, None, None).await;
+            let ctx = crate::extensions::view_context(&svc, None, None).await;
             crate::extensions::run_lens(
                 &svc.sql,
                 &svc.extension_catalog,
@@ -2836,10 +2836,10 @@ mod tests {
         let act = |action: &'static str, row| {
             let f = &f;
             async move {
-                crate::lens_actions::run_lens_action(
+                crate::viz_actions::run_lens_action(
                     &f.svc,
                     f._dir.path(),
-                    crate::lens_actions::LensActionCall {
+                    crate::viz_actions::LensActionCall {
                         lens_id: "oxplow-foundation/go-to-bookmarks".into(),
                         action_id: action.into(),
                         params: [("thread_id".to_string(), Int(f.thread.value()))].into(),
@@ -2937,7 +2937,7 @@ mod tests {
             .link
             .as_ref()
             .unwrap();
-        assert_eq!(link.kind, crate::extensions::LensLinkKind::Page);
+        assert_eq!(link.kind, crate::extensions::LinkKind::Page);
         assert_eq!(link.from.as_deref(), Some("uri"));
 
         let action = run.page.actions.iter().find(|a| a.id == "new").unwrap();

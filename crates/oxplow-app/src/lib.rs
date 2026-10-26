@@ -56,9 +56,6 @@ pub mod context_watch;
 pub mod contribution_health;
 pub mod credential_lint;
 pub mod daemon_supervisor;
-pub mod dashboard_tiles;
-#[cfg(test)]
-mod dashboards_reference_tests;
 pub mod diagnostics;
 #[cfg(test)]
 mod directory_lens_tests;
@@ -144,8 +141,6 @@ pub mod indexer;
 pub mod kind_search;
 pub mod knowledge;
 pub mod knowledge_conformance;
-pub mod lens_actions;
-pub mod lens_text;
 pub mod link_check;
 pub mod live_models;
 #[cfg(test)]
@@ -231,6 +226,8 @@ pub mod ui_push;
 pub mod vcs;
 #[cfg(test)]
 pub mod vcs_conformance;
+pub mod viz_actions;
+pub mod viz_text;
 pub mod vocabulary_reactor;
 pub mod wiki_drift;
 pub mod wiki_pages;
@@ -670,16 +667,12 @@ pub struct Services {
     /// Persisted agent nudges (report-less-run / coverage-target) — the
     /// human-facing record of what oxplow steered the agent to do.
     pub nudge_store: Arc<SqliteAgentNudgeStore>,
-    /// User-created dashboards (grids of metric tiles) — project-global (tsk138).
-    pub dashboard_store: Arc<oxplow_db::SqliteDashboardStore>,
     /// A stream's terminals: shells in its worktree, as rows.
     pub terminal_store: Arc<oxplow_db::SqliteTerminalStore>,
     /// Extension-source entity data + run state (see `collector_runner`).
     pub collector_store: Arc<oxplow_db::SqliteCollectorStore>,
     /// Runs collectors (the `oxplow.collector.sync` command and the scheduler).
     pub collector_runner: collector_runner::CollectorRunner,
-    /// An agent's answers in threads (`v_thread_answer`, `oxplow.lens.show`).
-    pub thread_answer_store: oxplow_db::SqliteThreadAnswerStore,
     /// The person's left-nav layout (P6.G1).
     pub panel_layout_store: oxplow_db::SqlitePanelLayoutStore,
     /// The person's page memory and app preferences (`ui_preference`).
@@ -828,17 +821,6 @@ impl Services {
         {
             tracing::warn!("providers didn't all shut down in time");
         }
-    }
-
-    /// Runtime metadata must use the same reader boundary as lens execution.
-    pub async fn lens_definition(
-        &self,
-        root: &std::path::Path,
-        id: &str,
-    ) -> Result<extensions::Lens, oxplow_domain::DomainError> {
-        self.sql
-            .read_generation(async { self.extension_catalog.find_lens(root, id) })
-            .await?
     }
 
     /// The extensions under `root` as listed: loaded, with what the
@@ -1097,7 +1079,6 @@ impl Services {
             .with_engine(metric_engine.clone())
             .with_watermarks(model_watermarks.clone());
         let nudge_store = Arc::new(SqliteAgentNudgeStore::new(db.clone()));
-        let dashboard_store = Arc::new(oxplow_db::SqliteDashboardStore::new(db.clone()));
         let terminal_store = Arc::new(oxplow_db::SqliteTerminalStore::new(db.clone()));
         let collector_store = Arc::new(oxplow_db::SqliteCollectorStore::new(db.clone()));
         let reasoning_store = Arc::new(oxplow_db::SqliteReasoningStore::new(db.clone()));
@@ -1574,7 +1555,6 @@ impl Services {
         ))
         .chain(commands::effort::ops(work_items.clone()))
         .chain(commands::hint::ops())
-        .chain(commands::dashboard::ops(db.clone(), sql.clone()))
         .chain(commands::terminal::ops(
             db.clone(),
             terminal_store.clone(),
@@ -1752,16 +1732,6 @@ impl Services {
         // A query that names a commit or a change by its keys has it made
         // first (`on_demand`), through the services once they exist.
         sql.on_demand().bind(services_slot.clone());
-        for command in commands::lens::ops(commands::lens::LensTarget {
-            project_dir: layout.project_dir.clone(),
-            catalog: extension_catalog.clone(),
-            db: db.clone(),
-            sql: sql.clone(),
-            services: services_slot.clone(),
-        }) {
-            commands.add_op(command).expect("lens ops register");
-        }
-        let thread_answer_store = oxplow_db::SqliteThreadAnswerStore::new(db.clone());
         let panel_layout_store = oxplow_db::SqlitePanelLayoutStore::new(db.clone());
         let ui_preference_store = oxplow_db::SqliteUiPreferenceStore::new(db.clone());
         for command in knowledge::ops(knowledge::KnowledgeTarget {
@@ -1968,11 +1938,9 @@ impl Services {
             metric_visibility,
             metrics,
             nudge_store,
-            dashboard_store,
             terminal_store,
             collector_store,
             collector_runner,
-            thread_answer_store,
             panel_layout_store,
             ui_preference_store,
             reasoning_store,
@@ -2366,7 +2334,7 @@ mod tests {
                 "oxplow.knowledge.link",
                 "oxplow.knowledge.verify_files",
                 "oxplow.knowledge.write_page",
-                // Lens files on disk (P6 review, tsk597): a Tx handler may
+                // VizConfig files on disk (P6 review, tsk597): a Tx handler may
                 // run twice, and a retried file write strands the first.
                 "oxplow.lens.keep",
                 "oxplow.lens.run",

@@ -1,5 +1,0 @@
-title: Metrics for a dashboard
-description: Every metric the project can use, by category, for a metric tile to show.
-query: SELECT key AS value, title AS label, coalesce(category, 'custom') AS "group" FROM v_metric_catalog ORDER BY category, title
-viz: table
-hidden: true

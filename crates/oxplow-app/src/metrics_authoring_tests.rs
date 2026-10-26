@@ -418,7 +418,7 @@ fn text_of(cell: &SqlCell) -> String {
 /// the metric off and on through `oxplow.metric.enable`.
 #[tokio::test(flavor = "multi_thread")]
 async fn the_metric_page_reads_the_definition_the_trend_and_the_recordings() {
-    use crate::lens_actions::{run_lens_action, LensActionCall};
+    use crate::viz_actions::{run_lens_action, LensActionCall};
     let (p, _) = project(|_| {}).await;
     p.baseline().await;
     let (plan, _) = rust(&[("calm", 0)]);
@@ -604,7 +604,7 @@ async fn the_lens_rows_carry_file_refs_to_the_path_and_line() {
         .find_map(|c| c.link.as_ref().map(|l| (c.key.as_str(), l)))
         .expect("a linked column");
     assert_eq!(link.0, "path");
-    assert_eq!(link.1.kind, crate::extensions::LensLinkKind::File);
+    assert_eq!(link.1.kind, crate::extensions::LinkKind::File);
     let (path_col, line_col) = (
         run.result.columns.iter().position(|c| c == "path").unwrap(),
         run.result

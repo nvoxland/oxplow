@@ -35,7 +35,6 @@ pub struct BundleSnapshot {
     pub(crate) generation: Option<String>,
     /// The commands it may run, as hashed.
     pub commands: Vec<String>,
-    pub assets: Vec<String>,
     /// It may run its own read-only SQL (`sql: read`), as hashed.
     pub sql: bool,
     /// The bundle's folder (in its deployment).
@@ -217,7 +216,6 @@ fn build_snapshot(
         component: component.id.clone(),
         generation,
         commands: component.commands.clone(),
-        assets: component.assets.clone(),
         sql: component.sql.is_some(),
         dir: root.join(&folder),
         files,
@@ -225,7 +223,7 @@ fn build_snapshot(
 }
 
 /// A bundle's version: a hash over its files, what it may query (its
-/// assets, its own SQL) and what it may run (its commands). Any change is a new version,
+/// its own SQL) and what it may run (its commands). Any change is a new version,
 /// so a mounted frame of the old one reloads.
 pub(crate) fn bundle_version(
     component: &CustomComponent,
@@ -249,10 +247,6 @@ pub(crate) fn bundle_version(
     for c in &component.commands {
         h.update([7u8]);
         h.update(c.as_bytes());
-    }
-    for asset in &component.assets {
-        h.update([8u8]);
-        h.update(asset.as_bytes());
     }
     if component.sql.is_some() {
         h.update([9u8]);

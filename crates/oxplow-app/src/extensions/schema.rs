@@ -1,6 +1,5 @@
 //! JSON Schemas for an extension's files: `extension.yaml` (from
-//! [`ManifestV2`]) and `lenses/*.yaml` (from the lens file's on-disk
-//! struct), generated from the serde types the loader reads, so an editor
+//! [`ManifestV2`]), generated from the serde types the loader reads, so an editor
 //! (yaml-language-server) completes and checks what the loader accepts.
 //! Checked in at `docs/reference/schemas/`; a test keeps them equal to
 //! what this generates (`OXPLOW_BLESS=1` rewrites them).
@@ -13,14 +12,10 @@ use schemars::generate::SchemaSettings;
 use serde_json::Value;
 
 use super::manifest_v2::ManifestV2;
-use super::LensFile;
 
 /// Where the published manifest schema lives (the docs site).
 pub const MANIFEST_SCHEMA_URL: &str =
     "https://nvoxland.github.io/oxplow/reference/schemas/extension.schema.json";
-/// Where the published lens schema lives.
-pub const LENS_SCHEMA_URL: &str =
-    "https://nvoxland.github.io/oxplow/reference/schemas/lens.schema.json";
 
 /// The first line of a scaffolded file: points yaml-language-server at
 /// its schema.
@@ -44,11 +39,6 @@ fn generate<T: schemars::JsonSchema>(id: &str, title: &str) -> Value {
 /// The schema of `extension.yaml` (manifest version 2).
 pub fn manifest_schema() -> Value {
     generate::<ManifestV2>(MANIFEST_SCHEMA_URL, "oxplow extension.yaml")
-}
-
-/// The schema of a lens file (`lenses/<slug>.yaml`).
-pub fn lens_schema() -> Value {
-    generate::<LensFile>(LENS_SCHEMA_URL, "oxplow lens")
 }
 
 #[cfg(test)]

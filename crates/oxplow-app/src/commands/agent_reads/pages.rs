@@ -3,8 +3,8 @@
 //!
 //! - `pages.read/open { thread_id, tab? }`: the page a thread has open —
 //!   in the window the person was in last, with the other windows' beside
-//!   it — or the named tab; for a lens, that lens re-run with the person's
-//!   params, as text.
+//!   it — or the named tab; for a page, the window's own open run of it
+//!   (`pageRun`), as text, with the node they are on.
 //! - `pages.read/list_tabs { scope?, thread? }`: the tabs of a thread, its
 //!   stream's threads or every thread, in every window, each with whether
 //!   it is selected and on screen and how fresh its report is.
@@ -88,72 +88,6 @@ async fn threads(svc: &Services) -> Result<Vec<(ThreadId, StreamId)>, CommandErr
         .collect())
 }
 
-fn lens_params(detail: &Value) -> std::collections::BTreeMap<String, SqlCell> {
-    detail
-        .get("params")
-        .and_then(|p| p.as_object())
-        .map(|m| {
-            m.iter()
-                .map(|(k, v)| (k.clone(), SqlCell::from(v.clone())))
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-/// A lens page re-run with `detail`'s params, as text; null for any other page.
-async fn lens_text(
-    svc: &Services,
-    thread: ThreadId,
-    page_id: &str,
-    detail: &Value,
-) -> Result<Value, CommandError> {
-    let Ok(lens_id) = refs::id_of(page_id, oxplow_domain::uri::resources::LENS) else {
-        return Ok(Value::Null);
-    };
-    // The app shows the main worktree's lenses, whatever the thread's stream.
-    let root = svc.worktrees.project_dir();
-    let ctx = crate::extensions::lens_context(svc, None, Some(thread)).await;
-    let read = async {
-        let run = crate::extensions::run_lens(
-            &svc.sql,
-            &svc.extension_catalog,
-            root,
-            &lens_id,
-            lens_params(detail),
-            &ctx,
-        )
-        .await?;
-        let text = crate::lens_text::text_run(svc, root, &run, &ctx).await?;
-        Ok::<_, oxplow_domain::DomainError>((run.lens, text))
-    };
-    Ok(match read.await {
-        Ok((lens, text)) => {
-            let mut out = serde_json::to_value(text).map_err(failed)?;
-            // Where the page and each of its parts come from: the files an
-            // agent edits to change what the person sees.
-            out["origin"] = lens.origin.to_json(root);
-            out["parts"] = lens
-                .parts
-                .iter()
-                .map(|p| {
-                    let part = p
-                        .lens
-                        .as_deref()
-                        .and_then(|id| svc.extension_catalog.find_lens(root, id).ok());
-                    json!({
-                        "id": p.id,
-                        "lens": p.lens,
-                        "title": p.title.clone().or_else(|| part.as_ref().map(|l| l.title.clone())),
-                        "source": part.and_then(|l| l.origin.source),
-                    })
-                })
-                .collect();
-            out
-        }
-        Err(e) => json!({ "error": e.to_string() }),
-    })
-}
-
 async fn open(svc: &Services, input: OpenPageInput) -> Result<Value, CommandError> {
     let thread = ThreadId::try_from_str(&input.thread_id).ok_or_else(|| {
         invalid(
@@ -206,16 +140,11 @@ async fn open(svc: &Services, input: OpenPageInput) -> Result<Value, CommandErro
         .as_deref()
         .and_then(|d| serde_json::from_str(d).ok())
         .unwrap_or(Value::Null);
-    let lens = if kind == "lens" {
-        lens_text(svc, thread, &page_id, &detail).await?
-    } else {
-        Value::Null
-    };
     // A page: the window's own open run, as the person sees it.
     let page_run = match detail.get("runId").and_then(Value::as_str) {
         Some(run_id) => match svc.page_runs.get(run_id) {
             Some(run) => {
-                let ctx = crate::extensions::lens_context(svc, None, Some(thread)).await;
+                let ctx = crate::extensions::view_context(svc, None, Some(thread)).await;
                 let text =
                     crate::pages::text::page_text(svc, svc.worktrees.project_dir(), &run, &ctx)
                         .await
@@ -266,7 +195,6 @@ async fn open(svc: &Services, input: OpenPageInput) -> Result<Value, CommandErro
             "stale": this.is_some_and(|p| p.stale),
         },
         "others": serde_json::to_value(others).map_err(failed)?,
-        "lens": lens,
         "pageRun": page_run,
     }))
 }

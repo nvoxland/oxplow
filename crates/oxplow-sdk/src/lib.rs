@@ -43,7 +43,7 @@ pub enum SdkError {
 pub enum Kind {
     /// One starter lens (open tasks in the viewer's stream) with a row
     /// action that starts one.
-    Lens,
+    VizConfig,
     /// A v2 manifest only.
     Extension,
     /// A provider of `capability` (one a process may implement): its
@@ -212,7 +212,7 @@ pub fn scaffold_with(
     };
     let ns = oxplow_domain::contribution::extension_namespace(name);
     // Each lens file names its schema, as the manifest does.
-    let lens_modeline = extensions::schema::modeline(extensions::schema::LENS_SCHEMA_URL);
+    let lens_modeline = String::new();
     // An identifier from the name: a provider's or a policy's id.
     let provider_id = oxplow_domain::contribution::extension_namespace(name);
     // The intent example, and its fixture (what `extension test` runs).

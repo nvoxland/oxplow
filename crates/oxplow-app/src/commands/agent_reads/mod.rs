@@ -1,6 +1,6 @@
 //! The agent's reads as operations of read scopes (`records.read`,
 //! `sql.read`, `search.read`, `pages.read`, `agent_text.read`,
-//! `lenses.read`, `lsp.read`, `vcs.read`, `extensions.check`,
+//! `lsp.read`, `vcs.read`, `extensions.check`,
 //! `collectors.preview`, `ai.compute`, `knowledge.read`, `changes.read`).
 //! Each is `Access::Read` on the daemon, with an `External` handler that
 //! reads live state through `Services`; `extensions/oxplow-foundation`
@@ -24,7 +24,6 @@ pub mod collectors;
 pub mod extensions;
 pub mod ids;
 pub mod knowledge;
-pub mod lens;
 pub mod lsp;
 pub mod page_tools;
 pub mod pages;
@@ -43,7 +42,6 @@ pub fn ops(services: ServicesSlot) -> Vec<Op> {
     ops.extend(pages::ops(services.clone()));
     ops.extend(page_tools::ops(services.clone()));
     ops.extend(skill::ops(services.clone()));
-    ops.extend(lens::ops(services.clone()));
     ops.extend(lsp::ops(services.clone()));
     ops.extend(vcs::ops(services.clone()));
     ops.extend(extensions::ops(services.clone()));

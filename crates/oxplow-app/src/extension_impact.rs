@@ -66,7 +66,7 @@ fn gaps_of(runs_program: bool, hosts: &[String]) -> Vec<String> {
 /// A lens, by its rendered text before and after.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
-pub struct LensImpact {
+pub struct PageImpact {
     pub id: String,
     pub change: Change,
     pub before: Option<String>,
@@ -724,11 +724,11 @@ pub struct ContributionImpact {
     pub differs: Vec<String>,
 }
 
-/// The kinds whose impact has detail of its own (lens text, model rows,
+/// The kinds whose impact has detail of its own (page text, model rows,
 /// grants, dry runs): everything else gets a [`ContributionImpact`].
 const DETAILED: &[oxplow_domain::contribution::ContributionKind] = {
     use oxplow_domain::contribution::ContributionKind as K;
-    &[K::Lens, K::Model, K::Collector, K::Provider, K::Effect]
+    &[K::Page, K::Model, K::Collector, K::Provider, K::Effect]
 };
 
 /// What differs between two versions' descriptors of the kinds without
@@ -785,7 +785,7 @@ pub fn contributions_diff(
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ImpactReport {
-    pub lenses: Vec<LensImpact>,
+    pub lenses: Vec<PageImpact>,
     pub models: Vec<ModelImpact>,
     pub collectors: Vec<CollectorImpact>,
     pub providers: Vec<ProviderImpact>,
@@ -1118,10 +1118,10 @@ pub fn summary(report: &ImpactReport) -> Vec<String> {
                 } else {
                     format!("{}; ", change_word(l.change))
                 };
-                out.push(format!("Lens {}: {change}its query fails: {e}", l.id));
+                out.push(format!("Page {}: {change}its query fails: {e}", l.id));
             }
             None if l.change != Change::Unchanged => {
-                out.push(format!("Lens {}: {}", l.id, change_word(l.change)))
+                out.push(format!("Page {}: {}", l.id, change_word(l.change)))
             }
             None => {}
         }
@@ -1609,8 +1609,8 @@ fn described_difference(before: &Value, after: &Value) -> Option<String> {
 pub struct Version<'a> {
     pub extension: &'a crate::extensions::Extension,
     pub read: &'a (dyn Fn(&str) -> Option<String> + Sync),
-    /// Its lenses, already run once (`extensions::run_lenses`).
-    pub lenses: &'a crate::extensions::LensRuns,
+    /// Its pages' loaders, already dry-run once (`pages::checks`).
+    pub pages: &'a crate::pages::checks::PageChecks,
     /// The temp views its models compile to (`extensions::Prepared`), so
     /// its rows are its own version's.
     pub overlay: &'a [oxplow_db::TempView],
@@ -1646,17 +1646,18 @@ async fn rows_of(
     })
 }
 
-/// Each lens's rendered text, by slug: what `lens_text` gives an agent,
-/// from the run the version's check already made; a grid renders its
-/// children empty. A query that failed is the lens's error.
-fn lens_texts(runs: &crate::extensions::LensRuns) -> BTreeMap<String, Result<String, String>> {
-    runs.iter()
-        .map(|(slug, run)| {
-            let text = run
-                .as_ref()
-                .map(|run| crate::lens_text::render(run, &Default::default()))
-                .map_err(Clone::clone);
-            (slug.clone(), text)
+/// Each page's rendered text, by slug: its viz nodes over the dry run the
+/// version's check already made. A loader that failed is the page's error.
+fn page_texts(
+    ext: &crate::extensions::Extension,
+    checks: &crate::pages::checks::PageChecks,
+) -> BTreeMap<String, Result<String, String>> {
+    let none = crate::pages::checks::LoaderChecks::new();
+    ext.page_files
+        .iter()
+        .map(|page| {
+            let loaders = checks.get(&page.slug).unwrap_or(&none);
+            (page.slug.clone(), crate::pages::checks::text(page, loaders))
         })
         .collect()
 }
@@ -1683,7 +1684,7 @@ pub async fn downstream_of(layer: &crate::sql_gateway::SqlGateway, view: &str) -
 }
 
 /// What installing `after` — over `before`, when one is installed — would
-/// change. Lenses are rendered from each version's runs (on its own
+/// change. Pages are rendered from each version's dry runs (on its own
 /// overlay); models' rows read and diffed; derived collectors and effects
 /// dry-run on the same inputs, within [`REVIEW_DEADLINE`]; exec
 /// collectors and providers only compared.
@@ -1711,9 +1712,9 @@ pub async fn impact_within(
     let name = &after.extension.name;
     let texts_before = before
         .as_ref()
-        .map(|b| lens_texts(b.lenses))
+        .map(|b| page_texts(b.extension, b.pages))
         .unwrap_or_default();
-    let texts_after = lens_texts(after.lenses);
+    let texts_after = page_texts(after.extension, after.pages);
     let slugs: BTreeSet<&String> = texts_before.keys().chain(texts_after.keys()).collect();
     let lenses = slugs
         .into_iter()
@@ -1721,7 +1722,7 @@ pub async fn impact_within(
             let (b, a) = (texts_before.get(slug), texts_after.get(slug));
             let ok = |r: Option<&Result<String, String>>| r.and_then(|r| r.as_ref().ok().cloned());
             let error = a.or(b).and_then(|r| r.as_ref().err().cloned());
-            LensImpact {
+            PageImpact {
                 id: format!("{name}/{slug}"),
                 change: match (b, a) {
                     (None, _) => Change::Added,
@@ -2259,7 +2260,7 @@ mod tests {
             },
         )
         .await;
-        let by: BTreeMap<&str, &LensImpact> =
+        let by: BTreeMap<&str, &PageImpact> =
             report.lenses.iter().map(|l| (l.id.as_str(), l)).collect();
         assert_eq!(by["x/broken"].change, Change::Unchanged);
         assert!(by["x/broken"].error.is_some(), "still says why it fails");
@@ -2303,7 +2304,7 @@ mod tests {
             },
         )
         .await;
-        let by: BTreeMap<&str, &LensImpact> =
+        let by: BTreeMap<&str, &PageImpact> =
             report.lenses.iter().map(|l| (l.id.as_str(), l)).collect();
         assert_eq!(by["x/same"].change, Change::Unchanged);
         assert_eq!(by["x/count"].change, Change::Changed);
@@ -3184,7 +3185,7 @@ mod tests {
     /// CLI and an effort's review all say.
     #[test]
     fn effects_spell_out_each_change_grants_first() {
-        let lens = |id: &str, change: Change, error: Option<&str>| LensImpact {
+        let lens = |id: &str, change: Change, error: Option<&str>| PageImpact {
             id: id.into(),
             change,
             before: None,
@@ -3344,9 +3345,9 @@ mod tests {
                 "Model v_shared_t: its description and tests changed (same columns)",
                 "Model v_shared_r: its query changed (same columns)",
                 "Model v_shared_r rows: 3 → 3 (1 added, 1 removed, 1 changed)",
-                "Lens shared/count: changed",
-                "Lens shared/new: added",
-                "Lens shared/bad: added; its query fails: no such table",
+                "Page shared/count: changed",
+                "Page shared/new: added",
+                "Page shared/bad: added; its query fails: no such table",
                 "Metric acme.todos: changed (global, needs)",
             ]
         );

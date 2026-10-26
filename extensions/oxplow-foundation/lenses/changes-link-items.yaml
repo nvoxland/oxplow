@@ -1,8 +1,0 @@
-title: Tasks to link an effort to
-description: The open work items, by title.
-hidden: true
-needs: [work_items]
-query: |
-  SELECT w.uri AS value, w.title AS label
-  FROM v_work_item w WHERE w.state NOT IN ('done', 'canceled')
-  ORDER BY w.updated_at DESC LIMIT 200

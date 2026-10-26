@@ -1,14 +1,14 @@
 //! `ui.replacements` (P9.A1, stable; `.context/extensions.md` →
-//! "Replacements"): a lens that takes the place of a named core
+//! "Replacements"): a page that takes the place of a named core
 //! sub-component ([`oxplow_domain::replaceable`]).
 //!
 //! ```yaml
 //! ui:
 //!   replacements:
-//!     - { target: work_item.board, lens: board, version: 1 }
+//!     - { target: work_item.board, page: board, version: 1 }
 //! ```
 //!
-//! Checked here: the target exists, the lens is the extension's and
+//! Checked here: the target exists, the page is the extension's and
 //! declares every prop of the target's contract, a pinned `version:` is
 //! the contract's, and — for a target bound to its capability's provider
 //! — the extension brings a provider of it.
@@ -19,7 +19,6 @@
 use serde::{Deserialize, Serialize};
 
 use super::manifest_v2::{at, item_lines, key_line, line_under};
-use super::Lens;
 
 /// A replacement (valid ones; invalid ones are in the extension's
 /// `errors`).
@@ -36,13 +35,9 @@ pub struct UiReplacement {
     /// Only while this extension's provider is the deciding one does it
     /// render; otherwise the person's choice among candidates decides.
     pub bound_to_provider: bool,
-    /// The lens that renders instead, given the target's props (empty when
-    /// a page does).
-    pub lens_id: String,
     /// The page that renders instead (`<extension>/<slug>`), given the
     /// target's props.
-    #[serde(default)]
-    pub page_id: Option<String>,
+    pub page: String,
     /// The contract's version it was written against (the table's).
     pub version: u32,
     /// The host page's view params it shares (the table's `view`).
@@ -56,12 +51,8 @@ pub struct UiReplacement {
 #[serde(deny_unknown_fields)]
 pub(crate) struct ReplacementFile {
     target: String,
-    /// The lens that renders instead…
-    #[serde(default)]
-    lens: Option<String>,
-    /// … or the page.
-    #[serde(default)]
-    page: Option<String>,
+    /// The page that renders instead: a slug of this extension.
+    page: String,
     /// The props contract's version it was written against; checked
     /// against the table's, so a changed contract refuses it rather than
     /// handing it props it doesn't know.
@@ -69,13 +60,12 @@ pub(crate) struct ReplacementFile {
     version: Option<u32>,
 }
 
-/// Parse `ui.replacements` against the extension's lenses and the
+/// Parse `ui.replacements` against the extension's pages and the
 /// capabilities its providers bring: the valid ones, and an error
 /// (`file:line: …`) for each broken one.
 pub fn parse_replacements(
     extension: &str,
     capabilities: &[String],
-    lenses: &[Lens],
     pages: &[crate::pages::schema::Page],
     value: &serde_yaml::Value,
     file: &str,
@@ -102,39 +92,13 @@ pub fn parse_replacements(
         };
         let line = item_line;
         let target = oxplow_domain::replaceable::replaceable(&r.target);
-        // What renders instead: a page, or (until lenses go) a lens. Its
-        // params are what the contract's props are checked against.
-        let (name, declared, page_id): (String, Option<Vec<String>>, Option<String>) =
-            match (&r.lens, &r.page) {
-                (Some(slug), None) => (
-                    format!("lens `{slug}`"),
-                    lenses
-                        .iter()
-                        .find(|l| &l.slug == slug)
-                        .map(|l| l.params.iter().map(|p| p.name.clone()).collect()),
-                    None,
-                ),
-                (None, Some(slug)) => {
-                    let page = pages.iter().find(|p| &p.slug == slug);
-                    (
-                        format!("page `{slug}`"),
-                        page.map(|p| p.params.iter().map(|x| x.name.clone()).collect()),
-                        page.map(|p| p.id.clone()),
-                    )
-                }
-                _ => {
-                    errors.push(at(
-                        file,
-                        line,
-                        "`ui.replacements`: give `lens` or `page`, one of them",
-                    ));
-                    continue;
-                }
-            };
-        let lens = r
-            .lens
-            .as_ref()
-            .and_then(|slug| lenses.iter().find(|l| &l.slug == slug));
+        // What renders instead: its params are what the contract's props
+        // are checked against.
+        let name = format!("page `{}`", r.page);
+        let declared: Option<Vec<String>> = pages
+            .iter()
+            .find(|p| p.slug == r.page)
+            .map(|p| p.params.iter().map(|x| x.name.clone()).collect());
         let problem = match (target, declared.as_ref()) {
             (None, _) => Some(format!(
                 "`target: {}` isn't a replaceable component ({})",
@@ -190,8 +154,7 @@ pub fn parse_replacements(
             target: t.target.to_string(),
             capability: t.capability.to_string(),
             bound_to_provider: t.bound_to_provider,
-            lens_id: lens.map(|l| l.id.clone()).unwrap_or_default(),
-            page_id,
+            page: format!("{extension}/{}", r.page),
             version: t.version,
             view: t.view.iter().map(|k| k.to_string()).collect(),
             label: t.label.to_string(),

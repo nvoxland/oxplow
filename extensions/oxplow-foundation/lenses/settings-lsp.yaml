@@ -1,8 +1,0 @@
-title: Language Servers
-description: "The language servers oxplow runs for code intelligence. Changes apply at once."
-viz: document
-sections:
-  - { lens: lsp-servers }
-  - { lens: lsp-install }
-  - { lens: lsp-suggestions }
-hidden: true

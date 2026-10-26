@@ -119,8 +119,6 @@ pub struct PublicContracts {
     /// another extension).
     #[serde(default)]
     pub withheld: Vec<Withheld>,
-    #[serde(skip)]
-    slots: Vec<(ContributionId, super::LensSlot)>,
 }
 
 pub(super) fn load(
@@ -226,18 +224,6 @@ fn resolve_global_imports(extensions: &mut [Extension]) {
 }
 
 pub(super) fn prepare(ext: &mut Extension) {
-    ext.public_contracts.slots = ext
-        .ui
-        .slots
-        .iter()
-        .enumerate()
-        .map(|(index, slot)| {
-            (
-                ContributionId::new(&ext.name, ContributionKind::Slot, &slot.local_id(index)),
-                slot.clone(),
-            )
-        })
-        .collect();
     let queries: Vec<_> = ext
         .models
         .iter()
@@ -255,13 +241,6 @@ pub(super) fn prepare(ext: &mut Extension) {
                 model.sql.clone(),
             )
         })
-        .chain(ext.lenses.iter().map(|lens| {
-            (
-                ContributionId::new(&ext.name, ContributionKind::Lens, &lens.slug),
-                lens.origin.running.clone(),
-                lens.query.clone(),
-            )
-        }))
         .chain(ext.page_files.iter().flat_map(|page| {
             page.loaders.iter().filter_map(|decl| match &decl.loader {
                 crate::pages::schema::Loader::Sql { sql, .. } => Some((
@@ -329,7 +308,6 @@ pub(super) fn prepare(ext: &mut Extension) {
         if !matches!(
             guard.contribution.kind,
             ContributionKind::Model
-                | ContributionKind::Lens
                 | ContributionKind::Page
                 | ContributionKind::Collector
                 | ContributionKind::Command
@@ -339,7 +317,7 @@ pub(super) fn prepare(ext: &mut Extension) {
                 | ContributionKind::Skill
                 | ContributionKind::Provider
         ) {
-            invalid(ext, &guard.source, format!("import guard `{}` must name a model, lens, page, collector, command, job, effect, advisory, skill or provider", guard.contribution));
+            invalid(ext, &guard.source, format!("import guard `{}` must name a model, page, collector, command, job, effect, advisory, skill or provider", guard.contribution));
         }
         if guard.imports.is_empty() {
             invalid(
@@ -504,10 +482,6 @@ fn resolve(extensions: &mut [Extension], publish: bool) {
             })
         })
         .collect();
-    let slots: BTreeMap<_, _> = extensions
-        .iter()
-        .map(|ext| (ext.name.clone(), ext.public_contracts.slots.clone()))
-        .collect();
     let resolution = loop {
         let candidates: Vec<_> = extensions
             .iter()
@@ -563,7 +537,7 @@ fn resolve(extensions: &mut [Extension], publish: bool) {
                 }
             }
         }
-        prune_mounts(extensions, &blocked, &slots);
+        prune_mounts(extensions, &blocked);
         let after: BTreeSet<_> = extensions
             .iter()
             .flat_map(|ext| {
@@ -659,11 +633,7 @@ fn remove_guarded(ext: &mut Extension, id: &ContributionId) {
         ContributionKind::Model => ext.models.retain(|model| {
             model.decl.name != local && model.twin.as_ref().is_none_or(|twin| twin.of != local)
         }),
-        ContributionKind::Lens => ext.lenses.retain(|lens| lens.slug != local),
-        ContributionKind::Page => {
-            ext.page_files.retain(|page| page.slug != local);
-            ext.pages.retain(|page| page.id != local);
-        }
+        ContributionKind::Page => ext.page_files.retain(|page| page.slug != local),
         ContributionKind::Collector => ext.collectors.retain(|collector| collector.id != local),
         ContributionKind::Command => ext.commands.retain(|command| command.name != local),
         ContributionKind::Job => ext.jobs.retain(|job| job.id != local),
@@ -684,32 +654,15 @@ fn remove_guarded(ext: &mut Extension, id: &ContributionId) {
     ext.contributions.retain(|descriptor| &descriptor.id != id);
 }
 
-fn prune_mounts(
-    extensions: &mut [Extension],
-    blocked: &BTreeSet<String>,
-    slots: &BTreeMap<String, Vec<(ContributionId, super::LensSlot)>>,
-) {
-    loop {
-        let lenses: BTreeSet<_> = extensions
-            .iter()
-            .filter(|ext| ext.enabled && !blocked.contains(&ext.name))
-            .flat_map(|ext| ext.lenses.iter().map(|lens| lens.id.clone()))
-            .collect();
-        let mut changed = false;
+/// What a withheld contribution leaves without a part: a provider command
+/// without its provider, a panel, slot mount or replacement without its
+/// page, a resource or decorator without its model.
+fn prune_mounts(extensions: &mut [Extension], blocked: &BTreeSet<String>) {
+    {
         for ext in extensions
             .iter_mut()
             .filter(|ext| ext.enabled && !blocked.contains(&ext.name))
         {
-            let grids: Vec<_> = ext
-                .lenses
-                .iter()
-                .filter(|lens| lens.part_lenses().any(|part| !lenses.contains(part)))
-                .map(|lens| ContributionId::new(&ext.name, ContributionKind::Lens, &lens.slug))
-                .collect();
-            changed |= !grids.is_empty();
-            for grid in grids {
-                remove_guarded(ext, &grid);
-            }
             let mut removed = BTreeSet::new();
             let providers: BTreeSet<_> = ext
                 .providers
@@ -731,30 +684,9 @@ fn prune_mounts(
                 }
                 true
             });
-            ext.pages.retain(|page| {
-                if page
-                    .lens()
-                    .into_iter()
-                    .chain(page.count.as_deref())
-                    .all(|lens| lenses.contains(lens))
-                {
-                    true
-                } else {
-                    removed.insert(ContributionId::new(
-                        &ext.name,
-                        ContributionKind::Page,
-                        &page.id,
-                    ));
-                    false
-                }
-            });
             let pages: BTreeSet<String> = ext.page_files.iter().map(|p| p.id.clone()).collect();
             ext.panels.retain(|panel| {
-                let present: &dyn Fn(&String) -> bool = if panel.pages {
-                    &|id| pages.contains(id)
-                } else {
-                    &|id| lenses.contains(id)
-                };
+                let present = |id: &String| pages.contains(id);
                 if [&panel.body]
                     .into_iter()
                     .chain(
@@ -777,16 +709,9 @@ fn prune_mounts(
                     false
                 }
             });
-            for (id, slot) in slots.get(&ext.name).into_iter().flatten() {
-                if !lenses.contains(&slot.lens_id) {
-                    ext.ui.slots.retain(|current| current != slot);
-                    removed.insert(id.clone());
-                }
-            }
-            let lens_slots = ext.ui.slots.len();
             let mut n = 0;
             ext.ui.page_slots.retain(|slot| {
-                let id = slot.local_id(lens_slots + n);
+                let id = slot.local_id(n);
                 n += 1;
                 if pages.contains(&slot.page) {
                     true
@@ -796,11 +721,7 @@ fn prune_mounts(
                 }
             });
             ext.ui.replacements.retain(|replacement| {
-                let present = match &replacement.page_id {
-                    Some(page) => pages.contains(page),
-                    None => lenses.contains(&replacement.lens_id),
-                };
-                if present {
+                if pages.contains(&replacement.page) {
                     true
                 } else {
                     removed.insert(ContributionId::new(
@@ -853,9 +774,6 @@ fn prune_mounts(
             ext.contributions
                 .retain(|descriptor| !removed.contains(&descriptor.id));
         }
-        if !changed {
-            break;
-        }
     }
 }
 
@@ -863,9 +781,6 @@ fn bind_sql(ext: &mut Extension) {
     let bindings = &ext.public_contracts.bindings;
     for model in &mut ext.models {
         model.sql = rewrite_sql(&model.sql, bindings, true);
-    }
-    for lens in &mut ext.lenses {
-        lens.query = rewrite_sql(&lens.query, bindings, false);
     }
     for page in &mut ext.page_files {
         for decl in &mut page.loaders {

@@ -1,5 +1,0 @@
-title: Backlog count
-description: How many work items wait on the backlog (on no thread) — the launcher's badge on Backlog.
-query: SELECT count(*) AS n FROM v_work_item WHERE thread_id IS NULL
-viz: number
-hidden: true

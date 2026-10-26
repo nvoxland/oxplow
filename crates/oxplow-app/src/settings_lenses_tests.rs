@@ -1358,7 +1358,7 @@ async fn the_git_dashboard_reads_the_branch_the_tree_and_the_recent_commits() {
 /// resized and removed through the tiles' own actions.
 #[tokio::test(flavor = "multi_thread")]
 async fn the_dashboard_page_adds_a_metric_tile_and_edits_its_tiles() {
-    use crate::lens_actions::{run_lens_action, LensActionCall};
+    use crate::viz_actions::{run_lens_action, LensActionCall};
     let fx = services_with_effort().await;
     let id = command(
         &fx,
@@ -1685,7 +1685,7 @@ async fn the_data_area_lists_entities_collectors_and_what_a_backfill_would_do() 
 /// in its layer (the choices stay the lens's own rows).
 #[tokio::test(flavor = "multi_thread")]
 async fn the_capabilities_lens_lists_the_implementations_and_choosing_one_is_a_config_write() {
-    use crate::lens_actions::{run_lens_action, LensActionCall};
+    use crate::viz_actions::{run_lens_action, LensActionCall};
     let fx = crate::test_fixtures::services_with_task_effort().await;
     let caps = run_task(&fx, "capabilities", vec![]).await;
     assert!(!caps.rows.is_empty());
@@ -1780,7 +1780,7 @@ async fn the_capabilities_lens_lists_the_implementations_and_choosing_one_is_a_c
 /// what was delivered.
 #[tokio::test]
 async fn the_context_pages_clear_empties_the_threads_basket() {
-    use crate::lens_actions::{run_lens_action, LensActionCall};
+    use crate::viz_actions::{run_lens_action, LensActionCall};
     let fx = services_with_effort().await;
     let thread = fx.thread.to_string();
     let add = |uri: &str| {

@@ -596,7 +596,7 @@ pub async fn run_as_page(
     run_as_page_in(svc, lens, params, crate::extensions::ViewContext::default()).await
 }
 
-/// [`run_as_page`] from a viewer's context (`lens_context`).
+/// [`run_as_page`] from a viewer's context (`view_context`).
 pub async fn run_as_page_in(
     svc: &crate::Services,
     lens: &str,

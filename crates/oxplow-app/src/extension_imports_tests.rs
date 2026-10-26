@@ -262,7 +262,7 @@ fn problem(svc: &crate::Services, extension: &str) -> String {
         .unwrap_or_default()
 }
 
-async fn lens(svc: &crate::Services, id: &str) -> Result<crate::extensions::LensRun, DomainError> {
+async fn lens(svc: &crate::Services, id: &str) -> Result<crate::extensions::VizRun, DomainError> {
     crate::extensions::run_lens(
         &svc.sql,
         &svc.extension_catalog,

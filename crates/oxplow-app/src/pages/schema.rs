@@ -10,7 +10,7 @@
 //! an arg's source); filtering and logic are SQL or a read command.
 //!
 //! A viz node's config (its viz, role block, columns, actions, empty
-//! text) is a [`Lens`] with no query of its own: what a viz shows is its
+//! text) is a [`VizConfig`] with no query of its own: what a viz shows is its
 //! loader's rows. So the shape checks, the action parser, the text
 //! renderers and the desktop's viz components are the ones lenses use.
 
@@ -20,10 +20,10 @@ use oxplow_db::SqlCell;
 use serde::{Deserialize, Serialize};
 
 use crate::extensions::{
-    holds_one_row, parse_actions, shape_problem, typed, AlertFile, LauncherCategory, Lens,
-    LensChart, LensCode, LensCustom, LensDiff, LensEditor, LensEmbed, LensForm, LensGroup,
-    LensHunks, LensMarkdown, LensSteps, LensTerminal, LensTimeline, LensTree, LensViz, PageAction,
-    PageAlert, PageColumn, PageParam, PageProvenance, ParamRole, Renders, TileSize, ViewContext,
+    holds_one_row, parse_actions, shape_problem, typed, AlertFile, FormSpec, LauncherCategory,
+    PageAction, PageAlert, PageColumn, PageParam, PageProvenance, ParamRole, Renders, TileSize,
+    ViewContext, Viz, VizChart, VizCode, VizConfig, VizCustom, VizDiff, VizEditor, VizEmbed,
+    VizGroup, VizHunks, VizMarkdown, VizSteps, VizTerminal, VizTimeline, VizTree,
 };
 
 /// A loaded page.
@@ -223,6 +223,21 @@ impl Node {
         }
     }
 
+    /// Every viz node's provenance below it, `self` included.
+    pub fn for_each_origin(&mut self, f: &mut impl FnMut(&mut PageProvenance)) {
+        match &mut self.kind {
+            NodeKind::Viz { config: lens, .. } => f(&mut lens.origin),
+            NodeKind::Stack { children }
+            | NodeKind::Grid { children }
+            | NodeKind::Switch { children, .. } => {
+                for c in children {
+                    c.for_each_origin(f);
+                }
+            }
+            _ => {}
+        }
+    }
+
     pub fn children(&self) -> &[Node] {
         match &self.kind {
             NodeKind::Stack { children }
@@ -246,7 +261,7 @@ pub enum NodeKind {
     /// reads no rows (a form, approvals).
     Viz {
         from: Option<String>,
-        lens: Box<Lens>,
+        config: Box<VizConfig>,
     },
     /// Another page, inline: its params by name from this page's params
     /// and its loaders' first rows, `params` naming any explicitly.
@@ -351,39 +366,39 @@ struct LoaderFile {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct VizFile {
-    viz: LensViz,
+    viz: Viz,
     #[serde(default)]
     columns: Vec<PageColumn>,
     #[serde(default)]
     empty: Option<String>,
     #[serde(default)]
-    chart: Option<LensChart>,
+    chart: Option<VizChart>,
     #[serde(default)]
-    tree: Option<LensTree>,
+    tree: Option<VizTree>,
     #[serde(default)]
-    timeline: Option<LensTimeline>,
+    timeline: Option<VizTimeline>,
     #[serde(default)]
-    steps: Option<LensSteps>,
+    steps: Option<VizSteps>,
     #[serde(default)]
-    hunks: Option<LensHunks>,
+    hunks: Option<VizHunks>,
     #[serde(default)]
-    code: Option<LensCode>,
+    code: Option<VizCode>,
     #[serde(default)]
-    diff: Option<LensDiff>,
+    diff: Option<VizDiff>,
     #[serde(default)]
-    editor: Option<LensEditor>,
+    editor: Option<VizEditor>,
     #[serde(default)]
-    embed: Option<LensEmbed>,
+    embed: Option<VizEmbed>,
     #[serde(default)]
-    terminal: Option<LensTerminal>,
+    terminal: Option<VizTerminal>,
     #[serde(default)]
-    markdown: Option<LensMarkdown>,
+    markdown: Option<VizMarkdown>,
     #[serde(default)]
-    form: Option<LensForm>,
+    form: Option<FormSpec>,
     #[serde(default)]
-    custom: Option<LensCustom>,
+    custom: Option<VizCustom>,
     #[serde(default)]
-    group: Option<LensGroup>,
+    group: Option<VizGroup>,
     #[serde(default)]
     emphasis: Option<String>,
     #[serde(default)]
@@ -416,8 +431,8 @@ struct ComponentFile {
 }
 
 /// The vizes a node shows no rows through.
-fn reads_no_rows(viz: LensViz) -> bool {
-    matches!(viz, LensViz::Form | LensViz::Approvals)
+fn reads_no_rows(viz: Viz) -> bool {
+    matches!(viz, Viz::Form | Viz::Approvals)
 }
 
 /// Parse and check page file `text`, page `slug` of extension `extension`
@@ -471,7 +486,7 @@ pub fn parse_page(
     let selected: Vec<String> = nodes
         .iter()
         .filter_map(|n| match &n.kind {
-            NodeKind::Viz { lens, .. } => {
+            NodeKind::Viz { config: lens, .. } => {
                 Some(lens.columns.iter().filter_map(|c| c.select.clone()))
             }
             _ => None,
@@ -572,13 +587,13 @@ fn inline_problem(page: &Page) -> Option<String> {
         let why = match &node.kind {
             NodeKind::Component { .. } => Some("a component"),
             NodeKind::Slot { .. } => Some("a slot"),
-            NodeKind::Viz { lens, .. } if !lens.actions.is_empty() => Some("actions"),
-            NodeKind::Viz { lens, .. } => match lens.viz {
-                LensViz::Form => Some("a form"),
-                LensViz::Approvals => Some("approvals"),
-                LensViz::Terminal => Some("a terminal"),
-                LensViz::Editor => Some("an editor"),
-                LensViz::Custom => Some("a component"),
+            NodeKind::Viz { config: lens, .. } if !lens.actions.is_empty() => Some("actions"),
+            NodeKind::Viz { config: lens, .. } => match lens.viz {
+                Viz::Form => Some("a form"),
+                Viz::Approvals => Some("approvals"),
+                Viz::Terminal => Some("a terminal"),
+                Viz::Editor => Some("an editor"),
+                Viz::Custom => Some("a component"),
                 _ => None,
             },
             _ => None,
@@ -960,15 +975,6 @@ fn parse_node(value: &serde_yaml::Value, ctx: &mut NodeCtx<'_>) -> Result<Node, 
         let from = take_str(&mut map, "from")?;
         let file: VizFile =
             serde_yaml::from_value(serde_yaml::Value::Mapping(map)).map_err(|e| e.to_string())?;
-        if matches!(
-            file.viz,
-            LensViz::Document | LensViz::Dashboard | LensViz::Answer
-        ) {
-            return Err(format!(
-                "viz `{}` isn't a page's: lay nodes out with `stack` or `grid`",
-                format!("{:?}", file.viz).to_lowercase()
-            ));
-        }
         let node_id = id
             .clone()
             .or_else(|| from.clone())
@@ -978,7 +984,7 @@ fn parse_node(value: &serde_yaml::Value, ctx: &mut NodeCtx<'_>) -> Result<Node, 
             node_id,
             NodeKind::Viz {
                 from,
-                lens: Box::new(lens),
+                config: Box::new(lens),
             },
         )
     } else if map.contains_key("stack") {
@@ -1054,28 +1060,25 @@ fn leaf_lens(
     node_id: &str,
     title: Option<&str>,
     f: VizFile,
-) -> Result<Lens, String> {
+) -> Result<VizConfig, String> {
     let actions = parse_actions(
         f.actions,
         ctx.params,
         f.group.is_some(),
-        holds_one_row(f.viz, true),
+        holds_one_row(f.viz),
     )
     .map_err(|e| format!("node `{node_id}`: {e}"))?;
-    let lens = Lens {
+    let lens = VizConfig {
         id: format!("{}#{node_id}", ctx.page_id),
         extension: ctx.extension.to_string(),
         slug: node_id.to_string(),
         title: title.unwrap_or(ctx.title).to_string(),
-        description: String::new(),
-        query: String::new(),
         viz: f.viz,
         params: ctx.params.to_vec(),
         columns: f.columns,
         empty: f.empty,
         chart: f.chart,
         tree: f.tree,
-        tile: None,
         timeline: f.timeline,
         steps: f.steps,
         hunks: f.hunks,
@@ -1083,7 +1086,6 @@ fn leaf_lens(
         diff: f.diff,
         editor: f.editor,
         embed: f.embed,
-        answer: None,
         terminal: f.terminal,
         markdown: f.markdown,
         form: f.form,
@@ -1091,26 +1093,13 @@ fn leaf_lens(
         group: f.group,
         emphasis: f.emphasis,
         depth: f.depth,
-        parts: Vec::new(),
-        view: None,
         fills: f.viz.fills(),
-        launcher_category: None,
-        hidden: true,
-        refresh: false,
         actions,
-        alert: None,
-        needs: Vec::new(),
         origin: ctx.origin.clone(),
-        tool: None,
     };
     // A custom viz's component is the extension's: checked where it loads.
-    // Its rows come from its loader, so it is checked as a lens with rows.
-    if lens.viz != LensViz::Custom {
-        let with_rows = Lens {
-            query: "SELECT 1".into(),
-            ..lens.clone()
-        };
-        if let Some(why) = shape_problem(&with_rows, &[], &[]) {
+    if lens.viz != Viz::Custom {
+        if let Some(why) = shape_problem(&lens, &[]) {
             return Err(format!("node `{node_id}`: {why}"));
         }
     }
@@ -1130,7 +1119,7 @@ fn check_page(page: &Page) -> Result<(), String> {
         }
         seen.push(&node.id);
         match &node.kind {
-            NodeKind::Viz { from, lens } => match from {
+            NodeKind::Viz { from, config: lens } => match from {
                 Some(from) if page.loader(from).is_none() => {
                     return Err(format!(
                         "node `{}` shows `{from}`, but there is no loader `{from}` in `data:`",

@@ -63,19 +63,16 @@ pub struct IntentFile {
 #[derive(Debug, Clone, PartialEq, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SlotMount {
+    /// A page's slot (`<extension>/<page>.<slot>`) or a core slot
+    /// (`diff.file.header`).
     pub slot: String,
-    /// The lens it mounts…
-    #[serde(default)]
-    pub lens: Option<String>,
-    /// … or the page (a slug of this extension), at a page's slot
-    /// (`<extension>/<page>.<slot>`).
-    #[serde(default)]
-    pub page: Option<String>,
+    /// The page it mounts: a slug of this extension.
+    pub page: String,
     /// Where among the page's parts (a parts slot only): `start`, `end`,
     /// `{ after: <id> }`, `{ before: <id> }`. Default `end`.
     #[serde(default)]
     pub at: Option<super::SlotAt>,
-    /// Its heading in the page; else the lens's title.
+    /// Its heading in the page; else the mounted page's title.
     #[serde(default)]
     pub title: Option<String>,
     /// A tile's size (a `.tiles` slot only).
@@ -83,14 +80,14 @@ pub struct SlotMount {
     pub size: Option<super::TileSize>,
 }
 
-/// `ui:` — everything an extension adds to the core UI: lenses mounted
-/// into core pages (`slots`), decorations on core refs (`decorators`) and
+/// `ui:` — everything an extension adds to the core UI: pages mounted at
+/// other pages' slots and core slots (`slots`), decorations on core refs (`decorators`) and
 /// replaced sub-components (`replacements`). Its commands
 /// meet a person through their own `ui` (`commands:`).
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct UiBlock {
-    /// Lenses mounted into core pages: `{ slot, lens }`, typed one by one
+    /// Pages mounted at slots: `{ slot, page, at? }`, typed one by one
     /// ([`slots_of`]).
     #[serde(default)]
     #[schemars(with = "Vec<SlotMount>")]
@@ -99,7 +96,7 @@ pub struct UiBlock {
     #[serde(default)]
     #[schemars(with = "Option<Vec<super::decorators::DecoratorFile>>")]
     pub decorators: Option<Value>,
-    /// A lens in place of a named core component.
+    /// A page in place of a named core component.
     #[serde(default)]
     #[schemars(with = "Option<Vec<super::replacements::ReplacementFile>>")]
     pub replacements: Option<Value>,
@@ -207,10 +204,6 @@ pub struct ManifestV2 {
     #[serde(default)]
     #[schemars(with = "Option<Vec<super::ai_profiles::AiProfileFile>>")]
     pub ai_profiles: Option<Value>,
-    /// Full pages, each showing one of its lenses.
-    #[serde(default)]
-    #[schemars(with = "Option<Vec<super::PageFile>>")]
-    pub pages: Option<Value>,
     /// Left-nav panels, each showing its lenses compact.
     #[serde(default)]
     #[schemars(with = "Option<Vec<super::PanelFile>>")]

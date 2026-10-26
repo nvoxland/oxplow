@@ -197,7 +197,7 @@ pub const MANIFEST: &[Capability] = &[
     // A lens's actions: commands run as the lens, for whoever pressed.
     both_named("run_lens_action", "run_lens_action", "oxplow_run_lens_action"),
     ui(
-        "lens_text",
+        "viz_text",
         "Copy's text on every lens; an agent reads the same text through `run_lens`",
     ),
     // A window's open page runs: it opens one, hears which loaders

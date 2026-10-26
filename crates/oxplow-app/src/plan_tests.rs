@@ -39,7 +39,7 @@ async fn a_proposed_plan_is_a_row_with_its_effort_and_turn() {
         &fx,
         HookKind::PreToolUse,
         json!({ "tool_name": "ExitPlanMode", "tool_use_id": "t1",
-                "tool_input": { "plan": "1. Model\n2. Lens", "planFilePath": "/h/p.md" } }),
+                "tool_input": { "plan": "1. Model\n2. VizConfig", "planFilePath": "/h/p.md" } }),
     ))
     .await;
     let rows = fx
@@ -60,7 +60,7 @@ async fn a_proposed_plan_is_a_row_with_its_effort_and_turn() {
     let row = &rows[0];
     assert_eq!(row[1], Int(1), "an open effort");
     assert_eq!(row[2], Int(1), "an open turn");
-    assert_eq!(row[3], Text("1. Model\n2. Lens".into()));
+    assert_eq!(row[3], Text("1. Model\n2. VizConfig".into()));
     assert_eq!(row[4], Text("/h/p.md".into()));
     assert_eq!(row[6], Int(1));
     // The row's event is the proposal itself.

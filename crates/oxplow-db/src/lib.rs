@@ -20,7 +20,6 @@ pub mod command_audit_store;
 pub mod comment_store;
 pub mod contribution_health_store;
 pub mod contribution_store;
-pub mod dashboard_store;
 mod database;
 pub mod diagnostic_store;
 pub mod effect_run_store;
@@ -61,7 +60,6 @@ pub mod table_generations;
 pub mod terminal_store;
 #[cfg(test)]
 pub(crate) mod test_tasks;
-pub mod thread_answer_store;
 pub mod thread_context_store;
 pub mod thread_store;
 pub mod token_usage_store;
@@ -99,9 +97,6 @@ pub use comment_store::SqliteCommentStore;
 pub use contribution_health_store::{
     ContributionHealthRow, ContributionKey, SqliteContributionHealthStore,
 };
-pub use dashboard_store::{
-    Dashboard, DashboardItem, DashboardWithItems, NewDashboardItem, SqliteDashboardStore,
-};
 pub use database::{
     interactive, map_sql_err, string_to_ts, ts_to_string, Database, DbInitError,
     PublicationTransaction, TxError,
@@ -138,7 +133,6 @@ pub use snapshot_tree::{ContentHasher, SnapshotTree, TreeEntry};
 pub use stream_store::SqliteStreamStore;
 pub use symbol_store::{FileSymbols, SqliteSymbolStore, SymbolCapture, SymbolRow};
 pub use terminal_store::{SqliteTerminalStore, Terminal};
-pub use thread_answer_store::{AnswerShows, SqliteThreadAnswerStore, ThreadAnswer};
 pub use thread_store::SqliteThreadStore;
 pub use token_usage_store::{
     AgentTokenUsage, NewAgentTokenUsage, SqliteTokenUsageStore, TokenUsageTotals,

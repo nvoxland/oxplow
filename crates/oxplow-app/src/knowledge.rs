@@ -1925,7 +1925,7 @@ mod tests {
             let root = dir(fx);
             let svc = fx.svc.clone();
             async move {
-                let ctx = crate::extensions::lens_context(&svc, None, None).await;
+                let ctx = crate::extensions::view_context(&svc, None, None).await;
                 crate::extensions::run_lens(
                     &layer,
                     &catalog,

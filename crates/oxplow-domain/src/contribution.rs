@@ -24,7 +24,7 @@ pub fn extension_namespace(extension: &str) -> String {
 }
 
 /// An extension's name: lowercase letters, digits and single dashes,
-/// starting with a letter — safe as a folder, a lens-id prefix and (dashes
+/// starting with a letter — safe as a folder, a page-id prefix and (dashes
 /// as underscores) a namespace.
 pub fn valid_extension_name(name: &str) -> bool {
     name.starts_with(|c: char| c.is_ascii_lowercase())
@@ -87,7 +87,6 @@ pub enum ContributionKind {
     Skill,
     Implementation,
     Provider,
-    Lens,
     Page,
     Panel,
     Slot,
@@ -102,7 +101,7 @@ pub enum ContributionKind {
 pub struct KindSpec {
     pub kind: ContributionKind,
     /// Its key in `extension.yaml` (`ui.slots` for the nested ones;
-    /// `lenses` are files, not a key).
+    /// `pages` are files, not a key).
     pub key: &'static str,
     /// How a person names it.
     pub title: &'static str,
@@ -257,18 +256,10 @@ pub const KINDS: &[KindSpec] = &[
         false,
     ),
     spec(
-        ContributionKind::Lens,
-        "lenses",
-        "Lens",
-        "a page or panel over a SQL query",
-        false,
-        false,
-    ),
-    spec(
         ContributionKind::Page,
         "pages",
         "Page",
-        "where its lenses show as pages",
+        "a page: its data loaders and the view that shows them",
         false,
         false,
     ),
@@ -276,7 +267,7 @@ pub const KINDS: &[KindSpec] = &[
         ContributionKind::Panel,
         "panels",
         "Panel",
-        "where its lenses show as panels",
+        "a rail panel showing its pages compact",
         false,
         false,
     ),
@@ -284,7 +275,7 @@ pub const KINDS: &[KindSpec] = &[
         ContributionKind::Slot,
         "ui.slots",
         "Slot mount",
-        "a lens mounted into a core page",
+        "a page mounted at another page's slot, or a core one",
         true,
         true,
     ),
@@ -300,7 +291,7 @@ pub const KINDS: &[KindSpec] = &[
         ContributionKind::Replacement,
         "ui.replacements",
         "Replacement",
-        "a lens in place of a core component",
+        "a page in place of a core component",
         true,
         false,
     ),
@@ -308,7 +299,7 @@ pub const KINDS: &[KindSpec] = &[
         ContributionKind::CustomComponent,
         "custom_components",
         "Custom component",
-        "sandboxed HTML components for `viz: custom` lenses",
+        "sandboxed HTML components a page draws, fed its loaders",
         false,
         false,
     ),
@@ -368,7 +359,6 @@ impl ContributionKind {
             ContributionKind::Skill => "skill",
             ContributionKind::Implementation => "implementation",
             ContributionKind::Provider => "provider",
-            ContributionKind::Lens => "lens",
             ContributionKind::Page => "page",
             ContributionKind::Panel => "panel",
             ContributionKind::Slot => "slot",
@@ -600,7 +590,7 @@ pub enum RunsOn {
     Call,
     /// Read by a query: a model, a measure, a metric, a dimension.
     Query,
-    /// Shown where it's mounted: a lens, a page, a slot.
+    /// Shown where it's mounted: a page, a slot.
     Mount,
     /// Read by an agent: a skill, an advisory.
     Agent,

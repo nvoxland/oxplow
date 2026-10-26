@@ -1,12 +1,10 @@
 //! Cores for the `extensions` command module — project extensions and
-//! their lenses. What the app shows is the main worktree's, whichever
+//! their components. What the app shows is the main worktree's, whichever
 //! stream is open; only the authoring call (`validate_extension`) reads a
 //! stream's working copy. See
 //! `.context/extensions.md` "Reading".
 
-use std::collections::BTreeMap;
-
-use oxplow_app::extensions::{self, Extension, Lens, LensRun};
+use oxplow_app::extensions::Extension;
 use oxplow_app::Services;
 use oxplow_db::SqlCell;
 use oxplow_domain::DomainError;
@@ -54,165 +52,6 @@ pub async fn list_services(_svc: &Services) -> Result<Vec<ServiceListing>, IpcEr
         .collect())
 }
 
-/// One lens by `<extension>/<slug>`.
-pub async fn get_lens(svc: &Services, id: String) -> Result<Lens, IpcError> {
-    Ok(svc.lens_definition(root(svc), &id).await?)
-}
-
-/// Run a lens with optional param overrides; returns the rows the lens
-/// page shows.
-pub async fn run_lens(
-    svc: &Services,
-    id: String,
-    params: Option<BTreeMap<String, SqlCell>>,
-    stream_id: Option<String>,
-) -> Result<LensRun, IpcError> {
-    let root = root(svc);
-    let ctx = context(svc, stream_id.as_deref()).await;
-    Ok(extensions::run_lens(
-        &svc.sql,
-        &svc.extension_catalog,
-        root,
-        &id,
-        params.unwrap_or_default(),
-        &ctx,
-    )
-    .await?)
-}
-
-/// The viewer's context: the stream (primary when omitted) and its
-/// selected thread, bound into lenses that declare `stream_id` /
-/// `thread_id`.
-async fn context(svc: &Services, stream_id: Option<&str>) -> extensions::ViewContext {
-    let stream = stream_id.and_then(oxplow_domain::StreamId::try_from_str);
-    extensions::lens_context(svc, stream, None).await
-}
-
-/// Run a lens spec a page shows without keeping it (Explore Data's
-/// query), checked first; a refusal names its field (`/spec/query`).
-pub async fn run_lens_spec(
-    svc: &Services,
-    spec: extensions::LensSpec,
-    params: Option<BTreeMap<String, SqlCell>>,
-    stream_id: Option<String>,
-) -> Result<LensRun, IpcError> {
-    let stream = stream_id
-        .as_deref()
-        .and_then(oxplow_domain::StreamId::try_from_str);
-    Ok(
-        oxplow_app::commands::lens::run_checked_spec(
-            svc,
-            &spec,
-            params.unwrap_or_default(),
-            stream,
-        )
-        .await?,
-    )
-}
-
-/// Run an answer shown in a thread (`oxplow:oxplow/answer?id=<id>`) as the person sees it.
-pub async fn run_answer(svc: &Services, answer: String) -> Result<LensRun, IpcError> {
-    let id: i64 =
-        oxplow_domain::uri::build::parse_as(&answer, oxplow_domain::uri::resources::ANSWER)
-            .or_else(|_| answer.parse())
-            .map_err(|_| {
-                IpcError::invalid(format!(
-                    "`{answer}` isn't an answer (`oxplow:oxplow/answer?id=<id>`)"
-                ))
-            })?;
-    Ok(oxplow_app::commands::lens::run_answer(svc, id).await?)
-}
-
-/// A lens's text rendering (`lens_text`): what Copy puts on the
-/// clipboard.
-pub async fn lens_text(
-    svc: &Services,
-    id: String,
-    params: Option<BTreeMap<String, SqlCell>>,
-    stream_id: Option<String>,
-) -> Result<String, IpcError> {
-    let root = root(svc);
-    let ctx = context(svc, stream_id.as_deref()).await;
-    let run = extensions::run_lens(
-        &svc.sql,
-        &svc.extension_catalog,
-        root,
-        &id,
-        params.unwrap_or_default(),
-        &ctx,
-    )
-    .await?;
-    Ok(oxplow_app::lens_text::text_of(svc, root, &run, &ctx).await?)
-}
-
-/// What a form lens shows: its command's spec (the fields) and the values
-/// they start from.
-pub async fn lens_form(
-    svc: &Services,
-    id: String,
-    params: Option<BTreeMap<String, SqlCell>>,
-    stream_id: Option<String>,
-) -> Result<oxplow_app::lens_actions::FormStart, IpcError> {
-    let root = root(svc);
-    let ctx = context(svc, stream_id.as_deref()).await;
-    Ok(
-        oxplow_app::lens_actions::form_start(svc, root, &id, params.unwrap_or_default(), &ctx)
-            .await?,
-    )
-}
-
-/// A person submits a form lens: its command runs as the lens, acting for
-/// them (`NEEDS_CONFIRMATION` asks them first).
-pub async fn submit_lens_form(
-    svc: &Services,
-    id: String,
-    input: oxplow_domain::Json,
-    params: Option<BTreeMap<String, SqlCell>>,
-    stream_id: Option<String>,
-    confirmed: bool,
-) -> Result<oxplow_domain::CommandOutcome, IpcError> {
-    let root = root(svc);
-    let ctx = context(svc, stream_id.as_deref()).await;
-    Ok(oxplow_app::lens_actions::submit_form(
-        svc,
-        root,
-        oxplow_app::lens_actions::FormSubmission {
-            lens_id: id,
-            input: input.0,
-            params: params.unwrap_or_default(),
-            on_behalf_of: oxplow_domain::Actor::Human,
-            confirmed,
-        },
-        &ctx,
-    )
-    .await?)
-}
-
-/// A custom component's frame reads one of its declared lenses (P6b.D2):
-/// `id` is the component (`<extension>/<component id>`); `asset` names the
-/// lens to run.
-pub async fn run_component_query(
-    svc: &Services,
-    id: String,
-    asset: String,
-    params: Option<BTreeMap<String, SqlCell>>,
-    stream_id: Option<String>,
-    version: String,
-) -> Result<LensRun, IpcError> {
-    let root = root(svc);
-    let ctx = context(svc, stream_id.as_deref()).await;
-    Ok(oxplow_app::lens_actions::run_component_query(
-        svc,
-        root,
-        &id,
-        &asset,
-        params.unwrap_or_default(),
-        &ctx,
-        &version,
-    )
-    .await?)
-}
-
 /// A custom component's frame runs its own read-only SQL (`querySql`):
 /// `id` declares `sql: read`, its extension `permissions.sql`.
 pub async fn run_component_sql(
@@ -227,10 +66,10 @@ pub async fn run_component_sql(
         .as_deref()
         .and_then(oxplow_domain::StreamId::try_from_str)
         .map(|s| s.value());
-    Ok(oxplow_app::lens_actions::run_component_sql(
+    Ok(oxplow_app::viz_actions::run_component_sql(
         svc,
         root(svc),
-        oxplow_app::lens_actions::ComponentSql {
+        oxplow_app::viz_actions::ComponentSql {
             component: id,
             sql,
             params: params.unwrap_or_default(),
@@ -251,8 +90,8 @@ pub async fn component_form(
     command: String,
     input: Option<oxplow_domain::Json>,
     version: String,
-) -> Result<oxplow_app::lens_actions::FormStart, IpcError> {
-    Ok(oxplow_app::lens_actions::component_form_pinned(
+) -> Result<oxplow_app::viz_actions::FormStart, IpcError> {
+    Ok(oxplow_app::viz_actions::component_form_pinned(
         svc,
         root(svc),
         &id,
@@ -267,7 +106,7 @@ pub async fn component_form(
 /// is now, for its frame (tsk984): the version the daemon serves it at
 /// (`/components/v/<version>/`) and the frame invokes with.
 pub async fn load_component(svc: &Services, id: String) -> Result<String, IpcError> {
-    Ok(oxplow_app::lens_actions::load_component_pinned(svc, root(svc), &id).await?)
+    Ok(oxplow_app::viz_actions::load_component_pinned(svc, root(svc), &id).await?)
 }
 
 /// A custom component's frame invokes one of its declared commands, as the
@@ -282,10 +121,10 @@ pub async fn invoke_component_command(
     confirmed: bool,
     version: String,
 ) -> Result<oxplow_domain::CommandOutcome, IpcError> {
-    Ok(oxplow_app::lens_actions::invoke_component_command(
+    Ok(oxplow_app::viz_actions::invoke_component_command(
         svc,
         root(svc),
-        oxplow_app::lens_actions::ComponentInvoke {
+        oxplow_app::viz_actions::ComponentInvoke {
             component: id,
             command,
             input: input.0,
@@ -297,68 +136,7 @@ pub async fn invoke_component_command(
     .await?)
 }
 
-/// One press of a lens's action: the lens, the action, the lens's params,
-/// the row it was pressed on (a row action), and what the person filled in
-/// (a form action, `form: true`).
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, specta::Type)]
-#[serde(rename_all = "camelCase")]
-pub struct LensPress {
-    pub id: String,
-    pub action: String,
-    #[serde(default)]
-    pub params: Option<BTreeMap<String, SqlCell>>,
-    #[serde(default)]
-    pub row: Option<BTreeMap<String, SqlCell>>,
-    #[serde(default)]
-    pub input: Option<oxplow_domain::Json>,
-    /// Where a dragged row landed (a drag action, `drag: true`).
-    #[serde(default)]
-    pub drop: Option<oxplow_app::lens_actions::Drop>,
-}
-
-impl LensPress {
-    fn call(self, confirmed: bool) -> oxplow_app::lens_actions::LensActionCall {
-        oxplow_app::lens_actions::LensActionCall {
-            lens_id: self.id,
-            action_id: self.action,
-            params: self.params.unwrap_or_default(),
-            row: self.row,
-            input: self.input.map(|i| i.0),
-            drop: self.drop,
-            on_behalf_of: oxplow_domain::Actor::Human,
-            confirmed,
-        }
-    }
-}
-
-/// The form a lens's form action (`form: true`) opens: its command, the
-/// values it starts from (the action's bound `input`) and its fixed fields.
-pub async fn lens_action_form(
-    svc: &Services,
-    press: LensPress,
-    stream_id: Option<String>,
-) -> Result<oxplow_app::lens_actions::FormStart, IpcError> {
-    let root = root(svc);
-    let ctx = context(svc, stream_id.as_deref()).await;
-    Ok(oxplow_app::lens_actions::action_form(svc, root, press.call(false), &ctx).await?)
-}
-
-/// A person presses one of a lens's actions: its command runs as the
-/// lens, acting for them (`NEEDS_CONFIRMATION` asks them first). A row
-/// action takes the row it was pressed on; a form action, what they
-/// filled in.
-pub async fn run_lens_action(
-    svc: &Services,
-    press: LensPress,
-    stream_id: Option<String>,
-    confirmed: bool,
-) -> Result<oxplow_domain::CommandOutcome, IpcError> {
-    let root = root(svc);
-    let ctx = context(svc, stream_id.as_deref()).await;
-    Ok(oxplow_app::lens_actions::run_lens_action(svc, root, press.call(confirmed), &ctx).await?)
-}
-
-/// Load one extension and dry-run each lens, returning every problem —
+/// Load one extension and dry-run each page, returning every problem —
 /// the SDK's `check`, the same report `oxplow extension check` prints.
 pub async fn validate_extension(
     svc: &Services,

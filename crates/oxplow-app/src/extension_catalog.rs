@@ -26,7 +26,7 @@ use std::sync::Arc;
 use oxplow_domain::DomainError;
 use parking_lot::Mutex;
 
-use crate::extensions::{self, Deployment, Extension, Lens};
+use crate::extensions::{self, Deployment, Extension};
 
 /// `(path, len, mtime)` for every file the load depends on, sorted.
 type Fingerprint = Vec<(PathBuf, u64, Option<std::time::SystemTime>)>;
@@ -573,16 +573,6 @@ impl ExtensionCatalog {
         Ok(ext.clone())
     }
 
-    /// One lens by `<extension>/<slug>`.
-    pub fn find_lens(&self, root: &Path, id: &str) -> Result<Lens, DomainError> {
-        let (ext, slug) = id.split_once('/').ok_or(DomainError::NotFound)?;
-        self.named(root, ext)?
-            .lenses
-            .into_iter()
-            .find(|l| l.slug == slug)
-            .ok_or(DomainError::NotFound)
-    }
-
     /// One page by `<extension>/<slug>`.
     pub fn find_page(
         &self,
@@ -594,6 +584,26 @@ impl ExtensionCatalog {
             .page_files
             .into_iter()
             .find(|p| p.slug == slug)
+            .ok_or(DomainError::NotFound)
+    }
+
+    /// The page a page URI's `page` param names: `<extension>/<slug>`, or a
+    /// bare slug for one of oxplow's own extensions (core-named, as
+    /// `oxplow:oxplow/page?page=tasks`).
+    pub fn page_named(
+        &self,
+        root: &Path,
+        page: &str,
+    ) -> Result<crate::pages::schema::Page, DomainError> {
+        if page.contains('/') {
+            return self.find_page(root, page);
+        }
+        self.get(root)
+            .iter()
+            .filter(|e| e.enabled && e.namespace == crate::extensions::CORE_NAMESPACE)
+            .flat_map(|e| e.page_files.iter())
+            .find(|p| p.slug == page)
+            .cloned()
             .ok_or(DomainError::NotFound)
     }
 

@@ -3,7 +3,7 @@
 //! run holds (the presser names it; the server checks it is one of the
 //! node's rows); a holds-one-row action on its node's one row. Each runs
 //! through the bus as the page acting for whoever pressed it, with the
-//! checks a lens's action passes (`lens_actions::prepare_resolved`).
+//! checks a lens's action passes (`viz_actions::prepare_resolved`).
 
 use std::collections::BTreeMap;
 
@@ -14,7 +14,7 @@ use serde_json::Value;
 use super::open_runs::PageRuns;
 use super::runner::PageRun;
 use super::text::{node, node_run};
-use crate::lens_actions::{prepare_resolved, Drop};
+use crate::viz_actions::{prepare_resolved, Drop};
 
 /// One press of a page's action.
 pub struct PageActionCall {
@@ -145,7 +145,7 @@ pub async fn run_page_action(
             let lens_run = node_run(holder, def)
                 .ok_or_else(|| invalid("/node", format!("node `{path}` has no actions")))?;
             let action = lens_run
-                .lens
+                .config
                 .actions
                 .iter()
                 .find(|a| a.id == call.action)
@@ -207,8 +207,8 @@ pub async fn run_page_action(
             };
             let actor = format!("{}#{id}", holder.page.id);
             prepare_resolved(
-                &lens_run.lens.id,
-                &lens_run.lens.actions,
+                &lens_run.config.id,
+                &lens_run.config.actions,
                 &actor,
                 &call.action,
                 &holder.params,
@@ -279,13 +279,13 @@ async fn page_rows(
 async fn form_sources(
     svc: &crate::Services,
     choices: &BTreeMap<String, String>,
-    fields: &[crate::extensions::LensFormField],
+    fields: &[crate::extensions::FormField],
     params: &BTreeMap<String, SqlCell>,
     viewer: &Actor,
 ) -> Result<
     (
-        BTreeMap<String, Vec<crate::lens_actions::Choice>>,
-        BTreeMap<String, Vec<crate::lens_actions::Subfield>>,
+        BTreeMap<String, Vec<crate::viz_actions::Choice>>,
+        BTreeMap<String, Vec<crate::viz_actions::Subfield>>,
         oxplow_db::Reads,
     ),
     CommandError,
@@ -295,7 +295,7 @@ async fn form_sources(
         let rows = page_rows(svc, source, params, viewer).await?;
         out_choices.insert(
             field.clone(),
-            crate::lens_actions::choices_from(&rows, field, source)?,
+            crate::viz_actions::choices_from(&rows, field, source)?,
         );
     }
     let mut subfields = BTreeMap::new();
@@ -306,7 +306,7 @@ async fn form_sources(
         reads.push(rows.reads.clone());
         subfields.insert(
             field.name().to_string(),
-            crate::lens_actions::subfields_from(&rows, field.name(), source)?,
+            crate::viz_actions::subfields_from(&rows, field.name(), source)?,
         );
     }
     Ok((out_choices, subfields, oxplow_db::Reads::union(&reads)))
@@ -320,7 +320,7 @@ pub async fn page_form(
     runs: &PageRuns,
     run_id: &str,
     node_path: &str,
-) -> Result<crate::lens_actions::FormStart, CommandError> {
+) -> Result<crate::viz_actions::FormStart, CommandError> {
     let run = runs
         .get(run_id)
         .ok_or_else(|| invalid("/runId", format!("no open page run `{run_id}`")))?;
@@ -330,8 +330,8 @@ pub async fn page_form(
         node(&holder.page, id).ok_or_else(|| invalid("/node", format!("no node `{node_path}`")))?;
     let lens_run = node_run(holder, def)
         .ok_or_else(|| invalid("/node", format!("`{node_path}` isn't a viz")))?;
-    let form = match (&lens_run.lens.viz, &lens_run.lens.form) {
-        (crate::extensions::LensViz::Form, Some(f)) => f.clone(),
+    let form = match (&lens_run.config.viz, &lens_run.config.form) {
+        (crate::extensions::Viz::Form, Some(f)) => f.clone(),
         _ => return Err(invalid("/node", format!("node `{node_path}` isn't a form"))),
     };
     let name = form.command.clone().unwrap_or_default();
@@ -340,7 +340,7 @@ pub async fn page_form(
         .spec(&name)
         .ok_or_else(|| CommandError::Unknown { name: name.clone() })?;
     let mut values = match form.defaults.as_ref() {
-        Some(d) => match crate::lens_actions::bind_input(d, &holder.params, None, None)? {
+        Some(d) => match crate::viz_actions::bind_input(d, &holder.params, None, None)? {
             Value::Object(m) => m,
             _ => serde_json::Map::new(),
         },
@@ -388,7 +388,7 @@ pub async fn page_form(
         &Actor::Human,
     )
     .await?;
-    Ok(crate::lens_actions::FormStart {
+    Ok(crate::viz_actions::FormStart {
         command,
         values: Value::Object(values),
         fixed: form.fixed,
@@ -419,15 +419,15 @@ pub async fn submit_page_form(
         node(&holder.page, id).ok_or_else(|| invalid("/node", format!("no node `{node_path}`")))?;
     let lens_run = node_run(holder, def)
         .ok_or_else(|| invalid("/node", format!("`{node_path}` isn't a viz")))?;
-    let form = match (&lens_run.lens.viz, &lens_run.lens.form) {
-        (crate::extensions::LensViz::Form, Some(f)) => f.clone(),
+    let form = match (&lens_run.config.viz, &lens_run.config.form) {
+        (crate::extensions::Viz::Form, Some(f)) => f.clone(),
         _ => return Err(invalid("/node", format!("node `{node_path}` isn't a form"))),
     };
     let defaults = match form.defaults.as_ref() {
-        Some(d) => crate::lens_actions::bind_input(d, &holder.params, None, None)?,
+        Some(d) => crate::viz_actions::bind_input(d, &holder.params, None, None)?,
         None => Value::Object(serde_json::Map::new()),
     };
-    let merged = crate::lens_actions::filled(defaults, input, &form.fixed)?;
+    let merged = crate::viz_actions::filled(defaults, input, &form.fixed)?;
     svc.commands
         .run(
             &Actor::Lens {
@@ -451,7 +451,7 @@ pub async fn page_action_form(
     node_path: Option<&str>,
     action_id: &str,
     row: Option<BTreeMap<String, SqlCell>>,
-) -> Result<crate::lens_actions::FormStart, CommandError> {
+) -> Result<crate::viz_actions::FormStart, CommandError> {
     let run = runs
         .get(run_id)
         .ok_or_else(|| invalid("/runId", format!("no open page run `{run_id}`")))?;
@@ -469,7 +469,7 @@ pub async fn page_action_form(
             let lens_run = node_run(holder, def)
                 .ok_or_else(|| invalid("/node", format!("`{path}` has no actions")))?;
             (
-                lens_run.lens.actions,
+                lens_run.config.actions,
                 holder.params.clone(),
                 Some(lens_run.result),
             )
@@ -507,7 +507,7 @@ pub async fn page_action_form(
         }
         (None, _) => None,
     };
-    let values = crate::lens_actions::bind_input(&action.input, &params, row.as_ref(), None)?;
+    let values = crate::viz_actions::bind_input(&action.input, &params, row.as_ref(), None)?;
     let (choices, _, _) = form_sources(svc, &action.choices, &[], &params, &Actor::Human).await?;
     let command = svc
         .commands
@@ -515,7 +515,7 @@ pub async fn page_action_form(
         .ok_or_else(|| CommandError::Unknown {
             name: action.command.clone(),
         })?;
-    Ok(crate::lens_actions::FormStart {
+    Ok(crate::viz_actions::FormStart {
         command,
         values,
         fixed: action.fixed,

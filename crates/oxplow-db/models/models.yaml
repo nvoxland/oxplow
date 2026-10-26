@@ -463,31 +463,6 @@
   tests:
     - { not_null: id }
     - { unique: id }
-- name: dashboard
-  version: 4
-  description: "User-created dashboards."
-  columns:
-    - { name: "id", type: "INTEGER", doc: "Dashboard id." }
-    - { name: "title", type: "TEXT", doc: "Title." }
-    - { name: "sort_index", type: "INTEGER", doc: "Order in the dashboards list." }
-    - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
-    - { name: "updated_at", type: "TEXT", doc: "RFC 3339 timestamp." }
-    - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/dashboard?id=dsh<id>`: its URI, the one place SQL spells it — select and join on this, never rebuild it. (v2)" }
-  tests:
-    - { not_null: id }
-    - { unique: id }
-- name: dashboard_item
-  version: 1
-  description: "Tiles on dashboards: a query (pinned SQL shown as a lens viz or the metric card), a lens or a text note. v2: `query` replaces `metric`; its SQL is in `options_json`."
-  columns:
-    - { name: "id", type: "INTEGER", doc: "Tile id." }
-    - { name: "dashboard_id", type: "INTEGER", doc: "Its dashboard (v_dashboard.id)." }
-    - { name: "sort_index", type: "INTEGER", doc: "Position on the dashboard." }
-    - { name: "kind", type: "TEXT", doc: "`query`, `lens` or `text`." }
-    - { name: "options_json", type: "TEXT", doc: "Tile options, JSON: a query tile's `sql` and `display` (a lens viz, or `metric` with its `metric` key), a lens tile's `lensId`, a text tile's `text`, and every tile's size and filter overrides." }
-  tests:
-    - { not_null: id }
-    - { unique: id }
 - name: decision
   version: 7
   description: "Decisions: forks the agent resolved while working (what it chose, what it didn't, why), recorded by the agent or inferred by oxplow. What a reviewer most wants to check."
@@ -777,18 +752,6 @@
   tests:
     - { not_null: uri }
     - { unique: uri }
-- name: search_dashboard
-  version: 3
-  description: "What site search indexes for each dashboard: the `dashboard` kind's index is restated from these rows when they change."
-  columns:
-    - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/dashboard?id=dsh<n>`: what a hit opens." }
-    - { name: "title", type: "TEXT", doc: "The dashboard's title." }
-    - { name: "body", type: "TEXT", doc: "The text of its text tiles and the titles of its query tiles, a line each, in order." }
-    - { name: "stream_id", type: "TEXT", doc: "Always NULL: dashboards belong to the project." }
-    - { name: "version", type: "TEXT", doc: "The newer of the dashboard's change and its tiles'." }
-  tests:
-    - { not_null: uri }
-    - { unique: uri }
 - name: search_decision
   version: 3
   description: "What site search indexes for each decision: the `decision` kind's index is restated from these rows when they change. Decisions on archived threads are included."
@@ -812,14 +775,14 @@
   tests:
     - { not_null: uri }
     - { unique: uri }
-- name: search_lens
-  version: 3
-  description: "What site search indexes for each lens: the `lens` kind's index is restated from these rows when they change. Hidden lenses (the agent's typed tools) are included."
+- name: search_page
+  version: 1
+  description: "What site search indexes for each page the launcher lists: the `page` kind's index is restated from these rows when they change. Hidden pages (opened from elsewhere) are left out."
   columns:
-    - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/lens?lens=<extension>/<slug>`: what a hit opens." }
-    - { name: "title", type: "TEXT", doc: "The lens's title." }
-    - { name: "body", type: "TEXT", doc: "Its description." }
-    - { name: "stream_id", type: "TEXT", doc: "Always NULL: lenses belong to the project." }
+    - { name: "uri", type: "TEXT", doc: "The page's URI (`v_page.uri`): what a hit opens." }
+    - { name: "title", type: "TEXT", doc: "The page's title." }
+    - { name: "body", type: "TEXT", doc: "Its description and launcher keywords." }
+    - { name: "stream_id", type: "TEXT", doc: "Always NULL: pages belong to the project." }
   tests:
     - { not_null: uri }
     - { unique: uri }
@@ -1395,25 +1358,6 @@
     - { name: "line", type: "INTEGER", doc: "Its line there, when the kind tracks lines." }
   tests:
     - { not_null: uri }
-- name: lens
-  version: 5
-  key: [uri]
-  description: "Every lens of every enabled extension: a saved query over the models and how to show it. Each is a page for the person (unless hidden); open one with `oxplow_show_lens`, run one with `oxplow_run_lens`, read its definition with `oxplow_read { ref }`. Restated with each extension generation, so it is what the running catalog holds."
-  columns:
-    - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/lens?lens=<extension>/<slug>`: its URI, the one place SQL spells it." }
-    - { name: "extension", type: "TEXT", doc: "The extension that declares it (v_extension.name)." }
-    - { name: "slug", type: "TEXT", doc: "Its id within the extension: the lens file's name." }
-    - { name: "title", type: "TEXT", doc: "What the person sees." }
-    - { name: "description", type: "TEXT", doc: "What it shows; empty when it says nothing." }
-    - { name: "viz", type: "TEXT", doc: "How it is drawn: `table`, `list`, `chart`, `tree`, `grid`, `form`, `custom`, … " }
-    - { name: "params", type: "TEXT", doc: "The params it takes, as a JSON array of `{name, label, default, options, type, role, presets}`: `type` is `text`, `choice`, `bool`, `date_range`, `branch` or `search`; `role` is `selection` when a column of its rows (or of a part's) selects it, else `filter`." }
-    - { name: "hidden", type: "INTEGER", doc: "1 when the launcher doesn't list it (a drill-down or a grid's child)." }
-    - { name: "launcher_category", type: "TEXT", doc: "The launcher section it is listed under (`Work`, `Code`, `Activity`, `Data`, …); NULL for the default `Lenses`." }
-    - { name: "needs", type: "TEXT", doc: "The capabilities (or features) it needs, as a JSON array; without them its run says so." }
-    - { name: "source", type: "TEXT", doc: "Its source file, the one to edit, relative to the project; NULL when no source is here (it ships with oxplow). A deployed extension runs a copy of it in the store." }
-  tests:
-    - { not_null: uri }
-    - { unique: uri }
 - name: page
   version: 1
   key: [uri]
@@ -1703,25 +1647,6 @@
     - { not_null: id }
     - { unique: uri }
     - { accepted_values: { column: decision, values: [pending, approved, declined, superseded] } }
-- name: thread_answer
-  version: 4
-  description: "An agent's answers in a thread: what `oxplow_show_lens` showed the person — an existing lens with its params, or the answer's own lens spec — and, once kept, the lens it became."
-  columns:
-    - { name: "id", type: "INTEGER", doc: "Answer id." }
-    - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/answer?id=<id>`." }
-    - { name: "thread_id", type: "INTEGER", doc: "The thread it was shown in (v_thread.id)." }
-    - { name: "turn_id", type: "INTEGER", doc: "The turn it was shown in (v_agent_turn.id), when one was open." }
-    - { name: "effort_id", type: "INTEGER", doc: "The effort open in the thread at the time, if any." }
-    - { name: "title", type: "TEXT", doc: "What it's called." }
-    - { name: "lens", type: "TEXT", doc: "An existing lens shown (`<extension>/<slug>`); NULL when the answer has its own spec." }
-    - { name: "spec", type: "TEXT", doc: "The answer's own lens spec (JSON: title, query, viz, columns, chart, …); NULL for an existing lens." }
-    - { name: "params", type: "TEXT", doc: "The params it ran with (JSON object)." }
-    - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
-    - { name: "kept_lens", type: "TEXT", doc: "The lens it was kept as (`oxplow.lens.keep`), if it was." }
-  tests:
-    - { not_null: id }
-    - { unique: uri }
-    - { relationships: { column: thread_id, to: thread, field: id } }
 - name: token_usage
   version: 1
   description: "Model token usage recorded from agent sessions, per thread, effort and model."

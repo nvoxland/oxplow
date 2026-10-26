@@ -179,7 +179,7 @@ async fn a_scaffolded_metric_checks_tests_and_declares_its_blocks() {
         .iter()
         .find_map(|c| c.link.as_ref())
         .expect("a linked column");
-    assert_eq!(link.kind, oxplow_app::extensions::LensLinkKind::File);
+    assert_eq!(link.kind, oxplow_app::extensions::LinkKind::File);
     assert_eq!(link.line.as_deref(), Some("line"));
 }
 

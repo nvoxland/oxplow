@@ -42,11 +42,6 @@ oxplow-dev wiki write <slug> [--title T] [--file F]   body from F, else stdin
 oxplow-dev wiki delete <slug>
 oxplow-dev wiki search <text>                pages whose slug, title or body has it
 oxplow-dev uri convert [<kind>=<extension> …] each stdin line that is an old ref, as its URI
-oxplow-dev pages convert <ext-dir> [--write]  an extension's lenses as page files: prints what
-                                             it would write (TODOs, manifest rewrites); --write
-                                             writes <ext-dir>/pages/*.yaml (lenses and manifest
-                                             left as they are)
-
 oxplow-dev extension status                  what the next boot would run, and what it
                                              would hold back and why (safe while oxplow runs)
 oxplow-dev extension deploy [<name>]         deploy <name>'s source as the app does,
@@ -100,7 +95,6 @@ async fn run(mut args: Vec<String>, env_thread: Option<String>) -> Result<String
             tasks.wiki(args.split_off(1)).await
         }
         Some("extension") => extension(&project, &args[1..]).await,
-        Some("pages") if args.get(1).is_some_and(|a| a == "convert") => pages_convert(&args[2..]),
         Some("uri") if args.get(1).is_some_and(|a| a == "convert") => {
             let mut input = String::new();
             std::io::Read::read_to_string(&mut std::io::stdin(), &mut input)
@@ -136,38 +130,6 @@ fn uri_convert(input: &str, args: &[String]) -> Result<String, String> {
         })
         .collect::<Vec<_>>()
         .join("\n"))
-}
-/// `pages convert <ext-dir> [--write]`: the extension's lenses as page
-/// files (`oxplow_app::pages::convert`). A dry run prints the report;
-/// `--write` also writes the files under `<ext-dir>`.
-fn pages_convert(args: &[String]) -> Result<String, String> {
-    let write = args.iter().any(|a| a == "--write");
-    let dir = args
-        .iter()
-        .find(|a| !a.starts_with("--"))
-        .ok_or("usage: oxplow-dev pages convert <ext-dir> [--write]")?;
-    let dir = Path::new(dir);
-    let conversion = oxplow_app::pages::convert::convert_dir(dir)?;
-    if write {
-        for (rel, text) in &conversion.files {
-            let path = dir.join(rel);
-            if let Some(parent) = path.parent() {
-                std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-            }
-            std::fs::write(&path, text).map_err(|e| format!("{}: {e}", path.display()))?;
-        }
-    }
-    let done = if write {
-        "wrote"
-    } else {
-        "would write (dry run; --write writes)"
-    };
-    Ok(format!(
-        "{}{done} {} files under {}",
-        conversion.report,
-        conversion.files.len(),
-        dir.display()
-    ))
 }
 
 /// Deploy from outside oxplow, as the app does: `name`'s source, or with

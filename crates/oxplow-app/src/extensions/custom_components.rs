@@ -1,8 +1,9 @@
-//! `custom_components:` (P6b.D1; **stable since P11**, tsk962): a web
-//! bundle a `viz: custom` lens renders in a sandboxed frame. The frame has
-//! no origin, no network and no daemon token, so it reaches only what it
-//! declares: the lenses it may query (`assets`, lens ids) and the commands
-//! it may invoke (`commands`). It renders and queries without approval;
+//! `custom_components:`: a web bundle a page's `component` node (or a
+//! `viz: custom` node) renders in a sandboxed frame, fed the page's loader
+//! results. The frame has no origin, no network and no daemon token, so it
+//! reaches only what it declares: its own read-only SQL when it says `sql:
+//! read`, and the commands it may invoke (`commands`). It renders without
+//! approval;
 //! one that declares `commands` is a program a person approves before its
 //! `invoke` runs them with their rights (tsk960), at the version of the
 //! bundle it loaded (tsk984). A bundled extension's component runs the same
@@ -14,7 +15,6 @@
 //!   - id: burndown
 //!     title: Burndown
 //!     bundle: components/burndown        # default components/<id>; holds index.html
-//!     assets: [open-tasks, oxplow-bundled/visits]   # a bare slug is this extension's
 //!     commands: [oxplow.work_item.transition]
 //! ```
 
@@ -29,15 +29,13 @@ use super::manifest_v2::{at, item_lines, key_line};
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct CustomComponent {
-    /// `[a-z0-9-]+`, unique in the extension; a lens names it in
-    /// `custom.component`.
+    /// `[a-z0-9-]+`, unique in the extension; a page's `component` node
+    /// names it.
     pub id: String,
     pub extension: String,
     pub title: Option<String>,
     /// The bundle's folder inside the extension, holding `index.html`.
     pub bundle: String,
-    /// Lens ids (`<extension>/<slug>`) the component may query.
-    pub assets: Vec<String>,
     /// Commands the component may invoke.
     pub commands: Vec<String>,
     /// It runs its own read-only SQL over the models (`querySql`): needs
@@ -55,8 +53,6 @@ pub(crate) struct ComponentFile {
     title: Option<String>,
     #[serde(default)]
     bundle: Option<String>,
-    #[serde(default)]
-    assets: Vec<String>,
     #[serde(default)]
     commands: Vec<String>,
     /// `read`: it runs its own read-only SQL over the models
@@ -500,7 +496,6 @@ pub fn parse_custom_components(
             vec![at(file, block, "`custom_components` must be a list")],
         );
     };
-    let resources = oxplow_domain::uri::resources::foundation();
     let mut out: Vec<CustomComponent> = Vec::new();
     let mut errors = Vec::new();
     let lines = item_lines(manifest, "custom_components");
@@ -518,17 +513,6 @@ pub fn parse_custom_components(
             .bundle
             .clone()
             .unwrap_or_else(|| format!("components/{}", c.id));
-        let assets: Vec<String> = c
-            .assets
-            .iter()
-            .map(|a| {
-                if a.contains('/') {
-                    a.clone()
-                } else {
-                    format!("{extension}/{a}")
-                }
-            })
-            .collect();
         let problem = if !valid_id(&c.id) {
             Some(format!(
                 "custom component id `{}` must be lowercase letters, digits and dashes",
@@ -539,17 +523,6 @@ pub fn parse_custom_components(
         } else if !inside(&bundle) {
             Some(format!(
                 "custom component `{}`: bundle `{bundle}` must be a folder inside the extension",
-                c.id
-            ))
-        } else if let Some(bad) = assets.iter().find(|a| {
-            // A lens id alone: params, a revision or a fragment would make
-            // it a different ref than the one `query(asset)` names.
-            a.contains(['?', '@', '#'])
-                || oxplow_domain::uri::OxplowUri::parse(&oxplow_domain::uri::build::lens_uri(a))
-                    .map_or(true, |r| resources.validate(&r).is_err())
-        }) {
-            Some(format!(
-                "custom component `{}`: asset `{bad}` isn't a lens id (`<slug>` or `<extension>/<slug>`)",
                 c.id
             ))
         } else if let Some(bad) = c
@@ -588,7 +561,6 @@ pub fn parse_custom_components(
                 extension: extension.to_string(),
                 title: c.title,
                 bundle,
-                assets,
                 commands: c.commands,
                 sql: c.sql,
             }),
@@ -631,7 +603,7 @@ mod tests {
     }
 
     use super::{bundle_problems, bundle_warnings, page_problems};
-    use crate::extensions::{load_extensions, Extension, LensViz};
+    use crate::extensions::{load_extensions, Extension, Viz};
     use std::path::Path;
 
     fn write(root: &Path, rel: &str, body: &str) {
@@ -941,7 +913,7 @@ mod tests {
         assert_eq!(c.bundle, "components/burndown");
         assert_eq!(c.assets, vec!["x/open-tasks", "oxplow-bundled/visits"]);
         let lens = ext.lenses.iter().find(|l| l.slug == "burn").unwrap();
-        assert_eq!(lens.viz, LensViz::Custom);
+        assert_eq!(lens.viz, Viz::Custom);
         assert_eq!(
             lens.custom.as_ref().unwrap().props.as_ref().unwrap()["color"],
             "accent"
@@ -985,7 +957,7 @@ mod tests {
                 "asset `x/nope` isn't in this extension's lenses/",
             ),
             (
-                "{ id: c, bundle: components/burndown, assets: [\"Not A Lens\"] }",
+                "{ id: c, bundle: components/burndown, assets: [\"Not A Page\"] }",
                 "",
                 "isn't a lens id",
             ),
@@ -1134,7 +1106,7 @@ mod tests {
         )
         .await
         .unwrap();
-        let text = crate::lens_text::render(&run, &Default::default());
+        let text = crate::viz_text::render(&run, &Default::default());
         assert!(
             text.starts_with("(custom component `x/burndown`; its table rendering)\n"),
             "{text}"

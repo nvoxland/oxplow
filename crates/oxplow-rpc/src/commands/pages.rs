@@ -41,7 +41,7 @@ fn target(page: Option<String>, spec_yaml: Option<String>) -> Result<RunTarget, 
 }
 
 async fn context(svc: &Services, stream_id: Option<&str>, thread_id: Option<&str>) -> ViewContext {
-    extensions::lens_context(
+    extensions::view_context(
         svc,
         stream_id.and_then(oxplow_domain::StreamId::try_from_str),
         thread_id.and_then(oxplow_domain::ThreadId::try_from_str),
@@ -210,7 +210,7 @@ pub async fn run_page_action(
     action: String,
     row: Option<BTreeMap<String, SqlCell>>,
     input: Option<oxplow_domain::Json>,
-    drop: Option<oxplow_app::lens_actions::Drop>,
+    drop: Option<oxplow_app::viz_actions::Drop>,
     confirmed: bool,
 ) -> Result<oxplow_domain::CommandOutcome, IpcError> {
     use oxplow_app::pages::actions::{run_page_action, PageActionCall};
@@ -237,7 +237,7 @@ pub async fn page_form(
     svc: &Services,
     run_id: String,
     node: String,
-) -> Result<oxplow_app::lens_actions::FormStart, IpcError> {
+) -> Result<oxplow_app::viz_actions::FormStart, IpcError> {
     Ok(oxplow_app::pages::actions::page_form(svc, &svc.page_runs, &run_id, &node).await?)
 }
 
@@ -268,7 +268,7 @@ pub async fn page_action_form(
     node: Option<String>,
     action: String,
     row: Option<BTreeMap<String, SqlCell>>,
-) -> Result<oxplow_app::lens_actions::FormStart, IpcError> {
+) -> Result<oxplow_app::viz_actions::FormStart, IpcError> {
     Ok(oxplow_app::pages::actions::page_action_form(
         svc,
         &svc.page_runs,

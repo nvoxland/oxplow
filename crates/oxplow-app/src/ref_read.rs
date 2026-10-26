@@ -131,19 +131,28 @@ pub async fn read(
             };
             out.set_content(text);
         }
-        r::LENS => {
+        r::PAGE => {
+            // A page's definition: who declares it, where its source is,
+            // which deployment runs it, and its file as written.
             let root = svc
                 .worktrees
                 .resolve(stream.map(|s| s.to_string()).as_deref())
                 .await
                 .into_local_path();
-            let lens = svc
+            let page = svc
                 .extension_catalog
-                .find_lens(&root, &param("lens"))
+                .page_named(&root, &param("page"))
                 .map_err(|_| ReadError::NotFound(out.uri.clone()))?;
-            let mut body =
-                serde_json::to_value(&lens).map_err(|e| ReadError::Invalid(e.to_string()))?;
-            body["origin"] = lens.origin.to_json(svc.worktrees.project_dir());
+            let yaml = std::fs::read_to_string(svc.layout.project_dir.join(&page.origin.running))
+                .unwrap_or_default();
+            let body = serde_json::json!({
+                "page": page.id,
+                "title": page.title,
+                "description": page.description,
+                "origin": page.origin.to_json(svc.worktrees.project_dir()),
+                "params": page.params,
+                "yaml": yaml,
+            });
             out.set_content(
                 serde_json::to_string_pretty(&body)
                     .map_err(|e| ReadError::Invalid(e.to_string()))?,

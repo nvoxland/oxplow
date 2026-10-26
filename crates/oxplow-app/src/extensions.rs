@@ -64,7 +64,7 @@ pub enum Deployment {
     Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
 )]
 #[serde(rename_all = "lowercase")]
-pub enum LensViz {
+pub enum Viz {
     /// Rows and columns.
     Table,
     /// One line per row: the first column (or the first `columns` entry)
@@ -82,14 +82,6 @@ pub enum LensViz {
     /// Nested rectangles sized by `chart.size`, labelled by `chart.label`,
     /// grouped (and coloured) by `chart.group`.
     Treemap,
-    /// A page of sections (`sections`), wiki style: each another lens,
-    /// given the params it declares from this lens's, or markdown. Other
-    /// extensions add sections at `<extension>/<slug>.sections`.
-    Document,
-    /// A grid of tiles (`tiles`), each another lens (or markdown) at a
-    /// size, given the params it declares from this lens's. Other
-    /// extensions add tiles at `<extension>/<slug>.tiles`.
-    Dashboard,
     /// Rows nested by `tree.parent` (a row's parent is the row whose
     /// `tree.id` it names; none, or one not in the result, is a root),
     /// each shown as `tree.label`.
@@ -140,11 +132,6 @@ pub enum LensViz {
     /// several; an agent row's `stopped` and `conversation` say whether
     /// the person stopped it and what it is bound to.
     Terminal,
-    /// An agent's answer (`answer.uri`, the first row's: an
-    /// `oxplow/answer` URI), re-run live, with Keep This until it is kept
-    /// (`answer.kept`: the lens it became) — core's component for what
-    /// `oxplow_show_lens` showed.
-    Answer,
     /// A web page (`embed.url`, the first row's), opened in oxplow's
     /// sandboxed window: the page is a status panel with Open again, Open in
     /// Browser and Copy URL — core's component for what an `http(s)` link
@@ -156,13 +143,13 @@ pub enum LensViz {
     Custom,
 }
 
-impl LensViz {
+impl Viz {
     /// It takes its page's whole height (a file, a diff): the page draws
     /// it filling the body, its title in the chrome.
     pub fn fills(self) -> bool {
         matches!(
             self,
-            LensViz::Code | LensViz::Diff | LensViz::Editor | LensViz::Terminal | LensViz::Embed
+            Viz::Code | Viz::Diff | Viz::Editor | Viz::Terminal | Viz::Embed
         )
     }
 }
@@ -172,7 +159,7 @@ impl LensViz {
     Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
 )]
 #[serde(deny_unknown_fields)]
-pub struct LensCustom {
+pub struct VizCustom {
     /// One of the extension's `custom_components` ids.
     pub component: Option<String>,
     /// Handed to the component as is.
@@ -303,7 +290,7 @@ pub(crate) fn evaluate_alert(alert: &PageAlert, result: &SqlQueryResult) -> Aler
     Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
 )]
 #[serde(deny_unknown_fields)]
-pub struct LensChart {
+pub struct VizChart {
     #[serde(default)]
     pub x: Option<String>,
     #[serde(default)]
@@ -327,7 +314,7 @@ pub struct LensChart {
     Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
 )]
 #[serde(deny_unknown_fields)]
-pub struct LensTree {
+pub struct VizTree {
     pub id: Option<String>,
     pub parent: Option<String>,
     pub label: Option<String>,
@@ -343,60 +330,12 @@ pub struct LensTree {
     pub branch: Option<String>,
 }
 
-/// `dashboard` viz: its query's rows are tiles, one per row, each value
-/// naming a column. A row draws its `lens` (run with the page's params it
-/// declares), its pinned `sql` (shown as `display`, a chart by `chart`,
-/// the metric card by `metric` and `viz`) or its `text` (a heading band).
-#[derive(
-    Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
-)]
-#[serde(deny_unknown_fields)]
-pub struct LensTile {
-    /// The tile's id: what its actions bind as `{{row.<id column>}}`.
-    pub id: Option<String>,
-    pub title: Option<String>,
-    /// `small`, `wide`, `tall` or `full` (unknown: `small`; a text tile's
-    /// default is `full`).
-    pub size: Option<String>,
-    /// A lens id (`<extension>/<slug>`).
-    pub lens: Option<String>,
-    /// Read-only SQL over the published models.
-    pub sql: Option<String>,
-    /// How a `sql` tile shows its rows: a viz name, or `metric`.
-    pub display: Option<String>,
-    /// A `sql` tile's chart roles, as JSON (`{"x": …, "y": …}`).
-    pub chart: Option<String>,
-    /// A `metric` display's metric key.
-    pub metric: Option<String>,
-    /// A `metric` display's card: `line` or `number`.
-    pub viz: Option<String>,
-    pub text: Option<String>,
-}
-
-impl LensTile {
-    /// Each role and the column it names.
-    pub fn roles(&self) -> [(&'static str, &Option<String>); 10] {
-        [
-            ("id", &self.id),
-            ("title", &self.title),
-            ("size", &self.size),
-            ("lens", &self.lens),
-            ("sql", &self.sql),
-            ("display", &self.display),
-            ("chart", &self.chart),
-            ("metric", &self.metric),
-            ("viz", &self.viz),
-            ("text", &self.text),
-        ]
-    }
-}
-
 /// `timeline` viz: when each row happened and what it says.
 #[derive(
     Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
 )]
 #[serde(deny_unknown_fields)]
-pub struct LensTimeline {
+pub struct VizTimeline {
     pub at: Option<String>,
     pub label: Option<String>,
     /// A column holding the URI each entry links to.
@@ -409,7 +348,7 @@ pub struct LensTimeline {
     Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
 )]
 #[serde(deny_unknown_fields)]
-pub struct LensSteps {
+pub struct VizSteps {
     pub label: Option<String>,
     pub status: Option<String>,
 }
@@ -448,7 +387,7 @@ pub enum ActionThen {
     Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
 )]
 #[serde(deny_unknown_fields)]
-pub struct LensForm {
+pub struct FormSpec {
     pub command: Option<String>,
     /// Input values the form starts with (`{{param.x}}` placeholders bound).
     #[serde(default, serialize_with = "plain_json")]
@@ -466,7 +405,7 @@ pub struct LensForm {
     /// secret }`. The rest keep their starting values and are submitted
     /// with them. None: every field.
     #[serde(default)]
-    pub fields: Option<Vec<LensFormField>>,
+    pub fields: Option<Vec<FormField>>,
     /// Fields picked from a list: each names a lens (`<extension>/<slug>`)
     /// run with the form's params, whose rows are the choices (`value`,
     /// `label`, optional `group`).
@@ -519,14 +458,14 @@ pub enum FormMode {
 /// One of a form's `fields`: its name, or its name and how it shows.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema)]
 #[serde(untagged)]
-pub enum LensFormField {
+pub enum FormField {
     Name(String),
-    Spec(LensFormFieldSpec),
+    Spec(FormFieldSpec),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct LensFormFieldSpec {
+pub struct FormFieldSpec {
     pub name: String,
     /// Shown only while each named field's value is one of these; hidden,
     /// it is neither required nor submitted.
@@ -564,27 +503,27 @@ pub enum FieldValue {
 
 static NO_CONDITIONS: BTreeMap<String, FieldValues> = BTreeMap::new();
 
-impl LensFormField {
+impl FormField {
     pub fn name(&self) -> &str {
         match self {
-            LensFormField::Name(n) => n,
-            LensFormField::Spec(s) => &s.name,
+            FormField::Name(n) => n,
+            FormField::Spec(s) => &s.name,
         }
     }
     pub fn secret(&self) -> bool {
-        matches!(self, LensFormField::Spec(s) if s.secret)
+        matches!(self, FormField::Spec(s) if s.secret)
     }
     /// The lens its children are read from, for an object field.
     pub fn from(&self) -> Option<&str> {
         match self {
-            LensFormField::Spec(s) => s.from.as_deref(),
-            LensFormField::Name(_) => None,
+            FormField::Spec(s) => s.from.as_deref(),
+            FormField::Name(_) => None,
         }
     }
     pub fn visible_if(&self) -> &BTreeMap<String, FieldValues> {
         match self {
-            LensFormField::Name(_) => &NO_CONDITIONS,
-            LensFormField::Spec(s) => &s.visible_if,
+            FormField::Name(_) => &NO_CONDITIONS,
+            FormField::Spec(s) => &s.visible_if,
         }
     }
 }
@@ -637,7 +576,7 @@ fn plain_json<S: serde::Serializer>(
     Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
 )]
 #[serde(deny_unknown_fields)]
-pub struct LensCode {
+pub struct VizCode {
     pub path: Option<String>,
     pub revision: Option<String>,
     /// A column holding `12-40` (or `12`): the lines marked and revealed.
@@ -653,7 +592,7 @@ pub struct LensCode {
     Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
 )]
 #[serde(deny_unknown_fields)]
-pub struct LensTerminal {
+pub struct VizTerminal {
     /// Its URI: an `oxplow/terminal` or `oxplow/agent_session`.
     pub of: Option<String>,
     #[serde(default)]
@@ -669,24 +608,12 @@ pub struct LensTerminal {
     pub thread: Option<String>,
 }
 
-/// `answer` viz: the answer the first row names, and the lens it was kept
-/// as (once it was).
-#[derive(
-    Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
-)]
-#[serde(deny_unknown_fields)]
-pub struct LensAnswer {
-    pub uri: Option<String>,
-    #[serde(default)]
-    pub kept: Option<String>,
-}
-
 /// `embed` viz: the web page the first row names.
 #[derive(
     Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
 )]
 #[serde(deny_unknown_fields)]
-pub struct LensEmbed {
+pub struct VizEmbed {
     /// The column holding the page's URL (`http` or `https`).
     pub url: Option<String>,
 }
@@ -697,7 +624,7 @@ pub struct LensEmbed {
     Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
 )]
 #[serde(deny_unknown_fields)]
-pub struct LensEditor {
+pub struct VizEditor {
     pub path: Option<String>,
     /// A column holding `12` (or `12-40`: its start): the line revealed.
     #[serde(default)]
@@ -709,7 +636,7 @@ pub struct LensEditor {
     Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
 )]
 #[serde(deny_unknown_fields)]
-pub struct LensDiff {
+pub struct VizDiff {
     pub path: Option<String>,
     pub from: Option<String>,
     pub to: Option<String>,
@@ -730,7 +657,7 @@ pub struct LensDiff {
     Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
 )]
 #[serde(deny_unknown_fields)]
-pub struct LensMarkdown {
+pub struct VizMarkdown {
     #[serde(default)]
     pub text: Option<String>,
 }
@@ -740,13 +667,13 @@ pub struct LensMarkdown {
     Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
 )]
 #[serde(deny_unknown_fields)]
-pub struct LensHunks {
+pub struct VizHunks {
     pub path: Option<String>,
     pub from: Option<String>,
     pub to: Option<String>,
 }
 
-impl LensChart {
+impl VizChart {
     /// Every column this chart names.
     fn columns(&self) -> Vec<&String> {
         [
@@ -780,18 +707,12 @@ pub enum LauncherCategory {
     System,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize, schemars::JsonSchema)]
-#[serde(deny_unknown_fields)]
-struct LauncherFile {
-    category: LauncherCategory,
-}
-
 /// A page a column value can link to.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
 )]
 #[serde(rename_all = "kebab-case")]
-pub enum LensLinkKind {
+pub enum LinkKind {
     /// `oxplow:oxplow/file?path=<path>`; the value is a repo-relative path.
     File,
     /// `oxplow:oxplow/wiki?slug=<slug>`.
@@ -820,8 +741,8 @@ pub enum LensLinkKind {
 /// Makes a column's cells link to a page.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct LensLink {
-    pub kind: LensLinkKind,
+pub struct ColumnLink {
+    pub kind: LinkKind,
     /// Result column holding the target id. Defaults to the column itself.
     #[serde(default)]
     pub from: Option<String>,
@@ -846,7 +767,7 @@ pub struct PageColumn {
     #[serde(default)]
     pub label: Option<String>,
     #[serde(default)]
-    pub link: Option<LensLink>,
+    pub link: Option<ColumnLink>,
     /// A column of the same row holding this one's unit (`ms`, `%`,
     /// `lines`): a number shows as a metric value in it.
     #[serde(default)]
@@ -910,142 +831,17 @@ pub enum ColumnFormat {
     Badge,
 }
 
-/// One part of a `document` (a section) or a `dashboard` (a tile):
-/// another lens, or markdown.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
-#[serde(rename_all = "camelCase")]
-pub struct LensPart {
-    /// Stable within the lens: what another extension's mount names to go
-    /// beside it (`at: { after: <id> }`).
-    pub id: String,
-    /// Its heading; else its lens's title.
-    pub title: Option<String>,
-    /// The lens it shows (`<extension>/<slug>`).
-    pub lens: Option<String>,
-    /// Or prose it shows.
-    pub markdown: Option<String>,
-    /// A tile's size.
-    pub size: Option<TileSize>,
-    /// The core component its lens stands in for (a target of
-    /// `oxplow_domain::replaceable::REPLACEABLE`): its lens is oxplow's own,
-    /// shown unless an extension replaces the target.
-    pub replaceable: Option<String>,
-    /// The extension that mounted it, when it isn't the lens's own.
-    pub from: Option<String>,
-}
-
-/// A part as a lens file writes it (`sections:` / `tiles:` entries).
-#[derive(Debug, Clone, PartialEq, Deserialize, schemars::JsonSchema)]
-#[serde(deny_unknown_fields)]
-struct PartFile {
-    /// Defaults to its lens's slug; required for markdown.
-    #[serde(default)]
-    id: Option<String>,
-    #[serde(default)]
-    title: Option<String>,
-    /// A lens slug in this extension, or `<ext>/<slug>`.
-    #[serde(default)]
-    lens: Option<String>,
-    #[serde(default)]
-    markdown: Option<String>,
-    /// A tile's size (`tiles:` only).
-    #[serde(default)]
-    size: Option<TileSize>,
-    /// The core component this part's lens stands in for (a lens part's).
-    #[serde(default)]
-    replaceable: Option<String>,
-}
-
-/// A lens file's `sections:` (for `document`) or `tiles:` (for
-/// `dashboard`) as parts: ids defaulted and unique, exactly one of `lens`
-/// and `markdown`, a size only on a tile. A dashboard whose rows are its
-/// tiles (`row_tiles`) may have none.
-fn parse_parts(
-    extension: &str,
-    viz: LensViz,
-    sections: Vec<PartFile>,
-    tiles: Vec<PartFile>,
-    row_tiles: bool,
-) -> Result<Vec<LensPart>, String> {
-    let (key, files) = match viz {
-        LensViz::Document if tiles.is_empty() => ("sections", sections),
-        LensViz::Dashboard if sections.is_empty() => ("tiles", tiles),
-        LensViz::Document => return Err("a `document` has `sections`, not `tiles`".into()),
-        LensViz::Dashboard => return Err("a `dashboard` has `tiles`, not `sections`".into()),
-        _ if sections.is_empty() && tiles.is_empty() => return Ok(Vec::new()),
-        _ => return Err("`sections` are a `document`'s and `tiles` a `dashboard`'s".into()),
-    };
-    if files.is_empty() && !row_tiles {
-        return Err(format!("viz `{}` needs `{key}: [...]`", viz_name(viz)));
-    }
-    let mut out: Vec<LensPart> = Vec::new();
-    for (i, f) in files.into_iter().enumerate() {
-        let lens = f.lens.map(|c| {
-            if c.contains('/') {
-                c
-            } else {
-                format!("{extension}/{c}")
-            }
-        });
-        if lens.is_some() == f.markdown.is_some() {
-            return Err(format!(
-                "{key}[{i}]: needs exactly one of `lens` and `markdown`"
-            ));
-        }
-        if let Some(target) = &f.replaceable {
-            if lens.is_none() {
-                return Err(format!("{key}[{i}]: `replaceable` is a lens part's"));
-            }
-            if oxplow_domain::replaceable::replaceable(target).is_none() {
-                return Err(format!(
-                    "{key}[{i}]: `replaceable: {target}` isn't a replaceable component ({})",
-                    oxplow_domain::replaceable::targets()
-                ));
-            }
-        }
-        if key == "sections" && f.size.is_some() {
-            return Err(format!("{key}[{i}]: `size` is a dashboard tile's"));
-        }
-        let id = match (f.id, &lens) {
-            (Some(id), _) => id,
-            (None, Some(l)) => l.rsplit('/').next().unwrap_or(l).to_string(),
-            (None, None) => return Err(format!("{key}[{i}]: a markdown part needs an `id`")),
-        };
-        if out.iter().any(|p| p.id == id) {
-            return Err(format!("{key}: two parts are `{id}`; give one an `id`"));
-        }
-        out.push(LensPart {
-            id,
-            title: f.title,
-            lens,
-            markdown: f.markdown,
-            size: f.size,
-            replaceable: f.replaceable,
-            from: None,
-        });
-    }
-    Ok(out)
-}
-
-/// A viz as a lens file names it.
-fn viz_name(viz: LensViz) -> String {
-    serde_json::to_value(viz)
-        .ok()
-        .and_then(|v| v.as_str().map(str::to_string))
-        .unwrap_or_default()
-}
-
 /// `group` on a `list` or `table`: the rows under a heading per distinct
 /// value of `by`, in the order each first appears; `link` makes the
 /// heading a link, read from the group's first row.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct LensGroup {
+pub struct VizGroup {
     /// The column whose value groups the rows (not shown as a cell).
     pub by: String,
     /// The heading's link; `from` defaults to `by`.
     #[serde(default)]
-    pub link: Option<LensLink>,
+    pub link: Option<ColumnLink>,
     /// The groups in this order, shown even when no row has the value
     /// (an empty board column is still somewhere to drop); values the
     /// rows have beyond these follow, in the order each first appears.
@@ -1070,7 +866,7 @@ pub struct PageParam {
     /// them as a toggle in its header, a lens page as a select. Its
     /// `default` must be one; a run supplying another is refused.
     #[serde(default)]
-    pub options: Vec<LensParamOption>,
+    pub options: Vec<ChoiceOption>,
     /// A lens whose rows are the values it takes, when it's a choice
     /// whose options aren't fixed (`value`, `label`, optional `group` —
     /// the form `choices` contract): a slug of this extension, or
@@ -1156,7 +952,7 @@ const RANGE_PRESETS: &[(&str, Option<i64>)] = &[
 /// One value a choice param takes, and what the viewer sees for it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct LensParamOption {
+pub struct ChoiceOption {
     pub value: String,
     pub label: String,
 }
@@ -1273,14 +1069,9 @@ fn range_ends(value: &str, now: time::OffsetDateTime) -> Option<(Option<String>,
 /// A param whose type its other fields or its default don't fit: a
 /// choice with no options or a default not among them, options or
 /// presets on another type, an unknown preset.
-fn param_problem(lens: &Lens) -> Option<String> {
+fn param_problem(lens: &VizConfig) -> Option<String> {
     lens.params.iter().find_map(|p| {
         let kind = p.kind();
-        // A document's view param is a choice of its sections, checked by
-        // `view_problem`: its options aren't filled until mounts are placed.
-        if lens.view.as_deref() == Some(p.name.as_str()) {
-            return None;
-        }
         let problem = if RESERVED_VIEW_KEYS.contains(&p.name.as_str()) {
             Some(format!(
                 "`{0}` is the page's view key (`#{0}=`): rename the param",
@@ -1328,74 +1119,6 @@ fn param_problem(lens: &Lens) -> Option<String> {
 /// comment by that name.)
 pub const RESERVED_VIEW_KEYS: &[&str] = &["section"];
 
-/// What's wrong with a lens's `view`: it is a document's, names a declared
-/// param that rides in the `#` (a `filter`) as a choice of the sections
-/// (no `options` of its own), and starts on one of its own sections.
-fn view_problem(lens: &Lens) -> Option<String> {
-    let name = lens.view.as_deref()?;
-    if lens.viz != LensViz::Document {
-        return Some("`view` is for a document".into());
-    }
-    let Some(p) = lens.params.iter().find(|p| p.name == name) else {
-        return Some(format!(
-            "`view` names param `{name}`, which the lens doesn't declare"
-        ));
-    };
-    if p.role != Some(ParamRole::Filter) {
-        return Some(format!(
-            "`view` param `{name}` rides in the `#`: leave `role` out or say `filter`"
-        ));
-    }
-    if p.kind != Some(ParamType::Choice) {
-        return Some(format!(
-            "`view` param `{name}` is a choice of the sections: leave `type` out"
-        ));
-    }
-    if !p.options.is_empty() || p.options_from.is_some() || !p.presets.is_empty() {
-        return Some(format!(
-            "`view` param `{name}`: the sections are its choices, not `options`"
-        ));
-    }
-    let Some(default) = &p.default else {
-        return Some(format!(
-            "`view` param `{name}` needs a `default`: the section shown first"
-        ));
-    };
-    let shown = match default {
-        SqlCell::Text(t) => t.clone(),
-        other => format!("{other:?}"),
-    };
-    if !lens
-        .parts
-        .iter()
-        .any(|part| matches!(default, SqlCell::Text(t) if *t == part.id))
-    {
-        return Some(format!(
-            "`view` param `{name}`'s default `{shown}` isn't a section"
-        ));
-    }
-    None
-}
-
-/// `params` with a document's view param (`view: <name>`) a `filter`
-/// choice when it doesn't say otherwise: its choices are the sections,
-/// filled once mounts are placed ([`fill_view_options`]).
-pub(crate) fn view_param(params: Vec<PageParam>, view: Option<&str>) -> Vec<PageParam> {
-    params
-        .into_iter()
-        .map(|p| {
-            if Some(p.name.as_str()) != view {
-                return p;
-            }
-            PageParam {
-                kind: Some(p.kind.unwrap_or(ParamType::Choice)),
-                role: Some(p.role.unwrap_or(ParamRole::Filter)),
-                ..p
-            }
-        })
-        .collect()
-}
-
 /// `params` with each one's type written out, so a page never infers it.
 pub(crate) fn typed(params: Vec<PageParam>) -> Vec<PageParam> {
     params
@@ -1405,16 +1128,6 @@ pub(crate) fn typed(params: Vec<PageParam>) -> Vec<PageParam> {
             ..p
         })
         .collect()
-}
-
-/// What a lens's query binds: its params, and each date_range's
-/// `<name>_from` / `<name>_to`.
-fn binds(
-    lens: &Lens,
-    params: &BTreeMap<String, SqlCell>,
-    now: time::OffsetDateTime,
-) -> Vec<(String, SqlCell)> {
-    bind_params(&lens.params, params, now)
 }
 
 /// What a query binds: the values of `declared` params, and each
@@ -1436,101 +1149,6 @@ pub(crate) fn bind_params(
         out.push((format!("{}_to", p.name), text(to)));
     }
     out
-}
-
-/// A lens file as written on disk (`lenses/<slug>.yaml`).
-#[derive(Debug, Clone, PartialEq, Deserialize, schemars::JsonSchema)]
-#[serde(deny_unknown_fields)]
-struct LensFile {
-    title: String,
-    #[serde(default)]
-    description: String,
-    /// Required, except by a `form` (whose query, if any, prefills it).
-    #[serde(default)]
-    query: String,
-    #[serde(default = "default_viz")]
-    viz: LensViz,
-    #[serde(default)]
-    params: Vec<PageParam>,
-    #[serde(default)]
-    columns: Vec<PageColumn>,
-    /// Shown instead of an empty result.
-    #[serde(default)]
-    empty: Option<String>,
-    #[serde(default)]
-    chart: Option<LensChart>,
-    #[serde(default)]
-    tree: Option<LensTree>,
-    /// `dashboard` only: its rows are its tiles.
-    #[serde(default)]
-    tile: Option<LensTile>,
-    #[serde(default)]
-    timeline: Option<LensTimeline>,
-    #[serde(default)]
-    steps: Option<LensSteps>,
-    #[serde(default)]
-    hunks: Option<LensHunks>,
-    #[serde(default)]
-    code: Option<LensCode>,
-    #[serde(default)]
-    diff: Option<LensDiff>,
-    #[serde(default)]
-    editor: Option<LensEditor>,
-    #[serde(default)]
-    embed: Option<LensEmbed>,
-    #[serde(default)]
-    answer: Option<LensAnswer>,
-    #[serde(default)]
-    terminal: Option<LensTerminal>,
-    #[serde(default)]
-    markdown: Option<LensMarkdown>,
-    #[serde(default)]
-    form: Option<LensForm>,
-    #[serde(default)]
-    custom: Option<LensCustom>,
-    #[serde(default)]
-    group: Option<LensGroup>,
-    #[serde(default)]
-    emphasis: Option<String>,
-    #[serde(default)]
-    depth: Option<String>,
-    /// For `document`: its sections, each a lens (a slug in this
-    /// extension, or `<ext>/<slug>`) or markdown.
-    #[serde(default)]
-    sections: Vec<PartFile>,
-    /// For `document`: the param whose value names the one section in
-    /// view (a filter whose choices are the sections); the others are the
-    /// page's rail.
-    #[serde(default)]
-    view: Option<String>,
-    /// For `dashboard`: its tiles.
-    #[serde(default)]
-    tiles: Vec<PartFile>,
-    #[serde(default)]
-    launcher: Option<LauncherFile>,
-    /// Keep it out of the launcher (e.g. a lens only a slot shows).
-    #[serde(default)]
-    hidden: bool,
-    /// Offer Refresh on its page. Off by default: a lens re-runs on its
-    /// own when oxplow's data changes; turn it on for one that reads
-    /// outside oxplow (an integration, a file on disk).
-    #[serde(default)]
-    refresh: bool,
-    /// Commands the lens offers (`{ id, label, command, input, row }`).
-    /// Parsed by [`parse_actions`].
-    #[serde(default)]
-    #[schemars(with = "Vec<ActionFile>")]
-    actions: Vec<serde_yaml::Value>,
-    #[serde(default)]
-    alert: Option<AlertFile>,
-    /// Capabilities or features it needs (`work_items`,
-    /// `snapshots.contents`).
-    #[serde(default)]
-    needs: Vec<String>,
-    /// Offer it to agents as an MCP tool too, named `<namespace>_<tool>`;
-    /// its params are the tool's input.
-    #[serde(default)]
-    tool: Option<String>,
 }
 
 /// A button on a lens: a command it runs (P6.B1, target §11.4). The
@@ -2005,11 +1623,10 @@ pub(crate) fn parse_actions(
     Ok(out)
 }
 
-/// Whether a lens of this `viz` holds one row, so a whole-lens action can
-/// name it: a detail, a form, a markdown, or a document with a `query:`.
-pub(crate) fn holds_one_row(viz: LensViz, has_query: bool) -> bool {
-    matches!(viz, LensViz::Detail | LensViz::Form | LensViz::Markdown)
-        || (viz == LensViz::Document && has_query)
+/// Whether a viz of this kind holds one row, so a whole-node action can
+/// name it: a detail, a form, a markdown.
+pub(crate) fn holds_one_row(viz: Viz) -> bool {
+    matches!(viz, Viz::Detail | Viz::Form | Viz::Markdown)
 }
 
 /// An edit action's edited field: the one input field that is exactly a
@@ -2048,10 +1665,6 @@ pub fn edit_column(action: &PageAction) -> Option<String> {
     let field = action.edit_field.as_deref()?;
     let value = action.input.get(field)?.as_str()?;
     oxplow_domain::template::whole_placeholder(value).map(|p| p.name)
-}
-
-fn default_viz() -> LensViz {
-    LensViz::Table
 }
 
 /// When core runs an advisory.
@@ -2254,102 +1867,6 @@ pub enum TileSize {
     Full,
 }
 
-/// What a slot holds, as a mount is checked against it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PartsKind {
-    Region,
-    Sections,
-    Tiles,
-}
-
-/// A slot naming a lens's parts — `<extension>/<slug>.sections` (a
-/// document's) or `.tiles` (a dashboard's): the lens id and which.
-fn lens_slot_target(slot: &str) -> Option<(&str, PartsKind)> {
-    let (lens, which) = slot.rsplit_once('.')?;
-    if !lens.contains('/') {
-        return None;
-    }
-    match which {
-        "sections" => Some((lens, PartsKind::Sections)),
-        "tiles" => Some((lens, PartsKind::Tiles)),
-        _ => None,
-    }
-}
-
-/// What's wrong with mounting `lens` in a slot that binds `params` and
-/// holds `kind` of parts with stable `ids`: an error, or a warning (an
-/// `at` beside a part the page doesn't have goes at the end).
-fn mount_problem(
-    mount: &LensSlot,
-    lens: &Lens,
-    params: &[&str],
-    row: &[&str],
-    kind: PartsKind,
-    ids: &[&str],
-) -> Result<Option<String>, String> {
-    // A slot offers params (and a page's query row its names); a mounted
-    // lens takes the ones it declares and must declare at least one, or it
-    // can't relate to the page.
-    let offered: Vec<&str> = params.iter().chain(row).copied().collect();
-    if !offered.is_empty()
-        && !offered
-            .iter()
-            .any(|p| lens.params.iter().any(|lp| lp.name == *p))
-    {
-        let list = |names: &[&str]| {
-            names
-                .iter()
-                .map(|p| format!("`{p}`"))
-                .collect::<Vec<_>>()
-                .join(", ")
-        };
-        let row_note = if row.is_empty() {
-            String::new()
-        } else {
-            format!(" and the page's row gives {}", list(row))
-        };
-        return Err(format!(
-            "slot `{}` passes {}{row_note}; lens `{}` must declare at least one in `params`",
-            mount.slot,
-            list(params),
-            lens.slug
-        ));
-    }
-    if kind == PartsKind::Region && mount.at.is_some() {
-        return Err(format!(
-            "slot `{}` is one region of its page; `at` places a mount among a page's \
-             sections or tiles",
-            mount.slot
-        ));
-    }
-    if kind != PartsKind::Tiles && mount.size.is_some() {
-        return Err(format!(
-            "slot `{}` holds no tiles; `size` is a dashboard tile's",
-            mount.slot
-        ));
-    }
-    Ok(mount
-        .at
-        .as_ref()
-        .and_then(SlotAt::anchor)
-        .filter(|id| !ids.contains(id))
-        .map(|id| {
-            format!(
-                "slot `{}` has no part `{id}` (it has {}); lens `{}` goes at the end",
-                mount.slot,
-                if ids.is_empty() {
-                    "none".to_string()
-                } else {
-                    ids.iter()
-                        .map(|i| format!("`{i}`"))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                },
-                lens.slug
-            )
-        }))
-}
-
 /// What a left-nav panel is bound to: the project, the current stream, or
 /// the current thread — which of `stream_id` / `thread_id` its lenses get.
 #[derive(
@@ -2393,68 +1910,6 @@ pub struct ExtensionPanel {
     /// the body above the bar), not in the rail.
     #[serde(default)]
     pub dock: bool,
-    /// Its parts name pages (`<extension>/<slug>`), not lenses.
-    #[serde(default)]
-    pub pages: bool,
-}
-
-/// A page an extension contributes (P6.G2, target §11.3): a lens shown
-/// full-page at `oxplow:oxplow/page?page=<extension>/<id>`, listed in the launcher under
-/// its category.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
-#[serde(rename_all = "camelCase")]
-pub struct ExtensionPage {
-    pub id: String,
-    pub extension: String,
-    /// Its tab id: `oxplow:oxplow/page?page=<id>` for the oxplow-namespace extension (its
-    /// pages are core-named, as its commands are), `oxplow:oxplow/page?page=<extension>/<id>`
-    /// for any other.
-    pub page_ref: String,
-    /// Its name: the launcher's, Open with's, a kind label's.
-    pub title: String,
-    /// What its tab says, when not its title: `{{param.<name>}}` placeholders
-    /// over the params of what it shows (`label: "{{param.path}}"`).
-    pub label: Option<String>,
-    pub icon: Option<String>,
-    /// Its launcher section; none = not in the launcher (a page only
-    /// opened from elsewhere: a diff, a form).
-    pub category: Option<LauncherCategory>,
-    /// More words the launcher matches it on.
-    pub keywords: Option<String>,
-    /// The params naming what it shows, in its URI's `?`
-    /// (`oxplow:oxplow/page?page=settings&stream=str1`); its lens's filters and
-    /// selections ride in the `#` view.
-    pub params: Vec<String>,
-    /// The lens whose value (a `number` lens) is the launcher's badge
-    /// (`<extension>/<slug>`).
-    pub count: Option<String>,
-    /// The resources it renders (`oxplow/file`, `acme/pr`; `https`, `http`
-    /// for a web page): a URI of one opens on it, the URI its tab's id.
-    /// Empty: a route, opened at `page_ref`.
-    #[serde(rename = "for")]
-    pub renders: Vec<String>,
-    /// Which URIs of those it takes, by param: `present`, `absent`, or an
-    /// anchored pattern the value matches (one form the desktop's JS and
-    /// Rust read alike). Empty: every one.
-    pub accepts: BTreeMap<String, String>,
-    /// What its resource opens on when the URI's view names no renderer
-    /// (`#oxplow.renderer=`): only a page of the extension declaring it.
-    pub default: bool,
-    /// Its tab leads the strip and isn't evicted (an agent session's).
-    pub pinned: bool,
-    /// Its text takes comments: its URI (its tab id) is their target, the
-    /// nav bar steps through them, and a selection in its text (a markdown
-    /// viz, a code viz, plain text) starts one.
-    pub comments: bool,
-    /// Its page offers Refresh (`refresh: true`), for a lens that reads
-    /// outside oxplow. The lens's own `refresh` does the same.
-    pub refresh: bool,
-    /// What draws it.
-    pub body: PageBody,
-    /// A component page's rail: a lens of its extension (`<ext>/<slug>`)
-    /// drawn beside the component, run with the page's view; a row's pick
-    /// writes the view, which the component hears.
-    pub rail: Option<String>,
 }
 
 /// The schemes a page may render besides oxplow's resources: a web page.
@@ -2463,97 +1918,6 @@ pub const RENDERED_SCHEMES: &[&str] = &["https", "http"];
 /// The namespace oxplow's own extension declares (`namespace: oxplow`): its
 /// commands are `oxplow.<area>.<verb>` and its pages `oxplow:oxplow/page?page=<id>`.
 pub const CORE_NAMESPACE: &str = "oxplow";
-
-/// What draws a page: a lens core renders through the kit, or — for the
-/// required bundled extension only, and shrinking — a built-in component
-/// core still renders (`built_in_pages::BUILT_IN_PAGES`).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
-#[serde(tag = "kind", rename_all = "camelCase")]
-pub enum PageBody {
-    Lens {
-        /// `<extension>/<slug>`.
-        lens: String,
-    },
-    BuiltIn {
-        /// A `BUILT_IN_PAGES` name.
-        name: String,
-    },
-    /// One of the extension's own custom components, filling the page
-    /// body: a custom page (`.context/extensions.md` "Pages").
-    Component {
-        /// `<extension>/<component id>`.
-        component: String,
-    },
-}
-
-impl ExtensionPage {
-    /// The lens it shows, when it is a lens page.
-    pub fn lens(&self) -> Option<&str> {
-        match &self.body {
-            PageBody::Lens { lens } => Some(lens),
-            _ => None,
-        }
-    }
-}
-
-/// A `pages:` entry as the manifest holds it.
-#[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
-#[serde(deny_unknown_fields)]
-struct PageFile {
-    id: String,
-    title: String,
-    /// What its tab says, when not its `title`: `{{param.<name>}}` filled
-    /// from what it shows (a renderer's URI, a route's `params`).
-    #[serde(default)]
-    label: Option<String>,
-    #[serde(default)]
-    icon: Option<String>,
-    /// Its launcher section; leave it out for a page only opened from
-    /// elsewhere.
-    #[serde(default)]
-    category: Option<LauncherCategory>,
-    #[serde(default)]
-    keywords: Option<String>,
-    /// The params naming what it shows, in its URI's `?`; its lens's filters
-    /// and selections ride in the `#` view.
-    #[serde(default)]
-    params: Vec<String>,
-    /// A `number` lens of this extension whose value is the launcher badge.
-    #[serde(default)]
-    count: Option<String>,
-    /// A lens of this extension that draws the page …
-    #[serde(default)]
-    lens: Option<String>,
-    /// … or `oxplow:<name>`, a built-in (oxplow's own extension only).
-    #[serde(default)]
-    component: Option<String>,
-    /// A component page's rail: a lens of this extension drawn beside the
-    /// component, run with the page's view.
-    #[serde(default)]
-    rail: Option<String>,
-    /// The resources it renders — one or a list: `oxplow/file`, its own
-    /// `<extension>/<name>`, another extension's, or `https` / `http` (a
-    /// web page). A URI of one opens on it; without `for` it is a route.
-    #[serde(default, rename = "for")]
-    renders: Option<Renders>,
-    /// Which URIs of those it takes, by param: `present`, `absent`, or an
-    /// anchored pattern (`^git:`) the value matches.
-    #[serde(default)]
-    accepts: BTreeMap<String, String>,
-    /// What its resource opens on when the URI's view names no renderer:
-    /// only for a resource this extension declares, one per resource.
-    #[serde(default)]
-    default: bool,
-    /// Its tab leads the strip and isn't evicted (a renderer only).
-    #[serde(default)]
-    pinned: bool,
-    /// Its text takes comments, anchored to its URI.
-    #[serde(default)]
-    comments: bool,
-    /// Offer Refresh on it, for a lens that reads outside oxplow.
-    #[serde(default)]
-    refresh: bool,
-}
 
 /// A page's `for`: one resource or several.
 #[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
@@ -2595,32 +1959,6 @@ struct PanelFile {
     dock: bool,
 }
 
-/// A lens an extension mounts into a core page.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
-#[serde(rename_all = "camelCase")]
-pub struct LensSlot {
-    /// Which page region, from [`SLOTS`] (`diff.file.header`,
-    /// `vcs.commit.details`, …), or a document or dashboard lens's parts
-    /// (`<extension>/<slug>.sections`, `.tiles`); the lens takes the params
-    /// it offers.
-    pub slot: String,
-    pub lens_id: String,
-    /// Where it goes among the page's parts; `None` in a region.
-    pub at: Option<SlotAt>,
-    /// Its heading; else its lens's title.
-    pub title: Option<String>,
-    /// A tile's size; `None` outside a dashboard.
-    pub size: Option<TileSize>,
-}
-
-impl LensSlot {
-    /// Its contribution's local id, as the `n`th mount of its extension:
-    /// `<slot>-<n>`, a lens's `/` written `.` (`base.page.sections-0`).
-    pub fn local_id(&self, n: usize) -> String {
-        format!("{}-{n}", self.slot.replace('/', "."))
-    }
-}
-
 /// Where a lens comes from. An agent edits `source`, never `running`: a
 /// deployed extension runs a copy in the store that the next deploy
 /// replaces.
@@ -2642,107 +1980,52 @@ pub struct PageProvenance {
     pub bundled: bool,
 }
 
-/// A loaded lens.
+/// How a page's viz node draws its loader's rows: the viz, its role
+/// block, columns, row styling and actions. It runs no query of its own.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
-pub struct Lens {
+pub struct VizConfig {
     /// `<extension>/<slug>`: the stable id used by `lens:` page refs,
     /// `oxplow_run_lens` and `get_lens`.
     pub id: String,
     pub extension: String,
     pub slug: String,
     pub title: String,
-    pub description: String,
-    pub query: String,
-    pub viz: LensViz,
+    pub viz: Viz,
     pub params: Vec<PageParam>,
     pub columns: Vec<PageColumn>,
     pub empty: Option<String>,
     /// Columns a chart viz draws from.
-    pub chart: Option<LensChart>,
-    pub tree: Option<LensTree>,
-    /// `dashboard` only: its query's rows are its tiles.
-    pub tile: Option<LensTile>,
-    pub timeline: Option<LensTimeline>,
-    pub steps: Option<LensSteps>,
-    pub hunks: Option<LensHunks>,
-    pub code: Option<LensCode>,
-    pub diff: Option<LensDiff>,
-    pub editor: Option<LensEditor>,
-    pub embed: Option<LensEmbed>,
-    pub answer: Option<LensAnswer>,
-    pub terminal: Option<LensTerminal>,
-    pub markdown: Option<LensMarkdown>,
-    pub form: Option<LensForm>,
+    pub chart: Option<VizChart>,
+    pub tree: Option<VizTree>,
+    pub timeline: Option<VizTimeline>,
+    pub steps: Option<VizSteps>,
+    pub hunks: Option<VizHunks>,
+    pub code: Option<VizCode>,
+    pub diff: Option<VizDiff>,
+    pub editor: Option<VizEditor>,
+    pub embed: Option<VizEmbed>,
+    pub terminal: Option<VizTerminal>,
+    pub markdown: Option<VizMarkdown>,
+    pub form: Option<FormSpec>,
     /// For `custom`: the component and its props.
-    pub custom: Option<LensCustom>,
+    pub custom: Option<VizCustom>,
     /// For `list` / `table`: rows under a heading per value.
-    pub group: Option<LensGroup>,
+    pub group: Option<VizGroup>,
     /// For `list` / `table` / `tree`: a column whose truthy value
     /// highlights the row.
     pub emphasis: Option<String>,
     /// For `list` / `table`: a column whose integer value indents the row.
     pub depth: Option<String>,
-    /// For `document` its sections, for `dashboard` its tiles: its own,
-    /// then what other extensions mount, placed by their `at`.
-    pub parts: Vec<LensPart>,
-    /// For `document`: the param whose value names the one section in
-    /// view. It is a `filter` choice whose options are the sections (its
-    /// own and mounted ones, filled once mounts are placed).
-    pub view: Option<String>,
     /// It takes its page's whole height: its viz does
-    /// ([`LensViz::fills`]), or it is a document whose last section's lens
+    /// ([`Viz::fills`]), or it is a document whose last section's lens
     /// fills, so that section takes the height left (set once the catalog
     /// is placed, `fill_document_fills`).
     pub fills: bool,
-    /// Launcher section; `None` = "Dashboards".
-    pub launcher_category: Option<LauncherCategory>,
-    /// Not listed in the launcher.
-    pub hidden: bool,
-    /// Its page offers Refresh (`refresh: true`): it reads outside oxplow,
-    /// so nothing re-runs it for the person.
-    pub refresh: bool,
     /// Commands the lens offers, as buttons or row actions (P6.B1).
     pub actions: Vec<PageAction>,
-    /// When the lens needs attention (its panel's badge).
-    pub alert: Option<PageAlert>,
-    /// The capabilities (or their features) it needs (`needs:
-    /// [work_items]`): without them its run says so instead of running.
-    pub needs: Vec<String>,
     /// Where it comes from: the file that runs and the source to edit.
     pub origin: PageProvenance,
-    /// The MCP tool it is also offered as (`tool:`), prefixed with its
-    /// extension's namespace (`extension_commands::tool_name`): a call
-    /// runs it and returns its text rendering.
-    pub tool: Option<String>,
-}
-
-impl Lens {
-    /// The lenses its parts show (a document's sections, a dashboard's
-    /// tiles).
-    pub fn part_lenses(&self) -> impl Iterator<Item = &str> {
-        self.parts.iter().filter_map(|p| p.lens.as_deref())
-    }
-
-    /// The parts a run with `params` shows: a view document's one section
-    /// in view (its view param's value, else its default), every part of
-    /// any other lens. What its text resolves and renders, so the two stay
-    /// in step; the desktop's `viewedParts` is the same rule.
-    pub fn viewed_parts(&self, params: &BTreeMap<String, SqlCell>) -> Vec<&LensPart> {
-        let Some(view) = &self.view else {
-            return self.parts.iter().collect();
-        };
-        let default = self
-            .params
-            .iter()
-            .find(|p| &p.name == view)
-            .and_then(|p| p.default.clone());
-        let id = match params.get(view).cloned().or(default) {
-            Some(SqlCell::Text(t)) => t,
-            _ => return Vec::new(),
-        };
-        self.parts.iter().filter(|p| p.id == id).collect()
-    }
 }
 
 /// A loaded extension and anything wrong with it.
@@ -2756,8 +2039,8 @@ pub struct Extension {
     pub description: String,
     /// Repo-relative path of the extension folder.
     pub path: String,
-    /// Problems found while loading; empty when healthy. A lens that
-    /// failed to load is listed here and missing from `lenses`.
+    /// Problems found while loading; empty when healthy. A page that
+    /// failed to load is listed here and missing from `page_files`.
     pub errors: Vec<String>,
     /// Things worth fixing that don't stop it loading: an intent with no
     /// examples.
@@ -2766,7 +2049,6 @@ pub struct Extension {
     pub manifest_version: u32,
     /// Why it exists (required; `None` only when the manifest didn't load).
     pub intent: Option<Intent>,
-    pub lenses: Vec<Lens>,
     /// Its page files (`pages/*.yaml`; valid ones — invalid ones are in
     /// `errors`).
     #[serde(default)]
@@ -2822,8 +2104,6 @@ pub struct Extension {
     /// Left-nav panels it contributes (valid ones; invalid ones are in
     /// `errors`).
     pub panels: Vec<ExtensionPanel>,
-    /// Full pages it contributes (valid ones; invalid ones are in `errors`).
-    pub pages: Vec<ExtensionPage>,
     /// Commands it registers on the bus, each a Starlark script composing
     /// core commands (P6b; valid ones — invalid ones are in `errors`).
     pub commands: Vec<crate::extension_commands::ExtensionCommand>,
@@ -2888,15 +2168,6 @@ impl Extension {
     }
 }
 
-/// A slot mount naming a lens (what a lens mount reads once checked).
-struct SlotMountLens {
-    slot: String,
-    lens: String,
-    at: Option<SlotAt>,
-    title: Option<String>,
-    size: Option<TileSize>,
-}
-
 /// A page another extension's page shows at one of its slots.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
@@ -2914,8 +2185,8 @@ pub struct PageSlot {
 }
 
 impl PageSlot {
-    /// Its contribution id among the extension's slot mounts: the
-    /// `n`th, after its lens mounts (`<host>.<slot>-<n>`, `/` → `.`).
+    /// Its contribution id among the extension's slot mounts: the `n`th
+    /// (`<host>.<slot>-<n>`, `/` → `.`).
     pub fn local_id(&self, n: usize) -> String {
         format!("{}.{}-{n}", self.host.replace('/', "."), self.slot)
     }
@@ -2925,8 +2196,6 @@ impl PageSlot {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ExtensionUi {
-    /// Lenses mounted into core pages (valid ones).
-    pub slots: Vec<LensSlot>,
     /// Pages mounted at other pages' slots (valid ones).
     #[serde(default)]
     pub page_slots: Vec<PageSlot>,
@@ -2937,32 +2206,15 @@ pub struct ExtensionUi {
     pub replacements: Vec<replacements::UiReplacement>,
 }
 
-/// The result of running a lens.
+/// One viz node of a page run: its viz, the page's params and the rows
+/// of the loader it shows.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
-pub struct LensRun {
-    pub lens: Lens,
+pub struct VizRun {
+    pub config: VizConfig,
     /// The parameter values actually used (supplied or default).
     pub params: BTreeMap<String, SqlCell>,
     pub result: SqlQueryResult,
-    /// The lens's alert on this result, if it declares one.
-    pub alert: Option<AlertState>,
-    /// What's worth knowing about its data: a view it read comes from a
-    /// collector failures disabled (P7.C2), so it isn't being refreshed.
-    pub warnings: Vec<String>,
-    /// Set when the lens needs a capability that isn't active: it didn't
-    /// run, and says what it needs instead of showing nothing.
-    pub inactive: Option<LensInactive>,
-}
-
-/// A lens that didn't run for want of a capability.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
-#[serde(rename_all = "camelCase")]
-pub struct LensInactive {
-    /// The needs that aren't met (`work_items`, `snapshots.contents`).
-    pub needs: Vec<String>,
-    /// What a person reads.
-    pub message: String,
 }
 
 /// Load every extension of the project at `root` from its source:
@@ -3175,7 +2427,7 @@ pub fn load_deployed(
     resolve_catalog(out, settings)
 }
 
-/// Fill in where each of `ext`'s lenses comes from: the deployment it
+/// Fill in where each of `ext`'s pages comes from: the deployment it
 /// runs, and its source file when the source is here.
 fn locate(ext: &mut Extension, project: &Path, settings: &oxplow_config::ExtensionSettings) {
     let deployment = match &ext.deployment {
@@ -3194,10 +2446,18 @@ fn locate(ext: &mut Extension, project: &Path, settings: &oxplow_config::Extensi
             }
         }
     }
-    for lens in &mut ext.lenses {
-        let file = lens.origin.running.rsplit('/').next().unwrap_or_default();
-        lens.origin.source = source.as_ref().map(|dir| format!("{dir}/lenses/{file}"));
-        lens.origin.deployment = deployment.clone();
+    for page in &mut ext.page_files {
+        let file = page.origin.running.rsplit('/').next().unwrap_or_default();
+        let at = source.as_ref().map(|dir| format!("{dir}/pages/{file}"));
+        let mut place = |o: &mut PageProvenance| {
+            o.source = at.clone();
+            o.deployment = deployment.clone();
+        };
+        place(&mut page.origin);
+        page.view.for_each_origin(&mut place);
+        if let Some(rail) = page.rail.as_mut() {
+            rail.for_each_origin(&mut place);
+        }
     }
 }
 
@@ -3251,38 +2511,6 @@ pub(super) fn resolve_catalog(
     settings: &oxplow_config::ExtensionSettings,
 ) -> Vec<Extension> {
     out.sort_by(|a, b| a.name.cmp(&b.name).then(a.origin.cmp(&b.origin)));
-    // A document's or dashboard's part from ANOTHER extension resolves
-    // here, once every extension is loaded; a missing one is an error and
-    // the lens is dropped so every loaded lens renders.
-    let all_ids: Vec<String> = out
-        .iter()
-        .flat_map(|e| e.lenses.iter().map(|l| l.id.clone()))
-        .collect();
-    for ext in &mut out {
-        let mut bad = Vec::new();
-        for l in &ext.lenses {
-            for c in l.part_lenses() {
-                if !all_ids.iter().any(|id| id == c) {
-                    ext.errors.push(format!(
-                        "{}: part lens `{c}` isn't in any loaded extension",
-                        l.origin.running
-                    ));
-                    bad.push(l.id.clone());
-                }
-            }
-        }
-        ext.lenses.retain(|l| !bad.contains(&l.id));
-    }
-    refuse_part_cycles(&mut out);
-    for ext in &mut out {
-        ext.contributions.retain(|descriptor| {
-            descriptor.id.kind != oxplow_domain::contribution::ContributionKind::Lens
-                || ext
-                    .lenses
-                    .iter()
-                    .any(|lens| lens.slug == descriptor.id.local)
-        });
-    }
     refuse_requires_cycles(&mut out);
     let mut out: Vec<Extension> = out
         .into_iter()
@@ -3308,7 +2536,7 @@ pub(super) fn resolve_catalog(
     }
     descriptors::check_catalog(&mut out);
     public_contracts::activate(&mut out);
-    let mut out: Vec<Extension> = out
+    let out: Vec<Extension> = out
         .into_iter()
         .map(|mut ext| {
             if ext.public_contracts.blocked {
@@ -3317,327 +2545,6 @@ pub(super) fn resolve_catalog(
             apply_disabled(ext, settings)
         })
         .collect();
-    place_lens_mounts(&mut out);
-    fill_view_options(&mut out);
-    fill_document_fills(&mut out);
-    warn_unread_row_columns(&mut out);
-    out
-}
-
-/// Refuse the lenses whose parts lead back to themselves (A's section is
-/// B, B's is A): a page would hold itself without end. Each lens on a
-/// cycle is an error of its extension and is dropped.
-fn refuse_part_cycles(out: &mut [Extension]) {
-    let parts: BTreeMap<String, Vec<String>> = out
-        .iter()
-        .flat_map(|e| e.lenses.iter())
-        .map(|l| (l.id.clone(), l.part_lenses().map(str::to_string).collect()))
-        .collect();
-    // Whether `from` reaches `to` through parts, never walking a lens twice.
-    let reaches = |from: &str, to: &str| -> bool {
-        let mut seen = std::collections::BTreeSet::new();
-        let mut stack = vec![from.to_string()];
-        while let Some(at) = stack.pop() {
-            for next in parts.get(&at).into_iter().flatten() {
-                if next == to {
-                    return true;
-                }
-                if seen.insert(next.clone()) {
-                    stack.push(next.clone());
-                }
-            }
-        }
-        false
-    };
-    let cyclic: Vec<String> = parts.keys().filter(|id| reaches(id, id)).cloned().collect();
-    for ext in out.iter_mut() {
-        for l in ext.lenses.iter().filter(|l| cyclic.contains(&l.id)) {
-            ext.errors.push(format!(
-                "{}: its parts lead back to `{}`; a page can't hold itself",
-                l.origin.running, l.id
-            ));
-        }
-        ext.lenses.retain(|l| !cyclic.contains(&l.id));
-    }
-}
-
-/// A view document's view param takes its sections as its choices, its
-/// own and the mounted ones: each part's id, labelled by its title, else
-/// its lens's title, else its id. Replaced, never added to: a catalog is
-/// resolved again from resolved extensions.
-/// A document fills when the lens of its last part does (mounts placed,
-/// so a mounted last section counts). Documents nest, and part cycles
-/// are refused before this, so it settles in as many rounds as the
-/// deepest nesting. A view document shows one section at a time, so
-/// which part is last says nothing: it doesn't fill.
-fn fill_document_fills(out: &mut [Extension]) {
-    loop {
-        let fills: BTreeMap<String, bool> = out
-            .iter()
-            .flat_map(|e| e.lenses.iter())
-            .map(|l| (l.id.clone(), l.fills))
-            .collect();
-        let mut changed = false;
-        for lens in out.iter_mut().flat_map(|e| e.lenses.iter_mut()) {
-            if lens.viz != LensViz::Document || lens.view.is_some() || lens.fills {
-                continue;
-            }
-            let last = lens.parts.last().and_then(|p| p.lens.as_ref());
-            if last.is_some_and(|id| fills.get(id) == Some(&true)) {
-                lens.fills = true;
-                changed = true;
-            }
-        }
-        if !changed {
-            break;
-        }
-    }
-}
-
-fn fill_view_options(out: &mut [Extension]) {
-    let titles: BTreeMap<String, String> = out
-        .iter()
-        .flat_map(|e| e.lenses.iter())
-        .map(|l| (l.id.clone(), l.title.clone()))
-        .collect();
-    for lens in out.iter_mut().flat_map(|e| e.lenses.iter_mut()) {
-        let Some(view) = lens.view.clone() else {
-            continue;
-        };
-        let options: Vec<LensParamOption> = lens
-            .parts
-            .iter()
-            .map(|part| LensParamOption {
-                value: part.id.clone(),
-                label: part
-                    .title
-                    .clone()
-                    .filter(|t| !t.is_empty())
-                    .or_else(|| part.lens.as_ref().and_then(|l| titles.get(l).cloned()))
-                    .unwrap_or_else(|| part.id.clone()),
-            })
-            .collect();
-        if let Some(p) = lens.params.iter_mut().find(|p| p.name == view) {
-            p.options = options;
-        }
-    }
-}
-
-/// A composite's row names a value its parts take as params: one none of
-/// its parts (its own and the mounted ones, once placed) declares is read
-/// by nothing. Said only when every part's lens is loaded.
-fn warn_unread_row_columns(out: &mut [Extension]) {
-    let params: BTreeMap<String, Vec<String>> = out
-        .iter()
-        .flat_map(|e| e.lenses.iter())
-        .map(|l| {
-            (
-                l.id.clone(),
-                l.params.iter().map(|p| p.name.clone()).collect(),
-            )
-        })
-        .collect();
-    for ext in out.iter_mut() {
-        // The columns a page's label reads off a lens's row.
-        let labelled: BTreeMap<String, Vec<String>> = ext
-            .pages
-            .iter()
-            .filter_map(|p| match &p.body {
-                PageBody::Lens { lens } => {
-                    Some((lens.clone(), label_row_columns(p.label.as_deref())))
-                }
-                _ => None,
-            })
-            .collect();
-        let warnings: Vec<String> = ext
-            .lenses
-            .iter()
-            .filter(|l| matches!(l.viz, LensViz::Document | LensViz::Dashboard))
-            .flat_map(|l| {
-                let parts: Option<Vec<&Vec<String>>> =
-                    l.part_lenses().map(|p| params.get(p)).collect();
-                let read_by_label = labelled.get(&l.id).cloned().unwrap_or_default();
-                let taken = move |name: &str| {
-                    read_by_label.iter().any(|x| x == name)
-                        || parts
-                            .as_deref()
-                            .is_none_or(|p| p.iter().any(|ps| ps.iter().any(|x| x == name)))
-                };
-                l.columns
-                    .iter()
-                    .filter(move |c| !taken(&c.key))
-                    .map(|c| {
-                        format!(
-                            "{}: column `{}` of the row is a param of none of its parts — \
-                             remove it, or declare it on the part that reads it",
-                            l.origin.running, c.key
-                        )
-                    })
-                    .collect::<Vec<_>>()
-            })
-            .collect();
-        ext.warnings.extend(warnings);
-    }
-}
-
-/// Mounts among another lens's parts (`<extension>/<slug>.sections` of a
-/// document, `.tiles` of a dashboard), once the catalog is final: each is
-/// checked against that lens and placed among its parts by its `at`, so
-/// the lens's page, its text and `get_lens` all show it. A bad one is an
-/// error of the extension that mounts it, and goes.
-fn place_lens_mounts(out: &mut [Extension]) {
-    // A catalog resolved again from resolved extensions places its mounts
-    // afresh: the ones placed before go first.
-    for lens in out.iter_mut().flat_map(|e| e.lenses.iter_mut()) {
-        lens.parts.retain(|p| p.from.is_none());
-    }
-    struct Target {
-        params: Vec<String>,
-        /// The names of its query's row (`columns:`), given to its parts.
-        row: Vec<String>,
-        kind: PartsKind,
-        ids: Vec<String>,
-        /// A view document: each section is a page of its own, so a mount
-        /// needn't read any of the document's params.
-        view: bool,
-    }
-    let targets: BTreeMap<String, Target> = out
-        .iter()
-        .flat_map(|e| e.lenses.iter())
-        .filter_map(|l| {
-            let kind = match l.viz {
-                LensViz::Document => PartsKind::Sections,
-                LensViz::Dashboard => PartsKind::Tiles,
-                _ => return None,
-            };
-            Some((
-                l.id.clone(),
-                Target {
-                    params: l.params.iter().map(|p| p.name.clone()).collect(),
-                    row: l.columns.iter().map(|c| c.key.clone()).collect(),
-                    kind,
-                    ids: l.parts.iter().map(|p| p.id.clone()).collect(),
-                    view: l.view.is_some(),
-                },
-            ))
-        })
-        .collect();
-    let mut placed: BTreeMap<String, Vec<(LensPart, SlotAt)>> = BTreeMap::new();
-    for ext in out.iter_mut() {
-        let manifest = format!("{}/extension.yaml", ext.path);
-        let mut dropped = Vec::new();
-        for (index, mount) in ext.ui.slots.iter().enumerate() {
-            let Some((target, kind)) = lens_slot_target(&mount.slot) else {
-                continue;
-            };
-            let Some(lens) = ext.lenses.iter().find(|l| l.id == mount.lens_id) else {
-                continue;
-            };
-            let checked = match targets.get(target) {
-                None => Err(format!(
-                    "slot `{}` names lens `{target}`, which isn't a loaded document or dashboard",
-                    mount.slot
-                )),
-                Some(t) if t.kind != kind => Err(format!(
-                    "slot `{}`: lens `{target}` is a {}, so its parts are at `{target}.{}`",
-                    mount.slot,
-                    if t.kind == PartsKind::Sections {
-                        "document"
-                    } else {
-                        "dashboard"
-                    },
-                    if t.kind == PartsKind::Sections {
-                        "sections"
-                    } else {
-                        "tiles"
-                    },
-                )),
-                Some(t) => {
-                    fn offered(names: &[String], view: bool) -> Vec<&str> {
-                        if view {
-                            Vec::new()
-                        } else {
-                            names.iter().map(String::as_str).collect()
-                        }
-                    }
-                    let params = offered(&t.params, t.view);
-                    let row = offered(&t.row, t.view);
-                    let ids: Vec<&str> = t.ids.iter().map(String::as_str).collect();
-                    mount_problem(mount, lens, &params, &row, kind, &ids)
-                }
-            };
-            match checked {
-                Err(problem) => {
-                    ext.errors.push(format!("{manifest}: {problem}"));
-                    dropped.push(index);
-                }
-                Ok(warning) => {
-                    ext.warnings
-                        .extend(warning.map(|w| format!("{manifest}: {w}")));
-                    placed.entry(target.to_string()).or_default().push((
-                        LensPart {
-                            id: mount.lens_id.clone(),
-                            title: mount.title.clone(),
-                            lens: Some(mount.lens_id.clone()),
-                            markdown: None,
-                            size: mount.size,
-                            replaceable: None,
-                            from: Some(ext.name.clone()),
-                        },
-                        mount.at.clone().unwrap_or_default(),
-                    ));
-                }
-            }
-        }
-        for index in dropped.into_iter().rev() {
-            let mount = ext.ui.slots.remove(index);
-            let id = oxplow_domain::contribution::ContributionId::new(
-                &ext.name,
-                oxplow_domain::contribution::ContributionKind::Slot,
-                &mount.local_id(index),
-            );
-            ext.contributions.retain(|d| d.id != id);
-        }
-    }
-    for lens in out.iter_mut().flat_map(|e| e.lenses.iter_mut()) {
-        if let Some(mounts) = placed.remove(&lens.id) {
-            lens.parts = place_parts(std::mem::take(&mut lens.parts), mounts);
-        }
-    }
-}
-
-/// A page's own parts with mounts placed among them: `start` ones first,
-/// each `before`/`after` one beside its part, `end` ones (and any beside a
-/// part the page doesn't have) last; mounts at one place keep their order.
-/// The UI places mounts into core pages the same way (`kit/placeParts.ts`).
-fn place_parts(own: Vec<LensPart>, mounts: Vec<(LensPart, SlotAt)>) -> Vec<LensPart> {
-    let ids: Vec<String> = own.iter().map(|p| p.id.clone()).collect();
-    let mounts: Vec<(LensPart, SlotAt)> = mounts
-        .into_iter()
-        .map(|(part, at)| match at.anchor() {
-            Some(id) if !ids.iter().any(|i| i == id) => (part, SlotAt::default()),
-            _ => (part, at),
-        })
-        .collect();
-    let at = |pred: &dyn Fn(&SlotAt) -> bool| -> Vec<LensPart> {
-        mounts
-            .iter()
-            .filter(|(_, a)| pred(a))
-            .map(|(p, _)| p.clone())
-            .collect()
-    };
-    let mut out = at(&|a| *a == SlotAt::Edge(SlotEdge::Start));
-    for part in own {
-        let id = part.id.clone();
-        out.extend(at(
-            &|a| matches!(a, SlotAt::Before { before } if *before == id),
-        ));
-        out.push(part);
-        out.extend(at(
-            &|a| matches!(a, SlotAt::After { after } if *after == id),
-        ));
-    }
-    out.extend(at(&|a| *a == SlotAt::default()));
     out
 }
 
@@ -4045,13 +2952,13 @@ pub async fn impact_between(
         Some(b) => Some(read_side(layer, catalog, root, &mut b.extension).await),
         None => None,
     };
-    let no_runs = LensRuns::new();
+    let no_runs = crate::pages::checks::PageChecks::new();
     crate::extension_impact::impact(
         layer,
         before.as_ref().map(|b| crate::extension_impact::Version {
             extension: &b.extension,
             read: b.read,
-            lenses: prepared_before.as_ref().map_or(&no_runs, |p| &p.lenses),
+            pages: prepared_before.as_ref().map_or(&no_runs, |p| &p.pages),
             overlay: prepared_before
                 .as_ref()
                 .map_or(&[], |p| p.overlay.as_slice()),
@@ -4059,7 +2966,7 @@ pub async fn impact_between(
         crate::extension_impact::Version {
             extension: &after.extension,
             read: after.read,
-            lenses: &prepared_after.lenses,
+            pages: &prepared_after.pages,
             overlay: &prepared_after.overlay,
         },
     )
@@ -4130,7 +3037,6 @@ pub(crate) fn empty_extension(name: &str, path: &str, origin: &str) -> Extension
         warnings: Vec::new(),
         manifest_version: manifest_v2::CURRENT,
         intent: None,
-        lenses: Vec::new(),
         page_files: Vec::new(),
         collectors: Vec::new(),
         providers: Vec::new(),
@@ -4150,7 +3056,6 @@ pub(crate) fn empty_extension(name: &str, path: &str, origin: &str) -> Extension
         models: Vec::new(),
         metrics: Vec::new(),
         panels: Vec::new(),
-        pages: Vec::new(),
         commands: Vec::new(),
         jobs: Vec::new(),
         ai_profiles: Vec::new(),
@@ -4293,7 +3198,6 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
     let panel_files = m.panels.clone();
     let decorator_files = m.ui.decorators.clone();
     let replacement_files = m.ui.replacements.clone();
-    let page_files = m.pages.clone();
     let resource_files = m.resources.clone();
     let slot_files = {
         if let Some(v) = m.event_types.as_ref() {
@@ -4701,97 +3605,17 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
         ext.errors.extend(errors);
         slots
     };
-    let mut lens_files: Vec<String> = files
+    // Lenses are pages now: an old `lenses/` folder is named, never read.
+    if files
         .list("lenses")
-        .into_iter()
-        .filter(|f| f.ends_with(".yaml") || f.ends_with(".yml"))
-        .collect();
-    lens_files.sort();
-    for file in lens_files {
-        let slug = file
-            .trim_end_matches(".yaml")
-            .trim_end_matches(".yml")
-            .to_string();
-        let lens_rel = format!("{rel}/lenses/{file}");
-        let parsed = files
-            .read(&format!("lenses/{file}"))
-            .ok_or_else(|| "unreadable".to_string())
-            .and_then(|t| serde_yaml::from_str::<LensFile>(&t).map_err(|e| e.to_string()))
-            .and_then(|mut l| {
-                let alert = l.alert.take().map(AlertFile::into_alert).transpose()?;
-                for need in &l.needs {
-                    oxplow_domain::capability::check_need(need)?;
-                }
-                let actions = parse_actions(
-                    std::mem::take(&mut l.actions),
-                    &l.params,
-                    l.group.is_some(),
-                    holds_one_row(l.viz, !l.query.trim().is_empty()),
-                )?;
-                let parts = parse_parts(
-                    name,
-                    l.viz,
-                    std::mem::take(&mut l.sections),
-                    std::mem::take(&mut l.tiles),
-                    l.tile.is_some(),
-                )?;
-                let tool = l
-                    .tool
-                    .take()
-                    .map(|t| crate::extension_commands::tool_name(&ext.namespace, &t))
-                    .transpose()?;
-                Ok((l, alert, actions, tool, parts))
-            });
-        match parsed {
-            Ok((l, alert, actions, tool, parts)) => ext.lenses.push(Lens {
-                tool,
-                id: format!("{name}/{slug}"),
-                extension: name.to_string(),
-                slug,
-                title: l.title,
-                description: l.description,
-                query: l.query,
-                viz: l.viz,
-                params: typed(view_param(l.params, l.view.as_deref())),
-                columns: l.columns,
-                empty: l.empty,
-                chart: l.chart,
-                tree: l.tree,
-                tile: l.tile,
-                timeline: l.timeline,
-                steps: l.steps,
-                hunks: l.hunks,
-                code: l.code,
-                diff: l.diff,
-                editor: l.editor,
-                embed: l.embed,
-                answer: l.answer,
-                terminal: l.terminal,
-                markdown: l.markdown,
-                form: l.form,
-                custom: l.custom,
-                group: l.group,
-                emphasis: l.emphasis,
-                depth: l.depth,
-                parts,
-                view: l.view,
-                fills: l.viz.fills(),
-                launcher_category: l.launcher.map(|la| la.category),
-                hidden: l.hidden,
-                refresh: l.refresh,
-                actions,
-                alert,
-                needs: l.needs,
-                origin: PageProvenance {
-                    extension: name.to_string(),
-                    source: None,
-                    running: lens_rel,
-                    deployment: None,
-                    bundled: origin == "bundled",
-                },
-            }),
-            Err(e) => ext.errors.push(format!("{lens_rel}: {e}")),
-        }
+        .iter()
+        .any(|f| f.ends_with(".yaml") || f.ends_with(".yml"))
+    {
+        ext.errors.push(format!(
+            "{rel}/lenses/: lenses are pages now — rewrite each as `pages/<slug>.yaml` \
+             (metadata, `data:` loaders and a `view:`; the oxplow-extension skill's \
+             page format) and remove the folder"
+        ));
     }
 
     let mut page_names: Vec<String> = files
@@ -4815,214 +3639,88 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
         match parsed {
             Ok(mut page) => {
                 page.origin.bundled = origin == "bundled";
+                ext.warnings.extend(
+                    crate::pages::checks::layout_warnings(&page)
+                        .into_iter()
+                        .map(|w| format!("{page_rel}: {w}")),
+                );
                 ext.page_files.push(page);
             }
             Err(e) => ext.errors.push(format!("{page_rel}: {e}")),
         }
     }
 
-    // A component's assets in this extension must be its lenses.
-    let ids: Vec<String> = ext.lenses.iter().map(|l| l.id.clone()).collect();
-    let mut missing_assets = Vec::new();
-    for c in &ext.custom_components {
-        let prefix = format!("{name}/");
-        if let Some(a) = c
-            .assets
-            .iter()
-            .find(|a| a.starts_with(&prefix) && !ids.contains(a))
-        {
-            ext.errors.push(at(
-                &file,
-                entry_line(&manifest, "custom_components", "id", &c.id),
-                format!(
-                    "custom component `{}`: asset `{a}` isn't in this extension's lenses/",
-                    c.id
-                ),
-            ));
-            missing_assets.push(c.id.clone());
-        }
-    }
-    ext.custom_components
-        .retain(|c| !missing_assets.contains(&c.id));
-
-    // A column's `expand` and a param's `options_from` name a lens by slug
-    // or `<extension>/<slug>`; the loaded lens has the whole id.
-    for l in &mut ext.lenses {
-        let extension = l.extension.clone();
-        for c in &mut l.columns {
-            if let Some(e) = c.expand.as_mut().filter(|e| !e.contains('/')) {
-                *e = format!("{extension}/{e}");
-            }
-        }
-        for p in &mut l.params {
-            if let Some(o) = p.options_from.as_mut().filter(|o| !o.contains('/')) {
-                *o = format!("{extension}/{o}");
-            }
-        }
-    }
-    // Drop lenses whose viz lacks what it needs, so every loaded lens renders.
-    let components: Vec<String> = ext.custom_components.iter().map(|c| c.id.clone()).collect();
-    let mut bad = Vec::new();
-    for l in &ext.lenses {
-        if let Some(problem) = shape_problem(l, &ids, &components)
-            .or_else(|| choices_problem(l, &ids))
-            .or_else(|| expand_problem(l, &ids))
-            .or_else(|| options_from_problem(l, &ids))
-        {
-            ext.errors.push(format!("{}: {problem}", l.origin.running));
-            bad.push(l.id.clone());
-        }
-    }
-    ext.lenses.retain(|l| !bad.contains(&l.id));
-    let selects: Vec<(String, String)> = ext
-        .lenses
-        .iter()
-        .filter_map(|l| {
-            Some((
-                l.id.clone(),
-                format!("{}: {}", l.origin.running, selects_problem(l, &ext.lenses)?),
-            ))
-        })
-        .collect();
-    for (_, problem) in &selects {
-        ext.errors.push(problem.clone());
-    }
-    ext.lenses
-        .retain(|l| !selects.iter().any(|(id, _)| id == &l.id));
-    let replaceable: Vec<(String, String)> = ext
-        .lenses
-        .iter()
-        .filter_map(|l| {
-            Some((
-                l.id.clone(),
-                format!(
-                    "{}: {}",
-                    l.origin.running,
-                    replaceable_problem(l, &ext.lenses)?
-                ),
-            ))
-        })
-        .collect();
-    for (_, problem) in &replaceable {
-        ext.errors.push(problem.clone());
-    }
-    ext.lenses
-        .retain(|l| !replaceable.iter().any(|(id, _)| id == &l.id));
-    let selected: Vec<Vec<String>> = ext
-        .lenses
-        .iter()
-        .map(|l| selected(l, &ext.lenses))
-        .collect();
-    for (lens, names) in ext.lenses.iter_mut().zip(selected) {
-        for p in &mut lens.params {
-            p.role = Some(if names.contains(&p.name) {
-                ParamRole::Selection
-            } else {
-                p.role.unwrap_or(ParamRole::Resource)
-            });
-        }
-    }
-
     for s in slot_files {
-        let (lens_slug, page_slug) = match (&s.lens, &s.page) {
-            (Some(l), None) => (l.clone(), None),
-            (None, Some(p)) => (String::new(), Some(p.clone())),
-            _ => {
-                ext.errors.push(at(
-                    &file,
-                    key_line(&manifest, "ui"),
-                    format!("slot `{}` mounts a `lens` or a `page`, one of them", s.slot),
-                ));
-                continue;
-            }
-        };
-        if let Some(page) = page_slug {
-            let mount_line = entry_line(&manifest, "ui", "page", &page);
-            let Some((host, slot_name)) = s.slot.rsplit_once('.') else {
-                ext.errors.push(at(
-                    &file,
-                    mount_line,
-                    format!(
-                        "slot `{}`: a page mounts at a page's slot, `<extension>/<page>.<slot>`",
-                        s.slot
-                    ),
-                ));
-                continue;
-            };
-            if !ext.page_files.iter().any(|p| p.slug == page) {
-                ext.errors.push(at(
-                    &file,
-                    mount_line,
-                    format!(
-                        "slot `{}` mounts page `{page}`, which isn't in pages/",
-                        s.slot
-                    ),
-                ));
-                continue;
-            }
-            ext.ui.page_slots.push(PageSlot {
-                host: host.to_string(),
-                slot: slot_name.to_string(),
-                page: format!("{name}/{page}"),
-                at: s.at,
-                title: s.title,
-                size: s.size,
-            });
-            continue;
-        }
-        let s = SlotMountLens {
-            slot: s.slot,
-            lens: lens_slug,
-            at: s.at,
-            title: s.title,
-            size: s.size,
-        };
-        let mount_line = entry_line(&manifest, "ui", "lens", &s.lens);
-        let Some(lens) = ext.lenses.iter().find(|l| l.slug == s.lens) else {
+        let page = s.page.clone();
+        let mount_line = entry_line(&manifest, "ui", "page", &page);
+        let Some(mounted) = ext.page_files.iter().find(|p| p.slug == page) else {
             ext.errors.push(at(
                 &file,
                 mount_line,
                 format!(
-                    "slot `{}` mounts lens `{}`, which isn't in lenses/",
-                    s.slot, s.lens
+                    "slot `{}` mounts page `{page}`, which isn't in pages/",
+                    s.slot
                 ),
             ));
             continue;
         };
-        let mount = LensSlot {
-            slot: s.slot,
-            lens_id: lens.id.clone(),
-            at: s.at,
-            title: s.title,
-            size: s.size,
-        };
-        // Another lens's parts resolve once every extension is loaded
-        // (`place_lens_mounts`).
-        if lens_slot_target(&mount.slot).is_some() {
-            ext.ui.slots.push(mount);
-            continue;
+        // A core slot (`diff.file.header`) binds the params it names; a
+        // page's slot (`<extension>/<page>.<slot>`) gives its own.
+        let core = SlotSpec::core(&s.slot);
+        if let Some(spec) = core {
+            let unbound: Vec<&str> = mounted
+                .params
+                .iter()
+                .filter(|p| p.default.is_none() && !spec.params.contains(&p.name.as_str()))
+                .map(|p| p.name.as_str())
+                .collect();
+            if !unbound.is_empty() {
+                ext.errors.push(at(
+                    &file,
+                    mount_line,
+                    format!(
+                        "slot `{}` gives {}; page `{page}` also needs {} (give each a `default`)",
+                        s.slot,
+                        spec.params.join(", "),
+                        unbound.join(", ")
+                    ),
+                ));
+                continue;
+            }
         }
-        let Some(spec) = SlotSpec::core(&mount.slot) else {
+        let Some((host, slot_name)) = s.slot.rsplit_once('.') else {
             ext.errors.push(at(
                 &file,
                 mount_line,
                 format!(
-                    "unknown slot `{}` (known: {}, or a document's `<extension>/<lens>.sections` \
-                     and a dashboard's `<extension>/<lens>.tiles`)",
-                    mount.slot,
+                    "slot `{}`: a page mounts at a page's slot, `<extension>/<page>.<slot>`, \
+                     or a core slot ({})",
+                    s.slot,
                     SLOTS.iter().map(|s| s.name).collect::<Vec<_>>().join(", ")
                 ),
             ));
             continue;
         };
-        match mount_problem(&mount, lens, spec.params, &[], PartsKind::Region, &[]) {
-            Err(problem) => ext.errors.push(at(&file, mount_line, problem)),
-            Ok(warning) => {
-                ext.warnings
-                    .extend(warning.map(|w| at(&file, mount_line, w)));
-                ext.ui.slots.push(mount);
-            }
+        if core.is_none() && !host.contains('/') {
+            ext.errors.push(at(
+                &file,
+                mount_line,
+                format!(
+                    "unknown slot `{}` (core slots: {}; a page's: `<extension>/<page>.<slot>`)",
+                    s.slot,
+                    SLOTS.iter().map(|s| s.name).collect::<Vec<_>>().join(", ")
+                ),
+            ));
+            continue;
         }
+        ext.ui.page_slots.push(PageSlot {
+            host: host.to_string(),
+            slot: slot_name.to_string(),
+            page: format!("{name}/{page}"),
+            at: s.at,
+            title: s.title,
+            size: s.size,
+        });
     }
     if let Some(v) = decorator_files {
         let (decorators, errors) =
@@ -5036,7 +3734,6 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
         let (replaced, errors) = replacements::parse_replacements(
             name,
             &capabilities,
-            &ext.lenses,
             &ext.page_files,
             &v,
             &file,
@@ -5058,36 +3755,17 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
         ext.resources = resources;
         ext.errors.extend(errors);
     }
-    // After resources: a page renders them.
-    if let Some(v) = page_files {
-        let (pages, errors) = parse_pages(
-            name,
-            &ext.namespace,
-            &ext.lenses,
-            &ext.custom_components,
-            &ext.resources,
-            v,
-        );
-        ext.pages = pages;
-        let lines = item_lines(&manifest, "pages");
-        ext.errors.extend(errors.into_iter().map(|(i, e)| {
-            let line = i.and_then(|i| lines.get(i).copied());
-            at(&file, line.or(key_line(&manifest, "pages")), e)
-        }));
+    // After resources: a page that renders one is checked against it.
+    let mut checked: Vec<crate::pages::schema::Page> = Vec::new();
+    for page in std::mem::take(&mut ext.page_files) {
+        match renderer_problem(name, &ext.namespace, &ext.resources, &page, &checked) {
+            Ok(()) => checked.push(page),
+            Err(e) => ext.errors.push(format!("{}: {e}", page.origin.running)),
+        }
     }
-    // Once the pages are known: a renderer's lens is told by its page.
-    let layout: Vec<String> = ext
-        .lenses
-        .iter()
-        .flat_map(|l| {
-            layout_warnings(l, &ext.lenses, renders_a_resource(&ext, l))
-                .into_iter()
-                .map(|w| format!("{}: {w}", l.origin.running))
-        })
-        .collect();
-    ext.warnings.extend(layout);
+    ext.page_files = checked;
     if let Some(v) = panel_files {
-        let (panels, errors) = parse_panels(name, &ext.lenses, &ext.page_files, v);
+        let (panels, errors) = parse_panels(name, &ext.page_files, v);
         ext.panels = panels;
         let lines = item_lines(&manifest, "panels");
         ext.errors.extend(errors.into_iter().map(|(i, e)| {
@@ -5258,19 +3936,23 @@ fn check_permissions(ext: &mut Extension, files: &dyn ExtensionFiles, file: &str
     ext.errors.extend(errors);
 }
 
-/// The SQL of `ext` that may read its own configuration — a model, a lens, an
-/// advisory — with where each is declared.
+/// The SQL of `ext` that may read its own configuration — a model, a page's
+/// loader, an advisory — with where each is declared.
 fn config_sql(ext: &Extension) -> Vec<(String, &str)> {
     let models = ext.models.iter().map(|m| (m.file.clone(), m.sql.as_str()));
-    let lenses = ext
-        .lenses
-        .iter()
-        .map(|l| (l.origin.running.clone(), l.query.as_str()));
+    let pages = ext.page_files.iter().flat_map(|p| {
+        p.loaders.iter().filter_map(|d| match &d.loader {
+            crate::pages::schema::Loader::Sql { sql, .. } => {
+                Some((p.origin.running.clone(), sql.as_str()))
+            }
+            _ => None,
+        })
+    });
     let advisories = ext
         .advisories
         .iter()
         .map(|a| (format!("advisory `{}`", a.id), a.query.as_str()));
-    models.chain(lenses).chain(advisories).collect()
+    models.chain(pages).chain(advisories).collect()
 }
 
 /// A `config('/pointer')` read names a scalar key the extension's own
@@ -5325,244 +4007,48 @@ fn config_key_type<'a>(schema: &'a serde_json::Value, pointer: &str) -> Option<&
     node.get("type")?.as_str()
 }
 
-/// Check the manifest's `pages:`: a kebab-case, unique id, a launcher
-/// category, and a lens that exists. Each error names the entry's index.
-fn parse_pages(
-    extension: &str,
-    namespace: &str,
-    lenses: &[Lens],
-    components: &[custom_components::CustomComponent],
-    resources: &[crate::extension_resources::ExtensionResource],
-    raw: serde_yaml::Value,
-) -> (Vec<ExtensionPage>, Vec<(Option<usize>, String)>) {
-    let mut pages: Vec<ExtensionPage> = Vec::new();
-    let mut errors = Vec::new();
-    let Some(list) = raw.as_sequence() else {
-        return (pages, vec![(None, "`pages` must be a list".into())]);
-    };
-    // Oxplow's own pages are core-named, as its commands are.
-    let core_named = namespace == CORE_NAMESPACE;
-    for (i, v) in list.iter().enumerate() {
-        let p = match serde_yaml::from_value::<PageFile>(v.clone()) {
-            Ok(p) => p,
-            Err(e) => {
-                errors.push((Some(i), format!(
-                    "pages: {e} (a page is `{{ id, title, icon?, category?, keywords?, params?, count?, for?, accepts?, default?, pinned?, comments?, refresh?, lens | component, rail? }}`; a category is one of Work, Code, Git, Activity, Knowledge, Data, Dashboards, System)"
-                )));
-                continue;
-            }
-        };
-        let err = |e: String| (Some(i), format!("page `{}`: {e}", p.id));
-        let body = match (&p.lens, &p.component) {
-            (Some(_), Some(_)) | (None, None) => {
-                Err("needs exactly one of `lens` and `component`".to_string())
-            }
-            (Some(lens), None) => {
-                if lenses.iter().any(|l| &l.slug == lens) {
-                    Ok(PageBody::Lens {
-                        lens: format!("{extension}/{lens}"),
-                    })
-                } else {
-                    Err(format!("its lens `{lens}` isn't in lenses/"))
-                }
-            }
-            (None, Some(c)) if c.starts_with("oxplow:") => {
-                if !crate::bundled_extensions::is_required(extension) {
-                    Err(format!(
-                        "`{c}` is a built-in page, which only oxplow's own extension declares; draw it with a lens"
-                    ))
-                } else {
-                    match crate::built_in_pages::built_in(c) {
-                        Some(name) => Ok(PageBody::BuiltIn {
-                            name: name.to_string(),
-                        }),
-                        None => Err(format!("`{c}` isn't a built-in page")),
-                    }
-                }
-            }
-            (None, Some(c)) => {
-                if components.iter().any(|k| &k.id == c) {
-                    Ok(PageBody::Component {
-                        component: format!("{extension}/{c}"),
-                    })
-                } else {
-                    Err(format!(
-                        "`{c}` isn't one of its custom_components or a built-in page \
-                         (`oxplow:<name>`)"
-                    ))
-                }
-            }
-        };
-        if !oxplow_domain::contribution::valid_local(
-            oxplow_domain::contribution::ContributionKind::Page,
-            &p.id,
-        ) {
-            errors.push(err("a page id is lowercase letters, digits and `-`".into()));
-        } else if pages.iter().any(|q| q.id == p.id) {
-            errors.push(err("declared twice".into()));
-        } else if let Err(e) = &body {
-            errors.push(err(e.clone()));
-        } else if let Some(c) = p
-            .count
-            .as_ref()
-            .filter(|c| !lenses.iter().any(|l| &l.slug == *c))
-        {
-            errors.push(err(format!("its count lens `{c}` isn't in lenses/")));
-        } else if p.rail.is_some() && p.component.is_none() {
-            errors.push(err(
-                "`rail` is a component page's; a lens page's rail is its own".into(),
-            ));
-        } else if let Some(r) = p
-            .rail
-            .as_ref()
-            .filter(|r| !lenses.iter().any(|l| &l.slug == *r))
-        {
-            errors.push(err(format!("its rail lens `{r}` isn't in lenses/")));
-        } else if p
-            .icon
-            .as_deref()
-            .is_some_and(|i| !crate::extension_resources::ICONS.contains(&i))
-        {
-            errors.push(err(format!(
-                "its icon `{}` isn't one oxplow draws (one of {})",
-                p.icon.as_deref().unwrap_or_default(),
-                crate::extension_resources::ICONS.join(", ")
-            )));
-        } else if let Some(bad) = p.params.iter().find(|n| {
-            n.is_empty()
-                || !n
-                    .chars()
-                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
-        }) {
-            errors.push(err(format!(
-                "param `{bad}` must be lowercase letters, digits and `_`"
-            )));
-        } else if let Err(e) = renderer_problem(
-            extension,
-            namespace,
-            resources,
-            &p,
-            &pages,
-            p.lens
-                .as_ref()
-                .and_then(|l| lenses.iter().find(|x| &x.slug == l)),
-        ) {
-            errors.push(err(e));
-        } else if let Some(lens) = p
-            .lens
-            .as_ref()
-            .filter(|_| p.renders.is_some())
-            .and_then(|l| lenses.iter().find(|x| &x.slug == l))
-            .filter(|l| !l.params.iter().any(|q| q.name == "uri"))
-        {
-            // A renderer's lens is run with the URI it shows (`uri`).
-            errors.push(err(format!(
-                "its lens `{}` renders a resource, so it takes the URI: declare a `uri` param",
-                lens.slug
-            )));
-        } else {
-            let renders = p.renders.clone().map(Renders::into_vec).unwrap_or_default();
-            let accepts = p
-                .accepts
-                .iter()
-                .map(|(k, v)| {
-                    let kept = match v.as_str() {
-                        "present" | "absent" => v.clone(),
-                        pattern => crate::param_pattern::param_pattern(pattern)
-                            .expect("checked by renderer_problem"),
-                    };
-                    (k.clone(), kept)
-                })
-                .collect();
-            pages.push(ExtensionPage {
-                page_ref: if core_named {
-                    oxplow_domain::uri::build::page_uri(&p.id, &[])
-                } else {
-                    oxplow_domain::uri::build::extension_page_uri(extension, &p.id)
-                },
-                id: p.id,
-                extension: extension.to_string(),
-                title: p.title,
-                label: p.label,
-                icon: p.icon,
-                category: p.category,
-                keywords: p.keywords,
-                params: p.params,
-                count: p.count.map(|c| format!("{extension}/{c}")),
-                renders,
-                accepts,
-                default: p.default,
-                pinned: p.pinned,
-                comments: p.comments,
-                refresh: p.refresh,
-                body: body.expect("checked above"),
-                rail: p.rail.map(|r| format!("{extension}/{r}")),
-            });
-        }
-    }
-    (pages, errors)
-}
-
 /// What's wrong with a page's `for`, `accepts`, `default` and `pinned`:
 /// each resource it renders is a scheme oxplow renders (`https`), one this
 /// extension declares, one of foundation's (`oxplow/*`) or another
 /// extension's (`<extension>/<name>`); `accepts` names a param of each
-/// (when they're known) with `present`, `absent` or an id pattern; its
-/// lens takes no resource param the resource hasn't (it is run with the
-/// URI's params);
+/// (when they're known) with `present`, `absent` or an id pattern; it
+/// takes no resource param the resource hasn't (it is run with the URI's
+/// params);
 /// `default` is for a resource of this extension's, one page per resource;
 /// `pinned` and `accepts` are a renderer's.
 fn renderer_problem(
     extension: &str,
     namespace: &str,
     resources: &[crate::extension_resources::ExtensionResource],
-    p: &PageFile,
-    pages: &[ExtensionPage],
-    lens: Option<&Lens>,
+    p: &crate::pages::schema::Page,
+    pages: &[crate::pages::schema::Page],
 ) -> Result<(), String> {
-    let renders = p.renders.clone().map(Renders::into_vec).unwrap_or_default();
-    // What its lens takes from the URI it is run for: its resource params
-    // but the URI itself and the context's.
-    let takes: Vec<&str> = lens
-        .map(|l| {
-            l.params
-                .iter()
-                .filter(|q| q.role.unwrap_or(ParamRole::Resource) == ParamRole::Resource)
-                .map(|q| q.name.as_str())
-                .filter(|n| !matches!(*n, "uri" | "stream_id" | "thread_id"))
-                .collect()
-        })
-        .unwrap_or_default();
+    let renders = p.renders.clone();
+    // What it takes from the URI it is run for: its resource params but
+    // the URI itself and the context's.
+    let takes: Vec<&str> = p
+        .params
+        .iter()
+        .filter(|q| q.role.unwrap_or(ParamRole::Resource) == ParamRole::Resource)
+        .map(|q| q.name.as_str())
+        .filter(|n| !matches!(*n, "uri" | "stream_id" | "thread_id"))
+        .collect();
     let refs = label_refs(p.label.as_deref())?;
     let named: Vec<String> = refs
         .iter()
         .filter(|(from, _)| *from == LabelFrom::Param)
         .map(|(_, n)| n.clone())
         .collect();
-    // A row column is read from the one row of a document with a query.
-    for (from, name) in &refs {
-        if *from != LabelFrom::Row {
-            continue;
-        }
-        let Some(l) = lens.filter(|l| l.viz == LensViz::Document && !l.query.trim().is_empty())
-        else {
-            return Err(format!(
-                "`label` names `row.{name}`, which only a document with a `query:` has"
-            ));
-        };
-        if !l.columns.iter().any(|c| &c.key == name) {
-            return Err(format!(
-                "`label` names `row.{name}`, which isn't a column of its lens's row (its `columns:`)"
-            ));
-        }
-    }
     if renders.is_empty() {
         if p.default || p.pinned || !p.accepts.is_empty() {
             return Err(
                 "`default`, `pinned` and `accepts` are for a renderer: give it `for`".into(),
             );
         }
-        if let Some(name) = named.iter().find(|n| !p.params.contains(n)) {
+        if let Some(name) = named
+            .iter()
+            .find(|n| !p.params.iter().any(|q| &&q.name == n))
+        {
             return Err(format!(
                 "`label` names `{name}`, which isn't one of its `params`"
             ));
@@ -5614,7 +4100,7 @@ fn renderer_problem(
         }
         if let Some(name) = takes.iter().find(|n| !has(n)) {
             return Err(format!(
-                "its lens takes `{name}`, which isn't a param of `{r}`: a renderer's lens is run with its URI's params"
+                "it takes `{name}`, which isn't a param of `{r}`: a renderer is run with its URI's params"
             ));
         }
         for (key, rule) in &p.accepts {
@@ -5654,7 +4140,6 @@ fn renderer_problem(
 /// `thread_id` (what the nav binds). Each error names the entry's index.
 fn parse_panels(
     extension: &str,
-    lenses: &[Lens],
     pages: &[crate::pages::schema::Page],
     raw: serde_yaml::Value,
 ) -> (Vec<ExtensionPanel>, Vec<(Option<usize>, String)>) {
@@ -5705,9 +4190,6 @@ fn parse_panels(
                 ok = false;
             }
         }
-        // A panel's parts are its extension's pages (or, until lenses are
-        // gone, its lenses when its body is no page): all one or the other.
-        let of_pages = pages.iter().any(|pg| pg.slug == p.body);
         for (role, slug) in [
             ("body", Some(&p.body)),
             ("badge", p.badge.as_ref()),
@@ -5715,48 +4197,21 @@ fn parse_panels(
             ("count", p.count.as_ref()),
         ] {
             let Some(slug) = slug else { continue };
-            if of_pages {
-                let Some(page) = pages.iter().find(|pg| &pg.slug == slug) else {
-                    errors.push(err(format!("its {role} page `{slug}` isn't in pages/")));
-                    ok = false;
-                    continue;
-                };
-                if role == "badge" && page.badge.is_none() && page.alert.is_none() {
-                    errors.push(err(format!(
-                        "its badge page `{slug}` declares no `badge` or `alert` (the badge is its count)"
-                    )));
-                    ok = false;
-                }
-                if let Some(param) = needs {
-                    if !page.params.iter().any(|pp| pp.name == param) {
-                        errors.push(err(format!(
-                            "a panel scoped to a stream or thread gives its pages `{param}`; page `{slug}` must declare it in `params`"
-                        )));
-                        ok = false;
-                    }
-                }
-                continue;
-            }
-            let Some(lens) = lenses.iter().find(|l| &l.slug == slug) else {
-                errors.push(err(format!("its {role} lens `{slug}` isn't in lenses/")));
+            let Some(page) = pages.iter().find(|pg| &pg.slug == slug) else {
+                errors.push(err(format!("its {role} page `{slug}` isn't in pages/")));
                 ok = false;
                 continue;
             };
-            if role == "badge" && lens.alert.is_none() {
+            if role == "badge" && page.badge.is_none() && page.alert.is_none() {
                 errors.push(err(format!(
-                    "its badge lens `{slug}` declares no `alert` (the badge is its count)"
+                    "its badge page `{slug}` declares no `badge` or `alert` (the badge is its count)"
                 )));
                 ok = false;
             }
             if let Some(param) = needs {
-                if !lens.params.iter().any(|lp| lp.name == param) {
-                    let scope = if param == "stream_id" {
-                        "stream"
-                    } else {
-                        "thread"
-                    };
+                if !page.params.iter().any(|pp| pp.name == param) {
                     errors.push(err(format!(
-                        "a `{scope}` panel's lenses get `{param}`; lens `{slug}` must declare `{param}` in `params`"
+                        "a panel scoped to a stream or thread gives its pages `{param}`; page `{slug}` must declare it in `params`"
                     )));
                     ok = false;
                 }
@@ -5775,183 +4230,14 @@ fn parse_panels(
                 collapsed: p.collapsed.map(|c| format!("{extension}/{c}")),
                 count: p.count.map(|c| format!("{extension}/{c}")),
                 dock: p.dock,
-                pages: of_pages,
             });
         }
     }
     (panels, errors)
 }
 
-/// Why `lens` can't render with its viz, if it can't.
-/// A grid's problem, if any: it names children, and each one in its own
-/// extension exists. It needs no `query` — it renders no rows of its own.
-/// A form's or a form action's `choices` naming a lens of this extension
-/// that isn't there.
-fn choices_problem(lens: &Lens, ids_in_extension: &[String]) -> Option<String> {
-    let mine = |c: &&String| {
-        c.split_once('/').map(|(e, _)| e) == Some(lens.extension.as_str())
-            && !ids_in_extension.contains(c)
-    };
-    lens.form
-        .iter()
-        .flat_map(|f| f.choices.values())
-        .find(mine)
-        .map(|c| format!("form: choices lens `{c}` isn't in this extension's lenses/"))
-        .or_else(|| {
-            lens.form
-                .iter()
-                .flat_map(|f| f.fields.iter().flatten())
-                .filter_map(|field| field.from())
-                .map(str::to_string)
-                .find(|c| mine(&c))
-                .map(|c| format!("form: `from` lens `{c}` isn't in this extension's lenses/"))
-        })
-        .or_else(|| {
-            lens.actions.iter().find_map(|a| {
-                a.choices.values().find(mine).map(|c| {
-                    format!(
-                        "actions: `{}`: choices lens `{c}` isn't in this extension's lenses/",
-                        a.id
-                    )
-                })
-            })
-        })
-}
-
-/// A column's `expand` naming a lens of this extension that isn't there
-/// (another extension's resolves with the catalog), or a lens that expands
-/// into itself.
-fn expand_problem(lens: &Lens, ids_in_extension: &[String]) -> Option<String> {
-    lens.columns.iter().find_map(|c| {
-        let target = c.expand.as_deref()?;
-        let mine = target.split_once('/').map(|(e, _)| e) == Some(lens.extension.as_str());
-        if target == lens.id {
-            Some(format!(
-                "column `{}`: `expand` names the lens itself",
-                c.key
-            ))
-        } else if mine && !ids_in_extension.iter().any(|id| id == target) {
-            Some(format!(
-                "column `{}`: `expand` lens `{target}` isn't in this extension's lenses/",
-                c.key
-            ))
-        } else {
-            None
-        }
-    })
-}
-
-/// A param's `options_from` naming a lens of this extension that isn't
-/// there (another extension's resolves with the catalog), or the lens
-/// itself.
-fn options_from_problem(lens: &Lens, ids_in_extension: &[String]) -> Option<String> {
-    lens.params.iter().find_map(|p| {
-        let target = p.options_from.as_deref()?;
-        let mine = target.split_once('/').map(|(e, _)| e) == Some(lens.extension.as_str());
-        if target == lens.id {
-            Some(format!(
-                "param `{}`: `options_from` names the lens itself",
-                p.name
-            ))
-        } else if mine && !ids_in_extension.iter().any(|id| id == target) {
-            Some(format!(
-                "param `{}`: `options_from` lens `{target}` isn't in this extension's lenses/",
-                p.name
-            ))
-        } else {
-            None
-        }
-    })
-}
-
-/// A composite's `columns:` name the row its `query` returns (what its
-/// parts and mounts may take as params): only with a query, and only their
-/// `key`s, which is all a row's name has.
-fn row_columns_problem(lens: &Lens) -> Option<String> {
-    if lens.columns.is_empty() {
-        return None;
-    }
-    if lens.tile.is_some() {
-        return Some(
-            "a dashboard whose rows are tiles names them in `tile:`, not `columns:`".into(),
-        );
-    }
-    let viz = format!("{:?}", lens.viz).to_lowercase();
-    if lens.query.trim().is_empty() {
-        return Some(format!("a `{viz}` without a query has no row to name"));
-    }
-    lens.columns
-        .iter()
-        .find(|c| {
-            c.label.is_some()
-                || c.link.is_some()
-                || c.unit.is_some()
-                || c.icon.is_some()
-                || c.tone.is_some()
-                || c.width.is_some()
-                || c.format.is_some()
-                || c.highlight.is_some()
-                || c.select.is_some()
-                || c.expand.is_some()
-        })
-        .map(|c| {
-            format!(
-                "column `{}`: a composite's column is only its `key`: it names a value of its row, not something shown",
-                c.key
-            )
-        })
-}
-
-/// A dashboard whose rows are its tiles (`tile:`): only a dashboard's,
-/// over a query, each row named by its `id` and drawn by its `lens`, `sql`
-/// or `text`; how a `sql` tile shows only with `sql`.
-fn tile_problem(lens: &Lens) -> Option<String> {
-    let t = lens.tile.as_ref()?;
-    if lens.viz != LensViz::Dashboard {
-        return Some(format!(
-            "`tile` is for viz `dashboard`, not `{}`",
-            viz_name(lens.viz)
-        ));
-    }
-    if lens.query.trim().is_empty() {
-        return Some("a `dashboard` whose rows are tiles needs a `query`".into());
-    }
-    if t.id.is_none() {
-        return Some("`tile` needs `id: <column>`".into());
-    }
-    if t.lens.is_none() && t.sql.is_none() && t.text.is_none() {
-        return Some("`tile` needs one of `lens`, `sql` or `text`".into());
-    }
-    if t.sql.is_none() {
-        let sql_only = [
-            ("display", &t.display),
-            ("chart", &t.chart),
-            ("metric", &t.metric),
-            ("viz", &t.viz),
-        ];
-        if let Some((role, _)) = sql_only.iter().find(|(_, c)| c.is_some()) {
-            return Some(format!("`tile.{role}` is a `sql` tile's"));
-        }
-    }
-    None
-}
-
-/// A document's or dashboard's part naming a lens of its own extension
-/// that isn't there (another extension's resolves with the catalog).
-fn parts_problem(lens: &Lens, ids_in_extension: &[String]) -> Option<String> {
-    if lens.part_lenses().any(|c| c == lens.id) {
-        return Some("a part names the lens itself; a page can't hold itself".into());
-    }
-    lens.part_lenses()
-        .find(|c| {
-            c.split_once('/').map(|(e, _)| e) == Some(lens.extension.as_str())
-                && !ids_in_extension.iter().any(|id| id == c)
-        })
-        .map(|c| format!("part lens `{c}` isn't in this extension's lenses/"))
-}
-
 /// What's wrong with a form's `fields`, `mode` and their conditions.
-fn form_fields_problem(f: &LensForm) -> Option<String> {
+fn form_fields_problem(f: &FormSpec) -> Option<String> {
     let Some(fields) = &f.fields else {
         return (f.mode == FormMode::Edit)
             .then(|| "form: `mode: edit` needs `fields`: the ones it edits".to_string());
@@ -5990,7 +4276,7 @@ fn form_fields_problem(f: &LensForm) -> Option<String> {
 /// must be the lens's own, with a `default` (the top level) and not one
 /// the context supplies; `branch` says which rows open; a column that
 /// `select`s the lazy param would re-root the page instead of opening.
-fn lazy_tree_problem(lens: &Lens, t: &LensTree) -> Option<String> {
+fn lazy_tree_problem(lens: &VizConfig, t: &VizTree) -> Option<String> {
     let Some(lazy) = &t.lazy else {
         return t
             .branch
@@ -6026,11 +4312,7 @@ fn lazy_tree_problem(lens: &Lens, t: &LensTree) -> Option<String> {
         })
 }
 
-pub(crate) fn shape_problem(
-    lens: &Lens,
-    ids_in_extension: &[String],
-    components: &[String],
-) -> Option<String> {
+pub(crate) fn shape_problem(lens: &VizConfig, components: &[String]) -> Option<String> {
     // `block` names the lens key the missing columns go under.
     let need = |block: &str, fields: &[(&str, &Option<String>)]| -> Option<String> {
         let missing: Vec<&str> = fields
@@ -6051,22 +4333,20 @@ pub(crate) fn shape_problem(
         })
     };
     if let Some(problem) = row_style_problem(lens)
-        .or_else(|| view_problem(lens))
         .or_else(|| param_problem(lens))
         .or_else(|| highlight_problem(lens))
         .or_else(|| markdown_problem(lens))
-        .or_else(|| tile_problem(lens))
     {
         return Some(problem);
     }
     let chart = lens.chart.clone().unwrap_or_default();
-    if chart.targets.is_some() && lens.viz != LensViz::Line {
+    if chart.targets.is_some() && lens.viz != Viz::Line {
         return Some("chart: `targets` draws target lines on viz `line` only".to_string());
     }
     match lens.viz {
-        LensViz::Bar | LensViz::Line => need("chart", &[("x", &chart.x), ("y", &chart.y)]),
-        LensViz::Treemap => need("chart", &[("label", &chart.label), ("size", &chart.size)]),
-        LensViz::Tree => {
+        Viz::Bar | Viz::Line => need("chart", &[("x", &chart.x), ("y", &chart.y)]),
+        Viz::Treemap => need("chart", &[("label", &chart.label), ("size", &chart.size)]),
+        Viz::Tree => {
             let t = lens.tree.clone().unwrap_or_default();
             need(
                 "tree",
@@ -6074,49 +4354,45 @@ pub(crate) fn shape_problem(
             )
             .or_else(|| lazy_tree_problem(lens, &t))
         }
-        LensViz::Timeline => {
+        Viz::Timeline => {
             let t = lens.timeline.clone().unwrap_or_default();
             need("timeline", &[("at", &t.at), ("label", &t.label)])
         }
-        LensViz::Steps => {
+        Viz::Steps => {
             let s = lens.steps.clone().unwrap_or_default();
             need("steps", &[("label", &s.label)])
         }
-        LensViz::Code => {
+        Viz::Code => {
             let c = lens.code.clone().unwrap_or_default();
             need("code", &[("path", &c.path), ("revision", &c.revision)])
         }
-        LensViz::Editor => {
+        Viz::Editor => {
             let e = lens.editor.clone().unwrap_or_default();
             need("editor", &[("path", &e.path)])
         }
-        LensViz::Answer => {
-            let a = lens.answer.clone().unwrap_or_default();
-            need("answer", &[("uri", &a.uri)])
-        }
-        LensViz::Terminal => {
+        Viz::Terminal => {
             let t = lens.terminal.clone().unwrap_or_default();
             need("terminal", &[("of", &t.of)])
         }
-        LensViz::Embed => {
+        Viz::Embed => {
             let e = lens.embed.clone().unwrap_or_default();
             need("embed", &[("url", &e.url)])
         }
-        LensViz::Diff => {
+        Viz::Diff => {
             let d = lens.diff.clone().unwrap_or_default();
             need(
                 "diff",
                 &[("path", &d.path), ("from", &d.from), ("to", &d.to)],
             )
         }
-        LensViz::Hunks => {
+        Viz::Hunks => {
             let h = lens.hunks.clone().unwrap_or_default();
             need(
                 "hunks",
                 &[("path", &h.path), ("from", &h.from), ("to", &h.to)],
             )
         }
-        LensViz::Form => {
+        Viz::Form => {
             let f = lens.form.clone().unwrap_or_default();
             need("form", &[("command", &f.command)])
                 .or_else(|| {
@@ -6138,57 +4414,36 @@ pub(crate) fn shape_problem(
                 })
                 .or_else(|| form_fields_problem(&f))
         }
-        // A grid composes its children; it renders no rows of its own.
-        LensViz::Document | LensViz::Dashboard => {
-            parts_problem(lens, ids_in_extension).or_else(|| row_columns_problem(lens))
-        }
-        // Its rows are what the component shows and what an agent reads.
-        LensViz::Custom if lens.query.trim().is_empty() => {
-            Some("viz `custom` needs a `query`: its rows are what the component shows".into())
-        }
-        LensViz::Custom => match lens.custom.as_ref().and_then(|c| c.component.as_ref()) {
+        Viz::Custom => match lens.custom.as_ref().and_then(|c| c.component.as_ref()) {
             None => Some("viz `custom` needs `custom: { component: <id> }`".into()),
             Some(c) if !components.contains(c) => Some(format!(
                 "viz `custom`: `{c}` isn't one of this extension's `custom_components`"
             )),
             Some(_) => None,
         },
-        _ if lens.query.trim().is_empty() => Some(format!(
-            "viz `{}` needs a `query`",
-            format!("{:?}", lens.viz).to_lowercase()
-        )),
-        LensViz::Board if lens.group.is_none() => {
+        Viz::Board if lens.group.is_none() => {
             Some("`board` needs `group: { by: <column> }` (its columns)".to_string())
         }
-        LensViz::Table
-        | LensViz::List
-        | LensViz::Number
-        | LensViz::Markdown
-        | LensViz::Detail
-        | LensViz::Board
-        | LensViz::Approvals => None,
+        Viz::Table
+        | Viz::List
+        | Viz::Number
+        | Viz::Markdown
+        | Viz::Detail
+        | Viz::Board
+        | Viz::Approvals => None,
     }
 }
 
 /// A `markdown` block off its viz, or an edit action that doesn't save the
 /// text the viz shows: a markdown viz's text, or a row-tile dashboard's
 /// text tiles (`tile.text`, edited in place).
-fn markdown_problem(lens: &Lens) -> Option<String> {
+fn markdown_problem(lens: &VizConfig) -> Option<String> {
     let viz = format!("{:?}", lens.viz).to_lowercase();
-    if lens.markdown.is_some() && lens.viz != LensViz::Markdown {
+    if lens.markdown.is_some() && lens.viz != Viz::Markdown {
         return Some(format!("`markdown` is for viz `markdown`, not `{viz}`"));
     }
     let edit = lens.actions.iter().find(|a| a.edit)?;
-    if let Some(text) = lens.tile.as_ref().and_then(|t| t.text.as_deref()) {
-        let saved = edit_column(edit)?;
-        return (saved != text).then(|| {
-            format!(
-                "`{}` saves `{saved}`, but the tiles' text is `{text}`",
-                edit.id
-            )
-        });
-    }
-    if lens.viz != LensViz::Markdown {
+    if lens.viz != Viz::Markdown {
         return Some(format!(
             "an edit action (`{}`) is a `markdown` viz's, not `{viz}`'s",
             edit.id
@@ -6209,7 +4464,7 @@ fn markdown_problem(lens: &Lens) -> Option<String> {
 }
 
 /// A column that highlights a param the lens doesn't declare.
-fn highlight_problem(lens: &Lens) -> Option<String> {
+fn highlight_problem(lens: &VizConfig) -> Option<String> {
     lens.columns.iter().find_map(|c| {
         [("highlight", &c.highlight), ("select", &c.select)]
             .into_iter()
@@ -6223,205 +4478,6 @@ fn highlight_problem(lens: &Lens) -> Option<String> {
                 })
             })
     })
-}
-
-/// The most `filter` params a page draws, `choice` options a select
-/// lists, characters a description runs, sections a document holds and
-/// columns a table shows before the layout warnings say so.
-const MAX_FILTERS: usize = 6;
-const MAX_CHOICE_OPTIONS: usize = 12;
-const MAX_DESCRIPTION: usize = 200;
-const MAX_SECTIONS: usize = 8;
-const MAX_COLUMNS: usize = 8;
-
-/// What an agent should change about a lens's page so it reads well: a
-/// warning each, with the fix after the dash. Never a reason to refuse
-/// the lens.
-fn layout_warnings(lens: &Lens, lenses: &[Lens], renderer: bool) -> Vec<String> {
-    let mut out = Vec::new();
-    // The props of a core component this lens stands in for on another
-    // lens's page: the host's to give, so neither a filter a person sets
-    // nor a param its query must read.
-    let contract: Vec<&str> = lenses
-        .iter()
-        .flat_map(|l| &l.parts)
-        .filter(|part| part.lens.as_deref() == Some(lens.id.as_str()))
-        .filter_map(|part| oxplow_domain::replaceable::replaceable(part.replaceable.as_deref()?))
-        .flat_map(|t| t.props.iter().copied())
-        .collect();
-    let filters = lens
-        .params
-        .iter()
-        .filter(|p| p.role != Some(ParamRole::Selection) && !contract.contains(&p.name.as_str()))
-        // A view document's view param is its section rail, not a filter.
-        .filter(|p| lens.view.as_deref() != Some(p.name.as_str()))
-        .count();
-    if filters > MAX_FILTERS {
-        out.push(format!(
-            "{filters} filters; a page shows {MAX_FILTERS} at most — fold related ones into one `choice` (not several `bool`s), or split the page"
-        ));
-    }
-    for p in &lens.params {
-        if p.kind == Some(ParamType::Choice) && p.options.len() > MAX_CHOICE_OPTIONS {
-            out.push(format!(
-                "param `{}` has {} options — use a `search`, or a lens that lists them",
-                p.name,
-                p.options.len()
-            ));
-        }
-    }
-    // A form, a custom component and the approvals list take their params
-    // by means other than a query.
-    if !matches!(
-        lens.viz,
-        LensViz::Custom | LensViz::Form | LensViz::Approvals
-    ) {
-        // Its own query and its parts', through parts that are composites
-        // themselves (a view document's section is often a document).
-        let mut queries: Vec<&str> = vec![lens.query.as_str()];
-        let mut seen: Vec<&str> = vec![lens.id.as_str()];
-        let mut stack: Vec<&Lens> = vec![lens];
-        while let Some(at) = stack.pop() {
-            for part in at
-                .part_lenses()
-                .filter_map(|id| lenses.iter().find(|l| l.id == id))
-            {
-                if seen.contains(&part.id.as_str()) {
-                    continue;
-                }
-                seen.push(part.id.as_str());
-                queries.push(part.query.as_str());
-                stack.push(part);
-            }
-        }
-        let templated: Vec<String> = lens
-            .actions
-            .iter()
-            .flat_map(|a| action_templates(&a.input))
-            .filter(|(scope, _)| scope == "param")
-            .map(|(_, name)| name)
-            .collect();
-        // A column that selects or highlights a param uses it.
-        let marked: Vec<&str> = lens
-            .columns
-            .iter()
-            .flat_map(|c| [c.select.as_deref(), c.highlight.as_deref()])
-            .flatten()
-            .collect();
-        // The metric cards of a dashboard's row tiles window their samples
-        // by the page's `range` and `branch`, on the page or a part of it.
-        let windowed = std::iter::once(lens)
-            .chain(
-                lens.part_lenses()
-                    .filter_map(|id| lenses.iter().find(|l| l.id == id)),
-            )
-            .any(|l| l.viz == LensViz::Dashboard && l.tile.is_some());
-        for p in &lens.params {
-            let read = |token: &str| queries.iter().any(|q| reads_param(q, token));
-            let range = p.kind == Some(ParamType::DateRange);
-            if !(read(&p.name)
-                || lens.view.as_deref() == Some(p.name.as_str())
-                || contract.contains(&p.name.as_str())
-                || range && (read(&format!("{}_from", p.name)) || read(&format!("{}_to", p.name)))
-                || templated.contains(&p.name)
-                || marked.contains(&p.name.as_str())
-                || windowed && ["range", "branch"].contains(&p.name.as_str())
-                // A renderer's lens is run with the URI it shows and the
-                // stream and thread it is shown in: the host's to give.
-                || renderer && ["uri", "stream_id", "thread_id"].contains(&p.name.as_str()))
-            {
-                out.push(format!(
-                    "param `{0}` isn't read by any query of the page — remove it, or read it as `:{0}`",
-                    p.name
-                ));
-            }
-        }
-    }
-    let described = lens.description.chars().count();
-    if described > MAX_DESCRIPTION && !lens.hidden {
-        out.push(format!(
-            "the description is {described} characters — keep it to a sentence or two; put the rest in a markdown section"
-        ));
-    }
-    // A view document shows one section at a time; the rest are its rail.
-    if lens.viz == LensViz::Document && lens.view.is_none() && lens.parts.len() > MAX_SECTIONS {
-        out.push(format!(
-            "{} sections — a page reads best with {MAX_SECTIONS} at most; split it",
-            lens.parts.len()
-        ));
-    }
-    if matches!(lens.viz, LensViz::Table | LensViz::List)
-        && lens.tool.is_none()
-        && lens.columns.len() > MAX_COLUMNS
-    {
-        out.push(format!(
-            "{} columns — show {MAX_COLUMNS} at most; put the rest in a section a row `select`s",
-            lens.columns.len()
-        ));
-    }
-    out
-}
-
-/// Whether `query` binds `:name` as a whole token (`:range` is not
-/// `:range_from`).
-fn reads_param(query: &str, name: &str) -> bool {
-    let token = format!(":{name}");
-    query.match_indices(&token).any(|(at, _)| {
-        !query[at + token.len()..]
-            .chars()
-            .next()
-            .is_some_and(|c| c.is_alphanumeric() || c == '_')
-    })
-}
-
-/// A document's or dashboard's own part whose rows select a param the
-/// page doesn't declare: the page holds the value its parts share, so a
-/// click there would reach nothing.
-fn selects_problem(lens: &Lens, lenses: &[Lens]) -> Option<String> {
-    lens.part_lenses().find_map(|id| {
-        let part = lenses.iter().find(|l| l.id == id)?;
-        part.columns
-            .iter()
-            .filter_map(|c| c.select.as_deref())
-            .find(|name| !lens.params.iter().any(|p| &p.name == name))
-            .map(|name| format!("part `{id}` selects `{name}`, a param this lens doesn't declare"))
-    })
-}
-
-/// A part standing in for a core component whose lens (one of this
-/// extension's) lacks a prop of the target's contract, or two parts
-/// standing in for the same target: the host gives a replacement exactly the
-/// contract, so the part's lens must hold all of it.
-fn replaceable_problem(lens: &Lens, lenses: &[Lens]) -> Option<String> {
-    let mut seen: Vec<&str> = Vec::new();
-    for part in &lens.parts {
-        let (Some(target), Some(id)) = (part.replaceable.as_deref(), part.lens.as_deref()) else {
-            continue;
-        };
-        if seen.contains(&target) {
-            return Some(format!("`{target}` is placed once on a page"));
-        }
-        seen.push(target);
-        let (Some(t), Some(part_lens)) = (
-            oxplow_domain::replaceable::replaceable(target),
-            lenses.iter().find(|l| l.id == id),
-        ) else {
-            continue;
-        };
-        let missing: Vec<String> = t
-            .props
-            .iter()
-            .filter(|p| !part_lens.params.iter().any(|lp| lp.name == **p))
-            .map(|p| format!("`{p}`"))
-            .collect();
-        if !missing.is_empty() {
-            return Some(format!(
-                "part lens `{id}` must declare {} (`params:`) — what `{target}` gives its replacement",
-                missing.join(", ")
-            ));
-        }
-    }
-    None
 }
 
 impl PageProvenance {
@@ -6448,24 +4504,12 @@ impl PageProvenance {
     }
 }
 
-/// The params a click on `lens`'s rows sets: its own columns' `select`s
-/// and its parts'.
-fn selected(lens: &Lens, lenses: &[Lens]) -> Vec<String> {
-    let parts = lens
-        .part_lenses()
-        .filter_map(|id| lenses.iter().find(|l| l.id == id));
-    std::iter::once(lens)
-        .chain(parts)
-        .flat_map(|l| l.columns.iter().filter_map(|c| c.select.clone()))
-        .collect()
-}
-
 /// Row styling on a viz that doesn't draw rows that way: `group` and
 /// `depth` are for `list` / `table`, `emphasis` also for `tree`.
-fn row_style_problem(lens: &Lens) -> Option<String> {
-    let rows = matches!(lens.viz, LensViz::List | LensViz::Table);
+fn row_style_problem(lens: &VizConfig) -> Option<String> {
+    let rows = matches!(lens.viz, Viz::List | Viz::Table);
     let viz = format!("{:?}", lens.viz).to_lowercase();
-    if lens.group.is_some() && !rows && lens.viz != LensViz::Board {
+    if lens.group.is_some() && !rows && lens.viz != Viz::Board {
         return Some(format!(
             "`group` is only for `list`, `table` and `board`, not `{viz}`"
         ));
@@ -6475,7 +4519,7 @@ fn row_style_problem(lens: &Lens) -> Option<String> {
             "`depth` is only for `list` and `table`, not `{viz}`"
         ));
     }
-    if lens.emphasis.is_some() && !rows && lens.viz != LensViz::Tree {
+    if lens.emphasis.is_some() && !rows && lens.viz != Viz::Tree {
         return Some(format!(
             "`emphasis` is only for `list`, `table` and `tree`, not `{viz}`"
         ));
@@ -6483,7 +4527,7 @@ fn row_style_problem(lens: &Lens) -> Option<String> {
     None
 }
 
-impl Lens {
+impl VizConfig {
     /// Every result column the lens's component blocks name (`chart`,
     /// `tree`, `tile`, `timeline`, `steps`, `hunks`) and its row styling
     /// (`group`, `emphasis`, `depth`) — what `validate` checks the query
@@ -6499,14 +4543,6 @@ impl Lens {
                     .into_iter()
                     .flatten()
                     .map(|k| ("tree", k)),
-            );
-        }
-        if let Some(t) = &self.tile {
-            out.extend(
-                t.roles()
-                    .into_iter()
-                    .filter_map(|(_, k)| k.as_ref())
-                    .map(|k| ("tile", k)),
             );
         }
         if let Some(t) = &self.timeline {
@@ -6547,14 +4583,6 @@ impl Lens {
                     .into_iter()
                     .flatten()
                     .map(|k| ("terminal", k)),
-            );
-        }
-        if let Some(a) = &self.answer {
-            out.extend(
-                [&a.uri, &a.kept]
-                    .into_iter()
-                    .flatten()
-                    .map(|k| ("answer", k)),
             );
         }
         if let Some(e) = &self.embed {
@@ -6609,7 +4637,6 @@ fn apply_disabled(mut ext: Extension, settings: &oxplow_config::ExtensionSetting
 }
 
 pub(super) fn clear_contributions(ext: &mut Extension) {
-    ext.lenses.clear();
     ext.ui = ExtensionUi::default();
     ext.collectors.clear();
     ext.providers.clear();
@@ -6626,7 +4653,6 @@ pub(super) fn clear_contributions(ext: &mut Extension) {
     ext.metrics.clear();
     ext.models.clear();
     ext.panels.clear();
-    ext.pages.clear();
     ext.commands.clear();
     ext.jobs.clear();
     ext.ai_profiles.clear();
@@ -6637,15 +4663,6 @@ pub(crate) fn disabled_error(name: &str) -> DomainError {
     DomainError::Invalid(format!(
         "extension `{name}` is disabled (`disableExtensions` in .oxplow/personal.yaml, or left off the project's `extensions` list); enable it in Settings → Extensions"
     ))
-}
-
-/// Find one lens by `<extension>/<slug>` through the catalog cache.
-pub fn find_lens(
-    catalog: &crate::extension_catalog::ExtensionCatalog,
-    root: &Path,
-    id: &str,
-) -> Result<Lens, DomainError> {
-    catalog.find_lens(root, id)
 }
 
 /// Where a lens is being looked at from: the viewer's current stream and
@@ -6683,7 +4700,7 @@ impl ViewContext {
 /// The context a lens is viewed from: `stream` (else `thread`'s stream,
 /// else the primary) and `thread` (else that stream's selected or active
 /// thread). Lookups that fail leave the value unset.
-pub async fn lens_context(
+pub async fn view_context(
     svc: &crate::Services,
     stream: Option<oxplow_domain::StreamId>,
     thread: Option<oxplow_domain::ThreadId>,
@@ -6721,89 +4738,6 @@ pub async fn lens_context(
                 .snapshot(&crate::config_service::read_config(&svc.config)),
         ),
     }
-}
-
-/// Run a lens: bind supplied params over the viewer's context over
-/// defaults, and query the semantic layer. Unknown params are rejected,
-/// so a typo doesn't silently fall back to a default.
-/// Run a lens made from `spec` (an answer's own lens) as `id`.
-pub async fn run_spec(
-    layer: &crate::sql_gateway::SqlGateway,
-    id: &str,
-    spec: &LensSpec,
-    params: BTreeMap<String, SqlCell>,
-    ctx: &ViewContext,
-) -> Result<LensRun, DomainError> {
-    execute(layer, Lens::from_spec(id, spec), params, ctx).await
-}
-
-pub async fn run_lens(
-    layer: &crate::sql_gateway::SqlGateway,
-    catalog: &crate::extension_catalog::ExtensionCatalog,
-    root: &Path,
-    id: &str,
-    params: BTreeMap<String, SqlCell>,
-    ctx: &ViewContext,
-) -> Result<LensRun, DomainError> {
-    layer
-        .read_generation(async { run_lens_unpinned(layer, catalog, root, id, params, ctx).await })
-        .await?
-}
-
-async fn run_lens_unpinned(
-    layer: &crate::sql_gateway::SqlGateway,
-    catalog: &crate::extension_catalog::ExtensionCatalog,
-    root: &Path,
-    id: &str,
-    params: BTreeMap<String, SqlCell>,
-    ctx: &ViewContext,
-) -> Result<LensRun, DomainError> {
-    let mut lens = catalog.find_lens(root, id)?;
-    let mut params = params;
-    // Its own extension's settings, as they are stored now.
-    if let Some(ext) = catalog
-        .unpinned(root, "a lens reads its own extension's settings")
-        .iter()
-        .find(|e| e.name == lens.extension)
-    {
-        lens.query = layer.with_extension_config(ext, &lens.query).await?;
-        if renders_a_resource(ext, &lens) {
-            params = with_uri_params(&lens, params);
-        }
-    }
-    if let Some(active) = &ctx.active {
-        let unmet = active.unmet(&lens.needs);
-        if !unmet.is_empty() {
-            let params = resolve_params(&lens, &params, ctx)?;
-            return Ok(LensRun {
-                lens,
-                params,
-                result: SqlQueryResult {
-                    columns: Vec::new(),
-                    rows: Vec::new(),
-                    truncated: false,
-                    reads: Default::default(),
-                    freshness: Vec::new(),
-                    generation: None,
-                    coverage: Vec::new(),
-                },
-                alert: None,
-                warnings: Vec::new(),
-                inactive: Some(LensInactive {
-                    message: crate::capabilities::needs_message(&unmet),
-                    needs: unmet,
-                }),
-            });
-        }
-    }
-    let mut run = execute(layer, lens, params, ctx)
-        .await
-        .map_err(|e| match e {
-            DomainError::Invalid(m) => DomainError::Invalid(explain_unsynced(catalog, root, &m)),
-            other => other,
-        })?;
-    run.warnings = disabled_sources(layer, catalog, root, &run.result.reads.models).await;
-    Ok(run)
 }
 
 /// What a page's `label` fills from: its URI's params, or a column of the
@@ -6867,130 +4801,12 @@ fn label_refs(label: Option<&str>) -> Result<Vec<(LabelFrom, String)>, String> {
     Ok(refs)
 }
 
-/// The columns of its lens's row a page's `label` reads.
-fn label_row_columns(label: Option<&str>) -> Vec<String> {
-    label_refs(label)
-        .unwrap_or_default()
-        .into_iter()
-        .filter(|(from, _)| *from == LabelFrom::Row)
-        .map(|(_, name)| name)
-        .collect()
-}
-
-/// Whether `lens` draws one of `ext`'s renderers (a page with `for:`): it
-/// is run for a URI, its `uri` param.
-fn renders_a_resource(ext: &Extension, lens: &Lens) -> bool {
-    ext.pages.iter().any(|p| {
-        !p.renders.is_empty() && matches!(&p.body, PageBody::Lens { lens: l } if *l == lens.id)
-    })
-}
-
-/// A renderer lens's params as run for the URI in its `uri`: each param it
-/// declares that the URI carries and the caller didn't supply takes the
-/// URI's value (supplied → URI → context → default).
-fn with_uri_params(
-    lens: &Lens,
-    mut params: BTreeMap<String, SqlCell>,
-) -> BTreeMap<String, SqlCell> {
-    let Some(SqlCell::Text(uri)) = params.get("uri") else {
-        return params;
-    };
-    let Ok(uri) = oxplow_domain::uri::oxplow_uri::OxplowUri::parse(uri) else {
-        return params;
-    };
-    for p in &lens.params {
-        if p.name != "uri" && !params.contains_key(&p.name) {
-            if let Some(v) = uri.param(&p.name) {
-                params.insert(p.name.clone(), SqlCell::Text(v.to_string()));
-            }
-        }
-    }
-    params
-}
-
-/// For each view in `models` an extension's collector writes, a warning
-/// when failures disabled that collector: its rows aren't refreshing.
-async fn disabled_sources(
-    layer: &crate::sql_gateway::SqlGateway,
-    catalog: &crate::extension_catalog::ExtensionCatalog,
-    root: &Path,
-    models: &[String],
-) -> Vec<String> {
-    let mut out = Vec::new();
-    for ext in catalog
-        .unpinned(root, "collectors are matched on their declarations")
-        .iter()
-    {
-        for c in &ext.collectors {
-            let Some(view) = c
-                .entities
-                .iter()
-                .map(|e| &e.view)
-                .find(|v| models.contains(v))
-            else {
-                continue;
-            };
-            let reason = layer
-                .query_sql(
-                    "SELECT reason FROM v_contribution_health
-                      WHERE extension = ?1 AND contribution = ?2 AND state = 'disabled'",
-                    vec![SqlCell::Text(ext.name.clone()), SqlCell::Text(c.id.clone())],
-                    Some(1),
-                )
-                .await
-                .ok()
-                .and_then(|r| r.rows.into_iter().next())
-                .and_then(|row| row.into_iter().next());
-            if let Some(SqlCell::Text(reason)) = reason {
-                out.push(format!(
-                    "`{view}` comes from the collector `{}/{}`, which is disabled ({reason}); \
-                     its rows aren't being refreshed",
-                    ext.name, c.id
-                ));
-            }
-        }
-    }
-    out
-}
-
-/// A lens reading a source entity before its first sync fails with
-/// SQLite's bare "no such table: v_x". Say which source to run instead.
-fn explain_unsynced(
-    catalog: &crate::extension_catalog::ExtensionCatalog,
-    root: &Path,
-    message: &str,
-) -> String {
-    let Some(rest) = message.split("no such table: ").nth(1) else {
-        return message.to_string();
-    };
-    let view: String = rest
-        .chars()
-        .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
-        .collect();
-    for ext in catalog
-        .unpinned(root, "collectors are matched on their declarations")
-        .iter()
-    {
-        for collector in &ext.collectors {
-            if collector.entities.iter().any(|e| e.view == view) {
-                let lens = message.split(':').next().unwrap_or("lens");
-                return format!(
-                    "{lens}: reads `{view}`, which hasn't been collected yet. Run collector \
-                     `{}/{}` (Settings → Extensions → Approve & Run, or Sync Now).",
-                    ext.name, collector.id
-                );
-            }
-        }
-    }
-    message.to_string()
-}
-
 /// The value of each of `lens`'s params: as supplied, else from the
 /// context (`stream_id` / `thread_id`), else its default, else NULL, each
 /// as its type binds it (`PageParam::take`). An unknown supplied name, or
 /// a value its param doesn't take, is refused.
 pub fn resolve_params(
-    lens: &Lens,
+    lens: &VizConfig,
     supplied: &BTreeMap<String, SqlCell>,
     ctx: &ViewContext,
 ) -> Result<BTreeMap<String, SqlCell>, DomainError> {
@@ -7036,70 +4852,6 @@ pub(crate) fn resolve_param_values(
     Ok(params)
 }
 
-/// The params a `document`'s or `dashboard`'s parts are given: its query's
-/// first row, column by column, under its own params — one of its own
-/// wins when it holds a value. Each part takes the ones it declares. A
-/// dashboard whose rows are its tiles has no row of params: its own alone.
-pub fn part_params(run: &LensRun) -> BTreeMap<String, SqlCell> {
-    let mut out = run.params.clone();
-    if run.lens.tile.is_some() {
-        return out;
-    }
-    if let Some(row) = run.result.rows.first() {
-        for (column, cell) in run.result.columns.iter().zip(row) {
-            match out.get(column) {
-                Some(v) if !matches!(v, SqlCell::Null(())) => {}
-                _ => {
-                    out.insert(column.clone(), cell.clone());
-                }
-            }
-        }
-    }
-    out
-}
-
-/// Run `lens` with its default params and no viewer context — how a
-/// review renders a lens it isn't showing anyone.
-pub async fn run_lens_spec(
-    layer: &crate::sql_gateway::SqlGateway,
-    lens: Lens,
-) -> Result<LensRun, DomainError> {
-    execute(layer, lens, BTreeMap::new(), &ViewContext::default()).await
-}
-
-/// Each of an extension's lenses run once with default params, by slug: a
-/// failure is its message. What `check_extension` checks and what the
-/// effect report renders — one run feeds both.
-pub type LensRuns = BTreeMap<String, Result<LensRun, String>>;
-
-/// [`LensRuns`] for `ext`.
-pub async fn run_lenses(layer: &crate::sql_gateway::SqlGateway, ext: &Extension) -> LensRuns {
-    let mut out = LensRuns::new();
-    for lens in &ext.lenses {
-        // A check reads no stored settings: the declared defaults.
-        let mut lens = lens.clone();
-        match oxplow_db::models::substitute_config(
-            &lens.query,
-            ext.default_configuration().as_ref(),
-        ) {
-            Ok(query) => lens.query = query,
-            Err(e) => {
-                out.insert(
-                    lens.slug.clone(),
-                    Err(e.to_string().replacen("invalid value: ", "", 1)),
-                );
-                continue;
-            }
-        }
-        let slug = lens.slug.clone();
-        let run = run_lens_spec(layer, lens)
-            .await
-            .map_err(|e| e.to_string().replacen("invalid value: ", "", 1));
-        out.insert(slug, run);
-    }
-    out
-}
-
 /// The HEAD commit of stream `stream_id`, when it is known.
 pub(crate) async fn stream_head(
     layer: &crate::sql_gateway::SqlGateway,
@@ -7115,63 +4867,6 @@ pub(crate) async fn stream_head(
     Ok(match rows.rows.first().and_then(|r| r.first()) {
         Some(SqlCell::Text(sha)) => Some(sha.clone()),
         _ => None,
-    })
-}
-
-async fn execute(
-    layer: &crate::sql_gateway::SqlGateway,
-    lens: Lens,
-    supplied: BTreeMap<String, SqlCell>,
-    ctx: &ViewContext,
-) -> Result<LensRun, DomainError> {
-    let mut params = resolve_params(&lens, &supplied, ctx)?;
-    // A lens's `:stream_id` is the stream its metrics (`metric_grid()`)
-    // are read over.
-    let stream = match params.get("stream_id") {
-        Some(SqlCell::Int(id)) => Some(*id),
-        _ => None,
-    };
-    // `head_sha`, unless supplied, is the viewed stream's HEAD commit
-    // (`v_stream.head_sha`), as `stream_id` is the viewer's stream.
-    if let (Some(SqlCell::Null(())), Some(stream_id)) = (params.get("head_sha"), stream) {
-        if let Some(head) = stream_head(layer, stream_id).await? {
-            params.insert("head_sha".into(), SqlCell::Text(head));
-        }
-    }
-    let named = binds(&lens, &params, time::OffsetDateTime::now_utc());
-    // A form without a query has no rows to read.
-    let result = if lens.query.trim().is_empty() {
-        oxplow_db::SqlQueryResult {
-            columns: Vec::new(),
-            rows: Vec::new(),
-            truncated: false,
-            reads: oxplow_db::Reads::default(),
-            freshness: Vec::new(),
-            generation: None,
-            coverage: Vec::new(),
-        }
-    } else {
-        layer
-            .run(
-                oxplow_db::SqlQuery::new(&lens.query)
-                    .named(named)
-                    .limit(None)
-                    .stream(stream),
-            )
-            .await
-            .map_err(|e| match e {
-                DomainError::Invalid(m) => DomainError::Invalid(format!("lens {}: {m}", lens.id)),
-                other => other,
-            })?
-    };
-    let alert = lens.alert.as_ref().map(|a| evaluate_alert(a, &result));
-    Ok(LensRun {
-        lens,
-        params,
-        result,
-        alert,
-        warnings: Vec::new(),
-        inactive: None,
     })
 }
 
@@ -7306,10 +5001,16 @@ fn check_components(
         }
     }
     let lookalikes: Vec<(String, &'static str)> = ext
-        .lenses
+        .page_files
         .iter()
-        .filter(|l| l.viz == LensViz::Custom)
-        .flat_map(|l| {
+        .flat_map(|p| p.nodes().into_iter().map(move |n| (p, n)))
+        .filter_map(|(p, n)| match &n.kind {
+            crate::pages::schema::NodeKind::Viz { config: lens, .. } if lens.viz == Viz::Custom => {
+                Some((p, lens))
+            }
+            _ => None,
+        })
+        .flat_map(|(p, l)| {
             [
                 ("chart", l.chart.is_some()),
                 ("tree", l.tree.is_some()),
@@ -7320,17 +5021,16 @@ fn check_components(
                 ("diff", l.diff.is_some()),
                 ("editor", l.editor.is_some()),
                 ("embed", l.embed.is_some()),
-                ("answer", l.answer.is_some()),
                 ("terminal", l.terminal.is_some()),
             ]
             .into_iter()
             .filter(|(_, set)| *set)
-            .map(|(block, _)| (l.origin.running.clone(), block))
+            .map(|(block, _)| (p.origin.running.clone(), block))
         })
         .collect();
     for (path, block) in lookalikes {
         ext.warnings.push(format!(
-            "{path}: a custom lens that fills `{block}`: the kit's `{block}` viz may already cover \
+            "{path}: a custom viz that fills `{block}`: the kit's `{block}` viz may already cover \
              it — prefer the kit where it does"
         ));
     }
@@ -7365,7 +5065,7 @@ fn entity_stubs(ext: &Extension) -> Vec<oxplow_db::models::EntityStub> {
 /// (and the other enabled extensions') compile to, published nowhere —
 /// for whatever else reads this version (a review's row counts).
 pub struct Prepared {
-    pub lenses: LensRuns,
+    pub pages: crate::pages::checks::PageChecks,
     pub overlay: Vec<oxplow_db::TempView>,
 }
 
@@ -7414,28 +5114,6 @@ async fn model_overlay(
     }
 }
 
-/// A version as a review reads it: its lenses rendered on its own models'
-/// overlay, nothing checked — the earlier side of a review is what it was,
-/// not a candidate (tsk791).
-/// The temp views a lens of extension `name` under `root` reads through:
-/// its models and the other enabled extensions' — and their collectors'
-/// entities, empty, where none is published — compiled as `check` does
-/// and published nowhere. So an author's lens over a model they haven't
-/// published yet (a worktree's, or before the next activation) answers
-/// rather than "no such table". Empty when the extension doesn't load.
-pub async fn lens_overlay(
-    layer: &crate::sql_gateway::SqlGateway,
-    catalog: &crate::extension_catalog::ExtensionCatalog,
-    root: &Path,
-    name: &str,
-) -> Vec<oxplow_db::TempView> {
-    let Ok(ext) = catalog.named(root, name) else {
-        return Vec::new();
-    };
-    let candidate = catalog.candidate(root, ext);
-    model_overlay(layer, &candidate).await.0
-}
-
 /// The temp views `draft`'s models (and the other enabled extensions')
 /// compile to, read from `root`: what a draft page's queries read through,
 /// published nowhere.
@@ -7458,8 +5136,8 @@ async fn read_side(
     let candidate = catalog.candidate(root, ext.clone());
     *ext = candidate.candidate().clone();
     let (overlay, _) = model_overlay(layer, &candidate).await;
-    let lenses = run_lenses(&layer.with_overlay(overlay.clone()), ext).await;
-    Prepared { lenses, overlay }
+    let pages = crate::pages::checks::dry_run_all(&layer.with_overlay(overlay.clone()), ext).await;
+    Prepared { pages, overlay }
 }
 
 /// Check `ext` — its commands, components, models, advisories and lenses —
@@ -7533,91 +5211,88 @@ async fn prepare(
             }
         }
     }
-    let runs = run_lenses(layer, ext).await;
-    for lens in ext.lenses.clone() {
-        let id = lens.id.clone();
-        match &runs[&lens.slug] {
-            Err(e) => ext.errors.push(e.clone()),
-            Ok(run) => {
-                let cols = &run.result.columns;
-                for (block, k) in run.lens.role_columns() {
-                    if !cols.contains(k) {
-                        ext.errors.push(format!(
-                            "lens {id}: {block} column `{k}` isn't in the query result (columns: {})",
-                            cols.join(", ")
-                        ));
-                    }
-                }
-                for a in &run.lens.actions {
-                    if let Some(when) = a.when.as_ref().filter(|w| !cols.contains(w)) {
-                        ext.errors.push(format!(
-                            "lens {id}: action `{}` is offered `when: {when}`, which isn't in the \
-                             query result (columns: {})",
-                            a.id,
-                            cols.join(", ")
-                        ));
-                    }
-                    for (scope, name) in action_templates(&a.input) {
-                        // A drop's neighbours and its order are rows of the
-                        // same result.
-                        let a_row = matches!(
-                            scope.as_str(),
-                            "row" | "before" | "after" | "onto" | "order"
-                        );
-                        if a_row && !cols.contains(&name) {
-                            ext.errors.push(format!(
-                                "lens {id}: action `{}` uses `{{{{{scope}.{name}}}}}`, which isn't in \
-                                 the query result (columns: {})",
-                                a.id,
-                                cols.join(", ")
-                            ));
-                        }
-                    }
-                }
-                for c in &run.lens.columns {
-                    let mut keys = vec![&c.key];
-                    keys.extend(c.unit.iter());
-                    keys.extend(c.icon.iter());
-                    keys.extend(c.tone.iter());
-                    if let Some(link) = c.link.as_ref() {
-                        keys.extend(link.from.iter());
-                        keys.extend(link.line.iter());
-                        keys.extend(link.base.iter());
-                        keys.extend(link.head.iter());
-                    }
-                    for k in keys {
-                        if !cols.contains(k) {
-                            ext.errors.push(format!(
-                                "lens {id}: column `{k}` isn't in the query result (columns: {})",
-                                cols.join(", ")
-                            ));
-                        }
-                    }
-                }
+    let pages = crate::pages::checks::dry_run_all(layer, ext).await;
+    for page in ext.page_files.clone() {
+        let Some(loaders) = pages.get(&page.slug) else {
+            continue;
+        };
+        for (name, result) in loaders {
+            if let Err(e) = result {
+                ext.errors
+                    .push(format!("{}: loader `{name}`: {e}", page.origin.running));
+            }
+        }
+        for (node, lens, result) in crate::pages::checks::viz_nodes(&page, loaders) {
+            let Ok(result) = result else { continue };
+            for problem in viz_column_problems(lens, &result.columns) {
+                ext.errors
+                    .push(format!("{}: node `{node}`: {problem}", page.origin.running));
             }
         }
     }
-    Prepared {
-        lenses: runs,
-        overlay,
-    }
+    Prepared { pages, overlay }
 }
 
-/// One extension by name, read from its source under `root` now, with
-/// `project`'s settings saying where that is — for the write paths
-/// (`save_lens`), which must see their own result.
-fn load_fresh(root: &Path, project: &Path, name: &str) -> Result<Extension, DomainError> {
-    let settings = oxplow_config::extension_settings(project);
-    let dir = settings.source(root, name);
-    if !dir.join("extension.yaml").is_file() {
-        return Err(DomainError::NotFound);
+/// What a viz names that its loader's columns lack: a role block's
+/// column, an action's `when` or row placeholder, a column's key, unit,
+/// icon, tone or link column.
+fn viz_column_problems(lens: &VizConfig, cols: &[String]) -> Vec<String> {
+    let mut problems: Vec<String> = Vec::new();
+    for (block, k) in lens.role_columns() {
+        if !cols.contains(k) {
+            problems.push(format!(
+                "{block} column `{k}` isn't in the query result (columns: {})",
+                cols.join(", ")
+            ));
+        }
     }
-    Ok(load_one(
-        &Disk(dir.clone()),
-        name,
-        &shown(root, &dir),
-        origin_of(name),
-    ))
+    for a in &lens.actions {
+        if let Some(when) = a.when.as_ref().filter(|w| !cols.contains(w)) {
+            problems.push(format!(
+                "action `{}` is offered `when: {when}`, which isn't in the \
+                     query result (columns: {})",
+                a.id,
+                cols.join(", ")
+            ));
+        }
+        for (scope, name) in action_templates(&a.input) {
+            // A drop's neighbours and its order are rows of the
+            // same result.
+            let a_row = matches!(
+                scope.as_str(),
+                "row" | "before" | "after" | "onto" | "order"
+            );
+            if a_row && !cols.contains(&name) {
+                problems.push(format!(
+                    "action `{}` uses `{{{{{scope}.{name}}}}}`, which isn't in \
+                         the query result (columns: {})",
+                    a.id,
+                    cols.join(", ")
+                ));
+            }
+        }
+    }
+    for c in &lens.columns {
+        let mut keys = vec![&c.key];
+        keys.extend(c.unit.iter());
+        keys.extend(c.icon.iter());
+        keys.extend(c.tone.iter());
+        if let Some(link) = c.link.as_ref() {
+            keys.extend(link.from.iter());
+            keys.extend(link.line.iter());
+            keys.extend(link.base.iter());
+            keys.extend(link.head.iter());
+        }
+        for k in keys {
+            if !cols.contains(k) {
+                problems.push(format!(
+                    "column `{k}` isn't in the query result (columns: {})",
+                    cols.join(", ")
+                ));
+            }
+        }
+    }
+    problems
 }
 
 /// A lowercase letter, then lowercase letters, digits and single dashes —
@@ -7625,181 +5300,6 @@ fn load_fresh(root: &Path, project: &Path, name: &str) -> Result<Extension, Doma
 /// command namespace.
 pub fn is_valid_name(name: &str) -> bool {
     oxplow_domain::contribution::valid_extension_name(name)
-}
-
-/// What a lens shows — the view part of a lens file, and the one shape a
-/// lens is made from: a lens file's body, an agent's answer
-/// (`thread_answer.spec`, P6.C1), what Explore Data saves, and what
-/// [`save_lens`] writes. The rest of a lens file (launcher placement,
-/// actions, an alert) is added by editing it.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct LensSpec {
-    pub title: String,
-    #[serde(default)]
-    pub description: String,
-    /// SQL over the `v_*` models, with `:param` bindings. Only a `form`
-    /// may leave it empty.
-    #[serde(default)]
-    pub query: String,
-    #[serde(default = "default_viz")]
-    pub viz: LensViz,
-    #[serde(default)]
-    pub params: Vec<PageParam>,
-    #[serde(default)]
-    pub columns: Vec<PageColumn>,
-    #[serde(default)]
-    pub empty: Option<String>,
-    #[serde(default)]
-    pub chart: Option<LensChart>,
-    #[serde(default)]
-    pub tree: Option<LensTree>,
-    #[serde(default)]
-    pub timeline: Option<LensTimeline>,
-    #[serde(default)]
-    pub steps: Option<LensSteps>,
-    #[serde(default)]
-    pub hunks: Option<LensHunks>,
-    #[serde(default)]
-    pub code: Option<LensCode>,
-    #[serde(default)]
-    pub diff: Option<LensDiff>,
-    #[serde(default)]
-    pub markdown: Option<LensMarkdown>,
-    #[serde(default)]
-    pub form: Option<LensForm>,
-    #[serde(default)]
-    pub group: Option<LensGroup>,
-    #[serde(default)]
-    pub emphasis: Option<String>,
-    #[serde(default)]
-    pub depth: Option<String>,
-}
-
-impl Lens {
-    /// A lens made from `spec`, as `id` (`<extension>/<slug>`, or an
-    /// answer's `answer/<n>`); it has no actions, alert or children.
-    pub fn from_spec(id: &str, spec: &LensSpec) -> Lens {
-        let (extension, slug) = id.split_once('/').unwrap_or((id, id));
-        Lens {
-            id: id.to_string(),
-            extension: extension.to_string(),
-            slug: slug.to_string(),
-            title: spec.title.clone(),
-            description: spec.description.clone(),
-            query: spec.query.clone(),
-            viz: spec.viz,
-            params: typed(spec.params.clone()),
-            columns: spec.columns.clone(),
-            empty: spec.empty.clone(),
-            chart: spec.chart.clone(),
-            tree: spec.tree.clone(),
-            tile: None,
-            timeline: spec.timeline.clone(),
-            steps: spec.steps.clone(),
-            hunks: spec.hunks.clone(),
-            code: spec.code.clone(),
-            diff: spec.diff.clone(),
-            editor: None,
-            embed: None,
-            answer: None,
-            terminal: None,
-            markdown: spec.markdown.clone(),
-            form: spec.form.clone(),
-            custom: None,
-            group: spec.group.clone(),
-            emphasis: spec.emphasis.clone(),
-            depth: spec.depth.clone(),
-            parts: Vec::new(),
-            view: None,
-            fills: spec.viz.fills(),
-            launcher_category: None,
-            hidden: false,
-            refresh: false,
-            actions: Vec::new(),
-            alert: None,
-            needs: Vec::new(),
-            origin: PageProvenance::default(),
-            tool: None,
-        }
-    }
-
-    /// The spec this lens was made from (its view part).
-    pub fn spec(&self) -> LensSpec {
-        LensSpec {
-            title: self.title.clone(),
-            description: self.description.clone(),
-            query: self.query.clone(),
-            viz: self.viz,
-            params: self.params.clone(),
-            columns: self.columns.clone(),
-            empty: self.empty.clone(),
-            chart: self.chart.clone(),
-            tree: self.tree.clone(),
-            timeline: self.timeline.clone(),
-            steps: self.steps.clone(),
-            hunks: self.hunks.clone(),
-            code: self.code.clone(),
-            diff: self.diff.clone(),
-            markdown: self.markdown.clone(),
-            form: self.form.clone(),
-            group: self.group.clone(),
-            emphasis: self.emphasis.clone(),
-            depth: self.depth.clone(),
-        }
-    }
-}
-
-/// What's wrong with `spec` as a standalone lens, if anything: no title,
-/// or a component missing what it needs. A `document` or `dashboard`
-/// composes other lenses and a `custom` lens an extension's component, so
-/// a standalone spec can't be either; nor a `form`, whose submit runs its command as the
-/// person — an answer an agent chose never does.
-pub fn spec_problem(spec: &LensSpec) -> Option<String> {
-    if spec.title.trim().is_empty() {
-        return Some("a lens needs a `title`".into());
-    }
-    if matches!(spec.viz, LensViz::Document | LensViz::Dashboard) {
-        return Some(format!(
-            "a `{}` composes lens files; show each lens instead",
-            viz_name(spec.viz)
-        ));
-    }
-    if spec.viz == LensViz::Custom {
-        return Some(
-            "a `custom` lens renders an extension's component; write it as a lens file in a \
-             private extension that declares the component"
-                .into(),
-        );
-    }
-    if spec.viz == LensViz::Terminal {
-        return Some("a `terminal` is a page's; an answer can't open one".into());
-    }
-    if spec.viz == LensViz::Answer {
-        return Some("an `answer` shows an answer; show its lens or spec instead".into());
-    }
-    if spec.viz == LensViz::Editor {
-        return Some(
-            "an `editor` saves as whoever presses Save, and an answer never writes as the \
-             person; show the file with `code` at `working`"
-                .into(),
-        );
-    }
-    if spec.viz == LensViz::Embed {
-        return Some(
-            "an `embed` opens a web page on the person's machine, and an answer never does \
-             that; link to the page in markdown instead"
-                .into(),
-        );
-    }
-    if spec.viz == LensViz::Form {
-        return Some(
-            "a `form` runs its command as whoever submits it, and an answer never runs a \
-             command as the person; write the form as a lens file in an extension"
-                .into(),
-        );
-    }
-    shape_problem(&Lens::from_spec("spec/spec", spec), &[], &[])
 }
 
 /// A lens slug from a title: lowercase letters and digits, runs of
@@ -7819,15 +5319,6 @@ pub fn slug_of(title: &str) -> String {
     } else {
         out
     }
-}
-
-/// Who asked for a new lens, for its extension's intent when the
-/// extension is created.
-pub struct LensOrigin<'a> {
-    /// What the lens answers (the extension's `intent.purpose`).
-    pub purpose: &'a str,
-    /// The thread or effort ref that asked for it (`intent.origin`).
-    pub origin: Option<&'a str>,
 }
 
 /// The source folder of extension `name` in the checkout at `root` (where
@@ -7851,110 +5342,6 @@ pub fn writable_extension_dir(
         )));
     }
     Ok(oxplow_config::extension_settings(project).source(root, name))
-}
-
-/// Write `spec` as a new lens file `lenses/<slug>.yaml` in extension
-/// `extension`'s source in the checkout at `root` (where `project`'s
-/// settings say it is), creating the extension (a v2 manifest whose intent
-/// is `origin`) if needed. Refuses a spec with a problem, overwriting a
-/// lens, and the bundled extensions. Nothing runs it until it is deployed.
-pub fn save_lens(
-    root: &Path,
-    project: &Path,
-    extension: &str,
-    slug: &str,
-    spec: &LensSpec,
-    origin: &LensOrigin<'_>,
-) -> Result<Lens, DomainError> {
-    let invalid = |m: String| DomainError::Invalid(m);
-    let storage = |e: std::io::Error| DomainError::Storage(format!("save lens: {e}"));
-    let dir = writable_extension_dir(root, project, extension)?;
-    if !is_valid_name(slug) {
-        return Err(invalid(format!(
-            "lens slug `{slug}` must start with a letter and be lowercase letters, digits and single dashes"
-        )));
-    }
-    if let Some(problem) = spec_problem(spec) {
-        return Err(invalid(problem));
-    }
-    let file = dir.join("lenses").join(format!("{slug}.yaml"));
-    if file.exists() {
-        return Err(invalid(format!("lens `{extension}/{slug}` already exists")));
-    }
-    let manifest = dir.join("extension.yaml");
-    std::fs::create_dir_all(file.parent().unwrap_or(&dir)).map_err(storage)?;
-    if !manifest.exists() {
-        // The same v2 manifest `oxplow extension new` writes, so a lens saved
-        // from Explore Data starts as a checkable extension with an intent.
-        std::fs::write(
-            &manifest,
-            scaffold_manifest(&ManifestScaffold {
-                name: extension,
-                description: "Lenses kept from answers in your threads",
-                purpose: origin.purpose,
-                origin: origin.origin,
-                example_name: slug,
-                example_input: &format!("{{ lens: {slug} }}"),
-                example_expect: "the rows the answer showed",
-            }),
-        )
-        .map_err(storage)?;
-    }
-    let body = lens_file_yaml(spec)?;
-    std::fs::write(&file, body).map_err(storage)?;
-    let ext = load_fresh(root, project, extension)?;
-    match ext.lenses.into_iter().find(|l| l.slug == slug) {
-        Some(lens) => Ok(lens),
-        None => {
-            // It didn't load: take it back out and say why.
-            let _ = std::fs::remove_file(&file);
-            let why: Vec<String> = ext
-                .errors
-                .into_iter()
-                .filter(|e| e.contains(&format!("{slug}.yaml")))
-                .collect();
-            Err(invalid(format!(
-                "the lens `{extension}/{slug}` doesn't load: {}",
-                if why.is_empty() {
-                    "no reason given".to_string()
-                } else {
-                    why.join("; ")
-                }
-            )))
-        }
-    }
-}
-
-/// `spec` as a lens file, naming its schema on the first line: what it
-/// sets, without the empty and absent keys at any depth (the file reads
-/// like one written by hand). Built as
-/// YAML directly — a JSON detour would carry serde_json's number
-/// representation into the file.
-fn lens_file_yaml(spec: &LensSpec) -> Result<String, DomainError> {
-    fn prune(v: serde_yaml::Value) -> Option<serde_yaml::Value> {
-        use serde_yaml::Value as Y;
-        match v {
-            Y::Null => None,
-            Y::String(s) if s.is_empty() => None,
-            Y::Sequence(items) => {
-                let items: Vec<Y> = items.into_iter().filter_map(prune).collect();
-                (!items.is_empty()).then_some(Y::Sequence(items))
-            }
-            Y::Mapping(map) => {
-                let map: serde_yaml::Mapping = map
-                    .into_iter()
-                    .filter_map(|(k, v)| prune(v).map(|v| (k, v)))
-                    .collect();
-                (!map.is_empty()).then_some(Y::Mapping(map))
-            }
-            other => Some(other),
-        }
-    }
-    let value =
-        serde_yaml::to_value(spec).map_err(|e| DomainError::Storage(format!("save lens: {e}")))?;
-    let body = serde_yaml::to_string(&prune(value).unwrap_or(serde_yaml::Value::Null))
-        .map_err(|e| DomainError::Storage(format!("save lens: {e}")))?;
-    Ok(schema::modeline(schema::LENS_SCHEMA_URL) + &body)
 }
 
 /// What a scaffolded `extension.yaml` says. One template for
@@ -8794,7 +6181,7 @@ empty: No items.
         assert_eq!(l.id, "review/by-status");
         assert_eq!(l.slug, "by-status");
         assert_eq!(l.title, "Items by state");
-        assert_eq!(l.viz, LensViz::Table);
+        assert_eq!(l.viz, Viz::Table);
         assert_eq!(
             l.origin.running,
             ".oxplow/extensions/review/lenses/by-status.yaml"
@@ -8805,8 +6192,8 @@ empty: No items.
         );
         assert_eq!(
             l.columns[0].link,
-            Some(LensLink {
-                kind: LensLinkKind::Page,
+            Some(ColumnLink {
+                kind: LinkKind::Page,
                 from: Some("uri".into()),
                 line: None,
                 base: None,
@@ -8959,7 +6346,7 @@ empty: No items.
             "title: Mine\nparams:\n  - { name: stream_id }\n  - { name: thread_id, default: 9 }\nquery: SELECT :stream_id AS s, :thread_id AS t\n",
         );
         let sl = layer().await;
-        let rows = |run: LensRun| serde_json::to_value(&run.result.rows).unwrap();
+        let rows = |run: VizRun| serde_json::to_value(&run.result.rows).unwrap();
         let here = ViewContext {
             stream_id: Some(2),
             thread_id: Some(5),
@@ -9021,10 +6408,10 @@ empty: No items.
                     .snapshot(&crate::config_service::read_config(&f.svc.config)),
             ),
         };
-        assert_eq!(lens_context(&f.svc, None, None).await, expect);
-        assert_eq!(lens_context(&f.svc, None, Some(f.thread)).await, expect);
+        assert_eq!(view_context(&f.svc, None, None).await, expect);
+        assert_eq!(view_context(&f.svc, None, Some(f.thread)).await, expect);
         assert_eq!(
-            lens_context(&f.svc, Some(thread.stream_id), None).await,
+            view_context(&f.svc, Some(thread.stream_id), None).await,
             expect
         );
     }
@@ -9090,7 +6477,7 @@ empty: No items.
             "",
         );
         let lens = ext.lenses.into_iter().find(|l| l.slug == "doc").unwrap();
-        let run = |sha: SqlCell, rows: Vec<Vec<SqlCell>>| LensRun {
+        let run = |sha: SqlCell, rows: Vec<Vec<SqlCell>>| VizRun {
             lens: lens.clone(),
             params: BTreeMap::from([
                 ("stream_id".to_string(), SqlCell::Int(1)),
@@ -9170,7 +6557,7 @@ empty: No items.
             title: String::new(),
             description: String::new(),
             query: String::new(),
-            viz: LensViz::Table,
+            viz: Viz::Table,
             params: Vec::new(),
             columns: Vec::new(),
             empty: None,
@@ -9204,11 +6591,11 @@ empty: No items.
         let spec = LensSpec {
             title: "Busy Files".into(),
             query: "SELECT path, n FROM v_x".into(),
-            viz: LensViz::Bar,
-            chart: Some(LensChart {
+            viz: Viz::Bar,
+            chart: Some(VizChart {
                 x: Some("path".into()),
                 y: Some("n".into()),
-                ..LensChart::default()
+                ..VizChart::default()
             }),
             ..spec_base()
         };
@@ -9237,7 +6624,7 @@ empty: No items.
             "{manifest}"
         );
         let bad = LensSpec {
-            viz: LensViz::Bar,
+            viz: Viz::Bar,
             chart: None,
             ..spec.clone()
         };
@@ -9264,11 +6651,11 @@ empty: No items.
         let project = tempfile::tempdir().unwrap();
         let spec = LensSpec {
             title: "New Task".into(),
-            viz: LensViz::Form,
-            form: Some(LensForm {
+            viz: Viz::Form,
+            form: Some(FormSpec {
                 command: Some("oxplow.work_item.create".into()),
                 defaults: Some(serde_json::json!({ "title": "x" })),
-                ..LensForm::default()
+                ..FormSpec::default()
             }),
             ..spec_base()
         };
@@ -10059,7 +7446,7 @@ commands:
             &LensSpec {
                 title: "X".into(),
                 query: "SELECT 1".into(),
-                viz: LensViz::Number,
+                viz: Viz::Number,
                 ..spec_base()
             },
             &todo_origin(),
@@ -10457,7 +7844,7 @@ commands:
             "",
         );
         let lens = ext.lenses.into_iter().find(|l| l.slug == "dash").unwrap();
-        let run = LensRun {
+        let run = VizRun {
             lens,
             params: BTreeMap::from([("id".to_string(), SqlCell::Text("dsh1".into()))]),
             result: oxplow_db::SqlQueryResult {
@@ -10656,7 +8043,7 @@ commands:
             "",
         );
         let lens = |slug: &str| ext.lenses.iter().find(|l| l.slug == slug);
-        assert_eq!(lens("visits").unwrap().viz, LensViz::Bar);
+        assert_eq!(lens("visits").unwrap().viz, Viz::Bar);
         assert_eq!(
             lens("visits").unwrap().chart.as_ref().unwrap().y.as_deref(),
             Some("n")
@@ -11066,7 +8453,7 @@ commands:
         let c = lens("c").expect("c loads");
         assert_eq!(
             c.code,
-            Some(LensCode {
+            Some(VizCode {
                 path: Some("p".into()),
                 revision: Some("r".into()),
                 lines: Some("l".into()),
@@ -11101,7 +8488,7 @@ commands:
         let e = ext.lenses.iter().find(|l| l.slug == "e").expect("e loads");
         assert_eq!(
             e.embed,
-            Some(LensEmbed {
+            Some(VizEmbed {
                 url: Some("u".into())
             })
         );
@@ -11131,7 +8518,7 @@ commands:
         let e = ext.lenses.iter().find(|l| l.slug == "e").expect("e loads");
         assert_eq!(
             e.editor,
-            Some(LensEditor {
+            Some(VizEditor {
                 path: Some("p".into()),
                 lines: Some("l".into()),
             })
@@ -11162,7 +8549,7 @@ commands:
         let t = ext.lenses.iter().find(|l| l.slug == "t").expect("t loads");
         assert_eq!(
             t.terminal,
-            Some(LensTerminal {
+            Some(VizTerminal {
                 of: Some("u".into()),
                 title: Some("t".into()),
                 stopped: Some("s".into()),
@@ -11380,7 +8767,7 @@ commands:
                 .await
             }
         };
-        let rows = |r: &LensRun| serde_json::to_value(&r.result.rows).unwrap();
+        let rows = |r: &VizRun| serde_json::to_value(&r.result.rows).unwrap();
 
         let first = run(vec![]).await.unwrap();
         assert_eq!(
@@ -11983,7 +9370,7 @@ commands:
             "",
         );
         assert!(ext.errors.is_empty(), "{:?}", ext.errors);
-        let kinds: Vec<LensLinkKind> = ext.lenses[0]
+        let kinds: Vec<LinkKind> = ext.lenses[0]
             .columns
             .iter()
             .map(|c| c.link.as_ref().unwrap().kind)
@@ -11991,10 +9378,10 @@ commands:
         assert_eq!(
             kinds,
             vec![
-                LensLinkKind::Commit,
-                LensLinkKind::Metric,
-                LensLinkKind::Page,
-                LensLinkKind::File
+                LinkKind::Commit,
+                LinkKind::Metric,
+                LinkKind::Page,
+                LinkKind::File
             ]
         );
         assert_eq!(
@@ -12607,10 +9994,10 @@ commands:
             .expect("a grouped, styled list loads");
         assert_eq!(
             a.group,
-            Some(LensGroup {
+            Some(VizGroup {
                 by: "bucket".into(),
-                link: Some(LensLink {
-                    kind: LensLinkKind::Page,
+                link: Some(ColumnLink {
+                    kind: LinkKind::Page,
                     from: Some("bucket_ref".into()),
                     line: None,
                     base: None,
@@ -13051,7 +10438,7 @@ commands:
             .link
             .clone()
             .unwrap();
-        assert_eq!(link.kind, LensLinkKind::DiffAt);
+        assert_eq!(link.kind, LinkKind::DiffAt);
         assert_eq!(
             (link.base.as_deref(), link.head.as_deref()),
             (Some("b"), Some("h"))
@@ -13661,7 +11048,7 @@ commands:
         assert_eq!(changes[0].change, crate::extension_impact::Change::Changed);
         let report = changes[0].impact.as_ref().unwrap();
         assert!(
-            report.lines.iter().any(|l| l == "Lens acme/count: changed"),
+            report.lines.iter().any(|l| l == "Page acme/count: changed"),
             "{:?}",
             report.lines
         );

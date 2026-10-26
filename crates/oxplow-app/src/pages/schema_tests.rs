@@ -2,7 +2,7 @@
 //! load-time check refuses.
 
 use super::schema::*;
-use crate::extensions::LensViz;
+use crate::extensions::Viz;
 
 fn page(text: &str) -> Result<Page, String> {
     parse_page(
@@ -54,7 +54,7 @@ view:
         panic!("{:?}", p.view)
     };
     assert_eq!(from.as_deref(), Some("problems"));
-    assert_eq!(lens.viz, LensViz::Table);
+    assert_eq!(lens.viz, Viz::Table);
     assert_eq!(lens.columns.len(), 2);
     assert_eq!(lens.empty.as_deref(), Some("No problems."));
     // A viz node's id defaults to the loader it shows.

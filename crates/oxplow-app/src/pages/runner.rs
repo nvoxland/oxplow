@@ -753,7 +753,7 @@ fn key_of(
 
 /// `args` with each source taken: a param's value, an earlier loader's
 /// first-row column, or the literal.
-fn bind_args(
+pub(super) fn bind_args(
     args: &BTreeMap<String, ArgSource>,
     params: &BTreeMap<String, SqlCell>,
     earlier: &BTreeMap<String, LoaderRun>,

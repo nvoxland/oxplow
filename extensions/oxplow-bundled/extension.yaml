@@ -104,7 +104,6 @@ ui:
     - { slot: oxplow-foundation/tasks.sections, page: thread-plan, at: { before: list } }
     - { slot: oxplow-foundation/tasks.sections, page: thread-shared-work, at: { before: list } }
     - { slot: oxplow-foundation/work-item.sections, page: item-shared-work }
-    - { slot: diff.file.header, lens: file-co-change }
     - { slot: oxplow-foundation/diff-view.sections, page: decisions }
     - { slot: oxplow-foundation/diff-view.sections, page: inferred-decisions }
     - { slot: oxplow-foundation/diff-view.sections, page: unverified-claims }

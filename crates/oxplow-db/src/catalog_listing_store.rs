@@ -1,32 +1,14 @@
-//! `lens` and `extension_listing` (V74), `page`, `page_answer` and
-//! `page_param` (V110) and `config_key` (V85): the lenses, pages and
-//! extensions the catalog holds, and what can be configured, restated
-//! whole by the app with each extension generation and read as `v_lens`,
-//! `v_page`, `v_extension` and `v_config_key`. What a person can ask is
+//! `extension_listing` (V74), `page`, `page_answer` and `page_param`
+//! (V110) and `config_key` (V85): the pages and extensions the catalog
+//! holds, and what can be configured, restated whole by the app with each
+//! extension generation and read as `v_page`, `v_extension` and
+//! `v_config_key`. What a person can ask is
 //! what pages answer (`v_page_answer`).
 
 use oxplow_domain::DomainError;
 use rusqlite::params;
 
 use crate::database::map_sql_err;
-
-/// One lens, as `v_lens` lists it.
-#[derive(Debug, Clone, PartialEq)]
-pub struct LensRow {
-    /// `<extension>/<slug>`.
-    pub id: String,
-    pub extension: String,
-    pub slug: String,
-    pub title: String,
-    pub description: String,
-    pub viz: String,
-    pub params_json: String,
-    pub hidden: bool,
-    pub launcher_category: Option<String>,
-    pub needs_json: String,
-    /// Its source file, the one to edit; none when no source is here.
-    pub source: Option<String>,
-}
 
 /// One page file, as `v_page` lists it.
 #[derive(Debug, Clone, PartialEq)]
@@ -113,7 +95,6 @@ pub struct ConfigKeyRow {
 /// What the catalog restates with each generation.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct CatalogListing {
-    pub lenses: Vec<LensRow>,
     pub pages: Vec<PageRow>,
     pub page_answers: Vec<PageAnswerRow>,
     pub page_params: Vec<PageParamRow>,
@@ -260,36 +241,11 @@ fn insert_pages(conn: &rusqlite::Connection, listing: &CatalogListing) -> Result
     Ok(())
 }
 
-/// Replace every lens, page, extension and config key row.
+/// Replace every page, extension and config key row.
 pub fn reset_tx(conn: &rusqlite::Connection, listing: &CatalogListing) -> Result<(), DomainError> {
-    let (lenses, extensions) = (&listing.lenses, &listing.extensions);
-    conn.execute("DELETE FROM lens", []).map_err(map_sql_err)?;
+    let extensions = &listing.extensions;
     conn.execute("DELETE FROM extension_listing", [])
         .map_err(map_sql_err)?;
-    let mut lens = conn
-        .prepare(
-            "INSERT OR REPLACE INTO lens
-               (id, extension, slug, title, description, viz, params_json, hidden,
-                launcher_category, needs_json, source)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
-        )
-        .map_err(map_sql_err)?;
-    for l in lenses {
-        lens.execute(params![
-            l.id,
-            l.extension,
-            l.slug,
-            l.title,
-            l.description,
-            l.viz,
-            l.params_json,
-            l.hidden,
-            l.launcher_category,
-            l.needs_json,
-            l.source,
-        ])
-        .map_err(map_sql_err)?;
-    }
     insert_pages(conn, listing)?;
     insert_extensions(conn, extensions)?;
     conn.execute("DELETE FROM config_key", [])
