@@ -516,8 +516,8 @@ async fn anyone_runs_a_command_and_a_job_only_its_own() {
     let (db, bus) = bus();
     bus.register(Command::new(kv_spec("oxplow.kv.set", Confirm::Never), kv_set()).unwrap())
         .unwrap();
-    let lens = |presser: Actor| Actor::Lens {
-        lens_id: "acme/x".into(),
+    let lens = |presser: Actor| Actor::Page {
+        page_id: "acme/x".into(),
         on_behalf_of: Box::new(presser),
     };
     for (i, actor) in [Actor::Human, agent(), lens(Actor::Human), lens(agent())]
@@ -851,8 +851,8 @@ async fn a_lens_acting_for_an_agent_is_treated_as_the_agent() {
     let (db, bus) = bus();
     bus.register(Command::new(kv_spec("oxplow.kv.set", Confirm::Always), kv_set()).unwrap())
         .unwrap();
-    let lens = |presser: Actor| Actor::Lens {
-        lens_id: "acme/x".into(),
+    let lens = |presser: Actor| Actor::Page {
+        page_id: "acme/x".into(),
         on_behalf_of: Box::new(presser),
     };
     bus.run(
@@ -1346,8 +1346,8 @@ async fn an_agents_stream_is_its_threads() {
         .await
         .unwrap();
     assert_eq!(out.result, json!("str1"));
-    let through_a_lens = Actor::Lens {
-        lens_id: "acme/x".into(),
+    let through_a_lens = Actor::Page {
+        page_id: "acme/x".into(),
         on_behalf_of: Box::new(agent(7)),
     };
     let out = bus
@@ -2358,8 +2358,8 @@ async fn an_effects_run_that_asks_is_proposed_and_never_confirmed() {
 async fn only_a_person_decides_a_proposal() {
     let (db, bus) = confirming_bus();
     let id = propose(&bus, "a", "1").await;
-    let lens_for_agent = Actor::Lens {
-        lens_id: "acme/x".into(),
+    let lens_for_agent = Actor::Page {
+        page_id: "acme/x".into(),
         on_behalf_of: Box::new(agent()),
     };
     for actor in [agent(), lens_for_agent, Actor::System, effect()] {
@@ -2384,8 +2384,8 @@ fn placing_an_agent_in_its_stream_keeps_its_session() {
         thread_id: Some(ThreadId::new(7)),
         stream_id: None,
     };
-    let lens = Actor::Lens {
-        lens_id: "l".into(),
+    let lens = Actor::Page {
+        page_id: "l".into(),
         on_behalf_of: Box::new(agent),
     };
     let placed = lens.in_stream(oxplow_domain::StreamId::new(1));

@@ -144,11 +144,9 @@ async fn open(svc: &Services, input: OpenPageInput) -> Result<Value, CommandErro
     let page_run = match detail.get("runId").and_then(Value::as_str) {
         Some(run_id) => match svc.page_runs.get(run_id) {
             Some(run) => {
-                let ctx = crate::extensions::view_context(svc, None, Some(thread)).await;
-                let text =
-                    crate::pages::text::page_text(svc, svc.worktrees.project_dir(), &run, &ctx)
-                        .await
-                        .map_err(failed)?;
+                let text = crate::pages::text::page_text(svc, svc.worktrees.project_dir(), &run)
+                    .await
+                    .map_err(failed)?;
                 json!({
                     "page": run.page.id,
                     "title": run.page.title,

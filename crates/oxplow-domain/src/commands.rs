@@ -18,7 +18,7 @@ use crate::{DomainError, EventId};
 pub enum Invoker {
     Human,
     Agent,
-    Lens,
+    Page,
     Job,
 }
 
@@ -468,8 +468,10 @@ pub enum Actor {
         thread_id: Option<ThreadId>,
         stream_id: Option<StreamId>,
     },
-    Lens {
-        lens_id: String,
+    /// A page acting for whoever pressed one of its actions (its
+    /// `<extension>/<page>`, `#<node>` for a node's).
+    Page {
+        page_id: String,
         on_behalf_of: Box<Actor>,
     },
     /// An extension's custom component acting for whoever uses it (its
@@ -529,7 +531,7 @@ impl Actor {
         match self {
             Actor::Human => ActorKind::Human,
             Actor::Agent { .. } => ActorKind::Agent,
-            Actor::Lens { .. } => ActorKind::Lens,
+            Actor::Page { .. } => ActorKind::Page,
             Actor::Component { .. } => ActorKind::Component,
             Actor::System => ActorKind::System,
             Actor::Effect { .. } => ActorKind::Effect,
@@ -543,7 +545,7 @@ impl Actor {
     pub fn may_confirm(&self) -> bool {
         match self {
             Actor::Human => true,
-            Actor::Lens { on_behalf_of, .. } | Actor::Component { on_behalf_of, .. } => {
+            Actor::Page { on_behalf_of, .. } | Actor::Component { on_behalf_of, .. } => {
                 on_behalf_of.may_confirm()
             }
             Actor::Agent { .. } | Actor::System | Actor::Effect { .. } | Actor::Job { .. } => false,
@@ -555,7 +557,7 @@ impl Actor {
     pub fn proposes(&self) -> bool {
         match self {
             Actor::Agent { .. } | Actor::Effect { .. } => true,
-            Actor::Lens { on_behalf_of, .. } | Actor::Component { on_behalf_of, .. } => {
+            Actor::Page { on_behalf_of, .. } | Actor::Component { on_behalf_of, .. } => {
                 on_behalf_of.proposes()
             }
             Actor::Human | Actor::System | Actor::Job { .. } => false,
@@ -567,7 +569,7 @@ impl Actor {
     pub fn is_agent_driven(&self) -> bool {
         match self {
             Actor::Agent { .. } => true,
-            Actor::Lens { on_behalf_of, .. } | Actor::Component { on_behalf_of, .. } => {
+            Actor::Page { on_behalf_of, .. } | Actor::Component { on_behalf_of, .. } => {
                 on_behalf_of.is_agent_driven()
             }
             Actor::Human | Actor::System | Actor::Effect { .. } | Actor::Job { .. } => false,
@@ -581,7 +583,7 @@ impl Actor {
         match self {
             Actor::Effect { thread_id, .. } => Some(*thread_id),
             Actor::Job { thread_id, .. } => Some(*thread_id),
-            Actor::Lens { on_behalf_of, .. } | Actor::Component { on_behalf_of, .. } => {
+            Actor::Page { on_behalf_of, .. } | Actor::Component { on_behalf_of, .. } => {
                 on_behalf_of.gated_thread()
             }
             other => other.agent_thread(),
@@ -608,7 +610,7 @@ impl Actor {
     /// agent (or a lens acting for one), or an effect, in its event's.
     pub fn confined_to_own_stream(&self) -> bool {
         match self {
-            Actor::Lens { on_behalf_of, .. } | Actor::Component { on_behalf_of, .. } => {
+            Actor::Page { on_behalf_of, .. } | Actor::Component { on_behalf_of, .. } => {
                 on_behalf_of.confined_to_own_stream()
             }
             _ => self.is_agent_driven() || matches!(self, Actor::Effect { .. } | Actor::Job { .. }),
@@ -619,7 +621,7 @@ impl Actor {
     pub fn agent_thread(&self) -> Option<Option<ThreadId>> {
         match self {
             Actor::Agent { thread_id, .. } => Some(*thread_id),
-            Actor::Lens { on_behalf_of, .. } | Actor::Component { on_behalf_of, .. } => {
+            Actor::Page { on_behalf_of, .. } | Actor::Component { on_behalf_of, .. } => {
                 on_behalf_of.agent_thread()
             }
             Actor::Human | Actor::System | Actor::Effect { .. } | Actor::Job { .. } => None,
@@ -630,7 +632,7 @@ impl Actor {
     /// for any other actor.
     pub fn presser(&self) -> Option<&Actor> {
         match self {
-            Actor::Lens { on_behalf_of, .. } | Actor::Component { on_behalf_of, .. } => {
+            Actor::Page { on_behalf_of, .. } | Actor::Component { on_behalf_of, .. } => {
                 Some(on_behalf_of)
             }
             _ => None,
@@ -641,18 +643,18 @@ impl Actor {
         match self {
             Actor::Human | Actor::System => Invoker::Human,
             Actor::Agent { .. } | Actor::Effect { .. } => Invoker::Agent,
-            Actor::Lens { on_behalf_of, .. } | Actor::Component { on_behalf_of, .. }
+            Actor::Page { on_behalf_of, .. } | Actor::Component { on_behalf_of, .. }
                 if on_behalf_of.invoker() == Invoker::Job =>
             {
                 Invoker::Job
             }
-            Actor::Lens { .. } | Actor::Component { .. } => Invoker::Lens,
+            Actor::Page { .. } | Actor::Component { .. } => Invoker::Page,
             Actor::Job { .. } => Invoker::Job,
         }
     }
 
     /// The `source` an event or audit row records: `human`, `agent:thr3`,
-    /// `page:acme/blocked#rows`, `system`, `effect:acme/notify`.
+    /// `oxplow:oxplow/page?page=acme/blocked`, `system`, `effect:acme/notify`.
     pub fn source(&self) -> String {
         match self {
             Actor::Human => "human".into(),
@@ -662,7 +664,11 @@ impl Actor {
             Actor::Agent {
                 thread_id: None, ..
             } => "agent".into(),
-            Actor::Lens { lens_id, .. } => format!("page:{lens_id}"),
+            // Its page, by its URI; a node's id (`#<node>`) is in `actor_id`.
+            Actor::Page { page_id, .. } => {
+                let page = page_id.split_once('#').map_or(page_id.as_str(), |(p, _)| p);
+                crate::uri::build::page_uri(page, &[])
+            }
             // It is its contribution, by its ref.
             Actor::Component { component, .. } => {
                 let (extension, id) = component.split_once('/').unwrap_or(("", component));
@@ -687,7 +693,7 @@ impl Actor {
             Actor::Agent {
                 thread_id: Some(t), ..
             } => Some(t.to_string()),
-            Actor::Lens { lens_id, .. } => Some(lens_id.clone()),
+            Actor::Page { page_id, .. } => Some(page_id.clone()),
             Actor::Component { component, .. } => Some(component.clone()),
             Actor::Effect { effect, .. } => Some(effect.clone()),
             Actor::Job {
@@ -705,7 +711,7 @@ impl Actor {
             Actor::Agent { thread_id, .. }
             | Actor::Effect { thread_id, .. }
             | Actor::Job { thread_id, .. } => *thread_id,
-            Actor::Lens { on_behalf_of, .. } | Actor::Component { on_behalf_of, .. } => {
+            Actor::Page { on_behalf_of, .. } | Actor::Component { on_behalf_of, .. } => {
                 on_behalf_of.thread_id()
             }
             _ => None,
@@ -719,7 +725,7 @@ impl Actor {
             Actor::Agent { stream_id, .. }
             | Actor::Effect { stream_id, .. }
             | Actor::Job { stream_id, .. } => *stream_id,
-            Actor::Lens { on_behalf_of, .. } | Actor::Component { on_behalf_of, .. } => {
+            Actor::Page { on_behalf_of, .. } | Actor::Component { on_behalf_of, .. } => {
                 on_behalf_of.stream_id()
             }
             _ => None,
@@ -731,7 +737,7 @@ impl Actor {
     pub fn session_id(&self) -> Option<AgentSessionId> {
         match self {
             Actor::Agent { session_id, .. } => *session_id,
-            Actor::Lens { on_behalf_of, .. } | Actor::Component { on_behalf_of, .. } => {
+            Actor::Page { on_behalf_of, .. } | Actor::Component { on_behalf_of, .. } => {
                 on_behalf_of.session_id()
             }
             _ => None,
@@ -752,11 +758,11 @@ impl Actor {
                 thread_id: *thread_id,
                 stream_id: Some(stream),
             },
-            Actor::Lens {
-                lens_id,
+            Actor::Page {
+                page_id,
                 on_behalf_of,
-            } => Actor::Lens {
-                lens_id: lens_id.clone(),
+            } => Actor::Page {
+                page_id: page_id.clone(),
                 on_behalf_of: Box::new(on_behalf_of.in_stream(stream)),
             },
             Actor::Component {
@@ -1346,12 +1352,12 @@ mod tests {
         assert_eq!(agent.source(), "agent:thr3");
         assert_eq!(agent.id().as_deref(), Some("thr3"));
         assert_eq!(agent.kind(), ActorKind::Agent);
-        let lens = Actor::Lens {
-            lens_id: "acme/blocked".into(),
+        let lens = Actor::Page {
+            page_id: "acme/blocked".into(),
             on_behalf_of: Box::new(agent.clone()),
         };
-        assert_eq!(lens.invoker(), Invoker::Lens);
-        assert_eq!(lens.source(), "page:acme/blocked");
+        assert_eq!(lens.invoker(), Invoker::Page);
+        assert_eq!(lens.source(), "oxplow:oxplow/page?page=acme/blocked");
         assert_eq!(lens.thread_id(), Some(ThreadId::new(3)));
         assert_eq!(Actor::Human.source(), "human");
         assert_eq!(Actor::System.invoker(), Invoker::Human);
@@ -1382,7 +1388,7 @@ mod tests {
         };
         let shown = component(Actor::Human);
         assert_eq!(shown.kind(), ActorKind::Component);
-        assert_eq!(shown.invoker(), Invoker::Lens);
+        assert_eq!(shown.invoker(), Invoker::Page);
         assert_eq!(
             shown.source(),
             "oxplow:oxplow/custom_component?custom_component=acme/board"
@@ -1426,8 +1432,8 @@ mod tests {
             agent.anchors().agent_session_id,
             Some(AgentSessionId::new(5))
         );
-        let lens = Actor::Lens {
-            lens_id: "acme/blocked".into(),
+        let lens = Actor::Page {
+            page_id: "acme/blocked".into(),
             on_behalf_of: Box::new(agent),
         };
         assert_eq!(lens.session_id(), Some(AgentSessionId::new(5)));
@@ -1450,8 +1456,8 @@ mod tests {
             thread_id: None,
             stream_id: None,
         };
-        let lens = |on: Actor| Actor::Lens {
-            lens_id: "acme/x".into(),
+        let lens = |on: Actor| Actor::Page {
+            page_id: "acme/x".into(),
             on_behalf_of: Box::new(on),
         };
         assert!(Actor::Human.may_confirm());

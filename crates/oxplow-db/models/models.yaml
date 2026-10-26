@@ -880,7 +880,7 @@
   tests:
     - { not_null: effect }
 - name: extension_run
-  version: 5
+  version: 6
   key: [run_id]
   description: "Each finished run of extension code, one row each: which contribution at which version and catalog generation, who ran it and on whose behalf, what caused it and where it sat, how it ended, what it cost and which scopes it called. What an extension actually did, never what it read or wrote: no input, result, credential value or prompt is kept. Kept 90 days, like a collector's events."
   columns:
@@ -891,7 +891,7 @@
     - { name: "kind", type: "TEXT", doc: "`collector`, `effect`, `command`, `implementation`, …" }
     - { name: "version", type: "TEXT", doc: "The extension's declared `version:` when it ran; NULL when it declares none." }
     - { name: "generation", type: "TEXT", doc: "The extension catalog's generation it ran against (`v_*` query results name theirs the same way); NULL for a run that holds none — a collector's, an effect's or a job's belongs to its extension's version. (v2)" }
-    - { name: "actor_kind", type: "TEXT", doc: "`human`, `agent`, `lens`, `system` or `effect`." }
+    - { name: "actor_kind", type: "TEXT", doc: "`human`, `agent`, `page`, `system` or `effect`." }
     - { name: "actor", type: "TEXT", doc: "Who, as an event source: `human`, `agent:thr3`, `system`, `effect:<ext>/<id>`, `effect:effort_policy:<id>`." }
     - { name: "stream_id", type: "INTEGER", doc: "The stream it ran for; NULL when none." }
     - { name: "thread_id", type: "INTEGER", doc: "The thread it ran for; NULL when none." }
@@ -1499,15 +1499,15 @@
     - { not_null: capability }
     - { not_null: provider }
 - name: command_audit
-  version: 2
+  version: 3
   key: [id]
-  description: "Every command run on the bus, as audited: who ran it, how it ended, and the error when it didn't. The record of how agents, people, lenses and effects use oxplow's commands — count them by `command`, `actor_kind` and `outcome`. A run refused before it started (`invalid`: its input didn't match the command's schema; `denied`: the actor may not run it) is a row too."
+  description: "Every command run on the bus, as audited: who ran it, how it ended, and the error when it didn't. The record of how agents, people, pages and effects use oxplow's commands — count them by `command`, `actor_kind` and `outcome`. A run refused before it started (`invalid`: its input didn't match the command's schema; `denied`: the actor may not run it) is a row too."
   columns:
     - { name: "id", type: "INTEGER", doc: "Audit row id, in run order." }
     - { name: "at", type: "TEXT", doc: "When it ran (RFC 3339)." }
     - { name: "command", type: "TEXT", doc: "The command id (`oxplow.work_item.create`)." }
-    - { name: "actor_kind", type: "TEXT", doc: "Who ran it: `human`, `agent`, `lens`, `system`, `effect` or `job`." }
-    - { name: "actor_id", type: "TEXT", doc: "The actor, by kind: an agent's thread (`thr3`), a lens's or effect's id; NULL for a person or the system." }
+    - { name: "actor_kind", type: "TEXT", doc: "Who ran it: `human`, `agent`, `page`, `component`, `system`, `effect` or `job`." }
+    - { name: "actor_id", type: "TEXT", doc: "The actor, by kind: an agent's thread (`thr3`), a page's or effect's id; NULL for a person or the system." }
     - { name: "outcome", type: "TEXT", doc: "`ok`; `invalid` (its input was refused); `denied` (the actor may not run it); `error` (it ran and failed)." }
     - { name: "error", type: "TEXT", doc: "What went wrong, for an outcome other than `ok`." }
     - { name: "thread_id", type: "INTEGER", doc: "The thread it ran on, if any (v_thread.id)." }
@@ -1515,7 +1515,7 @@
     - { name: "via", type: "TEXT", doc: "What the actor ran it through, when not directly: `assistant:ast3` for a command the Assistant ran for the person, which they approved. Assistant sessions live in memory, so an id may repeat after a restart. NULL otherwise. (v2)" }
   tests:
     - { accepted_values: { column: outcome, values: [ok, invalid, denied, error] } }
-    - { accepted_values: { column: actor_kind, values: [human, agent, lens, component, system, effect, job] } }
+    - { accepted_values: { column: actor_kind, values: [human, agent, page, component, system, effect, job] } }
 - name: zone
   version: 1
   description: "The project's architectural zone table (`zones:` in `.oxplow/project.yaml`) with the effect it has on the primary worktree's files: one row per rule in evaluation order (the first matching rule claims a file), each with how many files it claims, then a closing `other` row for the files no rule matched. Read live when a query names it. Change the table with `oxplow.config.set { key: \"zones\" }`; a large `other` count or a `v_zone_unmatched` full of real source means the table has gone stale as the repo grew."
@@ -1624,7 +1624,7 @@
     - { name: "spends", type: "INT", doc: "1 when a run over it spends the person's money (a model call on their provider key), so a tool over it asks before it runs; 0 otherwise. (v2)" }
     - { name: "summary", type: "TEXT", doc: "What it lets a handler do." }
 - name: command_proposal
-  version: 4
+  version: 5
   description: "Commands an agent ran that need a person's confirmation: each kept with its preview and what it would have done, until a person approves (the command then runs as them) or declines it. A newer proposal with the same `key` supersedes a pending one. The Alerts panel shows the pending ones."
   columns:
     - { name: "id", type: "INTEGER", doc: "Proposal id." }
@@ -1632,8 +1632,8 @@
     - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
     - { name: "command", type: "TEXT", doc: "The command (`oxplow.config.set`, `oxplow.work_item.delete`)." }
     - { name: "input", type: "TEXT", doc: "Its input (JSON)." }
-    - { name: "actor_kind", type: "TEXT", doc: "Who proposed it: `agent` or `lens`." }
-    - { name: "actor_id", type: "TEXT", doc: "The proposing thread (`thr3`) or lens, when known." }
+    - { name: "actor_kind", type: "TEXT", doc: "Who proposed it: `agent`, `page` or `effect`." }
+    - { name: "actor_id", type: "TEXT", doc: "The proposing thread (`thr3`), page or effect, when known." }
     - { name: "thread_id", type: "INTEGER", doc: "The thread it was proposed in (v_thread.id), if any." }
     - { name: "stream_id", type: "INTEGER", doc: "The stream it was proposed in, if any." }
     - { name: "key", type: "TEXT", doc: "What it supersedes on: `oxplow:oxplow/config?key=<key>` for a config change, else the command and its input." }

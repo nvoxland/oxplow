@@ -1,5 +1,5 @@
 //! Running a lens's actions (P6.B1, `.context/extensions.md`): each is a
-//! command the lens offers, run through the bus as `Actor::Lens` acting for
+//! command the lens offers, run through the bus as `Actor::Page` acting for
 //! whoever pressed it — a person from the UI, the calling agent from MCP.
 //! The bus applies that actor's whole policy (the agent policy,
 //! confirmation), so a lens offers a button and grants no power of its
@@ -177,8 +177,8 @@ pub(crate) fn prepare_resolved(
         Some(given) => filled(bound, given, &action.fixed)?,
     };
     Ok(Prepared {
-        actor: Actor::Lens {
-            lens_id: actor_id.to_string(),
+        actor: Actor::Page {
+            page_id: actor_id.to_string(),
             on_behalf_of: Box::new(on_behalf_of),
         },
         command: action.command,
@@ -1035,7 +1035,7 @@ view:
             .unwrap();
         assert_eq!(state(&fx.svc, fx.task).await, "done");
         let (kind, id) = audit_actor(&fx.svc).await;
-        assert_eq!(kind, "lens");
+        assert_eq!(kind, "page");
         assert_eq!(id.as_deref(), Some("acme/tasks"));
     }
 
@@ -1316,7 +1316,7 @@ view:
             .unwrap();
         assert_eq!(
             audit.actor_kind,
-            oxplow_domain::events::schema::ActorKind::Lens
+            oxplow_domain::events::schema::ActorKind::Page
         );
         assert_eq!(audit.actor_id.as_deref(), Some("acme/tasks"));
         assert_eq!(audit.thread_id, Some(fx.thread));
@@ -1637,7 +1637,7 @@ view:
         .unwrap();
         let item = out.result["uri"].as_str().unwrap().to_string();
         let (kind, _) = audit_actor(&fx.svc).await;
-        assert_eq!(kind, "lens");
+        assert_eq!(kind, "page");
         assert_eq!(column(&fx.svc, &item, "title").await, "Made by a form");
         assert_eq!(column(&fx.svc, &item, "body").await, "from the form");
         // A node that isn't a form can't be submitted.

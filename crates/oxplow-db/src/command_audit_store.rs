@@ -19,7 +19,7 @@ pub(crate) fn actor_kind_str(k: ActorKind) -> &'static str {
     match k {
         ActorKind::Human => "human",
         ActorKind::Agent => "agent",
-        ActorKind::Lens => "lens",
+        ActorKind::Page => "page",
         ActorKind::Component => "component",
         ActorKind::System => "system",
         ActorKind::Effect => "effect",
@@ -31,7 +31,7 @@ pub(crate) fn parse_actor_kind(s: &str) -> Result<ActorKind, DomainError> {
     Ok(match s {
         "human" => ActorKind::Human,
         "agent" => ActorKind::Agent,
-        "lens" => ActorKind::Lens,
+        "page" => ActorKind::Page,
         "component" => ActorKind::Component,
         "system" => ActorKind::System,
         "effect" => ActorKind::Effect,
@@ -351,7 +351,7 @@ mod tests {
                 tx,
                 &NewCommandAudit {
                     command: "oxplow.config.set".into(),
-                    actor_kind: ActorKind::Lens,
+                    actor_kind: ActorKind::Page,
                     actor_id: Some("acme/x".into()),
                     thread_id: None,
                     session_id: None,

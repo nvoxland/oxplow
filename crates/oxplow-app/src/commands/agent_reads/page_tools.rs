@@ -463,7 +463,7 @@ fn show_op(services: ServicesSlot) -> Op {
                     })
                     .await
                     .map_err(|e| page_error(p.page.as_deref().unwrap_or("inline"), e))?;
-                let text = crate::pages::text::page_text(&svc, &svc.layout.project_dir, &run, &ctx)
+                let text = crate::pages::text::page_text(&svc, &svc.layout.project_dir, &run)
                     .await
                     .map_err(failed)?;
                 // Beside the conversation: a tab of the caller's thread in
@@ -570,14 +570,10 @@ fn run_op(services: ServicesSlot) -> Op {
                         "tree": run.tree,
                     }),
                     _ => {
-                        let mut text = crate::pages::text::page_text(
-                            &svc,
-                            &svc.layout.project_dir,
-                            &run,
-                            &ctx,
-                        )
-                        .await
-                        .map_err(|e| page_error(&name, e))?;
+                        let mut text =
+                            crate::pages::text::page_text(&svc, &svc.layout.project_dir, &run)
+                                .await
+                                .map_err(|e| page_error(&name, e))?;
                         if let Some((stream, _)) = &draft_of {
                             text = format!(
                                 "Draft of {} (stream {stream}, not deployed)\n{text}",
@@ -1157,14 +1153,9 @@ mod definition_page_tests {
             yaml.rows[0][text],
             SqlCell::Text(format!("```yaml\n{INLINE_SPEC}\n```"))
         );
-        let text = crate::pages::text::page_text(
-            &f.svc,
-            &f.svc.layout.project_dir,
-            &run,
-            &crate::extensions::ViewContext::default(),
-        )
-        .await
-        .unwrap();
+        let text = crate::pages::text::page_text(&f.svc, &f.svc.layout.project_dir, &run)
+            .await
+            .unwrap();
         assert!(text.contains("Inline release"), "{text}");
         assert!(text.contains(INLINE_SPEC), "{text}");
         assert!(text.contains("total"), "{text}");

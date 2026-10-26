@@ -107,7 +107,7 @@ impl CommandBus {
                 let supersedes = inserted.superseded.clone();
                 let proposed = Envelope::typed::<CommandProposed>(
                     actor_c.source(),
-                    &CommandProposedV3 {
+                    &CommandProposedV4 {
                         proposal: inserted.id,
                         command: row.command.clone(),
                         actor_kind: actor_c.kind().try_into()?,

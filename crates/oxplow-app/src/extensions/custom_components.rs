@@ -1026,7 +1026,6 @@ mod tests {
     /// A page's custom viz names one of its extension's components: none,
     /// or one it doesn't declare, is an error at the page.
     #[test]
-    #[ignore = "page loading never checks a custom viz's component (shape_problem is only called with no components)"]
     fn a_custom_viz_needs_one_of_its_extensions_components() {
         for (page, says) in [
             (

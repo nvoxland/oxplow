@@ -7,7 +7,7 @@
           "enum": [
             "human",
             "agent",
-            "lens",
+            "page",
             "system"
           ],
           "type": "string"
@@ -22,7 +22,7 @@
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "`command.proposed@3`: an agent or an effect ran a command that needs a\nperson's confirmation; it is kept as a proposal until a person decides\n— v1, with an effect among the actor kinds (P8.D8). A v1 payload is a\nv2 one as is.",
+  "description": "`command.proposed@4`: an agent or an effect ran a command that needs a\nperson's confirmation; it is kept as a proposal until a person decides.\nv4 names a page among the actor kinds where v3 named a lens (V114\nrewrote v3 events).",
   "properties": {
     "actor_id": {
       "type": [
@@ -61,6 +61,6 @@
     "actor_kind",
     "destructive"
   ],
-  "title": "CommandProposedV3",
+  "title": "CommandProposedV4",
   "type": "object"
 }

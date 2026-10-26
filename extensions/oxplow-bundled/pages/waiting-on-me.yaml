@@ -1,6 +1,7 @@
 title: Waiting on Me
 description: Questions your agents are waiting on you to answer, work handed to a thread with no agent there, blocked work items, and open notes-to-self across the project.
-hidden: true
+icon: bell
+category: Work
 data:
   waiting_on_me:
     sql: |

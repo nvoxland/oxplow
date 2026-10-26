@@ -1273,14 +1273,7 @@ async fn page_example(
         }
     }
     if let Some(want) = ex.expect.get("text") {
-        match oxplow_app::pages::text::page_text(
-            &host.svc,
-            &host.root,
-            &run,
-            &oxplow_app::extensions::ViewContext::default(),
-        )
-        .await
-        {
+        match oxplow_app::pages::text::page_text(&host.svc, &host.root, &run).await {
             Err(e) => report.errors.push(format!(
                 "{shown}:1: page `{page}` has no text: {e} — fix: the page"
             )),

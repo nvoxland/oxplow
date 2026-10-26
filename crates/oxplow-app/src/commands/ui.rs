@@ -356,8 +356,8 @@ mod tests {
             thread_id: Some(ThreadId::new(fx.thread.value())),
             stream_id: None,
         };
-        let lens = Actor::Lens {
-            lens_id: "acme/errors".into(),
+        let lens = Actor::Page {
+            page_id: "acme/errors".into(),
             on_behalf_of: Box::new(Actor::Human),
         };
         for actor in [agent, lens] {

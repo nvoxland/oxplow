@@ -72,7 +72,7 @@ use oxplow_db::{
 };
 use oxplow_domain::events::schema::{
     CommandApproved, CommandApprovedV2, CommandDeclined, CommandDeclinedV2, CommandExecuted,
-    CommandExecutedV4, CommandOutcome as Outcome, CommandProposed, CommandProposedV3,
+    CommandExecutedV5, CommandOutcome as Outcome, CommandProposed, CommandProposedV4,
 };
 use oxplow_domain::uri::build::{command_uri, proposal_uri};
 use oxplow_domain::{

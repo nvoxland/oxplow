@@ -604,8 +604,8 @@ mod tests {
         std::fs::write(root.join("a.txt"), "one\n").unwrap();
         commit_all(&root, "base");
         let stream = svc.stream_store.list().await.unwrap()[0].id.to_string();
-        let lens = Actor::Lens {
-            lens_id: "oxplow-foundation/uncommitted".into(),
+        let lens = Actor::Page {
+            page_id: "oxplow-foundation/uncommitted".into(),
             on_behalf_of: Box::new(Actor::Human),
         };
         std::fs::write(root.join("a.txt"), "two\n").unwrap();
@@ -640,8 +640,8 @@ mod tests {
             .await
             .expect("confirmed, a lens discards for the person");
         std::fs::write(root.join("a.txt"), "four\n").unwrap();
-        let for_agent = Actor::Lens {
-            lens_id: "oxplow-foundation/uncommitted".into(),
+        let for_agent = Actor::Page {
+            page_id: "oxplow-foundation/uncommitted".into(),
             on_behalf_of: Box::new(Actor::Agent {
                 session_id: None,
                 thread_id: Some(f.thread),

@@ -110,7 +110,7 @@ ids. A command declares (`oxplow_domain::commands::CommandSpec`):
 
 `Actor` is who runs it: `Human`, `Agent { thread_id, stream_id }`,
 `Page { page_id, on_behalf_of }`, `System`. Its `source()` (`human`,
-`agent:thr3`, `page:acme/x` — an event source, not a URI) is what the event and audit record.
+`agent:thr3`, a page's URI `oxplow:oxplow/page?page=acme/x`) is what the event and audit record.
 
 `Actor::Job` is host-derived from a validated job/attempt/fence identity
 (source `job:<id>:<attempt>:<fence>`): what a job's model tool calls run

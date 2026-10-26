@@ -493,8 +493,8 @@ impl<'a> PageRunner<'a> {
         let input =
             serde_json::Value::Object(bind_args(args, params, earlier).into_iter().collect());
         // The page reads for whoever views it.
-        let actor = Actor::Lens {
-            lens_id: format!("{}#{}", page.id, decl.name),
+        let actor = Actor::Page {
+            page_id: format!("{}#{}", page.id, decl.name),
             on_behalf_of: Box::new(viewer.clone()),
         };
         let outcome = self

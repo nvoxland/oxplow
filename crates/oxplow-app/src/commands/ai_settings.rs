@@ -303,8 +303,8 @@ mod tests {
 
         // A person's lens (Settings → AI as a form) runs it, and its record
         // keeps the key out too; a lens an agent presses can't.
-        let lens = |presser: Actor| Actor::Lens {
-            lens_id: "oxplow-foundation/ai".into(),
+        let lens = |presser: Actor| Actor::Page {
+            page_id: "oxplow-foundation/ai".into(),
             on_behalf_of: Box::new(presser),
         };
         run(

@@ -4,8 +4,11 @@ category: Activity
 keywords: efforts sessions commits threads time axis history
 params:
 - name: from
+  role: filter
 - name: to
+  role: filter
 - name: thread
+  role: filter
 view:
   component:
     id: timeline

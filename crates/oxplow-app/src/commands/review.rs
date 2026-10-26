@@ -605,8 +605,8 @@ mod tests {
             thread_id: Some(ThreadId::new(fx.thread.value())),
             stream_id: None,
         };
-        let through_lens = Actor::Lens {
-            lens_id: "acme/review".into(),
+        let through_lens = Actor::Page {
+            page_id: "acme/review".into(),
             on_behalf_of: Box::new(agent.clone()),
         };
         fx.svc

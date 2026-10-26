@@ -119,7 +119,7 @@ mod tests {
                                     | crate::extensions::ParamRole::Filter
                             )
                         )
-                        || ["stream_id", "thread_id"].contains(&p.name.as_str());
+                        || ["stream_id", "thread_id", "head_sha"].contains(&p.name.as_str());
                     if !filled {
                         needy.push(format!("{} needs `{}`", page.id, p.name));
                     }
@@ -3895,8 +3895,8 @@ mod tests {
         };
         // An agent may run it too, through a lens or not: oxplow puts no
         // wall between a person and their agent. It doesn't ask.
-        let through_lens = oxplow_domain::Actor::Lens {
-            lens_id: "oxplow-bundled/packet".into(),
+        let through_lens = oxplow_domain::Actor::Page {
+            page_id: "oxplow-bundled/packet".into(),
             on_behalf_of: Box::new(agent.clone()),
         };
         review(

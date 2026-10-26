@@ -7,9 +7,13 @@
           "enum": [
             "human",
             "agent",
-            "lens",
             "system"
           ],
+          "type": "string"
+        },
+        {
+          "const": "page",
+          "description": "A page acting for whoever pressed it.",
           "type": "string"
         },
         {
@@ -42,7 +46,7 @@
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "Version 4 adds a custom component among the actors (v3, durable job\nattribution; V93 rewrote v3 events: each is a v4 one as is).",
+  "description": "Version 5 names a page among the actors where v4 named a lens (V114\nrewrote v4 events; v4 added a custom component, v3 durable job\nattribution).",
   "properties": {
     "actor_id": {
       "type": [
@@ -77,6 +81,6 @@
     "audit_id",
     "undoable"
   ],
-  "title": "CommandExecutedV4",
+  "title": "CommandExecutedV5",
   "type": "object"
 }

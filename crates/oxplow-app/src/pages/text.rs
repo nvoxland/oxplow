@@ -13,20 +13,19 @@ use oxplow_domain::DomainError;
 
 use super::runner::{PageRun, RunNode};
 use super::schema::{Node, NodeKind, Page};
-use crate::extensions::{ViewContext, VizRun};
+use crate::extensions::VizRun;
 
 /// `run` as text.
 pub async fn page_text(
     svc: &crate::Services,
     root: &Path,
     run: &PageRun,
-    ctx: &ViewContext,
 ) -> Result<String, DomainError> {
     let mut out = format!("# {}\n", run.page.title);
-    write_tree(svc, root, run, &run.tree, "", 2, ctx, &mut out).await?;
+    write_tree(svc, root, run, &run.tree, "", 2, &mut out).await?;
     if let Some(rail) = &run.rail {
         out.push_str("\n## Rail\n");
-        write_tree(svc, root, run, rail, "", 3, ctx, &mut out).await?;
+        write_tree(svc, root, run, rail, "", 3, &mut out).await?;
     }
     Ok(out)
 }
@@ -70,7 +69,6 @@ fn write_tree<'r>(
     at: &'r RunNode,
     prefix: &'r str,
     level: usize,
-    ctx: &'r ViewContext,
     out: &'r mut String,
 ) -> BoxFuture<'r, Result<(), DomainError>> {
     Box::pin(async move {
@@ -82,7 +80,7 @@ fn write_tree<'r>(
             if let Some(child) = &at.embed {
                 out.push_str(&heading(&child.page.title));
                 let nested = format!("{id}/");
-                write_tree(svc, root, child, &child.tree, &nested, level + 1, ctx, out).await?;
+                write_tree(svc, root, child, &child.tree, &nested, level + 1, out).await?;
             }
             return Ok(());
         };
@@ -97,7 +95,7 @@ fn write_tree<'r>(
                     level
                 };
                 for child in &at.children {
-                    write_tree(svc, root, run, child, prefix, deeper, ctx, out).await?;
+                    write_tree(svc, root, run, child, prefix, deeper, out).await?;
                 }
             }
             NodeKind::Viz { from, config: lens } => {
@@ -121,7 +119,7 @@ fn write_tree<'r>(
                     let title = def.title.as_deref().unwrap_or(&child.page.title);
                     out.push_str(&heading(title));
                     let nested = format!("{id}/");
-                    write_tree(svc, root, child, &child.tree, &nested, level + 1, ctx, out).await?;
+                    write_tree(svc, root, child, &child.tree, &nested, level + 1, out).await?;
                 }
                 (None, Some(e)) => {
                     out.push_str(&heading(def.title.as_deref().unwrap_or("Embedded page")));
@@ -144,7 +142,7 @@ fn write_tree<'r>(
             }
             NodeKind::Slot { .. } => {
                 for child in &at.children {
-                    write_tree(svc, root, run, child, prefix, level, ctx, out).await?;
+                    write_tree(svc, root, run, child, prefix, level, out).await?;
                 }
             }
         }

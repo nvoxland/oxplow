@@ -945,15 +945,15 @@ mod tests {
         let dir = developing_oxplow_with_a_stale_foundation().await;
         let p = dir.path();
         let acme = p.join(".oxplow/extensions/acme");
-        std::fs::create_dir_all(acme.join("lenses")).unwrap();
+        std::fs::create_dir_all(acme.join("pages")).unwrap();
         std::fs::write(
             acme.join("extension.yaml"),
             "manifest: 2\nname: acme\nintent:\n  purpose: test\n",
         )
         .unwrap();
         std::fs::write(
-            acme.join("lenses/one.yaml"),
-            "title: One\nquery: \"SELECT 1 AS n\"\n",
+            acme.join("pages/one.yaml"),
+            "title: One\ndata:\n  q: { sql: \"SELECT 1 AS n\" }\nview: { viz: table, from: q }\n",
         )
         .unwrap();
         std::fs::write(

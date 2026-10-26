@@ -145,13 +145,7 @@ pub async fn page_text(svc: &Services, run_id: String) -> Result<String, IpcErro
         .page_runs
         .get(&run_id)
         .ok_or_else(|| DomainError::Invalid(format!("no open page run `{run_id}`")))?;
-    Ok(oxplow_app::pages::text::page_text(
-        svc,
-        svc.worktrees.project_dir(),
-        &run,
-        &ViewContext::default(),
-    )
-    .await?)
+    Ok(oxplow_app::pages::text::page_text(svc, svc.worktrees.project_dir(), &run).await?)
 }
 
 /// One page's definition, by `<extension>/<slug>`.

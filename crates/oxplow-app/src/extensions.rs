@@ -1152,7 +1152,7 @@ pub(crate) fn bind_params(
 }
 
 /// A button on a lens: a command it runs (P6.B1, target §11.4). The
-/// command goes through the bus as `Actor::Lens` acting for whoever
+/// command goes through the bus as `Actor::Page` acting for whoever
 /// pressed it, so every policy — the agent policy, confirmation
 /// — applies as if they had run it themselves; a lens can offer a button
 /// but never grant a power. Copying the result and handing it to the
@@ -6873,7 +6873,7 @@ view:
     #[test]
     fn a_slot_mount_to_a_missing_page_names_its_line() {
         let dir = tempfile::tempdir().unwrap();
-        let manifest = format!("{EXT_V2}ui:\n  slots:\n    - {{ slot: diff.file.header, page: tasks }}\n    - {{ slot: diff.file.header, page: nope }}\n");
+        let manifest = format!("{EXT_V2}ui:\n  slots:\n    - {{ slot: oxplow-foundation/diff.file-header, page: tasks }}\n    - {{ slot: oxplow-foundation/diff.file-header, page: nope }}\n");
         write(
             dir.path(),
             ".oxplow/extensions/review/extension.yaml",
@@ -7328,15 +7328,15 @@ commands:
         assert_eq!(named[0].origin, "bundled");
     }
 
-    /// A mount's slot is a core slot or `<extension>/<page>.<slot>`, and
-    /// its page one of the extension's own.
+    /// A mount's slot is `<extension>/<page>.<slot>`, and its page one of
+    /// the extension's own.
     #[test]
     fn slots_must_name_a_known_slot_and_an_existing_page() {
         let dir = tempfile::tempdir().unwrap();
         write(
             dir.path(),
             ".oxplow/extensions/mine/extension.yaml",
-            "manifest: 2\nname: mine\nintent:\n  purpose: test\nui:\n  slots:\n    - { slot: diff.file.header, page: nope }\n    - { slot: sidebar, page: a }\n    - { slot: diff.file.header, page: a }\n",
+            "manifest: 2\nname: mine\nintent:\n  purpose: test\nui:\n  slots:\n    - { slot: acme/host.sections, page: nope }\n    - { slot: sidebar, page: a }\n    - { slot: acme/host.sections, page: a }\n",
         );
         write(
             dir.path(),
@@ -7352,25 +7352,10 @@ commands:
                 .iter()
                 .map(|s| (format!("{}.{}", s.host, s.slot), s.page.as_str()))
                 .collect();
-        assert_eq!(mounted, [("diff.file.header".to_string(), "mine/a")]);
+        assert_eq!(mounted, [("acme/host.sections".to_string(), "mine/a")]);
         assert_eq!(e.errors.len(), 2, "{:?}", e.errors);
         assert!(e.errors.iter().any(|m| m.contains("nope")));
         assert!(e.errors.iter().any(|m| m.contains("sidebar")));
-    }
-
-    /// A core slot is one region of its page: it takes no `at`.
-    #[test]
-    fn a_region_takes_no_placement() {
-        let (_d, ext) = load_x(
-            &[(
-                "region",
-                &viz_page("params: [{ name: path }]\n", "SELECT :path AS p", ""),
-            )],
-            "ui:\n  slots:\n    - { slot: diff.file.header, page: region, at: start }\n",
-        );
-        assert!(ext.ui.page_slots.is_empty(), "the bad mount goes");
-        let errs = ext.errors.join("\n");
-        assert!(errs.contains("is one region of its page"), "{errs}");
     }
 
     /// Another extension mounts its page at a page's slot
@@ -8762,96 +8747,6 @@ commands:
         );
     }
 
-    /// The mounts of `ext` as `(<host>.<slot>, page)`.
-    fn mounts(ext: &Extension) -> Vec<(String, String)> {
-        ext.ui
-            .page_slots
-            .iter()
-            .map(|s| (format!("{}.{}", s.host, s.slot), s.page.clone()))
-            .collect()
-    }
-
-    /// A core slot gives the params it names: a page mounted there may
-    /// declare any of them, and any other only with a `default`.
-    #[test]
-    fn a_core_slot_mount_takes_the_params_the_slot_gives() {
-        let (_d, ext) = load_x(
-            &[
-                ("t", &viz_page("params: [{ name: path }]\n", "SELECT :path AS p", "")),
-                ("th", &viz_page("params: [{ name: stream_id }]\n", "SELECT :stream_id AS s", "")),
-                ("plain", &viz_page("", "SELECT 1 AS n", "")),
-                ("dflt", &viz_page("params: [{ name: other, default: x }]\n", "SELECT :other AS o", "")),
-                ("needs", &viz_page("params: [{ name: other }]\n", "SELECT :other AS o", "")),
-            ],
-            "ui:\n  slots:\n    - { slot: diff.file.header, page: t }\n    - { slot: diff.file.header, page: th }\n    - { slot: diff.file.header, page: plain }\n    - { slot: diff.file.header, page: dflt }\n    - { slot: diff.file.header, page: needs }\n",
-        );
-        let at = |page: &str| ("diff.file.header".to_string(), format!("x/{page}"));
-        assert_eq!(
-            mounts(&ext),
-            vec![at("t"), at("th"), at("plain"), at("dflt")]
-        );
-        let errs = ext.errors.join("\n");
-        assert!(
-            errs.contains("page `needs` also needs other (give each a `default`)"),
-            "{errs}"
-        );
-    }
-
-    /// A file diff's header strip takes pages about the file: its path and
-    /// the two revisions the diff reads, and the stream.
-    #[test]
-    fn the_diff_file_header_slot_passes_the_path_and_both_revisions() {
-        let dir = tempfile::tempdir().unwrap();
-        let manifest = format!(
-            "{EXT_V2}ui:\n  slots:\n    - {{ slot: diff.file.header, page: partners }}\n    - {{ slot: diff.file.header, page: other }}\n"
-        );
-        write(
-            dir.path(),
-            ".oxplow/extensions/review/extension.yaml",
-            &manifest,
-        );
-        write(
-            dir.path(),
-            ".oxplow/extensions/review/pages/partners.yaml",
-            &viz_page(
-                "title: Partners\nparams: [{ name: path }, { name: left_revision }, { name: right_revision }, { name: stream_id }]\n",
-                "SELECT :path AS path, :left_revision AS l, :right_revision AS r, :stream_id AS s",
-                "",
-            ),
-        );
-        write(
-            dir.path(),
-            ".oxplow/extensions/review/pages/other.yaml",
-            &viz_page(
-                "title: Other\nparams: [{ name: sha }]\n",
-                "SELECT :sha AS n",
-                "",
-            ),
-        );
-        let e = only(dir.path(), "review");
-        assert_eq!(
-            mounts(&e),
-            vec![(
-                "diff.file.header".to_string(),
-                "review/partners".to_string()
-            )]
-        );
-        let errs = e.errors.join("\n");
-        for param in [
-            "path",
-            "left_revision",
-            "right_revision",
-            "stream_id",
-            "sha",
-        ] {
-            assert!(errs.contains(param), "{param}: {errs}");
-        }
-        assert!(
-            errs.contains("extension.yaml:11:") && errs.contains("page `other`"),
-            "{errs}"
-        );
-    }
-
     #[test]
     fn this_repos_own_extension_loads_clean() {
         let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
@@ -9847,7 +9742,7 @@ commands:
     }
 
     #[test]
-    fn change_links_and_slots() {
+    fn change_link_kinds_name_their_revisions() {
         let (_d, ext) = load_x(
             &[
                 (
@@ -9858,10 +9753,8 @@ commands:
                         "columns:\n  - { key: path, link: { kind: diff-at, line: ln, base: b, head: h } }\n  - { key: dup, link: { kind: compare, head: h } }\n",
                     ),
                 ),
-                ("both", &viz_page("params: [{ name: left_revision }]\n", "SELECT :left_revision AS l", "")),
-                ("none", &viz_page("params: [{ name: other }]\n", "SELECT :other AS o", "")),
             ],
-            "ui:\n  slots:\n    - { slot: diff.file.header, page: files }\n    - { slot: diff.file.header, page: both }\n    - { slot: diff.file.header, page: none }\n",
+            "",
         );
         let link = node(&ext, "files").unwrap().columns[0]
             .link
@@ -9871,17 +9764,6 @@ commands:
         assert_eq!(
             (link.base.as_deref(), link.head.as_deref()),
             (Some("b"), Some("h"))
-        );
-        let at = |page: &str| ("diff.file.header".to_string(), format!("x/{page}"));
-        assert_eq!(
-            mounts(&ext),
-            vec![at("files"), at("both")],
-            "a slot page takes only the slot's params"
-        );
-        let errs = ext.errors.join("\n");
-        assert!(
-            errs.contains("page `none`") && errs.contains("path"),
-            "{errs}"
         );
     }
 

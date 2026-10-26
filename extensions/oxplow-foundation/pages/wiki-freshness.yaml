@@ -4,6 +4,7 @@ icon: book-open
 category: Knowledge
 params:
 - name: slug
+  role: filter
   label: Wiki page (its slug)
 data:
   wiki_freshness:

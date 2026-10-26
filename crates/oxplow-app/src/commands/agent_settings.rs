@@ -223,8 +223,8 @@ mod tests {
             thread_id: Some(fx.thread),
             stream_id: None,
         };
-        let lens = |presser: Actor| Actor::Lens {
-            lens_id: "oxplow-foundation/agents".into(),
+        let lens = |presser: Actor| Actor::Page {
+            page_id: "oxplow-foundation/agents".into(),
             on_behalf_of: Box::new(presser),
         };
         for actor in [agent.clone(), lens(agent)] {
@@ -276,8 +276,8 @@ mod tests {
             thread_id: Some(fx.thread),
             stream_id: None,
         };
-        let lens = Actor::Lens {
-            lens_id: "oxplow-foundation/agents-prompt".into(),
+        let lens = Actor::Page {
+            page_id: "oxplow-foundation/agents-prompt".into(),
             on_behalf_of: Box::new(agent.clone()),
         };
         for actor in [agent, lens] {

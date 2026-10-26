@@ -19,8 +19,8 @@ async fn a_secret_set_by_anyone_is_never_read_back() {
         thread_id: Some(fx.thread),
         stream_id: None,
     };
-    let lens = Actor::Lens {
-        lens_id: "oxplow-foundation/ai-providers".into(),
+    let lens = Actor::Page {
+        page_id: "oxplow-foundation/ai-providers".into(),
         on_behalf_of: Box::new(agent.clone()),
     };
     let mut results = Vec::new();
@@ -118,8 +118,8 @@ async fn a_credential_or_secret_set_by_anyone_is_never_read_back() {
         thread_id: Some(fx.thread),
         stream_id: None,
     };
-    let lens = Actor::Lens {
-        lens_id: "oxplow-foundation/extensions-credentials".into(),
+    let lens = Actor::Page {
+        page_id: "oxplow-foundation/extensions-credentials".into(),
         on_behalf_of: Box::new(agent.clone()),
     };
     let mut results = Vec::new();

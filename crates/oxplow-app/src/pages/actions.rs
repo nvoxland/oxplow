@@ -444,8 +444,8 @@ pub async fn submit_page_form(
     let merged = crate::viz_actions::filled(defaults, input, &form.fixed)?;
     svc.commands
         .run(
-            &Actor::Lens {
-                lens_id: format!("{}#{id}", holder.page.id),
+            &Actor::Page {
+                page_id: format!("{}#{id}", holder.page.id),
                 on_behalf_of: Box::new(on_behalf_of),
             },
             &form.command.unwrap_or_default(),
@@ -513,6 +513,32 @@ pub async fn page_action_form(
         .find(|a| a.id == action_id && a.form)
         .cloned()
         .ok_or_else(|| invalid("/action", format!("no form action `{action_id}`")))?;
+    // A one-row action reads its node's one row, which the server holds.
+    let one_row = match (&row, &rows) {
+        (None, Some(result)) if action.one_row => match result.rows.as_slice() {
+            [only] => Some(
+                result
+                    .columns
+                    .iter()
+                    .cloned()
+                    .zip(only.iter().cloned())
+                    .collect::<BTreeMap<_, _>>(),
+            ),
+            rows => {
+                return Err(invalid(
+                    "/action",
+                    format!(
+                        "`{action_id}` runs on its node's one row, but it has {}",
+                        rows.len()
+                    ),
+                ))
+            }
+        },
+        _ => None,
+    };
+    if one_row.is_some() {
+        return form_start(svc, action, &params, one_row.as_ref()).await;
+    }
     // A row the presser names must be one the run holds.
     let row = match (row, rows) {
         (Some(given), Some(result)) => Some(

@@ -555,7 +555,7 @@ impl SqliteEventLogStore {
 mod tests {
     use super::*;
     use oxplow_domain::events::schema::{
-        ActorKind, CommandExecuted, CommandExecutedV4, CommandOutcome, ConfigChanged,
+        ActorKind, CommandExecuted, CommandExecutedV5, CommandOutcome, ConfigChanged,
         ConfigChangedV2, WorkItemStateChanged, WorkItemStateChangedV1,
     };
     use serde_json::{json, Value};
@@ -639,7 +639,7 @@ mod tests {
         .with_subject(["oxplow:oxplow/work_item?id=tsk4&provider=oxplow"]);
         let e2 = Envelope::typed::<CommandExecuted>(
             "agent:thr4",
-            &CommandExecutedV4 {
+            &CommandExecutedV5 {
                 command: "oxplow.work_item.transition".into(),
                 actor_kind: ActorKind::Agent,
                 actor_id: Some("thr4".into()),
