@@ -9,8 +9,8 @@ broader "Monaco at the core, custom shell around it" rationale, see
 ## The editor viz
 
 The working tree's file opens on oxplow-foundation's `editor` page, a
-lens (`lenses/editor.yaml`: params `uri`, `path`, `lines` a filter)
-over the kit's **`editor` viz** (`lens/EditorViz.tsx`, `editor: { path,
+page (`pages/editor.yaml`: params `uri`, `path`, `lines` a filter)
+over the kit's **`editor` viz** (`viz/EditorViz.tsx`, `editor: { path,
 lines }`; extensions.md "Pages"). The viz opens the file's buffer,
 draws `EditorPane` over it, lands on `#lines=`'s start, and tells its
 tab what it edits (`useTabEditing`: the ● on the tab, File → Save and
@@ -18,7 +18,7 @@ Find, the tab cap never closing it). Saving runs `oxplow.file.save`. A
 path that isn't a file says so in the page. Go to Definition, Reveal
 commit and Compare with Clipboard open their pages in their own tabs
 (the compare's two texts as the new entry's history state). An agent
-reads an editor lens as the file as saved (`lens_text`: unsaved edits
+reads an editor page as the file as saved (`page_text`: unsaved edits
 stay in the window), and an answer is never an editor (`spec_problem`).
 
 ## Buffers: one model per open file
@@ -223,10 +223,10 @@ which is the useful action.
 
 ## Read-only code and diff vizes
 
-A lens shows files through two kit vizes (`.context/extensions.md`
-"Lenses"):
+A page shows files through two kit vizes (`.context/extensions.md`
+"Viz"):
 
-- **`code`** (`lens/CodeViz.tsx`): one read-only Monaco per row, side by
+- **`code`** (`viz/CodeViz.tsx`): one read-only Monaco per row, side by
   side, each with a strip (path, marked lines, revision, Open file). The
   content comes from `readAt` at the row's revision; a file not there
   says so in its strip. A row's `lines` are a whole-line decoration with
@@ -234,16 +234,16 @@ A lens shows files through two kit vizes (`.context/extensions.md`
   (`oxplow-kit.css`), revealed near the top. Without a mark, the view
   state (scroll, cursor) stays with the tab's entry
   (`useMonacoViewState`); with one, the mark is where the page lands.
-  `code.sync` scrolls the editors together (`lens/codeScrollSync.ts`,
+  `code.sync` scrolls the editors together (`viz/codeScrollSync.ts`,
   plain logic): the marks line up two lines below the top (less when one
   is near its file's top), then a scroll moves the others the same
   distance from their own anchors, never to the same absolute position.
-- **`diff`** (`lens/DiffViz.tsx`): `DiffPane` at full size for the first
+- **`diff`** (`viz/DiffViz.tsx`): `DiffPane` at full size for the first
   row, its `lines` revealed on the modified side; Open file shows the
   working file.
 
 Open file navigates in the tab when there is one, else opens a page.
-The file-viewer and duplicate-block pages are lenses over these vizes;
+The file-viewer and duplicate-block pages draw these vizes;
 `DiffPane` stays (it is the `hunks` viz's and `diff`'s).
 
 ## Comment overlay

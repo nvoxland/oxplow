@@ -13,7 +13,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { querySql, readEventContent, runCommand } from "./api.js";
 import { logUi, type UiLogLevel } from "./logger.js";
-import { NO_READS, useRerunOnChange } from "./lens/lensRerun.js";
+import { NO_READS, useRerunOnChange } from "./viz/rerun.js";
 import type { Reads, SqlCell, SqlQueryResult } from "./tauri-bridge/generated/bindings.js";
 
 export interface OpErrorInput {

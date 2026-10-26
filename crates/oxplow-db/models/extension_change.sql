@@ -1,4 +1,4 @@
 SELECT CAST(NULL AS TEXT) AS base, CAST(NULL AS TEXT) AS head, CAST(NULL AS TEXT) AS name,
        CAST(NULL AS TEXT) AS change, CAST(NULL AS TEXT) AS errors, CAST(NULL AS TEXT) AS lines,
-       CAST(NULL AS TEXT) AS lens_changes, CAST(NULL AS INTEGER) AS stream_id
+       CAST(NULL AS TEXT) AS page_changes, CAST(NULL AS INTEGER) AS stream_id
 WHERE 0

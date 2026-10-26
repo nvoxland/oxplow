@@ -102,7 +102,7 @@ The same transaction restates `extension_listing` (V74,
 `oxplow_db::catalog_listing_store`), read as `v_extension`, and
 (V110) `page`, `page_answer` and `page_param` from every enabled extension's
 page files (`extension_generation::page_rows`), read as `v_page`,
-`v_page_answer` and `v_page_param`. (V113 dropped the old `lens`,
+`v_page_answer` and `v_page_param`. (V113 dropped the old UI table,
 `thread_answer` and dashboard tables.) A page's URI is `oxplow:oxplow/page?page=<extension>/<slug>`
 (`page=<slug>` for an extension in the `oxplow` namespace), stored in the row.
 Two kinds of listing row follow something other than a generation: those
@@ -523,7 +523,6 @@ the user guide is `docs/guide/pages.md`.
     `comments`, `refresh`, `hidden`, `tool`), `data:` (named loaders: `sql`,
     `command`, `page`, `rows`) and `view:` (a tree of nodes, with an optional
     `rail:`). Details: [pages-and-tabs.md](./pages-and-tabs.md) "Page files".
-    A source with a `lenses/` folder does not load.
   - Unknown keys are errors, so typos surface instead of being ignored.
 - **Ids.** A page id is `<extension>/<slug>`.
 - **Reading.** What the app shows is the **live set**: each extension's
@@ -609,7 +608,7 @@ the user guide is `docs/guide/pages.md`.
   - The desktop draws every page the same way: the page host
     (pages-and-tabs.md "The desktop host") runs the page, `PageTree` draws
     its node tree, and its viz nodes use the viz components
-    (`apps/desktop/src/lens/`, entry `LensResultView.tsx`; the directory
+    (`apps/desktop/src/viz/`, entry `VizView.tsx`; the directory
     keeps the old name). A viz node draws a `table`, `list`, `number`
     (through `formatMetricValue`), `markdown` and the rest below. Linked cells go
     through `RouteLink`, so plain-click navigates in the tab.
@@ -653,7 +652,7 @@ the user guide is `docs/guide/pages.md`.
     unreachable never arrive, so anything may have changed. The daemon
     keeps each open run (`pages/open_runs.rs`) and tells the window which
     loaders changed (`PageRunChanged`); `useRerunOnChange` in
-    `src/lens/lensRerun.ts` is the window's side.
+    `src/viz/rerun.ts` is the window's side.
   - The Cmd+P launcher re-reads pages (the live set's) every time it
     opens and lists them under their `category` (a page with none, or
     `hidden: true`, is not listed), merged into the static directory by
@@ -790,11 +789,11 @@ the user guide is `docs/guide/pages.md`.
       form's prefill (a Rename… starting from the name) and
       `oxplow_run_page_action` are the one path. The window shows such a
       button only while the result has exactly one row and `when` holds
-      (`offeredWholeLens`, the one predicate the toolbar and the page's
+      (`offeredWholePage`, the one predicate the toolbar and the page's
       hand-up share).
     - **Drag, bulk and key actions.** `drag: true` makes a row action
       what a drop runs (`rowInteract.ts`, `RowsBody`): a row the action is
-      offered on (`when`) drags (`LENS_ROW_DRAG_MIME`, taken only by the view
+      offered on (`when`) drags (`VIZ_ROW_DRAG_MIME`, taken only by the view
       it came from; a marked row carries every marked row), and where it
       lands binds `{{before.*}}` (the row below the drop), `{{after.*}}`
       (the row above), `{{onto.*}}` (the row dropped on: its middle third,
@@ -877,13 +876,13 @@ the user guide is `docs/guide/pages.md`.
       may reach is its extension's `permissions:`, approved at deploy
       ("Permissions"). An agent's `run_command oxplow.collector.sync` runs it as the
       agent.
-    - UI: the row menu and buttons in `LensResultView.tsx`, pressed
-      on the page run (`run_page_action`); logic in `lens/lensActions.ts`
-      (`performLensAction`, `rowRecord`). Copy is the page host's
+    - UI: the row menu and buttons in `VizView.tsx`, pressed
+      on the page run (`run_page_action`); logic in `viz/vizActions.ts`
+      (`performVizAction`, `rowRecord`). Copy is the page host's
       (`page_text`), Add to Context the ☰'s.
     - The GitHub example's PR page has a Sync PRs action
       (`command: oxplow.collector.sync`).
-  - **Viz** (`LensResultView.tsx`; the `Viz` enum and `VizConfig` in
+  - **Viz** (`VizView.tsx`; the `Viz` enum and `VizConfig` in
     `extensions.rs`): `table`, `list`, `number`, `markdown`, `bar`
     (`DailyBarChart`), `line` (`components/charts/TrendChart`, one chart per
     `chart.series`), `treemap` (two-level `components/charts/squarify`),
@@ -909,7 +908,7 @@ the user guide is `docs/guide/pages.md`.
     needs, naming the block (`chart`, `tree`, `timeline`, `steps`,
     `hunks`), and `oxplow_validate_extension` checks every named column
     exists in the loader's result (`VizConfig::role_columns`). Pure data
-    shaping lives in `lensModel.ts` (`barRows`, `lineSeries`, `treemapItems`,
+    shaping lives in `vizModel.ts` (`barRows`, `lineSeries`, `treemapItems`,
     `treeNodes`, `timelineEntries`, `stepItems`, `hunkRows`).
 - **Sharing.** There are three levels:
   - **Yourself.** A source is personal (`.oxplow/.gitignore` ignores it). It
@@ -939,7 +938,7 @@ the user guide is `docs/guide/pages.md`.
     column selecting the `model` param, the picked row emphasized). A
     pick pushes `#model=` (Back un-picks) and the component hears it.
   - **The component** (`main.ts`, its pure half `model.ts`, tested from
-    the desktop as `lens/exploreDataModel.test.ts`): the picked model's
+    the desktop as `viz/exploreDataModel.test.ts`): the picked model's
     documented columns (`v_model_column`) and lineage (`v_model_lineage`:
     the models it reads, links that pick them, the tables it reads, the
     models that read it); the SQL box (a pick writes `SELECT * … LIMIT
@@ -1052,7 +1051,7 @@ the user guide is `docs/guide/pages.md`.
 - **A page of sections leads with what matters.** In a `stack`, a
   titled `viz` section with no rows (no error, not `replaceable`) folds
   into one closing line, "Nothing found: Duplication, Co-change
-  Surprises, …" (`foldEmpty` in `lens/lensModel.ts`, used by
+  Surprises, …" (`foldEmpty` in `viz/vizModel.ts`, used by
   `pages/PageTree.tsx`). The effort page opens with its
   **verdict** above the slots: the `effort.verdict` replacement target
   ("Replacements"), which core leaves empty — what counts as tested,
@@ -1585,8 +1584,8 @@ custom_components: …   # sandboxed components a page's `component` node or `cu
 
 Pages aren't listed here: every `pages/*.yaml` file in the folder is
 loaded. A page gets into the launcher through its own `category` (or
-stays out with `hidden: true`). A `lenses/` folder is a load error that
-says to rewrite each file as a page.
+stays out with `hidden: true`). An old-format UI folder (`lenses/`) is a
+load error that says to rewrite each file as a page.
 
 **What the loader checks** (`Extension.errors` / `Extension.warnings`):
 - shape: unknown keys, `manifest` version, `intent` present and
@@ -2002,7 +2001,7 @@ SQL queries over the semantic layer, plus a tree of nodes that shows them.
 (Not "view", which is taken by the SQL `v_*` views.) A page is one file,
 `pages/<slug>.yaml`, in an extension; its id is `<extension>/<slug>`. The
 extension manifest lists no pages: the folder is the list. A source with
-a `lenses/` folder does not load.
+the old `lenses/` folder does not load.
 
 The reader's guide is `docs/guide/pages.md`; the agent's is the shipped
 `oxplow-extension` skill (`references/page-format.md`, `loaders.md`,
@@ -2113,7 +2112,7 @@ A param (`PageParam`) takes `name`, `label`, `default`, `options`,
   and the query says what an unknown value means. An agent's page tool
   (`agent_tools::params_schema`) emits no `enum` for it. A param named
   `uri`, `effort_id`, `thread_id` or `stream_id` draws as a picker over
-  the matching model, by title (`lens/lensParams.ts`); any other is typed.
+  the matching model, by title (`viz/vizParams.ts`); any other is typed.
 - **Implicit params.** A param named `stream_id` or `thread_id` is bound
   to the viewer's context (`ViewContext`, numeric ids) unless the caller
   supplies it. Precedence: supplied, then context, then `default`.
@@ -2282,7 +2281,7 @@ whose loader does not return one (`viz_column_problems`). An agent reads
   (kinds: `task`, `file`, `wiki`, `effort-diff`, `commit`, `metric`,
   `page`, `diff-at`, `compare`). `page` opens any oxplow URI. The pages
   a column's links open are the page's **origin**
-  (`lens/linkOrigin.ts`, `.context/pages-and-tabs.md` "Origins"): Up and
+  (`viz/linkOrigin.ts`, `.context/pages-and-tabs.md` "Origins"): Up and
   Down step through the rows that have one.
 - `select: <param>`: a click sets that param to the column's value, so
   whatever reads it re-runs (master and detail). It names a declared
@@ -2295,7 +2294,7 @@ whose loader does not return one (`viz_column_problems`). An agent reads
   shows as a metric value (`16.4 s`, `42.5%`).
 - `icon` and `tone` each name another column of the row. `icon`'s value
   is an icon drawn before the cell from a fixed vocabulary
-  (`lens/lensIcons.tsx`): the work glyphs (`ready` / `todo`,
+  (`viz/vizIcons.tsx`): the work glyphs (`ready` / `todo`,
   `in_progress`, `blocked`, `done`, `canceled`, `archived`), a file's
   status (`added`, `modified`, `deleted`, `renamed`, `untracked`,
   `conflicted`), the kinds (`epic`, `task`, `wiki`, `file`, `folder`,
@@ -2556,7 +2555,7 @@ extension. The viewer's stream is not a prop: a page that declares
 extension, target, capability, bound_to_provider, page, version, view,
 label }`).
 
-**At render** (`lens/useReplacement.ts`, `components/Replaceable.tsx`).
+**At render** (`viz/useReplacement.ts`, `components/Replaceable.tsx`).
 `useReplacement` reads the enabled extensions' replacements of the target
 and, only when one exists, what decides it:
 - **bound**: the host passes the provider of the thing it shows
@@ -2613,7 +2612,7 @@ commit's URI (`oxplow:oxplow/commit?sha=<sha>`); a Cmd/Ctrl-click opens it
 in a new tab (`navigate(uri, { newTab: true })`). It declares no commands,
 so it is not a program to approve. Core keeps no lane code: `CommitList`
 (the fallback, and the Git dashboard's recent commits with their stats) is
-a plain list. `lens/historyGraph.test.ts` runs the bundle's own script
+a plain list. `viz/historyGraph.test.ts` runs the bundle's own script
 against its page — lanes, merge lanes, child-before-parent order,
 filters, reveal, Cmd-click.
 
@@ -2629,7 +2628,7 @@ board), `work_item.list` (`compact-list`, a `viz: table` with Done and an
 `Edit…` form action) and `work_item.detail` (`edit-item`, a `viz: form` over
 `oxplow.work_item.update` with `uri` fixed). It reads `v_work_item` and
 changes items only through the interface commands, so it works with any
-list. `lens/swimlanes.test.ts` runs the bundle's script against its page;
+list. `viz/swimlanes.test.ts` runs the bundle's script against its page;
 `oxplow-sdk/tests/examples.rs` checks it clean and runs its fixtures.
 
 A form (`FormViz`) re-reads its start values when it resets, so after a
@@ -2647,7 +2646,7 @@ change. It does not only look at what the extension declares
 (`extension_impact.rs`). `ImpactReport` holds these lists, each entry
 with a `Change` (`added`, `removed`, `changed`, `unchanged`):
 
-- `lenses` (the field keeps its old name) — each page's rendered text
+- `pages` — each page's rendered text
   before and after (`PageImpact`);
 - `models` — each view, the parts that differ (`changed`: `query`,
   `columns`, `description`, `tests`, `version`, `deprecated`), its
@@ -2800,13 +2799,12 @@ has an "Extension Changes" table, empty unless the range touched
 `.oxplow/extensions/**`. Its `extensions` loader reads the live model
 `v_extension_change` (pinned to `base` and `head`, each a `v_change`
 revision spelling; columns `name`, `change`, `errors`, `lines`,
-`lens_changes`, `stream_id`). The server's
+`page_changes`, `stream_id`). The server's
 `extensions::extension_changes_between` names each extension whose files
 differ between the two revisions (`Trees::diff`), loads both versions as
 those revisions hold them (`extension_tree_at`) and reviews them with
 `impact_between`. Each row has the name, the change, the problems, the
-report's lines and the pages that differ (`lens_changes`, a column name
-kept from before). A removed extension has no report. The pages'
+report's lines and the pages that differ (`page_changes`). A removed extension has no report. The pages'
 before/after text is not shown (the changed file's diff has it). A failed
 review is a row's problems, never a spinner that does not end.
 
@@ -2857,7 +2855,7 @@ storage. The one way out is navigating itself. The page's `frame-src`
 daemon serves a bundle to; not `[::1]`, which no CSP host source can
 name) bounds that to this machine. That is Tauri's CSP in the app, and a
 one-directive meta CSP in `index.html` for a plain browser, where
-whatever serves `dist/` sends no header (`lens/frameBound.test.ts` keeps
+whatever serves `dist/` sends no header (`viz/frameBound.test.ts` keeps
 them one value; only `frame-src`, since a fuller policy would bound what
 the page connects to, and a daemon over a tunnel is not on loopback).
 The host also ends the component on its second `load`. So a component
@@ -2972,9 +2970,9 @@ the frame. A component acts for a person, so it never proposes.
 `run_component_sql` and `component_form` are the same kind of call. All
 are UI RPCs (`ui` in surface parity).
 
-**The host** (`lens/CustomComponentViz.tsx` for a `viz: custom` node,
+**The host** (`viz/CustomComponentViz.tsx` for a `viz: custom` node,
 `pages/PageComponent.tsx` for a `component` node, both over
-`lens/ComponentFrame.tsx` and `lens/componentBridge.ts`):
+`viz/ComponentFrame.tsx` and `viz/componentBridge.ts`):
 `<iframe sandbox="allow-scripts allow-forms" referrerPolicy="no-referrer">`
 at `componentBundleUrl(base, version)` (the daemon's
 `/components/v/<version>/`, once `load_component` answered; a bundle that
@@ -3012,7 +3010,7 @@ component's own: the host draws `schema`, a JSON Schema where a
 values submitted, running nothing); `{ id, method: signIn, instance, name
 }` and `{ id, method: cancelSignIn, instance, name }` (the host runs the
 whole OAuth redirect flow for a provider instance's credential,
-`lens/hostSignIn.ts`: the shell listens on the credential's registered
+`viz/hostSignIn.ts`: the shell listens on the credential's registered
 port, the system browser opens the service's page, each redirect goes to
 the core; it answers `{ state: signed_in }`, `{ state: failed, error }` or
 `{ state: cancelled }`). Each step is a command the component must declare
@@ -3039,7 +3037,7 @@ view shows, the frame sits at its content's height: the library posts
 `height: auto`). `setTitle`, `setActions` and `showView` are a
 whole-page component's. `openForm`, `signIn` and `cancelSignIn` are any
 host's that draws a slideover — a whole page and a component inside a
-page's layout, a settings section included (`lens/frameForms.tsx`,
+page's layout, a settings section included (`viz/frameForms.tsx`,
 `useFrameForms`). A host with none answers `INVALID`. And — each kind of
 page state by the name of its scope — `{ id, method: setViewParams,
 params }` (string values, null drops one: the `#` of its tab entry,
@@ -3057,7 +3055,7 @@ pushes a history step, a filter replaces), which a whole-page component
 hears through `onViewParams`. A page's rail stacked above its body (a
 narrow window) is capped and scrolls, so the body keeps the height.
 
-**Whose view a component has** (protocol 9, `lens/hostedView.ts`
+**Whose view a component has** (protocol 9, `viz/hostedView.ts`
 `useHostedView`): its host's, where the host shares one, and only what
 the host's contract names.
 

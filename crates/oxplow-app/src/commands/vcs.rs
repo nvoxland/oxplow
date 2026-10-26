@@ -75,7 +75,7 @@ macro_rules! stream_input {
 
 /// One VCS operation of `capability`: parse the input, resolve the
 /// stream's workspace strictly, run `op`, announce what it touched. A
-/// person's, an agent's (on its own stream only) or a lens's for either.
+/// person's, an agent's (on its own stream only) or a page's for either.
 /// `confirm` is the least a command over it asks.
 fn vcs_op<I, F, Fut>(
     capability: &str,
@@ -593,52 +593,52 @@ mod tests {
         assert!(silent.contains("git reported a failure"), "{silent}");
     }
 
-    /// A lens runs git for whoever pressed it: a person's destructive run
+    /// A page runs git for whoever pressed it: a person's destructive run
     /// asks them (the second click); an agent's doesn't — what an agent
     /// may call is its harness's to decide.
     #[tokio::test]
-    async fn a_lens_runs_git_for_its_presser_and_only_a_person_is_asked() {
+    async fn a_page_runs_git_for_its_presser_and_only_a_person_is_asked() {
         let f = services_with_effort().await;
         let svc = &f.svc;
         let root = svc.layout.project_dir.clone();
         std::fs::write(root.join("a.txt"), "one\n").unwrap();
         commit_all(&root, "base");
         let stream = svc.stream_store.list().await.unwrap()[0].id.to_string();
-        let lens = Actor::Page {
+        let page = Actor::Page {
             page_id: "oxplow-foundation/uncommitted".into(),
             on_behalf_of: Box::new(Actor::Human),
         };
         std::fs::write(root.join("a.txt"), "two\n").unwrap();
         svc.commands
             .run(
-                &lens,
+                &page,
                 "oxplow.vcs.stage",
                 json!({ "stream": stream, "paths": ["a.txt"] }),
                 false,
             )
             .await
-            .expect("a lens stages for the person");
+            .expect("a page stages for the person");
         svc.commands
             .run(
-                &lens,
+                &page,
                 "oxplow.vcs.commit",
-                json!({ "stream": stream, "message": "from a lens" }),
+                json!({ "stream": stream, "message": "from a page" }),
                 false,
             )
             .await
-            .expect("a lens commits for the person");
+            .expect("a page commits for the person");
         std::fs::write(root.join("a.txt"), "three\n").unwrap();
         let discard = json!({ "stream": stream, "paths": ["a.txt"] });
         let err = svc
             .commands
-            .run(&lens, "oxplow.vcs.discard", discard.clone(), false)
+            .run(&page, "oxplow.vcs.discard", discard.clone(), false)
             .await
             .unwrap_err();
         assert!(format!("{err:?}").contains("NeedsConfirmation"), "{err:?}");
         svc.commands
-            .run(&lens, "oxplow.vcs.discard", discard, true)
+            .run(&page, "oxplow.vcs.discard", discard, true)
             .await
-            .expect("confirmed, a lens discards for the person");
+            .expect("confirmed, a page discards for the person");
         std::fs::write(root.join("a.txt"), "four\n").unwrap();
         let for_agent = Actor::Page {
             page_id: "oxplow-foundation/uncommitted".into(),

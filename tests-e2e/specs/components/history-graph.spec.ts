@@ -63,7 +63,7 @@ test("the history graph's filter is the page's: in the address and kept on a rel
   await expect(body).toHaveAttribute("data-testid", "center-tab-body-oxplow:oxplow/page?page=git-history#q=side");
   await expect(page.getByTestId("page-nav-back").filter({ visible: true })).toBeDisabled();
 
-  // The filter re-runs the page's lenses; let them finish, or WebKit reports
+  // The filter re-runs the page's pages; let them finish, or WebKit reports
   // the reload's aborted requests as page errors.
   await page.waitForLoadState("networkidle");
   await page.reload();
@@ -74,7 +74,7 @@ test("the history graph's filter is the page's: in the address and kept on a rel
   // Oxplow's own list, given the same address, filters by it.
   await run(daemon, "oxplow.extension.disable", { name: "oxplow-bundled" });
   await expect(page.locator('[data-node="history"]:visible').getByText("Side work")).toBeVisible();
-  await expect(page.getByTestId("lens-param-q-value").filter({ visible: true })).toContainText("side");
+  await expect(page.getByTestId("page-param-q-value").filter({ visible: true })).toContainText("side");
 });
 
 test("without oxplow-bundled, Git History is oxplow's plain list", async ({ fresh }) => {

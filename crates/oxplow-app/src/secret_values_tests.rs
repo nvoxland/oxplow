@@ -1,5 +1,5 @@
 //! A secret is a kind of value (`writeOnly` in a command's input schema):
-//! whoever sets it — a person, their agent, a lens for either — it is
+//! whoever sets it — a person, their agent, a page for either — it is
 //! written and never read back. No published model, no audit row, no
 //! event and no result carries it (`.context/commands.md` "Secrets").
 
@@ -19,12 +19,12 @@ async fn a_secret_set_by_anyone_is_never_read_back() {
         thread_id: Some(fx.thread),
         stream_id: None,
     };
-    let lens = Actor::Page {
+    let page = Actor::Page {
         page_id: "oxplow-foundation/ai-providers".into(),
         on_behalf_of: Box::new(agent.clone()),
     };
     let mut results = Vec::new();
-    for (i, actor) in [Actor::Human, agent, lens].iter().enumerate() {
+    for (i, actor) in [Actor::Human, agent, page].iter().enumerate() {
         let out = svc
             .commands
             .run(
@@ -91,7 +91,7 @@ async fn leak_sweep(svc: &crate::Services, results: &[String], secret: &str) {
 }
 
 /// A collector's credential and a provider's host secret are set by a
-/// person, an agent and a lens for either; the value is in none of the
+/// person, an agent and a page for either; the value is in none of the
 /// places the AI key is not.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_credential_or_secret_set_by_anyone_is_never_read_back() {
@@ -118,12 +118,12 @@ async fn a_credential_or_secret_set_by_anyone_is_never_read_back() {
         thread_id: Some(fx.thread),
         stream_id: None,
     };
-    let lens = Actor::Page {
+    let page = Actor::Page {
         page_id: "oxplow-foundation/extensions-credentials".into(),
         on_behalf_of: Box::new(agent.clone()),
     };
     let mut results = Vec::new();
-    for actor in [Actor::Human, agent, lens] {
+    for actor in [Actor::Human, agent, page] {
         let out = svc
             .commands
             .run(

@@ -6,7 +6,7 @@
 //! reads live state through `Services`; `extensions/oxplow-foundation`
 //! declares the commands over them (`oxplow.records.read`,
 //! `oxplow.sql.query`, …), so an agent reaches each through
-//! `run_command` and a person or lens through the bus.
+//! `run_command` and a person or page through the bus.
 //!
 //! An agent's call runs as its `Actor::Agent`: a read that acts on a
 //! stream takes the one it names, else the actor's own

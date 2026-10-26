@@ -24,7 +24,7 @@ async function collect(daemon: Daemon, count: number) {
 }
 
 /** Collect the pull requests (`count` of them, `bars` drawable) and open
- *  the lens. */
+ *  the page. */
 async function openLifetimes(page: Page, daemon: Daemon, count = 2, bars = 2) {
   await collect(daemon, count);
   await page.goto("/");
@@ -58,7 +58,7 @@ const pr = (number: number, opened_at: string) => ({
 
 // tsk1008: a date that can't be read leaves that pull request out — said,
 // not every bar blanked — and a selected filter holds when the host runs
-// the lens again (its models changed), rather than redrawing everything.
+// the page again (its models changed), rather than redrawing everything.
 test("a bad date is left out, and a filter holds across the host's re-run", async ({ fresh }) => {
   const { page, daemon } = fresh;
   await addPrs(daemon, [pr(11, "not a date")]);
@@ -82,7 +82,7 @@ test("PR lifetimes draws, filters, syncs and opens", async ({ fresh }) => {
   const frame = await openLifetimes(page, daemon);
   await expect(page.getByTestId("custom-component-badge")).toHaveText("custom");
 
-  // Its filters re-run its own lens.
+  // Its filters re-run its own page.
   await frame.locator('[data-state="open"]').click();
   await expect(frame.locator(".bar")).toHaveCount(1);
   await expect(frame.locator(".bar")).toHaveAttribute("data-ref", "oxplow:github/pr?id=13");

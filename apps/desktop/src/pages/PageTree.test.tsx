@@ -70,8 +70,8 @@ test("a row action runs on the open run, naming the node and the row", async () 
       <PageTree run={run} runId="run-1" />
     </PageActionContext.Provider>,
   );
-  fireEvent.contextMenu(getByTestId("lens-row-1"));
-  fireEvent.click(getByTestId("menu-item-lens-action-finish"));
+  fireEvent.contextMenu(getByTestId("viz-row-1"));
+  fireEvent.click(getByTestId("menu-item-viz-action-finish"));
   await waitFor(() => expect(calls).toEqual([["run-1", "items", "finish", { id: "b", title: "Beta" }, null, null, false]]));
 });
 
@@ -87,8 +87,8 @@ test("an embedded node's action names it by its path", async () => {
       <PageTree run={run} runId="run-1" />
     </PageActionContext.Provider>,
   );
-  fireEvent.contextMenu(getByTestId("lens-row-0"));
-  fireEvent.click(getByTestId("menu-item-lens-action-drop"));
+  fireEvent.contextMenu(getByTestId("viz-row-0"));
+  fireEvent.click(getByTestId("menu-item-viz-action-drop"));
   await waitFor(() => expect(calls).toEqual([["run-1", "side/notes", "drop", { note: "n1" }, null, null, false]]));
 });
 
@@ -143,7 +143,7 @@ test("a focus on a node not drawn yet lands once it registers", () => {
 });
 
 // A stack's titled sections with nothing to show fold into one "Nothing
-// found" line, as a lens document's parts do: no rows, no error, not a
+// found" line, as a page document's parts do: no rows, no error, not a
 // form, nothing to press above its rows.
 test("a stack folds its empty titled sections into one Nothing found line", () => {
   const page = fakePage(
@@ -195,6 +195,6 @@ test("an embedded page's own actions are buttons above it, pressed naming the em
       <PageTree run={host} runId="run-1" />
     </PageActionContext.Provider>,
   );
-  fireEvent.click(getByTestId("lens-action-tidy"));
+  fireEvent.click(getByTestId("viz-action-tidy"));
   await waitFor(() => expect(calls).toEqual([["run-1", "notes", "tidy", null, null, null, false]]));
 });

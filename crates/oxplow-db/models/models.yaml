@@ -153,10 +153,10 @@
     - { unique: id }
     - { relationships: { column: ai_call_id, to: ai_call, field: id } }
 - name: ui_preference
-  version: 3
-  description: "What the person's oxplow remembers for them outside any one tab: a page's page memory (scoped by the page's URI without its params — `oxplow:oxplow/page?page=tasks`, `oxplow:oxplow/lens?lens=acme/board` — or `kind:<kind>` for every page of an entity kind; shared by every tab of it), a panel's (its `panel:` ref), a custom component's own (`component:<extension>/<id>`) and the app's preferences (`app`). A tab's view params and history state are in its tab, not here. Local to this project, never the repo."
+  version: 4
+  description: "What the person's oxplow remembers for them outside any one tab: a page's page memory (scoped by the page's URI without its params — `oxplow:oxplow/page?page=tasks`, `oxplow:oxplow/page?page=acme/board` — or `kind:<kind>` for every page of an entity kind; shared by every tab of it), a panel's (its `panel:` ref), a custom component's own (`component:<extension>/<id>`) and the app's preferences (`app`). A tab's view params and history state are in its tab, not here. Local to this project, never the repo."
   columns:
-    - { name: "scope", type: "TEXT", doc: "`app`; a page's URI (`oxplow:oxplow/page?page=…`, `oxplow:oxplow/lens?lens=…`) or `kind:<kind>`; a panel's URI; or `component:<extension>/<id>`." }
+    - { name: "scope", type: "TEXT", doc: "`app`; a page's URI (`oxplow:oxplow/page?page=…`) or `kind:<kind>`; a panel's URI; or `component:<extension>/<id>`." }
     - { name: "key", type: "TEXT", doc: "What is remembered, within its scope (`railWidth`, `mergeMode.str1.main`)." }
     - { name: "value_json", type: "TEXT", doc: "Its value, as JSON text." }
     - { name: "updated_at", type: "TEXT", doc: "RFC 3339 timestamp of the last change." }
@@ -703,12 +703,12 @@
     - { name: "extension", type: "TEXT", doc: "The extension that declares it, when `scope` is `extension`." }
     - { name: "entity_json", type: "TEXT", doc: "For an entity metric, what it reads: `{\"view\", \"where\", \"time\", \"value\", \"aggregation\"}`; NULL for a fact metric. (v2)" }
 - name: page_visit
-  version: 2
+  version: 3
   description: "Pages the human opened in oxplow, and for how long — what they've been looking at."
   columns:
     - { name: "id", type: "INTEGER", doc: "Visit id." }
     - { name: "thread_id", type: "INTEGER", doc: "Thread the page was opened in." }
-    - { name: "page_kind", type: "TEXT", doc: "Page kind (`task`, `file`, `lens`, …)." }
+    - { name: "page_kind", type: "TEXT", doc: "Page kind (`task`, `file`, `page`, …)." }
     - { name: "page_id", type: "TEXT", doc: "Page id (`task:42`, `oxplow:oxplow/file?path=src/a.rs`, …)." }
     - { name: "label", type: "TEXT", doc: "Title shown at the time." }
     - { name: "visited_at", type: "TEXT", doc: "RFC 3339 timestamp." }
@@ -945,7 +945,7 @@
 - name: job_run_output
   version: 1
   key: [job_id, attempt, seq]
-  description: "What a job produced as it ran, in order: the model's reply text as it streamed (one row per short run of it), each tool the model called and what the tool answered, each model round's usage. Written while the attempt runs, so a lens over it follows a job live."
+  description: "What a job produced as it ran, in order: the model's reply text as it streamed (one row per short run of it), each tool the model called and what the tool answered, each model round's usage. Written while the attempt runs, so a page over it follows a job live."
   columns:
     - { name: "job_id", type: "TEXT", doc: "The job (`v_job_run.id`)." }
     - { name: "attempt", type: "INTEGER", doc: "Its attempt." }
@@ -989,22 +989,22 @@
   tests:
     - { not_null: event_type }
 - name: replaceable
-  version: 2
+  version: 3
   key: [target]
-  description: "The core sub-components an extension may replace with a lens (`ui.replacements`), each with its versioned props contract: what the replacement is given, and must declare, instead of any host state. Which extension replaces one is the person's choice (`replacements:` in the project config) or, for a bound target, its provider's."
+  description: "The core sub-components an extension may replace with a page (`ui.replacements`), each with its versioned props contract: what the replacement is given, and must declare, instead of any host state. Which extension replaces one is the person's choice (`replacements:` in the project config) or, for a bound target, its provider's."
   columns:
     - { name: "target", type: "TEXT", doc: "The sub-component: `work_item.board`, `work_item.list`, `work_item.detail`, `work_item.detail.state`, `vcs.history.graph`." }
     - { name: "capability", type: "TEXT", doc: "The capability it belongs to (`work_items`, `vcs`)." }
     - { name: "bound", type: "INTEGER", doc: "1 when only the extension of the capability's deciding provider may replace it (the item's own provider's states); 0 when any extension may, and the person chooses." }
     - { name: "version", type: "INTEGER", doc: "The contract's version; a declaration may pin it (`version:`)." }
-    - { name: "props", type: "TEXT", doc: "JSON array of the prop names the replacement lens is given and must declare as `params`." }
+    - { name: "props", type: "TEXT", doc: "JSON array of the prop names the replacement page is given and must declare as `params`." }
     - { name: "view", type: "TEXT", doc: "JSON array of the host page's view params the replacement shares: it reads and writes them as the core component does (`q`, `author`, `branch` for `vcs.history.graph`). (v2)" }
     - { name: "label", type: "TEXT", doc: "What a person calls it (\"board\", \"detail editor\")." }
   tests:
     - { not_null: target }
     - { unique: target }
 - name: resource
-  version: 4
+  version: 5
   key: [resource]
   description: "Every resource a URI may name (`oxplow:<extension>/<resource>?<params>`), as the extensions declare them in `resources:` — oxplow-foundation's included, so none is special. Says what each one's params are and which view names it."
   columns:
@@ -1012,7 +1012,7 @@
     - { name: "extension", type: "TEXT", doc: "The extension that declares it (`oxplow-foundation` for oxplow's own)." }
     - { name: "label", type: "TEXT", doc: "What one is called (`Pull request`)." }
     - { name: "params", type: "TEXT", doc: "JSON object of its params by name, each `{ required, pattern }`: a URI carries every required one, and each value matches its pattern." }
-    - { name: "additional", type: "INTEGER", doc: "1 when a URI may carry params beyond its own (a page's or a lens's)." }
+    - { name: "additional", type: "INTEGER", doc: "1 when a URI may carry params beyond its own (a page's)." }
     - { name: "resolve", type: "TEXT", doc: "The view whose rows name each one; NULL when no model holds it (a file, a page)." }
     - { name: "title", type: "TEXT", doc: "The column of `resolve` that titles one; NULL means `title`." }
     - { name: "searchable", type: "TEXT", doc: "The view search indexes it from; NULL when search doesn't." }
@@ -1338,13 +1338,13 @@
     - { name: "since", type: "TEXT", doc: "When its run was first deferred (RFC 3339)." }
     - { name: "touched", type: "TEXT", doc: "When a triggering event last arrived for it (RFC 3339): what `settle` counts from." }
 - name: contribution
-  version: 5
+  version: 6
   key: [uri]
   description: "Every enabled extension's contributions, one row each, as their descriptors say: its URI (`<kind>:<extension>/<id>`, or `<kind>:<name>` for a command, metric, measure, dimension, event type or ref kind — the model that owns every contribution kind's URI), who contributed it and at what version, how it runs, what it needs, and the shared name it holds. What `list_extensions` counts and the reference documents. Kinds move onto descriptors one by one; a kind not yet listed here keeps its own listing."
   columns:
     - { name: "uri", type: "TEXT", doc: "Its ref: `oxplow:oxplow/job?job=effort-review/review`, `oxplow:oxplow/collector?collector=triage/todos`, `oxplow:oxplow/command?command=oxplow.review.accept`. (v3, was `id`)" }
     - { name: "extension", type: "TEXT", doc: "The extension that declares it." }
-    - { name: "kind", type: "TEXT", doc: "`collector`, `effect`, `command`, `metric`, `skill`, `provider`, `lens`, …" }
+    - { name: "kind", type: "TEXT", doc: "`collector`, `effect`, `command`, `metric`, `skill`, `provider`, `page`, …" }
     - { name: "local", type: "TEXT", doc: "Its id within the extension, or its global name (a command's bus id, a metric's key)." }
     - { name: "origin", type: "TEXT", doc: "`project` or `bundled`." }
     - { name: "version", type: "TEXT", doc: "The extension's `version:` (a bundled one's is oxplow's); NULL when it declares none." }
@@ -1361,7 +1361,7 @@
 - name: page
   version: 1
   key: [uri]
-  description: "Every page file of every enabled extension: a page's metadata, what it renders and how an agent finds it. Restated with each extension generation, beside `v_lens` (which stays until lenses are gone). Its params are `v_page_param`, the questions it answers `v_page_answer`."
+  description: "Every page file of every enabled extension: a page's metadata, what it renders and how an agent finds it. Restated with each extension generation. Its params are `v_page_param`, the questions it answers `v_page_answer`."
   columns:
     - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/page?page=<extension>/<slug>`; `page=<slug>` for an extension whose namespace is `oxplow`." }
     - { name: "extension", type: "TEXT", doc: "The extension that declares it (v_extension.name)." }
@@ -1395,7 +1395,7 @@
     - { name: "about", type: "TEXT", doc: "The resource kind whose pages offer it; NULL when it is about nothing in particular." }
     - { name: "params", type: "TEXT", doc: "The params that answer it, as a JSON object." }
 - name: page_param
-  version: 1
+  version: 2
   key: [page_uri, position]
   description: "Each param a page takes, typed, in the order it declares them. Restated with each extension generation."
   columns:
@@ -1406,11 +1406,11 @@
     - { name: "role", type: "TEXT", doc: "What it is to the page: `resource` (names what it shows), `filter` (narrows how) or `selection`." }
     - { name: "label", type: "TEXT", doc: "What the control says; NULL for the name." }
     - { name: "default", type: "TEXT", doc: "Its default, as JSON; NULL for none." }
-    - { name: "options", type: "TEXT", doc: "The values a choice takes, as a JSON array of `{value, label}`; `[]` when fixed by a lens (`options_from`) or not a choice." }
+    - { name: "options", type: "TEXT", doc: "The values a choice takes, as a JSON array of `{value, label}`; `[]` when fixed by a loader (`options_from`) or not a choice." }
 - name: extension
   version: 7
   key: [uri]
-  description: "Every extension the project knows — its own (sources in `.oxplow/extensions/`, or where `extensionSources` says) and the ones that ship with oxplow — enabled or not, with where its files come from (`deployment`) and why it loaded badly if it did. One listed as on that has nothing to run here is a row too (`undeployed`, `not_here`). What an extension contributes is in `v_contribution` (count it by `extension` and `kind`); its lenses are `v_lens`. Restated with each extension generation; an extension that fails to load holds its generation back, so it is not a row — `oxplow_validate_extension` says why. `errors` and `warnings` are what a loaded one reports."
+  description: "Every extension the project knows — its own (sources in `.oxplow/extensions/`, or where `extensionSources` says) and the ones that ship with oxplow — enabled or not, with where its files come from (`deployment`) and why it loaded badly if it did. One listed as on that has nothing to run here is a row too (`undeployed`, `not_here`). What an extension contributes is in `v_contribution` (count it by `extension` and `kind`); its pages are `v_page`. Restated with each extension generation; an extension that fails to load holds its generation back, so it is not a row — `oxplow_validate_extension` says why. `errors` and `warnings` are what a loaded one reports."
   columns:
     - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/extension?name=<name>`." }
     - { name: "name", type: "TEXT", doc: "Its name." }
@@ -1574,7 +1574,7 @@
     - { name: "reference", type: "TEXT", doc: "The secret's reference, as JSON (`{ schemaVersion, id }`): what the two secret commands take. It carries no value." }
     - { name: "is_set", type: "INT", doc: "1 when the OS keychain holds a value for it." }
 - name: extension_change
-  version: 1
+  version: 2
   key: [base, head, name]
   description: "The extensions under `.oxplow/extensions/` whose files differ between two revisions, each with what the change does: both versions loaded as their revision holds them and reviewed on their own overlays. Read live, and only when the query pins both sides (`WHERE base = :b AND head = :h`, each a revision as `v_change` spells it: `git:<rev>`, `snap:<id>`, `working`; `''` base for nothing before): the review runs both versions, so unpinned it has no rows."
   columns:
@@ -1583,8 +1583,8 @@
     - { name: "name", type: "TEXT", doc: "The extension." }
     - { name: "change", type: "TEXT", doc: "`added`, `removed` or `changed`." }
     - { name: "errors", type: "TEXT", doc: "What's wrong with the later version, as a JSON array of text." }
-    - { name: "lines", type: "TEXT", doc: "What the change does, as a JSON array of lines (grants first, then collectors' outputs, models and their rows, lenses); `[]` for a removed extension." }
-    - { name: "lens_changes", type: "TEXT", doc: "The lenses that differ, as a JSON array of `{ id, change }`." }
+    - { name: "lines", type: "TEXT", doc: "What the change does, as a JSON array of lines (grants first, then collectors' outputs, models and their rows, pages); `[]` for a removed extension." }
+    - { name: "page_changes", type: "TEXT", doc: "The pages that differ, as a JSON array of `{ id, change }`." }
     - { name: "stream_id", type: "INT", doc: "The stream whose worktree was reviewed." }
 - name: vcs_workspace
   version: 1
@@ -1992,7 +1992,7 @@
     - { not_null: path }
 - name: capture_exclusion
   version: 1
-  description: "The snapshot files a capture's scan was not given: over the size limit, binary or unreadable. A capture restates the paths it scanned; an excluded path is not one of them, so the facts it last had stay (stale) rather than reading as clean. A lens shows which files a metric did not check, and since when."
+  description: "The snapshot files a capture's scan was not given: over the size limit, binary or unreadable. A capture restates the paths it scanned; an excluded path is not one of them, so the facts it last had stay (stale) rather than reading as clean. A page shows which files a metric did not check, and since when."
   columns:
     - { name: "capture_id", type: "INTEGER", doc: "The capture that left it out (v_capture.id)." }
     - { name: "producer", type: "TEXT", doc: "What produced that capture (v_capture.producer)." }

@@ -250,7 +250,7 @@ lists each declared reference with Set… and Revoke.
 | `providers` | an external program implementing a capability, such as the work list | [Provider protocol](provider-protocol.md) |
 | `pages/*.yaml` (files, not a key) | a page: its data loaders and the view that shows them | [Pages](../guide/pages.md) |
 | `panels` | a rail panel showing its pages compact |  |
-| `ui.slots` | a page mounted at another page's slot, or a core one |  |
+| `ui.slots` | a page mounted at another page's slot |  |
 | `ui.decorators` | labels on core refs |  |
 | `ui.replacements` | a page in place of a core component |  |
 | `custom_components` | sandboxed HTML components a page draws, fed its loaders |  |

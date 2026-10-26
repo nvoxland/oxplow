@@ -22,9 +22,9 @@ pub const RECORDS_READ: &str = "oxplow.records.read";
 pub struct ReadInput {
     /// What to read, by its URI: `oxplow:oxplow/file?path=src/a.rs&rev=git:HEAD#lines=10-40`,
     /// `oxplow:oxplow/work_item?id=tsk12&provider=oxplow`, `oxplow:oxplow/commit?sha=<sha>`, `oxplow:oxplow/event?id=<id>#part=output`,
-    /// `oxplow:oxplow/lens?lens=<ext>/<slug>`.
+    /// `oxplow:oxplow/page?page=<ext>/<slug>`.
     pub uri: String,
-    /// The stream whose worktree a `file:` or `lens:` ref is read in
+    /// The stream whose worktree a `file:` or `page:` ref is read in
     /// (`str2`); absent, your own.
     #[serde(default)]
     pub stream: Option<String>,

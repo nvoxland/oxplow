@@ -31,7 +31,7 @@ test("Dashboards creates an empty page from its title form and opens it", async 
   await openFromLauncher(page, "Dashboards");
   await expect(activeHost(page)).toContainText("Dashboards");
   await page.getByTestId("action-page-action-new").filter({ visible: true }).click();
-  const title = page.getByTestId("lens-action-form-fields-title").filter({ visible: true });
+  const title = page.getByTestId("viz-action-form-fields-title").filter({ visible: true });
   await title.fill("Quokka release dashboard");
   await title.press("Enter");
   await expect(page.getByTestId("dashboard-title-edit").filter({ visible: true })).toHaveText("Quokka release dashboard");
@@ -44,7 +44,7 @@ test("Dashboards creates an empty page from its title form and opens it", async 
   await openFromLauncher(page, "Dashboards");
   // Other specs may have dashboards too, so find the linked row by its
   // title rather than depending on its ordinal position in the index.
-  const linked = activeHost(page).locator('[data-testid^="lens-row-"]').filter({ hasText: "Quokka release dashboard" });
+  const linked = activeHost(page).locator('[data-testid^="viz-row-"]').filter({ hasText: "Quokka release dashboard" });
   await expect(linked).toHaveCount(1);
   await linked.getByText("Quokka release dashboard", { exact: true }).click();
   await expect(page.getByTestId("dashboard-title-edit").filter({ visible: true })).toHaveText("Quokka release dashboard");

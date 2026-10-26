@@ -508,7 +508,7 @@ async fn schema_rejection_names_the_field_and_is_audited_invalid() {
     ));
 }
 
-/// A person, an agent and a lens acting for either run every command; a
+/// A person, an agent and a page acting for either run every command; a
 /// durable job's model runs only one declared for jobs (`job: true`),
 /// refused before anything runs, and `list` shows it only those.
 #[tokio::test(flavor = "multi_thread")]
@@ -516,11 +516,11 @@ async fn anyone_runs_a_command_and_a_job_only_its_own() {
     let (db, bus) = bus();
     bus.register(Command::new(kv_spec("oxplow.kv.set", Confirm::Never), kv_set()).unwrap())
         .unwrap();
-    let lens = |presser: Actor| Actor::Page {
+    let page = |presser: Actor| Actor::Page {
         page_id: "acme/x".into(),
         on_behalf_of: Box::new(presser),
     };
-    for (i, actor) in [Actor::Human, agent(), lens(Actor::Human), lens(agent())]
+    for (i, actor) in [Actor::Human, agent(), page(Actor::Human), page(agent())]
         .into_iter()
         .enumerate()
     {
@@ -844,19 +844,19 @@ async fn concurrent_undos_apply_the_inverse_once() {
     assert_eq!(ok_runs, 3, "two sets and one undo");
 }
 
-/// A lens acting for an agent is the agent's: its run of a command that
-/// asks doesn't ask; a person's lens asks the person.
+/// A page acting for an agent is the agent's: its run of a command that
+/// asks doesn't ask; a person's page asks the person.
 #[tokio::test(flavor = "multi_thread")]
-async fn a_lens_acting_for_an_agent_is_treated_as_the_agent() {
+async fn a_page_acting_for_an_agent_is_treated_as_the_agent() {
     let (db, bus) = bus();
     bus.register(Command::new(kv_spec("oxplow.kv.set", Confirm::Always), kv_set()).unwrap())
         .unwrap();
-    let lens = |presser: Actor| Actor::Page {
+    let page = |presser: Actor| Actor::Page {
         page_id: "acme/x".into(),
         on_behalf_of: Box::new(presser),
     };
     bus.run(
-        &lens(agent()),
+        &page(agent()),
         "oxplow.kv.set",
         json!({"k": "a", "v": "1"}),
         false,
@@ -866,7 +866,7 @@ async fn a_lens_acting_for_an_agent_is_treated_as_the_agent() {
     assert_eq!(kv_value(&db, "a").await.as_deref(), Some("1"));
     let err = bus
         .run(
-            &lens(Actor::Human),
+            &page(Actor::Human),
             "oxplow.kv.set",
             json!({"k": "b", "v": "1"}),
             false,
@@ -1315,7 +1315,7 @@ async fn a_composed_call_needs_what_a_direct_one_does() {
 
 /// A run's actor is resolved once: an agent whose transport carried its
 /// thread but not its stream runs with its thread's stream — through a
-/// lens too — so every handler's "the caller's stream" is the same
+/// page too — so every handler's "the caller's stream" is the same
 /// answer; an agent claiming a thread that doesn't exist is refused.
 #[tokio::test(flavor = "multi_thread")]
 async fn an_agents_stream_is_its_threads() {
@@ -1346,12 +1346,12 @@ async fn an_agents_stream_is_its_threads() {
         .await
         .unwrap();
     assert_eq!(out.result, json!("str1"));
-    let through_a_lens = Actor::Page {
+    let through_a_page = Actor::Page {
         page_id: "acme/x".into(),
         on_behalf_of: Box::new(agent(7)),
     };
     let out = bus
-        .run(&through_a_lens, "oxplow.kv.whoami", json!({}), false)
+        .run(&through_a_page, "oxplow.kv.whoami", json!({}), false)
         .await
         .unwrap();
     assert_eq!(out.result, json!("str1"));
@@ -2358,11 +2358,11 @@ async fn an_effects_run_that_asks_is_proposed_and_never_confirmed() {
 async fn only_a_person_decides_a_proposal() {
     let (db, bus) = confirming_bus();
     let id = propose(&bus, "a", "1").await;
-    let lens_for_agent = Actor::Page {
+    let page_for_agent = Actor::Page {
         page_id: "acme/x".into(),
         on_behalf_of: Box::new(agent()),
     };
-    for actor in [agent(), lens_for_agent, Actor::System, effect()] {
+    for actor in [agent(), page_for_agent, Actor::System, effect()] {
         let err = bus.approve(&actor, id).await.unwrap_err();
         assert!(matches!(err, CommandError::Denied { .. }), "{err:?}");
         let err = bus.decline(&actor, id).await.unwrap_err();
@@ -2384,11 +2384,11 @@ fn placing_an_agent_in_its_stream_keeps_its_session() {
         thread_id: Some(ThreadId::new(7)),
         stream_id: None,
     };
-    let lens = Actor::Page {
+    let page = Actor::Page {
         page_id: "l".into(),
         on_behalf_of: Box::new(agent),
     };
-    let placed = lens.in_stream(oxplow_domain::StreamId::new(1));
+    let placed = page.in_stream(oxplow_domain::StreamId::new(1));
     assert_eq!(
         placed.session_id(),
         Some(oxplow_domain::AgentSessionId::new(5))

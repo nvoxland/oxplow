@@ -1,4 +1,4 @@
-//! An extension's SQL reads its own configuration: a model, a lens and an
+//! An extension's SQL reads its own configuration: a model, a page and an
 //! advisory name a key with `config('/pointer')`, the value comes from the
 //! extension's effective settings, and a change of settings applies without a
 //! restart.
@@ -116,7 +116,7 @@ async fn a_settings_change_republishes_the_models_that_read_it() {
 /// An advisory reads the setting each time it runs: the large-uncommitted
 /// threshold lowered to one file fires on one.
 #[tokio::test(flavor = "multi_thread")]
-async fn a_lens_and_an_advisory_read_the_current_setting() {
+async fn a_page_and_an_advisory_read_the_current_setting() {
     let fx = services_with_effort().await;
     let bundled = fx
         .svc

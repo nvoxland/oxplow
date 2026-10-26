@@ -5,7 +5,7 @@
 /// pushed).
 import type { Extension, Node, Page, SqlCell } from "../tauri-bridge/generated/bindings.js";
 import type { PagePayload } from "../tabs/pageRefs.js";
-import { isDefaultValue } from "../lens/lensModel.js";
+import { isDefaultValue } from "../viz/vizModel.js";
 import { rendererFor, rendererName, renderersFor } from "./renderers.js";
 import { extPageUri, pageUri, type Params } from "../uri/uri.js";
 
@@ -85,7 +85,7 @@ function switchParams(page: Page): Set<string> {
  *  `resource` params (the `?`) and its `view` (the `#`: filters and picks)
  *  — and whether the change is somewhere to come back from (another
  *  resource, a pick set, another section: pushed) or not (a filter:
- *  replaced). The same rule as a lens page's (`lensViewChange`). */
+ *  replaced). The same rule as a page's (`pageViewChange`). */
 export function pageViewChange(
   page: Page,
   current: Record<string, SqlCell>,

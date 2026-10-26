@@ -154,7 +154,7 @@ pub fn set_op() -> Op {
             })
         })),
     )
-    // The person's navigation, through a lens too — never the agent's.
+    // The person's navigation, through a page too — never the agent's.
 }
 
 /// `remove { ref, thread?, stream? }`.

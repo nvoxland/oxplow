@@ -1,7 +1,7 @@
 /// The dock's panels: what each icon in the bar opens. Core registers its
 /// own (Alerts now; the assistant and the context basket join through
 /// `registerDockPanel`); an extension's `panels:` entry with `dock: true`
-/// joins as a panel whose body is its lens. `useDockPanels` is the one list
+/// joins as a panel whose body is its page. `useDockPanels` is the one list
 /// the bar and the panel read, in a fixed order: core's first (by
 /// `CORE_ORDER`), then the extensions' by title.
 

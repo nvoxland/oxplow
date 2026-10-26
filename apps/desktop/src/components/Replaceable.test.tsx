@@ -233,7 +233,7 @@ test("a replacement that can't load shows the core component and says why", asyn
   expect(view.queryByTestId("replacement-work_item.board")).toBeNull();
 });
 
-// A lens replacement is gone: one that names no page falls back, and says so.
+// A page replacement is gone: one that names no page falls back, and says so.
 test("a replacement that names no page shows the core component and says why", async () => {
   const ext = replacing("x");
   ext.ui.replacements[0] = { ...ext.ui.replacements[0]!, page: "" } as never;

@@ -357,7 +357,7 @@ mod tests {
                     session_id: None,
                     input: json!({}),
                     outcome: Outcome::Denied,
-                    error: Some("lenses may not run oxplow.config.set".into()),
+                    error: Some("pages may not run oxplow.config.set".into()),
                     result: None,
                     inverse: None,
                     scopes: BTreeMap::new(),

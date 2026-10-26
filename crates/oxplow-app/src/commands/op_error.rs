@@ -4,7 +4,7 @@
 //! `dismiss_all`). Each is a mark in the event log naming the
 //! `ui.op_failed` event, read back as `v_op_error.seen` / `dismissed`, and
 //! kept as long as the failure is (the `ui` namespace's window). A
-//! person's or a lens's on their behalf, never an agent's: the list is
+//! person's or a page's on their behalf, never an agent's: the list is
 //! what the person sees.
 
 use std::sync::Arc;

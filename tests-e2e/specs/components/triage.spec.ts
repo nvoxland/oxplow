@@ -123,10 +123,10 @@ test("TODOs are sorted by the model, and a decision from the board or the list p
     await openFromLauncher(page, "TODOs");
     const list = page.getByTestId("center-tab-body-oxplow:oxplow/page?page=triage/todos");
     await list.getByRole("row").filter({ hasText: "cleanup" }).locator("td").first().click({ button: "right" });
-    await page.getByTestId("menu-item-lens-action-decide").click();
-    const form = page.getByTestId("lens-action-form");
-    await form.getByTestId("lens-action-form-fields-decision").selectOption("wontfix");
-    await form.getByTestId("lens-action-form-fields-submit").click();
+    await page.getByTestId("menu-item-viz-action-decide").click();
+    const form = page.getByTestId("viz-action-form");
+    await form.getByTestId("viz-action-form-fields-decision").selectOption("wontfix");
+    await form.getByTestId("viz-action-form-fields-submit").click();
     await expect(form).toHaveCount(0);
     await until("the page's decision to be stored", 15_000, async () => (await decisions(daemon))["src/lib.rs:3"] === "wontfix");
 

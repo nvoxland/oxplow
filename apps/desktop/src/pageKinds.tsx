@@ -75,7 +75,6 @@ export function pageKindIconComponent(kind: string, extensions: Extension[] | nu
     case "dashboard":
       return LayoutDashboard;
 
-    case "lens":
     // A page no enabled extension declares (yet).
     case "page":
       return Glasses;

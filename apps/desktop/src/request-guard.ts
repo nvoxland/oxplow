@@ -1,5 +1,5 @@
 // Latest-request-wins for async fetches whose inputs change: a slow
-// response for old params (another thread, another lens) must not land
+// response for old params (another thread, another page) must not land
 // over the new ones. `begin()` a request and apply its result only while
 // the returned check still says it's current.
 import { useEffect, useRef } from "react";

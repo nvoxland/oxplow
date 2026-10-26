@@ -88,7 +88,7 @@ fn parse_thread(raw: &str, field: &str) -> Result<ThreadId, CommandError> {
 }
 
 /// Who authored a task an actor files: a person (`user`), an agent
-/// (`agent`, a lens acting for one included), or neither — an effect or
+/// (`agent`, a page acting for one included), or neither — an effect or
 /// oxplow itself: the creating actor is on the run's audit and its
 /// `work_item.created`, and the task isn't shown as the person's.
 fn task_author(actor: &Actor) -> Option<TaskAuthor> {
@@ -103,7 +103,7 @@ fn task_author(actor: &Actor) -> Option<TaskAuthor> {
 }
 
 /// Who a comment's `task_note.author` names, as [`task_author`] does for
-/// a task: `user` (a person), `agent` (a lens acting for one included),
+/// a task: `user` (a person), `agent` (a page acting for one included),
 /// `effect:<extension>/<id>` or `oxplow` — never the person's for what an
 /// effect or oxplow wrote.
 fn note_author(actor: &Actor) -> String {

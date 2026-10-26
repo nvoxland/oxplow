@@ -5,7 +5,7 @@ What comes with oxplow, built as an ordinary extension:
 - the effort review packet: what a person checks before accepting an
   agent's work, shown on each effort's diff (the `oxplow-foundation/changes.sections`
   slot), and the verdicts they give;
-- the analytics lenses: tests and coverage, metric deltas, churn,
+- the analytics pages: tests and coverage, metric deltas, churn,
   duplication, co-change, token use and page visits;
 - advisories that steer the agent toward tests and metric thresholds
   while an effort is open.
@@ -49,7 +49,7 @@ materialized ones refilled), and the advisory reads it on its next run.
   changed outside the area its work item names. A file is in the area
   when the item's title or body names it, or one of its directories at
   least two levels deep (`src/ui`). An item that names no area has none.
-- `v_effort_file`, `v_work_item` — what the packet's other lenses show.
+- `v_effort_file`, `v_work_item` — what the packet's other pages show.
 
 ## What a reviewer does
 

@@ -5,9 +5,9 @@
 /** A value in a result row or a param. */
 export type OxplowCell = string | number | boolean | null;
 
-/** One run of a lens: what it is, what it was asked, what it answered. */
+/** One run of a viz node: what it is, what it was asked, what it answered. */
 export interface OxplowRun {
-  lens: { id: string; title: string; [key: string]: unknown };
+  config: { id: string; title: string; [key: string]: unknown };
   params: Record<string, OxplowCell>;
   result: { columns: string[]; rows: OxplowCell[][]; truncated: boolean };
 }
@@ -41,7 +41,7 @@ export interface OxplowLoaderRows extends OxplowRows {
 
 /** New data: what `onUpdate` hears. */
 export interface OxplowUpdate {
-  /** A `viz: custom`'s own rows as a lens run; null for a component node. */
+  /** A `viz: custom`'s own rows as a viz run; null for a component node. */
   run: OxplowRun | null;
   /** Each loader's rows, by name. */
   data: Record<string, OxplowLoaderRows>;
@@ -63,11 +63,11 @@ export interface OxplowAction {
 }
 
 export interface OxplowComponent {
-  /** Its loaders' rows, by name (a lens's own rows as `rows`). */
+  /** Its loaders' rows, by name (a viz node's own rows as `rows`). */
   readonly data: Record<string, OxplowLoaderRows>;
   /** The params its data ran with. */
   readonly params: Record<string, OxplowCell>;
-  /** A `viz: custom`'s own rows as a lens run; null for a page's component node. */
+  /** A `viz: custom`'s own rows as a viz run; null for a page's component node. */
   readonly run: OxplowRun | null;
   /** The page it is (a page's component), or null. */
   readonly page: OxplowPage | null;
@@ -115,7 +115,7 @@ export interface OxplowComponent {
   setTitle(title: string): Promise<null>;
   /** Have oxplow draw an inline page under the page with its own
    *  components — its YAML (JSON is YAML too): `title`, read-only `sql`
-   *  loaders under `data`, a `view` — live, with Save as Lens and Pin to
+   *  loaders under `data`, a `view` — live, with Pin to
    *  Dashboard; null clears it. Resolves with its first loader's rows
    *  (null when cleared). Rejects `INVALID` with the `field` it is about
    *  (`/data/<loader>/sql`) for a page oxplow refuses or a loader that
@@ -128,8 +128,7 @@ export interface OxplowComponent {
   onAction(listener: (id: string) => void): () => void;
   /** **View params** — its tab's address, as far as it is the
    *  component's: a page's own (`page:x/timeline?from=…`), a replacement's
-   *  (the keys its target's contract lists, `v_replaceable.view`) or a
-   *  lens page's (the lens's params). Null when its host gives no view (a
+   *  (the keys its target's contract lists, `v_replaceable.view`). Null when its host gives no view (a
    *  dashboard tile, a slot). */
   readonly viewParams: Record<string, string> | null;
   /** Change its view params (null drops one): its tab's entry is replaced,

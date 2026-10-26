@@ -346,7 +346,7 @@ mod tests {
         assert!(row["payload_expired_at"].is_string());
     }
 
-    /// An agent, or a lens acting for a person, may report a UI error; each
+    /// An agent, or a page acting for a person, may report a UI error; each
     /// run logs one.
     #[tokio::test]
     async fn an_agent_may_report_a_ui_error() {
@@ -356,11 +356,11 @@ mod tests {
             thread_id: Some(ThreadId::new(fx.thread.value())),
             stream_id: None,
         };
-        let lens = Actor::Page {
+        let page = Actor::Page {
             page_id: "acme/errors".into(),
             on_behalf_of: Box::new(Actor::Human),
         };
-        for actor in [agent, lens] {
+        for actor in [agent, page] {
             fx.svc
                 .commands
                 .run(

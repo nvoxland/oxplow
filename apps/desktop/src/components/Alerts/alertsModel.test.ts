@@ -9,7 +9,7 @@ test("the bell counts what the Alerts page lists, red for a problem, accent for 
   expect(alertsSummary(none)).toEqual({ count: 0, tone: "none" });
   expect(alertsSummary({ ...none, proposals: [{ id: "oxplow:oxplow/proposal?id=1", title: "x" }] })).toEqual({ count: 1, tone: "accent" });
   // A panel's badge is shown by its panel and toasted; the page doesn't list it, so the bell doesn't count it.
-  expect(alertsSummary({ ...none, badges: [{ id: "x/b", title: "B", message: "2", open: "oxplow:oxplow/lens?lens=x/b" }] })).toEqual({ count: 0, tone: "none" });
+  expect(alertsSummary({ ...none, badges: [{ id: "x/b", title: "B", message: "2", open: "oxplow:oxplow/page?page=x/b" }] })).toEqual({ count: 0, tone: "none" });
   expect(
     alertsSummary({
       ...none,
@@ -40,7 +40,7 @@ test("new alerts are the items not seen before, once each", () => {
     "Push failed",
     "Waiting on You: 2 items",
   ]);
-  // A badge's Review opens its lens or page; the others open Alerts.
+  // A badge's Review opens its page; the others open Alerts.
   expect(newAlerts(before, now).map((a) => a.open ?? null)).toEqual([null, null, "oxplow:oxplow/page?page=x/b"]);
   expect(newAlerts(alertKeys(now), now)).toEqual([]);
   // Delivery: a toast when it starts failing, not on each new letter.

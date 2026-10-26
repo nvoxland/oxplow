@@ -1,4 +1,4 @@
-//! Every lens has a text rendering (design rule 17,
+//! Every viz has a text rendering (design rule 17,
 //! `.context/extensions.md`): what an agent reads instead
 //! of the rows, what `copy` puts on the clipboard, and what a panel says
 //! when read as text. One renderer per kit component, each saying what
@@ -28,10 +28,10 @@ pub const MAX_HUNK_BYTES: usize = 8_000;
 #[derive(Debug, Clone, Default)]
 pub struct Resolved {
     pub diffs: Vec<String>,
-    /// A `code` lens's files, one per row (up to [`MAX_HUNK_FILES`]): each
+    /// A `code` viz's files, one per row (up to [`MAX_HUNK_FILES`]): each
     /// one's text at its revision, cut to its marked lines.
     pub files: Vec<String>,
-    /// An `approvals` lens's pending proposals, one line each.
+    /// An `approvals` viz's pending proposals, one line each.
     pub approvals: Vec<String>,
 }
 
@@ -119,7 +119,7 @@ pub async fn resolve(
     Ok(out)
 }
 
-/// The pending proposals an `approvals` lens shows, one line each: its
+/// The pending proposals an `approvals` viz shows, one line each: its
 /// params `thread` (a thread ref) and `setting` (a config key) narrow them.
 async fn pending_proposals(
     svc: &crate::Services,
@@ -468,7 +468,7 @@ fn tree(run: &VizRun) -> String {
         return table(run);
     };
     // A lazy tree's run is one level: a row the `branch` column marks
-    // opens by running the lens again with `lazy` set to its id.
+    // opens by running the viz again with `lazy` set to its id.
     let lazy = t.lazy.as_deref().and_then(|p| {
         let branch = column(run, t.branch.as_ref())?;
         Some((p, branch))
@@ -536,7 +536,7 @@ fn tree(run: &VizRun) -> String {
     if let Some((param, _)) = lazy {
         let now = run.params.get(param).map(cell).unwrap_or_default();
         text.push_str(&format!(
-            "\n\nA ▸ row opens with `{param}=<id>`: run the lens with it to read that level (this run: `{param}={now}`)."
+            "\n\nA ▸ row opens with `{param}=<id>`: run the viz with it to read that level (this run: `{param}={now}`)."
         ));
     }
     text
@@ -659,7 +659,7 @@ fn hunks(run: &VizRun, diffs: &[String]) -> String {
 
 /// Code: each row's file, revision and marked lines, then its text in a
 /// fence named for its extension.
-/// The terminals a lens shows, one line each. Their output isn't read here
+/// The terminals a viz shows, one line each. Their output isn't read here
 /// (an agent never reads a person's terminal; a session's transcript is).
 fn terminals(run: &VizRun) -> String {
     let t = run.config.terminal.clone().unwrap_or_default();
@@ -937,9 +937,9 @@ mod tests {
     use crate::extensions::{VizChart, VizConfig};
     use oxplow_db::SqlQueryResult;
 
-    /// A markdown lens reads as its `text` column, not its first.
+    /// A markdown viz reads as its `text` column, not its first.
     #[test]
-    fn a_markdown_lens_reads_as_its_text_column() {
+    fn a_markdown_viz_reads_as_its_text_column() {
         let mut r = run(
             Viz::Markdown,
             None,
@@ -1012,7 +1012,7 @@ mod tests {
 
     /// A bar chart reads as its labels and values, with the total.
     #[test]
-    fn a_bar_lens_is_a_series_table_with_its_total() {
+    fn a_bar_viz_is_a_series_table_with_its_total() {
         let r = run(
             Viz::Bar,
             chart("day", "n", None),
@@ -1030,7 +1030,7 @@ mod tests {
 
     /// Lines pivot to one column per series, each with its total.
     #[test]
-    fn a_line_lens_has_a_column_per_series() {
+    fn a_line_viz_has_a_column_per_series() {
         let r = run(
             Viz::Line,
             chart("day", "n", Some("who")),
@@ -1071,7 +1071,7 @@ mod tests {
     }
 
     /// A table stops at MAX_ROWS and says how many more; an empty result
-    /// says the lens's `empty` text.
+    /// says the viz's `empty` text.
     #[test]
     fn a_table_is_capped_and_an_empty_one_says_so() {
         let rows = (0..60).map(|i| vec![SqlCell::Int(i)]).collect();
@@ -1187,7 +1187,7 @@ mod tests {
         r.params.insert("folder".into(), t(""));
         assert_eq!(
             render(&r, &Resolved::default()),
-            "- ▸ src\n- a.rs\n\nA ▸ row opens with `folder=<id>`: run the lens with it to read that level (this run: `folder=`)."
+            "- ▸ src\n- a.rs\n\nA ▸ row opens with `folder=<id>`: run the viz with it to read that level (this run: `folder=`)."
         );
     }
 
@@ -1297,7 +1297,7 @@ mod tests {
         );
     }
 
-    /// A hunks lens resolves each row's diff from the workspace.
+    /// A hunks viz resolves each row's diff from the workspace.
     #[tokio::test]
     async fn hunks_resolve_from_the_workspace() {
         let fx = crate::test_fixtures::services_with_effort().await;
@@ -1395,8 +1395,8 @@ mod tests {
         );
     }
 
-    /// A code lens reads each row's file at its revision, cut to its
-    /// lines; a diff lens diffs its first row's file.
+    /// A code viz reads each row's file at its revision, cut to its
+    /// lines; a diff viz diffs its first row's file.
     #[tokio::test]
     async fn code_and_diff_resolve_from_the_workspace() {
         let fx = crate::test_fixtures::services_with_effort().await;
@@ -1447,7 +1447,7 @@ mod tests {
         assert!(text.contains("-one") && text.contains("+uno"), "{text}");
     }
 
-    /// An editor lens reads its first row's file as the working tree has
+    /// An editor viz reads its first row's file as the working tree has
     /// it, and says the person's unsaved edits aren't in it.
     #[tokio::test]
     async fn an_editor_reads_the_working_file() {
@@ -1470,7 +1470,7 @@ mod tests {
         );
     }
 
-    /// A terminal lens names its terminals and never their output.
+    /// A terminal viz names its terminals and never their output.
     #[test]
     fn terminals_read_as_their_names() {
         let r = with(
@@ -1499,7 +1499,7 @@ mod tests {
         );
     }
 
-    /// An embed lens reads as a link to its page.
+    /// An embed viz reads as a link to its page.
     #[tokio::test]
     async fn an_embed_reads_as_a_link() {
         let fx = crate::test_fixtures::services_with_effort().await;
@@ -1524,9 +1524,9 @@ mod tests {
         );
     }
 
-    /// An approvals lens reads the pending proposals itself: an agent
+    /// An approvals viz reads the pending proposals itself: an agent
     /// sees what waits (and that it can't decide), narrowed by the
-    /// lens's `thread` param; with none waiting it says so.
+    /// viz's `thread` param; with none waiting it says so.
     #[tokio::test(flavor = "multi_thread")]
     async fn approvals_list_the_pending_proposals() {
         let fx = crate::test_fixtures::services_with_effort().await;

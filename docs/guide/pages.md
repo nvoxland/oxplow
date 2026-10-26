@@ -238,9 +238,10 @@ custom_components:
 ```yaml
 # pages/burndown.yaml
 title: Burndown
-query: SELECT day, remaining FROM v_my_ext_burndown
-viz: custom
-custom: { component: burndown, props: { color: accent } }
+data:
+  burndown:
+    sql: SELECT day, remaining FROM v_my_ext_burndown
+view: { component: { id: burndown, props: { color: accent } } }
 ```
 
 The bundle lives in `components/burndown/` and needs an `index.html`.

@@ -31,15 +31,16 @@ export interface Origin {
   /** The items as they were when the page opened; none for a live origin. */
   items: OriginItem[];
   index: number;
-  /** The collection is a lens's link column, run again whenever it is wanted
+  /** The collection is a viz node's link column, run again whenever it is wanted
    *  (the host resolves `items` from it and finds `index` by the page). */
   live?: LiveOrigin;
 }
 
 export interface LiveOrigin {
-  lens: string;
+  /** `<page>#<node>`: the viz node whose link column is the collection. */
+  node: string;
   params: Record<string, SqlCell>;
-  /** The lens column whose links are the pages. */
+  /** The column whose links are the pages. */
   column: string;
 }
 

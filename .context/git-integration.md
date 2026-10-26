@@ -213,14 +213,21 @@ turns them into `vcsRefsChanged` / `workspaceChanged` on the shared
 `EventBus`. Git's watcher debounces ~250ms (a single `git commit` fires a
 dozen events touching `HEAD`, `refs/*`, `logs/*`, `index`, `ORIG_HEAD`, …).
 
+File events are the fast path, not the guarantee: macOS FSEvents can
+deliver `refs/` events 15s late or not at all under load (the browser
+suite's parallel daemons showed it — commits never reached `v_commit`).
+So the watcher also checks the refs' state every second — HEAD's text and
+each ref file's and `packed-refs`' size and mtime — and announces a change
+no file event did. A file event restates what the check compares against,
+so one move is announced once.
+
 When the stream lives in a secondary worktree (the common case — oxplow
 creates worktrees as siblings of the main repo), the stream's
-`.git` is a pointer file, not a directory. The watcher reads the
-`gitdir:` line to find the per-worktree state dir (containing `HEAD`,
-`index`, `logs/HEAD`) and also follows the `commondir` pointer to watch
-the shared `.git` (where `refs/heads/*` actually update). Both dirs are
-watched; without the commondir watch, `git fetch` / ref updates from
-outside the worktree would be missed.
+`.git` is a pointer file, not a directory. The watcher asks git2 for
+the per-worktree git dir (`HEAD`, `index`, `logs/HEAD`) and the common
+dir (where `refs/heads/*` actually update): the file watch is on the
+common dir's `refs/`, and the timer's check reads both, so `git fetch` /
+ref updates from outside the worktree are heard too.
 
 Fires `vcsRefsChanged` after each debounce. Consumed silently (no
 loading spinner) by:

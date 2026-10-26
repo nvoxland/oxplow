@@ -6,7 +6,7 @@
 //! checked in at `crates/oxplow-domain/schemas/events/<type>@<v>.json`.
 //! A test regenerates each schema from its Rust type and fails if the
 //! file differs: a published `type@v` is a contract consumers (extensions,
-//! lenses, the agent) were written against, so a change is a **new
+//! pages, the agent) were written against, so a change is a **new
 //! version** (`V + 1`, with an `upcast` from the version before), never an
 //! edit. Run the test with `OXPLOW_BLESS=1` to write a new golden.
 //!
@@ -44,7 +44,6 @@ pub const CORE_NAMESPACES: &[&str] = &[
     "command",
     "effect",
     "collector",
-    "lens",
     "config",
     "provider",
     "contribution",

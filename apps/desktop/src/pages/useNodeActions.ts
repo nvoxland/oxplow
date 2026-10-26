@@ -1,15 +1,15 @@
 /// A page file's actions (`.context/pages-and-tabs.md` "Page files",
 /// Actions): pressed on its open run with `run_page_action`. A viz node's
-/// row and whole-lens actions come from the lens viz components, which
-/// press through `LensActionRunnerContext`; `nodeActionRunner` is that
+/// row and whole-page actions come from the page viz components, which
+/// press through `VizActionRunnerContext`; `nodeActionRunner` is that
 /// runner for one node, so the components draw a page's nodes unchanged.
 import { createContext, useContext, useMemo } from "react";
 
 import { usePageRunsStore } from "../pageRuns.js";
 
 import { unwrapResult } from "../api.js";
-import type { FormSource } from "../lens/formSource.js";
-import type { LensActionRunner } from "../lens/lensActionRunner.js";
+import type { FormSource } from "../viz/formSource.js";
+import type { VizActionRunner } from "../viz/vizActionRunner.js";
 import { commands, type CommandOutcome, type Drop, type FormStart, type SqlCell } from "../tauri-bridge/generated/bindings.js";
 
 /** `commands.runPageAction`, unwrapped. */
@@ -35,10 +35,10 @@ export const PageActionContext = createContext<RunPageAction>(daemonRunPageActio
 export type AfterPress = (runId: string) => void;
 
 /** The runner for node `node` (an embed's `<embed>/<id>`; null: the
- *  page's own actions) of open run `runId`. The lens id and params a viz
+ *  page's own actions) of open run `runId`. The page id and params a viz
  *  passes are the run's own, which the server holds. */
-export function nodeActionRunner(press: RunPageAction, runId: string | null, node: string | null, after?: AfterPress): LensActionRunner {
-  return async (_lens, action, _params, row, _streamId, confirmed, input = null, drop = null) => {
+export function nodeActionRunner(press: RunPageAction, runId: string | null, node: string | null, after?: AfterPress): VizActionRunner {
+  return async (_page, action, _params, row, _streamId, confirmed, input = null, drop = null) => {
     if (!runId) throw new Error("The page isn't open yet; try again in a moment.");
     const outcome = await press(runId, node, action, row, input, drop, confirmed);
     after?.(runId);
@@ -53,7 +53,7 @@ function useAfterPress(): AfterPress {
 }
 
 /** `nodeActionRunner` over the page's action context. */
-export function useNodeActions(runId: string | null, node: string | null): LensActionRunner {
+export function useNodeActions(runId: string | null, node: string | null): VizActionRunner {
   const press = useContext(PageActionContext);
   const after = useAfterPress();
   return useMemo(() => nodeActionRunner(press, runId, node, after), [press, runId, node, after]);
@@ -82,7 +82,7 @@ export const PageFormsContext = createContext<PageForms>(daemonForms);
 const notOpen = () => Promise.reject(new Error("The page isn't open yet; try again in a moment."));
 
 /** The form source for node `node` (null: the page's own actions) of open
- *  run `runId`: the lens id and params a form passes are the run's own,
+ *  run `runId`: the page id and params a form passes are the run's own,
  *  which the server holds. A form node needs a node. */
 export function nodeFormSource(forms: PageForms, runId: string | null, node: string | null, after?: AfterPress): FormSource {
   return {

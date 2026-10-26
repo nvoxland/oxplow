@@ -448,7 +448,7 @@ impl SqliteEventLogStore {
     }
 
     /// Append in a transaction of its own. For activity that has no
-    /// state write of its own (an agent tool call, a lens view).
+    /// state write of its own (an agent tool call, a page view).
     pub async fn append(&self, env: Envelope) -> Result<i64, DomainError> {
         let vocabulary = self.vocabulary.clone();
         self.db

@@ -260,7 +260,7 @@ pub struct OpenProjectInput {
 #[serde(deny_unknown_fields)]
 pub struct NavigateInput {
     /// What to show: a page's URI (`oxplow:oxplow/file?path=src/a.rs#lines=12`,
-    /// `oxplow:oxplow/work_item?id=tsk3&provider=oxplow`, `oxplow:oxplow/lens?lens=…`,
+    /// `oxplow:oxplow/work_item?id=tsk3&provider=oxplow`,
     /// `oxplow:oxplow/wiki?slug=…`, `oxplow:oxplow/page?page=<route>`), or a stream's or a
     /// thread's URI to select it. Its `#` is the page's view (a line, a
     /// filter): the same page in another view keeps its tab.
@@ -326,7 +326,7 @@ pub fn ops(host: &Arc<ClientHost>) -> Vec<Op> {
         "navigate",
         schema::<NavigateInput>(),
     ));
-    // A person's, through a lens too: oxplow never types for the agent.
+    // A person's, through a page too: oxplow never types for the agent.
     ops.push(ClientHost::op(
         host,
         "agent_input.write",

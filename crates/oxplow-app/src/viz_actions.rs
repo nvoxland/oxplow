@@ -1,8 +1,8 @@
-//! Running a lens's actions (P6.B1, `.context/extensions.md`): each is a
-//! command the lens offers, run through the bus as `Actor::Page` acting for
+//! Running a viz's actions (P6.B1, `.context/extensions.md`): each is a
+//! command the viz offers, run through the bus as `Actor::Page` acting for
 //! whoever pressed it — a person from the UI, the calling agent from MCP.
 //! The bus applies that actor's whole policy (the agent policy,
-//! confirmation), so a lens offers a button and grants no power of its
+//! confirmation), so a viz offers a button and grants no power of its
 //! own: it runs as its presser would, and can't confirm on anyone's
 //! behalf.
 
@@ -65,7 +65,7 @@ impl Drop {
 /// The scopes a drop binds.
 const DROP_SCOPES: &[&str] = &["before", "after", "onto", "group", "order"];
 
-/// The command a lens's action, form or component runs, resolved from one
+/// The command a viz's action, form or component runs, resolved from one
 /// catalog generation. It runs after that generation is let go: a command
 /// that activates (an extension's deploy, enable, disable or remove) waits
 /// for every reader of the generation it replaces, and would wait on its
@@ -89,7 +89,7 @@ impl Prepared {
 /// resolved `params`, `row` and `drop`, acting as `actor_id` for
 /// `on_behalf_of`. `source_id` identifies the declaration in diagnostics;
 /// neither a query nor a visualization config is needed to prepare it.
-/// Row/drop/when/form checks are shared by page and lens actions.
+/// Row, drop, when and form checks are the same for every viz action.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn prepare_resolved(
     source_id: &str,
@@ -115,7 +115,7 @@ pub(crate) fn prepare_resolved(
             let ids: Vec<&str> = actions.iter().map(|a| a.id.as_str()).collect();
             invalid(
                 "/action",
-                format!("lens `{source_id}` has no action `{action_id}` (it has {ids:?})"),
+                format!("viz `{source_id}` has no action `{action_id}` (it has {ids:?})"),
             )
         })?;
     match (action.row || action.one_row, row) {
@@ -128,7 +128,7 @@ pub(crate) fn prepare_resolved(
         (false, Some(_)) => {
             return Err(invalid(
                 "/row",
-                format!("`{action_id}` runs on the whole lens, not a row"),
+                format!("`{action_id}` runs on the whole viz, not a row"),
             ))
         }
         _ => {}
@@ -199,14 +199,14 @@ pub struct FormStart {
     pub fields: Option<Vec<crate::extensions::FormField>>,
     /// Fields picked from a list, with their choices.
     pub choices: BTreeMap<String, Vec<Choice>>,
-    /// Object fields' children, read from their `from` lens.
+    /// Object fields' children, read from their `from` viz.
     pub subfields: BTreeMap<String, Vec<Subfield>>,
-    /// What the `from` lenses read: when it changes, the form is read
+    /// What the `from` viz nodes read: when it changes, the form is read
     /// again.
     pub reads: oxplow_db::Reads,
 }
 
-/// A child of an object field (a row of its `from` lens).
+/// A child of an object field (a row of its `from` viz).
 #[derive(Debug, Clone, PartialEq, serde::Serialize, specta::Type)]
 pub struct Subfield {
     pub name: String,
@@ -322,11 +322,11 @@ pub(crate) fn filled(start: Value, given: Value, fixed: &[String]) -> Result<Val
 }
 
 /// The custom component `key` names (`<extension>/<component id>`) — the
-/// one a frame shows, whether a lens or a page shows it — from its
+/// one a frame shows, whether a viz node or a page shows it — from its
 /// extension.
 fn component_of(
     svc: &crate::Services,
-    lens_root: &Path,
+    project_root: &Path,
     key: &str,
 ) -> Result<
     (
@@ -340,7 +340,7 @@ fn component_of(
         .ok_or_else(|| CommandError::from(oxplow_domain::DomainError::NotFound))?;
     let ext = svc
         .extension_catalog
-        .named(lens_root, ext_name)
+        .named(project_root, ext_name)
         .map_err(CommandError::from)?;
     let component = ext
         .custom_components
@@ -360,20 +360,20 @@ fn component_of(
 /// the component.
 pub fn component_form(
     svc: &crate::Services,
-    lens_root: &Path,
+    project_root: &Path,
     key: &str,
     command: &str,
     input: Value,
     version: &str,
 ) -> Result<FormStart, CommandError> {
-    let (ext, component) = component_of(svc, lens_root, key)?;
+    let (ext, component) = component_of(svc, project_root, key)?;
     let loaded = svc
         .component_bundles
         .get(version)
         .filter(|bundle| {
             bundle.extension == ext.name
                 && bundle.component == component.id
-                && svc.component_bundles.is_current(lens_root, bundle)
+                && svc.component_bundles.is_current(project_root, bundle)
         })
         .ok_or_else(|| CommandError::Denied {
             reason: format!(
@@ -414,14 +414,14 @@ pub fn component_form(
 /// [`component_form`] under one pinned extension catalog generation.
 pub async fn component_form_pinned(
     svc: &crate::Services,
-    lens_root: &Path,
+    project_root: &Path,
     key: &str,
     command: &str,
     input: Value,
     version: &str,
 ) -> Result<FormStart, CommandError> {
     svc.sql
-        .read_generation(async { component_form(svc, lens_root, key, command, input, version) })
+        .read_generation(async { component_form(svc, project_root, key, command, input, version) })
         .await
         .map_err(CommandError::from)?
 }
@@ -449,12 +449,12 @@ pub struct ComponentSql {
 /// so the read is decided and recorded like a script's `sql.read`.
 pub async fn run_component_sql(
     svc: &crate::Services,
-    lens_root: &Path,
+    project_root: &Path,
     call: ComponentSql,
 ) -> Result<oxplow_db::SqlQueryResult, CommandError> {
     let (run, query) = svc
         .sql
-        .read_generation(async { prepare_component_sql(svc, lens_root, call) })
+        .read_generation(async { prepare_component_sql(svc, project_root, call) })
         .await
         .map_err(CommandError::from)??;
     svc.sql
@@ -465,17 +465,17 @@ pub async fn run_component_sql(
 
 fn prepare_component_sql(
     svc: &crate::Services,
-    lens_root: &Path,
+    project_root: &Path,
     call: ComponentSql,
 ) -> Result<(oxplow_domain::run::RunContext, oxplow_db::SqlQuery), CommandError> {
-    let (ext, component) = component_of(svc, lens_root, &call.component)?;
+    let (ext, component) = component_of(svc, project_root, &call.component)?;
     let loaded = svc
         .component_bundles
         .get(&call.version)
         .filter(|bundle| {
             bundle.extension == ext.name
                 && bundle.component == component.id
-                && svc.component_bundles.is_current(lens_root, bundle)
+                && svc.component_bundles.is_current(project_root, bundle)
         })
         .ok_or_else(|| CommandError::Denied {
             reason: format!(
@@ -496,7 +496,7 @@ fn prepare_component_sql(
     let run = oxplow_domain::run::RunContext::contribution(
         crate::run_context::contribution(
             &svc.extension_catalog,
-            lens_root,
+            project_root,
             &ext,
             oxplow_domain::contribution::ContributionKind::CustomComponent,
             &component.id,
@@ -546,11 +546,11 @@ pub struct ComponentInvoke {
 /// acts is what was approved, whatever the disk says now.
 pub async fn invoke_component_command(
     svc: &crate::Services,
-    lens_root: &Path,
+    project_root: &Path,
     call: ComponentInvoke,
 ) -> Result<CommandOutcome, CommandError> {
     svc.sql
-        .read_generation(async { prepare_component_command(svc, lens_root, call) })
+        .read_generation(async { prepare_component_command(svc, project_root, call) })
         .await
         .map_err(CommandError::from)??
         .run(svc)
@@ -559,21 +559,21 @@ pub async fn invoke_component_command(
 
 fn prepare_component_command(
     svc: &crate::Services,
-    lens_root: &Path,
+    project_root: &Path,
     call: ComponentInvoke,
 ) -> Result<Prepared, CommandError> {
-    let (ext, component) = component_of(svc, lens_root, &call.component)?;
+    let (ext, component) = component_of(svc, project_root, &call.component)?;
     let loaded = svc
         .component_bundles
         .get(&call.version)
         .filter(|bundle| {
             bundle.extension == ext.name
                 && bundle.component == component.id
-                && svc.component_bundles.is_current(lens_root, bundle)
+                && svc.component_bundles.is_current(project_root, bundle)
         })
         .ok_or_else(|| CommandError::Denied {
             reason: format!(
-                "component `{}/{}` isn't loaded at that version any more; reload its lens",
+                "component `{}/{}` isn't loaded at that version any more; reload its page",
                 ext.name, component.id
             ),
         })?;
@@ -600,17 +600,17 @@ fn prepare_component_command(
 }
 
 /// Load the bundle of component `key` (`<extension>/<id>`) as it is now
-/// under `lens_root`, for its frame: the version to serve it at and invoke
+/// under `project_root`, for its frame: the version to serve it at and invoke
 /// with.
 pub fn load_component(
     svc: &crate::Services,
-    lens_root: &Path,
+    project_root: &Path,
     key: &str,
 ) -> Result<String, CommandError> {
-    let (ext, component) = component_of(svc, lens_root, key)?;
+    let (ext, component) = component_of(svc, project_root, key)?;
     let loaded = svc
         .component_bundles
-        .load(lens_root, &ext, &component)
+        .load(project_root, &ext, &component)
         .map_err(CommandError::from)?;
     Ok(loaded.version.clone())
 }
@@ -618,11 +618,11 @@ pub fn load_component(
 /// Load a component under one pinned extension catalog generation.
 pub async fn load_component_pinned(
     svc: &crate::Services,
-    lens_root: &Path,
+    project_root: &Path,
     key: &str,
 ) -> Result<String, CommandError> {
     svc.sql
-        .read_generation(async { load_component(svc, lens_root, key) })
+        .read_generation(async { load_component(svc, project_root, key) })
         .await
         .map_err(CommandError::from)?
 }
@@ -1023,7 +1023,7 @@ view:
     }
 
     /// P6.B1's red: a person's click runs the command as the page, acting
-    /// for them — audited as a lens actor naming the page.
+    /// for them — audited as a page actor naming the page.
     #[tokio::test]
     async fn an_action_runs_its_command_as_the_page() {
         let (fx, _root) = fixture().await;
@@ -1766,7 +1766,7 @@ view:
             )
             .await
             .unwrap_err(),
-            "reload its lens",
+            "reload its page",
         );
         let new = load_board(&fx, &root).await;
         assert_ne!(new, old);

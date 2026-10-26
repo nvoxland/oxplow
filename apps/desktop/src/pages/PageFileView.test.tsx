@@ -62,8 +62,8 @@ test("a filter replaces the entry's view; the run is never told directly", async
   const m = moves();
   const { runs, calls } = fakePageRuns(listRun());
   const view = render(inTab(extPageRef("acme", "list", { project: "p1" }), m, <PageFileView page={listPage} resource={{ project: "p1" }} stream={null} threadId={null} runs={runs} />));
-  fireEvent.click(await view.findByTestId("lens-param-q-value"));
-  const input = view.getByTestId("lens-param-q-edit") as HTMLInputElement;
+  fireEvent.click(await view.findByTestId("page-param-q-value"));
+  const input = view.getByTestId("page-param-q-edit") as HTMLInputElement;
   fireEvent.change(input, { target: { value: "be" } });
   fireEvent.keyDown(input, { key: "Enter" });
   await waitFor(() => expect(m.sets).toEqual([{ view: { q: "be" }, push: false }]));
@@ -75,8 +75,8 @@ test("a row's pick pushes an entry, and the rail shows what it picked", async ()
   const m = moves();
   const { runs } = fakePageRuns(listRun());
   const view = render(inTab(extPageRef("acme", "list", { project: "p1" }), m, <PageFileView page={listPage} resource={{ project: "p1" }} stream={null} threadId={null} runs={runs} />));
-  await view.findByTestId("lens-row-0");
-  fireEvent.click(view.getByTestId("lens-row-0"));
+  await view.findByTestId("viz-row-0");
+  fireEvent.click(view.getByTestId("viz-row-0"));
   await waitFor(() => expect(m.sets).toEqual([{ view: { item: "a" }, push: true }]));
 });
 
@@ -91,7 +91,7 @@ test("another resource navigates to a new entry, keeping the view", async () => 
   const { runs } = fakePageRuns(fakeRun(resourcePage, { params: { project: "p1" }, loaders: { items: loader(["id"], [["p2"]]) } }));
   const ref = extPageRef("acme", "list", { project: "p1" }, { q: "x" });
   const view = render(inTab(ref, m, <PageFileView page={resourcePage} resource={{ project: "p1" }} stream={null} threadId={null} runs={runs} />));
-  fireEvent.click(await view.findByTestId("lens-row-0"));
+  fireEvent.click(await view.findByTestId("viz-row-0"));
   await waitFor(() => expect(m.navs).toEqual([extPageRef("acme", "list", { project: "p2" }, { q: "x" }).id]));
   expect(m.sets).toEqual([]);
 });
@@ -112,7 +112,7 @@ test("a renderer's other resource is that resource's URI", async () => {
     inTab({ id: uri }, m, <PageFileView page={commitPage} resource={{ uri, sha: "abc" }} renders={uri} stream={null} threadId={null} runs={runs} />),
   );
   await waitFor(() => expect(calls.open[0]?.params).toEqual({ uri, sha: "abc" }));
-  fireEvent.click(await view.findByTestId("lens-row-0"));
+  fireEvent.click(await view.findByTestId("viz-row-0"));
   await waitFor(() => expect(m.navs).toEqual(["oxplow:oxplow/commit?sha=def"]));
 });
 

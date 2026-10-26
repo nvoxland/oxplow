@@ -218,7 +218,7 @@
       "default": null
     },
     "panels": {
-      "description": "Left-nav panels, each showing its lenses compact.",
+      "description": "Left-nav panels, each showing its pages compact.",
       "type": [
         "array",
         "null"
@@ -312,7 +312,7 @@
       "default": null
     },
     "custom_components": {
-      "description": "Sandboxed web components for `viz: custom` lenses.",
+      "description": "Sandboxed web components for `viz: custom` viz nodes.",
       "type": [
         "array",
         "null"
@@ -1730,7 +1730,7 @@
       ]
     },
     "EntityRelation": {
-      "description": "A documented join from an entity to another view. Not executed; it\ntells agents and lens authors how the data connects.",
+      "description": "A documented join from an entity to another view. Not executed; it\ntells agents and page authors how the data connects.",
       "type": "object",
       "properties": {
         "to": {
@@ -2258,7 +2258,7 @@
       ]
     },
     "PanelScope": {
-      "description": "What a left-nav panel is bound to: the project, the current stream, or\nthe current thread — which of `stream_id` / `thread_id` its lenses get.",
+      "description": "What a left-nav panel is bound to: the project, the current stream, or\nthe current thread — which of `stream_id` / `thread_id` its viz nodes get.",
       "type": "string",
       "enum": [
         "project",
@@ -2304,11 +2304,11 @@
       "additionalProperties": false
     },
     "SlotMount": {
-      "description": "A slot mount: a lens into a core page, or among a document or\ndashboard lens's parts.",
+      "description": "A slot mount: a page mounted at another page's slot.",
       "type": "object",
       "properties": {
         "slot": {
-          "description": "A page's slot (`<extension>/<page>.<slot>`) or a core slot\n(`diff.file.header`).",
+          "description": "A page's slot (`<extension>/<page>.<slot>`).",
           "type": "string"
         },
         "page": {
@@ -2443,7 +2443,7 @@
           "const": "ref-chip"
         },
         {
-          "description": "A badge after a lens cell that links to a listed ref.",
+          "description": "A badge after a page cell that links to a listed ref.",
           "type": "string",
           "const": "row-badge"
         }

@@ -1,7 +1,7 @@
 //! The effort commands: open, close, link and retitle an effort — a span of
 //! one thread's work (`.context/work-tracking.md`). oxplow opens and closes
 //! efforts itself through an effort policy; these are what that policy, a
-//! person, an agent or a lens runs, over the effort store's cores.
+//! person, an agent or a page runs, over the effort store's cores.
 //!
 //! - `effort.open { thread?, work_item?, title?, adopt_since? }` opens one
 //!   on a thread (the caller's by default). The thread's current effort

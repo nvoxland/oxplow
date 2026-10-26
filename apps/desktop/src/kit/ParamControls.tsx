@@ -2,9 +2,9 @@ import { createContext, useCallback, useContext, useEffect, useId, useRef, useSt
 
 import { querySql, type SqlCell, type SqlQueryResult } from "../api.js";
 import { recordOpError } from "../opErrors.js";
-import { isDefaultValue, parseParamInput } from "../lens/lensModel.js";
-import { NO_READS, useRerunOnChange } from "../lens/lensRerun.js";
-import { paramKind, paramOptions, paramOptionsSql, type ParamKind, type ParamOption } from "../lens/lensParams.js";
+import { isDefaultValue, parseParamInput } from "../viz/vizModel.js";
+import { NO_READS, useRerunOnChange } from "../viz/rerun.js";
+import { paramKind, paramOptions, paramOptionsSql, type ParamKind, type ParamOption } from "../viz/vizParams.js";
 import type { PageParam, ParamType, Reads } from "../tauri-bridge/generated/bindings.js";
 import { humanize } from "./humanize.js";
 import { Popover } from "./Popover.js";
@@ -48,7 +48,7 @@ export interface ParamRowProps {
 }
 
 /**
- * One lens param in a page's rail: its label beside its value. Clicking
+ * One page param in a page's rail: its label beside its value. Clicking
  * the value edits it in place, or, when the control doesn't fit the row
  * (a custom date range), in a popover over the page. Enter applies,
  * Escape keeps the value from before the edit, and focus comes back to
@@ -90,7 +90,7 @@ export function ParamRow({ param, value, onApply, query = querySql, values = {},
   return (
     <div
       className={sameValue(type, shown, param.default ?? null) ? "ox-param" : "ox-param ox-param-changed"}
-      data-testid={`lens-param-${name}`}
+      data-testid={`page-param-${name}`}
       onBlur={(e) => {
         // Focus left the row (not into its popover): the edit is over.
         if (editing && !e.currentTarget.contains(e.relatedTarget as Node | null)) setEditing(false);
@@ -103,7 +103,7 @@ export function ParamRow({ param, value, onApply, query = querySql, values = {},
         <input
           type="checkbox"
           className="ox-param-check"
-          data-testid={`lens-param-${name}-edit`}
+          data-testid={`page-param-${name}-edit`}
           aria-label={label}
           checked={truthy(shown)}
           onChange={(e) => apply(e.target.checked)}
@@ -129,7 +129,7 @@ export function ParamRow({ param, value, onApply, query = querySql, values = {},
           ref={valueButton}
           type="button"
           className="ox-param-value"
-          data-testid={`lens-param-${name}-value`}
+          data-testid={`page-param-${name}-value`}
           aria-describedby={labelId}
           title={said ?? undefined}
           onClick={() => setEditing(true)}
@@ -162,7 +162,7 @@ export function ParamList({ params, values, onApply, query, streamId = null }: P
         <ParamRow key={p.name} param={p} value={values[p.name] ?? null} values={values} streamId={streamId} onApply={onApply} query={query} />
       ))}
       {folded > 0 ? (
-        <button type="button" className="ox-link ox-params-more" data-testid="lens-params-more" onClick={() => setAll(true)}>
+        <button type="button" className="ox-link ox-params-more" data-testid="page-params-more" onClick={() => setAll(true)}>
           More ({folded})
         </button>
       ) : null}
@@ -170,7 +170,7 @@ export function ParamList({ params, values, onApply, query, streamId = null }: P
   );
 }
 
-/** A param's type, as its lens says or as it follows from `options` /
+/** A param's type, as its page says or as it follows from `options` /
  *  `options_from`. */
 function paramType(param: PageParam): ParamType {
   return param.type ?? ((param.options?.length ?? 0) > 0 || param.options_from ? "choice" : "text");
@@ -218,7 +218,7 @@ function summary(param: PageParam, type: ParamType, value: SqlCell, options: Par
   }
 }
 
-/** An id param's options (`lensParams.ts`), read once; none for any other. */
+/** An id param's options (`vizParams.ts`), read once; none for any other. */
 function usePickerOptions(kind: ParamKind | null, query: Query): ParamOption[] {
   const [options, setOptions] = useState<ParamOption[]>([]);
   useEffect(() => {
@@ -257,7 +257,7 @@ function TextEditor({ name, label, value, onApply, onDone: done }: EditorProps) 
     <input
       autoFocus
       className="ox-input"
-      data-testid={`lens-param-${name}-edit`}
+      data-testid={`page-param-${name}-edit`}
       aria-label={label}
       value={draft}
       onChange={(e) => setDraft(e.target.value)}
@@ -289,7 +289,7 @@ function SearchEditor({ name, label, value, onApply, onDone: done }: EditorProps
       autoFocus
       type="search"
       className="ox-input"
-      data-testid={`lens-param-${name}-edit`}
+      data-testid={`page-param-${name}-edit`}
       aria-label={label}
       value={draft}
       onChange={(e) => setDraft(e.target.value)}
@@ -381,7 +381,7 @@ function useListedOptions(ref: string | null, values: Record<string, SqlCell>, s
   return options;
 }
 
-/** A choice lens's rows as options: `value`, `label` (the value when
+/** A choice page's rows as options: `value`, `label` (the value when
  *  none), optional `group`. */
 function listedOptions(result: SqlQueryResult): Option[] {
   const v = result.columns.indexOf("value");
@@ -410,7 +410,7 @@ function SelectEditor({ name, label, value, onApply, onDone, options, empty }: E
     <select
       autoFocus
       className="ox-select"
-      data-testid={`lens-param-${name}-edit`}
+      data-testid={`page-param-${name}-edit`}
       aria-label={label}
       value={current}
       onChange={(e) => {
@@ -459,7 +459,7 @@ function PickerEditor({ name, label, value, onApply, onDone, options }: EditorPr
     <select
       autoFocus
       className="ox-select"
-      data-testid={`lens-param-${name}-edit`}
+      data-testid={`page-param-${name}-edit`}
       aria-label={label}
       value={at === -1 ? "" : String(at)}
       onChange={(e) => {
@@ -498,7 +498,7 @@ function RangeEditor({ name, label, value, onApply, onDone, presets }: EditorPro
         ref={anchor}
         autoFocus
         className="ox-select"
-        data-testid={`lens-param-${name}-edit`}
+        data-testid={`page-param-${name}-edit`}
         aria-label={label}
         value={custom ? CUSTOM : current}
         onChange={(e) => {
@@ -521,7 +521,7 @@ function RangeEditor({ name, label, value, onApply, onDone, presets }: EditorPro
         <option value={CUSTOM}>Custom…</option>
       </select>
       {custom ? (
-        <Popover anchor={anchor} label={`${label}: custom range`} onClose={onDone} testId={`lens-param-${name}-custom`}>
+        <Popover anchor={anchor} label={`${label}: custom range`} onClose={onDone} testId={`page-param-${name}-custom`}>
           <div className="ox-form">
             <label className="ox-field">
               <span className="ox-label">From</span>
@@ -529,14 +529,14 @@ function RangeEditor({ name, label, value, onApply, onDone, presets }: EditorPro
                 autoFocus
                 type="date"
                 className="ox-input"
-                data-testid={`lens-param-${name}-from`}
+                data-testid={`page-param-${name}-from`}
                 value={from}
                 onChange={(e) => onApply(`${e.target.value}..${to}`)}
               />
             </label>
             <label className="ox-field">
               <span className="ox-label">To</span>
-              <input type="date" className="ox-input" data-testid={`lens-param-${name}-to`} value={to} onChange={(e) => onApply(`${from}..${e.target.value}`)} />
+              <input type="date" className="ox-input" data-testid={`page-param-${name}-to`} value={to} onChange={(e) => onApply(`${from}..${e.target.value}`)} />
             </label>
           </div>
         </Popover>

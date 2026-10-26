@@ -1,7 +1,7 @@
 title: Explore Data
 icon: database
 category: Data
-keywords: sql query schema semantic layer lens
+keywords: sql query schema semantic layer page
 params:
 - name: model
   label: Model

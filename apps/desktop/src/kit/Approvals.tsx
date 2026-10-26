@@ -9,7 +9,7 @@ import { decide, summarizeProposal, useProposals, type Proposal } from "../propo
  *  the person-only path (`decideProposal`): the one place they are drawn.
  *  `thread` (a `thread:thr3` ref or `thr3`) and `setting` (a config key)
  *  narrow the list; it draws nothing while none waits. The `approvals`
- *  lens viz renders this; the built-in pages that read their proposals
+ *  a viz renders this; the built-in pages that read their proposals
  *  already draw them with [`ProposalList`]. */
 export function Approvals({
   thread,

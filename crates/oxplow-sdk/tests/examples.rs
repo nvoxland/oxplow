@@ -1341,14 +1341,14 @@ async fn the_review_badges_example_consumes_effort_reviews_and_degrades_without_
         tested.warnings
     );
     assert_eq!(tested.errors, Vec::<String>::new());
-    for (example, lens) in [
+    for (example, page) in [
         ("review-verdicts", "review-verdicts"),
         ("item-review", "item-review"),
     ] {
         assert!(
             tested.warnings.iter().any(|w| w.contains(&format!(
                 "fixtures/{example}.yaml:1: example `{example}` isn't run: \
-                 `oxplow:oxplow/page?page=review-badges/{lens}` is withheld because import `reviews` is \
+                 `oxplow:oxplow/page?page=review-badges/{page}` is withheld because import `reviews` is \
                  unavailable (effort-review is disabled)"
             ))),
             "{example}: {:?}",

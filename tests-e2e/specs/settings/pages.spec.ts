@@ -20,7 +20,7 @@ test("every Settings area renders, reached from the rail", async ({ page }) => {
   await openFromLauncher(page, "Settings");
   const settings = page.locator('[data-testid="page-file"]:visible');
   await expect(settings.getByRole("heading", { level: 1 })).toHaveText("Every Setting");
-  await expect(page.getByTestId("lens-param-q").filter({ visible: true })).toBeVisible();
+  await expect(page.getByTestId("page-param-q").filter({ visible: true })).toBeVisible();
   for (const [id, title] of AREAS) {
     await page.getByTestId(`page-section-${id}`).filter({ visible: true }).click();
     await expect(page.locator('[data-testid="page-file"]:visible').getByRole("heading", { level: 1 })).toHaveText(title);
@@ -99,14 +99,14 @@ test("a stream's prompt is edited and saved on its Settings page", async ({ page
 test("New Stream forks a branch into a stream and gives way to it", async ({ page }) => {
   await page.goto("/");
   await openFromLauncher(page, "New Stream");
-  const form = page.locator('[data-testid="lens-form"]:visible');
-  await expect(form.getByTestId("lens-form-fields-existing_branch")).toBeVisible();
-  await expect(form.getByTestId("lens-form-fields-new_branch")).toHaveCount(0);
-  await form.getByTestId("lens-form-fields-source").selectOption("new");
-  await expect(form.getByTestId("lens-form-fields-existing_branch")).toHaveCount(0);
-  await form.getByTestId("lens-form-fields-title").fill("Side Work");
-  await form.getByTestId("lens-form-fields-new_branch").fill("side-work");
+  const form = page.locator('[data-testid="viz-form"]:visible');
+  await expect(form.getByTestId("viz-form-fields-existing_branch")).toBeVisible();
+  await expect(form.getByTestId("viz-form-fields-new_branch")).toHaveCount(0);
+  await form.getByTestId("viz-form-fields-source").selectOption("new");
+  await expect(form.getByTestId("viz-form-fields-existing_branch")).toHaveCount(0);
+  await form.getByTestId("viz-form-fields-title").fill("Side Work");
+  await form.getByTestId("viz-form-fields-new_branch").fill("side-work");
   await form.getByRole("button", { name: "New Stream" }).click();
   await expect(page.locator('[data-testid^="navigator-strip-stream-"]')).toHaveCount(2);
-  await expect(page.locator('[data-testid="lens-form"]:visible')).toHaveCount(0);
+  await expect(page.locator('[data-testid="viz-form"]:visible')).toHaveCount(0);
 });

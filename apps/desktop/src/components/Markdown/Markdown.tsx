@@ -1,7 +1,7 @@
 /**
  * Markdown, the one component every surface draws or edits markdown with
  * (`.context/markdown.md`): a wiki page, a work item's body, an effort's
- * summary, a comment, a form's markdown field, a lens's `markdown` viz.
+ * summary, a comment, a form's markdown field, a page's `markdown` viz.
  * Given `onChange` or `onCommit` it is the editor, else the viewer; both
  * have the one feature set — wikilinks and ref links that open through
  * the page (Cmd/Ctrl-click: a new tab; right-click: Open, Open in new
@@ -21,7 +21,7 @@ import { FileCode, Type } from "lucide-react";
 import type { CSSProperties } from "react";
 
 import { searchSite } from "../../api.js";
-import { useLensStream } from "../../lens/LensStream.js";
+import { useVizStream } from "../../viz/VizStream.js";
 import { useResources } from "../../resources.js";
 import { readWorkspaceIndex } from "../../workspaceFiles.js";
 import { useWorkListProfile } from "../../useWorkListProfile.js";
@@ -287,7 +287,7 @@ const REF_LIMIT = 12;
  *  on a page of a stream, its files by name — the index read once, on the
  *  first `[[`. */
 function useRefSearch(): RefSearch {
-  const stream = useLensStream();
+  const stream = useVizStream();
   const files = useRef<{ stream: string; paths: Promise<string[]> } | null>(null);
   const streamRef = useRef(stream?.id ?? null);
   streamRef.current = stream?.id ?? null;

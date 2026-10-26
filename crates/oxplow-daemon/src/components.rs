@@ -1,5 +1,5 @@
 //! `GET /components/v/{version}/{*path}` (P6b.D3, tsk984): a custom
-//! component's bundle, for the sandboxed frame a `viz: custom` lens
+//! component's bundle, for the sandboxed frame a `viz: custom` viz node
 //! renders (`.context/extensions.md`, "Custom components"). The daemon
 //! serves it because the shell holds no project state and browser mode has
 //! no custom scheme.

@@ -51,7 +51,7 @@ fn uri(resource: &str, params: &[(&str, &str)], view: &[(&str, &str)]) -> Oxplow
 }
 
 /// The one param that names one of `resource`'s, when one does: a
-/// contribution's id is its own name's param (`oxplow/lens` → `lens`), a
+/// contribution's id is its own name's param (`oxplow/page` → `page`), a
 /// stored thing's is `id`, and a few say what they are (`commit` → `sha`).
 /// `None` for a resource named by several (a file's `path` and `rev`, a
 /// work item's `provider` and `id`), which has its own readers.

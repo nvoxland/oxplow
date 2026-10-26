@@ -7,7 +7,7 @@ export interface Fact {
 }
 
 /** Labels beside their values: one record's facts (a metric's
- *  definition, a lens's `detail`). */
+ *  definition, a page's `detail`). */
 export function Facts({ facts, testId, ...rest }: HTMLAttributes<HTMLElement> & { facts: readonly Fact[]; testId?: string }) {
   return (
     <dl className="ox-facts" data-testid={testId} {...rest}>

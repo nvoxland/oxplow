@@ -9,7 +9,6 @@ describe("kindForTabId", () => {
     expect(kindForTabId("oxplow:oxplow/file?path=src/foo.ts")).toBe("oxplow/file");
     expect(kindForTabId("oxplow:oxplow/wiki?slug=url-schemes")).toBe("oxplow/wiki");
     expect(kindForTabId("oxplow:oxplow/work_item?id=tsk42&provider=oxplow")).toBe("oxplow/work_item");
-    expect(kindForTabId("oxplow:oxplow/lens?lens=acme/x&stream_id=2")).toBe("oxplow/lens");
     expect(kindForTabId("oxplow:oxplow/metric?metric=oxplow.todos")).toBe("oxplow/metric");
     expect(kindForTabId("oxplow:oxplow/dir?path=src/components")).toBe("oxplow/dir");
     expect(kindForTabId("oxplow:oxplow/commit?sha=abcdef0")).toBe("oxplow/commit");
@@ -31,12 +30,12 @@ describe("kindForTabId", () => {
 
 describe("pageKindIconComponent", () => {
   test("returns an icon for every entity kind", () => {
-    for (const k of ["file", "directory", "dir", "wiki", "work_item", "commit", "diff", "dashboard", "metric", "lens", "symbol"]) {
+    for (const k of ["file", "directory", "dir", "wiki", "work_item", "commit", "diff", "dashboard", "metric", "symbol"]) {
       expect(pageKindIconComponent(k), k).not.toBeNull();
     }
   });
 
-  test("a page no extension declares draws the lens icon", () => {
+  test("a page no extension declares draws the page icon", () => {
     expect(pageKindIconComponent("page")).not.toBeNull();
   });
 
@@ -75,7 +74,6 @@ describe("core kinds a search hit can be", () => {
       decision: "decision",
       commit: "commit",
       dashboard: "dashboard",
-      lens: "lens",
       handoff: "handoff",
       comment: "comment",
       work_item: "work item",

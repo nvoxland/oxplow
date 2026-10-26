@@ -648,7 +648,7 @@ Comments are not editor-only. Any page region can be commentable by
 declaring *what it is* and mounting the generic layer.
 
 - **Comments are a page's.** A page file says `comments: true` and core
-  does the rest (`PageHost`, `lens/pageComments.ts`):
+  does the rest (`PageHost`, `viz/pageComments.ts`):
   its URI (its tab's identity) is the comments' target, the nav bar gets
   the `CommentNavigator`, the body carries `data-ref` (so plain text and
   the markdown viewer take selections through the app-level layer), a

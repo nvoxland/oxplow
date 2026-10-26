@@ -12,14 +12,14 @@ export interface PageAction {
    *  page's nav bar it stays a button, never in the ☰ menu. */
   primary?: boolean;
   /** In a page's nav bar, a button rather than an item of its ☰ menu
-   *  (a lens action's `prominent`). Several may be. */
+   *  (a page action's `prominent`). Several may be. */
   prominent?: boolean;
-  /** One of oxplow's own actions every page of its kind has (a lens
+  /** One of oxplow's own actions every page of its kind has (a page
    *  page's Refresh, Copy, Add to Context): the
    *  ☰ keeps these together at the top, in the order given, and sorts the
    *  page's other actions by label. */
   standard?: boolean;
-  /** The ☰ submenu it is in (a lens action's `submenu`), shared with the
+  /** The ☰ submenu it is in (a page action's `submenu`), shared with the
    *  commands whose group has that name. */
   submenu?: string;
   /** An icon oxplow draws (`ICONS` in `resources.ts`): alone on its

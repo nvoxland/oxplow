@@ -1,5 +1,5 @@
 /**
- * Page-specific context a page publishes about itself (a lens's id and
+ * Page-specific context a page publishes about itself (a page's id and
  * current params), keyed by page id. App reports the *active* page plus
  * its detail to the backend (`report_open_page`), so an agent's
  * `get_open_page` sees what the human sees. Keeping detail here, rather

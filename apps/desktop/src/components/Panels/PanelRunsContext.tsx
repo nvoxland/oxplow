@@ -1,7 +1,7 @@
-/// The one owner of every extension panel's runs (lens runs, or one open
+/// The one owner of every extension panel's runs (page runs, or one open
 /// page run per part for a page-backed panel), shared by
 /// the rail (each panel's body, count and summary), the status bar's bell
-/// and the Alerts page (the badges that fire): each lens runs once per
+/// and the Alerts page (the badges that fire): each page runs once per
 /// refresh, and the three can't disagree. Provided by the app around
 /// everything that reads it.
 

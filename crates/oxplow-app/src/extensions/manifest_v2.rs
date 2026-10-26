@@ -7,7 +7,7 @@
 //!
 //! This module parses and checks the manifest's own shape and
 //! lifecycle; the loader (`extensions.rs`) resolves cross-references
-//! (a slot mount to its lens, a metric to its measure) with what it
+//! (a slot mount to its page, a metric to its measure) with what it
 //! loads.
 
 use serde::{Deserialize, Serialize};
@@ -58,13 +58,11 @@ pub struct IntentFile {
     pub examples: Vec<Value>,
 }
 
-/// A slot mount: a lens into a core page, or among a document or
-/// dashboard lens's parts.
+/// A slot mount: a page mounted at another page's slot.
 #[derive(Debug, Clone, PartialEq, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SlotMount {
-    /// A page's slot (`<extension>/<page>.<slot>`) or a core slot
-    /// (`diff.file.header`).
+    /// A page's slot (`<extension>/<page>.<slot>`).
     pub slot: String,
     /// The page it mounts: a slug of this extension.
     pub page: String,
@@ -204,7 +202,7 @@ pub struct ManifestV2 {
     #[serde(default)]
     #[schemars(with = "Option<Vec<super::ai_profiles::AiProfileFile>>")]
     pub ai_profiles: Option<Value>,
-    /// Left-nav panels, each showing its lenses compact.
+    /// Left-nav panels, each showing its pages compact.
     #[serde(default)]
     #[schemars(with = "Option<Vec<super::PanelFile>>")]
     pub panels: Option<Value>,
@@ -241,7 +239,7 @@ pub struct ManifestV2 {
     #[serde(default)]
     #[schemars(with = "Option<Vec<crate::effects::EffectFile>>")]
     pub effects: Option<Value>,
-    /// Sandboxed web components for `viz: custom` lenses.
+    /// Sandboxed web components for `viz: custom` viz nodes.
     #[serde(default)]
     #[schemars(with = "Option<Vec<super::custom_components::ComponentFile>>")]
     pub custom_components: Option<Value>,
@@ -257,7 +255,7 @@ pub fn key_line(text: &str, key: &str) -> Option<usize> {
 }
 
 /// The 1-based line of the first line containing `needle` after the
-/// top-level `key:` — a mount's lens name inside `slot_mounts`, say.
+/// top-level `key:` — a mount's page name inside `slot_mounts`, say.
 pub fn line_under(text: &str, key: &str, needle: &str) -> Option<usize> {
     let start = key_line(text, key)?;
     text.lines()
@@ -545,7 +543,7 @@ pub fn configuration_of(
 }
 
 /// Problems with a manifest's own shape and lifecycle (not its
-/// cross-references, which need the loaded lenses). `file` is how the
+/// cross-references, which need the loaded pages). `file` is how the
 /// manifest is named in messages; `text` its source, for lines.
 pub fn check(m: &ManifestV2, file: &str, text: &str) -> (Vec<String>, Vec<String>) {
     let mut errors = Vec::new();
@@ -732,9 +730,9 @@ mod tests {
 
     #[test]
     fn key_lines_are_one_based_and_nested_lookups_stay_in_their_block() {
-        let text = "manifest: 2\nname: a\nslot_mounts:\n  - { slot: rail, lens: x }\n  - { slot: commit, lens: y }\nadvisories: []\n";
+        let text = "manifest: 2\nname: a\nslot_mounts:\n  - { slot: rail, page: x }\n  - { slot: commit, page: y }\nadvisories: []\n";
         assert_eq!(key_line(text, "slot_mounts"), Some(3));
-        assert_eq!(line_under(text, "slot_mounts", "lens: y"), Some(5));
+        assert_eq!(line_under(text, "slot_mounts", "page: y"), Some(5));
         assert_eq!(line_under(text, "slot_mounts", "advisories"), None);
         assert_eq!(key_line(text, "nope"), None);
     }

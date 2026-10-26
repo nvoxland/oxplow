@@ -4,15 +4,14 @@ Scaffold, check and test oxplow extensions, and the provider
 conformance kit. It's the library behind:
 
 - `oxplow extension new | check | test` (the CLI in the desktop binary),
-- the `oxplow_validate_extension` RPC and MCP tool,
-- `save_lens` (Keep This).
+- the `oxplow_validate_extension` RPC and MCP tool.
 
-All three print problems the same way, `file:line: what — fix`, so a
+All of them print problems the same way, `file:line: what — fix`, so a
 person or a coding agent gets one answer wherever they meet it.
 
 | Module | What it does |
 |---|---|
-| `lib.rs` | `scaffold` (what `new` writes for each kind; a provider's declarations from its capability's contract) and `check` (load the extension, dry-run its models, commands, lenses and advisories) |
+| `lib.rs` | `scaffold` (what `new` writes for each kind; a provider's declarations from its capability's contract) and `check` (load the extension, dry-run its models, commands, pages and advisories) |
 | `extension_test` | `test`: on a throwaway oxplow, the check, each intent example's fixture, `questions.yaml`, each declared provider (its capability's suite: work list, effort policy or agent harness; a harness's checks include that a plain prompt body is a person's and an empty body names no subagent), and each effort policy script's conformance suite |
 | `conformance` | the provider kit: a `ReferenceClient` that drives a provider over the wire, validates every message against the protocol's schemas, records a golden transcript, and runs its capability's suite |
 | `answerability` | checks that an agent reading the right skill can answer the questions an area of oxplow is for |

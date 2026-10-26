@@ -90,7 +90,7 @@ pub struct ResourceDecl {
     pub name: ResourceName,
     pub label: String,
     pub params: BTreeMap<String, ParamDecl>,
-    /// It takes params beyond its own (a page's or a lens's).
+    /// It takes params beyond its own (a page's).
     pub additional: bool,
     /// The view whose rows name each one, by URI.
     pub resolve: Option<String>,

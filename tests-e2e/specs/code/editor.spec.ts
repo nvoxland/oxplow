@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { expect, test } from "../../support/fixtures.js";
 import { openFromLauncher } from "../../support/ui.js";
 
-// The editor is oxplow-foundation's lens over the `editor` viz: a file of
+// The editor is oxplow-foundation's page over the `editor` viz: a file of
 // the working tree, its unsaved edits marked on its tab (●), saved with
 // Ctrl/Cmd+S through `oxplow.file.save`, and a dirty tab closed with Undo.
 
@@ -13,7 +13,7 @@ const TAB = "oxplow:oxplow/file?path=emu.txt";
 async function openEmu(page: import("@playwright/test").Page) {
   await openFromLauncher(page, "Files");
   await page.locator('[data-testid="page-file"]:visible').getByRole("button", { name: "emu.txt" }).filter({ visible: true }).first().click();
-  const editor = page.getByTestId("lens-editor").filter({ visible: true }).locator(".monaco-editor").first();
+  const editor = page.getByTestId("viz-editor").filter({ visible: true }).locator(".monaco-editor").first();
   await expect(editor).toBeVisible();
   await expect(editor).toContainText("emu");
   return editor;
@@ -46,6 +46,6 @@ test("closing a dirty tab offers Undo, which brings the tab and its draft back",
   await expect(page.getByTestId(`center-tab-${TAB}`)).toHaveCount(0);
   await page.getByTestId("undo-toast-undo").click();
   await expect(page.getByTestId(`center-tab-dirty-${TAB}`)).toBeVisible();
-  await expect(page.getByTestId("lens-editor").filter({ visible: true }).locator(".monaco-editor").first()).toContainText("owl emu");
+  await expect(page.getByTestId("viz-editor").filter({ visible: true }).locator(".monaco-editor").first()).toContainText("owl emu");
   expect(readFileSync(join(daemon.project, "emu.txt"), "utf8")).toBe("emu\n");
 });

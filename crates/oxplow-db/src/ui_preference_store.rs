@@ -1,7 +1,7 @@
 //! What a person's oxplow remembers for them outside any one tab
 //! (`ui_preference`): a page's **page memory** (scoped by the page's own
 //! ref, whatever its params — `oxplow:oxplow/page?page=tasks`, `oxplow:oxplow/page?page=acme/pulls`,
-//! `oxplow:oxplow/lens?lens=acme/board` — or `kind:<kind>` for every page of an entity kind),
+//! `oxplow:oxplow/page?page=acme/board` — or `kind:<kind>` for every page of an entity kind),
 //! a panel's (its `panel:` ref), a custom component's own
 //! (`component:<ext>/<id>`), and the app's **app preferences** (`app`).
 //! A tab's own view and history state live in its tab session, not here.

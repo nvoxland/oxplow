@@ -6,8 +6,8 @@
 /// that run, which holds them.
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { limitRows, wantedBranches, type BranchRun } from "../lens/lensModel.js";
-import { EMPTY_RESULT } from "../lens/nodeRun.js";
+import { limitRows, wantedBranches, type BranchRun } from "../viz/vizModel.js";
+import { EMPTY_RESULT } from "../viz/nodeRun.js";
 import { keyOf, type PageKey, type PageRuns, type RunHandle, type RunState } from "../pageRuns.js";
 import type { VizRun, Node, PageRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
 import { nodeActionRunner, nodeFormSource, type PageForms, type RunPageAction } from "./useNodeActions.js";

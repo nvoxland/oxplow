@@ -15,10 +15,10 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, 
 import type { Stream } from "../api.js";
 import { EmptyState } from "../components/Prompts/EmptyState.js";
 import { SaveViewForm } from "./SaveViewForm.js";
-import { ComponentFrame, CustomBadge, noteStyle, useComponentBundle, type BridgeHost } from "../lens/ComponentFrame.js";
-import { pageData, type FrameAction, type PageInit, type ShownRows } from "../lens/componentBridge.js";
-import { useFrameForms } from "../lens/frameForms.js";
-import { useHostedView } from "../lens/hostedView.js";
+import { ComponentFrame, CustomBadge, noteStyle, useComponentBundle, type BridgeHost } from "../viz/ComponentFrame.js";
+import { pageData, type FrameAction, type PageInit, type ShownRows } from "../viz/componentBridge.js";
+import { useFrameForms } from "../viz/frameForms.js";
+import { useHostedView } from "../viz/hostedView.js";
 import { usePageRunsStore, usePageRunWith, type PageRuns, type RunHandle, type RunState } from "../pageRuns.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { remoteBaseUrl } from "../tauri-bridge/transport.js";

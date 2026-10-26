@@ -1,11 +1,11 @@
-//! Project extensions and their lenses.
+//! Project extensions and their pages.
 //!
 //! An extension is a folder `.oxplow/extensions/<name>/` in a stream's
-//! worktree with an `extension.yaml` and `lenses/<slug>.yaml` files. A
-//! lens is a query over the semantic layer (`v_*` views) plus how to
+//! worktree with an `extension.yaml` and `pages/<slug>.yaml` files. A
+//! viz node is a query over the semantic layer (`v_*` views) plus how to
 //! show it. See `.context/extensions.md`.
 //!
-//! Loading never fails as a whole: a broken extension or lens is
+//! Loading never fails as a whole: a broken extension or page is
 //! reported in that extension's `errors` and everything else still
 //! loads.
 
@@ -59,7 +59,7 @@ pub enum Deployment {
     NotHere,
 }
 
-/// How a lens renders its rows.
+/// How a viz renders its rows.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
 )]
@@ -116,13 +116,13 @@ pub enum Viz {
     Hunks,
     /// A form for command `form.command`: its fields from the command's
     /// input schema, prefilled from `form.defaults` (placeholders bound
-    /// like an action's) and the query's first row, if the lens has one.
-    /// Submitting runs the command as the lens.
+    /// like an action's) and the query's first row, if the viz has one.
+    /// Submitting runs the command as the viz.
     Form,
     /// The pending proposals an agent raised, each with Approve and
     /// Decline: core's consent component. The viz reads
     /// `v_command_proposal` itself and decides through the person-only
-    /// path, so the lens needs no query beyond `SELECT 1`; its params
+    /// path, so the viz needs no query beyond `SELECT 1`; its params
     /// `thread` (a thread ref) and `setting` (a config key) narrow the
     /// list.
     Approvals,
@@ -154,7 +154,7 @@ impl Viz {
     }
 }
 
-/// A `custom` lens's component and the props it starts with.
+/// A `custom` viz's component and the props it starts with.
 #[derive(
     Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
 )]
@@ -168,9 +168,9 @@ pub struct VizCustom {
     pub props: Option<serde_json::Value>,
 }
 
-/// When a lens needs attention: its row count reaches `min_rows`, or the
+/// When a viz needs attention: its row count reaches `min_rows`, or the
 /// first row's `column` goes `above` / `below` a threshold. A left-nav
-/// panel's `badge` lens shows its count, and the Alerts panel lists it.
+/// panel's `badge` viz shows its count, and the Alerts panel lists it.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct PageAlert {
@@ -183,7 +183,7 @@ pub struct PageAlert {
     pub label: Option<String>,
 }
 
-/// `alert:` as written in a lens file (snake_case keys).
+/// `alert:` as written in a viz file (snake_case keys).
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct AlertFile {
@@ -217,7 +217,7 @@ impl AlertFile {
     }
 }
 
-/// A lens's alert, evaluated on one run.
+/// A viz's alert, evaluated on one run.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AlertState {
@@ -318,9 +318,9 @@ pub struct VizTree {
     pub id: Option<String>,
     pub parent: Option<String>,
     pub label: Option<String>,
-    /// A lazy tree: the lens param a branch's children are read with. The
+    /// A lazy tree: the viz param a branch's children are read with. The
     /// run's rows are one level (the param's `default` is the top level);
-    /// a branch opens by running the lens again with the param set to the
+    /// a branch opens by running the viz again with the param set to the
     /// row's `id`, its rows spliced under it. Needs `branch`.
     #[serde(default)]
     pub lazy: Option<String>,
@@ -353,7 +353,7 @@ pub struct VizSteps {
     pub status: Option<String>,
 }
 
-/// What becomes of the page a lens is on after one of its actions (or its
+/// What becomes of the page a viz is on after one of its actions (or its
 /// form) ran a command whose `ui.open_after` names a page.
 #[derive(
     Debug,
@@ -369,16 +369,16 @@ pub struct VizSteps {
 )]
 #[serde(rename_all = "lowercase")]
 pub enum ActionThen {
-    /// The page opens in this tab; Back returns to the lens's page.
+    /// The page opens in this tab; Back returns to the viz's page.
     #[default]
     Open,
-    /// The page takes this tab and the lens's page leaves its history: Back
+    /// The page takes this tab and the viz's page leaves its history: Back
     /// never returns to a submitted form. A page that can't live in a tab
     /// (an agent session) closes this one and is focused.
     Replace,
-    /// Nothing opens; the lens's page stays (a form for the next entry).
+    /// Nothing opens; the viz's page stays (a form for the next entry).
     Stay,
-    /// The lens's page closes (it showed what the command removed).
+    /// The viz's page closes (it showed what the command removed).
     Close,
 }
 
@@ -406,7 +406,7 @@ pub struct FormSpec {
     /// with them. None: every field.
     #[serde(default)]
     pub fields: Option<Vec<FormField>>,
-    /// Fields picked from a list: each names a lens (`<extension>/<slug>`)
+    /// Fields picked from a list: each names a viz (`<extension>/<slug>`)
     /// run with the form's params, whose rows are the choices (`value`,
     /// `label`, optional `group`).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -475,11 +475,11 @@ pub struct FormFieldSpec {
     /// input; the command must keep it out of its record (`unrecorded`).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub secret: bool,
-    /// An object field whose children are the rows of this lens
+    /// An object field whose children are the rows of this viz
     /// (`<extension>/<slug>`: `name`, `title`, `kind` of `enum`, `text` or
     /// `number`, `values`, `read_only`), run with the form's params. The
     /// field's value is the object of those children; it is read again
-    /// when the lens's data changes.
+    /// when the viz's data changes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub from: Option<String>,
 }
@@ -513,7 +513,7 @@ impl FormField {
     pub fn secret(&self) -> bool {
         matches!(self, FormField::Spec(s) if s.secret)
     }
-    /// The lens its children are read from, for an object field.
+    /// The viz its children are read from, for an object field.
     pub fn from(&self) -> Option<&str> {
         match self {
             FormField::Spec(s) => s.from.as_deref(),
@@ -529,7 +529,7 @@ impl FormField {
 }
 
 /// Serialize a JSON value with its numbers as plain numbers, so a YAML
-/// lens file gets `1`, not serde_json's arbitrary-precision number map.
+/// viz file gets `1`, not serde_json's arbitrary-precision number map.
 fn plain_json<S: serde::Serializer>(
     v: &Option<serde_json::Value>,
     s: S,
@@ -651,7 +651,7 @@ pub struct VizDiff {
 }
 
 /// `markdown` viz: which column of the first row is the text. Without
-/// it, the first column. A lens with an `edit` action names it: the text
+/// it, the first column. A viz with an `edit` action names it: the text
 /// is what the editor saves.
 #[derive(
     Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
@@ -691,7 +691,7 @@ impl VizChart {
     }
 }
 
-/// Launcher (Cmd+K) sections a lens can be listed under. Mirrors the
+/// Launcher (Cmd+K) sections a viz can be listed under. Mirrors the
 /// renderer's `PageCategory`.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
@@ -774,7 +774,7 @@ pub struct PageColumn {
     pub unit: Option<String>,
     /// A column of the same row naming an icon drawn before the cell
     /// (`done`, `in_progress`, `epic`, `wiki`, …; the UI's fixed
-    /// vocabulary, `lens/lensIcons.tsx` — an unknown name draws none).
+    /// vocabulary, `viz/vizIcons.tsx` — an unknown name draws none).
     #[serde(default)]
     pub icon: Option<String>,
     /// A column of the same row naming the cell's tone: `accent`,
@@ -788,16 +788,16 @@ pub struct PageColumn {
     /// local time, a number with its `unit`).
     #[serde(default)]
     pub format: Option<ColumnFormat>,
-    /// A param of the lens: the cell's text is drawn with every
+    /// A param of the viz: the cell's text is drawn with every
     /// case-insensitive occurrence of its current value marked.
     #[serde(default)]
     pub highlight: Option<String>,
-    /// A param of the lens that clicking a row sets to this column's
+    /// A param of the viz that clicking a row sets to this column's
     /// value, re-running what reads it (a document's other sections):
     /// master and detail. The row whose value it holds is drawn selected.
     #[serde(default)]
     pub select: Option<String>,
-    /// A lens (`<slug>` of this extension or `<extension>/<slug>`) the row
+    /// A viz (`<slug>` of this extension or `<extension>/<slug>`) the row
     /// opens into: run with the row's values (the params it declares), its
     /// result drawn under the row.
     #[serde(default)]
@@ -849,7 +849,7 @@ pub struct VizGroup {
     pub values: Vec<String>,
 }
 
-/// A value the viewer (or an agent) can set when running the lens,
+/// A value the viewer (or an agent) can set when running the viz,
 /// bound into the query as `:name`.
 #[derive(
     Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
@@ -863,31 +863,31 @@ pub struct PageParam {
     #[serde(default)]
     pub default: Option<SqlCell>,
     /// The values it takes, when it's a choice: a panel shows
-    /// them as a toggle in its header, a lens page as a select. Its
+    /// them as a toggle in its header, a viz page as a select. Its
     /// `default` must be one; a run supplying another is refused.
     #[serde(default)]
     pub options: Vec<ChoiceOption>,
-    /// A lens whose rows are the values it takes, when it's a choice
+    /// A viz whose rows are the values it takes, when it's a choice
     /// whose options aren't fixed (`value`, `label`, optional `group` —
     /// the form `choices` contract): a slug of this extension, or
-    /// `<extension>/<slug>`; a loaded lens has the whole id. The page runs
+    /// `<extension>/<slug>`; a loaded viz has the whole id. The page runs
     /// it with the params it declares of the page's, so an `end` picker's
-    /// lens can leave out what `start` is. Its options aren't known at
+    /// viz can leave out what `start` is. Its options aren't known at
     /// load, so no `default` is needed and any text is taken. Exclusive
     /// with `options`.
     #[serde(default)]
     pub options_from: Option<String>,
     /// What it holds, and so how a page draws it. Left out, it is a
     /// `choice` when it has `options` or `options_from`, else `text`; a
-    /// loaded lens always says.
+    /// loaded viz always says.
     #[serde(default, rename = "type")]
     pub kind: Option<ParamType>,
     /// What it is to the page, and so where it rides in the page's URI:
     /// a `resource` (the default) names what the page shows, in the URI's
     /// `?`; `filter` narrows how it shows it, in the URI's `#` view. A
     /// `selection` follows from the columns and is never written: a param
-    /// a column of the lens (or of a part of the page) selects, in the
-    /// view too. A loaded lens always says.
+    /// a column of the viz (or of a part of the page) selects, in the
+    /// view too. A loaded viz always says.
     #[serde(default)]
     pub role: Option<ParamRole>,
     /// A `date_range`'s quick picks, of `1d 2d 3d 7d 30d 90d all`; the
@@ -896,7 +896,7 @@ pub struct PageParam {
     pub presets: Vec<String>,
 }
 
-/// What a lens param holds.
+/// What a viz param holds.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
 )]
@@ -921,7 +921,7 @@ pub enum ParamType {
     Search,
 }
 
-/// What a lens param is to its page.
+/// What a viz param is to its page.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
 )]
@@ -981,7 +981,7 @@ impl PageParam {
         }
         match self.kind() {
             ParamType::Text => Ok(value.clone()),
-            // Options a lens lists aren't known here: the query says what
+            // Options a viz lists aren't known here: the query says what
             // an unknown value means.
             ParamType::Choice if self.options_from.is_some() => match value {
                 SqlCell::Text(_) => Ok(value.clone()),
@@ -1101,7 +1101,7 @@ pub(crate) fn param_problem(params: &[PageParam]) -> Option<String> {
             Some(format!("unknown preset `{bad}`"))
         } else if kind == ParamType::Choice && p.default.is_none() && p.options_from.is_none() {
             // A choice with fixed options starts somewhere; one whose
-            // options a lens lists may start open.
+            // options a viz lists may start open.
             Some("a choice needs a `default`, one of its options".to_string())
         } else {
             p.default
@@ -1113,9 +1113,9 @@ pub(crate) fn param_problem(params: &[PageParam]) -> Option<String> {
     })
 }
 
-/// The keys of a page's `#` view that are the page's, never a lens
+/// The keys of a page's `#` view that are the page's, never a viz
 /// param's: `section`, the section a link lands on. (`comment` is the
-/// page's only on a page that takes comments; the Comments lenses pick a
+/// page's only on a page that takes comments; the Comments viz nodes pick a
 /// comment by that name.)
 pub const RESERVED_VIEW_KEYS: &[&str] = &["section"];
 
@@ -1151,16 +1151,16 @@ pub(crate) fn bind_params(
     out
 }
 
-/// A button on a lens: a command it runs (P6.B1, target §11.4). The
+/// A button on a viz: a command it runs (P6.B1, target §11.4). The
 /// command goes through the bus as `Actor::Page` acting for whoever
 /// pressed it, so every policy — the agent policy, confirmation
-/// — applies as if they had run it themselves; a lens can offer a button
+/// — applies as if they had run it themselves; a viz can offer a button
 /// but never grant a power. Copying the result and handing it to the
-/// agent are on every lens, not declared.
+/// agent are on every viz, not declared.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct PageAction {
-    /// Unique within the lens; `oxplow_run_lens_action` names it.
+    /// Unique within the viz; `oxplow_run_page_action` names it.
     pub id: String,
     pub label: String,
     /// The command it runs (`oxplow.work_item.transition`).
@@ -1177,17 +1177,17 @@ pub struct PageAction {
     /// value (as text) this is, instead of above the result.
     pub group: Option<String>,
     /// Opens the command's form, its fields starting from `input`, for the
-    /// person to fill in before it runs (`lens_action_form`), instead of
+    /// person to fill in before it runs (`the action form`), instead of
     /// running at once.
     pub form: bool,
     /// Fields of a form action the person sees but can't change: their
     /// values are `input`'s, imposed again when it runs (an item's `ref`).
     pub fixed: Vec<String>,
-    /// A form action's fields picked from a list: each names a lens
-    /// (`<extension>/<slug>`) run with the lens's params, whose rows are
+    /// A form action's fields picked from a list: each names a viz
+    /// (`<extension>/<slug>`) run with the viz's params, whose rows are
     /// the choices (`value`, `label`, optional `group`).
     pub choices: BTreeMap<String, String>,
-    /// What becomes of the lens's page when the command's `ui.open_after`
+    /// What becomes of the viz's page when the command's `ui.open_after`
     /// names a page.
     pub then: ActionThen,
     /// A row action offered only on rows whose column of this name is
@@ -1235,11 +1235,11 @@ pub struct PageAction {
     /// bound exactly to a `{{row.<column>}}` and not `fixed`.
     #[serde(default)]
     pub edit_field: Option<String>,
-    /// A whole-lens action over a lens that holds one row, that names
-    /// `when` or `{{row.*}}`: the lens's one row. Derived at load, not
+    /// A whole-viz action over a viz that holds one row, that names
+    /// `when` or `{{row.*}}`: the viz's one row. Derived at load, not
     /// declared: an action without `row: true` that names `when:` or
-    /// `{{row.*}}`. It runs on the row the server reads from the lens
-    /// itself, and only while the lens has exactly one.
+    /// `{{row.*}}`. It runs on the row the server reads from the viz
+    /// itself, and only while the viz has exactly one.
     #[serde(default)]
     pub one_row: bool,
 }
@@ -1255,11 +1255,11 @@ pub fn action_templates(input: &serde_json::Value) -> Vec<(String, String)> {
         .collect()
 }
 
-/// A lens action as written in a lens file.
+/// A viz action as written in a viz file.
 #[derive(Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct ActionFile {
-    /// Unique within the lens.
+    /// Unique within the viz.
     id: String,
     label: String,
     /// The command it runs (`oxplow.work_item.transition`).
@@ -1280,11 +1280,11 @@ struct ActionFile {
     /// editable).
     #[serde(default)]
     fixed: Vec<String>,
-    /// A form action's fields picked from a list: field → the lens whose
+    /// A form action's fields picked from a list: field → the viz whose
     /// rows are its choices.
     #[serde(default)]
     choices: BTreeMap<String, String>,
-    /// What becomes of the lens's page when the command opens one:
+    /// What becomes of the viz's page when the command opens one:
     /// `open` (default), `replace`, `stay` or `close`.
     #[serde(default)]
     then: ActionThen,
@@ -1354,11 +1354,11 @@ fn key_problem(key: &str) -> Option<String> {
     })
 }
 
-/// Parse a lens's `actions:`: each `{ id, label, command, input?, row? }`.
+/// Parse a viz's `actions:`: each `{ id, label, command, input?, row? }`.
 /// A placeholder must name a declared param (`{{param.x}}`) or, in a row
 /// action, a column (`{{row.x}}`, checked against the result when the
-/// extension is validated). A lens that `holds_one_row` (detail, form,
-/// markdown, a document's row) lets a whole-lens action name `when` and
+/// extension is validated). A viz that `holds_one_row` (detail, form,
+/// markdown, a document's row) lets a whole-viz action name `when` and
 /// `{{row.*}}` too: that row.
 pub(crate) fn parse_actions(
     raw: Vec<serde_yaml::Value>,
@@ -1380,7 +1380,7 @@ pub(crate) fn parse_actions(
         if let Some(g) = &f.group {
             if !grouped {
                 return Err(format!(
-                    "actions: `{}`: `group: {g}` needs the lens to have a `group`",
+                    "actions: `{}`: `group: {g}` needs the viz to have a `group`",
                     f.id
                 ));
             }
@@ -1406,7 +1406,7 @@ pub(crate) fn parse_actions(
         }
         if f.when.is_some() && !(f.row || f.drag || holds_one_row) {
             return Err(format!(
-                "actions: `{}`: `when` is for a row action (`row: true`), or a lens that holds one row (detail, form, markdown, a document's row)",
+                "actions: `{}`: `when` is for a row action (`row: true`), or a viz that holds one row (detail, form, markdown, a document's row)",
                 f.id
             ));
         }
@@ -1414,7 +1414,7 @@ pub(crate) fn parse_actions(
         // edit action is a form over the viz's row.
         let row = f.row || f.drag || f.edit;
         let form = f.form || f.edit;
-        // Derived: a whole-lens action that names `when` or the row.
+        // Derived: a whole-viz action that names `when` or the row.
         let one_row = !row
             && holds_one_row
             && (f.when.is_some()
@@ -1462,7 +1462,7 @@ pub(crate) fn parse_actions(
         if f.edit {
             if let Some(other) = out.iter().find(|a| a.edit) {
                 return Err(format!(
-                    "actions: `{}`: the lens already saves with `{}`",
+                    "actions: `{}`: the viz already saves with `{}`",
                     f.id, other.id
                 ));
             }
@@ -1545,7 +1545,7 @@ pub(crate) fn parse_actions(
                     }) => {}
                 "param" => {
                     return Err(format!(
-                        "actions: `{}`: `{{{{param.{name}}}}}` names no param of this lens",
+                        "actions: `{}`: `{{{{param.{name}}}}}` names no param of this viz",
                         f.id
                     ))
                 }
@@ -1565,7 +1565,7 @@ pub(crate) fn parse_actions(
                 }
                 "group" if !grouped => {
                     return Err(format!(
-                        "actions: `{}`: `{{{{group.value}}}}` needs the lens to have a `group`",
+                        "actions: `{}`: `{{{{group.value}}}}` needs the viz to have a `group`",
                         f.id
                     ))
                 }
@@ -1578,7 +1578,7 @@ pub(crate) fn parse_actions(
                 }
                 "row" => {
                     return Err(format!(
-                        "actions: `{}`: `{{{{row.{name}}}}}` needs `row: true`, or a lens that holds one row (detail, form, markdown, a document's row)",
+                        "actions: `{}`: `{{{{row.{name}}}}}` needs `row: true`, or a viz that holds one row (detail, form, markdown, a document's row)",
                         f.id
                     ))
                 }
@@ -1832,7 +1832,7 @@ pub enum TileSize {
 }
 
 /// What a left-nav panel is bound to: the project, the current stream, or
-/// the current thread — which of `stream_id` / `thread_id` its lenses get.
+/// the current thread — which of `stream_id` / `thread_id` its viz nodes get.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
 )]
@@ -1844,7 +1844,7 @@ pub enum PanelScope {
 }
 
 /// A left-nav panel an extension contributes (P6.G1, target §11.3): its
-/// `body` lens renders compact in the nav; its `badge` lens's alert gives
+/// `body` viz renders compact in the nav; its `badge` viz's alert gives
 /// the count shown on the panel and in the Alerts panel.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
@@ -1855,18 +1855,18 @@ pub struct ExtensionPanel {
     pub title: String,
     pub icon: Option<String>,
     pub scope: PanelScope,
-    /// The body lens (`<extension>/<slug>`).
+    /// The body viz (`<extension>/<slug>`).
     pub body: String,
-    /// The badge lens, which declares an `alert`.
+    /// The badge viz, which declares an `alert`.
     pub badge: Option<String>,
     /// The page its header opens (`oxplow:oxplow/page?page=<kind>`, a canonical ref): a core
     /// page the panel summarizes, as Comments opens the inbox.
-    /// Absent, the body lens's own page.
+    /// Absent, the body viz's own page.
     pub open: Option<String>,
-    /// The lens shown, compact, while the panel is collapsed: its one-line
+    /// The viz shown, compact, while the panel is collapsed: its one-line
     /// summary. Absent, a collapsed panel shows only its header.
     pub collapsed: Option<String>,
-    /// The lens whose row count (a `number` lens: its value) is the
+    /// The viz whose row count (a `number` viz: its value) is the
     /// header's count, without raising an alert. It wins over
     /// the badge's count; the badge still feeds Alerts.
     pub count: Option<String>,
@@ -1923,7 +1923,7 @@ struct PanelFile {
     dock: bool,
 }
 
-/// Where a lens comes from. An agent edits `source`, never `running`: a
+/// Where a viz comes from. An agent edits `source`, never `running`: a
 /// deployed extension runs a copy in the store that the next deploy
 /// replaces.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type)]
@@ -1949,8 +1949,7 @@ pub struct PageProvenance {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct VizConfig {
-    /// `<extension>/<slug>`: the stable id used by `lens:` page refs,
-    /// `oxplow_run_lens` and `get_lens`.
+    /// `<extension>/<slug>`: the stable id of the page this viz is on.
     pub id: String,
     pub extension: String,
     pub slug: String,
@@ -1982,11 +1981,11 @@ pub struct VizConfig {
     /// For `list` / `table`: a column whose integer value indents the row.
     pub depth: Option<String>,
     /// It takes its page's whole height: its viz does
-    /// ([`Viz::fills`]), or it is a document whose last section's lens
+    /// ([`Viz::fills`]), or it is a document whose last section's viz
     /// fills, so that section takes the height left (set once the catalog
     /// is placed, `fill_document_fills`).
     pub fills: bool,
-    /// Commands the lens offers, as buttons or row actions (P6.B1).
+    /// Commands the viz offers, as buttons or row actions (P6.B1).
     pub actions: Vec<PageAction>,
     /// Where it comes from: the file that runs and the source to edit.
     pub origin: PageProvenance,
@@ -2021,7 +2020,7 @@ pub struct Extension {
     pub collectors: Vec<oxplow_config::collectors::CollectorSpec>,
     /// Declared providers (valid ones — invalid ones are in `errors`).
     pub providers: Vec<crate::providers::ProviderSpec>,
-    /// Web components its `custom` lenses render, sandboxed (valid ones).
+    /// Web components its `custom` viz nodes render, sandboxed (valid ones).
     pub custom_components: Vec<custom_components::CustomComponent>,
     /// Event types it declares (valid ones — the vocabulary registers
     /// them, `vocabulary_reactor`).
@@ -2165,7 +2164,7 @@ pub struct ExtensionUi {
     pub page_slots: Vec<PageSlot>,
     /// Labels from its models on core refs (valid ones).
     pub decorators: Vec<decorators::UiDecorator>,
-    /// Lenses that take the place of a core sub-component while its
+    /// Viz nodes that take the place of a core sub-component while its
     /// provider is the capability's active one (valid ones).
     pub replacements: Vec<replacements::UiReplacement>,
 }
@@ -2642,7 +2641,7 @@ pub(crate) trait ExtensionFiles {
     fn paths(&self) -> std::io::Result<Vec<String>>;
     /// A file's bytes, by path inside the extension folder.
     fn bytes(&self, rel: &str) -> std::io::Result<Vec<u8>>;
-    /// File names directly inside `dir` (e.g. `lenses`).
+    /// File names directly inside `dir` (e.g. `pages`).
     fn list(&self, dir: &str) -> Vec<String>;
     /// What the folder `rel` holds, for a custom component's bundle;
     /// `None` when it isn't a folder (or the files aren't on disk).
@@ -2938,7 +2937,7 @@ pub struct ReviewSide<'a> {
 
 /// What going from `before` (none: a first install) to `after` would
 /// change: each side on its own overlay — `after` checked,
-/// `before` only read — then compared: lenses, models and their rows,
+/// `before` only read — then compared: viz nodes, models and their rows,
 /// collectors and their outputs, providers, config. `after.extension`
 /// gets its check's errors.
 pub async fn impact_between(
@@ -4245,7 +4244,7 @@ fn renderer_problem(
         };
         let has = |name: &str| match decl {
             Some(d) => d.additional || d.params.contains_key(name),
-            // A web page's lens takes the page as its `uri`.
+            // A web page's viz takes the page as its `uri`.
             None => !scheme || name == "uri",
         };
         if let Some(name) = named.iter().find(|n| !has(n)) {
@@ -4289,9 +4288,9 @@ fn renderer_problem(
     Ok(())
 }
 
-/// Check the manifest's `panels:` against the extension's lenses: a panel
-/// id is kebab-case and unique, its lenses exist, a badge declares an
-/// `alert`, and a `stream` / `thread` scope's lenses declare `stream_id` /
+/// Check the manifest's `panels:` against the extension's viz nodes: a panel
+/// id is kebab-case and unique, its viz nodes exist, a badge declares an
+/// `alert`, and a `stream` / `thread` scope's viz nodes declare `stream_id` /
 /// `thread_id` (what the nav binds). Each error names the entry's index.
 fn parse_panels(
     extension: &str,
@@ -4428,10 +4427,10 @@ fn form_fields_problem(f: &FormSpec) -> Option<String> {
 }
 
 /// What's wrong with a lazy tree (`tree.lazy` / `tree.branch`): the param
-/// must be the lens's own, with a `default` (the top level) and not one
+/// must be the viz's own, with a `default` (the top level) and not one
 /// the context supplies; `branch` says which rows open; a column that
 /// `select`s the lazy param would re-root the page instead of opening.
-fn lazy_tree_problem(lens: &VizConfig, t: &VizTree) -> Option<String> {
+fn lazy_tree_problem(cfg: &VizConfig, t: &VizTree) -> Option<String> {
     let Some(lazy) = &t.lazy else {
         return t
             .branch
@@ -4443,9 +4442,9 @@ fn lazy_tree_problem(lens: &VizConfig, t: &VizTree) -> Option<String> {
             "`tree.lazy` can't be `{lazy}`: the context supplies it"
         ));
     }
-    let Some(param) = lens.params.iter().find(|p| p.name == *lazy) else {
+    let Some(param) = cfg.params.iter().find(|p| p.name == *lazy) else {
         return Some(format!(
-            "`tree.lazy` names param `{lazy}`, which the lens doesn't declare"
+            "`tree.lazy` names param `{lazy}`, which the viz doesn't declare"
         ));
     };
     if param.default.is_none() {
@@ -4456,7 +4455,7 @@ fn lazy_tree_problem(lens: &VizConfig, t: &VizTree) -> Option<String> {
     if t.branch.is_none() {
         return Some("`tree.lazy` needs `tree.branch: <column>` (the rows that open)".to_string());
     }
-    lens.columns
+    cfg.columns
         .iter()
         .find(|c| c.select.as_deref() == Some(lazy.as_str()))
         .map(|c| {
@@ -4467,8 +4466,8 @@ fn lazy_tree_problem(lens: &VizConfig, t: &VizTree) -> Option<String> {
         })
 }
 
-pub(crate) fn shape_problem(lens: &VizConfig, components: &[String]) -> Option<String> {
-    // `block` names the lens key the missing columns go under.
+pub(crate) fn shape_problem(cfg: &VizConfig, components: &[String]) -> Option<String> {
+    // `block` names the viz key the missing columns go under.
     let need = |block: &str, fields: &[(&str, &Option<String>)]| -> Option<String> {
         let missing: Vec<&str> = fields
             .iter()
@@ -4478,7 +4477,7 @@ pub(crate) fn shape_problem(lens: &VizConfig, components: &[String]) -> Option<S
         (!missing.is_empty()).then(|| {
             format!(
                 "viz `{}` needs `{block}: {{ {} }}`",
-                format!("{:?}", lens.viz).to_lowercase(),
+                format!("{:?}", cfg.viz).to_lowercase(),
                 missing
                     .iter()
                     .map(|m| format!("{m}: <column>"))
@@ -4487,68 +4486,68 @@ pub(crate) fn shape_problem(lens: &VizConfig, components: &[String]) -> Option<S
             )
         })
     };
-    if let Some(problem) = row_style_problem(lens)
-        .or_else(|| param_problem(&lens.params))
-        .or_else(|| highlight_problem(lens))
-        .or_else(|| markdown_problem(lens))
+    if let Some(problem) = row_style_problem(cfg)
+        .or_else(|| param_problem(&cfg.params))
+        .or_else(|| highlight_problem(cfg))
+        .or_else(|| markdown_problem(cfg))
     {
         return Some(problem);
     }
-    let chart = lens.chart.clone().unwrap_or_default();
-    if chart.targets.is_some() && lens.viz != Viz::Line {
+    let chart = cfg.chart.clone().unwrap_or_default();
+    if chart.targets.is_some() && cfg.viz != Viz::Line {
         return Some("chart: `targets` draws target lines on viz `line` only".to_string());
     }
-    match lens.viz {
+    match cfg.viz {
         Viz::Bar | Viz::Line => need("chart", &[("x", &chart.x), ("y", &chart.y)]),
         Viz::Treemap => need("chart", &[("label", &chart.label), ("size", &chart.size)]),
         Viz::Tree => {
-            let t = lens.tree.clone().unwrap_or_default();
+            let t = cfg.tree.clone().unwrap_or_default();
             need(
                 "tree",
                 &[("id", &t.id), ("parent", &t.parent), ("label", &t.label)],
             )
-            .or_else(|| lazy_tree_problem(lens, &t))
+            .or_else(|| lazy_tree_problem(cfg, &t))
         }
         Viz::Timeline => {
-            let t = lens.timeline.clone().unwrap_or_default();
+            let t = cfg.timeline.clone().unwrap_or_default();
             need("timeline", &[("at", &t.at), ("label", &t.label)])
         }
         Viz::Steps => {
-            let s = lens.steps.clone().unwrap_or_default();
+            let s = cfg.steps.clone().unwrap_or_default();
             need("steps", &[("label", &s.label)])
         }
         Viz::Code => {
-            let c = lens.code.clone().unwrap_or_default();
+            let c = cfg.code.clone().unwrap_or_default();
             need("code", &[("path", &c.path), ("revision", &c.revision)])
         }
         Viz::Editor => {
-            let e = lens.editor.clone().unwrap_or_default();
+            let e = cfg.editor.clone().unwrap_or_default();
             need("editor", &[("path", &e.path)])
         }
         Viz::Terminal => {
-            let t = lens.terminal.clone().unwrap_or_default();
+            let t = cfg.terminal.clone().unwrap_or_default();
             need("terminal", &[("of", &t.of)])
         }
         Viz::Embed => {
-            let e = lens.embed.clone().unwrap_or_default();
+            let e = cfg.embed.clone().unwrap_or_default();
             need("embed", &[("url", &e.url)])
         }
         Viz::Diff => {
-            let d = lens.diff.clone().unwrap_or_default();
+            let d = cfg.diff.clone().unwrap_or_default();
             need(
                 "diff",
                 &[("path", &d.path), ("from", &d.from), ("to", &d.to)],
             )
         }
         Viz::Hunks => {
-            let h = lens.hunks.clone().unwrap_or_default();
+            let h = cfg.hunks.clone().unwrap_or_default();
             need(
                 "hunks",
                 &[("path", &h.path), ("from", &h.from), ("to", &h.to)],
             )
         }
         Viz::Form => {
-            let f = lens.form.clone().unwrap_or_default();
+            let f = cfg.form.clone().unwrap_or_default();
             need("form", &[("command", &f.command)])
                 .or_else(|| {
                     let command = f.command.as_deref().unwrap_or_default();
@@ -4569,14 +4568,14 @@ pub(crate) fn shape_problem(lens: &VizConfig, components: &[String]) -> Option<S
                 })
                 .or_else(|| form_fields_problem(&f))
         }
-        Viz::Custom => match lens.custom.as_ref().and_then(|c| c.component.as_ref()) {
+        Viz::Custom => match cfg.custom.as_ref().and_then(|c| c.component.as_ref()) {
             None => Some("viz `custom` needs `custom: { component: <id> }`".into()),
             Some(c) if !components.contains(c) => Some(format!(
                 "viz `custom`: `{c}` isn't one of this extension's `custom_components`"
             )),
             Some(_) => None,
         },
-        Viz::Board if lens.group.is_none() => {
+        Viz::Board if cfg.group.is_none() => {
             Some("`board` needs `group: { by: <column> }` (its columns)".to_string())
         }
         Viz::Table
@@ -4592,20 +4591,20 @@ pub(crate) fn shape_problem(lens: &VizConfig, components: &[String]) -> Option<S
 /// A `markdown` block off its viz, or an edit action that doesn't save the
 /// text the viz shows: a markdown viz's text, or a row-tile dashboard's
 /// text tiles (`tile.text`, edited in place).
-fn markdown_problem(lens: &VizConfig) -> Option<String> {
-    let viz = format!("{:?}", lens.viz).to_lowercase();
-    if lens.markdown.is_some() && lens.viz != Viz::Markdown {
+fn markdown_problem(cfg: &VizConfig) -> Option<String> {
+    let viz = format!("{:?}", cfg.viz).to_lowercase();
+    if cfg.markdown.is_some() && cfg.viz != Viz::Markdown {
         return Some(format!("`markdown` is for viz `markdown`, not `{viz}`"));
     }
-    let edit = lens.actions.iter().find(|a| a.edit)?;
-    if lens.viz != Viz::Markdown {
+    let edit = cfg.actions.iter().find(|a| a.edit)?;
+    if cfg.viz != Viz::Markdown {
         return Some(format!(
             "an edit action (`{}`) is a `markdown` viz's, not `{viz}`'s",
             edit.id
         ));
     }
     let saved = edit_column(edit)?;
-    match lens.markdown.as_ref().and_then(|m| m.text.as_deref()) {
+    match cfg.markdown.as_ref().and_then(|m| m.text.as_deref()) {
         None => Some(format!(
             "`{}` saves the text: give the viz `markdown: {{ text: {saved} }}`",
             edit.id
@@ -4618,16 +4617,16 @@ fn markdown_problem(lens: &VizConfig) -> Option<String> {
     }
 }
 
-/// A column that highlights a param the lens doesn't declare.
-fn highlight_problem(lens: &VizConfig) -> Option<String> {
-    lens.columns.iter().find_map(|c| {
+/// A column that highlights a param the viz doesn't declare.
+fn highlight_problem(cfg: &VizConfig) -> Option<String> {
+    cfg.columns.iter().find_map(|c| {
         [("highlight", &c.highlight), ("select", &c.select)]
             .into_iter()
             .find_map(|(field, name)| {
                 let name = name.as_deref()?;
-                (!lens.params.iter().any(|p| p.name == name)).then(|| {
+                (!cfg.params.iter().any(|p| p.name == name)).then(|| {
                     format!(
-                        "column `{}`: `{field}: {name}` names a param the lens doesn't declare",
+                        "column `{}`: `{field}: {name}` names a param the viz doesn't declare",
                         c.key
                     )
                 })
@@ -4661,20 +4660,20 @@ impl PageProvenance {
 
 /// Row styling on a viz that doesn't draw rows that way: `group` and
 /// `depth` are for `list` / `table`, `emphasis` also for `tree`.
-fn row_style_problem(lens: &VizConfig) -> Option<String> {
-    let rows = matches!(lens.viz, Viz::List | Viz::Table);
-    let viz = format!("{:?}", lens.viz).to_lowercase();
-    if lens.group.is_some() && !rows && lens.viz != Viz::Board {
+fn row_style_problem(cfg: &VizConfig) -> Option<String> {
+    let rows = matches!(cfg.viz, Viz::List | Viz::Table);
+    let viz = format!("{:?}", cfg.viz).to_lowercase();
+    if cfg.group.is_some() && !rows && cfg.viz != Viz::Board {
         return Some(format!(
             "`group` is only for `list`, `table` and `board`, not `{viz}`"
         ));
     }
-    if lens.depth.is_some() && !rows {
+    if cfg.depth.is_some() && !rows {
         return Some(format!(
             "`depth` is only for `list` and `table`, not `{viz}`"
         ));
     }
-    if lens.emphasis.is_some() && !rows && lens.viz != Viz::Tree {
+    if cfg.emphasis.is_some() && !rows && cfg.viz != Viz::Tree {
         return Some(format!(
             "`emphasis` is only for `list`, `table` and `tree`, not `{viz}`"
         ));
@@ -4683,7 +4682,7 @@ fn row_style_problem(lens: &VizConfig) -> Option<String> {
 }
 
 impl VizConfig {
-    /// Every result column the lens's component blocks name (`chart`,
+    /// Every result column the viz's component blocks name (`chart`,
     /// `tree`, `tile`, `timeline`, `steps`, `hunks`) and its row styling
     /// (`group`, `emphasis`, `depth`) — what `validate` checks the query
     /// returns.
@@ -4820,15 +4819,15 @@ pub(crate) fn disabled_error(name: &str) -> DomainError {
     ))
 }
 
-/// Where a lens is being looked at from: the viewer's current stream and
-/// thread (numeric ids, as the `v_*` views use). A lens that declares a
+/// Where a viz is being looked at from: the viewer's current stream and
+/// thread (numeric ids, as the `v_*` views use). A viz that declares a
 /// `stream_id` or `thread_id` param gets these unless it's given another
 /// value (tsk375).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ViewContext {
     pub stream_id: Option<i64>,
     pub thread_id: Option<i64>,
-    /// What's active, to check a lens's needs against; `None` checks
+    /// What's active, to check a viz's needs against; `None` checks
     /// nothing.
     pub active: Option<crate::capabilities::Active>,
 }
@@ -4852,7 +4851,7 @@ impl ViewContext {
     }
 }
 
-/// The context a lens is viewed from: `stream` (else `thread`'s stream,
+/// The context a viz is viewed from: `stream` (else `thread`'s stream,
 /// else the primary) and `thread` (else that stream's selected or active
 /// thread). Lookups that fail leave the value unset.
 pub async fn view_context(
@@ -4896,7 +4895,7 @@ pub async fn view_context(
 }
 
 /// What a page's `label` fills from: its URI's params, or a column of the
-/// one row its lens returns.
+/// one row its viz returns.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum LabelFrom {
     Param,
@@ -4956,21 +4955,21 @@ fn label_refs(label: Option<&str>) -> Result<Vec<(LabelFrom, String)>, String> {
     Ok(refs)
 }
 
-/// The value of each of `lens`'s params: as supplied, else from the
+/// The value of each of `viz`'s params: as supplied, else from the
 /// context (`stream_id` / `thread_id`), else its default, else NULL, each
 /// as its type binds it (`PageParam::take`). An unknown supplied name, or
 /// a value its param doesn't take, is refused.
 pub fn resolve_params(
-    lens: &VizConfig,
+    cfg: &VizConfig,
     supplied: &BTreeMap<String, SqlCell>,
     ctx: &ViewContext,
 ) -> Result<BTreeMap<String, SqlCell>, DomainError> {
-    resolve_param_values(&format!("lens {}", lens.id), &lens.params, supplied, ctx)
+    resolve_param_values(&format!("viz {}", cfg.id), &cfg.params, supplied, ctx)
 }
 
 /// `declared`'s values for a run: supplied, else the viewer's context,
 /// else the default, else NULL. An unknown or malformed supplied value is
-/// refused, named by `whose` (`lens acme/x`, `page acme/y`).
+/// refused, named by `whose` (`viz acme/x`, `page acme/y`).
 pub(crate) fn resolve_param_values(
     whose: &str,
     declared: &[PageParam],
@@ -5025,7 +5024,7 @@ pub(crate) async fn stream_head(
     })
 }
 
-/// Load one extension and dry-run every lens with default params,
+/// Load one extension and dry-run every page with default params,
 /// reporting query failures and `columns` keys the query doesn't
 /// return as errors.
 pub async fn validate_extension(
@@ -5124,7 +5123,7 @@ impl<F: Fn(&str) -> Option<serde_json::Value> + Sync> RunningCommands for F {
 /// The registry a check is given.
 pub type CommandSchemas<'a> = &'a dyn RunningCommands;
 
-/// A custom component's declared commands must exist; a `custom` lens
+/// A custom component's declared commands must exist; a `custom` viz
 /// that also fills a kit role block gets a nudge — the kit may already
 /// render it (the honest extent of a "this reimplements the kit" lint).
 fn check_components(
@@ -5160,8 +5159,8 @@ fn check_components(
         .iter()
         .flat_map(|p| p.nodes().into_iter().map(move |n| (p, n)))
         .filter_map(|(p, n)| match &n.kind {
-            crate::pages::schema::NodeKind::Viz { config: lens, .. } if lens.viz == Viz::Custom => {
-                Some((p, lens))
+            crate::pages::schema::NodeKind::Viz { config: cfg, .. } if cfg.viz == Viz::Custom => {
+                Some((p, cfg))
             }
             _ => None,
         })
@@ -5209,13 +5208,13 @@ fn entity_stubs(ext: &Extension) -> Vec<oxplow_db::models::EntityStub> {
         .collect()
 }
 
-/// Dry-run a loaded extension's models, commands, advisories and lenses,
+/// Dry-run a loaded extension's models, commands, advisories and viz nodes,
 /// appending what's wrong to its `errors`. `root` names sources for an
 /// unsynced view. What it declares but hasn't published — its collectors'
 /// entities (empty), its models, the other enabled extensions' — is an
 /// overlay of temp views every query reads through (P7.C6), so a fresh
 /// extension checks clean before its first sync.
-/// An extension version checked against a layer (P8.C2): its lenses, run
+/// An extension version checked against a layer (P8.C2): its viz nodes, run
 /// through its own models, and that overlay — the temp views its models
 /// (and the other enabled extensions') compile to, published nowhere —
 /// for whatever else reads this version (a review's row counts).
@@ -5295,10 +5294,10 @@ async fn read_side(
     Prepared { pages, overlay }
 }
 
-/// Check `ext` — its commands, components, models, advisories and lenses —
+/// Check `ext` — its commands, components, models, advisories and viz nodes —
 /// reading through its own models' overlay, and report what's wrong in
 /// `ext.errors`. `read` gives the files of the version under check (a
-/// component's page is linted as that version has it). Each side of a review prepares its own, so a lens renders
+/// component's page is linted as that version has it). Each side of a review prepares its own, so a viz renders
 /// against its version's models, whichever are published.
 async fn prepare(
     layer: &crate::sql_gateway::SqlGateway,
@@ -5377,9 +5376,9 @@ async fn prepare(
                     .push(format!("{}: loader `{name}`: {e}", page.origin.running));
             }
         }
-        for (node, lens, result) in crate::pages::checks::viz_nodes(&page, loaders) {
+        for (node, viz, result) in crate::pages::checks::viz_nodes(&page, loaders) {
             let Ok(result) = result else { continue };
-            for problem in viz_column_problems(lens, &result.columns) {
+            for problem in viz_column_problems(viz, &result.columns) {
                 ext.errors
                     .push(format!("{}: node `{node}`: {problem}", page.origin.running));
             }
@@ -5391,9 +5390,9 @@ async fn prepare(
 /// What a viz names that its loader's columns lack: a role block's
 /// column, an action's `when` or row placeholder, a column's key, unit,
 /// icon, tone or link column.
-fn viz_column_problems(lens: &VizConfig, cols: &[String]) -> Vec<String> {
+fn viz_column_problems(cfg: &VizConfig, cols: &[String]) -> Vec<String> {
     let mut problems: Vec<String> = Vec::new();
-    for (block, k) in lens.role_columns() {
+    for (block, k) in cfg.role_columns() {
         if !cols.contains(k) {
             problems.push(format!(
                 "{block} column `{k}` isn't in the query result (columns: {})",
@@ -5401,7 +5400,7 @@ fn viz_column_problems(lens: &VizConfig, cols: &[String]) -> Vec<String> {
             ));
         }
     }
-    for a in &lens.actions {
+    for a in &cfg.actions {
         if let Some(when) = a.when.as_ref().filter(|w| !cols.contains(w)) {
             problems.push(format!(
                 "action `{}` is offered `when: {when}`, which isn't in the \
@@ -5427,7 +5426,7 @@ fn viz_column_problems(lens: &VizConfig, cols: &[String]) -> Vec<String> {
             }
         }
     }
-    for c in &lens.columns {
+    for c in &cfg.columns {
         let mut keys = vec![&c.key];
         keys.extend(c.unit.iter());
         keys.extend(c.icon.iter());
@@ -5451,13 +5450,13 @@ fn viz_column_problems(lens: &VizConfig, cols: &[String]) -> Vec<String> {
 }
 
 /// A lowercase letter, then lowercase letters, digits and single dashes —
-/// safe as a folder name, a lens-id prefix and (dashes as underscores) a
+/// safe as a folder name, a page-id prefix and (dashes as underscores) a
 /// command namespace.
 pub fn is_valid_name(name: &str) -> bool {
     oxplow_domain::contribution::valid_extension_name(name)
 }
 
-/// A lens slug from a title: lowercase letters and digits, runs of
+/// A viz slug from a title: lowercase letters and digits, runs of
 /// anything else one dash.
 pub fn slug_of(title: &str) -> String {
     let mut out = String::new();
@@ -5470,16 +5469,16 @@ pub fn slug_of(title: &str) -> String {
     }
     let out = out.trim_end_matches('-').to_string();
     if out.is_empty() {
-        "lens".into()
+        "viz".into()
     } else {
         out
     }
 }
 
 /// The source folder of extension `name` in the checkout at `root` (where
-/// `project`'s settings say it is), if oxplow may write lens files into it:
+/// `project`'s settings say it is), if oxplow may write viz files into it:
 /// a valid name, not a bundled extension. The one check every writer of an
-/// extension's files (`save_lens`) runs first, so a
+/// extension's files (a page save, `extension.deploy`) runs first, so a
 /// path or a reserved name never reaches the filesystem.
 pub fn writable_extension_dir(
     root: &Path,
@@ -5500,7 +5499,7 @@ pub fn writable_extension_dir(
 }
 
 /// What a scaffolded `extension.yaml` says. One template for
-/// `oxplow extension new` and `save_lens`, so every new extension starts
+/// `oxplow extension new` and `extension.deploy`, so every new extension starts
 /// with an intent and passes `check`.
 pub struct ManifestScaffold<'a> {
     pub name: &'a str,
@@ -5509,7 +5508,7 @@ pub struct ManifestScaffold<'a> {
     /// The thread/effort ref that asked for it, when known.
     pub origin: Option<&'a str>,
     pub example_name: &'a str,
-    /// YAML flow text for the example's input (`{ lens: demo }`).
+    /// YAML flow text for the example's input (`{ page: demo }`).
     pub example_input: &'a str,
     pub example_expect: &'a str,
 }
@@ -5895,7 +5894,7 @@ mod tests {
             (vec!["{ id: a, label: A, command: x.y.z, drag: true, primary: true }"], true, "a drag action can't be `primary`"),
             (vec!["{ id: a, label: A, command: x.y.z, row: true, input: { b: '{{before.uri}}' } }"], true, "`{{before.uri}}` needs `drag: true`"),
             (vec!["{ id: a, label: A, command: x.y.z, row: true, input: { o: '{{order.uri}}' } }"], true, "`{{order.uri}}` needs `drag: true`"),
-            (vec!["{ id: a, label: A, command: x.y.z, drag: true, input: { g: '{{group.value}}' } }"], false, "`{{group.value}}` needs the lens to have a `group`"),
+            (vec!["{ id: a, label: A, command: x.y.z, drag: true, input: { g: '{{group.value}}' } }"], false, "`{{group.value}}` needs the viz to have a `group`"),
             (vec!["{ id: a, label: A, command: x.y.z, drag: true, input: { g: '{{group.by}}' } }"], true, "`{{group.by}}` isn't `{{group.value}}`"),
             (vec!["{ id: a, label: A, command: x.y.z, bulk: true }"], true, "`bulk` is for a row action"),
             (vec!["{ id: a, label: A, command: x.y.z, key: f }"], true, "`key` is for a row action"),
@@ -5949,7 +5948,7 @@ mod tests {
                     "{ id: a, label: A, command: x.y.z, edit: true, input: { body: '{{row.body}}' } }",
                     "{ id: b, label: B, command: x.y.z, edit: true, input: { body: '{{row.body}}' } }",
                 ],
-                "`b`: the lens already saves with `a`",
+                "`b`: the viz already saves with `a`",
             ),
         ] {
             let err = parse(&actions).unwrap_err();
@@ -6005,12 +6004,12 @@ mod tests {
             ],
             "",
         );
-        let lens = |slug: &str| node(&ext, slug);
-        let ok = lens("ok").expect("ok loads");
+        let viz = |slug: &str| node(&ext, slug);
+        let ok = viz("ok").expect("ok loads");
         assert_eq!(ok.markdown.as_ref().unwrap().text.as_deref(), Some("body"));
-        assert!(lens("view").is_some());
+        assert!(viz("view").is_some());
         for slug in ["notext", "other", "table", "block"] {
-            assert!(lens(slug).is_none(), "{slug} is refused");
+            assert!(viz(slug).is_none(), "{slug} is refused");
         }
         let errs = ext.errors.join("\n");
         for says in [
@@ -6041,10 +6040,10 @@ mod tests {
             ],
             "",
         );
-        let lens = |slug: &str| node(&ext, slug);
-        let b = lens("b").expect("b loads");
+        let viz = |slug: &str| node(&ext, slug);
+        let b = viz("b").expect("b loads");
         assert_eq!(b.group.as_ref().unwrap().values, vec!["todo", "done"]);
-        assert!(lens("nob").is_none());
+        assert!(viz("nob").is_none());
         let errs = ext.errors.join("\n");
         assert!(
             errs.contains("`board` needs `group: { by: <column> }`"),
@@ -7530,14 +7529,14 @@ commands:
             ],
             "",
         );
-        let lens = |slug: &str| node(&ext, slug);
-        assert_eq!(lens("visits").unwrap().viz, Viz::Bar);
+        let viz = |slug: &str| node(&ext, slug);
+        assert_eq!(viz("visits").unwrap().viz, Viz::Bar);
         assert_eq!(
-            lens("visits").unwrap().chart.as_ref().unwrap().y.as_deref(),
+            viz("visits").unwrap().chart.as_ref().unwrap().y.as_deref(),
             Some("n")
         );
         assert_eq!(
-            lens("trend")
+            viz("trend")
                 .unwrap()
                 .chart
                 .as_ref()
@@ -7547,16 +7546,10 @@ commands:
             Some("s")
         );
         assert_eq!(
-            lens("map")
-                .unwrap()
-                .chart
-                .as_ref()
-                .unwrap()
-                .group
-                .as_deref(),
+            viz("map").unwrap().chart.as_ref().unwrap().group.as_deref(),
             Some("zone")
         );
-        assert!(lens("nobar").is_none());
+        assert!(viz("nobar").is_none());
         let errs = ext.errors.join("\n");
         assert!(
             errs.contains("nobar.yaml") && errs.contains("`chart: { x: <column>, y: <column> }`"),
@@ -7607,15 +7600,15 @@ commands:
             ],
             "",
         );
-        let lens = |slug: &str| node(&ext, slug);
+        let viz = |slug: &str| node(&ext, slug);
         for slug in ["t", "tl", "d", "s", "h"] {
-            assert!(lens(slug).is_some(), "{slug}: {:?}", ext.errors);
+            assert!(viz(slug).is_some(), "{slug}: {:?}", ext.errors);
         }
         assert_eq!(
-            lens("t").unwrap().tree.as_ref().unwrap().parent.as_deref(),
+            viz("t").unwrap().tree.as_ref().unwrap().parent.as_deref(),
             Some("p")
         );
-        assert!(lens("notree").is_none() && lens("nohunks").is_none());
+        assert!(viz("notree").is_none() && viz("nohunks").is_none());
         let errs = ext.errors.join("\n");
         assert!(
             errs.contains("notree") && errs.contains("`tree: { parent: <column> }`"),
@@ -7699,8 +7692,8 @@ commands:
             ],
             "",
         );
-        let lens = |slug: &str| node(&ext, slug);
-        let lazy = lens("lazy").unwrap_or_else(|| panic!("{:?}", ext.errors));
+        let viz = |slug: &str| node(&ext, slug);
+        let lazy = viz("lazy").unwrap_or_else(|| panic!("{:?}", ext.errors));
         let t = lazy.tree.as_ref().unwrap();
         assert_eq!(
             (t.lazy.as_deref(), t.branch.as_deref()),
@@ -7708,14 +7701,14 @@ commands:
         );
         let errs = ext.errors.join("\n");
         for (slug, says) in [
-            ("undeclared", "`tree.lazy` names param `nope`, which the lens doesn't declare"),
+            ("undeclared", "`tree.lazy` names param `nope`, which the viz doesn't declare"),
             ("nodefault", "`tree.lazy` param `folder` needs a `default`: the top level"),
             ("context", "`tree.lazy` can't be `stream_id`: the context supplies it"),
             ("nobranch", "`tree.lazy` needs `tree.branch: <column>` (the rows that open)"),
             ("branchonly", "`tree.branch` is for a lazy tree (`tree.lazy: <param>`)"),
             ("selectlazy", "column `n`: `select` names the tree's `lazy` param; a click opens the branch instead"),
         ] {
-            assert!(lens(slug).is_none(), "{slug} loaded");
+            assert!(viz(slug).is_none(), "{slug} loaded");
             assert!(
                 errs.lines().any(|l| l.contains(slug) && l.contains(says)),
                 "{slug}: {errs}"
@@ -7762,8 +7755,8 @@ commands:
             ],
             "",
         );
-        let lens = |slug: &str| node(&ext, slug);
-        let c = lens("c").expect("c loads");
+        let viz = |slug: &str| node(&ext, slug);
+        let c = viz("c").expect("c loads");
         assert_eq!(
             c.code,
             Some(VizCode {
@@ -7773,12 +7766,12 @@ commands:
                 sync: true,
             })
         );
-        assert!(!lens("c2").unwrap().code.as_ref().unwrap().sync);
+        assert!(!viz("c2").unwrap().code.as_ref().unwrap().sync);
         assert_eq!(
-            lens("df").unwrap().diff.as_ref().unwrap().to.as_deref(),
+            viz("df").unwrap().diff.as_ref().unwrap().to.as_deref(),
             Some("b")
         );
-        assert!(lens("nocode").is_none() && lens("nodiff").is_none());
+        assert!(viz("nocode").is_none() && viz("nodiff").is_none());
         let errs = ext.errors.join("\n");
         assert!(errs.contains("`code: { revision: <column> }`"), "{errs}");
         assert!(
@@ -9341,7 +9334,7 @@ commands:
             ("b", "`group` is only for `list`, `table` and `board`"),
             ("c", "missing field `by`"),
             ("d", "`depth` is only for `list` and `table`"),
-            ("e", "`group: Ready` needs the lens to have a `group`"),
+            ("e", "`group: Ready` needs the viz to have a `group`"),
             ("f", "a group action isn't a row action"),
             ("g", "`emphasis` is only for `list`, `table` and `tree`"),
         ] {

@@ -138,7 +138,7 @@ impl ComponentBundles {
     }
 
     /// The bundle of `component` of `ext` under `root` (the worktree its
-    /// lens is shown in): the active generation's, or for another root
+    /// page is shown in): the active generation's, or for another root
     /// read as it is now.
     pub fn load(
         &self,

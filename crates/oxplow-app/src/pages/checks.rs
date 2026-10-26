@@ -99,8 +99,8 @@ pub fn viz_nodes<'p>(
         .filter_map(|n| match &n.kind {
             NodeKind::Viz {
                 from: Some(from),
-                config: lens,
-            } => loaders.get(from).map(|r| (n.id.as_str(), lens.as_ref(), r)),
+                config: cfg,
+            } => loaders.get(from).map(|r| (n.id.as_str(), cfg.as_ref(), r)),
             _ => None,
         })
         .collect()
@@ -110,15 +110,15 @@ pub fn viz_nodes<'p>(
 /// title — what a review compares between two versions.
 pub fn text(page: &Page, loaders: &LoaderChecks) -> Result<String, String> {
     let mut parts = Vec::new();
-    for (id, lens, result) in viz_nodes(page, loaders) {
+    for (id, cfg, result) in viz_nodes(page, loaders) {
         let result = result.as_ref().map_err(|e| format!("node `{id}`: {e}"))?;
         let run = VizRun {
-            config: lens.clone(),
+            config: cfg.clone(),
             params: BTreeMap::new(),
             result: result.clone(),
         };
         let body = crate::viz_text::render(&run, &crate::viz_text::Resolved::default());
-        parts.push(format!("### {}\n\n{body}", lens.title));
+        parts.push(format!("### {}\n\n{body}", cfg.title));
     }
     Ok(parts.join("\n\n"))
 }
@@ -185,15 +185,15 @@ pub fn layout_warnings(page: &Page) -> Vec<String> {
         read.extend(switches.iter().map(|s| s.to_string()));
         let mut actions: Vec<&crate::extensions::PageAction> = page.actions.iter().collect();
         for n in &nodes {
-            if let NodeKind::Viz { config: lens, .. } = &n.kind {
-                actions.extend(lens.actions.iter());
+            if let NodeKind::Viz { config: cfg, .. } = &n.kind {
+                actions.extend(cfg.actions.iter());
                 read.extend(
-                    lens.columns
+                    cfg.columns
                         .iter()
                         .flat_map(|c| [c.select.clone(), c.highlight.clone()])
                         .flatten(),
                 );
-                if lens.form.is_some() {
+                if cfg.form.is_some() {
                     // A form's defaults bind the params it is opened with.
                     read.extend(page.params.iter().map(|p| p.name.clone()));
                 }
@@ -249,16 +249,16 @@ pub fn layout_warnings(page: &Page) -> Vec<String> {
     }
     if page.tool.is_none() {
         for n in &nodes {
-            if let NodeKind::Viz { config: lens, .. } = &n.kind {
+            if let NodeKind::Viz { config: cfg, .. } = &n.kind {
                 if matches!(
-                    lens.viz,
+                    cfg.viz,
                     crate::extensions::Viz::Table | crate::extensions::Viz::List
-                ) && lens.columns.len() > MAX_COLUMNS
+                ) && cfg.columns.len() > MAX_COLUMNS
                 {
                     out.push(format!(
                         "node `{}`: {} columns — show {MAX_COLUMNS} at most; put the rest in a node a row `select`s",
                         n.id,
-                        lens.columns.len()
+                        cfg.columns.len()
                     ));
                 }
             }

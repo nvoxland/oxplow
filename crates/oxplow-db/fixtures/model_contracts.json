@@ -7282,6 +7282,46 @@
         }
       ],
       "key": []
+    },
+    "3": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Visit id."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "Thread the page was opened in."
+        },
+        {
+          "name": "page_kind",
+          "type": "TEXT",
+          "doc": "Page kind (`task`, `file`, `page`, …)."
+        },
+        {
+          "name": "page_id",
+          "type": "TEXT",
+          "doc": "Page id (`task:42`, `oxplow:oxplow/file?path=src/a.rs`, …)."
+        },
+        {
+          "name": "label",
+          "type": "TEXT",
+          "doc": "Title shown at the time."
+        },
+        {
+          "name": "visited_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "duration_ms",
+          "type": "INTEGER",
+          "doc": "Time on the page, when known."
+        }
+      ],
+      "key": []
     }
   },
   "search_comment": {
@@ -16478,6 +16518,83 @@
       "key": [
         "uri"
       ]
+    },
+    "6": {
+      "columns": [
+        {
+          "name": "uri",
+          "type": "TEXT",
+          "doc": "Its ref: `oxplow:oxplow/job?job=effort-review/review`, `oxplow:oxplow/collector?collector=triage/todos`, `oxplow:oxplow/command?command=oxplow.review.accept`. (v3, was `id`)"
+        },
+        {
+          "name": "extension",
+          "type": "TEXT",
+          "doc": "The extension that declares it."
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "doc": "`collector`, `effect`, `command`, `metric`, `skill`, `provider`, `page`, …"
+        },
+        {
+          "name": "local",
+          "type": "TEXT",
+          "doc": "Its id within the extension, or its global name (a command's bus id, a metric's key)."
+        },
+        {
+          "name": "origin",
+          "type": "TEXT",
+          "doc": "`project` or `bundled`."
+        },
+        {
+          "name": "version",
+          "type": "TEXT",
+          "doc": "The extension's `version:` (a bundled one's is oxplow's); NULL when it declares none."
+        },
+        {
+          "name": "contract_version",
+          "type": "INTEGER",
+          "doc": "The contract's own version (a model's, an event type's), when it has one."
+        },
+        {
+          "name": "runs_on",
+          "type": "TEXT",
+          "doc": "How it comes to run, as JSON: `{on: events, types}`, `{on: schedule, every}`, `{on: run}`, `{on: call}`, `{on: query}`, `{on: mount}`, `{on: agent}`, `{on: declared}`."
+        },
+        {
+          "name": "needs",
+          "type": "TEXT",
+          "doc": "What it requires (capabilities, features, scopes), as a JSON array. Never what a person granted."
+        },
+        {
+          "name": "after",
+          "type": "TEXT",
+          "doc": "What an effect or a collector runs after when one event reaches it and them (JSON array of refs: `effect:<ext>/<id>`, `oxplow:oxplow/collector?collector=<ext>/<id>`, `oxplow:oxplow/consumer?name=<name>`), as the catalog resolved its `after:`."
+        },
+        {
+          "name": "order_level",
+          "type": "INTEGER",
+          "doc": "Where an effect or a collector runs among what one event reaches: 0 first, each after every contribution it names. NULL for a kind that isn't ordered."
+        },
+        {
+          "name": "global_name",
+          "type": "TEXT",
+          "doc": "The name it holds in a space every extension shares (a metric key, a skill name, `<capability>/<id>`); NULL when none."
+        },
+        {
+          "name": "file",
+          "type": "TEXT",
+          "doc": "The manifest it's declared in."
+        },
+        {
+          "name": "line",
+          "type": "INTEGER",
+          "doc": "Its line there, when the kind tracks lines."
+        }
+      ],
+      "key": [
+        "uri"
+      ]
     }
   },
   "extension_run": {
@@ -17665,6 +17782,48 @@
           "name": "props",
           "type": "TEXT",
           "doc": "JSON array of the prop names the replacement lens is given and must declare as `params`."
+        },
+        {
+          "name": "view",
+          "type": "TEXT",
+          "doc": "JSON array of the host page's view params the replacement shares: it reads and writes them as the core component does (`q`, `author`, `branch` for `vcs.history.graph`). (v2)"
+        },
+        {
+          "name": "label",
+          "type": "TEXT",
+          "doc": "What a person calls it (\"board\", \"detail editor\")."
+        }
+      ],
+      "key": [
+        "target"
+      ]
+    },
+    "3": {
+      "columns": [
+        {
+          "name": "target",
+          "type": "TEXT",
+          "doc": "The sub-component: `work_item.board`, `work_item.list`, `work_item.detail`, `work_item.detail.state`, `vcs.history.graph`."
+        },
+        {
+          "name": "capability",
+          "type": "TEXT",
+          "doc": "The capability it belongs to (`work_items`, `vcs`)."
+        },
+        {
+          "name": "bound",
+          "type": "INTEGER",
+          "doc": "1 when only the extension of the capability's deciding provider may replace it (the item's own provider's states); 0 when any extension may, and the person chooses."
+        },
+        {
+          "name": "version",
+          "type": "INTEGER",
+          "doc": "The contract's version; a declaration may pin it (`version:`)."
+        },
+        {
+          "name": "props",
+          "type": "TEXT",
+          "doc": "JSON array of the prop names the replacement page is given and must declare as `params`."
         },
         {
           "name": "view",
@@ -22104,6 +22263,31 @@
         }
       ],
       "key": []
+    },
+    "4": {
+      "columns": [
+        {
+          "name": "scope",
+          "type": "TEXT",
+          "doc": "`app`; a page's URI (`oxplow:oxplow/page?page=…`) or `kind:<kind>`; a panel's URI; or `component:<extension>/<id>`."
+        },
+        {
+          "name": "key",
+          "type": "TEXT",
+          "doc": "What is remembered, within its scope (`railWidth`, `mergeMode.str1.main`)."
+        },
+        {
+          "name": "value_json",
+          "type": "TEXT",
+          "doc": "Its value, as JSON text."
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp of the last change."
+        }
+      ],
+      "key": []
     }
   },
   "agent_harness": {
@@ -22375,6 +22559,63 @@
           "name": "additional",
           "type": "INTEGER",
           "doc": "1 when a URI may carry params beyond its own (a page's or a lens's)."
+        },
+        {
+          "name": "resolve",
+          "type": "TEXT",
+          "doc": "The view whose rows name each one; NULL when no model holds it (a file, a page)."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "The column of `resolve` that titles one; NULL means `title`."
+        },
+        {
+          "name": "searchable",
+          "type": "TEXT",
+          "doc": "The view search indexes it from; NULL when search doesn't."
+        },
+        {
+          "name": "icon",
+          "type": "TEXT",
+          "doc": "The icon it is drawn with."
+        },
+        {
+          "name": "wikilink",
+          "type": "TEXT",
+          "doc": "JSON `{ prefix, param }`: `[[<prefix>:<value>]]` names it with that param set; NULL when it has no sugar."
+        }
+      ],
+      "key": [
+        "resource"
+      ]
+    },
+    "5": {
+      "columns": [
+        {
+          "name": "resource",
+          "type": "TEXT",
+          "doc": "`<extension>/<name>`: `oxplow/file`, `acme/pr`."
+        },
+        {
+          "name": "extension",
+          "type": "TEXT",
+          "doc": "The extension that declares it (`oxplow-foundation` for oxplow's own)."
+        },
+        {
+          "name": "label",
+          "type": "TEXT",
+          "doc": "What one is called (`Pull request`)."
+        },
+        {
+          "name": "params",
+          "type": "TEXT",
+          "doc": "JSON object of its params by name, each `{ required, pattern }`: a URI carries every required one, and each value matches its pattern."
+        },
+        {
+          "name": "additional",
+          "type": "INTEGER",
+          "doc": "1 when a URI may carry params beyond its own (a page's)."
         },
         {
           "name": "resolve",
@@ -22730,6 +22971,55 @@
           "name": "lens_changes",
           "type": "TEXT",
           "doc": "The lenses that differ, as a JSON array of `{ id, change }`."
+        },
+        {
+          "name": "stream_id",
+          "type": "INT",
+          "doc": "The stream whose worktree was reviewed."
+        }
+      ],
+      "key": [
+        "base",
+        "head",
+        "name"
+      ]
+    },
+    "2": {
+      "columns": [
+        {
+          "name": "base",
+          "type": "TEXT",
+          "doc": "The earlier side, as the query spelled it."
+        },
+        {
+          "name": "head",
+          "type": "TEXT",
+          "doc": "The later side, as the query spelled it."
+        },
+        {
+          "name": "name",
+          "type": "TEXT",
+          "doc": "The extension."
+        },
+        {
+          "name": "change",
+          "type": "TEXT",
+          "doc": "`added`, `removed` or `changed`."
+        },
+        {
+          "name": "errors",
+          "type": "TEXT",
+          "doc": "What's wrong with the later version, as a JSON array of text."
+        },
+        {
+          "name": "lines",
+          "type": "TEXT",
+          "doc": "What the change does, as a JSON array of lines (grants first, then collectors' outputs, models and their rows, pages); `[]` for a removed extension."
+        },
+        {
+          "name": "page_changes",
+          "type": "TEXT",
+          "doc": "The pages that differ, as a JSON array of `{ id, change }`."
         },
         {
           "name": "stream_id",
@@ -23363,6 +23653,81 @@
         "page_uri",
         "position"
       ]
+    },
+    "2": {
+      "columns": [
+        {
+          "name": "page_uri",
+          "type": "TEXT",
+          "doc": "The page (`v_page.uri`)."
+        },
+        {
+          "name": "position",
+          "type": "INTEGER",
+          "doc": "Its place among the page's params, from 1."
+        },
+        {
+          "name": "name",
+          "type": "TEXT",
+          "doc": "The param's name."
+        },
+        {
+          "name": "type",
+          "type": "TEXT",
+          "doc": "What it holds: `text`, `choice`, `bool`, `date_range`, `branch` or `search`."
+        },
+        {
+          "name": "role",
+          "type": "TEXT",
+          "doc": "What it is to the page: `resource` (names what it shows), `filter` (narrows how) or `selection`."
+        },
+        {
+          "name": "label",
+          "type": "TEXT",
+          "doc": "What the control says; NULL for the name."
+        },
+        {
+          "name": "default",
+          "type": "TEXT",
+          "doc": "Its default, as JSON; NULL for none."
+        },
+        {
+          "name": "options",
+          "type": "TEXT",
+          "doc": "The values a choice takes, as a JSON array of `{value, label}`; `[]` when fixed by a loader (`options_from`) or not a choice."
+        }
+      ],
+      "key": [
+        "page_uri",
+        "position"
+      ]
+    }
+  },
+  "search_page": {
+    "1": {
+      "columns": [
+        {
+          "name": "uri",
+          "type": "TEXT",
+          "doc": "The page's URI (`v_page.uri`): what a hit opens."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "The page's title."
+        },
+        {
+          "name": "body",
+          "type": "TEXT",
+          "doc": "Its description and launcher keywords."
+        },
+        {
+          "name": "stream_id",
+          "type": "TEXT",
+          "doc": "Always NULL: pages belong to the project."
+        }
+      ],
+      "key": []
     }
   },
   "search_page": {

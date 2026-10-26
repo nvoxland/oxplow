@@ -148,7 +148,7 @@ pub struct CommandSpec {
     /// A model's tool call inside a durable job may run it: only a
     /// command its extension declared for that, and a job of the same
     /// extension names in its `tools`. Anyone else — a person, an agent, a
-    /// lens acting for either — may run every command: oxplow puts no wall
+    /// page acting for either — may run every command: oxplow puts no wall
     /// between a person and their agent (the agent's harness says what it
     /// may call).
     #[serde(default)]
@@ -475,9 +475,9 @@ pub enum Actor {
         on_behalf_of: Box<Actor>,
     },
     /// An extension's custom component acting for whoever uses it (its
-    /// `invoke`, `querySql`), wherever it is shown — a lens or a page:
+    /// `invoke`, `querySql`), wherever it is shown:
     /// what acts is the component a person approved when its extension
-    /// was deployed. A lens's invoker class.
+    /// was deployed. A page's invoker class.
     Component {
         /// `<extension>/<component id>`.
         component: String,
@@ -540,7 +540,7 @@ impl Actor {
     }
 
     /// Whether this actor may confirm a run that asks: a person, directly
-    /// or through a lens they used. An agent, an effect and oxplow itself
+    /// or through a page they used. An agent, an effect and oxplow itself
     /// never can.
     pub fn may_confirm(&self) -> bool {
         match self {
@@ -564,7 +564,7 @@ impl Actor {
         }
     }
 
-    /// An agent, or a lens acting for one (at any depth). Agent-only
+    /// An agent, or a page acting for one (at any depth). Agent-only
     /// rules — the agent policy, "can never confirm" — apply to both.
     pub fn is_agent_driven(&self) -> bool {
         match self {
@@ -577,7 +577,7 @@ impl Actor {
     }
 
     /// The thread an agent's gates apply to, for an actor that has them:
-    /// an agent (or a lens acting for one) its own, an effect its event's.
+    /// an agent (or a page acting for one) its own, an effect its event's.
     /// `None` for a person or oxplow itself.
     pub fn gated_thread(&self) -> Option<Option<ThreadId>> {
         match self {
@@ -607,7 +607,7 @@ impl Actor {
     }
 
     /// Whether this actor works only in its own stream (VCS commands): an
-    /// agent (or a lens acting for one), or an effect, in its event's.
+    /// agent (or a page acting for one), or an effect, in its event's.
     pub fn confined_to_own_stream(&self) -> bool {
         match self {
             Actor::Page { on_behalf_of, .. } | Actor::Component { on_behalf_of, .. } => {
@@ -628,7 +628,7 @@ impl Actor {
         }
     }
 
-    /// Who pressed a lens or a component acting: its `on_behalf_of`. None
+    /// Who pressed a page or a component acting: its `on_behalf_of`. None
     /// for any other actor.
     pub fn presser(&self) -> Option<&Actor> {
         match self {
@@ -718,7 +718,7 @@ impl Actor {
         }
     }
 
-    /// The agent's stream, when the transport carried it (through a lens
+    /// The agent's stream, when the transport carried it (through a page
     /// chain too, like [`Self::thread_id`]).
     pub fn stream_id(&self) -> Option<StreamId> {
         match self {
@@ -732,7 +732,7 @@ impl Actor {
         }
     }
 
-    /// The agent session acting (through a lens chain too, like
+    /// The agent session acting (through a page chain too, like
     /// [`Self::thread_id`]).
     pub fn session_id(&self) -> Option<AgentSessionId> {
         match self {
@@ -744,7 +744,7 @@ impl Actor {
         }
     }
 
-    /// This actor with the agent behind it (directly or through a lens)
+    /// This actor with the agent behind it (directly or through a page)
     /// in `stream`, which its transport didn't carry. Anyone else is
     /// unchanged.
     pub fn in_stream(&self, stream: StreamId) -> Actor {
@@ -1352,13 +1352,13 @@ mod tests {
         assert_eq!(agent.source(), "agent:thr3");
         assert_eq!(agent.id().as_deref(), Some("thr3"));
         assert_eq!(agent.kind(), ActorKind::Agent);
-        let lens = Actor::Page {
+        let page = Actor::Page {
             page_id: "acme/blocked".into(),
             on_behalf_of: Box::new(agent.clone()),
         };
-        assert_eq!(lens.invoker(), Invoker::Page);
-        assert_eq!(lens.source(), "oxplow:oxplow/page?page=acme/blocked");
-        assert_eq!(lens.thread_id(), Some(ThreadId::new(3)));
+        assert_eq!(page.invoker(), Invoker::Page);
+        assert_eq!(page.source(), "oxplow:oxplow/page?page=acme/blocked");
+        assert_eq!(page.thread_id(), Some(ThreadId::new(3)));
         assert_eq!(Actor::Human.source(), "human");
         assert_eq!(Actor::System.invoker(), Invoker::Human);
         let effect = Actor::Effect {
@@ -1373,7 +1373,7 @@ mod tests {
     }
 
     /// A custom component acts as itself, for the person (or agent) using
-    /// it: its own source and kind, a lens's invoker class, and everything
+    /// it: its own source and kind, a page's invoker class, and everything
     /// else from who it acts for.
     #[test]
     fn a_component_acts_as_itself_for_who_uses_it() {
@@ -1416,7 +1416,7 @@ mod tests {
         );
     }
 
-    /// An agent's session is its own and anchors what it causes; a lens
+    /// An agent's session is its own and anchors what it causes; a page
     /// acting for it carries it too. A recorded actor from before sessions
     /// (no `session_id`) reads as one with none, and one with none writes
     /// none.
@@ -1432,11 +1432,11 @@ mod tests {
             agent.anchors().agent_session_id,
             Some(AgentSessionId::new(5))
         );
-        let lens = Actor::Page {
+        let page = Actor::Page {
             page_id: "acme/blocked".into(),
             on_behalf_of: Box::new(agent),
         };
-        assert_eq!(lens.session_id(), Some(AgentSessionId::new(5)));
+        assert_eq!(page.session_id(), Some(AgentSessionId::new(5)));
         let old: Actor = serde_json::from_value(
             serde_json::json!({"kind": "agent", "thread_id": "thr3", "stream_id": "str1"}),
         )
@@ -1448,7 +1448,7 @@ mod tests {
             .is_none());
     }
 
-    /// Only a person confirms — directly or through a lens they used.
+    /// Only a person confirms — directly or through a page they used.
     #[test]
     fn only_a_person_may_confirm() {
         let agent = Actor::Agent {
@@ -1456,15 +1456,15 @@ mod tests {
             thread_id: None,
             stream_id: None,
         };
-        let lens = |on: Actor| Actor::Page {
+        let page = |on: Actor| Actor::Page {
             page_id: "acme/x".into(),
             on_behalf_of: Box::new(on),
         };
         assert!(Actor::Human.may_confirm());
-        assert!(lens(Actor::Human).may_confirm());
+        assert!(page(Actor::Human).may_confirm());
         for actor in [
             agent.clone(),
-            lens(agent),
+            page(agent),
             Actor::System,
             Actor::Effect {
                 effect: "acme/notify".into(),

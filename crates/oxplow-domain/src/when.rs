@@ -10,7 +10,7 @@
 //! (`/^work/i`). A key alone is truthy when it's `true` or a non-empty
 //! string. `true` and `false` alone are the literals (VS Code's too):
 //! `when: "false"` is a command never offered on its own, declared for
-//! its label and `open_after` because lens actions run it. The ordering comparisons (`<` `<=` `>` `>=`) and `in` / `not
+//! its label and `open_after` because viz actions run it. The ordering comparisons (`<` `<=` `>` `>=`) and `in` / `not
 //! in` are VS Code's too, but no context key holds a number or a list, so
 //! they are refused as not supported yet.
 //!

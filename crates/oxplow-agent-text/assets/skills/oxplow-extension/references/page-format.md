@@ -38,7 +38,7 @@ panels:                 # optional: a left-nav panel
 
 A manifest without `manifest: 2` doesn't load. Unknown keys are errors;
 `oxplow_validate_extension` reports each as `file:line: what — fix`. A
-source with a `lenses/` folder doesn't load: lenses are pages now.
+source with a `lenses/` folder (the old UI format) doesn't load: rewrite each file as a page.
 
 ## A page
 

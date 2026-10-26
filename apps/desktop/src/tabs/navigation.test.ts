@@ -17,7 +17,7 @@ test("a ref opens its page, in the shown stream unless one is named", async () =
 });
 
 test("the pages a ref can name each resolve", async () => {
-  for (const ref of ["oxplow:oxplow/work_item?id=tsk3&provider=oxplow", "oxplow:oxplow/effort?id=eff9", "oxplow:oxplow/lens?lens=oxplow/tasks", "oxplow:oxplow/wiki?slug=overview", "oxplow:oxplow/dir?path=src", "oxplow:oxplow/page?page=git-dashboard"]) {
+  for (const ref of ["oxplow:oxplow/work_item?id=tsk3&provider=oxplow", "oxplow:oxplow/effort?id=eff9", "oxplow:oxplow/page?page=oxplow/tasks", "oxplow:oxplow/wiki?slug=overview", "oxplow:oxplow/dir?path=src", "oxplow:oxplow/page?page=git-dashboard"]) {
     expect((await planNavigation({ uri: ref }, states, "str1")).page?.id).toBe(ref);
   }
 });

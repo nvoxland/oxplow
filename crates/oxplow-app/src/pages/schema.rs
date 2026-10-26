@@ -12,7 +12,7 @@
 //! A viz node's config (its viz, role block, columns, actions, empty
 //! text) is a [`VizConfig`] with no query of its own: what a viz shows is its
 //! loader's rows. So the shape checks, the action parser, the text
-//! renderers and the desktop's viz components are the ones lenses use.
+//! renderers and the desktop's viz components are the ones viz nodes use.
 
 use std::collections::BTreeMap;
 
@@ -226,7 +226,7 @@ impl Node {
     /// Every viz node's provenance below it, `self` included.
     pub fn for_each_origin(&mut self, f: &mut impl FnMut(&mut PageProvenance)) {
         match &mut self.kind {
-            NodeKind::Viz { config: lens, .. } => f(&mut lens.origin),
+            NodeKind::Viz { config: cfg, .. } => f(&mut cfg.origin),
             NodeKind::Stack { children }
             | NodeKind::Grid { children }
             | NodeKind::Switch { children, .. } => {
@@ -489,8 +489,8 @@ pub fn parse_page(
     let selected: Vec<String> = nodes
         .iter()
         .filter_map(|n| match &n.kind {
-            NodeKind::Viz { config: lens, .. } => {
-                Some(lens.columns.iter().filter_map(|c| c.select.clone()))
+            NodeKind::Viz { config: cfg, .. } => {
+                Some(cfg.columns.iter().filter_map(|c| c.select.clone()))
             }
             _ => None,
         })
@@ -590,8 +590,8 @@ fn inline_problem(page: &Page) -> Option<String> {
         let why = match &node.kind {
             NodeKind::Component { .. } => Some("a component"),
             NodeKind::Slot { .. } => Some("a slot"),
-            NodeKind::Viz { config: lens, .. } if !lens.actions.is_empty() => Some("actions"),
-            NodeKind::Viz { config: lens, .. } => match lens.viz {
+            NodeKind::Viz { config: cfg, .. } if !cfg.actions.is_empty() => Some("actions"),
+            NodeKind::Viz { config: cfg, .. } => match cfg.viz {
                 Viz::Form => Some("a form"),
                 Viz::Approvals => Some("approvals"),
                 Viz::Terminal => Some("a terminal"),
@@ -983,12 +983,12 @@ fn parse_node(value: &serde_yaml::Value, ctx: &mut NodeCtx<'_>) -> Result<Node, 
             .clone()
             .or_else(|| from.clone())
             .unwrap_or_else(|| ctx.ids.layout("view"));
-        let lens = leaf_lens(ctx, &node_id, title.as_deref(), file)?;
+        let cfg = leaf_viz(ctx, &node_id, title.as_deref(), file)?;
         (
             node_id,
             NodeKind::Viz {
                 from,
-                config: Box::new(lens),
+                config: Box::new(cfg),
             },
         )
     } else if map.contains_key("stack") {
@@ -1058,8 +1058,8 @@ fn parse_node(value: &serde_yaml::Value, ctx: &mut NodeCtx<'_>) -> Result<Node, 
     })
 }
 
-/// A viz node's config as a lens with no query: its rows are its loader's.
-fn leaf_lens(
+/// A viz node's config as a viz config with no query: its rows are its loader's.
+fn leaf_viz(
     ctx: &NodeCtx<'_>,
     node_id: &str,
     title: Option<&str>,
@@ -1072,7 +1072,7 @@ fn leaf_lens(
         holds_one_row(f.viz),
     )
     .map_err(|e| format!("node `{node_id}`: {e}"))?;
-    let lens = VizConfig {
+    let cfg = VizConfig {
         id: format!("{}#{node_id}", ctx.page_id),
         extension: ctx.extension.to_string(),
         slug: node_id.to_string(),
@@ -1102,12 +1102,12 @@ fn leaf_lens(
         origin: ctx.origin.clone(),
     };
     // A custom viz's component is the extension's: checked where it loads.
-    if lens.viz != Viz::Custom {
-        if let Some(why) = shape_problem(&lens, &[]) {
+    if cfg.viz != Viz::Custom {
+        if let Some(why) = shape_problem(&cfg, &[]) {
             return Err(format!("node `{node_id}`: {why}"));
         }
     }
-    Ok(lens)
+    Ok(cfg)
 }
 
 /// What needs the whole page: node ids, bindings, selections, switches,
@@ -1142,14 +1142,14 @@ fn check_page(page: &Page) -> Result<(), String> {
         }
         seen.push(&node.id);
         match &node.kind {
-            NodeKind::Viz { from, config: lens } => match from {
+            NodeKind::Viz { from, config: cfg } => match from {
                 Some(from) if page.loader(from).is_none() => {
                     return Err(format!(
                         "node `{}` shows `{from}`, but there is no loader `{from}` in `data:`",
                         node.id
                     ));
                 }
-                None if !reads_no_rows(lens.viz) => {
+                None if !reads_no_rows(cfg.viz) => {
                     return Err(format!(
                         "node `{}` needs `from`: the loader whose rows it shows",
                         node.id

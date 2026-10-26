@@ -1,5 +1,5 @@
 //! A thread's earlier sessions — what the New Session page lists so a person
-//! can bring one back (`new-session-earlier`, oxplow-foundation's lens): its
+//! can bring one back (`new-session-earlier`, oxplow-foundation's page): its
 //! closed sessions in the stream, and every harness's saved conversations for
 //! the stream's worktree (`v_agent_conversation`), merged on (harness, native
 //! id). Each row says what taking it does: reopen (a session the person closed
@@ -91,7 +91,7 @@ async fn fixture() -> Fixture {
     }
 }
 
-/// What the lens says of one row.
+/// What the page says of one row.
 #[derive(Debug)]
 struct Row {
     label: String,

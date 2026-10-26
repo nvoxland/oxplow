@@ -579,7 +579,10 @@ rows are read when a query names the model.
   branches an unpinned side ranges over). The bus, as
   it posts such an event, posts the `ModelsChanged` naming the live models
   that follow it (`models_changed::announced_after`, so every emitter is
-  covered and no backend code listens to the bus), and the change loop adds
+  covered and no backend code listens to the bus) and tells the open page
+  runs the same models (`EventBus::reach_open_runs`, set once as the
+  services are built — the change loop sees only tables, so without it a
+  keychain write never re-ran the page showing it). The change loop adds
   the live models that read through the models a commit changed
   (`live_models_reading`). A page over a live model then re-runs like one
   over a table: its `reads.models` names it.

@@ -3,7 +3,7 @@
 //! same structure. Each node reads under a heading that names its id
 //! (`[node files]`; an embed's nodes `[node <embed>/<id>]`), so an agent
 //! can point the person at one (`#node=<id>`). A viz node renders as its
-//! lens would (`viz_text::render`, one renderer per viz, tables cut at
+//! viz would (`viz_text::render`, one renderer per viz, tables cut at
 //! [`crate::viz_text::MAX_ROWS`]).
 
 use std::path::Path;
@@ -30,11 +30,11 @@ pub async fn page_text(
     Ok(out)
 }
 
-/// The lens run a viz node shows: its config, the page's params, its
+/// The viz run a viz node shows: its config, the page's params, its
 /// loader's rows. `None` for a node that isn't a viz, or whose loader
 /// didn't run.
 pub fn node_run(run: &PageRun, node: &Node) -> Option<VizRun> {
-    let NodeKind::Viz { from, config: lens } = &node.kind else {
+    let NodeKind::Viz { from, config: cfg } = &node.kind else {
         return None;
     };
     let result = match from {
@@ -50,7 +50,7 @@ pub fn node_run(run: &PageRun, node: &Node) -> Option<VizRun> {
         },
     };
     Some(VizRun {
-        config: lens.as_ref().clone(),
+        config: cfg.as_ref().clone(),
         params: run.params.clone(),
         result,
     })
@@ -98,17 +98,17 @@ fn write_tree<'r>(
                     write_tree(svc, root, run, child, prefix, deeper, out).await?;
                 }
             }
-            NodeKind::Viz { from, config: lens } => {
-                out.push_str(&heading(def.title.as_deref().unwrap_or(&lens.title)));
+            NodeKind::Viz { from, config: cfg } => {
+                out.push_str(&heading(def.title.as_deref().unwrap_or(&cfg.title)));
                 let failed = from
                     .as_ref()
                     .and_then(|f| run.loaders.get(f))
                     .and_then(|l| l.error.clone());
                 match (failed, node_run(run, def)) {
                     (Some(error), _) => out.push_str(&format!("({error})\n")),
-                    (None, Some(lens_run)) => {
-                        let resolved = crate::viz_text::resolve(svc, root, &lens_run).await?;
-                        out.push_str(&crate::viz_text::render(&lens_run, &resolved));
+                    (None, Some(viz_run)) => {
+                        let resolved = crate::viz_text::resolve(svc, root, &viz_run).await?;
+                        out.push_str(&crate::viz_text::render(&viz_run, &resolved));
                         out.push('\n');
                     }
                     (None, None) => out.push_str("(its loader didn't run)\n"),

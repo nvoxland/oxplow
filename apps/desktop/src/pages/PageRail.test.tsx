@@ -22,17 +22,17 @@ const run = fakeRun(page, { params: { uri: "x", q: "old" }, loaders: { items: lo
 
 test("the rail lists the page's filters, never its resource or selection", () => {
   const { queryByTestId } = render(<PageRail run={run} runId="run-1" onApply={() => {}} />);
-  expect(queryByTestId("lens-param-q")).not.toBeNull();
-  expect(queryByTestId("lens-param-uri")).toBeNull();
-  expect(queryByTestId("lens-param-path")).toBeNull();
-  expect(queryByTestId("lens-param-picked")).toBeNull();
+  expect(queryByTestId("page-param-q")).not.toBeNull();
+  expect(queryByTestId("page-param-uri")).toBeNull();
+  expect(queryByTestId("page-param-path")).toBeNull();
+  expect(queryByTestId("page-param-picked")).toBeNull();
 });
 
 test("changing a filter applies it", () => {
   const applied: [string, SqlCell][] = [];
   const { getByTestId } = render(<PageRail run={run} runId="run-1" onApply={(n, v) => applied.push([n, v])} />);
-  fireEvent.click(getByTestId("lens-param-q-value"));
-  const input = getByTestId("lens-param-q-edit") as HTMLInputElement;
+  fireEvent.click(getByTestId("page-param-q-value"));
+  const input = getByTestId("page-param-q-edit") as HTMLInputElement;
   fireEvent.change(input, { target: { value: "new" } });
   fireEvent.keyDown(input, { key: "Enter" });
   expect(applied).toEqual([["q", "new"]]);
@@ -86,12 +86,12 @@ test("a filter's options_from runs the page it names once and lists its loader's
       <PageRail run={run} runId="run-1" onApply={() => {}} streamId="str1" />
     </PageReadsContext.Provider>,
   );
-  await waitFor(() => expect(getByTestId("lens-param-scope-value").textContent).toBe("All files"));
+  await waitFor(() => expect(getByTestId("page-param-scope-value").textContent).toBe("All files"));
   expect(asked).toEqual([
     ["page", "acme/scopes"],
     ["run", "acme/scopes", { stream_id: "str1" }, "str1"],
   ]);
-  fireEvent.click(getByTestId("lens-param-scope-value"));
-  const edit = getByTestId("lens-param-scope-edit") as HTMLSelectElement;
+  fireEvent.click(getByTestId("page-param-scope-value"));
+  const edit = getByTestId("page-param-scope-edit") as HTMLSelectElement;
   expect([...edit.options].map((o) => o.textContent)).toEqual(["All files", "Mine"]);
 });

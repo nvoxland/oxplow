@@ -8,12 +8,12 @@ test("an extension's page is offered, and turning the extension off takes it awa
   await searchLauncher(page, "Item");
   await expect(page.getByTestId("launcher-page-oxplow:oxplow/page?page=e2e/overview")).toBeVisible();
   await page.keyboard.press("Escape");
-  // The Extensions list (the foundation's lens in Settings): Disable is on
+  // The Extensions list (the foundation's page in Settings): Disable is on
   // the row's right-click menu.
   await openFromLauncher(page, "Settings: Extensions");
-  const row = page.locator('[data-testid^="lens-row-"]', { hasText: "e2e" }).first();
+  const row = page.locator('[data-testid^="viz-row-"]', { hasText: "e2e" }).first();
   await row.click({ button: "right" });
-  await page.getByTestId("menu-item-lens-action-disable").click();
+  await page.getByTestId("menu-item-viz-action-disable").click();
   await searchLauncher(page, "Item");
   await expect(page.getByTestId("launcher-page-oxplow:oxplow/page?page=e2e/overview")).toHaveCount(0);
 });

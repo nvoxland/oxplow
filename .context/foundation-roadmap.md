@@ -21,7 +21,7 @@ how to present it. Extensions should connect data and functionality to
 create understanding, rather than just add isolated panels.
 
 The current code supports this direction: the shared semantic layer,
-collector entities and metric facts, dimensions, lenses, references and
+collector entities and metric facts, dimensions, pages, references and
 page graph already support views over development evidence. Code
 inspection and sessions sit within that graph. The review gaps concern
 composability, lifecycle, policy and safety; they do not require turning
@@ -241,7 +241,7 @@ effects, effort policies and provider host calls, and pages on request
 collector's `input` is complete or declares its `limit` and reads
 `input.complete`. Every gateway result carries `generation` and the
 observed `coverage` of the collected models it read, which MCP/RPC
-`oxplow_query_sql` and lens runs return and the lens view shows
+`oxplow_query_sql` and page runs return and the page view shows
 (semantic-layer.md "Completeness and coverage").
 
 Scope: First stop sql.read from returning an apparently complete result when its 1000-row limit truncates data. Then define a compatible result contract for completeness, limits/pagination, generation and available collection freshness. Keep SQL read-only and distinguish complete query results from complete collection coverage.
@@ -317,7 +317,7 @@ Acceptance: Path traversal/symlinks, redirects, subprocesses, stale component au
 
 Validation: Use adversarial fixtures for unauthorized semantic reads (including derived models), paths, destinations, redirects, credentials, child processes and bridge messages. Test the supported OS enforcement matrix and a redeploy or disable during execution.
 
-Starting points: `crates/oxplow-app/src/grants.rs`, `crates/oxplow-app/src/collector_runner.rs`, `crates/oxplow-ai-providers/src/scripted.rs`, `apps/desktop/src/lens/CustomComponentViz.tsx`.
+Starting points: `crates/oxplow-app/src/grants.rs`, `crates/oxplow-app/src/collector_runner.rs`, `crates/oxplow-ai-providers/src/scripted.rs`, `apps/desktop/src/viz/CustomComponentViz.tsx`.
 
 Prerequisites: Define scoped extension grants and usage audit contracts.
 
@@ -327,7 +327,7 @@ Status: planned.
 
 Scope: Unify run identity, status, errors, cancellation, resource usage, grant decisions and data freshness across contributions. Publish semantic views and a small reusable inspector for extension authors and developers. Keep high-volume activity bounded and distinguish retryable execution failure from contract or permission rejection.
 
-Acceptance: A developer can identify extension/contribution version, cause, active generation, used services and outcome without reading logs or secrets. Retry/backoff behavior is consistent and failures remain linked to their data effects. Evidence supports custom lenses and policy queries. Retention and sampling preserve audit significance without unbounded storage.
+Acceptance: A developer can identify extension/contribution version, cause, active generation, used services and outcome without reading logs or secrets. Retry/backoff behavior is consistent and failures remain linked to their data effects. Evidence supports custom pages and policy queries. Retention and sampling preserve audit significance without unbounded storage.
 
 Validation: Run successful, rejected, cancelled and retrying contributions through the common views; assert ownership/cause linkage, no sensitive values, bounded retention and accurate freshness after failure.
 
@@ -586,7 +586,7 @@ with what it had, its call recorded as cancelled; a job's declared
 `query_sql` with `sql.read`) run under the job's run and answer the model,
 for at most `max_tool_rounds`; `timeout` fails it; its end is
 `contribution.job.completed` with every outcome. A person cancels any job
-(`oxplow.job.cancel`, the bundled Jobs lens). Still to do: the vendor
+(`oxplow.job.cancel`, the bundled Jobs page). Still to do: the vendor
 streaming mappings (Anthropic, OpenAI) and the hardening tests (lease
 expiry, revocation and generation change mid-run, restart, capacity).
 An `idempotent` job cut off by a restart or a lost lease runs again, up
@@ -660,7 +660,7 @@ Prerequisites: Use one versioned event envelope across runtime and authoring; Co
 
 Status: done. Core keeps evidence; the judgements it still made moved to
 the default extensions: an effort's verdict is the `effort.verdict`
-replacement (oxplow-bundled's lens; core shows none), claim backing is
+replacement (oxplow-bundled's page; core shows none), claim backing is
 oxplow-bundled's `claim_status`, struggle its `struggle`, and per-effort
 test outcome an oxplow-foundation collector. A value at a metric
 threshold hasn't crossed it, on the server and the Metrics page alike.
@@ -693,7 +693,7 @@ Acceptance: The same component can run bundled or from a project with equivalent
 
 Validation: Run the same component fixture in both origins, hot update and disable it, and test rejected bridge messages and undeclared commands.
 
-Starting points: `crates/oxplow-app/src/extensions/custom_components.rs`, `crates/oxplow-app/src/bundled_extensions.rs`, `apps/desktop/src/lens/CustomComponentViz.tsx`.
+Starting points: `crates/oxplow-app/src/extensions/custom_components.rs`, `crates/oxplow-app/src/bundled_extensions.rs`, `apps/desktop/src/viz/CustomComponentViz.tsx`.
 
 Prerequisites: Stage and activate one coherent extension generation; Enforce scoped grants across hosts and external execution.
 
@@ -705,8 +705,8 @@ provider (`work_item.board`, `work_item.list`, `work_item.detail`); only
 the state control stays bound to its item's provider. Contracts are
 versioned, published as `v_replaceable` and generated into the
 reference. The person picks whose view shows (`replacements`, Settings →
-Integrations). Lens actions open their command's form (`form: true`,
-`fixed`), form lenses take `fixed` and `fields`, a refused field shows
+Integrations). Page actions open their command's form (`form: true`,
+`fixed`), form pages take `fixed` and `fields`, a refused field shows
 under it in every form, and component bundles may hold forms (bridge
 protocol 4). The triage example keeps workflow decisions in private
 state through its own commands. Still to do: the task-views example and
@@ -718,7 +718,7 @@ Acceptance: A custom task view works with the existing provider, and a non-task 
 
 Validation: Build a custom task detail/board using two providers and a separate triage form using namespaced state. Exercise editing, reorder, navigation, invalid input and permission denial.
 
-Starting points: `crates/oxplow-app/src/extensions/replacements.rs`, `apps/desktop/src/lens/useReplacement.ts`, `apps/desktop/src/lens/CustomComponentViz.tsx`, `crates/oxplow-app/src/extensions/schema.rs`.
+Starting points: `crates/oxplow-app/src/extensions/replacements.rs`, `apps/desktop/src/viz/useReplacement.ts`, `apps/desktop/src/viz/CustomComponentViz.tsx`, `crates/oxplow-app/src/extensions/schema.rs`.
 
 Prerequisites: Provide namespaced extension state and configuration services.
 
@@ -741,24 +741,24 @@ Prerequisites: Stage and activate one coherent extension generation; Own and dis
 Status: done. `oxplow extension new metric` and `oxplow.metric.scaffold`
 are one template (`oxplow_app::metric_scaffold`): an extension with
 a per-path measure, a Starlark fact collector over `source_files()` +
-`code_metrics()`, the `<ns>.area` dimension, the metric and a lens linking
+`code_metrics()`, the `<ns>.area` dimension, the metric and a page linking
 `file` refs, with a fixture `extension test` runs. `metrics_authoring_tests`
 (`oxplow-app`) takes it from the scaffold through activation, a baseline
 capture, a delta capture that carries untouched files forward, slicing by
-area and a dimension filter, the lens rows' file and line refs, the
+area and a dimension filter, the viz rows' file and line refs, the
 documented refusals (bare dimension key, fact outside `facts:`, undefined
 measure) and a run that reports the oversize and binary files it left out
 (`BaselineReport.excluded`, `SweepReport.excluded`). `check` now dry-runs a
-lens reading `metric_grid()` / `metric_findings()`. Not exercised: joining
-the facts with another entity in the lens, and a stale-input case beyond
+page reading `metric_grid()` / `metric_findings()`. Not exercised: joining
+the facts with another entity in the page, and a stale-input case beyond
 the fingerprint re-baseline. The old `metric_scaffold` project-config path,
 `entries_yaml` and the gauge wording are gone.
 
-Scope: Update the old gauge authoring task to the current collector/fact/measure/metric/dimension model. Exercise files, AST queries and code metrics through the public authoring path, then join the resulting data with another entity and present it in a lens with reference drill-down.
+Scope: Update the old gauge authoring task to the current collector/fact/measure/metric/dimension model. Exercise files, AST queries and code metrics through the public authoring path, then join the resulting data with another entity and present it in a page with reference drill-down.
 
 Acceptance: A non-bundled fixture created through current SDK/agent tools produces correct facts and dimensioned aggregate values across changes. A developer can connect custom collection to existing effort/test/code evidence without a new core command. Stale inputs, truncation and invalid dimensions report clear errors. Obsolete scaffold_metric/gauges assumptions are removed.
 
-Validation: Use a small source corpus, edit it between captures, validate/run the collector and lens, and assert semantic query totals, dimension filtering, freshness and drill-down refs.
+Validation: Use a small source corpus, edit it between captures, validate/run the collector and page, and assert semantic query totals, dimension filtering, freshness and drill-down refs.
 
 Starting points: `crates/oxplow-sdk/src/lib.rs`, `crates/oxplow-script/src/helpers.rs`, `crates/oxplow-app/src/collector_runner.rs`, `docs/guide/metrics.md`.
 

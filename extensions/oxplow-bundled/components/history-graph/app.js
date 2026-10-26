@@ -1,8 +1,8 @@
 // oxplow-bundled/history-graph: the stream's commits as `git log --graph`
 // draws them — a lane per line of descent, a dot per commit, edges to its
 // parents — in place of core's plain commit list (the `vcs.history.graph`
-// replacement). Its lens walks `v_commit` from the stream's head; the
-// filters here only dim or hide rows, so typing never re-runs the lens.
+// replacement). Its page walks `v_commit` from the stream's head; the
+// filters here only dim or hide rows, so typing never re-runs the page.
 // On Git History the filters are the page's view params (`q`, `author`,
 // `branch`, the replacement's contract): they start from the page's,
 // each change writes them, and Back sets them again — a reload, a
@@ -62,7 +62,7 @@
     if (component.viewParams) showView(component.viewParams);
     else refill();
     draw();
-    // The host runs the lens again when a commit lands or a ref moves (or
+    // The host runs the page again when a commit lands or a ref moves (or
     // the page asks to reveal another commit); the filters stay as set.
     component.onUpdate(({ run }) => {
       history = read(run);

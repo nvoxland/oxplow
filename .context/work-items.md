@@ -121,7 +121,7 @@ name, a built `oxplow/work_item` URI or `tsk` id parsing in desktop code.
   `closedAt`, the list's own fields as `native`, and `commentCount`
   (`v_work_item_comment`).
 - **`readWorkItem`** and **`readWorkItemsByRef`** read the rest (the Tasks,
-  Backlog and Board pages are lenses over `v_work_item`: a thread's list or
+  Backlog and Board are pages over `v_work_item`: a thread's list or
   the backlog in list order (`rank`, then `created_at`), an item with a
   child an epic);
   `readItemEfforts(ref)` an item's activity.
@@ -153,7 +153,7 @@ through `useRerunOnChange` — or `readsChanged` outside a component
 changes. With **none** active every read is empty and the screens show
 their empty states.
 
-**One page for every item** (the `work-item` document lens, the renderer of
+**One page for every item** (the `work-item` document page, the renderer of
 `oxplow/work_item`; param `uri`): the state, the title and the list's declared fields
 (forms over `oxplow.work_item.transition` and `update`), the description
 (a `markdown` viz), About (where it is; Bring to this thread, Send to
@@ -166,7 +166,7 @@ list's extension may replace its state part (`work_item.detail.state`,
 can always move. **Custom views** need no provider: any extension may
 replace the Board (`work_item.board`), the Tasks list (`work_item.list`)
 or an item's description editor (`work_item.detail`) — with a
-lens or component over `v_work_item` that changes items only through the
+page or component over `v_work_item` that changes items only through the
 interface commands, so it works with whichever list is active; the person
 picks whose shows (`replacements`, Settings → Integrations).
 [extensions.md](./extensions.md) "Replacements" has the contracts. The `oxplow-foundation/work-item.sections` slot gets
@@ -188,7 +188,7 @@ items as cards in one column per canonical state. Drag a card to a
 column (a `drag: true` action on `oxplow.work_item.transition`), or
 right-click → Move To, to transition it through the work list. Its scope
 (this thread, the backlog, everything) is the page's `show` filter. List
-rows and Board cards drag as lens rows, which the agent terminal reads as
+rows and Board cards drag as viz rows, which the agent terminal reads as
 context URIs. **New Item** files on the active
 list: title, body, a canonical starting state (todo or blocked), the
 list's editable fields and — with `hierarchy` — a parent.
@@ -199,7 +199,7 @@ The agent reads work items through the interface too, with no tool of
 its own: `oxplow_query_sql` over `v_work_item` for a list in order (`WHERE
 thread_id = … ORDER BY rank IS NULL, rank, created_at`), `oxplow_read` on a
 work item's URI for one item with its `links` and `comments`, and the
-foundation lens `oxplow-foundation/work-next` (the tool `oxplow_work_next`,
+foundation page `oxplow-foundation/work-next` (the tool `oxplow_work_next`,
 param `thread: "thr3"`) for what to pick up next (an epic with its ready
 descendants, or every ready non-epic item; open `blocks` links hold an
 item). None of them belongs to an implementation, so the tool list never
@@ -301,7 +301,7 @@ how the task writes send a status. A link belongs to its task, not to a
 thread.
 `oxplow.work_item.comment` and `oxplow.work_item.link` refuse a deleted task (tsk572).
 A comment's `task_note.author` names who made it (`note_author`, tsk1000):
-`user`, `agent` (a lens acting for one included), `effect:<extension>/<id>`
+`user`, `agent` (a page acting for one included), `effect:<extension>/<id>`
 or `oxplow` — as a task's `author` is left empty for an effect or oxplow
 (`task_author`), neither is shown as the person's.
 
@@ -357,7 +357,7 @@ else the project's `activeProviders` (`{ work_items: <instance id> }`, a
 person-only key), else the default (`oxplow`) — and every declared row
 of a capability many implementations serve (`chosen_by = declared`,
 work-tracking.md "Capabilities"); both are chosen in
-Settings → Integrations → Capabilities (the `capabilities` foundation lens, below). A choice that isn't
+Settings → Integrations → Capabilities (the `capabilities` foundation page, below). A choice that isn't
 available falls to `none` (the work list is optional), listed with
 `available = 0` and the active row's `chosen_by = fallback`. The
 registry's `active()` resolves from the config as it is now, so a
@@ -392,7 +392,7 @@ conformance suite runs with the provider under test active, and checks it. The d
 exported through the bindings), which turns every flag a provider
 doesn't declare — or a provider that isn't listed — off.
 
-**Settings → Integrations → Capabilities** (the foundation lens `capabilities`, over `v_capability_provider`; `oxplow.capability.choose` writes the choice) is
+**Settings → Integrations → Capabilities** (the foundation page `capabilities`, over `v_capability_provider`; `oxplow.capability.choose` writes the choice) is
 generated from `v_capability_provider`: for each choosable capability
 (`choosable`, `capability_title` and `optional` are core's
 `CapabilitySpec`, on every row since v4) the active implementation and
@@ -400,7 +400,7 @@ why (`chosenNote`: personal, project, default, or which chosen one fell
 back), the project's choice as radios ("The default" unsets the
 capability's entry) and "Just for me" (`oxplow.config.set` / `oxplow.config.unset` with
 `layer: personal`). An optional capability's `none` names what it turns
-off: the enabled extensions' lenses and hints that declare a `needs:` on
+off: the enabled extensions' pages and hints that declare a `needs:` on
 it (`offWithout`). A click is the confirmation (`activeProviders` is
 person-only); a failure goes to the op-errors store.
 

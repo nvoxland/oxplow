@@ -139,7 +139,7 @@ pub const MANIFEST: &[Capability] = &[
     model("list_backlinks", &["v_page_ref"]),
     model("list_outbound", &["v_page_ref"]),
     // ---- the command bus (agent side; the UI reaches commands through
-    // lenses, the launcher and menus) ----
+    // pages, the launcher and menus) ----
     agent("list_commands"),
     // The services an extension's script may use (`oxplow_domain::service`):
     // Settings and the reference show a person the table; an agent writing

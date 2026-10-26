@@ -24,7 +24,7 @@ test("a failed operation is listed, opens to its output, and dismisses", async (
   await expect(part).toContainText("CONFLICT (content): Merge conflict in a.txt");
 
   // Dismiss takes it off the list.
-  await part.getByTestId("lens-row-0").click({ button: "right" });
-  await page.getByTestId("menu-item-lens-action-dismiss").click();
-  await expect(part.getByTestId("lens-row-0")).toHaveCount(0);
+  await part.getByTestId("viz-row-0").click({ button: "right" });
+  await page.getByTestId("menu-item-viz-action-dismiss").click();
+  await expect(part.getByTestId("viz-row-0")).toHaveCount(0);
 });

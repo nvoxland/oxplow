@@ -1,5 +1,5 @@
 //! Reviewing an extension by its **impact**: what installing or updating
-//! it would change — lenses' rendered text, models and their contracts
+//! it would change — pages' rendered text, models and their contracts
 //! (and what reads them), collectors' and providers' grants, a provider's
 //! commands and features — rather than only
 //! what it declares, plus models' rows before and after, and derived
@@ -63,7 +63,7 @@ fn gaps_of(runs_program: bool, hosts: &[String]) -> Vec<String> {
     })
 }
 
-/// A lens, by its rendered text before and after.
+/// A page, by its rendered text before and after.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct PageImpact {
@@ -785,7 +785,7 @@ pub fn contributions_diff(
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ImpactReport {
-    pub lenses: Vec<PageImpact>,
+    pub pages: Vec<PageImpact>,
     pub models: Vec<ModelImpact>,
     pub collectors: Vec<CollectorImpact>,
     pub providers: Vec<ProviderImpact>,
@@ -986,7 +986,7 @@ fn ran_text(r: Option<&Ran>) -> String {
 
 /// The report as lines: collectors' and providers' grants first (what a
 /// person approves), then what the collectors make of their inputs, the
-/// models (and their rows) and the lenses.
+/// models (and their rows) and the pages.
 pub fn summary(report: &ImpactReport) -> Vec<String> {
     let mut out = Vec::new();
     for c in &report.collectors {
@@ -1110,7 +1110,7 @@ pub fn summary(report: &ImpactReport) -> Vec<String> {
             ));
         }
     }
-    for l in &report.lenses {
+    for l in &report.pages {
         match &l.error {
             Some(e) => {
                 let change = if l.change == Change::Unchanged {
@@ -1716,7 +1716,7 @@ pub async fn impact_within(
         .unwrap_or_default();
     let texts_after = page_texts(after.extension, after.pages);
     let slugs: BTreeSet<&String> = texts_before.keys().chain(texts_after.keys()).collect();
-    let lenses = slugs
+    let pages = slugs
         .into_iter()
         .map(|slug| {
             let (b, a) = (texts_before.get(slug), texts_after.get(slug));
@@ -1844,7 +1844,7 @@ pub async fn impact_within(
         &declared(&after),
     );
     let mut report = ImpactReport {
-        lenses,
+        pages,
         models,
         collectors,
         providers,
@@ -2261,7 +2261,7 @@ mod tests {
         )
         .await;
         let by: BTreeMap<&str, &PageImpact> =
-            report.lenses.iter().map(|l| (l.id.as_str(), l)).collect();
+            report.pages.iter().map(|l| (l.id.as_str(), l)).collect();
         assert_eq!(by["x/broken"].change, Change::Unchanged);
         assert!(by["x/broken"].error.is_some(), "still says why it fails");
         assert_eq!(by["x/moved"].change, Change::Changed);
@@ -2305,7 +2305,7 @@ mod tests {
         )
         .await;
         let by: BTreeMap<&str, &PageImpact> =
-            report.lenses.iter().map(|l| (l.id.as_str(), l)).collect();
+            report.pages.iter().map(|l| (l.id.as_str(), l)).collect();
         assert_eq!(by["x/same"].change, Change::Unchanged);
         assert_eq!(by["x/count"].change, Change::Changed);
         // A page's text: its title, then each node's.
@@ -2333,7 +2333,7 @@ mod tests {
             },
         )
         .await;
-        assert!(fresh.lenses.iter().all(|l| l.change == Change::Added));
+        assert!(fresh.pages.iter().all(|l| l.change == Change::Added));
     }
 
     /// A candidate that declares a provider: its grants, commands and
@@ -3186,7 +3186,7 @@ mod tests {
     /// CLI and an effort's review all say.
     #[test]
     fn effects_spell_out_each_change_grants_first() {
-        let lens = |id: &str, change: Change, error: Option<&str>| PageImpact {
+        let page = |id: &str, change: Change, error: Option<&str>| PageImpact {
             id: id.into(),
             change,
             before: None,
@@ -3219,11 +3219,11 @@ mod tests {
             note: None,
         });
         let report = ImpactReport {
-            lenses: vec![
-                lens("shared/count", Change::Changed, None),
-                lens("shared/same", Change::Unchanged, None),
-                lens("shared/new", Change::Added, None),
-                lens("shared/bad", Change::Added, Some("no such table")),
+            pages: vec![
+                page("shared/count", Change::Changed, None),
+                page("shared/same", Change::Unchanged, None),
+                page("shared/new", Change::Added, None),
+                page("shared/bad", Change::Added, Some("no such table")),
             ],
             models: vec![
                 model(

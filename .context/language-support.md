@@ -203,7 +203,7 @@ These are the substrate the Metrics package/dimension roll-up builds on:
 latest values by **package** (directory) or any per-file `dims_json` key
 (e.g. **language**) — the `metric_subject` package grain made concrete. A
 slice by dimension is `metric_grid(…, dim)` in SQL; a per-package or
-per-language view is lens or agent work.
+per-language view is page or agent work.
 
 ## Adding a language (the checklist)
 

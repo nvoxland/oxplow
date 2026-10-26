@@ -25,14 +25,14 @@ test("explore a model, run SQL, and save it as a page", async ({ page, daemon })
   await expect(frame.getByTestId("explore-sql")).toHaveValue(/v_work_item/);
   await frame.getByTestId("explore-sql").fill("SELECT title FROM v_work_item WHERE title LIKE 'Echidna%'");
   await frame.getByTestId("explore-run").click();
-  await expect(page.getByTestId("custom-page-spec").getByTestId("lens-row-0")).toContainText("Echidna task");
+  await expect(page.getByTestId("custom-page-spec").getByTestId("viz-row-0")).toContainText("Echidna task");
   const before = await writes(daemon);
   await page.getByTestId("explore-save-open").click();
   await page.getByTestId("save-view-title").fill("Echidna tasks");
   await page.getByTestId("save-view-submit").click();
   // The saved page opens on its own, its rows as the view showed them.
   const saved = page.locator('[data-testid^="center-tab-body-oxplow:oxplow/page?page=my-pages/echidna-tasks"]:visible');
-  await expect(saved.getByTestId("lens-row-0")).toContainText("Echidna task");
+  await expect(saved.getByTestId("viz-row-0")).toContainText("Echidna task");
   // The save was one `oxplow.extension.write_page`, whatever other specs wrote before it.
   expect(await writes(daemon)).toBe(before + 1);
 });

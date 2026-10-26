@@ -5,7 +5,7 @@
  *
  * - An **entity** page's id is the entity's own ref: `file:<path>[@rev]`,
  *   `dir:<path>`, `wiki:<slug>`, `work_item:oxplow:tsk42`, `commit:<sha>`,
- *   `metric:<key>`, `lens:<ext>/<slug>[?params]`.
+ *   `metric:<key>`, `page:<ext>/<slug>[?params]`.
  * - A **declared page** (a manifest's `pages:` entry, not a thing in the
  *   graph) is `page:<id>[?params]` for oxplow's own extension (core-named,
  *   as its commands are: `page:tasks`, `page:settings#area=agents`) and
@@ -206,7 +206,7 @@ export function metricRef(metricKey: string, view?: Record<string, SqlCell>): Ta
 }
 
 /** A ref's resource params: its id's `?` params besides the one that names
- *  it (a lens's `lens`), read as the params form reads them. */
+ *  it (its `page` param), read as the params form reads them. */
 export function resourceParamsOf(ref: TabRef): Record<string, SqlCell> {
   const u = parseUri(ref.id);
   const resource = typeOf(ref.id);
@@ -219,7 +219,7 @@ export function viewParamsOf(ref: TabRef): Record<string, SqlCell> {
   return cellsOf(viewParamsOfUri(ref.id));
 }
 
-/** `ref`'s page (a lens's, a declared page's) naming `params` instead —
+/** `ref`'s page (a declared page's) naming `params` instead —
  *  another resource — in `view`: its key param kept, its payload rebuilt
  *  from the new id. */
 export function withResourceParams(ref: TabRef, params: Record<string, SqlCell>, view: Record<string, SqlCell> = {}): TabRef {
@@ -396,7 +396,7 @@ export function wikiFreshnessRef(slug: string): TabRef {
 }
 
 /** The Dashboards index — the list of the user's custom dashboards: the
- *  foundation's `dashboards` lens page. */
+ *  foundation's `dashboards` page. */
 export function dashboardsRef(): TabRef {
   return pageTabRef("dashboards");
 }
@@ -420,7 +420,7 @@ export function terminalRef(): TabRef {
   return pageTabRef("terminal");
 }
 
-/** The Hook Events page: the foundation's `hook-events` lens page. */
+/** The Hook Events page: the foundation's `hook-events` page. */
 export function hookEventsRef(): TabRef {
   return pageTabRef("hook-events");
 }
@@ -433,7 +433,7 @@ export function hookEventsRef(): TabRef {
 export function tasksRef(): TabRef {
   return pageTabRef("tasks");
 }
-/** The Done Work page: the foundation's `done-work` lens page. */
+/** The Done Work page: the foundation's `done-work` page. */
 export function doneWorkRef(): TabRef {
   return pageTabRef("done-work");
 }
@@ -486,12 +486,12 @@ export function endpointDiffRef(start: Revision | null, end: Revision): TabRef {
 }
 
 /** Uncommitted Changes — the working tree's changed files, commit form
- *  and the `uncommitted` lens slot. */
+ *  and the `uncommitted` page slot. */
 export function uncommittedChangesRef(): TabRef {
   return pageTabRef("uncommitted-changes");
 }
 
-/** The Go To page: the foundation's `go-to` lens page. */
+/** The Go To page: the foundation's `go-to` page. */
 export function goToRef(): TabRef {
   return pageTabRef("go-to");
 }

@@ -1958,7 +1958,7 @@ mod tests {
             ),
             // Who may run it isn't a command's to say: anyone may.
             (
-                entry("a.b", "    invokers: { human: true, agent: false, lens: true }\n"),
+                entry("a.b", "    invokers: { human: true, agent: false, page: true }\n"),
                 vec![("handlers/h.star", HANDLER)],
                 "unknown field `invokers`",
             ),

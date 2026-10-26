@@ -88,7 +88,7 @@ void oxplow.connect().then((c) => {
     el("code", {}, "SELECT bucket, MEASURE('oxplow.coverage.abs_pct') FROM metric_grid('week')"),
     ". Or ",
   );
-  const ask = el("button", { type: "button", className: "ox-link", testId: "explore-new-lens" }, "ask your agent to build one…");
+  const ask = el("button", { type: "button", className: "ox-link", testId: "explore-new-page" }, "ask your agent to build one…");
   ask.addEventListener("click", () => void c.invoke("oxplow.page.draft_with_agent", { text: AGENT_PROMPT }).catch(() => {}));
   intro.append(ask);
 

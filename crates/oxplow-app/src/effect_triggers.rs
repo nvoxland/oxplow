@@ -1610,14 +1610,14 @@ mod tests {
         );
     }
 
-    /// A retry is open to a lens (the Alerts page's failed reactions): a
-    /// lens a person presses runs it, only once the person confirms; a lens
+    /// A retry is open to a page (the Alerts page's failed reactions): a
+    /// page a person presses runs it, only once the person confirms; a page
     /// an agent presses runs it without asking.
     #[tokio::test(flavor = "multi_thread")]
-    async fn a_lens_a_person_presses_retries_with_confirmation_and_an_agents_does_not_ask() {
+    async fn a_page_a_person_presses_retries_with_confirmation_and_an_agents_does_not_ask() {
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
-        let lens = |presser: oxplow_domain::Actor| oxplow_domain::Actor::Page {
+        let page = |presser: oxplow_domain::Actor| oxplow_domain::Actor::Page {
             page_id: "oxplow-foundation/alerts-reactions".into(),
             on_behalf_of: Box::new(presser),
         };
@@ -1632,7 +1632,7 @@ mod tests {
         let unasked = svc
             .commands
             .run(
-                &lens(agent),
+                &page(agent),
                 crate::commands::effect::RETRY,
                 input.clone(),
                 false,
@@ -1646,7 +1646,7 @@ mod tests {
         let asks = svc
             .commands
             .run(
-                &lens(oxplow_domain::Actor::Human),
+                &page(oxplow_domain::Actor::Human),
                 crate::commands::effect::RETRY,
                 input.clone(),
                 false,
@@ -1661,7 +1661,7 @@ mod tests {
         let invalid = svc
             .commands
             .run(
-                &lens(oxplow_domain::Actor::Human),
+                &page(oxplow_domain::Actor::Human),
                 crate::commands::effect::RETRY,
                 input,
                 true,

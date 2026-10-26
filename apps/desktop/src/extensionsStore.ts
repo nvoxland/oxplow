@@ -2,7 +2,7 @@ import { useSyncExternalStore } from "react";
 
 import { listExtensions, onRemoteReconnect, subscribeOxplowEvents, type Extension } from "./api.js";
 import { recordOpError } from "./opErrors.js";
-import { extensionsChanged } from "./lens/lensRerun.js";
+import { extensionsChanged } from "./viz/rerun.js";
 
 /**
  * The loaded extensions — the main worktree's, the same in every stream —

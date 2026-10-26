@@ -413,7 +413,7 @@ export async function querySql(
   return unwrap(await commands.querySql(sql, params, limit, raw));
 }
 
-/// The extensions the app shows (and their lenses) — the main worktree's,
+/// The extensions the app shows (and their pages) — the main worktree's,
 /// for every stream — with per-extension load errors. See
 /// `.context/extensions.md`.
 export async function listExtensions(): Promise<Extension[]> {

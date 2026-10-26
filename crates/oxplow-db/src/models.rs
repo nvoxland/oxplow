@@ -1713,7 +1713,7 @@ pub fn replace_extensions(
 
 /// A declared entity a check stands in for before its collector ever
 /// ran (P7.C6): an empty view with its declared columns, which a model's
-/// `ref()` and a lens can read.
+/// `ref()` and a page can read.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EntityStub {
     /// The extension that declares it.

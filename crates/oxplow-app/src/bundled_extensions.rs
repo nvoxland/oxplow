@@ -138,10 +138,10 @@ mod tests {
         }
     }
 
-    /// The analytics effort-review lenses unnest the stored observation
+    /// The analytics effort-review pages unnest the stored observation
     /// payloads (JUnit cases, uncovered lines) in SQL; run them on real rows.
     #[tokio::test]
-    async fn analytics_effort_lenses_read_the_observation_payloads() {
+    async fn analytics_effort_pages_read_the_observation_payloads() {
         let f = crate::test_fixtures::services_with_effort().await;
         let obs = |kind: &str, value: Option<f64>, payload: serde_json::Value| {
             oxplow_db::EffortObservation {
@@ -188,20 +188,20 @@ mod tests {
             )
             .await
             .unwrap();
-        let lens = |slug: &'static str| run_analytics_page(&f, slug, "effort_id", f.effort.value());
+        let page = |slug: &'static str| run_analytics_page(&f, slug, "effort_id", f.effort.value());
         assert_eq!(
-            lens("effort-coverage").await,
+            page("effort-coverage").await,
             serde_json::json!([["**60%** of changed lines covered · 6/10"]])
         );
         assert_eq!(
-            lens("effort-untested-files").await,
+            page("effort-untested-files").await,
             serde_json::json!([["src/a.rs", 3, 4, "4, 9, 12"], ["src/c.rs", 1, 2, "2"]])
         );
         assert_eq!(
-            lens("effort-failed-tests").await,
+            page("effort-failed-tests").await,
             serde_json::json!([["s", "a › red", 1, "passed"]])
         );
-        let runs = lens("effort-test-runs").await;
+        let runs = page("effort-test-runs").await;
         assert_eq!(runs.as_array().unwrap().len(), 2);
     }
 
@@ -635,7 +635,7 @@ mod tests {
         assert!(checked > 30, "only {checked} bundled queries found");
     }
 
-    /// Run the page an oxplow-bundled lens became, with one integer param; its
+    /// Run the page an oxplow-bundled page became, with one integer param; its
     /// rows as JSON.
     async fn run_analytics_page(
         f: &crate::test_fixtures::EffortFixture,
@@ -646,7 +646,7 @@ mod tests {
         run_bundled_page(f, &format!("oxplow-bundled/{slug}"), &[(param, value)]).await
     }
 
-    /// Run the page (loader) a bundled lens (`<extension>/<slug>`) became, with
+    /// Run the page (loader) a bundled page (`<extension>/<slug>`) became, with
     /// integer params; its rows as JSON (`test_fixtures::run_as_page`).
     async fn run_bundled_page(
         f: &crate::test_fixtures::EffortFixture,
@@ -674,10 +674,10 @@ mod tests {
         serde_json::to_value(&run.rows).unwrap()
     }
 
-    /// The `runs` lens: per extension, the last week's runs, failures,
+    /// The `runs` page: per extension, the last week's runs, failures,
     /// denials, mean CPU and model calls, the ones needing attention first.
     #[tokio::test(flavor = "multi_thread")]
-    async fn the_runs_lens_counts_each_extensions_week() {
+    async fn the_runs_page_counts_each_extensions_week() {
         let f = crate::test_fixtures::services_with_effort().await;
         // Only these runs: the fixture's own (foundation's
         // `oxplow.effort.open`) are runs too.
@@ -775,11 +775,11 @@ mod tests {
         );
     }
 
-    /// The agent-interface lenses over recorded usage: tool calls by tool
+    /// The agent-interface pages over recorded usage: tool calls by tool
     /// and harness, an agent's command runs with the share refused and the
     /// most common errors, and the hints' counts.
     #[tokio::test(flavor = "multi_thread")]
-    async fn the_agent_interface_lenses_count_tools_commands_and_hints() {
+    async fn the_agent_interface_pages_count_tools_commands_and_hints() {
         let f = crate::test_fixtures::services_with_effort().await;
         let thread = f.thread.value();
         f.svc
@@ -832,7 +832,7 @@ mod tests {
                     ("oxplow.work_item.transition", "agent", "denied", Some("not allowed")),
                     ("oxplow.work_item.create", "agent", "error", Some("boom")),
                     ("oxplow.work_item.create", "human", "invalid", Some("a person's, not counted")),
-                    ("oxplow.lens.keep", "agent", "ok", None),
+                    ("oxplow.page.open", "agent", "ok", None),
                 ];
                 for (command, actor, outcome, error) in audits {
                     run(
@@ -895,8 +895,8 @@ mod tests {
                     50.0
                 ],
                 [
-                    "oxplow.lens.keep",
-                    errors_of("oxplow.lens.keep"),
+                    "oxplow.page.open",
+                    errors_of("oxplow.page.open"),
                     1,
                     0,
                     0,
@@ -965,9 +965,9 @@ mod tests {
         );
     }
 
-    /// Token usage moved from the task/thread widgets to slot lenses.
+    /// Token usage moved from the task/thread widgets to slot pages.
     #[tokio::test]
-    async fn analytics_token_lenses_sum_a_tasks_and_a_threads_turns() {
+    async fn analytics_token_pages_sum_a_tasks_and_a_threads_turns() {
         let f = crate::test_fixtures::services_with_task_effort().await;
         let turn =
             |effort: Option<String>, prompt: &str, tokens: i64| oxplow_db::NewAgentTokenUsage {
@@ -1028,7 +1028,7 @@ mod tests {
 
     /// The change-review grid reads a real analyzed commit.
     #[tokio::test]
-    async fn analytics_change_lenses_read_an_analyzed_commit() {
+    async fn analytics_change_pages_read_an_analyzed_commit() {
         let f = crate::test_fixtures::services_with_effort().await;
         let root = f.svc.layout.project_dir.clone();
         std::fs::create_dir_all(root.join("src")).unwrap();
@@ -1205,16 +1205,16 @@ mod tests {
                 .await
                 .unwrap();
         }
-        let lens = "oxplow-bundled/what-deviated";
+        let page = "oxplow-bundled/what-deviated";
         let effort = [("effort_id", f.effort.value())];
 
         describe("Fix the hover state in [[src/ui/button.ts]].").await;
-        let rows = run_bundled_page(&f, lens, &effort).await;
+        let rows = run_bundled_page(&f, page, &effort).await;
         assert_eq!(rows, serde_json::json!([["crates/db/store.rs", "updated"]]));
 
         // A task that names no paths states no area, so nothing deviates.
         describe("Make the buttons feel snappier.").await;
-        let rows = run_bundled_page(&f, lens, &effort).await;
+        let rows = run_bundled_page(&f, page, &effort).await;
         assert_eq!(rows, serde_json::json!([]));
     }
 
@@ -1429,7 +1429,7 @@ mod tests {
         );
     }
 
-    /// The rail's Comments panel is a lens: the stream's open
+    /// The rail's Comments panel is a page: the stream's open
     /// comments for the person and for the agent, each row and the header
     /// opening the inbox.
     #[tokio::test]
@@ -1497,7 +1497,7 @@ mod tests {
         assert_eq!(none, serde_json::json!([]));
     }
 
-    /// The rail's Work panel is a lens: per thread, what's in
+    /// The rail's Work panel is a page: per thread, what's in
     /// progress, what's ready and what finished since the person last
     /// cleared it (an extension command recording an event), grouped
     /// under headings; collapsed, just the active item; counted without
@@ -1647,11 +1647,11 @@ mod tests {
         );
     }
 
-    /// The Work panel and its sibling lenses read the work-item interface:
+    /// The Work panel and its sibling pages read the work-item interface:
     /// with the work list switched to none, oxplow's tasks are gone from
     /// them, whatever the task tables hold.
     #[tokio::test]
-    async fn work_lenses_show_only_the_active_work_list() {
+    async fn work_pages_show_only_the_active_work_list() {
         let f = crate::test_fixtures::services_with_effort().await;
         let thread = f.thread.to_string();
         for (title, state) in [("Next up", "todo"), ("Stuck", "blocked")] {
@@ -1720,11 +1720,11 @@ mod tests {
             run_bundled_page(&f, "oxplow-bundled/work-count", &[("thread_id", tid)]).await,
             serde_json::json!([[1]])
         );
-        for lens in ["oxplow-bundled/backlog-tasks", "oxplow-bundled/ready-tasks"] {
+        for page in ["oxplow-bundled/backlog-tasks", "oxplow-bundled/ready-tasks"] {
             assert_eq!(
-                run_bundled_page(&f, lens, &[]).await,
+                run_bundled_page(&f, page, &[]).await,
                 serde_json::json!([]),
-                "{lens}"
+                "{page}"
             );
         }
         let waiting = titles(
@@ -1734,10 +1734,10 @@ mod tests {
         assert!(!waiting.contains(&"Stuck".to_string()), "{waiting:?}");
     }
 
-    /// The foundation's typed lenses (offered to the agent as tools): each
+    /// The foundation's typed pages (offered to the agent as tools): each
     /// reads its params as refs and returns the rows its tool answers with.
     #[tokio::test]
-    async fn the_foundations_typed_lenses_answer_their_questions() {
+    async fn the_foundations_typed_pages_answer_their_questions() {
         use oxplow_db::SqlCell::{Int, Text};
         let f = crate::test_fixtures::services_with_effort().await;
         let thread = f.thread.value();
@@ -1846,7 +1846,7 @@ mod tests {
         assert_eq!(col(&rows, 2), ["todo"]);
     }
 
-    /// The thread-sessions lens lists a thread's sessions with their
+    /// The thread-sessions page lists a thread's sessions with their
     /// status and origin, and beneath each its subagents — a bracketed one
     /// by its state, one only its calls name as `unknown`.
     #[tokio::test]
@@ -1906,7 +1906,7 @@ mod tests {
         assert_eq!(col(&rows, 5), ["claude", "subagent", "subagent"]);
     }
 
-    /// The transcript lens lists a session's turns oldest first with the
+    /// The transcript page lists a session's turns oldest first with the
     /// thread's notes where they fall, marks a subagent's hand-back, counts
     /// each turn's tool calls, starts at a turn, and pages by 50.
     #[tokio::test]
@@ -1993,7 +1993,7 @@ mod tests {
         assert_eq!(col(&rows, 2), Vec::<String>::new(), "{rows}");
     }
 
-    /// A turn opens its session's transcript at it: the page is the lens
+    /// A turn opens its session's transcript at it: the page is the page
     /// ref built in SQL, with no prefix spelled outside the owners.
     #[tokio::test]
     async fn a_turn_opens_its_sessions_transcript_at_it() {
@@ -2131,7 +2131,7 @@ mod tests {
     /// The Catalog's sections answer: what can be asked, grouped by who
     /// offers it with Ask on each, and what can be configured.
     #[tokio::test]
-    async fn the_catalog_lenses_list_prompts_and_config_keys() {
+    async fn the_catalog_pages_list_prompts_and_config_keys() {
         let f = crate::test_fixtures::services_with_effort().await;
         let run = |id: &'static str| {
             let svc = f.svc.clone();
@@ -2189,7 +2189,7 @@ mod tests {
     /// Problems lists the stream's diagnostics by file, files with errors
     /// first, the severest first inside a file; a severity keeps only its own.
     #[tokio::test]
-    async fn the_problems_lens_groups_diagnostics_by_file() {
+    async fn the_problems_page_groups_diagnostics_by_file() {
         use oxplow_db::SqlCell::{Int, Text};
         let f = crate::test_fixtures::services_with_effort().await;
         let d = |severity: &str, message: &str, line: i64| oxplow_db::DiagnosticRow {
@@ -2230,7 +2230,7 @@ mod tests {
     /// Symbols nests each under its container, under its file; a filter
     /// keeps the names that contain it, a path one file.
     #[tokio::test]
-    async fn the_symbols_lens_nests_symbols_under_their_container_and_file() {
+    async fn the_symbols_page_nests_symbols_under_their_container_and_file() {
         use oxplow_db::SqlCell::{Int, Text};
         let f = crate::test_fixtures::services_with_effort().await;
         let sym = |id: &str, name: &str, kind: &str, container: Option<&str>, line: i64| {
@@ -2294,7 +2294,7 @@ mod tests {
 
     /// Closed threads lists only closed ones, with the work they finished.
     #[tokio::test]
-    async fn the_closed_threads_lens_lists_closed_threads_with_their_work() {
+    async fn the_closed_threads_page_lists_closed_threads_with_their_work() {
         use oxplow_db::SqlCell::Int;
         let f = crate::test_fixtures::services_with_effort().await;
         let thread =
@@ -2321,7 +2321,7 @@ mod tests {
 
     /// Done work lists the thread's closed items, the latest first.
     #[tokio::test]
-    async fn the_done_work_lens_lists_closed_items_latest_first() {
+    async fn the_done_work_page_lists_closed_items_latest_first() {
         use oxplow_db::SqlCell::Int;
         let f = crate::test_fixtures::services_with_effort().await;
         let thread = f.thread.to_string();
@@ -2377,7 +2377,7 @@ mod tests {
     /// Hook events read the stream's `agent.*` events newest first, each
     /// with what it says: a tool, its target and its outcome.
     #[tokio::test]
-    async fn the_hook_events_lens_says_what_each_agent_event_did() {
+    async fn the_hook_events_page_says_what_each_agent_event_did() {
         use oxplow_db::SqlCell::Int;
         let f = crate::test_fixtures::services_with_effort().await;
         let post = |event: &str, payload: serde_json::Value| {
@@ -2418,7 +2418,7 @@ mod tests {
     /// Wiki freshness lists the files a page cites under a heading that
     /// counts the stale ones.
     #[tokio::test]
-    async fn the_wiki_freshness_lens_lists_a_pages_cited_files() {
+    async fn the_wiki_freshness_page_lists_a_pages_cited_files() {
         use oxplow_db::SqlCell::Text;
         let f = crate::test_fixtures::services_with_effort().await;
         std::fs::create_dir_all(f._dir.path().join("src")).unwrap();
@@ -2509,7 +2509,7 @@ mod tests {
     /// first; the same snapshots under the commit each equals, the
     /// uncommitted ones first, and `all` lifting the caps.
     #[tokio::test]
-    async fn the_local_history_lenses_list_snapshots_and_group_them_by_commit() {
+    async fn the_local_history_pages_list_snapshots_and_group_them_by_commit() {
         use oxplow_db::analytics_stores::TakeRecord;
         use oxplow_db::analytics_stores::{FileSnapshot, SnapshotStorage};
         use oxplow_db::SqlCell::{Int, Text};
@@ -2561,7 +2561,7 @@ mod tests {
         ] {
             f.svc.snapshot_store.record_take(t).await.unwrap().unwrap();
         }
-        let lens = |slug: &'static str, mode: &'static str, all: i64| {
+        let page = |slug: &'static str, mode: &'static str, all: i64| {
             let f = &f;
             async move {
                 run_bundled_page_with(
@@ -2578,26 +2578,26 @@ mod tests {
         };
         // Recent: newest first. The wiki one says which page, the clean one
         // its commit, the first that it is the first.
-        let rows = lens("local-history-recent", "recent", 0).await;
+        let rows = page("local-history-recent", "recent", 0).await;
         assert_eq!(texts(&rows, 1), ["", "", "Initial Snapshot"], "{rows}");
         assert_eq!(texts(&rows, 2), ["", "abc1234", ""], "{rows}");
         assert_eq!(texts(&rows, 3), ["idea", "", ""], "{rows}");
         assert_eq!(texts(&rows, 4), ["+1 ~1", "+1 ~1", "+1"], "{rows}");
         assert_eq!(texts(&rows, 5), ["turn end", "idle", "startup"], "{rows}");
         // Not the grouped view's rows.
-        assert!(lens("local-history-commits", "recent", 0)
+        assert!(page("local-history-commits", "recent", 0)
             .await
             .as_array()
             .unwrap()
             .is_empty());
         // By commit: the uncommitted snapshots under one heading, first.
-        let rows = lens("local-history-commits", "by-commit", 0).await;
+        let rows = page("local-history-commits", "by-commit", 0).await;
         assert_eq!(
             texts(&rows, 2),
             ["Uncommitted", "Uncommitted", "abc1234"],
             "{rows}"
         );
-        assert!(lens("local-history-recent", "by-commit", 0)
+        assert!(page("local-history-recent", "by-commit", 0)
             .await
             .as_array()
             .unwrap()
@@ -2605,11 +2605,11 @@ mod tests {
     }
 
     /// Git History's plain list: the commits reachable from the stream's
-    /// HEAD (`head_sha`, which a lens with that param gets from the
+    /// HEAD (`head_sha`, which a page with that param gets from the
     /// viewed stream), narrowed by text, author or branch, with the
     /// branches and tags at each.
     #[tokio::test]
-    async fn the_git_history_lens_lists_the_commits_from_the_streams_head() {
+    async fn the_git_history_page_lists_the_commits_from_the_streams_head() {
         use oxplow_db::git_store::{GitBranchRow, GitCommitRow, GitTagRow};
         use oxplow_db::SqlCell::{Int, Text};
         let f = crate::test_fixtures::services_with_effort().await;
@@ -2664,7 +2664,7 @@ mod tests {
             .replace_stream_heads(vec![(1, "ccc333".into())])
             .await
             .unwrap();
-        let lens = |extra: Vec<(&'static str, oxplow_db::SqlCell)>| {
+        let page = |extra: Vec<(&'static str, oxplow_db::SqlCell)>| {
             let f = &f;
             let mut params = vec![("stream_id", Int(1))];
             params.extend(extra);
@@ -2673,20 +2673,20 @@ mod tests {
             }
         };
         // No head given: the stream's. The side branch isn't reachable from it.
-        let rows = lens(vec![]).await;
+        let rows = page(vec![]).await;
         assert_eq!(texts(&rows, 1), ["Third", "Second fix", "First"], "{rows}");
         assert_eq!(texts(&rows, 4), ["main", "v1", ""], "{rows}");
         // Text, author, and a branch (reachable from its head) narrow it.
         assert_eq!(
-            texts(&lens(vec![("q", Text("fix".into()))]).await, 1),
+            texts(&page(vec![("q", Text("fix".into()))]).await, 1),
             ["Second fix"]
         );
         assert_eq!(
-            texts(&lens(vec![("author", Text("ann".into()))]).await, 1),
+            texts(&page(vec![("author", Text("ann".into()))]).await, 1),
             ["Third", "First"]
         );
         assert_eq!(
-            texts(&lens(vec![("branch", Text("side".into()))]).await, 1),
+            texts(&page(vec![("branch", Text("side".into()))]).await, 1),
             ["First"]
         );
     }
@@ -2695,7 +2695,7 @@ mod tests {
     /// saved prompt and names the stream or thread by its ref, which the
     /// command takes; a thread lists its open agent sessions.
     #[tokio::test]
-    async fn the_settings_lenses_start_from_the_saved_prompt() {
+    async fn the_settings_pages_start_from_the_saved_prompt() {
         use oxplow_db::SqlCell::Text;
         let f = crate::test_fixtures::services_with_effort().await;
         let thread = f.thread.to_string();
@@ -2709,7 +2709,7 @@ mod tests {
             )
             .await
             .unwrap();
-        let lens = |slug: &'static str, param: &'static str, value: String| {
+        let page = |slug: &'static str, param: &'static str, value: String| {
             let f = &f;
             async move {
                 run_bundled_page_with(
@@ -2720,7 +2720,7 @@ mod tests {
                 .await
             }
         };
-        let rows = lens(
+        let rows = page(
             "thread-settings-prompt",
             "thread",
             format!("thr{}", f.thread.value()),
@@ -2728,10 +2728,10 @@ mod tests {
         .await;
         assert_eq!(texts(&rows, 0), std::slice::from_ref(&thread), "{rows}");
         assert_eq!(texts(&rows, 1), ["Be brief."], "{rows}");
-        let rows = lens("stream-settings-prompt", "stream", "str1".into()).await;
+        let rows = page("stream-settings-prompt", "stream", "str1".into()).await;
         assert_eq!(texts(&rows, 0), ["str1"], "{rows}");
         assert_eq!(texts(&rows, 1), [""], "{rows}");
-        let rows = lens(
+        let rows = page(
             "thread-settings-sessions",
             "thread",
             format!("thr{}", f.thread.value()),
@@ -2742,7 +2742,7 @@ mod tests {
             ["oxplow:oxplow/agent_session?id=ses1"],
             "{rows}"
         );
-        let rows = lens("thread-settings-sessions", "thread", "thr999".into()).await;
+        let rows = page("thread-settings-sessions", "thread", "thr999".into()).await;
         assert!(rows.as_array().unwrap().is_empty(), "{rows}");
     }
 
@@ -2750,7 +2750,7 @@ mod tests {
     /// its recent pages, and the stream's most visited. A bookmark's menu
     /// moves it to another scope, or removes it.
     #[tokio::test]
-    async fn the_go_to_page_lenses_list_bookmarks_and_visits_and_act_on_a_bookmark() {
+    async fn the_go_to_page_pages_list_bookmarks_and_visits_and_act_on_a_bookmark() {
         use oxplow_db::analytics_stores::PageVisitStore;
         use oxplow_db::SqlCell::Int;
         let f = crate::test_fixtures::services_with_effort().await;
@@ -2783,7 +2783,7 @@ mod tests {
                 .await
                 .unwrap();
         }
-        let lens = |slug: &'static str| {
+        let page = |slug: &'static str| {
             let f = &f;
             async move {
                 run_bundled_page_with(
@@ -2794,11 +2794,11 @@ mod tests {
                 .await
             }
         };
-        let rows = lens("go-to-bookmarks").await;
+        let rows = page("go-to-bookmarks").await;
         assert_eq!(texts(&rows, 0), ["Git"], "{rows}");
         assert_eq!(texts(&rows, 3), ["thread"], "{rows}");
         // Recent: newest first, once each, no agent sessions.
-        let rows = lens("go-to-recent").await;
+        let rows = page("go-to-recent").await;
         assert_eq!(
             texts(&rows, 2),
             [
@@ -2808,7 +2808,7 @@ mod tests {
             "{rows}"
         );
         // Most visited: the repeated page first, with its count.
-        let rows = lens("go-to-top").await;
+        let rows = page("go-to-top").await;
         assert_eq!(
             texts(&rows, 2),
             [
@@ -2867,10 +2867,10 @@ mod tests {
             }
         };
         act("to-stream").await;
-        let moved = lens("go-to-bookmarks").await;
+        let moved = page("go-to-bookmarks").await;
         assert_eq!(texts(&moved, 3), ["stream"], "{moved}");
         act("remove").await;
-        assert!(lens("go-to-bookmarks").await.as_array().unwrap().is_empty());
+        assert!(page("go-to-bookmarks").await.as_array().unwrap().is_empty());
     }
 
     /// Dashboards lists page-file dashboards, links their stored URIs and
@@ -3151,17 +3151,17 @@ mod tests {
     /// threads' efforts changed, an epic whose children sit on different
     /// threads. The thread and item variants keep only their own rows.
     #[tokio::test]
-    async fn the_shared_work_lenses_show_what_two_threads_hold() {
+    async fn the_shared_work_pages_show_what_two_threads_hold() {
         use oxplow_db::EffortStore as _;
         let f = crate::test_fixtures::services_with_task_effort().await;
         let item = oxplow_tasks::work_item_ref(f.task);
-        let lens = |id: &'static str| {
+        let page = |id: &'static str| {
             let id = format!("oxplow-bundled/{id}");
             let f = &f;
             async move { run_bundled_page(f, &id, &[]).await }
         };
         assert_eq!(
-            lens("shared-work").await.as_array().unwrap().len(),
+            page("shared-work").await.as_array().unwrap().len(),
             0,
             "nothing shared yet"
         );
@@ -3222,7 +3222,7 @@ mod tests {
             .await;
         }
 
-        let all = lens("shared-work").await;
+        let all = page("shared-work").await;
         let sections: Vec<(String, String)> = all
             .as_array()
             .unwrap()
@@ -3279,19 +3279,19 @@ mod tests {
         assert!(!kinds.contains(&"Epics spread over threads"), "{kinds:?}");
     }
 
-    /// The Plan lenses: the plans an agent proposed, newest first, under
+    /// The Plan pages: the plans an agent proposed, newest first, under
     /// an effort and under a thread; nothing when none was.
     #[tokio::test]
-    async fn the_plan_lenses_show_the_proposed_plans() {
+    async fn the_plan_pages_show_the_proposed_plans() {
         let f = crate::test_fixtures::services_with_effort().await;
-        for lens in ["oxplow-bundled/effort-plan", "oxplow-bundled/thread-plan"] {
-            let param = if lens.contains("effort") {
+        for page in ["oxplow-bundled/effort-plan", "oxplow-bundled/thread-plan"] {
+            let param = if page.contains("effort") {
                 ("effort_id", f.effort.value())
             } else {
                 ("thread_id", f.thread.value())
             };
-            let rows = run_bundled_page(&f, lens, &[param]).await;
-            assert_eq!(rows.as_array().unwrap().len(), 0, "{lens}: none yet");
+            let rows = run_bundled_page(&f, page, &[param]).await;
+            assert_eq!(rows.as_array().unwrap().len(), 0, "{page}: none yet");
         }
         use oxplow_domain::hook::HookKind;
         for (kind, id, plan) in [
@@ -3321,17 +3321,17 @@ mod tests {
                 .await
                 .unwrap();
         }
-        for lens in ["oxplow-bundled/effort-plan", "oxplow-bundled/thread-plan"] {
-            let param = if lens.contains("effort") {
+        for page in ["oxplow-bundled/effort-plan", "oxplow-bundled/thread-plan"] {
+            let param = if page.contains("effort") {
                 ("effort_id", f.effort.value())
             } else {
                 ("thread_id", f.thread.value())
             };
-            let rows = run_bundled_page(&f, lens, &[param]).await;
+            let rows = run_bundled_page(&f, page, &[param]).await;
             let text = rows[0][0].as_str().unwrap();
             let (first, second) = (text.find("1. First"), text.find("1. Second"));
-            assert!(first.is_some() && second.is_some(), "{lens}: {text}");
-            assert!(second < first, "{lens}: newest first: {text}");
+            assert!(first.is_some() && second.is_some(), "{page}: {text}");
+            assert!(second < first, "{page}: newest first: {text}");
         }
     }
 
@@ -3483,7 +3483,7 @@ mod tests {
     /// them, shared ones apart; the thread's activity names each turn's
     /// session.
     #[tokio::test]
-    async fn the_session_lenses_name_who_changed_what() {
+    async fn the_session_pages_name_who_changed_what() {
         let f = crate::test_fixtures::services_with_effort().await;
         let effort = f.effort.value();
         f.svc
@@ -3508,7 +3508,7 @@ mod tests {
         );
     }
 
-    /// The rail's Go To panel is a lens: the thread's bookmarks,
+    /// The rail's Go To panel is a page: the thread's bookmarks,
     /// then its recent (or most visited) pages, each once; collapsed, the
     /// bookmarks alone.
     #[tokio::test]
@@ -3634,7 +3634,7 @@ mod tests {
         );
     }
 
-    /// The rail's Uncommitted panel is a lens over the working
+    /// The rail's Uncommitted panel is a page over the working
     /// tree's file list (change analysis's stage one): a folder tree with
     /// A/M/D letters, collapsed to a one-line summary, counted by files.
     #[tokio::test]
@@ -3893,20 +3893,20 @@ mod tests {
             thread_id: Some(f.thread),
             stream_id: None,
         };
-        // An agent may run it too, through a lens or not: oxplow puts no
+        // An agent may run it too, through a page or not: oxplow puts no
         // wall between a person and their agent. It doesn't ask.
-        let through_lens = oxplow_domain::Actor::Page {
+        let through_page = oxplow_domain::Actor::Page {
             page_id: "oxplow-bundled/packet".into(),
             on_behalf_of: Box::new(agent.clone()),
         };
         review(
             &f,
-            &through_lens,
+            &through_page,
             "oxplow.review.accept",
             serde_json::json!({ "effort": effort_id(&f), "force": true }),
         )
         .await
-        .expect("an agent accepts through a lens, unasked");
+        .expect("an agent accepts through a page, unasked");
         assert_eq!(task_status(&f).await, "done");
     }
 

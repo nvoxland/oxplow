@@ -86,7 +86,7 @@ describe("buildQuickOpenResults", () => {
   // A search hit answering before the pages load would be the first row,
   // and Enter would take it in place of the page the query names.
   test("until the pages have loaded, a query has no results to take", () => {
-    const out = buildQuickOpenResults({ query: "Files", pages: null, commands, files, siteHits: [hit("lens", "files")] });
+    const out = buildQuickOpenResults({ query: "Files", pages: null, commands, files, siteHits: [hit("page", "files")] });
     expect(out.results).toEqual([]);
   });
 
@@ -183,15 +183,15 @@ describe("buildQuickOpenResults", () => {
   // A keyword matches at a word's start; a title match ranks first.
   test("a title match ranks first, and keywords match whole words", () => {
     const planning: PageDirectoryEntry = {
-      ...page("oxplow:oxplow/lens?lens=a/planning", "Planning"),
-      keywords: "lens oxplow-bundled planning what to do next, sorted by the oldest first",
+      ...page("oxplow:oxplow/page?page=a/planning", "Planning"),
+      keywords: "page oxplow-bundled planning what to do next, sorted by the oldest first",
     };
-    const todos: PageDirectoryEntry = { ...page("oxplow:oxplow/lens?lens=t/todos", "TODO comments"), keywords: "lens todo-watch todos every comment" };
+    const todos: PageDirectoryEntry = { ...page("oxplow:oxplow/page?page=t/todos", "TODO comments"), keywords: "page todo-watch todos every comment" };
     const symbols: PageDirectoryEntry = { ...page("symbols", "Symbols"), keywords: "outline go to definition" };
-    const stale: PageDirectoryEntry = { ...page("oxplow:oxplow/lens?lens=b/stale", "Stale Work"), keywords: "lens review todo items left open" };
+    const stale: PageDirectoryEntry = { ...page("oxplow:oxplow/page?page=b/stale", "Stale Work"), keywords: "page review todo items left open" };
     const out = buildQuickOpenResults({ query: "todo", pages: [planning, symbols, stale, todos], commands: [], files: [], siteHits: [] });
     const ids = out.results.filter((r) => r.kind === "page").map((r) => (r.kind === "page" ? r.entry.id : ""));
-    expect(ids).toEqual(["oxplow:oxplow/lens?lens=t/todos", "oxplow:oxplow/lens?lens=b/stale"]);
+    expect(ids).toEqual(["oxplow:oxplow/page?page=t/todos", "oxplow:oxplow/page?page=b/stale"]);
   });
 
   test("a page is found by its keywords, not just label/id", () => {

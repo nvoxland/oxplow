@@ -28,7 +28,6 @@ mock.module("../../api.js", () => ({
         { id: "x/v", extension: "x", title: "V", icon: null, scope: "project", body: "x/b", badge: null, open: null, collapsed: null, count: null },
         { id: "x/w", extension: "x", title: "W", icon: null, scope: "project", body: "x/b", badge: null, open: null, collapsed: null, count: null },
       ],
-      lenses: [],
       ui: { slots: [], commands: [], decorators: [], replacements: [] },
     },
   ],

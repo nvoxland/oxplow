@@ -410,7 +410,7 @@ snake_case, is `oxplow` or a core namespace, or repeats
 (`capability::instance_id_problem`); a capability with no provider
 contract; an `id_pattern` that isn't a regex, or `fields` / `idPattern`
 on a capability that keeps no items; an entry or declarations path
-outside the folder (or the manifest, or under `lenses/`); a bad host
+outside the folder (or the manifest, or under a retired UI folder); a bad host
 pattern; and declarations that don't parse, speak another protocol
 version, lack the named capability, declare a feature that isn't the
 capability's (each `true` or `false`), declare a capability `data` that
@@ -721,7 +721,7 @@ config, provider? } }`, the same entries and the same validation):
   `remove_instance` takes a project's replacement first, and the global
   one then shows through). The file is written only by the registry for a
   person (`Actor::Human`; anyone else is `Denied`) — no command reaches
-  it, so no agent or lens can;
+  it, so no agent or page can;
 - **every change is one read-modify-write of the instances as they are
   then** (tsk837): `write_instances` takes an `edit` of them, under the
   registry's `instances_gate` (one change at a time in a process, never
@@ -841,7 +841,7 @@ form; sign-in is a provider's.
   all is the same state with "isn't signed in". A token endpoint that
   can't be reached is an ordinary failed start (backoff), and a token
   that's still good is used as it is.
-- **A component page signs in through the bridge** (`signIn`, protocol 11): the host runs the flow below (`lens/hostSignIn.ts`, each step a command the component declares) and answers how it ended; the frame never touches the shell or the browser.
+- **A component page signs in through the bridge** (`signIn`, protocol 11): the host runs the flow below (`viz/hostSignIn.ts`, each step a command the component declares) and answers how it ended; the frame never touches the shell or the browser.
 - **Signing in** is a person's: command `oxplow.provider.begin_sign_in { instance,
   name, redirect_port }` (`ProviderRegistry::begin_sign_in`, `credentials.write`)
   returns the page to open — **only for a provider as its deployment declares it**: the
@@ -1151,7 +1151,7 @@ restated by the next read.
 
 **Settings → Integrations** is oxplow-foundation's own component
 (`extensions/oxplow-foundation/components/integrations/`: `index.html`,
-`app.js`, `app.css`, hand-written, no build), mounted by the lens
+`app.js`, `app.css`, hand-written, no build), mounted by the page
 `integrations` in `oxplow-foundation/settings-integrations.sections` after Capabilities and
 Replaced components. Its operations are commands
 (`commands/provider_instances.rs`, scopes `providers.write` and
@@ -1162,9 +1162,9 @@ instance, with its state, `detail`, config and config schema),
 never a value) and `v_provider_collector` (each collector's reads), pushed
 down on `instance` and following `ConfigChanged`, `ExtensionsChanged`,
 `CredentialChanged` and the models `v_contribution_health` /
-`v_collector_state`. The lens's query names all three (credentials and
+`v_collector_state`. The page's query names all three (credentials and
 collectors as aggregate columns), so a change to any of them changes the
-rows and the frame re-reads (`onUpdate`; a lens re-run posts `update` only
+rows and the frame re-reads (`onUpdate`; a page re-run posts `update` only
 when its rows differ). The component declares the `oxplow.provider.*`
 commands it runs and `sql: read`; the frame is as tall as its content
 (`fit`: a document section has no height to fill). Each row shows the
@@ -1281,7 +1281,7 @@ a keyed write once.
 session: [agent-model.md](./agent-model.md) "Observe conformance".)
 
 What `oxplow extension test <name> [--bless] [--json]` runs for each
-provider an extension declares, after its check and its lens and
+provider an extension declares, after its check and its page and
 collector examples ([extensions.md](./extensions.md) "The SDK"). The person running it runs their own program, so no deploy
 approval is asked; credentials come from the environment (the declared
 names — for a signed-in credential, an access token the author got

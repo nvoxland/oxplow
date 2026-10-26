@@ -4,7 +4,7 @@ import { cleanup, render, waitFor } from "@testing-library/react";
 import { configValueResult, readsSettings } from "../configValuesTestSupport.js";
 import { decl, fakePage, fakePageRuns, fakeRun, loader, node } from "./testing/fakeRun.js";
 
-// A page file's node marked `replaceable: <target>` is a lens part's
+// A page file's node marked `replaceable: <target>` is a viz part's
 // equal: oxplow's own (the node) unless an extension replaces the target.
 
 const realApi = await import("../api.js");
@@ -34,7 +34,7 @@ const run = () => {
 };
 
 test("with nothing replacing it, the node itself shows", async () => {
-  extensions = [{ name: "oxplow-foundation", enabled: true, pages: [], lenses: [], ui: { slots: [], commands: [], decorators: [], replacements: [] } }];
+  extensions = [{ name: "oxplow-foundation", enabled: true, pages: [], ui: { slots: [], commands: [], decorators: [], replacements: [] } }];
   const view = render(<PageTree run={run()} runId="run-1" />);
   await waitFor(() => expect(view.container.textContent).toContain("our card"));
 });
@@ -45,7 +45,7 @@ test("an extension's page replaces it, run with the page's params", async () => 
       name: "x",
       enabled: true,
       pages: [],
-      lenses: [],
+      pages: [],
       ui: {
         slots: [],
         commands: [],

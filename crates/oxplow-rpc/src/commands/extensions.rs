@@ -12,7 +12,7 @@ use oxplow_domain::DomainError;
 use crate::error::IpcError;
 
 /// Where the app's extensions come from: the main worktree, for every
-/// stream. A stream's `stream_id` only scopes the data a lens reads.
+/// stream. A stream's `stream_id` only scopes the data a page reads.
 fn root(svc: &Services) -> &std::path::Path {
     svc.worktrees.project_dir()
 }

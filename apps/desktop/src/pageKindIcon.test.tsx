@@ -19,7 +19,7 @@ test("a declared page draws the icon its declaration names", async () => {
   await waitFor(() => expect(container.querySelector("svg.lucide-triangle-alert")).not.toBeNull());
 });
 
-test("a page no extension declares draws the lens icon", () => {
+test("a page no extension declares draws the page icon", () => {
   const { container } = render(<PageKindIcon kind="page" />);
   expect(container.querySelector("svg.lucide-glasses")).not.toBeNull();
 });

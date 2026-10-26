@@ -801,21 +801,21 @@ export type Access =
 "write";
 
 /**
- *  What becomes of the page a lens is on after one of its actions (or its
+ *  What becomes of the page a viz is on after one of its actions (or its
  *  form) ran a command whose `ui.open_after` names a page.
  */
 export type ActionThen =
-/**  The page opens in this tab; Back returns to the lens's page. */
+/**  The page opens in this tab; Back returns to the viz's page. */
 "open" |
 /**
- *  The page takes this tab and the lens's page leaves its history: Back
+ *  The page takes this tab and the viz's page leaves its history: Back
  *  never returns to a submitted form. A page that can't live in a tab
  *  (an agent session) closes this one and is focused.
  */
 "replace" |
-/**  Nothing opens; the lens's page stays (a form for the next entry). */
+/**  Nothing opens; the viz's page stays (a form for the next entry). */
 "stay" |
-/**  The lens's page closes (it showed what the command removed). */
+/**  The viz's page closes (it showed what the command removed). */
 "close";
 
 /**
@@ -976,7 +976,7 @@ export type AiSettings = {
 	kinds: ProviderKindInfo[],
 };
 
-/**  A lens's alert, evaluated on one run. */
+/**  A viz's alert, evaluated on one run. */
 export type AlertState = {
 	firing: boolean,
 	/**  Rows the run returned. */
@@ -1675,7 +1675,7 @@ export type CommandSpec = {
 	 *  A model's tool call inside a durable job may run it: only a
 	 *  command its extension declared for that, and a job of the same
 	 *  extension names in its `tools`. Anyone else — a person, an agent, a
-	 *  lens acting for either — may run every command: oxplow puts no wall
+	 *  page acting for either — may run every command: oxplow puts no wall
 	 *  between a person and their agent (the agent's harness says what it
 	 *  may call).
 	 */
@@ -2020,7 +2020,7 @@ export type DeclaredAt = {
 export type DecoratorPlacement =
 /**  A chip in the header of a page whose ref the model lists. */
 "ref-chip" |
-/**  A badge after a lens cell that links to a listed ref. */
+/**  A badge after a page cell that links to a listed ref. */
 "row-badge";
 
 /**  Where a loaded extension's files came from. */
@@ -2277,13 +2277,13 @@ export type EntityDecl = {
 	key: string,
 	columns: EntityColumn[],
 	relations: EntityRelation[],
-	/**  SQL name lenses and agents query: `v_<owner>_<entity>`. */
+	/**  SQL name pages and agents query: `v_<owner>_<entity>`. */
 	view: string,
 };
 
 /**
  *  A documented join from an entity to another view. Not executed; it
- *  tells agents and lens authors how the data connects.
+ *  tells agents and page authors how the data connects.
  */
 export type EntityRelation = {
 	/**  The view it joins to, e.g. `v_work_item` or `v_github_review`. */
@@ -2442,7 +2442,7 @@ export type ExtensionInstanceConfig = {
 
 /**
  *  A left-nav panel an extension contributes (P6.G1, target §11.3): its
- *  `body` lens renders compact in the nav; its `badge` lens's alert gives
+ *  `body` viz renders compact in the nav; its `badge` viz's alert gives
  *  the count shown on the panel and in the Alerts panel.
  */
 export type ExtensionPanel = {
@@ -2452,23 +2452,23 @@ export type ExtensionPanel = {
 	title: string,
 	icon: string | null,
 	scope: PanelScope,
-	/**  The body lens (`<extension>/<slug>`). */
+	/**  The body viz (`<extension>/<slug>`). */
 	body: string,
-	/**  The badge lens, which declares an `alert`. */
+	/**  The badge viz, which declares an `alert`. */
 	badge: string | null,
 	/**
 	 *  The page its header opens (`oxplow:oxplow/page?page=<kind>`, a canonical ref): a core
 	 *  page the panel summarizes, as Comments opens the inbox.
-	 *  Absent, the body lens's own page.
+	 *  Absent, the body viz's own page.
 	 */
 	open: string | null,
 	/**
-	 *  The lens shown, compact, while the panel is collapsed: its one-line
+	 *  The viz shown, compact, while the panel is collapsed: its one-line
 	 *  summary. Absent, a collapsed panel shows only its header.
 	 */
 	collapsed: string | null,
 	/**
-	 *  The lens whose row count (a `number` lens: its value) is the
+	 *  The viz whose row count (a `number` viz: its value) is the
 	 *  header's count, without raising an alert. It wins over
 	 *  the badge's count; the badge still feeds Alerts.
 	 */
@@ -2497,7 +2497,7 @@ export type ExtensionUi = {
 	/**  Labels from its models on core refs (valid ones). */
 	decorators: UiDecorator[],
 	/**
-	 *  Lenses that take the place of a core sub-component while its
+	 *  Viz nodes that take the place of a core sub-component while its
 	 *  provider is the capability's active one (valid ones).
 	 */
 	replacements: UiReplacement[],
@@ -2537,7 +2537,7 @@ export type Extension_Deserialize = {
 	collectors: CollectorSpec[],
 	/**  Declared providers (valid ones — invalid ones are in `errors`). */
 	providers: ProviderSpec[],
-	/**  Web components its `custom` lenses render, sandboxed (valid ones). */
+	/**  Web components its `custom` viz nodes render, sandboxed (valid ones). */
 	customComponents: CustomComponent_Deserialize[],
 	/**
 	 *  Event types it declares (valid ones — the vocabulary registers
@@ -2691,7 +2691,7 @@ export type Extension_Serialize = {
 	collectors: CollectorSpec[],
 	/**  Declared providers (valid ones — invalid ones are in `errors`). */
 	providers: ProviderSpec[],
-	/**  Web components its `custom` lenses render, sandboxed (valid ones). */
+	/**  Web components its `custom` viz nodes render, sandboxed (valid ones). */
 	customComponents: CustomComponent_Serialize[],
 	/**
 	 *  Event types it declares (valid ones — the vocabulary registers
@@ -2952,11 +2952,11 @@ export type FormFieldSpec_Deserialize = {
 	 */
 	secret?: boolean,
 	/**
-	 *  An object field whose children are the rows of this lens
+	 *  An object field whose children are the rows of this viz
 	 *  (`<extension>/<slug>`: `name`, `title`, `kind` of `enum`, `text` or
 	 *  `number`, `values`, `read_only`), run with the form's params. The
 	 *  field's value is the object of those children; it is read again
-	 *  when the lens's data changes.
+	 *  when the viz's data changes.
 	 */
 	from?: string | null,
 };
@@ -2974,11 +2974,11 @@ export type FormFieldSpec_Serialize = {
 	 */
 	secret?: boolean,
 	/**
-	 *  An object field whose children are the rows of this lens
+	 *  An object field whose children are the rows of this viz
 	 *  (`<extension>/<slug>`: `name`, `title`, `kind` of `enum`, `text` or
 	 *  `number`, `values`, `read_only`), run with the form's params. The
 	 *  field's value is the object of those children; it is read again
-	 *  when the lens's data changes.
+	 *  when the viz's data changes.
 	 */
 	from?: string | null,
 };
@@ -3024,7 +3024,7 @@ export type FormSpec_Deserialize = {
 	 */
 	fields?: FormField_Deserialize[] | null,
 	/**
-	 *  Fields picked from a list: each names a lens (`<extension>/<slug>`)
+	 *  Fields picked from a list: each names a viz (`<extension>/<slug>`)
 	 *  run with the form's params, whose rows are the choices (`value`,
 	 *  `label`, optional `group`).
 	 */
@@ -3060,7 +3060,7 @@ export type FormSpec_Serialize = {
 	 */
 	fields: FormField_Serialize[] | null,
 	/**
-	 *  Fields picked from a list: each names a lens (`<extension>/<slug>`)
+	 *  Fields picked from a list: each names a viz (`<extension>/<slug>`)
 	 *  run with the form's params, whose rows are the choices (`value`,
 	 *  `label`, optional `group`).
 	 */
@@ -3093,10 +3093,10 @@ export type FormStart_Deserialize = {
 	fields: FormField_Deserialize[] | null,
 	/**  Fields picked from a list, with their choices. */
 	choices: { [key in string]: Choice[] },
-	/**  Object fields' children, read from their `from` lens. */
+	/**  Object fields' children, read from their `from` viz. */
 	subfields: { [key in string]: Subfield[] },
 	/**
-	 *  What the `from` lenses read: when it changes, the form is read
+	 *  What the `from` viz nodes read: when it changes, the form is read
 	 *  again.
 	 */
 	reads: Reads,
@@ -3114,10 +3114,10 @@ export type FormStart_Serialize = {
 	fields: FormField_Serialize[] | null,
 	/**  Fields picked from a list, with their choices. */
 	choices: { [key in string]: Choice[] },
-	/**  Object fields' children, read from their `from` lens. */
+	/**  Object fields' children, read from their `from` viz. */
 	subfields: { [key in string]: Subfield[] },
 	/**
-	 *  What the `from` lenses read: when it changes, the form is read
+	 *  What the `from` viz nodes read: when it changes, the form is read
 	 *  again.
 	 */
 	reads: Reads,
@@ -3288,7 +3288,7 @@ export type HostId = string;
 
 /**  Everything installing or updating an extension would change. */
 export type ImpactReport = {
-	lenses: PageImpact[],
+	pages: PageImpact[],
 	models: ModelImpact[],
 	collectors: CollectorImpact[],
 	providers: ProviderImpact[],
@@ -3528,7 +3528,7 @@ export type KeyedDiff = {
 };
 
 /**
- *  Launcher (Cmd+K) sections a lens can be listed under. Mirrors the
+ *  Launcher (Cmd+K) sections a viz can be listed under. Mirrors the
  *  renderer's `PageCategory`.
  */
 export type LauncherCategory = "Work" | "Code" | "Git" | "Activity" | "Knowledge" | "Data" | "Dashboards" | "System";
@@ -4370,7 +4370,7 @@ detail: string | null }) & { actor?: never; changeKind?: never; client?: never; 
 ({ kind: "assistantChanged"; id: string; seq: number }) & { actor?: never; agentSessionId?: never; changeKind?: never; client?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; input?: never; instance?: never; measures?: never; models?: never; name?: never; op?: never; path?: never; scope?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
 /**
  *  Published models (views) changed: a commit touched a table one of
- *  them reads, directly or through other models (P4.6). A lens re-runs
+ *  them reads, directly or through other models (P4.6). A page re-runs
  *  when a model it read is listed.
  */
 ({ kind: "modelsChanged"; models: string[] }) & { actor?: never; agentSessionId?: never; changeKind?: never; client?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; path?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
@@ -4401,7 +4401,7 @@ detail: string | null }) & { actor?: never; changeKind?: never; client?: never; 
  *  worktree's `.oxplow/extensions/` did, or the `extensions` config key
  *  (the catalog's own signal, tsk1030). Every host listing what
  *  extensions contribute — the launcher, pages, panels, slots —
- *  reloads, and a lens re-runs its definition.
+ *  reloads, and a page re-runs its definition.
  */
 ({ kind: "extensionsChanged" }) & { actor?: never; agentSessionId?: never; changeKind?: never; client?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; models?: never; name?: never; op?: never; path?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
 /**
@@ -4484,25 +4484,25 @@ export type Pacing = {
 export type Page = Page_Serialize | Page_Deserialize;
 
 /**
- *  A button on a lens: a command it runs (P6.B1, target §11.4). The
+ *  A button on a viz: a command it runs (P6.B1, target §11.4). The
  *  command goes through the bus as `Actor::Page` acting for whoever
  *  pressed it, so every policy — the agent policy, confirmation
- *  — applies as if they had run it themselves; a lens can offer a button
+ *  — applies as if they had run it themselves; a viz can offer a button
  *  but never grant a power. Copying the result and handing it to the
- *  agent are on every lens, not declared.
+ *  agent are on every viz, not declared.
  */
 export type PageAction = PageAction_Serialize | PageAction_Deserialize;
 
 /**
- *  A button on a lens: a command it runs (P6.B1, target §11.4). The
+ *  A button on a viz: a command it runs (P6.B1, target §11.4). The
  *  command goes through the bus as `Actor::Page` acting for whoever
  *  pressed it, so every policy — the agent policy, confirmation
- *  — applies as if they had run it themselves; a lens can offer a button
+ *  — applies as if they had run it themselves; a viz can offer a button
  *  but never grant a power. Copying the result and handing it to the
- *  agent are on every lens, not declared.
+ *  agent are on every viz, not declared.
  */
 export type PageAction_Deserialize = {
-	/**  Unique within the lens; `oxplow_run_lens_action` names it. */
+	/**  Unique within the viz; `oxplow_run_page_action` names it. */
 	id: string,
 	label: string,
 	/**  The command it runs (`oxplow.work_item.transition`). */
@@ -4525,7 +4525,7 @@ export type PageAction_Deserialize = {
 	group: string | null,
 	/**
 	 *  Opens the command's form, its fields starting from `input`, for the
-	 *  person to fill in before it runs (`lens_action_form`), instead of
+	 *  person to fill in before it runs (`the action form`), instead of
 	 *  running at once.
 	 */
 	form: boolean,
@@ -4535,13 +4535,13 @@ export type PageAction_Deserialize = {
 	 */
 	fixed: string[],
 	/**
-	 *  A form action's fields picked from a list: each names a lens
-	 *  (`<extension>/<slug>`) run with the lens's params, whose rows are
+	 *  A form action's fields picked from a list: each names a viz
+	 *  (`<extension>/<slug>`) run with the viz's params, whose rows are
 	 *  the choices (`value`, `label`, optional `group`).
 	 */
 	choices: { [key in string]: string },
 	/**
-	 *  What becomes of the lens's page when the command's `ui.open_after`
+	 *  What becomes of the viz's page when the command's `ui.open_after`
 	 *  names a page.
 	 */
 	then: ActionThen,
@@ -4602,25 +4602,25 @@ export type PageAction_Deserialize = {
 	 */
 	editField?: string | null,
 	/**
-	 *  A whole-lens action over a lens that holds one row, that names
-	 *  `when` or `{{row.*}}`: the lens's one row. Derived at load, not
+	 *  A whole-viz action over a viz that holds one row, that names
+	 *  `when` or `{{row.*}}`: the viz's one row. Derived at load, not
 	 *  declared: an action without `row: true` that names `when:` or
-	 *  `{{row.*}}`. It runs on the row the server reads from the lens
-	 *  itself, and only while the lens has exactly one.
+	 *  `{{row.*}}`. It runs on the row the server reads from the viz
+	 *  itself, and only while the viz has exactly one.
 	 */
 	oneRow?: boolean,
 };
 
 /**
- *  A button on a lens: a command it runs (P6.B1, target §11.4). The
+ *  A button on a viz: a command it runs (P6.B1, target §11.4). The
  *  command goes through the bus as `Actor::Page` acting for whoever
  *  pressed it, so every policy — the agent policy, confirmation
- *  — applies as if they had run it themselves; a lens can offer a button
+ *  — applies as if they had run it themselves; a viz can offer a button
  *  but never grant a power. Copying the result and handing it to the
- *  agent are on every lens, not declared.
+ *  agent are on every viz, not declared.
  */
 export type PageAction_Serialize = {
-	/**  Unique within the lens; `oxplow_run_lens_action` names it. */
+	/**  Unique within the viz; `oxplow_run_page_action` names it. */
 	id: string,
 	label: string,
 	/**  The command it runs (`oxplow.work_item.transition`). */
@@ -4643,7 +4643,7 @@ export type PageAction_Serialize = {
 	group: string | null,
 	/**
 	 *  Opens the command's form, its fields starting from `input`, for the
-	 *  person to fill in before it runs (`lens_action_form`), instead of
+	 *  person to fill in before it runs (`the action form`), instead of
 	 *  running at once.
 	 */
 	form: boolean,
@@ -4653,13 +4653,13 @@ export type PageAction_Serialize = {
 	 */
 	fixed: string[],
 	/**
-	 *  A form action's fields picked from a list: each names a lens
-	 *  (`<extension>/<slug>`) run with the lens's params, whose rows are
+	 *  A form action's fields picked from a list: each names a viz
+	 *  (`<extension>/<slug>`) run with the viz's params, whose rows are
 	 *  the choices (`value`, `label`, optional `group`).
 	 */
 	choices: { [key in string]: string },
 	/**
-	 *  What becomes of the lens's page when the command's `ui.open_after`
+	 *  What becomes of the viz's page when the command's `ui.open_after`
 	 *  names a page.
 	 */
 	then: ActionThen,
@@ -4720,19 +4720,19 @@ export type PageAction_Serialize = {
 	 */
 	editField: string | null,
 	/**
-	 *  A whole-lens action over a lens that holds one row, that names
-	 *  `when` or `{{row.*}}`: the lens's one row. Derived at load, not
+	 *  A whole-viz action over a viz that holds one row, that names
+	 *  `when` or `{{row.*}}`: the viz's one row. Derived at load, not
 	 *  declared: an action without `row: true` that names `when:` or
-	 *  `{{row.*}}`. It runs on the row the server reads from the lens
-	 *  itself, and only while the lens has exactly one.
+	 *  `{{row.*}}`. It runs on the row the server reads from the viz
+	 *  itself, and only while the viz has exactly one.
 	 */
 	oneRow: boolean,
 };
 
 /**
- *  When a lens needs attention: its row count reaches `min_rows`, or the
+ *  When a viz needs attention: its row count reaches `min_rows`, or the
  *  first row's `column` goes `above` / `below` a threshold. A left-nav
- *  panel's `badge` lens shows its count, and the Alerts panel lists it.
+ *  panel's `badge` viz shows its count, and the Alerts panel lists it.
  */
 export type PageAlert = {
 	minRows: number | null,
@@ -4774,7 +4774,7 @@ export type PageColumn = {
 	/**
 	 *  A column of the same row naming an icon drawn before the cell
 	 *  (`done`, `in_progress`, `epic`, `wiki`, …; the UI's fixed
-	 *  vocabulary, `lens/lensIcons.tsx` — an unknown name draws none).
+	 *  vocabulary, `viz/vizIcons.tsx` — an unknown name draws none).
 	 */
 	icon?: string | null,
 	/**
@@ -4790,25 +4790,25 @@ export type PageColumn = {
 	 */
 	format?: ColumnFormat | null,
 	/**
-	 *  A param of the lens: the cell's text is drawn with every
+	 *  A param of the viz: the cell's text is drawn with every
 	 *  case-insensitive occurrence of its current value marked.
 	 */
 	highlight?: string | null,
 	/**
-	 *  A param of the lens that clicking a row sets to this column's
+	 *  A param of the viz that clicking a row sets to this column's
 	 *  value, re-running what reads it (a document's other sections):
 	 *  master and detail. The row whose value it holds is drawn selected.
 	 */
 	select?: string | null,
 	/**
-	 *  A lens (`<slug>` of this extension or `<extension>/<slug>`) the row
+	 *  A viz (`<slug>` of this extension or `<extension>/<slug>`) the row
 	 *  opens into: run with the row's values (the params it declares), its
 	 *  result drawn under the row.
 	 */
 	expand?: string | null,
 };
 
-/**  A lens, by its rendered text before and after. */
+/**  A page, by its rendered text before and after. */
 export type PageImpact = {
 	id: string,
 	change: Change,
@@ -4827,7 +4827,7 @@ export type PageInactive = {
 };
 
 /**
- *  A value the viewer (or an agent) can set when running the lens,
+ *  A value the viewer (or an agent) can set when running the viz,
  *  bound into the query as `:name`.
  */
 export type PageParam = {
@@ -4837,17 +4837,17 @@ export type PageParam = {
 	default?: SqlCell | null,
 	/**
 	 *  The values it takes, when it's a choice: a panel shows
-	 *  them as a toggle in its header, a lens page as a select. Its
+	 *  them as a toggle in its header, a viz page as a select. Its
 	 *  `default` must be one; a run supplying another is refused.
 	 */
 	options?: ChoiceOption[],
 	/**
-	 *  A lens whose rows are the values it takes, when it's a choice
+	 *  A viz whose rows are the values it takes, when it's a choice
 	 *  whose options aren't fixed (`value`, `label`, optional `group` —
 	 *  the form `choices` contract): a slug of this extension, or
-	 *  `<extension>/<slug>`; a loaded lens has the whole id. The page runs
+	 *  `<extension>/<slug>`; a loaded viz has the whole id. The page runs
 	 *  it with the params it declares of the page's, so an `end` picker's
-	 *  lens can leave out what `start` is. Its options aren't known at
+	 *  viz can leave out what `start` is. Its options aren't known at
 	 *  load, so no `default` is needed and any text is taken. Exclusive
 	 *  with `options`.
 	 */
@@ -4855,7 +4855,7 @@ export type PageParam = {
 	/**
 	 *  What it holds, and so how a page draws it. Left out, it is a
 	 *  `choice` when it has `options` or `options_from`, else `text`; a
-	 *  loaded lens always says.
+	 *  loaded viz always says.
 	 */
 	type?: ParamType | null,
 	/**
@@ -4863,8 +4863,8 @@ export type PageParam = {
 	 *  a `resource` (the default) names what the page shows, in the URI's
 	 *  `?`; `filter` narrows how it shows it, in the URI's `#` view. A
 	 *  `selection` follows from the columns and is never written: a param
-	 *  a column of the lens (or of a part of the page) selects, in the
-	 *  view too. A loaded lens always says.
+	 *  a column of the viz (or of a part of the page) selects, in the
+	 *  view too. A loaded viz always says.
 	 */
 	role?: ParamRole | null,
 	/**
@@ -4875,7 +4875,7 @@ export type PageParam = {
 };
 
 /**
- *  Where a lens comes from. An agent edits `source`, never `running`: a
+ *  Where a viz comes from. An agent edits `source`, never `running`: a
  *  deployed extension runs a copy in the store that the next deploy
  *  replaces.
  */
@@ -5089,7 +5089,7 @@ export type PanelPlacement = {
 
 /**
  *  What a left-nav panel is bound to: the project, the current stream, or
- *  the current thread — which of `stream_id` / `thread_id` its lenses get.
+ *  the current thread — which of `stream_id` / `thread_id` its viz nodes get.
  */
 export type PanelScope = "project" | "stream" | "thread";
 
@@ -5102,7 +5102,7 @@ export type ParamDecl = {
 	pattern?: string | null,
 };
 
-/**  What a lens param is to its page. */
+/**  What a viz param is to its page. */
 export type ParamRole =
 /**
  *  Names what the page shows (its URI's `?`); a control in the
@@ -5117,7 +5117,7 @@ export type ParamRole =
 /**  The row a click picked; the rail shows that row, never an input. */
 "selection";
 
-/**  What a lens param holds. */
+/**  What a viz param holds. */
 export type ParamType =
 /**  Any value; a text box. */
 "text" |
@@ -5441,7 +5441,7 @@ export type ReportedTab = {
 	 *  `oxplow:oxplow/page?page=settings`, `oxplow:oxplow/agent_session?id=ses2`).
 	 */
 	id: string,
-	/**  Its page kind (`work_item`, `lens`, `agent_session`). */
+	/**  Its page kind (`work_item`, `page`, `agent_session`). */
 	kind: string,
 	/**  The title on the tab. */
 	title: string,
@@ -5465,7 +5465,7 @@ export type ResourceDecl = {
 	name: string,
 	label: string,
 	params: { [key in string]: ParamDecl },
-	/**  It takes params beyond its own (a page's or a lens's). */
+	/**  It takes params beyond its own (a page's). */
 	additional: boolean,
 	/**  The view whose rows name each one, by URI. */
 	resolve: string | null,
@@ -5949,7 +5949,7 @@ export type StreamId = string;
 /**  Whether a stream is the project's primary stream or a worktree. */
 export type StreamKind = "primary" | "worktree";
 
-/**  A child of an object field (a row of its `from` lens). */
+/**  A child of an object field (a row of its `from` viz). */
 export type Subfield = {
 	name: string,
 	title: string,
@@ -5988,7 +5988,7 @@ export type TabReport = {
 	threads: ThreadTabs[],
 	/**
 	 *  The detail the shown thread's active page publishes (JSON text: a
-	 *  lens's `{lensId, params}`, an editor's `{path, revision, selection}`).
+	 *  page's `{pageId, params}`, an editor's `{path, revision, selection}`).
 	 */
 	detail_json: string | null,
 	/**
@@ -6297,7 +6297,7 @@ export type VisitedPage = {
 	visit_count: number,
 };
 
-/**  How a lens renders its rows. */
+/**  How a viz renders its rows. */
 export type Viz =
 /**  Rows and columns. */
 "table" |
@@ -6373,15 +6373,15 @@ export type Viz =
 /**
  *  A form for command `form.command`: its fields from the command's
  *  input schema, prefilled from `form.defaults` (placeholders bound
- *  like an action's) and the query's first row, if the lens has one.
- *  Submitting runs the command as the lens.
+ *  like an action's) and the query's first row, if the viz has one.
+ *  Submitting runs the command as the viz.
  */
 "form" |
 /**
  *  The pending proposals an agent raised, each with Approve and
  *  Decline: core's consent component. The viz reads
  *  `v_command_proposal` itself and decides through the person-only
- *  path, so the lens needs no query beyond `SELECT 1`; its params
+ *  path, so the viz needs no query beyond `SELECT 1`; its params
  *  `thread` (a thread ref) and `setting` (a config key) narrow the
  *  list.
  */
@@ -6447,10 +6447,7 @@ export type VizConfig = VizConfig_Serialize | VizConfig_Deserialize;
  *  block, columns, row styling and actions. It runs no query of its own.
  */
 export type VizConfig_Deserialize = {
-	/**
-	 *  `<extension>/<slug>`: the stable id used by `lens:` page refs,
-	 *  `oxplow_run_lens` and `get_lens`.
-	 */
+	/**  `<extension>/<slug>`: the stable id of the page this viz is on. */
 	id: string,
 	extension: string,
 	slug: string,
@@ -6485,12 +6482,12 @@ export type VizConfig_Deserialize = {
 	depth: string | null,
 	/**
 	 *  It takes its page's whole height: its viz does
-	 *  ([`Viz::fills`]), or it is a document whose last section's lens
+	 *  ([`Viz::fills`]), or it is a document whose last section's viz
 	 *  fills, so that section takes the height left (set once the catalog
 	 *  is placed, `fill_document_fills`).
 	 */
 	fills: boolean,
-	/**  Commands the lens offers, as buttons or row actions (P6.B1). */
+	/**  Commands the viz offers, as buttons or row actions (P6.B1). */
 	actions: PageAction_Deserialize[],
 	/**  Where it comes from: the file that runs and the source to edit. */
 	origin: PageProvenance,
@@ -6501,10 +6498,7 @@ export type VizConfig_Deserialize = {
  *  block, columns, row styling and actions. It runs no query of its own.
  */
 export type VizConfig_Serialize = {
-	/**
-	 *  `<extension>/<slug>`: the stable id used by `lens:` page refs,
-	 *  `oxplow_run_lens` and `get_lens`.
-	 */
+	/**  `<extension>/<slug>`: the stable id of the page this viz is on. */
 	id: string,
 	extension: string,
 	slug: string,
@@ -6539,21 +6533,21 @@ export type VizConfig_Serialize = {
 	depth: string | null,
 	/**
 	 *  It takes its page's whole height: its viz does
-	 *  ([`Viz::fills`]), or it is a document whose last section's lens
+	 *  ([`Viz::fills`]), or it is a document whose last section's viz
 	 *  fills, so that section takes the height left (set once the catalog
 	 *  is placed, `fill_document_fills`).
 	 */
 	fills: boolean,
-	/**  Commands the lens offers, as buttons or row actions (P6.B1). */
+	/**  Commands the viz offers, as buttons or row actions (P6.B1). */
 	actions: PageAction_Serialize[],
 	/**  Where it comes from: the file that runs and the source to edit. */
 	origin: PageProvenance,
 };
 
-/**  A `custom` lens's component and the props it starts with. */
+/**  A `custom` viz's component and the props it starts with. */
 export type VizCustom = VizCustom_Serialize | VizCustom_Deserialize;
 
-/**  A `custom` lens's component and the props it starts with. */
+/**  A `custom` viz's component and the props it starts with. */
 export type VizCustom_Deserialize = {
 	/**  One of the extension's `custom_components` ids. */
 	component: string | null,
@@ -6561,7 +6555,7 @@ export type VizCustom_Deserialize = {
 	props?: unknown | null,
 };
 
-/**  A `custom` lens's component and the props it starts with. */
+/**  A `custom` viz's component and the props it starts with. */
 export type VizCustom_Serialize = {
 	/**  One of the extension's `custom_components` ids. */
 	component: string | null,
@@ -6629,7 +6623,7 @@ export type VizHunks = {
 
 /**
  *  `markdown` viz: which column of the first row is the text. Without
- *  it, the first column. A lens with an `edit` action names it: the text
+ *  it, the first column. A viz with an `edit` action names it: the text
  *  is what the editor saves.
  */
 export type VizMarkdown = {
@@ -6697,9 +6691,9 @@ export type VizTree = {
 	parent: string | null,
 	label: string | null,
 	/**
-	 *  A lazy tree: the lens param a branch's children are read with. The
+	 *  A lazy tree: the viz param a branch's children are read with. The
 	 *  run's rows are one level (the param's `default` is the top level);
-	 *  a branch opens by running the lens again with the param set to the
+	 *  a branch opens by running the viz again with the param set to the
 	 *  row's `id`, its rows spliced under it. Needs `branch`.
 	 */
 	lazy?: string | null,

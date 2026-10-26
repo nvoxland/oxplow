@@ -2866,7 +2866,7 @@ impl CollectionService {
     /// Returns only metrics the effort moved/touched, grouped code-health →
     /// coverage → tests → operational, then by title.
     /// Recompute `effort_id`'s metric deltas and observations and store them
-    /// (`v_effort_metric_delta`, `v_effort_observation`), so lenses can read
+    /// (`v_effort_metric_delta`, `v_effort_observation`), so pages can read
     /// what only the engine can compute.
     pub async fn refresh_effort_evidence(
         &self,
@@ -6574,7 +6574,7 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn refreshing_effort_evidence_stores_deltas_for_lenses() {
+        async fn refreshing_effort_evidence_stores_deltas_for_pages() {
             let h = build(None).await;
             let start = effort_start(&h, &h.effort_id).await;
             let before = Timestamp::from_unix_ms(start.unix_ms() - 60_000);

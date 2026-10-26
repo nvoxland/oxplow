@@ -60,7 +60,7 @@ function showWhole(e: React.MouseEvent<HTMLTableCellElement>) {
   else td.removeAttribute("title");
 }
 
-/** The one table: core pages and lenses draw rows through it. */
+/** The one table: core pages and viz nodes draw rows through it. */
 export function DataTable<R>({ columns, rows, groups, rowKey, rowProps, rowDetail, cellStyle, header = true, testId, tableProps }: DataTableProps<R>) {
   const fixed = columns.some((c) => c.width !== undefined);
   const parts: readonly { key: string; heading: ReactNode | null; rows: readonly R[] }[] =

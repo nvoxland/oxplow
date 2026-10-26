@@ -1,7 +1,7 @@
 /* oxplow's component kit: the classes every page is drawn with. The app
    imports this sheet (`apps/desktop/src/main.tsx`) and its kit components
-   (`src/kit/`) render these classes, so a core page, a lens and a custom
-   component look alike. A custom component (`viz: custom` lens) links it
+   (`src/kit/`) render these classes, so a core page, a viz node and a custom
+   component look alike. A custom component (`viz: custom`) links it
    beside the client library:
 
      <link rel="stylesheet" href="/component-lib/oxplow-kit.css">
@@ -95,7 +95,7 @@
 .ox-drag { cursor: grab; }
 .ox-dragging { opacity: 0.5; }
 .ox-drop-target { border: 1px dashed var(--accent); box-shadow: 0 0 0 2px var(--accent-soft-bg); }
-/* A lens's marked rows (Cmd/Ctrl+click, Shift+click, Space): a stripe and a tint. */
+/* A viz node's marked rows (Cmd/Ctrl+click, Shift+click, Space): a stripe and a tint. */
 [data-marked="true"] { box-shadow: inset 3px 0 0 var(--accent); background: var(--accent-soft-bg); }
 /* Where dragged rows would land: a line above or below a row, or the row or group itself. */
 [data-drop="before"] { box-shadow: inset 0 2px 0 var(--accent); }
@@ -120,14 +120,14 @@
 .ox-table tr.ox-clickable:hover,
 .ox-table tr.ox-selected { background: var(--accent-soft-bg); }
 .ox-table:focus-within tr[data-cursor="true"],
-[data-testid="lens-list"]:focus-within > li[data-cursor="true"] { background: var(--accent-soft-bg); }
+[data-testid="viz-list"]:focus-within > li[data-cursor="true"] { background: var(--accent-soft-bg); }
 .ox-table tr.ox-inert { color: var(--text-muted); cursor: default; }
 .ox-table tr.ox-emphasis { background: var(--accent-soft-bg); font-weight: var(--weight-medium); }
 .ox-num { font-variant-numeric: tabular-nums; text-align: right; }
 .ox-table th.ox-num { text-align: right; }
 /* A match drawn in a cell (a column's `highlight`). */
 .ox-mark { background: var(--accent-soft-bg); color: var(--text-primary); border-radius: var(--radius-sm); font-weight: var(--weight-medium); }
-/* The lines a `code` lens marks: the line's background and a bar in its margin. */
+/* The lines a `code` viz marks: the line's background and a bar in its margin. */
 .monaco-editor .ox-code-mark { background: var(--accent-soft-bg); }
 .monaco-editor .ox-code-mark-margin { box-shadow: inset 3px 0 0 var(--accent); }
 .ox-truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -293,7 +293,7 @@
 .ox-series-8 { fill: var(--chart-8); background: var(--chart-8); }
 .ox-axis { stroke: var(--border-strong); fill: var(--text-secondary); font-size: var(--text-xs); }
 
-/* A markdown lens's editor: the text, then its Save and Discard. */
+/* A markdown viz's editor: the text, then its Save and Discard. */
 .ox-markdown-editor { display: flex; flex-direction: column; gap: var(--space-2); }
 .ox-markdown-editor-actions { display: flex; gap: var(--space-2); justify-content: flex-end; }
 

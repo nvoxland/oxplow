@@ -1,6 +1,6 @@
 //! Comment commands (P8.A6, `.context/ipc-and-stores.md` "Comments"):
 //! threaded annotations anchored to a span of any page, written through
-//! the bus by a person, an agent or a lens. Each is `Tx` over
+//! the bus by a person, an agent or a page. Each is `Tx` over
 //! `oxplow_db::comment_store::*_tx`, logging `knowledge.comment.*` caused
 //! by the run. The author is the actor — a person `user`, an agent
 //! `agent` — never something a caller names. An agent comments on its own
@@ -115,7 +115,7 @@ pub struct CommentInput {
     pub comment: String,
 }
 
-/// Who wrote it: a person `user`, an agent `agent` (a lens writes as the
+/// Who wrote it: a person `user`, an agent `agent` (a page writes as the
 /// one it acts for), the system `system`.
 pub(super) fn author_of(actor: &Actor) -> &'static str {
     match actor {

@@ -29,7 +29,7 @@ test("a written page renders, and a task link in it opens the task", async ({ pa
   await expect(page.locator("body")).toContainText("Wombat follow-up");
 });
 
-// The wiki index is a lens page: its filter matches title or body, and the
+// The wiki index is a page: its filter matches title or body, and the
 // matched text is marked in the title and the snippet.
 test("the wiki index filters by body and marks the match", async ({ page, daemon }) => {
   await run(daemon, "oxplow.knowledge.write_page", {
@@ -47,8 +47,8 @@ test("the wiki index filters by body and marks the match", async ({ page, daemon
   const index = page.locator('[data-section="pages"]:visible');
   await expect(index).toContainText("Kiwi notes");
   // The search is a row in the page's rail: its value opens it.
-  await page.getByTestId("lens-param-filter-value").filter({ visible: true }).click();
-  await page.getByTestId("lens-param-filter-edit").fill("quokka");
+  await page.getByTestId("page-param-filter-value").filter({ visible: true }).click();
+  await page.getByTestId("page-param-filter-edit").fill("quokka");
   await page.keyboard.press("Enter");
   await expect(index).toContainText("Kiwi notes");
   await expect(index).not.toContainText("Other notes");

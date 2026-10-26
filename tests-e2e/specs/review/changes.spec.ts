@@ -30,16 +30,19 @@ test("an effort's page names its effort, renames it, and the pickers turn it int
   await expect(page.getByText(/Nothing found: Description/)).toBeVisible();
 
   // Rename… asks for the title in a form.
-  await effort.getByTestId("lens-action-rename").click();
-  const form = page.getByTestId("lens-action-form");
-  await form.getByTestId("lens-action-form-fields-title").fill("Quail fix, renamed");
-  await form.getByTestId("lens-action-form-fields-submit").click();
+  await effort.getByTestId("viz-action-rename").click();
+  const form = page.getByTestId("viz-action-form");
+  await form.getByTestId("viz-action-form-fields-title").fill("Quail fix, renamed");
+  await form.getByTestId("viz-action-form-fields-submit").click();
   await expect(effort).toContainText("Quail fix, renamed");
 
   // Picking an end leaves the effort for a plain comparison.
-  await page.getByTestId("lens-param-end-value").filter({ visible: true }).click();
-  await page.getByTestId("lens-param-end-edit").filter({ visible: true }).selectOption("working");
-  await expect(page.locator('[data-node="effort"]')).toHaveCount(0);
+  await page.getByTestId("page-param-end-value").filter({ visible: true }).click();
+  await page.getByTestId("page-param-end-edit").filter({ visible: true }).selectOption("working");
+  // The effort part stays a node of the page, showing nothing: no effort,
+  // and none of its actions (they act on the effort's row).
+  await expect(effort).toHaveText("");
+  await expect(effort.getByRole("button")).toHaveCount(0);
   await expect(page.locator('[data-node="header"]')).toContainText("Comparison");
   await expect(page.locator('[data-node="header"]')).toContainText("working tree");
 });

@@ -1,8 +1,8 @@
 import type { CSSProperties, ReactNode } from "react";
 
 import type { SqlCell } from "../api.js";
-import { HostedViewContext, useHostedView } from "../lens/hostedView.js";
-import { useReplacement } from "../lens/useReplacement.js";
+import { HostedViewContext, useHostedView } from "../viz/hostedView.js";
+import { useReplacement } from "../viz/useReplacement.js";
 import { usePageRunsStore, usePageRunWith, type PageRuns } from "../pageRuns.js";
 import { PageTree } from "../pages/PageTree.js";
 import { declaredParams } from "../pages/pageReads.js";

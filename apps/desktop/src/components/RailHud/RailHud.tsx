@@ -27,7 +27,7 @@ import { recordOpError } from "../../opErrors.js";
 import { EmptyState } from "../Prompts/EmptyState.js";
 
 export interface RailHudProps {
-  /** Current stream — what a panel's lens actions run in. */
+  /** Current stream — what a panel's page actions run in. */
   streamId?: string | null;
   /** Open a page (or focus if already open) in the active thread's tab area. */
   onOpenPage(ref: TabRef): void;
@@ -356,7 +356,7 @@ export function RailHud({
   onOpenPage,
 }: RailHudProps) {
   const width = useRailWidth();
-  // One owner for every panel's lens runs, shared with the bell and the
+  // One owner for every panel's page runs, shared with the bell and the
   // Alerts page (`PanelRunsProvider`).
   const { panels: allPanels, runs: panelRuns } = usePanelRuns();
   // A dock panel lives in the dock, not the rail.

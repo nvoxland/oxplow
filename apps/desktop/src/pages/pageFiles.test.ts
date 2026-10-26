@@ -128,7 +128,7 @@ describe("what draws a tab", () => {
   test("a resource: its page file renderer — a component's too — else nothing (the fallback draws it)", () => {
     expect(chooseRenderer(exts2, "oxplow:oxplow/commit?sha=abc", {})).toBe(commit);
     expect(chooseRenderer(exts2, "oxplow:oxplow/file?path=a", {})).toBe(editorFile);
-    expect(chooseRenderer(exts2, "oxplow:oxplow/lens?lens=a/b", {})).toBeNull();
+    expect(chooseRenderer(exts2, "oxplow:oxplow/page?page=a/b", {})).toBeNull();
     expect(chooseRenderer(exts2, "oxplow:oxplow/nothing?id=1", {})).toBeNull();
   });
 

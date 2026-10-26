@@ -106,7 +106,7 @@ test("a terminal is a row: closed with its shell, and New opens another", async 
 });
 
 // Several terminals: the strip picks one, its menu renames one through
-// the lens's action and closes one after asking.
+// the page's action and closes one after asking.
 test("a second terminal from the strip is picked, renamed and closed", async ({ fresh }) => {
   const { page, daemon } = fresh;
   const rows = async () =>
@@ -134,7 +134,7 @@ test("a second terminal from the strip is picked, renamed and closed", async ({ 
   // The panel stays open after a rename.
   await page.getByTestId(`terminal-tab-row-${second}`).click({ button: "right" });
   await page.getByTestId("menu-item-terminal.close").click();
-  await page.getByTestId("lens-action-confirm-run").click();
+  await page.getByTestId("viz-action-confirm-run").click();
   await until("the close", 15_000, async () => (await rows()).length === 1);
   await expect(page.getByTestId("terminal-tab-strip")).toHaveCount(0);
 });

@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { isMap, isSeq, parseDocument } from "yaml";
 
 import { useSelectedThreadId } from "../../contextBasket.js";
-import { useLensStream } from "../../lens/LensStream.js";
+import { useVizStream } from "../../viz/VizStream.js";
 import { Loading } from "../../kit/Loading.js";
 import { usePageRunsStore, usePageRunWith } from "../../pageRuns.js";
 import { NodeRegistryContext, PageTree } from "../../pages/PageTree.js";
@@ -36,7 +36,7 @@ export function InlineView(props: InlineViewProps) {
 }
 
 function InlineRun({ specYaml, streamId, threadId }: InlineViewProps) {
-  const stream = useLensStream();
+  const stream = useVizStream();
   const thread = useSelectedThreadId();
   const scope = useContext(PageViewContext);
   const resolvedStream = streamId === undefined ? scope ? scope.streamId : stream?.id ?? null : streamId;

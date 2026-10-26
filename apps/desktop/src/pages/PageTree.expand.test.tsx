@@ -89,7 +89,7 @@ test("an expanded row's page offers its viz's own actions as buttons, pressed on
     </PageActionContext.Provider>,
   );
   fireEvent.click(getByLabelText("Expand"));
-  fireEvent.click(await findByTestId("lens-action-backfill"));
+  fireEvent.click(await findByTestId("viz-action-backfill"));
   await waitFor(() => expect(calls).toEqual([["run-1", "plan", "backfill", null, null, null, false]]));
 });
 
@@ -136,15 +136,15 @@ test("a lazy branch runs the node's page with the lazy param set to its id; its 
   await view.findByText("lib.rs");
   expect(opened.map((o) => o.key)).toEqual([{ page: "acme/files", params: { folder: "src" }, streamId: "str1", threadId: null }]);
   // A branch row's action presses on the branch's run; a root row's on the root's.
-  const rows = view.getAllByTestId("lens-tree-row");
+  const rows = view.getAllByTestId("viz-tree-row");
   const lib = rows.find((r) => r.textContent?.includes("lib.rs"))!;
   fireEvent.contextMenu(lib);
-  fireEvent.click(within(document.body).getByTestId("menu-item-lens-action-rename"));
+  fireEvent.click(within(document.body).getByTestId("menu-item-viz-action-rename"));
   await waitFor(() => expect(calls.length).toBe(1));
   expect(calls[0]!.slice(0, 4)).toEqual(["run-1", "tree", "rename", { id: "src/lib.rs", parent: "src", name: "lib.rs", opens: 0 }]);
   const a = rows.find((r) => r.textContent?.includes("a.rs"))!;
   fireEvent.contextMenu(a);
-  fireEvent.click(within(document.body).getByTestId("menu-item-lens-action-rename"));
+  fireEvent.click(within(document.body).getByTestId("menu-item-viz-action-rename"));
   await waitFor(() => expect(calls.length).toBe(2));
   expect(calls[1]!.slice(0, 2)).toEqual(["run-0", "tree"]);
 });

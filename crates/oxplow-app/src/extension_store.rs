@@ -357,7 +357,7 @@ mod tests {
         let b = tempfile::tempdir().unwrap();
         for dir in [a.path(), b.path()] {
             write(dir, "extension.yaml", "name: x\n");
-            write(dir, "lenses/one.yaml", "title: One\n");
+            write(dir, "pages/one.yaml", "title: One\n");
         }
         // Dot entries are not part of the source.
         write(b.path(), ".DS_Store", "noise");
@@ -366,7 +366,7 @@ mod tests {
         assert_eq!(hash.len(), 16);
         assert_eq!(hash, source_hash(b.path()).unwrap());
 
-        write(b.path(), "lenses/one.yaml", "title: Uno\n");
+        write(b.path(), "pages/one.yaml", "title: Uno\n");
         assert_ne!(hash, source_hash(b.path()).unwrap());
         // A file moved to another folder is another source.
         let c = tempfile::tempdir().unwrap();
@@ -496,23 +496,23 @@ mod tests {
         let project = tempfile::tempdir().unwrap();
         let source = tempfile::tempdir().unwrap();
         write(source.path(), "extension.yaml", "name: x\n");
-        write(source.path(), "lenses/one.yaml", "title: One\n");
+        write(source.path(), "pages/one.yaml", "title: One\n");
         write(source.path(), ".hidden", "skip");
         let hash = source_hash(source.path()).unwrap();
 
         let dir = copy_into_store(project.path(), "x", source.path(), &hash).unwrap();
         assert_eq!(dir, deployment_dir(project.path(), "x", &hash));
         assert_eq!(
-            std::fs::read_to_string(dir.join("lenses/one.yaml")).unwrap(),
+            std::fs::read_to_string(dir.join("pages/one.yaml")).unwrap(),
             "title: One\n"
         );
         assert!(!dir.join(".hidden").exists());
 
         // The same hash again leaves the deployment as it was.
-        write(source.path(), "lenses/one.yaml", "title: changed\n");
+        write(source.path(), "pages/one.yaml", "title: changed\n");
         copy_into_store(project.path(), "x", source.path(), &hash).unwrap();
         assert_eq!(
-            std::fs::read_to_string(dir.join("lenses/one.yaml")).unwrap(),
+            std::fs::read_to_string(dir.join("pages/one.yaml")).unwrap(),
             "title: One\n"
         );
         let leftovers: Vec<_> = std::fs::read_dir(dir.parent().unwrap())

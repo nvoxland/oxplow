@@ -1,7 +1,7 @@
 //! The change-analysis producer: for one change (a commit, an effort, or
 //! the working tree) it diffs the two endpoints, analyzes the changed files
 //! (function metrics, churn, imports, zones, co-change) and stores the rows
-//! behind `v_change*`, which the analytics lenses read. See
+//! behind `v_change*`, which the analytics pages read. See
 //! `.context/semantic-layer.md` → "Change analysis".
 
 use std::collections::{BTreeMap, BTreeSet};

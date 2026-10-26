@@ -52,7 +52,7 @@ test("a view splits into the shell's keys and the page's", () => {
 });
 
 // A renderer's page is its URI: another value of one of its params is the
-// same resource with that param changed (its lens's own `uri` isn't one),
+// same resource with that param changed (its page's own `uri` isn't one),
 // one set to nothing is dropped, and the view rides along.
 test("a renderer's params change the URI it renders", () => {
   const uri = "oxplow:oxplow/dir?path=src";
@@ -72,7 +72,7 @@ test("a page's tab label is its label filled from its params, else its title", (
   expect(tabLabel(page("tasks", { title: "Tasks" }), { id: "12" })).toBe("Tasks");
 });
 
-// A label may also name a column of its lens's row, and filter what it
+// A label may also name a column of its page's row, and filter what it
 // fills: `short` (7 characters), `basename` (the last path segment).
 test("a label fills row columns and applies its filters; with no row yet it says the title", () => {
   const dash = page("dash", { title: "Dashboard", label: "{{row.title}}" });

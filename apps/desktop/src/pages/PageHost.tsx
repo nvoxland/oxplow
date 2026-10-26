@@ -10,21 +10,21 @@ import { CommandConfirm } from "../components/CommandConfirm.js";
 import { CommentNavigator } from "../components/Comments/CommentNavigator.js";
 import { contextNodeProps } from "../components/Comments/contextNodes.js";
 import { requestCommentReveal } from "../comment-reveal-bus.js";
-import { PageCommentsContext, type PageComments } from "../lens/pageComments.js";
+import { PageCommentsContext, type PageComments } from "../viz/pageComments.js";
 import { BacklinksList } from "../tabs/BacklinksList.js";
 import { getPageDetailStore } from "../tabs/openPageDetail.js";
 import { useBacklinks, usePageOutbound } from "../tabs/useBacklinks.js";
 import { useHistoryState } from "../tabs/useHistoryState.js";
-import { Contents } from "../lens/Contents.js";
-import { LensStreamContext } from "../lens/LensStream.js";
+import { Contents } from "../viz/Contents.js";
+import { VizStreamContext } from "../viz/VizStream.js";
 import type { Stream } from "../api.js";
 import { identityOf } from "../uri/uri.js";
 import { useOutOfDate, type PickedRow } from "./railGroups.js";
 import type { PageAction } from "../kit/actions.js";
 import { Loading } from "../kit/Loading.js";
-import { ActionForm, useLensActions } from "../lens/LensResultView.js";
-import { FormSourceContext } from "../lens/formSource.js";
-import { LensActionRunnerContext } from "../lens/lensActionRunner.js";
+import { ActionForm, useVizActions } from "../viz/VizView.js";
+import { FormSourceContext } from "../viz/formSource.js";
+import { VizActionRunnerContext } from "../viz/vizActionRunner.js";
 import { usePageRunsStore, usePageRunWith, type PageKey, type PageRuns } from "../pageRuns.js";
 import { Page } from "../tabs/Page.js";
 import { useOptionalPageNavigation, usePageTitle, useTabActions } from "../tabs/PageNavigationContext.js";
@@ -32,8 +32,8 @@ import type { TabRef } from "../tabs/tabState.js";
 import type { Node, PageParam, PageRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
 import { PageRail, switchSections } from "./PageRail.js";
 import { ComponentPage, type ComponentPageHost } from "./PageComponent.js";
-import type { BridgeHost } from "../lens/ComponentFrame.js";
-import type { FrameAction } from "../lens/componentBridge.js";
+import type { BridgeHost } from "../viz/ComponentFrame.js";
+import type { FrameAction } from "../viz/componentBridge.js";
 import { NodeRegistryContext, PageTree, createNodeRegistry, useNodeFocus } from "./PageTree.js";
 import { labelRow, tabLabel } from "./renderers.js";
 import { useNodeActions, useNodeForms } from "./useNodeActions.js";
@@ -42,7 +42,7 @@ import { definitionUri } from "./viewActions.js";
 import { PageViewContext } from "./PageViewContext.js";
 import { usePageReads } from "./pageReads.js";
 import { recordOpError } from "../opErrors.js";
-import { HostedViewContext, useHostedView } from "../lens/hostedView.js";
+import { HostedViewContext, useHostedView } from "../viz/hostedView.js";
 
 export interface PageHostProps {
   pageKey: PageKey;
@@ -104,11 +104,11 @@ export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, re
   useNodeFocus(registry, focus);
 
   // The page's own actions bind its params, pressed on the run with no
-  // node; a command that asks is confirmed as a lens action's is.
+  // node; a command that asks is confirmed as a page action's is.
   const target = useMemo(() => ({ config: { id: page?.id ?? "" }, params: run?.params ?? NO_PARAMS }), [page?.id, run?.params]);
   const pageRunner = useNodeActions(runId, null);
   const pageForms = useNodeForms(runId, null);
-  const actions = useLensActions(target, streamId, pageRunner);
+  const actions = useVizActions(target, streamId, pageRunner);
   const offered = (page?.actions ?? []).filter((a) => !a.row && !a.group && !a.edit);
   const reads = usePageReads();
   const [copied, setCopied] = useState(false);
@@ -241,7 +241,7 @@ export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, re
     >
       <NodeRegistryContext.Provider value={registry}>
       <PageViewContext.Provider value={{ streamId: pageKey.streamId, threadId: pageKey.threadId }}>
-      <LensStreamContext.Provider value={stream}>
+      <VizStreamContext.Provider value={stream}>
       <PageCommentsContext.Provider value={pageComments}>
         <div
           ref={setBody}
@@ -264,11 +264,11 @@ export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, re
             />
           ) : null}
           {actions.form ? (
-            <LensActionRunnerContext.Provider value={pageRunner}>
+            <VizActionRunnerContext.Provider value={pageRunner}>
               <FormSourceContext.Provider value={pageForms}>
                 <ActionForm run={target} streamId={streamId} pressed={actions.form} onClose={actions.closeForm} />
               </FormSourceContext.Provider>
-            </LensActionRunnerContext.Provider>
+            </VizActionRunnerContext.Provider>
           ) : null}
           {error ? (
             <div className="ox-error" role="alert">
@@ -287,7 +287,7 @@ export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, re
           ) : null}
         </div>
       </PageCommentsContext.Provider>
-      </LensStreamContext.Provider>
+      </VizStreamContext.Provider>
       </PageViewContext.Provider>
       </NodeRegistryContext.Provider>
     </Page>
@@ -311,7 +311,7 @@ const NO_PARAMS: Record<string, SqlCell> = {};
 const NO_PICKED: Record<string, PickedRow> = {};
 const fillStyle: CSSProperties = { display: "flex", flexDirection: "column", flex: 1, minHeight: 0 };
 
-/** Whether one of the run's viz nodes fills (a file, a diff: its lens
+/** Whether one of the run's viz nodes fills (a file, a diff: its page
  *  says): the page gives its body every pixel. */
 function anyFills(run: PageRun): boolean {
   const walk = (n: Node): boolean =>
@@ -320,7 +320,7 @@ function anyFills(run: PageRun): boolean {
 }
 
 /** Whether the page wants the full width: a grid, or a board or a
- *  dashboard anywhere in it (a lens page's rule); everything else reads as
+ *  dashboard anywhere in it (a page's rule); everything else reads as
  *  a document. */
 function wide(run: PageRun): boolean {
   const walk = (n: Node): boolean =>

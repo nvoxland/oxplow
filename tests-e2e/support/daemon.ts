@@ -155,6 +155,8 @@ export async function startDaemon({ bin = process.env.OXPLOW_E2E_DAEMON, tmp = t
       const lines = createInterface({ input: spawned.stdout! });
       const timer = setTimeout(() => reject(new Error(`the daemon didn't start:\n${said()}`)), 120_000);
       lines.on("line", (line) => {
+        // Its log lines (tracing writes to stdout) go with its stderr.
+        logFile.write(`${line}\n`);
         const m = /listening on (http:\/\/\S+)/.exec(line);
         if (m) {
           clearTimeout(timer);

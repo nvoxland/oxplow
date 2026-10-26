@@ -40,7 +40,7 @@ test("a person configures, checks and enables the fake tracker, and an item reac
   await expect(integrations.getByTestId("integration-status-e2e/fake")).toContainText("Ready");
   const fakeRow = page.locator("tr", { hasText: "fake" }).filter({ hasText: /Fake|fake tracker/i }).first();
   await fakeRow.click({ button: "right" });
-  await page.getByTestId("menu-item-lens-action-use-project").click();
+  await page.getByTestId("menu-item-viz-action-use-project").click();
   await expect(fakeRow).toContainText("The project uses it");
   // The choice is the daemon's once it lists the fake as the active work list.
   await until("the fake to be the active work list", 30_000, async () => {
@@ -57,21 +57,21 @@ test("a person configures, checks and enables the fake tracker, and an item reac
   await expect(integrations.getByTestId("integration-collector-e2e/fake-work_items")).toContainText(/1 record/);
   await openFromLauncher(page, "Board");
   // A tracker's item is on no thread.
-  await page.getByTestId("lens-param-show-value").filter({ visible: true }).click();
-  await page.getByTestId("lens-param-show-edit").filter({ visible: true }).selectOption("all");
-  await expect(page.getByTestId("lens-board")).toContainText("Kiwi from oxplow");
+  await page.getByTestId("page-param-show-value").filter({ visible: true }).click();
+  await page.getByTestId("page-param-show-edit").filter({ visible: true }).selectOption("all");
+  await expect(page.getByTestId("viz-board")).toContainText("Kiwi from oxplow");
   // The New Task page files on the active tracker too, on this thread
   // (tsk1059): it offers what any tracker takes, not oxplow's priority.
   await openNewTask(page);
-  await expect(page.getByTestId("lens-form-fields-state")).toBeVisible();
-  await expect(page.getByTestId("lens-form-fields-native.priority")).toHaveCount(0);
-  await page.getByTestId("lens-form-fields-title").fill("Kiwi from the page");
+  await expect(page.getByTestId("viz-form-fields-state")).toBeVisible();
+  await expect(page.getByTestId("viz-form-fields-native.priority")).toHaveCount(0);
+  await page.getByTestId("viz-form-fields-title").fill("Kiwi from the page");
   await page.keyboard.press("Enter");
   await expect.poll(() => fakeState(daemon.project)).toContain("Kiwi from the page");
   await run(daemon, "oxplow.provider.sync", { instance: "e2e/fake", collector: "work_items" });
   // The Board at its default view is another page beside the filtered one.
   await openFromLauncher(page, "Board");
-  await page.getByTestId("lens-param-show-value").filter({ visible: true }).click();
-  await page.getByTestId("lens-param-show-edit").filter({ visible: true }).selectOption("thread");
-  await expect(page.getByTestId("lens-board").filter({ visible: true })).toContainText("Kiwi from the page");
+  await page.getByTestId("page-param-show-value").filter({ visible: true }).click();
+  await page.getByTestId("page-param-show-edit").filter({ visible: true }).selectOption("thread");
+  await expect(page.getByTestId("viz-board").filter({ visible: true })).toContainText("Kiwi from the page");
 });

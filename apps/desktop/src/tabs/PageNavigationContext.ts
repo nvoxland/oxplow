@@ -82,7 +82,7 @@ export interface PageNavigation {
   stepOrigin?(index: number): void;
   /** Bookmark binding for the page currently rendered in this tab. */
   bookmark?: BookmarkBinding;
-  /** The page's canonical ref (`commit:<sha>`, `lens:x/y`) and stream,
+  /** The page's canonical ref (`commit:<sha>`, `page:x/y`) and stream,
    *  for the Ask menu; absent for a page whose tab id isn't one. */
   ask?: import("../components/Prompts/askTarget.js").AskTarget;
   /**

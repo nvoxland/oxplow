@@ -582,30 +582,30 @@ pub fn shipped_extensions() -> Vec<crate::extensions::Extension> {
     crate::extensions::load_extensions(project.path())
 }
 
-/// The page a lens became, run with `params`, and the rows of the loader
-/// that carried the lens's query: `<extension>/<slug>` as a page of that
+/// A bundled page, run with `params`, and the rows of the loader
+/// that carried its query: `<extension>/<slug>` as a page of that
 /// name (its loader named for the slug, else the one its first viz node
 /// shows), or a loader named for the slug (`-` as `_`) in one of the
-/// extension's other pages, where the lens was inlined as a part. Only the
+/// extension's other pages, where it was inlined as a part. Only the
 /// params the page declares are given to it.
 pub async fn run_as_page(
     svc: &crate::Services,
-    lens: &str,
+    id: &str,
     params: &[(String, oxplow_db::SqlCell)],
 ) -> oxplow_db::SqlQueryResult {
-    run_as_page_in(svc, lens, params, crate::extensions::ViewContext::default()).await
+    run_as_page_in(svc, id, params, crate::extensions::ViewContext::default()).await
 }
 
 /// [`run_as_page`] from a viewer's context (`view_context`).
 pub async fn run_as_page_in(
     svc: &crate::Services,
-    lens: &str,
+    id: &str,
     params: &[(String, oxplow_db::SqlCell)],
     ctx: crate::extensions::ViewContext,
 ) -> oxplow_db::SqlQueryResult {
     use crate::pages::runner::{PageRunner, RunRequest, RunTarget};
-    let (extension, slug) = lens.split_once('/').expect("<extension>/<slug>");
-    // Lenses the conversion inlined into a page as a part named otherwise,
+    let (extension, slug) = id.split_once('/').expect("<extension>/<slug>");
+    // Pages the conversion inlined into a page as a part named otherwise,
     // or renamed (`pages convert` prints both).
     const NAMED: &[(&str, &str, &str)] = &[
         ("oxplow-foundation/tasks-list", "tasks", "list"),
@@ -1000,7 +1000,7 @@ pub async fn run_as_page_in(
         ),
         ("oxplow-foundation/board", "board", "row"),
     ];
-    let named = NAMED.iter().find(|(l, _, _)| *l == lens);
+    let named = NAMED.iter().find(|(l, _, _)| *l == id);
     let (slug, loader_name) = match named {
         Some((_, page, loader)) => (*page, loader.to_string()),
         None => (slug, slug.replace('-', "_")),
@@ -1021,7 +1021,7 @@ pub async fn run_as_page_in(
     };
     let page = own
         .or_else(inlined)
-        .unwrap_or_else(|| panic!("no page for lens {lens}"));
+        .unwrap_or_else(|| panic!("no page for {id}"));
     let loader = page
         .loaders
         .iter()
@@ -1089,7 +1089,7 @@ pub async fn run_as_page_in(
     let run = run
         .loaders
         .get(&loader)
-        .unwrap_or_else(|| panic!("lens {lens}: loader {loader} didn't run (ran {ran:?})"));
+        .unwrap_or_else(|| panic!("page {id}: loader {loader} didn't run (ran {ran:?})"));
     if let Some(error) = &run.error {
         panic!("page {} loader {loader}: {error}", page.id);
     }

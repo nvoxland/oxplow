@@ -3,7 +3,7 @@
 //! run holds (the presser names it; the server checks it is one of the
 //! node's rows); a holds-one-row action on its node's one row. Each runs
 //! through the bus as the page acting for whoever pressed it, with the
-//! checks a lens's action passes (`viz_actions::prepare_resolved`).
+//! checks a viz's action passes (`viz_actions::prepare_resolved`).
 
 use std::collections::BTreeMap;
 
@@ -156,9 +156,9 @@ pub async fn run_page_action(
                 .ok_or_else(|| invalid("/node", format!("no node `{path}` in this run")))?;
             let def = node(&holder.page, id)
                 .ok_or_else(|| invalid("/node", format!("no node `{path}` in this run")))?;
-            let lens_run = node_run(holder, def)
+            let viz_run = node_run(holder, def)
                 .ok_or_else(|| invalid("/node", format!("node `{path}` has no actions")))?;
-            let action = lens_run
+            let action = viz_run
                 .config
                 .actions
                 .iter()
@@ -169,7 +169,7 @@ pub async fn run_page_action(
                         format!("node `{path}` has no action `{}`", call.action),
                     )
                 })?;
-            let columns = &lens_run.result.columns;
+            let columns = &viz_run.result.columns;
             let as_map = |row: &Vec<SqlCell>| -> BTreeMap<String, SqlCell> {
                 columns.iter().cloned().zip(row.iter().cloned()).collect()
             };
@@ -183,7 +183,7 @@ pub async fn run_page_action(
                         ),
                     ));
                 }
-                match lens_run.result.rows.as_slice() {
+                match viz_run.result.rows.as_slice() {
                     [only] => Some(as_map(only)),
                     rows => {
                         return Err(invalid(
@@ -199,7 +199,7 @@ pub async fn run_page_action(
             } else if let Some(given) = &call.row {
                 // The row must be one the run holds, matched on the
                 // columns the presser named.
-                let held = lens_run
+                let held = viz_run
                     .result
                     .rows
                     .iter()
@@ -221,8 +221,8 @@ pub async fn run_page_action(
             };
             let actor = format!("{}#{id}", holder.page.id);
             prepare_resolved(
-                &lens_run.config.id,
-                &lens_run.config.actions,
+                &viz_run.config.id,
+                &viz_run.config.actions,
                 &actor,
                 &call.action,
                 &holder.params,
@@ -342,9 +342,9 @@ pub async fn page_form(
         .ok_or_else(|| invalid("/node", format!("no node `{node_path}`")))?;
     let def =
         node(&holder.page, id).ok_or_else(|| invalid("/node", format!("no node `{node_path}`")))?;
-    let lens_run = node_run(holder, def)
+    let viz_run = node_run(holder, def)
         .ok_or_else(|| invalid("/node", format!("`{node_path}` isn't a viz")))?;
-    let form = match (&lens_run.config.viz, &lens_run.config.form) {
+    let form = match (&viz_run.config.viz, &viz_run.config.form) {
         (crate::extensions::Viz::Form, Some(f)) => f.clone(),
         _ => return Err(invalid("/node", format!("node `{node_path}` isn't a form"))),
     };
@@ -360,8 +360,8 @@ pub async fn page_form(
         },
         None => serde_json::Map::new(),
     };
-    if let Some(row) = lens_run.result.rows.first() {
-        for (col, cell) in lens_run.result.columns.iter().zip(row) {
+    if let Some(row) = viz_run.result.rows.first() {
+        for (col, cell) in viz_run.result.columns.iter().zip(row) {
             if *cell != SqlCell::Null(()) {
                 values.insert(
                     col.clone(),
@@ -431,9 +431,9 @@ pub async fn submit_page_form(
         .ok_or_else(|| invalid("/node", format!("no node `{node_path}`")))?;
     let def =
         node(&holder.page, id).ok_or_else(|| invalid("/node", format!("no node `{node_path}`")))?;
-    let lens_run = node_run(holder, def)
+    let viz_run = node_run(holder, def)
         .ok_or_else(|| invalid("/node", format!("`{node_path}` isn't a viz")))?;
-    let form = match (&lens_run.config.viz, &lens_run.config.form) {
+    let form = match (&viz_run.config.viz, &viz_run.config.form) {
         (crate::extensions::Viz::Form, Some(f)) => f.clone(),
         _ => return Err(invalid("/node", format!("node `{node_path}` isn't a form"))),
     };
@@ -499,12 +499,12 @@ pub async fn page_action_form(
                 locate(&run, path).ok_or_else(|| invalid("/node", format!("no node `{path}`")))?;
             let def = node(&holder.page, id)
                 .ok_or_else(|| invalid("/node", format!("no node `{path}`")))?;
-            let lens_run = node_run(holder, def)
+            let viz_run = node_run(holder, def)
                 .ok_or_else(|| invalid("/node", format!("`{path}` has no actions")))?;
             (
-                lens_run.config.actions,
+                viz_run.config.actions,
                 holder.params.clone(),
-                Some(lens_run.result),
+                Some(viz_run.result),
             )
         }
     };

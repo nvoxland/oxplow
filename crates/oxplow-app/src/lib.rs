@@ -58,7 +58,7 @@ pub mod credential_lint;
 pub mod daemon_supervisor;
 pub mod diagnostics;
 #[cfg(test)]
-mod directory_lens_tests;
+mod directory_page_tests;
 pub mod duplication_scan;
 #[cfg(test)]
 mod earlier_sessions_tests;
@@ -196,7 +196,7 @@ mod services_tests;
 pub mod session_auth;
 pub mod session_outcome;
 #[cfg(test)]
-mod settings_lenses_tests;
+mod settings_pages_tests;
 pub mod snapshot_capture;
 pub mod snapshot_capture_registry;
 pub mod snapshot_conformance;
@@ -695,7 +695,7 @@ pub struct Services {
     pub change_analyzer: Arc<change_analysis::ChangeAnalyzer>,
     /// Runs extension advisories for the hooks (see `advisories`).
     pub advisories: Arc<advisories::AdvisoryRunner>,
-    /// Per-effort metric deltas / observations for lenses (see `effort_evidence`).
+    /// Per-effort metric deltas / observations for pages (see `effort_evidence`).
     pub effort_evidence_store: Arc<oxplow_db::SqliteEffortEvidenceStore>,
     /// Secrets store (the OS keychain in the app): AI provider keys and
     /// extension-source credentials. Values never go to the UI or agents.
@@ -1014,6 +1014,9 @@ impl Services {
             .with_vocabulary(vocabulary.clone())
             .with_activation(extension_activation.clone());
         let event_bus = EventBus::new();
+        // A live model's event re-runs the open runs that read it.
+        let page_runs = pages::open_runs::PageRuns::default();
+        event_bus.reach_open_runs(page_runs.clone());
         let ref_moves = ref_moves::RefMoves::new(event_bus.clone());
         let event_pump = Arc::new(event_pump::EventPump::new(
             db.clone(),
@@ -1900,7 +1903,7 @@ impl Services {
             event_log_store,
             sql,
             model_watermarks,
-            page_runs: pages::open_runs::PageRuns::default(),
+            page_runs,
             assets,
             vocabulary,
             event_pump,

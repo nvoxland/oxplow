@@ -2,7 +2,7 @@
 //!
 //! Built on the official `rmcp` SDK. Core builds two tools, the command
 //! bus itself: `list_commands` and `run_command`. Every other tool is a
-//! command or a lens an enabled extension declares with `tool:`
+//! command or a page an enabled extension declares with `tool:`
 //! (`oxplow_app::agent_tools`) — oxplow's own are `oxplow-foundation`'s,
 //! named `oxplow_*` — listed per caller and run through the bus as it.
 
@@ -341,7 +341,7 @@ impl OxplowMcp {
     }
 }
 
-/// A declared tool as MCP lists it: its command's or lens's description
+/// A declared tool as MCP lists it: its command's or page's description
 /// and schema, hinted read-only when it changes nothing the person keeps.
 fn mcp_tool(tool: &AgentTool) -> Tool {
     let schema = match &tool.input_schema {
@@ -461,7 +461,7 @@ impl OxplowMcp {
     }
 
     /// Call the declared tool `name` as `caller`: a run of its command (a
-    /// lens tool's is `oxplow.lens.run`), whose result is the tool's — text
+    /// page tool's is `oxplow.page.run`), whose result is the tool's — text
     /// as is, anything else as JSON. An anonymous connection may call a
     /// read-only one; one that waits for a person returns the proposal.
     pub async fn call_declared(

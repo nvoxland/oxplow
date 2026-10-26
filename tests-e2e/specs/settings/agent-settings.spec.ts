@@ -21,10 +21,10 @@ test("an enabled harness's declared settings are offered and saved", async ({ fr
 
   // Change… opens the command's form; its field starts from the saved value.
   await row.click({ button: "right" });
-  await page.getByTestId("menu-item-lens-action-change").click();
-  const form = page.getByTestId("lens-action-form");
-  await form.getByTestId("lens-action-form-fields-value").fill("github-copilot/gpt-5");
-  await form.getByTestId("lens-action-form-fields-submit").click();
+  await page.getByTestId("menu-item-viz-action-change").click();
+  const form = page.getByTestId("viz-action-form");
+  await form.getByTestId("viz-action-form-fields-value").fill("github-copilot/gpt-5");
+  await form.getByTestId("viz-action-form-fields-submit").click();
   await expect
     .poll(() => readFileSync(join(daemon.project, ".oxplow", "project.yaml"), "utf8"))
     .toContain("github-copilot/gpt-5");

@@ -81,8 +81,8 @@ interface Common {
 const common = (id: string, o: Common = {}) => ({ id, title: o.title ?? null, replaceable: null, size: o.size ?? null });
 
 export const node = {
-  viz: (id: string, from: string | null, lens: Partial<VizConfig> = {}, o: Common = {}): Node =>
-    ({ ...common(id, o), kind: "viz", from, config: fakeViz(lens) }) as Node,
+  viz: (id: string, from: string | null, page: Partial<VizConfig> = {}, o: Common = {}): Node =>
+    ({ ...common(id, o), kind: "viz", from, config: fakeViz(page) }) as Node,
   stack: (id: string, children: Node[], o: Common = {}): Node => ({ ...common(id, o), kind: "stack", children }) as Node,
   grid: (id: string, children: Node[], o: Common = {}): Node => ({ ...common(id, o), kind: "grid", children }) as Node,
   switch: (id: string, param: string, children: Node[], o: Common = {}): Node =>
@@ -180,7 +180,7 @@ export function fakeRun(
 
 // --- The scenarios -------------------------------------------------------
 
-/** A page that is one table over one loader (a lens moved over 1:1). */
+/** A page that is one table over one loader (a page moved over 1:1). */
 export function tablePage(over: { actions?: PageAction[]; params?: PageParam[]; rowActions?: PageAction[] } = {}): PageRun {
   const page = fakePage(
     node.viz("items", "items", {

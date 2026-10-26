@@ -18,7 +18,7 @@ pub struct PreparedExtensionDatabase {
     models: Vec<ExtensionModels>,
     vocabulary: PreparedVocabulary,
     contributions: Vec<oxplow_domain::contribution::Descriptor>,
-    /// The enabled extensions' lenses, every loaded extension, what a
+    /// The enabled extensions' pages, every loaded extension, what a
     /// person can ask and what they can configure, listed.
     listing: oxplow_db::catalog_listing_store::CatalogListing,
     capabilities: Option<PreparedCapabilities>,

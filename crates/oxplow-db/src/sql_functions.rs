@@ -1,5 +1,5 @@
 //! Scalar functions every connection registers, for the SQL that models,
-//! lenses and migrations ship (`.context/semantic-layer.md`).
+//! pages and migrations ship (`.context/semantic-layer.md`).
 //!
 //! - `uri(resource, key, value, …)` is the one way SQL spells an oxplow
 //!   URI, canonical and escaped (`.context/resources.md`), and
@@ -298,14 +298,14 @@ mod tests {
     #[test]
     fn uri_view_sets_a_uris_view() {
         assert_eq!(
-            run("SELECT uri_view(uri('oxplow/lens', 'lens', 'x/y', 'session', 'ses2'), 'turn', 'trn7', 'gone', NULL)")
+            run("SELECT uri_view(uri('oxplow/page', 'page', 'x/y', 'session', 'ses2'), 'turn', 'trn7', 'gone', NULL)")
                 .unwrap()
                 .as_deref(),
-            Some("oxplow:oxplow/lens?lens=x/y&session=ses2#turn=trn7")
+            Some("oxplow:oxplow/page?page=x/y&session=ses2#turn=trn7")
         );
         assert_eq!(run("SELECT uri_view(NULL, 'turn', 'trn7')").unwrap(), None);
         assert!(run("SELECT uri_view('not a uri', 'turn', 'trn7')").is_err());
-        assert!(run("SELECT uri_view('oxplow:oxplow/lens?lens=x/y', 'turn')").is_err());
+        assert!(run("SELECT uri_view('oxplow:oxplow/page?page=x/y', 'turn')").is_err());
     }
 
     #[test]

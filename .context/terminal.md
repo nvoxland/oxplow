@@ -71,17 +71,17 @@ three pieces:
 
 Two pages draw it:
 
-- **The Terminal page** is oxplow-foundation's `terminal` lens over the
-  kit's **`terminal` viz** (`lens/TerminalViz.tsx`, `terminal: { of,
+- **The Terminal page** is oxplow-foundation's `terminal` page over the
+  kit's **`terminal` viz** (`viz/TerminalViz.tsx`, `terminal: { of,
   title?, stopped?, conversation? }`): one `TerminalView` per row, all
   mounted and kept warm (`display: none`), the picked one shown. With
-  several, the strip picks — the lens's selection (`select` on its
-  `title` column), so Back un-picks — and its row menu renames (the lens's
+  several, the strip picks — the page's selection (`select` on its
+  `title` column), so Back un-picks — and its row menu renames (the page's
   `rename` action, with the typed title) or closes (its `close` action,
   which asks first). `+` and **New Terminal** run `oxplow.terminal.open`;
   a stream with none opens one the first time the page shows (the viz is
-  its own empty state: a terminal lens with no rows isn't "No rows."). A
-  clicked file path opens in its own tab. An agent reads the lens as the
+  its own empty state: a terminal page with no rows isn't "No rows."). A
+  clicked file path opens in its own tab. An agent reads the page as the
   terminals' names, never their output.
 - **An agent session's page** is oxplow-foundation's `agent-session`
   document: its `agent-session-terminal` section is a `terminal` viz of one
@@ -174,7 +174,7 @@ Codex's daemon's `thread/list`), read as `v_agent_conversation`. The
 agent session page's **Switch Conversation…** / **Fork Conversation…**
 (offered `when` the harness declares `conversation_list` /
 `conversation_fork`) are forms whose conversation is a select from the
-`agent-session-conversations` lens — title, else first prompt, else id,
+`agent-session-conversations` page — title, else first prompt, else id,
 saying "this session's" and "open in another session" (from
 `v_agent_session_binding`) — and run
 `oxplow.agent_session.resume_conversation` (refused for one open in
@@ -187,7 +187,7 @@ terminal opens again once that process has exited.
 **Earlier sessions: the same lists, with no session to ask.** The New
 Session page lists the thread's earlier sessions under its Start row, so a
 person can bring one back without first opening a session to switch. One
-listing (the `new-session-earlier` lens, oxplow-foundation's, over
+listing (the `new-session-earlier` page, oxplow-foundation's, over
 `v_agent_session` and `v_agent_conversation`) merges the
 stream's closed oxplow sessions with every harness's saved conversations
 for the worktree (`harness_conversations`, what `v_agent_conversation`
@@ -209,7 +209,7 @@ labels a row with the given name, else a prompt.
 Nothing is adopted until a person picks it. The page filters in the client
 (title, prompts, thread, agent; ↑/↓, Enter, Escape clears the filter).
 A closed session's ref no longer opens nothing: it opens the
-`session-transcript` lens, which has a **Reopen** action.
+`session-transcript` page, which has a **Reopen** action.
 
 **Read-only session lookup (tsk139).** `lookup_terminal_session({ uri })`
 (core in `crates/oxplow-rpc/src/commands/terminal.rs`; Tauri shim +
@@ -367,7 +367,7 @@ confirmed; the last terminal may close). They log `terminal.opened@1`,
 `renamed@1` and `closed@1`. A stream's archive ends its terminals' shells and
 deletes their rows with it.
 
-The Terminal page is a lens over the rows (above). A stream with none when
+The Terminal page is a page over the rows (above). A stream with none when
 the page first opens gets one (once per page: closing the last leaves the
 page empty with **New Terminal**). The old pane-target strings (`shell`, `shell:<id>`,
 `ses3`) and the page-memory list of terminals are gone; a shell is its URI.

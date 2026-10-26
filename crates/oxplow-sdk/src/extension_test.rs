@@ -3,8 +3,8 @@
 //! on a throwaway oxplow — an in-memory one over a copy of the project's
 //! `.oxplow/extensions/` ([`Host`]) — so it never touches the project's
 //! data: `check` (against its real command registry, so `commands:`
-//! examples dry-run), then each intent example whose fixture names a lens
-//! (`input: { lens, params? }`, `expect: { columns?, rows }`), a derived
+//! examples dry-run), then each intent example whose fixture names a page
+//! (`input: { page, params? }`, `expect: { columns?, rows }`), a derived
 //! collector (`input: { collector, rows? }`, `expect: { entities: { <name>:
 //! n }, events?: [{ type, payload? }] }`; one that calls a model runs against the fixture model in the throwaway; an exec collector's isn't run — it is a program under the extension's `permissions.process`),
 //! a fact collector (`input: { collector, files: { <path>: <text> } }`,
@@ -186,7 +186,7 @@ fn example_fixture(
     Some((shown, doc))
 }
 
-/// The intent examples a throwaway oxplow runs: a lens's, a derived
+/// The intent examples a throwaway oxplow runs: a page's, a derived
 /// collector's. A provider's (`input: { command, input }`) run in its
 /// session.
 async fn examples(host: &Host, ext: &Extension, report: &mut TestReport) {
@@ -204,7 +204,7 @@ async fn examples(host: &Host, ext: &Extension, report: &mut TestReport) {
         let Some((shown, doc)) = example_fixture(&read, &rel, &example.name) else {
             report.warnings.push(format!(
                 "{rel}/extension.yaml:1: intent example `{}` has no fixture, so it isn't run — fix: \
-                 add fixtures/{}.yaml with its `input` (`{{ lens, params?, rows? }}`, `{{ collector, rows? }}`, a fact \
+                 add fixtures/{}.yaml with its `input` (`{{ page, params?, rows? }}`, `{{ collector, rows? }}`, a fact \
                  collector's `{{ collector, files }}`, `{{ event }}`, `{{ job, intentKey, request }}`, \
                  `{{ component }}`, `{{ form }}`, or a provider's `{{ command, input }}`) and `expect`",
                 example.name, example.name
@@ -307,7 +307,7 @@ async fn examples(host: &Host, ext: &Extension, report: &mut TestReport) {
     }
 }
 
-/// Why an example's target isn't here: the lens, form, job, component,
+/// Why an example's target isn't here: the page, form, job, component,
 /// effect, collector or command it names was withheld because an import is
 /// unavailable. `None` when it's here, or wasn't withheld.
 fn withheld_target(ext: &Extension, input: &Value) -> Option<String> {
@@ -1081,8 +1081,8 @@ async fn page_form_start(
             .nodes()
             .into_iter()
             .find(|n| {
-                matches!(&n.kind, NodeKind::Viz { config: lens, .. }
-                    if lens.viz == oxplow_app::extensions::Viz::Form)
+                matches!(&n.kind, NodeKind::Viz { config: cfg, .. }
+                    if cfg.viz == oxplow_app::extensions::Viz::Form)
             })
             .map(|n| n.id.clone())
             .ok_or_else(|| "the page has no form node".to_string())?,

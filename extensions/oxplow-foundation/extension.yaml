@@ -26,7 +26,7 @@ custom_components:
   - { id: integrations, title: Integrations, bundle: components/integrations, sql: read, commands: [oxplow.provider.check_instance, oxplow.provider.set_instance, oxplow.provider.add_instance, oxplow.provider.turn_off_here, oxplow.provider.remove_instance, oxplow.provider.set_credential, oxplow.provider.begin_sign_in, oxplow.provider.complete_sign_in, oxplow.provider.cancel_sign_in, oxplow.provider.sync] }
 intent:
   purpose: >-
-    Declare oxplow's own commands — what a person, an agent and a lens can
+    Declare oxplow's own commands — what a person, an agent and a page can
     do to oxplow's records, the repository and the project — over the
     scopes' operations, so nothing about them is special to core.
   origin: null
@@ -527,11 +527,11 @@ commands:
     example: {"session": "ses3"}
   # agent_text.read
   - name: skill.read
-    summary: "Read one of oxplow's skills (its SKILL.md). It says how to do a kind of oxplow work, e.g. `oxplow-extension` for building lenses. A skill sends you to `references/<name>.md` for detail: pass that `<name>` as `reference`. For agents that don't load skill files themselves; your instructions list the names."
+    summary: "Read one of oxplow's skills (its SKILL.md). It says how to do a kind of oxplow work, e.g. `oxplow-extension` for building pages. A skill sends you to `references/<name>.md` for detail: pass that `<name>` as `reference`. For agents that don't load skill files themselves; your instructions list the names."
     scope: agent_text.read
     op: skill
     tool: get_skill
-    example: {"name": "oxplow-extension", "reference": "lenses"}
+    example: {"name": "oxplow-extension", "reference": "page-format"}
   # ai.compute
   - name: ai.decide
     summary: "Ask a model a typed question about some text. Yes/no (`noul`, returns the probability of yes), `choice` among options, or `score` on ordered levels, each with probabilities, on the `decide` role. Good for second opinions like \"is this diff risky?\". Recorded (as the asking thread's call): the same questions on the same text are answered once (`cached`). Fails if the role has no model; the person assigns one in Settings → AI."
@@ -824,18 +824,18 @@ commands:
     example: {"job_run": "01990000-0000-7000-8000-000000000000"}
   # extensions.check
   - name: extension.preview
-    summary: "Preview a whole extension in a throwaway oxplow. What `oxplow extension test` runs, never touching this project's data. It checks the extension, activates it with the project's other extensions, and runs every intent example that has a fixture — lenses, collectors, commands, effects, events, jobs and components — with model calls answered by the fixture's replies, never a real provider. Returns `{ ok, errors, warnings, ran, … }`; run it after `oxplow.extension.validate` and before handing the extension over."
+    summary: "Preview a whole extension in a throwaway oxplow. What `oxplow extension test` runs, never touching this project's data. It checks the extension, activates it with the project's other extensions, and runs every intent example that has a fixture — pages, collectors, commands, effects, events, jobs and components — with model calls answered by the fixture's replies, never a real provider. Returns `{ ok, errors, warnings, ran, … }`; run it after `oxplow.extension.validate` and before handing the extension over."
     scope: extensions.check
     op: preview
     tool: preview_extension
     example: {"name": "my-extension"}
   - name: extension.draft_status
-    summary: "How a stream's draft of an extension differs from what runs. Reads the extension's source in the stream's checkout (yours unless `stream_id` names another) and compares it with the running version: `differs`, the running `deployed_hash` (null when none runs) and the draft's `source_hash`, and for `pages` (lenses and page files, by id) and `commands` (by name) the `added`, `removed` and `changed` ones. `draft` is true when that checkout is not the main stream's: a draft deploys only once its change is on the main branch. A deploy that would remove a page or command warns about it."
+    summary: "How a stream's draft of an extension differs from what runs. Reads the extension's source in the stream's checkout (yours unless `stream_id` names another) and compares it with the running version: `differs`, the running `deployed_hash` (null when none runs) and the draft's `source_hash`, and for `pages` (page files, by id) and `commands` (by name) the `added`, `removed` and `changed` ones. `draft` is true when that checkout is not the main stream's: a draft deploys only once its change is on the main branch. A deploy that would remove a page or command warns about it."
     scope: extensions.check
     op: draft_status
     example: {"name": "my-extension"}
   - name: extension.validate
-    summary: "Check an extension after editing it. The same report as `oxplow extension check`: manifest and lifecycle errors with file:line, unresolved cross-references, plus a dry run of every lens and advisory (SQL errors, `columns` keys the query doesn't return). `ok: true` means it works; `warnings` are worth fixing but don't block."
+    summary: "Check an extension after editing it. The same report as `oxplow extension check`: manifest and lifecycle errors with file:line, unresolved cross-references, plus a dry run of every page and advisory (SQL errors, `columns` keys the query doesn't return). `ok: true` means it works; `warnings` are worth fixing but don't block."
     scope: extensions.check
     op: validate
     tool: validate_extension
@@ -912,7 +912,7 @@ commands:
     summary: "Make a file in a stream's worktree. The folders above it are made too; it is refused when the file exists. Logs `file.created`."
     scope: files.write
     op: create
-    # Never offered by itself (it needs a path): a lens form action runs it and opens the file.
+    # Never offered by itself (it needs a path): a page form action runs it and opens the file.
     ui: { label: "New File…", group: File, open_after: "{{result.uri}}", when: "false" }
     example: {"stream": "str1", "path": "docs/notes.md", "content": "# Notes\n"}
   - name: file.create_directory
@@ -1087,7 +1087,7 @@ commands:
     example: {"language": "rust", "query": "Services"}
   # metrics.read
   - name: metric.scaffold
-    summary: "A starter for a new metric, as an extension of its own; writes nothing. Returns `name`, `dir` (`.oxplow/extensions/<name>`) and `files`, each with its project-relative path: the extension.yaml (a measure, a Starlark fact collector, the metric), the collector script, a lens and an example with its fixture. Write them with your own tools, check it (`oxplow_validate_extension`), then deploy it (`oxplow.extension.deploy`); its collector runs only once a person approves it. `oxplow.metric.enable` turns the metric on or off in .oxplow/project.yaml."
+    summary: "A starter for a new metric, as an extension of its own; writes nothing. Returns `name`, `dir` (`.oxplow/extensions/<name>`) and `files`, each with its project-relative path: the extension.yaml (a measure, a Starlark fact collector, the metric), the collector script, a page and an example with its fixture. Write them with your own tools, check it (`oxplow_validate_extension`), then deploy it (`oxplow.extension.deploy`); its collector runs only once a person approves it. `oxplow.metric.enable` turns the metric on or off in .oxplow/project.yaml."
     scope: metrics.read
     op: scaffold
     example: {"name": "complex-fns", "language": "rust", "glob": "crates/**/*.rs"}
@@ -1239,7 +1239,7 @@ commands:
     example: {"query": "oauth redirect", "resources": ["oxplow/wiki", "oxplow/work_item"], "limit": 10}
   # sql.read
   - name: sql.query
-    summary: "Run ONE read-only SQL statement over the published `v_*` models. It takes `SELECT`/`WITH` over the views lenses and the UI read (`v_model` lists them; physical tables are refused). Joins across views are fine. Metrics read as columns of a grid: `SELECT bucket, zone, MEASURE('<metric key>') FROM metric_grid('day'|'week'|'month'[, '<dimension>'])` (keys in v_metric_spec, dimensions in v_dimension). Positional params `?1`, `?2`, … bind from `params`. Returns `{columns, rows, truncated, reads, generation, coverage}`; rows are positional arrays; `truncated` means more rows existed than `limit`. `coverage` names the collector behind each collected model it read and how its last run stands (`current`, `stale`, `failed`, `disabled`, `needs_approval`, `never`): a complete result over a failed collector is still missing data. Writes, PRAGMA, ATTACH and multiple statements are rejected; queries time out after 5s. `v_model_column` documents every column."
+    summary: "Run ONE read-only SQL statement over the published `v_*` models. It takes `SELECT`/`WITH` over the views pages and the UI read (`v_model` lists them; physical tables are refused). Joins across views are fine. Metrics read as columns of a grid: `SELECT bucket, zone, MEASURE('<metric key>') FROM metric_grid('day'|'week'|'month'[, '<dimension>'])` (keys in v_metric_spec, dimensions in v_dimension). Positional params `?1`, `?2`, … bind from `params`. Returns `{columns, rows, truncated, reads, generation, coverage}`; rows are positional arrays; `truncated` means more rows existed than `limit`. `coverage` names the collector behind each collected model it read and how its last run stands (`current`, `stale`, `failed`, `disabled`, `needs_approval`, `never`): a complete result over a failed collector is still missing data. Writes, PRAGMA, ATTACH and multiple statements are rejected; queries time out after 5s. `v_model_column` documents every column."
     scope: sql.read
     op: query
     tool: query_sql
@@ -1456,7 +1456,7 @@ commands:
     ui: { label: "Quick Open…", group: File, shortcut: "Ctrl/Cmd+P", while_typing: true, menu: { bar: file, group: 3_go, order: 10 }, when: "streamShown" }
     example: {}
   - name: window.navigate
-    summary: "Take the person to a uri: opens and focuses its page (a file's editor, a work item, effort, lens, wiki page, directory or `oxplow:oxplow/page?page=<route>`), or selects a `stream:` / `thread:`. `stream` switches to that stream first. Changes what the person sees. Returns `{ opened, stream }`."
+    summary: "Take the person to a uri: opens and focuses its page (a file's editor, a work item, effort, wiki page, directory or `oxplow:oxplow/page?page=<route>`), or selects a `stream:` / `thread:`. `stream` switches to that stream first. Changes what the person sees. Returns `{ opened, stream }`."
     scope: window.show
     op: navigate
     example: {"uri": "oxplow:oxplow/file?path=src/auth.rs"}

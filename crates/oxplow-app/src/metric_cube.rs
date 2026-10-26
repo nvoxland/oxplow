@@ -2378,7 +2378,7 @@ mod tests {
     async fn a_superseded_repo_scalar_reads_zero_through_a_filter_on_both_paths() {
         // tsk103 review. "Latest assertion per producer wins" must be
         // FILTER-INDEPENDENT: a newer path-less assertion supersedes the older
-        // one no matter which spec's lens you read through. The fact fold used
+        // one no matter which spec's page you read through. The fact fold used
         // to decide the scalar eviction from the FILTERED fact list, so a
         // warning-severity assertion failed to supersede an error-severity one
         // under an error-filtered spec ([5, 5]) while the cube's live state —

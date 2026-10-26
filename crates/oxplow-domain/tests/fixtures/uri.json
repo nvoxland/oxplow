@@ -50,21 +50,21 @@
       "identity": "oxplow:oxplow/page"
     },
     {
-      "text": "oxplow:oxplow/lens?stream_id=2&lens=acme/blocked#q=fix&oxplow.renderer=acme/cards",
-      "resource": { "extension": "oxplow", "name": "lens" },
-      "params": { "lens": "acme/blocked", "stream_id": "2" },
+      "text": "oxplow:oxplow/page?stream_id=2&page=acme/blocked#q=fix&oxplow.renderer=acme/cards",
+      "resource": { "extension": "oxplow", "name": "page" },
+      "params": { "page": "acme/blocked", "stream_id": "2" },
       "view": { "oxplow.renderer": "acme/cards", "q": "fix" },
-      "canonical": "oxplow:oxplow/lens?lens=acme/blocked&stream_id=2#oxplow.renderer=acme/cards&q=fix",
-      "identity": "oxplow:oxplow/lens?lens=acme/blocked&stream_id=2"
+      "canonical": "oxplow:oxplow/page?page=acme/blocked&stream_id=2#oxplow.renderer=acme/cards&q=fix",
+      "identity": "oxplow:oxplow/page?page=acme/blocked&stream_id=2"
     },
     {
       "$comment": "Order doesn't matter: the same resource as the one above.",
-      "text": "oxplow:oxplow/lens?lens=acme/blocked&stream_id=2",
-      "resource": { "extension": "oxplow", "name": "lens" },
-      "params": { "lens": "acme/blocked", "stream_id": "2" },
+      "text": "oxplow:oxplow/page?page=acme/blocked&stream_id=2",
+      "resource": { "extension": "oxplow", "name": "page" },
+      "params": { "page": "acme/blocked", "stream_id": "2" },
       "view": {},
-      "canonical": "oxplow:oxplow/lens?lens=acme/blocked&stream_id=2",
-      "identity": "oxplow:oxplow/lens?lens=acme/blocked&stream_id=2"
+      "canonical": "oxplow:oxplow/page?page=acme/blocked&stream_id=2",
+      "identity": "oxplow:oxplow/page?page=acme/blocked&stream_id=2"
     },
     {
       "$comment": "A value holding the grammar's own characters, a space, a plus and non-ASCII: each encoded once, uppercase hex.",

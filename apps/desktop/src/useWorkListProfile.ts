@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { onRemoteReconnect, subscribeOxplowEvents } from "./api.js";
-import { coalesce, NO_READS, readsChanged } from "./lens/lensRerun.js";
+import { coalesce, NO_READS, readsChanged } from "./viz/rerun.js";
 import { NO_FEATURES, readWorkListProfile, type WorkListProfile } from "./workItems.js";
 
 /**

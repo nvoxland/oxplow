@@ -184,7 +184,7 @@ mod tests {
     /// A person sets which agents are on, in order: written as the
     /// `agents` key (logged, audited, undoable); an unregistered one is
     /// refused at its place in the list; none at all is refused; an agent
-    /// can't, nor can a lens it presses; the person's lens can.
+    /// can't, nor can a page it presses; the person's page can.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_person_sets_the_agents_in_order() {
         let fx = crate::test_fixtures::services_with_effort().await;
@@ -223,12 +223,12 @@ mod tests {
             thread_id: Some(fx.thread),
             stream_id: None,
         };
-        let lens = |presser: Actor| Actor::Page {
+        let page = |presser: Actor| Actor::Page {
             page_id: "oxplow-foundation/agents".into(),
             on_behalf_of: Box::new(presser),
         };
-        for actor in [agent.clone(), lens(agent)] {
-            // An agent, or a lens it pressed, may set the order too.
+        for actor in [agent.clone(), page(agent)] {
+            // An agent, or a page it pressed, may set the order too.
             svc.commands
                 .run(&actor, SET_AGENTS, json!({ "agents": [ids[0]] }), false)
                 .await
@@ -237,7 +237,7 @@ mod tests {
         }
         svc.commands
             .run(
-                &lens(Actor::Human),
+                &page(Actor::Human),
                 SET_AGENTS,
                 json!({ "agents": [ids[0]] }),
                 false,
@@ -255,7 +255,7 @@ mod tests {
     }
 
     /// The prompt addition is written as `agentPromptAppend` (blank removes
-    /// it), by a person, an agent or a lens for either.
+    /// it), by a person, an agent or a page for either.
     #[tokio::test(flavor = "multi_thread")]
     async fn anyone_sets_the_prompt_addition() {
         let fx = crate::test_fixtures::services_with_effort().await;
@@ -276,11 +276,11 @@ mod tests {
             thread_id: Some(fx.thread),
             stream_id: None,
         };
-        let lens = Actor::Page {
+        let page = Actor::Page {
             page_id: "oxplow-foundation/agents-prompt".into(),
             on_behalf_of: Box::new(agent.clone()),
         };
-        for actor in [agent, lens] {
+        for actor in [agent, page] {
             svc.commands
                 .run(&actor, SET_PROMPT_APPEND, json!({ "text": "x" }), true)
                 .await

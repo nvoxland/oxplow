@@ -1,7 +1,7 @@
 //! A reviewer's verdicts on an effort's reasoning (P7.C4,
 //! `.context/commands.md`): verifying or dismissing a claim oxplow read in
 //! the agent's answers, and confirming or dismissing a decision oxplow
-//! inferred. Each is a `Tx` command a person (or a lens acting for one)
+//! inferred. Each is a `Tx` command a person (or a page acting for one)
 //! runs — an agent checking its own claims isn't a review, so an
 //! agent-driven run is refused — and each is undone by its pair:
 //! `verify_claim` ↔ `unverify_claim`, `dismiss_claim` ↔ `reopen_claim`,
@@ -334,7 +334,7 @@ fn decision_op(op: &'static str, from: &'static [&'static str], to: &'static str
             review_decision(ctx, parse(input)?, from, to)
         })),
     )
-    // A person's review (through a lens too), never the agent's of its
+    // A person's review (through a page too), never the agent's of its
     // own work.
 }
 
@@ -596,7 +596,7 @@ mod tests {
     }
 
     /// An agent may verify a claim and review a decision, directly or
-    /// through a lens acting for it.
+    /// through a page acting for it.
     #[tokio::test]
     async fn an_agent_may_verify_a_claim_and_review_a_decision() {
         let (fx, claim, decision) = fixture().await;
@@ -605,7 +605,7 @@ mod tests {
             thread_id: Some(ThreadId::new(fx.thread.value())),
             stream_id: None,
         };
-        let through_lens = Actor::Page {
+        let through_page = Actor::Page {
             page_id: "acme/review".into(),
             on_behalf_of: Box::new(agent.clone()),
         };
@@ -618,7 +618,7 @@ mod tests {
         fx.svc
             .commands
             .run(
-                &through_lens,
+                &through_page,
                 CONFIRM_DECISION,
                 json!({ "decision": decision }),
                 false,

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { NO_READS, useRerunOnChange } from "./lens/lensRerun.js";
+import { NO_READS, useRerunOnChange } from "./viz/rerun.js";
 import type { Reads } from "./tauri-bridge/generated/bindings.js";
 import { readWorkspaceIndex } from "./workspaceFiles.js";
 

@@ -14,7 +14,6 @@ const KINDS: Array<[string, string]> = [
   ["decision", "decision"],
   ["commit", "commit"],
   ["dashboard", "dashboard"],
-  ["lens", "lens"],
 ];
 
 const realApi = await import("../api.js");

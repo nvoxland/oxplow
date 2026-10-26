@@ -275,7 +275,7 @@ pub const KINDS: &[KindSpec] = &[
         ContributionKind::Slot,
         "ui.slots",
         "Slot mount",
-        "a page mounted at another page's slot, or a core one",
+        "a page mounted at another page's slot",
         true,
         true,
     ),

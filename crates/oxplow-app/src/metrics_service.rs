@@ -883,7 +883,7 @@ impl MetricsService {
     /// A new code metric, as a template: the files of a private extension
     /// (`crate::metric_scaffold`, the same template `oxplow extension new
     /// metric` writes) — a per-path measure, a Starlark fact collector, the
-    /// dimension its facts carry, the metric and a lens that links to the
+    /// dimension its facts carry, the metric and a page that links to the
     /// file and line, with an example and its fixture. Writes nothing: the
     /// agent writes the files with its own tools, so the write guard and
     /// its worktree apply (the extensions "no scaffold tools" rule). The

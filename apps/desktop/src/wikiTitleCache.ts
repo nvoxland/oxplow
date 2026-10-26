@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { subscribeOxplowEvents } from "./api.js";
 import { readWikiPages } from "./knowledge.js";
-import { coalesce, NO_READS, readsChanged } from "./lens/lensRerun.js";
+import { coalesce, NO_READS, readsChanged } from "./viz/rerun.js";
 import type { Reads } from "./tauri-bridge/generated/bindings.js";
 
 /**

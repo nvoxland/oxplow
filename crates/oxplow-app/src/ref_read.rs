@@ -12,7 +12,7 @@
 //!   caller's), an event's stored body (`#part=input`, `output`, `prompt`,
 //!   `result` or `summary`; the caller's own stream's only), a model call's
 //!   (`#part=request` or `response`; not one another agent's thread asked
-//!   for), a lens's definition.
+//!   for), a page's definition.
 //!
 //! Content is cut at [`MAX_CONTENT`] bytes, saying so.
 
@@ -42,7 +42,7 @@ pub struct RefRead {
     /// Its resource (`oxplow/effort`).
     pub resource: String,
     /// The resolving model's row, every column; `None` for a resource no
-    /// model holds (a file, a lens).
+    /// model holds (a file).
     pub row: Option<Map<String, Value>>,
     /// What sits beside it, by name (`links`, `comments`, `files`).
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
@@ -98,7 +98,7 @@ pub struct Reader {
     pub stream: Option<StreamId>,
 }
 
-/// Read what `raw` names for `reader`. A file or lens is read in `at`'s
+/// Read what `raw` names for `reader`. A file or page is read in `at`'s
 /// worktree, else the reader's stream's; an event's body only in the
 /// reader's own stream; a model call's body unless another agent's thread
 /// asked for it.
@@ -642,7 +642,7 @@ mod tests {
         ));
     }
 
-    /// A file or lens can be read in another stream's worktree by naming the
+    /// A file or page can be read in another stream's worktree by naming the
     /// stream; without one, the caller's.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_file_reads_in_the_stream_named() {
