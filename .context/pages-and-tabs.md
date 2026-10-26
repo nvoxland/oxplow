@@ -345,7 +345,9 @@ the caller's stream's draft; its text starts `Draft of <page> (stream
 strN, not deployed)` and its json carries `draft: { stream, checkout }`.
 
 **What the person is looking at**: a window's tab report carries
-`detail_json: { runId, focus: { node } }` for a page tab, and
+`detail_json: { runId, focus }` for a page tab (`focus` is `{ node }` when
+the tab's `#node=<id>` lands on a node, else null; no row focus is
+reported yet), and
 `oxplow_get_open_page` returns that open run as `pageRun: { page, title,
 params, focus, source, text }` — the person's own run, not a re-run.
 
@@ -506,7 +508,8 @@ over with `showView` (an inline page's YAML) opens as a run of its own and
 is drawn under it (`ShownView`, with Save as Page); its `rail:` is drawn
 in the rail as any page's. Every node's root
 has `data-node` and registers in a `NodeRegistry`; `useNodeFocus` lands
-on `#node=<id>` (scroll, `data-focused` for 1.5 s). Viz components press
+on `#node=<id>` (scroll, `data-focused` for 1.5 s; a shown view's run
+never takes `node` as a param). Viz components press
 their actions through `VizActionRunnerContext`
 (`viz/vizActionRunner.ts`; outside a page run it refuses); `PageTree`
 provides `useNodeActions(runId, nodePath)` per viz node. Forms go the same way: `FormViz` and `ActionForm`
