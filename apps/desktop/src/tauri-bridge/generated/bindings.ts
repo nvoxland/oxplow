@@ -4818,6 +4818,14 @@ export type PageImpact = {
 	error: string | null,
 };
 
+/**  A page that didn't run for want of a capability. */
+export type PageInactive = {
+	/**  The needs that aren't met (`work_items`, `knowledge`). */
+	needs: string[],
+	/**  What a person reads. */
+	message: string,
+};
+
 /**
  *  A value the viewer (or an agent) can set when running the lens,
  *  bound into the query as `:name`.
@@ -4906,6 +4914,11 @@ export type PageRun_Deserialize = {
 	alert: AlertState | null,
 	/**  The badge's value, when the page has one. */
 	badge: SqlCell | null,
+	/**
+	 *  Set when the page needs a capability that isn't active: it ran no
+	 *  loaders, and says what it needs instead of showing nothing.
+	 */
+	inactive?: PageInactive | null,
 };
 
 /**  A run of a page. */
@@ -4920,6 +4933,11 @@ export type PageRun_Serialize = {
 	alert: AlertState | null,
 	/**  The badge's value, when the page has one. */
 	badge: SqlCell | null,
+	/**
+	 *  Set when the page needs a capability that isn't active: it ran no
+	 *  loaders, and says what it needs instead of showing nothing.
+	 */
+	inactive: PageInactive | null,
 };
 
 /**  A page another extension's page shows at one of its slots. */

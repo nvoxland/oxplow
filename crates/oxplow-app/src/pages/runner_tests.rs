@@ -114,6 +114,39 @@ async fn a_stream_change_reaches_what_binds_head_sha() {
     assert_eq!(keys, [&r.loaders["other"].key], "only `at` re-runs");
 }
 
+/// A page that needs a capability that isn't active runs nothing and says
+/// what it needs, instead of showing nothing.
+#[tokio::test]
+async fn a_page_whose_needs_are_unmet_says_so_and_runs_nothing() {
+    let (_dir, svc) = fixture().await;
+    let run_with = |active| {
+        let svc = svc.clone();
+        async move {
+            PageRunner::of(&svc)
+                .run(RunRequest {
+                    target: RunTarget::Page("acme/needy".into()),
+                    params: BTreeMap::new(),
+                    ctx: ViewContext {
+                        active,
+                        ..ViewContext::default()
+                    },
+                    viewer: Actor::Human,
+                })
+                .await
+                .unwrap()
+        }
+    };
+    let r = run_with(Some(crate::capabilities::Active::default())).await;
+    let inactive = r.inactive.expect("unmet");
+    assert_eq!(inactive.needs, ["work_items"]);
+    assert!(!inactive.message.is_empty());
+    assert!(r.loaders.is_empty());
+    // Where nothing says what's active (a check), it runs.
+    let r = run_with(None).await;
+    assert!(r.inactive.is_none());
+    assert_eq!(ints(&r, "q"), [1]);
+}
+
 #[tokio::test]
 async fn an_unknown_param_is_refused() {
     let (_dir, svc) = fixture().await;

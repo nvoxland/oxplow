@@ -148,6 +148,16 @@ view: { viz: number, from: a }
 "#,
     ),
     (
+        "needy",
+        r#"
+title: Needy
+needs: [work_items]
+data:
+  q: { sql: "SELECT 1 AS n" }
+view: { viz: table, from: q }
+"#,
+    ),
+    (
         "headed",
         r#"
 title: Headed

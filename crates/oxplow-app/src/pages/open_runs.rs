@@ -607,6 +607,7 @@ mod diff_tests {
             error: None,
         };
         PageRun {
+            inactive: None,
             page,
             params: BTreeMap::new(),
             loaders: BTreeMap::from([(
