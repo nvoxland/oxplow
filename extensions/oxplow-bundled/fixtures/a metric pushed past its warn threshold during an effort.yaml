@@ -1,0 +1,15 @@
+# An effort that pushed a metric into its warn zone is told so, once per
+# metric: the metric's title, the zone and the threshold.
+given:
+  - { command: oxplow.effort.open, input: { thread: thr1 } }
+  - observe:
+      evidence:
+        effort: eff1
+        metric_deltas:
+          - { key: test.size, title: size, baseline: 2, current: 6, warn_at: 5, crossing: warn }
+          - { key: test.calm, title: calm, baseline: 1, current: 2, warn_at: 9 }
+when: { advisory: threshold-crossed }
+expect:
+  lines:
+    - "# Metric thresholds"
+    - "⚠ size crossed its warn threshold (5)"

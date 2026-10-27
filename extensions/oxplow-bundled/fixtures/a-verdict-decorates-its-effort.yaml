@@ -1,0 +1,28 @@
+# The verdict shows where the effort is shown: its latest verdict as a label
+# and a color for the effort's chip and rows. It shows; it never acts.
+given:
+  - { command: oxplow.work_item.create, input: { title: Fix the hover state, body: "Fix the hover state in [[src/ui/button.ts]].", thread: thr1 }, bind: item }
+  - { command: oxplow.work_item.transition, input: { uri: $item.uri, to: in_progress } }
+  - observe:
+      turn:
+        prompt: Fix the hover state
+        tools:
+          - { name: Edit, kind: edit, paths: [src/ui/button.ts], ok: true }
+  - command: oxplow.effort.replace_inferred_claims
+    input: { effort: eff1, claims: [{ statement: no behavior change, kind: no_behavior_change }] }
+when:
+  command: oxplow.review.request_changes
+  input: { effort: eff1, note: Keep it to the UI. }
+  confirmed: true
+expect: { ok: true }
+steps:
+  - when: { sql: "SELECT uri, label, color FROM v_oxplow_bundled_verdict" }
+    expect:
+      rows:
+        - { uri: "oxplow:oxplow/effort?id=eff1", label: Changes requested, color: red }
+  - when: { command: oxplow.review.accept, input: { effort: eff1, force: true }, confirmed: true }
+    expect: { ok: true }
+  - when: { sql: "SELECT uri, label, color FROM v_oxplow_bundled_verdict" }
+    expect:
+      rows:
+        - { uri: "oxplow:oxplow/effort?id=eff1", label: Accepted (forced), color: orange }

@@ -1462,7 +1462,9 @@ async fn run_steps(
 ///
 /// - `event: { type, v?, payload, subject?, anchors? }`: an event logged
 ///   and delivered, the extension's effects reacting.
-/// - `evidence: { effort, observations: [..] }`: an effort's evidence.
+/// - `evidence: { effort, observations?: [..], metric_deltas?: [..] }`: an
+///   effort's evidence (a metric delta is `{ key, current, baseline?, warn_at?,
+///   fail_at?, crossing?, kind?, direction?, .. }`).
 /// - `commit: { sha, at, subject, files?, .. }`: a commit the indexer read.
 /// - `change: { kind?, target, files?, functions? }`: a change's analysis,
 ///   as the change analysis stores it (`kind` is `commit` by default; an
@@ -1912,9 +1914,42 @@ async fn observe_evidence(host: &Host, body: &Value) -> Result<(), String> {
             created_at: oxplow_domain::Timestamp::now(),
         });
     }
+    let mut deltas = Vec::new();
+    for d in body
+        .get("metric_deltas")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let text = |key: &str| d.get(key).and_then(Value::as_str).map(str::to_string);
+        let num = |key: &str| d.get(key).and_then(Value::as_f64);
+        let key = text("key").ok_or("a metric delta names its `key`")?;
+        let current = num("current").ok_or("a metric delta names its `current`")?;
+        deltas.push(oxplow_db::EffortMetricDelta {
+            title: text("title").unwrap_or_else(|| key.clone()),
+            key,
+            unit: text("unit"),
+            direction: text("direction").unwrap_or_else(|| "lower-better".into()),
+            kind: text("kind").unwrap_or_else(|| "gauge".into()),
+            category: text("category"),
+            language: text("language"),
+            agg: text("agg").unwrap_or_else(|| "files".into()),
+            baseline: num("baseline"),
+            current,
+            delta: num("delta").or_else(|| num("baseline").map(|b| current - b)),
+            changed: d.get("changed").and_then(Value::as_bool).unwrap_or(true),
+            attributed_files: d.get("attributed_files").and_then(Value::as_i64),
+            sample_count: d.get("sample_count").and_then(Value::as_i64).unwrap_or(1),
+            target: num("target"),
+            warn_at: num("warn_at"),
+            fail_at: num("fail_at"),
+            crossing: text("crossing"),
+            latest_capture_id: None,
+        });
+    }
     host.svc
         .effort_evidence_store
-        .replace(effort, Vec::new(), observations, String::new())
+        .replace(effort, deltas, observations, String::new())
         .await
         .map_err(|e| e.to_string())
 }
