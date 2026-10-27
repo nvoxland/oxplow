@@ -42,7 +42,10 @@ or exact mechanics.
     `.oxplow/extensions/` is checked with this: check, fixtures and page
     answers on a throwaway oxplow, in seconds, with no compile (a debug
     build reads oxplow's own extensions from their folders). After a
-    core change it rebuilds first, so a change to both runs both.
+    core change it rebuilds first, so a change to both runs both. A
+    fixture's `ui:` steps (a custom component's own code) draw in the
+    app's webview, so they need the app built once (`bun run build:dev`);
+    without it the report warns they didn't run.
   - `bun run test:fast` (filtered: `-p oxplow-app some_test`) and
     `bun run test:fast:ts` — quick, write the JUnit reports the
     effort's Tests panel shows.
@@ -71,13 +74,19 @@ or exact mechanics.
     included (deploy for the person to look, commit when they're happy);
     a worktree stream's copy is a draft that never deploys. Never restart
     oxplow for an extension change, and never ask the person to.
-    **A page's behavior is tested by a fixture in its extension**
-    (`fixtures/<example>.yaml`: `given:` → `expect:`, `steps:` for a
-    scenario; the skill's `references/testing.md`), not by a Rust test —
-    `crates/oxplow-app/src/bundled_extensions.rs` and its siblings are being
-    emptied into fixtures and don't grow. Its interaction (select, expand,
-    forms, slots, embeds) is the generic `tests-e2e/specs/pages/*` suite's:
-    add a per-page e2e spec only for behavior that suite doesn't cover.
+    **An extension's behavior is tested by a fixture in its extension,
+    written first** — a page, a command, an event's effects, a job, a
+    collector, an advisory, a query over its models, a custom component's
+    own code (`ui:` steps): `fixtures/<example>.yaml`, `given` → `when` →
+    `expect`, `steps` for a scenario (the skill's `references/testing.md`
+    has the kinds). It runs on a throwaway oxplow with only the data the
+    fixture makes and only the extensions this one declares (`requires:`),
+    never the project's database. Rust tests are for core, never for an
+    extension's behavior: `crates/oxplow-app/src/bundled_extensions.rs` and
+    its siblings don't grow. How the app draws a page (select, expand,
+    forms, slots, embeds, a component's frame) is the generic
+    `tests-e2e/specs/pages/*` suite's: add a per-page or per-component e2e
+    spec only for what only the app's shell does.
   - **Core** (any Rust crate, `apps/desktop/src`): it runs only after the
     person quits oxplow and runs `bun run run:dev` (build, deploy, start):
     say so when you finish. That also deploys foundation when its source

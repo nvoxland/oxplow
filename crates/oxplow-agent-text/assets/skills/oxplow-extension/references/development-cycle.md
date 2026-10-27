@@ -6,15 +6,21 @@ An extension has a **source** (the files you edit, in
 `.oxplow/runtime/extensions/<name>/<hash>/`). Nothing runs a source. Your
 edits change nothing on the person's screen until you deploy.
 
-## Edit, check, deploy
+## Fixture, edit, check, test, deploy
 
-1. Edit the source. Write as many files as the step needs.
-2. Check it after every edit: `oxplow_validate_extension` (the same report
-   as `oxplow extension check`), `oxplow_run_page` (`draft: true` in a worktree),
-   `oxplow_show_page` with a `spec`; and run its fixtures with
-   `$OXPLOW_BIN extension test <name>` in your terminal. These read the
-   source and dry-run, so they need no deploy.
-3. When a step is complete, run `oxplow.extension.deploy { name }` with
+1. Write the fixture for what you're about to build
+   (`references/testing.md`) and run `$OXPLOW_BIN extension test <name>`:
+   it fails, for the reason you expect.
+2. Edit the source. Write as many files as the step needs.
+3. Check it after every edit: `oxplow_validate_extension` (the same report
+   as `oxplow extension check`), then run its fixtures with
+   `$OXPLOW_BIN extension test <name>` in your terminal until they pass.
+   Both run on a throwaway oxplow — this build's schema, only the data a
+   fixture makes, only the extensions yours declares — so they need no
+   deploy and nothing in the project's database affects them.
+   `oxplow_run_page` (`draft: true` in a worktree) shows a page over the
+   project's real data: a look before you deploy, not a test.
+4. When a step is complete, run `oxplow.extension.deploy { name }` with
    `run_command`. It deploys the source in the main stream's checkout,
    uncommitted changes included: deploy to let the person see a change,
    and commit once they are happy with it. In another (worktree) stream,
@@ -27,7 +33,7 @@ edits change nothing on the person's screen until you deploy.
    settings, and replaces what runs in the running app. It returns once the
    new deployment runs, with `warnings` worth fixing. Pages that show the
    extension reload by themselves.
-4. Tell the person what changed and where to look.
+5. Tell the person what changed and where to look.
 
 Deploy at points where the work is whole, not after every edit. Each
 deploy is what the person sees, so a deploy in the middle of a change shows

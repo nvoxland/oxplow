@@ -275,10 +275,16 @@ effort's "Coverage & tests" panel.
 | Core and an extension together | both: `test:ext` rebuilds through `cargo run` first |
 | Ready to push | `test:collect` with `lint:collect`, once |
 
-A page's behavior is a fixture in its extension (`extensions.md`
-"`oxplow extension test`"), never a new Rust test:
+An extension's behavior is a fixture in its extension, written first
+(`extensions.md` "`oxplow extension test`"): a page, a command, an
+event's effects, a job, a collector, an advisory, a query over its
+models, a custom component's own code (`ui:` steps, "Testing a
+component"). Never a new Rust test: Rust tests are for core, and
 `bundled_extensions.rs`, `settings_pages_tests.rs` and
-`directory_page_tests.rs` are being emptied into fixtures and don't grow.
+`directory_page_tests.rs` keep only what no fixture can express yet. A
+fixture runs on a throwaway oxplow — this build's schema, only the data
+it makes, only the extensions its own declares — never the project's
+database. `ui:` steps need the app built once (`bun run build:dev`).
 `test:ext` writes `target/extension-tests/junit.xml`, which the project
 extension's `tests.extension_junit` collector reads.
 
@@ -338,8 +344,9 @@ command's UI path, a testid — and add or extend a spec under
 `tests-e2e/specs/<area>/` for a new user path. What every page does
 (select, expand, switch, forms, slots, replacements, embeds, components,
 panels) is `tests-e2e/specs/pages/*`'s, each over a small extension of its
-own: a page that moves into an extension gets a fixture for its data and a
-spec of its own only for behavior those don't cover. Rules a spec keeps:
+own: a page or component that moves into an extension gets fixtures for
+its data and behavior (`ui:` steps for a component's own code) and a spec
+of its own only for what only the app's shell does. Rules a spec keeps:
 
 - select by `data-testid` (a renamed testid breaks specs — grep
   `tests-e2e/` first);

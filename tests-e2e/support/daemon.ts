@@ -29,8 +29,8 @@ export const LOG_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", ".out
 
 /** The project's `.oxplow/project.yaml`: its threads run the fake terminal
  *  harness (the test extension's `scripted` provider, enabled here), so no
- *  spec ever starts a real agent CLI. The suite's extensions are on, so the
- *  daemon deploys them from their sources when it starts. */
+ *  spec ever starts a real agent CLI. The suite's extensions are on; the
+ *  fixtures deploy them once the daemon has started (boot deploys nothing). */
 function projectYaml(): string {
   return `agents: [scripted]\nextensions: [oxplow-bundled, e2e, github]\nextensionInstances:\n  e2e/scripted: { enabled: true, config: { team: core } }\n`;
 }

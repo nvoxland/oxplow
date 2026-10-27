@@ -1015,7 +1015,7 @@ commands:
     op: draft_status
     example: {"name": "my-extension"}
   - name: extension.validate
-    summary: "Check an extension after editing it. The same report as `oxplow extension check`: manifest and lifecycle errors with file:line, unresolved cross-references, plus a dry run of every page and advisory (SQL errors, `columns` keys the query doesn't return). `ok: true` means it works; `warnings` are worth fixing but don't block."
+    summary: "Check an extension after editing it. The same report as `oxplow extension check`: manifest and lifecycle errors with file:line, unresolved cross-references, plus a dry run of its models, advisories and command examples on this build's schema with no data — never the project's database (SQL errors, columns that differ from the contract). It doesn't run a page's loaders: `oxplow extension test` does. `ok: true` means it works; `warnings` are worth fixing but don't block."
     scope: extensions.check
     op: validate
     tool: validate_extension

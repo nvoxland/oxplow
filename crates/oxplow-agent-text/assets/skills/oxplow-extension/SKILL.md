@@ -1,6 +1,6 @@
 ---
 name: oxplow-extension
-description: Build oxplow pages and extensions on request: views over oxplow's data (tasks, efforts, threads, comments, wiki, snapshots, metrics) that the user sees in the app and can share with their team. Loads when the user asks to "make/build/show me a page/view/report/dashboard/list of X", "a place where I can see X", "track X across threads/efforts", "what's waiting on me", or asks to change an existing page. Teaches the semantic layer (`v_model`, `oxplow_query_sql`), the `.oxplow/extensions/<name>/` format, and the validate, preview, test, deploy loop.
+description: Build oxplow pages and extensions on request: views over oxplow's data (tasks, efforts, threads, comments, wiki, snapshots, metrics) that the user sees in the app and can share with their team. Loads when the user asks to "make/build/show me a page/view/report/dashboard/list of X", "a place where I can see X", "track X across threads/efforts", "what's waiting on me", or asks to change an existing page. Teaches the semantic layer (`v_model`, `oxplow_query_sql`), the `.oxplow/extensions/<name>/` format, and the fixture, check, test, deploy loop.
 ---
 
 # Building oxplow pages
@@ -18,12 +18,16 @@ with a table or chart now**, `oxplow_show_page { spec }` (an inline page,
 read-only) beats pasting rows; build a file only for a lasting page.
 
 **The loop:** find the data (`v_model`, `v_model_column`, `oxplow_query_sql`:
-read columns, never guess) → write the page → `oxplow_validate_extension`
-after every edit → `oxplow_run_page` (`draft: true` in a worktree) → a
-fixture for each behavior (write it, see it fail, then make the page pass
-it) → `oxplow.extension.deploy { name }` from the main stream (it
-replaces what runs, live; never ask for a restart) → tell the user the
-title and how to open it (Cmd+P).
+read columns, never guess) → **write a fixture for the behavior first**
+(`fixtures/<example>.yaml`: `given` the data, `when` it runs, `expect`
+what it shows or does — a component's with `ui:` steps) → write the page
+(or command, effect, component) → `oxplow_validate_extension` after every
+edit → `$OXPLOW_BIN extension test <name>` until it passes (seconds; it
+runs on a throwaway oxplow with only the data your fixtures make, never
+the project's) → `oxplow.extension.deploy { name }` from the main stream
+(it replaces what runs, live; never ask for a restart) → tell the user
+the title and how to open it (Cmd+P). `oxplow_run_page { draft: true }`
+shows a draft page over the project's real data: a look, not a test.
 
 **Open the reference for the task at hand** (a file here, or
 `oxplow_get_skill` with `name: oxplow-extension` and `reference: <name>`):
@@ -34,7 +38,7 @@ title and how to open it (Cmd+P).
 - `references/recipes.md`: data to page, a form, a dashboard, a slot mount.
 - `references/dashboards.md`: dashboards are pages of embeds; Pin.
 - `references/markdown-blocks.md`: `oxplow-page` blocks, `show_page`.
-- `references/testing.md`: fixtures, `given:`, `expect:`, answers, preview.
+- `references/testing.md`: fixtures (`given` → `when` → `expect`, `steps`, `ui`), check, answers.
 - `references/development-cycle.md`: source, drafts, deploy, held deployments.
 - `references/ui-contributions.md`: slots, panels, renderers, decorators, replacements.
 - `references/scaffolding.md`: the kinds `extension new` makes.

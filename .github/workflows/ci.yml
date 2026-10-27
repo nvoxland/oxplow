@@ -86,6 +86,12 @@ jobs:
       - name: Cargo test
         run: xvfb-run -a cargo test --workspace --all-features
 
+      # Every extension with a source here — oxplow's own and the project's
+      # — through its fixtures (check, examples, answers, `ui` steps), as an
+      # agent runs them after an extension edit.
+      - name: Extension tests
+        run: xvfb-run -a bun run test:ext
+
       # Drift guard: if `cargo test` regenerated TS bindings (because a
       # Rust signature changed), the diff fails the PR.
       - name: Verify generated TS bindings are up to date

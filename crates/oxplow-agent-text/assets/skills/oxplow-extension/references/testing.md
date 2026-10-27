@@ -17,16 +17,19 @@ page that isn't there, a command that doesn't exist or an input that doesn't
 fit it, a loader reading one declared after it); the models compiled without
 publishing (SQL errors, a `ref()` that doesn't resolve, columns that differ
 from the declared contract); and a dry run of every advisory and every command
-example. It **always** dry-runs: a collector's entities stand in empty. It
+example. It **always** dry-runs, on this build's schema with no data —
+never the project's database: a collector's entities stand in empty. It
 does not run a page's loaders: `oxplow_run_page` and `extension test` (which
 opens each page with its `answers:` params) do, so a bad query in a page
 shows there. `ok: true` means it works; fix every
 `error`, and every `warning` unless you can say why not.
 
-Then **`oxplow_run_page { page, draft?, params? }`** returns exactly what the
-person will see. In a worktree stream pass `draft: true` (it reads your
-source over live data; its commands are the deployed ones) and your own
-`stream_id`. The source runs nothing until `oxplow.extension.deploy`.
+**`oxplow_run_page { page, draft?, params? }`** shows what the person will
+see over the project's real data — a look, not a test: what happens to be
+in their database proves nothing about the page. In a worktree stream pass
+`draft: true` (it reads your source over live data; its commands are the
+deployed ones) and your own `stream_id`. The source runs nothing until
+`oxplow.extension.deploy`.
 
 An extension's own `questions.yaml` (`{ question, skill, reaches: { sql } |
 { command, input }, shape: { columns } }`, `skill` a markdown file in the
@@ -41,7 +44,8 @@ model the SQL reads and the command it runs. Prefer `answers:` on pages.
    oxplow, in a process of its own: activated as the app activates it
    (your entities empty, your models, commands, effects, jobs and
    components live), never the project's database or what is deployed,
-   with the project's extensions on (not the person's own choices), and
+   with only what your extension declares on (oxplow's own, and what it
+   `requires:` or imports — never the person's own choices), and
    every model call answered by the fixture's `model.replies` — never a
    real provider. It works before the extension's first deploy. Run it in
    the foreground after `oxplow_validate_extension` and before handing
