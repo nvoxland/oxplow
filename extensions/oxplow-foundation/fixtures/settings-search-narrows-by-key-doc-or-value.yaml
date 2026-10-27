@@ -1,0 +1,9 @@
+# A search matches a setting's key, its doc or its whole value; with none
+# it lists them all.
+input: { page: settings, params: { q: snapshotretention } }
+expect:
+  loaders:
+    settings_values: { rows: [{ key: snapshotRetentionDays }] }
+steps:
+  - params: { q: no such setting anywhere }
+    expect: { loaders: { settings_values: { rows: 0 } } }

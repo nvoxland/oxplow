@@ -1,0 +1,30 @@
+# Every setting is a row under its group, with where its value comes from,
+# the page holding its control and the request Ask puts in the agent's input.
+input: { page: settings, params: { q: snapshotRetentionDays } }
+expect:
+  loaders:
+    settings_values:
+      rows:
+        - key: snapshotRetentionDays
+          grp: Snapshots
+          source: default
+          ask: "Change the setting `snapshotRetentionDays` — File-snapshot retention in days; 0 disables pruning. It is now 7 (the default). Change it to: \n(Use oxplow.config.set; tell me what you changed.)"
+steps:
+  # `agents` also matches `testing`, whose doc names the agents.
+  - params: { q: agents }
+    expect:
+      loaders:
+        settings_values:
+          rows:
+            - { key: agents, grp: Agents, control_page: "oxplow:oxplow/page?page=settings#area=agents" }
+            - { key: testing, grp: Testing }
+  # Groups come in a fixed order: Agents, Snapshots, then the rest. "mini"
+  # is a word in one key of each of three groups.
+  - params: { q: mini }
+    expect:
+      loaders:
+        settings_values:
+          rows:
+            - { key: agentConfig, grp: Agents }
+            - { key: snapshotTurnBudgetMs, grp: Snapshots }
+            - { key: scripts, grp: Other }

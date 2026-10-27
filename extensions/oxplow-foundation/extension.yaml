@@ -55,6 +55,15 @@ intent:
     - name: stream-settings-start-from-the-saved-prompt
       input: { page: stream-settings, params: { stream: str1 } }
       expect: the stream's ref and an empty saved prompt
+    - name: settings-values-are-listed-by-group-with-their-source-and-ask
+      input: { page: settings, params: { q: snapshotRetentionDays } }
+      expect: a setting under its group with its source, its control's page and its Ask request
+    - name: settings-search-narrows-by-key-doc-or-value
+      input: { page: settings, params: { q: snapshotretention } }
+      expect: a search narrows the settings; one matching nothing leaves none
+    - name: comments-inbox-lists-threads-by-target-and-a-picked-one-reads-in-order
+      input: { page: comments, params: { stream_id: 1, days: "0" } }
+      expect: open threads under their target, a resolved one only when the filter reaches back, a picked thread as its messages in order
 # The agent harnesses and AI providers oxplow runs: core's
 # built-ins, many of each at once (every one declared here is active).
 implementations:
