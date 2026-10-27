@@ -2692,6 +2692,18 @@ fn loader_at<'r>(
     run: &'r oxplow_app::pages::runner::PageRun,
     name: &str,
 ) -> Option<&'r oxplow_app::pages::runner::LoaderRun> {
+    match name.split_once('/') {
+        None => run.loaders.get(name),
+        Some((embed, rest)) => embed_of(run, embed).and_then(|sub| loader_at(sub, rest)),
+    }
+}
+
+/// The run of the page node `id` of `run` embeds (an embed, a slot's
+/// mount, a replacement), in its view or its rail.
+fn embed_of<'r>(
+    run: &'r oxplow_app::pages::runner::PageRun,
+    id: &str,
+) -> Option<&'r oxplow_app::pages::runner::PageRun> {
     fn node<'r>(
         at: &'r oxplow_app::pages::runner::RunNode,
         id: &str,
@@ -2701,13 +2713,71 @@ fn loader_at<'r>(
         }
         at.children.iter().find_map(|c| node(c, id))
     }
-    match name.split_once('/') {
-        None => run.loaders.get(name),
-        Some((embed, rest)) => node(&run.tree, embed)
-            .or_else(|| run.rail.as_ref().and_then(|rail| node(rail, embed)))
-            .and_then(|n| n.embed.as_deref())
-            .and_then(|sub| loader_at(sub, rest)),
+    node(&run.tree, id)
+        .or_else(|| run.rail.as_ref().and_then(|rail| node(rail, id)))
+        .and_then(|n| n.embed.as_deref())
+}
+
+/// The run `path` (embed node ids, outermost first) leads to from `run`.
+fn embedded_at(
+    run: &oxplow_app::pages::runner::PageRun,
+    path: &[String],
+) -> Option<oxplow_app::pages::runner::PageRun> {
+    match path.split_first() {
+        None => Some(run.clone()),
+        Some((head, rest)) => embedded_at(embed_of(run, head)?, rest),
     }
+}
+
+/// The component node a `ui` step drives in `run`: the one `named` names
+/// (`<embed>/<node>` inside an embed, a mount or a replacement), else the
+/// page's first component node — or, with none, the first in a page it
+/// embeds. The embed path to the run holding it, that run, the node and
+/// its component.
+fn component_at(
+    run: &oxplow_app::pages::runner::PageRun,
+    named: Option<&str>,
+) -> Option<(
+    Vec<String>,
+    oxplow_app::pages::runner::PageRun,
+    String,
+    String,
+)> {
+    let inside = |embed: &str, rest: Option<&str>| {
+        let (mut path, inner, node, component) = component_at(embed_of(run, embed)?, rest)?;
+        path.insert(0, embed.to_string());
+        Some((path, inner, node, component))
+    };
+    if let Some((embed, rest)) = named.and_then(|n| n.split_once('/')) {
+        return inside(embed, Some(rest));
+    }
+    let own = run.page.nodes().into_iter().find_map(|n| {
+        let component = match &n.kind {
+            oxplow_app::pages::schema::NodeKind::Component { component, .. } => component.clone(),
+            oxplow_app::pages::schema::NodeKind::Viz { config, .. }
+                if config.viz == oxplow_app::extensions::Viz::Custom =>
+            {
+                config.custom.as_ref()?.component.clone()?
+            }
+            _ => return None,
+        };
+        (named.is_none_or(|id| id == n.id)).then(|| (n.id.clone(), component))
+    });
+    if let Some((node, component)) = own {
+        return Some((Vec::new(), run.clone(), node, component));
+    }
+    if named.is_some() {
+        return None;
+    }
+    fn embeds(at: &oxplow_app::pages::runner::RunNode, out: &mut Vec<String>) {
+        if at.embed.is_some() {
+            out.push(at.id.clone());
+        }
+        at.children.iter().for_each(|c| embeds(c, out));
+    }
+    let mut ids = Vec::new();
+    embeds(&run.tree, &mut ids);
+    ids.iter().find_map(|id| inside(id, None))
 }
 
 /// A page run's node ids (`<embed>/<id>` inside an embed) with their kinds.
@@ -3471,6 +3541,8 @@ fn node_actions(
 /// which the app's tab would make the page's params.
 #[derive(Default)]
 struct UiState {
+    /// The embeds the component's page is inside (`component_at`).
+    embed: Vec<String>,
     changed: bool,
     view: serde_json::Map<String, Value>,
     /// How many of the harness's records `view` has read.
@@ -3539,23 +3611,10 @@ impl PageAt<'_> {
             Ok(run) => run,
             Err(e) => return fail(report, format!("page `{page}`: {e}")),
         };
-        // The component the step drives, by its node.
+        // The component the step drives, by its node — in the page, or in
+        // a page it embeds (a replacement, a mount).
         let named = step.get("node").and_then(Value::as_str);
-        let found = run.page.nodes().into_iter().find_map(|n| {
-            let component = match &n.kind {
-                oxplow_app::pages::schema::NodeKind::Component { component, .. } => {
-                    component.clone()
-                }
-                oxplow_app::pages::schema::NodeKind::Viz { config, .. }
-                    if config.viz == oxplow_app::extensions::Viz::Custom =>
-                {
-                    config.custom.as_ref()?.component.clone()?
-                }
-                _ => return None,
-            };
-            (named.is_none_or(|id| id == n.id)).then(|| (n.id.clone(), component))
-        });
-        let Some((node, component)) = found else {
+        let Some((embed, run, node, component)) = component_at(&run, named) else {
             return fail(
                 report,
                 format!(
@@ -3604,7 +3663,14 @@ impl PageAt<'_> {
             Err(e) => return fail(report, e),
         };
         let ok = self
-            .drive(&harness, ext, (&params, steps), binds, label, report)
+            .drive(
+                &harness,
+                ext,
+                (&params, steps, &embed),
+                binds,
+                label,
+                report,
+            )
             .await;
         harness.close().await;
         ok
@@ -3615,7 +3681,7 @@ impl PageAt<'_> {
         &self,
         harness: &crate::component_harness::Harness,
         ext: &Extension,
-        (params, steps): (&Value, &[Value]),
+        (params, steps, embed): (&Value, &[Value], &[String]),
         binds: &mut Binds,
         label: &str,
         report: &mut TestReport,
@@ -3639,7 +3705,10 @@ impl PageAt<'_> {
             }
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         }
-        let mut state = UiState::default();
+        let mut state = UiState {
+            embed: embed.to_vec(),
+            ..UiState::default()
+        };
         for (index, item) in steps.iter().enumerate() {
             let at = format!("{label}: ui[{index}]");
             let item = match binds.substitute(item) {
@@ -3754,6 +3823,8 @@ impl PageAt<'_> {
                     self.ctx,
                 )
                 .await?;
+                let run = embedded_at(&run, &state.embed)
+                    .ok_or("the page no longer embeds the component's page")?;
                 harness
                     .op(json!({ "op": "update", "run": run }), wait)
                     .await?;
@@ -7758,6 +7829,86 @@ steps:
 "##,
         );
         let report = test_extension(root, "cards", false).await.unwrap();
+        assert_eq!(report.errors, Vec::<String>::new());
+    }
+
+    /// A `ui` step drives a component inside what the page embeds — here
+    /// the page another extension stands in with for a replaceable node —
+    /// the first one found, or the one `node: <embed>/<node>` names.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_ui_step_drives_a_component_a_replacement_stands_in_with() {
+        assert!(
+            crate::component_harness::shell().is_some(),
+            "no oxplow app to draw the harness: build it first (`bun run build:dev`)"
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        write(
+            root,
+            ".oxplow/extensions/host/extension.yaml",
+            "manifest: 2\nname: host\nintent:\n  purpose: Hosts.\n",
+        );
+        write(
+            root,
+            ".oxplow/extensions/host/pages/board.yaml",
+            "title: Board\nparams: [{ name: scope, default: all }, { name: thread_id }]\ndata:\n  own: { sql: \"SELECT 1 AS n\" }\nview: { id: cards, viz: table, from: own, replaceable: work_item.board }\n",
+        );
+        write(
+            root,
+            ".oxplow/extensions/lanes/extension.yaml",
+            "manifest: 2
+name: lanes
+intent:
+  purpose: Lanes.
+  examples:
+    - { name: drawn, input: { page: host/board }, expect: lanes }
+requires: [host]
+custom_components:
+  - { id: lanes, title: Lanes }
+ui:
+  replacements:
+    - { target: work_item.board, page: board }
+",
+        );
+        write(
+            root,
+            ".oxplow/extensions/lanes/pages/board.yaml",
+            "title: Lanes\nparams: [{ name: scope }, { name: thread_id }]\ndata:\n  items: { sql: \"SELECT title FROM v_work_item ORDER BY title\" }\nview: { id: board, component: { id: lanes } }\n",
+        );
+        write(
+            root,
+            ".oxplow/extensions/lanes/components/lanes/index.html",
+            "<!doctype html><html><head><title>lanes</title></head><body><ul id=\"list\"></ul>\
+             <script src=\"/component-lib/oxplow-component.js\"></script><script src=\"app.js\"></script></body></html>",
+        );
+        write(
+            root,
+            ".oxplow/extensions/lanes/components/lanes/app.js",
+            "oxplow.connect().then(function (c) {
+  var list = document.getElementById('list');
+  c.data.items.rows.forEach(function (r) {
+    var li = document.createElement('li');
+    li.textContent = r[0];
+    list.appendChild(li);
+  });
+});
+",
+        );
+        write(
+            root,
+            ".oxplow/extensions/lanes/fixtures/drawn.yaml",
+            "given: [{ command: oxplow.work_item.create, input: { title: First } }]
+when: { page: host/board }
+expect: { nodes: [{ id: cards/board }] }
+steps:
+  - ui:
+      - expect: { text: { li: First } }
+  - node: cards/board
+    ui:
+      - expect: { count: { li: 1 } }
+",
+        );
+        let report = test_extension(root, "lanes", false).await.unwrap();
         assert_eq!(report.errors, Vec::<String>::new());
     }
 

@@ -123,7 +123,10 @@ model the SQL reads and the command it runs. Prefer `answers:` on pages.
      these, are the page's params for its next run, as the app's tab does), `given`, `confirm: false`, `form: {
      submit: {..} }`, and `expect: { visible, count, text, title, actions,
      view_params, invoked, navigated, confirmed, forms, shown }` (waited for,
-     5 s). It needs the app (`OXPLOW_SHELL`, or the `oxplow` beside
+     5 s). It drives the page's first component, or `node: <id>`; a
+     component inside an embed, a slot mount or a replacement is
+     `node: <embed node>/<node>` (or the first found when the page has
+     none of its own). It needs the app (`OXPLOW_SHELL`, or the `oxplow` beside
      `$OXPLOW_BIN`); without it the report warns that the steps didn't run.
      Write the `ui` fixture first, then the component. A step can also act as a person would: `{ press: {
      action, node?, row?: { uri: $t.uri }, input? } }` presses one of the

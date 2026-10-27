@@ -3244,8 +3244,10 @@ seen). `init.view` carries both.
 ### Testing a component
 
 A page fixture's step `{ ui: [..], node? }` runs the page's custom
-component — its `node:`, else its first `component` / `viz: custom` node
-— **in the app's own webview, against the test's oxplow, with no app
+component — its `node:`, else its first `component` / `viz: custom` node,
+else the first in a page it embeds; `node: <embed>/<node>` names one inside
+an embed, a slot's mount or a replacement (`component_at`; on each re-run
+the harness is fed that embedded run again, `embedded_at`) — **in the app's own webview, against the test's oxplow, with no app
 around it** (`component_harness.rs`, `PageAt::ui`):
 
 - **The server** (loopback, per step) serves the harness's page (`/harness/`,
