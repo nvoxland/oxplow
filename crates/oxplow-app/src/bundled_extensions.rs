@@ -1186,48 +1186,6 @@ mod tests {
         assert!(waiting(rows).is_empty());
     }
 
-    /// Work handed to a thread with no agent session open there is the
-    /// person's move: Waiting on Me lists it until an agent is there.
-    #[tokio::test]
-    async fn waiting_on_me_lists_handoffs_no_agent_is_there_for() {
-        let f = crate::test_fixtures::services_with_effort().await;
-        let to =
-            crate::test_fixtures::new_thread(&f.svc, oxplow_domain::StreamId::new(1), "Docs").await;
-        f.svc
-            .commands
-            .run(
-                &oxplow_domain::Actor::Human,
-                crate::commands::handoff::SEND,
-                serde_json::json!({
-                    "from_thread": f.thread.to_string(),
-                    "to_thread": to.id.to_string(),
-                    "body": "the docs half is yours",
-                }),
-                false,
-            )
-            .await
-            .unwrap();
-        let handed = |rows: serde_json::Value| {
-            rows.as_array()
-                .unwrap()
-                .iter()
-                .filter(|r| r[0] == "Handed to a thread with no agent")
-                .map(|r| (r[1].clone(), r[3].clone()))
-                .collect::<Vec<_>>()
-        };
-        let rows = run_bundled_page(&f, "oxplow-bundled/waiting-on-me", &[]).await;
-        assert_eq!(
-            handed(rows),
-            vec![(
-                serde_json::json!("the docs half is yours"),
-                serde_json::json!("Docs")
-            )]
-        );
-        crate::test_fixtures::open_session(&f.svc, to.id).await;
-        let rows = run_bundled_page(&f, "oxplow-bundled/waiting-on-me", &[]).await;
-        assert!(handed(rows).is_empty());
-    }
-
     /// What Deviated: the effort's files outside the area its task names.
     #[tokio::test]
     async fn what_deviated_lists_files_outside_the_tasks_stated_area() {
@@ -1485,11 +1443,11 @@ mod tests {
         );
     }
 
-    /// The rail's Comments panel is a page: the stream's open
-    /// comments for the person and for the agent, each row and the header
-    /// opening the inbox.
+    /// The rail's Comments panel is a page (its rows are the
+    /// `comments-panel-counts-open-comments-by-who-acts` fixture): its body,
+    /// and the inbox the header opens.
     #[tokio::test]
-    async fn comments_is_a_panel_counting_open_comments_by_who_acts() {
+    async fn the_comments_panel_names_its_page_and_its_inbox() {
         let f = crate::test_fixtures::services_with_effort().await;
         let bundled = crate::extensions::load_extensions(f._dir.path())
             .into_iter()
@@ -1507,50 +1465,6 @@ mod tests {
                 Some("oxplow:oxplow/page?page=comments")
             )
         );
-        let run = |name: &'static str, input: serde_json::Value| {
-            let svc = f.svc.clone();
-            async move {
-                svc.commands
-                    .run(&oxplow_domain::Actor::Human, name, input, false)
-                    .await
-                    .unwrap()
-            }
-        };
-        for intent in ["note", "note", "followup", "note"] {
-            run(
-                crate::commands::comment::ADD,
-                serde_json::json!({
-                    "stream": "str1",
-                    "target": oxplow_domain::uri::build::wiki_uri("some-page"),
-                    "intent": intent,
-                    "body": "b",
-                }),
-            )
-            .await;
-        }
-        // The last note is resolved: it no longer counts.
-        let last = f
-            .svc
-            .sql
-            .query_sql("SELECT max(id) FROM v_comment", vec![], None)
-            .await
-            .unwrap();
-        let last = serde_json::to_value(&last.rows[0][0]).unwrap();
-        run(
-            crate::commands::comment::UPDATE,
-            serde_json::json!({ "comment": format!("cmt{last}").to_string(), "status": "resolved" }),
-        )
-        .await;
-        let rows = run_bundled_page(&f, "oxplow-bundled/comments-panel", &[("stream_id", 1)]).await;
-        assert_eq!(
-            rows,
-            serde_json::json!([
-                ["For me", 2, "oxplow:oxplow/page?page=comments"],
-                ["For the agent", 1, "oxplow:oxplow/page?page=comments"]
-            ])
-        );
-        let none = run_bundled_page(&f, "oxplow-bundled/comments-panel", &[("stream_id", 2)]).await;
-        assert_eq!(none, serde_json::json!([]));
     }
 
     /// The rail's Work panel is a page: per thread, what's in
@@ -1589,8 +1503,11 @@ mod tests {
         assert_eq!(run(f.svc.clone()).await, Vec::<String>::new());
     }
 
+    /// The rail's Work panel is a page (its rows are the
+    /// `work-panel-groups-a-threads-work` fixture): its body, its collapsed
+    /// line, its count and the page its header opens.
     #[tokio::test]
-    async fn work_is_a_panel_grouping_a_threads_work() {
+    async fn the_work_panel_names_its_pages() {
         let f = crate::test_fixtures::services_with_effort().await;
         let bundled = crate::extensions::load_extensions(f._dir.path())
             .into_iter()
@@ -1615,91 +1532,6 @@ mod tests {
                 Some("oxplow-bundled/work-count"),
                 Some("oxplow:oxplow/page?page=tasks")
             )
-        );
-        let run = |name: &'static str, input: serde_json::Value| {
-            let svc = f.svc.clone();
-            async move {
-                svc.commands
-                    .run(&oxplow_domain::Actor::Human, name, input, false)
-                    .await
-                    .unwrap_or_else(|e| panic!("{name}: {e:?}"))
-            }
-        };
-        let thread = f.thread.to_string();
-        for (title, state) in [("Next up", "todo"), ("Shipped", "done")] {
-            run(
-                "oxplow.work_item.create",
-                serde_json::json!({ "title": title, "state": state, "thread": thread }),
-            )
-            .await;
-        }
-        // As boot does: its models, its event types, its commands.
-        crate::test_fixtures::activate_with_problems(&f.svc).await;
-        crate::test_fixtures::activate(&f.svc).await;
-        let tid = f.thread.value();
-        // (group, title) per row, in display order.
-        let lines = |rows: serde_json::Value| -> Vec<(String, String)> {
-            rows.as_array()
-                .unwrap()
-                .iter()
-                .map(|r| {
-                    (
-                        r[0].as_str().unwrap().to_string(),
-                        r[1].as_str().unwrap().to_string(),
-                    )
-                })
-                .collect()
-        };
-        assert_eq!(
-            lines(run_bundled_page(&f, "oxplow-bundled/work", &[("thread_id", tid)]).await),
-            vec![
-                // The fixture's effort, linked to nothing, by its own title.
-                ("In progress".into(), "Work in progress".into()),
-                ("Ready".into(), "Next up".into()),
-                ("Finished".into(), "Shipped".into()),
-            ]
-        );
-        assert_eq!(
-            run_bundled_page(&f, "oxplow-bundled/work-count", &[("thread_id", tid)]).await,
-            serde_json::json!([[2]]),
-            "the active item and the ready one; finished isn't counted"
-        );
-        // Clearing hides what finished before it.
-        run(
-            "oxplow.work.clear_finished",
-            serde_json::json!({ "thread_id": f.thread.value() }),
-        )
-        .await;
-        assert_eq!(
-            lines(run_bundled_page(&f, "oxplow-bundled/work", &[("thread_id", tid)]).await)
-                .into_iter()
-                .map(|(g, _)| g)
-                .collect::<Vec<_>>(),
-            vec!["In progress".to_string(), "Ready".to_string()]
-        );
-
-        // An effort no item names shows too: in progress while open, then
-        // finished.
-        let opened = run(
-            "oxplow.effort.open",
-            serde_json::json!({ "thread": thread, "title": "Tidy the shell scripts" }),
-        )
-        .await;
-        let effort = opened.result["effort"].as_str().unwrap().to_string();
-        let work = lines(run_bundled_page(&f, "oxplow-bundled/work", &[("thread_id", tid)]).await);
-        assert!(
-            work.contains(&("In progress".into(), "Tidy the shell scripts".into())),
-            "{work:?}"
-        );
-        run(
-            "oxplow.effort.close",
-            serde_json::json!({ "effort": effort }),
-        )
-        .await;
-        let work = lines(run_bundled_page(&f, "oxplow-bundled/work", &[("thread_id", tid)]).await);
-        assert!(
-            work.contains(&("Finished".into(), "Tidy the shell scripts".into())),
-            "{work:?}"
         );
     }
 

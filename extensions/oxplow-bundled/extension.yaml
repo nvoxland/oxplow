@@ -76,6 +76,18 @@ intent:
     - name: reasoning-no-lists
       input: { effect: store-reasoning, event: { type: contribution.job.completed } }
       expect: a JSON object with neither list is skipped, saying so
+    - name: waiting-on-me-lists-handoffs-no-agent-is-there-for
+      input: { page: oxplow-bundled/waiting-on-me }
+      expect: a handoff to a thread with no agent session, gone once an agent session is open there
+    - name: comments-panel-counts-open-comments-by-who-acts
+      input: { page: oxplow-bundled/comments-panel, params: { stream_id: 1 } }
+      expect: open notes for the person and followups for the agent, a resolved one not counted, none for another stream
+    - name: work-panel-groups-a-threads-work
+      input: { page: oxplow-bundled/work, params: { thread_id: 1 } }
+      expect: in progress, ready and finished under headings; clearing hides the finished; an effort no item names shows
+    - name: work-count-counts-the-active-item-and-the-ready-ones
+      input: { page: oxplow-bundled/work-count, params: { thread_id: 1 } }
+      expect: the active item and the ready ones, not the finished
 # oxplow's default work list and effort policy: built-ins of core's,
 # declared here so they are an extension's like any other. Disabled, both
 # fall to none. Snapshots can't be none: their default is core's own (it
