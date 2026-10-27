@@ -3639,16 +3639,29 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             .trim_end_matches(".yml")
             .to_string();
         let page_rel = format!("{rel}/pages/{file}");
-        let parsed = files
-            .read(&format!("pages/{file}"))
+        let text = files.read(&format!("pages/{file}"));
+        let parsed = text
+            .as_deref()
             .ok_or_else(|| "unreadable".to_string())
             .and_then(|t| {
-                crate::pages::schema::parse_page(name, &ext.namespace, &slug, &page_rel, &t)
+                crate::pages::schema::parse_page(name, &ext.namespace, &slug, &page_rel, t)
             });
         match parsed {
             Ok(mut page) => {
                 page.origin.bundled = origin == "bundled";
                 qualify_page_refs(&mut page);
+                for param in crate::pages::checks::launcher_unfilled_params(&page) {
+                    ext.warnings.push(at(
+                        &page_rel,
+                        text.as_deref()
+                            .and_then(|t| entry_line(t, "params", "name", &param)),
+                        format!(
+                            "param `{param}` opens empty from the launcher — fix: give it a `default`, \
+                             a `filter` or `selection` role, or options from a loader (`options_from`); \
+                             or hide the page (`hidden: true`) and open it from a slot that fills it"
+                        ),
+                    ));
+                }
                 ext.warnings.extend(
                     crate::pages::checks::layout_warnings(&page)
                         .into_iter()
@@ -5475,6 +5488,7 @@ async fn prepare(
             }
         }
     }
+    check_collector_inputs(layer, ext, read).await;
     let pages = crate::pages::checks::dry_run_all(layer, ext).await;
     for page in ext.page_files.clone() {
         let Some(loaders) = pages.get(&page.slug) else {
@@ -5495,6 +5509,51 @@ async fn prepare(
         }
     }
     Prepared { pages, overlay }
+}
+
+/// A collector's `input` query reads published views only: a physical table
+/// is no part of the contract an extension reads through, and the read refuses
+/// it. Named at its collector's line in `extension.yaml`.
+async fn check_collector_inputs(
+    layer: &crate::sql_gateway::SqlGateway,
+    ext: &mut Extension,
+    read: &(dyn Fn(&str) -> Option<String> + Sync),
+) {
+    let file = format!("{}/extension.yaml", ext.path);
+    let manifest = read("extension.yaml").unwrap_or_default();
+    for c in ext.collectors.clone() {
+        let Some(input) = &c.input else { continue };
+        let line = manifest_v2::entry_line(&manifest, "collectors", "id", &c.id);
+        let problem = match oxplow_db::models::substitute_config(
+            &input.sql,
+            ext.default_configuration().as_ref(),
+        ) {
+            Err(e) => Some(e.to_string().replacen("invalid value: ", "", 1)),
+            Ok(sql) => match layer.check(&sql).await {
+                Err(e) => Some(e.to_string().replacen("invalid value: ", "", 1)),
+                Ok(reads) => {
+                    let tables: Vec<&String> = reads
+                        .tables
+                        .iter()
+                        .filter(|t| !t.starts_with("temp."))
+                        .collect();
+                    (!tables.is_empty()).then(|| {
+                        format!(
+                            "reads {tables:?}, which {} not published models — fix: read the `v_` views (`oxplow_catalog` lists them)",
+                            if tables.len() == 1 { "is" } else { "are" }
+                        )
+                    })
+                }
+            },
+        };
+        if let Some(problem) = problem {
+            ext.errors.push(manifest_v2::at(
+                &file,
+                line,
+                format!("collector `{}` input: {problem}", c.id),
+            ));
+        }
+    }
 }
 
 /// What a viz names that its loader's columns lack: a role block's
@@ -8746,6 +8805,49 @@ commands:
         assert!(page_of(&v, "p").is_some());
     }
 
+    /// A page in the launcher (a `category`, not hidden) opens with no
+    /// params given, so one without a default, a filter or selection role,
+    /// options from a loader, or a viewer's `stream_id` / `thread_id` /
+    /// `head_sha` opens empty: the check names it at its line.
+    #[test]
+    fn a_launcher_page_with_a_param_nobody_fills_gets_a_warning() {
+        let page = |head: &str, params: &str| {
+            viz_page(
+                &format!("category: Work\nparams:\n{params}{head}"),
+                "SELECT :effort_id || :state || :q || :thread_id AS a",
+                "",
+            )
+        };
+        let params = "  - { name: effort_id, label: Effort }\n  - { name: state, default: open }\n  - { name: q, role: filter }\n  - { name: thread_id }\n";
+        let (_d, ext) = load_x(&[("p", &page("", params))], "");
+        let warned: Vec<&String> = ext
+            .warnings
+            .iter()
+            .filter(|w| w.contains("opens empty"))
+            .collect();
+        assert_eq!(warned.len(), 1, "{:?}", ext.warnings);
+        assert!(
+            warned[0].contains("/pages/p.yaml:4: param `effort_id` opens empty from the launcher"),
+            "{}",
+            warned[0]
+        );
+        assert!(warned[0].contains(" — fix: "), "{}", warned[0]);
+        // Hidden, or in no category, it isn't opened from the launcher.
+        let (_d, ext) = load_x(&[("p", &page("hidden: true\n", params))], "");
+        assert!(
+            ext.warnings.iter().all(|w| !w.contains("opens empty")),
+            "{:?}",
+            ext.warnings
+        );
+        let uncategorized = viz_page(
+            &format!("params:\n{params}"),
+            "SELECT :effort_id || :state || :q || :thread_id AS a",
+            "",
+        );
+        let (_d, ext) = load_x(&[("p", &uncategorized)], "");
+        assert!(ext.warnings.iter().all(|w| !w.contains("opens empty")));
+    }
+
     /// What the app ships follows its own page-layout rules.
     #[test]
     fn the_bundled_pages_have_no_layout_warning() {
@@ -8758,6 +8860,40 @@ commands:
             assert!(layout.is_empty(), "{}: {layout:#?}", e.name);
         }
     }
+    /// A check names each query that reads a physical table (a page's
+    /// loader, an advisory, a collector's `input`): only the published
+    /// views are the extension's to read, and a table is not one of them.
+    #[tokio::test]
+    async fn a_check_names_a_query_that_reads_a_table() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            ".oxplow/extensions/tbl/extension.yaml",
+            "manifest: 2\nname: tbl\nintent:\n  purpose: test\nadvisories:\n  - id: peek\n    on: turn-end\n    query: SELECT title AS message FROM work_item\ncollectors:\n  - id: sum\n    runtime: starlark\n    entry: sum.star\n    input: SELECT title FROM work_item\n    entities:\n      - { name: notes, key: n, columns: { n: int } }\n",
+        );
+        write(
+            dir.path(),
+            ".oxplow/extensions/tbl/sum.star",
+            "def transform(x):\n    return {\"notes\": []}\n",
+        );
+        write(
+            dir.path(),
+            ".oxplow/extensions/tbl/pages/all.yaml",
+            &viz_page("title: All\n", "SELECT title FROM work_item", ""),
+        );
+        let e = validate_extension(&layer().await, &cat(), dir.path(), "tbl", None)
+            .await
+            .unwrap();
+        for what in ["advisory peek", "loader `q`", "collector `sum` input"] {
+            let found = e
+                .errors
+                .iter()
+                .find(|m| m.contains(what) && m.contains("`work_item` is a physical table"));
+            let found = found.unwrap_or_else(|| panic!("{what}: {:?}", e.errors));
+            assert!(found.contains("read v_work_item"), "{found}");
+        }
+    }
+
     /// Validation checks every block's columns, not only the chart's.
     #[tokio::test]
     async fn validate_checks_structure_columns_exist() {

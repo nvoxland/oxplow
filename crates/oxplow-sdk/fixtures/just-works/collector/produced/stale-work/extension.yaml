@@ -25,16 +25,15 @@ collectors:
     entry: collectors/stale_tasks.star
     input: |
       WITH touched AS (
-        SELECT CAST(substr(w.ref, 21) AS INTEGER) AS id, w.title,
+        SELECT CAST(substr(w.uri, 21) AS INTEGER) AS id, w.title,
                w.native_state AS status,
                json_extract(w.native, '$.priority') AS priority,
                w.thread_id, th.stream_id,
                max(w.updated_at,
-                   coalesce((SELECT max(c.last_activity_at) FROM v_comment c
-                             WHERE c.target_kind = 'work_item'
-                               AND c.target_id = substr(w.ref, 11)), ''),
+                   coalesce((SELECT max(c.created_at) FROM v_work_item_comment c
+                             WHERE c.uri = w.uri), ''),
                    coalesce((SELECT max(coalesce(e.ended_at, e.started_at)) FROM v_effort e
-                             WHERE e.work_item = w.ref), '')) AS last_touched_at
+                             WHERE e.work_item = w.uri), '')) AS last_touched_at
         FROM v_work_item w
         LEFT JOIN v_thread th ON th.id = w.thread_id
         WHERE w.state IN ('todo', 'in_progress', 'blocked')

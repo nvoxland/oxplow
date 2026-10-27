@@ -181,6 +181,15 @@ intent:
     - name: effort-summary-reads-an-effort-at-a-glance
       input: { page: effort-summary }
       expect: one effort at a glance
+    - name: the-test-outcome-says-how-an-efforts-tests-went
+      input: { sql: v_fact }
+      expect: four counts over an effort's runs, and the time from the first red to the next green
+    - name: asserted-failures-have-no-identity-so-distinct-falls-back-to-the-peak
+      input: { sql: v_fact }
+      expect: a run with only a failure count names no test, so distinct falls back to the peak
+    - name: snapshots-lists-newest-first-with-trigger-and-budget
+      input: { page: snapshots }
+      expect: snapshots come newest first, each with its parent, trigger and whether it ran over budget
 # The agent harnesses and AI providers oxplow runs: core's
 # built-ins, many of each at once (every one declared here is active).
 implementations:

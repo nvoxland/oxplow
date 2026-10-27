@@ -1,0 +1,21 @@
+# A change's file that was dormant 90 days or more (or never touched) is a
+# co-change surprise. The partner half — a file whose usual partners are
+# missing — reads `co_change_pair`, a materialized model filled by a
+# recompute the throwaway doesn't start yet, so it has no rows here.
+given:
+  - observe: { commit: { sha: ab0, at: "2026-10-22T00:00:00Z", files: [{ path: src/a.rs, status: modified }] } }
+  - observe: { commit: { sha: old, at: "2026-04-10T00:00:00Z", files: [{ path: src/c.rs, status: modified }] } }
+  - observe:
+      change:
+        kind: working
+        target: ""
+        files:
+          - { path: src/a.rs, additions: 1 }
+          - { path: src/c.rs, additions: 1 }
+          - { path: src/d.rs, status: added, additions: 1 }
+when:
+  sql: SELECT path, reason, dormant_days >= 90 AS long_dormant FROM v_oxplow_bundled_change_co_change ORDER BY path
+expect:
+  rows:
+    - { path: src/c.rs, reason: dormant, long_dormant: 1 }
+    - { path: src/d.rs, reason: dormant, long_dormant: 1 }

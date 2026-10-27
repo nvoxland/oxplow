@@ -1,0 +1,23 @@
+# When an effort finishes, its test outcome is four counts over the runs it
+# recorded — red at the close, the peak, the distinct failing tests, the red
+# runs — and the time from the first red to the next green. A record-only run
+# (a run with no report) counts for none of it.
+given:
+  - { command: oxplow.effort.open, input: { thread: thr1 } }
+  - observe: { test_run: { effort: eff1, at: "2026-01-01T00:00:01Z", cases: [{ name: a, status: failed }, { name: b, status: failed }, { name: c, status: passed }] } }
+  - observe: { test_run: { effort: eff1, at: "2026-01-01T00:00:20Z", producer: test-run, cases: [{ name: a, status: failed }, { name: b, status: failed }, { name: c, status: failed }] } }
+  - observe: { test_run: { effort: eff1, at: "2026-01-01T00:00:31.500Z", cases: [{ name: a, status: failed }, { name: b, status: passed }] } }
+  - observe: { test_run: { effort: eff1, at: "2026-01-01T00:01:01.250Z", cases: [{ name: a, status: passed }] } }
+  - observe: { collect: { effort: eff1, collectors: [oxplow.effort_test_outcome] } }
+when:
+  sql: SELECT measure_key, dims_json, subject, value, numerator, denominator FROM v_fact WHERE measure_key IN ('oxplow.effort_test_outcome', 'oxplow.effort_time_to_green') ORDER BY measure_key, dims_json
+expect:
+  rows:
+    - { measure_key: oxplow.effort_test_outcome, dims_json: '{"oxplow.tests_stat":"at_close"}', subject: "oxplow:oxplow/effort?id=eff1", value: 0.0, numerator: 0.0, denominator: 1.0 }
+    - { measure_key: oxplow.effort_test_outcome, dims_json: '{"oxplow.tests_stat":"distinct_failed"}', value: 2.0, numerator: 2.0, denominator: 1.0 }
+    - { measure_key: oxplow.effort_test_outcome, dims_json: '{"oxplow.tests_stat":"peak"}', value: 2.0, numerator: 2.0, denominator: 1.0 }
+    - { measure_key: oxplow.effort_test_outcome, dims_json: '{"oxplow.tests_stat":"red_runs"}', value: 2.0, numerator: 2.0, denominator: 1.0 }
+    - { measure_key: oxplow.effort_time_to_green, subject: "oxplow:oxplow/effort?id=eff1", value: 60250.0, numerator: 60250.0, denominator: 1.0 }
+steps:
+  - when: { sql: "SELECT branch IS NOT NULL AS has_branch FROM v_fact WHERE measure_key = 'oxplow.effort_test_outcome' LIMIT 1" }
+    expect: { rows: [{ has_branch: 1 }] }

@@ -1,0 +1,17 @@
+# When an effort finishes, the collector records the lines its change added
+# and deleted as one fact, over the change's rows.
+given:
+  - { command: oxplow.effort.open, input: { thread: thr1 } }
+  - observe:
+      change:
+        kind: effort
+        target: eff1
+        files:
+          - { path: src/a.rs, additions: 10, deletions: 4 }
+          - { path: src/b.rs, status: added, additions: 6 }
+  - observe: { collect: { effort: eff1, collectors: [oxplow_bundled.effort_churn] } }
+when:
+  sql: SELECT value FROM v_fact WHERE measure_key = 'oxplow_bundled.effort_churn_lines'
+expect:
+  rows:
+    - { value: 20.0 }

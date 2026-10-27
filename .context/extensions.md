@@ -560,7 +560,14 @@ the user guide is `docs/guide/pages.md`.
   `pages::checks::layout_warnings` adds warnings, never errors: more than
   six filters, a `choice` with more than twelve options, a description
   over 200 characters, more than eight sections or eight table columns, a
-  param nothing reads. Load checks also cover an unknown `icon`, a page named by `options_from`,
+  param nothing reads. A page in the launcher (a `category`, not
+  `hidden`) is also warned, at the param's line, for a param nothing
+  fills in when it opens there (`launcher_unfilled_params`: no `default`,
+  `options_from`, filter or selection role, and not the viewer's
+  `stream_id`, `thread_id` or `head_sha`). A collector's `input` query is
+  dry-run as a page's loaders and an advisory's query are, so one that
+  reads a physical table (or doesn't compile) is an error at the
+  collector's line. Load checks also cover an unknown `icon`, a page named by `options_from`,
   `expand` or a form field's `from` that is not in `pages/`, a `component`
   node or `viz: custom` naming a component the extension doesn't declare,
   a `replaceable` target that is not a replaceable component
@@ -2060,8 +2067,14 @@ a `KINDS` entry and a `dispatch` arm. The forms:
   the calls and the end (the checkpoint counts the turn's writing tools
   from `v_tool_call`) and settled after it (the checkpoint, then what reacts
   to it). The other kinds: `event` (logged and delivered; effects react),
-  `evidence` (`EffortEvidenceStore::replace`) and `commit`
-  (`SqliteGitStore::upsert_commit`). A step's `when: { sql }` reads the result, since a `steps` entry
+  `evidence` (`EffortEvidenceStore::replace`), `commit`
+  (`SqliteGitStore::upsert_commit`), `change` (a change's files and
+  functions, `SqliteChangeStore::store_results`; it never runs a deep
+  analysis, and the materialized models over the commit index, like
+  `co_change_pair`, fill on a recompute the throwaway doesn't start),
+  `test_run` (a `tests` capture and its `oxplow.test_case` facts through
+  `SqliteFactStore::record_facts`) and `snapshot` (one take in the
+  snapshot log, `SqliteSnapshotStore::record_take`). A step's `when: { sql }` reads the result, since a `steps` entry
   of a command, event or sql fixture takes the earlier kind in `KINDS`.
 - `when: { sql, params? }`, `expect: { rows, columns? }` — a read-only query
   over the published models, run as a page loader would (an inline page of

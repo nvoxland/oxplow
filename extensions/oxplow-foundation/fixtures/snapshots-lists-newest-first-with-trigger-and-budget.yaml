@@ -1,0 +1,17 @@
+# The stream's snapshot log, newest first: each take's parent, what
+# triggered it and whether it ran over its time budget.
+given:
+  - observe: { snapshot: { trigger: startup, elapsed_ms: 5, files: [{ path: a.txt, hash: h1 }, { path: b.txt, hash: h1 }, { path: c.txt, hash: h1 }] } }
+  - observe: { snapshot: { trigger: quiet, elapsed_ms: 900, budget_ms: 500, files: [{ path: a.txt, hash: h2 }, { path: b.txt, hash: h1 }, { path: c.txt, hash: h1 }, { path: d.txt, hash: h2 }] } }
+when: { page: oxplow-foundation/snapshots, params: { limit: 5 } }
+expect:
+  loaders:
+    snapshots:
+      rows:
+        - { trigger: quiet, over_budget: 1, elapsed_ms: 900, file_count: 4 }
+        - { trigger: startup, over_budget: 0, elapsed_ms: 5, file_count: 3, parent_snapshot_id: null }
+steps:
+  - params: { limit: 1 }
+    expect: { loaders: { snapshots: { rows: [{ trigger: quiet }] } } }
+  - when: { sql: "SELECT (SELECT parent_snapshot_id FROM v_snapshot_op WHERE trigger = 'quiet') = (SELECT snapshot_id FROM v_snapshot_op WHERE trigger = 'startup') AS chained" }
+    expect: { rows: [{ chained: 1 }] }
