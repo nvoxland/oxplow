@@ -331,8 +331,8 @@ sibling, otherwise it sits at the slot. A **panel**'s parts (`body`,
 (a badge page declares `badge` or `alert`; a stream or thread panel's
 pages take `stream_id` / `thread_id`), and a **replacement** names a
 page (`ui.replacements: [{ target, page, version }]`,
-`UiReplacement.page_id`), checked against the same props contract. Which replacement shows is still decided in the window
-(`useReplacement`: the item's provider and the person's choice). `dirty_loaders` is what a change makes run again: loaders that
+`UiReplacement.page_id`), checked against the same props contract. Which replacement shows is decided by the page run
+(`PageRunner::replacement`: the person's choice, the only candidate, the item's provider), which runs it as the node's embed. `dirty_loaders` is what a change makes run again: loaders that
 read a changed model (a command loader's are its `reads`) or bind a
 changed param, and everything downstream of them.
 
@@ -489,7 +489,7 @@ params, `pageViewKeys`; a change is the rail's `onChange`), as a
 replacement's shares its target's. `PageRail` lists the filter
 params (`ParamList`; a change is `setParams`) and draws `run.rail`.
 `PageTree` draws a `RunNode` tree (`compact` in a rail panel): a node
-with `replaceable: <target>` is wrapped in `Replaceable`; stack → `Section`s, grid → `TileGrid`
+another extension's page stands in for (`replacedBy`) draws its embed in `Replaced`; stack → `Section`s, grid → `TileGrid`
 at each child's `size`, switch → its one child, viz → `VizView`
 (`viz/VizView.tsx`, the one component that draws a viz) over
 `nodeRunOf` (`viz/nodeRun.ts`, the server's `node_run`), embed → a

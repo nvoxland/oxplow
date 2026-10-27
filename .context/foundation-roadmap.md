@@ -718,7 +718,7 @@ Acceptance: A custom task view works with the existing provider, and a non-task 
 
 Validation: Build a custom task detail/board using two providers and a separate triage form using namespaced state. Exercise editing, reorder, navigation, invalid input and permission denial.
 
-Starting points: `crates/oxplow-app/src/extensions/replacements.rs`, `apps/desktop/src/viz/useReplacement.ts`, `apps/desktop/src/viz/CustomComponentViz.tsx`, `crates/oxplow-app/src/extensions/schema.rs`.
+Starting points: `crates/oxplow-app/src/extensions/replacements.rs`, `crates/oxplow-app/src/pages/runner.rs` (`replacement`), `apps/desktop/src/viz/CustomComponentViz.tsx`, `crates/oxplow-app/src/extensions/schema.rs`.
 
 Prerequisites: Provide namespaced extension state and configuration services.
 

@@ -301,8 +301,8 @@ objects into the content-identity space for `resolve_for_compare`.
 ## Conformance
 
 The VCS pages also render complete with no extensions and every flag
-off — the UI half of conformance is `CapabilityUi.smoke.test.tsx`
-([work-items.md](./work-items.md), "Conformance"). The commit and Uncommitted pages are
+off — the UI half of conformance was `CapabilityUi.smoke.test.tsx`, now
+removed ([work-items.md](./work-items.md), "Conformance"). The commit and Uncommitted pages are
 foundation documents (their mounts are `oxplow-foundation/commit.sections` and
 `oxplow-foundation/uncommitted.sections`); Git History is a declared page with a
 replaceable part.

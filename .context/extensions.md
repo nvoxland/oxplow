@@ -2705,8 +2705,10 @@ page's loaders (the Tasks page's `row` loader derives `scope` from its
 `show` param), only the props the replacement page declares — and
 `RunNode.replaced_by` names the extension; else the node's own content
 runs. So a fixture of the host page sees the replacement
-(`loaders: { <node>/<loader> }`). The desktop's `Replaceable` still decides
-on its own (`useReplacement`) until it draws the run's embed. The page's params must cover the contract so
+(`loaders: { <node>/<loader> }`). The desktop draws what the run decided
+(`PageTree` → `components/Replaced.tsx`: the embed under a badge, sharing
+the view its contract lists; a replacement that didn't run shows oxplow's
+own and why). The page's params must cover the contract so
 the props exist; a page with a `replaceable` node is not warned about
 params it passes on.
 

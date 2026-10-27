@@ -2,10 +2,12 @@ import { afterAll, afterEach, expect, mock, test } from "bun:test";
 import { cleanup, render, waitFor } from "@testing-library/react";
 
 import { configValueResult, readsSettings } from "../configValuesTestSupport.js";
-import { decl, fakePage, fakePageRuns, fakeRun, loader, node } from "./testing/fakeRun.js";
+import { fakePage, fakeRun, loader, node } from "./testing/fakeRun.js";
+import type { PageRun, RunNode } from "../tauri-bridge/generated/bindings.js";
 
-// A page file's node marked `replaceable: <target>` is a viz part's
-// equal: oxplow's own (the node) unless an extension replaces the target.
+// A page file's node marked `replaceable: <target>` draws what the page run
+// decided (`RunNode.replacedBy`, the run's embed): another extension's page
+// in its place, badged, or oxplow's own.
 
 const realApi = await import("../api.js");
 const pristineApi = { ...realApi };
@@ -28,82 +30,37 @@ afterAll(() => {
   mock.module("../api.js", () => pristineApi);
 });
 
-const run = () => {
-  const page = fakePage({ ...node.viz("cards", "cards", { columns: [{ key: "title" } as never] }), replaceable: "work_item.board" } as never, { loaders: [decl("cards")] });
-  return fakeRun(page, { params: { scope: "all" }, loaders: { cards: loader(["title"], [["our card"]]) } });
-};
+/** A page whose `cards` node is replaceable (the Board), its own rows
+ *  `own`; the run's tree as `tree` says. */
+function host(tree: Partial<RunNode>): PageRun {
+  const page = fakePage({ ...node.viz("cards", "own"), replaceable: "work_item.board" });
+  const run = fakeRun(page, { loaders: { own: loader(["title"], [["oxplow's own row"]]) } });
+  return { ...run, tree: { ...run.tree, ...tree } as RunNode };
+}
 
-test("with nothing replacing it, the node itself shows", async () => {
-  extensions = [{ name: "oxplow-foundation", enabled: true, pages: [], ui: { slots: [], commands: [], decorators: [], replacements: [] } }];
-  const view = render(<PageTree run={run()} runId="run-1" />);
-  await waitFor(() => expect(view.container.textContent).toContain("our card"));
+/** The page another extension stands in with, as the run ran it. */
+const lanes = fakeRun(fakePage(node.viz("lanes", "rows"), { id: "beta/lanes", extension: "beta", slug: "lanes" }), {
+  loaders: { rows: loader(["lane"], [["Doing"]]) },
 });
 
-test("an extension's page replaces it, run with the page's params", async () => {
-  extensions = [
-    {
-      name: "x",
-      enabled: true,
-      pages: [],
-      pages: [],
-      ui: {
-        slots: [],
-        commands: [],
-        decorators: [],
-        replacements: [{ id: "x/work_item.board", extension: "x", target: "work_item.board", capability: "work_items", boundToProvider: false, page: "x/board", label: "board", version: 1, view: [] }],
-      },
-    },
-  ];
-  // The replacement runs on the window's page runs; the node's own tree
-  // runs nothing new.
-  const theirs = fakeRun(fakePage(node.viz("theirs", "theirs", { columns: [{ key: "t" } as never] }), { id: "x/board", loaders: [decl("theirs")] }), {
-    loaders: { theirs: loader(["t"], [["their card"]]) },
-  });
-  const { PageRunsContext } = await import("../pageRuns.js");
-  const fake = fakePageRuns(theirs);
-  const view = render(
-    <PageRunsContext.Provider value={fake.runs}>
-      <PageTree run={run()} runId="run-1" />
-    </PageRunsContext.Provider>,
-  );
-  await waitFor(() => expect(view.getByTestId("replacement-work_item.board").textContent).toContain("their card"));
-  expect(view.container.textContent).not.toContain("our card");
-  expect(fake.calls.open).toEqual([{ page: "x/board", params: { scope: "all" }, streamId: null, threadId: null }]);
+test("a node the run says another extension stands in for draws that run, badged", () => {
+  const { container, getByTestId } = render(<PageTree run={host({ replacedBy: "beta", embed: lanes })} runId="run-1" />);
+  expect(getByTestId("replacement-badge").textContent).toBe("replaced by beta");
+  // Drawn as an embed: its nodes under the replaced node's id.
+  expect(container.querySelector('[data-node="cards/lanes"]')!.textContent).toContain("Doing");
+  expect(container.textContent).not.toContain("oxplow's own row");
 });
 
-test("a prop the page's params don't hold comes from its loaders' first row, as an embed's does", async () => {
-  extensions = [
-    {
-      name: "x",
-      enabled: true,
-      pages: [],
-      pageFiles: [{ id: "x/board", params: [{ name: "scope" }, { name: "show" }] }],
-      ui: {
-        slots: [],
-        commands: [],
-        decorators: [],
-        replacements: [{ id: "x/work_item.board", extension: "x", target: "work_item.board", capability: "work_items", boundToProvider: false, page: "x/board", label: "board", version: 1, view: [] }],
-      },
-    },
-  ];
-  const theirs = fakeRun(fakePage(node.viz("theirs", "theirs", { columns: [{ key: "t" } as never] }), { id: "x/board", loaders: [decl("theirs")] }), {
-    loaders: { theirs: loader(["t"], [["their card"]]) },
-  });
-  const { PageRunsContext } = await import("../pageRuns.js");
-  const fake = fakePageRuns(theirs);
-  // The page holds `show`; its `row` loader derives the contract's `scope`.
-  const page = fakePage({ ...node.viz("cards", "cards", { columns: [{ key: "title" } as never] }), replaceable: "work_item.board" } as never, {
-    loaders: [decl("row"), decl("cards")],
-  });
-  const hosted = fakeRun(page, {
-    params: { show: "stream", scope: null },
-    loaders: { row: loader(["scope"], [["stream"]]), cards: loader(["title"], [["our card"]]) },
-  });
-  const view = render(
-    <PageRunsContext.Provider value={fake.runs}>
-      <PageTree run={hosted} runId="run-1" />
-    </PageRunsContext.Provider>,
+test("one whose page couldn't run shows oxplow's own, and says why", () => {
+  const { getByTestId, container } = render(
+    <PageTree run={host({ replacedBy: "beta", embed: null, error: "page beta/lanes is gone" })} runId="run-1" />,
   );
-  await waitFor(() => expect(view.getByTestId("replacement-work_item.board").textContent).toContain("their card"));
-  expect(fake.calls.open).toEqual([{ page: "x/board", params: { show: "stream", scope: "stream" }, streamId: null, threadId: null }]);
+  expect(getByTestId("replacement-fallback").textContent).toContain("couldn't load: page beta/lanes is gone.");
+  expect(container.textContent).toContain("oxplow's own row");
+});
+
+test("a replaceable node nobody stands in for is oxplow's own", async () => {
+  const view = render(<PageTree run={host({})} runId="run-1" />);
+  expect(view.queryByTestId("replacement-badge")).toBeNull();
+  await waitFor(() => expect(view.container.textContent).toContain("oxplow's own row"));
 });

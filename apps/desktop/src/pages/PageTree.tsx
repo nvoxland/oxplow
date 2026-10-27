@@ -11,7 +11,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 
 import { Markdown } from "../components/Markdown/Markdown.js";
-import { Replaceable } from "../components/Replaceable.js";
+import { Replaced } from "../components/Replaced.js";
 import { Section } from "../kit/Section.js";
 import { Tile, TileGrid, TileSlot } from "../kit/Tiles.js";
 import type { PickedRow } from "./railGroups.js";
@@ -144,13 +144,22 @@ function NodeView(props: NodeViewProps) {
   const def = nodeById(run.page, at.id);
   const id = `${prefix}${at.id}`;
   const own = at.error ? <NodeError message={at.error} /> : def ? <NodeBody {...props} def={def} id={id} /> : <Unknown {...props} />;
-  // A node another extension's provider may take the place of
-  // (`replaceable: work_item.board`): the same choice as a page part's.
-  const body = def?.replaceable ? (
-    <Replaceable target={def.replaceable} props={valued(run.params)} derived={firstRowValues(run)} streamId={props.streamId ?? null} onOpenPage={props.onOpenPage} fallback={own} />
-  ) : (
-    own
-  );
+  // A node another extension's page stands in for (`replaceable:
+  // work_item.board`): the run decided whose and ran it, drawn as an embed.
+  const body =
+    at.replacedBy && def?.replaceable ? (
+      <Replaced
+        target={def.replaceable}
+        extension={at.replacedBy}
+        error={at.error}
+        fallback={<NodeBody {...props} def={def} id={id} />}
+        streamId={props.streamId ?? null}
+      >
+        {at.embed ? <PageTree {...props} run={at.embed} root={at.embed.tree} prefix={`${id}/`} onSetParam={undefined} /> : null}
+      </Replaced>
+    ) : (
+      own
+    );
   // A page a slot mounted is titled by its own page.
   const title = def ? (def.title ?? null) : (at.embed?.page.title ?? null);
   const fills = fillsNode(run, at);
@@ -416,31 +425,6 @@ function NodeError({ message }: { message: string }) {
       {message}
     </div>
   );
-}
-
-/** The params that hold a value: what a replacement is given, so one the
- *  page left empty (`head_sha` before it resolves) resolves from the
- *  viewer's context there too rather than binding NULL. */
-/** The columns of the first row of the run's loaders (in order), first
- *  one wins, null skipped: an embed's rule for a param the host doesn't
- *  hold, so the Tasks page's `row` loader can derive the `scope` its `show`
- *  param stands for. */
-function firstRowValues(run: PageRun): Record<string, SqlCell> {
-  const out: Record<string, SqlCell> = {};
-  for (const decl of run.page.loaders) {
-    const result = run.loaders[decl.name]?.result;
-    const row = result?.rows[0];
-    if (!result || !row) continue;
-    result.columns.forEach((c, i) => {
-      const v = row[i];
-      if (!(c in out) && v !== null && v !== undefined) out[c] = v;
-    });
-  }
-  return out;
-}
-
-function valued(params: Record<string, SqlCell>): Record<string, SqlCell> {
-  return Object.fromEntries(Object.entries(params).filter(([, v]) => v !== null && v !== undefined));
 }
 
 /** How many rows a compact viz shows. */

@@ -430,8 +430,7 @@ and the last mock wins. A file that mocks `api.js` as
 before it**, not the real module — another file's `listPersonCommands`
 or `listExtensions` included. So it passes alone and fails in the full
 run. A file that depends on a read's answer pins that read itself
-(`CapabilityUi.smoke.test.tsx` routes each one through its bindings
-mock). Reproduce one of these by running the two files together:
+(`PageTree.replaceable.test.tsx` mocks `api.js` for the reads it makes). Reproduce one of these by running the two files together:
 `bun test <the earlier mocker> <the failing file>`.
 
 ### Coverage floors & pass-through crates

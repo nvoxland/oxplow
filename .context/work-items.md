@@ -162,7 +162,7 @@ Links, Comments and Activity (its efforts). Links and Comments are left out
 where the list declares no such feature (`needs: [work_items.links]`,
 `[work_items.comments]`). The item's own
 list's extension may replace its state part (`work_item.detail.state`,
-`Replaceable`); About's menu always offers the moves, so an item
+decided by the page run from the item's `provider`); About's menu always offers the moves, so an item
 can always move. **Custom views** need no provider: any extension may
 replace the Board (`work_item.board`), the Tasks list (`work_item.list`)
 or an item's description editor (`work_item.detail`) — with a
@@ -406,8 +406,11 @@ person-only); a failure goes to the op-errors store.
 
 ## Conformance
 
-**The UI with every enhancement off** (P6b.C6):
-`apps/desktop/src/pages/CapabilityUi.smoke.test.tsx` renders
+**The UI with every enhancement off** (P6b.C6) was
+`apps/desktop/src/pages/CapabilityUi.smoke.test.tsx`, which by the time
+replacements moved into the page run held only replacement tests (now
+`replacements::chosen`'s and the runner's) and was removed; nothing
+renders these pages with every enhancement off any more. It rendered
 the Board,
 the commit page, uncommitted changes and history with no extensions,
 and asserts each page's core content and the absence of every slot

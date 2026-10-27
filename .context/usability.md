@@ -322,7 +322,7 @@ markdown itself, nor edits it in a `<textarea>`.
 ## A replaced component is marked, and falls back to oxplow's
 
 - Where an extension's page stands in for a core component (the Board's
-  cards — `Replaceable`, P9.A1), a small **replaced by <extension>**
+  cards — `Replaced`, P9.A1), a small **replaced by <extension>**
   badge says whose it is; the page's own chrome stays oxplow's. When the
   replacement can't load, oxplow's own component shows, under a muted
   line saying whose couldn't load and why — never an error instead of
