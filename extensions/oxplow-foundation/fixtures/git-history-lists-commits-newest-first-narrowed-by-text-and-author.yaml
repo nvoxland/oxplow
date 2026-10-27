@@ -1,17 +1,28 @@
-# The stream's commits from its head back, newest first, narrowed by text or
-# author.
+# The commits reachable from the stream's head, newest first, narrowed by
+# text, author or branch, with the branches and tags at each.
 given:
-  - observe: { commit: { sha: c1, at: "2026-01-01T00:00:00Z", author: ann, subject: first, files: [{ path: a.rs }] } }
-  - observe: { commit: { sha: c2, at: "2026-01-02T00:00:00Z", author: bob, subject: second, parents: [c1], files: [{ path: a.rs }] } }
-when: { page: oxplow-foundation/git-history, params: { stream_id: 1, head_sha: c2 } }
+  - observe: { commit: { sha: aaa111, at: "2023-11-14T22:13:20Z", author: ann, email: ann@x, subject: First } }
+  - observe: { commit: { sha: bbb222, at: "2023-11-14T22:15:00Z", author: bob, email: bob@x, subject: Second fix, parents: [aaa111] } }
+  - observe: { commit: { sha: ccc333, at: "2023-11-14T22:16:40Z", author: ann, email: ann@x, subject: Third, parents: [bbb222] } }
+  - observe: { commit: { sha: ddd444, at: "2023-11-14T22:15:50Z", author: ann, email: ann@x, subject: Side work, parents: [aaa111] } }
+  - observe:
+      refs:
+        branches: [{ name: main, head: ccc333, stream: 1 }, { name: side, head: ddd444 }]
+        tags: [{ name: v1, sha: bbb222 }]
+        heads: [{ stream: 1, sha: ccc333 }]
+# No head given: the stream's. The side branch isn't reachable from it.
+when: { page: oxplow-foundation/git-history, params: { stream_id: 1 } }
 expect:
   loaders:
     history:
       rows:
-        - { sha: c2, author: bob, subject: second }
-        - { sha: c1, author: ann, subject: first }
+        - { subject: Third, refs: main }
+        - { subject: Second fix, refs: v1 }
+        - { subject: First, refs: null }
 steps:
-  - params: { stream_id: 1, head_sha: c2, author: ann }
-    expect: { loaders: { history: { rows: [{ sha: c1 }] } } }
-  - params: { stream_id: 1, head_sha: c2, q: second }
-    expect: { loaders: { history: { rows: [{ sha: c2 }] } } }
+  - params: { stream_id: 1, q: fix }
+    expect: { loaders: { history: { rows: [{ subject: Second fix }] } } }
+  - params: { stream_id: 1, author: ann }
+    expect: { loaders: { history: { rows: [{ subject: Third }, { subject: First }] } } }
+  - params: { stream_id: 1, branch: side }
+    expect: { loaders: { history: { rows: [{ subject: First }] } } }

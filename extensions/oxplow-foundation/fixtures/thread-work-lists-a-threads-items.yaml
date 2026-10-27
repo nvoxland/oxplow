@@ -1,8 +1,18 @@
-# A thread's work: its items by state.
+# A thread's work: the open items, then the finished ones newest first by
+# when they closed.
 # (Oxplow's own work list, effort policy and wiki are bundled's.)
 requires: [oxplow-bundled]
 given:
-  - { command: oxplow.work_item.create, input: { title: ship it, thread: thr1 } }
+  - { command: oxplow.work_item.create, input: { title: older done, thread: thr1 }, bind: older }
+  - { command: oxplow.work_item.create, input: { title: newer done, thread: thr1 }, bind: newer }
+  - { command: oxplow.work_item.create, input: { title: still open, thread: thr1 } }
+  - { command: oxplow.work_item.transition, input: { uri: $older.uri, to: done } }
+  - { command: oxplow.work_item.transition, input: { uri: $newer.uri, to: done } }
 when: { page: oxplow-foundation/thread-work, params: { thread: thr1 } }
 expect:
-  loaders: { thread_work: { rows: [{ title: ship it, state: todo }] } }
+  loaders:
+    thread_work:
+      rows:
+        - { title: still open, state: todo }
+        - { title: newer done, state: done }
+        - { title: older done, state: done }

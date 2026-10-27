@@ -2096,6 +2096,8 @@ a `KINDS` entry and a `dispatch` arm. The forms:
   snapshot log, `SqliteSnapshotStore::record_take`), `diagnostics`
   (`SqliteDiagnosticStore::replace_file`), `symbols` (`SqliteSymbolStore::record`
   at a snapshot taken with the file), `collect` (`run_effort_collectors`) 
+  `refs` (branches, tags and stream heads, `replace_branches` /
+  `replace_tags` / `replace_stream_heads`),
   `visit` (a page the person opened, `PageVisitStore::record`),
   `facts` (findings of a declared measure through `record_facts`) and
   `retention` (`event_retention::sweep`, run `days` ahead). A step's `when: { sql }` reads the result, since a `steps` entry

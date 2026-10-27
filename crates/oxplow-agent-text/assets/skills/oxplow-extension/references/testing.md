@@ -185,7 +185,9 @@ model the SQL reads and the command it runs. Prefer `answers:` on pages.
      `{ observe: { symbols: { path, items: [{ name, kind, container?, line? }] } } }`
      (the definitions the index read from it), `{ observe: { collect: {
      effort, collectors?: [key] } } }` (the fact collectors an effort's end
-     runs), `{ observe: { visit: { page, kind?, label?, thread?, duration_ms? } } }` (a
+     runs), `{ observe: { refs: { branches?: [{ name, head, stream?, … }], tags?, heads? } } }`
+     (what the git indexer read of branches, tags and the stream's head; a
+     `snapshot` also takes `revision` and `branch`), `{ observe: { visit: { page, kind?, label?, thread?, duration_ms? } } }` (a
      page the person opened, as the shell records it), `{ observe: { facts: { measure, items: [{ value?, path?, line?, rule?, severity? }] } } }`
      (findings of a measure, as a collector's capture records them) and `{ observe: { retention: { days } } }` (the log's retention
      sweep as it runs that many days from now: payloads expire, envelopes

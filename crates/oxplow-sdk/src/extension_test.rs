@@ -1545,12 +1545,14 @@ async fn run_steps(
 ///   effort's `target` is its id, like `eff1`).
 /// - `test_run: { effort, at?, cases?: [{ name, status }], asserted_failed? }`:
 ///   a test run an effort recorded, as a run recorder writes it.
-/// - `snapshot: { trigger?, elapsed_ms?, budget_ms?, files?: [{ path, hash }] }`:
+/// - `snapshot: { trigger?, elapsed_ms?, budget_ms?, revision?, branch?, files?: [{ path, hash }] }`:
 ///   one take in the stream's snapshot log.
 /// - `diagnostics: { path, language?, items?: [{ severity, message, line?, col?, source?, code? }] }`:
 ///   what a language server reported for a file.
 /// - `symbols: { path, language?, items?: [{ name, kind, id?, container?, signature?, line?, col? }] }`:
 ///   the definitions the index read from a file at a snapshot of it.
+/// - `refs: { branches?, tags?, heads? }`: the branches, tags and stream
+///   heads the git indexer read (each replaces what was stored).
 /// - `visit: { page, kind?, label?, thread?, duration_ms? }`: a page the person
 ///   opened, as the shell records it.
 /// - `facts: { measure, producer?, items?: [{ value?, path?, line?, rule?, severity?, detail?, subject? }] }`:
@@ -1583,9 +1585,10 @@ async fn observe(host: &Host, ext: &Extension, observed: &Value) -> Result<(), S
         "retention" => observe_retention(host, body).await,
         "facts" => observe_facts(host, body).await,
         "visit" => observe_visit(host, body).await,
+        "refs" => observe_refs(host, body).await,
         other => {
             return Err(format!(
-                "`{other}` isn't a kind — fix: `turn`, `evidence`, `event`, `commit`, `change`, `test_run`, `snapshot`, `collect`, `diagnostics`, `symbols`, `retention`, `facts` or `visit`"
+                "`{other}` isn't a kind — fix: `turn`, `evidence`, `event`, `commit`, `change`, `test_run`, `snapshot`, `collect`, `diagnostics`, `symbols`, `retention`, `facts`, `visit` or `refs`"
             ))
         }
     }?;
@@ -1923,6 +1926,62 @@ async fn observe_symbols(host: &Host, body: &Value) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
+/// `refs: { branches?: [{ name, kind?, head, stream?, default?, upstream?,
+/// ahead?, behind? }], tags?: [{ name, sha }], heads?: [{ stream, sha }] }`:
+/// the repository's refs as the git indexer stores them
+/// (`SqliteGitStore::replace_branches` / `replace_tags` /
+/// `replace_stream_heads`); a part left out keeps what was stored.
+async fn observe_refs(host: &Host, body: &Value) -> Result<(), String> {
+    use oxplow_db::git_store::{GitBranchRow, GitTagRow};
+    let text = |v: &Value, k: &str| v.get(k).and_then(Value::as_str).map(str::to_string);
+    let list = |k: &str| body.get(k).and_then(Value::as_array).cloned();
+    let git = &host.svc.git_store;
+    if let Some(branches) = list("branches") {
+        let mut rows = Vec::new();
+        for b in &branches {
+            rows.push(GitBranchRow {
+                name: text(b, "name").ok_or("a branch names its `name`")?,
+                kind: text(b, "kind").unwrap_or_else(|| "local".into()),
+                remote: text(b, "remote"),
+                head_sha: text(b, "head"),
+                stream_id: b.get("stream").and_then(Value::as_i64),
+                is_default: b.get("default").and_then(Value::as_bool).unwrap_or(false),
+                upstream: text(b, "upstream"),
+                ahead: b.get("ahead").and_then(Value::as_u64).unwrap_or(0) as u32,
+                behind: b.get("behind").and_then(Value::as_u64).unwrap_or(0) as u32,
+            });
+        }
+        git.replace_branches(rows)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+    if let Some(tags) = list("tags") {
+        let mut rows = Vec::new();
+        for t in &tags {
+            rows.push(GitTagRow {
+                name: text(t, "name").ok_or("a tag names its `name`")?,
+                sha: text(t, "sha").ok_or("a tag names its `sha`")?,
+            });
+        }
+        git.replace_tags(rows).await.map_err(|e| e.to_string())?;
+    }
+    if let Some(heads) = list("heads") {
+        let mut rows = Vec::new();
+        for h in &heads {
+            rows.push((
+                h.get("stream")
+                    .and_then(Value::as_i64)
+                    .ok_or("a head names its `stream`")?,
+                text(h, "sha").ok_or("a head names its `sha`")?,
+            ));
+        }
+        git.replace_stream_heads(rows)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 /// `visit: { page, kind?, label?, thread?, duration_ms? }`: a page the person
 /// opened (`page` its ref, `kind` its page kind, `page` by default), recorded
 /// as the shell's `record_page_visit` does (`PageVisitStore::record`).
@@ -2043,7 +2102,7 @@ async fn observe_collect(host: &Host, body: &Value) -> Result<(), String> {
     Ok(())
 }
 
-/// `snapshot: { trigger?, elapsed_ms?, budget_ms?, files?: [{ path, hash }] }`:
+/// `snapshot: { trigger?, elapsed_ms?, budget_ms?, revision?, branch?, files?: [{ path, hash }] }`:
 /// one take in the stream's snapshot log (`SqliteSnapshotStore::
 /// record_take`): its parent is the take before it, and it is over budget
 /// when `elapsed_ms` is more than `budget_ms`. A take whose files hash as
@@ -2096,8 +2155,14 @@ async fn take_snapshot(
             thread_id: None,
             turn_id: None,
             effort_id: None,
-            branch: None,
-            revision: None,
+            branch: body
+                .get("branch")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            revision: match body.get("revision").and_then(Value::as_str) {
+                Some(r) => Some(r.parse().map_err(|e| format!("`snapshot.revision`: {e}"))?),
+                None => None,
+            },
             elapsed_ms: body.get("elapsed_ms").and_then(Value::as_u64).unwrap_or(1),
             budget_ms: body.get("budget_ms").and_then(Value::as_u64),
             source: "fixture".into(),
@@ -6479,6 +6544,30 @@ expect: {{ rows: [{{ title: Mine }}] }}
             errors.contains("fixtures/basic.yaml:1: `requires` names `no-such-extension`"),
             "{errors}"
         );
+    }
+
+    /// `observe: { refs }` is what the git indexer read of the repository's
+    /// branches, tags and the stream's head; `snapshot` takes a `revision`.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_given_observes_git_refs_and_a_snapshots_revision() {
+        let dir = tempfile::tempdir().unwrap();
+        crate::scaffold(dir.path(), crate::Kind::Command, "notes", None).unwrap();
+        write(
+            dir.path(),
+            ".oxplow/extensions/notes/fixtures/basic.yaml",
+            "given:
+  - observe: { commit: { sha: c1, at: \"2026-01-01T00:00:00Z\", subject: first } }
+  - observe: { refs: { branches: [{ name: main, head: c1, stream: 1 }, { name: side, head: c1 }], tags: [{ name: v1, sha: c1 }], heads: [{ stream: 1, sha: c1 }] } }
+  - observe: { snapshot: { trigger: quiet, revision: \"git:c1\", files: [{ path: a.txt, hash: h1 }] } }
+when:
+  sql: SELECT (SELECT group_concat(name) FROM (SELECT name FROM v_branch ORDER BY name)) AS branches, (SELECT name FROM v_tag) AS tag, (SELECT head_sha FROM v_stream) AS head, (SELECT revision FROM v_snapshot) AS revision
+expect:
+  rows:
+    - { branches: \"main,side\", tag: v1, head: c1, revision: \"git:c1\" }
+",
+        );
+        let report = test_extension(dir.path(), "notes", false).await.unwrap();
+        assert!(report.ok, "{:?}", report.errors);
     }
 
     /// `observe: { evidence }` sets the observations an effort's page

@@ -1,22 +1,36 @@
-# Go To lists the pages bookmarked for the thread, newest first, then the
-# pages visited — the latest of each, and the most visited over the last 30
-# days.
+# Go To lists the thread's bookmarks with the scope each is at, its recent
+# pages (newest first, once each, no agent sessions) and the stream's most
+# visited. A bookmark's menu moves it to another scope, or removes it.
 given:
-  - { command: oxplow.bookmark.set, input: { uri: "oxplow:oxplow/page?page=problems", page_kind: problems, scope: thread, thread: thr1 } }
-  - observe: { visit: { page: "oxplow:oxplow/page?page=symbols", kind: symbols, label: Symbols, thread: thr1 } }
-  - observe: { visit: { page: "oxplow:oxplow/page?page=hook-events", kind: hook-events, label: Hook Events, thread: thr1 } }
-  - observe: { visit: { page: "oxplow:oxplow/page?page=symbols", kind: symbols, label: Symbols, thread: thr1 } }
+  - { command: oxplow.bookmark.set, input: { uri: "oxplow:oxplow/page?page=git-dashboard", page_kind: git-dashboard, label: Git, scope: thread, thread: thr1 } }
+  - observe: { visit: { page: "oxplow:oxplow/file?path=DEV.md", kind: file, label: DEV.md, thread: thr1 } }
+  - observe: { visit: { page: "oxplow:oxplow/file?path=DEV.md", kind: file, label: DEV.md, thread: thr1 } }
+  - observe: { visit: { page: "oxplow:oxplow/page?page=settings", kind: settings, label: Settings, thread: thr1 } }
+  - observe: { visit: { page: "oxplow:oxplow/agent_session?id=ses1", kind: agent_session, label: Claude, thread: thr1 } }
 when: { page: oxplow-foundation/go-to, params: { thread_id: 1 } }
 expect:
   loaders:
     bookmarks:
       rows:
-        - { uri: "oxplow:oxplow/page?page=problems" }
+        - { title: Git, scope: thread }
     recent:
       rows:
-        - { title: Symbols, uri: "oxplow:oxplow/page?page=symbols" }
-        - { title: Hook Events, uri: "oxplow:oxplow/page?page=hook-events" }
+        - { uri: "oxplow:oxplow/page?page=settings" }
+        - { uri: "oxplow:oxplow/file?path=DEV.md" }
     top:
       rows:
-        - { title: Symbols, visits: 2 }
-        - { title: Hook Events, visits: 1 }
+        - { uri: "oxplow:oxplow/file?path=DEV.md", visits: 2 }
+        - { uri: "oxplow:oxplow/page?page=settings" }
+steps:
+  - press:
+      action: to-stream
+      node: bookmarks
+      row: { title: Git, page_kind: git-dashboard, uri: "oxplow:oxplow/page?page=git-dashboard", scope: thread, thread: thr1 }
+    expect: { ok: true }
+  - expect: { loaders: { bookmarks: { rows: [{ title: Git, scope: stream }] } } }
+  - press:
+      action: remove
+      node: bookmarks
+      row: { title: Git, page_kind: git-dashboard, uri: "oxplow:oxplow/page?page=git-dashboard", scope: stream, thread: thr1 }
+    expect: { ok: true }
+  - expect: { loaders: { bookmarks: { rows: 0 } } }

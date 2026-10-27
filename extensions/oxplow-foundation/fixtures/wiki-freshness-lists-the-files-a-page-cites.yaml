@@ -1,5 +1,5 @@
-# The files a wiki page cites, each with its pinned snapshot and whether it
-# changed since.
+# The files a wiki page cites under a heading that counts the stale ones,
+# each with its pinned snapshot and whether it changed since.
 # (Oxplow's own work list, effort policy and wiki are bundled's.)
 requires: [oxplow-bundled]
 given:
@@ -10,4 +10,4 @@ expect:
   loaders:
     wiki_freshness:
       rows:
-        - { slug: otters, path: src/holt.rs }
+        - { slug: otters, heading: "otters — 0 of 1 stale", path: src/holt.rs, status: "✓ fresh" }

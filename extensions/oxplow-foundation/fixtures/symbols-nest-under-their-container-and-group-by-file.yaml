@@ -1,15 +1,25 @@
-# The definitions the index found, a file's symbols nested under their
-# container; a path gives one file's outline and a filter finds by name.
+# The definitions the index found, nested under their container, under their
+# file; a filter keeps the names that contain it, a path one file's outline.
 given:
-  - observe: { symbols: { path: src/lib.rs, items: [{ name: main, kind: fn, line: 1 }, { name: helper, kind: fn, container: main, line: 5 }] } }
-when: { page: oxplow-foundation/symbols, params: { stream_id: 1 } }
+  - observe:
+      symbols:
+        path: w.py
+        language: python
+        items:
+          - { id: Widget, name: Widget, kind: class, line: 1 }
+          - { id: "Widget::spin", name: spin, kind: method, container: Widget, line: 2 }
+when: { page: oxplow-foundation/symbols, params: { stream_id: 1, path: "", filter: "" } }
 expect:
   loaders:
     symbols:
       rows:
-        - { label: src/lib.rs, parent: null }
-        - { label: fn main, path: src/lib.rs, line: 1 }
-        - { label: fn helper, path: src/lib.rs, line: 5 }
+        - { id: w.py, parent: null, label: w.py, path: w.py }
+        # A file's node is its path (a tree id, not a ref); the class's
+        # parent is that node, and the class is the method's parent.
+        - { id: "oxplow:oxplow/symbol?path=w.py&symbol=Widget", parent: w.py, label: class Widget }
+        - { parent: "oxplow:oxplow/symbol?path=w.py&symbol=Widget", label: method spin }
 steps:
-  - params: { stream_id: 1, path: src/lib.rs, filter: help }
-    expect: { loaders: { symbols: { rows: [{ label: fn helper }] } } }
+  - params: { stream_id: 1, path: "", filter: spi }
+    expect: { loaders: { symbols: { rows: [{ label: w.py }, { label: method spin }] } } }
+  - params: { stream_id: 1, path: w.py, filter: "" }
+    expect: { loaders: { symbols: { rows: [{ label: class Widget }, { label: method spin }] } } }
