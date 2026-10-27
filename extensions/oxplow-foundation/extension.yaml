@@ -103,6 +103,12 @@ intent:
     - name: tasks-lists-its-scope-by-state-with-epics-and-a-summary
       input: { page: tasks, params: { show: thread, priority: any, thread_id: 1, stream_id: 1 } }
       expect: the scope's items by state with epics nested, the priority filter keeping an epic for its child, the last five done, the summary's counts
+    - name: changes-frames-an-effort-and-a-picked-range
+      input: { page: diff-view, params: { uri: "oxplow:oxplow/effort?id=eff1", stream_id: 1 } }
+      expect: an effort's own bracket to the working tree, a picked end as a range, nothing without a URI
+    - name: changes-effort-names-the-effort-it-is-of
+      input: { page: changes-effort, params: { effort_id: 1, effort: eff1 } }
+      expect: the effort is open and named for Rename and Link to task
 # The agent harnesses and AI providers oxplow runs: core's
 # built-ins, many of each at once (every one declared here is active).
 implementations:

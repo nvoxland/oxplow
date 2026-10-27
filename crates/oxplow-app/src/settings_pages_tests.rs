@@ -74,20 +74,6 @@ fn request(page: &str, params: Vec<(&str, SqlCell)>) -> RunRequest {
     }
 }
 
-/// Loader `loader` of foundation's page `page`, run as a person.
-async fn run_loader(
-    svc: &crate::Services,
-    page: &str,
-    loader: &str,
-    params: Vec<(&str, SqlCell)>,
-) -> Run {
-    let run = PageRunner::of(svc)
-        .run(request(page, params))
-        .await
-        .unwrap();
-    loader_of(&run, loader)
-}
-
 fn loader_of(run: &PageRun, loader: &str) -> Run {
     let ran = run
         .loaders
@@ -446,83 +432,13 @@ async fn the_extensions_area_lists_health_and_credentials() {
     assert!(run(&fx, "extensions-secrets", vec![]).await.rows.is_empty());
 }
 
-/// The Changes page: an effort's page frames its own bracket (to the
-/// working tree while it is open), the pickers override it with a range,
-/// and the parts that belong to an effort have it to read.
+/// Rename… and Link to task… of the Changes page's Effort part act on the
+/// effort the part shows: offered on its one row, so a range (no effort)
+/// shows neither. (The part's rows are the `changes-*` fixtures; a fixture
+/// cannot read an action's `one_row`.)
 #[tokio::test(flavor = "multi_thread")]
-async fn the_changes_page_frames_an_effort_and_a_picked_range() {
-    let fx = crate::test_fixtures::services_with_task_effort().await;
-    let effort = fx.fx.effort;
-    let uri = format!("oxplow:oxplow/effort?id=eff{}", effort.value());
-    let page = |extra: Vec<(&'static str, SqlCell)>| {
-        let mut params = vec![
-            ("uri", SqlCell::Text(uri.clone())),
-            ("stream_id", SqlCell::Int(1)),
-        ];
-        params.extend(extra);
-        run_loader(&fx.svc, "diff-view", "row", params)
-    };
-    let own = page(vec![]).await;
-    assert_eq!(own.rows.len(), 1, "{:?}", own.rows);
-    let row = &own.rows[0];
-    assert_eq!(own.text(row, "subject").as_deref(), Some("effort"));
-    assert_eq!(own.text(row, "end_rev").as_deref(), Some("working"));
-    assert!(own.flag(row, "in_progress"));
-    assert_eq!(
-        own.text(row, "effort").as_deref(),
-        Some(format!("eff{}", effort.value()).as_str())
-    );
-
-    // A picked end turns it into a range, leaving the effort.
-    let picked = page(vec![
-        ("start", SqlCell::Text(String::new())),
-        ("end", SqlCell::Text("working".into())),
-    ])
-    .await;
-    assert_eq!(
-        picked.text(&picked.rows[0], "subject").as_deref(),
-        Some("range")
-    );
-    assert_eq!(
-        picked.rows[0][picked
-            .columns
-            .iter()
-            .position(|c| c == "effort_id")
-            .unwrap()],
-        SqlCell::Null(())
-    );
-
-    // The route page: no URI, no end - nothing to compare yet.
-    let route = run_loader(
-        &fx.svc,
-        "diff-view",
-        "row",
-        vec![("stream_id", SqlCell::Int(1))],
-    )
-    .await;
-    assert!(route.rows.is_empty());
-
-    // Its parts.
-    let effort_part = run_loader(
-        &fx.svc,
-        "changes-effort",
-        "changes_effort",
-        vec![
-            ("effort_id", SqlCell::Int(effort.value())),
-            ("effort", SqlCell::Text(format!("eff{}", effort.value()))),
-        ],
-    )
-    .await;
-    assert_eq!(
-        effort_part.text(&effort_part.rows[0], "state").as_deref(),
-        Some("Open")
-    );
-    // Rename… and Link to task… act on the effort the part shows: offered
-    // on its one row, so a range (no effort) shows neither.
-    assert_eq!(
-        effort_part.text(&effort_part.rows[0], "effort").as_deref(),
-        Some(format!("eff{}", effort.value()).as_str())
-    );
+async fn the_changes_effort_part_offers_rename_and_link_on_its_one_row() {
+    let fx = services_with_effort().await;
     let part = PageRunner::of(&fx.svc)
         .run(request("changes-effort", vec![]))
         .await
@@ -530,33 +446,6 @@ async fn the_changes_page_frames_an_effort_and_a_picked_range() {
     for id in ["rename", "link"] {
         let action = part.page.actions.iter().find(|a| a.id == id).unwrap();
         assert!(action.one_row, "{id} is offered on the effort's row only");
-    }
-    // The header reads the row's frame.
-    let header = run_loader(
-        &fx.svc,
-        "diff-view",
-        "header",
-        vec![
-            ("uri", SqlCell::Text(uri.clone())),
-            ("stream_id", SqlCell::Int(1)),
-        ],
-    )
-    .await;
-    assert_eq!(
-        header.text(&header.rows[0], "from_label").as_deref(),
-        Some("(initial)")
-    );
-    assert_eq!(
-        header.text(&header.rows[0], "to_label").as_deref(),
-        Some("working tree")
-    );
-    assert!(header
-        .text(&header.rows[0], "note")
-        .unwrap()
-        .contains("in progress"));
-    for page in ["changes-starts", "changes-ends"] {
-        let options = run_task(&fx, page, vec![("stream_id", SqlCell::Int(1))]).await;
-        assert!(!options.rows.is_empty(), "{page}");
     }
 }
 

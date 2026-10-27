@@ -1,0 +1,9 @@
+# The Effort part of the Changes page: whether the effort is open, and the
+# effort Rename… and Link to task… act on.
+given:
+  - { command: oxplow.effort.open, input: { thread: thr1 } }
+input: { page: changes-effort, params: { effort_id: 1, effort: eff1 } }
+expect:
+  loaders:
+    changes_effort: { rows: [{ state: Open, effort: eff1 }] }
+  actions: [rename, link]
