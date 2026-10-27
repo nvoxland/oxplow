@@ -25,6 +25,9 @@ intent:
     - name: edit-item
       input: { page: edit-item, params: { uri: "oxplow:oxplow/work_item?id=1&provider=oxplow" } }
       expect: a form for the item's title and body, its uri fixed
+    - name: swimlanes-drags-a-card-to-a-lane
+      input: { page: swimlanes, params: { scope: all } }
+      expect: five lanes; a drag moves the card's item to the lane's state
 permissions:
   commands: [oxplow.work_item.transition, oxplow.work_item.reorder, oxplow.work_item.update]
 custom_components:
