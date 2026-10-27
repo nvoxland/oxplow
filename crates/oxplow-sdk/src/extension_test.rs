@@ -33,7 +33,7 @@ use oxplow_domain::events::EventView;
 use std::path::Path;
 use std::sync::Arc;
 
-use oxplow_app::extensions::{Extension, EXTENSIONS_DIR};
+use oxplow_app::extensions::Extension;
 use oxplow_app::providers::host::{self, Launch};
 use oxplow_app::providers::{self, ProviderSpec};
 use oxplow_domain::Actor;
@@ -218,7 +218,7 @@ pub async fn test_extension_in(
         for spec in &ext.providers {
             let (before, started) = (report.errors.len(), std::time::Instant::now());
             report.ran.push(format!("provider {}", spec.id));
-            test_provider(root, &ext, spec, bless, &env, &mut report).await;
+            test_provider(&host, root, &ext, spec, bless, &env, &mut report).await;
             report.finish_case(format!("provider {}", spec.id), before, started);
         }
         for decl in ext
@@ -227,7 +227,7 @@ pub async fn test_extension_in(
             .filter(|d| d.capability == EFFORT_POLICY && d.script.is_some())
         {
             let (before, started) = (report.errors.len(), std::time::Instant::now());
-            policy_suite(root, &ext, decl, &env, &mut report).await;
+            policy_suite(&host, &ext, decl, &mut report).await;
             report.finish_case(format!("policy {}", decl.id), before, started);
         }
         page_answers(&host, &ext, &mut report).await;
@@ -2711,6 +2711,7 @@ fn env_credentials(
 }
 
 async fn test_provider(
+    host: &Host,
     root: &Path,
     ext: &Extension,
     spec: &ProviderSpec,
@@ -2789,7 +2790,7 @@ async fn test_provider(
         ));
     }
     transcript(&dir, &rel, spec, &recorded.transcript, bless, report);
-    suite(root, ext, spec, config, env, report).await;
+    suite(host, ext, spec, config, env, report).await;
 }
 
 /// The provider a session tests.
@@ -3158,59 +3159,6 @@ fn kit_search_path(env: &host::HostEnv) -> Vec<std::path::PathBuf> {
     oxplow_app::agent_path::search_path_in(env("PATH").as_deref().map(std::ffi::OsStr::new), &extra)
 }
 
-/// A throwaway oxplow over a copy of `ext` alone, in `env`: the folder
-/// (kept alive by the guard), the services, and the extension as they
-/// loaded it.
-async fn suite_host(
-    root: &Path,
-    ext: &Extension,
-    env: &host::HostEnv,
-) -> Result<(tempfile::TempDir, Arc<oxplow_app::Services>, Extension), String> {
-    let tmp = tempfile::tempdir().map_err(|e| e.to_string())?;
-    let target = tmp.path().join(EXTENSIONS_DIR).join(&ext.name);
-    crate::throwaway::copy_dir(&root.join(&ext.path), &target).map_err(|e| e.to_string())?;
-    // It, and what ships with oxplow, are on; boot deploys nothing, so the
-    // author's own run of its tests deploys it as they would: confirmed,
-    // whatever it declares.
-    std::fs::create_dir_all(tmp.path().join(".oxplow")).map_err(|e| e.to_string())?;
-    let on: Vec<&str> = oxplow_config::DEFAULT_EXTENSIONS
-        .iter()
-        .copied()
-        .chain([ext.name.as_str()])
-        .collect();
-    std::fs::write(
-        tmp.path().join(".oxplow/project.yaml"),
-        serde_yaml::to_string(&serde_json::json!({ "extensions": on }))
-            .map_err(|e| e.to_string())?,
-    )
-    .map_err(|e| e.to_string())?;
-    oxplow_app::vcs::GitProvider
-        .init_repository(tmp.path())
-        .await
-        .map_err(|e| e.to_string())?;
-    let svc = oxplow_app::Services::in_memory_on_machine(
-        tmp.path(),
-        tmp.path().join(".oxplow/global-config"),
-        Arc::new(oxplow_ai::secrets::MemorySecrets::default()),
-        env.clone(),
-    )
-    .await
-    .map_err(|e| e.to_string())?;
-    oxplow_app::extension_deploy::deploy(&svc, &ext.name, true)
-        .await
-        .map_err(|e| e.to_string())?;
-    let hosted = svc
-        .extension_catalog
-        .get(tmp.path())
-        .iter()
-        .find(|e| e.name == ext.name)
-        .cloned()
-        .ok_or("the copied extension didn't load")?;
-    Ok((tmp, svc, hosted))
-}
-
-/// The effort-policy suite over the extension's policy script `decl`, in a
-/// throwaway host: the script chosen as the project's policy. A finding is an error at the manifest.
 /// Publish the generation the throwaway project's config and files ask
 /// for, as the app's owner of generations does on a change.
 async fn publish_generation(svc: &Arc<oxplow_app::Services>) -> Result<(), String> {
@@ -3221,24 +3169,27 @@ async fn publish_generation(svc: &Arc<oxplow_app::Services>) -> Result<(), Strin
         .map_err(|e| format!("{e:?}"))
 }
 
+/// The effort-policy suite over the extension's policy script `decl`, on
+/// a fork of `host`: the script chosen as the project's policy. A finding
+/// is an error at the manifest.
 async fn policy_suite(
-    root: &Path,
+    host: &Host,
     ext: &Extension,
     decl: &oxplow_app::extensions::implementations::ImplementationDecl,
-    env: &host::HostEnv,
     report: &mut TestReport,
 ) {
     let manifest = format!("{}/extension.yaml", ext.path.trim_end_matches('/'));
     report.ran.push(format!("{EFFORT_POLICY} suite"));
     let run = async {
-        let (_tmp, svc, _) = suite_host(root, ext, env).await?;
+        let fork = host.fork().await?;
+        let svc = &fork.svc;
         svc.config
             .write()
             .map_err(|e| e.to_string())?
             .active_providers
             .insert(EFFORT_POLICY.into(), decl.id.clone());
-        publish_generation(&svc).await?;
-        Ok::<_, String>(oxplow_app::effort_policy_conformance::suite(&svc, &decl.id).await)
+        publish_generation(svc).await?;
+        Ok::<_, String>(oxplow_app::effort_policy_conformance::suite(svc, &decl.id).await)
     };
     match run.await {
         Ok(run) => {
@@ -3259,7 +3210,7 @@ async fn policy_suite(
 }
 
 async fn suite(
-    root: &Path,
+    host: &Host,
     ext: &Extension,
     spec: &ProviderSpec,
     config: Value,
@@ -3269,8 +3220,10 @@ async fn suite(
     let manifest = format!("{}/extension.yaml", ext.path.trim_end_matches('/'));
     report.ran.push(format!("{} suite", spec.capability));
     let run = async {
-        let (tmp, svc, _) = suite_host(root, ext, env).await?;
-        let project = oxplow_app::collector_runner::project_key(tmp.path());
+        // On an oxplow of its own: what the suite files, no example sees.
+        let fork = host.fork().await?;
+        let svc = fork.svc.clone();
+        let project = oxplow_app::collector_runner::project_key(&fork.root);
         for (name, value) in env_credentials(spec, env) {
             svc.secrets
                 .set(

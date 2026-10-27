@@ -2042,8 +2042,8 @@ fixtures to it.
   calls checked against the registry; appending events is an error (a
   policy emits nothing). Naming no policy script of the extension is an
   error naming the id. For each such script `test` also runs the
-  effort-policy suite (`policy_suite`): a throwaway host over a copy of
-  the extension (`suite_host`, shared with a provider's suite), the
+  effort-policy suite (`policy_suite`): on a fork of the test's
+  throwaway (as a provider's suite runs), the
   script chosen as `activeProviders.effort_policy`, then
   `effort_policy_conformance::suite`; a finding is an error at the
   manifest, `ran` shows `effort_policy suite`;

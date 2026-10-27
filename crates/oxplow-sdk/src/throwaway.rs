@@ -310,7 +310,7 @@ fn copy_all(from: &Path, to: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-pub(crate) fn copy_dir(from: &Path, to: &Path) -> std::io::Result<()> {
+fn copy_dir(from: &Path, to: &Path) -> std::io::Result<()> {
     let exclude = oxplow_app::extension_store::Inputs::of(from).exclude;
     copy_tree(from, to, &exclude, "")
 }
