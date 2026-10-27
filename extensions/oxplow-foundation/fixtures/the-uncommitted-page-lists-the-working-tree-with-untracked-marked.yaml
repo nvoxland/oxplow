@@ -1,0 +1,20 @@
+# The uncommitted page makes the stream's working change and lists the
+# working tree's files as a tree, untracked ones as the change marks them;
+# the commit form shows once there are files to commit.
+given:
+  - observe: { turn: { prompt: base, write: { path: tracked.txt, body: "x\n" } } }
+  - { command: oxplow.vcs.stage, input: { stream: str1, paths: [tracked.txt] } }
+  - { command: oxplow.vcs.commit, input: { stream: str1, message: base } }
+  - observe: { turn: { prompt: change, write: { path: tracked.txt, body: "changed\n" } } }
+  - observe: { turn: { prompt: loose, write: { path: loose.txt, body: "n\n" } } }
+  - observe: { analyze: { kind: working } }
+when: { page: oxplow-foundation/uncommitted-changes, params: { stream_id: 1 } }
+expect:
+  loaders:
+    row: { rows: [{ change_id: $any }] }
+    files:
+      rows:
+        contains:
+          - { id: tracked.txt, icon: modified }
+          - { id: loose.txt, icon: added }
+    commit: { rows: [{ stream: str1 }] }

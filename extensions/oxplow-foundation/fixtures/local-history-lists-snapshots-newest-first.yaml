@@ -1,11 +1,28 @@
-# The stream's snapshots, newest first, each with what triggered it.
+# The stream's snapshots, newest first: each one's subject, version, wiki
+# pages, changes and why; the same snapshots under the commit each equals,
+# the uncommitted ones first.
 given:
-  - observe: { snapshot: { trigger: startup, files: [{ path: a.txt, hash: h1 }] } }
-  - observe: { snapshot: { trigger: quiet, files: [{ path: a.txt, hash: h2 }, { path: b.txt, hash: h2 }] } }
-when: { page: oxplow-foundation/local-history, params: { stream_id: 1 } }
+  - observe: { snapshot: { trigger: startup, branch: main, files: [{ path: a.txt, hash: h1 }] } }
+  - observe: { snapshot: { trigger: quiet, branch: main, revision: "git:abc1234def", files: [{ path: a.txt, hash: h2 }, { path: b.txt, hash: h1 }] } }
+  - observe: { snapshot: { trigger: turn_end, branch: main, files: [{ path: a.txt, hash: h3 }, { path: ".oxplow/wiki/idea.md", hash: w1 }] } }
+when: { page: oxplow-foundation/local-history, params: { stream_id: 1, mode: recent } }
 expect:
   loaders:
+    # The wiki one says which page, the clean one its commit, the first that
+    # it is the first.
     recent:
       rows:
-        - { why: idle, changes: "+1 ~1" }
-        - { why: startup, subject: Initial Snapshot }
+        - { subject: "", version: null, wiki: idea, changes: "+1 ~1", why: turn end }
+        - { subject: "", version: abc1234, wiki: null, changes: "+1 ~1", why: idle }
+        - { subject: Initial Snapshot, version: null, changes: "+1", why: startup }
+    by_commit: { rows: 0 }
+steps:
+  - params: { stream_id: 1, mode: by-commit }
+    expect:
+      loaders:
+        recent: { rows: 0 }
+        by_commit:
+          rows:
+            - { heading: Uncommitted }
+            - { heading: Uncommitted }
+            - { heading: abc1234 }

@@ -1545,12 +1545,17 @@ async fn run_steps(
 ///   effort's `target` is its id, like `eff1`).
 /// - `test_run: { effort, at?, cases?: [{ name, status }], asserted_failed? }`:
 ///   a test run an effort recorded, as a run recorder writes it.
-/// - `snapshot: { trigger?, elapsed_ms?, budget_ms?, files?: [{ path, hash }] }`:
+/// - `snapshot: { trigger?, elapsed_ms?, budget_ms?, revision?, branch?, files?: [{ path, hash }] }`:
 ///   one take in the stream's snapshot log.
 /// - `diagnostics: { path, language?, items?: [{ severity, message, line?, col?, source?, code? }] }`:
 ///   what a language server reported for a file.
 /// - `symbols: { path, language?, items?: [{ name, kind, id?, container?, signature?, line?, col? }] }`:
 ///   the definitions the index read from a file at a snapshot of it.
+/// - `analyze: { kind: working | commit | …, sha?, streamId? }`: a change
+///   analyzed now (`change_analysis::ensure_change`), so its files and
+///   functions are there to read.
+/// - `refs: { branches?, tags?, heads? }`: the branches, tags and stream
+///   heads the git indexer read (each replaces what was stored).
 /// - `visit: { page, kind?, label?, thread?, duration_ms? }`: a page the person
 ///   opened, as the shell records it.
 /// - `facts: { measure, producer?, items?: [{ value?, path?, line?, rule?, severity?, detail?, subject? }] }`:
@@ -1560,10 +1565,12 @@ async fn run_steps(
 /// - `collect: { effort, collectors?: [key] }`: the fact collectors an
 ///   effort's end triggers, run over what the effort recorded.
 /// - `turn: { prompt?, during?: [{ command, input?, as? }], tools?: [{ name, kind, paths?, command?, detail?,
-///   ok?, exit_code? }], write?: { path, body }, answer? }`: one turn on the
-///   primary thread, as its harness's hooks report it — the prompt, each
-///   tool call, the file the turn wrote (a snapshot of the worktree is taken
-///   after it) and the turn's end with the agent's last message.
+///   ok?, exit_code? }], write?: { path, body }, answer?, compactions?: n,
+///   context?: { tokens, window? } }`: one turn on the primary thread, as
+///   its harness's hooks report it — the prompt, each tool call, the file
+///   the turn wrote (a snapshot of the worktree is taken after it), the
+///   context compactions, and the turn's end with the agent's last message
+///   and how full its context was.
 async fn observe(host: &Host, ext: &Extension, observed: &Value) -> Result<(), String> {
     let Some(map) = observed.as_object().filter(|m| m.len() == 1) else {
         return Err("name one kind — fix: `observe: { turn: { .. } }`".into());
@@ -1583,9 +1590,11 @@ async fn observe(host: &Host, ext: &Extension, observed: &Value) -> Result<(), S
         "retention" => observe_retention(host, body).await,
         "facts" => observe_facts(host, body).await,
         "visit" => observe_visit(host, body).await,
+        "refs" => observe_refs(host, body).await,
+        "analyze" => observe_analyze(host, body).await,
         other => {
             return Err(format!(
-                "`{other}` isn't a kind — fix: `turn`, `evidence`, `event`, `commit`, `change`, `test_run`, `snapshot`, `collect`, `diagnostics`, `symbols`, `retention`, `facts` or `visit`"
+                "`{other}` isn't a kind — fix: `turn`, `evidence`, `event`, `commit`, `change`, `test_run`, `snapshot`, `collect`, `diagnostics`, `symbols`, `retention`, `facts`, `visit`, `refs` or `analyze`"
             ))
         }
     }?;
@@ -1923,6 +1932,83 @@ async fn observe_symbols(host: &Host, body: &Value) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
+/// `analyze: { kind: working, streamId } | { kind: commit, sha, streamId? } |
+/// …`: the change is made and analyzed to the end
+/// (`change_analysis::ensure_change`, what `oxplow_ensure_change` calls), so a
+/// page reads its files and functions without waiting for the background
+/// analysis. `streamId` of `working` defaults to the primary stream's.
+async fn observe_analyze(host: &Host, body: &Value) -> Result<(), String> {
+    let mut target = body.clone();
+    if target.get("kind").and_then(Value::as_str) == Some("working")
+        && target.get("streamId").is_none()
+    {
+        let stream = first_stream(host).await?;
+        target["streamId"] = json!(stream.to_string());
+    }
+    let target: oxplow_app::change_analysis::ChangeTarget =
+        serde_json::from_value(target).map_err(|e| format!("`analyze`: {e}"))?;
+    oxplow_app::change_analysis::ensure_change(&host.svc, target)
+        .await
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
+/// `refs: { branches?: [{ name, kind?, head, stream?, default?, upstream?,
+/// ahead?, behind? }], tags?: [{ name, sha }], heads?: [{ stream, sha }] }`:
+/// the repository's refs as the git indexer stores them
+/// (`SqliteGitStore::replace_branches` / `replace_tags` /
+/// `replace_stream_heads`); a part left out keeps what was stored.
+async fn observe_refs(host: &Host, body: &Value) -> Result<(), String> {
+    use oxplow_db::git_store::{GitBranchRow, GitTagRow};
+    let text = |v: &Value, k: &str| v.get(k).and_then(Value::as_str).map(str::to_string);
+    let list = |k: &str| body.get(k).and_then(Value::as_array).cloned();
+    let git = &host.svc.git_store;
+    if let Some(branches) = list("branches") {
+        let mut rows = Vec::new();
+        for b in &branches {
+            rows.push(GitBranchRow {
+                name: text(b, "name").ok_or("a branch names its `name`")?,
+                kind: text(b, "kind").unwrap_or_else(|| "local".into()),
+                remote: text(b, "remote"),
+                head_sha: text(b, "head"),
+                stream_id: b.get("stream").and_then(Value::as_i64),
+                is_default: b.get("default").and_then(Value::as_bool).unwrap_or(false),
+                upstream: text(b, "upstream"),
+                ahead: b.get("ahead").and_then(Value::as_u64).unwrap_or(0) as u32,
+                behind: b.get("behind").and_then(Value::as_u64).unwrap_or(0) as u32,
+            });
+        }
+        git.replace_branches(rows)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+    if let Some(tags) = list("tags") {
+        let mut rows = Vec::new();
+        for t in &tags {
+            rows.push(GitTagRow {
+                name: text(t, "name").ok_or("a tag names its `name`")?,
+                sha: text(t, "sha").ok_or("a tag names its `sha`")?,
+            });
+        }
+        git.replace_tags(rows).await.map_err(|e| e.to_string())?;
+    }
+    if let Some(heads) = list("heads") {
+        let mut rows = Vec::new();
+        for h in &heads {
+            rows.push((
+                h.get("stream")
+                    .and_then(Value::as_i64)
+                    .ok_or("a head names its `stream`")?,
+                text(h, "sha").ok_or("a head names its `sha`")?,
+            ));
+        }
+        git.replace_stream_heads(rows)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 /// `visit: { page, kind?, label?, thread?, duration_ms? }`: a page the person
 /// opened (`page` its ref, `kind` its page kind, `page` by default), recorded
 /// as the shell's `record_page_visit` does (`PageVisitStore::record`).
@@ -2043,7 +2129,7 @@ async fn observe_collect(host: &Host, body: &Value) -> Result<(), String> {
     Ok(())
 }
 
-/// `snapshot: { trigger?, elapsed_ms?, budget_ms?, files?: [{ path, hash }] }`:
+/// `snapshot: { trigger?, elapsed_ms?, budget_ms?, revision?, branch?, files?: [{ path, hash }] }`:
 /// one take in the stream's snapshot log (`SqliteSnapshotStore::
 /// record_take`): its parent is the take before it, and it is over budget
 /// when `elapsed_ms` is more than `budget_ms`. A take whose files hash as
@@ -2096,8 +2182,14 @@ async fn take_snapshot(
             thread_id: None,
             turn_id: None,
             effort_id: None,
-            branch: None,
-            revision: None,
+            branch: body
+                .get("branch")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            revision: match body.get("revision").and_then(Value::as_str) {
+                Some(r) => Some(r.parse().map_err(|e| format!("`snapshot.revision`: {e}"))?),
+                None => None,
+            },
             elapsed_ms: body.get("elapsed_ms").and_then(Value::as_u64).unwrap_or(1),
             budget_ms: body.get("budget_ms").and_then(Value::as_u64),
             source: "fixture".into(),
@@ -2243,9 +2335,19 @@ async fn observe_turn(host: &Host, body: &Value) -> Result<(), String> {
     use oxplow_app::hook_ingest::{HookEnvelope, LAST_ASSISTANT_MESSAGE};
     use oxplow_domain::hook::HookKind;
     for key in body.as_object().into_iter().flat_map(|m| m.keys()) {
-        if !["prompt", "during", "tools", "write", "answer"].contains(&key.as_str()) {
+        if ![
+            "prompt",
+            "during",
+            "tools",
+            "write",
+            "answer",
+            "compactions",
+            "context",
+        ]
+        .contains(&key.as_str())
+        {
             return Err(format!(
-                "`turn.{key}` — fix: `prompt`, `during`, `tools`, `write` or `answer`"
+                "`turn.{key}` — fix: `prompt`, `during`, `tools`, `write`, `answer`, `compactions` or `context`"
             ));
         }
     }
@@ -2362,11 +2464,22 @@ async fn observe_turn(host: &Host, body: &Value) -> Result<(), String> {
             .await
             .map_err(|e| e.to_string())?;
     }
+    for _ in 0..body.get("compactions").and_then(Value::as_u64).unwrap_or(0) {
+        ingest(envelope(HookKind::PostCompact, json!({}))).await?;
+    }
     let mut payload = json!({});
     if let Some(answer) = body.get("answer") {
         payload[LAST_ASSISTANT_MESSAGE] = answer.clone();
     }
-    ingest(envelope(HookKind::Stop, payload)).await
+    let mut stop = envelope(HookKind::Stop, payload);
+    if let Some(context) = body.get("context") {
+        stop.turn_run = Some(oxplow_domain::hook::TurnRun {
+            context_tokens: context.get("tokens").and_then(Value::as_i64),
+            context_window: context.get("window").and_then(Value::as_i64),
+            ..Default::default()
+        });
+    }
+    ingest(stop).await
 }
 
 /// Who runs a step's command (`as:`): a person, or `agent` (the primary
@@ -6479,6 +6592,30 @@ expect: {{ rows: [{{ title: Mine }}] }}
             errors.contains("fixtures/basic.yaml:1: `requires` names `no-such-extension`"),
             "{errors}"
         );
+    }
+
+    /// `observe: { refs }` is what the git indexer read of the repository's
+    /// branches, tags and the stream's head; `snapshot` takes a `revision`.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_given_observes_git_refs_and_a_snapshots_revision() {
+        let dir = tempfile::tempdir().unwrap();
+        crate::scaffold(dir.path(), crate::Kind::Command, "notes", None).unwrap();
+        write(
+            dir.path(),
+            ".oxplow/extensions/notes/fixtures/basic.yaml",
+            "given:
+  - observe: { commit: { sha: c1, at: \"2026-01-01T00:00:00Z\", subject: first } }
+  - observe: { refs: { branches: [{ name: main, head: c1, stream: 1 }, { name: side, head: c1 }], tags: [{ name: v1, sha: c1 }], heads: [{ stream: 1, sha: c1 }] } }
+  - observe: { snapshot: { trigger: quiet, revision: \"git:c1\", files: [{ path: a.txt, hash: h1 }] } }
+when:
+  sql: SELECT (SELECT group_concat(name) FROM (SELECT name FROM v_branch ORDER BY name)) AS branches, (SELECT name FROM v_tag) AS tag, (SELECT head_sha FROM v_stream) AS head, (SELECT revision FROM v_snapshot) AS revision
+expect:
+  rows:
+    - { branches: \"main,side\", tag: v1, head: c1, revision: \"git:c1\" }
+",
+        );
+        let report = test_extension(dir.path(), "notes", false).await.unwrap();
+        assert!(report.ok, "{:?}", report.errors);
     }
 
     /// `observe: { evidence }` sets the observations an effort's page

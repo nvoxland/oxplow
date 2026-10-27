@@ -1,0 +1,42 @@
+# The Files page: all files a folder at a time, or the changed files in
+# their folders (the working tree, each opening a diff).
+given:
+  - observe: { turn: { prompt: src, write: { path: src/new.rs, body: "fn main() {}\n" } } }
+  - observe: { turn: { prompt: top, write: { path: top.txt, body: "x\n" } } }
+  - observe: { refs: { branches: [{ name: main, stream: 1, default: true }] } }
+  - observe: { analyze: { kind: working } }
+# The scopes on offer: at least all files and the working tree's.
+when: { page: oxplow-foundation/files-scopes, params: { stream_id: 1 } }
+expect:
+  loaders:
+    files_scopes:
+      rows:
+        contains: [{ value: all }, { value: uncommitted }]
+steps:
+  # The working tree scope names a working change.
+  - when: { page: oxplow-foundation/files, params: { stream_id: 1, scope: uncommitted } }
+    expect: { loaders: { row: { rows: [{ change_kind: working }] } } }
+  # All files, a folder at a time; only all-files folders open lazily.
+  - when: { page: oxplow-foundation/files, params: { stream_id: 1, scope: all, folder: "" } }
+    expect:
+      loaders:
+        tree:
+          rows:
+            contains:
+              - { name: src, opens: 1 }
+              - { name: top.txt, opens: 0 }
+  - when: { page: oxplow-foundation/files, params: { stream_id: 1, scope: all, folder: src } }
+    expect:
+      loaders:
+        tree:
+          rows:
+            - { name: new.rs, parent: src, target: "oxplow:oxplow/file?path=src/new.rs" }
+  # Only the changed files: nested, each opening a diff.
+  - when: { page: oxplow-foundation/files, params: { stream_id: 1, scope: uncommitted, folder: "" } }
+    expect:
+      loaders:
+        tree:
+          rows:
+            contains:
+              - { id: src }
+              - { id: src/new.rs, parent: src, target: $any }

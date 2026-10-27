@@ -2073,7 +2073,7 @@ a `KINDS` entry and a `dispatch` arm. The forms:
   ran because of it — the script's steps, then what reacted (audited after
   it). The extension's own command with `answers` is still the dry run
   below, until those fixtures make their data.
-- `given: [{ observe: { turn: { prompt?, during?, tools?, write?, answer? } } }]`
+- `given: [{ observe: { turn: { prompt?, during?, tools?, write?, answer?, compactions?, context? } } }]`
   (`observe` in `extension_test.rs`; every kind takes `given` and `steps`) —
   what oxplow only learns from what happens around it, made through the API
   core makes it with, and a new kind is added to that `match`, red test
@@ -2096,6 +2096,12 @@ a `KINDS` entry and a `dispatch` arm. The forms:
   snapshot log, `SqliteSnapshotStore::record_take`), `diagnostics`
   (`SqliteDiagnosticStore::replace_file`), `symbols` (`SqliteSymbolStore::record`
   at a snapshot taken with the file), `collect` (`run_effort_collectors`) 
+  `analyze` (`change_analysis::ensure_change`: a working or commit change
+  analyzed to the end; real files come from `turn.write` and real commits from
+  `oxplow.vcs.stage` / `oxplow.vcs.commit`, a throwaway's forks keep their
+  streams in their own folder),
+  `refs` (branches, tags and stream heads, `replace_branches` /
+  `replace_tags` / `replace_stream_heads`),
   `visit` (a page the person opened, `PageVisitStore::record`),
   `facts` (findings of a declared measure through `record_facts`) and
   `retention` (`event_retention::sweep`, run `days` ahead). A step's `when: { sql }` reads the result, since a `steps` entry

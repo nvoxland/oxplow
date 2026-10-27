@@ -1,0 +1,12 @@
+# The Context page: its Waiting section lists what the person collected, and
+# Clear — a whole-page action, bound to the page's `thread_id` — empties it
+# through the page-action path, leaving what was delivered.
+given:
+  - { command: oxplow.context.add, input: { thread: thr1, uri: "oxplow:oxplow/page?page=tasks", label: "oxplow:oxplow/page?page=tasks" } }
+  - { command: oxplow.context.add, input: { thread: thr1, uri: "oxplow:oxplow/page?page=board", label: "oxplow:oxplow/page?page=board" } }
+when: { page: oxplow-foundation/context, params: { thread_id: 1 } }
+expect: { loaders: { waiting: { rows: 2 } } }
+steps:
+  - press: { action: clear }
+    expect: { ok: true }
+  - expect: { loaders: { waiting: { rows: 0 } } }

@@ -1,16 +1,12 @@
-# The agent's activity on the stream — a prompt, its tool calls and the
-# turn's end — newest first.
+# The agent's activity on the stream, newest first, each event with what it
+# says: a tool, its target and its outcome.
 given:
-  - observe:
-      turn:
-        prompt: Fix it
-        tools:
-          - { name: Edit, kind: edit, paths: [src/a.rs], ok: true }
+  - observe: { event: { type: agent.tool.requested, v: 3, payload: { tool: Edit, kind: edit, paths: [src/a.rs], decision: allowed }, anchors: { stream_id: str1 } } }
+  - observe: { event: { type: agent.tool.finished, v: 3, payload: { tool: Edit, kind: edit, paths: [src/a.rs], ok: false }, anchors: { stream_id: str1 } } }
 when: { page: oxplow-foundation/hook-events, params: { stream_id: 1 } }
 expect:
   loaders:
     hook_events:
       rows:
-        contains:
-          - { kind: prompt.submitted }
-          - { kind: turn.ended }
+        - { kind: tool.finished, detail: "Edit · src/a.rs · failed" }
+        - { kind: tool.requested, detail: "Edit · src/a.rs" }

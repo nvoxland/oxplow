@@ -352,7 +352,12 @@ pub fn ops(target: VcsTarget) -> Vec<Op> {
                     )
                     .await
                     .map_err(vcs_err)?;
-                Ok(json!({ "success": true, "revision": format!("{}:{rev}", t.vcs.rev_kind()) }))
+                Ok(json!({
+                    "success": true,
+                    "revision": format!("{}:{rev}", t.vcs.rev_kind()),
+                    // The commit's id in its VCS (a git sha), for what takes it bare.
+                    "rev": rev,
+                }))
             },
         ),
         vcs_op(
