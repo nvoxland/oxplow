@@ -1,6 +1,8 @@
 # The Tasks page: the items in scope by state with epics nested, the priority
 # filter keeping an epic whose child matches, the last five done, and the
 # summary's counts.
+# (Oxplow's own work list, effort policy and wiki are bundled's.)
+requires: [oxplow-bundled]
 given:
   - { command: oxplow.work_item.create, input: { title: An epic, thread: thr1, native: { priority: low } }, bind: epic }
   - { command: oxplow.work_item.create, input: { title: Urgent child, thread: thr1, native: { priority: urgent }, parent_uri: $epic.uri } }

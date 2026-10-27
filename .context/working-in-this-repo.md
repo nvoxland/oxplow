@@ -283,8 +283,9 @@ component"). Never a new Rust test: Rust tests are for core, and
 `bundled_extensions.rs`, `settings_pages_tests.rs` and
 `directory_page_tests.rs` keep only what no fixture can express yet. A
 fixture runs on a throwaway oxplow — this build's schema, only the data
-it makes, only the extensions its own declares — never the project's
-database. `ui:` steps need the app built once (`bun run build:dev`).
+it makes, only the extensions its own declares (a fixture's `requires:`
+adds more, e.g. `oxplow-bundled` for oxplow's work list) — never the
+project's database. `ui:` steps need the app built once (`bun run build:dev`).
 `test:ext` writes `target/extension-tests/junit.xml`, which the project
 extension's `tests.extension_junit` collector reads.
 

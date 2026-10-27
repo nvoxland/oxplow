@@ -24,6 +24,8 @@ const FIXTURE_INSTANCE: &str = "fixture";
 pub(crate) struct Host {
     _dir: tempfile::TempDir,
     pub(crate) root: PathBuf,
+    /// The project checkout it was made from, where sources are found.
+    pub(crate) checkout: PathBuf,
     pub(crate) svc: Arc<oxplow_app::Services>,
     /// What its activation held back, and why (`<extension>: <reason>`).
     pub(crate) problems: Vec<String>,
@@ -32,8 +34,8 @@ pub(crate) struct Host {
     /// and whether built sources were deployed.
     on: Vec<String>,
     copied: std::collections::BTreeMap<String, PathBuf>,
-    env: HostEnv,
-    builds: bool,
+    pub(crate) env: HostEnv,
+    pub(crate) builds: bool,
     /// Its database as the deploys left it, before anything ran: what a
     /// fork starts from.
     deployed: oxplow_db::Database,
@@ -45,16 +47,20 @@ pub(crate) struct Host {
 impl Host {
     /// A throwaway over the extensions in `checkout` (the project's main
     /// checkout, or a worktree holding drafts) with `testing` on too,
-    /// activated. Which are on is the project's list and every source here —
-    /// never one person's `enableExtensions` / `disableExtensions`, so a
-    /// test runs the same for everyone; where their sources are is the
+    /// activated. Which are on: the required foundation, `testing` and what
+    /// each of those requires or imports — never the default extensions, the
+    /// project's list or one person's `enableExtensions` /
+    /// `disableExtensions`, so a test runs the same for everyone, and oxplow's
+    /// own pages run as they do with nothing added to them; where their sources are is the
     /// project's settings (its main checkout's), read in `checkout`. Its
-    /// programs see `env`. With `builds`, a copied source with a `build:` is
+    /// programs see `env`, and `extra` are more extensions to turn on (a
+    /// fixture's `requires`). With `builds`, a copied source with a `build:` is
     /// built and deployed like the rest; without (a check, which runs no
     /// program), it isn't deployed.
     pub(crate) async fn start(
         checkout: &Path,
         testing: &str,
+        extra: &[String],
         env: HostEnv,
         builds: bool,
     ) -> Result<Host, String> {
@@ -65,9 +71,10 @@ impl Host {
             .await
             .unwrap_or_else(|| checkout.to_path_buf());
         let settings = oxplow_config::extension_settings(project);
-        // Which are on: what a fresh oxplow has (the required foundation,
-        // the default extensions), the one tested, and what each of those
-        // `requires:` or imports from, in turn. Never the project's list or
+        // Which are on: the required foundation, the one tested, and what
+        // each of those `requires:` or imports from, in turn. Not the default
+        // extensions: oxplow's own pages run complete without them, and an
+        // extension that reads bundled's models says `requires:`. Never the project's list or
         // one person's: a test passes or fails on what the extension
         // declares, the same for everyone, and a sibling it doesn't name —
         // broken or not — isn't in it.
@@ -108,10 +115,26 @@ impl Host {
             .iter()
             .filter(|b| b.required)
             .map(|b| b.name)
-            .chain(oxplow_config::DEFAULT_EXTENSIONS.iter().copied())
-            .chain([testing]);
+            .chain([testing])
+            .chain(extra.iter().map(String::as_str));
         for root in roots {
             visit(root, checkout, &settings, &mut on, &mut seen);
+        }
+        // An effort policy under test is judged by the work it files, and
+        // oxplow's own work list is bundled's.
+        let tested = settings.source(checkout, testing);
+        let judged = tested.is_dir() && {
+            let ext = oxplow_app::extensions::load_extension_at(&tested, testing);
+            ext.implementations
+                .iter()
+                .any(|d| d.capability == "effort_policy")
+                || ext
+                    .providers
+                    .iter()
+                    .any(|p| p.capability == "effort_policy")
+        };
+        if judged {
+            visit("oxplow-bundled", checkout, &settings, &mut on, &mut seen);
         }
         // Each source goes where the checkout keeps it, so a finding names
         // the file the author edits; one kept outside the checkout goes
@@ -141,7 +164,16 @@ impl Host {
         )
         .map_err(|e| e.to_string())?;
         std::fs::write(config, yaml).map_err(|e| e.to_string())?;
-        Self::boot(dir, root, on, copied, env, builds).await
+        Self::boot(dir, root, checkout.to_path_buf(), on, copied, env, builds).await
+    }
+
+    /// Whether `name` is an extension a throwaway here can turn on: shipped
+    /// with oxplow, or a source in the checkout.
+    pub(crate) fn knows(checkout: &Path, name: &str) -> bool {
+        oxplow_app::bundled_extensions::find(name).is_some()
+            || oxplow_config::extension_settings(checkout)
+                .source(checkout, name)
+                .is_dir()
     }
 
     /// Another throwaway like this one as it was deployed, before anything
@@ -175,6 +207,7 @@ impl Host {
         let host = Host {
             _dir: dir,
             root,
+            checkout: self.checkout.clone(),
             problems: problems(&svc, Vec::new()),
             svc,
             on: self.on.clone(),
@@ -193,6 +226,7 @@ impl Host {
     async fn boot(
         dir: tempfile::TempDir,
         root: PathBuf,
+        checkout: PathBuf,
         on: Vec<String>,
         copied: std::collections::BTreeMap<String, PathBuf>,
         env: HostEnv,
@@ -234,6 +268,7 @@ impl Host {
         Ok(Host {
             _dir: dir,
             root,
+            checkout,
             problems: problems(&svc, deploys),
             svc,
             deployed,
@@ -456,13 +491,18 @@ mod tests {
             "not: [valid\n",
         );
 
-        let host = Host::start(&wt, "acme", Arc::new(|_: &str| None), false)
+        let host = Host::start(&wt, "acme", &[], Arc::new(|_: &str| None), false)
             .await
             .unwrap();
-        for name in ["acme", "dep", "deeper", "oxplow-bundled"] {
+        for name in ["acme", "dep", "deeper"] {
             assert!(host.on.iter().any(|n| n == name), "{name}: {:?}", host.on);
         }
         assert!(!host.on.iter().any(|n| n == "other"), "{:?}", host.on);
+        assert!(
+            !host.on.iter().any(|n| n == "oxplow-bundled"),
+            "{:?}",
+            host.on
+        );
         assert!(!host.root.join(EXTENSIONS_DIR).join("other").exists());
         assert!(host.problems.is_empty(), "{:?}", host.problems);
         assert!(!host.root.join(".oxplow/personal.yaml").exists());
@@ -490,7 +530,7 @@ mod tests {
             "manifest: 2\nname: acme\nintent:\n  purpose: test\n  examples:\n    - { name: unpaired, input: { page: none }, expect: nothing }\n",
         );
 
-        let host = Host::start(project.path(), "acme", Arc::new(|_: &str| None), false)
+        let host = Host::start(project.path(), "acme", &[], Arc::new(|_: &str| None), false)
             .await
             .unwrap();
         assert!(host.root.join("extensions/acme").is_dir());

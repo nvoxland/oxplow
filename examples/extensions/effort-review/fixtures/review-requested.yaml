@@ -1,4 +1,6 @@
 # Asking for an effort's review enqueues the review job, keyed by the effort.
+# (Oxplow's own work list, effort policy and wiki are bundled's.)
+requires: [oxplow-bundled]
 when:
   command: effort_review.effort.review
   input: { effort: "eff7" }

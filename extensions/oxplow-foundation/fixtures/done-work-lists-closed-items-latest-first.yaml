@@ -1,4 +1,6 @@
 # Every done or canceled item on the thread's list, the latest closed first.
+# (Oxplow's own work list, effort policy and wiki are bundled's.)
+requires: [oxplow-bundled]
 given:
   - { command: oxplow.work_item.create, input: { title: First, thread: thr1 }, bind: a }
   - { command: oxplow.work_item.create, input: { title: Second, thread: thr1 }, bind: b }

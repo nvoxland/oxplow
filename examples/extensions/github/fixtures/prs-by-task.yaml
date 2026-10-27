@@ -1,4 +1,6 @@
 # Each PR's number, title and author, with the work item its title names.
+# (Oxplow's own work list, effort policy and wiki are bundled's.)
+requires: [oxplow-bundled]
 given:
   - { command: oxplow.work_item.create, input: { title: Parse blocks }, bind: item }
   - rows:

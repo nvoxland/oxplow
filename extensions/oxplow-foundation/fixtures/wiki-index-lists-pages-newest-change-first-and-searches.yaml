@@ -1,6 +1,8 @@
 # The project's wiki pages, the latest changed first; a search lists the
 # pages whose title or body matches, with a snippet around the match. The
 # pages visited are listed first, as their own list.
+# (Oxplow's own work list, effort policy and wiki are bundled's.)
+requires: [oxplow-bundled]
 given:
   - { command: oxplow.knowledge.write_page, input: { slug: otters, title: Otters, body: "# Otters\n\nThey hold hands.\n" } }
   - { command: oxplow.knowledge.write_page, input: { slug: beavers, title: Beavers, body: "# Beavers\n\nThey build dams.\n" } }

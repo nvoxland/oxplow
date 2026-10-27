@@ -172,6 +172,15 @@ intent:
     - name: the-history-graph-draws-lanes-filters-and-opens-a-commit
       input: { page: oxplow-foundation/git-history }
       expect: a row per commit, a lane for a merge's second parent, a filter that dims, a row that opens its commit
+    - name: data-effect-backfill-says-what-bundled-effect-would-do
+      input: { page: oxplow-foundation/data-effect-backfill }
+      expect: a bundled effect's backfill says there is nothing to catch up on
+    - name: settings-data-area-lists-bundled-effects
+      input: { page: oxplow-foundation/settings, params: { area: data } }
+      expect: Settings → Data lists bundled's four effects
+    - name: settings-ai-area-lists-bundleds-role
+      input: { page: oxplow-foundation/settings, params: { area: ai } }
+      expect: Settings → AI lists bundled's reasoning role, bound to nothing
 # oxplow's default work list and effort policy: built-ins of core's,
 # declared here so they are an extension's like any other. Disabled, both
 # fall to none. Snapshots can't be none: their default is core's own (it

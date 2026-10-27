@@ -1,6 +1,8 @@
 # Each review asked for is a row, with its effort and work item, from the
 # moment it is queued: a work item, an effort on it, and its review asked
 # for the way the effect and the Efforts page ask.
+# (Oxplow's own work list, effort policy and wiki are bundled's.)
+requires: [oxplow-bundled]
 given:
   - { command: oxplow.work_item.create, input: { title: Parse blocks }, bind: item }
   - { command: oxplow.effort.open, input: { thread: thr1, work_item: $item.uri } }

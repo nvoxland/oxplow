@@ -1,6 +1,8 @@
 # The backlog lists items on no thread, an epic's children indented under it,
 # filtered by a search that reads the title or any field; the gated actions
 # follow what the list can do; the quick-add form starts a Ready item.
+# (Oxplow's own work list, effort policy and wiki are bundled's.)
+requires: [oxplow-bundled]
 given:
   - { command: oxplow.work_item.create, input: { title: An epic }, bind: epic }
   - { command: oxplow.work_item.create, input: { title: Child of the epic, parent_uri: $epic.uri } }

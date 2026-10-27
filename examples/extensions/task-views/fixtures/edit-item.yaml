@@ -1,4 +1,6 @@
 # The editor's form: the item's title and body, its uri fixed.
+# (Oxplow's own work list, effort policy and wiki are bundled's.)
+requires: [oxplow-bundled]
 when:
   form: edit-item
   node: edit_item

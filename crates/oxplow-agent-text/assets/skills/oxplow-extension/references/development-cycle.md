@@ -16,7 +16,7 @@ edits change nothing on the person's screen until you deploy.
    as `oxplow extension check`), then run its fixtures with
    `$OXPLOW_BIN extension test <name>` in your terminal until they pass.
    Both run on a throwaway oxplow — this build's schema, only the data a
-   fixture makes, only the extensions yours declares — so they need no
+   fixture makes, only the extensions yours declares (a fixture adds more with `requires:`) — so they need no
    deploy and nothing in the project's database affects them.
    `oxplow_run_page` (`draft: true` in a worktree) shows a page over the
    project's real data: a look before you deploy, not a test.

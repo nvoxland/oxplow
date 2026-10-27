@@ -1,4 +1,6 @@
 # Open, a model counts its rows; the entity list itself holds it.
+# (Oxplow's own work list, effort policy and wiki are bundled's.)
+requires: [oxplow-bundled]
 given:
   - { command: oxplow.work_item.create, input: { title: One, thread: thr1 } }
 when: { page: data-entity-rows, params: { name: v_work_item } }

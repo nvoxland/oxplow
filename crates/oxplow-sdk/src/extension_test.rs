@@ -160,7 +160,7 @@ pub async fn test_extension_in(
 ) -> Result<TestReport, SdkError> {
     let started = std::time::Instant::now();
     let host = Arc::new(
-        Host::start(root, name, env.clone(), true)
+        Host::start(root, name, &[], env.clone(), true)
             .await
             .map_err(SdkError::Invalid)?,
     );
@@ -276,6 +276,9 @@ async fn examples(shared: &Arc<Host>, ext: &Extension, report: &mut TestReport) 
     // examples' order.
     let slots = Arc::new(tokio::sync::Semaphore::new(side_by_side()));
     let mut own = Vec::new();
+    // The oxplows fixtures that turn on more extensions start from, by
+    // what they turn on.
+    let mut required: std::collections::BTreeMap<Vec<String>, Arc<Host>> = Default::default();
     for example in examples {
         let Some((shown, doc)) = example_fixture(&read, &rel, &example.name) else {
             report.warnings.push(format!(
@@ -300,7 +303,7 @@ async fn examples(shared: &Arc<Host>, ext: &Extension, report: &mut TestReport) 
         {
             report.errors.push(format!(
                 "{shown}:1: `{key}` isn't a fixture key — fix: a fixture is `given` (the steps \
-                 first), `when` (what it does), `expect`, `steps` (a scenario), `view` and `model`"
+                 first), `when` (what it does), `expect`, `steps` (a scenario), `view`, `model` and `requires` (more extensions to turn on)"
             ));
             continue;
         }
@@ -311,6 +314,66 @@ async fn examples(shared: &Arc<Host>, ext: &Extension, report: &mut TestReport) 
                 "{}:1: example `{}` isn't run: {why}",
                 fixture.shown, fixture.name
             ));
+            continue;
+        }
+        // A fixture that turns on more extensions runs on an oxplow with
+        // them, of its own.
+        if !fixture.requires.is_empty() {
+            if let Some(unknown) = fixture
+                .requires
+                .iter()
+                .find(|n| !Host::knows(&shared.checkout, n))
+            {
+                report.errors.push(format!(
+                    "{}:1: `requires` names `{unknown}`, which isn't an extension here — fix: an \
+                     extension oxplow ships (`oxplow-bundled`) or one in `.oxplow/extensions/`",
+                    fixture.shown
+                ));
+                continue;
+            }
+            let base = match required.get(&fixture.requires) {
+                Some(base) => base.clone(),
+                None => {
+                    let built = match Host::start(
+                        &shared.checkout,
+                        &ext.name,
+                        &fixture.requires,
+                        shared.env.clone(),
+                        shared.builds,
+                    )
+                    .await
+                    {
+                        Ok(host) => host.start_runtime().map(|()| Arc::new(host)),
+                        Err(e) => Err(e),
+                    };
+                    match built {
+                        Ok(base) => {
+                            required.insert(fixture.requires.clone(), base.clone());
+                            base
+                        }
+                        Err(e) => {
+                            report.errors.push(format!(
+                                "{}:1: an oxplow with {}: {e}",
+                                fixture.shown,
+                                fixture.requires.join(", ")
+                            ));
+                            continue;
+                        }
+                    }
+                }
+            };
+            let (ext, slots) = (ext.clone(), slots.clone());
+            own.push(tokio::spawn(async move {
+                let _slot = slots.acquire_owned().await;
+                let mut part = TestReport::part(&ext.name);
+                match base.fork().await {
+                    Ok(host) => run_example(&host, &ext, &fixture.example(), &mut part).await,
+                    Err(e) => part
+                        .errors
+                        .push(format!("{}:1: an oxplow of its own: {e}", fixture.shown)),
+                }
+                part
+            }));
             continue;
         }
         // An example that makes data — steps, rows, a job, a logged event,
@@ -352,7 +415,9 @@ fn side_by_side() -> usize {
 }
 
 /// The keys of a fixture file.
-const FIXTURE_KEYS: [&str; 6] = ["given", "when", "expect", "steps", "view", "model"];
+const FIXTURE_KEYS: [&str; 7] = [
+    "requires", "given", "when", "expect", "steps", "view", "model",
+];
 
 /// An example's fixture, owned, so it can run on a task of its own.
 struct Fixture {
@@ -365,6 +430,8 @@ struct Fixture {
     steps: Option<Value>,
     view: Value,
     model: Value,
+    /// The extensions it turns on beyond the one tested.
+    requires: Vec<String>,
 }
 
 impl Fixture {
@@ -378,6 +445,13 @@ impl Fixture {
             steps: doc.get("steps").cloned(),
             view: doc.get("view").cloned().unwrap_or(Value::Null),
             model: doc.get("model").cloned().unwrap_or(Value::Null),
+            requires: doc
+                .get("requires")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(|n| n.as_str().map(str::to_string))
+                .collect(),
         }
     }
 
@@ -5498,9 +5572,24 @@ mod tests {
     use super::*;
     use crate::Format;
 
+    /// Write a file of a test's extension. A fixture that makes work items,
+    /// efforts or wiki pages turns on bundled — oxplow's own work list,
+    /// effort policy and wiki are bundled's — as a real fixture says in its
+    /// `requires`.
     fn write(root: &Path, rel: &str, body: &str) {
         let p = root.join(rel);
         std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        let needs_bundled = rel.contains("/fixtures/")
+            && rel.ends_with(".yaml")
+            && !body.contains("requires:")
+            && ["work_item", "effort", "knowledge."]
+                .iter()
+                .any(|k| body.contains(k));
+        let body = if needs_bundled {
+            format!("requires: [oxplow-bundled]\n{body}")
+        } else {
+            body.to_string()
+        };
         std::fs::write(p, body).unwrap();
     }
 
@@ -6244,6 +6333,103 @@ expect:
         );
         let report = test_extension(dir.path(), "notes", false).await.unwrap();
         assert!(report.ok, "{:?}", report.errors);
+    }
+
+    /// A test's oxplow has only what is declared on: the required
+    /// foundation, the extension tested and what it requires. Oxplow's own
+    /// pages run complete without the default extensions adding to them.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_foundation_fixture_runs_without_bundled() {
+        let dir = tempfile::tempdir().unwrap();
+        crate::scaffold(dir.path(), crate::Kind::Command, "notes", None).unwrap();
+        let host = Host::start(
+            dir.path(),
+            "oxplow-foundation",
+            &[],
+            Arc::new(|_: &str| None),
+            false,
+        )
+        .await
+        .unwrap();
+        observe_commit(
+            &host,
+            &json!({ "sha": "c1", "at": "2026-01-01T00:00:00Z", "subject": "first", "files": [{ "path": "a.rs" }] }),
+        )
+        .await
+        .unwrap();
+        let run = run_page(
+            &host,
+            oxplow_app::pages::runner::RunTarget::Page("oxplow-foundation/git-history".into()),
+            &json!({ "stream_id": 1, "head_sha": "c1" }),
+            &oxplow_app::extensions::ViewContext::default(),
+        )
+        .await
+        .unwrap();
+        fn walk<'a>(
+            n: &'a oxplow_app::pages::runner::RunNode,
+            out: &mut Vec<&'a oxplow_app::pages::runner::RunNode>,
+        ) {
+            out.push(n);
+            for c in &n.children {
+                walk(c, out);
+            }
+        }
+        let mut nodes = Vec::new();
+        walk(&run.tree, &mut nodes);
+        assert!(!nodes.is_empty());
+        for n in nodes {
+            assert_eq!(n.replaced_by, None, "{}", n.id);
+            assert!(!n.id.starts_with("oxplow-bundled."), "{}", n.id);
+        }
+    }
+
+    /// A fixture's `requires` turns on extensions beyond the one tested
+    /// (and what they require): oxplow's own work list is bundled's, so a
+    /// fixture that makes work items asks for it.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_fixture_requires_the_extensions_it_needs() {
+        let dir = tempfile::tempdir().unwrap();
+        crate::scaffold(dir.path(), crate::Kind::Command, "notes", None).unwrap();
+        let fixture = |requires: &str| {
+            format!(
+                "{requires}given:
+  - {{ command: oxplow.work_item.create, input: {{ title: Mine, thread: thr1 }} }}
+when: {{ sql: SELECT title FROM v_work_item }}
+expect: {{ rows: [{{ title: Mine }}] }}
+"
+            )
+        };
+        write(
+            dir.path(),
+            ".oxplow/extensions/notes/fixtures/basic.yaml",
+            &fixture("requires: [oxplow-bundled]\n"),
+        );
+        let report = test_extension(dir.path(), "notes", false).await.unwrap();
+        assert_eq!(report.errors, Vec::<String>::new());
+        // Without it there is no work list to make the item in.
+        std::fs::write(
+            dir.path()
+                .join(".oxplow/extensions/notes/fixtures/basic.yaml"),
+            fixture(""),
+        )
+        .unwrap();
+        let report = test_extension(dir.path(), "notes", false).await.unwrap();
+        assert!(!report.errors.is_empty());
+        // A name that isn't an extension here is a finding.
+        write(
+            dir.path(),
+            ".oxplow/extensions/notes/fixtures/basic.yaml",
+            &fixture("requires: [no-such-extension]\n"),
+        );
+        let errors = test_extension(dir.path(), "notes", false)
+            .await
+            .unwrap()
+            .errors
+            .join("\n");
+        assert!(
+            errors.contains("fixtures/basic.yaml:1: `requires` names `no-such-extension`"),
+            "{errors}"
+        );
     }
 
     /// `observe: { evidence }` sets the observations an effort's page
@@ -7332,7 +7518,8 @@ view:
 ",
             &[(
                 "submitted",
-                "when: { page: items }
+                "requires: [oxplow-bundled]
+when: { page: items }
 expect: { loaders: { items: { rows: 0 } } }
 steps:
   - submit: { node: add, input: { title: Written } }

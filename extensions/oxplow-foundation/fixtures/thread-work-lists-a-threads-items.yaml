@@ -1,4 +1,6 @@
 # A thread's work: its items by state.
+# (Oxplow's own work list, effort policy and wiki are bundled's.)
+requires: [oxplow-bundled]
 given:
   - { command: oxplow.work_item.create, input: { title: ship it, thread: thr1 } }
 when: { page: oxplow-foundation/thread-work, params: { thread: thr1 } }

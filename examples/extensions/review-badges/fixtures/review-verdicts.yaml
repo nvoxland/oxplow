@@ -1,4 +1,6 @@
 # Nothing has been reviewed in a fresh project.
+# (Oxplow's own work list, effort policy and wiki are bundled's.)
+requires: [oxplow-bundled]
 when:
   page: review-verdicts
 expect:
