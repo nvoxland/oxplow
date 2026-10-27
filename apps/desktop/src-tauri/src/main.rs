@@ -26,7 +26,54 @@ fn main() {
     // `generate_context!` embeds the Info.plist and may expand only
     // once per binary.
     let ctx = tauri::generate_context!();
+    if let Some(url) = harness_arg(std::env::args().skip(1)) {
+        run_harness(ctx, url);
+        return;
+    }
     run_shell(ctx);
+}
+
+/// `oxplow component-harness <url>`: the page of a component harness
+/// (`oxplow extension test` serves it on loopback) to open.
+fn harness_arg(mut args: impl Iterator<Item = String>) -> Option<tauri::Url> {
+    if args.next().as_deref() != Some("component-harness") {
+        return None;
+    }
+    let url = tauri::Url::parse(&args.next()?).ok()?;
+    let loopback = matches!(url.host_str(), Some("127.0.0.1" | "localhost"));
+    (url.scheme() == "http" && loopback).then_some(url)
+}
+
+/// One window on a component harness's page, and nothing of the app: no
+/// project, no daemon, no menu, no plugins — and no IPC, since no
+/// capability names its label. The engine is the app's own, so a component
+/// tested is drawn as it will be. Shown but off-screen (a hidden webview
+/// may throttle its timers), with no Dock icon; it quits when the page goes
+/// to `/harness/done`.
+fn run_harness(ctx: tauri::Context, url: tauri::Url) {
+    tauri::Builder::default()
+        .setup(move |app| {
+            #[cfg(target_os = "macos")]
+            app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+            let handle = app.handle().clone();
+            tauri::WebviewWindowBuilder::new(app, "harness", tauri::WebviewUrl::External(url))
+                .title("oxplow component harness")
+                .inner_size(1280.0, 800.0)
+                .position(-20_000.0, -20_000.0)
+                .focused(false)
+                .skip_taskbar(true)
+                .on_navigation(move |to| {
+                    if to.path() == "/harness/done" {
+                        handle.exit(0);
+                        return false;
+                    }
+                    true
+                })
+                .build()?;
+            Ok(())
+        })
+        .run(ctx)
+        .expect("the component harness's window opens");
 }
 
 /// What `--version` / `-V` or `--help` / `-h` print, when the first
@@ -39,6 +86,7 @@ fn info_arg(mut args: impl Iterator<Item = String>) -> Option<String> {
              Usage:\n  \
              oxplow [--init]                        open the app (--init: set up this dir as a project)\n  \
              oxplow extension <new|check|test> ...  the extension SDK\n  \
+             oxplow component-harness <url>         a component harness's page (extension test opens it)\n  \
              oxplow --version | --help"
                 .to_string(),
         ),
@@ -353,6 +401,25 @@ mod tests {
 
     fn info(args: &[&str]) -> Option<String> {
         info_arg(args.iter().map(|a| a.to_string()))
+    }
+
+    /// `oxplow component-harness <url>` opens a harness's loopback page,
+    /// and nothing else is one.
+    #[test]
+    fn the_component_harness_takes_a_loopback_page() {
+        let harness = |args: &[&str]| harness_arg(args.iter().map(|a| a.to_string()));
+        assert_eq!(
+            harness(&["component-harness", "http://127.0.0.1:4100/harness/"])
+                .map(|u| u.to_string()),
+            Some("http://127.0.0.1:4100/harness/".to_string())
+        );
+        assert_eq!(
+            harness(&["component-harness", "https://example.com/"]),
+            None
+        );
+        assert_eq!(harness(&["component-harness"]), None);
+        assert_eq!(harness(&["extension", "test"]), None);
+        assert_eq!(harness(&[]), None);
     }
 
     #[test]
