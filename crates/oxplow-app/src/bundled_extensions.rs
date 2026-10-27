@@ -2456,61 +2456,6 @@ mod tests {
         );
     }
 
-    /// Stream and Thread Settings: each page's prompt form starts from the
-    /// saved prompt and names the stream or thread by its ref, which the
-    /// command takes; a thread lists its open agent sessions.
-    #[tokio::test]
-    async fn the_settings_pages_start_from_the_saved_prompt() {
-        use oxplow_db::SqlCell::Text;
-        let f = crate::test_fixtures::services_with_effort().await;
-        let thread = f.thread.to_string();
-        f.svc
-            .commands
-            .run(
-                &oxplow_domain::Actor::Human,
-                "oxplow.thread.set_prompt",
-                serde_json::json!({ "thread": thread, "prompt": "Be brief." }),
-                false,
-            )
-            .await
-            .unwrap();
-        let page = |slug: &'static str, param: &'static str, value: String| {
-            let f = &f;
-            async move {
-                run_bundled_page_with(
-                    f,
-                    &format!("oxplow-foundation/{slug}"),
-                    &[(param, Text(value))],
-                )
-                .await
-            }
-        };
-        let rows = page(
-            "thread-settings-prompt",
-            "thread",
-            format!("thr{}", f.thread.value()),
-        )
-        .await;
-        assert_eq!(texts(&rows, 0), std::slice::from_ref(&thread), "{rows}");
-        assert_eq!(texts(&rows, 1), ["Be brief."], "{rows}");
-        let rows = page("stream-settings-prompt", "stream", "str1".into()).await;
-        assert_eq!(texts(&rows, 0), ["str1"], "{rows}");
-        assert_eq!(texts(&rows, 1), [""], "{rows}");
-        let rows = page(
-            "thread-settings-sessions",
-            "thread",
-            format!("thr{}", f.thread.value()),
-        )
-        .await;
-        assert_eq!(
-            texts(&rows, 3),
-            ["oxplow:oxplow/agent_session?id=ses1"],
-            "{rows}"
-        );
-        let rows = page("thread-settings-sessions", "thread", "thr999".into()).await;
-        assert!(rows.as_array().unwrap().is_empty(), "{rows}");
-    }
-
     /// Go To (the page): the thread's bookmarks with the scope each is at,
     /// its recent pages, and the stream's most visited. A bookmark's menu
     /// moves it to another scope, or removes it.

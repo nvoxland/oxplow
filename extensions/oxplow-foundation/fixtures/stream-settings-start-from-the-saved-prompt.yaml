@@ -1,0 +1,6 @@
+# A stream's settings page: its prompt form starts from the saved prompt
+# (none here) and names the stream by its ref, which the command takes.
+input: { page: stream-settings, params: { stream: str1 } }
+expect:
+  loaders:
+    prompt: { rows: [{ stream: str1, prompt: "" }] }

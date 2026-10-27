@@ -49,6 +49,12 @@ intent:
     - name: data-catalog-names-one-models-columns
       input: { page: data-catalog, params: { model: effort } }
       expect: one model's columns with their docs and key
+    - name: thread-settings-start-from-the-saved-prompt-and-list-open-sessions
+      input: { page: thread-settings, params: { thread: thr1 } }
+      expect: the thread's saved prompt and ref, its open agent sessions
+    - name: stream-settings-start-from-the-saved-prompt
+      input: { page: stream-settings, params: { stream: str1 } }
+      expect: the stream's ref and an empty saved prompt
 # The agent harnesses and AI providers oxplow runs: core's
 # built-ins, many of each at once (every one declared here is active).
 implementations:
