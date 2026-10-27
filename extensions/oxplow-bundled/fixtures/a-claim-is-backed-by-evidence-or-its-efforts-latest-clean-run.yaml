@@ -1,0 +1,41 @@
+# The review policy's rule for a backed claim: it cites evidence, or it
+# says the tests pass and its effort's LATEST run passed with at least one
+# test.
+given:
+  # Passed, then a later failure: not backed.
+  - { command: oxplow.effort.open, input: { thread: thr1 } }
+  - { command: oxplow.test.record_run, input: { thread: thr1, command: cargo test, passed: 5, failed: 0, total: 5 } }
+  - { command: oxplow.test.record_run, input: { thread: thr1, command: cargo test, passed: 4, failed: 1, total: 5 } }
+  - command: oxplow.effort.replace_inferred_claims
+    input:
+      effort: eff1
+      claims:
+        - { statement: The tests pass., kind: tests_pass }
+        - { statement: Empty input is handled., kind: handles_case, evidence: "test:empty_input" }
+  # Failed, then fixed: backed.
+  - { command: oxplow.effort.open, input: { thread: thr1 } }
+  - { command: oxplow.test.record_run, input: { thread: thr1, command: cargo test, passed: 3, failed: 2, total: 5 } }
+  - { command: oxplow.test.record_run, input: { thread: thr1, command: cargo test, passed: 5, failed: 0, total: 5 } }
+  - command: oxplow.effort.replace_inferred_claims
+    input:
+      effort: eff2
+      claims:
+        - { statement: The tests pass., kind: tests_pass }
+        - { statement: Nothing else changed., kind: no_behavior_change }
+  # A run with no tests: not backed.
+  - { command: oxplow.effort.open, input: { thread: thr1 } }
+  - { command: oxplow.test.record_run, input: { thread: thr1, command: cargo test, passed: 0, failed: 0, total: 0 } }
+  - command: oxplow.effort.replace_inferred_claims
+    input: { effort: eff3, claims: [{ statement: The tests pass., kind: tests_pass }] }
+when:
+  sql: |
+    SELECT c.kind, c.effort_id, s.verified, s.backed_by
+    FROM v_claim c JOIN v_oxplow_bundled_claim_status s ON s.uri = c.uri
+    ORDER BY c.id
+expect:
+  rows:
+    - { kind: tests_pass, effort_id: 1, verified: 0, backed_by: null }
+    - { kind: handles_case, effort_id: 1, verified: 1, backed_by: evidence }
+    - { kind: tests_pass, effort_id: 2, verified: 1, backed_by: latest run }
+    - { kind: no_behavior_change, effort_id: 2, verified: 0, backed_by: null }
+    - { kind: tests_pass, effort_id: 3, verified: 0, backed_by: null }

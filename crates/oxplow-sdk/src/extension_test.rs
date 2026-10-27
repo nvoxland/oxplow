@@ -1417,7 +1417,12 @@ async fn observe(host: &Host, observed: &Value) -> Result<(), String> {
     let (kind, body) = map.iter().next().expect("one key");
     match kind.as_str() {
         "turn" => observe_turn(host, body).await,
-        other => return Err(format!("`{other}` isn't a kind — fix: `turn`")),
+        "evidence" => observe_evidence(host, body).await,
+        other => {
+            return Err(format!(
+                "`{other}` isn't a kind — fix: `turn` or `evidence`"
+            ))
+        }
     }?;
     // What the log now holds reaches the models, as a command's events do;
     // a reaction's own events (a checkpoint, a policy's answer to it) are
@@ -1428,6 +1433,52 @@ async fn observe(host: &Host, observed: &Value) -> Result<(), String> {
         .deliver_projections()
         .await
         .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
+/// `evidence: { effort, observations: [{ kind, metric_value?, payload?,
+/// provenance?, source? }] }`: what an effort's evidence holds — its
+/// `test-run`s and `diff-coverage` — as the evidence store keeps it
+/// (`EffortEvidenceStore::replace`, what an effort's refresh calls); the
+/// observations are the effort's whole set.
+async fn observe_evidence(host: &Host, body: &Value) -> Result<(), String> {
+    let effort = body
+        .get("effort")
+        .and_then(Value::as_str)
+        .and_then(|e| e.strip_prefix("eff"))
+        .and_then(|n| n.parse::<i64>().ok())
+        .ok_or("`evidence.effort` is an effort's id, like `eff1`")?;
+    let mut observations = Vec::new();
+    for o in body
+        .get("observations")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let text = |key: &str, default: &str| {
+            o.get(key)
+                .and_then(Value::as_str)
+                .unwrap_or(default)
+                .to_string()
+        };
+        observations.push(oxplow_db::EffortObservation {
+            kind: o
+                .get("kind")
+                .and_then(Value::as_str)
+                .ok_or("an observation names its `kind`")?
+                .to_string(),
+            provenance: text("provenance", "observed"),
+            source: text("source", "fixture"),
+            metric_value: o.get("metric_value").and_then(Value::as_f64),
+            payload_json: o.get("payload").map(Value::to_string),
+            local_snapshot_id: None,
+            created_at: oxplow_domain::Timestamp::now(),
+        });
+    }
+    host.svc
+        .effort_evidence_store
+        .replace(effort, Vec::new(), observations, String::new())
+        .await
         .map_err(|e| e.to_string())
 }
 
@@ -4698,6 +4749,35 @@ expect:
             "{:?}",
             report.ran
         );
+    }
+
+    /// `observe: { evidence }` sets the observations an effort's page
+    /// reads.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_given_observes_an_efforts_evidence() {
+        let dir = tempfile::tempdir().unwrap();
+        crate::scaffold(dir.path(), crate::Kind::Command, "notes", None).unwrap();
+        write(
+            dir.path(),
+            ".oxplow/extensions/notes/fixtures/basic.yaml",
+            "given:
+  - { command: oxplow.effort.open, input: { thread: thr1 } }
+  - observe:
+      evidence:
+        effort: eff1
+        observations:
+          - { kind: test-run, payload: { passed: 4, failed: 1 } }
+          - { kind: diff-coverage, metric_value: 79.5, payload: { summaryPct: 79.5 } }
+when:
+  sql: SELECT kind, metric_value, provenance FROM v_effort_observation WHERE effort_id = 1 ORDER BY seq
+expect:
+  rows:
+    - { kind: test-run, metric_value: null, provenance: observed }
+    - { kind: diff-coverage, metric_value: 79.5 }
+",
+        );
+        let report = test_extension(dir.path(), "notes", false).await.unwrap();
+        assert!(report.ok, "{:?}", report.errors);
     }
 
     /// A policy that opens an item's effort when it starts on a thread,

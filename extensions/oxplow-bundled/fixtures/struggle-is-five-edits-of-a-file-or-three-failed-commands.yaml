@@ -1,0 +1,27 @@
+# The struggle rule: a file edited five times, or three failed shell
+# commands, in an effort. Four edits and two failures are not struggle; a
+# shell call with no known outcome is no failure.
+given:
+  - { command: oxplow.effort.open, input: { thread: thr1 } }
+  - observe:
+      turn:
+        prompt: Fix the parser
+        tools:
+          - { name: Edit, kind: edit, paths: [src/hot.rs], ok: true }
+          - { name: Edit, kind: edit, paths: [src/hot.rs], ok: true }
+          - { name: Edit, kind: edit, paths: [src/hot.rs], ok: true }
+          - { name: Edit, kind: edit, paths: [src/hot.rs], ok: true }
+          - { name: Edit, kind: edit, paths: [src/hot.rs], ok: true }
+          - { name: Edit, kind: edit, paths: [src/calm.rs], ok: true }
+          - { name: Edit, kind: edit, paths: [src/calm.rs], ok: true }
+          - { name: Edit, kind: edit, paths: [src/calm.rs], ok: true }
+          - { name: Edit, kind: edit, paths: [src/calm.rs], ok: true }
+          - { name: Bash, kind: shell, ok: false }
+          - { name: Bash, kind: shell, ok: false }
+          - { name: Bash, kind: shell, ok: false }
+          - { name: Bash, kind: shell }
+when: { sql: "SELECT kind, subject, count FROM v_oxplow_bundled_struggle ORDER BY kind" }
+expect:
+  rows:
+    - { kind: failed_commands, subject: shell, count: 3 }
+    - { kind: repeated_edits, subject: src/hot.rs, count: 5 }

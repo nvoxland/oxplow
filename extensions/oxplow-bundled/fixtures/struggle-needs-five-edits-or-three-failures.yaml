@@ -1,0 +1,16 @@
+# One fewer of each, and nothing is struggle.
+given:
+  - { command: oxplow.effort.open, input: { thread: thr1 } }
+  - observe:
+      turn:
+        prompt: Fix the parser
+        tools:
+          - { name: Edit, kind: edit, paths: [a.rs], ok: true }
+          - { name: Edit, kind: edit, paths: [a.rs], ok: true }
+          - { name: Edit, kind: edit, paths: [a.rs], ok: true }
+          - { name: Edit, kind: edit, paths: [a.rs], ok: true }
+          - { name: Bash, kind: shell, ok: false }
+          - { name: Bash, kind: shell, ok: false }
+when: { sql: "SELECT kind, subject, count FROM v_oxplow_bundled_struggle" }
+expect:
+  rows: 0

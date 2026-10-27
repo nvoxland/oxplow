@@ -100,6 +100,21 @@ intent:
     - name: waiting-on-me-shows-only-the-active-work-list
       input: { page: oxplow-bundled/waiting-on-me }
       expect: a blocked item gone once the work list is none
+    - name: struggle-is-five-edits-of-a-file-or-three-failed-commands
+      input: { sql: v_oxplow_bundled_struggle }
+      expect: a file edited five times, or three failed shell commands, is struggle
+    - name: struggle-needs-five-edits-or-three-failures
+      input: { sql: v_oxplow_bundled_struggle }
+      expect: one fewer of each is no struggle
+    - name: a-claim-is-backed-by-evidence-or-its-efforts-latest-clean-run
+      input: { sql: v_oxplow_bundled_claim_status }
+      expect: a claim is backed by cited evidence, or by its effort's latest clean run
+    - name: claim-status-counts-verified-claims-and-leaves-out-dismissed-ones
+      input: { sql: v_oxplow_bundled_claim_status }
+      expect: a verified claim is backed; a dismissed one is not counted
+    - name: the-effort-verdict-says-what-a-reviewer-needs-first
+      input: { page: effort-verdict }
+      expect: the verdict says whether it tested, how much ran and what is left to check
 # oxplow's default work list and effort policy: built-ins of core's,
 # declared here so they are an extension's like any other. Disabled, both
 # fall to none. Snapshots can't be none: their default is core's own (it

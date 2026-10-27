@@ -1,0 +1,35 @@
+# A reviewer's verdict on a claim moves it in the review policy: a
+# verified one is backed (even one that cites nothing), and a dismissed one
+# counts for nothing: neither unbacked nor backed, so it is not in
+# `claim_status` at all. The verdict counts only the one still unverified.
+given:
+  - { command: oxplow.effort.open, input: { thread: thr1 } }
+  - command: oxplow.effort.replace_inferred_claims
+    input:
+      effort: eff1
+      claims:
+        - { statement: Empty input is handled., kind: handles_case }
+        - { statement: Nothing else changed., kind: no_behavior_change }
+        - { statement: It is fast., kind: other }
+  - { command: oxplow.effort.verify_claim, input: { claim: 1 } }
+  - { command: oxplow.effort.dismiss_claim, input: { claim: 2 } }
+when:
+  sql: |
+    SELECT c.kind, s.verified, s.backed_by
+    FROM v_claim c LEFT JOIN v_oxplow_bundled_claim_status s ON s.uri = c.uri
+    ORDER BY c.id
+expect:
+  rows:
+    - { kind: handles_case, verified: 1, backed_by: evidence }
+    - { kind: no_behavior_change, verified: null, backed_by: null }
+    - { kind: other, verified: 0, backed_by: null }
+steps:
+  - when: { page: oxplow-bundled/effort-verdict, params: { effort_id: 1 } }
+    expect:
+      loaders:
+        effort_verdict:
+          rows:
+            - { text: "Tests: none ran" }
+            - { text: "Diff coverage: not measured" }
+            - { text: "1 unverified claim" }
+            - { text: "0 decisions made" }
