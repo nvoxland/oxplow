@@ -34,6 +34,9 @@ pub(crate) struct Host {
     copied: std::collections::BTreeMap<String, PathBuf>,
     env: HostEnv,
     builds: bool,
+    /// Its database as the deploys left it, before anything ran: what a
+    /// fork starts from.
+    deployed: oxplow_db::Database,
 }
 
 impl Host {
@@ -104,22 +107,39 @@ impl Host {
         Self::boot(dir, root, on, copied, env, builds).await
     }
 
-    /// Another throwaway like this one, with its own empty database: the
-    /// same sources, settings and deployments, copied, so nothing is built
-    /// again. What one example makes, the next one's fork doesn't see.
+    /// Another throwaway like this one as it was deployed, before anything
+    /// ran in it: its files copied and its database copied, so it boots
+    /// what was deployed — nothing is built or deployed again. What one
+    /// example makes, the next one's fork doesn't see.
     pub(crate) async fn fork(&self) -> Result<Host, String> {
         let dir = tempfile::tempdir().map_err(|e| e.to_string())?;
         let root = dir.path().to_path_buf();
         copy_all(&self.root, &root).map_err(|e| e.to_string())?;
-        let host = Self::boot(
-            dir,
-            root,
-            self.on.clone(),
-            self.copied.clone(),
+        oxplow_app::vcs::GitProvider
+            .init_repository(&root)
+            .await
+            .map_err(|e| e.to_string())?;
+        let db = self.deployed.copy_in_memory().map_err(|e| e.to_string())?;
+        let svc = oxplow_app::Services::on_machine_with_database(
+            &root,
+            root.join(".oxplow/global-config"),
+            Arc::new(oxplow_ai::secrets::MemorySecrets::default()),
             self.env.clone(),
-            self.builds,
+            db,
         )
-        .await?;
+        .await
+        .map_err(|e| e.to_string())?;
+        let host = Host {
+            _dir: dir,
+            root,
+            problems: problems(&svc, Vec::new()),
+            svc,
+            on: self.on.clone(),
+            copied: self.copied.clone(),
+            env: self.env.clone(),
+            builds: self.builds,
+            deployed: self.deployed.clone(),
+        };
         host.start_runtime()?;
         Ok(host)
     }
@@ -162,18 +182,17 @@ impl Host {
                 }
             }
         }
-        let problems = svc
-            .extension_activation
-            .problems()
-            .into_iter()
-            .flat_map(|(owner, why)| why.into_iter().map(move |w| format!("{owner}: {w}")))
-            .chain(deploys)
-            .collect();
+        let db = svc.db.clone();
+        let deployed = tokio::task::spawn_blocking(move || db.copy_in_memory())
+            .await
+            .map_err(|e| e.to_string())?
+            .map_err(|e| e.to_string())?;
         Ok(Host {
             _dir: dir,
             root,
+            problems: problems(&svc, deploys),
             svc,
-            problems,
+            deployed,
             on,
             copied,
             env,
@@ -232,6 +251,17 @@ impl Host {
 /// Copy an extension's source; a folder its `build:` excludes
 /// (`node_modules`) is linked instead, so a build in the copy still finds
 /// it.
+/// What `svc`'s activation held back and the `deploys` that failed, as
+/// `<extension>: <reason>`.
+fn problems(svc: &oxplow_app::Services, deploys: Vec<String>) -> Vec<String> {
+    svc.extension_activation
+        .problems()
+        .into_iter()
+        .flat_map(|(owner, why)| why.into_iter().map(move |w| format!("{owner}: {w}")))
+        .chain(deploys)
+        .collect()
+}
+
 /// Copy throwaway `from` to `to` whole but its git repository: symlinks
 /// stay symlinks, a deployment's read-only files stay read-only.
 fn copy_all(from: &Path, to: &Path) -> std::io::Result<()> {

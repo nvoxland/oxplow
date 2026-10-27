@@ -572,6 +572,26 @@ impl Database {
     /// Public so other crates' tests can build a Services graph
     /// without needing a tempfile.
     pub fn in_memory() -> Self {
+        Self::memory(|conn| load_migrated(conn).expect("in-memory migrations and models"))
+    }
+
+    /// A new in-memory database holding what this one (an in-memory one)
+    /// holds now: a test's starting state, made once and copied for each
+    /// case that needs one of its own. Nothing else may be using this one.
+    pub fn copy_in_memory(&self) -> Result<Self, DbInitError> {
+        let fail = |e: String| DbInitError::Migration(format!("copying a database: {e}"));
+        let copy = Self::memory(|_| {});
+        let source = self.pool.get().map_err(|e| fail(e.to_string()))?;
+        let mut target = copy.pool.get().map_err(|e| fail(e.to_string()))?;
+        rusqlite::backup::Backup::new(&source, &mut target)
+            .and_then(|b| b.run_to_completion(1000, std::time::Duration::ZERO, None))
+            .map_err(|e| fail(e.to_string()))?;
+        drop(target);
+        Ok(copy)
+    }
+
+    /// An in-memory database whose one connection `load` fills.
+    fn memory(load: impl FnOnce(&mut Connection)) -> Self {
         let changes = Arc::new(crate::changes::Changes::default());
         let hooks = changes.clone();
         let manager = SqliteConnectionManager::memory().with_init(move |c| {
@@ -585,7 +605,8 @@ impl Database {
             .expect("in-memory sqlite pool builds");
         let mut conn = pool.get().expect("in-memory sqlite connection");
         require_math_functions(&conn).expect("SQLite has its math functions");
-        load_migrated(&mut conn).expect("in-memory migrations and models");
+        load(&mut conn);
+        drop(conn);
         let permits = pool.max_size() as usize;
         Self {
             pool: Arc::new(pool),
@@ -1644,6 +1665,40 @@ mod tests {
             Database::open_existing(&path).is_err(),
             "another build's schema"
         );
+    }
+
+    /// A copy holds what its source held when it was made, and the two
+    /// change apart afterwards.
+    #[tokio::test]
+    async fn an_in_memory_copy_starts_equal_and_changes_apart() {
+        let db = Database::in_memory();
+        let count = |db: &Database| {
+            let db = db.clone();
+            async move {
+                db.read(|c| {
+                    c.query_row("SELECT count(*) FROM copied", [], |r| r.get::<_, i64>(0))
+                        .map_err(map_sql_err)
+                })
+                .await
+                .unwrap()
+            }
+        };
+        db.transaction(|c| {
+            c.execute_batch("CREATE TABLE copied (x); INSERT INTO copied VALUES (1);")
+                .map_err(map_sql_err)
+        })
+        .await
+        .unwrap();
+        let copy = db.copy_in_memory().unwrap();
+        assert_eq!(count(&copy).await, 1);
+        copy.transaction(|c| {
+            c.execute("INSERT INTO copied VALUES (2)", [])
+                .map(|_| ())
+                .map_err(map_sql_err)
+        })
+        .await
+        .unwrap();
+        assert_eq!((count(&db).await, count(&copy).await), (1, 2));
     }
 
     /// A database restored from the migrated template is exactly what

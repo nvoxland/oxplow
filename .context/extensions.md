@@ -1958,9 +1958,11 @@ job and component forms are in "The SDK"):
   - **`confirmed: true`** runs a command that asks a person first.
   - **One oxplow per page example that makes data.** A page example with
     `given`, `steps` or `rows` runs on a fork of the throwaway
-    (`Host::fork`: the sources, settings and deployments copied, nothing
-    built again, a fresh in-memory database), so no example sees another's
-    data. The rest — `check`, the other examples, the answers — share one.
+    (`Host::fork`: its files copied, and its database as the deploys left
+    it — `Database::copy_in_memory` of a snapshot taken before anything
+    ran — so the fork boots what was deployed and nothing is built or
+    deployed again; ~0.8 s, most of it that boot's activation), so no
+    example sees another's data. The rest — `check`, the other examples, the answers — share one.
   - **Answers.** After the examples every page's `answers:` entry runs on
     that shared, clean host (`ran: answers`): the page opens with its params
     and no loader fails, else the finding names the page file and the
