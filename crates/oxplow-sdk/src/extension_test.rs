@@ -1477,6 +1477,8 @@ async fn run_steps(
 ///   what a language server reported for a file.
 /// - `symbols: { path, language?, items?: [{ name, kind, id?, container?, signature?, line?, col? }] }`:
 ///   the definitions the index read from a file at a snapshot of it.
+/// - `visit: { page, kind?, label?, thread?, duration_ms? }`: a page the person
+///   opened, as the shell records it.
 /// - `facts: { measure, producer?, items?: [{ value?, path?, line?, rule?, severity?, detail?, subject? }] }`:
 ///   what a collector found, recorded as one capture of the measure.
 /// - `retention: { days }`: the log's retention sweep, run as it is `days`
@@ -1506,9 +1508,10 @@ async fn observe(host: &Host, ext: &Extension, observed: &Value) -> Result<(), S
         "symbols" => observe_symbols(host, body).await,
         "retention" => observe_retention(host, body).await,
         "facts" => observe_facts(host, body).await,
+        "visit" => observe_visit(host, body).await,
         other => {
             return Err(format!(
-                "`{other}` isn't a kind — fix: `turn`, `evidence`, `event`, `commit`, `change`, `test_run`, `snapshot`, `collect`, `diagnostics`, `symbols`, `retention` or `facts`"
+                "`{other}` isn't a kind — fix: `turn`, `evidence`, `event`, `commit`, `change`, `test_run`, `snapshot`, `collect`, `diagnostics`, `symbols`, `retention`, `facts` or `visit`"
             ))
         }
     }?;
@@ -1843,6 +1846,27 @@ async fn observe_symbols(host: &Host, body: &Value) -> Result<(), String> {
             },
         )
         .await
+        .map_err(|e| e.to_string())
+}
+
+/// `visit: { page, kind?, label?, thread?, duration_ms? }`: a page the person
+/// opened (`page` its ref, `kind` its page kind, `page` by default), recorded
+/// as the shell's `record_page_visit` does (`PageVisitStore::record`).
+async fn observe_visit(host: &Host, body: &Value) -> Result<(), String> {
+    use oxplow_db::analytics_stores::PageVisitStore as _;
+    let text = |key: &str| body.get(key).and_then(Value::as_str);
+    let page = text("page").ok_or("`visit.page` is the page's ref")?;
+    host.svc
+        .page_visit_store
+        .record(
+            text("kind").unwrap_or("page"),
+            page,
+            text("label"),
+            body.get("duration_ms").and_then(Value::as_i64),
+            text("thread"),
+        )
+        .await
+        .map(|_| ())
         .map_err(|e| e.to_string())
 }
 
@@ -6190,6 +6214,32 @@ expect:
   rows:
     - { path: src/a.rs, line: 3, rule: bug, value: 1.0 }
     - { path: src/b.rs, line: 9, rule: cleanup, value: 2.0 }
+",
+        );
+        let report = test_extension(dir.path(), "notes", false).await.unwrap();
+        assert!(report.ok, "{:?}", report.errors);
+    }
+
+    /// `observe: { visit }` is a page the person opened, as the shell
+    /// records it.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_given_observes_page_visits() {
+        let dir = tempfile::tempdir().unwrap();
+        crate::scaffold(dir.path(), crate::Kind::Command, "notes", None).unwrap();
+        write(
+            dir.path(),
+            ".oxplow/extensions/notes/fixtures/basic.yaml",
+            "given:
+  - observe: { visit: { page: \"oxplow:oxplow/page?page=problems\", kind: problems, label: Problems, duration_ms: 1200 } }
+  - observe: { visit: { page: \"oxplow:oxplow/page?page=problems\", kind: problems } }
+  - observe: { visit: { page: \"oxplow:oxplow/page?page=symbols\", kind: symbols, thread: thr1 } }
+when:
+  sql: SELECT page_kind, page_id, label, duration_ms, thread_id FROM v_page_visit ORDER BY id
+expect:
+  rows:
+    - { page_kind: problems, page_id: \"oxplow:oxplow/page?page=problems\", label: Problems, duration_ms: 1200 }
+    - { page_kind: problems }
+    - { page_kind: symbols, thread_id: 1 }
 ",
         );
         let report = test_extension(dir.path(), "notes", false).await.unwrap();

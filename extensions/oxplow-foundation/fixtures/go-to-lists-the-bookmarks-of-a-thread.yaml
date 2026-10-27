@@ -1,9 +1,22 @@
-# Go To lists the pages bookmarked for the thread, newest first.
+# Go To lists the pages bookmarked for the thread, newest first, then the
+# pages visited — the latest of each, and the most visited over the last 30
+# days.
 given:
   - { command: oxplow.bookmark.set, input: { uri: "oxplow:oxplow/page?page=problems", page_kind: problems, scope: thread, thread: thr1 } }
+  - observe: { visit: { page: "oxplow:oxplow/page?page=symbols", kind: symbols, label: Symbols, thread: thr1 } }
+  - observe: { visit: { page: "oxplow:oxplow/page?page=hook-events", kind: hook-events, label: Hook Events, thread: thr1 } }
+  - observe: { visit: { page: "oxplow:oxplow/page?page=symbols", kind: symbols, label: Symbols, thread: thr1 } }
 when: { page: oxplow-foundation/go-to, params: { thread_id: 1 } }
 expect:
   loaders:
     bookmarks:
       rows:
         - { uri: "oxplow:oxplow/page?page=problems" }
+    recent:
+      rows:
+        - { title: Symbols, uri: "oxplow:oxplow/page?page=symbols" }
+        - { title: Hook Events, uri: "oxplow:oxplow/page?page=hook-events" }
+    top:
+      rows:
+        - { title: Symbols, visits: 2 }
+        - { title: Hook Events, visits: 1 }

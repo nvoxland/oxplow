@@ -1,12 +1,17 @@
 # The project's wiki pages, the latest changed first; a search lists the
-# pages whose title or body matches, with a snippet around the match.
+# pages whose title or body matches, with a snippet around the match. The
+# pages visited are listed first, as their own list.
 given:
   - { command: oxplow.knowledge.write_page, input: { slug: otters, title: Otters, body: "# Otters\n\nThey hold hands.\n" } }
   - { command: oxplow.knowledge.write_page, input: { slug: beavers, title: Beavers, body: "# Beavers\n\nThey build dams.\n" } }
+  - { command: oxplow.knowledge.write_page, input: { slug: weasels, title: Weasels, body: "# Weasels\n\nThey dance.\n" } }
+  - observe: { visit: { page: "oxplow:oxplow/wiki?slug=weasels", kind: wiki, thread: thr1 } }
 when: { page: oxplow-foundation/wiki-index, params: { stream_id: 1 } }
 expect:
   loaders:
-    visited: { rows: 0 }
+    visited:
+      rows:
+        - { slug: weasels, title: Weasels }
     pages:
       rows:
         - { slug: beavers, title: Beavers }
