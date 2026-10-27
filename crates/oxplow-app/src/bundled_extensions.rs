@@ -2104,52 +2104,6 @@ mod tests {
         assert_eq!(rows[1][1], oxplow_db::SqlCell::Null(()));
     }
 
-    /// The data catalog lists every model with its owner, what it holds
-    /// and its columns; naming one gives its columns' docs and key.
-    #[tokio::test]
-    async fn the_catalog_lists_models_and_one_models_columns() {
-        use oxplow_db::SqlCell::Text;
-        let f = crate::test_fixtures::services_with_effort().await;
-        let col = |rows: &serde_json::Value, i: usize| -> Vec<String> {
-            rows.as_array()
-                .unwrap()
-                .iter()
-                .map(|r| {
-                    r[i].as_str()
-                        .map(str::to_string)
-                        .unwrap_or_else(|| r[i].to_string())
-                })
-                .collect()
-        };
-        let rows = run_bundled_page_with(
-            &f,
-            "oxplow-foundation/catalog",
-            &[("model", Text(String::new()))],
-        )
-        .await;
-        let views = col(&rows, 0);
-        assert!(
-            views.iter().any(|v| v == "v_effort") && views.iter().any(|v| v == "v_model"),
-            "{views:?}"
-        );
-        let rows = run_bundled_page_with(
-            &f,
-            "oxplow-foundation/catalog",
-            &[("model", Text("effort".into()))],
-        )
-        .await;
-        assert_eq!(col(&rows, 0), ["v_effort"]);
-        let columns = &col(&rows, 3)[0];
-        assert!(
-            columns.lines().any(|l| l.starts_with("uri TEXT — ")),
-            "{columns}"
-        );
-        assert!(
-            columns.lines().next().unwrap().starts_with("id INTEGER"),
-            "{columns}"
-        );
-    }
-
     /// The foundation's page files are oxplow's pages, core-named
     /// (`oxplow:oxplow/page?page=tasks`) as its commands are: a bare slug
     /// finds the foundation's page.
@@ -2182,56 +2136,6 @@ mod tests {
                 .unwrap_or_else(|e| panic!("{slug}: {e}"));
             assert_eq!(page.id, format!("oxplow-foundation/{slug}"));
         }
-    }
-
-    /// The Catalog's sections answer: what can be asked, grouped by who
-    /// offers it with Ask on each, and what can be configured.
-    #[tokio::test]
-    async fn the_catalog_pages_list_prompts_and_config_keys() {
-        let f = crate::test_fixtures::services_with_effort().await;
-        let run = |id: &'static str| {
-            let svc = f.svc.clone();
-            async move { crate::test_fixtures::run_as_page(&svc, id, &[]).await }
-        };
-        let prompts = run("oxplow-foundation/catalog-prompts").await;
-        assert!(!prompts.rows.is_empty());
-        let offered = prompts
-            .columns
-            .iter()
-            .position(|c| c == "offered_by")
-            .unwrap();
-        assert_eq!(
-            prompts.rows[0][offered],
-            oxplow_db::SqlCell::Text("Code".into()),
-            "oxplow's own questions (its pages' answers) are grouped by the page's category"
-        );
-        let page = f
-            .svc
-            .extension_catalog
-            .find_page(&f.svc.layout.project_dir, "oxplow-foundation/catalog")
-            .unwrap();
-        let ask = page
-            .nodes()
-            .into_iter()
-            .find_map(|n| match &n.kind {
-                crate::pages::schema::NodeKind::Viz { config, .. } if n.id == "ask" => {
-                    Some(config.actions.clone())
-                }
-                _ => None,
-            })
-            .unwrap();
-        assert!(ask
-            .iter()
-            .any(|a| a.id == "ask" && a.row && a.command == "oxplow.agent.draft"));
-        let keys = run("oxplow-foundation/catalog-config-keys").await;
-        assert_eq!(keys.rows.len(), oxplow_config::keys::config_keys().len());
-        let sections = match &page.view.kind {
-            crate::pages::schema::NodeKind::Stack { children } => {
-                children.iter().map(|c| c.id.as_str()).collect::<Vec<_>>()
-            }
-            other => panic!("{other:?}"),
-        };
-        assert_eq!(sections, ["ask", "data", "configure"]);
     }
 
     fn texts(rows: &serde_json::Value, i: usize) -> Vec<String> {

@@ -40,6 +40,15 @@ intent:
     - name: work-next-offers-the-ready-items-or-the-first-epic-with-its-children
       input: { page: work-next, params: { thread: thr1 } }
       expect: ready items in list order, a blocked one held until its blocker closes, a ready epic with its ready descendants
+    - name: catalog-lists-prompts-and-config-keys
+      input: { page: catalog }
+      expect: the questions grouped by who offers them with Ask on each, and the config keys
+    - name: data-catalog-lists-models-with-their-columns
+      input: { page: data-catalog, params: { model: "" } }
+      expect: every model with its owner, what it holds and its columns
+    - name: data-catalog-names-one-models-columns
+      input: { page: data-catalog, params: { model: effort } }
+      expect: one model's columns with their docs and key
 # The agent harnesses and AI providers oxplow runs: core's
 # built-ins, many of each at once (every one declared here is active).
 implementations:
