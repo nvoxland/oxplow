@@ -132,6 +132,28 @@ const MAX_DESCRIPTION: usize = 200;
 const MAX_SECTIONS: usize = 8;
 const MAX_COLUMNS: usize = 8;
 
+/// The params of a page shown in the launcher (it has a `category` and isn't
+/// `hidden`) that nothing fills in when it opens there: no default, no
+/// options from a loader, and neither a filter nor a selection (which start
+/// empty on purpose). The viewer's `stream_id`, `thread_id` and `head_sha`
+/// are filled in for it.
+pub fn launcher_unfilled_params(page: &Page) -> Vec<String> {
+    use crate::extensions::ParamRole;
+    if page.hidden || page.category.is_none() {
+        return Vec::new();
+    }
+    page.params
+        .iter()
+        .filter(|p| {
+            p.default.is_none()
+                && p.options_from.is_none()
+                && !matches!(p.role, Some(ParamRole::Selection | ParamRole::Filter))
+                && !["stream_id", "thread_id", "head_sha"].contains(&p.name.as_str())
+        })
+        .map(|p| p.name.clone())
+        .collect()
+}
+
 /// What makes `page` harder to read than it needs to be: too many filters,
 /// options, sections or columns, a long description, a param nothing reads.
 /// Warnings, never errors.

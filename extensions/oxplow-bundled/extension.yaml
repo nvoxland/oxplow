@@ -35,7 +35,7 @@ intent:
       input: { page: runs, params: {} }
       expect: each extension's runs, failures, denials, mean CPU and model calls, the ones needing attention first
     - name: a metric pushed past its warn threshold during an effort
-      input: { advisory: threshold-crossed, effort_id: 1 }
+      input: { advisory: threshold-crossed }
       expect: one "⚠ <metric> crossed its warn threshold" line, once per metric
     - name: repair-files-an-item
       input: { effect: repair-disabled, event: { type: contribution.disabled } }
@@ -157,6 +157,18 @@ intent:
     - name: the-review-verbs-log-a-typed-verdict
       input: { command: review.request_changes }
       expect: each review verb logs its typed verdict, a refused one none
+    - name: the-interest-model-scores-a-change-like-the-old-formula
+      input: { sql: v_oxplow_bundled_change_interest }
+      expect: size, complexity spikes, parameter growth and long new functions multiply into a score and its reasons
+    - name: an-efforts-churn-is-a-fact-from-its-change
+      input: { sql: v_fact }
+      expect: a finished effort's churn is the lines its change added and deleted
+    - name: co-change-surprises-come-from-the-commit-index
+      input: { sql: v_oxplow_bundled_change_co_change }
+      expect: a file whose usual partners are missing, or that was dormant 90 days, is a surprise
+    - name: a-verdict-decorates-its-effort
+      input: { sql: v_oxplow_bundled_verdict }
+      expect: "the latest verdict is the effort's label and color — changes requested is red, a forced acceptance orange"
 # oxplow's default work list and effort policy: built-ins of core's,
 # declared here so they are an extension's like any other. Disabled, both
 # fall to none. Snapshots can't be none: their default is core's own (it

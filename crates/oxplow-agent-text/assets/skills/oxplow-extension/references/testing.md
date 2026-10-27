@@ -142,7 +142,19 @@ model the SQL reads and the command it runs. Prefer `answers:` on pages.
      { effort, observations: [{ kind, metric_value?, payload? }] } } }` (an
      effort's `test-run` and `diff-coverage` evidence) and `{ observe: {
      commit: { sha, at, subject, files?: [{ path, status?, additions?,
-     deletions? }] } } }` (a commit the git indexer read);
+     deletions? }] } } }` (a commit the git indexer read), `{ observe: {
+     change: { kind?, target, files?: [{ path, status?, additions?,
+     deletions?, zone?, is_test? }], functions?: [{ path, symbol, status?,
+     body_changed?, length?, params_before?, params_after?,
+     complexity_delta?, … }] } } }` (what the change analysis stored for a
+     change: `kind` is `commit` by default, an effort's `target` is its id
+     like `eff1`; the models over a change read it, and the
+     materialized models that read the commit index need a step of their
+     own to fill), `{ observe: { test_run: { effort, at?, cases?: [{ name,
+     status }], asserted_failed? } } }` (a test run an effort recorded: a
+     capture with a fact per case) and `{ observe: { snapshot: { trigger?,
+     elapsed_ms?, budget_ms?, files?: [{ path, hash }] } } }` (one take in
+     the stream's snapshot log; its parent is the take before it);
    - `rows: { <entity>: [ {…} ] }` in a page or job fixture fills your
      collectors' entities first (they start empty);
    - an event: `when: { event: { type, payload, … } }` — logged in the

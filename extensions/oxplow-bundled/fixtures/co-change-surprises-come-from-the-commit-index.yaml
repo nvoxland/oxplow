@@ -1,0 +1,28 @@
+# Files committed together at least 3 times in 180 days are partners; a
+# change's files whose usual partners are missing, or that were dormant 90
+# days or more (or never touched), are the surprises.
+given:
+  - observe: { commit: { sha: ab0, at: "2026-10-22T00:00:00Z", files: [{ path: src/a.rs, status: modified }, { path: src/b.rs, status: modified }] } }
+  - observe: { commit: { sha: ab1, at: "2026-10-17T00:00:00Z", files: [{ path: src/a.rs, status: modified }, { path: src/b.rs, status: modified }] } }
+  - observe: { commit: { sha: ab2, at: "2026-10-07T00:00:00Z", files: [{ path: src/a.rs, status: modified }, { path: src/b.rs, status: modified }] } }
+  - observe: { commit: { sha: ef0, at: "2026-10-22T00:00:00Z", files: [{ path: src/e.rs, status: modified }, { path: src/f.rs, status: modified }] } }
+  - observe: { commit: { sha: ef1, at: "2026-10-17T00:00:00Z", files: [{ path: src/e.rs, status: modified }, { path: src/f.rs, status: modified }] } }
+  - observe: { commit: { sha: ef2, at: "2026-10-07T00:00:00Z", files: [{ path: src/e.rs, status: modified }, { path: src/f.rs, status: modified }] } }
+  - observe: { commit: { sha: old, at: "2026-04-10T00:00:00Z", files: [{ path: src/c.rs, status: modified }] } }
+  - observe:
+      change:
+        kind: working
+        target: ""
+        files:
+          - { path: src/a.rs, additions: 1 }
+          - { path: src/c.rs, additions: 1 }
+          - { path: src/d.rs, status: added, additions: 1 }
+          - { path: src/e.rs, additions: 1 }
+          - { path: src/f.rs, additions: 1 }
+when:
+  sql: SELECT path, reason, expected, dormant_days >= 90 AS long_dormant FROM v_oxplow_bundled_change_co_change ORDER BY path
+expect:
+  rows:
+    - { path: src/a.rs, reason: usual-co-changers-absent, expected: src/b.rs }
+    - { path: src/c.rs, reason: dormant, long_dormant: 1 }
+    - { path: src/d.rs, reason: dormant, long_dormant: 1 }

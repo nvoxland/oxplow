@@ -1462,8 +1462,19 @@ async fn run_steps(
 ///
 /// - `event: { type, v?, payload, subject?, anchors? }`: an event logged
 ///   and delivered, the extension's effects reacting.
-/// - `evidence: { effort, observations: [..] }`: an effort's evidence.
+/// - `evidence: { effort, observations?: [..], metric_deltas?: [..] }`: an
+///   effort's evidence (a metric delta is `{ key, current, baseline?, warn_at?,
+///   fail_at?, crossing?, kind?, direction?, .. }`).
 /// - `commit: { sha, at, subject, files?, .. }`: a commit the indexer read.
+/// - `change: { kind?, target, files?, functions? }`: a change's analysis,
+///   as the change analysis stores it (`kind` is `commit` by default; an
+///   effort's `target` is its id, like `eff1`).
+/// - `test_run: { effort, at?, cases?: [{ name, status }], asserted_failed? }`:
+///   a test run an effort recorded, as a run recorder writes it.
+/// - `snapshot: { trigger?, elapsed_ms?, budget_ms?, files?: [{ path, hash }] }`:
+///   one take in the stream's snapshot log.
+/// - `collect: { effort, collectors?: [key] }`: the fact collectors an
+///   effort's end triggers, run over what the effort recorded.
 /// - `turn: { prompt?, during?: [{ command, input?, as? }], tools?: [{ name, kind, paths?, command?, detail?,
 ///   ok?, exit_code? }], write?: { path, body }, answer? }`: one turn on the
 ///   primary thread, as its harness's hooks report it — the prompt, each
@@ -1479,9 +1490,13 @@ async fn observe(host: &Host, ext: &Extension, observed: &Value) -> Result<(), S
         "evidence" => observe_evidence(host, body).await,
         "event" => observe_event(host, ext, body).await,
         "commit" => observe_commit(host, body).await,
+        "change" => observe_change(host, body).await,
+        "test_run" => observe_test_run(host, body).await,
+        "snapshot" => observe_snapshot(host, body).await,
+        "collect" => observe_collect(host, body).await,
         other => {
             return Err(format!(
-                "`{other}` isn't a kind — fix: `turn`, `evidence`, `event` or `commit`"
+                "`{other}` isn't a kind — fix: `turn`, `evidence`, `event`, `commit`, `change`, `test_run`, `snapshot` or `collect`"
             ))
         }
     }?;
@@ -1516,6 +1531,294 @@ async fn observe_event(host: &Host, ext: &Extension, body: &Value) -> Result<(),
     host.svc
         .event_log_store
         .append(env)
+        .await
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
+/// The stream the throwaway's thread lives in.
+async fn first_stream(host: &Host) -> Result<oxplow_domain::StreamId, String> {
+    host.svc
+        .streams
+        .list_streams()
+        .await
+        .map_err(|e| e.to_string())?
+        .first()
+        .map(|s| s.id)
+        .ok_or_else(|| "no stream".to_string())
+}
+
+/// `change: { kind?, target, files?: [{ path, status?, additions?,
+/// deletions?, zone?, is_test? }], functions?: [{ path, symbol, name?, status?,
+/// container?, signature_changed?, body_changed?, start_line?, visibility?,
+/// is_test?, length?, params_before?, params_after?, complexity_delta? }] }`:
+/// what the change analysis stored for a change (`SqliteChangeStore::
+/// store_results`). A `working` or `effort` change's head is the working
+/// tree; a `commit`'s is the commit `target`.
+async fn observe_change(host: &Host, body: &Value) -> Result<(), String> {
+    use oxplow_db::{ChangeFileRow, ChangeFunctionRow, ChangeResults};
+    use oxplow_domain::vcs::Revision;
+    let text = |v: &Value, key: &str| v.get(key).and_then(Value::as_str).map(str::to_string);
+    let kind = text(body, "kind").unwrap_or_else(|| "commit".into());
+    let target = text(body, "target").ok_or("`change.target` names what the change is of")?;
+    let target = match (kind.as_str(), target.strip_prefix("eff")) {
+        ("effort", Some(n)) if n.parse::<i64>().is_ok() => n.to_string(),
+        _ => target,
+    };
+    let head = match kind.as_str() {
+        "working" | "effort" => Revision::Working,
+        _ => Revision::git(target.clone()),
+    };
+    let int = |v: &Value, key: &str| v.get(key).and_then(Value::as_i64);
+    let flag = |v: &Value, key: &str| v.get(key).and_then(Value::as_bool).unwrap_or(false);
+    let list = |key: &str| {
+        body.get(key)
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default()
+    };
+    let mut results = ChangeResults::default();
+    for f in list("files") {
+        results.files.push(ChangeFileRow {
+            path: text(&f, "path").ok_or("a change file names its `path`")?,
+            status: text(&f, "status").unwrap_or_else(|| "modified".into()),
+            additions: int(&f, "additions").unwrap_or(0),
+            deletions: int(&f, "deletions").unwrap_or(0),
+            zone: Some(text(&f, "zone").unwrap_or_else(|| "other".into())),
+            is_test: flag(&f, "is_test"),
+            ..Default::default()
+        });
+    }
+    for f in list("functions") {
+        let path = text(&f, "path").ok_or("a change function names its `path`")?;
+        let symbol = text(&f, "symbol").ok_or("a change function names its `symbol`")?;
+        results.functions.push(ChangeFunctionRow {
+            symbol_ref: oxplow_domain::uri::build::symbol_uri(&path, &symbol),
+            name: text(&f, "name").unwrap_or_else(|| symbol.clone()),
+            container: text(&f, "container").unwrap_or_default(),
+            status: text(&f, "status").unwrap_or_else(|| "modified".into()),
+            signature_changed: flag(&f, "signature_changed"),
+            body_changed: flag(&f, "body_changed"),
+            start_line: int(&f, "start_line").unwrap_or(1),
+            visibility: text(&f, "visibility").unwrap_or_else(|| "public".into()),
+            is_test: flag(&f, "is_test"),
+            length: int(&f, "length"),
+            params_before: int(&f, "params_before"),
+            params_after: int(&f, "params_after"),
+            complexity_delta: f.get("complexity_delta").and_then(Value::as_f64),
+            path,
+            ..Default::default()
+        });
+    }
+    let stream = first_stream(host).await?;
+    let (row, _) = host
+        .svc
+        .change_store
+        .get_or_create(stream.value(), &kind, &target, None, &head)
+        .await
+        .map_err(|e| e.to_string())?;
+    host.svc
+        .change_store
+        .store_results(row.id, results, None, 0, 0, None)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// `test_run: { effort, at?, producer?, branch?, cases?: [{ name, status }],
+/// asserted_failed? }`: a run an effort recorded, as a run recorder writes
+/// it: a `tests` capture with its detail and an `oxplow.test_case` fact
+/// per case (or per failure asserted as a count with no report), through
+/// the fact store. A `producer` other than `tests` is a record without
+/// measurements.
+async fn observe_test_run(host: &Host, body: &Value) -> Result<(), String> {
+    use oxplow_db::effort_store::EffortStore as _;
+    use oxplow_domain::{EffortId, Timestamp};
+    let effort = body
+        .get("effort")
+        .and_then(Value::as_str)
+        .and_then(|e| e.strip_prefix("eff"))
+        .and_then(|n| n.parse::<i64>().ok())
+        .ok_or("`test_run.effort` is an effort's id, like `eff1`")?;
+    let found = host
+        .svc
+        .effort_store
+        .get_effort(&EffortId::new(effort))
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("no effort eff{effort}"))?;
+    let at = match body.get("at").and_then(Value::as_str) {
+        Some(at) => Timestamp::parse(at).map_err(|e| format!("`test_run.at`: {e}"))?,
+        None => Timestamp::now(),
+    };
+    let producer = body
+        .get("producer")
+        .and_then(Value::as_str)
+        .unwrap_or("tests");
+    let branch = body.get("branch").and_then(Value::as_str).unwrap_or("main");
+    let asserted_failed = body
+        .get("asserted_failed")
+        .and_then(Value::as_i64)
+        .unwrap_or(0);
+    let mut cases = Vec::new();
+    for c in body
+        .get("cases")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let text = |key: &str| c.get(key).and_then(Value::as_str).map(str::to_string);
+        cases.push((
+            text("name").ok_or("a test case names its `name`")?,
+            text("status").ok_or("a test case names its `status`")?,
+        ));
+    }
+    let failed = cases
+        .iter()
+        .filter(|(_, status)| status == "failed")
+        .count() as i64
+        + asserted_failed;
+    let suites: Vec<Value> = if cases.is_empty() {
+        Vec::new()
+    } else {
+        vec![json!({
+            "name": "suite",
+            "cases": cases.iter().map(|(name, status)| json!({
+                "classname": "mod", "name": name, "status": status
+            })).collect::<Vec<_>>()
+        })]
+    };
+    let facts = &host.svc.fact_store;
+    let case = facts
+        .get_measure("oxplow.test_case")
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or("no `oxplow.test_case` measure")?;
+    let stream = first_stream(host).await?;
+    let mut capture = oxplow_db::NewMetricCapture::done(stream.value(), producer, "hook");
+    capture.thread_id = Some(found.thread_id.value());
+    capture.effort_id = Some(effort);
+    capture.branch = Some(branch.to_string());
+    capture.captured_at = Some(at);
+    capture.detail_json = Some(
+        json!({
+            "kind": "test-detail",
+            "payload": { "command": "cargo test", "failed": failed, "suites": suites }
+        })
+        .to_string(),
+    );
+    let mut rows: Vec<oxplow_db::NewFact> = cases
+        .iter()
+        .map(|(name, status)| oxplow_db::NewFact {
+            subject: Some(oxplow_domain::uri::build::test_uri("mod", name)),
+            dims_json: Some(json!({ "oxplow.status": status }).to_string()),
+            ..oxplow_db::NewFact::new(case.id, 1.0)
+        })
+        .collect();
+    for _ in 0..asserted_failed {
+        rows.push(oxplow_db::NewFact {
+            dims_json: Some(r#"{"oxplow.status":"failed"}"#.to_string()),
+            ..oxplow_db::NewFact::new(case.id, 1.0)
+        });
+    }
+    if producer != "tests" {
+        rows.clear();
+    }
+    facts
+        .record_facts(capture, rows)
+        .await
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
+/// `collect: { effort, collectors?: [key] }`: the fact collectors an
+/// `effort.finished` triggers (`MetricsService::run_effort_collectors`),
+/// run for the effort now; `collectors` names the ones to run (by key),
+/// else every one runs.
+async fn observe_collect(host: &Host, body: &Value) -> Result<(), String> {
+    use oxplow_db::effort_store::EffortStore as _;
+    use oxplow_domain::EffortId;
+    let effort = body
+        .get("effort")
+        .and_then(Value::as_str)
+        .and_then(|e| e.strip_prefix("eff"))
+        .and_then(|n| n.parse::<i64>().ok())
+        .ok_or("`collect.effort` is an effort's id, like `eff1`")?;
+    let found = host
+        .svc
+        .effort_store
+        .get_effort(&EffortId::new(effort))
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("no effort eff{effort}"))?;
+    let wanted: Option<Vec<String>> = body.get("collectors").and_then(Value::as_array).map(|l| {
+        l.iter()
+            .filter_map(|k| k.as_str().map(str::to_string))
+            .collect()
+    });
+    host.svc
+        .metrics
+        .run_effort_collectors(&found.thread_id, &found.id, None, &|c| {
+            wanted.as_ref().is_none_or(|w| w.contains(&c.key))
+        })
+        .await;
+    Ok(())
+}
+
+/// `snapshot: { trigger?, elapsed_ms?, budget_ms?, files?: [{ path, hash }] }`:
+/// one take in the stream's snapshot log (`SqliteSnapshotStore::
+/// record_take`): its parent is the take before it, and it is over budget
+/// when `elapsed_ms` is more than `budget_ms`. A take whose files hash as
+/// its parent's makes no new snapshot.
+async fn observe_snapshot(host: &Host, body: &Value) -> Result<(), String> {
+    use oxplow_db::{FileSnapshot, SnapshotStorage, TakeRecord};
+    use oxplow_domain::snapshot::SnapshotTrigger;
+    let stream = first_stream(host).await?;
+    let trigger = match body.get("trigger").and_then(Value::as_str) {
+        Some(t) => SnapshotTrigger::from_db_str(t)
+            .ok_or_else(|| format!("`{t}` isn't a snapshot trigger"))?,
+        None => SnapshotTrigger::Manual,
+    };
+    let mut rows = Vec::new();
+    for f in body
+        .get("files")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let text = |key: &str| f.get(key).and_then(Value::as_str);
+        rows.push(FileSnapshot {
+            id: 0,
+            stream_id: stream,
+            path: text("path")
+                .ok_or("a snapshot file names its `path`")?
+                .to_string(),
+            blob_hash: Some(text("hash").unwrap_or("h").to_string()),
+            size_bytes: 1,
+            captured_at: oxplow_domain::Timestamp::now(),
+            storage: SnapshotStorage::Oxplow,
+            snapshot_id: None,
+            mtime_ms: Some(1),
+            content_hash: None,
+        });
+    }
+    host.svc
+        .snapshot_store
+        .record_take(TakeRecord {
+            stream_id: stream,
+            rows,
+            trigger,
+            thread_id: None,
+            turn_id: None,
+            effort_id: None,
+            branch: None,
+            revision: None,
+            elapsed_ms: body.get("elapsed_ms").and_then(Value::as_u64).unwrap_or(1),
+            budget_ms: body.get("budget_ms").and_then(Value::as_u64),
+            source: "fixture".into(),
+            provider: None,
+            contents: false,
+            handle: None,
+        })
         .await
         .map(|_| ())
         .map_err(|e| e.to_string())
@@ -1611,9 +1914,42 @@ async fn observe_evidence(host: &Host, body: &Value) -> Result<(), String> {
             created_at: oxplow_domain::Timestamp::now(),
         });
     }
+    let mut deltas = Vec::new();
+    for d in body
+        .get("metric_deltas")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let text = |key: &str| d.get(key).and_then(Value::as_str).map(str::to_string);
+        let num = |key: &str| d.get(key).and_then(Value::as_f64);
+        let key = text("key").ok_or("a metric delta names its `key`")?;
+        let current = num("current").ok_or("a metric delta names its `current`")?;
+        deltas.push(oxplow_db::EffortMetricDelta {
+            title: text("title").unwrap_or_else(|| key.clone()),
+            key,
+            unit: text("unit"),
+            direction: text("direction").unwrap_or_else(|| "lower-better".into()),
+            kind: text("kind").unwrap_or_else(|| "gauge".into()),
+            category: text("category"),
+            language: text("language"),
+            agg: text("agg").unwrap_or_else(|| "files".into()),
+            baseline: num("baseline"),
+            current,
+            delta: num("delta").or_else(|| num("baseline").map(|b| current - b)),
+            changed: d.get("changed").and_then(Value::as_bool).unwrap_or(true),
+            attributed_files: d.get("attributed_files").and_then(Value::as_i64),
+            sample_count: d.get("sample_count").and_then(Value::as_i64).unwrap_or(1),
+            target: num("target"),
+            warn_at: num("warn_at"),
+            fail_at: num("fail_at"),
+            crossing: text("crossing"),
+            latest_capture_id: None,
+        });
+    }
     host.svc
         .effort_evidence_store
-        .replace(effort, Vec::new(), observations, String::new())
+        .replace(effort, deltas, observations, String::new())
         .await
         .map_err(|e| e.to_string())
 }
@@ -5006,6 +5342,108 @@ expect:
   rows:
     - { subject: second, status: M, additions: 2 }
     - { subject: first, status: A, additions: 1 }
+",
+        );
+        let report = test_extension(dir.path(), "notes", false).await.unwrap();
+        assert!(report.ok, "{:?}", report.errors);
+    }
+
+    /// `observe: { change }` stores a change's analysis as the change
+    /// analysis does: the files and functions the models read.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_given_observes_a_changes_analysis() {
+        let dir = tempfile::tempdir().unwrap();
+        crate::scaffold(dir.path(), crate::Kind::Command, "notes", None).unwrap();
+        write(
+            dir.path(),
+            ".oxplow/extensions/notes/fixtures/basic.yaml",
+            "given:
+  - observe:
+      change:
+        kind: commit
+        target: abc
+        files:
+          - { path: src/hot.rs, status: modified, additions: 10, deletions: 2 }
+          - { path: src/new.rs, status: added, additions: 3, is_test: true }
+        functions:
+          - { path: src/hot.rs, symbol: grow, status: modified, body_changed: true, length: 20, complexity_delta: 3 }
+when:
+  sql: SELECT f.path, f.additions, f.is_test, (SELECT count(*) FROM v_change_function g WHERE g.change_id = f.change_id) AS fns FROM v_change_file f JOIN v_change c ON c.id = f.change_id WHERE c.kind = 'commit' AND c.target = 'abc' ORDER BY f.path
+expect:
+  rows:
+    - { path: src/hot.rs, additions: 10, is_test: 0, fns: 1 }
+    - { path: src/new.rs, additions: 3, is_test: 1, fns: 1 }
+",
+        );
+        let report = test_extension(dir.path(), "notes", false).await.unwrap();
+        assert!(report.ok, "{:?}", report.errors);
+    }
+
+    /// `observe: { change }` of an effort's change takes the effort's id.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_given_observes_an_efforts_change() {
+        let dir = tempfile::tempdir().unwrap();
+        crate::scaffold(dir.path(), crate::Kind::Command, "notes", None).unwrap();
+        write(
+            dir.path(),
+            ".oxplow/extensions/notes/fixtures/basic.yaml",
+            "given:
+  - { command: oxplow.effort.open, input: { thread: thr1 } }
+  - observe: { change: { kind: effort, target: eff1, files: [{ path: src/a.rs, additions: 10, deletions: 4 }] } }
+when:
+  sql: SELECT c.kind, c.target, f.deletions FROM v_change c JOIN v_change_file f ON f.change_id = c.id
+expect:
+  rows:
+    - { kind: effort, target: '1', deletions: 4 }
+",
+        );
+        let report = test_extension(dir.path(), "notes", false).await.unwrap();
+        assert!(report.ok, "{:?}", report.errors);
+    }
+
+    /// `observe: { test_run }` records a run's cases as a run recorder does:
+    /// a capture of the effort with a fact per case.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_given_observes_a_test_run() {
+        let dir = tempfile::tempdir().unwrap();
+        crate::scaffold(dir.path(), crate::Kind::Command, "notes", None).unwrap();
+        write(
+            dir.path(),
+            ".oxplow/extensions/notes/fixtures/basic.yaml",
+            "given:
+  - { command: oxplow.effort.open, input: { thread: thr1 } }
+  - observe: { test_run: { effort: eff1, at: \"2026-01-01T00:00:00Z\", cases: [{ name: a, status: passed }, { name: b, status: failed }] } }
+  - observe: { test_run: { effort: eff1, at: \"2026-01-01T00:01:00Z\", asserted_failed: 2 } }
+when:
+  sql: SELECT dims_json, count(*) AS n FROM v_fact WHERE measure_key = 'oxplow.test_case' GROUP BY dims_json ORDER BY n
+expect:
+  rows:
+    - { dims_json: '{\"oxplow.status\":\"passed\"}', n: 1 }
+    - { dims_json: '{\"oxplow.status\":\"failed\"}', n: 3 }
+",
+        );
+        let report = test_extension(dir.path(), "notes", false).await.unwrap();
+        assert!(report.ok, "{:?}", report.errors);
+    }
+
+    /// `observe: { snapshot }` appends to the stream's snapshot log: each
+    /// take's parent is the one before it.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_given_observes_a_snapshot_log() {
+        let dir = tempfile::tempdir().unwrap();
+        crate::scaffold(dir.path(), crate::Kind::Command, "notes", None).unwrap();
+        write(
+            dir.path(),
+            ".oxplow/extensions/notes/fixtures/basic.yaml",
+            "given:
+  - observe: { snapshot: { trigger: startup, elapsed_ms: 5, files: [{ path: a.txt, hash: h1 }] } }
+  - observe: { snapshot: { trigger: quiet, elapsed_ms: 900, budget_ms: 500, files: [{ path: a.txt, hash: h2 }] } }
+when:
+  sql: SELECT trigger, over_budget, file_count, parent_snapshot_id IS NULL AS root FROM v_snapshot_op ORDER BY seq DESC
+expect:
+  rows:
+    - { trigger: quiet, over_budget: 1, file_count: 1, root: 0 }
+    - { trigger: startup, over_budget: 0, file_count: 1, root: 1 }
 ",
         );
         let report = test_extension(dir.path(), "notes", false).await.unwrap();

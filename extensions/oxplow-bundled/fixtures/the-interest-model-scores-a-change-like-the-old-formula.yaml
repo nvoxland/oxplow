@@ -1,0 +1,24 @@
+# The "look here first" score is a model over a change's rows: size,
+# complexity spikes, parameter growth and long new functions, multiplied.
+given:
+  - observe:
+      change:
+        kind: commit
+        target: abc
+        files:
+          - { path: src/hot.rs, additions: 10, deletions: 2 }
+          - { path: src/calm.rs, additions: 3, deletions: 1 }
+          - { path: src/big.rs, additions: 40, deletions: 20 }
+        functions:
+          - { path: src/hot.rs, symbol: grow, body_changed: true, start_line: 1, length: 20, params_before: 1, params_after: 1, complexity_delta: 3 }
+          - { path: src/hot.rs, symbol: widen, signature_changed: true, start_line: 30, length: 10, params_before: 1, params_after: 3 }
+          - { path: src/hot.rs, symbol: fresh, status: added, start_line: 50, length: 70, params_after: 0 }
+when:
+  sql: SELECT path, round(interest, 3) AS interest, reasons FROM v_oxplow_bundled_change_interest ORDER BY path
+expect:
+  rows:
+    - { path: src/big.rs, interest: $any, reasons: 60 lines touched }
+    - { path: src/calm.rs, interest: $any, reasons: "" }
+    - path: src/hot.rs
+      interest: 29.613
+      reasons: "complexity +3 across 1 fn; +2 params across 1 fn; added 70-line function"

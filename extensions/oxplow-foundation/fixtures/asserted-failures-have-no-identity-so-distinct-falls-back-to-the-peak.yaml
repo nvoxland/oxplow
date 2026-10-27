@@ -1,0 +1,18 @@
+# A run that only says how many tests failed names none of them, so the
+# distinct count falls back to the peak.
+given:
+  - { command: oxplow.effort.open, input: { thread: thr1 } }
+  - observe: { test_run: { effort: eff1, at: "2026-01-01T00:00:05Z", asserted_failed: 3 } }
+  - observe: { test_run: { effort: eff1, at: "2026-01-01T00:00:09Z", asserted_failed: 0 } }
+  - observe: { collect: { effort: eff1, collectors: [oxplow.effort_test_outcome] } }
+when:
+  sql: SELECT dims_json, value FROM v_fact WHERE measure_key = 'oxplow.effort_test_outcome' ORDER BY dims_json
+expect:
+  rows:
+    - { dims_json: '{"oxplow.tests_stat":"at_close"}', value: 0.0 }
+    - { dims_json: '{"oxplow.tests_stat":"distinct_failed"}', value: 3.0 }
+    - { dims_json: '{"oxplow.tests_stat":"peak"}', value: 3.0 }
+    - { dims_json: '{"oxplow.tests_stat":"red_runs"}', value: 1.0 }
+steps:
+  - when: { sql: "SELECT value FROM v_fact WHERE measure_key = 'oxplow.effort_time_to_green'" }
+    expect: { rows: [{ value: 4000.0 }] }
