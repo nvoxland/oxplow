@@ -5285,6 +5285,21 @@ async fn publish_generation(svc: &Arc<oxplow_app::Services>) -> Result<(), Strin
         .map_err(|e| format!("{e:?}"))
 }
 
+/// An oxplow like `host` with oxplow's own work list on (it is
+/// `oxplow-bundled`'s), for a conformance suite that files work.
+async fn with_work_list(host: &Host, ext: &Extension) -> Result<Host, String> {
+    let started = Host::start(
+        &host.checkout,
+        &ext.name,
+        &["oxplow-bundled".to_string()],
+        host.env.clone(),
+        host.builds,
+    )
+    .await?;
+    started.start_runtime()?;
+    Ok(started)
+}
+
 /// The effort-policy suite over the extension's policy script `decl`, on
 /// a fork of `host`: the script chosen as the project's policy. A finding
 /// is an error at the manifest.
@@ -5297,7 +5312,9 @@ async fn policy_suite(
     let manifest = format!("{}/extension.yaml", ext.path.trim_end_matches('/'));
     report.ran.push(format!("{EFFORT_POLICY} suite"));
     let run = async {
-        let fork = host.fork().await?;
+        // The suite files work, and oxplow's own work list is bundled's.
+        let with_list = with_work_list(host, ext).await?;
+        let fork = with_list.fork().await?;
         let svc = &fork.svc;
         svc.config
             .write()
@@ -5336,8 +5353,17 @@ async fn suite(
     let manifest = format!("{}/extension.yaml", ext.path.trim_end_matches('/'));
     report.ran.push(format!("{} suite", spec.capability));
     let run = async {
-        // On an oxplow of its own: what the suite files, no example sees.
-        let fork = host.fork().await?;
+        // On an oxplow of its own: what the suite files, no example sees. An
+        // effort policy's suite files work, and oxplow's own work list is
+        // bundled's: its oxplow has it on.
+        let with_list;
+        let base = if spec.capability == providers::effort_policy::EffortPolicyHost::CAPABILITY {
+            with_list = with_work_list(host, ext).await?;
+            &with_list
+        } else {
+            host
+        };
+        let fork = base.fork().await?;
         let svc = fork.svc.clone();
         let project = oxplow_app::collector_runner::project_key(&fork.root);
         for (name, value) in env_credentials(spec, env) {
@@ -5572,24 +5598,9 @@ mod tests {
     use super::*;
     use crate::Format;
 
-    /// Write a file of a test's extension. A fixture that makes work items,
-    /// efforts or wiki pages turns on bundled — oxplow's own work list,
-    /// effort policy and wiki are bundled's — as a real fixture says in its
-    /// `requires`.
     fn write(root: &Path, rel: &str, body: &str) {
         let p = root.join(rel);
         std::fs::create_dir_all(p.parent().unwrap()).unwrap();
-        let needs_bundled = rel.contains("/fixtures/")
-            && rel.ends_with(".yaml")
-            && !body.contains("requires:")
-            && ["work_item", "effort", "knowledge."]
-                .iter()
-                .any(|k| body.contains(k));
-        let body = if needs_bundled {
-            format!("requires: [oxplow-bundled]\n{body}")
-        } else {
-            body.to_string()
-        };
         std::fs::write(p, body).unwrap();
     }
 
@@ -6027,7 +6038,7 @@ after:
         write(
             dir.path(),
             ".oxplow/extensions/notes/fixtures/basic.yaml",
-            "given: [{ command: oxplow.work_item.create, input: { title: T }, bind: t }]
+            "requires: [oxplow-bundled]\ngiven: [{ command: oxplow.work_item.create, input: { title: T }, bind: t }]
 when:
   event: { type: work_item.state_changed, payload: { work_item: $t.uri, to: done } }
 expect:
@@ -6047,7 +6058,7 @@ expect:
         write(
             dir.path(),
             ".oxplow/extensions/notes/fixtures/basic.yaml",
-            "given: [{ command: oxplow.work_item.create, input: { title: T, state: in_progress }, bind: t }]
+            "requires: [oxplow-bundled]\ngiven: [{ command: oxplow.work_item.create, input: { title: T, state: in_progress }, bind: t }]
 when: { command: oxplow.work_item.transition, input: { uri: $t.uri, to: done } }
 expect:
   ok: true
@@ -6124,7 +6135,7 @@ expect:
         write(
             dir.path(),
             ".oxplow/extensions/notes/fixtures/basic.yaml",
-            "given:
+            "requires: [oxplow-bundled]\ngiven:
   - { command: oxplow.work_item.create, input: { title: T }, bind: t }
   - observe: { event: { type: work_item.state_changed, payload: { work_item: $t.uri, to: done } } }
 when: { sql: SELECT count(*) AS n FROM v_work_item_comment }
@@ -6197,7 +6208,7 @@ expect:
         write(
             dir.path(),
             ".oxplow/extensions/notes/fixtures/basic.yaml",
-            "given:
+            "requires: [oxplow-bundled]\ngiven:
   - { command: oxplow.effort.open, input: { thread: thr1 } }
   - observe: { change: { kind: effort, target: eff1, files: [{ path: src/a.rs, additions: 10, deletions: 4 }] } }
 when:
@@ -6220,7 +6231,7 @@ expect:
         write(
             dir.path(),
             ".oxplow/extensions/notes/fixtures/basic.yaml",
-            "given:
+            "requires: [oxplow-bundled]\ngiven:
   - { command: oxplow.effort.open, input: { thread: thr1 } }
   - observe: { test_run: { effort: eff1, at: \"2026-01-01T00:00:00Z\", cases: [{ name: a, status: passed }, { name: b, status: failed }] } }
   - observe: { test_run: { effort: eff1, at: \"2026-01-01T00:01:00Z\", asserted_failed: 2 } }
@@ -6441,7 +6452,7 @@ expect: {{ rows: [{{ title: Mine }}] }}
         write(
             dir.path(),
             ".oxplow/extensions/notes/fixtures/basic.yaml",
-            "given:
+            "requires: [oxplow-bundled]\ngiven:
   - { command: oxplow.effort.open, input: { thread: thr1 } }
   - observe:
       evidence:
@@ -6515,12 +6526,12 @@ implementations:
         write(
             root,
             ".oxplow/extensions/acme/fixtures/start.yaml",
-            "when: { implementation: tidy, event: { type: work_item.state_changed, payload: { work_item: \"work_item:oxplow:tsk1\", to: in_progress }, anchors: { thread_id: thr1 } } }\nexpect: { commands: [oxplow.effort.open] }\n",
+            "requires: [oxplow-bundled]\nwhen: { implementation: tidy, event: { type: work_item.state_changed, payload: { work_item: \"work_item:oxplow:tsk1\", to: in_progress }, anchors: { thread_id: thr1 } } }\nexpect: { commands: [oxplow.effort.open] }\n",
         );
         write(
             root,
             ".oxplow/extensions/acme/fixtures/finish.yaml",
-            "when: { implementation: tidy, event: { type: work_item.state_changed, payload: { work_item: \"work_item:oxplow:tsk1\", to: done } }, answers: { sql.read: [[{ uri: \"oxplow:oxplow/effort?id=eff3\" }]] } }\nexpect: { commands: [oxplow.effort.close] }\n",
+            "requires: [oxplow-bundled]\nwhen: { implementation: tidy, event: { type: work_item.state_changed, payload: { work_item: \"work_item:oxplow:tsk1\", to: done } }, answers: { sql.read: [[{ uri: \"oxplow:oxplow/effort?id=eff3\" }]] } }\nexpect: { commands: [oxplow.effort.close] }\n",
         );
     }
 
@@ -6824,7 +6835,7 @@ event_types:
         );
         let scenario = |last: &str| {
             format!(
-                "given: [{{ command: oxplow.work_item.create, input: {{ title: Fix it }}, bind: item }}]
+                "requires: [oxplow-bundled]\ngiven: [{{ command: oxplow.work_item.create, input: {{ title: Fix it }}, bind: item }}]
 when: {{ event_type: acme.merged, payload: {{ pr: $item.uri }} }}
 expect: {{ valid: true }}
 steps:
@@ -6899,7 +6910,7 @@ event_types:
         write(
             root,
             ".oxplow/extensions/acme/fixtures/merged.yaml",
-            "given: [{ command: oxplow.work_item.create, input: { title: Fix it } }]
+            "requires: [oxplow-bundled]\ngiven: [{ command: oxplow.work_item.create, input: { title: Fix it } }]
 when: { event_type: acme.merged, payload: { pr: 1 } }
 expect: { valid: true }
 steps:
@@ -6911,7 +6922,7 @@ steps:
         write(
             root,
             ".oxplow/extensions/acme/fixtures/paged.yaml",
-            "given: [{ command: oxplow.work_item.create, input: { title: Fix it } }]
+            "requires: [oxplow-bundled]\ngiven: [{ command: oxplow.work_item.create, input: { title: Fix it } }]
 when: { page: titles }
 expect: { loaders: { titles: { rows: [{ title: Fix it }] } } }
 steps:
@@ -7057,7 +7068,7 @@ intent:
         write(
             root,
             ".oxplow/extensions/editor/fixtures/edit.yaml",
-            "when: { form: edit-item, params: { uri: 'oxplow:oxplow/work_item?id=tsk1&provider=oxplow' } }\nexpect: { values: { uri: 'oxplow:oxplow/work_item?id=tsk1&provider=oxplow' }, fixed: [uri], fields: [title, body] }\n",
+            "requires: [oxplow-bundled]\nwhen: { form: edit-item, params: { uri: 'oxplow:oxplow/work_item?id=tsk1&provider=oxplow' } }\nexpect: { values: { uri: 'oxplow:oxplow/work_item?id=tsk1&provider=oxplow' }, fixed: [uri], fields: [title, body] }\n",
         );
         let report = test_extension(root, "editor", false).await.unwrap();
         assert_eq!(report.errors, Vec::<String>::new());
@@ -7070,7 +7081,7 @@ intent:
         write(
             root,
             ".oxplow/extensions/editor/fixtures/edit.yaml",
-            "when: { form: edit-item, params: { uri: 'oxplow:oxplow/work_item?id=tsk1&provider=oxplow' } }\nexpect: { fixed: [uri, title] }\n",
+            "requires: [oxplow-bundled]\nwhen: { form: edit-item, params: { uri: 'oxplow:oxplow/work_item?id=tsk1&provider=oxplow' } }\nexpect: { fixed: [uri, title] }\n",
         );
         let errors = test_extension(root, "editor", false)
             .await
@@ -7118,7 +7129,7 @@ answers:
             root,
             ".oxplow/extensions/pager/fixtures/created.yaml",
             &format!(
-                "given:
+                "requires: [oxplow-bundled]\ngiven:
   - {{ command: oxplow.work_item.create, input: {{ title: Write the page test }} }}
 when: {{ page: items }}
 expect: {expect}
@@ -7293,7 +7304,7 @@ view:
             BY_URI,
             &[(
                 "bound",
-                "given:
+                "requires: [oxplow-bundled]\ngiven:
   - { command: oxplow.work_item.create, input: { title: First }, bind: first }
 when: { page: items, params: { uri: $first.uri } }
 expect:
@@ -7319,7 +7330,7 @@ steps:
             BY_URI,
             &[(
                 "bound",
-                "given:
+                "requires: [oxplow-bundled]\ngiven:
   - { command: oxplow.work_item.create, input: { title: First }, bind: first }
 when: { page: items, params: { uri: $first.uri } }
 steps:
@@ -7371,7 +7382,7 @@ view:
   actions:
     - { id: start, label: Start, command: oxplow.work_item.transition, input: { uri: '{{row.uri}}', to: in_progress }, row: true }
 ";
-        let given = "given:
+        let given = "requires: [oxplow-bundled]\ngiven:
   - { command: oxplow.work_item.create, input: { title: First } }
   - { command: oxplow.work_item.create, input: { title: Second } }
   - { command: oxplow.work_item.create, input: { title: Third } }
@@ -7440,7 +7451,7 @@ view:
 ";
         let fixture = |press: &str| {
             format!(
-                "given: [{{ command: oxplow.work_item.create, input: {{ title: First }}, bind: first }}]
+                "requires: [oxplow-bundled]\ngiven: [{{ command: oxplow.work_item.create, input: {{ title: First }}, bind: first }}]
 when: {{ page: items, params: {{ uri: $first.uri }} }}
 expect: {{ loaders: {{ items: {{ rows: [{{ state: todo }}] }} }} }}
 steps:
@@ -7469,7 +7480,7 @@ steps:
             page,
             &[(
                 "pressed",
-                "given: [{ command: oxplow.work_item.create, input: { title: First }, bind: first }]
+                "requires: [oxplow-bundled]\ngiven: [{ command: oxplow.work_item.create, input: { title: First }, bind: first }]
 when: { page: items, params: { uri: $first.uri } }
 steps:
   - press: { action: start, node: items, row: { uri: \"oxplow:oxplow/work_item?id=tsk404&provider=oxplow\" } }
@@ -7599,7 +7610,7 @@ models:
         );
         let fixture = |want: &str| {
             format!(
-                "given: [{{ command: oxplow.work_item.create, input: {{ title: Three }} }}]
+                "requires: [oxplow-bundled]\ngiven: [{{ command: oxplow.work_item.create, input: {{ title: Three }} }}]
 when: {{ sql: \"SELECT title FROM v_acme_prs UNION ALL SELECT title FROM v_work_item WHERE title = :t ORDER BY title\", params: {{ t: Three }} }}
 expect: {{ rows: {want} }}
 "
@@ -7642,7 +7653,7 @@ expect: {{ rows: {want} }}
             &[
                 (
                     "ran",
-                    "given: [{ command: oxplow.work_item.create, input: { title: First }, bind: first }]
+                    "requires: [oxplow-bundled]\ngiven: [{ command: oxplow.work_item.create, input: { title: First }, bind: first }]
 when: { command: oxplow.work_item.transition, input: { uri: $first.uri, to: in_progress } }
 expect: { ok: true, commands: [] }
 steps:
@@ -7652,7 +7663,7 @@ steps:
                 ),
                 (
                     "wrong",
-                    "when: { command: oxplow.work_item.transition, input: { uri: \"oxplow:oxplow/work_item?id=tsk404&provider=oxplow\", to: done } }
+                    "requires: [oxplow-bundled]\nwhen: { command: oxplow.work_item.transition, input: { uri: \"oxplow:oxplow/work_item?id=tsk404&provider=oxplow\", to: done } }
 expect: { ok: true }
 ",
                 ),
@@ -7704,7 +7715,7 @@ models:
         write(
             root,
             ".oxplow/extensions/acme/fixtures/stored.yaml",
-            "given: [{ command: oxplow.work_item.create, input: { title: Fix it } }]
+            "requires: [oxplow-bundled]\ngiven: [{ command: oxplow.work_item.create, input: { title: Fix it } }]
 when: { sql: \"SELECT title FROM v_acme_titles\" }
 expect: { rows: [{ title: Fix it }] }
 steps:
@@ -7742,7 +7753,7 @@ advisories:
         );
         let fixture = |want: &str| {
             format!(
-                "given: [{{ command: oxplow.work_item.create, input: {{ title: Fix it }} }}]
+                "requires: [oxplow-bundled]\ngiven: [{{ command: oxplow.work_item.create, input: {{ title: Fix it }} }}]
 when: {{ advisory: hello }}
 expect: {{ lines: {want} }}
 "
@@ -7838,7 +7849,7 @@ custom_components:
         );
         let fixture = |last: u32| {
             format!(
-                "given: [{{ command: oxplow.work_item.create, input: {{ title: First }} }}]
+                "requires: [oxplow-bundled]\ngiven: [{{ command: oxplow.work_item.create, input: {{ title: First }} }}]
 when: {{ page: board }}
 steps:
   - ui:
@@ -7944,7 +7955,7 @@ view: { component: { id: cards } }
         write(
             root,
             ".oxplow/extensions/cards/fixtures/drawn.yaml",
-            "when: { page: board }
+            "requires: [oxplow-bundled]\nwhen: { page: board }
 steps:
   - ui:
       - key: { on: \"#t\", key: Enter }
@@ -7994,7 +8005,7 @@ steps:
         write(
             root,
             ".oxplow/extensions/cards/fixtures/drawn.yaml",
-            "given:
+            "requires: [oxplow-bundled]\ngiven:
   - { command: oxplow.work_item.create, input: { title: Alpha } }
   - { command: oxplow.work_item.create, input: { title: Beta } }
 when: { page: board }
@@ -8134,7 +8145,7 @@ ui:
         write(
             root,
             ".oxplow/extensions/lanes/fixtures/drawn.yaml",
-            "given: [{ command: oxplow.work_item.create, input: { title: First } }]
+            "requires: [oxplow-bundled]\ngiven: [{ command: oxplow.work_item.create, input: { title: First } }]
 when: { page: host/board }
 expect: { nodes: [{ id: cards/board }] }
 steps:
@@ -8173,7 +8184,7 @@ steps:
     async fn page_fixtures_dont_see_each_others_data() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
-        let fixture = "given: [{ command: oxplow.work_item.create, input: { title: Mine } }]
+        let fixture = "requires: [oxplow-bundled]\ngiven: [{ command: oxplow.work_item.create, input: { title: Mine } }]
 when: { page: items }
 expect: { loaders: { items: { rows: 1 } } }
 ";
@@ -8293,7 +8304,7 @@ view: { from: items, viz: table }
 ",
             &[(
                 "switched",
-                "given:
+                "requires: [oxplow-bundled]\ngiven:
   - { command: oxplow.work_item.create, input: { title: Filed } }
 when: { page: items }
 expect: { loaders: { items: { rows: [{ title: Filed }] } } }

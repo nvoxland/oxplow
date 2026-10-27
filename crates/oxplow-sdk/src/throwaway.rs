@@ -120,22 +120,6 @@ impl Host {
         for root in roots {
             visit(root, checkout, &settings, &mut on, &mut seen);
         }
-        // An effort policy under test is judged by the work it files, and
-        // oxplow's own work list is bundled's.
-        let tested = settings.source(checkout, testing);
-        let judged = tested.is_dir() && {
-            let ext = oxplow_app::extensions::load_extension_at(&tested, testing);
-            ext.implementations
-                .iter()
-                .any(|d| d.capability == "effort_policy")
-                || ext
-                    .providers
-                    .iter()
-                    .any(|p| p.capability == "effort_policy")
-        };
-        if judged {
-            visit("oxplow-bundled", checkout, &settings, &mut on, &mut seen);
-        }
         // Each source goes where the checkout keeps it, so a finding names
         // the file the author edits; one kept outside the checkout goes
         // under `.oxplow/extensions/`.

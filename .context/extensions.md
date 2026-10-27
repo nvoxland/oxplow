@@ -1956,9 +1956,9 @@ same meaning as the manifest's) adds more, on an oxplow of that fixture's
 own (an unknown name is a finding). The default extensions are not on:
 oxplow's own pages run complete without them. Oxplow's own work list,
 effort policy and wiki are bundled's, so a fixture that makes work items,
-efforts or wiki pages says `requires: [oxplow-bundled]`, and an extension
-under test that provides an effort policy is given bundled's work list
-(its conformance suite files work) — deployed in that order,
+efforts or wiki pages says `requires: [oxplow-bundled]`, and an effort
+policy's conformance suite, which files work, runs on an oxplow of its own
+with bundled on — deployed in that order,
 what one requires before it (`Host::start`). Never the project's list or
 one person's `enableExtensions` / `disableExtensions`, and never a
 sibling it doesn't name: a fixture passes or fails the same for everyone
