@@ -1,4 +1,6 @@
 # Changing an item that is not there is refused, with the command's reason.
+# (Oxplow's own work list, effort policy and wiki are bundled's.)
+requires: [oxplow-bundled]
 when:
   component: swimlanes
   invokes:

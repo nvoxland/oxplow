@@ -1,5 +1,6 @@
 # Settings → Data: the entities, the collectors (by who runs them) and the
-# effects oxplow's own extensions declare.
+# effects oxplow's own extensions declare
+# (foundation declares none).
 when: { page: settings, params: { area: data } }
 expect:
   loaders:
@@ -9,9 +10,4 @@ expect:
     data_sources:
       columns: [uri, collector, extension, id, trigger, state, tone, last_run_at, rows, problem, missing, can_enable_again]
       rows: $any
-    data_effects:
-      rows:
-        - { effect: oxplow-bundled/infer-reasoning }
-        - { effect: oxplow-bundled/repair-disabled }
-        - { effect: oxplow-bundled/store-reasoning }
-        - { effect: oxplow-bundled/verify-unchecked }
+    data_effects: { rows: 0 }

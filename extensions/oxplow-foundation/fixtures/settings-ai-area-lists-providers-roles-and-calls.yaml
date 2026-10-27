@@ -21,5 +21,4 @@ expect:
         - { role: summarize, bound: or · m1, restrict: '["tools"]', can_assign: 1, can_unassign: 1 }
         - { role: decide }
         - { role: assistant }
-        - { role: oxplow-bundled/reasoning, bound: Falls back to main (fixture), can_unassign: 0 }
     ai_calls: { rows: 0 }

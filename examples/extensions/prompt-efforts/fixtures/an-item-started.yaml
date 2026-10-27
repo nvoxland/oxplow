@@ -1,5 +1,7 @@
 # Starting an item on a thread whose open effort has none links the effort
 # to the item (the mover is an agent: the event names its thread).
+# (Oxplow's own work list, effort policy and wiki are bundled's.)
+requires: [oxplow-bundled]
 given:
   - { command: oxplow.capability.choose, input: { capability: effort_policy, provider: prompt_efforts }, confirmed: true }
   - { command: oxplow.work_item.create, input: { title: Parse blocks, thread: thr1 }, bind: item }

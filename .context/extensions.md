@@ -1949,9 +1949,16 @@ is held by a page with a whole-page action running that command.
 activates, its entities created empty, the fixture model answering every
 model call). It never reads what runs here — no deployment, no
 database — so an extension is tested before its first deploy. **Which
-extensions are on is what it declares**: what a fresh oxplow has (the
-required foundation, `DEFAULT_EXTENSIONS`), the one tested, and what each
-of those `requires:` or imports from, in turn — deployed in that order,
+extensions are on is what it declares**: the required
+foundation, the one tested, and what each of those `requires:` or imports
+from, in turn — and a fixture's own `requires: [<ext>…]` (a fixture key,
+same meaning as the manifest's) adds more, on an oxplow of that fixture's
+own (an unknown name is a finding). The default extensions are not on:
+oxplow's own pages run complete without them. Oxplow's own work list,
+effort policy and wiki are bundled's, so a fixture that makes work items,
+efforts or wiki pages says `requires: [oxplow-bundled]`, and an effort
+policy's conformance suite, which files work, runs on an oxplow of its own
+with bundled on — deployed in that order,
 what one requires before it (`Host::start`). Never the project's list or
 one person's `enableExtensions` / `disableExtensions`, and never a
 sibling it doesn't name: a fixture passes or fails the same for everyone
@@ -2783,8 +2790,8 @@ The rules are tested in Rust (`replacements::chosen`'s tests, the runner's
 `a_replaceable_node_runs_the_replacement_that_stands_in_for_it`); which
 replacement a page shows is a fixture's (`loaders: { <node>/<loader> }`,
 a `ui` step on the embedded component); the badge, the fallback line and
-choosing one on Settings are the e2e specs'. Nothing renders the
-capability pages with every enhancement off any more
+choosing one on Settings are the e2e specs'. The pages with every
+enhancement off are `tests-e2e/specs/pages/plain.spec.ts`'s
 ([work-items.md](./work-items.md), "Conformance").
 
 **The first real one: the history graph.** oxplow-bundled's

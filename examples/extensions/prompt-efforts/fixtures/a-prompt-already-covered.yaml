@@ -1,4 +1,6 @@
 # An effort opened during the turn already covers it: no second one.
+# (Oxplow's own work list, effort policy and wiki are bundled's.)
+requires: [oxplow-bundled]
 given:
   - { command: oxplow.capability.choose, input: { capability: effort_policy, provider: prompt_efforts }, confirmed: true }
   - observe:

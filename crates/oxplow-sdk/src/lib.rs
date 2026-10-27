@@ -432,7 +432,7 @@ pub fn scaffold_with(
         // is made first.
         let (given, when) = match kind {
             Kind::Command => (
-                "given: [{ command: oxplow.work_item.create, input: { title: First }, bind: item }]\n",
+                "# Oxplow's own work list is bundled's.\nrequires: [oxplow-bundled]\ngiven: [{ command: oxplow.work_item.create, input: { title: First }, bind: item }]\n",
                 format!("{{ command: {ns}.notes.add, input: {{ uri: $item.uri }} }}"),
             ),
             _ => ("", example_input.clone()),
@@ -1037,7 +1037,7 @@ pub async fn check(
         None => Some(
             // Check runs no program: it sees no environment and builds
             // nothing (a built source loads as written).
-            throwaway::Host::start(root, name, std::sync::Arc::new(|_: &str| None), false)
+            throwaway::Host::start(root, name, &[], std::sync::Arc::new(|_: &str| None), false)
                 .await
                 .map_err(SdkError::Invalid)?,
         ),

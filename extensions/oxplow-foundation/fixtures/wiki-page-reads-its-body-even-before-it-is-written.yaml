@@ -1,5 +1,7 @@
 # The wiki page reads its body even for a slug not written yet (the first
 # Save creates it), with whether the files it cites have drifted.
+# (Oxplow's own work list, effort policy and wiki are bundled's.)
+requires: [oxplow-bundled]
 given:
   - { command: oxplow.knowledge.write_page, input: { slug: otters, title: Otters, body: "# Otters\n\nThey hold hands.\n" } }
 when: { page: wiki-page, params: { slug: otters } }

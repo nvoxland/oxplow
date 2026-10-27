@@ -1,5 +1,7 @@
 # A card's title is its own form: Enter saves, an empty one is refused
 # under the input, Escape puts the title back.
+# (Oxplow's own work list, effort policy and wiki are bundled's.)
+requires: [oxplow-bundled]
 given:
   - { command: oxplow.work_item.create, input: { title: Card one, thread: thr1 } }
 when: { page: swimlanes, params: { scope: all } }

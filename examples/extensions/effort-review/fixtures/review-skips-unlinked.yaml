@@ -1,4 +1,6 @@
 # An effort without a work item has nowhere to put a review.
+# (Oxplow's own work list, effort policy and wiki are bundled's.)
+requires: [oxplow-bundled]
 given:
   - { command: oxplow.effort.open, input: { thread: thr1 } }
 when:
