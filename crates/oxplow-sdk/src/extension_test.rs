@@ -280,10 +280,10 @@ async fn examples(shared: &Arc<Host>, ext: &Extension, report: &mut TestReport) 
         let Some((shown, doc)) = example_fixture(&read, &rel, &example.name) else {
             report.warnings.push(format!(
                 "{rel}/extension.yaml:1: intent example `{}` has no fixture, so it isn't run — fix: \
-                 add fixtures/{}.yaml with its `input` (`{{ page, params?, rows? }}`, `{{ collector, rows? }}`, a fact \
-                 collector's `{{ collector, files }}`, `{{ event }}`, `{{ job, intentKey, request }}`, \
-                 `{{ component }}`, `{{ form }}`, or a provider's `{{ command, input }}`) and `expect`",
-                example.name, example.name
+                 add fixtures/{}.yaml: `given?`, `expect` and a `when` that is one of {}",
+                example.name,
+                example.name,
+                kinds_hint()
             ));
             continue;
         };
@@ -549,18 +549,111 @@ async fn dispatch(host: &Host, ext: &Extension, ex: &Example<'_>, report: &mut T
         command_run(host, ex, command, report).await;
     } else if ex.when.get("command").is_none() || ext.providers.is_empty() {
         report.errors.push(format!(
-            "{shown}:1: example `{}`'s `when` names no page, sql query, collector, command, effect, \
-             event, job, component, form, effort policy, event type, wikilink or provider command — \
-             fix: `{{ page: <slug>, params? }}` (with `given:`), `{{ sql, params? }}`, `{{ collector: <id>, rows?, event? }}`, \
-             `{{ command: <name>, input }}`, `{{ effect: <id>, event: {{ type, payload }} }}` \
-             (a dry run), `{{ event: {{ type, payload }} }}` (logged, and what reacts runs), \
-             `{{ job: <id>, intentKey, request }}`, `{{ component: <id>, items?, invokes? }}`, `{{ form: <page>, node?, params? }}`, \
-             `{{ implementation: <id>, event: {{ type, payload, anchors? }} }}`, \
-             `{{ event_type, v?, payload }}`, `{{ wikilink }}`, or (with a provider) \
-             `{{ command, input }}`",
-            ex.name
+            "{shown}:1: example `{}`'s `when` names no kind of fixture — fix: one of {}",
+            ex.name,
+            kinds_hint()
         ));
     }
+}
+
+/// A kind of fixture: the key its `when` names it by, the `when` it takes
+/// and what its `expect` checks.
+struct Kind {
+    key: &'static str,
+    when: &'static str,
+    expect: &'static str,
+}
+
+/// Every kind of fixture the runner runs, in the order `dispatch` tries
+/// them. The one statement of the grammar: the runner's hints and the
+/// skill's table (`testing.md`, held to it by a test) are made from it.
+const KINDS: &[Kind] = &[
+    Kind {
+        key: "page",
+        when: "{ page: <slug | ext/slug>, params? }",
+        expect: "{ loaders?, nodes?, text?, alert?, badge?, inactive?, actions? }",
+    },
+    Kind {
+        key: "form",
+        when: "{ form: <page>, node?, params? }",
+        expect: "{ values?, fixed?, fields? }",
+    },
+    Kind {
+        key: "job",
+        when: "{ job: <id>, intentKey, request, cancel?, setup?, rows? }",
+        expect: "{ state, result?, text?, toolCalls?, output?, effects?, commands?, pages? }",
+    },
+    Kind {
+        key: "component",
+        when: "{ component: <id>, items?, invokes?: [{ command, input? }] }",
+        expect: "{ invokes: [{ ok, result? } | { ok: false, refused }] }",
+    },
+    Kind {
+        key: "event",
+        when: "{ event: { type, v?, payload, subject?, anchors? } }",
+        expect: "{ effects?: [{ id, state }], commands?: [names] }",
+    },
+    Kind {
+        key: "effect",
+        when: "{ effect: <id>, event, answers? } (a dry run)",
+        expect: "{ commands } | { skip } | { reacts: false }",
+    },
+    Kind {
+        key: "implementation",
+        when: "{ implementation: <id>, event, answers? } (a dry run)",
+        expect: "{ commands } | { skip }",
+    },
+    Kind {
+        key: "event_type",
+        when: "{ event_type, v?, payload }",
+        expect: "{ valid, upcast? }",
+    },
+    Kind {
+        key: "sql",
+        when: "{ sql, params? }",
+        expect: "{ rows, columns? }",
+    },
+    Kind {
+        key: "wikilink",
+        when: "{ wikilink }",
+        expect: "{ uri }",
+    },
+    Kind {
+        key: "collector",
+        when: "{ collector: <id>, rows?, event? } | { collector: <id>, files }",
+        expect: "{ entities?, events? } | { facts }",
+    },
+    Kind {
+        key: "command",
+        when: "{ command, input?, as?, confirmed? } (with answers: the extension's own, a dry run)",
+        expect: "{ ok, result?, commands? } | { ok: false, refused }",
+    },
+];
+
+/// The kinds, for a finding's fix: each `when` and its `expect`.
+fn kinds_hint() -> String {
+    KINDS
+        .iter()
+        .map(|k| format!("{}: `when: {}`, `expect: {}`", k.key, k.when, k.expect))
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
+/// The skill's table of fixture kinds (`testing.md`).
+#[cfg(test)]
+fn kinds_table() -> String {
+    let mut out = String::from("| kind | `when` | `expect` |\n|---|---|---|\n");
+    for k in KINDS {
+        // A `|` inside a cell would split it.
+        let cell = |text: &str| text.replace('|', "\\|");
+        out.push_str(&format!(
+            "| {} | `{}` | `{}` |\n",
+            k.key,
+            cell(k.when),
+            cell(k.expect)
+        ));
+    }
+    out
 }
 
 /// Whether example `ex` changes its oxplow's data (and what reacts to
@@ -4589,6 +4682,31 @@ effects:
     /// Event-type and ref-kind fixtures: a payload checked against the
     /// declared schema (and its upcast), a wikilink against the declared
     /// kind; a wrong expectation is a finding at its fixture.
+    /// The skill's table of fixture kinds is the runner's own (`KINDS`):
+    /// what the runner accepts is what the skill teaches. `OXPLOW_BLESS=1`
+    /// writes it.
+    #[test]
+    fn the_skill_lists_every_fixture_kind_the_runner_runs() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../oxplow-agent-text/assets/skills/oxplow-extension/references/testing.md");
+        let text = std::fs::read_to_string(&path).unwrap();
+        let (start, end) = ("<!-- fixture-kinds -->\n", "<!-- /fixture-kinds -->");
+        let (Some(a), Some(b)) = (text.find(start), text.find(end)) else {
+            panic!("testing.md has no `{start}` … `{end}` block");
+        };
+        let table = kinds_table();
+        if std::env::var_os("OXPLOW_BLESS").is_some() {
+            let blessed = format!("{}{start}{table}{}", &text[..a], &text[b..]);
+            std::fs::write(&path, blessed).unwrap();
+            return;
+        }
+        assert_eq!(
+            text[a + start.len()..b],
+            table,
+            "testing.md's fixture kinds are stale: regenerate them with OXPLOW_BLESS=1"
+        );
+    }
+
     /// One rule compares every `expect`: an object only on the keys it
     /// names, a list item by item in order, `{ contains: [..] }` items a
     /// list has in any order, `$any` anything, `{ $exact: v }` the whole value.

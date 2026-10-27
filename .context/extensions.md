@@ -1948,7 +1948,13 @@ the project's database. It runs `check` there
 job and component forms are in "The SDK"). A fixture's keys are `given`
 (steps run first), `when` (what it does: one key names the kind, the rest
 are that kind's), `expect`, `steps`, `view` and `model` (`{ replies }`, the
-fixture model's answers); any other key is an error (`FIXTURE_KEYS`):
+fixture model's answers); any other key is an error (`FIXTURE_KEYS`).
+**The kinds are one list** (`extension_test::KINDS`: each kind's key, its
+`when` and its `expect`): the runner's "fix:" hints and the skill's table
+(`references/testing.md`, between `<!-- fixture-kinds -->` markers) are
+made from it, and `the_skill_lists_every_fixture_kind_the_runner_runs`
+fails when the table is stale (`OXPLOW_BLESS=1` writes it). A new kind is
+a `KINDS` entry and a `dispatch` arm. The forms:
 
 - `when: { page: <slug | ext/slug>, params? }` with optional `given: [..]`,
   `view: { stream?, thread? }` and `steps: [..]` beside `when`, and

@@ -60,6 +60,25 @@ model the SQL reads and the command it runs. Prefer `answers:` on pages.
    run first), `when` (what it does — one key names the kind), `expect`
    (`$any` matches anything), and `model: { replies: [...] }` when it calls
    a model. Any other key is an error:
+   The kinds of fixture (generated from the runner's own list):
+
+<!-- fixture-kinds -->
+| kind | `when` | `expect` |
+|---|---|---|
+| page | `{ page: <slug \| ext/slug>, params? }` | `{ loaders?, nodes?, text?, alert?, badge?, inactive?, actions? }` |
+| form | `{ form: <page>, node?, params? }` | `{ values?, fixed?, fields? }` |
+| job | `{ job: <id>, intentKey, request, cancel?, setup?, rows? }` | `{ state, result?, text?, toolCalls?, output?, effects?, commands?, pages? }` |
+| component | `{ component: <id>, items?, invokes?: [{ command, input? }] }` | `{ invokes: [{ ok, result? } \| { ok: false, refused }] }` |
+| event | `{ event: { type, v?, payload, subject?, anchors? } }` | `{ effects?: [{ id, state }], commands?: [names] }` |
+| effect | `{ effect: <id>, event, answers? } (a dry run)` | `{ commands } \| { skip } \| { reacts: false }` |
+| implementation | `{ implementation: <id>, event, answers? } (a dry run)` | `{ commands } \| { skip }` |
+| event_type | `{ event_type, v?, payload }` | `{ valid, upcast? }` |
+| sql | `{ sql, params? }` | `{ rows, columns? }` |
+| wikilink | `{ wikilink }` | `{ uri }` |
+| collector | `{ collector: <id>, rows?, event? } \| { collector: <id>, files }` | `{ entities?, events? } \| { facts }` |
+| command | `{ command, input?, as?, confirmed? } (with answers: the extension's own, a dry run)` | `{ ok, result?, commands? } \| { ok: false, refused }` |
+<!-- /fixture-kinds -->
+
    - a page: `when: { page: <slug | ext/slug>, params? }`, with `given:` —
      steps run first, in order: `{ command, input?, as?,
      confirmed?, bind? }` or `{ rows: { <entity>: [..] } }`.
@@ -118,10 +137,10 @@ model the SQL reads and the command it runs. Prefer `answers:` on pages.
      the tool's result); `cancel: true` cancels it through
      your `jobs.write/cancel` command once it has written. `expect: {
      state, result?, text?, toolCalls?, output?: [{ kind }] }`;
-   - a component: `when: { component: <id>, page?, items?: [title],
-     queries?: [{ asset, params? }], invokes?: [{ command, input? }] }` — what its
-     frame would ask; `expect: { queries: [{ rows }], invokes: [{ ok,
-     refused? }] }` (an invoke is `refused` when the command refuses it; `items` are work
+   - a component: `when: { component: <id>, items?: [title], invokes?: [{
+     command, input? }] }` — what its frame would ask; `expect: { invokes: [{
+     ok, result? } | { ok: false, refused }] }` (an invoke is `refused` when the
+     command refuses or fails; `items` are work
      items filed first, `oxplow:oxplow/work_item?id=<id>&provider=oxplow`, …);
    - a page's form (a `viz: form` node): `when: { form: <page>, node?,
      params? }` — opens it as a person would (`node` names the form node,
