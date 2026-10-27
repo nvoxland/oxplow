@@ -119,7 +119,13 @@ impl Host {
             .init_repository(&root)
             .await
             .map_err(|e| e.to_string())?;
-        let db = self.deployed.copy_in_memory().map_err(|e| e.to_string())?;
+        // Off the runtime: forks side by side wait their turn for the
+        // snapshot's one connection.
+        let deployed = self.deployed.clone();
+        let db = tokio::task::spawn_blocking(move || deployed.copy_in_memory())
+            .await
+            .map_err(|e| e.to_string())?
+            .map_err(|e| e.to_string())?;
         let svc = oxplow_app::Services::on_machine_with_database(
             &root,
             root.join(".oxplow/global-config"),

@@ -1980,7 +1980,10 @@ job and component forms are in "The SDK"):
     it — `Database::copy_in_memory` of a snapshot taken before anything
     ran — so the fork boots what was deployed and nothing is built or
     deployed again; ~0.8 s, most of it that boot's activation), so no
-    example sees another's data. The rest — `check`, the other examples, the answers — share one.
+    example sees another's data. Being independent, they run side by side
+    (spawned tasks, `side_by_side()`: half the cores, at most four), and
+    their findings join the report in the examples' order after the
+    shared host's; the CLI's runtime has threads for it. The rest — `check`, the other examples, the answers — share one.
   - **Answers.** After the examples every page's `answers:` entry runs on
     that shared, clean host (`ran: answers`): the page opens with its params
     and no loader fails, else the finding names the page file and the

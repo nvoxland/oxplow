@@ -352,7 +352,8 @@ fn locate(root: Option<&Path>, target: &str) -> (PathBuf, String) {
 }
 
 fn block_on<F: std::future::Future>(f: F) -> F::Output {
-    tokio::runtime::Builder::new_current_thread()
+    // Threads, so `test`'s examples that each boot an oxplow run side by side.
+    tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
         .expect("tokio runtime")

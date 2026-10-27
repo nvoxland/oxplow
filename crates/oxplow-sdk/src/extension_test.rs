@@ -99,6 +99,35 @@ pub struct TestCase {
 }
 
 impl TestReport {
+    /// An empty report for part of extension `name`'s run, to [`Self::absorb`].
+    fn part(name: &str) -> TestReport {
+        TestReport {
+            name: name.to_string(),
+            ok: false,
+            errors: Vec::new(),
+            warnings: Vec::new(),
+            blessed: Vec::new(),
+            ran: Vec::new(),
+            imports: Vec::new(),
+            profiles: Vec::new(),
+            generation: None,
+            contributes: Vec::new(),
+            unsupported: Vec::new(),
+            left: Vec::new(),
+            cases: Vec::new(),
+        }
+    }
+
+    /// What `part` found and ran, after what this report has.
+    fn absorb(&mut self, part: TestReport) {
+        self.errors.extend(part.errors);
+        self.warnings.extend(part.warnings);
+        self.blessed.extend(part.blessed);
+        self.ran.extend(part.ran);
+        self.left.extend(part.left);
+        self.cases.extend(part.cases);
+    }
+
     /// Record case `name`, which started at `started` when the report had
     /// `errors_before` errors: it passed when it added none.
     fn finish_case(&mut self, name: String, errors_before: usize, started: std::time::Instant) {
@@ -130,9 +159,11 @@ pub async fn test_extension_in(
     env: host::HostEnv,
 ) -> Result<TestReport, SdkError> {
     let started = std::time::Instant::now();
-    let host = Host::start(root, name, env.clone(), true)
-        .await
-        .map_err(SdkError::Invalid)?;
+    let host = Arc::new(
+        Host::start(root, name, env.clone(), true)
+            .await
+            .map_err(SdkError::Invalid)?,
+    );
     host.start_runtime().map_err(SdkError::Invalid)?;
     let checked = crate::check(
         &host.root,
@@ -229,7 +260,7 @@ fn example_fixture(
 /// The intent examples a throwaway oxplow runs: a page's, a derived
 /// collector's. A provider's (`input: { command, input }`) run in its
 /// session.
-async fn examples(shared: &Host, ext: &Extension, report: &mut TestReport) {
+async fn examples(shared: &Arc<Host>, ext: &Extension, report: &mut TestReport) {
     let rel = ext.path.trim_end_matches('/').to_string();
     // Read as the extension's files are everywhere: a bundled extension's
     // fixtures are embedded with it, not on disk.
@@ -240,6 +271,11 @@ async fn examples(shared: &Host, ext: &Extension, report: &mut TestReport) {
         .as_ref()
         .map(|i| i.examples.clone())
         .unwrap_or_default();
+    // Examples that make data, each on an oxplow of its own, run side by
+    // side, a few at a time; their findings join the report in the
+    // examples' order.
+    let slots = Arc::new(tokio::sync::Semaphore::new(side_by_side()));
+    let mut own = Vec::new();
     for example in examples {
         let Some((shown, doc)) = example_fixture(&read, &rel, &example.name) else {
             report.warnings.push(format!(
@@ -258,9 +294,70 @@ async fn examples(shared: &Host, ext: &Extension, report: &mut TestReport) {
                 continue;
             }
         };
-        let ex = Example {
-            name: &example.name,
-            shown: &shown,
+        let fixture = Fixture::of(example.name.clone(), shown, &doc);
+        let ex = fixture.example();
+        if let Some(why) = withheld_target(ext, &ex.input) {
+            report.warnings.push(format!(
+                "{}:1: example `{}` isn't run: {why}",
+                fixture.shown, fixture.name
+            ));
+            continue;
+        }
+        // An example that makes data — steps, rows, a job, a logged event,
+        // a component's filed items — runs on an oxplow of its own, so no
+        // other example sees what it made or what reacted to it.
+        if makes_data(&ex) {
+            let (shared, ext, slots) = (shared.clone(), ext.clone(), slots.clone());
+            own.push(tokio::spawn(async move {
+                let _slot = slots.acquire_owned().await;
+                let mut part = TestReport::part(&ext.name);
+                match shared.fork().await {
+                    Ok(host) => run_example(&host, &ext, &fixture.example(), &mut part).await,
+                    Err(e) => part
+                        .errors
+                        .push(format!("{}:1: an oxplow of its own: {e}", fixture.shown)),
+                }
+                part
+            }));
+        } else {
+            run_example(shared, ext, &ex, report).await;
+        }
+    }
+    for task in own {
+        match task.await {
+            Ok(part) => report.absorb(part),
+            Err(e) => report
+                .errors
+                .push(format!("{}: an example's run stopped: {e}", ext.name)),
+        }
+    }
+}
+
+/// How many examples run side by side: half the machine's cores, at most
+/// four — each boots an oxplow of its own.
+fn side_by_side() -> usize {
+    std::thread::available_parallelism()
+        .map_or(1, |n| n.get() / 2)
+        .clamp(1, 4)
+}
+
+/// An example's fixture, owned, so it can run on a task of its own.
+struct Fixture {
+    name: String,
+    /// The fixture file, as findings name it.
+    shown: String,
+    input: Value,
+    expect: Value,
+    given: Value,
+    steps: Option<Value>,
+    view: Value,
+}
+
+impl Fixture {
+    fn of(name: String, shown: String, doc: &Value) -> Fixture {
+        Fixture {
+            name,
+            shown,
             input: doc.get("input").cloned().unwrap_or(Value::Null),
             expect: doc.get("expect").cloned().unwrap_or(Value::Null),
             given: doc
@@ -270,105 +367,95 @@ async fn examples(shared: &Host, ext: &Extension, report: &mut TestReport) {
                 .unwrap_or(Value::Null),
             steps: doc.get("steps").cloned(),
             view: doc.get("view").cloned().unwrap_or(Value::Null),
-        };
-        if let Some(why) = withheld_target(ext, &ex.input) {
-            report.warnings.push(format!(
-                "{shown}:1: example `{}` isn't run: {why}",
-                example.name
-            ));
-            continue;
         }
-        // An example that makes data — steps, rows, a job, a logged event,
-        // a component's filed items — runs on an oxplow of its own, so no
-        // other example sees what it made or what reacted to it.
-        let forked;
-        let host = if makes_data(&ex) {
-            match shared.fork().await {
-                Ok(host) => {
-                    forked = host;
-                    &forked
-                }
-                Err(e) => {
-                    report
-                        .errors
-                        .push(format!("{shown}:1: an oxplow of its own: {e}"));
-                    continue;
-                }
-            }
-        } else {
-            shared
-        };
-        let (before, started) = (report.errors.len(), std::time::Instant::now());
-        if let Some(replies) = model_replies(&ex, report) {
-            if let Err(e) = host.answer_with(replies) {
-                report
-                    .errors
-                    .push(format!("{shown}:1: the fixture model: {e}"));
-                continue;
-            }
-        } else {
-            continue;
-        }
-        if ex.input.get("lens").is_some() {
-            report.errors.push(format!(
-                "{shown}:1: example `{}` runs a lens; lenses are pages now — fix: \
-                 `{{ page: <slug>, params? }}` with `expect.loaders`",
-                ex.name
-            ));
-        } else if let Some(page) = ex.input.get("page").and_then(Value::as_str) {
-            report.ran.push(format!("example {}", ex.name));
-            page_example(host, ext, &ex, page, report).await;
-        } else if let Some(slug) = ex.input.get("form").and_then(Value::as_str) {
-            report.ran.push(format!("example {}", ex.name));
-            form_example(host, ext, &ex, slug, report).await;
-        } else if let Some(id) = ex.input.get("job").and_then(Value::as_str) {
-            report.ran.push(format!("example {}", ex.name));
-            job_example(host, ext, &ex, id, report).await;
-        } else if let Some(id) = ex.input.get("component").and_then(Value::as_str) {
-            report.ran.push(format!("example {}", ex.name));
-            component_example(host, ext, &ex, id, report).await;
-        } else if ex.input.get("event").is_some()
-            && ex.input.get("effect").is_none()
-            && ex.input.get("implementation").is_none()
-            && ex.input.get("collector").is_none()
-        {
-            report.ran.push(format!("example {}", ex.name));
-            event_example(host, ext, &ex, report).await;
-        } else if let Some(id) = ex.input.get("effect").and_then(Value::as_str) {
-            effect_example(host, ext, &ex, id, report).await;
-        } else if let Some(id) = ex.input.get("implementation").and_then(Value::as_str) {
-            policy_example(host, ext, &ex, id, report).await;
-        } else if let Some(t) = ex.input.get("event_type").and_then(Value::as_str) {
-            event_type_example(ext, &ex, t, report);
-        } else if let Some(link) = ex.input.get("wikilink").and_then(Value::as_str) {
-            report.ran.push(format!("example {}", ex.name));
-            wikilink_example(ext, &ex, link, report);
-        } else if let Some(id) = ex.input.get("collector").and_then(Value::as_str) {
-            collector_example(host, ext, &ex, id, report).await;
-        } else if let Some(cmd) = ex
-            .input
-            .get("command")
-            .and_then(Value::as_str)
-            .and_then(|name| ext.commands.iter().find(|c| c.name == name))
-        {
-            report.ran.push(format!("example {}", ex.name));
-            command_example(host, &ex, cmd, report).await;
-        } else if ex.input.get("command").is_none() || ext.providers.is_empty() {
-            report.errors.push(format!(
-                "{shown}:1: example `{}`'s `input` names no page, collector, command, effect, \
-                 event, job, component, form, effort policy, event type, wikilink or provider command — \
-                 fix: `{{ page: <slug>, params? }}` (with `given:`), `{{ collector: <id>, rows?, event? }}`, \
-                 `{{ command: <name>, input }}`, `{{ effect: <id>, event: {{ type, payload }} }}` \
-                 (a dry run), `{{ event: {{ type, payload }} }}` (logged, and what reacts runs), \
-                 `{{ job: <id>, intentKey, request }}`, `{{ component: <id>, items?, invokes? }}`, `{{ form: <page>, node?, params? }}`, \
-                 `{{ implementation: <id>, event: {{ type, payload, anchors? }} }}`, \
-                 `{{ event_type, v?, payload }}`, `{{ wikilink }}`, or (with a provider) \
-                 `{{ command, input }}`",
-                example.name
-            ));
-        }
-        report.finish_case(format!("example {}", example.name), before, started);
     }
+
+    fn example(&self) -> Example<'_> {
+        Example {
+            name: &self.name,
+            shown: &self.shown,
+            input: self.input.clone(),
+            expect: self.expect.clone(),
+            given: self.given.clone(),
+            steps: self.steps.clone(),
+            view: self.view.clone(),
+        }
+    }
+}
+
+/// Run example `ex` on `host`, by what its `input` names, as one test case.
+async fn run_example(host: &Host, ext: &Extension, ex: &Example<'_>, report: &mut TestReport) {
+    let shown = ex.shown;
+    let (before, started) = (report.errors.len(), std::time::Instant::now());
+    if let Some(replies) = model_replies(ex, report) {
+        if let Err(e) = host.answer_with(replies) {
+            report
+                .errors
+                .push(format!("{shown}:1: the fixture model: {e}"));
+            return;
+        }
+    } else {
+        return;
+    }
+    if ex.input.get("lens").is_some() {
+        report.errors.push(format!(
+            "{shown}:1: example `{}` runs a lens; lenses are pages now — fix: \
+             `{{ page: <slug>, params? }}` with `expect.loaders`",
+            ex.name
+        ));
+    } else if let Some(page) = ex.input.get("page").and_then(Value::as_str) {
+        report.ran.push(format!("example {}", ex.name));
+        page_example(host, ext, ex, page, report).await;
+    } else if let Some(slug) = ex.input.get("form").and_then(Value::as_str) {
+        report.ran.push(format!("example {}", ex.name));
+        form_example(host, ext, ex, slug, report).await;
+    } else if let Some(id) = ex.input.get("job").and_then(Value::as_str) {
+        report.ran.push(format!("example {}", ex.name));
+        job_example(host, ext, ex, id, report).await;
+    } else if let Some(id) = ex.input.get("component").and_then(Value::as_str) {
+        report.ran.push(format!("example {}", ex.name));
+        component_example(host, ext, ex, id, report).await;
+    } else if ex.input.get("event").is_some()
+        && ex.input.get("effect").is_none()
+        && ex.input.get("implementation").is_none()
+        && ex.input.get("collector").is_none()
+    {
+        report.ran.push(format!("example {}", ex.name));
+        event_example(host, ext, ex, report).await;
+    } else if let Some(id) = ex.input.get("effect").and_then(Value::as_str) {
+        effect_example(host, ext, ex, id, report).await;
+    } else if let Some(id) = ex.input.get("implementation").and_then(Value::as_str) {
+        policy_example(host, ext, ex, id, report).await;
+    } else if let Some(t) = ex.input.get("event_type").and_then(Value::as_str) {
+        event_type_example(ext, ex, t, report);
+    } else if let Some(link) = ex.input.get("wikilink").and_then(Value::as_str) {
+        report.ran.push(format!("example {}", ex.name));
+        wikilink_example(ext, ex, link, report);
+    } else if let Some(id) = ex.input.get("collector").and_then(Value::as_str) {
+        collector_example(host, ext, ex, id, report).await;
+    } else if let Some(cmd) = ex
+        .input
+        .get("command")
+        .and_then(Value::as_str)
+        .and_then(|name| ext.commands.iter().find(|c| c.name == name))
+    {
+        report.ran.push(format!("example {}", ex.name));
+        command_example(host, ex, cmd, report).await;
+    } else if ex.input.get("command").is_none() || ext.providers.is_empty() {
+        report.errors.push(format!(
+            "{shown}:1: example `{}`'s `input` names no page, collector, command, effect, \
+             event, job, component, form, effort policy, event type, wikilink or provider command — \
+             fix: `{{ page: <slug>, params? }}` (with `given:`), `{{ collector: <id>, rows?, event? }}`, \
+             `{{ command: <name>, input }}`, `{{ effect: <id>, event: {{ type, payload }} }}` \
+             (a dry run), `{{ event: {{ type, payload }} }}` (logged, and what reacts runs), \
+             `{{ job: <id>, intentKey, request }}`, `{{ component: <id>, items?, invokes? }}`, `{{ form: <page>, node?, params? }}`, \
+             `{{ implementation: <id>, event: {{ type, payload, anchors? }} }}`, \
+             `{{ event_type, v?, payload }}`, `{{ wikilink }}`, or (with a provider) \
+             `{{ command, input }}`",
+            ex.name
+        ));
+    }
+    report.finish_case(format!("example {}", ex.name), before, started);
 }
 
 /// Whether example `ex` changes its oxplow's data (and what reacts to
