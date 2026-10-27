@@ -199,6 +199,18 @@ intent:
     - name: thread-activity-shows-the-context-fill-and-compactions
       input: { page: thread-activity, params: { thread_id: 1 } }
       expect: a turn's context fill, of its window when known, and how often it compacted
+    - name: go-to-panel-lists-bookmarks-then-recent-or-most-visited
+      input: { page: go-to-panel, params: { thread_id: 1 } }
+      expect: the thread's bookmarks, then its recent or most visited pages, each once; collapsed, the bookmarks alone
+    - name: uncommitted-panel-is-a-tree-over-the-working-files
+      input: { page: uncommitted, params: { stream_id: 1 } }
+      expect: a folder tree of the working files with A/M/D letters, a one-line summary and a count
+    - name: waiting-on-me-alerts-while-anything-waits
+      input: { page: waiting-on-me }
+      expect: the alert fires, with a count, while anything waits on the person
+    - name: a-forced-acceptance-files-one-verify-follow-up
+      input: { command: oxplow.review.accept, input: { effort: eff1, force: true } }
+      expect: a forced acceptance files one verify checklist item; a second files nothing
 # oxplow's default work list and effort policy: built-ins of core's,
 # declared here so they are an extension's like any other. Disabled, both
 # fall to none. Snapshots can't be none: their default is core's own (it

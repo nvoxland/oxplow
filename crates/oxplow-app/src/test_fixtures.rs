@@ -1095,17 +1095,3 @@ pub async fn run_as_page_in(
     }
     run.result.clone()
 }
-
-/// Page `id` (`<extension>/<slug>`) run as a person, with no params.
-pub async fn run_page(svc: &crate::Services, id: &str) -> crate::pages::runner::PageRun {
-    use crate::pages::runner::{PageRunner, RunRequest, RunTarget};
-    PageRunner::of(svc)
-        .run(RunRequest {
-            target: RunTarget::Page(id.to_string()),
-            params: Default::default(),
-            ctx: crate::extensions::ViewContext::default(),
-            viewer: oxplow_domain::Actor::Human,
-        })
-        .await
-        .unwrap()
-}

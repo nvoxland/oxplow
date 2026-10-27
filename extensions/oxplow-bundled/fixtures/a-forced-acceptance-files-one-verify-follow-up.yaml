@@ -1,0 +1,33 @@
+# Approved, a forced acceptance files one item to verify what it left
+# unchecked — a checklist naming each claim and decision — and a second forced acceptance of the same effort files nothing:
+# it was followed up already.
+given:
+  - { command: oxplow.work_item.create, input: { title: Fix the hover state, body: "Fix the hover state in [[src/ui/button.ts]].", thread: thr1 }, bind: item }
+  - { command: oxplow.work_item.transition, input: { uri: $item.uri, to: in_progress } }
+  - observe:
+      turn:
+        prompt: Fix the hover state
+        tools:
+          - { name: Edit, kind: edit, paths: [src/ui/button.ts], ok: true }
+          - { name: Edit, kind: edit, paths: [crates/db/store.rs], ok: true }
+  - command: oxplow.effort.replace_inferred_claims
+    input: { effort: eff1, claims: [{ statement: no behavior change, kind: no_behavior_change }] }
+  - command: oxplow.effort.replace_inferred_decisions
+    input: { effort: eff1, decisions: [{ question: Which store?, choice: SQLite, alternatives: [files], why: "it's there" }] }
+when: { command: oxplow.review.accept, input: { effort: eff1, force: true }, confirmed: true }
+expect: { ok: true }
+steps:
+  - when:
+      sql: |
+        SELECT title,
+               instr(body, 'no behavior change') > 0 AS names_claim,
+               instr(body, 'Which store?') > 0 AND instr(body, 'SQLite') > 0 AS names_decision,
+               instr(body, '- [ ] ') > 0 AS checklist
+        FROM v_work_item WHERE title LIKE 'Verify what the review of %'
+    expect:
+      rows:
+        - { title: "Verify what the review of eff1 accepted unchecked", names_claim: 1, names_decision: 1, checklist: 1 }
+  - when: { command: oxplow.review.accept, input: { effort: eff1, force: true }, confirmed: true }
+    expect: { ok: true }
+  - when: { sql: "SELECT count(*) AS n FROM v_work_item WHERE title LIKE 'Verify what the review of %'" }
+    expect: { rows: [{ n: 1 }] }
