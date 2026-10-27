@@ -7,7 +7,7 @@ import { join } from "node:path";
 // `var(--x)` it reads is a token the app's root defines — the ones
 // `applyTheme` sets on a frame's root — and it names no color of its own.
 
-const SHEET = join(import.meta.dir, "..", "..", "..", "..", "crates", "oxplow-daemon", "assets", "oxplow-kit.css");
+const SHEET = join(import.meta.dir, "..", "..", "..", "..", "crates", "oxplow-app", "assets", "component", "oxplow-kit.css");
 const INDEX = join(import.meta.dir, "..", "..", "index.html");
 
 test("every var(--x) in the kit's sheet is a theme token, and it names no color", () => {

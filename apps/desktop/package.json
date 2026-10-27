@@ -8,7 +8,8 @@
     "typecheck": "tsc --noEmit",
     "test": "tsc --noEmit && bun test",
     "test:junit": "bun test --reporter=junit --reporter-outfile=test-report.xml",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "build:harness": "bun build src/viz/harnessEntry.ts --target browser --format iife --outfile ../../crates/oxplow-sdk/assets/harness-host.js"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.12.0",

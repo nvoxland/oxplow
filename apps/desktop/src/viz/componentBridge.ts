@@ -45,7 +45,7 @@
 /// the frame. The daemon serves a client library wrapping this
 /// (`/component-lib/oxplow-component.js`, `oxplow.connect()`); it checks
 /// `protocol` against the one it speaks.
-import { ICONS } from "../icons.js";
+import { isIconName } from "../iconNames.js";
 import { IpcCallError, needsConfirmation } from "../ipc-error.js";
 import { parseUri } from "../uri/uri.js";
 import type { CommandOutcome, VizRun, PageRun, SqlCell, SqlQueryResult } from "../tauri-bridge/generated/bindings.js";
@@ -142,7 +142,7 @@ export interface FrameAction {
   disabled: boolean;
   /** The ☰ submenu it is in. */
   submenu?: string;
-  /** An icon oxplow draws (`ICONS`); an unknown name draws none. */
+  /** An icon oxplow draws (`ICON_NAMES`); an unknown name draws none. */
   icon?: string;
 }
 
@@ -247,7 +247,7 @@ export function parseFrameMessage(data: unknown): FrameMessage | null {
           prominent: a.prominent === true,
           disabled: a.disabled === true,
           ...(typeof a.submenu === "string" && a.submenu.trim() ? { submenu: a.submenu.trim() } : {}),
-          ...(typeof a.icon === "string" && a.icon in ICONS ? { icon: a.icon } : {}),
+          ...(typeof a.icon === "string" && isIconName(a.icon) ? { icon: a.icon } : {}),
         });
       }
       return { type: "request", request: { id: m.id, method: "setActions", actions } };

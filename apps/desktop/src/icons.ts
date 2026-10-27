@@ -53,12 +53,14 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
+import type { IconName } from "./iconNames.js";
+
 /**
- * The icons a resource, a page or an action may name — the Rust `ICONS` allowlist
- * (`extension_resources.rs`), which a Rust test keeps in step with these
- * keys.
+ * What draws each icon a resource, a page or an action may name
+ * (`iconNames.ts`, the Rust `ICONS` allowlist, which a Rust test keeps in
+ * step with these keys).
  */
-export const ICONS: Readonly<Record<string, LucideIcon>> = {
+export const ICONS: Readonly<Record<IconName, LucideIcon>> = {
   "activity": Activity,
   "archive": Archive,
   "at-sign": AtSign,
