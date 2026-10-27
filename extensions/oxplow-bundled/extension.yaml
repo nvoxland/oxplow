@@ -169,6 +169,9 @@ intent:
     - name: a-verdict-decorates-its-effort
       input: { sql: v_oxplow_bundled_verdict }
       expect: "the latest verdict is the effort's label and color — changes requested is red, a forced acceptance orange"
+    - name: the-history-graph-draws-lanes-filters-and-opens-a-commit
+      input: { page: oxplow-foundation/git-history }
+      expect: a row per commit, a lane for a merge's second parent, a filter that dims, a row that opens its commit
 # oxplow's default work list and effort policy: built-ins of core's,
 # declared here so they are an extension's like any other. Disabled, both
 # fall to none. Snapshots can't be none: their default is core's own (it

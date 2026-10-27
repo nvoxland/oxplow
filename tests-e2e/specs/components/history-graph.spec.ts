@@ -27,21 +27,15 @@ function history(daemon: Daemon) {
   git("merge", "-q", "--no-ff", "-m", "Merge side", "side");
 }
 
-test("the history graph draws lanes, filters and opens a commit", async ({ fresh }) => {
+test("the history graph replaces the list and opens a commit", async ({ fresh }) => {
   const { page, daemon } = fresh;
   history(daemon);
   await page.goto("/");
   await openFromLauncher(page, "Git History");
   await expect(page.getByTestId("replacement-vcs.history.graph")).toContainText("replaced by oxplow-bundled");
+  // The rows, the lanes and the filter are bundled's `ui` fixture's; the
+  // app's part is the replacement and that a row opens its commit's page.
   const frame = page.frameLocator('[data-testid="custom-component-frame"]');
-  await expect(frame.locator(".row", { hasText: "Merge side" })).toBeVisible();
-  // The merge's second parent is on a lane of its own.
-  await expect(frame.locator(".row", { hasText: "Side work" }).locator("circle.node-1")).toHaveCount(1);
-
-  await frame.locator("#query").fill("side work");
-  await expect(frame.locator(".row:not(.dimmed)")).toHaveCount(1);
-  await frame.locator("#query").fill("");
-
   await frame.locator(".row", { hasText: "Main work" }).click();
   await expect(page.locator('[data-testid="page-file"]:visible')).toContainText("Main work");
 });
