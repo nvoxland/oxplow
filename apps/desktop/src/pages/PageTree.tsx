@@ -147,7 +147,7 @@ function NodeView(props: NodeViewProps) {
   // A node another extension's provider may take the place of
   // (`replaceable: work_item.board`): the same choice as a page part's.
   const body = def?.replaceable ? (
-    <Replaceable target={def.replaceable} props={valued(run.params)} streamId={props.streamId ?? null} onOpenPage={props.onOpenPage} fallback={own} />
+    <Replaceable target={def.replaceable} props={valued(run.params)} derived={firstRowValues(run)} streamId={props.streamId ?? null} onOpenPage={props.onOpenPage} fallback={own} />
   ) : (
     own
   );
@@ -421,6 +421,24 @@ function NodeError({ message }: { message: string }) {
 /** The params that hold a value: what a replacement is given, so one the
  *  page left empty (`head_sha` before it resolves) resolves from the
  *  viewer's context there too rather than binding NULL. */
+/** The columns of the first row of the run's loaders (in order), first
+ *  one wins, null skipped: an embed's rule for a param the host doesn't
+ *  hold, so the Tasks page's `row` loader can derive the `scope` its `show`
+ *  param stands for. */
+function firstRowValues(run: PageRun): Record<string, SqlCell> {
+  const out: Record<string, SqlCell> = {};
+  for (const decl of run.page.loaders) {
+    const result = run.loaders[decl.name]?.result;
+    const row = result?.rows[0];
+    if (!result || !row) continue;
+    result.columns.forEach((c, i) => {
+      const v = row[i];
+      if (!(c in out) && v !== null && v !== undefined) out[c] = v;
+    });
+  }
+  return out;
+}
+
 function valued(params: Record<string, SqlCell>): Record<string, SqlCell> {
   return Object.fromEntries(Object.entries(params).filter(([, v]) => v !== null && v !== undefined));
 }

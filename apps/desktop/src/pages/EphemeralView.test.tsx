@@ -31,3 +31,20 @@ test("a shown view keeps its source in the entry, and a restored tab supplies it
   await waitFor(() => expect(opened).toHaveLength(2));
   expect(opened[1]).toMatchObject({ view: "v1", specYaml: source, threadId: "thr1" });
 });
+
+test("`#node=` is where the view lands, never a param of its run", async () => {
+  const opened: PageKey[] = [];
+  const runs = createPageRuns({
+    open: async (key) => { opened.push(key); return { runId: "run-1", run: tablePage() }; },
+    close: async () => {}, fetch: async () => ({}), setParams: async () => tablePage(), rerun: async () => tablePage(),
+    onChange: () => () => {}, onReconnect: () => () => {},
+  });
+  render(<PageNavigationContext.Provider value={{
+    ref: { id: "oxplow:oxplow/view?id=v1#node=t&q=a" }, viewParams: { node: "t", q: "a", "oxplow.renderer": "x" }, historyState: {},
+    setHistoryState: () => {}, navigate: () => {}, goBack: () => {}, goForward: () => {}, canGoBack: false, canGoForward: false,
+  } as PageNavigation}>
+    <EphemeralView view="v1" stream={null} threadId="thr1" runs={runs} />
+  </PageNavigationContext.Provider>);
+  await waitFor(() => expect(opened).toHaveLength(1));
+  expect(opened[0]!.params).toEqual({ q: "a" });
+});

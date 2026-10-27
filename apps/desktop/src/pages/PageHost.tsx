@@ -166,7 +166,7 @@ export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, re
   useEffect(() => {
     if (!pageId) return;
     const store = getPageDetailStore();
-    store.publish(pageId, { runId, focus: { node: focus } });
+    store.publish(pageId, { runId, focus: focus ? { node: focus } : null });
     return () => store.publish(pageId, null);
   }, [pageId, runId, focus]);
 

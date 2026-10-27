@@ -152,6 +152,9 @@ impl Drop for PageClient {
 /// How long signals gather before the open runs re-run: a burst of
 /// commits is one re-run.
 const COALESCE: std::time::Duration = std::time::Duration::from_millis(100);
+/// A change's re-run of one open run taking this long is logged: the
+/// window waits on it, so it shows up as lag.
+const SLOW_RERUN: std::time::Duration = std::time::Duration::from_millis(250);
 
 impl PageRuns {
     pub fn connect_client(&self, client: &str) -> PageClient {
@@ -462,7 +465,22 @@ impl PageRuns {
     ) -> Vec<RunChange> {
         let mut out = Vec::new();
         for id in ids {
+            let started = std::time::Instant::now();
             let outcome = self.rerun_with(svc, &id, BTreeMap::new(), changed).await;
+            let took = started.elapsed();
+            if took >= SLOW_RERUN {
+                let loaders = match &outcome {
+                    Ok((_, change)) => change.loaders.join(","),
+                    Err(_) => String::new(),
+                };
+                tracing::warn!(
+                    run = %id,
+                    page = %self.get(&id).map(|r| r.page.id.clone()).unwrap_or_default(),
+                    %loaders,
+                    took_ms = took.as_millis() as u64,
+                    "slow page re-run"
+                );
+            }
             match outcome {
                 Ok((_, change)) if !change.loaders.is_empty() || change.tree => out.push(change),
                 Ok(_) => {}

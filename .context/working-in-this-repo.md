@@ -135,7 +135,10 @@ be held back and why. `deploy <name>` deploys that source as the app does
 (built, copied into the store, activated, recorded active), confirming its
 permissions and build as the person running it; `deploy` with no name does
 that for every extension that is on and whose source isn't what runs,
-oxplow's required ones first. It refuses while oxplow holds the project
+oxplow's required ones first. There, one that isn't required and doesn't
+load is held back, as boot holds it: the deploy prints why and still
+succeeds, so `run:dev` starts oxplow (a required one failing, or the one
+named, fails it). It refuses while oxplow holds the project
 (the instance lock: a running daemon keeps the live set in memory and its
 next publication would undo it), so quit oxplow, deploy, then start it.
 With foundation running, deploy from inside oxplow instead
@@ -185,9 +188,11 @@ The backend is Rust; the desktop frontend is React/Monaco/xterm.
   shell crate; `bun run build:dev` (root workspace script)
   builds the frontend and the shell; run `./target/debug/oxplow .`.
 - `extensions/oxplow-foundation`, `extensions/oxplow-bundled` — oxplow's
-  own extensions, compiled into the app by `crates/oxplow-app/build.rs`
-  (every file in the folder ships; a `build:` runs there first). Building
-  oxplow therefore needs bun, as its extension builds use it.
+  own extensions, compiled into a release build by
+  `crates/oxplow-app/build.rs` (every file in the folder ships; a `build:`
+  runs there first). A debug build and the Rust tests read them from the
+  folder at run time instead, so editing one never recompiles a crate.
+  Building oxplow needs bun, as its extension builds use it.
 - `crates/` — reusable Rust libraries. `oxplow-domain` (pure types +
   store traits), `oxplow-db` (rusqlite stores + migrations),
   `oxplow-tasks` (oxplow's own task list, one implementation of the

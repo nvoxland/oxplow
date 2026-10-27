@@ -89,3 +89,16 @@ test("a failed report does not block a newer pending roster or a later heartbeat
   await Promise.resolve();
   expect(sent.at(-1)).toEqual(["heartbeat"]);
 });
+
+test("the shown page's run and focused node reach the report as detail_json", () => {
+  const report = buildTabReport({
+    client: "w1",
+    focused: true,
+    visible: true,
+    shownThread: null,
+    sessions: {},
+    titleOf: () => null,
+    detail: { runId: "run-1", focus: { node: "big" } },
+  });
+  expect(JSON.parse(report.detail_json!)).toEqual({ runId: "run-1", focus: { node: "big" } });
+});

@@ -72,6 +72,8 @@ CORS is permissive for exactly this (`.context/remote-daemon.md`).
     no other may touch first (nothing approved, an empty project). Its page
     has the same guard, and a spec on `fresh` alone never boots the
     worker's daemon.
+- **`support/pages.ts`** — `installExtension` writes an extension of the spec's
+  own (manifest, pages, component files) into the project and deploys it.
 - **`support/ui.ts`** — a person's moves (`expandRailSection`, `openNewTask`,
   `openFromLauncher` — which waits for the query's own row before Enter).
 - **`specs/<area>/*.spec.ts`** — the specs. Wait with web-first `expect`,

@@ -777,7 +777,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let foundation = crate::bundled_extensions::find("oxplow-foundation").unwrap();
         let to = dir.path().join(".oxplow/extensions/oxplow-foundation");
-        for (rel, bytes) in foundation.files {
+        for (rel, bytes) in foundation.files() {
             let file = to.join(rel);
             std::fs::create_dir_all(file.parent().unwrap()).unwrap();
             std::fs::write(file, bytes).unwrap();

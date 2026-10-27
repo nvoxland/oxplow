@@ -345,7 +345,9 @@ the caller's stream's draft; its text starts `Draft of <page> (stream
 strN, not deployed)` and its json carries `draft: { stream, checkout }`.
 
 **What the person is looking at**: a window's tab report carries
-`detail_json: { runId, focus: { node } }` for a page tab, and
+`detail_json: { runId, focus }` for a page tab (`focus` is `{ node }` when
+the tab's `#node=<id>` lands on a node, else null; no row focus is
+reported yet), and
 `oxplow_get_open_page` returns that open run as `pageRun: { page, title,
 params, focus, source, text }` — the person's own run, not a re-run.
 
@@ -375,7 +377,9 @@ everything (it lagged); the bus signals the live models an event changed
 read a changed model or measure — a command loader's are its `reads` —
 then emits `OxplowEvent::PageRunChanged { runId, seq, loaders, tree }`
 for each that changed: the loaders whose rows differ (an embed's as
-`<embed>/<loader>`), never the rows. The window fetches what changed in
+`<embed>/<loader>`), never the rows. A re-run of one run that takes 250 ms or
+more logs `slow page re-run` (run, page, loaders, `took_ms`): the place
+to look when a page, or the window around it, lags. The window fetches what changed in
 one `fetch_page_runs` batch, whose entries are `{ run, seq }` captured
 under the same lock. It drops replies older than the actual snapshot
 sequence it applied, not the triggering notice's sequence. Direct
@@ -506,7 +510,8 @@ over with `showView` (an inline page's YAML) opens as a run of its own and
 is drawn under it (`ShownView`, with Save as Page); its `rail:` is drawn
 in the rail as any page's. Every node's root
 has `data-node` and registers in a `NodeRegistry`; `useNodeFocus` lands
-on `#node=<id>` (scroll, `data-focused` for 1.5 s). Viz components press
+on `#node=<id>` (scroll, `data-focused` for 1.5 s; a shown view's run
+never takes `node` as a param). Viz components press
 their actions through `VizActionRunnerContext`
 (`viz/vizActionRunner.ts`; outside a page run it refuses); `PageTree`
 provides `useNodeActions(runId, nodePath)` per viz node. Forms go the same way: `FormViz` and `ActionForm`

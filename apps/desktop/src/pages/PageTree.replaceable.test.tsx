@@ -70,3 +70,40 @@ test("an extension's page replaces it, run with the page's params", async () => 
   expect(view.container.textContent).not.toContain("our card");
   expect(fake.calls.open).toEqual([{ page: "x/board", params: { scope: "all" }, streamId: null, threadId: null }]);
 });
+
+test("a prop the page's params don't hold comes from its loaders' first row, as an embed's does", async () => {
+  extensions = [
+    {
+      name: "x",
+      enabled: true,
+      pages: [],
+      pageFiles: [{ id: "x/board", params: [{ name: "scope" }, { name: "show" }] }],
+      ui: {
+        slots: [],
+        commands: [],
+        decorators: [],
+        replacements: [{ id: "x/work_item.board", extension: "x", target: "work_item.board", capability: "work_items", boundToProvider: false, page: "x/board", label: "board", version: 1, view: [] }],
+      },
+    },
+  ];
+  const theirs = fakeRun(fakePage(node.viz("theirs", "theirs", { columns: [{ key: "t" } as never] }), { id: "x/board", loaders: [decl("theirs")] }), {
+    loaders: { theirs: loader(["t"], [["their card"]]) },
+  });
+  const { PageRunsContext } = await import("../pageRuns.js");
+  const fake = fakePageRuns(theirs);
+  // The page holds `show`; its `row` loader derives the contract's `scope`.
+  const page = fakePage({ ...node.viz("cards", "cards", { columns: [{ key: "title" } as never] }), replaceable: "work_item.board" } as never, {
+    loaders: [decl("row"), decl("cards")],
+  });
+  const hosted = fakeRun(page, {
+    params: { show: "stream", scope: null },
+    loaders: { row: loader(["scope"], [["stream"]]), cards: loader(["title"], [["our card"]]) },
+  });
+  const view = render(
+    <PageRunsContext.Provider value={fake.runs}>
+      <PageTree run={hosted} runId="run-1" />
+    </PageRunsContext.Provider>,
+  );
+  await waitFor(() => expect(view.getByTestId("replacement-work_item.board").textContent).toContain("their card"));
+  expect(fake.calls.open).toEqual([{ page: "x/board", params: { show: "stream", scope: "stream" }, streamId: null, threadId: null }]);
+});

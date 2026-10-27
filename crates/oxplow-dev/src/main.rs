@@ -161,6 +161,12 @@ async fn deploy_from_outside(project: &Path, name: Option<&String>) -> Result<St
         .initialize(svc.clone())
         .await
         .map_err(|e| e.to_string())?;
+    let required = |n: &str| {
+        oxplow_app::bundled_extensions::BUNDLED
+            .iter()
+            .any(|b| b.required && b.name == n)
+    };
+    let name_given = name;
     let names = match name {
         Some(name) => vec![name.clone()],
         None => {
@@ -200,6 +206,13 @@ async fn deploy_from_outside(project: &Path, name: Option<&String>) -> Result<St
                         .unwrap_or_default()
                 ));
                 out.extend(deployed.warnings.iter().map(|w| format!("  warning: {w}")));
+            }
+            // With no name, one that is on but doesn't deploy is held
+            // back, as boot holds it, so the rest still runs; a required
+            // one, or the one named, fails the deploy.
+            Err(e) if name_given.is_none() && !required(name) => {
+                out.push(format!("held back: {name}"));
+                out.push(format!("  - {e}"));
             }
             Err(e) => failed.push(format!("deploy `{name}`: {e}")),
         }
@@ -833,7 +846,7 @@ mod tests {
         assert!(ok);
         let shipped = oxplow_app::bundled_extensions::find("oxplow-foundation").unwrap();
         let write_files = |to: &Path, edit: &dyn Fn(String) -> String| {
-            for (rel, bytes) in shipped.files {
+            for (rel, bytes) in shipped.files() {
                 let file = to.join(rel);
                 std::fs::create_dir_all(file.parent().unwrap()).unwrap();
                 let text = String::from_utf8_lossy(bytes).into_owned();
@@ -975,6 +988,38 @@ mod tests {
         for name in ["oxplow-foundation", "acme"] {
             assert!(again.contains(&format!("{name}: already runs")), "{again}");
         }
+    }
+
+    /// With no name, an extension that is on but doesn't load is held
+    /// back, as boot holds it: the deploy says why and still succeeds, so
+    /// `run:dev` starts oxplow. A required extension that fails still
+    /// fails the deploy, and naming the broken one fails it too.
+    #[tokio::test]
+    async fn deploy_with_no_name_holds_back_what_does_not_load() {
+        if !cfg!(debug_assertions) {
+            return;
+        }
+        let dir = developing_oxplow_with_a_stale_foundation().await;
+        let p = dir.path();
+        let old = p.join(".oxplow/extensions/old");
+        std::fs::create_dir_all(old.join("lenses")).unwrap();
+        std::fs::write(old.join("lenses/one.yaml"), "title: One\n").unwrap();
+        std::fs::write(
+            old.join("extension.yaml"),
+            "manifest: 2\nname: old\nintent:\n  purpose: test\n",
+        )
+        .unwrap();
+        std::fs::write(
+            p.join(".oxplow/project.yaml"),
+            "enableBundledExtensions: false\nextensions: [old]\n",
+        )
+        .unwrap();
+        let out = dev(p, &["extension", "deploy"]).await.unwrap();
+        assert!(out.contains("oxplow-foundation: deployed"), "{out}");
+        assert!(out.contains("held back: old"), "{out}");
+        assert!(out.contains("lenses are pages now"), "{out}");
+        let err = dev(p, &["extension", "deploy", "old"]).await.unwrap_err();
+        assert!(err.contains("lenses are pages now"), "{err}");
     }
 
     /// A project that runs the extensions built into oxplow has no source

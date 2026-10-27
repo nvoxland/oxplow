@@ -1,4 +1,8 @@
-//! oxplow's own extensions, compiled in (`src/bundled_extensions.rs`).
+//! oxplow's own extensions, compiled in by a release build
+//! (`src/bundled_extensions.rs`). A debug build reads them from their
+//! folders at run time instead, so this script only builds a missing
+//! output there and watches nothing under `extensions/`: editing an
+//! extension never recompiles this crate.
 //!
 //! Each one's files are whatever its folder `extensions/<name>/` holds —
 //! dot entries and the folders its `build.exclude` names left out — written
@@ -27,13 +31,24 @@ fn main() {
     let manifest_dir =
         PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"));
     let extensions = manifest_dir.join("../../extensions");
+    if std::env::var_os("CARGO_CFG_DEBUG_ASSERTIONS").is_some() {
+        println!("cargo:rerun-if-changed=build.rs");
+        for name in BUNDLED {
+            let dir = extensions.join(name);
+            let build = Build::of(&read_manifest(&dir));
+            if let (Some(run), Some(output)) = (&build.run, &build.output) {
+                if !dir.join(output).is_dir() {
+                    run_build(&dir, name, run);
+                }
+            }
+        }
+        return;
+    }
     let mut out = String::new();
     for name in BUNDLED {
         let dir = extensions.join(name);
         let manifest = dir.join("extension.yaml");
-        let text = std::fs::read_to_string(&manifest)
-            .unwrap_or_else(|e| panic!("{}: {e}", manifest.display()));
-        let build = Build::of(&text);
+        let build = Build::of(&read_manifest(&dir));
         let mut skip: Vec<String> = build.exclude.clone();
         if let Some(output) = &build.output {
             skip.push(output.clone());
@@ -48,27 +63,14 @@ fn main() {
             println!("cargo:rerun-if-changed={}", folder.display());
         }
         if let Some(run) = &build.run {
-            let status = std::process::Command::new("/bin/sh")
-                .arg("-c")
-                .arg(run)
-                .current_dir(&dir)
-                .status()
-                .unwrap_or_else(|e| {
-                    panic!("building extensions/{name}: couldn't run `{run}`: {e}")
-                });
-            if !status.success() {
-                panic!(
-                    "building extensions/{name}: `{run}` failed ({status}); building oxplow \
-                     builds its own extensions, which needs the tools their build uses (bun)"
-                );
-            }
+            run_build(&dir, name, run);
         }
         // Every file it ships: the inputs and what the build wrote.
         let shipped = walk(&dir, &build.exclude);
-        let ident = name.to_uppercase().replace('-', "_");
+        let ident = name.replace('-', "_");
         writeln!(
             out,
-            "/// `extensions/{name}/`'s files, as `(path inside it, bytes)`.\npub const {ident}: &[(&str, &[u8])] = &["
+            "/// `extensions/{name}/`'s files, as `(path inside it, bytes)`.\npub fn {ident}() -> super::Files {{\n    &["
         )
         .expect("writing to a String");
         for (rel, path) in shipped {
@@ -79,11 +81,33 @@ fn main() {
             )
             .expect("writing to a String");
         }
-        out.push_str("];\n");
+        out.push_str("    ]\n}\n");
     }
     let dest = PathBuf::from(std::env::var("OUT_DIR").expect("cargo sets OUT_DIR"))
         .join("bundled_files.rs");
     std::fs::write(dest, out).expect("write bundled_files.rs");
+}
+
+/// The text of `dir`'s `extension.yaml`.
+fn read_manifest(dir: &Path) -> String {
+    let manifest = dir.join("extension.yaml");
+    std::fs::read_to_string(&manifest).unwrap_or_else(|e| panic!("{}: {e}", manifest.display()))
+}
+
+/// Run extension `name`'s build command `run` in its folder `dir`.
+fn run_build(dir: &Path, name: &str, run: &str) {
+    let status = std::process::Command::new("/bin/sh")
+        .arg("-c")
+        .arg(run)
+        .current_dir(dir)
+        .status()
+        .unwrap_or_else(|e| panic!("building extensions/{name}: couldn't run `{run}`: {e}"));
+    if !status.success() {
+        panic!(
+            "building extensions/{name}: `{run}` failed ({status}); building oxplow \
+             builds its own extensions, which needs the tools their build uses (bun)"
+        );
+    }
 }
 
 /// A manifest's `build:`, as far as packaging cares.

@@ -878,6 +878,154 @@ mod tests {
         assert_eq!(none["pages"], json!([]), "{none}");
     }
 
+    /// A project with extension `rank`: the pages the find ranking tests read.
+    async fn ranked(
+        pages: &[(&str, String)],
+    ) -> (tempfile::TempDir, std::sync::Arc<crate::Services>) {
+        let dir = tempfile::tempdir().unwrap();
+        crate::test_fixtures::init_git_repo(dir.path());
+        crate::pages::test_support::write(
+            dir.path(),
+            ".oxplow/extensions/rank/extension.yaml",
+            "manifest: 2\nname: rank\nintent:\n  purpose: test\n",
+        );
+        for (slug, text) in pages {
+            crate::pages::test_support::write(
+                dir.path(),
+                &format!(".oxplow/extensions/rank/pages/{slug}.yaml"),
+                text,
+            );
+        }
+        let svc = crate::Services::in_memory(dir.path()).await.unwrap();
+        let problems = crate::test_fixtures::activate_with_problems(&svc).await;
+        assert!(problems.is_empty(), "{problems:?}");
+        (dir, svc)
+    }
+
+    /// The fixture's pages found, in order (the bundled pages are left out).
+    fn ids(found: &serde_json::Value) -> Vec<String> {
+        found["pages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|p| p["page"].as_str().unwrap().to_string())
+            .filter(|id| id.starts_with("rank/"))
+            .collect()
+    }
+
+    const BODY: &str = "data:\n  a: { sql: \"SELECT 1 AS n\" }\nview: { viz: number, from: a }\n";
+
+    /// Answer x3, title x2, description and keywords x1.
+    #[tokio::test]
+    async fn find_ranks_a_matching_answer_over_title_over_description() {
+        let (_dir, svc) = ranked(&[
+            // Title only. Sorts first by title if scores tie.
+            ("by-title", format!("title: Failures\n{BODY}")),
+            // An answer, under a title that never matches.
+            (
+                "by-answer",
+                format!(
+                    "title: Zulu\nanswers:\n  - {{ question: \"What failures happened?\" }}\n{BODY}"
+                ),
+            ),
+            (
+                "by-description",
+                format!("title: Alpha\ndescription: Lists failures.\n{BODY}"),
+            ),
+            // Ties with the description; the title order breaks it.
+            (
+                "by-keywords",
+                format!("title: Beta\nkeywords: failures\n{BODY}"),
+            ),
+        ])
+        .await;
+        let found = run(&svc, "oxplow.page.find", json!({ "question": "failures" })).await;
+        assert_eq!(
+            ids(&found),
+            [
+                "rank/by-answer",
+                "rank/by-title",
+                "rank/by-description",
+                "rank/by-keywords"
+            ],
+            "{found}"
+        );
+    }
+
+    #[tokio::test]
+    async fn find_about_keeps_the_pages_for_that_resource_and_binds_its_uri() {
+        let (_dir, svc) = ranked(&[
+            (
+                "shows",
+                format!("title: Shows\nfor: oxplow/commit\nparams: [{{ name: uri }}]\n{BODY}"),
+            ),
+            (
+                "answers-about",
+                format!(
+                    "title: Answers\nparams: [{{ name: uri }}]\nanswers:\n  - {{ question: \"Who wrote it?\", about: oxplow/commit }}\n{BODY}"
+                ),
+            ),
+            (
+                "no-uri-param",
+                format!("title: Plain\nfor: oxplow/commit\n{BODY}"),
+            ),
+            (
+                "elsewhere",
+                format!(
+                    "title: Elsewhere\nfor: oxplow/branch\nparams: [{{ name: uri }}]\n{BODY}"
+                ),
+            ),
+            ("unrelated", format!("title: Unrelated\n{BODY}")),
+        ])
+        .await;
+        let uri = "oxplow:oxplow/commit?sha=abc1234";
+        let found = run(&svc, "oxplow.page.find", json!({ "about": uri })).await;
+        assert_eq!(
+            ids(&found),
+            ["rank/answers-about", "rank/no-uri-param", "rank/shows"],
+            "{found}"
+        );
+        for p in found["pages"].as_array().unwrap() {
+            if !p["page"].as_str().unwrap().starts_with("rank/") {
+                continue;
+            }
+            let want = if p["page"] == json!("rank/no-uri-param") {
+                json!(null)
+            } else {
+                json!({ "uri": uri })
+            };
+            assert_eq!(p["bind"], want, "{found}");
+        }
+        // With a question, the filter and the ranking both apply.
+        let both = run(
+            &svc,
+            "oxplow.page.find",
+            json!({ "about": uri, "question": "who wrote" }),
+        )
+        .await;
+        assert_eq!(ids(&both), ["rank/answers-about"], "{both}");
+        assert_eq!(both["pages"].as_array().unwrap().len(), 1, "{both}");
+    }
+
+    #[tokio::test]
+    async fn find_returns_at_most_limit_pages_ten_by_default() {
+        let pages: Vec<(String, String)> = (0..12)
+            .map(|i| (format!("w{i:02}"), format!("title: Widget {i:02}\n{BODY}")))
+            .collect();
+        let refs: Vec<(&str, String)> =
+            pages.iter().map(|(s, t)| (s.as_str(), t.clone())).collect();
+        let (_dir, svc) = ranked(&refs).await;
+        let all = run(&svc, "oxplow.page.find", json!({ "question": "widget" })).await;
+        assert_eq!(ids(&all).len(), 10, "{all}");
+        let three = run(
+            &svc,
+            "oxplow.page.find",
+            json!({ "question": "widget", "limit": 3 }),
+        )
+        .await;
+        assert_eq!(ids(&three), ["rank/w00", "rank/w01", "rank/w02"], "{three}");
+    }
+
     #[tokio::test]
     async fn a_pages_definition_names_each_node_and_where_it_comes_from() {
         let (_dir, svc) = fixture().await;
