@@ -5075,12 +5075,13 @@ fn check_dependencies(ext: &mut Extension, others: &[Extension], files: &dyn Ext
         )
         .collect();
     let base = ext.path.trim_end_matches('/').to_string();
-    // A command namespace the required foundation holds too is no one
-    // extension's to declare.
-    let shared: Vec<&str> = others
+    // A command namespace the required foundation, or `ext` itself, holds
+    // too is no one other extension's to declare.
+    let shared: Vec<String> = others
         .iter()
         .filter(|o| crate::bundled_extensions::is_required(&o.name))
-        .map(|o| o.namespace.as_str())
+        .map(|o| o.namespace.clone())
+        .chain([ext.namespace.clone()])
         .collect();
     let others: Vec<&Extension> = others
         .iter()
@@ -5145,7 +5146,7 @@ fn check_dependencies(ext: &mut Extension, others: &[Extension], files: &dyn Ext
                     note(&owner.name, format!("its model `{name}`"), at.clone());
                 } else if let Some(name) = word(&page) {
                     note(&owner.name, format!("its page `{name}`"), at.clone());
-                } else if !shared.contains(&owner.namespace.as_str()) {
+                } else if !shared.contains(&owner.namespace) {
                     if let Some(name) = word(&command) {
                         note(&owner.name, format!("its command `{name}`"), at.clone());
                     }
