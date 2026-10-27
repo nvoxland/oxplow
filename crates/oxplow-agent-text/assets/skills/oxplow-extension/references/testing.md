@@ -123,7 +123,8 @@ model the SQL reads and the command it runs. Prefer `answers:` on pages.
    - an event: `when: { event: { type, payload, … } }` — logged in the
      throwaway and delivered: your effects react for
      real and their commands run. `expect: { effects: [{ id, state }],
-     commands: [names] }` (only the keys you name are compared);
+     commands: [names] }` (`commands` are the ones an effect's run
+     made, its steps in order, not the sequence that carried them; only the keys you name are compared);
    - a job: `when: { job: <id>, intentKey, request, cancel?, setup?,
      rows? }` — `setup: [{ command, input?, as? }]` first runs oxplow's
      own commands (`as: agent` for the agent of `oxplow:oxplow/thread?id=thr1`) to make

@@ -922,15 +922,37 @@ async fn effect_outcome(host: &Host, seq: i64, at: &str) -> (Vec<Value>, Vec<Str
     .iter()
     .map(|r| json!({ "id": text(&r[0]), "state": text(&r[1]), "reason": text(&r[2]) }))
     .collect();
-    let commands: Vec<String> = rows(
-        "SELECT json_extract(payload, '$.command') FROM v_event \
+    let ran = rows(
+        "SELECT json_extract(payload, '$.command'), json_extract(payload, '$.audit_id') FROM v_event \
          WHERE type = 'command.executed' AND seq > ?1 \
            AND json_extract(payload, '$.actor_kind') = 'effect' ORDER BY seq",
     )
-    .await
-    .iter()
-    .map(|r| text(&r[0]))
-    .collect();
+    .await;
+    // An effect's commands run as one sequence; its steps are what the
+    // fixture names.
+    let audits = oxplow_db::SqliteCommandAuditStore::new(host.svc.db.clone());
+    let mut commands = Vec::new();
+    for r in &ran {
+        let name = text(&r[0]);
+        let steps = match (&r[1], name == "oxplow.command.sequence") {
+            (oxplow_db::SqlCell::Int(id), true) => audits
+                .get(*id)
+                .await
+                .ok()
+                .flatten()
+                .and_then(|a| a.result.and_then(|r| r.get("children").cloned())),
+            _ => None,
+        };
+        match steps {
+            Some(Value::Array(children)) => commands.extend(
+                children
+                    .iter()
+                    .filter_map(|c| c.get("name").and_then(Value::as_str))
+                    .map(str::to_string),
+            ),
+            _ => commands.push(name),
+        }
+    }
     (effects, commands)
 }
 
@@ -4421,6 +4443,26 @@ after:
             ),
             "{errors}"
         );
+    }
+
+    /// An event fixture names the commands an effect ran, not the one
+    /// sequence that carried them.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_event_fixture_lists_the_commands_an_effect_ran_not_their_sequence() {
+        let dir = tempfile::tempdir().unwrap();
+        crate::scaffold(dir.path(), crate::Kind::Effect, "notes", None).unwrap();
+        write(
+            dir.path(),
+            ".oxplow/extensions/notes/fixtures/basic.yaml",
+            "given: [{ command: oxplow.work_item.create, input: { title: T }, bind: t }]
+when:
+  event: { type: work_item.state_changed, payload: { work_item: $t.uri, to: done } }
+expect:
+  commands: [oxplow.work_item.comment]
+",
+        );
+        let report = test_extension(dir.path(), "notes", false).await.unwrap();
+        assert!(report.ok, "{:?}", report.errors);
     }
 
     /// A policy that opens an item's effort when it starts on a thread,

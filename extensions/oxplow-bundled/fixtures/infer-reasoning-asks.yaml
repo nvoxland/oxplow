@@ -1,12 +1,11 @@
 # A model serves the reasoning profile (here, Main's): the finished
 # effort's decisions and claims are asked about.
+given:
+  - { command: oxplow.effort.open, input: { thread: thr1 } }
 when:
-  effect: infer-reasoning
   event:
     type: effort.finished
-    payload: { effort: "eff7", work_item: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", end_snapshot: 3 }
-  answers:
-    ai.discover:
-      - { role: oxplow-bundled/reasoning, model: { provider: local, model: llama }, problem: null }
+    payload: { effort: "eff1", end_snapshot: 3 }
 expect:
+  effects: [{ id: oxplow-bundled/infer-reasoning, state: ok }]
   commands: [oxplow.effort.infer_reasoning]

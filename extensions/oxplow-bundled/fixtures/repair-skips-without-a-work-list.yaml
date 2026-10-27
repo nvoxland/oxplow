@@ -1,11 +1,12 @@
 # No work list is running: nothing to file on, and not a failure.
+given:
+  - command: oxplow.capability.choose
+    input: { capability: work_items, provider: none }
+    confirmed: true
 when:
-  effect: repair-disabled
   event:
     type: contribution.disabled
     payload: { contribution: "oxplow:oxplow/collector?collector=work/hot", reason: boom }
-  answers:
-    sql.read:
-      - [{ provider: null, open_item: null }]
 expect:
-  skip: no work list
+  effects: [{ id: oxplow-bundled/repair-disabled, state: skipped }]
+  commands: []

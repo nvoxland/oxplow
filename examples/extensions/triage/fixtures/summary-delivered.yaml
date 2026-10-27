@@ -13,7 +13,7 @@ expect:
   state: succeeded
   effects:
     - { id: triage/publish-summary, state: ok }
-  commands: [oxplow.command.sequence]
+  commands: [oxplow.knowledge.write_page]
   pages: ["oxplow:oxplow/wiki?slug=triage-summary"]
 model:
   replies: ["One bug TODO and two cleanups."]

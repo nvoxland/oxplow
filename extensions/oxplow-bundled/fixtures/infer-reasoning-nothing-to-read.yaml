@@ -1,11 +1,10 @@
 # An effort with no turns and no tool calls asks nothing.
+given:
+  - { command: oxplow.effort.open, input: { thread: thr1 } }
 when:
   command: oxplow.effort.infer_reasoning
-  input: { effort: "eff7" }
-  answers:
-    sql.read:
-      - [{ id: 7, work_item: null, title: "" }]
-      - []
-      - []
+  input: { effort: eff1 }
 expect:
+  ok: true
+  result: { skipped: "nothing to read for eff1" }
   commands: []

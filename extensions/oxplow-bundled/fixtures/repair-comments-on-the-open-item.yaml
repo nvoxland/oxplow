@@ -1,13 +1,14 @@
 # Disabled again while its repair item is open: a comment on it, not a
 # second item.
+given:
+  - command: oxplow.work_item.create
+    input:
+      title: "Repair work hot: boom"
+      links: [{ target: "oxplow:oxplow/collector?collector=work/hot", link_type: about }]
 when:
-  effect: repair-disabled
   event:
     type: contribution.disabled
     payload: { contribution: "oxplow:oxplow/collector?collector=work/hot", reason: "3 failures in a row; the last: boom again" }
-  answers:
-    sql.read:
-      - [{ provider: oxplow, open_item: "oxplow:oxplow/work_item?id=tsk9&provider=oxplow" }]
-      - [{ declared: null, collector_errors: null, effect_errors: null, last_error: boom }]
 expect:
+  effects: [{ id: oxplow-bundled/repair-disabled, state: ok }]
   commands: [oxplow.work_item.comment]
