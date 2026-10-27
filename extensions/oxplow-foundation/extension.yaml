@@ -91,6 +91,12 @@ intent:
     - name: board-lists-work-items-by-scope
       input: { page: board, params: { show: thread, thread_id: 1 } }
       expect: the thread's cards, the backlog's or all of them by the scope; the row names the scope drawn
+    - name: wiki-page-reads-its-body-even-before-it-is-written
+      input: { page: wiki-page, params: { slug: otters } }
+      expect: the body of a written page and of a slug not written yet, freshness, no references
+    - name: work-item-page-reads-the-item-its-links-and-its-comments
+      input: { page: work-item, params: { uri: "<the item's uri>", thread_id: 1 } }
+      expect: the item, its gated buttons, its links from both ends, its comments
 # The agent harnesses and AI providers oxplow runs: core's
 # built-ins, many of each at once (every one declared here is active).
 implementations:

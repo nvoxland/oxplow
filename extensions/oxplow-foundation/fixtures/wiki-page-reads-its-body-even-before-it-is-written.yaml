@@ -1,0 +1,16 @@
+# The wiki page reads its body even for a slug not written yet (the first
+# Save creates it), with whether the files it cites have drifted.
+given:
+  - { command: oxplow.knowledge.write_page, input: { slug: otters, title: Otters, body: "# Otters\n\nThey hold hands.\n" } }
+input: { page: wiki-page, params: { slug: otters } }
+expect:
+  loaders:
+    body: { rows: [{ slug: otters, body: "# Otters\n\nThey hold hands.\n" }] }
+    info: { rows: [{ freshness: fresh }] }
+    refs: { rows: 0 }
+steps:
+  - params: { slug: not-yet }
+    expect:
+      loaders:
+        body: { rows: [{ slug: not-yet, body: "" }] }
+        info: { rows: 0 }

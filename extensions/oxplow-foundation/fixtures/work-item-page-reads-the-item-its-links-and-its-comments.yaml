@@ -1,0 +1,27 @@
+# A work item's page: the parts read the item by its uri, its list's
+# features switch the gated buttons, and links show from both ends.
+given:
+  - { command: oxplow.work_item.create, input: { title: The item, body: Some words., thread: thr1 }, bind: item }
+  - { command: oxplow.work_item.create, input: { title: Its blocker, body: Some words., thread: thr1 }, bind: blocker }
+  - { command: oxplow.work_item.link, input: { uri: $item.uri, target: $blocker.uri, link_type: blocks } }
+  - { command: oxplow.work_item.comment, input: { uri: $item.uri, body: A note. } }
+input: { page: work-item, params: { uri: $item.uri, thread_id: 1 } }
+expect:
+  loaders:
+    # The page's row names its tab: the item's title.
+    row: { rows: [{ title: The item }] }
+    state: { rows: [{ to: todo }] }
+    fields: { rows: [{ title: The item, native: '{"priority":"medium","author":"user"}' }] }
+    body: { rows: [{ body: Some words. }] }
+    # On the viewed thread: it can be sent to the backlog and deleted, not brought.
+    info: { rows: [{ can_send: 1, can_bring: 0, can_delete: 1 }] }
+    # Its own end of the link, which can be unlinked.
+    links: { rows: [{ outbound: 1 }] }
+    comments: { rows: [{ body: A note. }] }
+    activity: { rows: 0 }
+steps:
+  # The other end of the link shows it too, but can't unlink it.
+  - params: { uri: $blocker.uri }
+    expect: { loaders: { links: { rows: [{ outbound: 0, other: $item.uri }] } } }
+  - params: { uri: "oxplow:oxplow/work_item?id=nope&provider=oxplow" }
+    expect: { loaders: { state: { rows: 0 } } }
