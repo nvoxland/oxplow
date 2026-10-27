@@ -3788,7 +3788,8 @@ impl UiState {
 impl PageAt<'_> {
     /// Run a step's `ui:` list against the page's custom component — its
     /// `node:`, else the first component node — in the app's own webview
-    /// (`component_harness`), on this oxplow. False when it found anything.
+    /// (`component_harness`), on this oxplow. False when the scenario stops
+    /// here: it found anything, or the window draws nothing.
     async fn ui(
         &self,
         ext: &Extension,
@@ -3806,10 +3807,11 @@ impl PageAt<'_> {
         };
         let Some(shell) = shell() else {
             report.warnings.push(format!(
-                "{shown}:1: {label}: its `ui` steps aren't run: no oxplow app here to draw them — \
-                 fix: set OXPLOW_SHELL to the app, or build it (`bun run build:dev`)"
+                "{shown}:1: {label}: its `ui` steps, and the steps after them, aren't run: no \
+                 oxplow app here to draw them — fix: set OXPLOW_SHELL to the app, or build it \
+                 (`bun run build:dev`)"
             ));
-            return true;
+            return false;
         };
         let Some(steps) = ui.as_array() else {
             return fail(report, "`ui` is a list of steps".into());
@@ -3874,17 +3876,19 @@ impl PageAt<'_> {
             Err(e) => return fail(report, e),
         };
         // A window that draws no frames (the display locked or asleep)
-        // can't lay a component out: its steps aren't run, never failed.
+        // can't lay a component out: its steps aren't run, never failed, nor
+        // are the steps after them, which read what they did.
         match harness.drawing(std::time::Duration::from_secs(10)).await {
             Some(true) => {}
             Some(false) => {
                 harness.close().await;
                 report.warnings.push(format!(
-                    "{shown}:1: {label}: its `ui` steps aren't run: the oxplow app's window \
+                    "{shown}:1: {label}: its `ui` steps, and the steps after them, aren't run: \
+                     the oxplow app's window \
                      draws nothing while the display is locked or asleep — fix: run it \
                      again with the display awake"
                 ));
-                return true;
+                return false;
             }
             None => {
                 harness.close().await;
@@ -8063,7 +8067,8 @@ steps:
     }
 
     /// A window that draws no frames (the display locked or asleep) leaves
-    /// a fixture's `ui` steps not run, with why, never failed. The shell is
+    /// a fixture's `ui` steps, and the steps after them, not run, with why,
+    /// never failed. The shell is
     /// a stand-in that says so, as the harness's page does.
     #[cfg(unix)]
     #[tokio::test(flavor = "multi_thread")]
@@ -8088,15 +8093,17 @@ while :; do case "$(post /harness/next '{"result":null}')" in *done*) exit 0;; e
         write(
             root,
             ".oxplow/extensions/cards/fixtures/drawn.yaml",
-            "when: { page: board }\nsteps:\n  - ui:\n      - expect: { count: { li: 99 } }\n",
+            "when: { page: board }\nsteps:\n  - ui:\n      - expect: { count: { li: 99 } }\n  \
+             - when: { sql: SELECT 1 AS n }\n    expect: { rows: [{ n: 2 }] }\n",
         );
         let report = test_extension(root, "cards", false).await.unwrap();
+        // What follows the `ui` steps reads what they did: it isn't run either.
         assert_eq!(report.errors, Vec::<String>::new());
         assert!(
             report
                 .warnings
                 .iter()
-                .any(|w| w.contains("its `ui` steps aren't run") && w.contains("display")),
+                .any(|w| w.contains("the steps after them, aren't run") && w.contains("display")),
             "{:?}",
             report.warnings
         );
