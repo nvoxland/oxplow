@@ -1562,10 +1562,12 @@ async fn run_steps(
 /// - `collect: { effort, collectors?: [key] }`: the fact collectors an
 ///   effort's end triggers, run over what the effort recorded.
 /// - `turn: { prompt?, during?: [{ command, input?, as? }], tools?: [{ name, kind, paths?, command?, detail?,
-///   ok?, exit_code? }], write?: { path, body }, answer? }`: one turn on the
-///   primary thread, as its harness's hooks report it — the prompt, each
-///   tool call, the file the turn wrote (a snapshot of the worktree is taken
-///   after it) and the turn's end with the agent's last message.
+///   ok?, exit_code? }], write?: { path, body }, answer?, compactions?: n,
+///   context?: { tokens, window? } }`: one turn on the primary thread, as
+///   its harness's hooks report it — the prompt, each tool call, the file
+///   the turn wrote (a snapshot of the worktree is taken after it), the
+///   context compactions, and the turn's end with the agent's last message
+///   and how full its context was.
 async fn observe(host: &Host, ext: &Extension, observed: &Value) -> Result<(), String> {
     let Some(map) = observed.as_object().filter(|m| m.len() == 1) else {
         return Err("name one kind — fix: `observe: { turn: { .. } }`".into());
@@ -2308,9 +2310,19 @@ async fn observe_turn(host: &Host, body: &Value) -> Result<(), String> {
     use oxplow_app::hook_ingest::{HookEnvelope, LAST_ASSISTANT_MESSAGE};
     use oxplow_domain::hook::HookKind;
     for key in body.as_object().into_iter().flat_map(|m| m.keys()) {
-        if !["prompt", "during", "tools", "write", "answer"].contains(&key.as_str()) {
+        if ![
+            "prompt",
+            "during",
+            "tools",
+            "write",
+            "answer",
+            "compactions",
+            "context",
+        ]
+        .contains(&key.as_str())
+        {
             return Err(format!(
-                "`turn.{key}` — fix: `prompt`, `during`, `tools`, `write` or `answer`"
+                "`turn.{key}` — fix: `prompt`, `during`, `tools`, `write`, `answer`, `compactions` or `context`"
             ));
         }
     }
@@ -2427,11 +2439,22 @@ async fn observe_turn(host: &Host, body: &Value) -> Result<(), String> {
             .await
             .map_err(|e| e.to_string())?;
     }
+    for _ in 0..body.get("compactions").and_then(Value::as_u64).unwrap_or(0) {
+        ingest(envelope(HookKind::PostCompact, json!({}))).await?;
+    }
     let mut payload = json!({});
     if let Some(answer) = body.get("answer") {
         payload[LAST_ASSISTANT_MESSAGE] = answer.clone();
     }
-    ingest(envelope(HookKind::Stop, payload)).await
+    let mut stop = envelope(HookKind::Stop, payload);
+    if let Some(context) = body.get("context") {
+        stop.turn_run = Some(oxplow_domain::hook::TurnRun {
+            context_tokens: context.get("tokens").and_then(Value::as_i64),
+            context_window: context.get("window").and_then(Value::as_i64),
+            ..Default::default()
+        });
+    }
+    ingest(stop).await
 }
 
 /// Who runs a step's command (`as:`): a person, or `agent` (the primary

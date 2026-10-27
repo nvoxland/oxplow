@@ -1,0 +1,16 @@
+# The effort's files outside the area its task names; a task that names no
+# paths states no area, so nothing deviates.
+given:
+  - { command: oxplow.work_item.create, input: { title: Fix the hover state, body: "Fix the hover state in [[src/ui/button.ts]].", thread: thr1 }, bind: item }
+  - { command: oxplow.work_item.transition, input: { uri: $item.uri, to: in_progress } }
+  - observe: { turn: { prompt: Panel, tools: [{ name: Edit, kind: edit, paths: [src/ui/panel.ts], ok: true }], write: { path: src/ui/panel.ts, body: "export {};\n" } } }
+  - observe: { turn: { prompt: Button, tools: [{ name: Edit, kind: edit, paths: [src/ui/button.ts], ok: true }], write: { path: src/ui/button.ts, body: "export {};\n" } } }
+  - observe: { turn: { prompt: Store, tools: [{ name: Edit, kind: edit, paths: [crates/db/store.rs], ok: true }], write: { path: crates/db/store.rs, body: "fn s() {}\n" } } }
+when: { page: oxplow-bundled/what-deviated, params: { effort_id: 1 } }
+expect:
+  loaders:
+    what_deviated: { rows: [{ path: crates/db/store.rs, change_kind: $any }] }
+steps:
+  - given:
+      - { command: oxplow.work_item.update, input: { uri: $item.uri, body: Make the buttons feel snappier. } }
+  - expect: { loaders: { what_deviated: { rows: 0 } } }

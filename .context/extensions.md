@@ -2073,7 +2073,7 @@ a `KINDS` entry and a `dispatch` arm. The forms:
   ran because of it — the script's steps, then what reacted (audited after
   it). The extension's own command with `answers` is still the dry run
   below, until those fixtures make their data.
-- `given: [{ observe: { turn: { prompt?, during?, tools?, write?, answer? } } }]`
+- `given: [{ observe: { turn: { prompt?, during?, tools?, write?, answer?, compactions?, context? } } }]`
   (`observe` in `extension_test.rs`; every kind takes `given` and `steps`) —
   what oxplow only learns from what happens around it, made through the API
   core makes it with, and a new kind is added to that `match`, red test

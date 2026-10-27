@@ -181,6 +181,24 @@ intent:
     - name: settings-ai-area-lists-bundleds-role
       input: { page: oxplow-foundation/settings, params: { area: ai } }
       expect: Settings → AI lists bundled's reasoning role, bound to nothing
+    - name: waiting-on-me-lists-a-question-the-agent-asked
+      input: { page: waiting-on-me }
+      expect: a question the agent's last message asked is waiting on the person until a prompt moves it on
+    - name: what-deviated-lists-files-outside-the-tasks-stated-area
+      input: { page: what-deviated, params: { effort_id: 1 } }
+      expect: files outside the area the task names; none when it names no area
+    - name: review-prompt-names-the-task-and-what-changed
+      input: { page: review-prompt, params: { effort_id: 1 } }
+      expect: the prompt names the task, its files and claims; a foreign work item is named
+    - name: review-starters-read-the-viewers-streams-decisions-and-claims
+      input: { page: recent-decisions }
+      expect: the stream's decisions and unbacked claims, for the viewer's stream only
+    - name: thread-activity-lists-turns-by-effort
+      input: { page: thread-activity, params: { thread_id: 1 } }
+      expect: each turn under its effort; turns outside any effort under their own heading
+    - name: thread-activity-shows-the-context-fill-and-compactions
+      input: { page: thread-activity, params: { thread_id: 1 } }
+      expect: a turn's context fill, of its window when known, and how often it compacted
 # oxplow's default work list and effort policy: built-ins of core's,
 # declared here so they are an extension's like any other. Disabled, both
 # fall to none. Snapshots can't be none: their default is core's own (it

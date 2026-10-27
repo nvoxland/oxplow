@@ -155,7 +155,8 @@ model the SQL reads and the command it runs. Prefer `answers:` on pages.
      happens around it, made through the API core makes it with:
      `{ observe: { turn: { prompt?, during?: [{ command, input?, as? }],
      tools?: [{ name, kind, paths?, command?, detail?, ok?, exit_code? }],
-     write?: { path, body }, answer? } } }` — one turn on the thread, as its
+     write?: { path, body }, answer?, compactions?: n,
+     context?: { tokens, window? } } } }` — one turn on the thread, as its
      harness's hooks report it: the prompt, the commands made `during` it
      (an effort opened mid-turn), each tool call (a finished call; a shell
      `cargo test` also records a test run), the file the turn wrote (with a

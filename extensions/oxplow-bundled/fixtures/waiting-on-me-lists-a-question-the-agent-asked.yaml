@@ -1,0 +1,18 @@
+# A thread whose agent's last message asked the person something is waiting
+# on them, until a prompt moves it on.
+given:
+  - { command: oxplow.agent_session.open, input: { thread: thr1, harness: claude } }
+  - observe: { turn: { prompt: go, answer: "Pick A or B?" } }
+when: { page: oxplow-bundled/waiting-on-me }
+expect:
+  loaders:
+    waiting_on_me:
+      rows: { contains: [{ what: Waiting for your answer, title: "Pick A or B?" }] }
+steps:
+  - given:
+      # The person answers: a new turn starts, and ends with no question.
+      - observe: { turn: { prompt: A, answer: Done. } }
+  - expect:
+      loaders:
+        waiting_on_me:
+          rows: { contains: [] }
