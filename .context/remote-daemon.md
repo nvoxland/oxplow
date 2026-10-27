@@ -175,6 +175,19 @@ Logs, tab reports and the socket use the same lightweight `uiClientId.ts` identi
 - **A daemon doesn't outlive its app.** The supervising app keeps the
   daemon's stdin open; end-of-file means the app is gone (quit, crashed,
   killed) and the daemon stops (`stop_when_app_goes`).
+- **Nothing the daemon started outlives it.** A stop (a signal, the
+  lifeline) runs `Services::shutdown`, then `process::exit`, which runs no
+  destructors, so each kind of child is ended explicitly first:
+  - in the daemon's own group (LSP servers, harness CLIs asked for their
+    models or sessions): the supervisor's SIGTERM to the group, or the
+    lifeline's (`signal_tree`), and LSP servers are killed in `shutdown`;
+  - in groups of their own: providers (their orderly `shutdown`), every
+    terminal and agent PTY (`TerminalSessionRegistry::close_all`: the
+    PTY's whole group), and, after `shutdown`, any program group a
+    cancelled job still owns (`external_process::stop_all`: collectors,
+    extension builds).
+  Starlark `exec` programs (`oxplow-script`) keep their own group code and
+  are not in that list yet.
 - **A second app defers.** `.oxplow/daemon.json` names the running
   daemon. Opening a project whose daemon is alive waits a few seconds
   (one whose app just quit is on its way out), then refuses: "already
@@ -219,8 +232,7 @@ token**; only the person's renderer holds it.
   crashed, SIGKILLed), and the daemon stops with its agents
   (`daemon_supervisor::stop_when_app_goes`: SIGTERM to its group when it
   leads one, else just itself). Anything starting a daemon with
-  `--token-stdin` must hold stdin open; closing it stops the daemon. The
-  boot-time orphan sweep stays for a daemon from before this.
+  `--token-stdin` must hold stdin open; closing it stops the daemon.
 - **Hand-started daemon:** it mints its own and prints `ui token: …`.
 - **Presenting it:** `Authorization: Bearer <token>` on `/ipc`, and
   `?token=` on the `/events` WebSocket (browsers can't set its headers).
@@ -311,5 +323,6 @@ diagnostics through the extension listing. Later failures retain the last
 coherent generation.
 
 Daemon termination signals the job scheduler before provider shutdown/process
-exit. Dropping a worker propagates cancellation; expired durable leases are
+exit; `external_process::stop_all` then stops the program groups its
+cancelled jobs still own. Dropping a worker propagates cancellation; expired durable leases are
 recovered on restart without claiming the remote computation stopped.
