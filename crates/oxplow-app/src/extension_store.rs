@@ -131,7 +131,7 @@ pub fn shipped_hash(bundled: &crate::bundled_extensions::BundledExtension) -> St
         .unwrap_or_default();
     let skipped = inputs.skipped();
     let mut files: Vec<(&str, &[u8])> = bundled
-        .files
+        .files()
         .iter()
         .copied()
         .filter(|(rel, _)| {
@@ -159,7 +159,7 @@ pub fn extract_shipped(
         return Ok(hash);
     }
     write_whole(&target, |staging| {
-        for (rel, bytes) in bundled.files {
+        for (rel, bytes) in bundled.files() {
             let to = staging.join(rel);
             std::fs::create_dir_all(to.parent().expect("a file has a parent"))?;
             std::fs::write(&to, bytes)?;
@@ -229,6 +229,24 @@ fn set_read_only(dir: &Path, read_only: bool) -> std::io::Result<()> {
 /// Remove `dir`, a deployment or the folder of them.
 fn remove_tree(dir: &Path) {
     let _ = std::fs::remove_dir_all(dir);
+}
+
+/// The files a bundled extension ships from its folder `source`, as
+/// `(relative path, bytes)` in path order: every file but dot entries and
+/// the manifest's `build.exclude` — its build's output is shipped. Only a
+/// debug build reads them at run time (`bundled_extensions`).
+#[cfg(debug_assertions)]
+pub(crate) fn shipped_files(source: &Path) -> std::io::Result<Vec<(String, Vec<u8>)>> {
+    let exclude: Vec<String> = Inputs::of(source)
+        .exclude
+        .iter()
+        .map(|dir| dir.trim_end_matches('/').to_string())
+        .collect();
+    let exclude: Vec<&str> = exclude.iter().map(String::as_str).collect();
+    source_files(source, &exclude)?
+        .into_iter()
+        .map(|(rel, path)| Ok((rel, std::fs::read(path)?)))
+        .collect()
 }
 
 /// Every file under `source` as `(relative path, absolute path)`, in path
@@ -449,19 +467,20 @@ mod tests {
     /// inputs and build command, not what the build wrote.
     #[test]
     fn a_shipped_copy_with_a_build_hashes_by_its_inputs() {
-        let manifest = "name: x\nbuild: { run: make, output: dist, exclude: [node_modules] }\n";
+        const MANIFEST: &str =
+            "name: x\nbuild: { run: make, output: dist, exclude: [node_modules] }\n";
+        const FILES: crate::bundled_extensions::Files = &[
+            ("dist/w/index.html", b"built"),
+            ("extension.yaml", MANIFEST.as_bytes()),
+            ("src/a.ts", b"source"),
+        ];
         let source = tempfile::tempdir().unwrap();
-        write(source.path(), "extension.yaml", manifest);
+        write(source.path(), "extension.yaml", MANIFEST);
         write(source.path(), "src/a.ts", "source");
         write(source.path(), "dist/w/index.html", "built");
-        let files: &'static [(&'static str, &'static [u8])] = Box::leak(Box::new([
-            ("dist/w/index.html", b"built".as_slice()),
-            ("extension.yaml", manifest.as_bytes()),
-            ("src/a.ts", b"source".as_slice()),
-        ]));
         let bundled = crate::bundled_extensions::BundledExtension {
             name: "x",
-            files,
+            files: || FILES,
             required: false,
         };
         assert_eq!(shipped_hash(&bundled), source_hash(source.path()).unwrap());

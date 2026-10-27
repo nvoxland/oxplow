@@ -158,7 +158,7 @@ pub async fn services_developing_oxplow() -> EffortFixture {
     init_git_repo(dir.path());
     for b in crate::bundled_extensions::BUNDLED {
         let to = dir.path().join(".oxplow/extensions").join(b.name);
-        for (rel, bytes) in b.files {
+        for (rel, bytes) in b.files() {
             let file = to.join(rel);
             std::fs::create_dir_all(file.parent().unwrap()).unwrap();
             std::fs::write(file, bytes).unwrap();

@@ -188,9 +188,11 @@ The backend is Rust; the desktop frontend is React/Monaco/xterm.
   shell crate; `bun run build:dev` (root workspace script)
   builds the frontend and the shell; run `./target/debug/oxplow .`.
 - `extensions/oxplow-foundation`, `extensions/oxplow-bundled` — oxplow's
-  own extensions, compiled into the app by `crates/oxplow-app/build.rs`
-  (every file in the folder ships; a `build:` runs there first). Building
-  oxplow therefore needs bun, as its extension builds use it.
+  own extensions, compiled into a release build by
+  `crates/oxplow-app/build.rs` (every file in the folder ships; a `build:`
+  runs there first). A debug build and the Rust tests read them from the
+  folder at run time instead, so editing one never recompiles a crate.
+  Building oxplow needs bun, as its extension builds use it.
 - `crates/` — reusable Rust libraries. `oxplow-domain` (pure types +
   store traits), `oxplow-db` (rusqlite stores + migrations),
   `oxplow-tasks` (oxplow's own task list, one implementation of the

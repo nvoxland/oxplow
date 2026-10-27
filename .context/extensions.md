@@ -1000,12 +1000,8 @@ the user guide is `docs/guide/pages.md`.
   extension, because the point is building oxplow on its own extension
   platform, not letting people pick between its features. It can still be
   disabled like any other.
-  - Their sources live in the repo at `extensions/<name>/`. They're
-    compiled into the binary by `crates/oxplow-app/src/bundled_extensions.rs`
-    (`include_str!`). A test fails if a file in the folder isn't listed.
-  - The loader reads them through the same `load_one` as project
-    extensions, over an `ExtensionFiles` abstraction (`Disk` /
-    `Embedded`). Nothing is written to disk.
+  - Their sources live in the repo at `extensions/<name>/`, and they
+    ship as described under "Shipped deployments" below.
   - `origin` is `bundled` and their path is `bundled:<name>`.
   - Their names are reserved:
     - a project folder with that name is listed with an error and never
@@ -1238,21 +1234,32 @@ source directly: an edit changes nothing until it is deployed.
   under `.oxplow/runtime/`; it does watch `.oxplow/extensions/` (an agent's
   edits to a source are its work, snapshotted and given to its effort), and
   watching never activates anything.
-- **Shipped deployments:** `oxplow-foundation` and `oxplow-bundled` are
-  compiled into the binary (`bundled_extensions::BUNDLED`) and written to the
-  store once per hash as their shipped deployment
-  (`extension_store::extract_shipped`); they run from disk like any other.
-  Their file lists are generated: `crates/oxplow-app/build.rs` walks each
-  folder (dot entries and `build.exclude` left out) into `include_bytes!`
-  arrays, so adding a file to the folder ships it; one with a `build:` is
-  built there first (its command, `/bin/sh -c` in its folder), so its
-  output ships without being committed — building oxplow needs the tools
-  those builds use (bun). Cargo is told to rerun on the manifest, every
-  input file, and the input folders that hold nothing skipped — never a
-  folder holding the output, `node_modules` or a dot entry, which cargo
-  would check recursively and find rewritten by the build every time. So a
-  new top-level file (or one in a folder like that) is noticed only after
-  `extension.yaml` is touched. The shipped hash uses the source rule
+- **Shipped deployments:** `oxplow-foundation` and `oxplow-bundled` ship
+  inside oxplow (`bundled_extensions::BUNDLED`, each one's files through
+  `BundledExtension::files()`) and are written to the store once per hash as
+  their shipped deployment (`extension_store::extract_shipped`); they run
+  from disk like any other. What ships is the folder: every file but dot
+  entries and `build.exclude`, its build's output included.
+  - **A release build compiles them in.** `crates/oxplow-app/build.rs`
+    walks each folder into `include_bytes!` arrays, so adding a file to the
+    folder ships it; one with a `build:` is built there first (its command,
+    `/bin/sh -c` in its folder), so its output ships without being
+    committed — building oxplow needs the tools those builds use (bun).
+    Cargo is told to rerun on the manifest, every input file, and the input
+    folders that hold nothing skipped — never a folder holding the output,
+    `node_modules` or a dot entry, which cargo would check recursively and
+    find rewritten by the build every time. So a new top-level file (or one
+    in a folder like that) is noticed only after `extension.yaml` is
+    touched.
+  - **A debug build (and every Rust test) reads them from their folders**
+    the first time they're asked for, once per process
+    (`extension_store::shipped_files`), so editing an extension never
+    recompiles `oxplow-app` or anything above it. Its `build.rs` watches only
+    itself and runs a `build:` only when its `output` folder is missing (a
+    fresh checkout); a changed source reaches a running dev oxplow through
+    deploy, which builds. A test reads the folder as it is on disk, edits
+    included, the moment it runs.
+  - The shipped hash uses the source rule
   (`extension_store::shipped_hash`: the inputs and the build command,
   never the output), so deploying an unchanged
   `extensions/oxplow-foundation` resolves to the shipped deployment. A

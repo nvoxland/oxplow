@@ -846,7 +846,7 @@ mod tests {
         assert!(ok);
         let shipped = oxplow_app::bundled_extensions::find("oxplow-foundation").unwrap();
         let write_files = |to: &Path, edit: &dyn Fn(String) -> String| {
-            for (rel, bytes) in shipped.files {
+            for (rel, bytes) in shipped.files() {
                 let file = to.join(rel);
                 std::fs::create_dir_all(file.parent().unwrap()).unwrap();
                 let text = String::from_utf8_lossy(bytes).into_owned();

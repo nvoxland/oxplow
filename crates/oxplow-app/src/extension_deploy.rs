@@ -441,7 +441,7 @@ impl std::fmt::Display for DeployError {
 
 /// The permissions a bundled extension ships with.
 fn shipped_permissions(b: &crate::bundled_extensions::BundledExtension) -> Permissions {
-    b.files
+    b.files()
         .iter()
         .find(|(rel, _)| *rel == "extension.yaml")
         .and_then(|(_, bytes)| {
@@ -2404,7 +2404,7 @@ mod tests {
         let dir = root.join(".oxplow/extensions/oxplow-bundled");
         for (rel, bytes) in crate::bundled_extensions::find("oxplow-bundled")
             .unwrap()
-            .files
+            .files()
         {
             let path = dir.join(rel);
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -2829,7 +2829,7 @@ mod tests {
             .unwrap();
         let dir = root.join(".oxplow/extensions").join(name);
         let shipped = crate::bundled_extensions::find(name).unwrap();
-        for (rel, bytes) in shipped.files {
+        for (rel, bytes) in shipped.files() {
             let to = dir.join(rel);
             std::fs::create_dir_all(to.parent().unwrap()).unwrap();
             std::fs::write(to, bytes).unwrap();
@@ -2969,7 +2969,7 @@ mod tests {
     fn shipped_with(name: &str, edit: impl Fn(String) -> String) -> Vec<(&'static str, String)> {
         crate::bundled_extensions::find(name)
             .unwrap()
-            .files
+            .files()
             .iter()
             .map(|(rel, bytes)| {
                 let text = String::from_utf8_lossy(bytes).into_owned();
@@ -3062,7 +3062,7 @@ mod tests {
         let (dir, svc) = unbooted();
         for b in crate::bundled_extensions::BUNDLED {
             let to = dir.path().join(".oxplow/extensions").join(b.name);
-            for (rel, bytes) in b.files {
+            for (rel, bytes) in b.files() {
                 let file = to.join(rel);
                 std::fs::create_dir_all(file.parent().unwrap()).unwrap();
                 std::fs::write(file, bytes).unwrap();
