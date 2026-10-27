@@ -50,6 +50,10 @@ model the SQL reads and the command it runs. Prefer `answers:` on pages.
    Its report says what it ran, the generation, what the extension
    `contributes`, and what it can't run here (`unsupported`: panels, decorators,
    replacements, skills — the app shows them).
+   **A test runs your extension with what it declares**, plus oxplow's
+   own (foundation, and the extensions on by default): another
+   extension you read, mount at or run commands of must be in
+   `requires: [name]` (or imported) — `check` says so when it isn't.
    **How `expect` is compared, everywhere:** an object only on the keys it
    names (a key the result lacks matches only `null`); a list every item,
    in order; `{ contains: [..] }` items a list has, in any order, among
