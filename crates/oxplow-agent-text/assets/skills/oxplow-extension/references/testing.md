@@ -119,7 +119,10 @@ model the SQL reads and the command it runs. Prefer `answers:` on pages.
      another's data, so a fixture makes everything it reads. Every kind
      below takes `given:` and `steps:` the same way; a step of a kind
      that isn't a page is `{ when?, expect }`, its `when` keys over the
-     fixture's (`when: { payload: { .. } }` changes just the payload). Every page's `answers:` entry
+     fixture's (`when: { payload: { .. } }` changes just the payload). A
+     step's `when` that names another kind or page runs that instead:
+     `- when: { sql: "SELECT …" }` reads what an event or command did,
+     `- when: { page: other }` checks another page, and the scenario goes on. Every page's `answers:` entry
      also runs (`ran: answers`), on a clean oxplow: the page must open with
      its params and no failing loader;
    - a `given` step can also **observe** what oxplow only learns from what

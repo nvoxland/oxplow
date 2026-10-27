@@ -446,21 +446,10 @@ async fn scenario(host: &Host, ext: &Extension, ex: &Example<'_>, report: &mut T
             return;
         }
     };
-    // What `when` and `expect` say, with the values bound so far.
-    let bound = |when: &Value, expect: &Value, binds: &Binds| {
-        Ok::<_, String>(Example {
-            when: binds.substitute(when)?,
-            expect: binds.substitute(expect)?,
-            given: Value::Null,
-            steps: None,
-            ..ex.clone()
-        })
-    };
-    if ex.steps.is_none() || !ex.expect.is_null() {
-        match bound(&ex.when, &ex.expect, &binds) {
-            Ok(first) => dispatch(host, ext, &first, report).await,
-            Err(e) => return report.errors.push(format!("{shown}:1: {e}")),
-        }
+    if (ex.steps.is_none() || !ex.expect.is_null())
+        && !step_run(host, ext, ex, (&ex.when, &ex.expect), &binds, "", report).await
+    {
+        return;
     }
     for (index, step) in steps.iter().enumerate() {
         let label = format!("steps[{index}]");
@@ -486,26 +475,73 @@ async fn scenario(host: &Host, ext: &Extension, ex: &Example<'_>, report: &mut T
                  `{{ when?, expect }}`"
             ));
         };
-        let mut when = ex.when.as_object().cloned().unwrap_or_default();
-        if let Some(over) = step.get("when").and_then(Value::as_object) {
-            when.extend(over.clone());
+        // Its `when` keys over the fixture's — or, naming another kind,
+        // its own.
+        let when = match step.get("when") {
+            Some(own) if kind_of(own) != kind_of(&ex.when) && kind_of(own).is_some() => own.clone(),
+            over => {
+                let mut when = ex.when.as_object().cloned().unwrap_or_default();
+                when.extend(over.and_then(Value::as_object).cloned().unwrap_or_default());
+                Value::Object(when)
+            }
+        };
+        if !step_run(host, ext, ex, (&when, expect), &binds, &label, report).await {
+            return;
         }
-        let at = report.errors.len();
-        match bound(&Value::Object(when), expect, &binds) {
-            Ok(run) => dispatch(host, ext, &run, report).await,
-            Err(e) => report.errors.push(format!("{shown}:1: {e}")),
+    }
+}
+
+/// The kind a `when` names: its one kind key (`event` also rides with an
+/// effect's, a policy's or a collector's).
+fn kind_of(when: &Value) -> Option<&'static str> {
+    let named: Vec<&'static str> = KINDS
+        .iter()
+        .map(|k| k.key)
+        .filter(|key| when.get(key).is_some())
+        .collect();
+    named
+        .iter()
+        .copied()
+        .find(|key| *key != "event" || named.len() == 1)
+}
+
+/// Run `when` (as the fixture `ex`'s kind would) and check it against
+/// `expect`, both read through `binds`; its findings name `label` (a step),
+/// when it has one. False when it found anything.
+async fn step_run(
+    host: &Host,
+    ext: &Extension,
+    ex: &Example<'_>,
+    (when, expect): (&Value, &Value),
+    binds: &Binds,
+    label: &str,
+    report: &mut TestReport,
+) -> bool {
+    let shown = ex.shown;
+    let at = report.errors.len();
+    match (binds.substitute(when), binds.substitute(expect)) {
+        (Ok(when), Ok(expect)) => {
+            let run = Example {
+                when,
+                expect,
+                given: Value::Null,
+                steps: None,
+                ..ex.clone()
+            };
+            // A page's scenario runs steps, so this nests.
+            Box::pin(dispatch(host, ext, &run, report)).await;
         }
-        // Its findings say which step they're of.
+        (Err(e), _) | (_, Err(e)) => report.errors.push(format!("{shown}:1: {e}")),
+    }
+    if !label.is_empty() {
         let prefix = format!("{shown}:1: ");
         for error in &mut report.errors[at..] {
             if let Some(rest) = error.strip_prefix(&prefix) {
                 *error = format!("{prefix}{label}: {rest}");
             }
         }
-        if report.errors.len() > at {
-            return;
-        }
     }
+    report.errors.len() == at
 }
 
 /// Run what example `ex`'s `when` names and check it against its `expect`.
@@ -2340,6 +2376,13 @@ async fn page_example(
         let mut run_params = params.as_object().cloned().unwrap_or_default();
         if let Some(over) = step.get("params").and_then(Value::as_object) {
             run_params.extend(over.clone());
+        }
+        if let Some(when) = step.get("when") {
+            let expect = step.get("expect").cloned().unwrap_or(Value::Null);
+            if !step_run(host, ext, ex, (when, &expect), &binds, &label, report).await {
+                return;
+            }
+            continue;
         }
         if step.get("press").is_some() || step.get("submit").is_some() {
             let Some(outcome) = at
@@ -5336,6 +5379,73 @@ steps:
         );
     }
 
+    /// A step whose `when` names another kind — or, in a page's scenario,
+    /// another page — runs that instead of the fixture's own, and the
+    /// scenario goes on.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_step_runs_another_kind_or_page() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        write(
+            root,
+            ".oxplow/extensions/acme/extension.yaml",
+            "manifest: 2
+name: acme
+intent:
+  purpose: PRs.
+  examples:
+    - { name: merged, input: { event_type: acme.merged }, expect: valid }
+    - { name: paged, input: { page: titles }, expect: titles }
+event_types:
+  types:
+    - { type: acme.merged, v: 1, schema: merged.json, summary: Merged. }
+",
+        );
+        write(
+            root,
+            ".oxplow/extensions/acme/merged.json",
+            r#"{"type": "object", "required": ["pr"]}"#,
+        );
+        write(
+            root,
+            ".oxplow/extensions/acme/pages/titles.yaml",
+            "title: Titles\ndata:\n  titles: { sql: \"SELECT title FROM v_work_item\" }\nview: { viz: table, from: titles }\n",
+        );
+        write(
+            root,
+            ".oxplow/extensions/acme/pages/count.yaml",
+            "title: Count\ndata:\n  n: { sql: \"SELECT COUNT(*) AS n FROM v_work_item\" }\nview: { viz: number, from: n }\n",
+        );
+        write(
+            root,
+            ".oxplow/extensions/acme/fixtures/merged.yaml",
+            "given: [{ command: oxplow.work_item.create, input: { title: Fix it } }]
+when: { event_type: acme.merged, payload: { pr: 1 } }
+expect: { valid: true }
+steps:
+  - when: { sql: \"SELECT title FROM v_work_item\" }
+    expect: { rows: [{ title: Fix it }] }
+  - expect: { valid: true }
+",
+        );
+        write(
+            root,
+            ".oxplow/extensions/acme/fixtures/paged.yaml",
+            "given: [{ command: oxplow.work_item.create, input: { title: Fix it } }]
+when: { page: titles }
+expect: { loaders: { titles: { rows: [{ title: Fix it }] } } }
+steps:
+  - when: { page: count }
+    expect: { loaders: { n: { rows: [{ n: 1 }] } } }
+  - when: { sql: \"SELECT COUNT(*) AS n FROM v_work_item\" }
+    expect: { rows: [{ n: 1 }] }
+  - expect: { loaders: { titles: { rows: 1 } } }
+",
+        );
+        let report = test_extension(root, "acme", false).await.unwrap();
+        assert_eq!(report.errors, Vec::<String>::new());
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     async fn event_type_and_ref_kind_fixtures_check_what_they_declare() {
         let dir = tempfile::tempdir().unwrap();
@@ -6077,6 +6187,24 @@ expect: { ok: true }
             errors.contains("fixtures/wrong.yaml:1: command `oxplow.work_item.transition` gave"),
             "{errors}"
         );
+    }
+
+    /// `rows: []` is no rows, like `rows: 0`.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_empty_row_list_is_no_rows() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        paged(
+            root,
+            "title: Items\ndata:\n  items: { sql: \"SELECT 1 AS n\" }\nview: { viz: table, from: items }\n",
+            &[("empty", "when: { page: items }\nexpect: { loaders: { items: { rows: [] } } }\n")],
+        );
+        let errors = test_extension(root, "paged", false)
+            .await
+            .unwrap()
+            .errors
+            .join("\n");
+        assert!(errors.contains("loader `items` returned"), "{errors}");
     }
 
     /// Each example with `given` runs on an oxplow of its own: what one
