@@ -2748,45 +2748,44 @@ extension. The viewer's stream is not a prop: a page that declares
 extension, target, capability, bound_to_provider, page, version, view,
 label }`).
 
-**At render** (`viz/useReplacement.ts`, `components/Replaceable.tsx`).
-`useReplacement` reads the enabled extensions' replacements of the target
-and, only when one exists, what decides it:
-- **bound**: the host passes the provider of the thing it shows
-  (`<Replaceable provider={item.provider}>`): the **item's own provider**
-  decides, whichever is active, so another provider's item never gets a
-  page that sends this one's states. Which extension brings it is read
-  from `v_capability_provider` at render, not at load, so installing or
-  switching one needs no reload;
+**In the run** (`PageRunner::replacement` → `replacements::chosen`), from
+the enabled extensions' replacements of the target, only when one exists:
+- **bound**: the **item's own provider** decides, whichever is active, so
+  another provider's item never gets a page that sends this one's states.
+  The provider is the `provider` param of the node's `uri` param (a work
+  item's URI carries it); which extension brings it is the capability
+  registry's answer at run time, not at load, so installing or switching
+  one needs no reload;
 - **unbound**: the person's choice (`replacements`), or the only
   candidate; no provider is read;
 - no candidate, a provider no extension brings (oxplow's own), several
-  unbound candidates and no choice, or `oxplow` chosen → the fallback,
-  untouched;
-- chosen → its page runs with the props it declares and draws through
-  `PageTree` (kit vizzes, or `viz: custom` with its sandbox and "custom"
-  badge, sharing the view its target's contract lists) under a **"replaced
-  by <extension>"** badge (`replacement-<target>`, `replacement-badge`),
-  kept fresh by the daemon. The page's own chrome (the Board's scope
-  picker) stays oxplow's;
-- it cannot load — its page run fails → **the core component**, under a
-  line saying whose it was and why ("beads's board couldn't load: ….
-  Showing oxplow's.", `replacement-fallback`), outside the replacement's
-  frame: no badge;
-- while any of that is not known yet, nothing renders, so the wrong
-  component never flashes. Reads of who is active overlap (one per
-  change); the newest one asked decides, however they resolve.
+  unbound candidates and no choice, or `oxplow` chosen → the node's own
+  content, `replaced_by` unset;
+- chosen → its page runs as the node's embed with the props it declares;
+  a run that fails sets the node's `error` and the node's own content
+  runs instead.
+
+**Drawn** (`components/Replaced.tsx`, chosen by `PageTree` when the node
+has `replaced_by`): the embed (kit vizzes, or `viz: custom` with its
+sandbox and "custom" badge, sharing the view its target's contract lists)
+under a **"replaced by <extension>"** badge (`replacement-<target>`,
+`replacement-badge`), kept fresh as any page run is. The page's own chrome
+(the Board's scope picker) stays oxplow's. A run with an `error` draws
+the core component under a line saying whose it was and why ("beads's
+board couldn't load: …. Showing oxplow's.", `replacement-fallback`),
+outside the replacement's frame: no badge. Nothing is decided in the
+desktop, so the wrong component never flashes.
 
 Showing one records `usage { kind: "replacement", key: <ext>/<target> }`
-(the evidence a kind needs to be promoted) — a kit page when it ran, a
-custom one when its component says `ready` (`onCustomReady`), so one that
-never loads is not counted. Agents read work items from `v_work_item`
-either way. The capability smoke test (`pages/CapabilityUi.smoke.test.tsx`)
-renders the Board with every enhancement off (no `replacement-*`), and an
-extension's view replacing it with no provider of its own; a work item's
-editor replaced with the rail still oxplow's; a work item's state control,
-with two extensions replacing it, shows the item's own provider's, not the
-active one's; Git History shows the plain list, and oxplow-bundled's graph
-when it replaces it.
+(the evidence a kind needs to be promoted), once per replacement drawn
+without an error. Agents read work items from `v_work_item` either way.
+The rules are tested in Rust (`replacements::chosen`'s tests, the runner's
+`a_replaceable_node_runs_the_replacement_that_stands_in_for_it`); which
+replacement a page shows is a fixture's (`loaders: { <node>/<loader> }`,
+a `ui` step on the embedded component); the badge, the fallback line and
+choosing one on Settings are the e2e specs'. Nothing renders the
+capability pages with every enhancement off any more
+([work-items.md](./work-items.md), "Conformance").
 
 **The first real one: the history graph.** oxplow-bundled's
 `history-graph` component (`components/history-graph/`, classic scripts on
