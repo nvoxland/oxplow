@@ -100,6 +100,9 @@ intent:
     - name: backlog-lists-items-on-no-thread-with-epics-and-search
       input: { page: backlog, params: { q: "", thread_id: 1 } }
       expect: x
+    - name: tasks-lists-its-scope-by-state-with-epics-and-a-summary
+      input: { page: tasks, params: { show: thread, priority: any, thread_id: 1, stream_id: 1 } }
+      expect: the scope's items by state with epics nested, the priority filter keeping an epic for its child, the last five done, the summary's counts
 # The agent harnesses and AI providers oxplow runs: core's
 # built-ins, many of each at once (every one declared here is active).
 implementations:
