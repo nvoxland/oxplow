@@ -3261,8 +3261,12 @@ around it** (`component_harness.rs`, `PageAt::ui`):
   (`run_component_sql`), `openForm` / `askForm`, `showView` — runs on the
   test's oxplow; what only the shell answers (`setTitle`, `setActions`,
   `setViewParams`, `setHistoryState`, `navigate`, a confirmation) is
-  recorded. The server drives it one op at a time (`/harness/next`): a DOM
-  step for the agent, a nav-bar press, a view change, new rows.
+  recorded, in the order made (one queue of posts, which the next op waits
+  for). `showView` runs one at a time in the order asked and is recorded
+  once the core has answered: `shown` is the spec when the core drew it,
+  `null` when it refused it or the component cleared it. The server drives
+  it one op at a time (`/harness/next`): a DOM step for the agent, a nav-bar
+  press, a view change, new rows.
 - **The window** is the shell's `oxplow component-harness <url>`: one
   window, off-screen but shown, no Dock icon, no project, daemon, menu or
   IPC; it quits at `/harness/done`. Found as `OXPLOW_SHELL`, else an
@@ -3270,9 +3274,15 @@ around it** (`component_harness.rs`, `PageAt::ui`):
   none, the `ui` steps aren't run and the report warns — never a pass. CI
   builds the app and runs the tests under `xvfb-run`.
 - **Steps**: `click: <sel>`, `fill: { <sel>: text }`, `key: { on, key }`
-  (`Mod+Enter`), `drag: { from, to }` (synthetic DOM events, not a
+  (`Mod+Enter`; a plain `Enter` in a form's `<input>` that nothing stopped
+  submits the form, as a browser's implicit submission does),
+  `drag: { from, to }` (synthetic DOM events, not a
   person's: focus and keyboard details can differ); `press: <action id>`
-  (the nav bar), `view_params: {..}` (Back/Forward); `given: [..]` (the
+  (the nav bar), `view_params: {..}` (Back/Forward; `null` drops one). The view
+  params the frame set (`setViewParams`) and the ones a step sent are kept,
+  merged, and when they change the page runs again with them over the
+  step's `params`, and the frame hears the rows, as the app's tab does with
+  its `#`; `given: [..]` (the
   page runs again and the frame hears its rows, as after any command it
   ran); `confirm: false` (the next confirmation's answer; default yes),
   `form: { submit: {..} }` (the next form's values; without, it's closed);

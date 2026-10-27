@@ -28,6 +28,9 @@ intent:
     - name: swimlanes-drags-a-card-to-a-lane
       input: { page: swimlanes, params: { scope: all } }
       expect: five lanes; a drag moves the card's item to the lane's state
+    - name: swimlanes-renames-a-card-through-its-title
+      input: { page: swimlanes, params: { scope: all } }
+      expect: an empty title is refused under the input, Escape puts it back and Enter saves a new one
 permissions:
   commands: [oxplow.work_item.transition, oxplow.work_item.reorder, oxplow.work_item.update]
 custom_components:

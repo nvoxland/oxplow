@@ -492,6 +492,7 @@
   async function runHarness(server, frame, agent) {
     const start = await server.start();
     const fed = fedBy(start.run, start.node);
+    let showing = Promise.resolve();
     const host = await new Promise((mounted) => {
       frame.addEventListener("load", () => {
         const channel = new MessageChannel;
@@ -507,9 +508,27 @@
           querySql: async (sql, params) => await server.rpc("querySql", { sql, params }),
           openForm: async (command, input) => await server.rpc("openForm", { command, input }),
           askForm: async (form) => await server.rpc("askForm", { form }),
-          showView: async (spec) => {
-            server.record("showView", spec);
-            return spec === null ? null : await server.rpc("showView", { spec });
+          showView: (spec) => {
+            const mine = showing.then(async () => {
+              if (spec === null) {
+                server.record("showView", null);
+                return null;
+              }
+              try {
+                const drawn = await server.rpc("showView", { spec });
+                server.record("showView", spec);
+                return drawn;
+              } catch (e) {
+                server.record("showView", null);
+                throw e;
+              }
+            });
+            showing = mine.then(() => {
+              return;
+            }, () => {
+              return;
+            });
+            return mine;
           },
           setTitle: record("title"),
           setActions: record("actions"),
@@ -558,6 +577,7 @@
     }
   }
   function httpServer() {
+    let sent = Promise.resolve();
     const post = async (path, body) => {
       const response = await fetch(path, {
         method: "POST",
@@ -574,12 +594,21 @@
           throw new IpcCallError(out.error.message, out.error.code, out.error.field ?? null);
         return out.result;
       },
-      record: (kind, value) => void fetch("/harness/record", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ kind, value })
-      }),
-      next: async (result) => await post("/harness/next", { result })
+      record: (kind, value) => {
+        sent = sent.then(() => fetch("/harness/record", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ kind, value })
+        }).then(() => {
+          return;
+        }, () => {
+          return;
+        }));
+      },
+      next: async (result) => {
+        await sent;
+        return await post("/harness/next", { result });
+      }
     };
   }
   function main() {

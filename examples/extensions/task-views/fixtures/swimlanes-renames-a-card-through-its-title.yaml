@@ -1,0 +1,21 @@
+# A card's title is its own form: Enter saves, an empty one is refused
+# under the input, Escape puts the title back.
+given:
+  - { command: oxplow.work_item.create, input: { title: Card one, thread: thr1 } }
+when: { page: swimlanes, params: { scope: all } }
+steps:
+  - ui:
+      - click: ".card .title"
+      - fill: { "input.ox-input": "" }
+      - key: { on: "input.ox-input", key: Enter }
+      - expect:
+          visible: [".ox-error"]
+          invoked: [{ command: oxplow.work_item.update, ok: false }]
+      - key: { on: "input.ox-input", key: Escape }
+      - expect: { text: { ".card .title": Card one } }
+      - click: ".card .title"
+      - fill: { "input.ox-input": Card renamed }
+      - key: { on: "input.ox-input", key: Enter }
+      - expect:
+          text: { ".card .title": Card renamed }
+          invoked: [{ command: oxplow.work_item.update, ok: false }, { command: oxplow.work_item.update, ok: true }]

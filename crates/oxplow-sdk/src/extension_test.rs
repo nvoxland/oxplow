@@ -3466,6 +3466,42 @@ fn node_actions(
         .unwrap_or_default()
 }
 
+/// What a `ui` step list has changed since the page last ran: data it
+/// changed, and the view params the frame set (merged; `null` drops one),
+/// which the app's tab would make the page's params.
+#[derive(Default)]
+struct UiState {
+    changed: bool,
+    view: serde_json::Map<String, Value>,
+    /// How many of the harness's records `view` has read.
+    seen: usize,
+}
+
+impl UiState {
+    fn merge_view(&mut self, change: &Value) {
+        for (k, v) in change.as_object().into_iter().flatten() {
+            let before = self.view.get(k).cloned();
+            if v.is_null() {
+                self.view.remove(k);
+            } else {
+                self.view.insert(k.clone(), v.clone());
+            }
+            if self.view.get(k) != before.as_ref() {
+                self.changed = true;
+            }
+        }
+    }
+
+    /// The step's params with the view params over them.
+    fn params(&self, step: &Value) -> Value {
+        let mut merged = step.as_object().cloned().unwrap_or_default();
+        for (k, v) in &self.view {
+            merged.insert(k.clone(), v.clone());
+        }
+        Value::Object(merged)
+    }
+}
+
 impl PageAt<'_> {
     /// Run a step's `ui:` list against the page's custom component — its
     /// `node:`, else the first component node — in the app's own webview
@@ -3603,7 +3639,7 @@ impl PageAt<'_> {
             }
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         }
-        let mut changed = false;
+        let mut state = UiState::default();
         for (index, item) in steps.iter().enumerate() {
             let at = format!("{label}: ui[{index}]");
             let item = match binds.substitute(item) {
@@ -3631,12 +3667,13 @@ impl PageAt<'_> {
                     .await
                     .map(|_| ())
             } else if let Some(view) = item.get("view_params") {
+                state.merge_view(view);
                 harness
                     .op(json!({ "op": "viewParams", "params": view }), wait)
                     .await
                     .map(|_| ())
             } else if let Some(given) = item.get("given") {
-                changed = true;
+                state.changed = true;
                 if run_steps(
                     self.host,
                     ext,
@@ -3659,7 +3696,7 @@ impl PageAt<'_> {
                 harness.submit_next(form.get("submit").cloned());
                 Ok(())
             } else if let Some(want) = item.get("expect") {
-                self.expect_ui(harness, params, want, &mut changed).await
+                self.expect_ui(harness, params, want, &mut state).await
             } else {
                 Err(
                     "a `ui` step is `click`, `fill`, `key`, `drag`, `press`, `view_params`, \
@@ -3695,14 +3732,28 @@ impl PageAt<'_> {
         harness: &crate::component_harness::Harness,
         params: &Value,
         want: &Value,
-        changed: &mut bool,
+        state: &mut UiState,
     ) -> Result<(), String> {
         let wait = std::time::Duration::from_secs(10);
         let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
         loop {
-            if harness.take_acted() || std::mem::take(changed) {
+            // The view params the frame set are the page's next run's.
+            let records = harness.records();
+            for (kind, change) in records.iter().skip(state.seen) {
+                if kind == "viewParams" {
+                    state.merge_view(change);
+                }
+            }
+            state.seen = records.len();
+            if harness.take_acted() || std::mem::take(&mut state.changed) {
                 self.host.settle().await;
-                let run = run_page(self.host, self.target.clone(), params, self.ctx).await?;
+                let run = run_page(
+                    self.host,
+                    self.target.clone(),
+                    &state.params(params),
+                    self.ctx,
+                )
+                .await?;
                 harness
                     .op(json!({ "op": "update", "run": run }), wait)
                     .await?;
@@ -7515,6 +7566,199 @@ steps:
                 && errors.contains("<li>From the bar</li>"),
             "{errors}"
         );
+    }
+
+    /// A component page of one custom component, for the `ui` tests: its
+    /// `app.js` runs on `oxplow.connect()`'s component.
+    fn component_ext(root: &Path, app: &str) {
+        write(
+            root,
+            ".oxplow/extensions/cards/extension.yaml",
+            "manifest: 2
+name: cards
+intent:
+  purpose: Cards.
+  examples:
+    - { name: drawn, input: { page: board }, expect: cards }
+permissions: { commands: [oxplow.work_item.create] }
+custom_components:
+  - { id: cards, title: Cards, commands: [oxplow.work_item.create] }
+",
+        );
+        write(
+            root,
+            ".oxplow/extensions/cards/pages/board.yaml",
+            "title: Board
+params:
+  - { name: kind, role: filter, default: all }
+data:
+  items: { sql: \"SELECT title FROM v_work_item WHERE :kind = 'all' OR title LIKE :kind || '%' ORDER BY title\" }
+view: { component: { id: cards } }
+",
+        );
+        write(
+            root,
+            ".oxplow/extensions/cards/components/cards/index.html",
+            "<!doctype html><html><body><form id=\"f\"><input id=\"t\"><span id=\"err\"></span></form><ul id=\"list\"></ul>\
+             <script src=\"/component-lib/oxplow-component.js\"></script><script src=\"app.js\"></script></body></html>",
+        );
+        write(
+            root,
+            ".oxplow/extensions/cards/components/cards/app.js",
+            app,
+        );
+    }
+
+    /// Enter in a field of a form submits it, as a browser does: the form's
+    /// own `submit` handler runs, and one that stops the keydown keeps it
+    /// from submitting.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_ui_enter_submits_the_form_a_field_is_in() {
+        assert!(
+            crate::component_harness::shell().is_some(),
+            "no oxplow app to draw the harness: build it first (`bun run build:dev`)"
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        component_ext(
+            root,
+            "oxplow.connect().then(function (c) {
+  var f = document.getElementById('f'), t = document.getElementById('t');
+  f.addEventListener('submit', function (e) {
+    e.preventDefault();
+    if (!t.value) { document.getElementById('err').textContent = 'Required'; return; }
+    document.getElementById('err').textContent = '';
+    c.invoke('oxplow.work_item.create', { title: t.value });
+  });
+});
+",
+        );
+        write(
+            root,
+            ".oxplow/extensions/cards/fixtures/drawn.yaml",
+            "when: { page: board }
+steps:
+  - ui:
+      - key: { on: \"#t\", key: Enter }
+      - expect: { text: { \"#err\": Required }, invoked: [] }
+      - fill: { \"#t\": Second }
+      - key: { on: \"#t\", key: Enter }
+      - expect: { text: { \"#err\": \"\" }, invoked: [{ command: oxplow.work_item.create, ok: true }] }
+",
+        );
+        let report = test_extension(root, "cards", false).await.unwrap();
+        assert_eq!(report.errors, Vec::<String>::new());
+    }
+
+    /// A component's view params re-run its page, as the app's tab does: a
+    /// filter it sets is the page's param for the next run, and Back
+    /// (`view_params` with `null`) drops it.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_ui_view_param_runs_the_page_again_with_it() {
+        assert!(
+            crate::component_harness::shell().is_some(),
+            "no oxplow app to draw the harness: build it first (`bun run build:dev`)"
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        component_ext(
+            root,
+            "oxplow.connect().then(function (c) {
+  var list = document.getElementById('list');
+  var draw = function (data) {
+    list.innerHTML = '';
+    data.items.rows.forEach(function (r) {
+      var li = document.createElement('li');
+      li.textContent = r[0];
+      list.appendChild(li);
+    });
+  };
+  draw(c.data);
+  c.onUpdate(function (u) { draw(u.data); });
+  var b = document.createElement('button');
+  b.id = 'only-b';
+  b.textContent = 'B';
+  b.addEventListener('click', function () { c.setViewParams({ kind: 'B' }); });
+  document.body.appendChild(b);
+});
+",
+        );
+        write(
+            root,
+            ".oxplow/extensions/cards/fixtures/drawn.yaml",
+            "given:
+  - { command: oxplow.work_item.create, input: { title: Alpha } }
+  - { command: oxplow.work_item.create, input: { title: Beta } }
+when: { page: board }
+steps:
+  - ui:
+      - expect: { count: { li: 2 } }
+      - click: \"#only-b\"
+      - expect: { count: { li: 1 }, text: { li: Beta }, view_params: { kind: B } }
+      - view_params: { kind: null }
+      - expect: { count: { li: 2 } }
+",
+        );
+        let report = test_extension(root, "cards", false).await.unwrap();
+        assert_eq!(report.errors, Vec::<String>::new());
+    }
+
+    /// `shown` is the view the core drew: the spec when it opened, `null`
+    /// when the core refused it or the component cleared it — however fast
+    /// the component asks.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_ui_shown_is_the_last_view_the_core_drew() {
+        assert!(
+            crate::component_harness::shell().is_some(),
+            "no oxplow app to draw the harness: build it first (`bun run build:dev`)"
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        component_ext(
+            root,
+            "oxplow.connect().then(function (c) {
+  var spec = function (sql) {
+    return 'title: Out\\ndata:\\n  rows: { sql: \"' + sql + '\" }\\nview: { from: rows, viz: table }\\n';
+  };
+  var button = function (id, run) {
+    var b = document.createElement('button');
+    b.id = id;
+    b.addEventListener('click', run);
+    document.body.appendChild(b);
+  };
+  button('bad', function () { c.showView(spec('SELECT * FROM no_such_model')).catch(function () {}); });
+  button('good', function () { c.showView(spec('SELECT 1 AS n')).catch(function () {}); });
+  button('clear', function () { c.showView(null); });
+  // Three asks at once: the last the core drew is the one that counts.
+  button('burst', function () {
+    c.showView(spec('SELECT 1 AS n')).catch(function () {});
+    c.showView(spec('SELECT * FROM no_such_model')).catch(function () {});
+    c.showView(spec('SELECT 2 AS n')).catch(function () {});
+  });
+});
+",
+        );
+        write(
+            root,
+            ".oxplow/extensions/cards/fixtures/drawn.yaml",
+            r##"when: { page: board }
+steps:
+  - ui:
+      - click: "#bad"
+      - expect: { shown: null }
+      - click: "#good"
+      - expect: { shown: "title: Out\ndata:\n  rows: { sql: \"SELECT 1 AS n\" }\nview: { from: rows, viz: table }\n" }
+      - click: "#bad"
+      - expect: { shown: null }
+      - click: "#good"
+      - click: "#clear"
+      - expect: { shown: null }
+      - click: "#burst"
+      - expect: { shown: "title: Out\ndata:\n  rows: { sql: \"SELECT 2 AS n\" }\nview: { from: rows, viz: table }\n" }
+"##,
+        );
+        let report = test_extension(root, "cards", false).await.unwrap();
+        assert_eq!(report.errors, Vec::<String>::new());
     }
 
     /// `rows: []` is no rows, like `rows: 0`.
