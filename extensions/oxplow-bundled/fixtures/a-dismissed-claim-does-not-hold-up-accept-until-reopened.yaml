@@ -1,0 +1,31 @@
+# A dismissed claim doesn't count: with it dismissed and the decision
+# confirmed, accept needs no force, and reopening it brings the refusal
+# back.
+given:
+  - { command: oxplow.work_item.create, input: { title: Fix the hover state, body: "Fix the hover state in [[src/ui/button.ts]].", thread: thr1 }, bind: item }
+  - { command: oxplow.work_item.transition, input: { uri: $item.uri, to: in_progress } }
+  - observe:
+      turn:
+        prompt: Fix the hover state
+        tools:
+          - { name: Edit, kind: edit, paths: [src/ui/button.ts], ok: true }
+          - { name: Edit, kind: edit, paths: [crates/db/store.rs], ok: true }
+  - command: oxplow.effort.replace_inferred_claims
+    input: { effort: eff1, claims: [{ statement: no behavior change, kind: no_behavior_change }] }
+  - command: oxplow.effort.replace_inferred_decisions
+    input: { effort: eff1, decisions: [{ question: Which store?, choice: SQLite, alternatives: [files], why: "it's there" }] }
+  - { command: oxplow.effort.confirm_decision, input: { decision: 1 } }
+  - { command: oxplow.effort.dismiss_claim, input: { claim: 1 } }
+  - { command: oxplow.effort.reopen_claim, input: { claim: 1 } }
+when:
+  command: oxplow.review.accept
+  input: { effort: eff1 }
+  confirmed: true
+expect:
+  ok: false
+  refused: 1 unverified claim
+steps:
+  - given: [{ command: oxplow.effort.dismiss_claim, input: { claim: 1 } }]
+  - expect: { ok: true }
+  - when: { sql: "SELECT state FROM v_work_item" }
+    expect: { rows: [{ state: done }] }

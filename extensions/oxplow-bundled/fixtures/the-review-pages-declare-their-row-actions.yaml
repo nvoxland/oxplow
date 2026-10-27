@@ -1,0 +1,14 @@
+# The review's rows carry their verdicts: Mark Verified on an unverified
+# claim, with Dismiss and Reopen beside it.
+given:
+  - { command: oxplow.effort.open, input: { thread: thr1 } }
+  - command: oxplow.effort.replace_inferred_claims
+    input: { effort: eff1, claims: [{ statement: The tests pass., kind: tests_pass }] }
+when: { page: oxplow-bundled/unverified-claims, params: { effort_id: 1 } }
+expect:
+  nodes:
+    - id: unverified_claims
+      actions:
+        - { label: Mark Verified, command: oxplow.effort.verify_claim, row: true }
+        - { label: Dismiss, command: oxplow.effort.dismiss_claim, row: true }
+        - { label: Reopen, command: oxplow.effort.reopen_claim, row: true }

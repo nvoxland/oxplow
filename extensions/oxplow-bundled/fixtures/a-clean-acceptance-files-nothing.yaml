@@ -1,0 +1,26 @@
+# An acceptance that left nothing unchecked files nothing: the follow-up
+# effect skips.
+given:
+  - { command: oxplow.work_item.create, input: { title: Fix the hover state, body: "Fix the hover state in [[src/ui/button.ts]].", thread: thr1 }, bind: item }
+  - { command: oxplow.work_item.transition, input: { uri: $item.uri, to: in_progress } }
+  - observe:
+      turn:
+        prompt: Fix the hover state
+        tools:
+          - { name: Edit, kind: edit, paths: [src/ui/button.ts], ok: true }
+          - { name: Edit, kind: edit, paths: [crates/db/store.rs], ok: true }
+  - command: oxplow.effort.replace_inferred_claims
+    input: { effort: eff1, claims: [{ statement: no behavior change, kind: no_behavior_change }] }
+  - command: oxplow.effort.replace_inferred_decisions
+    input: { effort: eff1, decisions: [{ question: Which store?, choice: SQLite, alternatives: [files], why: "it's there" }] }
+  - { command: oxplow.effort.verify_claim, input: { claim: 1 } }
+  - { command: oxplow.effort.confirm_decision, input: { decision: 1 } }
+when:
+  command: oxplow.review.accept
+  input: { effort: eff1 }
+  confirmed: true
+expect:
+  ok: true
+steps:
+  - when: { sql: "SELECT (SELECT count(*) FROM v_work_item WHERE title LIKE 'Verify what the review of %') AS follow_ups, (SELECT group_concat(state) FROM v_effect_run WHERE effect = 'oxplow-bundled/verify-unchecked') AS reacted" }
+    expect: { rows: [{ follow_ups: 0, reacted: skipped }] }

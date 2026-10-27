@@ -115,6 +115,45 @@ intent:
     - name: the-effort-verdict-says-what-a-reviewer-needs-first
       input: { page: effort-verdict }
       expect: the verdict says whether it tested, how much ran and what is left to check
+    - name: accept-refuses-unreviewed-work-unless-forced
+      input: { command: review.accept }
+      expect: accept-refuses-unreviewed-work-unless-forced
+    - name: accept-after-review-needs-no-force
+      input: { command: review.accept }
+      expect: accept-after-review-needs-no-force
+    - name: a-dismissed-claim-does-not-hold-up-accept-until-reopened
+      input: { command: review.accept }
+      expect: a-dismissed-claim-does-not-hold-up-accept-until-reopened
+    - name: an-agent-accepts-a-review-through-a-page-unasked
+      input: { command: review.accept }
+      expect: an-agent-accepts-a-review-through-a-page-unasked
+    - name: accept-asks-a-person-first
+      input: { command: review.accept }
+      expect: unconfirmed, accept runs nothing
+    - name: a-disabled-contribution-files-a-repair-item-and-a-repeat-comments
+      input: { event: contribution.disabled }
+      expect: one repair item while open, a comment on a repeat, a new item once closed
+    - name: a-claim-statement-stays-one-checklist-line
+      input: { command: review.accept }
+      expect: a claim cannot add items to the follow-up
+    - name: a-clean-acceptance-files-nothing
+      input: { command: review.accept }
+      expect: a clean acceptance files nothing
+    - name: request-changes-lists-what-to-fix-and-reopens-the-item
+      input: { command: review.request_changes }
+      expect: a checklist of what to fix, and the item back to ready
+    - name: the-accept-comment-holds-a-claim-as-inert-text
+      input: { command: review.accept }
+      expect: a claim is inert text in the review comment
+    - name: the-request-changes-comment-holds-a-claim-as-inert-text
+      input: { command: review.request_changes }
+      expect: a claim is inert text in the checklist
+    - name: the-review-pages-declare-their-row-actions
+      input: { page: unverified-claims }
+      expect: Mark Verified, Dismiss and Reopen on a claim row
+    - name: inferred-decisions-offer-confirm-and-dismiss
+      input: { page: inferred-decisions }
+      expect: Confirm and Dismiss on an inferred decision
 # oxplow's default work list and effort policy: built-ins of core's,
 # declared here so they are an extension's like any other. Disabled, both
 # fall to none. Snapshots can't be none: their default is core's own (it

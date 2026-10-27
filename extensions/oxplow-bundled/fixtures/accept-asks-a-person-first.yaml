@@ -1,0 +1,14 @@
+# The review verbs ask a person before they act: unconfirmed, accept runs
+# nothing.
+given:
+  - { command: oxplow.work_item.create, input: { title: Fix the hover state, thread: thr1 }, bind: item }
+  - { command: oxplow.work_item.transition, input: { uri: $item.uri, to: in_progress } }
+when:
+  command: oxplow.review.accept
+  input: { effort: eff1 }
+expect:
+  ok: false
+  refused: needs confirmation
+steps:
+  - when: { sql: "SELECT state FROM v_work_item" }
+    expect: { rows: [{ state: in_progress }] }

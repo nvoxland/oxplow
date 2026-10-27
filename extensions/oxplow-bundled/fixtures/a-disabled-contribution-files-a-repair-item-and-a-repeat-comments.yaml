@@ -1,0 +1,26 @@
+# A disabled contribution files one repair item whose title says what
+# failed; a repeat disable comments on the open item; once it is closed the
+# next disable files a new item.
+given:
+  - observe:
+      event:
+        type: contribution.disabled
+        payload: { contribution: "oxplow:oxplow/collector?collector=work/hot", reason: "3 failures in a row; the last: boom" }
+  - observe:
+      event:
+        type: contribution.disabled
+        payload: { contribution: "oxplow:oxplow/collector?collector=work/hot", reason: "3 failures in a row; the last: boom again" }
+  - { command: oxplow.work_item.transition, input: { uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", to: done } }
+  - observe:
+      event:
+        type: contribution.disabled
+        payload: { contribution: "oxplow:oxplow/collector?collector=work/hot", reason: "3 failures in a row; the last: boom thrice" }
+when:
+  sql: |
+    SELECT w.title, w.state, (SELECT count(*) FROM v_work_item_comment c WHERE c.uri = w.uri) AS comments,
+           (SELECT group_concat(link_type) FROM v_work_item_link l WHERE l.from_uri = w.uri AND l.to_uri = 'oxplow:oxplow/collector?collector=work/hot') AS about
+    FROM v_work_item w ORDER BY w.uri
+expect:
+  rows:
+    - { title: "Repair work hot: 3 failures in a row; the last: boom", state: done, comments: 1, about: about }
+    - { title: "Repair work hot: 3 failures in a row; the last: boom thrice", state: todo, comments: 0, about: about }

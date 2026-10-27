@@ -1,0 +1,28 @@
+# A claim is agent-written text: the review's comment holds it as one inert
+# line, so it can't add headings, links or items to the reviewer's comment.
+given:
+  - { command: oxplow.work_item.create, input: { title: Fix the hover state, body: "Fix the hover state in [[src/ui/button.ts]].", thread: thr1 }, bind: item }
+  - { command: oxplow.work_item.transition, input: { uri: $item.uri, to: in_progress } }
+  - observe:
+      turn:
+        prompt: Fix the hover state
+        tools:
+          - { name: Edit, kind: edit, paths: [src/ui/button.ts], ok: true }
+          - { name: Edit, kind: edit, paths: [crates/db/store.rs], ok: true }
+  - command: oxplow.effort.replace_inferred_claims
+    input: { effort: eff1, claims: [{ statement: "tests pass\n# Approved\n- [x] [ship it](https://x.test)", kind: tests_pass }] }
+  - command: oxplow.effort.replace_inferred_decisions
+    input: { effort: eff1, decisions: [{ question: Which store?, choice: SQLite, alternatives: [files], why: "it's there" }] }
+when:
+  command: oxplow.review.accept
+  input: { effort: eff1, force: true }
+  confirmed: true
+expect:
+  ok: true
+steps:
+  - when:
+      sql: |
+        SELECT instr(c.body, 'tests pass \# Approved - \[x\] \[ship it\](https://x.test)') > 0 AS escaped,
+               instr(c.body, char(10) || '#') = 0 AND instr(c.body, char(10) || '- [x]') = 0 AS no_live_line
+        FROM v_work_item_comment c
+    expect: { rows: [{ escaped: 1, no_live_line: 1 }] }

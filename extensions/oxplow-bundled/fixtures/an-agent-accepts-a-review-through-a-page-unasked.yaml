@@ -1,0 +1,27 @@
+# oxplow puts no wall between a person and their agent: an agent accepts,
+# forced, without being asked; the verb asks a person.
+given:
+  - { command: oxplow.work_item.create, input: { title: Fix the hover state, body: "Fix the hover state in [[src/ui/button.ts]].", thread: thr1 }, bind: item }
+  - { command: oxplow.work_item.transition, input: { uri: $item.uri, to: in_progress } }
+  - observe:
+      turn:
+        prompt: Fix the hover state
+        tools:
+          - { name: Edit, kind: edit, paths: [src/ui/button.ts], ok: true }
+          - { name: Edit, kind: edit, paths: [crates/db/store.rs], ok: true }
+  - command: oxplow.effort.replace_inferred_claims
+    input: { effort: eff1, claims: [{ statement: no behavior change, kind: no_behavior_change }] }
+  - command: oxplow.effort.replace_inferred_decisions
+    input: { effort: eff1, decisions: [{ question: Which store?, choice: SQLite, alternatives: [files], why: "it's there" }] }
+when:
+  command: oxplow.review.accept
+  input: { effort: eff1, force: true }
+  as: agent
+expect:
+  ok: true
+steps:
+  - when: { sql: "SELECT title, state FROM v_work_item ORDER BY title" }
+    expect:
+      rows:
+        - { title: Fix the hover state, state: done }
+        - { title: Verify what the review of eff1 accepted unchecked, state: todo }

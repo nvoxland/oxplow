@@ -888,6 +888,34 @@ async fn event_example(host: &Host, ext: &Extension, ex: &Example<'_>, report: &
     }
 }
 
+/// `commands` as audited (name, audit id): a sequence — how an effect's
+/// commands run — is replaced by its steps, in order.
+async fn without_sequences(host: &Host, audited: Vec<(String, Option<i64>)>) -> Vec<String> {
+    let audits = oxplow_db::SqliteCommandAuditStore::new(host.svc.db.clone());
+    let mut commands = Vec::new();
+    for (name, id) in audited {
+        let steps = match (id, name == "oxplow.command.sequence") {
+            (Some(id), true) => audits
+                .get(id)
+                .await
+                .ok()
+                .flatten()
+                .and_then(|a| a.result.and_then(|r| r.get("children").cloned())),
+            _ => None,
+        };
+        match steps {
+            Some(Value::Array(children)) => commands.extend(
+                children
+                    .iter()
+                    .filter_map(|c| c.get("name").and_then(Value::as_str))
+                    .map(str::to_string),
+            ),
+            _ => commands.push(name),
+        }
+    }
+    commands
+}
+
 /// What the effects did after log position `seq`: each latest run on the
 /// events at it (`at` is `=`: one event) or past it (`>`: whatever a job
 /// logged), and the commands they ran, once the effects have heard the log.
@@ -928,31 +956,14 @@ async fn effect_outcome(host: &Host, seq: i64, at: &str) -> (Vec<Value>, Vec<Str
            AND json_extract(payload, '$.actor_kind') = 'effect' ORDER BY seq",
     )
     .await;
-    // An effect's commands run as one sequence; its steps are what the
-    // fixture names.
-    let audits = oxplow_db::SqliteCommandAuditStore::new(host.svc.db.clone());
-    let mut commands = Vec::new();
-    for r in &ran {
-        let name = text(&r[0]);
-        let steps = match (&r[1], name == "oxplow.command.sequence") {
-            (oxplow_db::SqlCell::Int(id), true) => audits
-                .get(*id)
-                .await
-                .ok()
-                .flatten()
-                .and_then(|a| a.result.and_then(|r| r.get("children").cloned())),
-            _ => None,
-        };
-        match steps {
-            Some(Value::Array(children)) => commands.extend(
-                children
-                    .iter()
-                    .filter_map(|c| c.get("name").and_then(Value::as_str))
-                    .map(str::to_string),
-            ),
-            _ => commands.push(name),
-        }
-    }
+    let audited = ran
+        .iter()
+        .map(|r| match &r[1] {
+            oxplow_db::SqlCell::Int(id) => (text(&r[0]), Some(*id)),
+            _ => (text(&r[0]), None),
+        })
+        .collect();
+    let commands = without_sequences(host, audited).await;
     (effects, commands)
 }
 
@@ -1332,7 +1343,7 @@ async fn run_steps(
                     return false;
                 }
             };
-            if let Err(e) = observe(host, &observed).await {
+            if let Err(e) = observe(host, ext, &observed).await {
                 report
                     .errors
                     .push(format!("{shown}:1: `{key}[{index}]` `observe`: {e}"));
@@ -1405,12 +1416,15 @@ async fn run_steps(
 /// `observe: { <kind>: { .. } }`: a fact oxplow only learns from what
 /// happens around it, made through the API core makes it with.
 ///
+/// - `event: { type, v?, payload, subject?, anchors? }`: an event logged
+///   and delivered, the extension's effects reacting.
+/// - `evidence: { effort, observations: [..] }`: an effort's evidence.
 /// - `turn: { prompt?, during?: [{ command, input?, as? }], tools?: [{ name, kind, paths?, command?, detail?,
 ///   ok?, exit_code? }], write?: { path, body }, answer? }`: one turn on the
 ///   primary thread, as its harness's hooks report it — the prompt, each
 ///   tool call, the file the turn wrote (a snapshot of the worktree is taken
 ///   after it) and the turn's end with the agent's last message.
-async fn observe(host: &Host, observed: &Value) -> Result<(), String> {
+async fn observe(host: &Host, ext: &Extension, observed: &Value) -> Result<(), String> {
     let Some(map) = observed.as_object().filter(|m| m.len() == 1) else {
         return Err("name one kind — fix: `observe: { turn: { .. } }`".into());
     };
@@ -1418,9 +1432,10 @@ async fn observe(host: &Host, observed: &Value) -> Result<(), String> {
     match kind.as_str() {
         "turn" => observe_turn(host, body).await,
         "evidence" => observe_evidence(host, body).await,
+        "event" => observe_event(host, ext, body).await,
         other => {
             return Err(format!(
-                "`{other}` isn't a kind — fix: `turn` or `evidence`"
+                "`{other}` isn't a kind — fix: `turn`, `evidence` or `event`"
             ))
         }
     }?;
@@ -1431,6 +1446,30 @@ async fn observe(host: &Host, observed: &Value) -> Result<(), String> {
     host.svc
         .event_pump
         .deliver_projections()
+        .await
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
+/// `event: { type, v?, payload, subject?, anchors? }`: an event oxplow
+/// logs when something outside it happens (a contribution disabled after
+/// failing, say), logged and delivered as a fixture's `when: { event }` is,
+/// the extension's effects reacting to it.
+async fn observe_event(host: &Host, ext: &Extension, body: &Value) -> Result<(), String> {
+    start_effects(host, ext).await?;
+    let view = EventView::fixture(body, &host.svc.vocabulary.current()).map_err(|e| e.message())?;
+    let mut env = oxplow_domain::events::Envelope::new(
+        view.event_type.clone(),
+        view.v,
+        "fixture",
+        view.payload.clone(),
+    )
+    .map_err(|e| e.to_string())?;
+    env.subject = view.subject.clone();
+    env.anchors = view.anchors.clone();
+    host.svc
+        .event_log_store
+        .append(env)
         .await
         .map(|_| ())
         .map_err(|e| e.to_string())
@@ -1679,11 +1718,11 @@ async fn command_run(host: &Host, ex: &Example<'_>, command: &str, report: &mut 
         },
         Err(e) => json!({ "ok": false, "refused": e.to_string() }),
     };
-    let mut ran: Vec<String> = host
+    let mut audited: Vec<(String, Option<i64>)> = host
         .svc
         .sql
         .query_sql(
-            "SELECT command FROM v_command_audit WHERE id > ?1 ORDER BY id",
+            "SELECT command, id FROM v_command_audit WHERE id > ?1 ORDER BY id",
             vec![head],
             None,
         )
@@ -1691,15 +1730,18 @@ async fn command_run(host: &Host, ex: &Example<'_>, command: &str, report: &mut 
         .map(|r| r.rows)
         .unwrap_or_default()
         .iter()
-        .filter_map(|row| match row.first() {
-            Some(oxplow_db::SqlCell::Text(name)) => Some(name.clone()),
+        .filter_map(|row| match row.as_slice() {
+            [oxplow_db::SqlCell::Text(name), oxplow_db::SqlCell::Int(id)] => {
+                Some((name.clone(), Some(*id)))
+            }
             _ => None,
         })
         .collect();
-    if let Some(own) = ran.iter().position(|name| name == command) {
-        ran.remove(own);
+    if let Some(own) = audited.iter().position(|(name, _)| name == command) {
+        audited.remove(own);
     }
-    composed.extend(ran);
+    let mut ran = without_sequences(host, audited).await;
+    composed.append(&mut ran);
     let ran = composed;
     got["commands"] = json!(ran);
     if let Some((path, want, at)) = compare(&ex.expect, &got) {
@@ -4694,6 +4736,26 @@ expect:
         assert!(report.ok, "{:?}", report.errors);
     }
 
+    /// A command fixture lists what reacted to it by the commands an effect
+    /// ran, not the sequence that carried them.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_command_fixture_lists_the_commands_an_effect_ran_not_their_sequence() {
+        let dir = tempfile::tempdir().unwrap();
+        crate::scaffold(dir.path(), crate::Kind::Effect, "notes", None).unwrap();
+        write(
+            dir.path(),
+            ".oxplow/extensions/notes/fixtures/basic.yaml",
+            "given: [{ command: oxplow.work_item.create, input: { title: T, state: in_progress }, bind: t }]
+when: { command: oxplow.work_item.transition, input: { uri: $t.uri, to: done } }
+expect:
+  ok: true
+  commands: [oxplow.work_item.comment]
+",
+        );
+        let report = test_extension(dir.path(), "notes", false).await.unwrap();
+        assert!(report.ok, "{:?}", report.errors);
+    }
+
     /// `observe: { turn }` makes a turn the way hooks report one: its
     /// prompt, its tool calls (a failed one, one naming a file), its
     /// answer, and the file it wrote.
@@ -4749,6 +4811,26 @@ expect:
             "{:?}",
             report.ran
         );
+    }
+
+    /// `observe: { event }` logs an event and lets the effects react, so a
+    /// scenario reads what they did.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_given_observes_an_event_the_effects_react_to() {
+        let dir = tempfile::tempdir().unwrap();
+        crate::scaffold(dir.path(), crate::Kind::Effect, "notes", None).unwrap();
+        write(
+            dir.path(),
+            ".oxplow/extensions/notes/fixtures/basic.yaml",
+            "given:
+  - { command: oxplow.work_item.create, input: { title: T }, bind: t }
+  - observe: { event: { type: work_item.state_changed, payload: { work_item: $t.uri, to: done } } }
+when: { sql: SELECT count(*) AS n FROM v_work_item_comment }
+expect: { rows: [{ n: 1 }] }
+",
+        );
+        let report = test_extension(dir.path(), "notes", false).await.unwrap();
+        assert!(report.ok, "{:?}", report.errors);
     }
 
     /// `observe: { evidence }` sets the observations an effort's page

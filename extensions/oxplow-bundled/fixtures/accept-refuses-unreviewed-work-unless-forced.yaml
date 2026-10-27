@@ -1,0 +1,37 @@
+# Accept refuses while a claim is unverified or an inferred decision is
+# unreviewed; forced, it closes the item and leaves one review comment
+# that lists what was accepted unchecked.
+given:
+  - { command: oxplow.work_item.create, input: { title: Fix the hover state, body: "Fix the hover state in [[src/ui/button.ts]].", thread: thr1 }, bind: item }
+  - { command: oxplow.work_item.transition, input: { uri: $item.uri, to: in_progress } }
+  - observe:
+      turn:
+        prompt: Fix the hover state
+        tools:
+          - { name: Edit, kind: edit, paths: [src/ui/button.ts], ok: true }
+          - { name: Edit, kind: edit, paths: [crates/db/store.rs], ok: true }
+  - command: oxplow.effort.replace_inferred_claims
+    input: { effort: eff1, claims: [{ statement: no behavior change, kind: no_behavior_change }] }
+  - command: oxplow.effort.replace_inferred_decisions
+    input: { effort: eff1, decisions: [{ question: Which store?, choice: SQLite, alternatives: [files], why: "it's there" }] }
+when:
+  command: oxplow.review.accept
+  input: { effort: eff1 }
+  confirmed: true
+expect:
+  ok: false
+  refused: 1 unverified claim and 1 inferred decision
+steps:
+  - when: { sql: "SELECT w.state, c.body FROM v_work_item w LEFT JOIN v_work_item_comment c ON c.uri = w.uri" }
+    expect: { rows: [{ state: in_progress, body: null }] }
+  - when: { command: oxplow.review.accept, input: { effort: eff1, force: true }, confirmed: true }
+    expect:
+      ok: true
+      # It ends the effort, and its follow-up item is filed for what was accepted unchecked.
+      commands: [oxplow.work_item.comment, oxplow.work_item.transition, oxplow.effort.close, oxplow.work_item.create]
+  - when: { sql: "SELECT w.state, c.body FROM v_work_item w LEFT JOIN v_work_item_comment c ON c.uri = w.uri" }
+    expect:
+      rows:
+        - state: done
+          body: "Review accepted (eff1).\n\nAccepted with unverified claims:\n- no behavior change\n\nAccepted with unreviewed decisions:\n- Which store? → SQLite"
+        - { state: todo, body: null }
