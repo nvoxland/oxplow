@@ -1322,10 +1322,20 @@ async fn run_steps(
             }
             continue;
         }
+        if let Some(observed) = step.get("observe") {
+            if let Err(e) = observe(host, observed).await {
+                report
+                    .errors
+                    .push(format!("{shown}:1: `{key}[{index}]` `observe`: {e}"));
+                return false;
+            }
+            host.settle().await;
+            continue;
+        }
         let Some(command) = step.get("command").and_then(Value::as_str) else {
             report.errors.push(format!(
-                "{shown}:1: `{key}[{index}]` names no command — fix: `{{ command, input?, as? }}` \
-                 or `{{ rows: {{ <entity>: [..] }} }}`"
+                "{shown}:1: `{key}[{index}]` names no command — fix: `{{ command, input?, as? }}`, \
+                 `{{ observe: {{ <kind>: {{ .. }} }} }}` or `{{ rows: {{ <entity>: [..] }} }}`"
             ));
             return false;
         };
@@ -1381,6 +1391,113 @@ async fn run_steps(
         }
     }
     true
+}
+
+/// `observe: { <kind>: { .. } }`: a fact oxplow only learns from what
+/// happens around it, made through the API core makes it with.
+///
+/// - `turn: { prompt?, tools?: [{ name, kind, paths?, command?, detail?,
+///   ok?, exit_code? }], write?: { path, body }, answer? }`: one turn on the
+///   primary thread, as its harness's hooks report it — the prompt, each
+///   tool call, the file the turn wrote (a snapshot of the worktree is taken
+///   after it) and the turn's end with the agent's last message.
+async fn observe(host: &Host, observed: &Value) -> Result<(), String> {
+    let Some(map) = observed.as_object().filter(|m| m.len() == 1) else {
+        return Err("name one kind — fix: `observe: { turn: { .. } }`".into());
+    };
+    let (kind, body) = map.iter().next().expect("one key");
+    match kind.as_str() {
+        "turn" => observe_turn(host, body).await,
+        other => Err(format!("`{other}` isn't a kind — fix: `turn`")),
+    }
+}
+
+async fn observe_turn(host: &Host, body: &Value) -> Result<(), String> {
+    use oxplow_app::hook_ingest::{HookEnvelope, LAST_ASSISTANT_MESSAGE};
+    use oxplow_domain::hook::HookKind;
+    for key in body.as_object().into_iter().flat_map(|m| m.keys()) {
+        if !["prompt", "tools", "write", "answer"].contains(&key.as_str()) {
+            return Err(format!(
+                "`turn.{key}` — fix: `prompt`, `tools`, `write` or `answer`"
+            ));
+        }
+    }
+    let svc = &host.svc;
+    let thread = oxplow_domain::ThreadId::new(1);
+    let envelope = |kind: HookKind, payload: Value| HookEnvelope {
+        session_title: None,
+        turn_run: None,
+        kind,
+        thread_id: Some(thread),
+        stream_id: None,
+        agent_session_id: None,
+        session_id: Some("fixture".into()),
+        payload_json: payload.to_string(),
+        prompt: None,
+        decision: None,
+        tool: None,
+        subagent: None,
+        peer: None,
+    };
+    let ingest = |env: HookEnvelope| async move {
+        svc.hook_ingest
+            .ingest(env)
+            .await
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    };
+    let mut prompt = envelope(HookKind::UserPromptSubmit, json!({}));
+    prompt.prompt = Some(
+        body.get("prompt")
+            .and_then(Value::as_str)
+            .unwrap_or("Work on it")
+            .to_string(),
+    );
+    ingest(prompt).await?;
+    for tool in body
+        .get("tools")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let used: oxplow_domain::agent::tool::ToolUse =
+            serde_json::from_value(tool.clone()).map_err(|e| format!("a tool: {e}"))?;
+        let mut call = envelope(HookKind::PostToolUse, json!({}));
+        call.tool = Some(used);
+        ingest(call).await?;
+    }
+    if let Some(write) = body.get("write") {
+        let (Some(path), Some(text)) = (
+            write.get("path").and_then(Value::as_str),
+            write.get("body").and_then(Value::as_str),
+        ) else {
+            return Err("`turn.write` is `{ path, body }`".into());
+        };
+        let file = svc.layout.project_dir.join(path);
+        if let Some(parent) = file.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        std::fs::write(&file, text).map_err(|e| e.to_string())?;
+        let stream = svc
+            .streams
+            .list_streams()
+            .await
+            .map_err(|e| e.to_string())?
+            .first()
+            .map(|s| s.id)
+            .ok_or("no stream")?;
+        svc.snapshot_captures
+            .get(&stream)
+            .ok_or("no snapshot capture")?
+            .enqueue_startup_diff()
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+    let mut payload = json!({});
+    if let Some(answer) = body.get("answer") {
+        payload[LAST_ASSISTANT_MESSAGE] = answer.clone();
+    }
+    ingest(envelope(HookKind::Stop, payload)).await
 }
 
 /// Who runs a step's command (`as:`): a person, or `agent` (the primary
@@ -4463,6 +4580,59 @@ expect:
         );
         let report = test_extension(dir.path(), "notes", false).await.unwrap();
         assert!(report.ok, "{:?}", report.errors);
+    }
+
+    /// `observe: { turn }` makes a turn the way hooks report one: its
+    /// prompt, its tool calls (a failed one, one naming a file), its
+    /// answer, and the file it wrote.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_given_observes_a_turn_through_the_hook_ingest() {
+        let dir = tempfile::tempdir().unwrap();
+        crate::scaffold(dir.path(), crate::Kind::Command, "notes", None).unwrap();
+        write(
+            dir.path(),
+            ".oxplow/extensions/notes/fixtures/basic.yaml",
+            "given:
+  - observe:
+      turn:
+        prompt: Add CSV export
+        tools:
+          - { name: Edit, kind: edit, paths: [src/report.rs], ok: true }
+          - { name: Bash, kind: shell, command: cargo test, detail: cargo test, ok: false }
+        answer: Done; used the csv crate.
+when:
+  sql: SELECT tool, path, ok FROM v_tool_call ORDER BY id
+expect:
+  rows:
+    - { tool: Edit, path: src/report.rs, ok: 1 }
+    - { tool: Bash, ok: 0 }
+",
+        );
+        write(
+            dir.path(),
+            ".oxplow/extensions/notes/fixtures/answer.yaml",
+            "given:
+  - observe: { turn: { prompt: Add CSV export, answer: Done; used the csv crate. } }
+when:
+  sql: SELECT prompt, answer FROM v_agent_turn
+expect:
+  rows: [{ prompt: Add CSV export, answer: Done; used the csv crate. }]
+",
+        );
+        let manifest = dir.path().join(".oxplow/extensions/notes/extension.yaml");
+        let text = std::fs::read_to_string(&manifest).unwrap();
+        std::fs::write(
+            &manifest,
+            text.replacen(
+                "  examples:\n",
+                "  examples:\n    - { name: answer, expect: the turn's answer }\n",
+                1,
+            ),
+        )
+        .unwrap();
+        let report = test_extension(dir.path(), "notes", false).await.unwrap();
+        assert!(report.ok, "{:?}", report.errors);
+        assert!(report.ran.contains(&"example answer".to_string()), "{:?}", report.ran);
     }
 
     /// A policy that opens an item's effort when it starts on a thread,
