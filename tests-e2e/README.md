@@ -107,6 +107,15 @@ Board, list and editor) and the triage example (its real `todos` collector
 over the `sorter` provider, decisions from the board and the `todos` page,
 surviving a reload).
 
+`pages/` is the page-mechanics suite: each spec installs a tiny extension
+of its own (`installExtension` in `support/pages.ts`) and checks one generic
+behaviour: select, expand, group fold, switch, form, slot, replacement,
+embed, component, panel, params. A page migrated into an extension gets a
+per-page spec only for behaviour the `specs/pages/*` suite does not cover
+(a command's effect, a data flow, keyboard, drag, undo). A spec that only
+checks that a page draws, a row opens a page, a group folds or a renderer
+takes a URI repeats that suite, and costs a full run for nothing.
+
 What stays a hand walk: the WKWebView window itself, shell-only surfaces
 (project setup, the native menu, the clipboard, external URLs), OAuth
 sign-in.

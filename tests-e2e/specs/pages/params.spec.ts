@@ -39,7 +39,6 @@ async function openHistory(page: Page) {
     host,
     body: host.getByTestId("page-file"),
     commits: host.locator('[data-node="commits"]'),
-    files: host.locator('[data-node="files"]'),
     rail: host.getByTestId("page-rail"),
     filters: host.getByTestId("page-rail-filters"),
   };
@@ -52,7 +51,7 @@ test("the rail's filters narrow a page, a row click shows the next section its p
   // The window is up while the commits land, as a person's is.
   await page.goto("/");
   await twoCommits(daemon);
-  const { body, commits, files, rail, filters } = await openHistory(page);
+  const { body, commits, rail, filters } = await openHistory(page);
   // The rail is the page's one place for controls: its filters as rows
   // (a label beside its value), the selection, and where it comes from.
   await expect(filters.getByTestId("page-param-range-value")).toHaveText("Last 30 days");
@@ -73,11 +72,11 @@ test("the rail's filters narrow a page, a row click shows the next section its p
   await expect(commits).not.toContainText("Add the wombat");
   await expect(commits).toContainText("Add the numbat");
 
-  // Clicking the commit sets the page's `commit`: its files show below.
+  // A pick is the next section's input (select.spec.ts checks the fill and the
+  // reload); here it matters to the rail and the history.
   const row = commits.getByTestId("viz-row-0");
   await row.click();
   await expect(row).toHaveAttribute("aria-selected", "true");
-  await expect(files).toContainText("numbat.txt");
   await expect(rail.getByTestId("page-rail-selection")).toContainText("Add the numbat");
 
   // The page's view is its tab's entry: the search and the pick are in
@@ -97,7 +96,6 @@ test("the rail's filters narrow a page, a row click shows the next section its p
   // A reload brings the tab back with its values.
   await page.reload();
   await expect(filters.getByTestId("page-param-q-value")).toHaveText("numbat");
-  await expect(files).toContainText("numbat.txt");
 
   // A custom range opens over the page; Escape closes it.
   await filters.getByTestId("page-param-range-value").click();
