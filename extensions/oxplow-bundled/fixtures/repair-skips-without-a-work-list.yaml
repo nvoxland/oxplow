@@ -1,5 +1,5 @@
 # No work list is running: nothing to file on, and not a failure.
-input:
+when:
   effect: repair-disabled
   event:
     type: contribution.disabled

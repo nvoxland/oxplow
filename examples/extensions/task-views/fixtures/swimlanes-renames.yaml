@@ -1,6 +1,6 @@
 # Renaming an item through the board goes through: the update answers
 # with the item.
-input:
+when:
   component: swimlanes
   items: [Fix the parser]
   invokes:

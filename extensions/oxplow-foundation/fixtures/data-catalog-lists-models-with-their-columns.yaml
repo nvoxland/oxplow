@@ -3,7 +3,7 @@
 # `v_model` are found by name, which is how the list is read).
 given:
   - { command: oxplow.effort.open, input: { thread: thr1 } }
-input: { page: data-catalog, params: { model: "" } }
+when: { page: data-catalog, params: { model: "" } }
 expect:
   text: { contains: ["| Model | Owner | Holds | Columns |", "| v_agent_conversation | core |"] }
 steps:

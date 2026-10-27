@@ -4,7 +4,7 @@
 given:
   - { command: oxplow.knowledge.add_comment, input: { stream: str1, target: "oxplow:oxplow/wiki?slug=a-page", quote: one, intent: note, body: first }, bind: first }
   - { command: oxplow.knowledge.add_comment, input: { stream: str1, target: "oxplow:oxplow/wiki?slug=a-page", quote: two, intent: followup, body: first }, bind: second }
-input: { page: comments, params: { stream_id: 1, days: "0" } }
+when: { page: comments, params: { stream_id: 1, days: "0" } }
 expect:
   loaders:
     threads:

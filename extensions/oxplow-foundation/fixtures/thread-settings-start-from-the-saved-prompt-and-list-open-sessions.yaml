@@ -5,7 +5,7 @@
 given:
   - { command: oxplow.thread.set_prompt, input: { thread: thr1, prompt: Be brief. } }
   - { command: oxplow.agent_session.open, input: { thread: thr1, harness: claude } }
-input: { page: thread-settings, params: { thread: thr1 } }
+when: { page: thread-settings, params: { thread: thr1 } }
 expect:
   loaders:
     # The page's row names its tab.

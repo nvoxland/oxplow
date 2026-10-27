@@ -1,6 +1,6 @@
 # Cancelled while the model writes: the job stops at once and keeps what
 # it had written.
-input:
+when:
   job: summarize
   intentKey: summary-cancelled
   cancel: true
@@ -9,9 +9,9 @@ input:
     role: summarize
     messages:
       - { role: user, parts: [{ type: text, text: "Summarize the TODO comments at length." }] }
-  model:
-    replies:
-      - { text: "One bug TODO in the parser, two cleanups in the tests, and a feature request for a faster index.", chunkDelayMs: 100 }
 expect:
   state: cancelled
   result: { stopped: cancelled }
+model:
+  replies:
+    - { text: "One bug TODO in the parser, two cleanups in the tests, and a feature request for a faster index.", chunkDelayMs: 100 }

@@ -1,6 +1,6 @@
 # A disabled collector with no open repair item: one item is filed, on
 # whichever work list is active.
-input:
+when:
   effect: repair-disabled
   event:
     type: contribution.disabled

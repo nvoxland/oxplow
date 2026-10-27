@@ -1,6 +1,6 @@
 # Every setting is a row under its group, with where its value comes from,
 # the page holding its control and the request Ask puts in the agent's input.
-input: { page: settings, params: { q: snapshotRetentionDays } }
+when: { page: settings, params: { q: snapshotRetentionDays } }
 expect:
   loaders:
     settings_values:

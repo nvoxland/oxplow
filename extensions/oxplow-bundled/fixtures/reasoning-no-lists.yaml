@@ -1,5 +1,5 @@
 # JSON, but neither list: nothing is stored, and the skip says so.
-input:
+when:
   effect: store-reasoning
   event:
     type: contribution.job.completed

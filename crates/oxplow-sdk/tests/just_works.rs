@@ -404,7 +404,7 @@ async fn a_scaffolded_provider_is_red_until_a_program_speaks_for_it() {
     .unwrap();
     std::fs::write(
         ext.join("fixtures/basic.yaml"),
-        "input: { command: create, input: { title: First } }\nexpect: { uri: $any }\n",
+        "when: { command: create, input: { title: First } }\nexpect: { uri: $any }\n",
     )
     .unwrap();
     let blessed = kit_on_a_fresh_service(dir.path(), true).await;
@@ -620,7 +620,7 @@ async fn extension_test_runs_the_harness_suite_over_a_harness_provider() {
     .unwrap();
     std::fs::write(
         ext.join("fixtures/basic.yaml"),
-        "input: { command: render, input: { answer: { kind: ack } } }\nexpect: { body: $any }\n",
+        "when: { command: render, input: { answer: { kind: ack } } }\nexpect: { body: $any }\n",
     )
     .unwrap();
     std::fs::write(
@@ -682,7 +682,7 @@ async fn extension_test_runs_the_knowledge_suite_over_a_knowledge_provider() {
     .unwrap();
     std::fs::write(
         ext.join("fixtures/basic.yaml"),
-        format!("input: {write}\nexpect: {{ page: example }}\n"),
+        format!("when: {write}\nexpect: {{ page: example }}\n"),
     )
     .unwrap();
     std::fs::write(
@@ -745,7 +745,7 @@ async fn extension_test_runs_the_snapshot_suite_over_a_snapshots_provider() {
     .unwrap();
     std::fs::write(
         ext.join("fixtures/basic.yaml"),
-        format!("input: {mark}\nexpect: {{ handle: $any, unchanged: false, file_count: 1 }}\n"),
+        format!("when: {mark}\nexpect: {{ handle: $any, unchanged: false, file_count: 1 }}\n"),
     )
     .unwrap();
     std::fs::write(

@@ -1,7 +1,7 @@
 # The effort's conversation, tool calls, recorded decisions and stated
 # claims become one reasoning job, keyed by the effort. Each turn's final
 # answer is in the request.
-input:
+when:
   command: oxplow.effort.infer_reasoning
   input: { effort: "eff7" }
   answers:

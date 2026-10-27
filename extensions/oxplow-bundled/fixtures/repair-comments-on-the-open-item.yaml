@@ -1,6 +1,6 @@
 # Disabled again while its repair item is open: a comment on it, not a
 # second item.
-input:
+when:
   effect: repair-disabled
   event:
     type: contribution.disabled

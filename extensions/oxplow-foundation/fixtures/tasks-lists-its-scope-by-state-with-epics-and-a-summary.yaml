@@ -14,7 +14,7 @@ given:
   - { command: oxplow.work_item.create, input: { title: Finished 4, thread: thr1, state: done } }
   - { command: oxplow.work_item.create, input: { title: Finished 5, thread: thr1, state: done } }
   - { command: oxplow.work_item.create, input: { title: Finished 6, thread: thr1, state: done } }
-input: { page: tasks, params: { show: thread, priority: any, thread_id: 1, stream_id: 1 } }
+when: { page: tasks, params: { show: thread, priority: any, thread_id: 1, stream_id: 1 } }
 expect:
   loaders:
     row: { rows: [{ scope: thread }] }

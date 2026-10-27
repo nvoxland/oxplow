@@ -4,12 +4,12 @@
 //! `.oxplow/extensions/` ([`Host`]) — so it never touches the project's
 //! data: `check` (against its real command registry, so `commands:`
 //! examples dry-run), then each intent example whose fixture names a page
-//! (`input: { page, params? }`, `expect: { columns?, rows }`), a derived
-//! collector (`input: { collector, rows? }`, `expect: { entities: { <name>:
+//! (`when: { page, params? }`, `expect: { columns?, rows }`), a derived
+//! collector (`when: { collector, rows? }`, `expect: { entities: { <name>:
 //! n }, events?: [{ type, payload? }] }`; one that calls a model runs against the fixture model in the throwaway; an exec collector's isn't run — it is a program under the extension's `permissions.process`),
-//! a fact collector (`input: { collector, files: { <path>: <text> } }`,
+//! a fact collector (`when: { collector, files: { <path>: <text> } }`,
 //! `expect: { facts: [{ measure, value?, path?, … }] }`, tsk1047),
-//! or one of its own commands (`input: { command, input, rows? }`,
+//! or one of its own commands (`when: { command, input, rows? }`,
 //! `expect: { commands: [names] }` and/or `{ result }` — only the keys it
 //! names — or `{ refuses }`, dry-run),
 //! the extension's `questions.yaml`, and for each declared provider —
@@ -18,7 +18,7 @@
 //! 2. `check` accepts the instance config in
 //!    `fixtures/provider-<id>.yaml` (`config: { … }`);
 //! 3. each `intent.examples[*]` with a fixture `fixtures/<name>.yaml`
-//!    (`input: { command, input }`, `expect`) is invoked and its result
+//!    (`when: { command, input }`, `expect`) is invoked and its result
 //!    matches `expect` (`$any` matches anything);
 //! 4. every message validates against the protocol's schema goldens, and
 //!    the session's transcript matches `fixtures/transcripts/<id>.jsonl`
@@ -258,7 +258,7 @@ fn example_fixture(
 }
 
 /// The intent examples a throwaway oxplow runs: a page's, a derived
-/// collector's. A provider's (`input: { command, input }`) run in its
+/// collector's. A provider's (`when: { command, input }`) run in its
 /// session.
 async fn examples(shared: &Arc<Host>, ext: &Extension, report: &mut TestReport) {
     let rel = ext.path.trim_end_matches('/').to_string();
@@ -294,9 +294,19 @@ async fn examples(shared: &Arc<Host>, ext: &Extension, report: &mut TestReport) 
                 continue;
             }
         };
+        if let Some(key) = doc
+            .as_object()
+            .and_then(|o| o.keys().find(|k| !FIXTURE_KEYS.contains(&k.as_str())))
+        {
+            report.errors.push(format!(
+                "{shown}:1: `{key}` isn't a fixture key — fix: a fixture is `given` (the steps \
+                 first), `when` (what it does), `expect`, `steps` (a scenario), `view` and `model`"
+            ));
+            continue;
+        }
         let fixture = Fixture::of(example.name.clone(), shown, &doc);
         let ex = fixture.example();
-        if let Some(why) = withheld_target(ext, &ex.input) {
+        if let Some(why) = withheld_target(ext, &ex.when) {
             report.warnings.push(format!(
                 "{}:1: example `{}` isn't run: {why}",
                 fixture.shown, fixture.name
@@ -341,16 +351,20 @@ fn side_by_side() -> usize {
         .clamp(1, 4)
 }
 
+/// The keys of a fixture file.
+const FIXTURE_KEYS: [&str; 6] = ["given", "when", "expect", "steps", "view", "model"];
+
 /// An example's fixture, owned, so it can run on a task of its own.
 struct Fixture {
     name: String,
     /// The fixture file, as findings name it.
     shown: String,
-    input: Value,
+    when: Value,
     expect: Value,
     given: Value,
     steps: Option<Value>,
     view: Value,
+    model: Value,
 }
 
 impl Fixture {
@@ -358,15 +372,12 @@ impl Fixture {
         Fixture {
             name,
             shown,
-            input: doc.get("input").cloned().unwrap_or(Value::Null),
+            when: doc.get("when").cloned().unwrap_or(Value::Null),
             expect: doc.get("expect").cloned().unwrap_or(Value::Null),
-            given: doc
-                .get("given")
-                .or_else(|| doc.get("input").and_then(|i| i.get("given")))
-                .cloned()
-                .unwrap_or(Value::Null),
+            given: doc.get("given").cloned().unwrap_or(Value::Null),
             steps: doc.get("steps").cloned(),
             view: doc.get("view").cloned().unwrap_or(Value::Null),
+            model: doc.get("model").cloned().unwrap_or(Value::Null),
         }
     }
 
@@ -374,11 +385,12 @@ impl Fixture {
         Example {
             name: &self.name,
             shown: &self.shown,
-            input: self.input.clone(),
+            when: self.when.clone(),
             expect: self.expect.clone(),
             given: self.given.clone(),
             steps: self.steps.clone(),
             view: self.view.clone(),
+            model: self.model.clone(),
         }
     }
 }
@@ -397,51 +409,51 @@ async fn run_example(host: &Host, ext: &Extension, ex: &Example<'_>, report: &mu
     } else {
         return;
     }
-    if ex.input.get("lens").is_some() {
+    if ex.when.get("lens").is_some() {
         report.errors.push(format!(
             "{shown}:1: example `{}` runs a lens; lenses are pages now — fix: \
              `{{ page: <slug>, params? }}` with `expect.loaders`",
             ex.name
         ));
-    } else if let Some(page) = ex.input.get("page").and_then(Value::as_str) {
+    } else if let Some(page) = ex.when.get("page").and_then(Value::as_str) {
         report.ran.push(format!("example {}", ex.name));
         page_example(host, ext, ex, page, report).await;
-    } else if let Some(slug) = ex.input.get("form").and_then(Value::as_str) {
+    } else if let Some(slug) = ex.when.get("form").and_then(Value::as_str) {
         report.ran.push(format!("example {}", ex.name));
         form_example(host, ext, ex, slug, report).await;
-    } else if let Some(id) = ex.input.get("job").and_then(Value::as_str) {
+    } else if let Some(id) = ex.when.get("job").and_then(Value::as_str) {
         report.ran.push(format!("example {}", ex.name));
         job_example(host, ext, ex, id, report).await;
-    } else if let Some(id) = ex.input.get("component").and_then(Value::as_str) {
+    } else if let Some(id) = ex.when.get("component").and_then(Value::as_str) {
         report.ran.push(format!("example {}", ex.name));
         component_example(host, ext, ex, id, report).await;
-    } else if ex.input.get("event").is_some()
-        && ex.input.get("effect").is_none()
-        && ex.input.get("implementation").is_none()
-        && ex.input.get("collector").is_none()
+    } else if ex.when.get("event").is_some()
+        && ex.when.get("effect").is_none()
+        && ex.when.get("implementation").is_none()
+        && ex.when.get("collector").is_none()
     {
         report.ran.push(format!("example {}", ex.name));
         event_example(host, ext, ex, report).await;
-    } else if let Some(id) = ex.input.get("effect").and_then(Value::as_str) {
+    } else if let Some(id) = ex.when.get("effect").and_then(Value::as_str) {
         effect_example(host, ext, ex, id, report).await;
-    } else if let Some(id) = ex.input.get("implementation").and_then(Value::as_str) {
+    } else if let Some(id) = ex.when.get("implementation").and_then(Value::as_str) {
         policy_example(host, ext, ex, id, report).await;
-    } else if let Some(t) = ex.input.get("event_type").and_then(Value::as_str) {
+    } else if let Some(t) = ex.when.get("event_type").and_then(Value::as_str) {
         event_type_example(ext, ex, t, report);
-    } else if let Some(link) = ex.input.get("wikilink").and_then(Value::as_str) {
+    } else if let Some(link) = ex.when.get("wikilink").and_then(Value::as_str) {
         report.ran.push(format!("example {}", ex.name));
         wikilink_example(ext, ex, link, report);
-    } else if let Some(id) = ex.input.get("collector").and_then(Value::as_str) {
+    } else if let Some(id) = ex.when.get("collector").and_then(Value::as_str) {
         collector_example(host, ext, ex, id, report).await;
     } else if let Some(cmd) = ex
-        .input
+        .when
         .get("command")
         .and_then(Value::as_str)
         .and_then(|name| ext.commands.iter().find(|c| c.name == name))
     {
         report.ran.push(format!("example {}", ex.name));
         command_example(host, ex, cmd, report).await;
-    } else if ex.input.get("command").is_none() || ext.providers.is_empty() {
+    } else if ex.when.get("command").is_none() || ext.providers.is_empty() {
         report.errors.push(format!(
             "{shown}:1: example `{}`'s `input` names no page, collector, command, effect, \
              event, job, component, form, effort policy, event type, wikilink or provider command — \
@@ -463,7 +475,7 @@ async fn run_example(host: &Host, ext: &Extension, ex: &Example<'_>, report: &mu
 /// component's items. A dry run (a command's, an effect's, a policy's) or a
 /// collector run that stores nothing doesn't.
 fn makes_data(ex: &Example<'_>) -> bool {
-    let input = &ex.input;
+    let input = &ex.when;
     let has = |key: &str| input.get(key).is_some();
     !ex.given.is_null()
         || ex.steps.is_some()
@@ -529,9 +541,10 @@ fn withheld_target(ext: &Extension, input: &Value) -> Option<String> {
 /// toolCalls?, chunkDelayMs? }`); none when it gives none. `None`, with
 /// the error reported, when it isn't that shape.
 fn model_replies(ex: &Example<'_>, report: &mut TestReport) -> Option<Vec<FixtureReply>> {
-    let Some(model) = ex.input.get("model") else {
+    if ex.model.is_null() {
         return Some(Vec::new());
-    };
+    }
+    let model = &ex.model;
     let replies = model
         .get("replies")
         .filter(|r| r.is_array())
@@ -595,7 +608,7 @@ fn unsupported(ext: &Extension) -> Vec<String> {
     out
 }
 
-/// Log the fixture's event (`input: { event: { type, payload, subject?,
+/// Log the fixture's event (`when: { event: { type, payload, subject?,
 /// anchors? }, model? }`) in the throwaway and deliver it: the extension's
 /// effects — running in the throwaway host — react for real, their
 /// commands run through the bus. What happened against `expect`:
@@ -706,7 +719,7 @@ async fn start_effects(host: &Host, ext: &Extension) -> Result<(), String> {
 }
 
 /// Record intent for job `id` through the extension's own command over
-/// `jobs.write/enqueue` (`input: { job, intentKey, request, model?,
+/// `jobs.write/enqueue` (`when: { job, intentKey, request, model?,
 /// setup?, rows? }`: `setup` and `rows` first make what its tools read), the
 /// job running in the throwaway host, and read its outcome through its
 /// `jobs.read/snapshot` command once it ends: against `expect` — `{ state,
@@ -773,8 +786,8 @@ async fn job_example(
         .unwrap_or(0);
     let input = json!({
         "job": id,
-        "intentKey": ex.input.get("intentKey").cloned().unwrap_or_else(|| json!(ex.name)),
-        "request": ex.input.get("request").cloned().unwrap_or(Value::Null),
+        "intentKey": ex.when.get("intentKey").cloned().unwrap_or_else(|| json!(ex.name)),
+        "request": ex.when.get("request").cloned().unwrap_or(Value::Null),
     });
     // A job asked for in a thread: the effects that react to its end run
     // for that thread, as a command that changes the workspace needs.
@@ -804,7 +817,7 @@ async fn job_example(
             .push(format!("{shown}:1: job `{id}`: {queued} names no job"));
         return;
     };
-    if ex.input.get("cancel") == Some(&json!(true)) {
+    if ex.when.get("cancel") == Some(&json!(true)) {
         let Some(cancel) = by_op("jobs.write", "cancel") else {
             report.errors.push(format!(
                 "{shown}:1: job `{id}`: `cancel: true` needs a command over `jobs.write/cancel` \
@@ -972,7 +985,7 @@ async fn seed_rows(
     ex: &Example<'_>,
     report: &mut TestReport,
 ) -> bool {
-    match ex.input.get("rows") {
+    match ex.when.get("rows") {
         Some(rows) => publish_rows(host, ext, ex.shown, rows, report).await,
         None => true,
     }
@@ -1017,7 +1030,7 @@ async fn run_setup(
     ex: &Example<'_>,
     report: &mut TestReport,
 ) -> bool {
-    match ex.input.get("setup") {
+    match ex.when.get("setup") {
         Some(steps) => {
             let mut binds = Binds::default();
             run_steps(host, ext, ex.shown, "setup", steps, &mut binds, report).await
@@ -1228,7 +1241,7 @@ fn run_json(run: &oxplow_app::pages::runner::PageRun) -> Value {
 }
 
 /// Load component `id` as its frame would, then ask what the fixture asks
-/// (`input: { component, items?: [title], invokes?: [{ command, input? }]
+/// (`when: { component, items?: [title], invokes?: [{ command, input? }]
 /// }`): `items` are work items filed first
 /// (`oxplow:oxplow/work_item?id=tsk1&provider=oxplow`, …); each invoke's
 /// outcome — what the command answers when the component calls it —
@@ -1256,7 +1269,7 @@ async fn component_example(
         }
     };
     for title in ex
-        .input
+        .when
         .get("items")
         .and_then(Value::as_array)
         .cloned()
@@ -1282,7 +1295,7 @@ async fn component_example(
     }
     let mut invokes = Vec::new();
     for i in ex
-        .input
+        .when
         .get("invokes")
         .and_then(Value::as_array)
         .cloned()
@@ -1323,7 +1336,7 @@ async fn component_example(
     }
 }
 
-/// Open page `slug`'s form as a person would (`input: { form, node?,
+/// Open page `slug`'s form as a person would (`when: { form, node?,
 /// params? }`): `expect: { values?, fixed?, fields? }` against the values
 /// the fields start from (the form's `defaults`, its loader's first row
 /// laid over them), the fields shown read-only, and the fields shown
@@ -1337,7 +1350,7 @@ async fn form_example(
 ) {
     let shown = ex.shown;
     let params = ex
-        .input
+        .when
         .get("params")
         .and_then(Value::as_object)
         .map(|o| {
@@ -1347,7 +1360,7 @@ async fn form_example(
         })
         .unwrap_or_default();
     let start = match ext.page_files.iter().find(|p| p.slug == slug) {
-        Some(page) => page_form_start(host, page, ex.input.get("node"), params).await,
+        Some(page) => page_form_start(host, page, ex.when.get("node"), params).await,
         None => Err(format!("`{slug}` isn't one of this extension's pages")),
     };
     let start = match start {
@@ -1422,9 +1435,11 @@ struct Example<'a> {
     name: &'a str,
     /// Its fixture file, as findings name it.
     shown: &'a str,
-    input: Value,
+    /// What it does: one key names the kind (`page`, `command`, `event`,
+    /// …), the rest are that kind's.
+    when: Value,
     expect: Value,
-    /// Steps run before it (`given:`, beside `input`, or inside it).
+    /// Steps run before it (`given:`).
     given: Value,
     /// A page example's scenario (`steps:`): `{ given }` changes the state,
     /// `{ expect, params?, bind? }` runs the page again and checks it.
@@ -1432,6 +1447,9 @@ struct Example<'a> {
     /// The stream and thread a page is viewed from (`view: { stream,
     /// thread }`).
     view: Value,
+    /// What the fixture model answers its model calls with (`model: {
+    /// replies }`).
+    model: Value,
 }
 
 /// A page run's node ids (`<embed>/<id>` inside an embed) with their kinds.
@@ -1585,7 +1603,7 @@ async fn page_example(
     } else {
         format!("{}/{page}", ext.name)
     };
-    let params = ex.input.get("params").cloned().unwrap_or(Value::Null);
+    let params = ex.when.get("params").cloned().unwrap_or(Value::Null);
     let at = PageAt {
         host,
         shown,
@@ -1990,7 +2008,7 @@ fn answers(
     what: &str,
     report: &mut TestReport,
 ) -> Option<std::collections::BTreeMap<String, Vec<Value>>> {
-    match ex.input.get("answers").cloned().map(serde_json::from_value) {
+    match ex.when.get("answers").cloned().map(serde_json::from_value) {
         None => Some(Default::default()),
         Some(Ok(answers)) => Some(answers),
         Some(Err(e)) => {
@@ -2021,7 +2039,7 @@ async fn command_example(
     let Some(answers) = answers(ex, &format!("command `{}`", cmd.name), report) else {
         return;
     };
-    let input = ex.input.get("input").cloned().unwrap_or_else(|| json!({}));
+    let input = ex.when.get("input").cloned().unwrap_or_else(|| json!({}));
     let decided = dry_run(
         &host.svc.sql,
         cmd,
@@ -2059,7 +2077,7 @@ async fn command_example(
     }
 }
 
-/// Dry-run effect `id` on the fixture's event (`input: { effect, event: {
+/// Dry-run effect `id` on the fixture's event (`when: { effect, event: {
 /// type, payload, subject? }, rows? }`): whether it reacts (`on`/`where`),
 /// and what its script composes — checked against the throwaway's
 /// registry — against `expect`: `{ commands: [names] }`, `{ skip: <part of
@@ -2157,7 +2175,7 @@ fn reaction_problem(
 /// over (`EventView::fixture`, through the throwaway's vocabulary); one
 /// that couldn't happen is a finding at the fixture.
 fn example_event(host: &Host, ex: &Example<'_>, report: &mut TestReport) -> Option<EventView> {
-    let given = ex.input.get("event").cloned().unwrap_or_else(|| json!({}));
+    let given = ex.when.get("event").cloned().unwrap_or_else(|| json!({}));
     match EventView::fixture(&given, &host.svc.vocabulary.current()) {
         Ok(view) => Some(view),
         Err(e) => {
@@ -2174,7 +2192,7 @@ fn example_event(host: &Host, ex: &Example<'_>, report: &mut TestReport) -> Opti
 }
 
 /// Dry-run the extension's effort policy script `id` on the fixture's
-/// event (`input: { implementation, event: { type, payload, subject?,
+/// event (`when: { implementation, event: { type, payload, subject?,
 /// anchors? }, answers? }`, the answers standing in for its scope calls'):
 /// what it composes, checked against the throwaway's registry, against
 /// `expect` as an effect's is. A policy emits nothing. Nothing runs.
@@ -2239,7 +2257,7 @@ async fn policy_example(
 }
 
 /// Check a payload against one of the extension's declared event types
-/// (`input: { event_type, v?, payload }`, the newest version when `v` is
+/// (`when: { event_type, v?, payload }`, the newest version when `v` is
 /// left out): `expect: { valid: true | false, upcast?: <payload at the
 /// newest version> }`.
 fn event_type_example(
@@ -2256,7 +2274,7 @@ fn event_type_example(
         let _ = registry.register_declared(&ext.name, d.declared());
     }
     let Some(v) = ex
-        .input
+        .when
         .get("v")
         .and_then(Value::as_u64)
         .map(|v| v as u32)
@@ -2270,11 +2288,7 @@ fn event_type_example(
         return;
     };
     report.ran.push(format!("example {}", ex.name));
-    let payload = ex
-        .input
-        .get("payload")
-        .cloned()
-        .unwrap_or_else(|| json!({}));
+    let payload = ex.when.get("payload").cloned().unwrap_or_else(|| json!({}));
     let valid = registry.validate(event_type, v, &payload);
     let want_valid = ex
         .expect
@@ -2309,7 +2323,7 @@ fn event_type_example(
 }
 
 /// What a `[[…]]` names with the extension's resources beside
-/// oxplow-foundation's (`input: { wikilink: "pr:12" }`):
+/// oxplow-foundation's (`when: { wikilink: "pr:12" }`):
 /// `expect: { uri: "oxplow:acme/pr?id=12" | null }`.
 fn wikilink_example(ext: &Extension, ex: &Example<'_>, link: &str, report: &mut TestReport) {
     let mut resources = oxplow_domain::uri::resources::foundation().clone();
@@ -2340,7 +2354,7 @@ async fn fact_collector_example(
     let (shown, example, id) = (ex.shown, ex.name, spec.id.as_str());
     report.ran.push(format!("example {example}"));
     let files: std::collections::HashMap<String, String> = ex
-        .input
+        .when
         .get("files")
         .and_then(Value::as_object)
         .map(|m| {
@@ -2350,7 +2364,7 @@ async fn fact_collector_example(
         })
         .unwrap_or_default();
     let mut input: serde_json::Map<String, Value> = ex
-        .input
+        .when
         .as_object()
         .map(|m| {
             m.iter()
@@ -2451,7 +2465,7 @@ async fn collector_example(
     }
     report.ran.push(format!("example {example}"));
     let rows = ex
-        .input
+        .when
         .get("rows")
         .and_then(Value::as_array)
         .map(|r| r.to_vec());
@@ -2459,7 +2473,7 @@ async fn collector_example(
         &oxplow_app::collector_runner::Collectors::of(&host.svc, &host.root),
         &ext.name,
         id,
-        ex.input.get("event"),
+        ex.when.get("event"),
         rows,
     )
     .await;
@@ -2891,12 +2905,12 @@ async fn session(
         let Some((shown, Ok(doc))) = example_fixture(&read, rel, &example.name) else {
             continue;
         };
-        let Some(command) = doc.pointer("/input/command").and_then(Value::as_str) else {
+        let Some(command) = doc.pointer("/when/command").and_then(Value::as_str) else {
             continue;
         };
-        let Some(input) = doc.pointer("/input/input") else {
+        let Some(input) = doc.pointer("/when/input") else {
             report.errors.push(format!(
-                "{shown}:1: a provider example's `input` is `{{ command, input }}` — fix: give \
+                "{shown}:1: a provider example's `when` is `{{ command, input }}` — fix: give \
                  the command's input"
             ));
             continue;
@@ -3537,19 +3551,19 @@ commands:
         write(
             root,
             ".oxplow/extensions/tally/fixtures/labelled.yaml",
-            "input: { page: labelled }\nexpect: { loaders: { labelled: { columns: [id, label], rows: 0 } } }\n",
+            "when: { page: labelled }\nexpect: { loaders: { labelled: { columns: [id, label], rows: 0 } } }\n",
         );
         write(
             root,
             ".oxplow/extensions/tally/fixtures/things.yaml",
             &format!(
-                "input: {{ collector: things, rows: [{{ id: 1 }}, {{ id: 2 }}] }}\nexpect: {collector_expect}\n"
+                "when: {{ collector: things, rows: [{{ id: 1 }}, {{ id: 2 }}] }}\nexpect: {collector_expect}\n"
             ),
         );
         write(
             root,
             ".oxplow/extensions/tally/fixtures/shell.yaml",
-            "input: { collector: shell }\nexpect: { entities: { line: $any } }\n",
+            "when: { collector: shell }\nexpect: { entities: { line: $any } }\n",
         );
         write(
             root,
@@ -3755,7 +3769,7 @@ commands:
                 dir.path(),
                 ".oxplow/extensions/tally/fixtures/counted.yaml",
                 &format!(
-                    "input: {{ command: tally.things.count, input: {{}}, answers: {{ sql.read: [[{{ id: 1 }}, {{ id: 2 }}]] }} }}\nexpect: {{ result: {want} }}\n"
+                    "when: {{ command: tally.things.count, input: {{}}, answers: {{ sql.read: [[{{ id: 1 }}, {{ id: 2 }}]] }} }}\nexpect: {{ result: {want} }}\n"
                 ),
             );
             let report = test_extension(dir.path(), "tally", false).await.unwrap();
@@ -3935,18 +3949,18 @@ implementations:
             root,
             ".oxplow/extensions/acme/fixtures/basic.yaml",
             &format!(
-                "input: {{ implementation: tidy, event: {{ type: thread.checkpoint, payload: {{ thread: thr1, turn: trn1, reason: turn_end, snapshot: 1, changed: false, writing_tools: 0 }} }} }}\nexpect: {basic_expect}\n"
+                "when: {{ implementation: tidy, event: {{ type: thread.checkpoint, payload: {{ thread: thr1, turn: trn1, reason: turn_end, snapshot: 1, changed: false, writing_tools: 0 }} }} }}\nexpect: {basic_expect}\n"
             ),
         );
         write(
             root,
             ".oxplow/extensions/acme/fixtures/start.yaml",
-            "input: { implementation: tidy, event: { type: work_item.state_changed, payload: { work_item: \"work_item:oxplow:tsk1\", to: in_progress }, anchors: { thread_id: thr1 } } }\nexpect: { commands: [oxplow.effort.open] }\n",
+            "when: { implementation: tidy, event: { type: work_item.state_changed, payload: { work_item: \"work_item:oxplow:tsk1\", to: in_progress }, anchors: { thread_id: thr1 } } }\nexpect: { commands: [oxplow.effort.open] }\n",
         );
         write(
             root,
             ".oxplow/extensions/acme/fixtures/finish.yaml",
-            "input: { implementation: tidy, event: { type: work_item.state_changed, payload: { work_item: \"work_item:oxplow:tsk1\", to: done } }, answers: { sql.read: [[{ uri: \"oxplow:oxplow/effort?id=eff3\" }]] } }\nexpect: { commands: [oxplow.effort.close] }\n",
+            "when: { implementation: tidy, event: { type: work_item.state_changed, payload: { work_item: \"work_item:oxplow:tsk1\", to: done } }, answers: { sql.read: [[{ uri: \"oxplow:oxplow/effort?id=eff3\" }]] } }\nexpect: { commands: [oxplow.effort.close] }\n",
         );
     }
 
@@ -4057,7 +4071,7 @@ implementations:
                 root,
                 ".oxplow/extensions/acme/fixtures/basic.yaml",
                 &format!(
-                    "input: {{ implementation: tidy, event: {event} }}\nexpect: {{ skip: $any }}\n"
+                    "when: {{ implementation: tidy, event: {event} }}\nexpect: {{ skip: $any }}\n"
                 ),
             );
             let report = test_extension(root, "acme", false).await.unwrap();
@@ -4117,7 +4131,7 @@ effects:
         write(
             root,
             ".oxplow/extensions/acme/fixtures/old.yaml",
-            "input: { effect: note, event: { type: acme.merged, v: 1, payload: { number: 3 } } }\nexpect: { skip: v2 by unknown }\n",
+            "when: { effect: note, event: { type: acme.merged, v: 1, payload: { number: 3 } } }\nexpect: { skip: v2 by unknown }\n",
         );
         let report = test_extension(root, "acme", false).await.unwrap();
         assert!(report.ok, "{:?}", report.errors);
@@ -4205,13 +4219,13 @@ resources:
         write(
             root,
             ".oxplow/extensions/acme/fixtures/merged.yaml",
-            "input: { event_type: acme.merged, payload: { pr: 12 } }\nexpect: { valid: true }\n",
+            "when: { event_type: acme.merged, payload: { pr: 12 } }\nexpect: { valid: true }\n",
         );
-        write(root, ".oxplow/extensions/acme/fixtures/old.yaml", "input: { event_type: acme.merged, v: 1, payload: { number: 12 } }\nexpect: { valid: true, upcast: { pr: 12 } }\n");
+        write(root, ".oxplow/extensions/acme/fixtures/old.yaml", "when: { event_type: acme.merged, v: 1, payload: { number: 12 } }\nexpect: { valid: true, upcast: { pr: 12 } }\n");
         write(
             root,
             ".oxplow/extensions/acme/fixtures/link.yaml",
-            "input: { wikilink: \"pr:12\" }\nexpect: { uri: \"oxplow:acme/pr?id=12\" }\n",
+            "when: { wikilink: \"pr:12\" }\nexpect: { uri: \"oxplow:acme/pr?id=12\" }\n",
         );
         let report = test_extension(root, "acme", false).await.unwrap();
         assert!(report.ok, "{:?}", report.errors);
@@ -4223,11 +4237,15 @@ resources:
             );
         }
 
-        write(root, ".oxplow/extensions/acme/fixtures/merged.yaml", "input: { event_type: acme.merged, payload: { number: 12 } }\nexpect: { valid: true }\n");
+        write(
+            root,
+            ".oxplow/extensions/acme/fixtures/merged.yaml",
+            "when: { event_type: acme.merged, payload: { number: 12 } }\nexpect: { valid: true }\n",
+        );
         write(
             root,
             ".oxplow/extensions/acme/fixtures/link.yaml",
-            "input: { wikilink: \"pr:12\" }\nexpect: { uri: \"oxplow:acme/pr?id=13\" }\n",
+            "when: { wikilink: \"pr:12\" }\nexpect: { uri: \"oxplow:acme/pr?id=13\" }\n",
         );
         let errors = test_extension(root, "acme", false)
             .await
@@ -4273,7 +4291,7 @@ intent:
         write(
             root,
             ".oxplow/extensions/editor/fixtures/edit.yaml",
-            "input: { form: edit-item, params: { uri: 'oxplow:oxplow/work_item?id=tsk1&provider=oxplow' } }\nexpect: { values: { uri: 'oxplow:oxplow/work_item?id=tsk1&provider=oxplow' }, fixed: [uri], fields: [title, body] }\n",
+            "when: { form: edit-item, params: { uri: 'oxplow:oxplow/work_item?id=tsk1&provider=oxplow' } }\nexpect: { values: { uri: 'oxplow:oxplow/work_item?id=tsk1&provider=oxplow' }, fixed: [uri], fields: [title, body] }\n",
         );
         let report = test_extension(root, "editor", false).await.unwrap();
         assert_eq!(report.errors, Vec::<String>::new());
@@ -4286,7 +4304,7 @@ intent:
         write(
             root,
             ".oxplow/extensions/editor/fixtures/edit.yaml",
-            "input: { form: edit-item, params: { uri: 'oxplow:oxplow/work_item?id=tsk1&provider=oxplow' } }\nexpect: { fixed: [uri, title] }\n",
+            "when: { form: edit-item, params: { uri: 'oxplow:oxplow/work_item?id=tsk1&provider=oxplow' } }\nexpect: { fixed: [uri, title] }\n",
         );
         let errors = test_extension(root, "editor", false)
             .await
@@ -4336,7 +4354,7 @@ answers:
             &format!(
                 "given:
   - {{ command: oxplow.work_item.create, input: {{ title: Write the page test }} }}
-input: {{ page: items }}
+when: {{ page: items }}
 expect: {expect}
 "
             ),
@@ -4511,7 +4529,7 @@ view:
                 "bound",
                 "given:
   - { command: oxplow.work_item.create, input: { title: First }, bind: first }
-input: { page: items, params: { uri: $first.uri } }
+when: { page: items, params: { uri: $first.uri } }
 expect:
   loaders: { items: { rows: [{ title: First, uri: $first.uri }] } }
   nodes: [{ id: items, kind: viz, actions: [start] }]
@@ -4537,7 +4555,7 @@ steps:
                 "bound",
                 "given:
   - { command: oxplow.work_item.create, input: { title: First }, bind: first }
-input: { page: items, params: { uri: $first.uri } }
+when: { page: items, params: { uri: $first.uri } }
 steps:
   - expect: { loaders: { items: { rows: [{ title: Other }] } } }
 ",
@@ -4560,7 +4578,7 @@ steps:
             BY_URI,
             &[(
                 "bound",
-                "input: { page: items, params: { uri: $nowhere.uri } }\n",
+                "when: { page: items, params: { uri: $nowhere.uri } }\n",
             )],
         );
         let errors = test_extension(root, "paged", false)
@@ -4591,7 +4609,7 @@ view:
   - { command: oxplow.work_item.create, input: { title: First } }
   - { command: oxplow.work_item.create, input: { title: Second } }
   - { command: oxplow.work_item.create, input: { title: Third } }
-input: { page: items }
+when: { page: items }
 ";
         paged(
             root,
@@ -4644,7 +4662,7 @@ input: { page: items }
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         let fixture = "given: [{ command: oxplow.work_item.create, input: { title: Mine } }]
-input: { page: items }
+when: { page: items }
 expect: { loaders: { items: { rows: 1 } } }
 ";
         paged(
@@ -4682,7 +4700,7 @@ alert: { min_rows: 1, label: Configured }
 given:
   - { command: oxplow.ai.set_provider, input: { id: spare, kind: anthropic, key: sk-ant-test } }
   - { command: oxplow.ai.remove_provider, input: { id: spare }, confirmed: true }
-input: { page: items }
+when: { page: items }
 expect:
   loaders: { items: { rows: [{ thread: 1 }] } }
   alert: { firing: true, count: 1, message: $any }
@@ -4700,7 +4718,7 @@ expect:
                 "given:
   - { command: oxplow.ai.set_provider, input: { id: spare, kind: anthropic, key: sk-ant-test } }
   - { command: oxplow.ai.remove_provider, input: { id: spare } }
-input: { page: items }
+when: { page: items }
 ",
             )],
         );
@@ -4765,7 +4783,7 @@ view: { from: items, viz: table }
                 "switched",
                 "given:
   - { command: oxplow.work_item.create, input: { title: Filed } }
-input: { page: items }
+when: { page: items }
 expect: { loaders: { items: { rows: [{ title: Filed }] } } }
 steps:
   - given: [{ command: oxplow.capability.choose, input: { capability: work_items, provider: none }, confirmed: true }]

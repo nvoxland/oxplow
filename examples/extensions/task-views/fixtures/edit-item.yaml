@@ -1,5 +1,5 @@
 # The editor's form: the item's title and body, its uri fixed.
-input:
+when:
   form: edit-item
   node: edit_item
   params: { uri: "oxplow:oxplow/work_item?id=1&provider=oxplow" }

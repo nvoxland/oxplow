@@ -1,5 +1,5 @@
 # A finished effort with a work item asks for its review.
-input:
+when:
   effect: review-on-finish
   event:
     type: effort.finished

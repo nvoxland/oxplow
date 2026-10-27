@@ -1,5 +1,5 @@
 # An effort with no turns and no tool calls asks nothing.
-input:
+when:
   command: oxplow.effort.infer_reasoning
   input: { effort: "eff7" }
   answers:

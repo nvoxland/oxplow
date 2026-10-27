@@ -1,5 +1,4 @@
 # The `runs` page over a throwaway oxplow with no runs recorded: it runs and
 # says so. (Rows over recorded runs are pinned by `the_runs_page_counts_each_extensions_week`.)
-name: extension runs over the last week
-input: { page: runs, params: {} }
+when: { page: runs, params: {} }
 expect: { loaders: { runs: { rows: 0 } } }

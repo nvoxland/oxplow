@@ -4,7 +4,7 @@
 # then closed. The answer is matched to the tool's result (`when`), so it
 # comes only once the evidence carries the test run; the call, the tool's
 # answer and the reply are the job's output, in order.
-input:
+when:
   setup:
     - { command: oxplow.work_item.create, input: { title: Parse blocks } }
     - { command: oxplow.effort.open, input: { thread: thr1, work_item: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow" } }
@@ -17,10 +17,6 @@ input:
     role: summarize
     messages:
       - { role: user, parts: [{ type: text, text: "Review eff1." }] }
-  model:
-    replies:
-      - { toolCalls: [{ name: effort_evidence, arguments: { effort: "eff1" } }] }
-      - { when: "cargo test", text: "All 12 tests of cargo test passed." }
 expect:
   state: succeeded
   toolCalls: 1
@@ -31,3 +27,7 @@ expect:
     - { kind: tool_result }
     - { kind: text }
     - { kind: usage }
+model:
+  replies:
+    - { toolCalls: [{ name: effort_evidence, arguments: { effort: "eff1" } }] }
+    - { when: "cargo test", text: "All 12 tests of cargo test passed." }

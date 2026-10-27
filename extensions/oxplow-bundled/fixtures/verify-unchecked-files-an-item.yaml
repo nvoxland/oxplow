@@ -1,7 +1,7 @@
 # An acceptance logged before the payload named its effort by bare id
 # (`oxplow_bundled.accepted@1`, the effort a URI) is read as the current
 # version: the follow-up still files, about the effort.
-input:
+when:
   effect: verify-unchecked
   event:
     type: oxplow_bundled.accepted

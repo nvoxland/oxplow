@@ -23,7 +23,7 @@ Each recipe: write the file, check it, deploy, test.
    draft over live data. From the main stream, `oxplow.extension.deploy`
    first, then `oxplow_run_page`.
 4. Add a fixture (`testing.md` "Pages"): `fixtures/<name>.yaml` with
-   `given:` steps (`{ command, input }` makes data), `input: { page: <slug> }`
+   `given:` steps (`{ command, input }` makes data), `when: { page: <slug> }`
    and `expect: { loaders: { items: { rows: [{ title: T }] } } }`, and
    an `intent.examples` entry that names it. `$OXPLOW_BIN extension test
    <name>` runs it and every `answers:` entry.

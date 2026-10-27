@@ -431,8 +431,8 @@ pub fn scaffold_with(
             &format!("{rel_dir}/fixtures/basic.yaml"),
             format!(
                 "# The acceptance example from extension.yaml as a fixture for `oxplow extension test`\n\
-                 # (input in, expected output out). Keep the two in step.\n\
-                 name: basic\ninput: {example_input}\nexpect: {expect}\n"
+                 # (`when` it does this, `expect` that). Keep the two in step.\n\
+                 when: {example_input}\nexpect: {expect}\n"
             ),
         )?;
     }
@@ -1880,7 +1880,7 @@ mod tests {
         write(
             dir.path(),
             ".oxplow/extensions/team/fixtures/a.yaml",
-            &format!("input: {{}}\nsecret: {token}\n"),
+            &format!("when: {{}}\nsecret: {token}\n"),
         );
         let team = check(
             dir.path(),
@@ -1922,7 +1922,7 @@ mod tests {
             write(
                 dir.path(),
                 &format!(".oxplow/extensions/pairs/fixtures/{fixture}.yaml"),
-                "input: {}\n",
+                "when: {}\n",
             );
         }
         let report = check(

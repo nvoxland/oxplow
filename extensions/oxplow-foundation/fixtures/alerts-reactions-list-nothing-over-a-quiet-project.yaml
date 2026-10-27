@@ -1,3 +1,3 @@
 # A quiet project has no undelivered events or failed reactions to show.
-input: { page: alerts-reactions }
+when: { page: alerts-reactions }
 expect: { loaders: { alerts_reactions: { rows: 0 } } }

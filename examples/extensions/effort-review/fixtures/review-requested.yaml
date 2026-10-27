@@ -1,5 +1,5 @@
 # Asking for an effort's review enqueues the review job, keyed by the effort.
-input:
+when:
   command: effort_review.effort.review
   input: { effort: "eff7" }
 expect:

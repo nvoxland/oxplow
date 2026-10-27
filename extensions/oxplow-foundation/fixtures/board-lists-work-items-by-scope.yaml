@@ -4,7 +4,7 @@
 given:
   - { command: oxplow.work_item.create, input: { title: On the thread, thread: thr1 } }
   - { command: oxplow.work_item.create, input: { title: In the backlog } }
-input: { page: board, params: { show: thread, thread_id: 1 } }
+when: { page: board, params: { show: thread, thread_id: 1 } }
 expect:
   loaders:
     row: { rows: [{ scope: thread }] }

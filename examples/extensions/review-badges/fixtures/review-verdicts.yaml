@@ -1,5 +1,5 @@
 # Nothing has been reviewed in a fresh project.
-input:
+when:
   page: review-verdicts
 expect:
   loaders:

@@ -6,7 +6,7 @@ given:
   - { command: oxplow.work_item.create, input: { title: Child of the epic, parent_uri: $epic.uri } }
   - { command: oxplow.work_item.create, input: { title: Plain item } }
   - { command: oxplow.work_item.create, input: { title: On the thread, thread: thr1 } }
-input: { page: backlog, params: { q: "", thread_id: 1 } }
+when: { page: backlog, params: { q: "", thread_id: 1 } }
 expect:
   loaders:
     items:

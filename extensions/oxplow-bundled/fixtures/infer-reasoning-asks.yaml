@@ -1,6 +1,6 @@
 # A model serves the reasoning profile (here, Main's): the finished
 # effort's decisions and claims are asked about.
-input:
+when:
   effect: infer-reasoning
   event:
     type: effort.finished

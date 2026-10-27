@@ -1,7 +1,7 @@
 # The finished review's event reaches publish-review (running in the throwaway host),
 # which reads the job back and looks for its effort — the throwaway has
 # none, so it comments nothing.
-input:
+when:
   job: review
   intentKey: "review:eff3"
   request:
@@ -9,10 +9,10 @@ input:
     role: summarize
     messages:
       - { role: user, parts: [{ type: text, text: "Review eff3 in one line." }] }
-  model:
-    replies: ["Tests pass; nothing measured."]
 expect:
   state: succeeded
   effects:
     - { id: effort-review/publish-review, state: skipped }
   commands: []
+model:
+  replies: ["Tests pass; nothing measured."]

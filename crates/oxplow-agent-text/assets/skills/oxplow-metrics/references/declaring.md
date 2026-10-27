@@ -23,7 +23,7 @@ a fixture that proves the collector:
 | `extension.yaml` | `measures:` (one per-path, semi-additive measure on files), `dimensions:` (`<ns>.area`), `collectors:` (a Starlark one on `snapshot.taken`), `metrics:` (the `sum`, `lower-better`, `displayKind: findings`), and the `intent` with its example |
 | `collectors/complex_functions.star` | counts each file's functions over a complexity `LIMIT` (`source_files()` + `code_metrics()`) and records **one fact per file**: `value`, `path`, the worst function's `line`, `dims: { <ns>.area: <top folder> }` |
 | `pages/<name>.yaml` | a Code launcher page over `metric_findings('<metric>')`; its `path` column links `file` at the `line` column |
-| `fixtures/basic.yaml` | the example as a fixture: `input: { collector, files: { path: text } }`, `expect: { facts: [...] }` |
+| `fixtures/basic.yaml` | the example as a fixture: `when: { collector, files: { path: text } }`, `expect: { facts: [...] }` |
 
 Change the collector to what the user asked for and **change the fixture with
 it** (a small corpus and the exact facts it yields); `extension test` runs the

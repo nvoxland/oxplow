@@ -2,7 +2,7 @@
 # list once dismissed. The other parts list nothing over a quiet project.
 given:
   - { command: oxplow.ui.report_error, input: { label: Merge bugfixes into current, command: git merge bugfixes, message: conflict, exit_code: 1, stderr: CONFLICT in a.txt }, bind: merged }
-input: { page: alerts }
+when: { page: alerts }
 expect:
   loaders:
     operations: { rows: [{ label: Merge bugfixes into current, tone: danger, unseen: 1 }] }

@@ -5,7 +5,7 @@
 given:
   - { command: oxplow.ai.set_provider, input: { id: or, kind: openrouter, key: sk-secret-123 } }
   - { command: oxplow.ai.set_role, input: { role: summarize, provider: or, model: m1, restrict: [tools] } }
-input: { page: settings, params: { area: ai } }
+when: { page: settings, params: { area: ai } }
 expect:
   loaders:
     ai_providers:

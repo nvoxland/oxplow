@@ -1,7 +1,7 @@
 # The job runs in the throwaway host; the event it logs when it ends
 # reaches `publish-summary` (running there too), which writes the model's
 # answer to the `triage-summary` page.
-input:
+when:
   job: summarize
   intentKey: summary-2
   request:
@@ -9,11 +9,11 @@ input:
     role: summarize
     messages:
       - { role: user, parts: [{ type: text, text: "Summarize the TODO comments in two lines." }] }
-  model:
-    replies: ["One bug TODO and two cleanups."]
 expect:
   state: succeeded
   effects:
     - { id: triage/publish-summary, state: ok }
   commands: [oxplow.command.sequence]
   pages: ["oxplow:oxplow/wiki?slug=triage-summary"]
+model:
+  replies: ["One bug TODO and two cleanups."]

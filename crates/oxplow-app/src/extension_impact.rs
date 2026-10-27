@@ -437,7 +437,7 @@ fn effect_fixtures(v: &Version<'_>, id: &str) -> Vec<(String, Value, Answers)> {
         .filter_map(|ex| {
             let text = (v.read)(&format!("fixtures/{}.yaml", ex.name))?;
             let doc: Value = serde_yaml::from_str(&text).ok()?;
-            let input = doc.get("input")?;
+            let input = doc.get("when")?;
             (input.get("effect")?.as_str()? == id).then(|| {
                 let event = input.get("event").cloned().unwrap_or_default();
                 let answers = input
@@ -1261,7 +1261,7 @@ fn collector_fixtures(v: &Version<'_>, id: &str) -> Vec<(String, Option<Vec<Valu
         .filter_map(|ex| {
             let text = (v.read)(&format!("fixtures/{}.yaml", ex.name))?;
             let doc: Value = serde_yaml::from_str(&text).ok()?;
-            let input = doc.get("input")?;
+            let input = doc.get("when")?;
             (input.get("collector")?.as_str()? == id).then(|| {
                 let rows = input.get("rows").and_then(Value::as_array).cloned();
                 (ex.name.clone(), rows)
@@ -2544,11 +2544,11 @@ mod tests {
         );
         w(
             "fixtures/two.yaml",
-            "input: { collector: things, rows: [{ id: 1 }, { id: 2 }] }\nexpect: { entities: { thing: 2 } }\n",
+            "when: { collector: things, rows: [{ id: 1 }, { id: 2 }] }\nexpect: { entities: { thing: 2 } }\n",
         );
         w(
             "fixtures/smart.yaml",
-            "input: { collector: smart, rows: [{ id: 1 }] }\nexpect: { entities: { summary: 1 } }\n",
+            "when: { collector: smart, rows: [{ id: 1 }] }\nexpect: { entities: { summary: 1 } }\n",
         );
         w(
             "collectors/things.star",
@@ -2723,7 +2723,7 @@ mod tests {
         for f in ["one", "two"] {
             std::fs::write(
                 dir.join(format!("fixtures/{f}.yaml")),
-                "input:\n  collector: things\n  rows: []\n",
+                "when:\n  collector: things\n  rows: []\n",
             )
             .unwrap();
         }
@@ -2810,7 +2810,7 @@ mod tests {
             std::fs::write(dir.join("e.star"), script).unwrap();
             std::fs::write(
                 dir.join("fixtures/basic.yaml"),
-                "input: { effect: on-done, event: { type: work_item.state_changed, payload: { work_item: \"work_item:oxplow:tsk1\", to: done } } }\nexpect: { commands: [oxplow.work_item.comment] }\n",
+                "when: { effect: on-done, event: { type: work_item.state_changed, payload: { work_item: \"work_item:oxplow:tsk1\", to: done } } }\nexpect: { commands: [oxplow.work_item.comment] }\n",
             )
             .unwrap();
         };
@@ -2905,12 +2905,12 @@ mod tests {
         .unwrap();
         std::fs::write(
             dir.join("fixtures/old.yaml"),
-            "input: { effect: note, event: { type: acme.merged, v: 1, payload: { number: 3 } } }\nexpect: { skip: $any }\n",
+            "when: { effect: note, event: { type: acme.merged, v: 1, payload: { number: 3 } } }\nexpect: { skip: $any }\n",
         )
         .unwrap();
         std::fs::write(
             dir.join("fixtures/bad.yaml"),
-            "input: { effect: note, event: { type: acme.merged, v: 7, payload: { number: 3 } } }\nexpect: { skip: $any }\n",
+            "when: { effect: note, event: { type: acme.merged, v: 7, payload: { number: 3 } } }\nexpect: { skip: $any }\n",
         )
         .unwrap();
         let ext = crate::extensions::load_project_extension(root.path(), "acme");

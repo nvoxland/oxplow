@@ -1,3 +1,2 @@
-name: create
-input: { command: create, input: { title: First note } }
+when: { command: create, input: { title: First note } }
 expect: { uri: $any }

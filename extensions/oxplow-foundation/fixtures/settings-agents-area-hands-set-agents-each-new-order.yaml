@@ -1,7 +1,7 @@
 # Settings → Agents: the agents in priority order, with the lists a row's
 # actions hand `set_agents`; what new threads start with; the prompt
 # addition's form prefilled with what is saved.
-input: { page: settings, params: { area: agents } }
+when: { page: settings, params: { area: agents } }
 expect:
   loaders:
     agents_list:

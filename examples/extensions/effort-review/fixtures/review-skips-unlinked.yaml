@@ -1,5 +1,5 @@
 # An effort without a work item has nowhere to put a review.
-input:
+when:
   effect: review-on-finish
   event:
     type: effort.finished

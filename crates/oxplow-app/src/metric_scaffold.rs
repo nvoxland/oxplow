@@ -229,8 +229,8 @@ pub fn extension_files(
     let script = collector_script(starter, &measure, &area);
     let fixture = format!(
         "# The acceptance example from extension.yaml as a fixture for `oxplow extension test`\n\
-         # (input in, expected output out). Keep the two in step.\n\
-         name: basic\ninput: {}\nexpect: {}\n",
+         # (`when` it does this, `expect` that). Keep the two in step.\n\
+         when: {}\nexpect: {}\n",
         sample.input(&collector),
         sample.expect()
     );

@@ -1,6 +1,6 @@
 # Settings → Data: the entities, the collectors (by who runs them) and the
 # effects oxplow's own extensions declare.
-input: { page: settings, params: { area: data } }
+when: { page: settings, params: { area: data } }
 expect:
   loaders:
     data_entities:

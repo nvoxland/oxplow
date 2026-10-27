@@ -1,7 +1,7 @@
 # The Catalog's sections: what can be asked, grouped by who offers it (oxplow's
 # own questions by the page's category) with Ask on each, and what can be
 # configured.
-input: { page: catalog }
+when: { page: catalog }
 expect:
   text:
     contains:

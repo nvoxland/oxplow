@@ -1,6 +1,6 @@
 # The board runs its extension's commands: a decision is recorded in the
 # extension's state and read back.
-input:
+when:
   component: todo-board
   invokes:
     - { command: triage.todos.decide, input: { path: src/lib.rs, line: 1, decision: fix-now } }

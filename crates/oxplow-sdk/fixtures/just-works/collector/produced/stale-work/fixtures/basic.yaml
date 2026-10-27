@@ -1,7 +1,6 @@
 # The acceptance example from extension.yaml as a fixture for `oxplow extension test`
 # (input in, expected output out). Keep the two in step.
-name: basic
-input:
+when:
   collector: stale_tasks
   rows:
     - { id: 1, title: Untouched for ten days, status: ready, priority: medium, thread_id: 1, stream_id: 1, last_touched_at: "2026-09-22T09:00:00.000000Z", days_idle: 10 }

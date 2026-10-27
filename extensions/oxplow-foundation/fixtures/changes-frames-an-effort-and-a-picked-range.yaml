@@ -3,7 +3,7 @@
 # effort; the route page, with no URI and no end, has nothing to compare yet.
 given:
   - { command: oxplow.effort.open, input: { thread: thr1 } }
-input: { page: diff-view, params: { uri: "oxplow:oxplow/effort?id=eff1", stream_id: 1 } }
+when: { page: diff-view, params: { uri: "oxplow:oxplow/effort?id=eff1", stream_id: 1 } }
 expect:
   loaders:
     row: { rows: [{ subject: effort, end_rev: working, in_progress: 1, effort: eff1 }] }

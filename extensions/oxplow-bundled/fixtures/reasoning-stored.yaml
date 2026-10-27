@@ -2,7 +2,7 @@
 # dropped) replace the effort's inferred decisions and its unreviewed
 # claims. A malformed entry is dropped; an unknown claim kind becomes
 # `other`.
-input:
+when:
   effect: store-reasoning
   event:
     type: contribution.job.completed

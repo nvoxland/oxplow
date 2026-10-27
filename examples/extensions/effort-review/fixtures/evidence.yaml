@@ -1,7 +1,7 @@
 # The evidence for one effort, from the models' answers (in the order the
 # script reads them): the effort, its files, its functions, test runs,
 # observations, metrics and findings.
-input:
+when:
   command: effort_review.effort.evidence
   input: { effort: "eff7" }
   answers:

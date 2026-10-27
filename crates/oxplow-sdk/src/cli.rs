@@ -695,7 +695,7 @@ mod tests {
         .unwrap();
         std::fs::write(
             ext.join("fixtures/basic.yaml"),
-            "name: basic\ninput: { command: react, input: { event: { id: e1, type: thread.checkpoint, v: 1, seq: 1, source: system, subject: [], payload: {}, anchors: {} } } }\nexpect: { skip: $any }\n",
+            "when: { command: react, input: { event: { id: e1, type: thread.checkpoint, v: 1, seq: 1, source: system, subject: [], payload: {}, anchors: {} } } }\nexpect: { skip: $any }\n",
         )
         .unwrap();
         std::fs::write(

@@ -1,5 +1,5 @@
 # A commit that isn't there has no files.
-input:
+when:
   page: history
   params: { commit: "0000000" }
 expect:

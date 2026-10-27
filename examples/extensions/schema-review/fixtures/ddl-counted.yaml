@@ -1,5 +1,5 @@
 # Two kinds of statement in one migration; a source file is not one.
-input:
+when:
   collector: ddl
   files:
     migrations/0002_users.sql: "CREATE TABLE users (id INT);\nALTER TABLE accounts ADD owner INT;\ncreate table roles (id INT);\n"

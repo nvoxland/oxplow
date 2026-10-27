@@ -1,4 +1,4 @@
-input:
+when:
   implementation: prompt_efforts
   event: { type: thread.checkpoint, payload: { thread: thr1, turn: trn7, reason: turn_end, snapshot: 7, changed: true, writing_tools: 2 }, anchors: { thread_id: thr1, turn_id: 7 } }
   answers:

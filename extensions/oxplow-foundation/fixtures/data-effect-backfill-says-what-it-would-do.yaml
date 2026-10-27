@@ -1,6 +1,6 @@
 # What a backfill would do for an effect that is enabled; an effect nothing
 # declares has no plan.
-input: { page: data-effect-backfill, params: { effect: oxplow-bundled/store-reasoning } }
+when: { page: data-effect-backfill, params: { effect: oxplow-bundled/store-reasoning } }
 expect:
   loaders:
     data_effect_backfill: { rows: [{ effect: oxplow-bundled/store-reasoning, what: Nothing to catch up on. }] }

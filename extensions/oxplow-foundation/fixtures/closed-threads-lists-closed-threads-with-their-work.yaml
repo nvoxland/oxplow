@@ -4,7 +4,7 @@ given:
   - { command: oxplow.thread.create, input: { stream: str1, title: Old }, bind: old }
   - { command: oxplow.thread.create, input: { stream: str1, title: Live } }
   - { command: oxplow.thread.close, input: { thread: $old.id } }
-input: { page: closed-threads, params: { stream_id: 1 } }
+when: { page: closed-threads, params: { stream_id: 1 } }
 expect:
   loaders:
     closed_threads: { rows: [{ title: Old, work: "" }] }

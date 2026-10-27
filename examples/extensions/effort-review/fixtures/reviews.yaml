@@ -5,7 +5,7 @@ given:
   - { command: oxplow.work_item.create, input: { title: Parse blocks }, bind: item }
   - { command: oxplow.effort.open, input: { thread: thr1, work_item: $item.uri } }
   - { command: effort_review.effort.review, input: { effort: eff1 } }
-input: { page: reviews }
+when: { page: reviews }
 expect:
   loaders:
     reviews:

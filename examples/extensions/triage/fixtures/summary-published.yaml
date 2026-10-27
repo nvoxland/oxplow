@@ -1,6 +1,6 @@
 # The job runs in the throwaway host; its model call answers with the
 # fixture model's reply — no provider, nothing spent.
-input:
+when:
   job: summarize
   intentKey: summary-1
   request:
@@ -8,8 +8,8 @@ input:
     role: summarize
     messages:
       - { role: user, parts: [{ type: text, text: "Summarize the TODO comments." }] }
-  model:
-    replies: ["Two cleanup TODOs and one bug."]
 expect:
   state: succeeded
   result: $any
+model:
+  replies: ["Two cleanup TODOs and one bug."]

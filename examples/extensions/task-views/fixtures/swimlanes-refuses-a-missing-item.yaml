@@ -1,5 +1,5 @@
 # Changing an item that is not there is refused, with the command's reason.
-input:
+when:
   component: swimlanes
   invokes:
     - { command: oxplow.work_item.update, input: { uri: "oxplow:oxplow/work_item?id=1&provider=oxplow", title: x } }

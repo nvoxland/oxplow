@@ -1,5 +1,5 @@
 # The model wrote prose: nothing is stored, and the skip says why.
-input:
+when:
   effect: store-reasoning
   event:
     type: contribution.job.completed

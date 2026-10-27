@@ -50,11 +50,12 @@ model the SQL reads and the command it runs. Prefer `answers:` on pages.
    Its report says what it ran, the generation, what the extension
    `contributes`, and what it can't run here (`unsupported`: panels, decorators,
    replacements, skills — the app shows them).
-   Give each example a fixture, `fixtures/<example>.yaml`, with `input`
-   and `expect` (`$any` matches anything), and `model: { replies: [...] }`
-   in `input` when it calls a model:
-   - a page: `input: { page: <slug | ext/slug>, params? }`, with `given:` beside
-     `input` — steps run first, in order: `{ command, input?, as?,
+   Give each example a fixture, `fixtures/<example>.yaml`: `given` (steps
+   run first), `when` (what it does — one key names the kind), `expect`
+   (`$any` matches anything), and `model: { replies: [...] }` when it calls
+   a model. Any other key is an error:
+   - a page: `when: { page: <slug | ext/slug>, params? }`, with `given:` —
+     steps run first, in order: `{ command, input?, as?,
      confirmed?, bind? }` or `{ rows: { <entity>: [..] } }`.
      `expect: { loaders: { <name>: { rows: n | $any | [ { col: val } ],
      contains?: [ { col: val } ], columns? } }, nodes: [{ id, kind?,
@@ -71,7 +72,7 @@ model the SQL reads and the command it runs. Prefer `answers:` on pages.
      `expect` is that value. `confirmed: true` runs a command that asks a
      person first. Example:
      `given: [{ command: oxplow.work_item.create, input: { title: T }, bind: t }]`,
-     `input: { page: items, params: { uri: $t.uri } }`, `expect: { loaders:
+     `when: { page: items, params: { uri: $t.uri } }`, `expect: { loaders:
      { items: { rows: [{ title: T }] } } }`.
      **Scenarios:** `steps: [ { given: [..] } | { expect, params?, bind? } ]`
      after it — each `expect` runs the page again (`params` over the
@@ -85,11 +86,11 @@ model the SQL reads and the command it runs. Prefer `answers:` on pages.
      its params and no failing loader;
    - `rows: { <entity>: [ {…} ] }` in a page or job fixture fills your
      collectors' entities first (they start empty);
-   - an event: `input: { event: { type, payload, … } }` — logged in the
+   - an event: `when: { event: { type, payload, … } }` — logged in the
      throwaway and delivered: your effects react for
      real and their commands run. `expect: { effects: [{ id, state }],
      commands: [names] }` (only the keys you name are compared);
-   - a job: `input: { job: <id>, intentKey, request, cancel?, setup?,
+   - a job: `when: { job: <id>, intentKey, request, cancel?, setup?,
      rows? }` — `setup: [{ command, input?, as? }]` first runs oxplow's
      own commands (`as: agent` for the agent of `oxplow:oxplow/thread?id=thr1`) to make
      what its tools read: a work item, an effort, a test run — run
@@ -102,26 +103,26 @@ model the SQL reads and the command it runs. Prefer `answers:` on pages.
      the tool's result); `cancel: true` cancels it through
      your `jobs.write/cancel` command once it has written. `expect: {
      state, result?, text?, toolCalls?, output?: [{ kind }] }`;
-   - a component: `input: { component: <id>, page?, items?: [title],
+   - a component: `when: { component: <id>, page?, items?: [title],
      queries?: [{ asset, params? }], invokes?: [{ command, input? }] }` — what its
      frame would ask; `expect: { queries: [{ rows }], invokes: [{ ok,
      refused? }] }` (an invoke is `refused` when the command refuses it; `items` are work
      items filed first, `oxplow:oxplow/work_item?id=<id>&provider=oxplow`, …);
-   - a page's form (a `viz: form` node): `input: { form: <page>, node?,
+   - a page's form (a `viz: form` node): `when: { form: <page>, node?,
      params? }` — opens it as a person would (`node` names the form node,
      else the page's first); `expect: { values?, fixed?, fields? }` (the
      values its fields start from, the read-only fields, the shown ones,
      `null` for all);
-   - a collector: `input: { collector: <id>, rows: [...], event? }`
+   - a collector: `when: { collector: <id>, rows: [...], event? }`
      (`rows` stands in for its `input` query; `event` is the event an
      `on:` collector reacts to), `expect: { entities: { <name>: n } }` —
      it runs your script and types its rows; an exec collector's example
      isn't run (it is a program under `permissions.process`);
-   - a fact collector (one with `facts:`): `input: { collector: <id>,
+   - a fact collector (one with `facts:`): `when: { collector: <id>,
      files: { "src/a.ts": "…" } }` (the tree its `files()` sees),
      `expect: { facts: [{ measure, value, path? }] }` — each fact is
      compared on the keys you name, in order;
-   - a command: `input: { command: <id>, input: {...}, answers? }`,
+   - a command: `when: { command: <id>, input: {...}, answers? }`,
      `expect: { commands: [names], result: {...} }` (either or both;
      `result` is compared on the keys you name, so a read command's
      example checks its answer) or `{ refuses: <part of the reason> }` —
@@ -131,7 +132,7 @@ model the SQL reads and the command it runs. Prefer `answers:` on pages.
      }`, `expect: { commands: [names] }` or `{ skip: <part of the
      reason> | $any }` — a dry run; the test also runs the effort-policy
      conformance suite over the script;
-   - a provider: `input: { command, input }` (`references/providers.md`).
+   - a provider: `when: { command, input }` (`references/providers.md`).
 
    An `event:` in an example is `{ type, v?, payload, subject?, anchors?
    }`, with a payload valid for its type (the whole payload, as oxplow

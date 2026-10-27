@@ -5,7 +5,7 @@ given:
   - { command: oxplow.work_item.create, input: { title: Its blocker, body: Some words., thread: thr1 }, bind: blocker }
   - { command: oxplow.work_item.link, input: { uri: $item.uri, target: $blocker.uri, link_type: blocks } }
   - { command: oxplow.work_item.comment, input: { uri: $item.uri, body: A note. } }
-input: { page: work-item, params: { uri: $item.uri, thread_id: 1 } }
+when: { page: work-item, params: { uri: $item.uri, thread_id: 1 } }
 expect:
   loaders:
     # The page's row names its tab: the item's title.

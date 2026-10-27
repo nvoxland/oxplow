@@ -1,5 +1,5 @@
 # The kinds a provider form offers are the AI providers extensions declare.
-input: { page: ai-provider-kinds }
+when: { page: ai-provider-kinds }
 expect:
   loaders:
     ai_provider_kinds: { rows: 12 }

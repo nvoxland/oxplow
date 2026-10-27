@@ -1,5 +1,5 @@
 # A repository with no commits shows none, at any range.
-input:
+when:
   page: history
   params: { range: all }
 expect:

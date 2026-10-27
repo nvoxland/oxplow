@@ -1939,10 +1939,13 @@ every finding names that path — the file the author edits. It never opens
 the project's database. It runs `check` there
 (with that registry, so `commands:` examples dry-run), then — only if `check` is clean — each
 `intent.examples[*]` by its fixture `fixtures/<name>.yaml` (the event,
-job and component forms are in "The SDK"):
+job and component forms are in "The SDK"). A fixture's keys are `given`
+(steps run first), `when` (what it does: one key names the kind, the rest
+are that kind's), `expect`, `steps`, `view` and `model` (`{ replies }`, the
+fixture model's answers); any other key is an error (`FIXTURE_KEYS`):
 
-- `input: { page: <slug | ext/slug>, params? }` with optional `given: [..]`,
-  `view: { stream?, thread? }` and `steps: [..]` beside `input`, and
+- `when: { page: <slug | ext/slug>, params? }` with optional `given: [..]`,
+  `view: { stream?, thread? }` and `steps: [..]` beside `when`, and
   `expect: { loaders?: { <name>: { rows: n | $any | [ { col: val } | [ val,
   … ] ], contains?: [ { col: val } ], columns? } }, nodes?: [{ id, kind?,
   actions? }], text?, alert?,
@@ -1996,7 +1999,7 @@ job and component forms are in "The SDK"):
     message, duration_ms }` per thing that ran (`check`, `example <name>`,
     `answers <page>`, `provider <id>`, `policy <id>`), and
     `render(report, Format::Junit)` writes them as one `<testsuite>`.
-- `input: { collector: <id>, rows?, event? }`, `expect: { entities: { <name>:
+- `when: { collector: <id>, rows?, event? }`, `expect: { entities: { <name>:
   n | $any } }` — a derived collector runs over `rows` (standing in for
   its `input` query, `oxplow_preview_collector(…, event, rows)`) and `event`
   (the event an `on:` collector reacts to, as the envelope), storing nothing, its
@@ -2006,14 +2009,14 @@ job and component forms are in "The SDK"):
   { label: { type: choice, choice } } }` for `ai_classify`); an exec or
   provider-reading collector's example is a warning, not run (it runs a
   program);
-- `input: { collector: <id>, files: { <path>: <text> } }`, `expect: {
+- `when: { collector: <id>, files: { <path>: <text> } }`, `expect: {
   facts: [...] }` — a **fact** collector (one with `facts:`) runs over
   `files` as its tree (`MetricsService::preview_fact_collector`, its other
   input keys — `report`, `rows`, `event` (made the envelope) — as its
   input), storing nothing;
   each fact is compared on the keys its expected fact names (it is not run as an
   entity collector);
-- `input: { command, input }` — a provider's, run in its session
+- `when: { command, input }` — a provider's, run in its session
   (providers.md "The conformance kit");
 Every example's `event:` is built by `EventView::fixture` through the
 throwaway's vocabulary (core's plus the extensions' declared types,
@@ -2024,18 +2027,18 @@ review reads each fixture through that version's own declared types
 (`Vocabulary::with_declared`), so a version that adds v2 carries its v1
 fixtures to it.
 
-- `input: { effect: <id>, event: { type, payload, subject? }, answers? }`,
+- `when: { effect: <id>, event: { type, payload, subject? }, answers? }`,
   `expect: { commands: [names] } | { skip: <part of the reason> } | {
   reacts: false }` (P8.D12) — whether the effect reacts (`on`/`where`),
   then `effects::dry_run`: its script, its scope calls answered
   from `answers` (per scope, in call order) or for real, the
   composed calls checked against the registry; nothing runs. An
-  extension command's is `input: { command: <id>, input, answers? }`,
+  extension command's is `when: { command: <id>, input, answers? }`,
   `expect: { commands?, result? }` (each compared on the keys it names:
   a read command's example checks what it answers) or `{ refuses }`;
   `{ skip: $any }` matches any skip (`reaction_problem`, shared with the
   policy's);
-- `input: { implementation: <id>, event: { type, payload, subject?,
+- `when: { implementation: <id>, event: { type, payload, subject?,
   anchors? }, answers? }`, the same `expect` but `reacts` — an
   **effort policy script** (`implementations:` with `capability:
   effort_policy`): the event envelope, `effects::run_over` with the answers, the
@@ -2047,10 +2050,10 @@ fixtures to it.
   script chosen as `activeProviders.effort_policy`, then
   `effort_policy_conformance::suite`; a finding is an error at the
   manifest, `ran` shows `effort_policy suite`;
-- `input: { event_type, v?, payload }`, `expect: { valid: true | false,
+- `when: { event_type, v?, payload }`, `expect: { valid: true | false,
   upcast?: <payload> }` — the payload against the extension's declared
   schema (the newest version without `v`), and its upcast;
-- `input: { wikilink }`, `expect: { uri: <canonical URI> | null }` — what
+- `when: { wikilink }`, `expect: { uri: <canonical URI> | null }` — what
   `[[…]]` names with the extension's resources beside core's;
 - no fixture is a warning; an `input` naming none of these is an error.
 
@@ -2825,7 +2828,7 @@ model data; nothing is written.
 **A collector's outputs.** Each derived collector (Starlark,
 jaq) whose script or declaration changed is dry-run on the same inputs
 in both versions: each version's intent-example fixtures that name it
-(`fixtures/<example>.yaml`, `input: { collector, rows }`), the latest
+(`fixtures/<example>.yaml`, `when: { collector, rows }`), the latest
 five events its `on:` trigger matches, else its `input:` query once. The
 runner is `collector_runner::dry_run_collector`: each version's own
 script text, its `input:` read through that version's own overlay,
@@ -2843,7 +2846,7 @@ says "its script changed" even when there is nothing to run it on.
 effect by id (`EffectImpact`) with its trigger before and after
 (`EffectTrigger { on, filter, needs }`; a script-only change is
 `changed` too). When it changed, it also has `outputs`: each input — both
-versions' fixtures that name it (`input: { effect, event, answers? }`)
+versions' fixtures that name it (`when: { effect, event, answers? }`)
 and the latest five events of its `on` types — composed by each version
 that reacts to it (`effects::dry_run` through that side's overlay,
 nothing runs): `Composes { commands, skip?, error? }`. The lines read

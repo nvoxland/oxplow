@@ -1,6 +1,6 @@
 # The board's page reads the TODOs its component draws; a fresh project has
 # none.
-input:
+when:
   page: todo-board
 expect:
   loaders:

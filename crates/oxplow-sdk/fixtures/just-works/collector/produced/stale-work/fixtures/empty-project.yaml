@@ -1,4 +1,3 @@
 # A fresh project: the collector has never synced, so the page is empty.
-name: empty-project
-input: { page: stale-tasks }
+when: { page: stale-tasks }
 expect: { loaders: { stale_tasks: { columns: [id, title, status, priority, days_idle, last_touched_at], rows: 0 } } }

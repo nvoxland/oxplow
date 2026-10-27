@@ -1127,7 +1127,7 @@ mod tests {
         );
         write(
             ".oxplow/extensions/acme/fixtures/one.yaml",
-            "input: { page: items }\nexpect: { loaders: { items: { rows: 1 } } }\n",
+            "when: { page: items }\nexpect: { loaders: { items: { rows: 1 } } }\n",
         );
         let junit = p.join("target/extension-tests/junit.xml");
         let out = dev(
@@ -1155,7 +1155,7 @@ mod tests {
 
         write(
             ".oxplow/extensions/acme/fixtures/one.yaml",
-            "input: { page: items }\nexpect: { loaders: { items: { rows: 2 } } }\n",
+            "when: { page: items }\nexpect: { loaders: { items: { rows: 2 } } }\n",
         );
         let err = dev(p, &["extension", "test", "acme"]).await.unwrap_err();
         assert!(err.contains("loader `items` returned"), "{err}");

@@ -1,5 +1,5 @@
 # An item with no review shows no row.
-input:
+when:
   page: item-review
   params: { uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow" }
 expect:

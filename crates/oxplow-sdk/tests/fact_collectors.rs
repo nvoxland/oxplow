@@ -39,13 +39,13 @@ async fn a_fact_collectors_examples_run_over_their_files() {
     write(
         root,
         &format!("{ext}/fixtures/one-todo.yaml"),
-        "input:\n  collector: todos.scan\n  files:\n    src/a.ts: \"// TODO: one\\nexport const a = 1;\\n\"\n    src/b.ts: \"export const b = 2;\\n\"\n\
+        "when:\n  collector: todos.scan\n  files:\n    src/a.ts: \"// TODO: one\\nexport const a = 1;\\n\"\n    src/b.ts: \"export const b = 2;\\n\"\n\
          expect:\n  facts:\n    - { measure: todos.count, value: 1, path: src/a.ts }\n",
     );
     write(
         root,
         &format!("{ext}/fixtures/wrong-count.yaml"),
-        "input:\n  collector: todos.scan\n  files:\n    src/a.ts: \"// TODO: one\\n\"\n\
+        "when:\n  collector: todos.scan\n  files:\n    src/a.ts: \"// TODO: one\\n\"\n\
          expect:\n  facts:\n    - { measure: todos.count, value: 2, path: src/a.ts }\n",
     );
     let tested = test_extension(root, "todos", false).await.unwrap();

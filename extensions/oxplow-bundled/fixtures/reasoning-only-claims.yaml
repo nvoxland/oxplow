@@ -1,6 +1,6 @@
 # A reply with only the claims list still runs both writers: the missing
 # decisions list clears the stale inferred decisions.
-input:
+when:
   effect: store-reasoning
   event:
     type: contribution.job.completed

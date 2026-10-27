@@ -1927,7 +1927,7 @@ name with `_` for `-`):
 - a Code launcher page over `metric_findings('<ns>.complex_functions')`
   whose `path` column links `file` at the `line` column, and an intent
   example + `fixtures/basic.yaml` in the fact-collector form `extension
-  test` runs (`input: { collector, files: {path: text} }`, `expect: {
+  test` runs (`when: { collector, files: {path: text} }`, `expect: {
   facts: [...] }`, each fact compared on the keys the expectation names).
 
 It checks with no warnings and tests clean as written

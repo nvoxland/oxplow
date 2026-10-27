@@ -8,7 +8,7 @@ An extension with an **external provider** (`providers:` — a program that
    stub `bin/provider` to replace, and the fixtures).
    The test runs `check`, then the provider: its `initialize` must equal
    `provider.json`, its `check` must accept `fixtures/provider-<id>.yaml`'s
-   `config`, each intent example's fixture (`input: { command, input }`,
+   `config`, each intent example's fixture (`when: { command, input }`,
    `expect`, `$any` matching anything) is invoked, every message must
    match the protocol, the session must match the golden
    `fixtures/transcripts/<id>.jsonl` (`--bless` writes it when a change is

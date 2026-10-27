@@ -1,4 +1,4 @@
-input:
+when:
   implementation: prompt_efforts
   event: { type: work_item.state_changed, payload: { work_item: "oxplow:oxplow/work_item?id=tsk2&provider=oxplow", to: in_progress }, anchors: { thread_id: thr1 } }
   answers:

@@ -1,6 +1,6 @@
 # Cancelled while the model writes: the job stops at once and keeps what
 # it had written.
-input:
+when:
   job: review
   intentKey: "review:eff2"
   cancel: true
@@ -9,9 +9,9 @@ input:
     role: summarize
     messages:
       - { role: user, parts: [{ type: text, text: "Review eff2 at length." }] }
-  model:
-    replies:
-      - { text: "The tests the agent ran cover the parser change, but the diff coverage leaves the error path in src/parse.rs untested, and the riskiest change is parse_block.", chunkDelayMs: 100 }
 expect:
   state: cancelled
   result: { stopped: cancelled }
+model:
+  replies:
+    - { text: "The tests the agent ran cover the parser change, but the diff coverage leaves the error path in src/parse.rs untested, and the riskiest change is parse_block.", chunkDelayMs: 100 }

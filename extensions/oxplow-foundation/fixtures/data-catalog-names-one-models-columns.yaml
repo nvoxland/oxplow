@@ -1,7 +1,7 @@
 # Naming one model gives its columns' docs and key.
 given:
   - { command: oxplow.effort.open, input: { thread: thr1 } }
-input: { page: data-catalog, params: { model: effort } }
+when: { page: data-catalog, params: { model: effort } }
 expect:
   loaders:
     catalog: { rows: [{ view: v_effort }] }

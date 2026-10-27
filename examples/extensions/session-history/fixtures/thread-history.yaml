@@ -1,5 +1,5 @@
 # A thread with no recorded prompts shows no row.
-input:
+when:
   page: thread-history
   params: { thread_id: 1 }
 expect:
