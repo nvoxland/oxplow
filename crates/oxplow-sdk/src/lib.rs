@@ -11,6 +11,7 @@
 
 pub mod answerability;
 pub mod cli;
+mod component_harness;
 pub mod conformance;
 pub mod extension_test;
 mod throwaway;

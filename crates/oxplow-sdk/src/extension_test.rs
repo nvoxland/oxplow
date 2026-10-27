@@ -2859,6 +2859,16 @@ async fn page_example(
         if let Some(over) = step.get("params").and_then(Value::as_object) {
             run_params.extend(over.clone());
         }
+        if let Some(ui) = step.get("ui") {
+            let params = Value::Object(run_params);
+            if !at
+                .ui(ext, &params, (step, ui), &mut binds, &label, report)
+                .await
+            {
+                return;
+            }
+            continue;
+        }
         if let Some(when) = step.get("when") {
             let expect = step.get("expect").cloned().unwrap_or(Value::Null);
             if !step_run(host, ext, ex, (when, &expect), &binds, &label, report).await {
@@ -3403,6 +3413,384 @@ fn node_actions(
             _ => None,
         })
         .unwrap_or_default()
+}
+
+impl PageAt<'_> {
+    /// Run a step's `ui:` list against the page's custom component — its
+    /// `node:`, else the first component node — in the app's own webview
+    /// (`component_harness`), on this oxplow. False when it found anything.
+    async fn ui(
+        &self,
+        ext: &Extension,
+        params: &Value,
+        (step, ui): (&Value, &Value),
+        binds: &mut Binds,
+        label: &str,
+        report: &mut TestReport,
+    ) -> bool {
+        use crate::component_harness::{shell, Harness};
+        let (shown, page) = (self.shown, self.page);
+        let fail = |report: &mut TestReport, why: String| {
+            report.errors.push(format!("{shown}:1: {label}: {why}"));
+            false
+        };
+        let Some(shell) = shell() else {
+            report.warnings.push(format!(
+                "{shown}:1: {label}: its `ui` steps aren't run: no oxplow app here to draw them — \
+                 fix: set OXPLOW_SHELL to the app, or build it (`bun run build:dev`)"
+            ));
+            return true;
+        };
+        let Some(steps) = ui.as_array() else {
+            return fail(report, "`ui` is a list of steps".into());
+        };
+        let params = match binds.substitute(params) {
+            Ok(params) => params,
+            Err(e) => return fail(report, e),
+        };
+        let run = match run_page(self.host, self.target.clone(), &params, self.ctx).await {
+            Ok(run) => run,
+            Err(e) => return fail(report, format!("page `{page}`: {e}")),
+        };
+        // The component the step drives, by its node.
+        let named = step.get("node").and_then(Value::as_str);
+        let found = run.page.nodes().into_iter().find_map(|n| {
+            let component = match &n.kind {
+                oxplow_app::pages::schema::NodeKind::Component { component, .. } => {
+                    component.clone()
+                }
+                oxplow_app::pages::schema::NodeKind::Viz { config, .. }
+                    if config.viz == oxplow_app::extensions::Viz::Custom =>
+                {
+                    config.custom.as_ref()?.component.clone()?
+                }
+                _ => return None,
+            };
+            (named.is_none_or(|id| id == n.id)).then(|| (n.id.clone(), component))
+        });
+        let Some((node, component)) = found else {
+            return fail(
+                report,
+                format!(
+                    "page `{page}` has no component node to drive{}",
+                    named.map(|n| format!(" named `{n}`")).unwrap_or_default()
+                ),
+            );
+        };
+        let owner = run
+            .page
+            .id
+            .split('/')
+            .next()
+            .unwrap_or(&ext.name)
+            .to_string();
+        let key = if component.contains('/') {
+            component
+        } else {
+            format!("{owner}/{component}")
+        };
+        let version =
+            match oxplow_app::viz_actions::load_component(&self.host.svc, &self.host.root, &key) {
+                Ok(version) => version,
+                Err(e) => return fail(report, format!("component `{key}` doesn't load: {e}")),
+            };
+        // A component that is the whole page is told it is one, and has a view.
+        let whole = run.page.view.id == node;
+        let start = json!({
+            "version": version,
+            "run": run,
+            "node": node,
+            "page": whole.then(|| json!({ "streamId": null, "threadId": null })),
+            "view": whole.then(|| json!({ "viewParams": {}, "historyState": {} })),
+        });
+        let harness = match Harness::open(
+            &shell,
+            self.host.svc.clone(),
+            self.host.root.clone(),
+            key.clone(),
+            version,
+            start,
+        )
+        .await
+        {
+            Ok(harness) => harness,
+            Err(e) => return fail(report, e),
+        };
+        let ok = self
+            .drive(&harness, ext, (&params, steps), binds, label, report)
+            .await;
+        harness.close().await;
+        ok
+    }
+
+    /// The `ui` steps on an open harness.
+    async fn drive(
+        &self,
+        harness: &crate::component_harness::Harness,
+        ext: &Extension,
+        (params, steps): (&Value, &[Value]),
+        binds: &mut Binds,
+        label: &str,
+        report: &mut TestReport,
+    ) -> bool {
+        let shown = self.shown;
+        let wait = std::time::Duration::from_secs(10);
+        // It starts: the frame says `ready`.
+        let started = std::time::Instant::now();
+        while !harness.records().iter().any(|(kind, _)| kind == "ready") {
+            if started.elapsed() > std::time::Duration::from_secs(30) {
+                let page = harness
+                    .op(json!({ "op": "dom", "action": { "page": true } }), wait)
+                    .await
+                    .unwrap_or_default();
+                report.errors.push(format!(
+                    "{shown}:1: {label}: the component didn't start (it never connected) — the \
+                     frame: {}",
+                    page["value"]
+                ));
+                return false;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        let mut changed = false;
+        for (index, item) in steps.iter().enumerate() {
+            let at = format!("{label}: ui[{index}]");
+            let item = match binds.substitute(item) {
+                Ok(item) => item,
+                Err(e) => {
+                    report.errors.push(format!("{shown}:1: {at}: {e}"));
+                    return false;
+                }
+            };
+            let dom = ["click", "fill", "key", "drag"]
+                .into_iter()
+                .any(|k| item.get(k).is_some());
+            let done = if dom {
+                match harness
+                    .op(json!({ "op": "dom", "action": item }), wait)
+                    .await
+                {
+                    Ok(out) if out["ok"] == true => Ok(()),
+                    Ok(out) => Err(out["error"].as_str().unwrap_or("it failed").to_string()),
+                    Err(e) => Err(e),
+                }
+            } else if let Some(id) = item.get("press").and_then(Value::as_str) {
+                harness
+                    .op(json!({ "op": "press", "id": id }), wait)
+                    .await
+                    .map(|_| ())
+            } else if let Some(view) = item.get("view_params") {
+                harness
+                    .op(json!({ "op": "viewParams", "params": view }), wait)
+                    .await
+                    .map(|_| ())
+            } else if let Some(given) = item.get("given") {
+                changed = true;
+                if run_steps(
+                    self.host,
+                    ext,
+                    shown,
+                    &format!("{at}.given"),
+                    given,
+                    binds,
+                    report,
+                )
+                .await
+                {
+                    Ok(())
+                } else {
+                    return false;
+                }
+            } else if let Some(yes) = item.get("confirm").and_then(Value::as_bool) {
+                harness.confirm_next(yes);
+                Ok(())
+            } else if let Some(form) = item.get("form") {
+                harness.submit_next(form.get("submit").cloned());
+                Ok(())
+            } else if let Some(want) = item.get("expect") {
+                self.expect_ui(harness, params, want, &mut changed).await
+            } else {
+                Err(
+                    "a `ui` step is `click`, `fill`, `key`, `drag`, `press`, `view_params`, \
+                     `given`, `confirm`, `form` or `expect`"
+                        .into(),
+                )
+            };
+            if let Err(why) = done {
+                let page = harness
+                    .op(json!({ "op": "dom", "action": { "page": true } }), wait)
+                    .await
+                    .unwrap_or_default();
+                report.errors.push(format!(
+                    "{shown}:1: {at}: {why} — the frame: {} {}",
+                    page["value"]["html"].as_str().unwrap_or("(unreadable)"),
+                    match page["value"]["errors"].as_array() {
+                        Some(errors) if !errors.is_empty() =>
+                            format!("— its errors: {}", json!(errors)),
+                        _ => String::new(),
+                    }
+                ));
+                return false;
+            }
+        }
+        true
+    }
+
+    /// Wait (up to 5 s) for what the frame draws and asked the shell to be
+    /// what `want` says; the page runs again and the frame hears its rows
+    /// whenever a command ran or a step changed data.
+    async fn expect_ui(
+        &self,
+        harness: &crate::component_harness::Harness,
+        params: &Value,
+        want: &Value,
+        changed: &mut bool,
+    ) -> Result<(), String> {
+        let wait = std::time::Duration::from_secs(10);
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            if harness.take_acted() || std::mem::take(changed) {
+                self.host.settle().await;
+                let run = run_page(self.host, self.target.clone(), params, self.ctx).await?;
+                harness
+                    .op(json!({ "op": "update", "run": run }), wait)
+                    .await?;
+            }
+            let (wanted, got) = self.ui_seen(harness, want, wait).await?;
+            match compare(&wanted, &got) {
+                None => return Ok(()),
+                Some(_) if std::time::Instant::now() < until => {
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                }
+                Some((path, want, at)) => {
+                    return Err(format!(
+                        "{at} at `{path}`, the example expects {want} — fix: the component, or \
+                         the step's `expect` (`{{ visible, count, text, title, actions, \
+                         view_params, invoked, navigated, confirmed, forms, shown }}`)"
+                    ))
+                }
+            }
+        }
+    }
+
+    /// What `want` names, as the frame draws it and as it asked the shell:
+    /// `want` as compared (`visible: sel` as `{ sel: true }`, a text's
+    /// `{ contains }` kept when it holds) and what was seen.
+    async fn ui_seen(
+        &self,
+        harness: &crate::component_harness::Harness,
+        want: &Value,
+        wait: std::time::Duration,
+    ) -> Result<(Value, Value), String> {
+        let query = |selector: String| {
+            let op = json!({ "op": "dom", "action": { "query": selector } });
+            async move {
+                let out = harness.op(op, wait).await?;
+                Ok::<_, String>((
+                    out["value"]["count"].as_u64().unwrap_or(0),
+                    out["value"]["texts"]
+                        .as_array()
+                        .cloned()
+                        .unwrap_or_default(),
+                ))
+            }
+        };
+        // A text `{ contains }` holds when the text has it.
+        let text = |want: &Value, got: Option<&str>| match (want.get("contains"), got) {
+            (Some(Value::String(part)), Some(got)) if got.contains(part.as_str()) => want.clone(),
+            (_, got) => json!(got),
+        };
+        let records = harness.records();
+        let of = |kind: &str| -> Vec<Value> {
+            records
+                .iter()
+                .filter(|(k, _)| k == kind)
+                .map(|(_, v)| v.clone())
+                .collect()
+        };
+        let (mut wanted, mut got) = (serde_json::Map::new(), serde_json::Map::new());
+        for (key, w) in want.as_object().into_iter().flatten() {
+            let seen = match key.as_str() {
+                "visible" => {
+                    let selectors: Vec<String> = match w {
+                        Value::String(s) => vec![s.clone()],
+                        Value::Array(list) => list
+                            .iter()
+                            .filter_map(|s| s.as_str().map(str::to_string))
+                            .collect(),
+                        _ => return Err("`visible` is a selector or a list of them".into()),
+                    };
+                    let mut shown = serde_json::Map::new();
+                    for selector in &selectors {
+                        shown.insert(
+                            selector.clone(),
+                            json!(query(selector.clone()).await?.0 > 0),
+                        );
+                    }
+                    wanted.insert(
+                        key.clone(),
+                        json!(selectors
+                            .iter()
+                            .map(|s| (s.clone(), json!(true)))
+                            .collect::<serde_json::Map<_, _>>()),
+                    );
+                    Value::Object(shown)
+                }
+                "count" | "text" => {
+                    let mut seen = serde_json::Map::new();
+                    for (selector, w) in w.as_object().into_iter().flatten() {
+                        let (count, texts) = query(selector.clone()).await?;
+                        seen.insert(
+                            selector.clone(),
+                            if key == "count" {
+                                json!(count)
+                            } else {
+                                text(w, texts.first().and_then(Value::as_str))
+                            },
+                        );
+                    }
+                    Value::Object(seen)
+                }
+                "title" => text(w, of("title").last().and_then(Value::as_str)),
+                "actions" => json!(of("actions")
+                    .last()
+                    .and_then(Value::as_array)
+                    .map(|a| a.iter().map(|a| a["id"].clone()).collect::<Vec<_>>())
+                    .unwrap_or_default()),
+                "view_params" => {
+                    let mut view = serde_json::Map::new();
+                    for change in of("viewParams") {
+                        for (k, v) in change.as_object().into_iter().flatten() {
+                            if v.is_null() {
+                                view.remove(k);
+                            } else {
+                                view.insert(k.clone(), v.clone());
+                            }
+                        }
+                    }
+                    Value::Object(view)
+                }
+                "invoked" => json!(of("invoked")),
+                "navigated" => json!(of("navigate")),
+                "confirmed" => json!(of("confirm")),
+                "forms" => json!(of("openForm")
+                    .into_iter()
+                    .chain(of("askForm"))
+                    .collect::<Vec<_>>()),
+                "shown" => of("showView").last().cloned().unwrap_or(Value::Null),
+                other => {
+                    return Err(format!(
+                        "`expect.{other}` isn't something a `ui` step reads"
+                    ))
+                }
+            };
+            if !wanted.contains_key(key) {
+                wanted.insert(key.clone(), w.clone());
+            }
+            got.insert(key.clone(), seen);
+        }
+        Ok((Value::Object(wanted), Value::Object(got)))
+    }
 }
 
 /// Every page's `answers:` entry runs with its params: the page opens and
@@ -6947,6 +7335,110 @@ expect: {{ lines: {want} }}
             .join("\n");
         assert!(
             errors.contains("fixtures/greeted.yaml:1: advisory `hello` said"),
+            "{errors}"
+        );
+    }
+
+    /// A page's `ui:` step runs its custom component's own code in the
+    /// app's webview against the test's oxplow: what it draws, what it asks
+    /// the shell (a title, actions) and what it invokes, through clicks,
+    /// typing and a nav-bar press — and a wrong expectation names the step
+    /// and shows the frame.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_ui_step_runs_the_component_in_the_apps_webview() {
+        assert!(
+            crate::component_harness::shell().is_some(),
+            "no oxplow app to draw the harness: build it first (`bun run build:dev`)"
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        write(
+            root,
+            ".oxplow/extensions/cards/extension.yaml",
+            "manifest: 2
+name: cards
+intent:
+  purpose: Cards.
+  examples:
+    - { name: drawn, input: { page: board }, expect: cards }
+permissions: { commands: [oxplow.work_item.create] }
+custom_components:
+  - { id: cards, title: Cards, commands: [oxplow.work_item.create] }
+",
+        );
+        write(
+            root,
+            ".oxplow/extensions/cards/pages/board.yaml",
+            "title: Board\ndata:\n  items: { sql: \"SELECT title FROM v_work_item ORDER BY title\" }\nview: { component: { id: cards, props: { heading: Work } } }\n",
+        );
+        write(
+            root,
+            ".oxplow/extensions/cards/components/cards/index.html",
+            "<!doctype html><html><head><title>cards</title></head><body>\
+             <h1 id=\"heading\"></h1><ul id=\"list\"></ul><input id=\"t\"><button id=\"go\">Go</button>\
+             <script src=\"/component-lib/oxplow-component.js\"></script><script src=\"app.js\"></script></body></html>",
+        );
+        write(
+            root,
+            ".oxplow/extensions/cards/components/cards/app.js",
+            "oxplow.connect().then(function (c) {
+  var list = document.getElementById('list');
+  var draw = function (data) {
+    list.innerHTML = '';
+    data.items.rows.forEach(function (r) {
+      var li = document.createElement('li');
+      li.textContent = r[0];
+      list.appendChild(li);
+    });
+  };
+  document.getElementById('heading').textContent = c.props.heading;
+  draw(c.data);
+  c.onUpdate(function (u) { draw(u.data); });
+  c.setTitle('Cards: ' + c.data.items.rows.length);
+  c.setActions([{ id: 'add', label: 'Add' }]);
+  c.onAction(function (id) { if (id === 'add') c.invoke('oxplow.work_item.create', { title: 'From the bar' }); });
+  document.getElementById('go').addEventListener('click', function () {
+    c.invoke('oxplow.work_item.create', { title: document.getElementById('t').value });
+  });
+});
+",
+        );
+        let fixture = |last: u32| {
+            format!(
+                "given: [{{ command: oxplow.work_item.create, input: {{ title: First }} }}]
+when: {{ page: board }}
+steps:
+  - ui:
+      - expect: {{ count: {{ li: 1 }}, text: {{ \"#heading\": Work }}, title: \"Cards: 1\", actions: [add] }}
+      - fill: {{ \"#t\": Second }}
+      - click: \"#go\"
+      - expect: {{ count: {{ li: 2 }}, invoked: [{{ command: oxplow.work_item.create, ok: true }}] }}
+      - press: add
+      - expect: {{ count: {{ li: {last} }} }}
+"
+            )
+        };
+        write(
+            root,
+            ".oxplow/extensions/cards/fixtures/drawn.yaml",
+            &fixture(3),
+        );
+        let report = test_extension(root, "cards", false).await.unwrap();
+        assert_eq!(report.errors, Vec::<String>::new());
+
+        write(
+            root,
+            ".oxplow/extensions/cards/fixtures/drawn.yaml",
+            &fixture(5),
+        );
+        let errors = test_extension(root, "cards", false)
+            .await
+            .unwrap()
+            .errors
+            .join("\n");
+        assert!(
+            errors.contains("fixtures/drawn.yaml:1: steps[0]: ui[5]:")
+                && errors.contains("<li>From the bar</li>"),
             "{errors}"
         );
     }

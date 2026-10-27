@@ -3233,6 +3233,51 @@ and `{ type: historyState, state }` when the entry's change (Back,
 Forward, an echo; `createBridgeHost` sends only what the frame has not
 seen). `init.view` carries both.
 
+### Testing a component
+
+A page fixture's step `{ ui: [..], node? }` runs the page's custom
+component — its `node:`, else its first `component` / `viz: custom` node
+— **in the app's own webview, against the test's oxplow, with no app
+around it** (`component_harness.rs`, `PageAt::ui`):
+
+- **The server** (loopback, per step) serves the harness's page (`/harness/`,
+  `crates/oxplow-sdk/assets/harness-host.js`), the bundle exactly as the
+  daemon serves it (`oxplow_app::component_http`: the same files, CSP and
+  library) with the agent (`assets/harness-agent.js`, served beside the
+  library so the CSP allows it) put first in its `index.html`.
+- **The host** (`apps/desktop/src/viz/harnessHost.ts`, built by `bun run
+  build:harness`; `harnessBuild.test.ts` fails when the committed build is
+  stale or pulls in React) mounts the frame with the app's own
+  `createBridgeHost` / `initMessage` / `pageData`. What the core answers —
+  `invoke` (`invoke_component_command`, as the person), `querySql`
+  (`run_component_sql`), `openForm` / `askForm`, `showView` — runs on the
+  test's oxplow; what only the shell answers (`setTitle`, `setActions`,
+  `setViewParams`, `setHistoryState`, `navigate`, a confirmation) is
+  recorded. The server drives it one op at a time (`/harness/next`): a DOM
+  step for the agent, a nav-bar press, a view change, new rows.
+- **The window** is the shell's `oxplow component-harness <url>`: one
+  window, off-screen but shown, no Dock icon, no project, daemon, menu or
+  IPC; it quits at `/harness/done`. Found as `OXPLOW_SHELL`, else an
+  `oxplow` beside the running program or up to two folders above it. With
+  none, the `ui` steps aren't run and the report warns — never a pass. CI
+  builds the app and runs the tests under `xvfb-run`.
+- **Steps**: `click: <sel>`, `fill: { <sel>: text }`, `key: { on, key }`
+  (`Mod+Enter`), `drag: { from, to }` (synthetic DOM events, not a
+  person's: focus and keyboard details can differ); `press: <action id>`
+  (the nav bar), `view_params: {..}` (Back/Forward); `given: [..]` (the
+  page runs again and the frame hears its rows, as after any command it
+  ran); `confirm: false` (the next confirmation's answer; default yes),
+  `form: { submit: {..} }` (the next form's values; without, it's closed);
+  `expect: { visible, count: { <sel>: n }, text: { <sel>: text | {
+  contains } }, title, actions: [ids], view_params, invoked: [{ command,
+  input, ok, result | refused }], navigated, confirmed, forms, shown }`,
+  compared by the one rule and waited for (5 s). A finding names
+  `steps[i]: ui[j]` and carries the frame's HTML (4 kB) and the errors
+  the agent caught.
+- **What it can't see**: how the app draws the frame, the nav bar or the
+  slideover (the generic `tests-e2e/specs/pages/component.spec.ts`), real
+  input events, or how it looks.
+
 **A page's rail.** A page file may have a `rail:` node tree beside its
 `view:`. The page host draws it in the page's rail, and a row it picks
 writes the page's view by the rail's rule (`pageViewChange`: a selection

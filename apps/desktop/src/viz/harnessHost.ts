@@ -149,7 +149,11 @@ export async function runHarness(
 /** The server this page was served by, over HTTP. */
 export function httpServer(): Server {
   const post = async (path: string, body: unknown) => {
-    const response = await fetch(path, { method: "POST", body: JSON.stringify(body) });
+    const response = await fetch(path, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
     return response.json() as Promise<unknown>;
   };
   return {
@@ -162,7 +166,12 @@ export function httpServer(): Server {
       if ("error" in out) throw new IpcCallError(out.error.message, out.error.code, out.error.field ?? null);
       return out.result;
     },
-    record: (kind, value) => void post("/harness/record", { kind, value }),
+    record: (kind, value) =>
+      void fetch("/harness/record", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ kind, value }),
+      }),
     next: async (result) => (await post("/harness/next", { result })) as Op,
   };
 }

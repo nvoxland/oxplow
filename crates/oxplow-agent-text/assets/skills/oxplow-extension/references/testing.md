@@ -109,7 +109,17 @@ model the SQL reads and the command it runs. Prefer `answers:` on pages.
      after it — each `expect` runs the page again (`params` over the
      example's; `bind: { c: 'loaders.items.rows[0].uri' }` keeps a value of
      that run), so one fixture can change the state and check the page
-     between changes. A step can also act as a person would: `{ press: {
+     between changes. **A custom component is tested by a `ui:` step**:
+     `- ui: [ { expect: { count: { li: 1 } } }, { click: "#go" }, { expect: {
+     invoked: [{ command: <yours>, ok: true }] } } ]` runs the page's component
+     in the oxplow app's own webview against this test's data — `click`,
+     `fill: { "#t": text }`, `key: { on, key }`, `drag: { from, to }`, `press:
+     <nav-bar action id>`, `view_params`, `given`, `confirm: false`, `form: {
+     submit: {..} }`, and `expect: { visible, count, text, title, actions,
+     view_params, invoked, navigated, confirmed, forms, shown }` (waited for,
+     5 s). It needs the app (`OXPLOW_SHELL`, or the `oxplow` beside
+     `$OXPLOW_BIN`); without it the report warns that the steps didn't run.
+     Write the `ui` fixture first, then the component. A step can also act as a person would: `{ press: {
      action, node?, row?: { uri: $t.uri }, input? } }` presses one of the
      page's actions, `{ submit: { node, input } }` submits a form node —
      for real; its `expect` is `{ ok: true, result? }` or `{ ok: false,

@@ -36,7 +36,8 @@ jobs:
             libayatana-appindicator3-dev \
             librsvg2-dev \
             patchelf \
-            build-essential
+            build-essential \
+            xvfb
 
       - name: Cache Cargo registry + target
         uses: actions/cache@v6
@@ -76,8 +77,14 @@ jobs:
       - name: Stage the daemon sidecar
         run: bash apps/desktop/src-tauri/scripts/stage-sidecars.sh debug
 
+      # A fixture's `ui:` steps draw the component in the app's own webview
+      # (`oxplow component-harness`, .context/extensions.md "Testing a
+      # component"): the SDK's tests need the app built and a display.
+      - name: Build the app the component harness draws in
+        run: bun run --cwd apps/desktop build && cargo build -p oxplow-desktop
+
       - name: Cargo test
-        run: cargo test --workspace --all-features
+        run: xvfb-run -a cargo test --workspace --all-features
 
       # Drift guard: if `cargo test` regenerated TS bindings (because a
       # Rust signature changed), the diff fails the PR.
