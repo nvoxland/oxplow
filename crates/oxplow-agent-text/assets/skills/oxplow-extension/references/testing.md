@@ -1,5 +1,10 @@
 # Checking and testing an extension
 
+A page's behavior is tested here, by fixtures in its extension — what its
+loaders return after some steps, in which state — not by tests in another
+language. `oxplow extension test` runs them in seconds on a throwaway
+oxplow, so write the fixture first and watch it fail.
+
 ## Check after every edit
 
 **Run `oxplow_validate_extension(name, stream_id)` after every edit**, not

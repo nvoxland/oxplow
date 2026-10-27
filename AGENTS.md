@@ -38,6 +38,11 @@ or exact mechanics.
   commands, all in the foreground (a backgrounded run's reports are
   never ingested), never bare `cargo test` / `bun test` (they emit no
   reports):
+  - `bun run test:ext [<name>]` — an edit under `extensions/` or
+    `.oxplow/extensions/` is checked with this: check, fixtures and page
+    answers on a throwaway oxplow, in seconds, with no compile (a debug
+    build reads oxplow's own extensions from their folders). After a
+    core change it rebuilds first, so a change to both runs both.
   - `bun run test:fast` (filtered: `-p oxplow-app some_test`) and
     `bun run test:fast:ts` — quick, write the JUnit reports the
     effort's Tests panel shows.
@@ -66,6 +71,13 @@ or exact mechanics.
     included (deploy for the person to look, commit when they're happy);
     a worktree stream's copy is a draft that never deploys. Never restart
     oxplow for an extension change, and never ask the person to.
+    **A page's behavior is tested by a fixture in its extension**
+    (`fixtures/<example>.yaml`: `given:` → `expect:`, `steps:` for a
+    scenario; the skill's `references/testing.md`), not by a Rust test —
+    `crates/oxplow-app/src/bundled_extensions.rs` and its siblings are being
+    emptied into fixtures and don't grow. Its interaction (select, expand,
+    forms, slots, embeds) is the generic `tests-e2e/specs/pages/*` suite's:
+    add a per-page e2e spec only for behavior that suite doesn't cover.
   - **Core** (any Rust crate, `apps/desktop/src`): it runs only after the
     person quits oxplow and runs `bun run run:dev` (build, deploy, start):
     say so when you finish. That also deploys foundation when its source
