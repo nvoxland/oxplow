@@ -395,44 +395,135 @@ impl Fixture {
     }
 }
 
-/// Run example `ex` on `host`, by what its `input` names, as one test case.
+/// Run example `ex` on `host` as one test case: its `given` steps, what
+/// its `when` names checked against `expect`, then its `steps`, each
+/// `{ given }` or a `{ when?, expect }` run the same way (`when` over the
+/// fixture's). A page runs its own scenario (`page_example`).
 async fn run_example(host: &Host, ext: &Extension, ex: &Example<'_>, report: &mut TestReport) {
     let shown = ex.shown;
-    let (before, started) = (report.errors.len(), std::time::Instant::now());
-    if let Some(replies) = model_replies(ex, report) {
-        if let Err(e) = host.answer_with(replies) {
-            report
-                .errors
-                .push(format!("{shown}:1: the fixture model: {e}"));
-            return;
-        }
-    } else {
+    // A provider's command runs in its session (`test_provider`).
+    let command = ex.when.get("command").and_then(Value::as_str);
+    if command.is_some_and(|name| !ext.commands.iter().any(|c| c.name == name))
+        && !ext.providers.is_empty()
+    {
         return;
     }
-    if ex.when.get("lens").is_some() {
-        report.errors.push(format!(
-            "{shown}:1: example `{}` runs a lens; lenses are pages now — fix: \
-             `{{ page: <slug>, params? }}` with `expect.loaders`",
-            ex.name
-        ));
-    } else if let Some(page) = ex.when.get("page").and_then(Value::as_str) {
-        report.ran.push(format!("example {}", ex.name));
+    let (before, started) = (report.errors.len(), std::time::Instant::now());
+    report.ran.push(format!("example {}", ex.name));
+    match model_replies(ex, report).map(|replies| host.answer_with(replies)) {
+        Some(Ok(())) => {
+            if ex.when.get("page").is_some() {
+                dispatch(host, ext, ex, report).await;
+            } else {
+                scenario(host, ext, ex, report).await;
+            }
+        }
+        Some(Err(e)) => report
+            .errors
+            .push(format!("{shown}:1: the fixture model: {e}")),
+        None => {}
+    }
+    report.finish_case(format!("example {}", ex.name), before, started);
+}
+
+/// A fixture that isn't a page's, run as [`run_example`] says.
+async fn scenario(host: &Host, ext: &Extension, ex: &Example<'_>, report: &mut TestReport) {
+    let shown = ex.shown;
+    let mut binds = Binds::default();
+    if !ex.given.is_null()
+        && !run_steps(host, ext, shown, "given", &ex.given, &mut binds, report).await
+    {
+        return;
+    }
+    let steps = match &ex.steps {
+        None => Vec::new(),
+        Some(Value::Array(steps)) => steps.clone(),
+        Some(_) => {
+            report.errors.push(format!(
+                "{shown}:1: `steps` isn't a list — fix: `steps: [{{ given: [..] }} | {{ when?, \
+                 expect }}]`"
+            ));
+            return;
+        }
+    };
+    // What `when` and `expect` say, with the values bound so far.
+    let bound = |when: &Value, expect: &Value, binds: &Binds| {
+        Ok::<_, String>(Example {
+            when: binds.substitute(when)?,
+            expect: binds.substitute(expect)?,
+            given: Value::Null,
+            steps: None,
+            ..ex.clone()
+        })
+    };
+    if ex.steps.is_none() || !ex.expect.is_null() {
+        match bound(&ex.when, &ex.expect, &binds) {
+            Ok(first) => dispatch(host, ext, &first, report).await,
+            Err(e) => return report.errors.push(format!("{shown}:1: {e}")),
+        }
+    }
+    for (index, step) in steps.iter().enumerate() {
+        let label = format!("steps[{index}]");
+        if let Some(given) = step.get("given") {
+            if !run_steps(
+                host,
+                ext,
+                shown,
+                &format!("{label}.given"),
+                given,
+                &mut binds,
+                report,
+            )
+            .await
+            {
+                return;
+            }
+            continue;
+        }
+        let Some(expect) = step.get("expect") else {
+            return report.errors.push(format!(
+                "{shown}:1: `{label}` has no `given` or `expect` — fix: `{{ given: [..] }}` or \
+                 `{{ when?, expect }}`"
+            ));
+        };
+        let mut when = ex.when.as_object().cloned().unwrap_or_default();
+        if let Some(over) = step.get("when").and_then(Value::as_object) {
+            when.extend(over.clone());
+        }
+        let at = report.errors.len();
+        match bound(&Value::Object(when), expect, &binds) {
+            Ok(run) => dispatch(host, ext, &run, report).await,
+            Err(e) => report.errors.push(format!("{shown}:1: {e}")),
+        }
+        // Its findings say which step they're of.
+        let prefix = format!("{shown}:1: ");
+        for error in &mut report.errors[at..] {
+            if let Some(rest) = error.strip_prefix(&prefix) {
+                *error = format!("{prefix}{label}: {rest}");
+            }
+        }
+        if report.errors.len() > at {
+            return;
+        }
+    }
+}
+
+/// Run what example `ex`'s `when` names and check it against its `expect`.
+async fn dispatch(host: &Host, ext: &Extension, ex: &Example<'_>, report: &mut TestReport) {
+    let shown = ex.shown;
+    if let Some(page) = ex.when.get("page").and_then(Value::as_str) {
         page_example(host, ext, ex, page, report).await;
     } else if let Some(slug) = ex.when.get("form").and_then(Value::as_str) {
-        report.ran.push(format!("example {}", ex.name));
         form_example(host, ext, ex, slug, report).await;
     } else if let Some(id) = ex.when.get("job").and_then(Value::as_str) {
-        report.ran.push(format!("example {}", ex.name));
         job_example(host, ext, ex, id, report).await;
     } else if let Some(id) = ex.when.get("component").and_then(Value::as_str) {
-        report.ran.push(format!("example {}", ex.name));
         component_example(host, ext, ex, id, report).await;
     } else if ex.when.get("event").is_some()
         && ex.when.get("effect").is_none()
         && ex.when.get("implementation").is_none()
         && ex.when.get("collector").is_none()
     {
-        report.ran.push(format!("example {}", ex.name));
         event_example(host, ext, ex, report).await;
     } else if let Some(id) = ex.when.get("effect").and_then(Value::as_str) {
         effect_example(host, ext, ex, id, report).await;
@@ -441,7 +532,6 @@ async fn run_example(host: &Host, ext: &Extension, ex: &Example<'_>, report: &mu
     } else if let Some(t) = ex.when.get("event_type").and_then(Value::as_str) {
         event_type_example(ext, ex, t, report);
     } else if let Some(link) = ex.when.get("wikilink").and_then(Value::as_str) {
-        report.ran.push(format!("example {}", ex.name));
         wikilink_example(ext, ex, link, report);
     } else if let Some(id) = ex.when.get("collector").and_then(Value::as_str) {
         collector_example(host, ext, ex, id, report).await;
@@ -451,11 +541,10 @@ async fn run_example(host: &Host, ext: &Extension, ex: &Example<'_>, report: &mu
         .and_then(Value::as_str)
         .and_then(|name| ext.commands.iter().find(|c| c.name == name))
     {
-        report.ran.push(format!("example {}", ex.name));
         command_example(host, ex, cmd, report).await;
     } else if ex.when.get("command").is_none() || ext.providers.is_empty() {
         report.errors.push(format!(
-            "{shown}:1: example `{}`'s `input` names no page, collector, command, effect, \
+            "{shown}:1: example `{}`'s `when` names no page, collector, command, effect, \
              event, job, component, form, effort policy, event type, wikilink or provider command — \
              fix: `{{ page: <slug>, params? }}` (with `given:`), `{{ collector: <id>, rows?, event? }}`, \
              `{{ command: <name>, input }}`, `{{ effect: <id>, event: {{ type, payload }} }}` \
@@ -467,7 +556,6 @@ async fn run_example(host: &Host, ext: &Extension, ex: &Example<'_>, report: &mu
             ex.name
         ));
     }
-    report.finish_case(format!("example {}", ex.name), before, started);
 }
 
 /// Whether example `ex` changes its oxplow's data (and what reacts to
@@ -1431,6 +1519,7 @@ async fn page_form_start(
 }
 
 /// One intent example with its fixture.
+#[derive(Clone)]
 struct Example<'a> {
     name: &'a str,
     /// Its fixture file, as findings name it.
@@ -4160,6 +4249,80 @@ effects:
     /// Event-type and ref-kind fixtures: a payload checked against the
     /// declared schema (and its upcast), a wikilink against the declared
     /// kind; a wrong expectation is a finding at its fixture.
+    /// Every kind of fixture has `given` steps whose bound values its
+    /// `when` and `expect` read, and `steps`: each `{ when?, expect }` runs
+    /// again with its `when` over the fixture's, and a finding names its step.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_fixture_of_any_kind_has_given_and_steps() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        write(
+            root,
+            ".oxplow/extensions/acme/extension.yaml",
+            "manifest: 2
+name: acme
+intent:
+  purpose: PRs.
+  examples:
+    - { name: merged, input: { event_type: acme.merged }, expect: valid }
+event_types:
+  types:
+    - { type: acme.merged, v: 1, schema: merged.v1.json, summary: Merged. }
+    - { type: acme.merged, v: 2, schema: merged.v2.json, summary: Merged., upcast: merged.star }
+",
+        );
+        write(
+            root,
+            ".oxplow/extensions/acme/merged.v1.json",
+            r#"{"type": "object", "required": ["number"]}"#,
+        );
+        write(
+            root,
+            ".oxplow/extensions/acme/merged.v2.json",
+            r#"{"type": "object", "required": ["pr"]}"#,
+        );
+        write(
+            root,
+            ".oxplow/extensions/acme/merged.star",
+            "def transform(x):\n    return {\"pr\": x[\"payload\"][\"number\"]}\n",
+        );
+        let scenario = |last: &str| {
+            format!(
+                "given: [{{ command: oxplow.work_item.create, input: {{ title: Fix it }}, bind: item }}]
+when: {{ event_type: acme.merged, payload: {{ pr: $item.uri }} }}
+expect: {{ valid: true }}
+steps:
+  - when: {{ v: 1, payload: {{ number: $item.uri }} }}
+    expect: {{ valid: true, upcast: {{ pr: $item.uri }} }}
+  - when: {{ payload: {{ number: 1 }} }}
+    expect: {{ valid: {last} }}
+"
+            )
+        };
+        write(
+            root,
+            ".oxplow/extensions/acme/fixtures/merged.yaml",
+            &scenario("false"),
+        );
+        let report = test_extension(root, "acme", false).await.unwrap();
+        assert_eq!(report.errors, Vec::<String>::new());
+
+        write(
+            root,
+            ".oxplow/extensions/acme/fixtures/merged.yaml",
+            &scenario("true"),
+        );
+        let errors = test_extension(root, "acme", false)
+            .await
+            .unwrap()
+            .errors
+            .join("\n");
+        assert!(
+            errors.contains(".oxplow/extensions/acme/fixtures/merged.yaml:1: steps[1]: "),
+            "{errors}"
+        );
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     async fn event_type_and_ref_kind_fixtures_check_what_they_declare() {
         let dir = tempfile::tempdir().unwrap();

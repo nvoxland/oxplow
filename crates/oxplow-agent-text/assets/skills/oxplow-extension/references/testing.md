@@ -81,7 +81,10 @@ model the SQL reads and the command it runs. Prefer `answers:` on pages.
      between changes. What a step sets off (a reaction to its event, a
      setting taking effect) has happened before the next step. Each
      example that makes data gets an oxplow of its own: no fixture sees
-     another's data, so a fixture makes everything it reads. Every page's `answers:` entry
+     another's data, so a fixture makes everything it reads. Every kind
+     below takes `given:` and `steps:` the same way; a step of a kind
+     that isn't a page is `{ when?, expect }`, its `when` keys over the
+     fixture's (`when: { payload: { .. } }` changes just the payload). Every page's `answers:` entry
      also runs (`ran: answers`), on a clean oxplow: the page must open with
      its params and no failing loader;
    - `rows: { <entity>: [ {…} ] }` in a page or job fixture fills your

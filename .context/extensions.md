@@ -1971,6 +1971,10 @@ fixture model's answers); any other key is an error (`FIXTURE_KEYS`):
     params?, bind? }` runs the page again — `params` over the example's,
     `bind: { <name>: loaders.<loader>.rows[0].<column> }` keeping a value of
     that run — and findings name the step (`steps[3]: …`).
+  - **Every kind has them** (`scenario`): a fixture that isn't a page's
+    runs its `given` steps first, its `when` and `expect` read the values
+    they bound, and each `{ when?, expect }` step runs the same kind
+    again, its `when` keys over the fixture's.
   - **`confirmed: true`** runs a command that asks a person first.
   - **What a step sets off lands before the next step.** After each
     command step the host settles (`Host::settle`): every async consumer
