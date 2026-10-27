@@ -223,6 +223,9 @@ intent:
     - name: the-timeline-draws-the-projects-activity-and-titles-itself
       input: { page: timeline }
       expect: the timeline draws items, titles itself and offers Today and Fit; Fit writes from and to
+    - name: explore-data-says-why-a-query-is-refused
+      input: { page: explore-data }
+      expect: a refused query shows its reason in the explorer and draws nothing
 # The agent harnesses and AI providers oxplow runs: core's
 # built-ins, many of each at once (every one declared here is active).
 implementations:
