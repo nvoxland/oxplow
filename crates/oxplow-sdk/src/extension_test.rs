@@ -5285,13 +5285,33 @@ async fn publish_generation(svc: &Arc<oxplow_app::Services>) -> Result<(), Strin
         .map_err(|e| format!("{e:?}"))
 }
 
-/// An oxplow like `host` with oxplow's own work list on (it is
-/// `oxplow-bundled`'s), for a conformance suite that files work.
+/// An oxplow like `host` with a work list on, for a conformance suite that
+/// files work: the first extension in the checkout (by name) that declares a
+/// `work_items` implementation or provider. None is an error the suite
+/// reports.
 async fn with_work_list(host: &Host, ext: &Extension) -> Result<Host, String> {
+    let mut lists: Vec<String> = oxplow_app::extensions::load_extensions(&host.checkout)
+        .into_iter()
+        .filter(|e| {
+            e.implementations
+                .iter()
+                .any(|d| d.capability == "work_items")
+                || e.providers.iter().any(|p| p.capability == "work_items")
+        })
+        .map(|e| e.name)
+        .collect();
+    lists.sort();
+    let Some(list) = lists.into_iter().next() else {
+        return Err(
+            "its suite files work, and no extension in the checkout declares a `work_items` \
+             implementation or provider — fix: add one to the checkout"
+                .into(),
+        );
+    };
     let started = Host::start(
         &host.checkout,
         &ext.name,
-        &["oxplow-bundled".to_string()],
+        &[list],
         host.env.clone(),
         host.builds,
     )
