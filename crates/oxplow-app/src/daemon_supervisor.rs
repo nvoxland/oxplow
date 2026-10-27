@@ -118,6 +118,31 @@ fn signal_tree(pid: u32, sig: libc::c_int) {
 #[cfg(not(unix))]
 fn signal_tree(_pid: u32, _sig: i32) {}
 
+/// The daemon's last act, when it leads its process group (as one the
+/// app started does): SIGTERM to the group, itself excepted. What still
+/// runs there (a harness CLI asked for its models, an LSP server's
+/// helper) then ends with it however the daemon was stopped — the
+/// supervisor signals the group, but `kill <pid>` or a test harness
+/// signals the daemon alone. A daemon in someone else's group (started by
+/// hand from a shell) signals nothing: that group is the person's
+/// terminal.
+#[cfg(unix)]
+pub fn end_own_group() {
+    // SAFETY: getpgid(0) reads this process's group; SIGTERM is ignored
+    // here only because the process exits next; kill(0, …) signals the
+    // group it leads.
+    unsafe {
+        if libc::getpgid(0) != std::process::id() as libc::pid_t {
+            return;
+        }
+        libc::signal(libc::SIGTERM, libc::SIG_IGN);
+        libc::kill(0, libc::SIGTERM);
+    }
+}
+
+#[cfg(not(unix))]
+pub fn end_own_group() {}
+
 /// True when `pid` names a live process.
 #[cfg(unix)]
 pub(crate) fn process_alive(pid: u32) -> bool {
@@ -519,6 +544,47 @@ mod tests {
     fn supervisor(script: &'static str) -> DaemonSupervisor {
         DaemonSupervisor::with_launcher(Box::new(FakeDaemon(script)))
             .with_startup_timeout(Duration::from_secs(5))
+    }
+
+    /// A daemon stopped by a signal to it alone (`kill <pid>`, a test
+    /// harness), not to its group, still ends what runs in its group: a
+    /// harness CLI asked for its models, an LSP server's helper. Run as a
+    /// child in a group of its own, so the test runner's isn't signalled.
+    #[cfg(unix)]
+    #[test]
+    fn end_own_group_ends_what_runs_in_the_daemons_group() {
+        if let Ok(pidfile) = std::env::var("OXPLOW_TEST_END_OWN_GROUP") {
+            let sleeper = Command::new("sleep").arg("60").spawn().unwrap();
+            std::fs::write(&pidfile, sleeper.id().to_string()).unwrap();
+            end_own_group();
+            std::process::exit(0);
+        }
+        let tmp = tempfile::tempdir().unwrap();
+        let pidfile = tmp.path().join("sleeper.pid");
+        let mut daemon = Command::new(std::env::current_exe().unwrap());
+        daemon
+            .args([
+                "--exact",
+                "daemon_supervisor::tests::end_own_group_ends_what_runs_in_the_daemons_group",
+            ])
+            .env("OXPLOW_TEST_END_OWN_GROUP", &pidfile)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
+        own_process_group(&mut daemon);
+        assert!(daemon.status().unwrap().success());
+        let sleeper: u32 = std::fs::read_to_string(&pidfile)
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        let gone = (0..150).any(|_| {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+            !process_alive(sleeper)
+        });
+        if !gone {
+            unsafe { libc::kill(sleeper as libc::pid_t, libc::SIGKILL) };
+        }
+        assert!(gone, "the daemon's group outlived it");
     }
 
     #[test]

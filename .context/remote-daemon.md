@@ -179,8 +179,12 @@ Logs, tab reports and the socket use the same lightweight `uiClientId.ts` identi
   lifeline) runs `Services::shutdown`, then `process::exit`, which runs no
   destructors, so each kind of child is ended explicitly first:
   - in the daemon's own group (LSP servers, harness CLIs asked for their
-    models or sessions): the supervisor's SIGTERM to the group, or the
-    lifeline's (`signal_tree`), and LSP servers are killed in `shutdown`;
+    models or sessions): LSP servers are killed in `shutdown`, and the
+    daemon's last act, when it leads its group, is SIGTERM to that group,
+    itself excepted (`daemon_supervisor::end_own_group`), so they end
+    however it was stopped: the supervisor and the lifeline signal the
+    group, `kill <pid>` or a test harness the daemon alone. A daemon in
+    someone else's group (started by hand) signals nothing;
   - in groups of their own: providers (their orderly `shutdown`), every
     terminal and agent PTY (`TerminalSessionRegistry::close_all`: the
     PTY's whole group), and, after `shutdown`, any program group a

@@ -237,9 +237,10 @@ pub async fn run_main(name: &str, secrets: Arc<dyn oxplow_ai::secrets::SecretSto
     // The background loops, jobs, providers, terminals and LSP servers are
     // stopped — not orphaned by the exit, which runs no destructors —
     // within the supervisor's grace for the daemon; then any program group
-    // a cancelled job still owns.
+    // a cancelled job still owns, and what runs in the daemon's own group.
     stopping.shutdown().await;
     oxplow_app::external_process::stop_all();
+    oxplow_app::daemon_supervisor::end_own_group();
     oxplow_app::daemon_supervisor::clear_daemon_info(&project_dir);
     std::process::exit(0);
 }
