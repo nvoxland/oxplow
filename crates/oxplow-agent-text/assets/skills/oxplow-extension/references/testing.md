@@ -73,8 +73,10 @@ model the SQL reads and the command it runs. Prefer `answers:` on pages.
      after it — each `expect` runs the page again (`params` over the
      example's; `bind: { c: 'loaders.items.rows[0].uri' }` keeps a value of
      that run), so one fixture can change the state and check the page
-     between changes. Each page example that makes data gets an oxplow of
-     its own: no fixture sees another's data. Every page's `answers:` entry
+     between changes. What a step sets off (a reaction to its event, a
+     setting taking effect) has happened before the next step. Each
+     example that makes data gets an oxplow of its own: no fixture sees
+     another's data, so a fixture makes everything it reads. Every page's `answers:` entry
      also runs (`ran: answers`), on a clean oxplow: the page must open with
      its params and no failing loader;
    - `rows: { <entity>: [ {…} ] }` in a page or job fixture fills your

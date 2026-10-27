@@ -1965,8 +1965,17 @@ job and component forms are in "The SDK"):
     `bind: { <name>: loaders.<loader>.rows[0].<column> }` keeping a value of
     that run — and findings name the step (`steps[3]: …`).
   - **`confirmed: true`** runs a command that asks a person first.
-  - **One oxplow per page example that makes data.** A page example with
-    `given`, `steps` or `rows` runs on a fork of the throwaway
+  - **What a step sets off lands before the next step.** After each
+    command step the host settles (`Host::settle`): every async consumer
+    hears what was logged (`EventPump::settle_all`) — the config reactors,
+    registered as at boot, among them — and a generation one asked for is
+    published (`ExtensionActivation::serve_pending`, what the owner does
+    after its debounce). So `oxplow.capability.choose` is in effect for
+    the next run, as it would be for a person.
+  - **One oxplow per example that makes data.** An example with `given`,
+    `steps`, `rows` or `setup`, or one that runs a job, logs an event or
+    files a component's items (`makes_data`), runs on a fork of the
+    throwaway
     (`Host::fork`: its files copied, and its database as the deploys left
     it — `Database::copy_in_memory` of a snapshot taken before anything
     ran — so the fork boots what was deployed and nothing is built or

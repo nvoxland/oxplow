@@ -1,6 +1,13 @@
-# The reviews the job examples before it started in the same throwaway:
-# asked, cancelled and delivered — one row each.
+# Each review asked for is a row, with its effort and work item, from the
+# moment it is queued: a work item, an effort on it, and its review asked
+# for the way the effect and the Efforts page ask.
+given:
+  - { command: oxplow.work_item.create, input: { title: Parse blocks }, bind: item }
+  - { command: oxplow.effort.open, input: { thread: thr1, work_item: $item.uri } }
+  - { command: effort_review.effort.review, input: { effort: eff1 } }
 input: { page: reviews }
 expect:
   loaders:
-    reviews: { rows: 3, columns: [job_run, output_ref, effort, work_item, state, opening, reviewed_at] }
+    reviews:
+      rows: [{ effort: "oxplow:oxplow/effort?id=eff1", work_item: $item.uri }]
+      columns: [job_run, output_ref, effort, work_item, state, opening, reviewed_at]

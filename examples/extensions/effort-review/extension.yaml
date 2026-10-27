@@ -36,7 +36,7 @@ intent:
       expect: the effort's evidence in one bounded bundle
     - name: reviews
       input: { page: reviews }
-      expect: one row per review the job examples started
+      expect: one row per review asked for, with its effort and work item
 
 # The model the review asks for: a person binds `effort-review/review` in
 # Settings → AI; until then it uses their Summarize model. The review calls

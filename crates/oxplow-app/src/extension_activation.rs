@@ -96,6 +96,8 @@ pub struct ExtensionActivation {
     state: Arc<RwLock<GenerationState>>,
     activating: tokio::sync::Mutex<()>,
     requested: tokio::sync::Notify,
+    /// A [`Self::request`] no publication has served yet.
+    pending: std::sync::atomic::AtomicBool,
     spawned: std::sync::atomic::AtomicBool,
     /// Set once the first generation is published; before it the boundary
     /// serves the current load.
@@ -130,7 +132,49 @@ impl ExtensionActivation {
     }
 
     pub fn request(&self) {
+        self.pending
+            .store(true, std::sync::atomic::Ordering::Release);
         self.requested.notify_one();
+    }
+
+    /// Publish now what was asked for — a [`Self::request`], or a catalog
+    /// whose sources moved past the live set — as the owner
+    /// ([`Self::spawn`]) would after its debounce: for a host with no owner
+    /// running (a test's throwaway) whose next step needs the change in
+    /// place. `false` when nothing was asked for.
+    pub async fn serve_pending(&self, svc: Arc<Services>) -> bool {
+        let moved = svc
+            .extension_catalog
+            .live_snapshot(&svc.layout.project_dir)
+            .source_generation()
+            != svc
+                .extension_catalog
+                .snapshot(&svc.layout.project_dir)
+                .source_generation();
+        if !self.pending.load(std::sync::atomic::Ordering::Acquire) && !moved {
+            return false;
+        }
+        self.publish_requested(svc).await;
+        true
+    }
+
+    /// One publication for what was asked for, and what follows a new
+    /// generation: the catalog's change signal, the entity states, the
+    /// agents' text. A rejected candidate is recorded.
+    async fn publish_requested(&self, svc: Arc<Services>) {
+        self.pending
+            .store(false, std::sync::atomic::Ordering::Release);
+        match self.activate(svc.clone()).await {
+            Ok(_) => {
+                svc.extension_catalog.runtime_changed();
+                let _ = svc
+                    .sql
+                    .read_generation(svc.metrics.capture_entity_states(true))
+                    .await;
+                crate::capabilities::refresh_agent_text(&svc).await;
+            }
+            Err(error) => self.record_failure(&svc, error),
+        }
     }
 
     pub fn problems(&self) -> VocabularyErrors {
@@ -323,17 +367,7 @@ impl ExtensionActivation {
                 let Some(svc) = services.upgrade() else {
                     return;
                 };
-                match owner.activate(svc.clone()).await {
-                    Ok(_) => {
-                        svc.extension_catalog.runtime_changed();
-                        let _ = svc
-                            .sql
-                            .read_generation(svc.metrics.capture_entity_states(true))
-                            .await;
-                        crate::capabilities::refresh_agent_text(&svc).await;
-                    }
-                    Err(error) => owner.record_failure(&svc, error),
-                }
+                owner.publish_requested(svc).await;
             }
         });
     }

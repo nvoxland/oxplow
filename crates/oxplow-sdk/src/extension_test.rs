@@ -278,12 +278,11 @@ async fn examples(shared: &Host, ext: &Extension, report: &mut TestReport) {
             ));
             continue;
         }
-        // A page example that makes data runs on an oxplow of its own, so
-        // the next example doesn't see it.
+        // An example that makes data — steps, rows, a job, a logged event,
+        // a component's filed items — runs on an oxplow of its own, so no
+        // other example sees what it made or what reacted to it.
         let forked;
-        let host = if ex.input.get("page").is_some()
-            && (!ex.given.is_null() || ex.steps.is_some() || ex.input.get("rows").is_some())
-        {
+        let host = if makes_data(&ex) {
             match shared.fork().await {
                 Ok(host) => {
                     forked = host;
@@ -370,6 +369,22 @@ async fn examples(shared: &Host, ext: &Extension, report: &mut TestReport) {
         }
         report.finish_case(format!("example {}", example.name), before, started);
     }
+}
+
+/// Whether example `ex` changes its oxplow's data (and what reacts to
+/// that): it has steps or rows, or runs a job, logs an event or files a
+/// component's items. A dry run (a command's, an effect's, a policy's) or a
+/// collector run that stores nothing doesn't.
+fn makes_data(ex: &Example<'_>) -> bool {
+    let input = &ex.input;
+    let has = |key: &str| input.get(key).is_some();
+    !ex.given.is_null()
+        || ex.steps.is_some()
+        || has("rows")
+        || has("setup")
+        || has("job")
+        || has("component")
+        || (has("event") && !has("effect") && !has("implementation") && !has("collector"))
 }
 
 /// Why an example's target isn't here: the page, form, job, component,
@@ -1003,6 +1018,9 @@ async fn run_steps(
                 if let Some(name) = step.get("bind").and_then(Value::as_str) {
                     binds.0.insert(name.to_string(), outcome.result);
                 }
+                // What it set off — a reactor hearing its event, the
+                // generation it asked for — happens before the next step.
+                host.settle().await;
             }
             Err(e) => {
                 report.errors.push(format!(
@@ -4558,5 +4576,35 @@ input: { page: items }
             "{xml}"
         );
         assert!(xml.contains("<testcase name=\"answers items\""), "{xml}");
+    }
+
+    /// What a step's command sets off — a reactor hearing its event —
+    /// has happened before the next step and the run: switching the work
+    /// list off through its command empties the work-item interface.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_steps_reactions_land_before_the_page_runs() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        paged(
+            root,
+            "title: Items
+data:
+  items: { sql: \"SELECT title FROM v_work_item\" }
+view: { from: items, viz: table }
+",
+            &[(
+                "switched",
+                "given:
+  - { command: oxplow.work_item.create, input: { title: Filed } }
+input: { page: items }
+expect: { loaders: { items: { rows: [{ title: Filed }] } } }
+steps:
+  - given: [{ command: oxplow.capability.choose, input: { capability: work_items, provider: none }, confirmed: true }]
+  - expect: { loaders: { items: { rows: 0 } } }
+",
+            )],
+        );
+        let report = test_extension(root, "paged", false).await.unwrap();
+        assert_eq!(report.errors, Vec::<String>::new());
     }
 }

@@ -206,11 +206,30 @@ impl Host {
     pub(crate) fn start_runtime(&self) -> Result<(), String> {
         oxplow_app::effect_triggers::register(&self.svc);
         oxplow_app::collector_triggers::register(&self.svc);
+        // A config change reaches what runs, as at boot; what it asks to
+        // publish, [`Host::settle`] publishes.
+        oxplow_app::config_reactors::register(&self.svc);
         self.svc.jobs.spawn(
             self.svc.extension_activation.clone(),
             self.svc.commands.clone(),
         );
         self.answer_with(Vec::new())
+    }
+
+    /// Let what the last step set off finish, as a person would wait for
+    /// it: every reactor hears its events, and a generation one asked for
+    /// is published.
+    pub(crate) async fn settle(&self) {
+        let wait = std::time::Duration::from_secs(10);
+        self.svc.event_pump.settle_all(wait).await;
+        if self
+            .svc
+            .extension_activation
+            .serve_pending(self.svc.clone())
+            .await
+        {
+            self.svc.event_pump.settle_all(wait).await;
+        }
     }
 
     /// Model calls from here on answer with `replies` in turn (the last

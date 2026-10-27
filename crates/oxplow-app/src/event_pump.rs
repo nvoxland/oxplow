@@ -230,6 +230,18 @@ impl EventPump {
     /// the work then finishes on a later run. The run is spawned, so a
     /// timeout abandons the wait, never the work. Only the named consumers
     /// run: a slow one elsewhere (a model call) never holds a settle up.
+    /// [`Self::settle`] over every async consumer: for a caller that needs
+    /// everything an event set off to have happened (a test's next step).
+    pub async fn settle_all(self: &Arc<Self>, timeout: Duration) -> bool {
+        let names: Vec<String> = self
+            .async_slots()
+            .iter()
+            .map(|s| s.consumer.name().to_string())
+            .collect();
+        let names: Vec<&str> = names.iter().map(String::as_str).collect();
+        self.settle(&names, timeout).await
+    }
+
     pub async fn settle(self: &Arc<Self>, consumers: &[&str], timeout: Duration) -> bool {
         let pump = self.clone();
         let slots: Vec<Arc<AsyncSlot>> = self
