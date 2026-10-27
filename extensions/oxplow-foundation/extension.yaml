@@ -88,6 +88,9 @@ intent:
     - name: ai-provider-choices-list-the-configured-providers
       input: { page: ai-provider-choices }
       expect: the configured providers
+    - name: board-lists-work-items-by-scope
+      input: { page: board, params: { show: thread, thread_id: 1 } }
+      expect: the thread's cards, the backlog's or all of them by the scope; the row names the scope drawn
 # The agent harnesses and AI providers oxplow runs: core's
 # built-ins, many of each at once (every one declared here is active).
 implementations:

@@ -1,0 +1,25 @@
+# The Board: every work item in scope as a card in its state; the scope
+# narrows it to the thread's, the backlog's or everything; the page's row
+# says which scope its part draws.
+given:
+  - { command: oxplow.work_item.create, input: { title: On the thread, thread: thr1 } }
+  - { command: oxplow.work_item.create, input: { title: In the backlog } }
+input: { page: board, params: { show: thread, thread_id: 1 } }
+expect:
+  loaders:
+    row: { rows: [{ scope: thread }] }
+    board: { rows: [{ title: On the thread, state: todo, not_done: 1, not_todo: 0 }] }
+steps:
+  - params: { show: backlog }
+    expect:
+      loaders:
+        row: { rows: [{ scope: backlog }] }
+        board: { rows: [{ title: In the backlog }] }
+  - params: { show: all }
+    expect:
+      loaders:
+        row: { rows: [{ scope: all }] }
+        board: { rows: [{ title: On the thread, state: todo, not_done: 1, not_todo: 0 }, { title: In the backlog }] }
+  # With no thread, "this thread" is everything.
+  - params: { show: thread, thread_id: null }
+    expect: { loaders: { row: { rows: [{ scope: all }] } } }
