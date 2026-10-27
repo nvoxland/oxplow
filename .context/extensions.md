@@ -2002,6 +2002,14 @@ a `KINDS` entry and a `dispatch` arm. The forms:
     params?, bind? }` runs the page again — `params` over the example's,
     `bind: { <name>: loaders.<loader>.rows[0].<column> }` keeping a value of
     that run — and findings name the step (`steps[3]: …`).
+  - **Materialized models are current when read.** The throwaway runs
+    the change loop as boot does (`models_changed::spawn`), and before a
+    read — a page run, a query, a command (`Host::current`) — after any
+    step changed something, every asset recomputes at once, each after
+    those it reads, a clocked one (`every: 1h`) too, without waiting out
+    the coalesce window (`Assets::recompute_all`): a test has no clock to
+    wait on. Once per read, not per step, so it costs the run nothing
+    measurable.
   - **Inside embeds and mounts.** `loaders: { <embed>/<loader>: .. }`
     names a loader of the page an embed node or a slot mount runs (a
     mount's id is its page's with `/` as `.`: `beta.extra/words`), so a
@@ -2017,7 +2025,11 @@ a `KINDS` entry and a `dispatch` arm. The forms:
   - **Every kind has them** (`scenario`): a fixture that isn't a page's
     runs its `given` steps first, its `when` and `expect` read the values
     they bound, and each `{ when?, expect }` step runs the same kind
-    again, its `when` keys over the fixture's.
+    again, its `when` keys over the fixture's. A step whose `when` names
+    another kind (`kind_of`) runs that instead — an event, then a `sql`
+    read of what it did — and in a page's scenario a step with a `when`
+    runs it (another page, a query, a command) and the scenario goes on
+    (`step_run`).
   - **`confirmed: true`** runs a command that asks a person first.
   - **What a step sets off lands before the next step.** After each
     command step the host settles (`Host::settle`): every async consumer
@@ -2076,6 +2088,11 @@ a `KINDS` entry and a `dispatch` arm. The forms:
   `SqliteFactStore::record_facts`) and `snapshot` (one take in the
   snapshot log, `SqliteSnapshotStore::record_take`). A step's `when: { sql }` reads the result, since a `steps` entry
   of a command, event or sql fixture takes the earlier kind in `KINDS`.
+- `when: { advisory: <id>, thread? }`, `expect: { lines: [..] }` — the
+  extension's advisory run for a thread (the primary one when none) as
+  the app runs it on its `on:` (`advisories::for_thread`, over the
+  thread's open effort), its text line by line, heading included; on an
+  oxplow of its own, since it records what it said (`once_per`).
 - `when: { sql, params? }`, `expect: { rows, columns? }` — a read-only query
   over the published models, run as a page loader would (an inline page of
   one `sql` loader, `sql_example`) and compared as a loader's: a model, a
