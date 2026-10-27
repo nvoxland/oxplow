@@ -2075,6 +2075,11 @@ a `KINDS` entry and a `dispatch` arm. The forms:
   `evidence` (`EffortEvidenceStore::replace`) and `commit`
   (`SqliteGitStore::upsert_commit`). A step's `when: { sql }` reads the result, since a `steps` entry
   of a command, event or sql fixture takes the earlier kind in `KINDS`.
+- `when: { advisory: <id>, thread? }`, `expect: { lines: [..] }` — the
+  extension's advisory run for a thread (the primary one when none) as
+  the app runs it on its `on:` (`advisories::for_thread`, over the
+  thread's open effort), its text line by line, heading included; on an
+  oxplow of its own, since it records what it said (`once_per`).
 - `when: { sql, params? }`, `expect: { rows, columns? }` — a read-only query
   over the published models, run as a page loader would (an inline page of
   one `sql` loader, `sql_example`) and compared as a loader's: a model, a

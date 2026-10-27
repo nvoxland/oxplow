@@ -567,6 +567,8 @@ async fn dispatch(host: &Host, ext: &Extension, ex: &Example<'_>, report: &mut T
         policy_example(host, ext, ex, id, report).await;
     } else if let Some(t) = ex.when.get("event_type").and_then(Value::as_str) {
         event_type_example(ext, ex, t, report);
+    } else if let Some(id) = ex.when.get("advisory").and_then(Value::as_str) {
+        advisory_example(host, ext, ex, id, report).await;
     } else if let Some(sql) = ex.when.get("sql").and_then(Value::as_str) {
         sql_example(host, ex, sql, report).await;
     } else if let Some(link) = ex.when.get("wikilink").and_then(Value::as_str) {
@@ -645,6 +647,11 @@ const KINDS: &[Kind] = &[
         expect: "{ valid, upcast? }",
     },
     Kind {
+        key: "advisory",
+        when: "{ advisory: <id>, thread? }",
+        expect: "{ lines: [text] }",
+    },
+    Kind {
         key: "sql",
         when: "{ sql, params? }",
         expect: "{ rows, columns? }",
@@ -705,6 +712,7 @@ fn makes_data(ex: &Example<'_>) -> bool {
         || has("setup")
         || has("job")
         || has("component")
+        || has("advisory")
         || (has("event") && !has("effect") && !has("implementation") && !has("collector"))
 }
 
@@ -2460,6 +2468,56 @@ fn bind_from(
         }
     }
     true
+}
+
+/// Run advisory `id` for a thread (`when: { advisory, thread? }`, the
+/// primary thread when none) as the app does on its `on:` — over that
+/// thread's open effort — and check what the agent is told, line by line:
+/// `expect: { lines: [..] }` (none: `[]`).
+async fn advisory_example(
+    host: &Host,
+    ext: &Extension,
+    ex: &Example<'_>,
+    id: &str,
+    report: &mut TestReport,
+) {
+    let shown = ex.shown;
+    let Some(advisory) = ext.advisories.iter().find(|a| a.id == id) else {
+        return report.errors.push(format!(
+            "{shown}:1: `{id}` isn't one of the extension's advisories — fix: the example's \
+             `when.advisory`"
+        ));
+    };
+    let thread = match ex.when.get("thread").and_then(Value::as_str) {
+        None => oxplow_domain::ThreadId::new(1),
+        Some(t) => match oxplow_domain::ThreadId::try_from_str(t) {
+            Some(thread) => thread,
+            None => {
+                return report.errors.push(format!(
+                    "{shown}:1: `when.thread: {t}` isn't a thread — fix: `thr1`"
+                ))
+            }
+        },
+    };
+    if let Err(e) = host.svc.streams.ensure_primary().await {
+        return report.errors.push(format!("{shown}:1: its thread: {e}"));
+    }
+    host.current().await;
+    let hits =
+        oxplow_app::advisories::for_thread(&host.svc.advisory_deps(), &thread, advisory.on, None)
+            .await;
+    let lines: Vec<String> = hits
+        .iter()
+        .filter(|hit| hit.id == id || hit.id.ends_with(&format!("/{id}")))
+        .flat_map(|hit| hit.text.lines().map(str::to_string).collect::<Vec<_>>())
+        .collect();
+    let got = json!({ "lines": lines });
+    if let Some((path, want, at)) = compare(&ex.expect, &got) {
+        report.errors.push(format!(
+            "{shown}:1: advisory `{id}` said {at} at `{path}`, the example expects {want} — fix: \
+             its query, or the example's `given` and `expect` (`{{ lines: [..] }}`)"
+        ));
+    }
 }
 
 /// Read the published models with `when: { sql, params? }` as a page's
@@ -6235,6 +6293,62 @@ steps:
         );
         let report = test_extension(root, "acme", false).await.unwrap();
         assert_eq!(report.errors, Vec::<String>::new());
+    }
+
+    /// `when: { advisory }` runs one of the extension's advisories for a
+    /// thread as the app would: its `lines` are what the agent is told.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_fixture_runs_an_advisory() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        write(
+            root,
+            ".oxplow/extensions/acme/extension.yaml",
+            "manifest: 2
+name: acme
+intent:
+  purpose: Greets.
+  examples:
+    - { name: greeted, input: { advisory: hello }, expect: a greeting per item }
+permissions: { agent: true }
+advisories:
+  - id: hello
+    on: prompt
+    once_per: turn
+    heading: \"# Hello\"
+    query: \"SELECT uri AS key, 'Hello ' || title AS message FROM v_work_item ORDER BY title\"
+",
+        );
+        let fixture = |want: &str| {
+            format!(
+                "given: [{{ command: oxplow.work_item.create, input: {{ title: Fix it }} }}]
+when: {{ advisory: hello }}
+expect: {{ lines: {want} }}
+"
+            )
+        };
+        write(
+            root,
+            ".oxplow/extensions/acme/fixtures/greeted.yaml",
+            &fixture("{ contains: [Hello Fix it] }"),
+        );
+        let report = test_extension(root, "acme", false).await.unwrap();
+        assert_eq!(report.errors, Vec::<String>::new());
+
+        write(
+            root,
+            ".oxplow/extensions/acme/fixtures/greeted.yaml",
+            &fixture("[]"),
+        );
+        let errors = test_extension(root, "acme", false)
+            .await
+            .unwrap()
+            .errors
+            .join("\n");
+        assert!(
+            errors.contains("fixtures/greeted.yaml:1: advisory `hello` said"),
+            "{errors}"
+        );
     }
 
     /// `rows: []` is no rows, like `rows: 0`.
