@@ -1,0 +1,40 @@
+# Settings → Agents: the agents in priority order, with the lists a row's
+# actions hand `set_agents`; what new threads start with; the prompt
+# addition's form prefilled with what is saved.
+input: { page: settings, params: { area: agents } }
+expect:
+  loaders:
+    agents_list:
+      rows:
+        - { id: claude, state: on, priority: 1, can_up: 0 }
+        # Move Up swaps the second with the first.
+        - { id: codex, state: on, priority: 2, can_up: 1, can_disable: 1, moved_up: '["codex","claude","opencode"]' }
+        - { id: opencode, state: on, priority: 3, can_up: 1, can_disable: 1 }
+    # The picker, until a choice is made.
+    agents_new_thread:
+      rows: [{ value: ask, current: 1 }, { value: none }, { value: claude }, { value: codex }, { value: opencode }]
+steps:
+  - given: [{ command: oxplow.agent.set_agents, input: { agents: [codex, claude, opencode] } }]
+  - expect:
+      loaders:
+        agents_list:
+          rows: [{ id: codex, without_it: '["claude","opencode"]' }, { id: claude }, { id: opencode }]
+  # Disable drops it from the order; Enable puts it back last.
+  - given: [{ command: oxplow.agent.set_agents, input: { agents: [claude, opencode] } }]
+  - expect:
+      loaders:
+        agents_list:
+          rows:
+            - { id: claude }
+            - { id: opencode }
+            - { id: codex, state: off, can_enable: 1, can_disable: 0, with_it: '["claude","opencode","codex"]' }
+  # What new threads start with: `config.set` asks first; a page action's
+  # click is the person's yes.
+  - given:
+      - { command: oxplow.config.set, input: { key: newThreadSession, value: none, layer: personal }, confirmed: true }
+  - expect:
+      loaders:
+        agents_new_thread:
+          rows: [{ value: ask, current: 0, can_ask: 1 }, { value: none, current: 1 }, { value: claude }, { value: opencode }]
+  - given: [{ command: oxplow.agent.set_prompt_append, input: { text: Prefer TDD. } }]
+  - expect: { loaders: { agents_prompt: { rows: [{ text: Prefer TDD. }] } } }

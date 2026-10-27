@@ -76,6 +76,18 @@ intent:
     - name: alerts-reactions-list-nothing-over-a-quiet-project
       input: { page: alerts-reactions }
       expect: nothing listed over a quiet project
+    - name: settings-agents-area-hands-set-agents-each-new-order
+      input: { page: settings, params: { area: agents } }
+      expect: agents in priority order with the lists a row hands set_agents; what new threads start with; the saved prompt addition
+    - name: settings-ai-area-lists-providers-roles-and-calls
+      input: { page: settings, params: { area: ai } }
+      expect: a provider with its kind and a saved key (never the key), a role with its binding, a role bound to nothing with its fallback
+    - name: ai-provider-kinds-offer-every-declared-kind
+      input: { page: ai-provider-kinds }
+      expect: the declared AI provider kinds
+    - name: ai-provider-choices-list-the-configured-providers
+      input: { page: ai-provider-choices }
+      expect: the configured providers
 # The agent harnesses and AI providers oxplow runs: core's
 # built-ins, many of each at once (every one declared here is active).
 implementations:
