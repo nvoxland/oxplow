@@ -47,33 +47,60 @@ fn harness_arg(mut args: impl Iterator<Item = String>) -> Option<tauri::Url> {
 /// One window on a component harness's page, and nothing of the app: no
 /// project, no daemon, no menu, no plugins — and no IPC, since no
 /// capability names its label. The engine is the app's own, so a component
-/// tested is drawn as it will be. Shown but off-screen (a hidden webview
-/// may throttle its timers), with no Dock icon; it quits when the page goes
-/// to `/harness/done`.
+/// tested is drawn as it will be. A test runs while the person works, so
+/// the window is never seen: on macOS it is shown — WebKit draws no frames
+/// for a hidden window, or one off every display — but fully transparent,
+/// borderless and click-through, with no Dock icon and never focused. It
+/// quits when the page goes to `/harness/done`.
 fn run_harness(ctx: tauri::Context, url: tauri::Url) {
     tauri::Builder::default()
         .setup(move |app| {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
             let handle = app.handle().clone();
-            tauri::WebviewWindowBuilder::new(app, "harness", tauri::WebviewUrl::External(url))
-                .title("oxplow component harness")
-                .inner_size(1280.0, 800.0)
-                .position(-20_000.0, -20_000.0)
-                .focused(false)
-                .skip_taskbar(true)
-                .on_navigation(move |to| {
-                    if to.path() == "/harness/done" {
-                        handle.exit(0);
-                        return false;
-                    }
-                    true
-                })
-                .build()?;
+            let window =
+                tauri::WebviewWindowBuilder::new(app, "harness", tauri::WebviewUrl::External(url))
+                    .title("oxplow component harness")
+                    .inner_size(1280.0, 800.0)
+                    .decorations(false)
+                    .visible(false)
+                    .focused(false)
+                    .skip_taskbar(true)
+                    .on_navigation(move |to| {
+                        if to.path() == "/harness/done" {
+                            handle.exit(0);
+                            return false;
+                        }
+                        true
+                    })
+                    .build()?;
+            unseen(&window)?;
+            window.show()?;
             Ok(())
         })
         .run(ctx)
         .expect("the component harness's window opens");
+}
+
+/// Make `window` invisible and let clicks pass through it, before it is
+/// shown.
+#[cfg(target_os = "macos")]
+fn unseen(window: &tauri::WebviewWindow) -> tauri::Result<()> {
+    let ns = window.ns_window()?.cast::<objc2_app_kit::NSWindow>();
+    // SAFETY: Tauri's NSWindow for this window, alive while `window` is,
+    // and set up here on the main thread, where `setup` runs.
+    unsafe {
+        (*ns).setAlphaValue(0.0);
+        (*ns).setIgnoresMouseEvents(true);
+    }
+    Ok(())
+}
+
+/// Elsewhere there is no transparency to ask for: the window goes beyond
+/// the displays' usual extent.
+#[cfg(not(target_os = "macos"))]
+fn unseen(window: &tauri::WebviewWindow) -> tauri::Result<()> {
+    window.set_position(tauri::PhysicalPosition::new(-20_000, -20_000))
 }
 
 /// What `--version` / `-V` or `--help` / `-h` print, when the first

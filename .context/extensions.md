@@ -3270,8 +3270,13 @@ around it** (`component_harness.rs`, `PageAt::ui`):
   it one op at a time (`/harness/next`): a DOM step for the agent, a nav-bar
   press, a view change, new rows.
 - **The window** is the shell's `oxplow component-harness <url>`: one
-  window, off-screen but shown, no Dock icon, no project, daemon, menu or
-  IPC; it quits at `/harness/done`. Found as `OXPLOW_SHELL`, else an
+  window, no Dock icon, never focused, no project, daemon, menu or IPC; it
+  quits at `/harness/done`. Tests run while the person works, so it is
+  never seen: on macOS it is shown (WebKit draws no frames for a hidden
+  window, or for one off every display, and macOS moves a titled window
+  placed off-screen onto a display left of or above the main one) but
+  borderless, fully transparent and click-through (`unseen` in the
+  shell's `main.rs`); elsewhere it goes to -20000, -20000. Found as `OXPLOW_SHELL`, else an
   `oxplow` beside the running program or up to two folders above it. With
   none, the `ui` steps aren't run and the report warns — never a pass. CI
   builds the app and runs the tests under `xvfb-run`.
