@@ -50,6 +50,12 @@ model the SQL reads and the command it runs. Prefer `answers:` on pages.
    Its report says what it ran, the generation, what the extension
    `contributes`, and what it can't run here (`unsupported`: panels, decorators,
    replacements, skills — the app shows them).
+   **How `expect` is compared, everywhere:** an object only on the keys it
+   names (a key the result lacks matches only `null`); a list every item,
+   in order; `{ contains: [..] }` items a list has, in any order, among
+   others; `$any` any value that's there; `{ $exact: v }` the whole value;
+   `refused: <text>` a reason containing the text (anything that refuses
+   or fails says `refused`). So a row `{ title: A }` checks its title only.
    Give each example a fixture, `fixtures/<example>.yaml`: `given` (steps
    run first), `when` (what it does — one key names the kind), `expect`
    (`$any` matches anything), and `model: { replies: [...] }` when it calls
@@ -57,12 +63,10 @@ model the SQL reads and the command it runs. Prefer `answers:` on pages.
    - a page: `when: { page: <slug | ext/slug>, params? }`, with `given:` —
      steps run first, in order: `{ command, input?, as?,
      confirmed?, bind? }` or `{ rows: { <entity>: [..] } }`.
-     `expect: { loaders: { <name>: { rows: n | $any | [ { col: val } ],
-     contains?: [ { col: val } ], columns? } }, nodes: [{ id, kind?,
+     `expect: { loaders: { <name>: { rows: n | $any | [ { col: val } ] |
+     { contains: [ { col: val } ] }, columns? } }, nodes: [{ id, kind?,
      actions? }], text: { contains: [..] } | "<exact>", alert?, badge?,
-     inactive?, actions? }` (a row map compares only the columns it names;
-     `rows: [..]` is every row in order, `contains` rows it has in any
-     order among others; `text` is the page's text, as `oxplow_run_page`
+     inactive?, actions? }` (`text` is the page's text, as `oxplow_run_page`
      shows it; `actions`, the page's or a node's, list ids, or objects
      compared on the fields they name, spelled as in the page YAML:
      `{ id: rename, form: true, one_row: true }`).
@@ -128,7 +132,7 @@ model the SQL reads and the command it runs. Prefer `answers:` on pages.
    - a command: `when: { command: <id>, input: {...}, answers? }`,
      `expect: { commands: [names], result: {...} }` (either or both;
      `result` is compared on the keys you name, so a read command's
-     example checks its answer) or `{ refuses: <part of the reason> }` —
+     example checks its answer) or `{ refused: <part of the reason> }` —
      a dry run; nothing changes;
    - an effort policy script (`implementations:`): `input: {
      implementation: <id>, event: { type, payload, anchors? }, answers?

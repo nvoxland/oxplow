@@ -3573,7 +3573,7 @@ mod tests {
                 .flatten()
             {
                 if let Some(y) = yaml(&f.path()) {
-                    let ev = &y["input"]["event"];
+                    let ev = &y["when"]["event"];
                     if let Some(t) = ev["type"].as_str() {
                         fixtures.push((t.into(), ev["v"].as_u64().unwrap_or(0) as u32));
                     }

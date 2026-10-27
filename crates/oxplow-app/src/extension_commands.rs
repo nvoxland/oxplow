@@ -13,7 +13,7 @@
 //!     access: write                      # write | record | read
 //!     examples:
 //!       - { name: happy, input: { uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow" }, expect_commands: [oxplow.work_item.transition] }
-//!       - { name: gone, input: { uri: "oxplow:oxplow/work_item?id=tsk9&provider=oxplow" }, answers: { sql.read: [[]] }, refuses: no such task }
+//!       - { name: gone, input: { uri: "oxplow:oxplow/work_item?id=tsk9&provider=oxplow" }, answers: { sql.read: [[]] }, refused: no such task }
 //! ```
 //!
 //! The script reads with `scope("sql.read", { sql, params })` (one
@@ -47,7 +47,7 @@ pub struct CommandExample {
     pub answers: BTreeMap<String, Vec<Value>>,
     pub expect_commands: Vec<String>,
     /// A part of the reason the script should refuse with.
-    pub refuses: Option<String>,
+    pub refused: Option<String>,
 }
 
 /// A command an extension declares (valid ones; invalid ones are in the
@@ -204,7 +204,7 @@ struct ExampleFile {
     #[serde(default)]
     expect_commands: Vec<String>,
     #[serde(default)]
-    refuses: Option<String>,
+    refused: Option<String>,
 }
 
 /// An operation's name — a provider's command, a scope's op: one
@@ -567,7 +567,7 @@ fn command_of(
     let example = f.example.or_else(|| {
         f.examples
             .iter()
-            .find(|e| e.refuses.is_none())
+            .find(|e| e.refused.is_none())
             .map(|e| e.input.clone())
     });
     let tool = f
@@ -606,7 +606,7 @@ fn command_of(
             .examples
             .into_iter()
             .map(|e| {
-                if e.refuses.is_some() && !e.expect_commands.is_empty() {
+                if e.refused.is_some() && !e.expect_commands.is_empty() {
                     return Err(format!(
                         "example `{}` expects commands and a refusal — fix: one or the other",
                         e.name
@@ -617,7 +617,7 @@ fn command_of(
                     input: e.input,
                     answers: e.answers,
                     expect_commands: e.expect_commands,
-                    refuses: e.refuses,
+                    refused: e.refused,
                 })
             })
             .collect::<Result<_, _>>()?,
@@ -1495,7 +1495,7 @@ async fn check_example(
     schema_of: CommandSchemas<'_>,
 ) -> Result<(), String> {
     let decided = dry_run(layer, cmd, &ex.input, &ex.answers, schema_of).await?;
-    match (decided, &ex.refuses) {
+    match (decided, &ex.refused) {
         (Composed::Refused(why), Some(want)) if why.contains(want.as_str()) => Ok(()),
         (Composed::Refused(why), Some(want)) => {
             Err(format!("refused ({why}) but it should refuse ({want})"))
@@ -2875,7 +2875,7 @@ mod tests {
 
     /// An example may stand in answers for its scope calls
     /// (`answers:`, so it doesn't depend on the project's data) and may
-    /// expect a refusal (`refuses:`, a part of its reason).
+    /// expect a refusal (`refused:`, a part of its reason).
     #[tokio::test(flavor = "multi_thread")]
     async fn an_example_runs_on_its_answers_and_may_expect_a_refusal() {
         let transition_schema = serde_json::json!({
@@ -2927,7 +2927,7 @@ mod tests {
 
         // The project has no such item, but the example's answers stand in.
         let d = check(
-            "      - { name: happy, input: { uri: \"oxplow:oxplow/work_item?id=tsk1&provider=oxplow\" }, answers: { sql.read: [[{ uri: \"oxplow:oxplow/work_item?id=tsk1&provider=oxplow\" }]] }, expect_commands: [oxplow.work_item.transition] }\n      - { name: missing, input: { uri: \"oxplow:oxplow/work_item?id=tsk9&provider=oxplow\" }, answers: { sql.read: [[]] }, refuses: no such item }\n",
+            "      - { name: happy, input: { uri: \"oxplow:oxplow/work_item?id=tsk1&provider=oxplow\" }, answers: { sql.read: [[{ uri: \"oxplow:oxplow/work_item?id=tsk1&provider=oxplow\" }]] }, expect_commands: [oxplow.work_item.transition] }\n      - { name: missing, input: { uri: \"oxplow:oxplow/work_item?id=tsk9&provider=oxplow\" }, answers: { sql.read: [[]] }, refused: no such item }\n",
         );
         assert_eq!(errors(d).await, "");
 
@@ -2937,15 +2937,15 @@ mod tests {
                 "example `happy`: refused (no such item) but `expect_commands` is [oxplow.work_item.transition]",
             ),
             (
-                "      - { name: missing, input: { uri: \"oxplow:oxplow/work_item?id=tsk1&provider=oxplow\" }, answers: { sql.read: [[{ uri: \"oxplow:oxplow/work_item?id=tsk1&provider=oxplow\" }]] }, refuses: no such item }\n",
+                "      - { name: missing, input: { uri: \"oxplow:oxplow/work_item?id=tsk1&provider=oxplow\" }, answers: { sql.read: [[{ uri: \"oxplow:oxplow/work_item?id=tsk1&provider=oxplow\" }]] }, refused: no such item }\n",
                 "example `missing`: composed [oxplow.work_item.transition] but it should refuse (no such item)",
             ),
             (
-                "      - { name: missing, input: { uri: \"oxplow:oxplow/work_item?id=tsk1&provider=oxplow\" }, answers: { sql.read: [[]] }, refuses: unverified }\n",
+                "      - { name: missing, input: { uri: \"oxplow:oxplow/work_item?id=tsk1&provider=oxplow\" }, answers: { sql.read: [[]] }, refused: unverified }\n",
                 "example `missing`: refused (no such item) but it should refuse (unverified)",
             ),
             (
-                "      - { name: both, input: { uri: \"oxplow:oxplow/work_item?id=tsk1&provider=oxplow\" }, answers: { sql.read: [[]] }, refuses: x, expect_commands: [oxplow.work_item.transition] }\n",
+                "      - { name: both, input: { uri: \"oxplow:oxplow/work_item?id=tsk1&provider=oxplow\" }, answers: { sql.read: [[]] }, refused: x, expect_commands: [oxplow.work_item.transition] }\n",
                 "example `both` expects commands and a refusal",
             ),
         ] {

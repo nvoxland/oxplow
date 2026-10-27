@@ -32,7 +32,7 @@
   stays, and there's no undo). It does no I/O, has 5 s,
   and `examples` (at most 10) are dry-run by `check`: give each
   `answers: { sql.read: [[rows of the 1st read], …] }` so it doesn't
-  depend on the project's data, and `expect_commands: [...]` or `refuses:
+  depend on the project's data, and `expect_commands: [...]` or `refused:
   <part of the reason>`. An agent is shown an `example:` input beside the
   schema (a script's first example that runs, unless it declares one;
   give one to a command over a `scope:` op). `access: read` makes a command that only reads

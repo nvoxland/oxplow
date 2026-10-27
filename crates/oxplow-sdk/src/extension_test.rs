@@ -11,7 +11,7 @@
 //! `expect: { facts: [{ measure, value?, path?, … }] }`, tsk1047),
 //! or one of its own commands (`when: { command, input, rows? }`,
 //! `expect: { commands: [names] }` and/or `{ result }` — only the keys it
-//! names — or `{ refuses }`, dry-run),
+//! names — or `{ refused }`, dry-run),
 //! the extension's `questions.yaml`, and for each declared provider —
 //!
 //! 1. the live `initialize` equals its declarations file;
@@ -43,7 +43,7 @@ use oxplow_provider_protocol::model::{
 use serde::Serialize;
 use serde_json::{json, Value};
 
-use crate::conformance::{first_mismatch, normalize, ReferenceClient};
+use crate::conformance::{first_mismatch, normalize, ReferenceClient, ANY};
 use crate::throwaway::Host;
 use crate::SdkError;
 
@@ -658,25 +658,70 @@ fn model_replies(ex: &Example<'_>, report: &mut TestReport) -> Option<Vec<Fixtur
     }
 }
 
-/// `got` with only what `expect` names: an object keeps the keys `expect`
-/// has, an array its items shaped like `expect`'s (when as many). So a
-/// fixture says what it cares about — an effect's `state`, not its run's
-/// every field — and `first_mismatch` compares exactly that.
-fn shaped_like(expect: &Value, got: &Value) -> Value {
-    match (expect, got) {
-        (Value::Object(want), Value::Object(have)) => Value::Object(
-            want.keys()
-                .filter_map(|k| have.get(k).map(|v| (k.clone(), shaped_like(&want[k], v))))
-                .collect(),
-        ),
-        (Value::Array(want), Value::Array(have)) if want.len() == have.len() => Value::Array(
-            want.iter()
-                .zip(have)
-                .map(|(w, h)| shaped_like(w, h))
-                .collect(),
-        ),
-        _ => got.clone(),
+/// Where `got` first differs from what `want` (an example's `expect`, or
+/// a part of it) says, as a JSON pointer with the two values. The one rule
+/// for every expectation: an object compares only the keys it names (one
+/// `got` lacks matches only `null`, not even `$any`); a list compares every item, in order;
+/// `{ contains: [..] }` holds against a list having each item (compared
+/// the same way) in any order, among others; `$any` matches anything;
+/// `{ $exact: v }` compares the whole value, every key. `refused: <text>`
+/// holds when the reason it said no contains that text.
+fn compare(want: &Value, got: &Value) -> Option<(String, Value, Value)> {
+    fn walk(path: &str, want: &Value, got: &Value) -> Option<(String, Value, Value)> {
+        let differs = || {
+            Some((
+                if path.is_empty() { "/" } else { path }.to_string(),
+                want.clone(),
+                got.clone(),
+            ))
+        };
+        match want {
+            Value::String(any) if any == ANY => None,
+            Value::Object(o) if o.len() == 1 && o.contains_key("$exact") => {
+                first_mismatch(&o["$exact"], got).map(|(at, w, g)| {
+                    let at = if at == "/" { String::new() } else { at };
+                    (format!("{path}{at}"), w, g)
+                })
+            }
+            Value::Object(o) if o.len() == 1 && o.contains_key("contains") && got.is_array() => {
+                let items = got.as_array().expect("a list");
+                o["contains"].as_array().map_or_else(differs, |wanted| {
+                    wanted.iter().enumerate().find_map(|(i, item)| {
+                        (!items.iter().any(|g| walk("", item, g).is_none()))
+                            .then(|| (format!("{path}/contains/{i}"), item.clone(), got.clone()))
+                    })
+                })
+            }
+            Value::Object(o) => match got {
+                Value::Object(g) => o.iter().find_map(|(k, w)| {
+                    let at = format!("{path}/{k}");
+                    match g.get(k) {
+                        // Why it said no: any reason holding that text.
+                        Some(Value::String(why))
+                            if k == "refused" && w.as_str().is_some_and(|w| why.contains(w)) =>
+                        {
+                            None
+                        }
+                        Some(g) => walk(&at, w, g),
+                        None if w.is_null() => None,
+                        None => Some((at, w.clone(), Value::Null)),
+                    }
+                }),
+                _ => differs(),
+            },
+            Value::Array(w) => match got {
+                Value::Array(g) if g.len() == w.len() => w
+                    .iter()
+                    .zip(g)
+                    .enumerate()
+                    .find_map(|(i, (w, g))| walk(&format!("{path}/{i}"), w, g)),
+                _ => differs(),
+            },
+            _ if want == got => None,
+            _ => differs(),
+        }
     }
+    walk("", want, got)
 }
 
 /// What `ext` contributes that only a person sees in the app — this host
@@ -736,11 +781,8 @@ async fn event_example(host: &Host, ext: &Extension, ex: &Example<'_>, report: &
         }
     };
     let (effects, commands) = effect_outcome(host, seq, "=").await;
-    let got = shaped_like(
-        &ex.expect,
-        &json!({ "effects": effects, "commands": commands }),
-    );
-    if let Some((path, want, got)) = first_mismatch(&ex.expect, &got) {
+    let got = json!({ "effects": effects, "commands": commands });
+    if let Some((path, want, got)) = compare(&ex.expect, &got) {
         report.errors.push(format!(
             "{shown}:1: the event led to {got} at `{path}`, the example expects {want} — fix: \
              the effects, or the example's `expect` (`{{ effects: [{{ id, state }}], commands: \
@@ -1054,8 +1096,8 @@ async fn job_example(
         }
         ended["pages"] = json!(pages);
     }
-    let got = shaped_like(&ex.expect, &ended);
-    if let Some((path, want, got)) = first_mismatch(&ex.expect, &got) {
+    let got = ended;
+    if let Some((path, want, got)) = compare(&ex.expect, &got) {
         report.errors.push(format!(
             "{shown}:1: job `{id}` ended {got} at `{path}`, the example expects {want} — fix: \
              the job's request, or the example's `expect` (`{{ state, result?, text?, toolCalls?, \
@@ -1408,14 +1450,15 @@ async fn component_example(
         .await;
         invokes.push(match out {
             Ok(out) => json!({ "ok": true, "result": out.result }),
+            // Denied or failed alike: it said no, and why.
             Err(oxplow_domain::CommandError::Denied { reason }) => {
                 json!({ "ok": false, "refused": reason })
             }
-            Err(e) => json!({ "ok": false, "error": e.to_string() }),
+            Err(e) => json!({ "ok": false, "refused": e.to_string() }),
         });
     }
-    let got = shaped_like(&ex.expect, &json!({ "invokes": invokes }));
-    if let Some((path, want, got)) = first_mismatch(&ex.expect, &got) {
+    let got = json!({ "invokes": invokes });
+    if let Some((path, want, got)) = compare(&ex.expect, &got) {
         report.errors.push(format!(
             "{shown}:1: component `{id}` answered {got} at `{path}`, the example expects {want} \
              — fix: the component's declarations, or the example's `expect` (`{{ invokes: [{{ \
@@ -1461,11 +1504,8 @@ async fn form_example(
             return;
         }
     };
-    let got = shaped_like(
-        &ex.expect,
-        &json!({ "values": start.values, "fixed": start.fixed, "fields": start.fields }),
-    );
-    if let Some((path, want, got)) = first_mismatch(&ex.expect, &got) {
+    let got = json!({ "values": start.values, "fixed": start.fixed, "fields": start.fields });
+    if let Some((path, want, got)) = compare(&ex.expect, &got) {
         report.errors.push(format!(
             "{shown}:1: form `{slug}` opened with {got} at `{path}`, the example expects {want} \
              — fix: the form's `defaults`, `fixed` or `fields`, or the example's `expect` (`{{ \
@@ -1836,68 +1876,42 @@ impl PageAt<'_> {
                     continue;
                 };
                 let rows = &loader.result.rows;
-                let cells = |row: &Vec<oxplow_db::SqlCell>| json!(row);
-                let by_column = |row: &Vec<oxplow_db::SqlCell>, want: &Value| -> Value {
-                    let named: serde_json::Map<String, Value> = want
-                        .as_object()
-                        .into_iter()
-                        .flatten()
-                        .map(|(column, _)| {
-                            let at = loader.result.columns.iter().position(|c| c == column);
-                            (
-                                column.clone(),
-                                at.and_then(|i| row.get(i))
-                                    .map_or(Value::Null, |c| json!(c)),
-                            )
-                        })
-                        .collect();
-                    Value::Object(named)
+                // Each row as its columns by name — or its cells, where the
+                // example lists that row as a list; a count where it gives one.
+                let named = |row: &Vec<oxplow_db::SqlCell>| -> Value {
+                    Value::Object(
+                        loader
+                            .result
+                            .columns
+                            .iter()
+                            .cloned()
+                            .zip(row.iter().map(|c| json!(c)))
+                            .collect(),
+                    )
                 };
-                let mut got = json!({ "rows": rows.len() });
-                if let Some(list) = want.get("rows").and_then(Value::as_array) {
-                    got["rows"] = Value::Array(
+                let listed = want.get("rows").and_then(Value::as_array);
+                let got_rows = match want.get("rows") {
+                    Some(Value::Number(_)) => json!(rows.len()),
+                    _ => Value::Array(
                         rows.iter()
                             .enumerate()
-                            .map(|(i, row)| match list.get(i) {
-                                Some(w) if w.is_object() => by_column(row, w),
-                                _ => cells(row),
+                            .map(|(i, row)| match listed.and_then(|l| l.get(i)) {
+                                Some(Value::Array(_)) => json!(row),
+                                _ => named(row),
                             })
                             .collect(),
-                    );
-                }
+                    ),
+                };
+                let mut got = json!({ "rows": got_rows });
                 if want.get("columns").is_some() {
                     got["columns"] = json!(loader.result.columns);
                 }
-                // `contains`: rows it has, in any order, among others.
-                let mut want = want.clone();
-                let contains = want.as_object_mut().and_then(|w| w.remove("contains"));
-                for like in contains
-                    .as_ref()
-                    .and_then(Value::as_array)
-                    .into_iter()
-                    .flatten()
-                {
-                    if !rows
-                        .iter()
-                        .any(|row| first_mismatch(like, &by_column(row, like)).is_none())
-                    {
-                        report.errors.push(format!(
-                            "{shown}:1: {label}page `{page}` loader `{name}` has no row like \
-                             {like} — fix: the page, or the example's \
-                             `expect.loaders.{name}.contains`; its rows are {}",
-                            json!(rows
-                                .iter()
-                                .map(|row| by_column(row, like))
-                                .collect::<Vec<_>>())
-                        ));
-                    }
-                }
-                let want = &want;
-                if let Some((path, want, got)) = first_mismatch(want, &got) {
+                if let Some((path, want, got)) = compare(want, &got) {
                     report.errors.push(format!(
                         "{shown}:1: {label}page `{page}` loader `{name}` returned {got} at \
                          `{path}`, the example expects {want} — fix: the page, or the example's \
-                         `expect.loaders.{name}` (`{{ rows: n | $any | [..], contains?: [..], columns? }}`)"
+                         `expect.loaders.{name}` (`{{ rows: n | $any | [..] | {{ contains: [..] }}, \
+                         columns? }}`)"
                     ));
                 }
             }
@@ -1917,7 +1931,7 @@ impl PageAt<'_> {
                 "actions" => actions_like(want, &run.page.actions),
                 _ => got,
             };
-            if let Some((path, want, got)) = first_mismatch(want, &got) {
+            if let Some((path, want, got)) = compare(want, &got) {
                 report.errors.push(format!(
                     "{shown}:1: {label}page `{page}`'s {key} is {got} at `{key}{path}`, the \
                      example expects {want} — fix: the page, or `expect.{key}`"
@@ -1985,7 +1999,7 @@ impl PageAt<'_> {
                 }
                 if let Some(want) = want.get("actions") {
                     let got = actions_like(want, &node_actions(&run, id));
-                    if let Some((path, want, got)) = first_mismatch(want, &got) {
+                    if let Some((path, want, got)) = compare(want, &got) {
                         report.errors.push(format!(
                             "{shown}:1: {label}page `{page}` node `{id}`'s actions are {got} at \
                              `{path}`, the example expects {want} — fix: the page, or the node's \
@@ -2009,7 +2023,7 @@ fn actions_like(want: &Value, actions: &[oxplow_app::extensions::PageAction]) ->
             .iter()
             .enumerate()
             .map(|(i, action)| match named.and_then(|w| w.get(i)) {
-                Some(like @ Value::Object(_)) => {
+                Some(Value::Object(_)) => {
                     let fields = match json!(action) {
                         Value::Object(fields) => fields
                             .into_iter()
@@ -2017,7 +2031,7 @@ fn actions_like(want: &Value, actions: &[oxplow_app::extensions::PageAction]) ->
                             .collect(),
                         _ => serde_json::Map::new(),
                     };
-                    shaped_like(like, &Value::Object(fields))
+                    Value::Object(fields)
                 }
                 _ => json!(action.id),
             })
@@ -2116,7 +2130,7 @@ fn answers(
 /// scope, in call order): what it composes, checked against the
 /// throwaway's registry, and what it answers, against `expect` — `{
 /// commands: [names] }` and/or `{ result }` (only the keys it names), or
-/// `{ refuses: <part of the reason> }`. Nothing runs.
+/// `{ refused: <part of the reason> }`. Nothing runs.
 async fn command_example(
     host: &Host,
     ex: &Example<'_>,
@@ -2137,7 +2151,7 @@ async fn command_example(
         host.svc.commands.as_ref(),
     )
     .await;
-    let problem = match (decided, ex.expect.get("refuses").and_then(Value::as_str)) {
+    let problem = match (decided, ex.expect.get("refused").and_then(Value::as_str)) {
         (Err(e), _) => Some(format!("failed: {e}")),
         (Ok(Composed::Refused(why)), Some(want)) if why.contains(want) => None,
         (Ok(Composed::Refused(why)), _) => Some(format!("refused ({why})")),
@@ -2147,7 +2161,7 @@ async fn command_example(
         )),
         (Ok(Composed::Run { calls, result, .. }), None) => {
             let got = json!({ "commands": call_names(&calls), "result": result });
-            first_mismatch(&ex.expect, &shaped_like(&ex.expect, &got)).map(|(path, want, got)| {
+            compare(&ex.expect, &got).map(|(path, want, got)| {
                 let did = if path.starts_with("/result") {
                     "answered"
                 } else {
@@ -2160,7 +2174,7 @@ async fn command_example(
     if let Some(p) = problem {
         report.errors.push(format!(
             "{shown}:1: command `{}` {p} — fix: its script, or the example's `expect` \
-             (`{{ commands: [names], result: {{ … }} }}` or `{{ refuses: <part of the reason> }}`)",
+             (`{{ commands: [names], result: {{ … }} }}` or `{{ refused: <part of the reason> }}`)",
             cmd.name
         ));
     }
@@ -2188,7 +2202,6 @@ async fn effect_example(
         ));
         return;
     };
-    report.ran.push(format!("example {example}"));
     let Some(event) = example_event(host, ex, report) else {
         return;
     };
@@ -2252,11 +2265,11 @@ fn reaction_problem(
             "composed [{}] but the example expects it to skip ({want})",
             r.command_names().join(", ")
         )),
-        (Ok(r @ Reaction::Run { .. }), None) => first_mismatch(
-            expect,
-            &json!({ "commands": r.command_names() }),
-        )
-        .map(|(path, want, got)| format!("composed {got} at `{path}`, the example expects {want}")),
+        (Ok(r @ Reaction::Run { .. }), None) => {
+            compare(expect, &json!({ "commands": r.command_names() })).map(|(path, want, got)| {
+                format!("composed {got} at `{path}`, the example expects {want}")
+            })
+        }
     }
 }
 
@@ -2308,7 +2321,6 @@ async fn policy_example(
         ));
         return;
     };
-    report.ran.push(format!("example {example}"));
     let Some(event) = example_event(host, ex, report) else {
         return;
     };
@@ -2376,7 +2388,6 @@ fn event_type_example(
         ));
         return;
     };
-    report.ran.push(format!("example {}", ex.name));
     let payload = ex.when.get("payload").cloned().unwrap_or_else(|| json!({}));
     let valid = registry.validate(event_type, v, &payload);
     let want_valid = ex
@@ -2397,7 +2408,7 @@ fn event_type_example(
     if let Some(want) = ex.expect.get("upcast") {
         match registry.upcast_to_latest(event_type, v, payload) {
             Ok((_, got)) => {
-                if let Some((path, want, got)) = first_mismatch(want, &got) {
+                if let Some((path, want, got)) = compare(want, &got) {
                     report.errors.push(format!(
                         "{shown}:1: `{event_type}@{v}` upcasts to {got} at `{path}`, the example \
                          expects {want} — fix: its upcast, or the example's `expect.upcast`"
@@ -2420,7 +2431,7 @@ fn wikilink_example(ext: &Extension, ex: &Example<'_>, link: &str, report: &mut 
         let _ = resources.register(r.decl.clone());
     }
     let got = oxplow_domain::uri::canonical_wikilink(&resources, link).map(|u| u.to_string());
-    if let Some((path, want, got)) = first_mismatch(&ex.expect, &json!({ "uri": got })) {
+    if let Some((path, want, got)) = compare(&ex.expect, &json!({ "uri": got })) {
         report.errors.push(format!(
             "{}:1: `[[{link}]]` names {got} at `{path}`, the example expects {want} — fix: the \
              resource's `params`/`wikilink`, or the example's `expect`",
@@ -2440,8 +2451,7 @@ async fn fact_collector_example(
     spec: &oxplow_config::collectors::CollectorSpec,
     report: &mut TestReport,
 ) {
-    let (shown, example, id) = (ex.shown, ex.name, spec.id.as_str());
-    report.ran.push(format!("example {example}"));
+    let (shown, id) = (ex.shown, spec.id.as_str());
     let files: std::collections::HashMap<String, String> = ex
         .when
         .get("files")
@@ -2505,7 +2515,7 @@ async fn fact_collector_example(
             },
         )
         .collect();
-    if let Some((path, want, got)) = first_mismatch(&ex.expect, &json!({ "facts": got })) {
+    if let Some((path, want, got)) = compare(&ex.expect, &json!({ "facts": got })) {
         report.errors.push(format!(
             "{shown}:1: collector `{id}` returned {got} at `{path}`, the example expects {want} — \
              fix: the script, or the example's `expect` (`{{ facts: [{{ measure, value?, path?, \
@@ -2552,7 +2562,6 @@ async fn collector_example(
     if !spec.facts.is_empty() {
         return fact_collector_example(host, ext, ex, spec, report).await;
     }
-    report.ran.push(format!("example {example}"));
     let rows = ex
         .when
         .get("rows")
@@ -2599,7 +2608,7 @@ async fn collector_example(
     if !events.is_empty() || expect.get("events").is_some() {
         got["events"] = Value::Array(events);
     }
-    if let Some((path, want, got)) = first_mismatch(expect, &got) {
+    if let Some((path, want, got)) = compare(expect, &got) {
         report.errors.push(format!(
             "{shown}:1: collector `{id}` returned {got} at `{path}`, the example expects {want} — \
              fix: the script, or the example's `expect` (`{{ entities: {{ <name>: n | $any }}, \
@@ -3032,7 +3041,7 @@ async fn session(
                         report.left.push(made.to_string());
                     }
                 }
-                if let Some((path, want, got)) = first_mismatch(&expect, &out.result) {
+                if let Some((path, want, got)) = compare(&expect, &out.result) {
                     report.errors.push(format!(
                         "{shown}:1: `{command}` returned {got} at `{path}`, the example expects \
                          {want} — fix: the provider or the example's `expect`"
@@ -4249,6 +4258,46 @@ effects:
     /// Event-type and ref-kind fixtures: a payload checked against the
     /// declared schema (and its upcast), a wikilink against the declared
     /// kind; a wrong expectation is a finding at its fixture.
+    /// One rule compares every `expect`: an object only on the keys it
+    /// names, a list item by item in order, `{ contains: [..] }` items a
+    /// list has in any order, `$any` anything, `{ $exact: v }` the whole value.
+    #[test]
+    fn one_rule_compares_what_an_example_expects() {
+        let got = json!({ "state": "done", "rows": [{ "a": 1, "b": 2 }, { "a": 3, "b": 4 }] });
+        let holds = |want: Value| compare(&want, &got).is_none();
+        assert!(holds(json!({ "state": "done" })));
+        assert!(holds(json!({ "rows": [{ "a": 1 }, { "b": 4 }] })));
+        assert!(
+            !holds(json!({ "rows": [{ "a": 1 }] })),
+            "a list is every item"
+        );
+        assert!(holds(json!({ "rows": { "contains": [{ "a": 3 }] } })));
+        assert!(holds(
+            json!({ "rows": { "contains": [{ "b": 4 }, { "a": 1 }] } })
+        ));
+        assert!(!holds(json!({ "rows": { "contains": [{ "a": 5 }] } })));
+        assert!(holds(json!({ "rows": "$any", "state": "$any" })));
+        assert!(!holds(json!({ "missing": 1 })));
+        assert!(
+            !holds(json!({ "missing": "$any" })),
+            "$any is a value that's there"
+        );
+        assert!(holds(json!({ "missing": null })));
+        let no = json!({ "ok": false, "refused": "`tsk9` isn't a work item" });
+        assert!(compare(&json!({ "refused": "isn't a work item" }), &no).is_none());
+        assert!(compare(&json!({ "refused": "is archived" }), &no).is_some());
+        assert!(holds(
+            json!({ "rows": { "$exact": [{ "a": 1, "b": 2 }, { "a": 3, "b": 4 }] } })
+        ));
+        assert!(!holds(
+            json!({ "rows": { "$exact": [{ "a": 1 }, { "a": 3 }] } })
+        ));
+        assert_eq!(
+            compare(&json!({ "rows": [{ "a": 1 }, { "a": 9 }] }), &got),
+            Some(("/rows/1/a".into(), json!(9), json!(3)))
+        );
+    }
+
     /// Every kind of fixture has `given` steps whose bound values its
     /// `when` and `expect` read, and `steps`: each `{ when?, expect }` runs
     /// again with its `when` over the fixture's, and a finding names its step.
@@ -4781,7 +4830,7 @@ when: { page: items }
                 "contains",
                 &format!(
                     "{given}expect:
-  loaders: {{ items: {{ rows: 3, contains: [{{ title: Third }}, {{ title: First }}] }} }}
+  loaders: {{ items: {{ rows: {{ contains: [{{ title: Third }}, {{ title: First }}] }} }} }}
   nodes: [{{ id: items, actions: [{{ id: start, row: true, one_row: false }}] }}]
 "
                 ),
@@ -4797,7 +4846,7 @@ when: { page: items }
                 "contains",
                 &format!(
                     "{given}expect:
-  loaders: {{ items: {{ contains: [{{ title: Fourth }}] }} }}
+  loaders: {{ items: {{ rows: {{ contains: [{{ title: Fourth }}] }} }} }}
   nodes: [{{ id: items, actions: [{{ id: start, row: false }}] }}]
 "
                 ),
@@ -4809,7 +4858,7 @@ when: { page: items }
             .errors
             .join("\n");
         assert!(
-            errors.contains("loader `items` has no row like {\"title\":\"Fourth\"}"),
+            errors.contains("loader `items` returned") && errors.contains("at `/rows/contains/0`"),
             "{errors}"
         );
         assert!(

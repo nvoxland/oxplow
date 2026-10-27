@@ -2035,7 +2035,7 @@
           },
           "default": []
         },
-        "refuses": {
+        "refused": {
           "type": [
             "string",
             "null"

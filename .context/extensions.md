@@ -1851,9 +1851,14 @@ and one calling MCP read identical `file:line: what — fix` lines.
   values?, fixed?, fields? }`, the values the fields start from, the
   read-only ones and the shown ones, `null` for all), and the dry runs that
   stay dry (`{ effect, event }`, `{ implementation, event }`, `{ command,
-  input }`, a derived or fact collector, an event type, a wikilink). For
-  the new forms only the keys `expect` names are compared
-  (`shaped_like`). Then, per declared provider, the conformance kit
+  input }`, a derived or fact collector, an event type, a wikilink).
+  **One rule compares every `expect`** (`compare`): an object only on the
+  keys it names (a key the result lacks matches only `null`, not even
+  `$any`); a list every item, in order; `{ contains: [..] }` the items a
+  list has, in any order, among others; `$any` any value that's there;
+  `{ $exact: v }` the whole value, every key; `refused: <text>` a reason
+  that contains the text. **One way to say no**: a command, an invoke or a
+  command example that refuses or fails is `refused: <its reason>`. Then, per declared provider, the conformance kit
   ([providers.md](./providers.md) "The conformance kit"), the effort
   policy suite for a policy script, `questions.yaml` and incremental
   models. `TestReport { ok, errors, warnings, blessed, ran, generation,
@@ -1947,16 +1952,16 @@ fixture model's answers); any other key is an error (`FIXTURE_KEYS`):
 - `when: { page: <slug | ext/slug>, params? }` with optional `given: [..]`,
   `view: { stream?, thread? }` and `steps: [..]` beside `when`, and
   `expect: { loaders?: { <name>: { rows: n | $any | [ { col: val } | [ val,
-  … ] ], contains?: [ { col: val } ], columns? } }, nodes?: [{ id, kind?,
+  … ] ] | { contains: [..] }, columns? } }, nodes?: [{ id, kind?,
   actions? }], text?, alert?,
   badge?, inactive?, actions? }` — the page runs (`PageRunner`, as a person,
   from the `view`'s stream and thread) after the `given` steps, each `{
   command, input?, as?, confirmed?, bind? }` or `{ rows: { <entity>: [..] }
-  }`, in order. A row map matches when every column it names equals (`$any`
-  matches anything); a row list is every row, in order; `contains` names
-  rows the loader has, in any order among others; `nodes` ids are in the
+  }`, in order. Everything is compared by the one rule: a row is its
+  columns by name (or its cells, where the example writes the row as a
+  list), `rows: n` a count; `nodes` ids are in the
   run's tree (`<embed>/<id>` inside an embed); `alert`, `badge` and
-  `inactive` are the run's own, each compared on the keys named. `actions`
+  `inactive` are the run's own. `actions`
   (the page's, or a node's viz's) list ids, or objects compared on the
   fields they name, spelled as the page YAML spells them (`one_row`, which
   oxplow derives, included) — `actions_like`. A loader that fails
@@ -4311,7 +4316,7 @@ commands:
       input: { uri: "{{uri}}" }
     examples:
       - { name: happy, input: { uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow" }, expect_commands: [oxplow.work_item.transition] }
-      - { name: gone, input: { uri: "oxplow:oxplow/work_item?id=tsk9&provider=oxplow" }, answers: { sql.read: [[]] }, refuses: no such }
+      - { name: gone, input: { uri: "oxplow:oxplow/work_item?id=tsk9&provider=oxplow" }, answers: { sql.read: [[]] }, refused: no such }
     example: { uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow" }   # the input an agent is shown; a script's defaults to its first example that runs
 ```
 
@@ -4349,7 +4354,7 @@ otherwise): it reads and returns a `result`, is never confirmed and needs
 no scope that changes things; the bus runs it unrecorded. An example may give `answers:` — per scope, its calls'
 answers in order, standing in so it doesn't depend on the project's data
 (a scope without any is served for real; one that runs out is an
-error) — and may expect a refusal with `refuses: <part of the reason>` instead of
+error) — and may expect a refusal with `refused: <part of the reason>` instead of
 `expect_commands` (not both). A command's manifest `name` is
 `<area>.<verb>`; its **command id** is `<namespace>.<area>.<verb>`. The
 **namespace** is the manifest's `namespace:`, else the extension's name with

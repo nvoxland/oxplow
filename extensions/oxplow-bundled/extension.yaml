@@ -614,7 +614,7 @@ commands:
       - name: an unverified claim
         input: { effort: "eff1" }
         answers: { sql.read: [[{ work_item: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", unverified: '[{"claim":"oxplow:oxplow/claim?id=1","statement":"tests pass"}]', inferred: "[]", deviated: "[]" }]] }
-        refuses: 1 unverified claim
+        refused: 1 unverified claim
       - name: forced
         input: { effort: "eff1", force: true }
         answers: { sql.read: [[{ work_item: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", unverified: '[{"claim":"oxplow:oxplow/claim?id=1","statement":"tests pass"}]', inferred: "[]", deviated: "[]" }]] }
@@ -626,7 +626,7 @@ commands:
       - name: no work item
         input: { effort: "eff3" }
         answers: { sql.read: [[{ work_item: null, unverified: "[]", inferred: "[]", deviated: "[]" }]] }
-        refuses: has no work item
+        refused: has no work item
   - name: review.request_changes
     summary: Send an effort's work back — comment a checklist of its unverified claims, inferred decisions and files outside its work item's area (and your note) on the item, and move it back to todo.
     input_schema:
@@ -648,7 +648,7 @@ commands:
       - name: nothing to ask for
         input: { effort: "eff1" }
         answers: { sql.read: [[{ work_item: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", unverified: "[]", inferred: "[]", deviated: "[]" }]] }
-        refuses: nothing to ask for
+        refused: nothing to ask for
       - name: another provider's item
         input: { effort: "eff2", note: "Add the migration." }
         answers: { sql.read: [[{ work_item: "oxplow:oxplow/work_item?id=ENG-12&provider=issues", unverified: "[]", inferred: "[]", deviated: "[]" }]] }
@@ -656,7 +656,7 @@ commands:
       - name: no work item
         input: { effort: "eff3", note: "x" }
         answers: { sql.read: [[{ work_item: null, unverified: "[]", inferred: "[]", deviated: "[]" }]] }
-        refuses: has no work item
+        refused: has no work item
   - name: work.clear_finished
     summary: Clear a thread's Finished list in the Work panel — what finished before now stops showing there.
     input_schema:
