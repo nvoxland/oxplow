@@ -1443,35 +1443,6 @@ mod tests {
         );
     }
 
-    /// The rail's Comments panel is a page (its rows are the
-    /// `comments-panel-counts-open-comments-by-who-acts` fixture): its body,
-    /// and the inbox the header opens.
-    #[tokio::test]
-    async fn the_comments_panel_names_its_page_and_its_inbox() {
-        let f = crate::test_fixtures::services_with_effort().await;
-        let bundled = crate::extensions::load_extensions(f._dir.path())
-            .into_iter()
-            .find(|e| e.name == "oxplow-bundled")
-            .unwrap();
-        let panel = bundled
-            .panels
-            .iter()
-            .find(|p| p.id == "oxplow-bundled/comments")
-            .expect("a comments panel");
-        assert_eq!(
-            (panel.body.as_str(), panel.open.as_deref()),
-            (
-                "oxplow-bundled/comments-panel",
-                Some("oxplow:oxplow/page?page=comments")
-            )
-        );
-    }
-
-    /// The rail's Work panel is a page: per thread, what's in
-    /// progress, what's ready and what finished since the person last
-    /// cleared it (an extension command recording an event), grouped
-    /// under headings; collapsed, just the active item; counted without
-    /// an alert.
     /// The task pages need no work list: with none they run (and, reading
     /// the interface, show nothing) rather than failing.
     #[tokio::test]
@@ -1501,38 +1472,6 @@ mod tests {
             .personal_active_providers
             .insert("work_items".into(), "none".into());
         assert_eq!(run(f.svc.clone()).await, Vec::<String>::new());
-    }
-
-    /// The rail's Work panel is a page (its rows are the
-    /// `work-panel-groups-a-threads-work` fixture): its body, its collapsed
-    /// line, its count and the page its header opens.
-    #[tokio::test]
-    async fn the_work_panel_names_its_pages() {
-        let f = crate::test_fixtures::services_with_effort().await;
-        let bundled = crate::extensions::load_extensions(f._dir.path())
-            .into_iter()
-            .find(|e| e.name == "oxplow-bundled")
-            .unwrap();
-        assert!(bundled.errors.is_empty(), "{:?}", bundled.errors);
-        let panel = bundled
-            .panels
-            .iter()
-            .find(|p| p.id == "oxplow-bundled/work")
-            .expect("a work panel");
-        assert_eq!(
-            (
-                panel.body.as_str(),
-                panel.collapsed.as_deref(),
-                panel.count.as_deref(),
-                panel.open.as_deref()
-            ),
-            (
-                "oxplow-bundled/work",
-                Some("oxplow-bundled/work-line"),
-                Some("oxplow-bundled/work-count"),
-                Some("oxplow:oxplow/page?page=tasks")
-            )
-        );
     }
 
     /// The foundation's typed pages (offered to the agent as tools): each

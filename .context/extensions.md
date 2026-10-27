@@ -1944,15 +1944,19 @@ job and component forms are in "The SDK"):
 - `input: { page: <slug | ext/slug>, params? }` with optional `given: [..]`,
   `view: { stream?, thread? }` and `steps: [..]` beside `input`, and
   `expect: { loaders?: { <name>: { rows: n | $any | [ { col: val } | [ val,
-  … ] ], columns? } }, nodes?: [{ id, kind?, actions? }], text?, alert?,
+  … ] ], contains?: [ { col: val } ], columns? } }, nodes?: [{ id, kind?,
+  actions? }], text?, alert?,
   badge?, inactive?, actions? }` — the page runs (`PageRunner`, as a person,
   from the `view`'s stream and thread) after the `given` steps, each `{
   command, input?, as?, confirmed?, bind? }` or `{ rows: { <entity>: [..] }
   }`, in order. A row map matches when every column it names equals (`$any`
-  matches anything); a row list matches in order; `nodes` ids are in the
-  run's tree (`<embed>/<id>` inside an embed) and a node's `actions` are its
-  viz's action ids; `alert`, `badge` and `inactive` are the run's own and
-  `actions` the page's, each compared on the keys named. A loader that fails
+  matches anything); a row list is every row, in order; `contains` names
+  rows the loader has, in any order among others; `nodes` ids are in the
+  run's tree (`<embed>/<id>` inside an embed); `alert`, `badge` and
+  `inactive` are the run's own, each compared on the keys named. `actions`
+  (the page's, or a node's viz's) list ids, or objects compared on the
+  fields they name, spelled as the page YAML spells them (`one_row`, which
+  oxplow derives, included) — `actions_like`. A loader that fails
   is a finding naming it. `expect.text` is `{ contains: [..] }` or the exact
   text, against `page_text`.
   - **Bind and reuse.** `bind: <name>` on a step keeps its command's result;

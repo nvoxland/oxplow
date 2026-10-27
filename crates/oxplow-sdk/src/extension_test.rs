@@ -1761,11 +1761,36 @@ impl PageAt<'_> {
                 if want.get("columns").is_some() {
                     got["columns"] = json!(loader.result.columns);
                 }
+                // `contains`: rows it has, in any order, among others.
+                let mut want = want.clone();
+                let contains = want.as_object_mut().and_then(|w| w.remove("contains"));
+                for like in contains
+                    .as_ref()
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                {
+                    if !rows
+                        .iter()
+                        .any(|row| first_mismatch(like, &by_column(row, like)).is_none())
+                    {
+                        report.errors.push(format!(
+                            "{shown}:1: {label}page `{page}` loader `{name}` has no row like \
+                             {like} — fix: the page, or the example's \
+                             `expect.loaders.{name}.contains`; its rows are {}",
+                            json!(rows
+                                .iter()
+                                .map(|row| by_column(row, like))
+                                .collect::<Vec<_>>())
+                        ));
+                    }
+                }
+                let want = &want;
                 if let Some((path, want, got)) = first_mismatch(want, &got) {
                     report.errors.push(format!(
                         "{shown}:1: {label}page `{page}` loader `{name}` returned {got} at \
                          `{path}`, the example expects {want} — fix: the page, or the example's \
-                         `expect.loaders.{name}` (`{{ rows: n | $any | [..], columns? }}`)"
+                         `expect.loaders.{name}` (`{{ rows: n | $any | [..], contains?: [..], columns? }}`)"
                     ));
                 }
             }
@@ -1775,14 +1800,15 @@ impl PageAt<'_> {
             ("alert", json!(run.alert)),
             ("badge", json!(run.badge)),
             ("inactive", json!(run.inactive)),
-            (
-                "actions",
-                json!(run.page.actions.iter().map(|a| &a.id).collect::<Vec<_>>()),
-            ),
+            ("actions", Value::Null),
         ];
         for (key, got) in parts {
             let Some(want) = expect.get(key) else {
                 continue;
+            };
+            let got = match key {
+                "actions" => actions_like(want, &run.page.actions),
+                _ => got,
             };
             if let Some((path, want, got)) = first_mismatch(want, &got) {
                 report.errors.push(format!(
@@ -1851,7 +1877,7 @@ impl PageAt<'_> {
                     }
                 }
                 if let Some(want) = want.get("actions") {
-                    let got = json!(node_actions(&run, id));
+                    let got = actions_like(want, &node_actions(&run, id));
                     if let Some((path, want, got)) = first_mismatch(want, &got) {
                         report.errors.push(format!(
                             "{shown}:1: {label}page `{page}` node `{id}`'s actions are {got} at \
@@ -1866,18 +1892,55 @@ impl PageAt<'_> {
     }
 }
 
-/// The ids of the actions node `id` of a run's page offers (a viz's), in
-/// the order it declares them.
-fn node_actions(run: &oxplow_app::pages::runner::PageRun, id: &str) -> Vec<String> {
+/// `actions` as an example names them: an id where it names an id, else
+/// the action's fields (spelled as the page YAML spells them) that the
+/// example names.
+fn actions_like(want: &Value, actions: &[oxplow_app::extensions::PageAction]) -> Value {
+    let named = want.as_array();
+    Value::Array(
+        actions
+            .iter()
+            .enumerate()
+            .map(|(i, action)| match named.and_then(|w| w.get(i)) {
+                Some(like @ Value::Object(_)) => {
+                    let fields = match json!(action) {
+                        Value::Object(fields) => fields
+                            .into_iter()
+                            .map(|(k, v)| (snake_case(&k), v))
+                            .collect(),
+                        _ => serde_json::Map::new(),
+                    };
+                    shaped_like(like, &Value::Object(fields))
+                }
+                _ => json!(action.id),
+            })
+            .collect(),
+    )
+}
+
+/// `oneRow` → `one_row`.
+fn snake_case(name: &str) -> String {
+    name.chars()
+        .flat_map(|c| {
+            let lower = c.to_ascii_lowercase();
+            (c.is_ascii_uppercase().then_some('_').into_iter()).chain([lower])
+        })
+        .collect()
+}
+
+/// The actions node `id` of a run's page offers (a viz's), in the order
+/// it declares them.
+fn node_actions(
+    run: &oxplow_app::pages::runner::PageRun,
+    id: &str,
+) -> Vec<oxplow_app::extensions::PageAction> {
     let local = id.rsplit('/').next().unwrap_or(id);
     run.page
         .nodes()
         .into_iter()
         .find(|n| n.id == local)
         .and_then(|n| match &n.kind {
-            oxplow_app::pages::schema::NodeKind::Viz { config, .. } => {
-                Some(config.actions.iter().map(|a| a.id.clone()).collect())
-            }
+            oxplow_app::pages::schema::NodeKind::Viz { config, .. } => Some(config.actions.clone()),
             _ => None,
         })
         .unwrap_or_default()
@@ -4553,6 +4616,72 @@ steps:
             .errors
             .join("\n");
         assert!(errors.contains("`$nowhere` isn't bound"), "{errors}");
+    }
+
+    /// A loader's `contains` names rows it has, in any order, among
+    /// others; an action named by an object is compared on the fields it
+    /// names, spelled as the page YAML spells them.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_page_fixture_checks_rows_it_contains_and_an_actions_details() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let page = "title: Items
+data:
+  items: { sql: \"SELECT title, uri FROM v_work_item ORDER BY title\" }
+view:
+  from: items
+  viz: table
+  actions:
+    - { id: start, label: Start, command: oxplow.work_item.transition, input: { uri: '{{row.uri}}', to: in_progress }, row: true }
+";
+        let given = "given:
+  - { command: oxplow.work_item.create, input: { title: First } }
+  - { command: oxplow.work_item.create, input: { title: Second } }
+  - { command: oxplow.work_item.create, input: { title: Third } }
+input: { page: items }
+";
+        paged(
+            root,
+            page,
+            &[(
+                "contains",
+                &format!(
+                    "{given}expect:
+  loaders: {{ items: {{ rows: 3, contains: [{{ title: Third }}, {{ title: First }}] }} }}
+  nodes: [{{ id: items, actions: [{{ id: start, row: true, one_row: false }}] }}]
+"
+                ),
+            )],
+        );
+        let report = test_extension(root, "paged", false).await.unwrap();
+        assert_eq!(report.errors, Vec::<String>::new());
+
+        paged(
+            root,
+            page,
+            &[(
+                "contains",
+                &format!(
+                    "{given}expect:
+  loaders: {{ items: {{ contains: [{{ title: Fourth }}] }} }}
+  nodes: [{{ id: items, actions: [{{ id: start, row: false }}] }}]
+"
+                ),
+            )],
+        );
+        let errors = test_extension(root, "paged", false)
+            .await
+            .unwrap()
+            .errors
+            .join("\n");
+        assert!(
+            errors.contains("loader `items` has no row like {\"title\":\"Fourth\"}"),
+            "{errors}"
+        );
+        assert!(
+            errors.contains("node `items`'s actions are true at `/0/row`"),
+            "{errors}"
+        );
     }
 
     /// Each example with `given` runs on an oxplow of its own: what one

@@ -57,10 +57,14 @@ model the SQL reads and the command it runs. Prefer `answers:` on pages.
      `input` — steps run first, in order: `{ command, input?, as?,
      confirmed?, bind? }` or `{ rows: { <entity>: [..] } }`.
      `expect: { loaders: { <name>: { rows: n | $any | [ { col: val } ],
-     columns? } }, nodes: [{ id, kind?, actions? }], text: { contains: [..] }
-     | "<exact>", alert?, badge?, inactive?, actions? }` (a row map compares
-     only the columns it names; `text` is the page's text, as
-     `oxplow_run_page` shows it; a node's `actions` are its action ids).
+     contains?: [ { col: val } ], columns? } }, nodes: [{ id, kind?,
+     actions? }], text: { contains: [..] } | "<exact>", alert?, badge?,
+     inactive?, actions? }` (a row map compares only the columns it names;
+     `rows: [..]` is every row in order, `contains` rows it has in any
+     order among others; `text` is the page's text, as `oxplow_run_page`
+     shows it; `actions`, the page's or a node's, list ids, or objects
+     compared on the fields they name, spelled as in the page YAML:
+     `{ id: rename, form: true, one_row: true }`).
      `view: { stream: str1, thread: thr1 }` runs it from that stream and
      thread. `bind: <name>` on a step keeps the command's result, and
      `$name.uri` (any `.key` / `[n]` path) in a later input, `params` or

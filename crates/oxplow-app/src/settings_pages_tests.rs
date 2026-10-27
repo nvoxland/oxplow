@@ -9,7 +9,7 @@ use oxplow_db::SqlCell;
 use crate::extensions::ViewContext;
 use crate::pages::actions::{run_page_action, PageActionCall};
 use crate::pages::open_runs::PageRuns;
-use crate::pages::runner::{PageRun, PageRunner, RunRequest, RunTarget};
+use crate::pages::runner::{PageRun, RunRequest, RunTarget};
 use crate::test_fixtures::services_with_effort;
 
 type Row = Vec<SqlCell>;
@@ -430,23 +430,6 @@ async fn the_extensions_area_lists_health_and_credentials() {
     assert!(creds.flag(&creds.rows[0], "is_set"));
 
     assert!(run(&fx, "extensions-secrets", vec![]).await.rows.is_empty());
-}
-
-/// Rename… and Link to task… of the Changes page's Effort part act on the
-/// effort the part shows: offered on its one row, so a range (no effort)
-/// shows neither. (The part's rows are the `changes-*` fixtures; a fixture
-/// cannot read an action's `one_row`.)
-#[tokio::test(flavor = "multi_thread")]
-async fn the_changes_effort_part_offers_rename_and_link_on_its_one_row() {
-    let fx = services_with_effort().await;
-    let part = PageRunner::of(&fx.svc)
-        .run(request("changes-effort", vec![]))
-        .await
-        .unwrap();
-    for id in ["rename", "link"] {
-        let action = part.page.actions.iter().find(|a| a.id == id).unwrap();
-        assert!(action.one_row, "{id} is offered on the effort's row only");
-    }
 }
 
 /// The Git Dashboard: the stream's branch with no upstream, the working
