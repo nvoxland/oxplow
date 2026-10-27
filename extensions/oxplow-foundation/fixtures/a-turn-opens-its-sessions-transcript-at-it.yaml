@@ -1,0 +1,12 @@
+# A turn opens its session's transcript at it: the page is the page ref
+# built in SQL; a turn no session claimed opens nothing.
+given:
+  - { command: oxplow.agent_session.open, input: { thread: thr1, harness: claude }, bind: ses }
+  - observe: { turn: { session: $ses.id, prompt: ask } }
+  - { command: oxplow.thread.create, input: { stream: str1, title: Beta }, bind: beta }
+  - observe: { turn: { thread: $beta.id, prompt: unclaimed } }
+when: { sql: "SELECT prompt, transcript_page FROM v_agent_turn ORDER BY id" }
+expect:
+  rows:
+    - { prompt: ask, transcript_page: "oxplow:oxplow/page?page=session-transcript&session=ses1#turn=trn1" }
+    - { prompt: unclaimed, transcript_page: null }

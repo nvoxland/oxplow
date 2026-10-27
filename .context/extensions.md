@@ -2096,6 +2096,13 @@ a `KINDS` entry and a `dispatch` arm. The forms:
   snapshot log, `SqliteSnapshotStore::record_take`), `diagnostics`
   (`SqliteDiagnosticStore::replace_file`), `symbols` (`SqliteSymbolStore::record`
   at a snapshot taken with the file), `collect` (`run_effort_collectors`) 
+  `run` (`extension_run_store::record_tx`; `days_ago` through
+  `RunContext::began_at`), `health` (`disable_tx`), `token_usage`, `hint`
+  and `nudge` (their stores), a `project:` given (keys of
+  `.oxplow/project.yaml`, then `reload_config_from_disk`), and a `turn` that
+  also takes `thread`, `session`, `prompt: null` + `subagent` (a hand-back)
+  and `pre: true` on a tool; none can set the time of a hook (a tool call
+  or a turn is as old as the run), only a `run`'s `days_ago`,
   `analyze` (`change_analysis::ensure_change`: a working or commit change
   analyzed to the end; real files come from `turn.write` and real commits from
   `oxplow.vcs.stage` / `oxplow.vcs.commit`, a throwaway's forks keep their

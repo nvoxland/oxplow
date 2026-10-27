@@ -186,7 +186,15 @@ model the SQL reads and the command it runs. Prefer `answers:` on pages.
      `{ observe: { symbols: { path, items: [{ name, kind, container?, line? }] } } }`
      (the definitions the index read from it), `{ observe: { collect: {
      effort, collectors?: [key] } } }` (the fact collectors an effort's end
-     runs), `{ observe: { analyze: { kind: working | commit, sha? } } }` (a change
+     runs), `{ observe: { run: { extension, contribution, kind?, outcome?, days_ago?, cpu_ms?, ai_calls? } } }`
+     (a finished run of an extension's code), `{ observe: { health: { extension, contribution,
+     kind?, disable } } }` (a contribution disabled after failures), `{ observe: { token_usage: {
+     thread?, effort?, session?, prompt?, input_tokens?, output_tokens?, … } } }`, `{ observe: {
+     hint: { hint, evaluated? } } }` and `{ observe: { nudge: { kind, message, delivered? } } }`,
+     a `{ project: { <project.yaml key>: … } }` given (keys of `.oxplow/project.yaml`, read again
+     as core does), and a `turn` that also takes `thread`, `session`, `prompt: null` with
+     `subagent` / `peer` (a hand-back), and `pre: true` on a tool (the call as it
+     starts), `{ observe: { analyze: { kind: working | commit, sha? } } }` (a change
      analyzed to the end, so its files and functions are there to read; make
      the commit first with `turn.write`, `oxplow.vcs.stage` and
      `oxplow.vcs.commit`, whose answer has the commit's `rev`), `{ observe: { refs: { branches?: [{ name, head, stream?, … }], tags?, heads? } } }`

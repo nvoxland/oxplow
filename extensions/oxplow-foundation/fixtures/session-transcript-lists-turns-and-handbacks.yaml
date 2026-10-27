@@ -1,0 +1,33 @@
+# The transcript page lists a session's turns oldest first, marks a
+# subagent's hand-back, counts each turn's tool calls, starts at a turn, and
+# pages by 50.
+given:
+  - { command: oxplow.agent_session.open, input: { thread: thr1, harness: claude }, bind: ses }
+  - observe:
+      turn:
+        session: $ses.id
+        prompt: first ask
+        answer: one
+        tools: [{ name: Read, kind: read, paths: [a.rs], ok: true }, { name: Read, kind: read, paths: [b.rs], ok: true }]
+  - observe: { turn: { session: $ses.id, prompt: null, subagent: { id: a1, kind: Explore }, answer: report } }
+  - observe: { turn: { session: $ses.id, prompt: third ask, answer: three } }
+when: { page: oxplow-foundation/session-transcript, params: { session: $ses.id, turn: "", page: 1 } }
+expect:
+  loaders:
+    session_transcript:
+      rows:
+        - { kind: turn, prompt: first ask, answer: one, tool_calls: 2 }
+        - { kind: hand-back, answer: report, tool_calls: 0 }
+        - { kind: turn, prompt: third ask, answer: three, tool_calls: 0 }
+steps:
+  # Starting at the hand-back's turn leaves it and what follows.
+  - params: { session: $ses.id, turn: trn2, page: 1 }
+    expect:
+      loaders:
+        session_transcript:
+          rows:
+            - { kind: hand-back }
+            - { kind: turn }
+  # A second page of 50 is past them.
+  - params: { session: $ses.id, turn: "", page: 2 }
+    expect: { loaders: { session_transcript: { rows: 0 } } }

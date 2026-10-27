@@ -565,6 +565,12 @@ impl RunContext {
         self.began
     }
 
+    /// It began at `at`, not now: a run recorded after the fact.
+    pub fn began_at(mut self, at: crate::time::Timestamp) -> Self {
+        self.began = at;
+        self
+    }
+
     /// It called scope `id`.
     pub fn used_scope(&self, id: &str) {
         *self.usage_lock().scopes.entry(id.to_string()).or_insert(0) += 1;

@@ -1,0 +1,18 @@
+# A server of `.oxplow/project.yaml` is listed, offers no Remove (it is the
+# file's), and the suggestions leave out its language.
+when: { page: oxplow-foundation/settings, params: { area: lsp } }
+expect:
+  loaders:
+    lsp_suggestions: { rows: { contains: [{ package: rust-analyzer }] } }
+steps:
+  - given:
+      - project:
+          lsp:
+            servers:
+              - { languageId: rust, extensions: [.rs], command: /opt/bin/rust-analyzer, args: [] }
+  - expect:
+      loaders:
+        lsp_servers:
+          rows:
+            - { language: rust, program: rust-analyzer, source: project.yaml, can_remove: 0, can_restart: 0 }
+        lsp_suggestions: { rows: { contains: [] } }

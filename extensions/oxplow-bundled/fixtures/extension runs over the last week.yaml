@@ -1,4 +1,29 @@
-# The `runs` page over a throwaway oxplow with no runs recorded: it runs and
-# says so. (Rows over recorded runs are pinned by `the_runs_page_counts_each_extensions_week`.)
-when: { page: runs, params: {} }
-expect: { loaders: { runs: { rows: 0 } } }
+# The `runs` page: per extension, the last week's runs, failures, denials,
+# mean CPU and model calls, the ones needing attention first; an extension's
+# own runs newest first, the run a week and a day old left out. (Foundation's
+# own runs in a fresh oxplow are runs too, so only the extensions named here
+# are read.)
+given:
+  - observe: { run: { extension: acme, contribution: pull, outcome: ok, days_ago: 1, cpu_ms: 10 } }
+  - observe: { run: { extension: acme, contribution: pull, outcome: failed, days_ago: 2, cpu_ms: 30, ai_calls: 2 } }
+  - observe: { run: { extension: acme, contribution: pull, outcome: denied, days_ago: 3, cpu_ms: 20 } }
+  - observe: { run: { extension: acme, contribution: pull, outcome: ok, days_ago: 8, cpu_ms: 999, ai_calls: 9 } }
+  - observe: { run: { extension: beta, contribution: pull, outcome: ok, cpu_ms: 5 } }
+  - observe: { run: { extension: beta, contribution: pull, outcome: ok, days_ago: 4, cpu_ms: 7 } }
+when: { page: runs }
+expect:
+  loaders:
+    runs:
+      rows:
+        contains:
+          - { extension: acme, runs_ref: "oxplow:oxplow/page?extension=acme&page=extension-runs", runs: 3, failures: 1, denials: 1, mean_cpu_ms: 20.0, ai_calls: 2 }
+          - { extension: beta, runs_ref: "oxplow:oxplow/page?extension=beta&page=extension-runs", runs: 2, failures: 0, denials: 0, mean_cpu_ms: 6.0, ai_calls: 0 }
+steps:
+  - when: { page: extension-runs, params: { extension: acme } }
+    expect:
+      loaders:
+        extension_runs:
+          rows:
+            - { contribution: "oxplow:oxplow/collector?collector=acme/pull (collector)", outcome: ok }
+            - { outcome: failed }
+            - { outcome: denied }

@@ -19,6 +19,9 @@ intent:
     - name: pr-lifetimes-draws-bars-filters-syncs-and-opens
       input: { page: pr-lifetimes }
       expect: a bar per readable pull request; the filters re-run the page, Sync runs the collector and a bar opens its pull request
+    - name: settings-extensions-area-lists-health-and-credentials
+      input: { page: oxplow-foundation/settings, params: { area: extensions } }
+      expect: a collector disabled after failures says why; a declared credential is listed once, never its value
 permissions:
   commands: [oxplow.collector.sync]
   network: [api.github.com]

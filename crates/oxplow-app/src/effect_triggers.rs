@@ -2088,6 +2088,42 @@ mod tests {
         assert_eq!(guarded, json!([["skipped"]]));
     }
 
+    /// An effect that retitles the fixture's task with the first ref its
+    /// event is about.
+    async fn retitle_by_subject(fx: &crate::test_fixtures::TaskEffortFixture) {
+        let task = oxplow_tasks::work_item_ref(fx.task);
+        extension(
+            &fx.svc,
+            "  - id: note\n    summary: Retitle by what the event is about.\n    on: [work_item.state_changed]\n    entry: note.star\n",
+            &[(
+                "note.star",
+                &format!(
+                    "def transform(x):\n    return {{\"commands\": [{{\"name\": \"oxplow.work_item.update\", \"input\": {{\"uri\": \"{task}\", \"title\": x[\"event\"][\"subject\"][0]}}}}]}}\n"
+                ),
+            )],
+        )
+        .await;
+    }
+
+    /// An effect is handed the event the pump delivers, not a second read of
+    /// the log: an event the log does not hold (a redelivery with another
+    /// subject than its stored row) is reacted to as delivered.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_effect_reacts_to_the_delivered_event_not_the_log() {
+        let fx = crate::test_fixtures::services_with_task_effort().await;
+        let svc = &fx.svc;
+        retitle_by_subject(&fx).await;
+        start(svc).await;
+        let mut stored = log(svc, state_changed(&fx, CanonicalState::Done)).await;
+        stored.envelope.id = oxplow_domain::EventId::generate();
+        stored.envelope.subject = vec!["oxplow:oxplow/effort?id=eff77".into()];
+        EffectTriggers::new(Arc::downgrade(svc))
+            .handle(&stored)
+            .await
+            .unwrap();
+        assert_eq!(title(&fx).await, "oxplow:oxplow/effort?id=eff77");
+    }
+
     async fn run_as_person(
         svc: &Services,
         name: &str,
