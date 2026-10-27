@@ -97,6 +97,9 @@ intent:
     - name: work-item-page-reads-the-item-its-links-and-its-comments
       input: { page: work-item, params: { uri: "<the item's uri>", thread_id: 1 } }
       expect: the item, its gated buttons, its links from both ends, its comments
+    - name: backlog-lists-items-on-no-thread-with-epics-and-search
+      input: { page: backlog, params: { q: "", thread_id: 1 } }
+      expect: x
 # The agent harnesses and AI providers oxplow runs: core's
 # built-ins, many of each at once (every one declared here is active).
 implementations:

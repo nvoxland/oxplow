@@ -1,0 +1,31 @@
+# The backlog lists items on no thread, an epic's children indented under it,
+# filtered by a search that reads the title or any field; the gated actions
+# follow what the list can do; the quick-add form starts a Ready item.
+given:
+  - { command: oxplow.work_item.create, input: { title: An epic }, bind: epic }
+  - { command: oxplow.work_item.create, input: { title: Child of the epic, parent_uri: $epic.uri } }
+  - { command: oxplow.work_item.create, input: { title: Plain item } }
+  - { command: oxplow.work_item.create, input: { title: On the thread, thread: thr1 } }
+input: { page: backlog, params: { q: "", thread_id: 1 } }
+expect:
+  loaders:
+    items:
+      rows:
+        - title: An epic
+          depth: 0
+          add_child: "oxplow:oxplow/page?page=new-task&parent=oxplow:oxplow/work_item?id%3Dtsk1%26provider%3Doxplow"
+        - title: Child of the epic
+          depth: 1
+          can_order: 1
+          can_delete: 1
+          can_bring: 1
+          can_prioritize: 1
+          thread_ref: thr1
+        - { title: Plain item }
+    add: { rows: [{ state: todo }] }
+steps:
+  - params: { q: plain }
+    expect: { loaders: { items: { rows: [{ title: Plain item }] } } }
+  # A field's value is searchable too (priority defaults to medium).
+  - params: { q: medium }
+    expect: { loaders: { items: { rows: 3 } } }
