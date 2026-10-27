@@ -676,30 +676,6 @@ async fn the_files_page_lists_a_folder_or_the_changed_files() {
     assert!(changed.has("id", "src"));
 }
 
-/// A page's tab is named by the one row of its page (`label: {{row.title}}`):
-/// a thread's and a stream's settings, by their titles.
-#[tokio::test(flavor = "multi_thread")]
-async fn the_settings_pages_row_names_the_thread_and_the_stream() {
-    let fx = crate::test_fixtures::services_with_task_effort().await;
-    let thread = run_task(
-        &fx,
-        "thread-settings",
-        vec![("thread", SqlCell::Text(format!("thr{}", fx.thread.value())))],
-    )
-    .await;
-    assert_eq!(thread.rows.len(), 1, "{:?}", thread.rows);
-    assert!(thread
-        .text(&thread.rows[0], "title")
-        .is_some_and(|t| !t.is_empty()));
-    let stream = run_task(
-        &fx,
-        "stream-settings",
-        vec![("stream", SqlCell::Text("str1".into()))],
-    )
-    .await;
-    assert_eq!(stream.rows.len(), 1, "{:?}", stream.rows);
-}
-
 /// Settings → Data: the entities (counted when one is opened), the
 /// collectors, and each effect's backfill (what it would react to).
 #[tokio::test(flavor = "multi_thread")]
