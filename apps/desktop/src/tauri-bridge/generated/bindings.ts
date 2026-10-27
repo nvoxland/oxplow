@@ -1317,8 +1317,6 @@ export type CheckReport_Deserialize = {
 	/**  `file:line: what — fix` lines. */
 	errors: string[],
 	warnings: string[],
-	/**  What its SQL was dry-run against. */
-	dryRun: DryRun,
 	extension: Extension_Deserialize,
 	/**
 	 *  With `--impact`: what going from `against` to the working
@@ -1344,8 +1342,6 @@ export type CheckReport_Serialize = {
 	/**  `file:line: what — fix` lines. */
 	errors: string[],
 	warnings: string[],
-	/**  What its SQL was dry-run against. */
-	dryRun: DryRun,
 	extension: Extension_Serialize,
 	/**
 	 *  With `--impact`: what going from `against` to the working
@@ -1614,7 +1610,7 @@ export type CommandExample = {
 	answers: { [key in string]: unknown[] },
 	expectCommands: string[],
 	/**  A part of the reason the script should refuse with. */
-	refuses: string | null,
+	refused: string | null,
 };
 
 /**  What runs an extension's command. */
@@ -2151,16 +2147,6 @@ export type Drop = {
 	group?: SqlCell | null,
 	order?: { [key in string]: SqlCell }[] | null,
 };
-
-/**
- *  The database a check dry-runs an extension's SQL on. It always has one
- *  (P7.C6): what it declares but hasn't published stands in either way.
- */
-export type DryRun =
-/**  The project's own (its synced data, read-only). */
-"project" |
-/**  A fresh, empty one: no usable project database. */
-"emptyDatabase";
 
 /**
  *  An effect as loaded (valid ones; invalid ones are in the extension's
@@ -5588,6 +5574,11 @@ export type RunNode_Deserialize = {
 	embed: PageRun_Deserialize | null,
 	/**  Why it shows nothing (an embed that didn't run). */
 	error: string | null,
+	/**
+	 *  A `replaceable:` node another extension's page stands in for: that
+	 *  extension, its run the `embed`.
+	 */
+	replacedBy: string | null,
 };
 
 /**  A node of a run's tree: the page's node by id, and what it resolved to. */
@@ -5602,6 +5593,11 @@ export type RunNode_Serialize = {
 	embed: PageRun_Serialize | null,
 	/**  Why it shows nothing (an embed that didn't run). */
 	error: string | null,
+	/**
+	 *  A `replaceable:` node another extension's page stands in for: that
+	 *  extension, its run the `embed`.
+	 */
+	replacedBy: string | null,
 };
 
 /**  A run and the sequence of that exact snapshot, captured under one lock. */

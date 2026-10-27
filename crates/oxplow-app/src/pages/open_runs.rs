@@ -623,6 +623,7 @@ mod diff_tests {
             children: Vec::new(),
             embed: None,
             error: None,
+            replaced_by: None,
         };
         PageRun {
             inactive: None,
@@ -672,6 +673,7 @@ mod diff_tests {
             children: Vec::new(),
             embed: Some(Box::new(fixture("child"))),
             error: None,
+            replaced_by: None,
         });
         let mut new = old.clone();
         new.rail
@@ -698,6 +700,7 @@ mod diff_tests {
             children: Vec::new(),
             embed: Some(Box::new(fixture("child"))),
             error: None,
+            replaced_by: None,
         });
         let mut new = old.clone();
         new.rail.as_mut().unwrap().embed = None;

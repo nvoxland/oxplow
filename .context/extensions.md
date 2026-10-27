@@ -2697,11 +2697,16 @@ than handing it props it does not know.
 **Who places a target.** A page node marked `replaceable: <target>`
 (`Node.replaceable`; `check_page` refuses an unknown target and a target
 placed twice on a page). The node's own content is oxplow's own and the
-fallback. At render `PageTree` wraps the node in `Replaceable`, its props
-the run's resolved `params`; a prop the params leave out comes from the first
-row of the page's loaders, as an embed's does (the Tasks page's `row` loader
-derives `scope` from its `show` param), and only the props the replacement
-page declares are given. The page's params must cover the contract so
+fallback. **The page run decides** (`PageRunner::replacement`, the rules in
+`replacements::chosen`): when a replacement stands in, the node runs it as
+an embed (`run_embedded`, as a slot's mount runs) — its props by name from
+the run's `params`, a prop the params leave out from the first row of the
+page's loaders (the Tasks page's `row` loader derives `scope` from its
+`show` param), only the props the replacement page declares — and
+`RunNode.replaced_by` names the extension; else the node's own content
+runs. So a fixture of the host page sees the replacement
+(`loaders: { <node>/<loader> }`). The desktop's `Replaceable` still decides
+on its own (`useReplacement`) until it draws the run's embed. The page's params must cover the contract so
 the props exist; a page with a `replaceable` node is not warned about
 params it passes on.
 

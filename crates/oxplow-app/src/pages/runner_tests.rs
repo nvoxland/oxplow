@@ -352,3 +352,57 @@ async fn a_page_loader_does_not_double_charge_its_transient_source_page_results(
     assert!(!borrowed.result.truncated);
     assert!(result_bytes(&run) <= MAX_RESULT_BYTES);
 }
+
+/// A `replaceable:` node runs the page that stands in for it — the only
+/// extension replacing an unbound target, here — as an embed, given the
+/// target's props by name from the host's params, and says whose it is;
+/// the person choosing `oxplow` keeps the node's own content.
+#[tokio::test]
+async fn a_replaceable_node_runs_the_replacement_that_stands_in_for_it() {
+    let dir = tempfile::tempdir().unwrap();
+    crate::test_fixtures::init_git_repo(dir.path());
+    let write = |rel: &str, body: &str| {
+        let p = dir.path().join(rel);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, body).unwrap();
+    };
+    write(
+        ".oxplow/extensions/acme/extension.yaml",
+        "manifest: 2\nname: acme\nintent:\n  purpose: test\n",
+    );
+    write(
+        ".oxplow/extensions/acme/pages/board.yaml",
+        "title: Board\nparams: [{ name: scope, default: all }, { name: thread_id }]\ndata:\n  own: { sql: \"SELECT 1 AS n\" }\nview: { id: cards, viz: table, from: own, replaceable: work_item.board }\n",
+    );
+    write(
+        ".oxplow/extensions/beta/extension.yaml",
+        "manifest: 2\nname: beta\nintent:\n  purpose: test\nui:\n  replacements:\n    - { target: work_item.board, page: lanes }\n",
+    );
+    write(
+        ".oxplow/extensions/beta/pages/lanes.yaml",
+        "title: Lanes\nparams: [{ name: scope }, { name: thread_id }]\ndata:\n  echo: { sql: \"SELECT :scope AS scope\" }\nview: { viz: table, from: echo }\n",
+    );
+    let svc = crate::Services::in_memory(dir.path()).await.unwrap();
+    let problems = crate::test_fixtures::activate_with_problems(&svc).await;
+    assert!(problems.is_empty(), "{problems:?}");
+
+    let r = run(&svc, "acme/board", &[]).await;
+    assert_eq!(r.tree.id, "cards");
+    assert_eq!(r.tree.replaced_by.as_deref(), Some("beta"));
+    let lanes = r.tree.embed.as_ref().expect("the replacement ran");
+    assert_eq!(lanes.page.id, "beta/lanes");
+    assert_eq!(
+        lanes.loaders["echo"].result.rows,
+        [[SqlCell::Text("all".into())]],
+        "`scope` flowed from the host"
+    );
+
+    svc.config
+        .write()
+        .unwrap()
+        .replacements
+        .insert("work_item.board".into(), "oxplow".into());
+    let own = run(&svc, "acme/board", &[]).await;
+    assert_eq!(own.tree.replaced_by, None);
+    assert!(own.tree.embed.is_none(), "{:?}", own.tree);
+}

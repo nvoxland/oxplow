@@ -107,6 +107,9 @@ pub struct RunNode {
     pub embed: Option<Box<PageRun>>,
     /// Why it shows nothing (an embed that didn't run).
     pub error: Option<String>,
+    /// A `replaceable:` node another extension's page stands in for: that
+    /// extension, its run the `embed`.
+    pub replaced_by: Option<String>,
 }
 
 /// Runs pages over one oxplow's data.
@@ -118,6 +121,11 @@ pub struct PageRunner<'a> {
     pub root: &'a Path,
     /// A draft's own pages, found before the catalog's.
     pub draft: Option<Draft>,
+    /// What the person chose to stand in for each replaceable target
+    /// (`replacements`).
+    pub replacements: BTreeMap<String, String>,
+    /// Which extension brings a provider, for a target bound to one.
+    pub capabilities: Option<std::sync::Arc<crate::capabilities::CapabilityRegistry>>,
 }
 
 /// An extension's draft: its source in a checkout other than the one that
@@ -150,6 +158,12 @@ impl<'a> PageRunner<'a> {
             commands: svc.commands.as_ref(),
             root: &svc.layout.project_dir,
             draft: None,
+            replacements: svc
+                .config
+                .read()
+                .map(|c| c.replacements.clone())
+                .unwrap_or_default(),
+            capabilities: Some(svc.capabilities.clone()),
         }
     }
 
@@ -264,6 +278,7 @@ impl<'a> PageRunner<'a> {
                     children: Vec::new(),
                     embed: None,
                     error: None,
+                    replaced_by: None,
                 };
                 return Ok(PageRun {
                     page,
@@ -589,11 +604,34 @@ impl<'a> PageRunner<'a> {
         depth: usize,
     ) -> BoxFuture<'r, RunNode> {
         Box::pin(async move {
+            // Another extension's page standing in for it runs instead.
+            if let Some(stand_in) = node
+                .replaceable
+                .as_deref()
+                .and_then(|target| self.replacement(target, params))
+            {
+                let mut out = self
+                    .run_embedded(
+                        page,
+                        &stand_in.page,
+                        params,
+                        loaders,
+                        ctx,
+                        viewer,
+                        RunData { memo, budget },
+                        depth,
+                    )
+                    .await;
+                out.id = node.id.clone();
+                out.replaced_by = Some(stand_in.extension);
+                return out;
+            }
             let mut out = RunNode {
                 id: node.id.clone(),
                 children: Vec::new(),
                 embed: None,
                 error: None,
+                replaced_by: None,
             };
             match &node.kind {
                 NodeKind::Stack { children } | NodeKind::Grid { children } => {
@@ -616,6 +654,7 @@ impl<'a> PageRunner<'a> {
                             children: Vec::new(),
                             embed: None,
                             error: None,
+                            replaced_by: None,
                         };
                         for mount in self.mounts(&page.id, name) {
                             let r = self
@@ -724,6 +763,46 @@ impl PageRunner<'_> {
         out.into_iter().map(|(_, m)| m).collect()
     }
 
+    /// The replacement standing in for `target` now (`replacements::
+    /// chosen`): the enabled extensions' candidates, the person's choice,
+    /// and — for a target bound to a provider — the extension bringing the
+    /// provider of the thing shown (its `uri` param's `provider`).
+    fn replacement(
+        &self,
+        target: &str,
+        params: &BTreeMap<String, SqlCell>,
+    ) -> Option<crate::extensions::replacements::UiReplacement> {
+        let extensions = self
+            .catalog
+            .unpinned(self.root, "a replaceable node reads one snapshot");
+        let candidates: Vec<&crate::extensions::replacements::UiReplacement> = extensions
+            .iter()
+            .filter(|e| e.enabled)
+            .flat_map(|e| e.ui.replacements.iter())
+            .filter(|r| r.target == target)
+            .collect();
+        let first = candidates.first()?;
+        let provider_extension = match (first.bound_to_provider, params.get("uri")) {
+            (true, Some(SqlCell::Text(uri))) => {
+                let provider = oxplow_domain::uri::OxplowUri::parse(uri)
+                    .ok()?
+                    .param("provider")?
+                    .to_string();
+                self.capabilities
+                    .as_ref()?
+                    .get(&first.capability, &provider)?
+                    .extension
+            }
+            _ => None,
+        };
+        crate::extensions::replacements::chosen(
+            &candidates,
+            self.replacements.get(target).map(String::as_str),
+            provider_extension.as_deref(),
+        )
+        .cloned()
+    }
+
     /// A mounted page run as an embed (its params by name from the host),
     /// its node id the page's id with `.` for `/`.
     #[allow(clippy::too_many_arguments)]
@@ -739,13 +818,45 @@ impl PageRunner<'_> {
         budget: &mut ResultBudget,
         depth: usize,
     ) -> RunNode {
+        let mut out = self
+            .run_embedded(
+                host,
+                &mount.page,
+                params,
+                loaders,
+                ctx,
+                viewer,
+                RunData { memo, budget },
+                depth,
+            )
+            .await;
+        out.id = mount.page.replace('/', ".");
+        out
+    }
+
+    /// Page `id` run inside `host` as an embed — a slot's mount, a
+    /// replacement — its params by name from the host's params and its
+    /// loaders' first rows.
+    #[allow(clippy::too_many_arguments)]
+    async fn run_embedded(
+        &self,
+        host: &Page,
+        id: &str,
+        params: &BTreeMap<String, SqlCell>,
+        loaders: &BTreeMap<String, LoaderRun>,
+        ctx: &ViewContext,
+        viewer: &Actor,
+        RunData { memo, budget }: RunData<'_>,
+        depth: usize,
+    ) -> RunNode {
         let mut out = RunNode {
-            id: mount.page.replace('/', "."),
+            id: id.to_string(),
             children: Vec::new(),
             embed: None,
             error: None,
+            replaced_by: None,
         };
-        match self.find(&mount.page) {
+        match self.find(id) {
             Err(e) => out.error = Some(e.to_string()),
             Ok(child) => {
                 let flowed = flow_params(&child, &BTreeMap::new(), params, loaders, &host.loaders);

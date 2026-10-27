@@ -46,6 +46,39 @@ pub struct UiReplacement {
     pub label: String,
 }
 
+/// The person's `replacements` value that keeps oxplow's own component.
+pub const OXPLOWS_OWN: &str = "oxplow";
+
+/// Which of `candidates` — the enabled extensions' replacements of one
+/// target — stands in for it now, if any. `choice` is what the person said
+/// for the target (`replacements: { <target>: <extension> | oxplow }`);
+/// `oxplow` keeps oxplow's own wherever. A target bound to a provider (a
+/// work item's state: that tracker's own states) shows only the
+/// replacement of `provider_extension`, the extension bringing the
+/// provider whose thing it shows; none keeps oxplow's own. An unbound one
+/// (the Board, the list, the history graph) shows the person's choice, or
+/// with none the only candidate; several and no choice keep oxplow's own.
+pub fn chosen<'a>(
+    candidates: &[&'a UiReplacement],
+    choice: Option<&str>,
+    provider_extension: Option<&str>,
+) -> Option<&'a UiReplacement> {
+    let first = candidates.first()?;
+    if choice == Some(OXPLOWS_OWN) {
+        return None;
+    }
+    let decider = if first.bound_to_provider {
+        provider_extension?
+    } else {
+        match (choice, candidates) {
+            (Some(said), _) => said,
+            (None, [only]) => only.extension.as_str(),
+            (None, _) => return None,
+        }
+    };
+    candidates.iter().copied().find(|c| c.extension == decider)
+}
+
 /// A `ui.replacements` entry as the manifest holds it.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -172,6 +205,67 @@ mod tests {
         let p = root.join(rel);
         std::fs::create_dir_all(p.parent().unwrap()).unwrap();
         std::fs::write(p, body).unwrap();
+    }
+
+    /// `extension`'s replacement of `target`, bound to its provider or not.
+    fn candidate(extension: &str, target: &str, bound: bool) -> super::UiReplacement {
+        super::UiReplacement {
+            id: format!("{extension}/{target}"),
+            extension: extension.into(),
+            target: target.into(),
+            capability: "work_items".into(),
+            bound_to_provider: bound,
+            page: format!("{extension}/page"),
+            version: 1,
+            view: Vec::new(),
+            label: target.into(),
+        }
+    }
+
+    /// Whose page stands in, as the person and the thing shown say: an
+    /// unbound target's only candidate, or the one the person chose;
+    /// several and no choice, or `oxplow` chosen, keep oxplow's own; a bound
+    /// one only the extension of the provider whose thing it shows.
+    #[test]
+    fn whose_replacement_shows() {
+        let (a, b) = (
+            candidate("a", "work_item.board", false),
+            candidate("b", "work_item.board", false),
+        );
+        let named = |c: Option<&super::UiReplacement>| c.map(|c| c.extension.clone());
+        assert_eq!(named(super::chosen(&[], None, None)), None);
+        assert_eq!(named(super::chosen(&[&a], None, None)), Some("a".into()));
+        assert_eq!(named(super::chosen(&[&a, &b], None, None)), None);
+        assert_eq!(
+            named(super::chosen(&[&a, &b], Some("b"), None)),
+            Some("b".into())
+        );
+        assert_eq!(
+            named(super::chosen(&[&a], Some(super::OXPLOWS_OWN), None)),
+            None
+        );
+        assert_eq!(named(super::chosen(&[&a], Some("nobody"), None)), None);
+        let (x, y) = (
+            candidate("x", "work_item.detail.state", true),
+            candidate("y", "work_item.detail.state", true),
+        );
+        assert_eq!(
+            named(super::chosen(&[&x, &y], None, Some("y"))),
+            Some("y".into())
+        );
+        assert_eq!(
+            named(super::chosen(&[&x, &y], Some("x"), Some("y"))),
+            Some("y".into())
+        );
+        assert_eq!(
+            named(super::chosen(&[&x], None, None)),
+            None,
+            "whose item it is decides"
+        );
+        assert_eq!(
+            named(super::chosen(&[&x], Some(super::OXPLOWS_OWN), Some("x"))),
+            None
+        );
     }
 
     const BOARD: &str = "title: Board\nparams: [{ name: scope }, { name: thread_id }]\ndata:\n  rows: { sql: \"SELECT uri, title, state FROM v_work_item\" }\nview: { viz: table, from: rows }\n";
