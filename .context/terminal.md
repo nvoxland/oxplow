@@ -350,6 +350,16 @@ reset and the new session's replay is written under a dim "the previous
 session ended; this one was started again" line. Helpers in
 `components/terminalSession.ts`.
 
+**Ending a session's processes.** portable-pty makes each pane's child the
+leader of its own session and process group, outside the daemon's group, so
+the group is everything the pane started: an agent's workers, its tool
+processes, a shell's jobs. Killing a pane (`PtyManager::kill`, which every
+stop goes through: `TerminalSessionRegistry::close`, an agent session's
+stop or close, a thread's close) ends that group, not just the child. The
+group gets a SIGHUP, as a closed terminal gives it, and a SIGKILL after
+`HANGUP_GRACE` (500 ms) if anything ignored it (`end_tree`). The kill runs
+off the manager's owner loop, so one slow kill doesn't hold the other panes.
+
 ## Terminals are rows
 
 A stream's terminals are rows of the `terminal` table (`id`, `stream_id`,

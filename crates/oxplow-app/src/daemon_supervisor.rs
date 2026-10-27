@@ -86,9 +86,10 @@ pub fn parse_listening_line(line: &str) -> Option<String> {
 }
 
 /// Put `cmd`'s child in its own process group so the supervisor can
-/// signal the daemon **and everything it spawned** (agent PTYs, LSP
-/// servers, scan helpers) as a unit. Without this, killing the daemon
-/// orphans its children — the exact failure this epic exists to remove.
+/// signal the daemon and what it spawned into that group (LSP servers,
+/// harness CLIs, scan helpers) as a unit. Agent and terminal PTYs and
+/// provider processes lead groups of their own; the daemon ends those
+/// itself as it stops (`Services::shutdown`).
 #[cfg(unix)]
 pub(crate) fn own_process_group(cmd: &mut Command) {
     use std::os::unix::process::CommandExt;
@@ -645,10 +646,10 @@ mod tests {
         assert_eq!(sup.running_count(), 0);
     }
 
-    /// Stopping a daemon must take its CHILDREN with it. The real daemon
-    /// spawns agent PTYs, LSP servers and scan helpers; killing only the
-    /// daemon pid would orphan every one of them — the exact leak this
-    /// epic exists to remove. (nextest's "leaky" flag caught this.)
+    /// Stopping a daemon must take the children in its group with it
+    /// (LSP servers, harness CLIs, scan helpers); killing only the daemon
+    /// pid would orphan every one of them. (nextest's "leaky" flag caught
+    /// this.)
     #[test]
     fn stop_takes_the_daemons_children_with_it() {
         let tmp = tempfile::tempdir().unwrap();

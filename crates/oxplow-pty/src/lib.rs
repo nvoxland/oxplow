@@ -191,10 +191,11 @@ struct PaneEntry {
     /// exit) gets there first owns the child and handles cleanup. The
     /// other path sees `None` and no-ops.
     child: Arc<std::sync::Mutex<Option<Box<dyn Child + Send + Sync>>>>,
-    /// PID stashed at spawn time so Kill can signal the process even
-    /// when the wait task is currently holding the Child handle. Some
-    /// processes (e.g. `sleep`) ignore SIGHUP from a closed PTY, so
-    /// we can't rely on master-drop alone to terminate.
+    /// PID stashed at spawn time: the child leads its own process group,
+    /// so Kill signals the group by it (`end_tree`) even when the wait
+    /// task holds the Child handle. Some processes (e.g. `sleep`) ignore
+    /// SIGHUP from a closed PTY, so we can't rely on master-drop alone to
+    /// terminate.
     pid: Option<u32>,
 }
 
@@ -254,37 +255,19 @@ async fn owner_loop(mut cmd_rx: mpsc::Receiver<Cmd>) {
                 };
                 let _ = reply.send(result);
             }
-            Cmd::Kill { id, reply } => {
-                let result = match panes.remove(&id) {
-                    Some(entry) => {
-                        // Two paths to ensure the process dies:
-                        //
-                        // 1. If the entry still holds the Child handle
-                        //    (no natural exit raced us), use the
-                        //    portable_pty Child::kill, which sends
-                        //    SIGKILL on Unix.
-                        // 2. Otherwise the wait task is blocking on
-                        //    child.wait(); send SIGTERM directly to
-                        //    the PID so wait() returns. This covers
-                        //    processes that ignore SIGHUP from a
-                        //    closed PTY (e.g. `sleep`).
-                        let child_taken = entry.child.lock().ok().and_then(|mut g| g.take());
-                        if let Some(mut child) = child_taken {
-                            let _ = child.kill();
-                            let _ = child.wait();
-                        } else if let Some(pid) = entry.pid {
-                            kill_pid(pid);
-                        }
-                        // entry's Drop runs at end of scope and frees
-                        // the master, completing the Windows-safe
-                        // teardown order.
-                        drop(entry);
-                        Ok(())
-                    }
-                    None => Err(PtyError::NotFound(id.0.clone())),
-                };
-                let _ = reply.send(result);
-            }
+            Cmd::Kill { id, reply } => match panes.remove(&id) {
+                // Off the owner loop: a tree that ignores the hangup
+                // holds its kill for the grace, not every other pane.
+                Some(entry) => {
+                    tokio::spawn(async move {
+                        end_pane(entry).await;
+                        let _ = reply.send(Ok(()));
+                    });
+                }
+                None => {
+                    let _ = reply.send(Err(PtyError::NotFound(id.0.clone())));
+                }
+            },
         }
     }
 
@@ -292,30 +275,73 @@ async fn owner_loop(mut cmd_rx: mpsc::Receiver<Cmd>) {
     panes.clear();
 }
 
-/// Best-effort process termination by PID. Unix sends SIGKILL via
-/// `libc::kill`; Windows uses `TerminateProcess` via the win32 API.
-/// Used as a fallback when the wait task already owns the
-/// `portable_pty::Child` handle and Kill can't reach it directly.
-fn kill_pid(pid: u32) {
-    #[cfg(unix)]
-    unsafe {
-        libc::kill(pid as libc::pid_t, libc::SIGKILL);
-    }
-    #[cfg(windows)]
-    unsafe {
-        use windows_sys::Win32::Foundation::CloseHandle;
-        use windows_sys::Win32::System::Threading::{
-            OpenProcess, TerminateProcess, PROCESS_TERMINATE,
-        };
-        let handle = OpenProcess(PROCESS_TERMINATE, 0, pid);
-        if !handle.is_null() {
-            TerminateProcess(handle, 1);
-            CloseHandle(handle);
+/// How long a pane's processes get to exit on a hangup before they're
+/// killed.
+const HANGUP_GRACE: std::time::Duration = std::time::Duration::from_millis(500);
+
+/// End `entry`'s process and everything it started, then free the pane
+/// (its `Drop` releases the master, the Windows-safe teardown order).
+async fn end_pane(entry: PaneEntry) {
+    let _ = tokio::task::spawn_blocking(move || {
+        let child = entry.child.lock().ok().and_then(|mut g| g.take());
+        end_tree(entry.pid, child);
+        drop(entry);
+    })
+    .await;
+}
+
+/// End a pane's process tree. portable-pty makes each pane's child the
+/// leader of its own session and process group, so the group is
+/// everything the pane started — an agent's workers and tool processes,
+/// which signalling the child alone would leave running. The group gets
+/// a hangup, as a closed terminal gives it, then a kill after
+/// [`HANGUP_GRACE`] if anything ignored it. `child`, when the wait task
+/// hasn't taken it, is reaped here.
+#[cfg(unix)]
+fn end_tree(pid: Option<u32>, child: Option<Box<dyn Child + Send + Sync>>) {
+    if let Some(pid) = pid {
+        let group = -(pid as libc::pid_t);
+        let alive = || unsafe { libc::kill(group, 0) } == 0;
+        unsafe { libc::kill(group, libc::SIGHUP) };
+        let deadline = std::time::Instant::now() + HANGUP_GRACE;
+        while alive() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        if alive() {
+            unsafe { libc::kill(group, libc::SIGKILL) };
         }
     }
-    #[cfg(not(any(unix, windows)))]
-    {
-        let _ = pid;
+    if let Some(mut child) = child {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+}
+
+/// End a pane's process: through the `Child` when the wait task hasn't
+/// taken it, else by pid with `TerminateProcess`.
+#[cfg(windows)]
+fn end_tree(pid: Option<u32>, child: Option<Box<dyn Child + Send + Sync>>) {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{OpenProcess, TerminateProcess, PROCESS_TERMINATE};
+    if let Some(mut child) = child {
+        let _ = child.kill();
+        let _ = child.wait();
+    } else if let Some(pid) = pid {
+        unsafe {
+            let handle = OpenProcess(PROCESS_TERMINATE, 0, pid);
+            if !handle.is_null() {
+                TerminateProcess(handle, 1);
+                CloseHandle(handle);
+            }
+        }
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
+fn end_tree(_pid: Option<u32>, child: Option<Box<dyn Child + Send + Sync>>) {
+    if let Some(mut child) = child {
+        let _ = child.kill();
+        let _ = child.wait();
     }
 }
 
@@ -575,6 +601,72 @@ mod tests {
         .await
         .unwrap();
         assert!(out.contains("home=unset"), "{out}");
+    }
+
+    /// A pane whose shell started `sleep 60` in the background, both
+    /// deaf to a hangup and to SIGTERM, with the sleeper's pid read from
+    /// its output.
+    #[cfg(unix)]
+    async fn pane_with_a_deaf_grandchild(mgr: &PtyManager) -> (PaneHandle, i32) {
+        let req = SpawnRequest {
+            command: "sh".into(),
+            args: vec![
+                "-c".into(),
+                "trap '' HUP TERM; sleep 60 & echo \"pid=$!\"; wait".into(),
+            ],
+            cwd: tempdir().unwrap().keep(),
+            env: vec![],
+            env_remove: vec![],
+            cols: 80,
+            rows: 24,
+        };
+        let mut handle = mgr.spawn_pane(req).await.unwrap();
+        let pid = timeout(Duration::from_secs(5), async {
+            let mut out = String::new();
+            loop {
+                if let Ok(PaneEvent::Output(b)) = handle.events.recv().await {
+                    out.push_str(&String::from_utf8_lossy(&b));
+                }
+                if let Some(pid) = out
+                    .split("pid=")
+                    .nth(1)
+                    .and_then(|rest| rest.lines().next())
+                    .and_then(|line| line.trim().parse::<i32>().ok())
+                {
+                    return pid;
+                }
+            }
+        })
+        .await
+        .expect("the shell says its sleeper's pid");
+        (handle, pid)
+    }
+
+    #[cfg(unix)]
+    fn gone_within(pid: i32, wait: Duration) -> bool {
+        let deadline = std::time::Instant::now() + wait;
+        while std::time::Instant::now() < deadline {
+            if unsafe { libc::kill(pid, 0) } != 0 {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        false
+    }
+
+    /// Killing a pane ends everything it started, not just its own
+    /// process: an agent's workers and tool processes go with it.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn kill_ends_the_panes_whole_tree() {
+        let mgr = PtyManager::spawn();
+        let (handle, sleeper) = pane_with_a_deaf_grandchild(&mgr).await;
+        mgr.kill(&handle.id).await.unwrap();
+        let gone = gone_within(sleeper, Duration::from_secs(5));
+        if !gone {
+            unsafe { libc::kill(sleeper, libc::SIGKILL) };
+        }
+        assert!(gone, "the pane's grandchild outlived the kill");
     }
 
     #[tokio::test]
