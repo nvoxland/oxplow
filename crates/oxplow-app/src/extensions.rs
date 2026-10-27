@@ -5050,8 +5050,117 @@ pub async fn validate_extension(
     if let Ok(files) = files_at(root, &path) {
         check_fixture_pairing(&mut ext, files.as_ref());
         check_credentials(&mut ext, files.as_ref());
+        check_dependencies(&mut ext, &declared, files.as_ref());
     }
     Ok(ext)
+}
+
+/// Another extension `ext` uses but doesn't declare — reads its model
+/// (`v_<namespace>_…` in a page or a model), mounts at or names its page
+/// (`<name>/…`), runs its command (`<namespace>.…`) — is an error at the
+/// first place it does: a test runs `ext` with only what it declares
+/// (`requires:`, or the extension an import names), and a person may turn
+/// the other off. The required foundation, and a command in a namespace it
+/// shares, need no declaration.
+fn check_dependencies(ext: &mut Extension, others: &[Extension], files: &dyn ExtensionFiles) {
+    let declared: std::collections::BTreeSet<&str> = ext
+        .requires
+        .iter()
+        .map(String::as_str)
+        .chain(
+            ext.public_contracts
+                .imports
+                .iter()
+                .map(|i| i.contribution.extension.as_str()),
+        )
+        .collect();
+    let base = ext.path.trim_end_matches('/').to_string();
+    // A command namespace the required foundation holds too is no one
+    // extension's to declare.
+    let shared: Vec<&str> = others
+        .iter()
+        .filter(|o| crate::bundled_extensions::is_required(&o.name))
+        .map(|o| o.namespace.as_str())
+        .collect();
+    let others: Vec<&Extension> = others
+        .iter()
+        .filter(|o| {
+            o.name != ext.name
+                && !crate::bundled_extensions::is_required(&o.name)
+                && !declared.contains(o.name.as_str())
+        })
+        .collect();
+    let mut found: Vec<(String, String, String)> = Vec::new();
+    let mut note = |owner: &str, what: String, at: String| {
+        if !found.iter().any(|(o, _, _)| o == owner) {
+            found.push((owner.to_string(), what, at));
+        }
+    };
+    // A slot it mounts at.
+    for mount in &ext.ui.page_slots {
+        if let Some(owner) = others
+            .iter()
+            .find(|o| mount.host.split('/').next() == Some(o.name.as_str()))
+        {
+            note(
+                &owner.name,
+                format!("its slot `{}.{}`", mount.host, mount.slot),
+                format!("{base}/extension.yaml:1"),
+            );
+        }
+    }
+    // What its pages, models and scripts name.
+    let mut paths = files.paths().unwrap_or_default();
+    paths.sort();
+    for rel in paths.iter().filter(|p| {
+        (p.starts_with("pages/") && p.ends_with(".yaml"))
+            || (p.starts_with("models/") && p.ends_with(".sql"))
+            || p.ends_with(".star")
+    }) {
+        let Some(text) = files.read(rel) else {
+            continue;
+        };
+        for (n, line) in text.lines().enumerate() {
+            let at = format!("{base}/{rel}:{}", n + 1);
+            for owner in &others {
+                let model = format!("v_{}_", owner.namespace);
+                let page = format!("{}/", owner.name);
+                let command = format!("{}.", owner.namespace);
+                let word = |token: &str| {
+                    line.match_indices(token).find_map(|(i, _)| {
+                        let before = line[..i].chars().next_back();
+                        let starts =
+                            before.is_none_or(|c| !(c.is_alphanumeric() || c == '_' || c == '-'));
+                        starts.then(|| {
+                            line[i..]
+                                .split(|c: char| !(c.is_alphanumeric() || "_-./".contains(c)))
+                                .next()
+                                .unwrap_or_default()
+                                .trim_end_matches('.')
+                                .to_string()
+                        })
+                    })
+                };
+                if let Some(name) = word(&model) {
+                    note(&owner.name, format!("its model `{name}`"), at.clone());
+                } else if let Some(name) = word(&page) {
+                    note(&owner.name, format!("its page `{name}`"), at.clone());
+                } else if !shared.contains(&owner.namespace.as_str()) {
+                    if let Some(name) = word(&command) {
+                        note(&owner.name, format!("its command `{name}`"), at.clone());
+                    }
+                }
+            }
+        }
+    }
+    for (owner, what, at) in found {
+        ext.errors.push(format!(
+            "{at}: uses `{owner}` ({what}) without declaring it — a test runs `{}` without \
+             `{owner}`, and a person may turn it off — fix: `requires: [{owner}]` in \
+             extension.yaml (or import what it reads)",
+            ext.name
+        ));
+    }
 }
 
 /// An extension's manifest, scripts and fixtures, read for what looks like

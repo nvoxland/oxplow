@@ -1919,6 +1919,81 @@ mod tests {
     /// A fixture that no intent example names never runs, and an example
     /// without a fixture runs nothing: each is a finding that names the file
     /// or example and the fix, not a bare "not found" later.
+    /// An extension that reads another's model, mounts at its page or runs
+    /// its command without declaring it (`requires:`, or importing what it
+    /// reads) is a finding naming where and the fix: a test runs it
+    /// without the other, and a person may turn the other off.
+    #[tokio::test]
+    async fn check_reports_another_extension_used_but_not_declared() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            ".oxplow/extensions/other/extension.yaml",
+            "manifest: 2\nname: other\nintent:\n  purpose: x\nmodels:\n  - { name: things, version: 1, description: Things., columns: [{ name: n, type: \"\", doc: N. }] }\n",
+        );
+        write(
+            dir.path(),
+            ".oxplow/extensions/other/models/things.sql",
+            "SELECT 1 AS n",
+        );
+        write(
+            dir.path(),
+            ".oxplow/extensions/other/pages/home.yaml",
+            "title: Home\ndata:\n  n: { sql: \"SELECT 1 AS n\" }\nview:\n  stack:\n    - { id: n, viz: number, from: n }\n    - { slot: more }\n",
+        );
+        let user = |requires: &str, mounts: bool| {
+            let slots = if mounts {
+                "ui:\n  slots:\n    - { slot: other/home.more, page: counted }\n"
+            } else {
+                ""
+            };
+            format!("manifest: 2\nname: user\nintent:\n  purpose: x\n{requires}{slots}")
+        };
+        write(
+            dir.path(),
+            ".oxplow/extensions/user/pages/counted.yaml",
+            "title: Counted\ndata:\n  n: { sql: \"SELECT n FROM v_other_things\" }\nview: { viz: number, from: n }\n",
+        );
+        let found = |manifest: String| {
+            write(
+                dir.path(),
+                ".oxplow/extensions/user/extension.yaml",
+                &manifest,
+            );
+            async {
+                let report = check(
+                    dir.path(),
+                    "user",
+                    &ExtensionCatalog::new(),
+                    None,
+                    None,
+                    None,
+                )
+                .await
+                .unwrap();
+                render_findings(&report, Format::Text)
+            }
+        };
+        // One finding per extension it uses, at the first place it does.
+        let text = found(user("", true)).await;
+        assert!(
+            text.contains(
+                ".oxplow/extensions/user/extension.yaml:1: uses `other` (its slot `other/home.more`)"
+            ) && text.contains("fix: `requires: [other]`")
+                && text.matches("uses `other`").count() == 1,
+            "{text}"
+        );
+        let text = found(user("", false)).await;
+        assert!(
+            text.contains(
+                ".oxplow/extensions/user/pages/counted.yaml:3: uses `other` (its model `v_other_things`)"
+            ),
+            "{text}"
+        );
+        let text = found(user("requires: [other]\n", true)).await;
+        assert!(!text.contains("uses `other`"), "{text}");
+    }
+
     #[tokio::test]
     async fn check_reports_fixtures_and_intent_examples_that_do_not_pair_up() {
         let dir = tempfile::tempdir().unwrap();

@@ -62,17 +62,65 @@ impl Host {
             .await
             .unwrap_or_else(|| checkout.to_path_buf());
         let settings = oxplow_config::extension_settings(project);
+        // Which are on: what a fresh oxplow has (the required foundation,
+        // the default extensions), the one tested, and what each of those
+        // `requires:` or imports from, in turn. Never the project's list or
+        // one person's: a test passes or fails on what the extension
+        // declares, the same for everyone, and a sibling it doesn't name —
+        // broken or not — isn't in it.
+        // In the order they deploy: what one requires before it.
+        fn visit(
+            name: &str,
+            checkout: &Path,
+            settings: &oxplow_config::ExtensionSettings,
+            on: &mut Vec<String>,
+            seen: &mut std::collections::BTreeSet<String>,
+        ) {
+            if !seen.insert(name.to_string()) {
+                return;
+            }
+            let source = settings.source(checkout, name);
+            // One with no source here and none shipped isn't here at all:
+            // what needs it says so.
+            if !source.is_dir() {
+                if oxplow_app::bundled_extensions::find(name).is_some() {
+                    on.push(name.to_string());
+                }
+                return;
+            }
+            let ext = oxplow_app::extensions::load_extension_at(&source, name);
+            let needs = ext.requires.iter().cloned().chain(
+                ext.public_contracts
+                    .imports
+                    .iter()
+                    .map(|i| i.contribution.extension.clone()),
+            );
+            for need in needs.collect::<Vec<_>>() {
+                visit(&need, checkout, settings, on, seen);
+            }
+            on.push(name.to_string());
+        }
+        let (mut on, mut seen) = (Vec::new(), std::collections::BTreeSet::new());
+        let roots = oxplow_app::bundled_extensions::BUNDLED
+            .iter()
+            .filter(|b| b.required)
+            .map(|b| b.name)
+            .chain(oxplow_config::DEFAULT_EXTENSIONS.iter().copied())
+            .chain([testing]);
+        for root in roots {
+            visit(root, checkout, &settings, &mut on, &mut seen);
+        }
         // Each source goes where the checkout keeps it, so a finding names
         // the file the author edits; one kept outside the checkout goes
         // under `.oxplow/extensions/`.
         let mut sources = std::collections::BTreeMap::new();
         let mut copied = std::collections::BTreeMap::new();
-        for name in oxplow_app::extensions::known_names(checkout, &settings) {
-            let source = settings.source(checkout, &name);
+        for name in &on {
+            let source = settings.source(checkout, name);
             if !source.is_dir() {
                 continue;
             }
-            let default = Path::new(EXTENSIONS_DIR).join(&name);
+            let default = Path::new(EXTENSIONS_DIR).join(name);
             let rel = source
                 .strip_prefix(checkout)
                 .map(Path::to_path_buf)
@@ -81,21 +129,7 @@ impl Host {
                 sources.insert(name.clone(), rel.to_string_lossy().into_owned());
             }
             copy_dir(&source, &root.join(&rel)).map_err(|e| e.to_string())?;
-            copied.insert(name, rel);
-        }
-        // Which of them are on — the project's, never one person's
-        // `enableExtensions` / `disableExtensions`, so a test passes or
-        // fails the same for everyone — and nothing else of its config: its
-        // provider instances would start its programs here.
-        let mut on: Vec<String> = settings.team.clone();
-        // Every source here is on, as in a source load.
-        for name in oxplow_app::extensions::known_names(checkout, &settings) {
-            if settings.source(checkout, &name).is_dir() && !on.contains(&name) {
-                on.push(name);
-            }
-        }
-        if !on.iter().any(|n| n == testing) {
-            on.push(testing.to_string());
+            copied.insert(name.clone(), rel);
         }
         let config = root.join(".oxplow/project.yaml");
         std::fs::create_dir_all(config.parent().expect("a folder")).map_err(|e| e.to_string())?;
@@ -345,13 +379,14 @@ mod tests {
         std::fs::write(p, body).unwrap();
     }
 
-    /// A test runs with the project's extensions, whoever runs it: the
-    /// person's own `disableExtensions` (here in the main checkout, as a
-    /// worktree has no `personal.yaml`) doesn't turn one off in the
-    /// throwaway, so a fixture passes or fails the same for everyone and in
-    /// CI. A source that doesn't load is a warning beside the one tested.
+    /// A test runs an extension with what it declares and what a fresh
+    /// oxplow has, whoever runs it: its `requires:` (and theirs) are on, a
+    /// sibling source it doesn't name is not — so a broken one is no noise
+    /// in its report — and the person's own `disableExtensions` (here in
+    /// the main checkout, as a worktree has no `personal.yaml`) turns
+    /// nothing off.
     #[tokio::test]
-    async fn a_test_runs_with_the_projects_extensions_not_the_persons() {
+    async fn a_test_runs_an_extension_with_what_it_declares_and_nothing_else() {
         let main = tempfile::tempdir().unwrap();
         oxplow_app::vcs::GitProvider
             .init_repository(main.path())
@@ -360,7 +395,7 @@ mod tests {
         write(
             main.path(),
             ".oxplow/personal.yaml",
-            "disableExtensions: [other]\n",
+            "disableExtensions: [dep]\n",
         );
         let parent = tempfile::tempdir().unwrap();
         let wt = parent.path().join("wt");
@@ -374,7 +409,17 @@ mod tests {
         write(
             &wt,
             ".oxplow/extensions/acme/extension.yaml",
-            "manifest: 2\nname: acme\nintent:\n  purpose: test\n",
+            "manifest: 2\nname: acme\nintent:\n  purpose: test\nrequires: [dep]\n",
+        );
+        write(
+            &wt,
+            ".oxplow/extensions/dep/extension.yaml",
+            "manifest: 2\nname: dep\nintent:\n  purpose: test\nrequires: [deeper]\n",
+        );
+        write(
+            &wt,
+            ".oxplow/extensions/deeper/extension.yaml",
+            "manifest: 2\nname: deeper\nintent:\n  purpose: test\n",
         );
         write(
             &wt,
@@ -385,9 +430,13 @@ mod tests {
         let host = Host::start(&wt, "acme", Arc::new(|_: &str| None), false)
             .await
             .unwrap();
-        assert!(host.on.iter().any(|n| n == "other"), "{:?}", host.on);
+        for name in ["acme", "dep", "deeper", "oxplow-bundled"] {
+            assert!(host.on.iter().any(|n| n == name), "{name}: {:?}", host.on);
+        }
+        assert!(!host.on.iter().any(|n| n == "other"), "{:?}", host.on);
+        assert!(!host.root.join(EXTENSIONS_DIR).join("other").exists());
+        assert!(host.problems.is_empty(), "{:?}", host.problems);
         assert!(!host.root.join(".oxplow/personal.yaml").exists());
-        assert!(host.root.join(EXTENSIONS_DIR).join("acme").is_dir());
     }
 
     /// An extension whose source the project keeps elsewhere

@@ -1452,7 +1452,14 @@ entry must be a valid extension name other than its own, and a cycle is a
 load error on each member (`refuse_requires_cycles`). A required bundled
 extension (foundation) always counts as on. Unlike `imports:`, `requires`
 names no contract: it is for composing another extension's commands or
-reading its models without an export.
+reading its models without an export. **Using another extension without
+declaring it is an error** (`check_dependencies`, in `validate_extension`):
+reading its model (`v_<namespace>_…` in a page, a model or a script),
+naming its page (`<name>/…`), mounting at its slot or running its command
+(`<namespace>.…`, unless the required foundation shares the namespace) —
+one finding per extension, at the first place, `fix: requires: [x]`. The
+required foundation needs no declaration. A test turns on only what is
+declared, so the check says why before a fixture fails on a missing table.
 
 **Writing a page** (`oxplow.extension.write_page { extension, page, spec,
 deploy? }`, `extension_deploy::write_page`) writes `pages/<page>.yaml` into
@@ -1935,10 +1942,16 @@ is held by a page with a whole-page action running that command.
 **a throwaway oxplow** (`Host`, "The SDK" above: activated as boot
 activates, its entities created empty, the fixture model answering every
 model call). It never reads what runs here — no deployment, no
-database — so an extension is tested before its first deploy. Which
-extensions are on is the project's list (`extensions:`) and every source
-present, never one person's `enableExtensions` / `disableExtensions`:
-a fixture passes or fails the same for everyone and in CI. Each source is
+database — so an extension is tested before its first deploy. **Which
+extensions are on is what it declares**: what a fresh oxplow has (the
+required foundation, `DEFAULT_EXTENSIONS`), the one tested, and what each
+of those `requires:` or imports from, in turn — deployed in that order,
+what one requires before it (`Host::start`). Never the project's list or
+one person's `enableExtensions` / `disableExtensions`, and never a
+sibling it doesn't name: a fixture passes or fails the same for everyone
+and in CI, and a broken neighbour is no noise in its report. One named
+but neither here nor shipped isn't turned on (an import of it reports it
+isn't here). Each source is
 copied to where the checkout keeps it
 (`extensionSources`, so oxplow's own land at `extensions/<name>/`), and
 every finding names that path — the file the author edits. It never opens
