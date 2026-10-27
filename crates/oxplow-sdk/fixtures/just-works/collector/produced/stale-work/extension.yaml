@@ -25,7 +25,7 @@ collectors:
     entry: collectors/stale_tasks.star
     input: |
       WITH touched AS (
-        SELECT CAST(substr(w.uri, 21) AS INTEGER) AS id, w.title,
+        SELECT CAST(substr(uri_param(w.uri, 'id'), 4) AS INTEGER) AS id, w.title,
                w.native_state AS status,
                json_extract(w.native, '$.priority') AS priority,
                w.thread_id, th.stream_id,

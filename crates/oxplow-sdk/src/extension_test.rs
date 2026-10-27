@@ -1473,6 +1473,12 @@ async fn run_steps(
 ///   a test run an effort recorded, as a run recorder writes it.
 /// - `snapshot: { trigger?, elapsed_ms?, budget_ms?, files?: [{ path, hash }] }`:
 ///   one take in the stream's snapshot log.
+/// - `diagnostics: { path, language?, items?: [{ severity, message, line?, col?, source?, code? }] }`:
+///   what a language server reported for a file.
+/// - `symbols: { path, language?, items?: [{ name, kind, id?, container?, signature?, line?, col? }] }`:
+///   the definitions the index read from a file at a snapshot of it.
+/// - `retention: { days }`: the log's retention sweep, run as it is `days`
+///   from now: payloads past their keep are expired, envelopes stay.
 /// - `collect: { effort, collectors?: [key] }`: the fact collectors an
 ///   effort's end triggers, run over what the effort recorded.
 /// - `turn: { prompt?, during?: [{ command, input?, as? }], tools?: [{ name, kind, paths?, command?, detail?,
@@ -1494,9 +1500,12 @@ async fn observe(host: &Host, ext: &Extension, observed: &Value) -> Result<(), S
         "test_run" => observe_test_run(host, body).await,
         "snapshot" => observe_snapshot(host, body).await,
         "collect" => observe_collect(host, body).await,
+        "diagnostics" => observe_diagnostics(host, body).await,
+        "symbols" => observe_symbols(host, body).await,
+        "retention" => observe_retention(host, body).await,
         other => {
             return Err(format!(
-                "`{other}` isn't a kind — fix: `turn`, `evidence`, `event`, `commit`, `change`, `test_run`, `snapshot` or `collect`"
+                "`{other}` isn't a kind — fix: `turn`, `evidence`, `event`, `commit`, `change`, `test_run`, `snapshot`, `collect`, `diagnostics`, `symbols` or `retention`"
             ))
         }
     }?;
@@ -1730,6 +1739,127 @@ async fn observe_test_run(host: &Host, body: &Value) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
+/// `diagnostics: { path, language?, items?: [{ severity, message, line?,
+/// col?, source?, code? }] }`: what a language server reported for one file
+/// (`SqliteDiagnosticStore::replace_file`); no items says the file is clean.
+async fn observe_diagnostics(host: &Host, body: &Value) -> Result<(), String> {
+    let path = body
+        .get("path")
+        .and_then(Value::as_str)
+        .ok_or("`diagnostics.path` names the file")?;
+    let language = body
+        .get("language")
+        .and_then(Value::as_str)
+        .unwrap_or("rust");
+    let mut rows = Vec::new();
+    for d in body
+        .get("items")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let text = |key: &str| d.get(key).and_then(Value::as_str).map(str::to_string);
+        let int = |key: &str, default: i64| d.get(key).and_then(Value::as_i64).unwrap_or(default);
+        rows.push(oxplow_db::DiagnosticRow {
+            severity: text("severity").ok_or("a diagnostic names its `severity`")?,
+            message: text("message").ok_or("a diagnostic names its `message`")?,
+            source: text("source"),
+            code: text("code"),
+            line: int("line", 1),
+            col: int("col", 1),
+            end_line: int("end_line", int("line", 1)),
+            end_col: int("end_col", int("col", 1) + 1),
+        });
+    }
+    let stream = first_stream(host).await?;
+    host.svc
+        .diagnostic_store
+        .replace_file(stream.value(), language.into(), path.into(), rows)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// `symbols: { path, language?, items?: [{ name, kind, id?, container?,
+/// signature?, line?, col? }] }`: the definitions the symbol index read from
+/// a file (`SqliteSymbolStore::record`), at a snapshot of the tree taken
+/// with the file in it.
+async fn observe_symbols(host: &Host, body: &Value) -> Result<(), String> {
+    use oxplow_db::symbol_store::{FileSymbols, SymbolCapture, SymbolRow};
+    let path = body
+        .get("path")
+        .and_then(Value::as_str)
+        .ok_or("`symbols.path` names the file")?;
+    let language = body
+        .get("language")
+        .and_then(Value::as_str)
+        .unwrap_or("rust");
+    let mut rows = Vec::new();
+    for sym in body
+        .get("items")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let text = |key: &str| sym.get(key).and_then(Value::as_str).map(str::to_string);
+        let int = |key: &str, default: i64| sym.get(key).and_then(Value::as_i64).unwrap_or(default);
+        let name = text("name").ok_or("a symbol names its `name`")?;
+        rows.push(SymbolRow {
+            id: text("id").unwrap_or_else(|| name.clone()),
+            kind: text("kind").unwrap_or_else(|| "fn".into()),
+            container: text("container"),
+            signature: text("signature"),
+            line: int("line", 1),
+            col: int("col", 1),
+            start_line: int("line", 1),
+            start_col: int("col", 1),
+            end_line: int("line", 1),
+            end_col: int("col", 1) + name.len() as i64,
+            name,
+        });
+    }
+    let outcome = take_snapshot(
+        host,
+        &json!({ "trigger": "manual", "files": [{ "path": path, "hash": "symbols" }] }),
+    )
+    .await?
+    .ok_or("no snapshot to read the symbols at")?;
+    let stream = first_stream(host).await?;
+    host.svc
+        .symbol_store
+        .record(
+            stream.value(),
+            outcome.snapshot_id,
+            vec![FileSymbols {
+                path: path.into(),
+                language: language.into(),
+                rows: Some(rows),
+            }],
+            SymbolCapture {
+                files_collected: 1,
+                files_failed: 0,
+            },
+        )
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// `retention: { days }`: the event log's retention sweep
+/// (`event_retention::sweep`) as it runs `days` from now — a payload past
+/// its kind's keep expires, its envelope (type, subject, cause) stays.
+async fn observe_retention(host: &Host, body: &Value) -> Result<(), String> {
+    let days = body
+        .get("days")
+        .and_then(Value::as_i64)
+        .ok_or("`retention.days` is how many days ahead the sweep runs")?;
+    let later = oxplow_domain::Timestamp::from_unix_ms(
+        oxplow_domain::Timestamp::now().unix_ms() + days * oxplow_db::event_retention::DAY_MS,
+    );
+    oxplow_db::event_retention::sweep(&host.svc.db, later, &Default::default())
+        .await
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
 /// `collect: { effort, collectors?: [key] }`: the fact collectors an
 /// `effort.finished` triggers (`MetricsService::run_effort_collectors`),
 /// run for the effort now; `collectors` names the ones to run (by key),
@@ -1770,6 +1900,13 @@ async fn observe_collect(host: &Host, body: &Value) -> Result<(), String> {
 /// when `elapsed_ms` is more than `budget_ms`. A take whose files hash as
 /// its parent's makes no new snapshot.
 async fn observe_snapshot(host: &Host, body: &Value) -> Result<(), String> {
+    take_snapshot(host, body).await.map(|_| ())
+}
+
+async fn take_snapshot(
+    host: &Host,
+    body: &Value,
+) -> Result<Option<oxplow_db::TakeOutcome>, String> {
     use oxplow_db::{FileSnapshot, SnapshotStorage, TakeRecord};
     use oxplow_domain::snapshot::SnapshotTrigger;
     let stream = first_stream(host).await?;
@@ -1820,7 +1957,6 @@ async fn observe_snapshot(host: &Host, body: &Value) -> Result<(), String> {
             handle: None,
         })
         .await
-        .map(|_| ())
         .map_err(|e| e.to_string())
 }
 
@@ -5444,6 +5580,32 @@ expect:
   rows:
     - { trigger: quiet, over_budget: 1, file_count: 1, root: 0 }
     - { trigger: startup, over_budget: 0, file_count: 1, root: 1 }
+",
+        );
+        let report = test_extension(dir.path(), "notes", false).await.unwrap();
+        assert!(report.ok, "{:?}", report.errors);
+    }
+
+    /// `observe: { diagnostics }` is what a language server reported for a
+    /// file; `observe: { symbols }` the definitions the index read from it.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_given_observes_diagnostics_and_symbols() {
+        let dir = tempfile::tempdir().unwrap();
+        crate::scaffold(dir.path(), crate::Kind::Command, "notes", None).unwrap();
+        write(
+            dir.path(),
+            ".oxplow/extensions/notes/fixtures/basic.yaml",
+            "given:
+  - observe: { diagnostics: { path: a.rs, items: [{ severity: error, message: broken, line: 3, col: 1 }, { severity: warning, message: unused, line: 9 }] } }
+  - observe: { symbols: { path: src/lib.rs, language: rust, items: [{ name: main, kind: fn, line: 1 }, { name: helper, kind: fn, container: main, line: 5 }] } }
+when:
+  sql: SELECT 'd' AS k, path AS a, severity AS b FROM v_diagnostic UNION ALL SELECT 's', path, name FROM v_symbol ORDER BY 1, 3
+expect:
+  rows:
+    - { k: d, a: a.rs, b: error }
+    - { k: d, a: a.rs, b: warning }
+    - { k: s, a: src/lib.rs, b: helper }
+    - { k: s, a: src/lib.rs, b: main }
 ",
         );
         let report = test_extension(dir.path(), "notes", false).await.unwrap();

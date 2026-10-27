@@ -1,0 +1,17 @@
+# The stream's commits from its head back, newest first, narrowed by text or
+# author.
+given:
+  - observe: { commit: { sha: c1, at: "2026-01-01T00:00:00Z", author: ann, subject: first, files: [{ path: a.rs }] } }
+  - observe: { commit: { sha: c2, at: "2026-01-02T00:00:00Z", author: bob, subject: second, parents: [c1], files: [{ path: a.rs }] } }
+when: { page: oxplow-foundation/git-history, params: { stream_id: 1, head_sha: c2 } }
+expect:
+  loaders:
+    history:
+      rows:
+        - { sha: c2, author: bob, subject: second }
+        - { sha: c1, author: ann, subject: first }
+steps:
+  - params: { stream_id: 1, head_sha: c2, author: ann }
+    expect: { loaders: { history: { rows: [{ sha: c1 }] } } }
+  - params: { stream_id: 1, head_sha: c2, q: second }
+    expect: { loaders: { history: { rows: [{ sha: c2 }] } } }

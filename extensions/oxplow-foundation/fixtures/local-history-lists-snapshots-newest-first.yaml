@@ -1,0 +1,11 @@
+# The stream's snapshots, newest first, each with what triggered it.
+given:
+  - observe: { snapshot: { trigger: startup, files: [{ path: a.txt, hash: h1 }] } }
+  - observe: { snapshot: { trigger: quiet, files: [{ path: a.txt, hash: h2 }, { path: b.txt, hash: h2 }] } }
+when: { page: oxplow-foundation/local-history, params: { stream_id: 1 } }
+expect:
+  loaders:
+    recent:
+      rows:
+        - { why: idle, changes: "+1 ~1" }
+        - { why: startup, subject: Initial Snapshot }

@@ -1,0 +1,9 @@
+# Go To lists the pages bookmarked for the thread, newest first.
+given:
+  - { command: oxplow.bookmark.set, input: { uri: "oxplow:oxplow/page?page=problems", page_kind: problems, scope: thread, thread: thr1 } }
+when: { page: oxplow-foundation/go-to, params: { thread_id: 1 } }
+expect:
+  loaders:
+    bookmarks:
+      rows:
+        - { uri: "oxplow:oxplow/page?page=problems" }

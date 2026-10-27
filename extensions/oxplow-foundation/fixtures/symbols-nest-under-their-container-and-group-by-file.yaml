@@ -1,0 +1,15 @@
+# The definitions the index found, a file's symbols nested under their
+# container; a path gives one file's outline and a filter finds by name.
+given:
+  - observe: { symbols: { path: src/lib.rs, items: [{ name: main, kind: fn, line: 1 }, { name: helper, kind: fn, container: main, line: 5 }] } }
+when: { page: oxplow-foundation/symbols, params: { stream_id: 1 } }
+expect:
+  loaders:
+    symbols:
+      rows:
+        - { label: src/lib.rs, parent: null }
+        - { label: fn main, path: src/lib.rs, line: 1 }
+        - { label: fn helper, path: src/lib.rs, line: 5 }
+steps:
+  - params: { stream_id: 1, path: src/lib.rs, filter: help }
+    expect: { loaders: { symbols: { rows: [{ label: fn helper }] } } }

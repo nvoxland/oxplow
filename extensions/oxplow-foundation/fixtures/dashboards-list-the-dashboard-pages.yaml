@@ -1,0 +1,6 @@
+# The dashboards index lists the pages in the Dashboards category; with
+# none made it is empty.
+when: { page: oxplow-foundation/dashboards }
+expect:
+  loaders:
+    dashboards: { rows: 0 }
