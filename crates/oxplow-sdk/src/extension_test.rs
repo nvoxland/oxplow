@@ -1776,6 +1776,22 @@ async fn page_example(
                 return;
             }
         }
+        let mut run_params = params.as_object().cloned().unwrap_or_default();
+        if let Some(over) = step.get("params").and_then(Value::as_object) {
+            run_params.extend(over.clone());
+        }
+        if step.get("press").is_some() || step.get("submit").is_some() {
+            let Some(outcome) = at
+                .act(&Value::Object(run_params), step, &binds, &label, report)
+                .await
+            else {
+                return;
+            };
+            if !bind_from(step, &outcome, &mut binds, shown, &label, report) {
+                return;
+            }
+            continue;
+        }
         let Some(expect) = step.get("expect") else {
             if step.get("given").is_none() {
                 report.errors.push(format!(
@@ -1786,10 +1802,6 @@ async fn page_example(
             }
             continue;
         };
-        let mut run_params = params.as_object().cloned().unwrap_or_default();
-        if let Some(over) = step.get("params").and_then(Value::as_object) {
-            run_params.extend(over.clone());
-        }
         let Some(run) = at
             .check(
                 &Value::Object(run_params),
@@ -1802,27 +1814,46 @@ async fn page_example(
         else {
             return;
         };
-        if let Some(bind) = step.get("bind").and_then(Value::as_object) {
-            let seen = run_json(&run);
-            for (name, path) in bind {
-                match path
-                    .as_str()
-                    .and_then(|path| read_path(&seen, &format!(".{path}")))
-                {
-                    Some(value) => {
-                        binds.0.insert(name.clone(), value);
-                    }
-                    None => {
-                        report.errors.push(format!(
-                            "{shown}:1: {label}: `bind.{name}` reads nothing in the run — fix: a \
-                             path like `loaders.<name>.rows[0].<column>`"
-                        ));
-                        return;
-                    }
-                }
+        if !bind_from(step, &run_json(&run), &mut binds, shown, &label, report) {
+            return;
+        }
+    }
+}
+
+/// Keep what a step's `bind: { <name>: <path> }` reads in `seen` (a run,
+/// or what a press answered). False, with the finding, when a path reads
+/// nothing.
+fn bind_from(
+    step: &Value,
+    seen: &Value,
+    binds: &mut Binds,
+    shown: &str,
+    label: &str,
+    report: &mut TestReport,
+) -> bool {
+    for (name, path) in step
+        .get("bind")
+        .and_then(Value::as_object)
+        .into_iter()
+        .flatten()
+    {
+        match path
+            .as_str()
+            .and_then(|path| read_path(seen, &format!(".{path}")))
+        {
+            Some(value) => {
+                binds.0.insert(name.clone(), value);
+            }
+            None => {
+                report.errors.push(format!(
+                    "{shown}:1: {label}: `bind.{name}` reads nothing in {seen} — fix: a path \
+                     like `loaders.<name>.rows[0].<column>` (a run) or `result.<key>` (a press)"
+                ));
+                return false;
             }
         }
     }
+    true
 }
 
 /// Where a page example runs: its host, fixture, page and view.
@@ -1837,6 +1868,136 @@ struct PageAt<'a> {
 }
 
 impl PageAt<'_> {
+    /// Act on a run of the page with `params`, as a person would: the
+    /// step's `press` (`{ action, node?, row?, input?, confirmed? }`, one of
+    /// its actions) or `submit` (`{ node, input, confirmed? }`, a form
+    /// node), read through `binds`. What it gave is `{ ok: true, result }`,
+    /// or `{ ok: false, refused }` when it said no — checked against the
+    /// step's `expect` when it has one; without, one that says no is a
+    /// finding. `None` when the step can't go on.
+    async fn act(
+        &self,
+        params: &Value,
+        step: &Value,
+        binds: &Binds,
+        label: &str,
+        report: &mut TestReport,
+    ) -> Option<Value> {
+        let (shown, page) = (self.shown, self.page);
+        let submit = step.get("submit").is_some();
+        let kind = if submit { "submit" } else { "press" };
+        let (params, what, expect) = match (
+            binds.substitute(params),
+            binds.substitute(&step[kind]),
+            step.get("expect").map(|e| binds.substitute(e)).transpose(),
+        ) {
+            (Ok(p), Ok(what), Ok(e)) => (p, what, e),
+            (Err(e), _, _) | (_, Err(e), _) | (_, _, Err(e)) => {
+                report.errors.push(format!("{shown}:1: {label}: {e}"));
+                return None;
+            }
+        };
+        let Some(action) = what
+            .get(if submit { "node" } else { "action" })
+            .and_then(Value::as_str)
+        else {
+            report.errors.push(format!(
+                "{shown}:1: {label}: `press` is `{{ action, node?, row?, input?, confirmed? }}`, \
+                 `submit` is `{{ node, input, confirmed? }}`"
+            ));
+            return None;
+        };
+        let cells = |v: &Value| -> std::collections::BTreeMap<String, oxplow_db::SqlCell> {
+            v.as_object()
+                .into_iter()
+                .flatten()
+                .map(|(k, v)| (k.clone(), oxplow_db::SqlCell::from(v.clone())))
+                .collect()
+        };
+        let runs = oxplow_app::pages::open_runs::PageRuns::default();
+        let opened = runs
+            .open(
+                &self.host.svc,
+                oxplow_app::pages::runner::RunRequest {
+                    target: oxplow_app::pages::runner::RunTarget::Page(self.id.to_string()),
+                    params: cells(&params),
+                    ctx: self.ctx.clone(),
+                    viewer: Actor::Human,
+                },
+                "fixture",
+            )
+            .await;
+        let run_id = match opened {
+            Ok((run_id, _)) => run_id,
+            Err(e) => {
+                report
+                    .errors
+                    .push(format!("{shown}:1: {label}: page `{page}`: {e}"));
+                return None;
+            }
+        };
+        let confirmed = what
+            .get("confirmed")
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
+        let input = what.get("input").cloned();
+        let outcome = if submit {
+            oxplow_app::pages::actions::submit_page_form(
+                &self.host.svc,
+                &runs,
+                &run_id,
+                action,
+                input.unwrap_or_else(|| json!({})),
+                Actor::Human,
+                confirmed,
+            )
+            .await
+        } else {
+            oxplow_app::pages::actions::run_page_action(
+                &self.host.svc,
+                &runs,
+                oxplow_app::pages::actions::PageActionCall {
+                    run_id,
+                    node: what.get("node").and_then(Value::as_str).map(str::to_string),
+                    action: action.to_string(),
+                    row: what.get("row").map(cells),
+                    input,
+                    drop: None,
+                    on_behalf_of: Actor::Human,
+                    confirmed,
+                },
+            )
+            .await
+        };
+        self.host.settle().await;
+        let got = match outcome {
+            Ok(out) => json!({ "ok": true, "result": out.result }),
+            Err(e) => json!({ "ok": false, "refused": e.to_string() }),
+        };
+        match expect {
+            Some(expect) => {
+                if let Some((path, want, at)) = compare(&expect, &got) {
+                    report.errors.push(format!(
+                        "{shown}:1: {label}: {kind} `{action}` on page `{page}` gave {at} at \
+                         `{path}`, the example expects {want} — fix: the action, or the step's \
+                         `expect` (`{{ ok, result? }}` or `{{ ok: false, refused }}`)"
+                    ));
+                    return None;
+                }
+            }
+            None if got["ok"] == false => {
+                report.errors.push(format!(
+                    "{shown}:1: {label}: {kind} `{action}` on page `{page}` said no: {} — fix: \
+                     the action, or `expect: {{ ok: false, refused }}` on the step",
+                    got["refused"]
+                ));
+                return None;
+            }
+            None => {}
+        }
+        Some(got)
+    }
+
     /// Run the page with `params` and check it against `expect`, both
     /// read through `binds`; findings start with `label`. The run, unless
     /// it couldn't run.
@@ -4865,6 +5026,116 @@ when: { page: items }
             errors.contains("node `items`'s actions are true at `/0/row`"),
             "{errors}"
         );
+    }
+
+    /// A page step presses one of its actions for real, as a person would:
+    /// on a row (`row:` its columns), with what it answered or why it said
+    /// no checked by `expect`, and the page run again shows what it did.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_page_fixture_presses_an_action() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let page = "title: Items
+params: [{ name: uri }]
+data:
+  items: { sql: \"SELECT title, uri, state FROM v_work_item WHERE uri = :uri\" }
+view:
+  from: items
+  viz: table
+  actions:
+    - { id: start, label: Start, command: oxplow.work_item.transition, input: { uri: '{{row.uri}}', to: in_progress }, row: true }
+";
+        let fixture = |press: &str| {
+            format!(
+                "given: [{{ command: oxplow.work_item.create, input: {{ title: First }}, bind: first }}]
+when: {{ page: items, params: {{ uri: $first.uri }} }}
+expect: {{ loaders: {{ items: {{ rows: [{{ state: todo }}] }} }} }}
+steps:
+  - {press}
+  - expect: {{ loaders: {{ items: {{ rows: [{{ state: in_progress }}] }} }} }}
+"
+            )
+        };
+        paged(
+            root,
+            page,
+            &[(
+                "pressed",
+                &fixture(
+                    "press: { action: start, node: items, row: { uri: $first.uri } }
+    expect: { ok: true }",
+                ),
+            )],
+        );
+        let report = test_extension(root, "paged", false).await.unwrap();
+        assert_eq!(report.errors, Vec::<String>::new());
+
+        // A press that says no is checked like any outcome.
+        paged(
+            root,
+            page,
+            &[(
+                "pressed",
+                "given: [{ command: oxplow.work_item.create, input: { title: First }, bind: first }]
+when: { page: items, params: { uri: $first.uri } }
+steps:
+  - press: { action: start, node: items, row: { uri: \"oxplow:oxplow/work_item?id=tsk404&provider=oxplow\" } }
+    expect: { ok: false, refused: $any }
+",
+            )],
+        );
+        let report = test_extension(root, "paged", false).await.unwrap();
+        assert_eq!(report.errors, Vec::<String>::new());
+
+        // One that fails where the example expects it to work names its step.
+        paged(
+            root,
+            page,
+            &[(
+                "pressed",
+                &fixture("press: { action: begin, node: items, row: { uri: $first.uri } }"),
+            )],
+        );
+        let errors = test_extension(root, "paged", false)
+            .await
+            .unwrap()
+            .errors
+            .join("\n");
+        assert!(
+            errors.contains("fixtures/pressed.yaml:1: steps[0]: press `begin`"),
+            "{errors}"
+        );
+    }
+
+    /// A page step submits a form node with what a person would fill in,
+    /// and the command it names runs for real.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_page_fixture_submits_a_form() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        paged(
+            root,
+            "title: New item
+data:
+  items: { sql: \"SELECT title FROM v_work_item\" }
+view:
+  stack:
+    - { id: add, viz: form, form: { command: oxplow.work_item.create } }
+    - { id: items, viz: table, from: items }
+",
+            &[(
+                "submitted",
+                "when: { page: items }
+expect: { loaders: { items: { rows: 0 } } }
+steps:
+  - submit: { node: add, input: { title: Written } }
+    expect: { ok: true }
+  - expect: { loaders: { items: { rows: [{ title: Written }] } } }
+",
+            )],
+        );
+        let report = test_extension(root, "paged", false).await.unwrap();
+        assert_eq!(report.errors, Vec::<String>::new());
     }
 
     /// Each example with `given` runs on an oxplow of its own: what one

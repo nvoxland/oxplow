@@ -1976,6 +1976,13 @@ fixture model's answers); any other key is an error (`FIXTURE_KEYS`):
     params?, bind? }` runs the page again — `params` over the example's,
     `bind: { <name>: loaders.<loader>.rows[0].<column> }` keeping a value of
     that run — and findings name the step (`steps[3]: …`).
+  - **A step acts as a person would** (`PageAt::act`): `{ press: { action,
+    node?, row?: { <column>: value }, input?, confirmed? } }` presses one of
+    the page's actions on an open run (`run_page_action`), `{ submit: {
+    node, input, confirmed? } }` submits a form node (`submit_page_form`);
+    both run for real and settle. What it gave — `{ ok: true, result }` or
+    `{ ok: false, refused }` — is checked against the step's `expect`;
+    without one, a no is a finding. `bind` reads it (`result.<key>`).
   - **Every kind has them** (`scenario`): a fixture that isn't a page's
     runs its `given` steps first, its `when` and `expect` read the values
     they bound, and each `{ when?, expect }` step runs the same kind

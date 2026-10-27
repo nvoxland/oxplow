@@ -82,7 +82,12 @@ model the SQL reads and the command it runs. Prefer `answers:` on pages.
      after it — each `expect` runs the page again (`params` over the
      example's; `bind: { c: 'loaders.items.rows[0].uri' }` keeps a value of
      that run), so one fixture can change the state and check the page
-     between changes. What a step sets off (a reaction to its event, a
+     between changes. A step can also act as a person would: `{ press: {
+     action, node?, row?: { uri: $t.uri }, input? } }` presses one of the
+     page's actions, `{ submit: { node, input } }` submits a form node —
+     for real; its `expect` is `{ ok: true, result? }` or `{ ok: false,
+     refused: <part of the reason> }` (none: a no fails the step), and the
+     next `expect` step shows what it changed. What a step sets off (a reaction to its event, a
      setting taking effect) has happened before the next step. Each
      example that makes data gets an oxplow of its own: no fixture sees
      another's data, so a fixture makes everything it reads. Every kind
