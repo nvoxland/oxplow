@@ -58,14 +58,36 @@ export function fedBy(run: PageRun, node: string): HostedData {
   return pageData(run, def?.kind === "component" ? def.props : null);
 }
 
+/** Whether this window draws: a frame within `wait` ms. WebKit draws none
+ *  while the display is locked or asleep, and a component that lays
+ *  itself out in a frame then never draws, so its test can't run. */
+export function drawsFrames(wait = 2000): Promise<boolean> {
+  return new Promise((drew) => {
+    const timer = setTimeout(() => drew(false), wait);
+    requestAnimationFrame(() => {
+      clearTimeout(timer);
+      drew(true);
+    });
+  });
+}
+
 /** Mount `start` in `frame` and run the server's ops until it says done:
  *  `dom` ops go to the agent in the frame (`toAgent`, whose answer comes
- *  back through `fromAgent`), the rest to the bridge. */
+ *  back through `fromAgent`), the rest to the bridge. First the server is
+ *  told whether the window draws (`frames`); one that doesn't mounts
+ *  nothing and waits to be told it's done. */
 export async function runHarness(
   server: Server,
   frame: HTMLIFrameElement,
   agent: { send(id: number, action: unknown): void; answers(cb: (id: number, result: unknown) => void): void },
+  frames: () => Promise<boolean> = drawsFrames,
 ): Promise<void> {
+  const drawing = await frames();
+  server.record("drawing", drawing);
+  if (!drawing) {
+    while ((await server.next(null)).op !== "done");
+    return;
+  }
   const start = await server.start();
   const fed = fedBy(start.run, start.node);
   let showing: Promise<void> = Promise.resolve();

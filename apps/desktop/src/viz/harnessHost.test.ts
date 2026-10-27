@@ -83,3 +83,19 @@ test("the harness mounts the bundle with the page's rows and speaks the real bri
   expect(s.sent).toEqual([{ query: ".card" }]);
   expect(s.results).toEqual([null, null, { count: 2 }]);
 });
+
+test("a window that draws no frames (a locked or sleeping display) is reported, and nothing is mounted", async () => {
+  const s = scene([]);
+  let started = false;
+  const server = { ...s.server, start: async () => ((started = true), s.server.start()) };
+  await runHarness(server, s.frame, s.agent, async () => false);
+  expect(s.calls).toEqual([{ kind: "drawing", value: false }]);
+  expect(started).toBe(false);
+});
+
+test("a window that draws says so before it mounts", async () => {
+  const s = scene([]);
+  await runHarness(s.server, s.frame, s.agent, async () => true);
+  expect(s.calls[0]).toEqual({ kind: "drawing", value: true });
+  expect(s.calls).toContainEqual({ kind: "ready", value: true });
+});

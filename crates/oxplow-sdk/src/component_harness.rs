@@ -169,6 +169,24 @@ impl Harness {
             .map_err(|_| "the harness's page went away".to_string())
     }
 
+    /// Whether the window draws (its page asks first, before it mounts
+    /// anything): `None` when its page didn't say within `wait`.
+    pub(crate) async fn drawing(&self, wait: Duration) -> Option<bool> {
+        let until = tokio::time::Instant::now() + wait;
+        loop {
+            let said = self
+                .shared()
+                .records
+                .iter()
+                .find(|(kind, _)| kind == "drawing")
+                .and_then(|(_, value)| value.as_bool());
+            if said.is_some() || tokio::time::Instant::now() >= until {
+                return said;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }
+
     /// What only the shell answers, as asked so far.
     pub(crate) fn records(&self) -> Vec<(String, Value)> {
         self.shared().records.clone()

@@ -3760,6 +3760,24 @@ impl PageAt<'_> {
             Ok(harness) => harness,
             Err(e) => return fail(report, e),
         };
+        // A window that draws no frames (the display locked or asleep)
+        // can't lay a component out: its steps aren't run, never failed.
+        match harness.drawing(std::time::Duration::from_secs(10)).await {
+            Some(true) => {}
+            Some(false) => {
+                harness.close().await;
+                report.warnings.push(format!(
+                    "{shown}:1: {label}: its `ui` steps aren't run: the oxplow app's window \
+                     draws nothing while the display is locked or asleep — fix: run it \
+                     again with the display awake"
+                ));
+                return true;
+            }
+            None => {
+                harness.close().await;
+                return fail(report, "the harness's page never started".into());
+            }
+        }
         let ok = self
             .drive(
                 &harness,
@@ -7904,6 +7922,46 @@ steps:
             errors.contains("fixtures/drawn.yaml:1: steps[0]: ui[5]:")
                 && errors.contains("<li>From the bar</li>"),
             "{errors}"
+        );
+    }
+
+    /// A window that draws no frames (the display locked or asleep) leaves
+    /// a fixture's `ui` steps not run, with why, never failed. The shell is
+    /// a stand-in that says so, as the harness's page does.
+    #[cfg(unix)]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_window_that_draws_nothing_leaves_the_ui_steps_unrun() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let shell = root.join("fake-shell");
+        std::fs::write(
+            &shell,
+            r#"#!/bin/sh
+base="${2%/harness/}"
+post() { curl -s -X POST -H 'content-type: application/json' -d "$2" "$base$1"; }
+post /harness/record '{"kind":"drawing","value":false}' >/dev/null
+while :; do case "$(post /harness/next '{"result":null}')" in *done*) exit 0;; esac; done
+"#,
+        )
+        .unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&shell, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::env::set_var("OXPLOW_SHELL", &shell);
+        component_ext(root, "oxplow.connect();");
+        write(
+            root,
+            ".oxplow/extensions/cards/fixtures/drawn.yaml",
+            "when: { page: board }\nsteps:\n  - ui:\n      - expect: { count: { li: 99 } }\n",
+        );
+        let report = test_extension(root, "cards", false).await.unwrap();
+        assert_eq!(report.errors, Vec::<String>::new());
+        assert!(
+            report
+                .warnings
+                .iter()
+                .any(|w| w.contains("its `ui` steps aren't run") && w.contains("display")),
+            "{:?}",
+            report.warnings
         );
     }
 

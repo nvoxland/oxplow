@@ -489,7 +489,23 @@
       return pageData(run, def.config.custom?.props ?? null, nodeRunOf(run, def));
     return pageData(run, def?.kind === "component" ? def.props : null);
   }
-  async function runHarness(server, frame, agent) {
+  function drawsFrames(wait = 2000) {
+    return new Promise((drew) => {
+      const timer = setTimeout(() => drew(false), wait);
+      requestAnimationFrame(() => {
+        clearTimeout(timer);
+        drew(true);
+      });
+    });
+  }
+  async function runHarness(server, frame, agent, frames = drawsFrames) {
+    const drawing = await frames();
+    server.record("drawing", drawing);
+    if (!drawing) {
+      while ((await server.next(null)).op !== "done")
+        ;
+      return;
+    }
     const start = await server.start();
     const fed = fedBy(start.run, start.node);
     let showing = Promise.resolve();
