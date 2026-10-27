@@ -1,0 +1,44 @@
+# Settings → Integrations → Capabilities: each choosable capability's
+# implementations and a default row; choosing writes `activeProviders` in its
+# layer, and the default row resets it. Replaced components: each target has
+# the default, oxplow's own, and each extension replacing it; choosing writes
+# `replacements`.
+# (Oxplow's own work list, effort policy and wiki are bundled's.)
+requires: [oxplow-bundled]
+when: { page: oxplow-foundation/settings, params: { area: integrations } }
+expect:
+  loaders:
+    capabilities:
+      rows:
+        contains:
+          # Every capability has its default row.
+          - { capability: work_items, provider: "", is_default: 1 }
+          - { capability: work_items, provider: oxplow, can_choose: 1, is_default: 0 }
+          - { capability: work_items, provider: none, can_choose: 1 }
+    replacements:
+      rows:
+        contains:
+          - { target: vcs.history.graph, whose: oxplow, can_choose: 1 }
+steps:
+  - press:
+      action: use-project
+      node: capabilities
+      row: { capability: work_items, provider: none, can_choose: 1, is_default: 0 }
+    expect: { ok: true }
+  - when: { sql: "SELECT provider, chosen_by FROM v_capability_provider WHERE capability = 'work_items' AND active = 1" }
+    expect: { rows: [{ provider: none, chosen_by: project }] }
+  # The default row resets it.
+  - press:
+      action: default-project
+      node: capabilities
+      row: { capability: work_items, provider: "", can_choose: 0, is_default: 1 }
+    expect: { ok: true }
+  - when: { sql: "SELECT provider, chosen_by FROM v_capability_provider WHERE capability = 'work_items' AND active = 1" }
+    expect: { rows: [{ provider: oxplow, chosen_by: default }] }
+  - press:
+      action: use
+      node: replacements
+      row: { target: vcs.history.graph, whose: oxplow, can_choose: 1, is_default: 0 }
+    expect: { ok: true }
+  - when: { sql: "SELECT chosen FROM v_replacement WHERE target = 'vcs.history.graph' LIMIT 1" }
+    expect: { rows: [{ chosen: oxplow }] }

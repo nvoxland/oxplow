@@ -1,0 +1,23 @@
+# The Git Dashboard: the stream's branch with no upstream, the working tree,
+# the last commits; with no other stream or remote the rest is empty.
+given:
+  - observe: { turn: { prompt: new, write: { path: new.txt, body: "x\n" } } }
+  - observe: { analyze: { kind: working } }
+  - observe: { commit: { sha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", at: "2023-11-14T22:13:20Z", author: Ada, email: ada@example.com, subject: first } }
+  - observe:
+      refs:
+        branches: [{ name: main, head: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", stream: 1, default: true }]
+        heads: [{ stream: 1, sha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }]
+when: { page: oxplow-foundation/git-dashboard, params: { stream_id: 1 } }
+expect:
+  loaders:
+    row: { rows: [{ branch: main }] }
+    upstream: { rows: [{ branch: main, status: No upstream }] }
+    recent: { rows: [{ subject: first, commit_ref: $any }] }
+    streams: { rows: 0 }
+    readiness: { rows: 0 }
+    remotes: { rows: 0 }
+    uncommitted: { rows: [{ changes: $any }] }
+steps:
+  - when: { page: oxplow-foundation/git-dashboard-between, params: { base: main, head: main } }
+    expect: { loaders: { git_dashboard_between: { rows: 0 } } }

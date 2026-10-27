@@ -2096,6 +2096,10 @@ a `KINDS` entry and a `dispatch` arm. The forms:
   snapshot log, `SqliteSnapshotStore::record_take`), `diagnostics`
   (`SqliteDiagnosticStore::replace_file`), `symbols` (`SqliteSymbolStore::record`
   at a snapshot taken with the file), `collect` (`run_effort_collectors`) 
+  `analyze` (`change_analysis::ensure_change`: a working or commit change
+  analyzed to the end; real files come from `turn.write` and real commits from
+  `oxplow.vcs.stage` / `oxplow.vcs.commit`, a throwaway's forks keep their
+  streams in their own folder),
   `refs` (branches, tags and stream heads, `replace_branches` /
   `replace_tags` / `replace_stream_heads`),
   `visit` (a page the person opened, `PageVisitStore::record`),

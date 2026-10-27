@@ -1,0 +1,22 @@
+# A commit page: its document's row makes the commit's change and hands the
+# change and its revisions to the parts; the files come as a tree, folders
+# first, each file with its status and the diff its link opens.
+given:
+  - observe: { turn: { prompt: base, write: { path: base.txt, body: "x\n" } } }
+  - { command: oxplow.vcs.stage, input: { stream: str1, paths: [base.txt] } }
+  - { command: oxplow.vcs.commit, input: { stream: str1, message: base } }
+  - observe: { turn: { prompt: deep, write: { path: src/deep/a.rs, body: "a\n" } } }
+  - observe: { turn: { prompt: top, write: { path: top.txt, body: "t\n" } } }
+  - { command: oxplow.vcs.stage, input: { stream: str1, paths: [src/deep/a.rs, top.txt] } }
+  - { command: oxplow.vcs.commit, input: { stream: str1, message: "add things\n\nwith a body" }, bind: change }
+when: { page: oxplow-foundation/commit, params: { stream_id: 1, sha: $change.rev } }
+expect:
+  loaders:
+    row: { rows: [{ change_id: $any, head_revision: $any }] }
+    detail: { rows: [{ subject: add things, sha: $change.rev }] }
+    files:
+      rows:
+        - { id: src, parent: null, name: src, icon: folder, file: null }
+        - { id: src/deep, parent: src, name: deep, icon: folder, file: null }
+        - { id: src/deep/a.rs, parent: src/deep, name: a.rs, icon: added, file: src/deep/a.rs, head_revision: $any }
+        - { id: top.txt, parent: null, name: top.txt, icon: added }

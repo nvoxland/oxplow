@@ -186,7 +186,10 @@ model the SQL reads and the command it runs. Prefer `answers:` on pages.
      `{ observe: { symbols: { path, items: [{ name, kind, container?, line? }] } } }`
      (the definitions the index read from it), `{ observe: { collect: {
      effort, collectors?: [key] } } }` (the fact collectors an effort's end
-     runs), `{ observe: { refs: { branches?: [{ name, head, stream?, … }], tags?, heads? } } }`
+     runs), `{ observe: { analyze: { kind: working | commit, sha? } } }` (a change
+     analyzed to the end, so its files and functions are there to read; make
+     the commit first with `turn.write`, `oxplow.vcs.stage` and
+     `oxplow.vcs.commit`, whose answer has the commit's `rev`), `{ observe: { refs: { branches?: [{ name, head, stream?, … }], tags?, heads? } } }`
      (what the git indexer read of branches, tags and the stream's head; a
      `snapshot` also takes `revision` and `branch`), `{ observe: { visit: { page, kind?, label?, thread?, duration_ms? } } }` (a
      page the person opened, as the shell records it), `{ observe: { facts: { measure, items: [{ value?, path?, line?, rule?, severity? }] } } }`

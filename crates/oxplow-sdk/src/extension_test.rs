@@ -1551,6 +1551,9 @@ async fn run_steps(
 ///   what a language server reported for a file.
 /// - `symbols: { path, language?, items?: [{ name, kind, id?, container?, signature?, line?, col? }] }`:
 ///   the definitions the index read from a file at a snapshot of it.
+/// - `analyze: { kind: working | commit | …, sha?, streamId? }`: a change
+///   analyzed now (`change_analysis::ensure_change`), so its files and
+///   functions are there to read.
 /// - `refs: { branches?, tags?, heads? }`: the branches, tags and stream
 ///   heads the git indexer read (each replaces what was stored).
 /// - `visit: { page, kind?, label?, thread?, duration_ms? }`: a page the person
@@ -1588,9 +1591,10 @@ async fn observe(host: &Host, ext: &Extension, observed: &Value) -> Result<(), S
         "facts" => observe_facts(host, body).await,
         "visit" => observe_visit(host, body).await,
         "refs" => observe_refs(host, body).await,
+        "analyze" => observe_analyze(host, body).await,
         other => {
             return Err(format!(
-                "`{other}` isn't a kind — fix: `turn`, `evidence`, `event`, `commit`, `change`, `test_run`, `snapshot`, `collect`, `diagnostics`, `symbols`, `retention`, `facts`, `visit` or `refs`"
+                "`{other}` isn't a kind — fix: `turn`, `evidence`, `event`, `commit`, `change`, `test_run`, `snapshot`, `collect`, `diagnostics`, `symbols`, `retention`, `facts`, `visit`, `refs` or `analyze`"
             ))
         }
     }?;
@@ -1925,6 +1929,27 @@ async fn observe_symbols(host: &Host, body: &Value) -> Result<(), String> {
             },
         )
         .await
+        .map_err(|e| e.to_string())
+}
+
+/// `analyze: { kind: working, streamId } | { kind: commit, sha, streamId? } |
+/// …`: the change is made and analyzed to the end
+/// (`change_analysis::ensure_change`, what `oxplow_ensure_change` calls), so a
+/// page reads its files and functions without waiting for the background
+/// analysis. `streamId` of `working` defaults to the primary stream's.
+async fn observe_analyze(host: &Host, body: &Value) -> Result<(), String> {
+    let mut target = body.clone();
+    if target.get("kind").and_then(Value::as_str) == Some("working")
+        && target.get("streamId").is_none()
+    {
+        let stream = first_stream(host).await?;
+        target["streamId"] = json!(stream.to_string());
+    }
+    let target: oxplow_app::change_analysis::ChangeTarget =
+        serde_json::from_value(target).map_err(|e| format!("`analyze`: {e}"))?;
+    oxplow_app::change_analysis::ensure_change(&host.svc, target)
+        .await
+        .map(|_| ())
         .map_err(|e| e.to_string())
 }
 

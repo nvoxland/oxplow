@@ -188,6 +188,20 @@ impl Host {
         )
         .await
         .map_err(|e| e.to_string())?;
+        // The copy's streams live in the copy's folder, not the one it was
+        // copied from: a stage or a commit runs where its files are.
+        {
+            use oxplow_domain::stores::StreamStore as _;
+            for mut stream in svc.stream_store.list().await.map_err(|e| e.to_string())? {
+                if Path::new(&stream.worktree_path) == self.root {
+                    stream.worktree_path = root.to_string_lossy().into_owned();
+                    svc.stream_store
+                        .upsert(&stream)
+                        .await
+                        .map_err(|e| e.to_string())?;
+                }
+            }
+        }
         let host = Host {
             _dir: dir,
             root,

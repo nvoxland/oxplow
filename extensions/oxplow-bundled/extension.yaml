@@ -211,6 +211,12 @@ intent:
     - name: a-forced-acceptance-files-one-verify-follow-up
       input: { command: oxplow.review.accept, input: { effort: eff1, force: true } }
       expect: a forced acceptance files one verify checklist item; a second files nothing
+    - name: tests-weakened-reports-deleted-tests-fewer-assertions-and-skips
+      input: { page: tests-weakened }
+      expect: deleted tests, fewer assertions and new skips in a change
+    - name: the-change-review-grid-reads-an-analyzed-commit
+      input: { page: change-review, params: { change_id: 1 } }
+      expect: the summary, the changed functions and the test files of an analyzed commit
 # oxplow's default work list and effort policy: built-ins of core's,
 # declared here so they are an extension's like any other. Disabled, both
 # fall to none. Snapshots can't be none: their default is core's own (it
