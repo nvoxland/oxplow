@@ -1,0 +1,25 @@
+# A reported failure lists red until it is seen, then muted, and leaves the
+# list once dismissed. The other parts list nothing over a quiet project.
+given:
+  - { command: oxplow.ui.report_error, input: { label: Merge bugfixes into current, command: git merge bugfixes, message: conflict, exit_code: 1, stderr: CONFLICT in a.txt }, bind: merged }
+input: { page: alerts }
+expect:
+  loaders:
+    operations: { rows: [{ label: Merge bugfixes into current, tone: danger, unseen: 1 }] }
+    hints: { rows: 0 }
+    extensions: { rows: 0 }
+steps:
+  - given: [{ command: oxplow.ui.report_error, input: { label: Quiet, message: no output } }]
+  - expect:
+      loaders:
+        operations:
+          rows: [{ label: Quiet, tone: danger }, { label: Merge bugfixes into current, tone: danger }]
+  - given: [{ command: oxplow.op_error.mark_seen, input: { event: $merged.event } }]
+  - expect:
+      loaders:
+        operations:
+          rows: [{ label: Quiet, tone: danger }, { label: Merge bugfixes into current, tone: muted }]
+  - given: [{ command: oxplow.op_error.dismiss, input: { event: $merged.event } }]
+  - expect:
+      loaders:
+        operations: { rows: [{ label: Quiet, tone: danger }] }

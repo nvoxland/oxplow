@@ -64,6 +64,18 @@ intent:
     - name: comments-inbox-lists-threads-by-target-and-a-picked-one-reads-in-order
       input: { page: comments, params: { stream_id: 1, days: "0" } }
       expect: open threads under their target, a resolved one only when the filter reaches back, a picked thread as its messages in order
+    - name: alerts-operation-reads-how-a-failure-ended
+      input: { page: alerts-operation, params: { event_id: "<a failure's event>" } }
+      expect: a failure's command and stderr; one that captured nothing says so
+    - name: alerts-lists-failures-until-seen-and-dismissed
+      input: { page: alerts }
+      expect: a failure red until seen, muted after, gone once dismissed; the other parts empty over a quiet project
+    - name: alerts-deliveries-list-nothing-over-a-quiet-project
+      input: { page: alerts-deliveries }
+      expect: nothing listed over a quiet project
+    - name: alerts-reactions-list-nothing-over-a-quiet-project
+      input: { page: alerts-reactions }
+      expect: nothing listed over a quiet project
 # The agent harnesses and AI providers oxplow runs: core's
 # built-ins, many of each at once (every one declared here is active).
 implementations:
