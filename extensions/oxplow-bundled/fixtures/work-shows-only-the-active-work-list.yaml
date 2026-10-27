@@ -1,0 +1,15 @@
+# The Work panel reads the work-item interface: with the work list switched
+# to none, only the effort no item names is left.
+given:
+  - { command: oxplow.effort.open, input: { thread: thr1 } }
+  - { command: oxplow.work_item.create, input: { title: Next up, state: todo, thread: thr1 } }
+  - { command: oxplow.work_item.create, input: { title: Stuck, state: blocked, thread: thr1 } }
+  - { command: oxplow.work_item.create, input: { title: Someday } }
+input: { page: oxplow-bundled/work, params: { thread_id: 1 } }
+expect:
+  loaders:
+    work: { rows: [{ grp: In progress, title: Work in progress }, { grp: Ready, title: Next up }] }
+steps:
+  - given:
+      - { command: oxplow.capability.choose, input: { capability: work_items, provider: none }, confirmed: true }
+  - expect: { loaders: { work: { rows: [{ grp: In progress, title: Work in progress }] } } }

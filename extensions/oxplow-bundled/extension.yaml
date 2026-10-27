@@ -88,6 +88,18 @@ intent:
     - name: work-count-counts-the-active-item-and-the-ready-ones
       input: { page: oxplow-bundled/work-count, params: { thread_id: 1 } }
       expect: the active item and the ready ones, not the finished
+    - name: planning-shows-only-the-active-work-list
+      input: { page: oxplow-bundled/planning }
+      expect: ready and backlog items gone once the work list is none
+    - name: work-shows-only-the-active-work-list
+      input: { page: oxplow-bundled/work, params: { thread_id: 1 } }
+      expect: only the unlinked effort once the work list is none
+    - name: work-count-shows-only-the-active-work-list
+      input: { page: oxplow-bundled/work-count, params: { thread_id: 1 } }
+      expect: the count follows the active work list
+    - name: waiting-on-me-shows-only-the-active-work-list
+      input: { page: oxplow-bundled/waiting-on-me }
+      expect: a blocked item gone once the work list is none
 # oxplow's default work list and effort policy: built-ins of core's,
 # declared here so they are an extension's like any other. Disabled, both
 # fall to none. Snapshots can't be none: their default is core's own (it
