@@ -300,12 +300,16 @@ objects into the content-identity space for `resolve_for_compare`.
 
 ## Conformance
 
-The VCS pages also render complete with no extensions and every flag
-off — the UI half of conformance was `CapabilityUi.smoke.test.tsx`, now
-removed ([work-items.md](./work-items.md), "Conformance"). The commit and Uncommitted pages are
-foundation documents (their mounts are `oxplow-foundation/commit.sections` and
-`oxplow-foundation/uncommitted.sections`); Git History is a declared page with a
-replaceable part.
+The VCS pages also render complete with every enhancement off: with only
+oxplow-foundation on, Git History, the commit page and Uncommitted changes
+show their own content and nothing another extension adds
+(`tests-e2e/specs/pages/plain.spec.ts`; the page-run half is every
+foundation fixture's, which runs with only foundation on —
+[work-items.md](./work-items.md), "Conformance"). The commit and
+Uncommitted pages are foundation documents (their mounts are
+`oxplow-foundation/commit.sections` and
+`oxplow-foundation/uncommitted-changes.sections`); Git History is a
+declared page with a replaceable part.
 
 `oxplow_app::vcs_conformance` (test-only) holds the contract as
 `async fn(&dyn Vcs, &Path)` checks over a fresh workspace, so a second

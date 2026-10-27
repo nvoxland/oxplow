@@ -2790,8 +2790,8 @@ The rules are tested in Rust (`replacements::chosen`'s tests, the runner's
 `a_replaceable_node_runs_the_replacement_that_stands_in_for_it`); which
 replacement a page shows is a fixture's (`loaders: { <node>/<loader> }`,
 a `ui` step on the embedded component); the badge, the fallback line and
-choosing one on Settings are the e2e specs'. Nothing renders the
-capability pages with every enhancement off any more
+choosing one on Settings are the e2e specs'. The pages with every
+enhancement off are `tests-e2e/specs/pages/plain.spec.ts`'s
 ([work-items.md](./work-items.md), "Conformance").
 
 **The first real one: the history graph.** oxplow-bundled's

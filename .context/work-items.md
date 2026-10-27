@@ -406,16 +406,23 @@ person-only); a failure goes to the op-errors store.
 
 ## Conformance
 
-**The UI with every enhancement off** (P6b.C6) was
-`apps/desktop/src/pages/CapabilityUi.smoke.test.tsx`, which by the time
-replacements moved into the page run held only replacement tests (now
-`replacements::chosen`'s and the runner's) and was removed; nothing
-renders these pages with every enhancement off any more. It rendered
-the Board,
-the commit page, uncommitted changes and history with no extensions,
-and asserts each page's core content and the absence of every slot
-section, the Commands menu, decorations and feature-gated actions; then,
-with one extension, that the P6b mounts receive their params.
+**The UI with every enhancement off** is
+`tests-e2e/specs/pages/plain.spec.ts`: the e2e project with only
+oxplow-foundation on (`oxplow-bundled`, `e2e` and `github` disabled). What an
+extension adds splits in two. What the page run decides and its JSON shows
+— slot mounts (`PageRunner::mounts`), replacements (`RunNode.replaced_by`
+and its `embed`), feature-gated actions, `needs` — is every foundation
+fixture's, because a test's oxplow has only what is declared: the required
+foundation, the extension tested, and what a fixture `requires:`. What only
+the desktop decides — decorators (`ref-chip` / `row-badge`, `title="from
+<ext>"`), extension commands in the ☰, panels in the rail — is the spec's:
+it opens Git History, a commit and Uncommitted changes and asserts each
+page's core content and no marker of another extension. The Board and Tasks
+read oxplow's own work list, which is `oxplow-bundled`'s: with only
+foundation they have no list, and the spec asserts their empty state
+without an error (their fixtures run `requires: [oxplow-bundled]` and
+cover them with the list). Another provider's item with every flag off gets
+an `inactive` page from `work-item.yaml`'s `needs`, not a plain one.
 
 `oxplow_app::work_items_conformance::suite(items, provider, features,
 native, probe, actor)` — plain functions returning a `SuiteRun { findings,
