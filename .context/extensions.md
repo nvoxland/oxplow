@@ -1995,6 +1995,14 @@ a `KINDS` entry and a `dispatch` arm. The forms:
     params?, bind? }` runs the page again — `params` over the example's,
     `bind: { <name>: loaders.<loader>.rows[0].<column> }` keeping a value of
     that run — and findings name the step (`steps[3]: …`).
+  - **Materialized models are current when read.** The throwaway runs
+    the change loop as boot does (`models_changed::spawn`), and before a
+    read — a page run, a query, a command (`Host::current`) — after any
+    step changed something, every asset recomputes at once, each after
+    those it reads, a clocked one (`every: 1h`) too, without waiting out
+    the coalesce window (`Assets::recompute_all`): a test has no clock to
+    wait on. Once per read, not per step, so it costs the run nothing
+    measurable.
   - **Inside embeds and mounts.** `loaders: { <embed>/<loader>: .. }`
     names a loader of the page an embed node or a slot mount runs (a
     mount's id is its page's with `/` as `.`: `beta.extra/words`), so a

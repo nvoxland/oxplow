@@ -1760,6 +1760,7 @@ fn step_actor(step: &Value) -> Result<Actor, String> {
 /// script's, an effect's), checked against `expect`.
 async fn command_run(host: &Host, ex: &Example<'_>, command: &str, report: &mut TestReport) {
     let shown = ex.shown;
+    host.current().await;
     let actor = match step_actor(&ex.when) {
         Ok(actor) => actor,
         Err(e) => return report.errors.push(format!("{shown}:1: {e}")),
@@ -2220,6 +2221,7 @@ async fn run_page(
     ctx: &oxplow_app::extensions::ViewContext,
 ) -> Result<oxplow_app::pages::runner::PageRun, String> {
     use oxplow_app::pages::runner::{PageRunner, RunRequest};
+    host.current().await;
     let params = params
         .as_object()
         .map(|o| {
@@ -6187,6 +6189,52 @@ expect: { ok: true }
             errors.contains("fixtures/wrong.yaml:1: command `oxplow.work_item.transition` gave"),
             "{errors}"
         );
+    }
+
+    /// A materialized model is refilled before a fixture reads it, as the
+    /// app's change loop refills it: what a step made is in it.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_materialized_model_is_current_when_a_fixture_reads_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        write(
+            root,
+            ".oxplow/extensions/acme/extension.yaml",
+            "manifest: 2
+name: acme
+intent:
+  purpose: Titles.
+  examples:
+    - { name: stored, input: { sql: x }, expect: rows }
+models:
+  - name: titles
+    version: 1
+    key: [id]
+    materialize: on_change
+    description: Titles.
+    columns:
+      - { name: id, type: TEXT, doc: The item. }
+      - { name: title, type: TEXT, doc: Its title. }
+",
+        );
+        write(
+            root,
+            ".oxplow/extensions/acme/models/titles.sql",
+            "SELECT uri AS id, title FROM ref('work_item')",
+        );
+        write(
+            root,
+            ".oxplow/extensions/acme/fixtures/stored.yaml",
+            "given: [{ command: oxplow.work_item.create, input: { title: Fix it } }]
+when: { sql: \"SELECT title FROM v_acme_titles\" }
+expect: { rows: [{ title: Fix it }] }
+steps:
+  - given: [{ command: oxplow.work_item.create, input: { title: Another } }]
+  - expect: { rows: 2 }
+",
+        );
+        let report = test_extension(root, "acme", false).await.unwrap();
+        assert_eq!(report.errors, Vec::<String>::new());
     }
 
     /// `rows: []` is no rows, like `rows: 0`.

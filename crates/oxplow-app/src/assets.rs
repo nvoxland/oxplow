@@ -429,6 +429,39 @@ impl Assets {
         }
     }
 
+    /// Recompute every asset now, each after those it reads — one on a
+    /// clock too, which ignores its inputs' changes — without waiting out
+    /// the coalesce window: what a test, which has no clock to wait on and
+    /// reads right after it writes, reads models after.
+    pub async fn recompute_all(&self) {
+        let mut left: Vec<Arc<Entry>> = self
+            .entries
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        while !left.is_empty() {
+            // Those that read none of the others left; a cycle runs as is.
+            let ready: Vec<Arc<Entry>> = left
+                .iter()
+                .filter(|e| {
+                    !left
+                        .iter()
+                        .any(|up| !Arc::ptr_eq(up, e) && e.inputs.contains(up.materializer.asset()))
+                })
+                .cloned()
+                .collect();
+            let ready = if ready.is_empty() {
+                left.clone()
+            } else {
+                ready
+            };
+            for entry in &ready {
+                run_once(&self.db, &self.entries, entry, &self.now).await;
+            }
+            left.retain(|e| !ready.iter().any(|r| Arc::ptr_eq(r, e)));
+        }
+    }
+
     /// Anything may have changed (a lagged listener): every asset is dirty.
     pub fn all_changed(&self) {
         for entry in self
