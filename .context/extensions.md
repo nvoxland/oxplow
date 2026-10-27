@@ -2021,6 +2021,14 @@ fixture model's answers); any other key is an error (`FIXTURE_KEYS`):
     message, duration_ms }` per thing that ran (`check`, `example <name>`,
     `answers <page>`, `provider <id>`, `policy <id>`), and
     `render(report, Format::Junit)` writes them as one `<testsuite>`.
+- `when: { command, input?, as?, confirmed? }`, `expect: { ok, result?,
+  commands? }` or `{ ok: false, refused }` — any command run for real
+  through the bus as a person (or `as: agent`), then settled
+  (`command_run`): what it answered (a script's own answer, unwrapped from
+  its composite's `{ result, children }`), and `commands`, the ones that
+  ran because of it — the script's steps, then what reacted (audited after
+  it). The extension's own command with `answers` is still the dry run
+  below, until those fixtures make their data.
 - `when: { sql, params? }`, `expect: { rows, columns? }` — a read-only query
   over the published models, run as a page loader would (an inline page of
   one `sql` loader, `sql_example`) and compared as a loader's: a model, a

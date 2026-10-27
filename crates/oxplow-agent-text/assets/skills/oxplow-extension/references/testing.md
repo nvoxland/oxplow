@@ -128,6 +128,10 @@ model the SQL reads and the command it runs. Prefer `answers:` on pages.
      else the page's first); `expect: { values?, fixed?, fields? }` (the
      values its fields start from, the read-only fields, the shown ones,
      `null` for all);
+   - a command, run for real: `when: { command, input, as?, confirmed? }`,
+     `expect: { ok: true, result?, commands?: [names] }` or `{ ok: false,
+     refused: <part of the reason> }` — `commands` are the ones it ran (a
+     script's) and what reacted. Make what it needs with `given:` first.
    - a query: `when: { sql: "SELECT … FROM v_<ext>_<model>", params? }`,
      `expect: { rows: [ { col: val } ] }` — reads the published models as a
      page loader would, for a model, a decorator's labels or a metric

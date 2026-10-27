@@ -542,8 +542,11 @@ async fn dispatch(host: &Host, ext: &Extension, ex: &Example<'_>, report: &mut T
         .get("command")
         .and_then(Value::as_str)
         .and_then(|name| ext.commands.iter().find(|c| c.name == name))
+        .filter(|_| ex.when.get("answers").is_some())
     {
         command_example(host, ex, cmd, report).await;
+    } else if let Some(command) = ex.when.get("command").and_then(Value::as_str) {
+        command_run(host, ex, command, report).await;
     } else if ex.when.get("command").is_none() || ext.providers.is_empty() {
         report.errors.push(format!(
             "{shown}:1: example `{}`'s `when` names no page, sql query, collector, command, effect, \
@@ -1211,17 +1214,12 @@ async fn run_steps(
             ));
             return false;
         };
-        let actor = match step.get("as").and_then(Value::as_str) {
-            None | Some("person") => Actor::Human,
-            Some("agent") => Actor::Agent {
-                session_id: None,
-                thread_id: Some(oxplow_domain::ThreadId::new(1)),
-                stream_id: None,
-            },
-            Some(other) => {
-                report.errors.push(format!(
-                    "{shown}:1: `{key}[{index}]`: `as: {other}` — fix: `person` or `agent`"
-                ));
+        let actor = match step_actor(step) {
+            Ok(actor) => actor,
+            Err(e) => {
+                report
+                    .errors
+                    .push(format!("{shown}:1: `{key}[{index}]`: {e}"));
                 return false;
             }
         };
@@ -1268,6 +1266,105 @@ async fn run_steps(
         }
     }
     true
+}
+
+/// Who runs a step's command (`as:`): a person, or `agent` (the primary
+/// thread's).
+fn step_actor(step: &Value) -> Result<Actor, String> {
+    match step.get("as").and_then(Value::as_str) {
+        None | Some("person") => Ok(Actor::Human),
+        Some("agent") => Ok(Actor::Agent {
+            session_id: None,
+            thread_id: Some(oxplow_domain::ThreadId::new(1)),
+            stream_id: None,
+        }),
+        Some(other) => Err(format!("`as: {other}` — fix: `person` or `agent`")),
+    }
+}
+
+/// Run `when: { command, input?, as?, confirmed? }` for real, through the
+/// bus, and let what it set off settle: `{ ok: true, result }` or `{ ok:
+/// false, refused }`, and `commands`, the ones that ran because of it (its
+/// script's, an effect's), checked against `expect`.
+async fn command_run(host: &Host, ex: &Example<'_>, command: &str, report: &mut TestReport) {
+    let shown = ex.shown;
+    let actor = match step_actor(&ex.when) {
+        Ok(actor) => actor,
+        Err(e) => return report.errors.push(format!("{shown}:1: {e}")),
+    };
+    let head = host
+        .svc
+        .sql
+        .query_sql(
+            "SELECT COALESCE(MAX(id), 0) FROM v_command_audit",
+            vec![],
+            None,
+        )
+        .await
+        .ok()
+        .and_then(|r| r.rows.first().and_then(|row| row.first()).cloned())
+        .unwrap_or(oxplow_db::SqlCell::Int(0));
+    let outcome = host
+        .svc
+        .commands
+        .run(
+            &actor,
+            command,
+            ex.when.get("input").cloned().unwrap_or_else(|| json!({})),
+            ex.when
+                .get("confirmed")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        )
+        .await;
+    host.settle().await;
+    // A composite (a script's command) answers `{ result, children }`:
+    // its own answer, and the commands it ran.
+    let mut composed = Vec::new();
+    let mut got = match outcome {
+        Ok(out) => match (out.result.get("result"), out.result.get("children")) {
+            (Some(result), Some(Value::Array(children))) => {
+                composed = children
+                    .iter()
+                    .filter_map(|c| c.get("name").and_then(Value::as_str))
+                    .map(str::to_string)
+                    .collect();
+                json!({ "ok": true, "result": result })
+            }
+            _ => json!({ "ok": true, "result": out.result }),
+        },
+        Err(e) => json!({ "ok": false, "refused": e.to_string() }),
+    };
+    let mut ran: Vec<String> = host
+        .svc
+        .sql
+        .query_sql(
+            "SELECT command FROM v_command_audit WHERE id > ?1 ORDER BY id",
+            vec![head],
+            None,
+        )
+        .await
+        .map(|r| r.rows)
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|row| match row.first() {
+            Some(oxplow_db::SqlCell::Text(name)) => Some(name.clone()),
+            _ => None,
+        })
+        .collect();
+    if let Some(own) = ran.iter().position(|name| name == command) {
+        ran.remove(own);
+    }
+    composed.extend(ran);
+    let ran = composed;
+    got["commands"] = json!(ran);
+    if let Some((path, want, at)) = compare(&ex.expect, &got) {
+        report.errors.push(format!(
+            "{shown}:1: command `{command}` gave {at} at `{path}`, the example expects {want} — \
+             fix: the command's input or the steps before it, or the example's `expect` (`{{ ok, \
+             result?, commands? }}` or `{{ ok: false, refused }}`)"
+        ));
+    }
 }
 
 /// Values a fixture bound (`bind:`), by name: a step's command result, or
@@ -5304,6 +5401,47 @@ expect: {{ rows: {want} }}
             .join("\n");
         assert!(
             errors.contains("fixtures/read.yaml:1: page `query` loader `rows` returned"),
+            "{errors}"
+        );
+    }
+
+    /// `when: { command, input }` runs the command for real, as a person
+    /// (or `as: agent`): what it answered, or why it said no, and the
+    /// commands that ran because of it.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_fixture_runs_a_command_for_real() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        paged(
+            root,
+            BY_URI,
+            &[
+                (
+                    "ran",
+                    "given: [{ command: oxplow.work_item.create, input: { title: First }, bind: first }]
+when: { command: oxplow.work_item.transition, input: { uri: $first.uri, to: in_progress } }
+expect: { ok: true, commands: [] }
+steps:
+  - when: { input: { uri: \"oxplow:oxplow/work_item?id=tsk404&provider=oxplow\", to: done } }
+    expect: { ok: false, refused: $any }
+",
+                ),
+                (
+                    "wrong",
+                    "when: { command: oxplow.work_item.transition, input: { uri: \"oxplow:oxplow/work_item?id=tsk404&provider=oxplow\", to: done } }
+expect: { ok: true }
+",
+                ),
+            ],
+        );
+        let errors = test_extension(root, "paged", false)
+            .await
+            .unwrap()
+            .errors
+            .join("\n");
+        assert!(!errors.contains("fixtures/ran.yaml"), "{errors}");
+        assert!(
+            errors.contains("fixtures/wrong.yaml:1: command `oxplow.work_item.transition` gave"),
             "{errors}"
         );
     }

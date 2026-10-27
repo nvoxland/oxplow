@@ -248,7 +248,7 @@ pub fn scaffold_with(
         Kind::Command => (
             format!("{{ command: {ns}.notes.add, input: {{ uri: \"{work_item}\" }} }}"),
             "a comment on the work item",
-            Some("{ commands: [oxplow.work_item.comment] }".to_string()),
+            Some("{ ok: true, commands: [oxplow.work_item.comment] }".to_string()),
         ),
         Kind::Effect => (
             format!(
@@ -427,12 +427,21 @@ pub fn scaffold_with(
     }
     write(&format!("{rel_dir}/extension.yaml"), manifest)?;
     if let Some(expect) = fixture_expect {
+        // A command runs for real on the test's oxplow: the item it notes
+        // is made first.
+        let (given, when) = match kind {
+            Kind::Command => (
+                "given: [{ command: oxplow.work_item.create, input: { title: First }, bind: item }]\n",
+                format!("{{ command: {ns}.notes.add, input: {{ uri: $item.uri }} }}"),
+            ),
+            _ => ("", example_input.clone()),
+        };
         write(
             &format!("{rel_dir}/fixtures/basic.yaml"),
             format!(
                 "# The acceptance example from extension.yaml as a fixture for `oxplow extension test`\n\
-                 # (`when` it does this, `expect` that). Keep the two in step.\n\
-                 when: {example_input}\nexpect: {expect}\n"
+                 # (`given` this, `when` it does this, `expect` that). Keep the two in step.\n\
+                 {given}when: {when}\nexpect: {expect}\n"
             ),
         )?;
     }
