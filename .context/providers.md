@@ -592,8 +592,9 @@ way** (`Connection::shutdown`): every stop — reconcile, a config or
 deployment change, a disable, a sign-in renewal (`Instance::end`, outside
 the `live` lock; the renewal is recorded first, so a call it cuts off
 knows why), `check_as`, and the daemon's exit (`Services::shutdown` → `shutdown_all`, every
-instance at once, within 2 s of the supervisor's grace; `process::exit`
-runs no destructors, so without it the processes were orphaned) — sends
+instance at once, alongside the terminals and LSP servers, within 2 s of
+the supervisor's grace; `process::exit` runs no destructors, so without it
+the processes were orphaned) — sends
 `shutdown` and waits `HostDeps.shutdown_grace`
 (`MachineEnv.provider_shutdown_grace`: 5 s in the app, 1 s in
 `Services::in_memory`) for the process to exit, then kills it. Then **the handshake**: the live `initialize` must equal

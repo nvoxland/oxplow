@@ -129,6 +129,17 @@ impl PtyManager {
         reply_rx.await.map_err(|_| PtyError::Shutdown)?
     }
 
+    /// End every pane's process tree, as [`Self::kill`] does each, all at
+    /// once; returns when they are gone.
+    pub async fn shutdown(&self) -> Result<(), PtyError> {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        self.cmd_tx
+            .send(Cmd::Shutdown { reply: reply_tx })
+            .await
+            .map_err(|_| PtyError::Shutdown)?;
+        reply_rx.await.map_err(|_| PtyError::Shutdown)
+    }
+
     pub async fn kill(&self, id: &PaneId) -> Result<(), PtyError> {
         let (reply_tx, reply_rx) = oneshot::channel();
         self.cmd_tx
@@ -172,6 +183,9 @@ enum Cmd {
     Kill {
         id: PaneId,
         reply: oneshot::Sender<Result<(), PtyError>>,
+    },
+    Shutdown {
+        reply: oneshot::Sender<()>,
     },
 }
 
@@ -268,6 +282,18 @@ async fn owner_loop(mut cmd_rx: mpsc::Receiver<Cmd>) {
                     let _ = reply.send(Err(PtyError::NotFound(id.0.clone())));
                 }
             },
+            Cmd::Shutdown { reply } => {
+                let ending: Vec<_> = panes
+                    .drain()
+                    .map(|(_, entry)| tokio::spawn(end_pane(entry)))
+                    .collect();
+                tokio::spawn(async move {
+                    for pane in ending {
+                        let _ = pane.await;
+                    }
+                    let _ = reply.send(());
+                });
+            }
         }
     }
 

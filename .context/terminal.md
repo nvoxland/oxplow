@@ -359,6 +359,10 @@ stop or close, a thread's close) ends that group, not just the child. The
 group gets a SIGHUP, as a closed terminal gives it, and a SIGKILL after
 `HANGUP_GRACE` (500 ms) if anything ignored it (`end_tree`). The kill runs
 off the manager's owner loop, so one slow kill doesn't hold the other panes.
+The daemon's exit ends every pane at once (`Services::shutdown` →
+`TerminalSessionRegistry::close_all` → `PtyManager::shutdown`): its
+`process::exit` runs no destructors, and no signal to the daemon's own
+group reaches the panes' groups.
 
 ## Terminals are rows
 

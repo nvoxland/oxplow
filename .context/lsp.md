@@ -43,6 +43,12 @@ manager owns:
   `didOpen`. Crash detection: pump sees `Closed`, removes the session
   (generation-checked so intentional restarts don't double-report) and
   emits `SessionStatus crashed`; the next request respawns.
+- **Ending servers**: a stream's delete (`drop_for_stream`) and the
+  daemon's exit (`shutdown_all`, from `Services::shutdown`, whose
+  `process::exit` runs no destructors) remove the sessions and **kill**
+  each server (`LspProxy::kill`): a request in flight holds the proxy, so
+  dropping the session alone would leave it running. No orderly LSP
+  `shutdown`; the session is removed first, so the pump reports no crash.
 - **Config resolution**: `.oxplow/project.yaml` `lsp.servers[]` first, then the
   Mason-installed registry (`InstalledServers`, carries package
   name/version). `NoConfig` errors are self-describing — they embed

@@ -320,6 +320,46 @@ async fn shutdown_stops_the_background_loops() {
     assert_eq!(ticks.load(std::sync::atomic::Ordering::SeqCst), after);
 }
 
+/// Shutdown ends the terminals and agent PTYs: each leads a process group
+/// of its own, and the daemon's `process::exit` runs no destructors, so
+/// nothing else would.
+#[cfg(unix)]
+#[tokio::test]
+async fn shutdown_ends_the_terminals() {
+    let (_dir, svc) = project().await;
+    let session = svc
+        .terminal_sessions
+        .attach_or_create("terminal|trm1".to_string(), 80, 24, |c, r| {
+            oxplow_pty::SpawnRequest {
+                command: "sh".into(),
+                args: vec!["-c".into(), "trap '' HUP TERM; exec sleep 60".into()],
+                cwd: std::env::temp_dir(),
+                env: vec![],
+                env_remove: vec![],
+                cols: c,
+                rows: r,
+            }
+        })
+        .await
+        .unwrap();
+    let pid = svc
+        .terminal_sessions
+        .pid_of(&session.session_id)
+        .await
+        .unwrap() as i32;
+
+    svc.shutdown().await;
+
+    let gone = (0..150).any(|_| {
+        std::thread::sleep(Duration::from_millis(20));
+        (unsafe { libc::kill(pid, 0) }) != 0
+    });
+    if !gone {
+        unsafe { libc::kill(pid, libc::SIGKILL) };
+    }
+    assert!(gone, "the terminal outlived shutdown");
+}
+
 /// Two activations at once are serialized: the second waits for the first
 /// and both leave one generation, the latest edit's.
 #[tokio::test(flavor = "multi_thread")]

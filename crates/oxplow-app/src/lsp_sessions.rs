@@ -736,17 +736,31 @@ impl LspSessionManager {
     }
 
     /// Tear down all sessions for a stream (e.g. on stream delete).
-    /// Best-effort; we don't shutdown LSPs cleanly here, just drop.
     pub async fn drop_for_stream(&self, stream_id: &str) {
+        self.end_where(|k| k.stream_id == stream_id).await;
+    }
+
+    /// End every server: the daemon's exit (`Services::shutdown`), whose
+    /// `process::exit` runs no destructors.
+    pub async fn shutdown_all(&self) {
+        self.end_where(|_| true).await;
+    }
+
+    /// End the sessions whose key `ends`: each server is killed, not just
+    /// dropped (a request in flight holds its proxy), with no orderly LSP
+    /// `shutdown` — it is our child to end, and nothing it would save is
+    /// ours.
+    async fn end_where(&self, ends: impl Fn(&SessionKey) -> bool) {
         let mut map = self.sessions.lock().await;
-        let keys: Vec<_> = map
-            .keys()
-            .filter(|k| k.stream_id == stream_id)
-            .cloned()
-            .collect();
+        let keys: Vec<_> = map.keys().filter(|k| ends(k)).cloned().collect();
         for key in keys {
-            if map.remove(&key).is_some() {
-                warn!(stream_id, language = key.language, "lsp session dropped");
+            if let Some(entry) = map.remove(&key) {
+                entry.proxy.kill();
+                warn!(
+                    stream_id = key.stream_id,
+                    language = key.language,
+                    "lsp session dropped"
+                );
                 let _ = self.events.send(LspSessionEvent::SessionStatus {
                     stream_id: key.stream_id.clone(),
                     language: key.language.clone(),
@@ -759,7 +773,7 @@ impl LspSessionManager {
         self.docs
             .lock()
             .expect("docs mutex")
-            .retain(|k, _| k.stream_id != stream_id);
+            .retain(|k, _| !ends(k));
     }
 }
 
@@ -1038,6 +1052,48 @@ mod tests {
         );
         servers.unregister_package("clangd");
         assert!(servers.list().is_empty());
+    }
+
+    /// The daemon's exit ends every server: `process::exit` runs no
+    /// destructors, and a request in flight holds the proxy besides.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn shutdown_all_ends_every_server() {
+        let mgr = manager_with_fake("fake");
+        let mut pids = Vec::new();
+        for stream in ["s-1", "s-2"] {
+            let proxy = mgr
+                .ensure(stream, "fake", std::env::temp_dir())
+                .await
+                .expect("ensure");
+            pids.push(proxy.pid().expect("a pid") as i32);
+        }
+        // A caller still holds one, as a request in flight would.
+        let held = mgr
+            .ensure("s-1", "fake", std::env::temp_dir())
+            .await
+            .expect("ensure");
+
+        mgr.shutdown_all().await;
+
+        assert!(!mgr.is_running("s-1", "fake").await);
+        assert!(!mgr.is_running("s-2", "fake").await);
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        let gone = |pid: i32| {
+            // Reaped, or a zombie its holder hasn't reaped yet.
+            (unsafe { libc::kill(pid, 0) } != 0)
+                || std::process::Command::new("ps")
+                    .args(["-o", "stat=", "-p", &pid.to_string()])
+                    .output()
+                    .map(|o| String::from_utf8_lossy(&o.stdout).trim().starts_with('Z'))
+                    .unwrap_or(false)
+        };
+        while !pids.iter().all(|p| gone(*p)) && std::time::Instant::now() < deadline {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        let left: Vec<_> = pids.into_iter().filter(|p| !gone(*p)).collect();
+        drop(held);
+        assert!(left.is_empty(), "servers outlived shutdown_all: {left:?}");
     }
 
     #[tokio::test]

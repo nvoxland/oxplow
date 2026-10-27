@@ -610,8 +610,10 @@ agent session (the URI is the session's, `oxplow:oxplow/agent_session?id=ses3`),
 the live process and two sessions in a thread are two processes; a
 terminal's URI is a plain `$SHELL -l` in its stream's worktree.
 Switching streams or threads doesn't kill sessions: the daemon keeps them
-and a re-attach replays the buffer. They end with the daemon; the next
-open resumes. There is no terminal multiplexer.
+and a re-attach replays the buffer. They end with the daemon
+(`Services::shutdown` → `TerminalSessionRegistry::close_all`, which ends
+each PTY's whole process group: `.context/terminal.md` "Ending a
+session's processes"); the next open resumes. There is no terminal multiplexer.
 
 ### The agent is spawned by absolute path, on purpose
 

@@ -604,6 +604,20 @@ impl TerminalSessionRegistry {
         }
     }
 
+    /// Stop every session's PTY, as [`Self::close`] does one, and wait for
+    /// their processes to be gone: the daemon's exit (`Services::shutdown`)
+    /// runs no destructors, and each PTY leads a process group of its own
+    /// that no signal to the daemon's group reaches.
+    pub async fn close_all(&self) {
+        let entries: Vec<SessionEntry> = self.inner.lock().await.drain().map(|(_, e)| e).collect();
+        for entry in &entries {
+            entry.forwarder.abort();
+        }
+        self.by_key.lock().await.clear();
+        self.input.lock().unwrap_or_else(|e| e.into_inner()).clear();
+        let _ = self.pty.shutdown().await;
+    }
+
     pub async fn close(&self, session_id: &str) -> Result<(), TerminalSessionError> {
         let mut map = self.inner.lock().await;
         let entry = map
@@ -1137,5 +1151,53 @@ mod tests {
 
         let _ = reg.close(&session_id).await;
         let _ = std::fs::remove_file(&path);
+    }
+
+    /// The daemon's exit ends every session's process: each leads its own
+    /// group, outside the daemon's, so nothing else would.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn close_all_ends_every_session() {
+        let reg = TerminalSessionRegistry::new(
+            PtyManager::spawn(),
+            crate::output_activity::OutputActivity::new(),
+        );
+        let deaf = |c, r| SpawnRequest {
+            command: "sh".into(),
+            args: vec!["-c".into(), "trap '' HUP TERM; exec sleep 60".into()],
+            cwd: std::env::temp_dir(),
+            env: vec![],
+            env_remove: vec![],
+            cols: c,
+            rows: r,
+        };
+        let mut pids = Vec::new();
+        for key in ["session|ses1", "terminal|trm1"] {
+            let s = reg
+                .attach_or_create(key.to_string(), 80, 24, deaf)
+                .await
+                .expect("spawn session");
+            pids.push(reg.pid_of(&s.session_id).await.expect("a pid") as i32);
+        }
+
+        reg.close_all().await;
+
+        for key in ["session|ses1", "terminal|trm1"] {
+            assert_eq!(
+                reg.session_id_for_key(key).await,
+                None,
+                "{key} still registered"
+            );
+        }
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        let gone = |pid: i32| unsafe { libc::kill(pid, 0) } != 0;
+        while !pids.iter().all(|p| gone(*p)) && std::time::Instant::now() < deadline {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        let left: Vec<_> = pids.into_iter().filter(|p| !gone(*p)).collect();
+        for pid in &left {
+            unsafe { libc::kill(*pid, libc::SIGKILL) };
+        }
+        assert!(left.is_empty(), "sessions outlived close_all: {left:?}");
     }
 }

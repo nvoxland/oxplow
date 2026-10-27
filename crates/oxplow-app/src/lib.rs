@@ -808,19 +808,26 @@ impl Services {
     }
 
     /// Stop what runs in the background: the loops, the job scheduler (a
-    /// running job is cancelled; recovery decides its end next time) and
-    /// the provider processes, which get two seconds.
+    /// running job is cancelled; recovery decides its end next time), and
+    /// every process the daemon started outside its own process group —
+    /// the provider processes, the terminals and agent PTYs (each leads a
+    /// group of its own) and the LSP servers — which get two seconds,
+    /// together. The daemon's `process::exit` runs no destructors, so
+    /// what isn't ended here outlives it.
     pub async fn shutdown(&self) {
         self.stopping.cancel();
         self.jobs.shutdown();
-        if tokio::time::timeout(
-            std::time::Duration::from_secs(2),
-            self.providers.shutdown_all(),
-        )
+        if tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            tokio::join!(
+                self.providers.shutdown_all(),
+                self.terminal_sessions.close_all(),
+                self.lsp_sessions.shutdown_all(),
+            )
+        })
         .await
         .is_err()
         {
-            tracing::warn!("providers didn't all shut down in time");
+            tracing::warn!("the daemon's processes didn't all end in time");
         }
     }
 

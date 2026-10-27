@@ -60,13 +60,14 @@ pub enum ServerEvent {
 
 type PendingMap = Arc<Mutex<HashMap<i64, oneshot::Sender<Result<Value, LspError>>>>>;
 
-/// Active LSP proxy. Drop to terminate.
+/// Active LSP proxy. Drop, or [`LspProxy::kill`], to terminate.
 pub struct LspProxy {
     next_id: AtomicI64,
     write_tx: mpsc::Sender<String>,
     pending: PendingMap,
     events: broadcast::Sender<ServerEvent>,
-    _child: Child,
+    child: std::sync::Mutex<Child>,
+    pid: Option<u32>,
 }
 
 impl LspProxy {
@@ -103,8 +104,24 @@ impl LspProxy {
             write_tx,
             pending,
             events: event_tx,
-            _child: child,
+            pid: child.id(),
+            child: std::sync::Mutex::new(child),
         })
+    }
+
+    /// The server's OS process id, when it had one at spawn.
+    pub fn pid(&self) -> Option<u32> {
+        self.pid
+    }
+
+    /// Kill the server now, though others still hold this proxy; their
+    /// requests then fail as for a server that closed.
+    pub fn kill(&self) {
+        let _ = self
+            .child
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .start_kill();
     }
 
     /// Send a JSON-RPC request and await the response.
