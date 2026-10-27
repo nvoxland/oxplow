@@ -3267,7 +3267,11 @@ around it** (`component_harness.rs`, `PageAt::ui`):
   submits the form, as a browser's implicit submission does),
   `drag: { from, to }` (synthetic DOM events, not a
   person's: focus and keyboard details can differ); `press: <action id>`
-  (the nav bar), `view_params: {..}` (Back/Forward); `given: [..]` (the
+  (the nav bar), `view_params: {..}` (Back/Forward; `null` drops one). The view
+  params the frame set (`setViewParams`) and the ones a step sent are kept,
+  merged, and when they change the page runs again with them over the
+  step's `params`, and the frame hears the rows, as the app's tab does with
+  its `#`; `given: [..]` (the
   page runs again and the frame hears its rows, as after any command it
   ran); `confirm: false` (the next confirmation's answer; default yes),
   `form: { submit: {..} }` (the next form's values; without, it's closed);

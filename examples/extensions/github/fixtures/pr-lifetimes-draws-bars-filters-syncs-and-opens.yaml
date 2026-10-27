@@ -12,14 +12,13 @@ when: { page: pr-lifetimes }
 steps:
   - ui:
       - expect: { count: { ".bar": 2 }, text: { "#note": { contains: "1 pull request has a date that can't be read" } } }
-      # A filter button writes the page's `state`; the app re-runs the page
-      # with it, which the next step does.
+      # A filter button writes the page's `state`, and the page runs again
+      # with it.
       - click: '[data-state="open"]'
-      - expect: { view_params: { state: open } }
+      - expect: { view_params: { state: open }, count: { ".bar": 1, '.bar[data-ref="oxplow:github/pr?id=13"]': 1 } }
+      - click: '[data-state="all"]'
+      - expect: { count: { ".bar": 2 } }
       - click: "#sync"
       - expect: { invoked: [{ command: oxplow.collector.sync }] }
       - click: '[data-ref="oxplow:github/pr?id=12"] rect'
       - expect: { navigated: $any }
-  - params: { state: open }
-    ui:
-      - expect: { count: { ".bar": 1, '.bar[data-ref="oxplow:github/pr?id=13"]': 1 } }
