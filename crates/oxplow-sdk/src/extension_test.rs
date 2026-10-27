@@ -531,6 +531,8 @@ async fn dispatch(host: &Host, ext: &Extension, ex: &Example<'_>, report: &mut T
         policy_example(host, ext, ex, id, report).await;
     } else if let Some(t) = ex.when.get("event_type").and_then(Value::as_str) {
         event_type_example(ext, ex, t, report);
+    } else if let Some(sql) = ex.when.get("sql").and_then(Value::as_str) {
+        sql_example(host, ex, sql, report).await;
     } else if let Some(link) = ex.when.get("wikilink").and_then(Value::as_str) {
         wikilink_example(ext, ex, link, report);
     } else if let Some(id) = ex.when.get("collector").and_then(Value::as_str) {
@@ -544,9 +546,9 @@ async fn dispatch(host: &Host, ext: &Extension, ex: &Example<'_>, report: &mut T
         command_example(host, ex, cmd, report).await;
     } else if ex.when.get("command").is_none() || ext.providers.is_empty() {
         report.errors.push(format!(
-            "{shown}:1: example `{}`'s `when` names no page, collector, command, effect, \
+            "{shown}:1: example `{}`'s `when` names no page, sql query, collector, command, effect, \
              event, job, component, form, effort policy, event type, wikilink or provider command — \
-             fix: `{{ page: <slug>, params? }}` (with `given:`), `{{ collector: <id>, rows?, event? }}`, \
+             fix: `{{ page: <slug>, params? }}` (with `given:`), `{{ sql, params? }}`, `{{ collector: <id>, rows?, event? }}`, \
              `{{ command: <name>, input }}`, `{{ effect: <id>, event: {{ type, payload }} }}` \
              (a dry run), `{{ event: {{ type, payload }} }}` (logged, and what reacts runs), \
              `{{ job: <id>, intentKey, request }}`, `{{ component: <id>, items?, invokes? }}`, `{{ form: <page>, node?, params? }}`, \
@@ -1636,16 +1638,16 @@ fn run_nodes(run: &oxplow_app::pages::runner::PageRun) -> Vec<(String, String)> 
     out
 }
 
-/// Run page `id` (`<extension>/<slug>`) with `params` as a person would
-/// open it from `ctx`; the failure to run, or a loader that failed, as a
-/// message.
+/// Run `target` (a page, `<extension>/<slug>`, or an inline one) with
+/// `params` as a person would open it from `ctx`; the failure to run, or a
+/// loader that failed, as a message.
 async fn run_page(
     host: &Host,
-    id: &str,
+    target: oxplow_app::pages::runner::RunTarget,
     params: &Value,
     ctx: &oxplow_app::extensions::ViewContext,
 ) -> Result<oxplow_app::pages::runner::PageRun, String> {
-    use oxplow_app::pages::runner::{PageRunner, RunRequest, RunTarget};
+    use oxplow_app::pages::runner::{PageRunner, RunRequest};
     let params = params
         .as_object()
         .map(|o| {
@@ -1656,7 +1658,7 @@ async fn run_page(
         .unwrap_or_default();
     let run = PageRunner::of(&host.svc)
         .run(RunRequest {
-            target: RunTarget::Page(id.to_string()),
+            target,
             params,
             ctx: ctx.clone(),
             viewer: Actor::Human,
@@ -1760,7 +1762,7 @@ async fn page_example(
         host,
         shown,
         page,
-        id: &id,
+        target: oxplow_app::pages::runner::RunTarget::Page(id.clone()),
         ctx: &ctx,
     };
     let steps = match &ex.steps {
@@ -1879,14 +1881,55 @@ fn bind_from(
     true
 }
 
+/// Read the published models with `when: { sql, params? }` as a page's
+/// loader would — a model, a decorator's labels, a metric's grid — through
+/// an inline page of one `sql` loader: `expect: { rows, columns? }`,
+/// compared as a loader's.
+async fn sql_example(host: &Host, ex: &Example<'_>, sql: &str, report: &mut TestReport) {
+    let shown = ex.shown;
+    let params = ex.when.get("params").cloned().unwrap_or_else(|| json!({}));
+    let declared: Vec<Value> = params
+        .as_object()
+        .into_iter()
+        .flatten()
+        .map(|(name, _)| json!({ "name": name }))
+        .collect();
+    let spec = json!({
+        "title": "Query",
+        "params": declared,
+        "data": { "rows": { "sql": sql } },
+        "view": { "viz": "table", "from": "rows" },
+    });
+    let page = serde_yaml::to_string(&spec)
+        .map_err(|e| e.to_string())
+        .and_then(|text| oxplow_app::pages::schema::parse_inline_page(&text));
+    let page = match page {
+        Ok(page) => page,
+        Err(e) => return report.errors.push(format!("{shown}:1: the query: {e}")),
+    };
+    let Some(ctx) = view_context(ex, report) else {
+        return;
+    };
+    let at = PageAt {
+        host,
+        shown,
+        page: "query",
+        target: oxplow_app::pages::runner::RunTarget::Spec(Arc::new(page)),
+        ctx: &ctx,
+    };
+    let expect = json!({ "loaders": { "rows": ex.expect } });
+    at.check(&params, &expect, &Binds::default(), "", report)
+        .await;
+}
+
 /// Where a page example runs: its host, fixture, page and view.
 struct PageAt<'a> {
     host: &'a Host,
     shown: &'a str,
     /// The page as the fixture names it.
     page: &'a str,
-    /// `<extension>/<slug>`.
-    id: &'a str,
+    /// What runs: the page (`<extension>/<slug>`), or an inline one.
+    target: oxplow_app::pages::runner::RunTarget,
     ctx: &'a oxplow_app::extensions::ViewContext,
 }
 
@@ -1942,7 +1985,7 @@ impl PageAt<'_> {
             .open(
                 &self.host.svc,
                 oxplow_app::pages::runner::RunRequest {
-                    target: oxplow_app::pages::runner::RunTarget::Page(self.id.to_string()),
+                    target: self.target.clone(),
                     params: cells(&params),
                     ctx: self.ctx.clone(),
                     viewer: Actor::Human,
@@ -2040,7 +2083,7 @@ impl PageAt<'_> {
                 return None;
             }
         };
-        let run = match run_page(self.host, self.id, &params, self.ctx).await {
+        let run = match run_page(self.host, self.target.clone(), &params, self.ctx).await {
             Ok(run) => run,
             Err(e) => {
                 report.errors.push(format!(
@@ -2272,7 +2315,14 @@ async fn page_answers(host: &Host, ext: &Extension, report: &mut TestReport) {
         let (before, started) = (report.errors.len(), std::time::Instant::now());
         for answer in &page.answers {
             let params = json!(answer.params);
-            if let Err(e) = run_page(host, &page.id, &params, &ctx).await {
+            if let Err(e) = run_page(
+                host,
+                oxplow_app::pages::runner::RunTarget::Page(page.id.clone()),
+                &params,
+                &ctx,
+            )
+            .await
+            {
                 report.errors.push(format!(
                     "{rel}/pages/{}.yaml:1: the answer to \"{}\" doesn't run: {e} — fix: the \
                      answer's `params`, or the page",
@@ -5195,6 +5245,67 @@ steps:
         );
         let report = test_extension(root, "beta", false).await.unwrap();
         assert_eq!(report.errors, Vec::<String>::new());
+    }
+
+    /// `when: { sql }` reads the published models as a page loader would —
+    /// a model, a decorator's labels, a metric — its rows checked like a
+    /// loader's.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_fixture_reads_the_models_with_sql() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        write(
+            root,
+            ".oxplow/extensions/acme/extension.yaml",
+            "manifest: 2
+name: acme
+intent:
+  purpose: PRs.
+  examples:
+    - { name: read, input: { sql: x }, expect: rows }
+models:
+  - name: prs
+    version: 1
+    description: PRs.
+    columns:
+      - { name: title, type: \"\", doc: Its title. }
+",
+        );
+        write(
+            root,
+            ".oxplow/extensions/acme/models/prs.sql",
+            "SELECT 'One' AS title UNION ALL SELECT 'Two'",
+        );
+        let fixture = |want: &str| {
+            format!(
+                "given: [{{ command: oxplow.work_item.create, input: {{ title: Three }} }}]
+when: {{ sql: \"SELECT title FROM v_acme_prs UNION ALL SELECT title FROM v_work_item WHERE title = :t ORDER BY title\", params: {{ t: Three }} }}
+expect: {{ rows: {want} }}
+"
+            )
+        };
+        write(
+            root,
+            ".oxplow/extensions/acme/fixtures/read.yaml",
+            &fixture("[{ title: One }, { title: Three }, { title: Two }]"),
+        );
+        let report = test_extension(root, "acme", false).await.unwrap();
+        assert_eq!(report.errors, Vec::<String>::new());
+
+        write(
+            root,
+            ".oxplow/extensions/acme/fixtures/read.yaml",
+            &fixture("{ contains: [{ title: Four }] }"),
+        );
+        let errors = test_extension(root, "acme", false)
+            .await
+            .unwrap()
+            .errors
+            .join("\n");
+        assert!(
+            errors.contains("fixtures/read.yaml:1: page `query` loader `rows` returned"),
+            "{errors}"
+        );
     }
 
     /// Each example with `given` runs on an oxplow of its own: what one

@@ -2021,6 +2021,10 @@ fixture model's answers); any other key is an error (`FIXTURE_KEYS`):
     message, duration_ms }` per thing that ran (`check`, `example <name>`,
     `answers <page>`, `provider <id>`, `policy <id>`), and
     `render(report, Format::Junit)` writes them as one `<testsuite>`.
+- `when: { sql, params? }`, `expect: { rows, columns? }` — a read-only query
+  over the published models, run as a page loader would (an inline page of
+  one `sql` loader, `sql_example`) and compared as a loader's: a model, a
+  decorator's labels or a metric's `metric_grid` tested on its own.
 - `when: { collector: <id>, rows?, event? }`, `expect: { entities: { <name>:
   n | $any } }` — a derived collector runs over `rows` (standing in for
   its `input` query, `oxplow_preview_collector(…, event, rows)`) and `event`

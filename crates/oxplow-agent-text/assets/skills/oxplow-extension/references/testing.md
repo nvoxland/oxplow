@@ -128,6 +128,10 @@ model the SQL reads and the command it runs. Prefer `answers:` on pages.
      else the page's first); `expect: { values?, fixed?, fields? }` (the
      values its fields start from, the read-only fields, the shown ones,
      `null` for all);
+   - a query: `when: { sql: "SELECT … FROM v_<ext>_<model>", params? }`,
+     `expect: { rows: [ { col: val } ] }` — reads the published models as a
+     page loader would, for a model, a decorator's labels or a metric
+     (`metric_grid`) on its own.
    - a collector: `when: { collector: <id>, rows: [...], event? }`
      (`rows` stands in for its `input` query; `event` is the event an
      `on:` collector reacts to), `expect: { entities: { <name>: n } }` —
