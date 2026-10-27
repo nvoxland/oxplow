@@ -999,8 +999,6 @@ pub struct CheckReport {
     /// `file:line: what — fix` lines.
     pub errors: Vec<String>,
     pub warnings: Vec<String>,
-    /// What its SQL was dry-run against.
-    pub dry_run: DryRun,
     pub extension: Extension,
     /// With `--impact`: what going from `against` to the working
     /// tree changes; `null` without it.
@@ -1012,17 +1010,6 @@ pub struct CheckReport {
     pub services: Vec<oxplow_app::services::ScriptServices>,
     /// What serves each of its `ai_profiles:` here ([`profile_lines`]).
     pub profiles: Vec<String>,
-}
-
-/// The database a check dry-runs an extension's SQL on. It always has one
-/// (P7.C6): what it declares but hasn't published stands in either way.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, serde::Deserialize, specta::Type)]
-#[serde(rename_all = "camelCase")]
-pub enum DryRun {
-    /// The project's own (its synced data, read-only).
-    Project,
-    /// A fresh, empty one: no usable project database.
-    EmptyDatabase,
 }
 
 /// Load `name` under `root` and report everything wrong with it: the
@@ -1058,28 +1045,18 @@ pub async fn check(
         host.as_ref()
             .map(|h| h.svc.commands.as_ref() as extensions::CommandSchemas<'_>)
     });
-    // No project database: the throwaway oxplow's, which is empty but has
-    // the extension's models and metrics (a page may read both).
+    // Its SQL dry-runs on a database of this build's schema and no data —
+    // the test's oxplow (the caller's, or the one started above), with what
+    // the extension and what it declares publish — never the project's:
+    // what happens to be there is no part of a check.
     let empty;
-    let (layer, dry_run) = match (layer, host.as_ref()) {
-        (Some(layer), _) => (layer, DryRun::Project),
-        (None, Some(host)) => (&host.svc.sql, DryRun::EmptyDatabase),
+    let layer = match (layer, host.as_ref()) {
+        (Some(layer), _) => layer,
+        (None, Some(host)) => &host.svc.sql,
         (None, None) => {
             empty = SqlGateway::with_metrics(oxplow_db::Database::in_memory());
-            (&empty, DryRun::EmptyDatabase)
+            &empty
         }
-    };
-    // A metric the app has not loaded yet is the extension under check's
-    // own: resolve it from there, not only from the project's store.
-    let declared;
-    let layer = match catalog.named(root, name) {
-        Ok(under_check) if dry_run == DryRun::Project => {
-            declared = layer.with_declared_metrics(
-                oxplow_app::metrics_service::declared_metric_specs(&under_check),
-            );
-            &declared
-        }
-        _ => layer,
     };
     let extension = extensions::validate_extension(layer, catalog, root, name, commands)
         .await
@@ -1087,10 +1064,24 @@ pub async fn check(
             DomainError::NotFound => SdkError::NotFound(name.to_string()),
             other => SdkError::Domain(other),
         })?;
+    // A review of what a change does to the person's own pages: over the
+    // project's database, read-only, when it has one.
+    let project = against
+        .and_then(|_| project_database(root))
+        .and_then(|path| oxplow_db::Database::open_read_only(&path).ok())
+        .map(SqlGateway::with_metrics);
     let impact = match (against, commands) {
-        (Some(rev), Some(commands)) => {
-            Some(impact_against(root, name, catalog, layer, rev, commands).await?)
-        }
+        (Some(rev), Some(commands)) => Some(
+            impact_against(
+                root,
+                name,
+                catalog,
+                project.as_ref().unwrap_or(layer),
+                rev,
+                commands,
+            )
+            .await?,
+        ),
         _ => None,
     };
     Ok(CheckReport {
@@ -1102,7 +1093,6 @@ pub async fn check(
             warnings.extend(profile_warnings(&extension, &ai_bindings(root)));
             warnings
         },
-        dry_run,
         services: oxplow_app::services::of_extension(&extension, &|file| {
             extensions::read_extension_file(root, &extension.path, file)
         }),
@@ -1351,12 +1341,7 @@ pub fn render_findings(report: &CheckReport, format: Format) -> String {
             for line in &report.profiles {
                 out.push_str(&format!("{line}\n"));
             }
-            let sql = match report.dry_run {
-                DryRun::Project => "its SQL dry-run against the project's database",
-                DryRun::EmptyDatabase => {
-                    "its SQL dry-run on an empty database (no usable project database)"
-                }
-            };
+            let sql = "its SQL dry-run on an empty database of this build's schema";
             out.push_str(&format!(
                 "{}: {} error{}, {} warning{}; {sql}\n",
                 report.name,
@@ -1383,7 +1368,7 @@ pub fn render_findings(report: &CheckReport, format: Format) -> String {
 }
 
 /// The project's local database, when the folder is an oxplow project
-/// that has been opened: what `check` dry-runs page SQL against.
+/// that has been opened: what `check --impact` reviews a change over.
 pub fn project_database(root: &Path) -> Option<PathBuf> {
     let path = root.join(".oxplow").join("local.sqlite");
     path.is_file().then_some(path)
@@ -1564,30 +1549,6 @@ mod tests {
         assert!(report.ok, "{}", render_findings(&report, Format::Text));
         assert!(report.warnings.is_empty(), "{:?}", report.warnings);
     }
-
-    /// A metric the app has not loaded yet: checking against a project
-    /// database resolves it from the extension under check, so its page
-    /// (which reads `metric_findings()`) dry-runs rather than failing on an
-    /// unknown metric.
-    #[tokio::test]
-    async fn check_against_a_project_database_resolves_a_metric_it_has_not_loaded() {
-        let dir = tempfile::tempdir().unwrap();
-        scaffold(dir.path(), Kind::Metric, "demo", None).unwrap();
-        let project = SqlGateway::with_metrics(oxplow_db::Database::in_memory());
-        let report = check(
-            dir.path(),
-            "demo",
-            &ExtensionCatalog::new(),
-            Some(&project),
-            None,
-            None,
-        )
-        .await
-        .unwrap();
-        assert_eq!(report.dry_run, DryRun::Project);
-        assert!(report.ok, "{}", render_findings(&report, Format::Text));
-    }
-
     /// The feature-gated harness verbs have real descriptions to declare
     /// them with, not a TODO.
     #[test]
@@ -1699,8 +1660,6 @@ mod tests {
         .unwrap();
         assert!(report.ok, "{}", render_findings(&report, Format::Text));
         assert!(report.warnings.is_empty(), "{:?}", report.warnings);
-        // No project database: the SQL still dry-runs, on an empty one.
-        assert_eq!(report.dry_run, DryRun::EmptyDatabase);
         assert_eq!(report.extension.manifest_version, 2);
         assert_eq!(
             report.extension.intent.as_ref().unwrap().origin.as_deref(),

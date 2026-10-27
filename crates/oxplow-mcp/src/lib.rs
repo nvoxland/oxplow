@@ -48,16 +48,11 @@ impl ExtensionChecks for SdkChecks {
         root: &std::path::Path,
         name: &str,
     ) -> Result<serde_json::Value, CheckError> {
-        let report = oxplow_sdk::check(
-            root,
-            name,
-            &svc.extension_catalog,
-            Some(&svc.sql),
-            Some(svc.commands.as_ref()),
-            None,
-        )
-        .await
-        .map_err(sdk_check_error)?;
+        // On a throwaway oxplow, as the CLI's check: this build's schema
+        // and no data, never the project's.
+        let report = oxplow_sdk::check(root, name, &svc.extension_catalog, None, None, None)
+            .await
+            .map_err(sdk_check_error)?;
         serde_json::to_value(report).map_err(|e| CheckError::Failed(e.to_string()))
     }
 }

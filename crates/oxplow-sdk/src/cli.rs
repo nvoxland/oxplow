@@ -33,9 +33,9 @@ usage:
       (a provider once a real program replaces its stub)
   oxplow extension check <name|path> [--impact] [--against <rev>] [--services] [--json] [--root <dir>]
       load the extension and report every problem with file:line, dry-running
-      its models, commands, pages and advisories — against the project's
-      database when it has been opened in oxplow (.oxplow/local.sqlite),
-      else an empty one; command names against a throwaway oxplow.
+      its models, commands, pages and advisories on a throwaway oxplow —
+      this build's schema, no data, what the extension declares turned on
+      (never the project's database); command names against the same.
       --impact also says what the working tree's version changes against
       git HEAD (or --against <rev>, which implies --impact): pages' text,
       models and their rows, collectors' outputs, providers' grants —
@@ -243,22 +243,6 @@ fn run_inner(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> Resul
                 .ok_or_else(|| Failure::Usage("check needs an extension name or path".into()))?;
             let (root, name) = locate(p.root.as_deref(), target);
             let catalog = ExtensionCatalog::new();
-            // Read-only, no migrations: this CLI may not be the app's
-            // version, and it must never change the project's database.
-            let db = crate::project_database(&root).and_then(|path| {
-                match oxplow_db::Database::open_read_only(&path) {
-                    Ok(db) => Some(db),
-                    Err(e) => {
-                        let _ = writeln!(
-                            err,
-                            "warning: could not open the project database ({}): {e}",
-                            path.display()
-                        );
-                        None
-                    }
-                }
-            });
-            let layer = db.map(oxplow_app::sql_gateway::SqlGateway::with_metrics);
             // No running oxplow to ask which commands exist: the check
             // starts a throwaway one, and its impact review uses the same.
             let against = (p.impact || p.against.is_some())
@@ -267,7 +251,7 @@ fn run_inner(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> Resul
                 &root,
                 &name,
                 &catalog,
-                layer.as_ref(),
+                None,
                 None,
                 against.as_deref(),
             ))?;
@@ -615,23 +599,26 @@ mod tests {
         assert!(err.contains("a metric's"), "{err}");
     }
 
-    /// `check` must never migrate or write the project's database, and an
-    /// unreadable one is reported, not passed off as "none found".
+    /// `check` dry-runs on a database of this build's schema and no data —
+    /// what the test runs on — never the project's: what happens to be in
+    /// it is no part of a check, and it is never opened.
     #[test]
-    fn check_opens_the_project_database_read_only_and_reports_trouble() {
+    fn check_never_reads_the_project_database() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().to_str().unwrap();
         assert_eq!(cli(&["new", "page", "demo", "--root", root]).0, 0);
         std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
         std::fs::write(dir.path().join(".oxplow/local.sqlite"), "not a database").unwrap();
         let (code, out, err) = cli(&["check", "demo", "--root", root]);
-        assert_eq!(code, 0, "the manifest itself is fine: {out}{err}");
-        assert!(err.contains("could not open the project database"), "{err}");
-        assert!(out.contains("dry-run on an empty database"), "{out}");
+        assert_eq!(code, 0, "{out}{err}");
+        assert!(!err.contains("project database"), "{err}");
+        assert!(
+            out.contains("its SQL dry-run on an empty database of this build's schema"),
+            "{out}"
+        );
         assert_eq!(
             std::fs::read_to_string(dir.path().join(".oxplow/local.sqlite")).unwrap(),
-            "not a database",
-            "check wrote to the project's database"
+            "not a database"
         );
     }
 

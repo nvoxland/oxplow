@@ -1754,14 +1754,14 @@ and one calling MCP read identical `file:line: what — fix` lines.
   `catalog.named` (manifest shape, lifecycle, cross-refs, page shape;
   a Starlark collector's script must parse and define `transform`, an
   error at the collector's line) plus `extensions::validate_extension`'s
-  dry run — **always** (P7.C6): on `layer` (the project's database,
-  read-only), else on the throwaway oxplow's empty in-memory one, which
-  has the extension's models and metrics seeded so a page may read
-  `metric_grid()` / `metric_findings()` (`DryRun::{Project,
-  EmptyDatabase}`; the CLI's project layer is `SqlGateway::with_metrics`,
-  so those functions resolve there too — a metric not yet seeded in that
-  database is `no metric … (see v_metric_spec)` until the app has loaded
-  the extension). The dry run first compiles, in a rolled-back read,
+  dry run — **always** (P7.C6), and **never on the project's database**:
+  on the throwaway oxplow — this build's schema, no data, what the
+  extension declares turned on, its models and metrics seeded so a page
+  may read `metric_grid()` / `metric_findings()` — or on the caller's own
+  (`extension test`'s). What happens to be in a project's database is no
+  part of a check, and a CLI older or newer than the app is never refused
+  over its schema. The agent's `oxplow_validate_extension` checks the same
+  way, starting a throwaway in the app. The dry run first compiles, in a rolled-back read,
   the extension's models beside the other enabled extensions' (P4.9 —
   resolution, lineage, and the contract, so a changed contract at a
   published version fails here before it publishes) over **empty
@@ -1881,12 +1881,11 @@ and one calling MCP read identical `file:line: what — fix` lines.
 - **The CLI** is `apps/desktop/src-tauri/src/extension_cli.rs`, dispatched
   by `main.rs` before Tauri boots exactly like `oxplow hook`. It takes a
   bare name (under `--root` or the cwd) or the extension folder's path
-  (the project is read off `…/.oxplow/extensions/<name>`). `check` opens
-  `<root>/.oxplow/local.sqlite` **read-only** (`Database::open_read_only`:
-  no migrations, no writes, refused unless its schema version matches
-  this build — the CLI may not be the app's version) so page SQL is
-  dry-run against the real project; without a usable one it warns on
-  stderr with the reason and checks everything else. Exit 0 clean, 1 with errors (or an SDK error such as an unknown
+  (the project is read off `…/.oxplow/extensions/<name>`). `check` never
+  opens the project's database (`check_never_reads_the_project_database`);
+  only `--impact`, a review of what a change does to the person's pages,
+  reads `<root>/.oxplow/local.sqlite` **read-only** (`Database::open_read_only`:
+  no migrations, no writes). Exit 0 clean, 1 with errors (or an SDK error such as an unknown
   extension), 2 usage.
 - **`validate_extension`** (RPC and MCP) returns the `CheckReport`, not
   the bare `Extension`; the extension is inside it.
@@ -2940,8 +2939,9 @@ and its impact with one throwaway oxplow's command registry. It loads
 the extension at git `HEAD` (or `--against`) — `extension_tree_at`
 through a `Trees` over the VCS alone — as `before` and the working tree
 as `after`, and runs `extensions::impact_between`. Each side is on its
-own overlay over the project's database read read-only (else an empty
-one), so the check **writes nothing** — the database file is
+own overlay over the project's database read read-only (else the
+check's empty one) — a review, the one place a check reads the project's
+data — so the check **writes nothing** — the database file is
 byte-identical after. Text output adds `impact against <rev>:` and the
 report's lines; `--json` adds `impact` (the `ImpactReport`) and
 `against` to the check's JSON.
