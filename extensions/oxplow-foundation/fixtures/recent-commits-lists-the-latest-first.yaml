@@ -1,0 +1,14 @@
+# The latest commits on the stream, newest first, cut to the limit.
+given:
+  - observe: { commit: { sha: c1, at: "2026-01-01T00:00:00Z", author: ann, subject: first, files: [{ path: a.rs, status: A, additions: 1 }, { path: z.rs, status: A, additions: 1 }] } }
+  - observe: { commit: { sha: c2, at: "2026-01-02T00:00:00Z", author: bob, subject: second, files: [{ path: a.rs, status: M, additions: 2, deletions: 1 }] } }
+when: { page: oxplow-foundation/recent-commits, params: { limit: 5 } }
+expect:
+  loaders:
+    recent_commits:
+      rows:
+        - { sha: c2, author: bob, subject: second }
+        - { sha: c1, author: ann, subject: first }
+steps:
+  - params: { limit: 1 }
+    expect: { loaders: { recent_commits: { rows: [{ sha: c2 }] } } }

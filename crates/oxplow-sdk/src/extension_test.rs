@@ -1419,6 +1419,7 @@ async fn run_steps(
 /// - `event: { type, v?, payload, subject?, anchors? }`: an event logged
 ///   and delivered, the extension's effects reacting.
 /// - `evidence: { effort, observations: [..] }`: an effort's evidence.
+/// - `commit: { sha, at, subject, files?, .. }`: a commit the indexer read.
 /// - `turn: { prompt?, during?: [{ command, input?, as? }], tools?: [{ name, kind, paths?, command?, detail?,
 ///   ok?, exit_code? }], write?: { path, body }, answer? }`: one turn on the
 ///   primary thread, as its harness's hooks report it — the prompt, each
@@ -1433,9 +1434,10 @@ async fn observe(host: &Host, ext: &Extension, observed: &Value) -> Result<(), S
         "turn" => observe_turn(host, body).await,
         "evidence" => observe_evidence(host, body).await,
         "event" => observe_event(host, ext, body).await,
+        "commit" => observe_commit(host, body).await,
         other => {
             return Err(format!(
-                "`{other}` isn't a kind — fix: `turn`, `evidence` or `event`"
+                "`{other}` isn't a kind — fix: `turn`, `evidence`, `event` or `commit`"
             ))
         }
     }?;
@@ -1472,6 +1474,57 @@ async fn observe_event(host: &Host, ext: &Extension, body: &Value) -> Result<(),
         .append(env)
         .await
         .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
+/// `commit: { sha, at, subject, author?, email?, body?, parents?, files?:
+/// [{ path, status?, additions?, deletions? }] }`: a commit the git indexer
+/// read, stored as it stores one (`SqliteGitStore::upsert_commit`).
+async fn observe_commit(host: &Host, body: &Value) -> Result<(), String> {
+    let text = |key: &str| body.get(key).and_then(Value::as_str);
+    let at = text("at").ok_or("`commit.at` is when it was committed (RFC 3339)")?;
+    let committed = oxplow_domain::Timestamp::parse(at).map_err(|e| format!("`commit.at`: {e}"))?;
+    let mut files = Vec::new();
+    for f in body
+        .get("files")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        files.push(oxplow_db::git_store::GitCommitFileRow {
+            path: f
+                .get("path")
+                .and_then(Value::as_str)
+                .ok_or("a commit file names its `path`")?
+                .to_string(),
+            status: f
+                .get("status")
+                .and_then(Value::as_str)
+                .unwrap_or("M")
+                .to_string(),
+            additions: f.get("additions").and_then(Value::as_i64).unwrap_or(0),
+            deletions: f.get("deletions").and_then(Value::as_i64).unwrap_or(0),
+        });
+    }
+    host.svc
+        .git_store
+        .upsert_commit(oxplow_db::git_store::GitCommitRow {
+            sha: text("sha").ok_or("`commit.sha` names it")?.to_string(),
+            author: text("author").unwrap_or("fixture").to_string(),
+            email: text("email").unwrap_or("fixture@example.test").to_string(),
+            committed_secs: committed.unix_ms() / 1000,
+            subject: text("subject").unwrap_or_default().to_string(),
+            body: text("body").unwrap_or_default().to_string(),
+            parents: body
+                .get("parents")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(|p| p.as_str().map(str::to_string))
+                .collect(),
+            files,
+        })
+        .await
         .map_err(|e| e.to_string())
 }
 
@@ -4827,6 +4880,29 @@ expect:
   - observe: { event: { type: work_item.state_changed, payload: { work_item: $t.uri, to: done } } }
 when: { sql: SELECT count(*) AS n FROM v_work_item_comment }
 expect: { rows: [{ n: 1 }] }
+",
+        );
+        let report = test_extension(dir.path(), "notes", false).await.unwrap();
+        assert!(report.ok, "{:?}", report.errors);
+    }
+
+    /// `observe: { commit }` stores a commit the way the git indexer does.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_given_observes_a_commit() {
+        let dir = tempfile::tempdir().unwrap();
+        crate::scaffold(dir.path(), crate::Kind::Command, "notes", None).unwrap();
+        write(
+            dir.path(),
+            ".oxplow/extensions/notes/fixtures/basic.yaml",
+            "given:
+  - observe: { commit: { sha: c1, at: \"2026-01-01T00:00:00Z\", subject: first, files: [{ path: a.rs, status: A, additions: 1 }] } }
+  - observe: { commit: { sha: c2, at: \"2026-01-02T00:00:00Z\", subject: second, files: [{ path: a.rs, additions: 2, deletions: 1 }] } }
+when:
+  sql: SELECT c.subject, f.status, f.additions FROM v_commit c JOIN v_commit_file f ON f.sha = c.sha WHERE f.path = 'a.rs' ORDER BY c.committed_at DESC
+expect:
+  rows:
+    - { subject: second, status: M, additions: 2 }
+    - { subject: first, status: A, additions: 1 }
 ",
         );
         let report = test_extension(dir.path(), "notes", false).await.unwrap();

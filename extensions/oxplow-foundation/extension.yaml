@@ -166,6 +166,21 @@ intent:
     - name: duplicate-lines-restates-both-sides-of-every-duplicate-block
       input: { collector: oxplow.duplicate_lines }
       expect: both sides of a duplicate block are facts on their own block
+    - name: recent-commits-lists-the-latest-first
+      input: { page: recent-commits }
+      expect: the latest commits, newest first, cut to the limit
+    - name: file-history-lists-the-commits-that-touched-a-file
+      input: { page: file-history }
+      expect: the commits that touched a file, newest first
+    - name: effort-files-lists-what-an-effort-claimed
+      input: { page: effort-files }
+      expect: the files an effort claimed, by path
+    - name: thread-work-lists-a-threads-items
+      input: { page: thread-work }
+      expect: a thread's items by state
+    - name: effort-summary-reads-an-effort-at-a-glance
+      input: { page: effort-summary }
+      expect: one effort at a glance
 # The agent harnesses and AI providers oxplow runs: core's
 # built-ins, many of each at once (every one declared here is active).
 implementations:

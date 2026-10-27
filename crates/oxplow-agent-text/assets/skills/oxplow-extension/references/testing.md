@@ -132,7 +132,13 @@ model the SQL reads and the command it runs. Prefer `answers:` on pages.
      `cargo test` also records a test run), the file the turn wrote (with a
      snapshot before and after, so the turn's checkpoint says `changed`) and
      the turn's end with the agent's last message. Read the result with
-     `when: { sql }` (`v_tool_call`, `v_agent_turn`, `v_effort`, …);
+     `when: { sql }` (`v_tool_call`, `v_agent_turn`, `v_effort`, …).
+     Other kinds: `{ observe: { event: { type, payload, … } } }` (an event
+     oxplow logs on its own, your effects reacting), `{ observe: { evidence:
+     { effort, observations: [{ kind, metric_value?, payload? }] } } }` (an
+     effort's `test-run` and `diff-coverage` evidence) and `{ observe: {
+     commit: { sha, at, subject, files?: [{ path, status?, additions?,
+     deletions? }] } } }` (a commit the git indexer read);
    - `rows: { <entity>: [ {…} ] }` in a page or job fixture fills your
      collectors' entities first (they start empty);
    - an event: `when: { event: { type, payload, … } }` — logged in the

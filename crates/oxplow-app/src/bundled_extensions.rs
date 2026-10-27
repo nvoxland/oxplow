@@ -1119,26 +1119,19 @@ mod tests {
         assert_eq!(run(f.svc.clone()).await, Vec::<String>::new());
     }
 
-    /// The foundation's typed pages (offered to the agent as tools): each
-    /// reads its params as refs and returns the rows its tool answers with.
+    /// The snapshots page lists the stream's snapshots newest first with
+    /// each one's parent, trigger and whether its take ran over budget (the
+    /// snapshot log has no fixture step to make them yet).
     #[tokio::test]
-    async fn the_foundations_typed_pages_answer_their_questions() {
+    async fn the_snapshots_page_lists_newest_first_with_trigger_and_budget() {
         use oxplow_db::SqlCell::{Int, Text};
         let f = crate::test_fixtures::services_with_effort().await;
         let thread = f.thread.value();
-        let effort = f.effort.value();
         f.svc
             .db
             .transaction(move |tx| {
                 tx.execute_batch(&format!(
-                    "INSERT INTO effort_file (effort_id, path, change_kind, local_snapshot_id, source)
-                       VALUES ({effort}, 'b.rs', 'created', 0, 'claimed'), ({effort}, 'a.rs', 'updated', 0, 'claimed');
-                     INSERT INTO git_commit (sha, author, email, committed_at, subject)
-                       VALUES ('c1', 'ann', 'a@x', '2026-01-01T00:00:00Z', 'first'),
-                              ('c2', 'bob', 'b@x', '2026-01-02T00:00:00Z', 'second');
-                     INSERT INTO git_commit_file (sha, path, status, additions, deletions)
-                       VALUES ('c1', 'a.rs', 'A', 1, 0), ('c1', 'z.rs', 'A', 1, 0), ('c2', 'a.rs', 'M', 2, 1);
-                     INSERT INTO snapshot (id, stream_id, created_at, revision, branch, tree_hash)
+                    "INSERT INTO snapshot (id, stream_id, created_at, revision, branch, tree_hash)
                        SELECT 501, stream_id, '2026-01-01T00:00:00Z', NULL, NULL, 'h1' FROM threads WHERE id = {thread};
                      INSERT INTO snapshot (id, stream_id, created_at, revision, branch, tree_hash)
                        SELECT 502, stream_id, '2026-01-02T00:00:00Z', NULL, NULL, 'h2' FROM threads WHERE id = {thread};
@@ -1151,13 +1144,6 @@ mod tests {
             })
             .await
             .unwrap();
-        crate::test_fixtures::file_item(
-            &f.svc,
-            serde_json::json!({ "title": "ship it", "thread": f.thread.to_string() }),
-        )
-        .await;
-        let thread_ref = Text(format!("thr{thread}"));
-        let effort_ref = Text(format!("eff{effort}"));
         let col = |rows: &serde_json::Value, i: usize| -> Vec<String> {
             rows.as_array()
                 .unwrap()
@@ -1169,66 +1155,16 @@ mod tests {
                 })
                 .collect()
         };
-
-        let rows = run_bundled_page_with(
-            &f,
-            "oxplow-foundation/effort-files",
-            &[("effort", effort_ref.clone())],
-        )
-        .await;
-        assert_eq!(col(&rows, 0), ["a.rs", "b.rs"]);
-        assert_eq!(col(&rows, 1), ["updated", "created"]);
-
-        let rows = run_bundled_page_with(
-            &f,
-            "oxplow-foundation/effort-summary",
-            &[("effort", effort_ref)],
-        )
-        .await;
-        let parts = col(&rows, 1);
-        assert_eq!(parts.first().map(String::as_str), Some("effort"), "{rows}");
-        assert_eq!(&parts[parts.len() - 2..], ["file", "file"], "{rows}");
-
-        let rows = run_bundled_page_with(
-            &f,
-            "oxplow-foundation/file-history",
-            &[("path", Text("a.rs".into())), ("limit", Int(20))],
-        )
-        .await;
-        assert_eq!(col(&rows, 0), ["c2", "c1"]);
-        let rows = run_bundled_page_with(
-            &f,
-            "oxplow-foundation/file-history",
-            &[("path", Text("a.rs".into())), ("limit", Int(1))],
-        )
-        .await;
-        assert_eq!(col(&rows, 0), ["c2"]);
-
-        let rows =
-            run_bundled_page_with(&f, "oxplow-foundation/recent-commits", &[("limit", Int(5))])
-                .await;
-        assert_eq!(col(&rows, 0), ["c2", "c1"]);
-
         let rows = run_bundled_page_with(
             &f,
             "oxplow-foundation/snapshots",
             &[("stream", Text(String::new())), ("limit", Int(5))],
         )
         .await;
-        // Newest first: its parent, trigger and whether it ran over budget.
         assert_eq!(col(&rows, 0), ["502", "501"]);
         assert_eq!(col(&rows, 2), ["501", "null"]);
         assert_eq!(col(&rows, 3), ["quiet", "startup"]);
         assert_eq!(col(&rows, 4), ["1", "0"]);
-
-        let rows = run_bundled_page_with(
-            &f,
-            "oxplow-foundation/thread-work",
-            &[("thread", thread_ref)],
-        )
-        .await;
-        assert_eq!(col(&rows, 1), ["ship it"], "{rows}");
-        assert_eq!(col(&rows, 2), ["todo"]);
     }
 
     /// The thread-sessions page lists a thread's sessions with their

@@ -1,0 +1,6 @@
+# A thread's work: its items by state.
+given:
+  - { command: oxplow.work_item.create, input: { title: ship it, thread: thr1 } }
+when: { page: oxplow-foundation/thread-work, params: { thread: thr1 } }
+expect:
+  loaders: { thread_work: { rows: [{ title: ship it, state: todo }] } }

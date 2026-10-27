@@ -2060,7 +2060,9 @@ a `KINDS` entry and a `dispatch` arm. The forms:
   (`last_assistant_message`). The log's projections are delivered between
   the calls and the end (the checkpoint counts the turn's writing tools
   from `v_tool_call`) and settled after it (the checkpoint, then what reacts
-  to it). A step's `when: { sql }` reads the result, since a `steps` entry
+  to it). The other kinds: `event` (logged and delivered; effects react),
+  `evidence` (`EffortEvidenceStore::replace`) and `commit`
+  (`SqliteGitStore::upsert_commit`). A step's `when: { sql }` reads the result, since a `steps` entry
   of a command, event or sql fixture takes the earlier kind in `KINDS`.
 - `when: { sql, params? }`, `expect: { rows, columns? }` — a read-only query
   over the published models, run as a page loader would (an inline page of

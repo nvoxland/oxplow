@@ -1,0 +1,13 @@
+# One effort at a glance: the effort first, then its item, its files, runs,
+# claims and decisions.
+given:
+  - { command: oxplow.effort.open, input: { thread: thr1 } }
+  - observe: { turn: { prompt: Make the files, tools: [{ name: Edit, kind: edit, paths: [b.rs], ok: true }, { name: Edit, kind: edit, paths: [a.rs], ok: true }] } }
+when: { page: oxplow-foundation/effort-summary, params: { effort: eff1 } }
+expect:
+  loaders:
+    effort_summary:
+      rows:
+        - { section: effort }
+        - { section: file, text: a.rs }
+        - { section: file, text: b.rs }
