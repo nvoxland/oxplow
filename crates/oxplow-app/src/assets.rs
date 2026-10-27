@@ -410,13 +410,17 @@ impl Assets {
         Ok(())
     }
 
-    /// A commit changed some tables: mark every asset reading one dirty.
+    /// A commit changed some tables: mark every asset reading one dirty —
+    /// but one on a clock, which runs on its clock whatever changed: asked
+    /// for a recompute it won't make until then, it would count as pending
+    /// and hold every asset reading it till its next run.
     pub fn changed(&self, changed: &oxplow_db::changes::Changed) {
         for entry in self
             .entries
             .read()
             .unwrap_or_else(|e| e.into_inner())
             .iter()
+            .filter(|e| e.materializer.every().is_none())
         {
             if entry.inputs.iter().any(|t| changed.rewrote.contains(t)) {
                 entry
@@ -462,13 +466,15 @@ impl Assets {
         }
     }
 
-    /// Anything may have changed (a lagged listener): every asset is dirty.
+    /// Anything may have changed (a lagged listener): every asset is dirty
+    /// (but one on a clock, as [`Assets::changed`] says).
     pub fn all_changed(&self) {
         for entry in self
             .entries
             .read()
             .unwrap_or_else(|e| e.into_inner())
             .iter()
+            .filter(|e| e.materializer.every().is_none())
         {
             entry
                 .needs_full
@@ -1128,6 +1134,35 @@ mod tests {
             every: HOUR,
             definition,
         })
+    }
+
+    /// A change to a clocked asset's input asks nothing of it (it runs on
+    /// its clock), so an asset reading it doesn't wait for its next hour:
+    /// the reader's own change lands within its coalesce window.
+    #[tokio::test(start_paused = true)]
+    async fn an_asset_reading_a_clocked_one_doesnt_wait_for_its_clock() {
+        let db = Database::in_memory();
+        let runs = Arc::new(AtomicUsize::new(0));
+        let log = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let assets = Assets::new(db.clone(), Duration::from_millis(10)).with_now(paused_now());
+        assets.register(clocked(&runs, None));
+        assets.register(Arc::new(Logged {
+            name: "evidence",
+            inputs: vec!["counting".into(), "other".into()],
+            log: log.clone(),
+        }));
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        let built = log.lock().unwrap().len();
+        assets.changed(&oxplow_db::changes::Changed::inserted([
+            "task".to_string(),
+            "other".to_string(),
+        ]));
+        tokio::time::sleep(MINUTE).await;
+        assert!(
+            log.lock().unwrap().len() > built,
+            "the reader waited on the clocked asset: {:?}",
+            log.lock().unwrap()
+        );
     }
 
     /// P8.B2: a clocked asset builds when it never ran, then on its clock —
