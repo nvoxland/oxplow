@@ -56,7 +56,11 @@
       shiftKey: mod("Shift"),
       altKey: mod("Alt"),
     };
-    el.dispatchEvent(new KeyboardEvent("keydown", init));
+    var kept = el.dispatchEvent(new KeyboardEvent("keydown", init));
+    // A browser's implicit submission: Enter in a form's input, when nothing
+    // stopped the keydown, submits the form (its handler runs, and its
+    // validation applies).
+    if (kept && k === "Enter" && el.tagName === "INPUT" && el.form && !parts.length) el.form.requestSubmit();
     el.dispatchEvent(new KeyboardEvent("keyup", init));
   }
   function drag(from, to) {

@@ -3263,7 +3263,9 @@ around it** (`component_harness.rs`, `PageAt::ui`):
   none, the `ui` steps aren't run and the report warns — never a pass. CI
   builds the app and runs the tests under `xvfb-run`.
 - **Steps**: `click: <sel>`, `fill: { <sel>: text }`, `key: { on, key }`
-  (`Mod+Enter`), `drag: { from, to }` (synthetic DOM events, not a
+  (`Mod+Enter`; a plain `Enter` in a form's `<input>` that nothing stopped
+  submits the form, as a browser's implicit submission does),
+  `drag: { from, to }` (synthetic DOM events, not a
   person's: focus and keyboard details can differ); `press: <action id>`
   (the nav bar), `view_params: {..}` (Back/Forward); `given: [..]` (the
   page runs again and the frame hears its rows, as after any command it

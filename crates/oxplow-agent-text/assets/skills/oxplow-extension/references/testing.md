@@ -117,7 +117,8 @@ model the SQL reads and the command it runs. Prefer `answers:` on pages.
      `- ui: [ { expect: { count: { li: 1 } } }, { click: "#go" }, { expect: {
      invoked: [{ command: <yours>, ok: true }] } } ]` runs the page's component
      in the oxplow app's own webview against this test's data — `click`,
-     `fill: { "#t": text }`, `key: { on, key }`, `drag: { from, to }`, `press:
+     `fill: { "#t": text }`, `key: { on, key }` (Enter in a form's input submits the form unless
+     the keydown was stopped), `drag: { from, to }`, `press:
      <nav-bar action id>`, `view_params`, `given`, `confirm: false`, `form: {
      submit: {..} }`, and `expect: { visible, count, text, title, actions,
      view_params, invoked, navigated, confirmed, forms, shown }` (waited for,

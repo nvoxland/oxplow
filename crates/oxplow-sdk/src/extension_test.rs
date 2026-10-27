@@ -7517,6 +7517,88 @@ steps:
         );
     }
 
+    /// A component page of one custom component, for the `ui` tests: its
+    /// `app.js` runs on `oxplow.connect()`'s component.
+    fn component_ext(root: &Path, app: &str) {
+        write(
+            root,
+            ".oxplow/extensions/cards/extension.yaml",
+            "manifest: 2
+name: cards
+intent:
+  purpose: Cards.
+  examples:
+    - { name: drawn, input: { page: board }, expect: cards }
+permissions: { commands: [oxplow.work_item.create] }
+custom_components:
+  - { id: cards, title: Cards, commands: [oxplow.work_item.create] }
+",
+        );
+        write(
+            root,
+            ".oxplow/extensions/cards/pages/board.yaml",
+            "title: Board
+params:
+  - { name: kind, role: filter, default: all }
+data:
+  items: { sql: \"SELECT title FROM v_work_item WHERE :kind = 'all' OR title LIKE :kind || '%' ORDER BY title\" }
+view: { component: { id: cards } }
+",
+        );
+        write(
+            root,
+            ".oxplow/extensions/cards/components/cards/index.html",
+            "<!doctype html><html><body><form id=\"f\"><input id=\"t\"><span id=\"err\"></span></form><ul id=\"list\"></ul>\
+             <script src=\"/component-lib/oxplow-component.js\"></script><script src=\"app.js\"></script></body></html>",
+        );
+        write(
+            root,
+            ".oxplow/extensions/cards/components/cards/app.js",
+            app,
+        );
+    }
+
+    /// Enter in a field of a form submits it, as a browser does: the form's
+    /// own `submit` handler runs, and one that stops the keydown keeps it
+    /// from submitting.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_ui_enter_submits_the_form_a_field_is_in() {
+        assert!(
+            crate::component_harness::shell().is_some(),
+            "no oxplow app to draw the harness: build it first (`bun run build:dev`)"
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        component_ext(
+            root,
+            "oxplow.connect().then(function (c) {
+  var f = document.getElementById('f'), t = document.getElementById('t');
+  f.addEventListener('submit', function (e) {
+    e.preventDefault();
+    if (!t.value) { document.getElementById('err').textContent = 'Required'; return; }
+    document.getElementById('err').textContent = '';
+    c.invoke('oxplow.work_item.create', { title: t.value });
+  });
+});
+",
+        );
+        write(
+            root,
+            ".oxplow/extensions/cards/fixtures/drawn.yaml",
+            "when: { page: board }
+steps:
+  - ui:
+      - key: { on: \"#t\", key: Enter }
+      - expect: { text: { \"#err\": Required }, invoked: [] }
+      - fill: { \"#t\": Second }
+      - key: { on: \"#t\", key: Enter }
+      - expect: { text: { \"#err\": \"\" }, invoked: [{ command: oxplow.work_item.create, ok: true }] }
+",
+        );
+        let report = test_extension(root, "cards", false).await.unwrap();
+        assert_eq!(report.errors, Vec::<String>::new());
+    }
+
     /// `rows: []` is no rows, like `rows: 0`.
     #[tokio::test(flavor = "multi_thread")]
     async fn an_empty_row_list_is_no_rows() {

@@ -50,10 +50,9 @@ async function titled(daemon: Daemon, title: string): Promise<boolean> {
   return out.rows.length > 0;
 }
 
-/** The Board, replaced: the lanes and the drag are the example's `ui`
- *  fixture's; here the drag runs over each work list, then the rename and the
- *  empty title's refusal under its input (a `ui` key step doesn't submit a
- *  form). `scope` is the Board's scope that shows the items. */
+/** The Board, replaced: the lanes, the drag and the title's rename are the
+ *  example's `ui` fixtures'; here the drag runs over each work list. `scope`
+ *  is the Board's scope that shows the items. */
 async function swimlanes(page: Page, daemon: Workspace, scope: string) {
   await run(daemon, "oxplow.work_item.create", { title: "Card one", thread: daemon.thread });
   // A tracker's items reach oxplow's models through its collector's read.
@@ -74,25 +73,9 @@ async function swimlanes(page: Page, daemon: Workspace, scope: string) {
   await card.dragTo(frame.locator('.lane[data-state="done"]'));
   await expect(frame.locator('.lane[data-state="done"] .card', { hasText: "Card one" })).toBeVisible();
   expect(await stateOf(daemon, "Card one")).toBe("done");
-
-  // The title is its own form: Enter saves, an empty one is refused under
-  // the input, Escape puts it back.
-  const done = frame.locator('.lane[data-state="done"] .card');
-  await done.locator(".title").click();
-  const input = done.locator("input.ox-input");
-  await input.fill("");
-  await input.press("Enter");
-  await expect(done.locator(".ox-error")).toBeVisible();
-  await input.press("Escape");
-  await expect(done.locator(".title")).toHaveText("Card one");
-  await done.locator(".title").click();
-  await done.locator("input.ox-input").fill("Card renamed");
-  await done.locator("input.ox-input").press("Enter");
-  await expect(frame.locator(".card", { hasText: "Card renamed" })).toBeVisible();
-  await until("the rename to be stored", 15_000, () => titled(daemon, "Card renamed"));
 }
 
-test("the swimlanes replace the Board: drag and rename", async ({ fresh }) => {
+test("the swimlanes replace the Board and move a card", async ({ fresh }) => {
   const { page, daemon } = fresh;
   await install(daemon);
   await swimlanes(page, daemon, "thread");
