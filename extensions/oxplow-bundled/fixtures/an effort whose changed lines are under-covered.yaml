@@ -1,0 +1,25 @@
+# The effort's diff coverage, the uncovered changed lines by file, and its
+# test runs, newest first.
+given:
+  - { command: oxplow.effort.open, input: { thread: thr1 } }
+  - observe:
+      evidence:
+        effort: eff1
+        observations:
+          - { kind: test-run, payload: { passed: 41, failed: 0, command: cargo test } }
+          - kind: diff-coverage
+            metric_value: 72.5
+            payload:
+              summaryPct: 72.5
+              coveredLines: 29
+              changedLines: 40
+              files:
+                - { path: src/parse.rs, uncoveredChangedLines: [88, 89, 90] }
+                - { path: src/ok.rs, uncoveredChangedLines: [] }
+when: { page: oxplow-bundled/effort-tests, params: { effort_id: 1 } }
+expect:
+  loaders:
+    effort_coverage: { rows: [{ summary: "**73%** of changed lines covered · 29/40" }] }
+    effort_untested_files:
+      rows: [{ path: src/parse.rs, uncovered: 3, first_line: 88, lines: "88, 89, 90" }]
+    effort_test_runs: { rows: [{ passed: 41, failed: 0, command: cargo test }] }

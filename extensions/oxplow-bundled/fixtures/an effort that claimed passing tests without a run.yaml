@@ -1,0 +1,11 @@
+# A claim that the tests pass, with no test run behind it, is listed as
+# unverified.
+given:
+  - { command: oxplow.effort.open, input: { thread: thr1 } }
+  - command: oxplow.effort.replace_inferred_claims
+    input: { effort: eff1, claims: [{ statement: The tests pass., kind: tests_pass }] }
+when: { page: oxplow-bundled/unverified-claims, params: { effort_id: 1 } }
+expect:
+  loaders:
+    unverified_claims:
+      rows: [{ statement: The tests pass., kind: tests_pass, source: Read, state: Unverified }]

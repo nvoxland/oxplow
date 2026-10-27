@@ -1,0 +1,17 @@
+# Each PR's number, title and author, with the work item its title names.
+given:
+  - { command: oxplow.work_item.create, input: { title: Parse blocks }, bind: item }
+  - rows:
+      pr:
+        - { number: 12, title: "tsk1: parse blocks", state: open, author: ann, head_branch: parse, draft: false }
+        - { number: 11, title: "Fix a typo", state: closed, author: bob, head_branch: typo, draft: false }
+when: { page: prs-by-task, params: { state: all } }
+expect:
+  loaders:
+    prs_by_task:
+      rows:
+        - { number: 12, state: open, author: ann, item: Parse blocks }
+        - { number: 11, state: closed, author: bob, item: null }
+steps:
+  - params: { state: open }
+    expect: { loaders: { prs_by_task: { rows: [{ number: 12 }] } } }

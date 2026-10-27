@@ -26,7 +26,7 @@ intent:
       input: { page: unverified-claims, params: { effort_id: 1 } }
       expect: the claim listed with no verifying test run
     - name: a stream with blocked tasks and open follow-ups
-      input: { page: waiting-on-me, params: { stream_id: 1 } }
+      input: { page: waiting-on-me }
       expect: the blocked tasks and open follow-up comments, and the Waiting panel's badge firing
     - name: an effort whose changed lines are under-covered
       input: { page: effort-tests, params: { effort_id: 1 } }

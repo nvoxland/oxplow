@@ -1,0 +1,13 @@
+# Bookmarking a page puts it in v_bookmark at the thread's scope; removing
+# it takes it out.
+when:
+  command: oxplow.bookmark.set
+  input: { uri: "oxplow:oxplow/page?page=git-dashboard", page_kind: git-dashboard, scope: thread, thread: thr1 }
+expect: { ok: true }
+steps:
+  - when: { sql: "SELECT uri, page_kind, scope FROM v_bookmark" }
+    expect: { rows: [{ uri: "oxplow:oxplow/page?page=git-dashboard", page_kind: git-dashboard, scope: thread }] }
+  - when: { command: oxplow.bookmark.remove, input: { uri: "oxplow:oxplow/page?page=git-dashboard", thread: thr1 } }
+    expect: { ok: true }
+  - when: { sql: "SELECT count(*) AS n FROM v_bookmark" }
+    expect: { rows: [{ n: 0 }] }
