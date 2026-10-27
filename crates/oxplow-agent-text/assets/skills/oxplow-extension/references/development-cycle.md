@@ -11,8 +11,9 @@ edits change nothing on the person's screen until you deploy.
 1. Edit the source. Write as many files as the step needs.
 2. Check it after every edit: `oxplow_validate_extension` (the same report
    as `oxplow extension check`), `oxplow_run_page` (`draft: true` in a worktree),
-   `oxplow_preview_extension`, `oxplow_show_page` with a `spec`. These read the source and dry-run, so
-   they need no deploy.
+   `oxplow_show_page` with a `spec`; and run its fixtures with
+   `$OXPLOW_BIN extension test <name>` in your terminal. These read the
+   source and dry-run, so they need no deploy.
 3. When a step is complete, run `oxplow.extension.deploy { name }` with
    `run_command`. It deploys the source in the main stream's checkout,
    uncommitted changes included: deploy to let the person see a change,

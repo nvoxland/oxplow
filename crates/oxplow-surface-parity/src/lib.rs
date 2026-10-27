@@ -120,9 +120,6 @@ pub const MANIFEST: &[Capability] = &[
     agent("oxplow_get_skill"),
     // A dry run for an agent writing a source in its worktree.
     agent("oxplow_preview_collector"),
-    // A whole extension in a throwaway oxplow, for an agent authoring it;
-    // a person runs `oxplow extension test`.
-    agent("oxplow_preview_extension"),
     model("list_streams", &["v_stream"]),
     // The work-item interface, read for the agent; the UI reads the
     // models (`v_work_item`).

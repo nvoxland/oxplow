@@ -8,9 +8,9 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+use crate::{Format, Kind};
 use oxplow_app::extension_catalog::ExtensionCatalog;
 use oxplow_app::extensions::EXTENSIONS_DIR;
-use oxplow_sdk::{Format, Kind};
 
 const USAGE: &str = "\
 usage:
@@ -41,14 +41,15 @@ usage:
       models and their rows, collectors' outputs, providers' grants —
       writing nothing. --services lists, per script, the host services it
       uses (sql.read, tree.read, ai.compute) and whether it declared them
-  oxplow extension test <name|path> [--bless] [--json] [--root <dir>]
+  oxplow extension test <name|path> [--bless] [--json] [--junit <file>] [--root <dir>]
       on a throwaway oxplow over a copy of the project's extensions: check,
       then each intent example's fixture (a page's rows, a collector's
       entities, a command's composition), questions.yaml, and each declared
       provider: its handshake against its declarations, its test config,
       its examples, every message against the protocol's schemas, its
       golden transcript (--bless writes it) and its capability's
-      conformance suite
+      conformance suite. --junit also writes the report to <file> as JUnit,
+      for a report collector
 
 <name|path> is an extension name (its source in the project's
 .oxplow/extensions/, or where extensionSources points), or the path to that
@@ -81,11 +82,11 @@ pub fn run_to(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 
 
 enum Failure {
     Usage(String),
-    Sdk(oxplow_sdk::SdkError),
+    Sdk(crate::SdkError),
 }
 
-impl From<oxplow_sdk::SdkError> for Failure {
-    fn from(e: oxplow_sdk::SdkError) -> Self {
+impl From<crate::SdkError> for Failure {
+    fn from(e: crate::SdkError) -> Self {
         Failure::Sdk(e)
     }
 }
@@ -106,6 +107,8 @@ struct Parsed {
     /// `check --services`: each script's services.
     services: bool,
     against: Option<String>,
+    /// `test --junit <file>`: also write the report there as JUnit.
+    junit: Option<PathBuf>,
 }
 
 fn parse(args: &[String]) -> Result<Parsed, Failure> {
@@ -121,6 +124,7 @@ fn parse(args: &[String]) -> Result<Parsed, Failure> {
         impact: false,
         services: false,
         against: None,
+        junit: None,
     };
     let mut it = args.iter();
     while let Some(a) = it.next() {
@@ -170,6 +174,12 @@ fn parse(args: &[String]) -> Result<Parsed, Failure> {
                 )
             }
             "--bless" => p.bless = true,
+            "--junit" => {
+                p.junit =
+                    Some(PathBuf::from(it.next().ok_or_else(|| {
+                        Failure::Usage("--junit needs a file".into())
+                    })?))
+            }
             "-h" | "--help" | "help" => return Err(Failure::Usage("help".into())),
             flag if flag.starts_with('-') => {
                 return Err(Failure::Usage(format!("unknown flag `{flag}`")))
@@ -213,9 +223,9 @@ fn run_inner(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> Resul
                         .into(),
                 ));
             }
-            let starter = oxplow_sdk::MetricStarter::new(p.language.as_deref(), p.glob.as_deref())
+            let starter = crate::MetricStarter::new(p.language.as_deref(), p.glob.as_deref())
                 .map_err(Failure::Usage)?;
-            let made = oxplow_sdk::scaffold_with(&root, kind, name, p.origin.as_deref(), &starter)?;
+            let made = crate::scaffold_with(&root, kind, name, p.origin.as_deref(), &starter)?;
             let _ = writeln!(out, "created {}", made.dir);
             for f in &made.files {
                 let _ = writeln!(out, "  {f}");
@@ -235,7 +245,7 @@ fn run_inner(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> Resul
             let catalog = ExtensionCatalog::new();
             // Read-only, no migrations: this CLI may not be the app's
             // version, and it must never change the project's database.
-            let db = oxplow_sdk::project_database(&root).and_then(|path| {
+            let db = crate::project_database(&root).and_then(|path| {
                 match oxplow_db::Database::open_read_only(&path) {
                     Ok(db) => Some(db),
                     Err(e) => {
@@ -253,7 +263,7 @@ fn run_inner(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> Resul
             // starts a throwaway one, and its impact review uses the same.
             let against = (p.impact || p.against.is_some())
                 .then(|| p.against.clone().unwrap_or_else(|| "HEAD".into()));
-            let report = block_on(oxplow_sdk::check(
+            let report = block_on(crate::check(
                 &root,
                 &name,
                 &catalog,
@@ -262,11 +272,11 @@ fn run_inner(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> Resul
                 against.as_deref(),
             ))?;
             let format = if p.json { Format::Json } else { Format::Text };
-            let _ = write!(out, "{}", oxplow_sdk::render_findings(&report, format));
+            let _ = write!(out, "{}", crate::render_findings(&report, format));
             if p.json {
                 let _ = writeln!(out);
             } else if p.services {
-                let _ = write!(out, "{}", oxplow_sdk::render_services(&report));
+                let _ = write!(out, "{}", crate::render_services(&report));
             }
             Ok(if report.ok { 0 } else { 1 })
         }
@@ -277,17 +287,29 @@ fn run_inner(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> Resul
             let (root, name) = locate(p.root.as_deref(), target);
             // A throwaway oxplow over a copy of the project's extensions:
             // the project's database is never opened.
-            let report = block_on(oxplow_sdk::extension_test::test_extension(
-                &root, &name, p.bless,
-            ))?;
+            let report = block_on(crate::extension_test::test_extension(&root, &name, p.bless))?;
             let format = if p.json { Format::Json } else { Format::Text };
-            let _ = write!(
-                out,
-                "{}",
-                oxplow_sdk::extension_test::render(&report, format)
-            );
+            let _ = write!(out, "{}", crate::extension_test::render(&report, format));
             if p.json {
                 let _ = writeln!(out);
+            }
+            if let Some(file) = &p.junit {
+                let written = file
+                    .parent()
+                    .map_or(Ok(()), std::fs::create_dir_all)
+                    .and_then(|()| {
+                        std::fs::write(
+                            file,
+                            format!(
+                                "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<testsuites>\n{}</testsuites>\n",
+                                crate::extension_test::render(&report, Format::Junit)
+                            ),
+                        )
+                    });
+                if let Err(e) = written {
+                    let _ = writeln!(err, "oxplow extension: {}: {e}", file.display());
+                    return Ok(1);
+                }
             }
             Ok(if report.ok { 0 } else { 1 })
         }
@@ -303,7 +325,7 @@ fn cwd() -> PathBuf {
 /// path `…/.oxplow/extensions/<name>` names its own project; anything
 /// else is a name under `--root` (or the current directory).
 fn locate(root: Option<&Path>, target: &str) -> (PathBuf, String) {
-    let name = oxplow_sdk::name_of(target).to_string();
+    let name = crate::name_of(target).to_string();
     if let Some(root) = root {
         return (root.to_path_buf(), name);
     }
@@ -355,6 +377,40 @@ mod tests {
             String::from_utf8(out).unwrap(),
             String::from_utf8(err).unwrap(),
         )
+    }
+
+    /// `test --junit <file>` also writes the report as JUnit, which a
+    /// project's report collector reads into the Tests panel.
+    #[test]
+    fn test_writes_junit_when_asked() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_str().unwrap();
+        let (code, _, err) = cli(&[
+            "new",
+            "page",
+            "demo",
+            "--origin",
+            "oxplow:oxplow/effort?id=eff1",
+            "--root",
+            root,
+        ]);
+        assert_eq!(code, 0, "{err}");
+        let junit = dir.path().join("out/junit.xml");
+        let (code, out, err) = cli(&[
+            "test",
+            "demo",
+            "--root",
+            root,
+            "--junit",
+            junit.to_str().unwrap(),
+        ]);
+        assert_eq!(code, 0, "{out}{err}");
+        assert!(out.contains("demo: 0 errors"), "{out}");
+        let xml = std::fs::read_to_string(&junit).unwrap();
+        assert!(
+            xml.starts_with("<?xml") && xml.contains("<testsuite name=\"demo\""),
+            "{xml}"
+        );
     }
 
     #[test]

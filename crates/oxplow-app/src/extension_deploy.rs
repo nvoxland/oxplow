@@ -698,7 +698,7 @@ pub async fn refuse_draft_deploy(
     Err(invalid(format!(
         "`{name}` deploys only from the main stream ({}, on `{main_branch}`); this thread's \
          stream `{stream}` (on `{}`) holds a draft of it. Check it with \
-         `oxplow_validate_extension` and test it with `oxplow_preview_extension` there. \
+         `oxplow_validate_extension` and test it with `$OXPLOW_BIN extension test {name}` there. \
          It deploys once the change is on `{main_branch}`: from a main-stream thread, or \
          Settings → Extensions.",
         project.display(),

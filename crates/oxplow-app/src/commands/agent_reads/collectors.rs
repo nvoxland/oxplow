@@ -20,8 +20,8 @@ pub struct PreviewCollectorParams {
     /// The collector's `id` in its `collectors:`.
     pub id: String,
     /// Stream whose files and data it reads; omit for your own. What runs
-    /// is the deployed collector: a draft is checked with
-    /// `oxplow_preview_extension`.
+    /// is the deployed collector: a draft is tested with
+    /// `$OXPLOW_BIN extension test <name>`.
     pub stream_id: Option<String>,
     /// The event an `on:` collector reacts to, as a fixture writes it:
     /// `{ type, v?, payload?, subject?, anchors? }`. The script gets it as
@@ -88,7 +88,7 @@ pub fn ops(services: ServicesSlot) -> Vec<Op> {
                 RunCollectorError::NotFound => invalid(
                     "/id",
                     format!(
-                        "no deployed collector `{}/{}` (see `v_extension`; a draft is checked with `oxplow_preview_extension`)",
+                        "no deployed collector `{}/{}` (see `v_extension`; a draft is tested with `$OXPLOW_BIN extension test <name>`)",
                         p.owner, p.id
                     ),
                 ),

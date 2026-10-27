@@ -4,7 +4,6 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-mod extension_cli;
 mod icon_tint;
 
 use oxplow_tauri_ipc::{specta_builder, windows};
@@ -19,7 +18,7 @@ fn main() {
         return;
     }
     if let Some(args) = extension_args() {
-        std::process::exit(extension_cli::run(&args));
+        std::process::exit(oxplow_sdk::cli::run(&args));
     }
 
     init_tracing();

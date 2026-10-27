@@ -1,8 +1,8 @@
 //! `extensions.check` operations: look at an extension before it ships —
-//! validate a folder (`oxplow.extension.validate`), preview it in a
-//! throwaway oxplow (`oxplow.extension.preview`), and say how a stream's
+//! validate a folder (`oxplow.extension.validate`) and say how a stream's
 //! draft differs from what runs (`oxplow.extension.draft_status`). None
-//! changes a record.
+//! changes a record. Its tests run outside oxplow, in a process of their
+//! own: `$OXPLOW_BIN extension test <name>`.
 
 use std::path::Path;
 use std::sync::{Arc, OnceLock};
@@ -37,9 +37,6 @@ pub trait ExtensionChecks: Send + Sync {
         root: &Path,
         name: &str,
     ) -> Result<Value, CheckError>;
-    /// What `oxplow extension test` reports for `name` under `root`, in a
-    /// throwaway oxplow with no environment.
-    async fn preview(&self, root: &Path, name: &str) -> Result<Value, CheckError>;
 }
 
 /// Where the installed [`ExtensionChecks`] sits.
@@ -140,34 +137,6 @@ pub fn ops(services: ServicesSlot) -> Vec<Op> {
                 result_of(report)
             },
         ),
-        read_op(
-            "extensions.check",
-            "preview",
-            services.clone(),
-            |svc, actor, p: ValidateExtensionParams| async move {
-                check_optional_stream(
-                    "oxplow_preview_extension",
-                    "/stream_id",
-                    p.stream_id.as_deref(),
-                )?;
-                let stream = stream_or_actors(&svc, &actor, p.stream_id.clone()).await?;
-                let root = svc
-                    .worktrees
-                    .resolve(stream.as_deref())
-                    .await
-                    .into_local_path();
-                // An agent's preview: the extension's programs see no
-                // environment (no person's credentials), and model calls
-                // answer from the fixtures.
-                let report = svc
-                    .extension_checks
-                    .get()?
-                    .preview(&root, &p.name)
-                    .await
-                    .map_err(|e| check_failed(&p.name, e))?;
-                result_of(report)
-            },
-        ),
     ]
 }
 
@@ -193,19 +162,6 @@ mod tests {
                 .join(name)
                 .exists()
                 .then(|| json!({ "ok": true, "root": root.to_string_lossy() }))
-                .ok_or(CheckError::NotFound)
-        }
-        async fn preview(&self, root: &Path, name: &str) -> Result<Value, CheckError> {
-            self.validate_in(root, name)
-        }
-    }
-
-    impl Folder {
-        fn validate_in(&self, root: &Path, name: &str) -> Result<Value, CheckError> {
-            root.join(".oxplow/extensions")
-                .join(name)
-                .exists()
-                .then(|| json!({ "ok": true }))
                 .ok_or(CheckError::NotFound)
         }
     }

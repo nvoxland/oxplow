@@ -42,8 +42,9 @@ Rules:
 - `v_collector_run` shows each collector's last run and error, and
   `v_collector_state` whether this OS enforces its `network` list
   (`network_enforced`) and why failures disabled it, if they did.
-- **Check a collector before you deploy it** with `oxplow_preview_extension`:
-  it runs your source (a worktree's draft included) in a throwaway oxplow,
+- **Test a collector before you deploy it** with `$OXPLOW_BIN extension test
+  <name>` from your terminal: it runs your source (a worktree's draft
+  included) in a throwaway oxplow,
   through the examples you wrote for it. Your source's code runs nowhere
   else until it is deployed from the main stream.
 - `oxplow_preview_collector(owner, id, stream_id)` dry-runs the **deployed**

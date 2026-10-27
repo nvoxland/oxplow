@@ -232,7 +232,6 @@ mod tests {
                 "oxplow_list_tabs",
                 "oxplow_navigate",
                 "oxplow_preview_collector",
-                "oxplow_preview_extension",
                 "oxplow_query_sql",
                 "oxplow_read",
                 "oxplow_run_page",

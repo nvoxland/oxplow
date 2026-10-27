@@ -25,8 +25,8 @@ Each recipe: write the file, check it, deploy, test.
 4. Add a fixture (`testing.md` "Pages"): `fixtures/<name>.yaml` with
    `given:` steps (`{ command, input }` makes data), `input: { page: <slug> }`
    and `expect: { loaders: { items: { rows: [{ title: T }] } } }`, and
-   an `intent.examples` entry that names it. `oxplow_preview_extension`
-   runs it and every `answers:` entry.
+   an `intent.examples` entry that names it. `$OXPLOW_BIN extension test
+   <name>` runs it and every `answers:` entry.
 5. Deploy from the main stream (`development-cycle.md`), tell the person
    the title.
 

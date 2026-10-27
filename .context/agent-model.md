@@ -253,7 +253,7 @@ Every tool foundation declares is named below
 | Common questions, typed | foundation pages with `tool:`: `oxplow_thread_work`, `oxplow_work_next`, `oxplow_effort_summary`, `oxplow_catalog` (each runs `oxplow.page.run` on its page, its params the tool's input: `agent_tools::ToolTarget::Page`). Every other page is `oxplow_find_page` → `oxplow_run_page` (`effort-files`, `file-history`, `recent-commits`, `snapshots`, `thread-sessions`, `session-transcript`) |
 | What the person has | `oxplow_list_tabs` (the tabs each of their windows shows, per thread, stream or project: selected, on screen, stale), `oxplow_get_open_page` (the page open in a thread in the window they were in last, the others' beside it, or one listed tab: `page` is its identity, `view` its `#`; the page's run as a tree with their params, and the focused node), `oxplow_list_comments` (their anchored comments, hydrated) |
 | Wiki | `oxplow_wiki_ref_drift` (one stale ref's diff against its pin) |
-| Extension authoring | `oxplow_validate_extension`, `oxplow_preview_extension`, `oxplow_preview_collector` |
+| Extension authoring | `oxplow_validate_extension`, `oxplow_preview_collector`; its tests run in a process of their own, `$OXPLOW_BIN extension test <name>` (`OXPLOW_BIN`: the daemon's binary, set for every agent session) |
 | oxplow's guidance | `oxplow_get_skill { name, reference? }` |
 
 A tool's `read_only_hint` (so a client can auto-approve) is its

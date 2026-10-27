@@ -572,7 +572,7 @@ the user guide is `docs/guide/pages.md`.
     `get_page`, `page_text`, `page_form`, `submit_page_form`,
     `run_page_action`, `validate_extension`. MCP: `oxplow_run_page`,
     `oxplow_find_page`, `oxplow_show_page`, `oxplow_run_page_action`,
-    `oxplow_validate_extension`, `oxplow_preview_extension`; an agent reads a
+    `oxplow_validate_extension`; an agent reads a
     page's definition with `oxplow_read`
     (`oxplow:oxplow/page?page=<ext>/<slug>`).
   - An agent lists pages, extensions and what each contributes with
@@ -586,10 +586,18 @@ the user guide is `docs/guide/pages.md`.
     **source**: an omitted `stream_id` is the caller's own stream
     (its header, else its thread's; the primary only for an anonymous
     caller), so an agent in a worktree can check the extension it just
-    wrote before it deploys it — the same for `oxplow_preview_extension`
-    (a throwaway over that stream's sources, under the project's
-    settings: which extensions are on come from the main checkout),
+    wrote before it deploys it — the same for
     `oxplow_run_page` with `draft: true` and `oxplow_ensure_change`.
+  - **An agent tests an extension with the CLI, not a tool:**
+    `$OXPLOW_BIN extension test <name> [--junit <file>]` from its own
+    checkout (a worktree's draft as it is). `OXPLOW_BIN` is set for every
+    agent session to the binary that launched it (the daemon's, which has
+    the `extension` subcommands too, so it works on a remote host). The
+    throwaway runs in that process, never in the app: a hang, a crash or
+    its memory are the test's. It is a test run like any other — a
+    `runPatterns` entry and a report collector for `--junit` put it in the
+    Tests panel — and its programs see the agent's own environment, which
+    the agent's shell already has.
     `oxplow_preview_collector` reads that stream's files and data but runs
     the deployed entity collector. `oxplow.extension.deploy` names no
     stream: it deploys the main stream's copy.
@@ -1798,8 +1806,9 @@ and one calling MCP read identical `file:line: what — fix` lines.
   Then a stub `bin/provider` that exits 1 and `fixtures/provider-<id>.yaml`
   (`config: {}`).
 - **`extension_test::test_extension(root, name, bless)`** (`extension
-  test <name> [--bless] [--json]`, P5.D5; MCP `oxplow_preview_extension`, which
-  runs it for an agent with an empty environment) runs on **a throwaway
+  test <name> [--bless] [--json] [--junit <file>]`, P5.D5, from either
+  binary: `oxplow extension …` and `oxplow-daemon extension …` are the one
+  CLI, `oxplow_sdk::cli`) runs on **a throwaway
   oxplow** (`throwaway::Host`) that is a real one: a temp project with a
   copy of the project's `.oxplow/extensions/` and of which it turned off
   (nothing else of its config — its provider instances would start its
@@ -2468,7 +2477,8 @@ JSON, 50 as text, with `truncated`), `oxplow_run_page_action`,
 `oxplow_show_page` (an inline `spec`, or an existing page with params,
 beside the conversation), `oxplow_get_open_page` (the page's tree, the
 viewer's filters and picks and the focused node). `oxplow_validate_extension`
-and `oxplow_preview_extension` check and preview a page before deploy.
+checks a page before deploy, and `$OXPLOW_BIN extension test <name>` runs
+its fixtures.
 `v_page`, `v_page_answer` and `v_page_param` list the loaded pages
 for SQL.
 
@@ -4945,8 +4955,8 @@ tool: open_work              # offered as <namespace>_open_work
   project-wide (one `ext__<ext>__<entity>` table), so a run (the
   `oxplow.collector.sync` command over `CollectorRunner::sync`, from any caller)
   always runs the **live** copy. An agent
-  writing a collector checks it with MCP
-  `oxplow_preview_extension` (a throwaway, through its examples); MCP
+  writing a collector tests it with `$OXPLOW_BIN extension test <name>` (a
+  throwaway, through its examples); MCP
   `oxplow_preview_collector(owner, id, stream_id)` dry-runs what is
   deployed against that stream's files and data: `collector_runner::
   preview_collector` runs the deployed entity collector through the same

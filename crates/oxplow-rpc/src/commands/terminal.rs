@@ -64,6 +64,8 @@ fn not_stopped(session: &AgentSession) -> Result<(), IpcError> {
 /// about itself: the hook endpoint, its session's bearer, and its stream,
 /// thread and session. The bearer alone tells the control plane who is
 /// calling; the ids are the agent's own knowledge of where it is.
+/// `OXPLOW_BIN` is this process's own binary, which runs the extension SDK
+/// (`$OXPLOW_BIN extension test <name>`) wherever the agent runs.
 fn identity_env(
     endpoints: &Endpoints,
     stream: StreamId,
@@ -82,6 +84,12 @@ fn identity_env(
         ("OXPLOW_STREAM_ID".to_string(), stream.to_string()),
         ("OXPLOW_THREAD_ID".to_string(), thread.to_string()),
         ("OXPLOW_SESSION".to_string(), session.to_string()),
+        (
+            "OXPLOW_BIN".to_string(),
+            std::env::current_exe()
+                .map(|p| p.to_string_lossy().into_owned())
+                .unwrap_or_else(|_| "oxplow".to_string()),
+        ),
     ]
 }
 
@@ -480,6 +488,11 @@ mod tests {
         assert_eq!(env["OXPLOW_THREAD_ID"], "thr2");
         assert_eq!(env["OXPLOW_STREAM_ID"], "str1");
         assert_eq!(env["OXPLOW_HOOK_TOKEN"], "test-token");
+        // The binary that runs `extension test`: this process's own.
+        assert_eq!(
+            env["OXPLOW_BIN"],
+            std::env::current_exe().unwrap().to_string_lossy()
+        );
     }
 
     fn runtime() -> crate::PluginRuntime {

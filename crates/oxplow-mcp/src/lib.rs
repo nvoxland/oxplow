@@ -31,7 +31,7 @@ pub struct OxplowMcp {
     tool_router: ToolRouter<Self>,
 }
 
-/// The extension checks `oxplow.extension.validate` and `.preview` run
+/// The extension check `oxplow.extension.validate` runs
 /// (`oxplow-sdk`'s, which `oxplow-app` can't link): installed on the
 /// services of every host that serves these tools. Idempotent.
 pub fn install_extension_checks(services: &Services) {
@@ -55,22 +55,6 @@ impl ExtensionChecks for SdkChecks {
             Some(&svc.sql),
             Some(svc.commands.as_ref()),
             None,
-        )
-        .await
-        .map_err(sdk_check_error)?;
-        serde_json::to_value(report).map_err(|e| CheckError::Failed(e.to_string()))
-    }
-
-    async fn preview(
-        &self,
-        root: &std::path::Path,
-        name: &str,
-    ) -> Result<serde_json::Value, CheckError> {
-        let report = oxplow_sdk::extension_test::test_extension_in(
-            root,
-            name,
-            false,
-            Arc::new(|_: &str| None),
         )
         .await
         .map_err(sdk_check_error)?;

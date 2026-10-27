@@ -4595,6 +4595,7 @@ dependencies = [
  "oxplow-db",
  "oxplow-domain",
  "oxplow-rpc",
+ "oxplow-sdk",
  "oxplow-workspace-hack",
  "reqwest",
  "serde",

@@ -261,7 +261,7 @@ pub const SCOPES: &[Scope] = &[
         access: Access::Read,
         host: Host::Daemon,
         spends: false,
-        summary: "Check an extension before it is deployed: validate its source, or preview what it contributes in a throwaway oxplow (it changes no record).",
+        summary: "Check an extension before it is deployed: validate its source, or say how a stream's draft differs from what runs (it changes no record).",
     },
     Scope {
         id: "extensions.deploy",

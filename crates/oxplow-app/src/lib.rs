@@ -2311,7 +2311,6 @@ mod tests {
                 "oxplow.extension.enable",
                 // Page YAML in the extension source; deployment owns what runs.
                 "oxplow.extension.new_dashboard",
-                "oxplow.extension.preview",
                 "oxplow.extension.remove",
                 "oxplow.extension.revoke_secret",
                 "oxplow.extension.rollback",

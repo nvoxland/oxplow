@@ -150,6 +150,7 @@ pub const NOT_INHERITED: &[&str] = &[
     "OXPLOW_STREAM_ID",
     "OXPLOW_THREAD_ID",
     "OXPLOW_SESSION",
+    "OXPLOW_BIN",
     "OXPLOW_HOOK_DEBUG",
 ];
 

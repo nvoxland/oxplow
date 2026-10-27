@@ -21,6 +21,7 @@ oxplow-ai = { workspace = true }
 oxplow-db = { workspace = true }
 oxplow-rpc = { workspace = true }
 oxplow-control-plane = { workspace = true }
+oxplow-sdk = { workspace = true }
 
 axum = { version = "0.8", features = ["json", "ws"] }
 tower-http = { version = "0.7", features = ["cors"] }

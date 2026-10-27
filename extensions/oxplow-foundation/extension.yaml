@@ -609,7 +609,7 @@ commands:
     example: {"kind": "commit", "sha": "HEAD"}
   # collectors.preview
   - name: collector.preview
-    summary: "Dry-run a collector, storing nothing. Runs the deployed entity collector against a stream's files and data (a draft's code doesn't run outside a throwaway: check a source you're writing with `oxplow_preview_extension`); a fact collector, which only computes, runs that stream's own script. Returns what it would store: an entity collector's rows (first 50 per entity, coerced to the declared columns), or a fact collector's (`facts:`) facts as `{ owner, id, facts: [{ measure, value, subject, … }] }`, computed over the stream's latest snapshot (a collector that reads `input` rows is previewed through an example: `oxplow extension test`). oxplow.collector.sync runs it for real, and collected data is project-wide. Pass `event` (`{ type, payload, anchors? }`) to preview an `on:` collector on the event it reacts to. An exec collector still needs a person's approval of that exact version; starlark/jaq collectors run without it."
+    summary: "Dry-run a collector, storing nothing. Runs the deployed entity collector against a stream's files and data (a draft's code doesn't run outside a throwaway: test a source you're writing with `$OXPLOW_BIN extension test <name>`); a fact collector, which only computes, runs that stream's own script. Returns what it would store: an entity collector's rows (first 50 per entity, coerced to the declared columns), or a fact collector's (`facts:`) facts as `{ owner, id, facts: [{ measure, value, subject, … }] }`, computed over the stream's latest snapshot (a collector that reads `input` rows is previewed through an example: `oxplow extension test`). oxplow.collector.sync runs it for real, and collected data is project-wide. Pass `event` (`{ type, payload, anchors? }`) to preview an `on:` collector on the event it reacts to. An exec collector still needs a person's approval of that exact version; starlark/jaq collectors run without it."
     scope: collectors.preview
     op: preview
     tool: preview_collector
@@ -829,12 +829,6 @@ commands:
     op: cancel
     example: {"job_run": "01990000-0000-7000-8000-000000000000"}
   # extensions.check
-  - name: extension.preview
-    summary: "Preview a whole extension in a throwaway oxplow. What `oxplow extension test` runs, never touching this project's data. It checks the extension, activates it with the project's other extensions, and runs every intent example that has a fixture — pages, collectors, commands, effects, events, jobs and components — with model calls answered by the fixture's replies, never a real provider. Returns `{ ok, errors, warnings, ran, … }`; run it after `oxplow.extension.validate` and before handing the extension over."
-    scope: extensions.check
-    op: preview
-    tool: preview_extension
-    example: {"name": "my-extension"}
   - name: extension.draft_status
     summary: "How a stream's draft of an extension differs from what runs. Reads the extension's source in the stream's checkout (yours unless `stream_id` names another) and compares it with the running version: `differs`, the running `deployed_hash` (null when none runs) and the draft's `source_hash`, and for `pages` (page files, by id) and `commands` (by name) the `added`, `removed` and `changed` ones. `draft` is true when that checkout is not the main stream's: a draft deploys only once its change is on the main branch. A deploy that would remove a page or command warns about it."
     scope: extensions.check

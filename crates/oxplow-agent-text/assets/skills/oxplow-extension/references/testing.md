@@ -18,9 +18,9 @@ fit it, a loader reading one declared after it); the models compiled without
 publishing (SQL errors, a `ref()` that doesn't resolve, columns that differ
 from the declared contract); and a dry run of every advisory and every command
 example. It **always** dry-runs: a collector's entities stand in empty. It
-does not run a page's loaders: `oxplow_run_page` and `oxplow_preview_extension`
-(which opens each page with its `answers:` params) do, so a bad query in a
-page shows there. `ok: true` means it works; fix every
+does not run a page's loaders: `oxplow_run_page` and `extension test` (which
+opens each page with its `answers:` params) do, so a bad query in a page
+shows there. `ok: true` means it works; fix every
 `error`, and every `warning` unless you can say why not.
 
 Then **`oxplow_run_page { page, draft?, params? }`** returns exactly what the
@@ -33,15 +33,20 @@ An extension's own `questions.yaml` (`{ question, skill, reaches: { sql } |
 extension) also runs under `oxplow extension test`: the skill must name every
 model the SQL reads and the command it runs. Prefer `answers:` on pages.
 
-## Testing the whole extension (`oxplow_preview_extension`, fixtures)
+## Testing the whole extension (`extension test`, fixtures)
 
-**`oxplow_preview_extension(name, stream_id)`** (MCP; `oxplow extension test
-   <name>` from a terminal) runs your whole extension in a throwaway
-   oxplow: activated as the app activates it (your entities empty, your
-   models, commands, effects, jobs and components live), never the
-   project's database, your programs seeing no credentials, and every
-   model call answered by the fixture's `model.replies` — never a real
-   provider. Run it after `oxplow_validate_extension` and before handing over.
+**`$OXPLOW_BIN extension test <name>`**, from your terminal in your own
+   checkout (a worktree's draft as it is; `OXPLOW_BIN` is set in your
+   session, else run `oxplow`), runs your whole extension in a throwaway
+   oxplow, in a process of its own: activated as the app activates it
+   (your entities empty, your models, commands, effects, jobs and
+   components live), never the project's database or what is deployed,
+   with the project's extensions on (not the person's own choices), and
+   every model call answered by the fixture's `model.replies` — never a
+   real provider. It works before the extension's first deploy. Run it in
+   the foreground after `oxplow_validate_extension` and before handing
+   over; `--junit <file>` also writes a report for the Tests panel, `--json`
+   the full report. It exits 1 when anything failed.
    Its report says what it ran, the generation, what the extension
    `contributes`, and what it can't run here (`unsupported`: panels, decorators,
    replacements, skills — the app shows them).

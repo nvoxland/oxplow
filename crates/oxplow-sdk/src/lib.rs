@@ -10,6 +10,7 @@
 //! it gets back names the file and line and says what to change.
 
 pub mod answerability;
+pub mod cli;
 pub mod conformance;
 pub mod extension_test;
 mod throwaway;
