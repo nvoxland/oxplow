@@ -3592,6 +3592,7 @@ commands:
             ["`items` → oxplow:oxplow/model?model=maker/items v1: unavailable (maker exports v2)"]
         );
 
+        // A person's own disable doesn't change what a test runs with.
         let dir = tempfile::tempdir().unwrap();
         producer_and_consumer(dir.path(), 1);
         write(
@@ -3602,7 +3603,7 @@ commands:
         let report = test_extension(dir.path(), "reader", false).await.unwrap();
         assert_eq!(
             report.imports,
-            ["`items` → oxplow:oxplow/model?model=maker/items v1: unavailable (maker is disabled)"]
+            ["`items` → oxplow:oxplow/model?model=maker/items v1: available"]
         );
     }
 

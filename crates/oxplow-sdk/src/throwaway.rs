@@ -39,7 +39,9 @@ pub(crate) struct Host {
 impl Host {
     /// A throwaway over the extensions in `checkout` (the project's main
     /// checkout, or a worktree holding drafts) with `testing` on too,
-    /// activated. Which are on, and where their sources are, are the
+    /// activated. Which are on is the project's list and every source here —
+    /// never one person's `enableExtensions` / `disableExtensions`, so a
+    /// test runs the same for everyone; where their sources are is the
     /// project's settings (its main checkout's), read in `checkout`. Its
     /// programs see `env`. With `builds`, a copied source with a `build:` is
     /// built and deployed like the rest; without (a check, which runs no
@@ -78,16 +80,14 @@ impl Host {
             copy_dir(&source, &root.join(&rel)).map_err(|e| e.to_string())?;
             copied.insert(name, rel);
         }
-        // Which of them are on, and nothing else of its config: its
+        // Which of them are on — the project's, never one person's
+        // `enableExtensions` / `disableExtensions`, so a test passes or
+        // fails the same for everyone — and nothing else of its config: its
         // provider instances would start its programs here.
-        let mut on: Vec<String> = settings.enabled().into_iter().map(|(n, _)| n).collect();
-        // Every source here is on unless the person turned it off, as in a
-        // source load.
+        let mut on: Vec<String> = settings.team.clone();
+        // Every source here is on, as in a source load.
         for name in oxplow_app::extensions::known_names(checkout, &settings) {
-            if settings.source(checkout, &name).is_dir()
-                && !settings.personal.disable.contains(&name)
-                && !on.contains(&name)
-            {
+            if settings.source(checkout, &name).is_dir() && !on.contains(&name) {
                 on.push(name);
             }
         }
@@ -101,18 +101,6 @@ impl Host {
         )
         .map_err(|e| e.to_string())?;
         std::fs::write(config, yaml).map_err(|e| e.to_string())?;
-        // And the ones the person turned off stay off in the copy.
-        let off: Vec<&String> = settings
-            .personal
-            .disable
-            .iter()
-            .filter(|n| *n != testing)
-            .collect();
-        if !off.is_empty() {
-            let yaml = serde_yaml::to_string(&serde_json::json!({ "disableExtensions": off }))
-                .map_err(|e| e.to_string())?;
-            std::fs::write(root.join(".oxplow/personal.yaml"), yaml).map_err(|e| e.to_string())?;
-        }
         Self::boot(dir, root, on, copied, env, builds).await
     }
 
@@ -302,12 +290,13 @@ mod tests {
         std::fs::write(p, body).unwrap();
     }
 
-    /// A throwaway over a worktree's sources reads which extensions are on
-    /// from the project (the main checkout): a worktree has no
-    /// `personal.yaml` of its own (git ignores it), so the person's
-    /// `disableExtensions` would otherwise be lost there.
+    /// A test runs with the project's extensions, whoever runs it: the
+    /// person's own `disableExtensions` (here in the main checkout, as a
+    /// worktree has no `personal.yaml`) doesn't turn one off in the
+    /// throwaway, so a fixture passes or fails the same for everyone and in
+    /// CI. A source that doesn't load is a warning beside the one tested.
     #[tokio::test]
-    async fn a_worktrees_sources_are_tested_under_the_projects_settings() {
+    async fn a_test_runs_with_the_projects_extensions_not_the_persons() {
         let main = tempfile::tempdir().unwrap();
         oxplow_app::vcs::GitProvider
             .init_repository(main.path())
@@ -341,11 +330,8 @@ mod tests {
         let host = Host::start(&wt, "acme", Arc::new(|_: &str| None), false)
             .await
             .unwrap();
-        assert!(
-            !host.problems.iter().any(|p| p.starts_with("other")),
-            "{:?}",
-            host.problems
-        );
+        assert!(host.on.iter().any(|n| n == "other"), "{:?}", host.on);
+        assert!(!host.root.join(".oxplow/personal.yaml").exists());
         assert!(host.root.join(EXTENSIONS_DIR).join("acme").is_dir());
     }
 

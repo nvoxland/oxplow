@@ -1919,7 +1919,12 @@ is held by a page with a whole-page action running that command.
 **`oxplow extension test <name>`** (`extension_test.rs`) runs on
 **a throwaway oxplow** (`Host`, "The SDK" above: activated as boot
 activates, its entities created empty, the fixture model answering every
-model call). Each source is copied to where the checkout keeps it
+model call). It never reads what runs here — no deployment, no
+database — so an extension is tested before its first deploy. Which
+extensions are on is the project's list (`extensions:`) and every source
+present, never one person's `enableExtensions` / `disableExtensions`:
+a fixture passes or fails the same for everyone and in CI. Each source is
+copied to where the checkout keeps it
 (`extensionSources`, so oxplow's own land at `extensions/<name>/`), and
 every finding names that path — the file the author edits. It never opens
 the project's database. It runs `check` there
