@@ -1,0 +1,10 @@
+# defn and defn- heads count; a local named defn does not.
+when:
+  collector: oxplow.clojure.defn_count
+  files:
+    "src/core.clj": ";; TODO: refactor\n(defn add [a b] (+ a b))\n(defn- helper [] :ok)\n(def x 1)\n(let [defn 1] defn)\n"
+    "src/util.cljs": "(defn greet [n] (str \"hi \" n)) ; FIXME i18n\n"
+expect:
+  facts:
+    - {"measure": "oxplow.ast_hit", "value": 2, "subject": "oxplow:oxplow/file?path=src/core.clj", "path": "src/core.clj", "rule": "defn", "dims": {"oxplow.language": "clojure"}}
+    - {"measure": "oxplow.ast_hit", "value": 1, "subject": "oxplow:oxplow/file?path=src/util.cljs", "path": "src/util.cljs", "rule": "defn", "dims": {"oxplow.language": "clojure"}}

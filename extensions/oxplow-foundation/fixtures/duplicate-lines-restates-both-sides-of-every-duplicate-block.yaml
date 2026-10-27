@@ -1,0 +1,11 @@
+# both sides of a duplicate block are facts on their own block.
+when:
+  collector: oxplow.duplicate_lines
+  files:
+    "src/a.rs": "pub fn compute(input: &[i64]) -> i64 {\n    let mut total = 0;\n    for value in input {\n        if *value > 0 {\n            total += *value;\n        } else {\n            total -= *value;\n        }\n    }\n    total * 2 + 1\n}\n"
+    "src/b.rs": "// a copy\npub fn compute(input: &[i64]) -> i64 {\n    let mut total = 0;\n    for value in input {\n        if *value > 0 {\n            total += *value;\n        } else {\n            total -= *value;\n        }\n    }\n    total * 2 + 1\n}\n"
+    "src/c.rs": "fn other() {}\n"
+expect:
+  facts:
+    - {"measure": "oxplow.duplicate_lines", "value": 11, "subject": "oxplow:oxplow/block?lines=1-11&path=src/a.rs", "path": "src/a.rs", "line": 1}
+    - {"measure": "oxplow.duplicate_lines", "value": 11, "subject": "oxplow:oxplow/block?lines=2-12&path=src/b.rs", "path": "src/b.rs", "line": 2}

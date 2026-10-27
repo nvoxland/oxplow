@@ -118,6 +118,54 @@ intent:
     - name: data-effect-backfill-says-what-it-would-do
       input: { page: data-effect-backfill, params: { effect: oxplow-bundled/store-reasoning } }
       expect: a backfill plan for an enabled effect, none for one nothing declares
+    - name: rust-unsafe-blocks-are-counted-per-file-and-tagged-with-their-rule
+      input: { collector: oxplow.rust.unsafe_blocks }
+      expect: Rust — each file with unsafe blocks has one ast_hit fact tagged unsafe_block (src/a.rs has 2, src/b.rs none, the README is skipped)
+    - name: rust-unwrap-and-expect-calls-are-counted
+      input: { collector: oxplow.rust.unwrap_expect_calls }
+      expect: Rust — unwrap and expect calls are counted per file
+    - name: rust-panic-todo-and-path-qualified-panic-macros-are-counted
+      input: { collector: oxplow.rust.panic_macros }
+      expect: Rust — panic!, todo! and std — —panic! count (the scoped form too)
+    - name: ts-any-annotations-are-counted
+      input: { collector: oxplow.ts.any_usage }
+      expect: TypeScript — every `any` annotation counts
+    - name: ts-non-null-assertions-are-counted
+      input: { collector: oxplow.ts.non_null_assertions }
+      expect: TypeScript — non-null assertions count
+    - name: ts-console-calls-are-counted-including-namespaced-ones
+      input: { collector: oxplow.ts.console_calls }
+      expect: TypeScript — console calls count, window.console too
+    - name: ts-ignore-and-expect-error-comments-are-counted
+      input: { collector: oxplow.ts.ts_ignore }
+      expect: TypeScript — @ts-ignore and @ts-expect-error comments count
+    - name: doc-coverage-is-documented-public-over-public
+      input: { collector: oxplow.doc_coverage }
+      expect: one ratio fact per file — documented public functions over public ones
+    - name: clojure-defn-count-counts-heads-only
+      input: { collector: oxplow.clojure.defn_count }
+      expect: defn and defn- heads count; a local named defn does not
+    - name: every-function-gets-a-complexity-fact-across-languages
+      input: { collector: oxplow.high_complexity_fns }
+      expect: one complexity fact per function in every language
+    - name: every-function-gets-a-length-fact-across-languages
+      input: { collector: oxplow.long_functions }
+      expect: one length fact per function in every language
+    - name: every-function-gets-a-parameter-count-fact
+      input: { collector: oxplow.fn_count }
+      expect: one parameter-count fact per function
+    - name: todo-and-fixme-comments-are-counted-across-languages
+      input: { collector: oxplow.todos }
+      expect: one todo fact per marker comment; a README is not source
+    - name: csharp-empty-catch-blocks-are-counted
+      input: { collector: oxplow.csharp.empty_catch }
+      expect: C# — empty catch blocks count
+    - name: csharp-blocking-async-calls-are-counted
+      input: { collector: oxplow.csharp.blocking_async_calls }
+      expect: C# — .Result and invoked .Wait() count, a method-group reference does not
+    - name: duplicate-lines-restates-both-sides-of-every-duplicate-block
+      input: { collector: oxplow.duplicate_lines }
+      expect: both sides of a duplicate block are facts on their own block
 # The agent harnesses and AI providers oxplow runs: core's
 # built-ins, many of each at once (every one declared here is active).
 implementations:

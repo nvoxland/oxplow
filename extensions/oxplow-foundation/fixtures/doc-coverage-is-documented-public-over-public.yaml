@@ -1,0 +1,8 @@
+# one ratio fact per file: documented public functions over public ones.
+when:
+  collector: oxplow.doc_coverage
+  files:
+    "src/a.rs": "/// documented\npub fn a() {}\npub fn b() {}\nfn c() {}\n"
+expect:
+  facts:
+    - {"measure": "oxplow.doc_coverage", "value": 50, "subject": "oxplow:oxplow/file?path=src/a.rs", "path": "src/a.rs", "num": 1.0, "den": 2.0, "dims": {"oxplow.language": "rust"}}

@@ -1,0 +1,10 @@
+# TypeScript: every `any` annotation counts.
+when:
+  collector: oxplow.ts.any_usage
+  files:
+    "notes.md": "any! console.log @ts-ignore"
+    "src/a.ts": "\n// @ts-ignore\nfunction f(x: any): any {\nconsole.log(x);\nwindow.console.error(x);\nconst y = x!.foo;\nreturn y;\n}\nconst g = (a: any) => a!;\n"
+    "src/b.tsx": "// @ts-expect-error\nexport const C = () => { console.warn('x'); return null; };\n"
+expect:
+  facts:
+    - {"measure": "oxplow.ast_hit", "value": 3, "subject": "oxplow:oxplow/file?path=src/a.ts", "path": "src/a.ts", "rule": "any_usage", "dims": {"oxplow.language": "typescript"}}

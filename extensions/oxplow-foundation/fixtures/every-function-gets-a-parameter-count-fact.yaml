@@ -1,0 +1,14 @@
+# one parameter-count fact per function.
+when:
+  collector: oxplow.fn_count
+  files:
+    "README.md": "TODO not code\n"
+    "src/a.ts": "// TODO wire this up\nfunction f(x: number) { return x; }\n"
+    "src/c.rs": "fn complex(x: i32) -> i32 {\n    if x == 0 { return 0; }\n    if x == 1 { return 1; }\n    if x == 2 { return 2; }\n    if x == 3 { return 3; }\n    if x == 4 { return 4; }\n    if x == 5 { return 5; }\n    if x == 6 { return 6; }\n    if x == 7 { return 7; }\n    if x == 8 { return 8; }\n    if x == 9 { return 9; }\n    if x == 10 { return 10; }\n    0\n}\nfn big() {\n    let v0 = 0;\n    let v1 = 1;\n    let v2 = 2;\n    let v3 = 3;\n    let v4 = 4;\n    let v5 = 5;\n    let v6 = 6;\n    let v7 = 7;\n    let v8 = 8;\n    let v9 = 9;\n    let v10 = 10;\n    let v11 = 11;\n    let v12 = 12;\n    let v13 = 13;\n    let v14 = 14;\n    let v15 = 15;\n    let v16 = 16;\n    let v17 = 17;\n    let v18 = 18;\n    let v19 = 19;\n    let v20 = 20;\n    let v21 = 21;\n    let v22 = 22;\n    let v23 = 23;\n    let v24 = 24;\n    let v25 = 25;\n    let v26 = 26;\n    let v27 = 27;\n    let v28 = 28;\n    let v29 = 29;\n    let v30 = 30;\n    let v31 = 31;\n    let v32 = 32;\n    let v33 = 33;\n    let v34 = 34;\n    let v35 = 35;\n    let v36 = 36;\n    let v37 = 37;\n    let v38 = 38;\n    let v39 = 39;\n    let v40 = 40;\n    let v41 = 41;\n    let v42 = 42;\n    let v43 = 43;\n    let v44 = 44;\n    let v45 = 45;\n    let v46 = 46;\n    let v47 = 47;\n    let v48 = 48;\n    let v49 = 49;\n    let v50 = 50;\n    let v51 = 51;\n    let v52 = 52;\n    let v53 = 53;\n    let v54 = 54;\n    let v55 = 55;\n    let v56 = 56;\n    let v57 = 57;\n    let v58 = 58;\n    let v59 = 59;\n    let v60 = 60;\n    let v61 = 61;\n    let v62 = 62;\n    let v63 = 63;\n    let v64 = 64;\n}\n"
+    "src/core.clj": "; FIXME naming\n(defn g [] :ok)\n"
+expect:
+  facts:
+    - {"measure": "oxplow.parameter_count", "value": 1, "subject": "oxplow:oxplow/symbol?path=src/a.ts&symbol=f", "path": "src/a.ts", "line": 2, "dims": {"oxplow.language": "typescript"}}
+    - {"measure": "oxplow.parameter_count", "value": 1, "subject": "oxplow:oxplow/symbol?path=src/c.rs&symbol=complex", "path": "src/c.rs", "line": 1, "dims": {"oxplow.language": "rust"}}
+    - {"measure": "oxplow.parameter_count", "value": 0, "subject": "oxplow:oxplow/symbol?path=src/c.rs&symbol=big", "path": "src/c.rs", "line": 15, "dims": {"oxplow.language": "rust"}}
+    - {"measure": "oxplow.parameter_count", "value": 0, "subject": "oxplow:oxplow/symbol?path=src/core.clj&symbol=g", "path": "src/core.clj", "line": 2, "dims": {"oxplow.language": "clojure"}}

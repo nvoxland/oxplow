@@ -154,6 +154,9 @@ intent:
     - name: inferred-decisions-offer-confirm-and-dismiss
       input: { page: inferred-decisions }
       expect: Confirm and Dismiss on an inferred decision
+    - name: the-review-verbs-log-a-typed-verdict
+      input: { command: review.request_changes }
+      expect: each review verb logs its typed verdict, a refused one none
 # oxplow's default work list and effort policy: built-ins of core's,
 # declared here so they are an extension's like any other. Disabled, both
 # fall to none. Snapshots can't be none: their default is core's own (it

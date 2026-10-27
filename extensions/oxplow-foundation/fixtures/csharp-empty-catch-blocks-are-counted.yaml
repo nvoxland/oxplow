@@ -1,0 +1,11 @@
+# C#: empty catch blocks count.
+when:
+  collector: oxplow.csharp.empty_catch
+  files:
+    "README.md": ".Result .Wait() catch { }"
+    "src/Service.cs": "\nnamespace Acme {\nclass Service {\n    public void Run(int x) {\n        try { Work(); } catch (System.Exception) { }\n        var r = FetchAsync().Result;\n        _task.Wait();\n        System.Action w = _task.Wait; // method-group ref, NOT a blocking call\n    }\n    async void Background() { await Task.Delay(1); }\n}\n}\n"
+    "src/Util.cs": "class Util {\n    static void Noop() { try { } catch { } }\n}\n"
+expect:
+  facts:
+    - {"measure": "oxplow.ast_hit", "value": 1, "subject": "oxplow:oxplow/file?path=src/Service.cs", "path": "src/Service.cs", "rule": "empty_catch", "dims": {"oxplow.language": "csharp"}}
+    - {"measure": "oxplow.ast_hit", "value": 1, "subject": "oxplow:oxplow/file?path=src/Util.cs", "path": "src/Util.cs", "rule": "empty_catch", "dims": {"oxplow.language": "csharp"}}
