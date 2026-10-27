@@ -1864,7 +1864,8 @@ and one calling MCP read identical `file:line: what — fix` lines.
   models. `TestReport { ok, errors, warnings, blessed, ran, generation,
   contributes, unsupported, left }`: `contributes` is the extension's
   descriptors by public id, `unsupported` what only the app shows
-  (panels, slot mounts, decorators, replacements, skills); `render`
+  (panels, decorators, replacements, skills; a slot mount runs in its
+  host page's run, so a fixture of the host page checks it); `render`
   prints it like `check`'s. Exit 0 / 1 / 2 as `check`. `check` with no
   running oxplow asks a throwaway (with no environment) for its command
   registry. `the_triage_example_reads_the_tree_the_layer_and_a_model`
@@ -1976,6 +1977,11 @@ fixture model's answers); any other key is an error (`FIXTURE_KEYS`):
     params?, bind? }` runs the page again — `params` over the example's,
     `bind: { <name>: loaders.<loader>.rows[0].<column> }` keeping a value of
     that run — and findings name the step (`steps[3]: …`).
+  - **Inside embeds and mounts.** `loaders: { <embed>/<loader>: .. }`
+    names a loader of the page an embed node or a slot mount runs (a
+    mount's id is its page's with `/` as `.`: `beta.extra/words`), so a
+    mounting extension's fixture runs the host page (`when: { page:
+    host/items }`) and checks what it mounted (`loader_at`).
   - **A step acts as a person would** (`PageAt::act`): `{ press: { action,
     node?, row?: { <column>: value }, input?, confirmed? } }` presses one of
     the page's actions on an open run (`run_page_action`), `{ submit: {

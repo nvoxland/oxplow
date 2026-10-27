@@ -734,7 +734,6 @@ fn unsupported(ext: &Extension) -> Vec<String> {
         }
     };
     note(ext.panels.len(), "panel(s)");
-    note(ext.ui.page_slots.len(), "slot mount(s)");
     note(ext.ui.decorators.len(), "decorator(s)");
     note(ext.ui.replacements.len(), "replacement(s)");
     note(ext.skills.len(), "skill(s)");
@@ -1581,6 +1580,30 @@ struct Example<'a> {
     model: Value,
 }
 
+/// Loader `name` of a run: its own, or — `<embed>/<loader>` — one of the
+/// page an embed node or a slot mount (`<extension>.<page>`) runs there.
+fn loader_at<'r>(
+    run: &'r oxplow_app::pages::runner::PageRun,
+    name: &str,
+) -> Option<&'r oxplow_app::pages::runner::LoaderRun> {
+    fn node<'r>(
+        at: &'r oxplow_app::pages::runner::RunNode,
+        id: &str,
+    ) -> Option<&'r oxplow_app::pages::runner::RunNode> {
+        if at.id == id {
+            return Some(at);
+        }
+        at.children.iter().find_map(|c| node(c, id))
+    }
+    match name.split_once('/') {
+        None => run.loaders.get(name),
+        Some((embed, rest)) => node(&run.tree, embed)
+            .or_else(|| run.rail.as_ref().and_then(|rail| node(rail, embed)))
+            .and_then(|n| n.embed.as_deref())
+            .and_then(|sub| loader_at(sub, rest)),
+    }
+}
+
 /// A page run's node ids (`<embed>/<id>` inside an embed) with their kinds.
 fn run_nodes(run: &oxplow_app::pages::runner::PageRun) -> Vec<(String, String)> {
     fn walk(
@@ -2029,7 +2052,7 @@ impl PageAt<'_> {
         };
         if let Some(loaders) = expect.get("loaders").and_then(Value::as_object) {
             for (name, want) in loaders {
-                let Some(loader) = run.loaders.get(name) else {
+                let Some(loader) = loader_at(&run, name) else {
                     report.errors.push(format!(
                         "{shown}:1: {label}page `{page}` has no loader `{name}` — fix: the \
                          example's `expect.loaders`"
@@ -5135,6 +5158,42 @@ steps:
             )],
         );
         let report = test_extension(root, "paged", false).await.unwrap();
+        assert_eq!(report.errors, Vec::<String>::new());
+    }
+
+    /// What another extension mounts at a page's slot runs inside it: a
+    /// fixture of the mounting extension runs the host page and checks the
+    /// mount (`<mount id>`) and its loaders (`<mount id>/<loader>`).
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_page_fixture_checks_what_is_mounted_at_a_slot() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        write(
+            root,
+            ".oxplow/extensions/host/extension.yaml",
+            "manifest: 2\nname: host\nintent:\n  purpose: Hosts.\n",
+        );
+        write(
+            root,
+            ".oxplow/extensions/host/pages/items.yaml",
+            "title: Items\ndata:\n  n: { sql: \"SELECT 1 AS n\" }\nview:\n  stack:\n    - { id: count, viz: number, from: n }\n    - { slot: extra }\n",
+        );
+        write(
+            root,
+            ".oxplow/extensions/beta/extension.yaml",
+            "manifest: 2\nname: beta\nintent:\n  purpose: Mounts.\n  examples:\n    - { name: mounted, input: { page: host/items }, expect: it }\nui:\n  slots:\n    - { slot: host/items.extra, page: extra }\n",
+        );
+        write(
+            root,
+            ".oxplow/extensions/beta/pages/extra.yaml",
+            "title: Extra\ndata:\n  words: { sql: \"SELECT 'hello' AS word\" }\nview: { viz: table, from: words }\n",
+        );
+        write(
+            root,
+            ".oxplow/extensions/beta/fixtures/mounted.yaml",
+            "when: { page: host/items }\nexpect:\n  nodes: [{ id: beta.extra }]\n  loaders: { n: { rows: 1 }, beta.extra/words: { rows: [{ word: hello }] } }\n",
+        );
+        let report = test_extension(root, "beta", false).await.unwrap();
         assert_eq!(report.errors, Vec::<String>::new());
     }
 

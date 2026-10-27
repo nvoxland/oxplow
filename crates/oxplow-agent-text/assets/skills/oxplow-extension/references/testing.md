@@ -66,7 +66,10 @@ model the SQL reads and the command it runs. Prefer `answers:` on pages.
      `expect: { loaders: { <name>: { rows: n | $any | [ { col: val } ] |
      { contains: [ { col: val } ] }, columns? } }, nodes: [{ id, kind?,
      actions? }], text: { contains: [..] } | "<exact>", alert?, badge?,
-     inactive?, actions? }` (`text` is the page's text, as `oxplow_run_page`
+     inactive?, actions? }` (a loader of an embedded or slot-mounted page
+     is `<node id>/<loader>` — a mount's node id is its page's with `/` as
+     `.`, so test a mount from the host page: `when: { page: host/items }`,
+     `loaders: { beta.extra/words: { rows: 1 } }`; `text` is the page's text, as `oxplow_run_page`
      shows it; `actions`, the page's or a node's, list ids, or objects
      compared on the fields they name, spelled as in the page YAML:
      `{ id: rename, form: true, one_row: true }`).
