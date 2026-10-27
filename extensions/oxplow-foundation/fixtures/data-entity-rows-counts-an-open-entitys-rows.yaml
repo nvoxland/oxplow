@@ -1,0 +1,7 @@
+# Open, a model counts its rows; the entity list itself holds it.
+given:
+  - { command: oxplow.work_item.create, input: { title: One, thread: thr1 } }
+input: { page: data-entity-rows, params: { name: v_work_item } }
+expect:
+  loaders:
+    data_entity_rows: { rows: [{ rows: 1 rows }] }

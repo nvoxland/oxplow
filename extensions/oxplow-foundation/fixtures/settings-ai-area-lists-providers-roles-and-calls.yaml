@@ -1,0 +1,25 @@
+# Settings → AI: a provider lists with its kind and whether it has a key
+# (never the key: no column holds it), a role bound to it shows its binding
+# and hands `set_role` its current values, and a role bound to nothing says
+# what it falls back to. The throwaway oxplow has a `fixture` provider.
+given:
+  - { command: oxplow.ai.set_provider, input: { id: or, kind: openrouter, key: sk-secret-123 } }
+  - { command: oxplow.ai.set_role, input: { role: summarize, provider: or, model: m1, restrict: [tools] } }
+input: { page: settings, params: { area: ai } }
+expect:
+  loaders:
+    ai_providers:
+      columns: [id, kind, base_url, key, test_model]
+      rows:
+        - { id: fixture }
+        # The test action starts from the model a role already uses on it.
+        - { id: or, kind: OpenRouter, key: Key saved, test_model: m1 }
+    ai_roles:
+      columns: [role, description, bound, problem, provider, model, restrict, can_assign, can_unassign]
+      rows:
+        - { role: main }
+        - { role: summarize, bound: or · m1, restrict: '["tools"]', can_assign: 1, can_unassign: 1 }
+        - { role: decide }
+        - { role: assistant }
+        - { role: oxplow-bundled/reasoning, bound: Falls back to main (fixture), can_unassign: 0 }
+    ai_calls: { rows: 0 }

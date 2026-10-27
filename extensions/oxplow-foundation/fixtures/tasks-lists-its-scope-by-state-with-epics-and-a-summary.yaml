@@ -1,0 +1,40 @@
+# The Tasks page: the items in scope by state with epics nested, the priority
+# filter keeping an epic whose child matches, the last five done, and the
+# summary's counts.
+given:
+  - { command: oxplow.work_item.create, input: { title: An epic, thread: thr1, native: { priority: low } }, bind: epic }
+  - { command: oxplow.work_item.create, input: { title: Urgent child, thread: thr1, native: { priority: urgent }, parent_uri: $epic.uri } }
+  - { command: oxplow.work_item.create, input: { title: Plain child, thread: thr1, native: { priority: low }, parent_uri: $epic.uri } }
+  - { command: oxplow.work_item.create, input: { title: Loose item, thread: thr1, native: { priority: low } } }
+  - { command: oxplow.work_item.create, input: { title: Backlogged } }
+  - { command: oxplow.work_item.create, input: { title: Finished 0, thread: thr1, state: done } }
+  - { command: oxplow.work_item.create, input: { title: Finished 1, thread: thr1, state: done } }
+  - { command: oxplow.work_item.create, input: { title: Finished 2, thread: thr1, state: done } }
+  - { command: oxplow.work_item.create, input: { title: Finished 3, thread: thr1, state: done } }
+  - { command: oxplow.work_item.create, input: { title: Finished 4, thread: thr1, state: done } }
+  - { command: oxplow.work_item.create, input: { title: Finished 5, thread: thr1, state: done } }
+  - { command: oxplow.work_item.create, input: { title: Finished 6, thread: thr1, state: done } }
+input: { page: tasks, params: { show: thread, priority: any, thread_id: 1, stream_id: 1 } }
+expect:
+  loaders:
+    row: { rows: [{ scope: thread }] }
+    list:
+      rows:
+        - { title: An epic, depth: 0 }
+        - { title: Urgent child, depth: 1 }
+        - { title: Plain child, depth: 1 }
+        - { title: Loose item }
+        # The last five done; the backlogged item is not on the thread.
+        - { title: Finished 2 }
+        - { title: Finished 3 }
+        - { title: Finished 4 }
+        - { title: Finished 5 }
+        - { title: Finished 6 }
+    summary: { rows: [{ ready: 4, done: 7 }] }
+    backlog: { rows: [{ waiting: 1 }] }
+steps:
+  # The epic stays for its matching child.
+  - params: { priority: urgent }
+    expect: { loaders: { list: { rows: [{ title: An epic }, { title: Urgent child }] } } }
+  - params: { show: stream }
+    expect: { loaders: { row: { rows: [{ scope: stream }] } } }

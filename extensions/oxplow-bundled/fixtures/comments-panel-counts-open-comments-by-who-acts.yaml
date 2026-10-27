@@ -1,0 +1,19 @@
+# The rail's Comments panel body: the stream's open comments for the person
+# (notes) and for the agent (followups), each row opening the inbox; a
+# resolved comment no longer counts.
+given:
+  - { command: oxplow.knowledge.add_comment, input: { stream: str1, target: "oxplow:oxplow/wiki?slug=some-page", intent: note, body: b } }
+  - { command: oxplow.knowledge.add_comment, input: { stream: str1, target: "oxplow:oxplow/wiki?slug=some-page", intent: note, body: b } }
+  - { command: oxplow.knowledge.add_comment, input: { stream: str1, target: "oxplow:oxplow/wiki?slug=some-page", intent: followup, body: b } }
+  - { command: oxplow.knowledge.add_comment, input: { stream: str1, target: "oxplow:oxplow/wiki?slug=some-page", intent: note, body: b }, bind: last }
+  - { command: oxplow.knowledge.update_comment, input: { comment: $last.comment.id, status: resolved } }
+input: { page: oxplow-bundled/comments-panel, params: { stream_id: 1 } }
+expect:
+  loaders:
+    comments:
+      rows:
+        - { who: For me, open: 2, inbox: "oxplow:oxplow/page?page=comments" }
+        - { who: For the agent, open: 1, inbox: "oxplow:oxplow/page?page=comments" }
+steps:
+  - params: { stream_id: 2 }
+    expect: { loaders: { comments: { rows: 0 } } }

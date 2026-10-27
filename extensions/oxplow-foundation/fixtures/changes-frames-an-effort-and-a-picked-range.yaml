@@ -1,0 +1,16 @@
+# The Changes page: an effort's page frames its own bracket (to the working
+# tree while it is open); a picked end turns it into a range, leaving the
+# effort; the route page, with no URI and no end, has nothing to compare yet.
+given:
+  - { command: oxplow.effort.open, input: { thread: thr1 } }
+input: { page: diff-view, params: { uri: "oxplow:oxplow/effort?id=eff1", stream_id: 1 } }
+expect:
+  loaders:
+    row: { rows: [{ subject: effort, end_rev: working, in_progress: 1, effort: eff1 }] }
+    # The header reads the row's frame.
+    header: { rows: [{ from_label: "(initial)" }] }
+steps:
+  - params: { start: "", end: working }
+    expect: { loaders: { row: { rows: [{ subject: range, effort_id: null }] } } }
+  - params: { uri: null }
+    expect: { loaders: { row: { rows: 0 } } }

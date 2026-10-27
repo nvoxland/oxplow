@@ -1,0 +1,34 @@
+# The inbox lists open threads grouped by what they are anchored to; a
+# resolved one only when the filter reaches back to it; a picked thread reads
+# as its messages in order, and none picked shows nothing.
+given:
+  - { command: oxplow.knowledge.add_comment, input: { stream: str1, target: "oxplow:oxplow/wiki?slug=a-page", quote: one, intent: note, body: first }, bind: first }
+  - { command: oxplow.knowledge.add_comment, input: { stream: str1, target: "oxplow:oxplow/wiki?slug=a-page", quote: two, intent: followup, body: first }, bind: second }
+input: { page: comments, params: { stream_id: 1, days: "0" } }
+expect:
+  loaders:
+    threads:
+      rows:
+        - { quote: one }
+        - quote: two
+          kind: follow-up
+          target_label: wiki/a-page
+          go: Go to location
+          # Go to location opens the page at the comment.
+          go_ref: "oxplow:oxplow/wiki?slug=a-page#comment=cmt2"
+          latest: "user: first"
+          is_open: 1
+          is_followup: 1
+steps:
+  # Resolving hides a thread until the filter reaches back to it.
+  - given: [{ command: oxplow.knowledge.update_comment, input: { comment: $first.comment.id, status: resolved } }]
+  - expect: { loaders: { threads: { rows: [{ quote: two }] } } }
+  - params: { days: "7" }
+    expect:
+      loaders: { threads: { rows: [{ quote: one, state: resolved, is_resolved: 1 }, { quote: two }] } }
+  # A picked thread: its messages in the order they were written.
+  - given: [{ command: oxplow.knowledge.reply_comment, input: { comment: $second.comment.id, body: second } }]
+  - params: { comment: $second.comment.id }
+    expect: { loaders: { conversation: { rows: [{ body: first }, { body: second }] } } }
+  - params: { comment: null }
+    expect: { loaders: { conversation: { rows: 0 } } }

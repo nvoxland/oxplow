@@ -1,0 +1,15 @@
+# The Catalog's sections: what can be asked, grouped by who offers it (oxplow's
+# own questions by the page's category) with Ask on each, and what can be
+# configured.
+input: { page: catalog }
+expect:
+  text:
+    contains:
+      - "## What you can ask [node ask]\n\n### Code\n\n| Question"
+      - "## What you can configure [node configure]"
+      - "| activeProviders |"
+      - "| agentPromptAppend |"
+  nodes:
+    - { id: ask, kind: viz, actions: [ask] }
+    - { id: data }
+    - { id: configure, kind: viz }

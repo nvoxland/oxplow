@@ -1,0 +1,13 @@
+# A failure's expansion carries how it ended: its command and what it wrote
+# to stderr; a failure that captured nothing says so.
+given:
+  - { command: oxplow.ui.report_error, input: { label: Merge bugfixes into current, command: git merge bugfixes, message: conflict, exit_code: 1, stderr: CONFLICT in a.txt }, bind: merged }
+input: { page: alerts-operation, params: { event_id: $merged.event } }
+expect:
+  loaders:
+    alerts_operation: { rows: [{ command: git merge bugfixes, stderr: CONFLICT in a.txt, output_note: "" }] }
+steps:
+  - given:
+      - { command: oxplow.ui.report_error, input: { label: Quiet, message: no output }, bind: quiet }
+  - params: { event_id: $quiet.event }
+    expect: { loaders: { alerts_operation: { rows: [{ output_note: No output was captured. }] } } }

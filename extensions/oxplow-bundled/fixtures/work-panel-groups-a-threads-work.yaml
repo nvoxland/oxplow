@@ -1,0 +1,28 @@
+# The rail's Work panel body: per thread, what is in progress, ready and
+# finished, under headings; clearing hides what finished before it; an
+# effort no item names shows too, in progress while open, then finished (a
+# new effort closes the thread's open one).
+given:
+  - { command: oxplow.effort.open, input: { thread: thr1 } }
+  - { command: oxplow.work_item.create, input: { title: Next up, state: todo, thread: thr1 } }
+  - { command: oxplow.work_item.create, input: { title: Shipped, state: done, thread: thr1 } }
+input: { page: oxplow-bundled/work, params: { thread_id: 1 } }
+expect:
+  loaders:
+    work:
+      rows:
+        # The effort, linked to nothing, by its own title.
+        - { grp: In progress, title: Work in progress }
+        - { grp: Ready, title: Next up }
+        - { grp: Finished, title: Shipped }
+steps:
+  - given: [{ command: oxplow.work.clear_finished, input: { thread_id: 1 } }]
+  - expect:
+      loaders: { work: { rows: [{ grp: In progress, title: Work in progress }, { grp: Ready, title: Next up }] } }
+  - given:
+      - { command: oxplow.effort.open, input: { thread: thr1, title: Tidy the shell scripts }, bind: tidy }
+  - expect:
+      loaders: { work: { rows: [{ grp: In progress, title: Tidy the shell scripts }, { grp: Ready, title: Next up }, { grp: Finished, title: Work in progress }] } }
+  - given: [{ command: oxplow.effort.close, input: { effort: $tidy.effort } }]
+  - expect:
+      loaders: { work: { rows: [{ grp: Ready, title: Next up }, { grp: Finished, title: Tidy the shell scripts }, { grp: Finished, title: Work in progress }] } }
