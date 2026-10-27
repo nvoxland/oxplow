@@ -1,4 +1,12 @@
+# A turn that changed nothing gets no effort of its own.
+given:
+  - { command: oxplow.capability.choose, input: { capability: effort_policy, provider: prompt_efforts }, confirmed: true }
+  - { command: oxplow.effort.open, input: { thread: thr1 } }
+  - observe:
+      turn:
+        prompt: What does the parser do?
+        tools: [{ name: Read, kind: read, paths: [src/parse.rs], ok: true }]
 when:
-  implementation: prompt_efforts
-  event: { type: thread.checkpoint, payload: { thread: thr1, turn: trn8, reason: turn_end, snapshot: 8, changed: false, writing_tools: 0 }, anchors: { thread_id: thr1, turn_id: 8 } }
-expect: { skip: $any }
+  sql: "SELECT id, ended_at IS NOT NULL AS ended FROM v_effort ORDER BY id"
+expect:
+  rows: [{ id: 1, ended: 0 }]

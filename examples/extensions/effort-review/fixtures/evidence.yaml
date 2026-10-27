@@ -1,28 +1,29 @@
-# The evidence for one effort, from the models' answers (in the order the
-# script reads them): the effort, its files, its functions, test runs,
-# observations, metrics and findings.
+# The effort's evidence in one bundle: its work item, the files its edits
+# claimed and the test runs its shell calls made. What the effort hasn't
+# got (functions, observations, metrics, findings) is empty.
+given:
+  - { command: oxplow.work_item.create, input: { title: Parse blocks }, bind: item }
+  - { command: oxplow.effort.open, input: { thread: thr1, work_item: $item.uri } }
+  - observe:
+      turn:
+        prompt: Parse blocks
+        tools:
+          - { name: Edit, kind: edit, paths: [src/parse.rs], ok: true }
+          - { name: Bash, kind: shell, command: cargo test, detail: cargo test, ok: true, exit_code: 0 }
 when:
   command: effort_review.effort.evidence
-  input: { effort: "eff7" }
-  answers:
-    sql.read:
-      - [{ id: 7 }]
-      - [{ work_item: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", title: "Parse blocks", summary: null, started_at: "2026-10-12T10:00:00Z", ended_at: "2026-10-12T11:00:00Z", closed_by: commit }]
-      - [{ path: src/parse.rs, change_kind: updated, source: claimed, additions: 40, deletions: 5, is_test: 0 }]
-      - [{ path: src/parse.rs, container: "", name: parse_block, status: modified, signature_changed: 0, complexity: 9, complexity_delta: 3, length_delta: 20, is_test: 0 }]
-      - [{ command: cargo test, exit_code: 0, passed: 41, failed: 0, skipped: 0, total: 41, provenance: observed, captured_at: "2026-10-12T10:50:00Z" }]
-      - [{ kind: diff-coverage, provenance: observed, metric_value: 72.5, detail: '{"uncovered":[{"path":"src/parse.rs","lines":[88,89]}]}', created_at: "2026-10-12T10:51:00Z" }]
-      - []
-      - []
+  input: { effort: eff1 }
 expect:
+  ok: true
   commands: []
   result:
-    effort: "eff7"
-    workItem: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow"
-    files: [{ path: src/parse.rs, additions: 40 }]
-    functions: [{ name: parse_block, complexity_delta: 3 }]
-    testRuns: [{ passed: 41, failed: 0 }]
-    observations: [{ kind: diff-coverage, metric_value: 72.5 }]
+    effort: eff1
+    workItem: $item.uri
+    title: Parse blocks
+    files: [{ path: src/parse.rs, source: claimed }]
+    functions: []
+    testRuns: [{ command: cargo test, exit_code: 0 }]
+    observations: []
     metrics: []
     findings: []
     truncated: []

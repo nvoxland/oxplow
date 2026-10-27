@@ -1,8 +1,13 @@
+# An effort opened during the turn already covers it: no second one.
+given:
+  - { command: oxplow.capability.choose, input: { capability: effort_policy, provider: prompt_efforts }, confirmed: true }
+  - observe:
+      turn:
+        prompt: Add a helper
+        during: [{ command: oxplow.effort.open, input: { thread: thr1 } }]
+        tools: [{ name: Edit, kind: edit, paths: [helper.txt], ok: true }]
+        write: { path: helper.txt, body: "one" }
 when:
-  implementation: prompt_efforts
-  event: { type: thread.checkpoint, payload: { thread: thr1, turn: trn9, reason: turn_end, snapshot: 9, changed: true, writing_tools: 1 }, anchors: { thread_id: thr1, turn_id: 9 } }
-  answers:
-    sql.read:
-      - [{ started_at: "2026-10-09T10:00:00Z" }]
-      - [{ uri: "oxplow:oxplow/effort?id=eff4", work_item: null, started_at: "2026-10-09T10:00:05Z" }]
-expect: { skip: $any }
+  sql: "SELECT id, ended_at IS NOT NULL AS ended FROM v_effort ORDER BY id"
+expect:
+  rows: [{ id: 1, ended: 0 }]

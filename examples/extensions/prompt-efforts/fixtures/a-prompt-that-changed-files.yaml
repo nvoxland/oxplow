@@ -1,8 +1,17 @@
+# A turn that wrote a file closes the thread's open effort as of the turn's
+# start and opens a new one for the turn, keeping the effort's work item.
+given:
+  - { command: oxplow.capability.choose, input: { capability: effort_policy, provider: prompt_efforts }, confirmed: true }
+  - { command: oxplow.work_item.create, input: { title: Parse blocks, thread: thr1 }, bind: item }
+  - { command: oxplow.effort.open, input: { thread: thr1, work_item: $item.uri } }
+  - observe:
+      turn:
+        prompt: Add a helper
+        tools: [{ name: Edit, kind: edit, paths: [helper.txt], ok: true }]
+        write: { path: helper.txt, body: "one" }
 when:
-  implementation: prompt_efforts
-  event: { type: thread.checkpoint, payload: { thread: thr1, turn: trn7, reason: turn_end, snapshot: 7, changed: true, writing_tools: 2 }, anchors: { thread_id: thr1, turn_id: 7 } }
-  answers:
-    sql.read:
-      - [{ started_at: "2026-10-09T10:00:00Z" }]
-      - [{ uri: "oxplow:oxplow/effort?id=eff3", work_item: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", started_at: "2026-10-09T09:00:00Z" }]
-expect: { commands: [oxplow.effort.close, oxplow.effort.open] }
+  sql: "SELECT id, work_item, ended_at IS NOT NULL AS ended FROM v_effort ORDER BY id"
+expect:
+  rows:
+    - { id: 1, ended: 1 }
+    - { id: 2, work_item: $item.uri, ended: 0 }

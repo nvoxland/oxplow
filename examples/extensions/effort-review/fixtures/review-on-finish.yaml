@@ -1,8 +1,11 @@
 # A finished effort with a work item asks for its review.
+given:
+  - { command: oxplow.work_item.create, input: { title: Parse blocks }, bind: item }
+  - { command: oxplow.effort.open, input: { thread: thr1, work_item: $item.uri } }
 when:
-  effect: review-on-finish
   event:
     type: effort.finished
-    payload: { effort: "eff7", work_item: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", end_snapshot: 3 }
+    payload: { effort: "eff1", work_item: $item.uri, end_snapshot: 3 }
 expect:
-  commands: [effort_review.effort.review]
+  effects: { contains: [{ id: effort-review/review-on-finish, state: ok }] }
+  commands: [effort_review.effort.review, oxplow.effort.infer_reasoning]

@@ -1,15 +1,20 @@
 # The effort's conversation, tool calls, recorded decisions and stated
 # claims become one reasoning job, keyed by the effort. Each turn's final
 # answer is in the request.
+given:
+  - { command: oxplow.work_item.create, input: { title: Add CSV export }, bind: item }
+  - { command: oxplow.effort.open, input: { thread: thr1, work_item: $item.uri } }
+  - observe:
+      turn:
+        prompt: Add CSV export to reports
+        tools:
+          - { name: Bash, kind: shell, command: cargo add csv, detail: cargo add csv, ok: true }
+          - { name: Edit, kind: edit, paths: [src/report.rs], ok: true }
+        answer: Done; used the csv crate.
+  - { command: oxplow.effort.record_decision, input: { thread: thr1, question: Where does export live?, choice: src/report.rs } }
 when:
   command: oxplow.effort.infer_reasoning
-  input: { effort: "eff7" }
-  answers:
-    sql.read:
-      - [{ id: 7, work_item: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", title: Add CSV export }]
-      - [{ prompt: Add CSV export to reports, answer: Done; used the csv crate. }]
-      - [{ tool: Bash, path: null, detail: cargo add csv, ok: 1 }, { tool: Edit, path: src/report.rs, detail: null, ok: 1 }]
-      - [{ question: Where does export live? }]
-      - [{ statement: The export tests pass. }]
+  input: { effort: eff1 }
 expect:
+  ok: true
   commands: [oxplow.reasoning.ask]

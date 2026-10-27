@@ -2,7 +2,6 @@
 when:
   command: triage.todos.decide
   input: { path: src/lib.rs, line: 1, decision: wontfix }
-  answers:
-    state.read: [null]
 expect:
+  ok: true
   commands: [triage.state.set]

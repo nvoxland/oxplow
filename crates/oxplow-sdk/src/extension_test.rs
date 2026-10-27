@@ -1323,7 +1323,16 @@ async fn run_steps(
             continue;
         }
         if let Some(observed) = step.get("observe") {
-            if let Err(e) = observe(host, observed).await {
+            let observed = match binds.substitute(observed) {
+                Ok(observed) => observed,
+                Err(e) => {
+                    report
+                        .errors
+                        .push(format!("{shown}:1: `{key}[{index}]`: {e}"));
+                    return false;
+                }
+            };
+            if let Err(e) = observe(host, &observed).await {
                 report
                     .errors
                     .push(format!("{shown}:1: `{key}[{index}]` `observe`: {e}"));
@@ -1396,7 +1405,7 @@ async fn run_steps(
 /// `observe: { <kind>: { .. } }`: a fact oxplow only learns from what
 /// happens around it, made through the API core makes it with.
 ///
-/// - `turn: { prompt?, tools?: [{ name, kind, paths?, command?, detail?,
+/// - `turn: { prompt?, during?: [{ command, input?, as? }], tools?: [{ name, kind, paths?, command?, detail?,
 ///   ok?, exit_code? }], write?: { path, body }, answer? }`: one turn on the
 ///   primary thread, as its harness's hooks report it — the prompt, each
 ///   tool call, the file the turn wrote (a snapshot of the worktree is taken
@@ -1408,17 +1417,27 @@ async fn observe(host: &Host, observed: &Value) -> Result<(), String> {
     let (kind, body) = map.iter().next().expect("one key");
     match kind.as_str() {
         "turn" => observe_turn(host, body).await,
-        other => Err(format!("`{other}` isn't a kind — fix: `turn`")),
-    }
+        other => return Err(format!("`{other}` isn't a kind — fix: `turn`")),
+    }?;
+    // What the log now holds reaches the models, as a command's events do;
+    // a reaction's own events (a checkpoint, a policy's answer to it) are
+    // heard in turn.
+    host.settle().await;
+    host.svc
+        .event_pump
+        .deliver_projections()
+        .await
+        .map(|_| ())
+        .map_err(|e| e.to_string())
 }
 
 async fn observe_turn(host: &Host, body: &Value) -> Result<(), String> {
     use oxplow_app::hook_ingest::{HookEnvelope, LAST_ASSISTANT_MESSAGE};
     use oxplow_domain::hook::HookKind;
     for key in body.as_object().into_iter().flat_map(|m| m.keys()) {
-        if !["prompt", "tools", "write", "answer"].contains(&key.as_str()) {
+        if !["prompt", "during", "tools", "write", "answer"].contains(&key.as_str()) {
             return Err(format!(
-                "`turn.{key}` — fix: `prompt`, `tools`, `write` or `answer`"
+                "`turn.{key}` — fix: `prompt`, `during`, `tools`, `write` or `answer`"
             ));
         }
     }
@@ -1446,6 +1465,29 @@ async fn observe_turn(host: &Host, body: &Value) -> Result<(), String> {
             .map(|_| ())
             .map_err(|e| e.to_string())
     };
+    // A turn that writes starts from a snapshot of the tree as it is.
+    let capture = match body.get("write") {
+        Some(_) => {
+            let stream = svc
+                .streams
+                .list_streams()
+                .await
+                .map_err(|e| e.to_string())?
+                .first()
+                .map(|s| s.id)
+                .ok_or("no stream")?;
+            let capture = svc
+                .snapshot_captures
+                .get(&stream)
+                .ok_or("no snapshot capture")?;
+            capture
+                .request_snapshot(oxplow_domain::snapshot::SnapshotTrigger::Startup)
+                .await
+                .map_err(|e| e.to_string())?;
+            Some(capture)
+        }
+        None => None,
+    };
     let mut prompt = envelope(HookKind::UserPromptSubmit, json!({}));
     prompt.prompt = Some(
         body.get("prompt")
@@ -1454,6 +1496,28 @@ async fn observe_turn(host: &Host, body: &Value) -> Result<(), String> {
             .to_string(),
     );
     ingest(prompt).await?;
+    for step in body
+        .get("during")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let command = step
+            .get("command")
+            .and_then(Value::as_str)
+            .ok_or("`turn.during` steps are `{ command, input?, as? }`")?;
+        svc.commands
+            .run(
+                &step_actor(step)?,
+                command,
+                step.get("input").cloned().unwrap_or_else(|| json!({})),
+                step.get("confirmed")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+            )
+            .await
+            .map_err(|e| format!("`turn.during` `{command}` failed: {e}"))?;
+    }
     for tool in body
         .get("tools")
         .and_then(Value::as_array)
@@ -1466,6 +1530,12 @@ async fn observe_turn(host: &Host, body: &Value) -> Result<(), String> {
         call.tool = Some(used);
         ingest(call).await?;
     }
+    // The calls are in the models before the turn ends, as the app's pump
+    // has them by then: the end's checkpoint counts them.
+    svc.event_pump
+        .deliver_projections()
+        .await
+        .map_err(|e| e.to_string())?;
     if let Some(write) = body.get("write") {
         let (Some(path), Some(text)) = (
             write.get("path").and_then(Value::as_str),
@@ -1478,16 +1548,7 @@ async fn observe_turn(host: &Host, body: &Value) -> Result<(), String> {
             std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         }
         std::fs::write(&file, text).map_err(|e| e.to_string())?;
-        let stream = svc
-            .streams
-            .list_streams()
-            .await
-            .map_err(|e| e.to_string())?
-            .first()
-            .map(|s| s.id)
-            .ok_or("no stream")?;
-        svc.snapshot_captures
-            .get(&stream)
+        capture
             .ok_or("no snapshot capture")?
             .enqueue_startup_diff()
             .await
@@ -4632,7 +4693,11 @@ expect:
         .unwrap();
         let report = test_extension(dir.path(), "notes", false).await.unwrap();
         assert!(report.ok, "{:?}", report.errors);
-        assert!(report.ran.contains(&"example answer".to_string()), "{:?}", report.ran);
+        assert!(
+            report.ran.contains(&"example answer".to_string()),
+            "{:?}",
+            report.ran
+        );
     }
 
     /// A policy that opens an item's effort when it starts on a thread,

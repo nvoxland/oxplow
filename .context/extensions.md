@@ -2048,6 +2048,20 @@ a `KINDS` entry and a `dispatch` arm. The forms:
   ran because of it — the script's steps, then what reacted (audited after
   it). The extension's own command with `answers` is still the dry run
   below, until those fixtures make their data.
+- `given: [{ observe: { turn: { prompt?, during?, tools?, write?, answer? } } }]`
+  (`observe` in `extension_test.rs`; every kind takes `given` and `steps`) —
+  what oxplow only learns from what happens around it, made through the API
+  core makes it with, and a new kind is added to that `match`, red test
+  first, one at a time. `turn` is one turn on the primary thread through
+  `hook_ingest.ingest`: `UserPromptSubmit`, the commands made `during` it,
+  one `PostToolUse` per tool (`ToolUse` as the harness maps it), the file
+  written with a snapshot before and after (`SnapshotTrigger::Startup`,
+  `enqueue_startup_diff`), then `Stop` with the answer
+  (`last_assistant_message`). The log's projections are delivered between
+  the calls and the end (the checkpoint counts the turn's writing tools
+  from `v_tool_call`) and settled after it (the checkpoint, then what reacts
+  to it). A step's `when: { sql }` reads the result, since a `steps` entry
+  of a command, event or sql fixture takes the earlier kind in `KINDS`.
 - `when: { sql, params? }`, `expect: { rows, columns? }` — a read-only query
   over the published models, run as a page loader would (an inline page of
   one `sql` loader, `sql_example`) and compared as a loader's: a model, a

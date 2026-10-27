@@ -122,6 +122,17 @@ model the SQL reads and the command it runs. Prefer `answers:` on pages.
      fixture's (`when: { payload: { .. } }` changes just the payload). Every page's `answers:` entry
      also runs (`ran: answers`), on a clean oxplow: the page must open with
      its params and no failing loader;
+   - a `given` step can also **observe** what oxplow only learns from what
+     happens around it, made through the API core makes it with:
+     `{ observe: { turn: { prompt?, during?: [{ command, input?, as? }],
+     tools?: [{ name, kind, paths?, command?, detail?, ok?, exit_code? }],
+     write?: { path, body }, answer? } } }` — one turn on the thread, as its
+     harness's hooks report it: the prompt, the commands made `during` it
+     (an effort opened mid-turn), each tool call (a finished call; a shell
+     `cargo test` also records a test run), the file the turn wrote (with a
+     snapshot before and after, so the turn's checkpoint says `changed`) and
+     the turn's end with the agent's last message. Read the result with
+     `when: { sql }` (`v_tool_call`, `v_agent_turn`, `v_effort`, …);
    - `rows: { <entity>: [ {…} ] }` in a page or job fixture fills your
      collectors' entities first (they start empty);
    - an event: `when: { event: { type, payload, … } }` — logged in the
