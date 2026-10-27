@@ -1,0 +1,16 @@
+# The agent's activity on the stream — a prompt, its tool calls and the
+# turn's end — newest first.
+given:
+  - observe:
+      turn:
+        prompt: Fix it
+        tools:
+          - { name: Edit, kind: edit, paths: [src/a.rs], ok: true }
+when: { page: oxplow-foundation/hook-events, params: { stream_id: 1 } }
+expect:
+  loaders:
+    hook_events:
+      rows:
+        contains:
+          - { kind: prompt.submitted }
+          - { kind: turn.ended }

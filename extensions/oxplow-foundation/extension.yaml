@@ -190,6 +190,36 @@ intent:
     - name: snapshots-lists-newest-first-with-trigger-and-budget
       input: { page: snapshots }
       expect: snapshots come newest first, each with its parent, trigger and whether it ran over budget
+    - name: problems-lists-diagnostics-by-file-with-errors-first
+      input: { page: problems }
+      expect: the problems page lists what its loaders read
+    - name: symbols-nest-under-their-container-and-group-by-file
+      input: { page: symbols }
+      expect: the symbols page lists what its loaders read
+    - name: hook-events-lists-the-agents-activity-newest-first
+      input: { page: hook-events }
+      expect: the hook-events page lists what its loaders read
+    - name: done-work-lists-closed-items-latest-first
+      input: { page: done-work }
+      expect: the done-work page lists what its loaders read
+    - name: dashboards-list-the-dashboard-pages
+      input: { page: dashboards }
+      expect: the dashboards page lists what its loaders read
+    - name: go-to-lists-the-bookmarks-of-a-thread
+      input: { page: go-to }
+      expect: the go-to page lists what its loaders read
+    - name: local-history-lists-snapshots-newest-first
+      input: { page: local-history }
+      expect: the local-history page lists what its loaders read
+    - name: git-history-lists-commits-newest-first-narrowed-by-text-and-author
+      input: { page: git-history }
+      expect: the git-history page lists what its loaders read
+    - name: wiki-index-lists-pages-newest-change-first-and-searches
+      input: { page: wiki-index }
+      expect: the wiki-index page lists what its loaders read
+    - name: wiki-freshness-lists-the-files-a-page-cites
+      input: { page: wiki-freshness }
+      expect: the wiki-freshness page lists what its loaders read
 # The agent harnesses and AI providers oxplow runs: core's
 # built-ins, many of each at once (every one declared here is active).
 implementations:

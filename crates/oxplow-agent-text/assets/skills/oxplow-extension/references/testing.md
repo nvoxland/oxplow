@@ -154,7 +154,15 @@ model the SQL reads and the command it runs. Prefer `answers:` on pages.
      status }], asserted_failed? } } }` (a test run an effort recorded: a
      capture with a fact per case) and `{ observe: { snapshot: { trigger?,
      elapsed_ms?, budget_ms?, files?: [{ path, hash }] } } }` (one take in
-     the stream's snapshot log; its parent is the take before it);
+     the stream's snapshot log; its parent is the take before it,
+     `{ observe: { diagnostics: { path, items: [{ severity, message, line?,
+     col? }] } } }` (what a language server reported for a file),
+     `{ observe: { symbols: { path, items: [{ name, kind, container?, line? }] } } }`
+     (the definitions the index read from it), `{ observe: { collect: {
+     effort, collectors?: [key] } } }` (the fact collectors an effort's end
+     runs) and `{ observe: { retention: { days } } }` (the log's retention
+     sweep as it runs that many days from now: payloads expire, envelopes
+     stay);
    - `rows: { <entity>: [ {…} ] }` in a page or job fixture fills your
      collectors' entities first (they start empty);
    - an event: `when: { event: { type, payload, … } }` — logged in the

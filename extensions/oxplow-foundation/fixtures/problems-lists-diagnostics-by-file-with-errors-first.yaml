@@ -1,0 +1,16 @@
+# What the language servers report, by file: files with errors first, the
+# severest first inside a file; a severity keeps only its own.
+given:
+  - observe: { diagnostics: { path: a.rs, items: [{ severity: warning, message: unused, line: 3 }] } }
+  - observe: { diagnostics: { path: b.rs, items: [{ severity: warning, message: late, line: 9 }, { severity: error, message: broken, line: 20 }] } }
+when: { page: oxplow-foundation/problems, params: { stream_id: 1 } }
+expect:
+  loaders:
+    problems:
+      rows:
+        - { path: b.rs, severity: error, message: broken, position: "20:1" }
+        - { path: b.rs, severity: warning, message: late }
+        - { path: a.rs, severity: warning, message: unused }
+steps:
+  - params: { stream_id: 1, severity: error }
+    expect: { loaders: { problems: { rows: [{ path: b.rs, message: broken }] } } }

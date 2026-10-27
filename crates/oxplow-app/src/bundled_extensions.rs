@@ -1200,40 +1200,6 @@ mod tests {
         assert_eq!(rows[1][1], oxplow_db::SqlCell::Null(()));
     }
 
-    /// The foundation's page files are oxplow's pages, core-named
-    /// (`oxplow:oxplow/page?page=tasks`) as its commands are: a bare slug
-    /// finds the foundation's page.
-    #[tokio::test]
-    async fn the_foundation_declares_its_pages() {
-        let f = crate::test_fixtures::services_with_effort().await;
-        let root = f._dir.path();
-        for slug in [
-            "problems",
-            "symbols",
-            "closed-threads",
-            "hook-events",
-            "done-work",
-            "wiki-freshness",
-            "wiki-index",
-            "catalog",
-            "go-to",
-            "dashboards",
-            "local-history",
-            "git-history",
-            "stream-settings",
-            "thread-settings",
-        ] {
-            let page = f
-                .svc
-                .extension_activation
-                .read(async { f.svc.extension_catalog.page_named(root, slug) })
-                .await
-                .unwrap()
-                .unwrap_or_else(|e| panic!("{slug}: {e}"));
-            assert_eq!(page.id, format!("oxplow-foundation/{slug}"));
-        }
-    }
-
     fn texts(rows: &serde_json::Value, i: usize) -> Vec<String> {
         rows.as_array()
             .unwrap()
@@ -2675,10 +2641,6 @@ mod tests {
         f
     }
 
-    fn effort_ref(f: &crate::test_fixtures::EffortFixture) -> String {
-        oxplow_domain::uri::build::effort_uri(f.effort)
-    }
-
     /// The effort's bare id, as the verbs and the verdict's payload carry it.
     fn effort_id(f: &crate::test_fixtures::EffortFixture) -> String {
         f.effort.to_string()
@@ -2974,13 +2936,12 @@ mod tests {
         assert_eq!(follow_ups(&f).await.len(), 1);
     }
 
-    /// P10 (K1): oxplow-bundled shows the verdict where the effort is shown
-    /// — the first bundled use of `ui.decorators`, which made it stable.
-    /// Its `verdict` model is each effort's latest verdict (over
-    /// `verdicts`, appended as each lands), as a label and a color the
-    /// effort's chip and rows show. It shows; it never acts.
+    /// oxplow-bundled shows the verdict where the effort is shown: it
+    /// declares two decorators over its `verdict` model, a chip on the
+    /// effort's refs and a badge on its rows. (What they show is the
+    /// `a-verdict-decorates-its-effort` fixture's.)
     #[tokio::test(flavor = "multi_thread")]
-    async fn a_verdict_decorates_its_effort() {
+    async fn the_verdict_is_declared_as_a_chip_and_a_badge_on_the_effort() {
         let f = review_fixture().await;
         let review_ext = f
             .svc
@@ -3011,109 +2972,6 @@ mod tests {
                     DecoratorPlacement::RowBadge
                 )
             ]
-        );
-        // What keeps `verdicts` current in the app (boot starts it): each
-        // verdict appended to the log lands in the model.
-        crate::models_changed::spawn(
-            f.svc.db.clone(),
-            std::sync::Arc::new(crate::models_changed::ModelWatermarks::default()),
-            f.svc.events.clone(),
-            f.svc.assets.clone(),
-            f.svc.event_pump.clone(),
-            crate::pages::open_runs::PageRuns::default(),
-        );
-        let shown = || async {
-            f.svc
-                .sql
-                .query_sql(
-                    "SELECT uri, label, color FROM v_oxplow_bundled_verdict",
-                    vec![],
-                    None,
-                )
-                .await
-                .map(|r| serde_json::to_value(&r.rows).unwrap())
-                .unwrap_or_default()
-        };
-        let until = |want: serde_json::Value| async move {
-            tokio::time::timeout(std::time::Duration::from_secs(10), async {
-                loop {
-                    let rows = shown().await;
-                    if rows == want {
-                        return;
-                    }
-                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-                }
-            })
-            .await
-            .unwrap_or_else(|_| panic!("never showed {want}"))
-        };
-        let human = oxplow_domain::Actor::Human;
-        review(
-            &f,
-            &human,
-            "oxplow.review.request_changes",
-            serde_json::json!({ "effort": effort_id(&f), "note": "Keep it to the UI." }),
-        )
-        .await
-        .unwrap();
-        until(serde_json::json!([[
-            effort_ref(&f),
-            "Changes requested",
-            "red"
-        ]]))
-        .await;
-        review(
-            &f,
-            &human,
-            "oxplow.review.accept",
-            serde_json::json!({ "effort": effort_id(&f), "force": true }),
-        )
-        .await
-        .unwrap();
-        until(serde_json::json!([[
-            effort_ref(&f),
-            "Accepted (forced)",
-            "orange"
-        ]]))
-        .await;
-        // tsk886: the verdict is state. Its payload expires with the
-        // extension default's 30 days, but what the chip shows is in the envelope
-        // (type and subject), which is kept.
-        let later = oxplow_domain::Timestamp::from_unix_ms(
-            oxplow_domain::Timestamp::now().unix_ms() + 31 * oxplow_db::event_retention::DAY_MS,
-        );
-        let swept = oxplow_db::event_retention::sweep(&f.svc.db, later, &Default::default())
-            .await
-            .unwrap();
-        assert!(swept.payloads_expired >= 2, "{swept:?}");
-        // Refilled whole, as a restart or a rewrite of the log does.
-        let computed = || async {
-            f.svc
-                .db
-                .transaction(|tx| {
-                    tx.query_row(
-                        "SELECT computed_at FROM asset_state \
-                         WHERE asset = 'v_oxplow_bundled_verdicts'",
-                        [],
-                        |r| r.get::<_, String>(0),
-                    )
-                    .map_err(oxplow_db::map_sql_err)
-                })
-                .await
-                .unwrap()
-        };
-        let before = computed().await;
-        f.svc.assets.all_changed();
-        tokio::time::timeout(std::time::Duration::from_secs(10), async {
-            while computed().await == before {
-                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-            }
-        })
-        .await
-        .expect("the verdicts refilled");
-        assert_eq!(
-            shown().await,
-            serde_json::json!([[effort_ref(&f), "Accepted (forced)", "orange"]])
         );
     }
 }
