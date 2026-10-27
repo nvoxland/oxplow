@@ -7703,6 +7703,64 @@ steps:
         assert_eq!(report.errors, Vec::<String>::new());
     }
 
+    /// `shown` is the view the core drew: the spec when it opened, `null`
+    /// when the core refused it or the component cleared it — however fast
+    /// the component asks.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_ui_shown_is_the_last_view_the_core_drew() {
+        assert!(
+            crate::component_harness::shell().is_some(),
+            "no oxplow app to draw the harness: build it first (`bun run build:dev`)"
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        component_ext(
+            root,
+            "oxplow.connect().then(function (c) {
+  var spec = function (sql) {
+    return 'title: Out\\ndata:\\n  rows: { sql: \"' + sql + '\" }\\nview: { from: rows, viz: table }\\n';
+  };
+  var button = function (id, run) {
+    var b = document.createElement('button');
+    b.id = id;
+    b.addEventListener('click', run);
+    document.body.appendChild(b);
+  };
+  button('bad', function () { c.showView(spec('SELECT * FROM no_such_model')).catch(function () {}); });
+  button('good', function () { c.showView(spec('SELECT 1 AS n')).catch(function () {}); });
+  button('clear', function () { c.showView(null); });
+  // Three asks at once: the last the core drew is the one that counts.
+  button('burst', function () {
+    c.showView(spec('SELECT 1 AS n')).catch(function () {});
+    c.showView(spec('SELECT * FROM no_such_model')).catch(function () {});
+    c.showView(spec('SELECT 2 AS n')).catch(function () {});
+  });
+});
+",
+        );
+        write(
+            root,
+            ".oxplow/extensions/cards/fixtures/drawn.yaml",
+            r##"when: { page: board }
+steps:
+  - ui:
+      - click: "#bad"
+      - expect: { shown: null }
+      - click: "#good"
+      - expect: { shown: "title: Out\ndata:\n  rows: { sql: \"SELECT 1 AS n\" }\nview: { from: rows, viz: table }\n" }
+      - click: "#bad"
+      - expect: { shown: null }
+      - click: "#good"
+      - click: "#clear"
+      - expect: { shown: null }
+      - click: "#burst"
+      - expect: { shown: "title: Out\ndata:\n  rows: { sql: \"SELECT 2 AS n\" }\nview: { from: rows, viz: table }\n" }
+"##,
+        );
+        let report = test_extension(root, "cards", false).await.unwrap();
+        assert_eq!(report.errors, Vec::<String>::new());
+    }
+
     /// `rows: []` is no rows, like `rows: 0`.
     #[tokio::test(flavor = "multi_thread")]
     async fn an_empty_row_list_is_no_rows() {

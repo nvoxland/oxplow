@@ -3254,8 +3254,12 @@ around it** (`component_harness.rs`, `PageAt::ui`):
   (`run_component_sql`), `openForm` / `askForm`, `showView` — runs on the
   test's oxplow; what only the shell answers (`setTitle`, `setActions`,
   `setViewParams`, `setHistoryState`, `navigate`, a confirmation) is
-  recorded. The server drives it one op at a time (`/harness/next`): a DOM
-  step for the agent, a nav-bar press, a view change, new rows.
+  recorded, in the order made (one queue of posts, which the next op waits
+  for). `showView` runs one at a time in the order asked and is recorded
+  once the core has answered: `shown` is the spec when the core drew it,
+  `null` when it refused it or the component cleared it. The server drives
+  it one op at a time (`/harness/next`): a DOM step for the agent, a nav-bar
+  press, a view change, new rows.
 - **The window** is the shell's `oxplow component-harness <url>`: one
   window, off-screen but shown, no Dock icon, no project, daemon, menu or
   IPC; it quits at `/harness/done`. Found as `OXPLOW_SHELL`, else an

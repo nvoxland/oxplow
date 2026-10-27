@@ -68,6 +68,7 @@ export async function runHarness(
 ): Promise<void> {
   const start = await server.start();
   const fed = fedBy(start.run, start.node);
+  let showing: Promise<void> = Promise.resolve();
   const host = await new Promise<ReturnType<typeof createBridgeHost>>((mounted) => {
     frame.addEventListener(
       "load",
@@ -88,9 +89,29 @@ export async function runHarness(
             querySql: async (sql: string, params: SqlCell[]) => (await server.rpc("querySql", { sql, params })) as never,
             openForm: async (command, input) => (await server.rpc("openForm", { command, input })) as never,
             askForm: async (form) => (await server.rpc("askForm", { form })) as never,
-            showView: async (spec) => {
-              server.record("showView", spec);
-              return spec === null ? null : ((await server.rpc("showView", { spec })) as never);
+            // One at a time, in the order asked, and recorded once the core has
+            // answered: the spec when it drew it, `null` when it refused it
+            // or the component cleared it.
+            showView: (spec) => {
+              const mine = showing.then(async () => {
+                if (spec === null) {
+                  server.record("showView", null);
+                  return null;
+                }
+                try {
+                  const drawn = (await server.rpc("showView", { spec })) as never;
+                  server.record("showView", spec);
+                  return drawn;
+                } catch (e) {
+                  server.record("showView", null);
+                  throw e;
+                }
+              });
+              showing = mine.then(
+                () => undefined,
+                () => undefined,
+              );
+              return mine;
             },
             setTitle: record("title"),
             setActions: record("actions"),
@@ -148,6 +169,7 @@ export async function runHarness(
 
 /** The server this page was served by, over HTTP. */
 export function httpServer(): Server {
+  let sent: Promise<void> = Promise.resolve();
   const post = async (path: string, body: unknown) => {
     const response = await fetch(path, {
       method: "POST",
@@ -166,13 +188,25 @@ export function httpServer(): Server {
       if ("error" in out) throw new IpcCallError(out.error.message, out.error.code, out.error.field ?? null);
       return out.result;
     },
-    record: (kind, value) =>
-      void fetch("/harness/record", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ kind, value }),
-      }),
-    next: async (result) => (await post("/harness/next", { result })) as Op,
+    // The records go in the order they were made: each post waits for the
+    // one before, and the next op waits for them all, so the fixture reads
+    // what the frame did in the order it did it.
+    record: (kind, value) => {
+      sent = sent.then(() =>
+        fetch("/harness/record", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ kind, value }),
+        }).then(
+          () => undefined,
+          () => undefined,
+        ),
+      );
+    },
+    next: async (result) => {
+      await sent;
+      return (await post("/harness/next", { result })) as Op;
+    },
   };
 }
 

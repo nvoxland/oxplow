@@ -100,6 +100,21 @@ function isolated(dir: string, harnessFake: string): NodeJS.ProcessEnv {
   return env;
 }
 
+/** End every process in the group `pgid` and wait until none is left. */
+async function endGroup(pgid: number): Promise<void> {
+  const signal = (sig: NodeJS.Signals | 0) => {
+    try {
+      process.kill(-pgid, sig);
+      return true;
+    } catch {
+      return false; // no such group: nothing is left
+    }
+  };
+  if (!signal("SIGKILL")) return;
+  const until = Date.now() + 10_000;
+  while (signal(0) && Date.now() < until) await new Promise((r) => setTimeout(r, 10));
+}
+
 /** Start a daemon over a new project in a temp dir under `tmp`. Whatever
  *  goes wrong before it's listening, the process is killed and the dir
  *  removed; its log is kept and named in the error. `bin` and `tmp` are for
@@ -121,6 +136,10 @@ export async function startDaemon({ bin = process.env.OXPLOW_E2E_DAEMON, tmp = t
       // for from the spawn, so a daemon already dead can't hang this.
       if (child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
       await exited;
+      // A process the daemon started is still in its group, and may still
+      // be writing into the home: end the group, and wait until it is gone,
+      // before the directory is removed under it.
+      await endGroup(child.pid!);
     }
     rmSync(dir, { recursive: true, force: true });
   };
@@ -137,6 +156,9 @@ export async function startDaemon({ bin = process.env.OXPLOW_E2E_DAEMON, tmp = t
     const spawned = spawn(bin, ["--project", project, "--bind", "127.0.0.1:0", "--token-stdin"], {
       env,
       stdio: ["pipe", "pipe", "pipe"],
+      // Its own process group: what the daemon starts (a harness CLI asked
+      // for its models) can outlive it, and `stop` ends them with it.
+      detached: true,
     });
     child = spawned;
     exited = new Promise((r) => spawned.once("exit", () => r()));
