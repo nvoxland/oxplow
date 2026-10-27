@@ -79,7 +79,7 @@ async function decisions(daemon: Daemon): Promise<Record<string, string>> {
   return decided;
 }
 
-test("TODOs are sorted by the model, and a decision from the board or the list page survives a reload", async ({ fresh }) => {
+test("TODOs are sorted by the model, and a decision from the list page survives a reload beside one made earlier", async ({ fresh }) => {
   const { page, daemon } = fresh;
   const model = await jev();
   try {
@@ -114,10 +114,9 @@ test("TODOs are sorted by the model, and a decision from the board or the list p
     await expect(card(3)).toBeVisible();
     await expect(frame.locator("#status")).toHaveText("");
 
-    // A decision from the board's card form.
-    await card(1).locator("select[name=decision]").selectOption("fix-now");
-    await card(1).getByRole("button", { name: "Save" }).click();
-    await until("the board's decision to be stored", 15_000, async () => (await decisions(daemon))["src/lib.rs:1"] === "fix-now");
+    // A decision from the board's card form is the example's `ui` fixture's;
+    // here the first is made as the command, so the reload has both.
+    await run(daemon, "triage.todos.decide", { path: "src/lib.rs", line: 1, decision: "fix-now" });
 
     // A decision from the `todos` page's `Decide…` row action, in its slideover.
     await openFromLauncher(page, "TODOs");

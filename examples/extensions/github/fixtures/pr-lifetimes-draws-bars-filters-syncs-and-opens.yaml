@@ -1,0 +1,25 @@
+# PR Lifetimes draws a bar per pull request, from when it was opened to when
+# it was merged (or now); its filter buttons re-run its page; a date that
+# can't be read leaves that pull request out, said; Sync runs the
+# collector as the person; a bar opens its pull request.
+given:
+  - rows:
+      pr:
+        - { number: 12, title: Fix the hover state, state: merged, author: ann, head_branch: hover, draft: false, opened_at: "2026-09-01T00:00:00Z", merged_at: "2026-09-03T00:00:00Z" }
+        - { number: 13, title: Add dark mode, state: open, author: bob, head_branch: dark, draft: false, opened_at: "2026-09-20T00:00:00Z", merged_at: null }
+        - { number: 11, title: Mystery, state: open, author: cy, head_branch: odd, draft: false, opened_at: "not a date", merged_at: null }
+when: { page: pr-lifetimes }
+steps:
+  - ui:
+      - expect: { count: { ".bar": 2 }, text: { "#note": { contains: "1 pull request has a date that can't be read" } } }
+      # A filter button writes the page's `state`; the app re-runs the page
+      # with it, which the next step does.
+      - click: '[data-state="open"]'
+      - expect: { view_params: { state: open } }
+      - click: "#sync"
+      - expect: { invoked: [{ command: oxplow.collector.sync }] }
+      - click: '[data-ref="oxplow:github/pr?id=12"] rect'
+      - expect: { navigated: $any }
+  - params: { state: open }
+    ui:
+      - expect: { count: { ".bar": 1, '.bar[data-ref="oxplow:github/pr?id=13"]': 1 } }

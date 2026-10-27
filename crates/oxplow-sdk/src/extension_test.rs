@@ -1477,6 +1477,8 @@ async fn run_steps(
 ///   what a language server reported for a file.
 /// - `symbols: { path, language?, items?: [{ name, kind, id?, container?, signature?, line?, col? }] }`:
 ///   the definitions the index read from a file at a snapshot of it.
+/// - `facts: { measure, producer?, items?: [{ value?, path?, line?, rule?, severity?, detail?, subject? }] }`:
+///   what a collector found, recorded as one capture of the measure.
 /// - `retention: { days }`: the log's retention sweep, run as it is `days`
 ///   from now: payloads past their keep are expired, envelopes stay.
 /// - `collect: { effort, collectors?: [key] }`: the fact collectors an
@@ -1503,9 +1505,10 @@ async fn observe(host: &Host, ext: &Extension, observed: &Value) -> Result<(), S
         "diagnostics" => observe_diagnostics(host, body).await,
         "symbols" => observe_symbols(host, body).await,
         "retention" => observe_retention(host, body).await,
+        "facts" => observe_facts(host, body).await,
         other => {
             return Err(format!(
-                "`{other}` isn't a kind — fix: `turn`, `evidence`, `event`, `commit`, `change`, `test_run`, `snapshot`, `collect`, `diagnostics`, `symbols` or `retention`"
+                "`{other}` isn't a kind — fix: `turn`, `evidence`, `event`, `commit`, `change`, `test_run`, `snapshot`, `collect`, `diagnostics`, `symbols`, `retention` or `facts`"
             ))
         }
     }?;
@@ -1840,6 +1843,54 @@ async fn observe_symbols(host: &Host, body: &Value) -> Result<(), String> {
             },
         )
         .await
+        .map_err(|e| e.to_string())
+}
+
+/// `facts: { measure, producer?, items?: [{ value?, path?, line?, rule?,
+/// severity?, detail?, subject? }] }`: findings of `measure` (declared by
+/// core or an extension), recorded as one capture
+/// (`SqliteFactStore::record_facts`), the way a collector's run records them.
+async fn observe_facts(host: &Host, body: &Value) -> Result<(), String> {
+    let key = body
+        .get("measure")
+        .and_then(Value::as_str)
+        .ok_or("`facts.measure` names the measure")?;
+    let producer = body.get("producer").and_then(Value::as_str).unwrap_or(key);
+    let facts = &host.svc.fact_store;
+    let measure = facts
+        .get_measure(key)
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("no measure `{key}` — fix: declare it in `measures:`"))?;
+    let rows: Vec<oxplow_db::NewFact> = body
+        .get("items")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .map(|f| {
+            let text = |k: &str| f.get(k).and_then(Value::as_str).map(str::to_string);
+            oxplow_db::NewFact {
+                subject: text("subject"),
+                path: text("path"),
+                line: f.get("line").and_then(Value::as_i64),
+                severity: text("severity"),
+                rule: text("rule"),
+                detail: text("detail"),
+                ..oxplow_db::NewFact::new(
+                    measure.id,
+                    f.get("value").and_then(Value::as_f64).unwrap_or(1.0),
+                )
+            }
+        })
+        .collect();
+    let stream = first_stream(host).await?;
+    facts
+        .record_facts(
+            oxplow_db::NewMetricCapture::done(stream.value(), producer, "hook"),
+            rows,
+        )
+        .await
+        .map(|_| ())
         .map_err(|e| e.to_string())
 }
 
@@ -5994,6 +6045,29 @@ expect:
     - { k: d, a: a.rs, b: warning }
     - { k: s, a: src/lib.rs, b: helper }
     - { k: s, a: src/lib.rs, b: main }
+",
+        );
+        let report = test_extension(dir.path(), "notes", false).await.unwrap();
+        assert!(report.ok, "{:?}", report.errors);
+    }
+
+    /// `observe: { facts }` records findings of a measure, as a collector's
+    /// capture does.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_given_observes_facts() {
+        let dir = tempfile::tempdir().unwrap();
+        crate::scaffold(dir.path(), crate::Kind::Command, "notes", None).unwrap();
+        write(
+            dir.path(),
+            ".oxplow/extensions/notes/fixtures/basic.yaml",
+            "given:
+  - observe: { facts: { measure: oxplow.test_case, items: [{ path: src/a.rs, line: 3, rule: bug }, { path: src/b.rs, line: 9, rule: cleanup, value: 2 }] } }
+when:
+  sql: SELECT path, line, rule, value FROM v_fact WHERE measure_key = 'oxplow.test_case' ORDER BY path
+expect:
+  rows:
+    - { path: src/a.rs, line: 3, rule: bug, value: 1.0 }
+    - { path: src/b.rs, line: 9, rule: cleanup, value: 2.0 }
 ",
         );
         let report = test_extension(dir.path(), "notes", false).await.unwrap();

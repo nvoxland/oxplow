@@ -1,7 +1,7 @@
 import { expect, test } from "../../support/fixtures.js";
 import { openFromLauncher } from "../../support/ui.js";
 
-// The Timeline (tsk1455): oxplow-foundation's custom page, a component
+// The Timeline: oxplow-foundation's custom page, a component
 // built with a library the kit doesn't have, filling its page under core's
 // nav bar. It reads with its own SQL, titles its page with the range and
 // puts Today and Fit in the bar, which core draws.
@@ -11,15 +11,12 @@ test("the Timeline page draws the project's activity and titles itself", async (
   await openFromLauncher(page, "Timeline");
   // A page file whose view is the component: the frame is the page.
   await expect(page.locator('[data-testid="page-host"]:visible [data-testid="custom-component"]')).toBeVisible();
-  const frame = page.frameLocator('[data-testid="custom-component-frame"]');
-  // A fresh project has its first thread and session in the last week.
-  await expect(frame.locator(".vis-item").first()).toBeVisible();
+  // What it draws, its title and its actions are the foundation's `ui`
+  // fixture's; the app's part is the bar: the title, and Today and Fit as
+  // buttons in it, not in its ☰.
   await expect(page.getByTestId("page-nav-title")).toContainText("Timeline:");
-  // Today and Fit are prominent: buttons in the bar, not in its ☰.
   await expect(page.getByTestId("action-today")).toBeVisible();
   await expect(page.getByTestId("action-fit")).toBeVisible();
-  await page.getByTestId("action-fit").click();
-  await expect(frame.locator(".vis-item").first()).toBeVisible();
 });
 
 // Its window is its view params: Fit writes `from` and `to` into the tab's
@@ -29,8 +26,7 @@ test("the Timeline's window is its tab's: Fit puts it in the address, a reload k
   const { page } = fresh;
   await page.goto("/");
   await openFromLauncher(page, "Timeline");
-  const frame = page.frameLocator('[data-testid="custom-component-frame"]');
-  await expect(frame.locator(".vis-item").first()).toBeVisible();
+  await expect(page.getByTestId("page-nav-title")).toContainText("Timeline:");
   // The window it opens at is "the last week", not a date: not in the address.
   const body = page.locator('[data-testid^="center-tab-body-oxplow:oxplow/page?"][data-testid*="page=timeline"]:visible');
   await expect(body).toHaveAttribute("data-testid", "center-tab-body-oxplow:oxplow/page?page=timeline");

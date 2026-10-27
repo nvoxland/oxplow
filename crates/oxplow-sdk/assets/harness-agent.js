@@ -82,7 +82,9 @@
       var el = one(a.click);
       mouse(el, "mousedown");
       mouse(el, "mouseup");
-      el.click();
+      // An SVG element has no `click()`: it hears the event.
+      if (typeof el.click === "function") el.click();
+      else mouse(el, "click");
       return null;
     }
     if (a.fill !== undefined) {

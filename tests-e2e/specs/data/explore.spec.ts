@@ -37,9 +37,9 @@ test("explore a model, run SQL, and save it as a page", async ({ page, daemon })
   expect(await writes(daemon)).toBe(before + 1);
 });
 
-// A refused query is the component's to show: oxplow answers it with the
-// reason, and draws nothing.
-test("a query oxplow refuses says why in the explorer", async ({ page }) => {
+// A refused query draws nothing under the explorer. (The message it shows
+// is the foundation's `ui` fixture's.)
+test("a query oxplow refuses draws nothing under the explorer", async ({ page }) => {
   await page.goto("/");
   await openFromLauncher(page, "Explore Data");
   const frame = page.frameLocator('[data-testid="custom-component-frame"]');

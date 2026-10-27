@@ -50,9 +50,10 @@ async function titled(daemon: Daemon, title: string): Promise<boolean> {
   return out.rows.length > 0;
 }
 
-/** The Board, replaced: drag a card, rename it, and the empty title's
- *  refusal under its input. `scope` is
- *  the Board's scope that shows the items. */
+/** The Board, replaced: the lanes and the drag are the example's `ui`
+ *  fixture's; here the drag runs over each work list, then the rename and the
+ *  empty title's refusal under its input (a `ui` key step doesn't submit a
+ *  form). `scope` is the Board's scope that shows the items. */
 async function swimlanes(page: Page, daemon: Workspace, scope: string) {
   await run(daemon, "oxplow.work_item.create", { title: "Card one", thread: daemon.thread });
   // A tracker's items reach oxplow's models through its collector's read.
@@ -69,7 +70,6 @@ async function swimlanes(page: Page, daemon: Workspace, scope: string) {
   const frame = page.frameLocator('iframe[aria-label="Swimlanes"]');
   const card = frame.locator(".card", { hasText: "Card one" });
   await expect(card).toBeVisible();
-  await expect(frame.locator(".lane")).toHaveCount(5);
 
   await card.dragTo(frame.locator('.lane[data-state="done"]'));
   await expect(frame.locator('.lane[data-state="done"] .card', { hasText: "Card one" })).toBeVisible();

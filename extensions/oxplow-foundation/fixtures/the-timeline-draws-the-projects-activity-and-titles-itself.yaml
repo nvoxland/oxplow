@@ -1,0 +1,13 @@
+# The Timeline draws the project's efforts, sessions and commits on a time
+# axis, titles itself with its window and puts Today and Fit in the nav
+# bar. Fit writes the window it shows into the page's view params.
+given:
+  - { command: oxplow.work_item.create, input: { title: Draw it, thread: thr1 }, bind: item }
+  - { command: oxplow.work_item.transition, input: { uri: $item.uri, to: in_progress } }
+  - observe: { turn: { prompt: Draw it, tools: [{ name: Edit, kind: edit, paths: [src/a.rs], ok: true }] } }
+when: { page: timeline }
+steps:
+  - ui:
+      - expect: { visible: [".vis-item"], title: { contains: "Timeline:" }, actions: [today, fit] }
+      - press: fit
+      - expect: { visible: [".vis-item"], view_params: { from: $any, to: $any } }

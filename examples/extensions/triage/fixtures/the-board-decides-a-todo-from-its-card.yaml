@@ -1,0 +1,24 @@
+# The TODO board is a column per kind the model sorted the comments into,
+# a card for each; a card's form records a decision through the
+# extension's own command.
+given:
+  - observe:
+      facts:
+        measure: triage.todos
+        items:
+          - { path: src/lib.rs, line: 1, rule: bug }
+          - { path: src/lib.rs, line: 3, rule: cleanup }
+when: { page: todo-board }
+steps:
+  - ui:
+      - expect:
+          count: { ".card": 2, ".column": 3 }
+          text: { "#status": "" }
+      - fill: { ".card:first-of-type select[name=decision]": fix-now }
+      - click: ".card:first-of-type button[type=submit]"
+      - expect:
+          invoked:
+            - { command: triage.todos.decisions, ok: true }
+            - { command: triage.todos.decide, input: { path: src/lib.rs, line: 1, decision: fix-now }, ok: true }
+            # The board reads the decisions again and shows the new one.
+            - { command: triage.todos.decisions, ok: true, result: { result: { decisions: { "src/lib.rs:1": fix-now } } } }

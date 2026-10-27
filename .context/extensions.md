@@ -2088,7 +2088,8 @@ a `KINDS` entry and a `dispatch` arm. The forms:
   `SqliteFactStore::record_facts`) and `snapshot` (one take in the
   snapshot log, `SqliteSnapshotStore::record_take`), `diagnostics`
   (`SqliteDiagnosticStore::replace_file`), `symbols` (`SqliteSymbolStore::record`
-  at a snapshot taken with the file), `collect` (`run_effort_collectors`) and
+  at a snapshot taken with the file), `collect` (`run_effort_collectors`) 
+  `facts` (findings of a declared measure through `record_facts`) and
   `retention` (`event_retention::sweep`, run `days` ahead). A step's `when: { sql }` reads the result, since a `steps` entry
   of a command, event or sql fixture takes the earlier kind in `KINDS`.
 - `when: { advisory: <id>, thread? }`, `expect: { lines: [..] }` — the
