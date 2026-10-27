@@ -83,9 +83,8 @@ or exact mechanics.
     has the kinds). It runs on a throwaway oxplow with only the data the
     fixture makes and only the extensions this one declares (`requires:`),
     never the project's database. Rust tests are for core, never for an
-    extension's behavior: `crates/oxplow-app/src/bundled_extensions.rs` and
-    its siblings don't grow. How the app draws a page (select, expand,
-    forms, slots, embeds, a component's frame) is the generic
+    extension's behavior (the page tests are fixtures now). How the app
+    draws a page (select, expand, forms, slots, embeds, a component's frame) is the generic
     `tests-e2e/specs/pages/*` suite's: add a per-page or per-component e2e
     spec only for what only the app's shell does.
   - **Core** (any Rust crate, `apps/desktop/src`): it runs only after the

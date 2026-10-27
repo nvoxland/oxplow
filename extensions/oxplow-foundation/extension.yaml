@@ -244,6 +244,18 @@ intent:
     - name: the-context-pages-clear-empties-the-threads-basket
       input: { page: context, params: { thread_id: 1 } }
       expect: the waiting section lists what was collected; Clear empties it
+    - name: session-transcript-lists-turns-and-handbacks
+      input: { page: session-transcript }
+      expect: a session's turns oldest first, a hand-back marked, tool calls counted, start at a turn, paged by 50
+    - name: a-turn-opens-its-sessions-transcript-at-it
+      input: { sql: v_agent_turn }
+      expect: a turn's transcript page is its session's page at the turn; an unclaimed turn has none
+    - name: thread-sessions-lists-sessions-with-their-subagents-beneath
+      input: { page: thread-sessions, params: { thread: thr1 } }
+      expect: a thread's sessions with their subagents beneath, by state
+    - name: a-configured-language-server-is-listed-and-not-suggested-again
+      input: { page: settings, params: { area: lsp } }
+      expect: a language server of project.yaml is listed, can't be removed, and isn't suggested again
 # The agent harnesses and AI providers oxplow runs: core's
 # built-ins, many of each at once (every one declared here is active).
 implementations:

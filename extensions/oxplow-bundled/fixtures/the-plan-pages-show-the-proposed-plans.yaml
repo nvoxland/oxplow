@@ -1,0 +1,23 @@
+# The Plan pages: the plans an agent proposed, newest first, under an effort
+# and under a thread; nothing when none was.
+given:
+  - { command: oxplow.effort.open, input: { thread: thr1 } }
+when: { page: oxplow-bundled/effort-plan, params: { effort_id: 1 } }
+expect: { loaders: { effort_plan: { rows: 0 } } }
+steps:
+  - when: { page: oxplow-bundled/thread-plan, params: { thread_id: 1 } }
+    expect: { loaders: { thread_plan: { rows: 0 } } }
+  - given:
+      - observe:
+          turn:
+            prompt: plan it
+            tools:
+              - { name: ExitPlanMode, kind: plan, plan: { text: "1. First" }, call_id: t1, pre: true }
+              - { name: ExitPlanMode, kind: plan, plan: { text: "1. Second" }, call_id: t2, pre: true }
+  - when: { page: oxplow-bundled/effort-plan, params: { effort_id: 1 } }
+    expect: { loaders: { effort_plan: { rows: 1 }, }, text: { contains: ["1. First", "1. Second"] } }
+  - when: { page: oxplow-bundled/thread-plan, params: { thread_id: 1 } }
+    expect: { loaders: { thread_plan: { rows: 1 } }, text: { contains: ["1. First", "1. Second"] } }
+  # Newest first: the page reads the plans by their sequence, latest on top.
+  - when: { sql: "SELECT text FROM v_agent_plan ORDER BY seq DESC" }
+    expect: { rows: [{ text: "1. Second" }, { text: "1. First" }] }

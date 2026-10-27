@@ -1,0 +1,15 @@
+# The thread-sessions page lists a thread's sessions with their status and
+# origin, and beneath each its subagents — a bracketed one by its state, one
+# only its calls name as `unknown`.
+given:
+  - { command: oxplow.agent_session.open, input: { thread: thr1, harness: claude }, bind: ses }
+  - observe: { event: { type: agent.subagent.started, v: 2, payload: { thread: "thread:thr1", subagent: { id: a1, kind: Explore } }, anchors: { thread_id: thr1, agent_session_id: $ses.id } } }
+  - observe: { turn: { session: $ses.id, prompt: look, tools: [{ name: Read, kind: read, paths: [a.rs], ok: true, subagent: { id: child-9 } }] } }
+when: { page: oxplow-foundation/thread-sessions, params: { thread: thr1 } }
+expect:
+  loaders:
+    thread_sessions:
+      rows:
+        - { name: $any, harness: claude, status: idle }
+        - { name: $any, harness: subagent, status: running }
+        - { name: $any, harness: subagent, status: unknown }

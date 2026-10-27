@@ -361,6 +361,23 @@ pub fn beyond_kept(deployments: &[(String, bool)]) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
+    /// What ships is the repo's folder as a deployment would hash it: a
+    /// deploy of the unchanged source resolves to the shipped copy.
+    #[test]
+    fn a_shipped_copy_hashes_as_its_source_folder() {
+        for b in crate::bundled_extensions::BUNDLED {
+            let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../extensions")
+                .join(b.name);
+            assert_eq!(
+                crate::extension_store::shipped_hash(b),
+                crate::extension_store::source_hash(&dir).unwrap(),
+                "{}",
+                b.name
+            );
+        }
+    }
+
     use super::*;
 
     fn write(dir: &Path, rel: &str, text: &str) {

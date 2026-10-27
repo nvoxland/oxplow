@@ -1451,6 +1451,16 @@ async fn run_steps(
             }
             continue;
         }
+        if let Some(project) = step.get("project") {
+            if let Err(e) = given_project(host, project) {
+                report
+                    .errors
+                    .push(format!("{shown}:1: `{key}[{index}]` `project`: {e}"));
+                return false;
+            }
+            host.settle().await;
+            continue;
+        }
         if let Some(observed) = step.get("observe") {
             let observed = match binds.substitute(observed) {
                 Ok(observed) => observed,
@@ -1531,6 +1541,34 @@ async fn run_steps(
     true
 }
 
+/// `project: { <key>: <value>, .. }`: keys of `.oxplow/project.yaml` set on
+/// the throwaway's root, as a person's edit of the file, and the config read
+/// again from disk, as core does when the file changes.
+fn given_project(host: &Host, project: &Value) -> Result<(), String> {
+    let Some(keys) = project.as_object() else {
+        return Err(
+            "`project` is a map of project.yaml keys — fix: `project: { lspServers: [..] }`".into(),
+        );
+    };
+    let file = host.root.join(".oxplow/project.yaml");
+    let text = std::fs::read_to_string(&file).unwrap_or_default();
+    let mut doc: serde_yaml::Mapping = serde_yaml::from_str(&text).unwrap_or_default();
+    for (key, value) in keys {
+        doc.insert(
+            serde_yaml::Value::String(key.clone()),
+            serde_yaml::to_value(value).map_err(|e| e.to_string())?,
+        );
+    }
+    std::fs::write(
+        &file,
+        serde_yaml::to_string(&doc).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())?;
+    host.svc
+        .reload_config_from_disk()
+        .map_err(|e| e.to_string())
+}
+
 /// `observe: { <kind>: { .. } }`: a fact oxplow only learns from what
 /// happens around it, made through the API core makes it with.
 ///
@@ -1551,6 +1589,16 @@ async fn run_steps(
 ///   what a language server reported for a file.
 /// - `symbols: { path, language?, items?: [{ name, kind, id?, container?, signature?, line?, col? }] }`:
 ///   the definitions the index read from a file at a snapshot of it.
+/// - `run: { extension, contribution, kind?, outcome?, days_ago?, cpu_ms?, ai_calls?, error? }`:
+///   a finished run of an extension's code, as the host records it.
+/// - `health: { extension, contribution, kind?, disable }`: a contribution
+///   disabled after failures, with the reason.
+/// - `token_usage: { thread?, effort?, session?, model?, prompt?, input_tokens?,
+///   output_tokens?, cache_creation_input_tokens?, cache_read_input_tokens?, turn? }`:
+///   the tokens a turn spent.
+/// - `hint: { hint, evaluated?, thread? }`: a hint's query ran that many times.
+/// - `nudge: { kind, message, thread?, effort?, audience?, delivered? }`: a
+///   nudge a hint raised.
 /// - `analyze: { kind: working | commit | …, sha?, streamId? }`: a change
 ///   analyzed now (`change_analysis::ensure_change`), so its files and
 ///   functions are there to read.
@@ -1566,7 +1614,8 @@ async fn run_steps(
 ///   effort's end triggers, run over what the effort recorded.
 /// - `turn: { prompt?, during?: [{ command, input?, as? }], tools?: [{ name, kind, paths?, command?, detail?,
 ///   ok?, exit_code? }], write?: { path, body }, answer?, compactions?: n,
-///   context?: { tokens, window? } }`: one turn on the primary thread, as
+///   context?: { tokens, window? }, thread?, session?, subagent?, peer? }`:
+///   one turn on `thread` (thr1), in `session`, as
 ///   its harness's hooks report it — the prompt, each tool call, the file
 ///   the turn wrote (a snapshot of the worktree is taken after it), the
 ///   context compactions, and the turn's end with the agent's last message
@@ -1592,9 +1641,14 @@ async fn observe(host: &Host, ext: &Extension, observed: &Value) -> Result<(), S
         "visit" => observe_visit(host, body).await,
         "refs" => observe_refs(host, body).await,
         "analyze" => observe_analyze(host, body).await,
+        "run" => observe_run(host, body).await,
+        "health" => observe_health(host, body).await,
+        "token_usage" => observe_token_usage(host, body).await,
+        "hint" => observe_hint(host, body).await,
+        "nudge" => observe_nudge(host, body).await,
         other => {
             return Err(format!(
-                "`{other}` isn't a kind — fix: `turn`, `evidence`, `event`, `commit`, `change`, `test_run`, `snapshot`, `collect`, `diagnostics`, `symbols`, `retention`, `facts`, `visit`, `refs` or `analyze`"
+                "`{other}` isn't a kind — fix: `turn`, `evidence`, `event`, `commit`, `change`, `test_run`, `snapshot`, `collect`, `diagnostics`, `symbols`, `retention`, `facts`, `visit`, `refs`, `analyze`, `run`, `health`, `token_usage`, `hint` or `nudge`"
             ))
         }
     }?;
@@ -1930,6 +1984,198 @@ async fn observe_symbols(host: &Host, body: &Value) -> Result<(), String> {
         )
         .await
         .map_err(|e| e.to_string())
+}
+
+/// `run: { extension, contribution, kind?, outcome?, days_ago?, cpu_ms?,
+/// ai_calls?, error? }`: a finished run of `extension`'s `contribution`
+/// (`kind` a collector by default), recorded as the host does
+/// (`extension_run_store::record_tx`); `days_ago` is when it began.
+async fn observe_run(host: &Host, body: &Value) -> Result<(), String> {
+    use oxplow_domain::contribution::{ContributionId, ContributionKind};
+    use oxplow_domain::run::{ContributionRef, Mode, Outcome, RunContext};
+    let text = |k: &str| body.get(k).and_then(Value::as_str);
+    let extension = text("extension").ok_or("`run.extension` names the extension")?;
+    let local = text("contribution").ok_or("`run.contribution` names the contribution")?;
+    let kind = match text("kind").unwrap_or("collector") {
+        "collector" => ContributionKind::Collector,
+        "effect" => ContributionKind::Effect,
+        "command" => ContributionKind::Command,
+        "job" => ContributionKind::Job,
+        "advisory" => ContributionKind::Advisory,
+        "implementation" => ContributionKind::Implementation,
+        other => return Err(format!("`run.kind: {other}` — fix: collector, effect, command, job, advisory or implementation")),
+    };
+    let outcome = match text("outcome").unwrap_or("ok") {
+        "ok" => Outcome::Ok,
+        "skipped" => Outcome::Skipped,
+        "failed" => Outcome::Failed,
+        "denied" => Outcome::Denied,
+        "cancelled" => Outcome::Cancelled,
+        other => {
+            return Err(format!(
+                "`run.outcome: {other}` — fix: ok, skipped, failed, denied or cancelled"
+            ))
+        }
+    };
+    let mut run = RunContext::contribution(
+        ContributionRef {
+            id: ContributionId::new(extension, kind, local),
+            version: None,
+            generation: None,
+        },
+        Actor::System,
+        Mode::External,
+    );
+    if let Some(days) = body.get("days_ago").and_then(Value::as_f64) {
+        let at = oxplow_domain::Timestamp::from_unix_ms(
+            oxplow_domain::Timestamp::now().unix_ms() - (days * 86_400_000.0) as i64,
+        );
+        run = run.began_at(at);
+    }
+    run.used_cpu(body.get("cpu_ms").and_then(Value::as_u64).unwrap_or(0), 0);
+    for _ in 0..body.get("ai_calls").and_then(Value::as_u64).unwrap_or(0) {
+        run.used_ai();
+    }
+    let error = text("error").map(str::to_string);
+    host.svc
+        .db
+        .transaction(move |tx| {
+            oxplow_db::extension_run_store::record_tx(tx, &run, outcome, error.as_deref())
+        })
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// `health: { extension, contribution, kind?, disable }`: the contribution
+/// disabled after failures, with `disable` as the reason
+/// (`contribution_health_store::disable_tx`).
+async fn observe_health(host: &Host, body: &Value) -> Result<(), String> {
+    let text = |k: &str| body.get(k).and_then(Value::as_str);
+    let key = oxplow_db::ContributionKey {
+        extension: text("extension").ok_or("`health.extension`")?.to_string(),
+        contribution: text("contribution")
+            .ok_or("`health.contribution`")?
+            .to_string(),
+        kind: match text("kind").unwrap_or("collector") {
+            "collector" => "collector",
+            "effect" => "effect",
+            "provider" => "provider",
+            other => {
+                return Err(format!(
+                    "`health.kind: {other}` — fix: collector, effect or provider"
+                ))
+            }
+        },
+    };
+    let reason = text("disable")
+        .ok_or("`health.disable` is the reason it was disabled")?
+        .to_string();
+    let now = oxplow_domain::Timestamp::now().to_string();
+    host.svc
+        .db
+        .transaction(move |tx| {
+            oxplow_db::contribution_health_store::disable_tx(tx, &key, &reason, &now)
+        })
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// The id (`thr3`) or `thr1` of the thread a `thread` key names.
+fn thread_text(body: &Value) -> String {
+    body.get("thread")
+        .and_then(Value::as_str)
+        .unwrap_or("thr1")
+        .to_string()
+}
+
+/// `token_usage: { thread?, effort?, session?, model?, prompt?, input_tokens?,
+/// output_tokens?, cache_creation_input_tokens?, cache_read_input_tokens?,
+/// turn? }`: the tokens a turn spent (`SqliteTokenUsageStore::record`).
+async fn observe_token_usage(host: &Host, body: &Value) -> Result<(), String> {
+    let text = |k: &str| body.get(k).and_then(Value::as_str).map(str::to_string);
+    let int = |k: &str| body.get(k).and_then(Value::as_i64).unwrap_or(0);
+    let stream = first_stream(host).await?;
+    host.svc
+        .token_usage_store
+        .record(oxplow_db::NewAgentTokenUsage {
+            stream_id: stream.to_string(),
+            thread_id: thread_text(body),
+            effort_id: text("effort"),
+            session_id: text("session").unwrap_or_else(|| "s".into()),
+            agent_kind: text("agent").unwrap_or_else(|| "claude".into()),
+            model: text("model").or_else(|| Some("m".into())),
+            prompt: text("prompt"),
+            input_tokens: int("input_tokens"),
+            output_tokens: int("output_tokens"),
+            cache_creation_input_tokens: int("cache_creation_input_tokens"),
+            cache_read_input_tokens: int("cache_read_input_tokens"),
+            message_count: body
+                .get("message_count")
+                .and_then(Value::as_i64)
+                .unwrap_or(1),
+            turn_id: body.get("turn").and_then(Value::as_i64),
+            cause: None,
+        })
+        .await
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
+/// `hint: { hint, evaluated?, thread? }`: the hint's query ran `evaluated`
+/// times (1) on the thread (`SqliteAgentNudgeStore::evaluated`).
+async fn observe_hint(host: &Host, body: &Value) -> Result<(), String> {
+    let hint = body
+        .get("hint")
+        .and_then(Value::as_str)
+        .ok_or("`hint.hint` names the hint")?;
+    let thread = oxplow_domain::ThreadId::try_from_str(&thread_text(body))
+        .ok_or("`hint.thread` is a thread, like `thr1`")?;
+    for _ in 0..body.get("evaluated").and_then(Value::as_u64).unwrap_or(1) {
+        host.svc
+            .nudge_store
+            .evaluated(thread.value(), vec![hint.to_string()])
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// `nudge: { kind, message, thread?, effort?, audience?, delivered? }`: a
+/// nudge a hint raised (`SqliteAgentNudgeStore::record`), delivered or not.
+async fn observe_nudge(host: &Host, body: &Value) -> Result<(), String> {
+    use oxplow_db::agent_nudge_store::{Audience, NewAgentNudge};
+    let text = |k: &str| body.get(k).and_then(Value::as_str).map(str::to_string);
+    let id = host
+        .svc
+        .nudge_store
+        .record(NewAgentNudge {
+            thread_id: thread_text(body),
+            effort_id: text("effort"),
+            kind: text("kind").ok_or("`nudge.kind`")?,
+            message: text("message").unwrap_or_default(),
+            trigger: None,
+            turn_id: None,
+            cause: None,
+            audience: match text("audience").as_deref() {
+                Some("person") => Audience::Person,
+                _ => Audience::Agent,
+            },
+        })
+        .await
+        .map_err(|e| e.to_string())?;
+    if let (Some(id), true) = (
+        id,
+        body.get("delivered")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+    ) {
+        host.svc
+            .nudge_store
+            .mark_delivered(vec![id])
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 
 /// `analyze: { kind: working, streamId } | { kind: commit, sha, streamId? } |
@@ -2343,23 +2589,35 @@ async fn observe_turn(host: &Host, body: &Value) -> Result<(), String> {
             "answer",
             "compactions",
             "context",
+            "thread",
+            "session",
+            "subagent",
+            "peer",
         ]
         .contains(&key.as_str())
         {
             return Err(format!(
-                "`turn.{key}` — fix: `prompt`, `during`, `tools`, `write`, `answer`, `compactions` or `context`"
+                "`turn.{key}` — fix: `prompt`, `during`, `tools`, `write`, `answer`, `compactions`, `context`, `thread`, `session`, `subagent` or `peer`"
             ));
         }
     }
     let svc = &host.svc;
-    let thread = oxplow_domain::ThreadId::new(1);
+    let thread = oxplow_domain::ThreadId::try_from_str(&thread_text(body))
+        .ok_or("`turn.thread` is a thread, like `thr2`")?;
+    let session = match body.get("session").and_then(Value::as_str) {
+        Some(s) => Some(
+            oxplow_domain::AgentSessionId::try_from_str(s)
+                .ok_or("`turn.session` is an agent session, like `ses2`")?,
+        ),
+        None => None,
+    };
     let envelope = |kind: HookKind, payload: Value| HookEnvelope {
         session_title: None,
         turn_run: None,
         kind,
         thread_id: Some(thread),
         stream_id: None,
-        agent_session_id: None,
+        agent_session_id: session,
         session_id: Some("fixture".into()),
         payload_json: payload.to_string(),
         prompt: None,
@@ -2399,12 +2657,17 @@ async fn observe_turn(host: &Host, body: &Value) -> Result<(), String> {
         None => None,
     };
     let mut prompt = envelope(HookKind::UserPromptSubmit, json!({}));
-    prompt.prompt = Some(
-        body.get("prompt")
-            .and_then(Value::as_str)
-            .unwrap_or("Work on it")
-            .to_string(),
-    );
+    // No prompt (`prompt: null`) is a subagent's or a peer's hand-back.
+    prompt.prompt = match body.get("prompt") {
+        Some(Value::Null) => None,
+        Some(p) => Some(p.as_str().unwrap_or_default().to_string()),
+        None => Some("Work on it".to_string()),
+    };
+    if let Some(sub) = body.get("subagent") {
+        prompt.subagent =
+            Some(serde_json::from_value(sub.clone()).map_err(|e| format!("`turn.subagent`: {e}"))?);
+    }
+    prompt.peer = body.get("peer").and_then(Value::as_str).map(str::to_string);
     ingest(prompt).await?;
     for step in body
         .get("during")
@@ -2434,9 +2697,23 @@ async fn observe_turn(host: &Host, body: &Value) -> Result<(), String> {
         .into_iter()
         .flatten()
     {
+        // `pre: true` is the call as it starts (PreToolUse), not as it ends.
+        let mut tool = tool.clone();
+        let pre = tool
+            .as_object_mut()
+            .and_then(|m| m.remove("pre"))
+            .and_then(|p| p.as_bool())
+            .unwrap_or(false);
         let used: oxplow_domain::agent::tool::ToolUse =
-            serde_json::from_value(tool.clone()).map_err(|e| format!("a tool: {e}"))?;
-        let mut call = envelope(HookKind::PostToolUse, json!({}));
+            serde_json::from_value(tool).map_err(|e| format!("a tool: {e}"))?;
+        let mut call = envelope(
+            if pre {
+                HookKind::PreToolUse
+            } else {
+                HookKind::PostToolUse
+            },
+            json!({}),
+        );
         call.tool = Some(used);
         ingest(call).await?;
     }
@@ -6616,6 +6893,60 @@ when:
 expect:
   rows:
     - { branches: \"main,side\", tag: v1, head: c1, revision: \"git:c1\" }
+",
+        );
+        let report = test_extension(dir.path(), "notes", false).await.unwrap();
+        assert!(report.ok, "{:?}", report.errors);
+    }
+
+    /// `observe: { run }` and `{ health }` are what the extension host
+    /// records of a contribution's run and its failures; `token_usage`,
+    /// `hint` and `nudge` what a harness and the hints record.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_given_observes_runs_health_usage_and_hints() {
+        let dir = tempfile::tempdir().unwrap();
+        crate::scaffold(dir.path(), crate::Kind::Command, "notes", None).unwrap();
+        write(
+            dir.path(),
+            ".oxplow/extensions/notes/fixtures/basic.yaml",
+            "given:
+  - observe: { run: { extension: acme, contribution: pull, kind: collector, outcome: failed, days_ago: 2, cpu_ms: 30, ai_calls: 2 } }
+  - observe: { run: { extension: acme, contribution: pull, kind: collector, outcome: ok } }
+  - observe: { health: { extension: acme, contribution: pull, kind: collector, disable: boom } }
+  - observe: { token_usage: { prompt: fix it, input_tokens: 1999, output_tokens: 1 } }
+  - observe: { hint: { hint: x/never, evaluated: 3 } }
+  - observe: { nudge: { kind: x/spoke, message: m } }
+when:
+  sql: SELECT (SELECT group_concat(outcome || ':' || cpu_ms || ':' || ai_calls, ',') FROM (SELECT * FROM v_extension_run ORDER BY started_at)) AS runs, (SELECT state || ':' || reason FROM v_contribution_health) AS health, (SELECT input_tokens FROM v_token_usage) AS tokens, (SELECT evaluated FROM v_hint_stat WHERE hint = 'x/never') AS evaluated, (SELECT count(*) FROM v_agent_nudge WHERE kind = 'x/spoke') AS nudges
+expect:
+  rows:
+    - { runs: \"failed:30:2,ok:0:0\", health: \"disabled:boom\", tokens: 1999, evaluated: 3, nudges: 1 }
+",
+        );
+        let report = test_extension(dir.path(), "notes", false).await.unwrap();
+        assert!(report.ok, "{:?}", report.errors);
+    }
+
+    /// A turn is observed on a thread of its own, in a session of its own,
+    /// with a subagent's hand-back (no prompt) and a call as it starts.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_given_observes_a_turn_on_a_thread_and_session_with_handbacks() {
+        let dir = tempfile::tempdir().unwrap();
+        crate::scaffold(dir.path(), crate::Kind::Command, "notes", None).unwrap();
+        write(
+            dir.path(),
+            ".oxplow/extensions/notes/fixtures/basic.yaml",
+            "given:
+  - { command: oxplow.thread.create, input: { stream: str1, title: Beta }, bind: beta }
+  - { command: oxplow.agent_session.open, input: { thread: $beta.id, harness: codex }, bind: ses }
+  - observe: { turn: { thread: $beta.id, session: $ses.id, prompt: first ask, answer: one, tools: [{ name: ExitPlanMode, kind: plan, plan: { text: \"1. First\" }, pre: true }] } }
+  - observe: { turn: { thread: $beta.id, session: $ses.id, prompt: null, subagent: { id: a1, kind: Explore }, answer: report } }
+when:
+  sql: SELECT t.prompt, t.answer, th.title FROM v_agent_turn t JOIN v_thread th ON th.id = t.thread_id WHERE th.title = 'Beta' ORDER BY t.id
+expect:
+  rows:
+    - { prompt: first ask, answer: one, title: Beta }
+    - { prompt: \"\", answer: report, title: Beta }
 ",
         );
         let report = test_extension(dir.path(), "notes", false).await.unwrap();

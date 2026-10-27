@@ -1,0 +1,17 @@
+# `session-files` groups an effort's files by the session that claimed them.
+# (A file two sessions *observed* is shared; the throwaway records observed
+# files only from the snapshot diff of a closed effort, which no fixture step
+# makes yet.)
+given:
+  - { command: oxplow.effort.open, input: { thread: thr1 } }
+  - { command: oxplow.agent_session.open, input: { thread: thr1, harness: claude }, bind: first }
+  - { command: oxplow.agent_session.open, input: { thread: thr1, harness: codex }, bind: second }
+  - observe: { turn: { session: $first.id, prompt: one, tools: [{ name: Edit, kind: edit, paths: [a.rs], ok: true }] } }
+  - observe: { turn: { session: $second.id, prompt: two, tools: [{ name: Edit, kind: edit, paths: [b.rs], ok: true }] } }
+when: { page: oxplow-bundled/session-files, params: { effort_id: 1 } }
+expect:
+  loaders:
+    session_files:
+      rows:
+        - { session: Session 1, path: a.rs, source: claimed }
+        - { session: Session 2, path: b.rs, source: claimed }

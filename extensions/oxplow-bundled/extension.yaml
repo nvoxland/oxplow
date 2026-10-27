@@ -217,6 +217,21 @@ intent:
     - name: the-change-review-grid-reads-an-analyzed-commit
       input: { page: change-review, params: { change_id: 1 } }
       expect: the summary, the changed functions and the test files of an analyzed commit
+    - name: token-pages-sum-a-tasks-and-a-threads-turns
+      input: { page: task-tokens }
+      expect: a task's turns summed and listed, a thread's total, an idle thread nothing
+    - name: the-plan-pages-show-the-proposed-plans
+      input: { page: effort-plan, params: { effort_id: 1 } }
+      expect: the plans an agent proposed, newest first, under an effort and a thread
+    - name: the-shared-work-pages-show-what-two-threads-hold
+      input: { page: shared-work }
+      expect: items, files and epics shared between threads; the thread and item variants keep their own
+    - name: session-files-group-an-efforts-files-by-session
+      input: { page: session-files, params: { effort_id: 1 } }
+      expect: an effort's files grouped by the session that changed them, shared ones apart
+    - name: the-agent-interface-pages-count-tools-commands-and-hints
+      input: { page: agent-interface }
+      expect: tool calls by tool and harness, an agent's command runs and refusals, and the hints' counts
 # oxplow's default work list and effort policy: built-ins of core's,
 # declared here so they are an extension's like any other. Disabled, both
 # fall to none. Snapshots can't be none: their default is core's own (it
