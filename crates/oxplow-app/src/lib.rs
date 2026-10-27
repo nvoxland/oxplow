@@ -49,6 +49,7 @@ pub mod commands;
 pub mod commit_indexer;
 pub mod commit_links;
 pub mod component_bundles;
+pub mod component_http;
 pub mod config_reactors;
 pub mod config_service;
 pub mod config_watch;

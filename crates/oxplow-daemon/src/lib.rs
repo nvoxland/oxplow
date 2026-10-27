@@ -499,7 +499,7 @@ mod tests {
             assert_eq!(h["referrer-policy"], "no-referrer");
             assert_eq!(
                 h["content-security-policy"].to_str().unwrap(),
-                components::bundle_csp(
+                oxplow_app::component_http::bundle_csp(
                     &format!("{base}{folder_url}"),
                     &format!("{base}/component-lib/")
                 )
@@ -672,7 +672,7 @@ mod tests {
             assert_eq!(resp.status(), 200, "{host}");
             assert_eq!(
                 resp.headers()["content-security-policy"].to_str().unwrap(),
-                components::bundle_csp(
+                oxplow_app::component_http::bundle_csp(
                     &format!("http://{host}{folder}"),
                     &format!("http://{host}/component-lib/")
                 ),

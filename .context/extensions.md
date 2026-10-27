@@ -3287,7 +3287,7 @@ and the host's confirmation.
 **The client library.** A bundle does not speak the protocol by
 hand. The daemon serves `oxplow-component.js` (and its `.d.ts`) at
 `/component-lib/<file>` — embedded in the daemon
-(`crates/oxplow-daemon/assets/`, `components::component_lib`), served
+(`crates/oxplow-app/assets/component/`, `component_http::library`), served
 like a bundle (loopback `Host` only, ungated, outside CORS, `nosniff`),
 and named in every bundle's CSP `script-src` beside the bundle's own
 folder (`bundle_csp(source, lib)`). There is no `'self'` in that CSP:

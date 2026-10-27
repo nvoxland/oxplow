@@ -249,9 +249,9 @@ an extension's own files, never project data (the frame reaches that
 only through the host's bridged RPCs). It is mounted **outside the
 permissive CORS layer**, so a web page can't read a bundle with `fetch`,
 and it answers only a loopback `Host` (`127.0.0.1` or `localhost`,
-optional port — `loopback_host`; not `[::1]`, since the page's
-`frame-src` can't name an IPv6 literal and a frame there would never load,
-tsk1048): without that, DNS rebinding (a
+optional port — `component_http::loopback_host`, shared with a test's harness; not `[::1]`, since the page's
+`frame-src` can't name an IPv6 literal and a frame there would never load):
+without that, DNS rebinding (a
 page whose name flips to 127.0.0.1) would read bundles same-origin; the
 CSP's bundle-folder source is built from that validated `Host`. 404 for a
 foreign `Host`, a version that isn't loaded, or anything but exactly one

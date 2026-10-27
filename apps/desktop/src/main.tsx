@@ -1,6 +1,6 @@
 import "@xterm/xterm/css/xterm.css";
 // The component kit's classes (`src/kit/`), the same sheet custom components link.
-import "../../../crates/oxplow-daemon/assets/oxplow-kit.css";
+import "../../../crates/oxplow-app/assets/component/oxplow-kit.css";
 import EditorWorker from "monaco-editor/editor/editor.worker?worker";
 import JsonWorker from "monaco-editor/language/json/json.worker?worker";
 import CssWorker from "monaco-editor/language/css/css.worker?worker";

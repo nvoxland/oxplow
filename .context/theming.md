@@ -173,7 +173,7 @@ When adding a new list surface, match these numbers — the
 Lengths are tokens too, on `:root` in `apps/desktop/index.html`:
 `--space-1` … `--space-6` (4, 8, 12, 16, 24, 32px) and `--radius-sm`
 (4px), `--radius-md` (6px), `--radius-pill`. The component kit
-(`src/kit/`, drawn by `crates/oxplow-daemon/assets/oxplow-kit.css`) uses
+(`src/kit/`, drawn by `crates/oxplow-app/assets/component/oxplow-kit.css`) uses
 only these. That sheet is the kit's one look: the app imports it, custom
 components link it, and its `:where(body)` rule weighs nothing so the
 app's own body rules win. the component kit sheet's test checks it reads only

@@ -734,7 +734,7 @@ before extensions load) right after the entry it followed.
 Core owns the look; a page, core or extension, fits one of three shapes
 and draws it with the **component kit** (`apps/desktop/src/kit/`, one
 export point `kit/index.ts`). The kit's parts render the classes of one
-stylesheet, `crates/oxplow-daemon/assets/oxplow-kit.css`, which the app
+stylesheet, `crates/oxplow-app/assets/component/oxplow-kit.css`, which the app
 imports (`main.tsx`) and custom components link, so a core page, a page
 file and a sandboxed component look alike. A page composes the kit; a new local
 section, table, filter list or "Loading…" line is a review finding.

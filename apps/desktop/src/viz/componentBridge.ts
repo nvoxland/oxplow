@@ -51,7 +51,7 @@ import { parseUri } from "../uri/uri.js";
 import type { CommandOutcome, VizRun, PageRun, SqlCell, SqlQueryResult } from "../tauri-bridge/generated/bindings.js";
 
 /// The protocol above, by number: bumped when a message's shape changes,
-/// with the served library (`crates/oxplow-daemon/assets/`). 2: `init`
+/// with the served library (`crates/oxplow-app/assets/component/`). 2: `init`
 /// lost `kitCss` — the kit is a stylesheet the bundle links (tsk961).
 /// 3: `navigate` carries `newTab` (a Cmd-click in a component). 4: a
 /// refused request's error carries the input `field` it names, when it

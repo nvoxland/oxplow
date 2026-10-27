@@ -5,7 +5,7 @@ import { BRIDGE_PROTOCOL, createBridgeHost, initMessage, vizData, type BridgeDep
 // The library the daemon serves to component bundles (P9.A4): the one
 // place it and the host are proven to speak the same protocol. It is a
 // classic script — loading it defines the global `oxplow`.
-await import("../../../../crates/oxplow-daemon/assets/oxplow-component.js");
+await import("../../../../crates/oxplow-app/assets/component/oxplow-component.js");
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const { connect, PROTOCOL } = (globalThis as any).oxplow;
 
