@@ -1,5 +1,10 @@
 # Checking and testing an extension
 
+A page's behavior is tested here, by fixtures in its extension — what its
+loaders return after some steps, in which state — not by tests in another
+language. `oxplow extension test` runs them in seconds on a throwaway
+oxplow, so write the fixture first and watch it fail.
+
 ## Check after every edit
 
 **Run `oxplow_validate_extension(name, stream_id)` after every edit**, not
@@ -44,20 +49,29 @@ model the SQL reads and the command it runs. Prefer `answers:` on pages.
    and `expect` (`$any` matches anything), and `model: { replies: [...] }`
    in `input` when it calls a model:
    - a page: `input: { page: <slug | ext/slug>, params? }`, with `given:` beside
-     `input` — steps run first, in order, on the extension's throwaway
-     database: `{ command, input?, as? }` or `{ rows: { <entity>: [..] } }`.
+     `input` — steps run first, in order: `{ command, input?, as?,
+     confirmed?, bind? }` or `{ rows: { <entity>: [..] } }`.
      `expect: { loaders: { <name>: { rows: n | $any | [ { col: val } ],
-     columns? } }, nodes: [{ id, kind? }], text: { contains: [..] } | "<exact>" }`
-     (a row map compares only the columns it names; `text` is the page's
-     text, as `oxplow_run_page` shows it). Every page's `answers:` entry also runs: the page
-     must open with its params and no failing loader. Example:
-     `given: [{ command: oxplow.work_item.create, input: { title: T } }]`,
-     `input: { page: items }`, `expect: { loaders: { items: { rows: [{
-     title: T }] } } }`. `answers:` double as fixtures: each runs after the
-     examples (`ran: answers`), and a page with no `expect` still has to
-     open. One throwaway oxplow serves every fixture of the extension, and
-     `given` steps mutate its database in order, so a later fixture sees what
-     an earlier one made;
+     columns? } }, nodes: [{ id, kind?, actions? }], text: { contains: [..] }
+     | "<exact>", alert?, badge?, inactive?, actions? }` (a row map compares
+     only the columns it names; `text` is the page's text, as
+     `oxplow_run_page` shows it; a node's `actions` are its action ids).
+     `view: { stream: str1, thread: thr1 }` runs it from that stream and
+     thread. `bind: <name>` on a step keeps the command's result, and
+     `$name.uri` (any `.key` / `[n]` path) in a later input, `params` or
+     `expect` is that value. `confirmed: true` runs a command that asks a
+     person first. Example:
+     `given: [{ command: oxplow.work_item.create, input: { title: T }, bind: t }]`,
+     `input: { page: items, params: { uri: $t.uri } }`, `expect: { loaders:
+     { items: { rows: [{ title: T }] } } }`.
+     **Scenarios:** `steps: [ { given: [..] } | { expect, params?, bind? } ]`
+     after it — each `expect` runs the page again (`params` over the
+     example's; `bind: { c: 'loaders.items.rows[0].uri' }` keeps a value of
+     that run), so one fixture can change the state and check the page
+     between changes. Each page example that makes data gets an oxplow of
+     its own: no fixture sees another's data. Every page's `answers:` entry
+     also runs (`ran: answers`), on a clean oxplow: the page must open with
+     its params and no failing loader;
    - `rows: { <entity>: [ {…} ] }` in a page or job fixture fills your
      collectors' entities first (they start empty);
    - an event: `input: { event: { type, payload, … } }` — logged in the

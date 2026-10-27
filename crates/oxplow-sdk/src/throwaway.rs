@@ -27,12 +27,21 @@ pub(crate) struct Host {
     pub(crate) svc: Arc<oxplow_app::Services>,
     /// What its activation held back, and why (`<extension>: <reason>`).
     pub(crate) problems: Vec<String>,
+    /// How it was made, for [`Host::fork`]: the extensions on, where each
+    /// copied source is (relative to `root`), its programs' environment,
+    /// and whether built sources were deployed.
+    on: Vec<String>,
+    copied: std::collections::BTreeMap<String, PathBuf>,
+    env: HostEnv,
+    builds: bool,
 }
 
 impl Host {
     /// A throwaway over the extensions in `checkout` (the project's main
     /// checkout, or a worktree holding drafts) with `testing` on too,
-    /// activated. Which are on, and where their sources are, are the
+    /// activated. Which are on is the project's list and every source here —
+    /// never one person's `enableExtensions` / `disableExtensions`, so a
+    /// test runs the same for everyone; where their sources are is the
     /// project's settings (its main checkout's), read in `checkout`. Its
     /// programs see `env`. With `builds`, a copied source with a `build:` is
     /// built and deployed like the rest; without (a check, which runs no
@@ -69,18 +78,16 @@ impl Host {
                 sources.insert(name.clone(), rel.to_string_lossy().into_owned());
             }
             copy_dir(&source, &root.join(&rel)).map_err(|e| e.to_string())?;
-            copied.insert(name, root.join(rel));
+            copied.insert(name, rel);
         }
-        // Which of them are on, and nothing else of its config: its
+        // Which of them are on — the project's, never one person's
+        // `enableExtensions` / `disableExtensions`, so a test passes or
+        // fails the same for everyone — and nothing else of its config: its
         // provider instances would start its programs here.
-        let mut on: Vec<String> = settings.enabled().into_iter().map(|(n, _)| n).collect();
-        // Every source here is on unless the person turned it off, as in a
-        // source load.
+        let mut on: Vec<String> = settings.team.clone();
+        // Every source here is on, as in a source load.
         for name in oxplow_app::extensions::known_names(checkout, &settings) {
-            if settings.source(checkout, &name).is_dir()
-                && !settings.personal.disable.contains(&name)
-                && !on.contains(&name)
-            {
+            if settings.source(checkout, &name).is_dir() && !on.contains(&name) {
                 on.push(name);
             }
         }
@@ -94,18 +101,39 @@ impl Host {
         )
         .map_err(|e| e.to_string())?;
         std::fs::write(config, yaml).map_err(|e| e.to_string())?;
-        // And the ones the person turned off stay off in the copy.
-        let off: Vec<&String> = settings
-            .personal
-            .disable
-            .iter()
-            .filter(|n| *n != testing)
-            .collect();
-        if !off.is_empty() {
-            let yaml = serde_yaml::to_string(&serde_json::json!({ "disableExtensions": off }))
-                .map_err(|e| e.to_string())?;
-            std::fs::write(root.join(".oxplow/personal.yaml"), yaml).map_err(|e| e.to_string())?;
-        }
+        Self::boot(dir, root, on, copied, env, builds).await
+    }
+
+    /// Another throwaway like this one, with its own empty database: the
+    /// same sources, settings and deployments, copied, so nothing is built
+    /// again. What one example makes, the next one's fork doesn't see.
+    pub(crate) async fn fork(&self) -> Result<Host, String> {
+        let dir = tempfile::tempdir().map_err(|e| e.to_string())?;
+        let root = dir.path().to_path_buf();
+        copy_all(&self.root, &root).map_err(|e| e.to_string())?;
+        let host = Self::boot(
+            dir,
+            root,
+            self.on.clone(),
+            self.copied.clone(),
+            self.env.clone(),
+            self.builds,
+        )
+        .await?;
+        host.start_runtime()?;
+        Ok(host)
+    }
+
+    /// Open oxplow over `root` (sources copied, settings written) and
+    /// deploy what's on, as the author's own run would.
+    async fn boot(
+        dir: tempfile::TempDir,
+        root: PathBuf,
+        on: Vec<String>,
+        copied: std::collections::BTreeMap<String, PathBuf>,
+        env: HostEnv,
+        builds: bool,
+    ) -> Result<Host, String> {
         oxplow_app::vcs::GitProvider
             .init_repository(&root)
             .await
@@ -114,7 +142,7 @@ impl Host {
             &root,
             root.join(".oxplow/global-config"),
             Arc::new(oxplow_ai::secrets::MemorySecrets::default()),
-            env,
+            env.clone(),
         )
         .await
         .map_err(|e| e.to_string())?;
@@ -122,10 +150,10 @@ impl Host {
         // copied, as they would, confirmed.
         let mut deploys = Vec::new();
         for name in &on {
-            let Some(copied) = copied.get(name) else {
+            let Some(source) = copied.get(name) else {
                 continue;
             };
-            let built = oxplow_app::extension_store::Inputs::of(copied)
+            let built = oxplow_app::extension_store::Inputs::of(&root.join(source))
                 .run
                 .is_some();
             if builds || !built {
@@ -146,6 +174,10 @@ impl Host {
             root,
             svc,
             problems,
+            on,
+            copied,
+            env,
+            builds,
         })
     }
 
@@ -200,6 +232,29 @@ impl Host {
 /// Copy an extension's source; a folder its `build:` excludes
 /// (`node_modules`) is linked instead, so a build in the copy still finds
 /// it.
+/// Copy throwaway `from` to `to` whole but its git repository: symlinks
+/// stay symlinks, a deployment's read-only files stay read-only.
+fn copy_all(from: &Path, to: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(to)?;
+    for entry in std::fs::read_dir(from)? {
+        let entry = entry?;
+        let target = to.join(entry.file_name());
+        let kind = entry.file_type()?;
+        if kind.is_symlink() {
+            #[cfg(unix)]
+            std::os::unix::fs::symlink(std::fs::read_link(entry.path())?, &target)?;
+        } else if kind.is_dir() {
+            if from.join(".git") == entry.path() {
+                continue;
+            }
+            copy_all(&entry.path(), &target)?;
+        } else {
+            std::fs::copy(entry.path(), &target)?;
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn copy_dir(from: &Path, to: &Path) -> std::io::Result<()> {
     let exclude = oxplow_app::extension_store::Inputs::of(from).exclude;
     copy_tree(from, to, &exclude, "")
@@ -235,12 +290,13 @@ mod tests {
         std::fs::write(p, body).unwrap();
     }
 
-    /// A throwaway over a worktree's sources reads which extensions are on
-    /// from the project (the main checkout): a worktree has no
-    /// `personal.yaml` of its own (git ignores it), so the person's
-    /// `disableExtensions` would otherwise be lost there.
+    /// A test runs with the project's extensions, whoever runs it: the
+    /// person's own `disableExtensions` (here in the main checkout, as a
+    /// worktree has no `personal.yaml`) doesn't turn one off in the
+    /// throwaway, so a fixture passes or fails the same for everyone and in
+    /// CI. A source that doesn't load is a warning beside the one tested.
     #[tokio::test]
-    async fn a_worktrees_sources_are_tested_under_the_projects_settings() {
+    async fn a_test_runs_with_the_projects_extensions_not_the_persons() {
         let main = tempfile::tempdir().unwrap();
         oxplow_app::vcs::GitProvider
             .init_repository(main.path())
@@ -274,11 +330,8 @@ mod tests {
         let host = Host::start(&wt, "acme", Arc::new(|_: &str| None), false)
             .await
             .unwrap();
-        assert!(
-            !host.problems.iter().any(|p| p.starts_with("other")),
-            "{:?}",
-            host.problems
-        );
+        assert!(host.on.iter().any(|n| n == "other"), "{:?}", host.on);
+        assert!(!host.root.join(".oxplow/personal.yaml").exists());
         assert!(host.root.join(EXTENSIONS_DIR).join("acme").is_dir());
     }
 

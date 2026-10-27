@@ -265,6 +265,23 @@ suite passed, failing if either did) is the configured `testing.command` — it'
 test run that emits the JUnit + lcov reports oxplow parses into the
 effort's "Coverage & tests" panel.
 
+**Which check for which change:**
+
+| You changed | Run |
+|---|---|
+| Only files under `extensions/` or `.oxplow/extensions/` | `bun run test:ext [<name>]` — seconds, no compile |
+| A Rust crate | `bun run test:fast -p <crate> [filter]` |
+| `apps/desktop/src` | `bun run test:fast:ts` (and `bun run e2e` for a user path) |
+| Core and an extension together | both: `test:ext` rebuilds through `cargo run` first |
+| Ready to push | `test:collect` with `lint:collect`, once |
+
+A page's behavior is a fixture in its extension (`extensions.md`
+"`oxplow extension test`"), never a new Rust test:
+`bundled_extensions.rs`, `settings_pages_tests.rs` and
+`directory_page_tests.rs` are being emptied into fixtures and don't grow.
+`test:ext` writes `target/extension-tests/junit.xml`, which the project
+extension's `tests.extension_junit` collector reads.
+
 **For the red/green loop, use `bun run test:fast` (the configured
 `testing.fastCommand`) rather than a bare `cargo test`.** It takes
 the same filters (`bun run test:fast -p oxplow-git symlink`) and still
@@ -318,7 +335,11 @@ of `test:collect` (it builds the frontend and boots a daemon per worker,
 ~40 s); CI runs it as its own `e2e` job. **Run it when a change touches
 what a person sees or does in the app** — a page, a rail section, a
 command's UI path, a testid — and add or extend a spec under
-`tests-e2e/specs/<area>/` for a new user path. Rules a spec keeps:
+`tests-e2e/specs/<area>/` for a new user path. What every page does
+(select, expand, switch, forms, slots, replacements, embeds, components,
+panels) is `tests-e2e/specs/pages/*`'s, each over a small extension of its
+own: a page that moves into an extension gets a fixture for its data and a
+spec of its own only for behavior those don't cover. Rules a spec keeps:
 
 - select by `data-testid` (a renamed testid breaks specs — grep
   `tests-e2e/` first);

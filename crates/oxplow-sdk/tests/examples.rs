@@ -1294,21 +1294,15 @@ async fn the_review_badges_example_consumes_effort_reviews_and_degrades_without_
         );
     }
 
-    // The producer disabled.
-    let dir = review_project(true).await;
+    // The producer missing.
+    let dir = review_project(false).await;
     let root = dir.path();
-    std::fs::create_dir_all(root.join(".oxplow")).unwrap();
-    std::fs::write(
-        root.join(".oxplow/personal.yaml"),
-        "disableExtensions: [effort-review]\n",
-    )
-    .unwrap();
     let tested = test_extension(root, "review-badges", false).await.unwrap();
     // The pages and the slot are withheld, named in the one warning for
     // the import; the fixtures that test them are skipped, saying why.
     assert_eq!(
         tested.imports,
-        ["`reviews` → oxplow:oxplow/model?model=effort-review/reviews v2: unavailable (effort-review is disabled)"]
+        ["`reviews` → oxplow:oxplow/model?model=effort-review/reviews v2: unavailable (effort-review or its contribution isn't here)"]
     );
     assert!(tested.contributes.is_empty(), "{:?}", tested.contributes);
     let import_warnings: Vec<_> = tested
@@ -1321,7 +1315,7 @@ async fn the_review_badges_example_consumes_effort_reviews_and_degrades_without_
     assert!(
         warning.contains(
             "optional import `reviews` for `oxplow:oxplow/model?model=effort-review/reviews` v2 is unavailable: \
-             effort-review is disabled; withheld: "
+             effort-review or its contribution isn't here; withheld: "
         ),
         "{warning}"
     );
@@ -1349,12 +1343,28 @@ async fn the_review_badges_example_consumes_effort_reviews_and_degrades_without_
             tested.warnings.iter().any(|w| w.contains(&format!(
                 "fixtures/{example}.yaml:1: example `{example}` isn't run: \
                  `oxplow:oxplow/page?page=review-badges/{page}` is withheld because import `reviews` is \
-                 unavailable (effort-review is disabled)"
+                 unavailable (effort-review or its contribution isn't here)"
             ))),
             "{example}: {:?}",
             tested.warnings
         );
     }
+    // A person who turned the producer off withholds what reads it in their
+    // oxplow; a test still runs the project's extensions, the producer
+    // among them.
+    let dir = review_project(true).await;
+    let root = dir.path();
+    std::fs::create_dir_all(root.join(".oxplow")).unwrap();
+    std::fs::write(
+        root.join(".oxplow/personal.yaml"),
+        "disableExtensions: [effort-review]\n",
+    )
+    .unwrap();
+    let tested = test_extension(root, "review-badges", false).await.unwrap();
+    assert_eq!(
+        tested.imports,
+        ["`reviews` → oxplow:oxplow/model?model=effort-review/reviews v2: available"]
+    );
     let svc = common::booted(root).await;
     let consumer = svc.extension_catalog.named(root, "review-badges").unwrap();
     assert!(
@@ -1385,16 +1395,6 @@ async fn the_review_badges_example_consumes_effort_reviews_and_degrades_without_
         ["`reviews` → oxplow:oxplow/model?model=effort-review/reviews v2: unavailable (effort-review exports v3)"]
     );
     assert!(tested.contributes.is_empty(), "{:?}", tested.contributes);
-
-    // The producer missing: unavailable, and no error from loading it.
-    let dir = review_project(false).await;
-    let root = dir.path();
-    let tested = test_extension(root, "review-badges", false).await.unwrap();
-    assert_eq!(
-        tested.imports,
-        ["`reviews` → oxplow:oxplow/model?model=effort-review/reviews v2: unavailable (effort-review or its contribution isn't here)"]
-    );
-    assert_eq!(tested.errors, Vec::<String>::new());
 }
 
 /// With both examples running in one oxplow, a review effort-review's job

@@ -386,6 +386,14 @@ collectors:
     path: target/nextest/default/junit.xml
   trigger:
     on_run: test
+- id: tests.extension_junit
+  doc: The extensions' tests (`bun run test:ext`, JUnit).
+  records: tests
+  entry: oxplow:junit
+  report:
+    path: target/extension-tests/junit.xml
+  trigger:
+    on_run: test
 - id: tests.desktop_junit
   doc: The desktop test cases (bun JUnit).
   records: tests

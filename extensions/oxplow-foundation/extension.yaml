@@ -34,6 +34,12 @@ intent:
     - name: a person bookmarks a page for their thread
       input: { command: oxplow.bookmark.set, input: { uri: "oxplow:oxplow/page?page=git-dashboard", page_kind: git-dashboard, scope: thread, thread: "thr1" } }
       expect: the page in v_bookmark at the thread's scope, undone by oxplow.bookmark.remove
+    - name: closed-threads-lists-closed-threads-with-their-work
+      input: { page: closed-threads, params: { stream_id: 1 } }
+      expect: the stream's closed threads only, each with a Reopen action
+    - name: work-next-offers-the-ready-items-or-the-first-epic-with-its-children
+      input: { page: work-next, params: { thread: thr1 } }
+      expect: ready items in list order, a blocked one held until its blocker closes, a ready epic with its ready descendants
 # The agent harnesses and AI providers oxplow runs: core's
 # built-ins, many of each at once (every one declared here is active).
 implementations:

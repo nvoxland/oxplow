@@ -19,8 +19,9 @@ read-only) beats pasting rows; build a file only for a lasting page.
 
 **The loop:** find the data (`v_model`, `v_model_column`, `oxplow_query_sql`:
 read columns, never guess) → write the page → `oxplow_validate_extension`
-after every edit → `oxplow_run_page` (`draft: true` in a worktree) → add a
-fixture → `oxplow.extension.deploy { name }` from the main stream (it
+after every edit → `oxplow_run_page` (`draft: true` in a worktree) → a
+fixture for each behavior (write it, see it fail, then make the page pass
+it) → `oxplow.extension.deploy { name }` from the main stream (it
 replaces what runs, live; never ask for a restart) → tell the user the
 title and how to open it (Cmd+P).
 

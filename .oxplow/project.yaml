@@ -95,10 +95,12 @@ testing:
   - bun test
   - test:collect
   - test:junit
+  - test:ext
+  - extension test
   analysisPatterns:
   - clippy --message-format=json
   - lint:collect
-  agentHint: 'While iterating (red phase, green phase, single tests) run `bun run test:fast` with a filter (e.g. `bun run test:fast -p oxplow-app some_test`) and `bun run test:fast:ts` for the frontend: they write the JUnit reports the effort''s Tests panel shows, without coverage instrumentation. When you want the full suite with coverage, lint can run alongside: `bash -c ''(bun run lint:collect >/dev/null 2>&1 & bun run test:collect; wait)''` — `test:collect` is the only run that emits coverage. Which tests to run, and when, is your call. Always in the FOREGROUND (a backgrounded run finishes after the collection hook fires, so its reports are never ingested). Never bare `cargo test`/`bun test`/`bun run test`: they emit no reports.'
+  agentHint: 'An edit under `extensions/` or `.oxplow/extensions/` is checked with `bun run test:ext [<name>]` (seconds, no compile: check, fixtures, page answers); a page''s behavior is tested by a fixture in its extension, not by a Rust test. While iterating on Rust (red phase, green phase, single tests) run `bun run test:fast` with a filter (e.g. `bun run test:fast -p oxplow-app some_test`) and `bun run test:fast:ts` for the frontend: they write the JUnit reports the effort''s Tests panel shows, without coverage instrumentation. When you want the full suite with coverage, lint can run alongside: `bash -c ''(bun run lint:collect >/dev/null 2>&1 & bun run test:collect; wait)''` — `test:collect` is the only run that emits coverage. Which tests to run, and when, is your call. Always in the FOREGROUND (a backgrounded run finishes after the collection hook fires, so its reports are never ingested). Never bare `cargo test`/`bun test`/`bun run test`: they emit no reports.'
 metrics:
 - use: oxplow.rust.unsafe_blocks
 - use: oxplow.rust.unwrap_expect_calls
