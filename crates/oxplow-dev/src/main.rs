@@ -50,6 +50,12 @@ oxplow-dev extension deploy [<name>]         deploy <name>'s source as the app d
                                              whose source changed (foundation first): the
                                              first run of a checkout, or after a core change;
                                              only while oxplow is quit
+oxplow-dev extension test [<name> …] [--junit F]
+                                             run each extension's tests (check, fixtures,
+                                             page answers) on a throwaway oxplow — no
+                                             compile for an extension-only change, safe
+                                             while oxplow runs; no name: every extension
+                                             with a source here; --junit writes JUnit to F
 
 oxplow-dev --help                            this
 
@@ -259,9 +265,62 @@ async fn extension(project: &Path, args: &[String]) -> Result<String, String> {
             }
             Ok(out.join("\n"))
         }
+        [test, rest @ ..] if test == "test" => extension_test(project, rest).await,
         [deploy, name] if deploy == "deploy" => deploy_from_outside(project, Some(name)).await,
         [deploy] if deploy == "deploy" => deploy_from_outside(project, None).await,
         _ => Err(format!("usage:\n{USAGE}")),
+    }
+}
+
+/// `extension test [<name> …] [--junit <file>]`: each named extension's
+/// tests (`oxplow extension test`'s), else every extension with a source
+/// here; the findings as text, and with `--junit` one JUnit file over all of
+/// them. Any failing extension fails the command.
+async fn extension_test(project: &Path, args: &[String]) -> Result<String, String> {
+    use oxplow_sdk::extension_test::{render, test_extension};
+    let mut args = args.to_vec();
+    let junit = take_flag(&mut args, "--junit");
+    let names = if args.is_empty() {
+        let settings = oxplow_config::extension_settings(project);
+        oxplow_app::extensions::known_names(project, &settings)
+            .into_iter()
+            .filter(|n| settings.source(project, n).join("extension.yaml").is_file())
+            .collect()
+    } else {
+        args
+    };
+    let (mut text, mut suites, mut failed) = (String::new(), String::new(), false);
+    for name in &names {
+        match test_extension(project, name, false).await {
+            Ok(report) => {
+                failed |= !report.ok;
+                text.push_str(&render(&report, oxplow_sdk::Format::Text));
+                suites.push_str(&render(&report, oxplow_sdk::Format::Junit));
+            }
+            Err(e) => {
+                failed = true;
+                text.push_str(&format!("{name}: {e}\n"));
+            }
+        }
+    }
+    if let Some(file) = junit {
+        let file = project.join(file);
+        if let Some(dir) = file.parent() {
+            std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        }
+        std::fs::write(
+            &file,
+            format!(
+                "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<testsuites>\n{suites}</testsuites>\n"
+            ),
+        )
+        .map_err(|e| format!("{}: {e}", file.display()))?;
+    }
+    let text = text.trim_end().to_string();
+    if failed {
+        Err(text)
+    } else {
+        Ok(text)
     }
 }
 
@@ -1044,5 +1103,61 @@ mod tests {
         );
         let out = dev(p, &["extension", "deploy"]).await.unwrap();
         assert!(!out.contains("deployed"), "{out}");
+    }
+
+    /// `extension test` runs an extension's tests on a throwaway oxplow,
+    /// prints what they found and, with `--junit`, writes a report oxplow's
+    /// Tests panel reads; a failing extension fails the command.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn extension_test_runs_an_extensions_tests_and_writes_junit() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path();
+        let write = |rel: &str, text: &str| {
+            let path = p.join(rel);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, text).unwrap();
+        };
+        write(
+            ".oxplow/extensions/acme/extension.yaml",
+            "manifest: 2\nname: acme\nintent:\n  purpose: test\n  examples:\n    - { name: one, input: { page: items }, expect: a row }\n",
+        );
+        write(
+            ".oxplow/extensions/acme/pages/items.yaml",
+            "title: Items\ndata:\n  items: { sql: \"SELECT 1 AS n\" }\nview: { from: items, viz: table }\n",
+        );
+        write(
+            ".oxplow/extensions/acme/fixtures/one.yaml",
+            "input: { page: items }\nexpect: { loaders: { items: { rows: 1 } } }\n",
+        );
+        let junit = p.join("target/extension-tests/junit.xml");
+        let out = dev(
+            p,
+            &[
+                "extension",
+                "test",
+                "acme",
+                "--junit",
+                junit.to_str().unwrap(),
+            ],
+        )
+        .await
+        .unwrap();
+        assert!(out.contains("acme: 0 errors"), "{out}");
+        let xml = std::fs::read_to_string(&junit).unwrap();
+        assert!(
+            xml.starts_with("<?xml") && xml.contains("<testsuites>"),
+            "{xml}"
+        );
+        assert!(
+            xml.contains("<testcase name=\"example one\" classname=\"acme\""),
+            "{xml}"
+        );
+
+        write(
+            ".oxplow/extensions/acme/fixtures/one.yaml",
+            "input: { page: items }\nexpect: { loaders: { items: { rows: 2 } } }\n",
+        );
+        let err = dev(p, &["extension", "test", "acme"]).await.unwrap_err();
+        assert!(err.contains("loader `items` returned"), "{err}");
     }
 }
