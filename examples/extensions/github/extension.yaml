@@ -16,6 +16,9 @@ intent:
     - name: pr-link
       input: { wikilink: "pr:12" }
       expect: the pull request's URI, `oxplow:github/pr?id=12`
+    - name: pr-lifetimes-draws-bars-filters-syncs-and-opens
+      input: { page: pr-lifetimes }
+      expect: a bar per readable pull request; the filters re-run the page, Sync runs the collector and a bar opens its pull request
 permissions:
   commands: [oxplow.collector.sync]
   network: [api.github.com]
