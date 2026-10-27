@@ -1,7 +1,15 @@
+# Finishing an item closes the effort open on it.
+given:
+  - { command: oxplow.capability.choose, input: { capability: effort_policy, provider: prompt_efforts }, confirmed: true }
+  - { command: oxplow.work_item.create, input: { title: Parse blocks, thread: thr1 }, bind: item }
+  - { command: oxplow.effort.open, input: { thread: thr1, work_item: $item.uri } }
 when:
-  implementation: prompt_efforts
-  event: { type: work_item.state_changed, payload: { work_item: "oxplow:oxplow/work_item?id=tsk2&provider=oxplow", to: done } }
-  answers:
-    sql.read:
-      - [{ uri: "oxplow:oxplow/effort?id=eff4" }]
-expect: { commands: [oxplow.effort.close] }
+  command: oxplow.work_item.transition
+  input: { uri: $item.uri, to: done }
+  as: agent
+expect:
+  ok: true
+  commands: [oxplow.effort.close]
+steps:
+  - when: { sql: "SELECT id, ended_at IS NOT NULL AS ended FROM v_effort ORDER BY id" }
+    expect: { rows: [{ id: 1, ended: 1 }] }
