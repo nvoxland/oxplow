@@ -109,6 +109,15 @@ intent:
     - name: changes-effort-names-the-effort-it-is-of
       input: { page: changes-effort, params: { effort_id: 1, effort: eff1 } }
       expect: the effort is open and named for Rename and Link to task
+    - name: settings-data-area-lists-entities-collectors-and-effects
+      input: { page: settings, params: { area: data } }
+      expect: the entities, the collectors and the declared effects
+    - name: data-entity-rows-counts-an-open-entitys-rows
+      input: { page: data-entity-rows, params: { name: v_work_item } }
+      expect: the rows an open entity holds
+    - name: data-effect-backfill-says-what-it-would-do
+      input: { page: data-effect-backfill, params: { effect: oxplow-bundled/store-reasoning } }
+      expect: a backfill plan for an enabled effect, none for one nothing declares
 # The agent harnesses and AI providers oxplow runs: core's
 # built-ins, many of each at once (every one declared here is active).
 implementations:

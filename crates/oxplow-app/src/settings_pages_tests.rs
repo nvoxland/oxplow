@@ -676,54 +676,6 @@ async fn the_files_page_lists_a_folder_or_the_changed_files() {
     assert!(changed.has("id", "src"));
 }
 
-/// Settings → Data: the entities (counted when one is opened), the
-/// collectors, and each effect's backfill (what it would react to).
-#[tokio::test(flavor = "multi_thread")]
-async fn the_data_area_lists_entities_collectors_and_what_a_backfill_would_do() {
-    let fx = crate::test_fixtures::services_with_task_effort().await;
-    let entities = run_task(&fx, "data-entities", vec![]).await;
-    assert!(
-        entities.has("name", "v_work_item"),
-        "{:?}",
-        entities.rows.len()
-    );
-    // Open, a model counts its rows: this fixture has a task.
-    let rows = run_task(
-        &fx,
-        "data-entity-rows",
-        vec![("name", SqlCell::Text("v_work_item".into()))],
-    )
-    .await;
-    assert!(
-        rows.text(&rows.rows[0], "rows")
-            .is_some_and(|t| t.ends_with(" rows")),
-        "{:?}",
-        rows.rows
-    );
-    let sources = run_task(&fx, "data-sources", vec![]).await;
-    assert!(sources.columns.contains(&"collector".to_string()));
-    let effects = run_task(&fx, "data-effects", vec![]).await;
-    if let Some(first) = effects.rows.first() {
-        let effect = effects.text(first, "effect").unwrap();
-        let plan = run_task(
-            &fx,
-            "data-effect-backfill",
-            vec![("effect", SqlCell::Text(effect))],
-        )
-        .await;
-        assert_eq!(plan.rows.len(), 1, "{:?}", plan.rows);
-        assert!(plan.text(&plan.rows[0], "what").is_some());
-    }
-    // An effect nothing declares has no plan.
-    let none = run_task(
-        &fx,
-        "data-effect-backfill",
-        vec![("effect", SqlCell::Text("nope/none".into()))],
-    )
-    .await;
-    assert!(none.rows.is_empty());
-}
-
 /// Settings → Integrations → Capabilities: each choosable capability's
 /// implementations and a default row; choosing writes `activeProviders`
 /// in its layer (the choices stay the page's own rows).
