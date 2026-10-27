@@ -81,6 +81,35 @@ pub struct TestReport {
     /// conformance suite filed and couldn't delete. Against a real
     /// service, a person (or a live test) cleans up exactly these.
     pub left: Vec<String>,
+    /// Each thing that ran and how it went: `check`, `example <name>`,
+    /// `answers <page>`, `provider <id>`, … — a test case each in the JUnit
+    /// form.
+    pub cases: Vec<TestCase>,
+}
+
+/// One thing `extension test` ran.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TestCase {
+    pub name: String,
+    pub ok: bool,
+    /// The errors it added, one per line; `None` when it passed.
+    pub message: Option<String>,
+    pub duration_ms: u64,
+}
+
+impl TestReport {
+    /// Record case `name`, which started at `started` when the report had
+    /// `errors_before` errors: it passed when it added none.
+    fn finish_case(&mut self, name: String, errors_before: usize, started: std::time::Instant) {
+        let added = &self.errors[errors_before.min(self.errors.len())..];
+        self.cases.push(TestCase {
+            name,
+            ok: added.is_empty(),
+            message: (!added.is_empty()).then(|| added.join("\n")),
+            duration_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
+        });
+    }
 }
 
 /// Run every test of extension `name` under `root`. `bless` writes the
@@ -100,6 +129,7 @@ pub async fn test_extension_in(
     bless: bool,
     env: host::HostEnv,
 ) -> Result<TestReport, SdkError> {
+    let started = std::time::Instant::now();
     let host = Host::start(root, name, env.clone(), true)
         .await
         .map_err(SdkError::Invalid)?;
@@ -132,6 +162,7 @@ pub async fn test_extension_in(
         contributes: Vec::new(),
         unsupported: Vec::new(),
         left: Vec::new(),
+        cases: Vec::new(),
     };
     // What activation held back: this extension's is an error (unless
     // check already says it), another's a warning — it's beside it.
@@ -150,22 +181,31 @@ pub async fn test_extension_in(
     let ext = checked.extension;
     report.contributes = ext.contributions.iter().map(|d| d.id.to_string()).collect();
     report.unsupported = unsupported(&ext);
+    report.finish_case("check".into(), 0, started);
     if report.errors.is_empty() {
         examples(&host, &ext, &mut report).await;
         for spec in &ext.providers {
+            let (before, started) = (report.errors.len(), std::time::Instant::now());
             report.ran.push(format!("provider {}", spec.id));
             test_provider(root, &ext, spec, bless, &env, &mut report).await;
+            report.finish_case(format!("provider {}", spec.id), before, started);
         }
         for decl in ext
             .implementations
             .iter()
             .filter(|d| d.capability == EFFORT_POLICY && d.script.is_some())
         {
+            let (before, started) = (report.errors.len(), std::time::Instant::now());
             policy_suite(root, &ext, decl, &env, &mut report).await;
+            report.finish_case(format!("policy {}", decl.id), before, started);
         }
         page_answers(&host, &ext, &mut report).await;
+        let (before, started) = (report.errors.len(), std::time::Instant::now());
         questions(&host, &ext, &mut report).await;
         incremental_models(&host, &ext, &mut report).await;
+        if report.errors.len() > before {
+            report.finish_case("questions and models".into(), before, started);
+        }
     }
     report.ok = report.errors.is_empty();
     Ok(report)
@@ -189,12 +229,12 @@ fn example_fixture(
 /// The intent examples a throwaway oxplow runs: a page's, a derived
 /// collector's. A provider's (`input: { command, input }`) run in its
 /// session.
-async fn examples(host: &Host, ext: &Extension, report: &mut TestReport) {
+async fn examples(shared: &Host, ext: &Extension, report: &mut TestReport) {
     let rel = ext.path.trim_end_matches('/').to_string();
     // Read as the extension's files are everywhere: a bundled extension's
     // fixtures are embedded with it, not on disk.
     let read =
-        |file: &str| oxplow_app::extensions::read_extension_file(&host.root, &ext.path, file);
+        |file: &str| oxplow_app::extensions::read_extension_file(&shared.root, &ext.path, file);
     let examples = ext
         .intent
         .as_ref()
@@ -228,6 +268,8 @@ async fn examples(host: &Host, ext: &Extension, report: &mut TestReport) {
                 .or_else(|| doc.get("input").and_then(|i| i.get("given")))
                 .cloned()
                 .unwrap_or(Value::Null),
+            steps: doc.get("steps").cloned(),
+            view: doc.get("view").cloned().unwrap_or(Value::Null),
         };
         if let Some(why) = withheld_target(ext, &ex.input) {
             report.warnings.push(format!(
@@ -236,6 +278,28 @@ async fn examples(host: &Host, ext: &Extension, report: &mut TestReport) {
             ));
             continue;
         }
+        // A page example that makes data runs on an oxplow of its own, so
+        // the next example doesn't see it.
+        let forked;
+        let host = if ex.input.get("page").is_some()
+            && (!ex.given.is_null() || ex.steps.is_some() || ex.input.get("rows").is_some())
+        {
+            match shared.fork().await {
+                Ok(host) => {
+                    forked = host;
+                    &forked
+                }
+                Err(e) => {
+                    report
+                        .errors
+                        .push(format!("{shown}:1: an oxplow of its own: {e}"));
+                    continue;
+                }
+            }
+        } else {
+            shared
+        };
+        let (before, started) = (report.errors.len(), std::time::Instant::now());
         if let Some(replies) = model_replies(&ex, report) {
             if let Err(e) = host.answer_with(replies) {
                 report
@@ -304,6 +368,7 @@ async fn examples(host: &Host, ext: &Extension, report: &mut TestReport) {
                 example.name
             ));
         }
+        report.finish_case(format!("example {}", example.name), before, started);
     }
 }
 
@@ -851,21 +916,27 @@ async fn run_setup(
     report: &mut TestReport,
 ) -> bool {
     match ex.input.get("setup") {
-        Some(steps) => run_steps(host, ext, ex.shown, "setup", steps, report).await,
+        Some(steps) => {
+            let mut binds = Binds::default();
+            run_steps(host, ext, ex.shown, "setup", steps, &mut binds, report).await
+        }
         None => true,
     }
 }
 
 /// `steps` (the example's `key`, `setup` or `given`), run in order on the
-/// throwaway's own database: each `{ command, input?, as? }` or, for a
-/// `given`, `{ rows: { <entity>: [ … ] } }`. `false`, with the error
-/// reported, when one fails.
+/// throwaway's own database: each `{ command, input?, as?, confirmed?,
+/// bind? }` or, for a `given`, `{ rows: { <entity>: [ … ] } }`. A step's
+/// input may use what an earlier one bound (`$name.path`); `bind: <name>`
+/// keeps a command's result for later. `false`, with the error reported,
+/// when one fails.
 async fn run_steps(
     host: &Host,
     ext: &Extension,
     shown: &str,
     key: &str,
     steps: &Value,
+    binds: &mut Binds,
     report: &mut TestReport,
 ) -> bool {
     let Some(steps) = steps.as_array() else {
@@ -908,16 +979,147 @@ async fn run_steps(
                 return false;
             }
         };
-        let input = step.get("input").cloned().unwrap_or_else(|| json!({}));
-        if let Err(e) = host.svc.commands.run(&actor, command, input, false).await {
-            report.errors.push(format!(
-                "{shown}:1: `{key}[{index}]` `{command}` failed: {e} — fix: its input, or the steps \
-                 before it"
-            ));
-            return false;
+        let input = match binds.substitute(&step.get("input").cloned().unwrap_or_else(|| json!({})))
+        {
+            Ok(input) => input,
+            Err(e) => {
+                report
+                    .errors
+                    .push(format!("{shown}:1: `{key}[{index}]`: {e}"));
+                return false;
+            }
+        };
+        let confirmed = step
+            .get("confirmed")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        match host
+            .svc
+            .commands
+            .run(&actor, command, input, confirmed)
+            .await
+        {
+            Ok(outcome) => {
+                if let Some(name) = step.get("bind").and_then(Value::as_str) {
+                    binds.0.insert(name.to_string(), outcome.result);
+                }
+            }
+            Err(e) => {
+                report.errors.push(format!(
+                    "{shown}:1: `{key}[{index}]` `{command}` failed: {e} — fix: its input, or the \
+                     steps before it{}",
+                    if confirmed {
+                        ""
+                    } else {
+                        " (a command that asks first runs with `confirmed: true`)"
+                    }
+                ));
+                return false;
+            }
         }
     }
     true
+}
+
+/// Values a fixture bound (`bind:`), by name: a step's command result, or
+/// a value of a page run. `$name` followed by `.key` and `[n]` parts reads
+/// one; `$any` is never a name.
+#[derive(Default)]
+struct Binds(std::collections::BTreeMap<String, Value>);
+
+impl Binds {
+    /// `value` with every string that is exactly a reference replaced by
+    /// what it reads, its type kept.
+    fn substitute(&self, value: &Value) -> Result<Value, String> {
+        Ok(match value {
+            Value::String(text) => match reference(text) {
+                Some(reference) => self.resolve(reference)?,
+                None => value.clone(),
+            },
+            Value::Array(items) => Value::Array(
+                items
+                    .iter()
+                    .map(|v| self.substitute(v))
+                    .collect::<Result<_, _>>()?,
+            ),
+            Value::Object(map) => Value::Object(
+                map.iter()
+                    .map(|(k, v)| Ok((k.clone(), self.substitute(v)?)))
+                    .collect::<Result<_, String>>()?,
+            ),
+            other => other.clone(),
+        })
+    }
+
+    /// What `name.path` reads.
+    fn resolve(&self, reference: &str) -> Result<Value, String> {
+        let end = reference.find(['.', '[']).unwrap_or(reference.len());
+        let (name, path) = reference.split_at(end);
+        let bound = self.0.get(name).ok_or_else(|| {
+            format!("`${name}` isn't bound — fix: `bind: {name}` on an earlier step")
+        })?;
+        read_path(bound, path).ok_or_else(|| format!("`${reference}` reads nothing"))
+    }
+}
+
+/// The name and path a string refers to (`$first.uri` → `first.uri`):
+/// `$` and a letter or `_`, and not `$any`.
+fn reference(text: &str) -> Option<&str> {
+    let rest = text.strip_prefix('$')?;
+    (text != crate::conformance::ANY
+        && rest.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_'))
+    .then_some(rest)
+}
+
+/// The value at `path` (`.key` and `[n]` parts, or none) in `value`.
+fn read_path(value: &Value, path: &str) -> Option<Value> {
+    let mut at = value;
+    let mut rest = path;
+    while !rest.is_empty() {
+        if let Some(after) = rest.strip_prefix('[') {
+            let close = after.find(']')?;
+            at = at.get(after[..close].parse::<usize>().ok()?)?;
+            rest = &after[close + 1..];
+        } else {
+            let after = rest.strip_prefix('.').unwrap_or(rest);
+            let end = after.find(['.', '[']).unwrap_or(after.len());
+            at = at.get(&after[..end])?;
+            rest = &after[end..];
+        }
+    }
+    Some(at.clone())
+}
+
+/// A run as a fixture's `bind` reads it: each loader's rows as maps by
+/// column, and its alert, badge and what keeps it inactive.
+fn run_json(run: &oxplow_app::pages::runner::PageRun) -> Value {
+    let loaders: serde_json::Map<String, Value> = run
+        .loaders
+        .iter()
+        .map(|(name, loader)| {
+            let rows: Vec<Value> = loader
+                .result
+                .rows
+                .iter()
+                .map(|row| {
+                    Value::Object(
+                        loader
+                            .result
+                            .columns
+                            .iter()
+                            .zip(row)
+                            .map(|(column, cell)| (column.clone(), json!(cell)))
+                            .collect(),
+                    )
+                })
+                .collect();
+            (
+                name.clone(),
+                json!({ "rows": rows, "columns": loader.result.columns }),
+            )
+        })
+        .collect();
+    json!({ "loaders": loaders, "alert": run.alert, "badge": run.badge, "inactive": run.inactive })
 }
 
 /// Load component `id` as its frame would, then ask what the fixture asks
@@ -1119,6 +1321,12 @@ struct Example<'a> {
     expect: Value,
     /// Steps run before it (`given:`, beside `input`, or inside it).
     given: Value,
+    /// A page example's scenario (`steps:`): `{ given }` changes the state,
+    /// `{ expect, params?, bind? }` runs the page again and checks it.
+    steps: Option<Value>,
+    /// The stream and thread a page is viewed from (`view: { stream,
+    /// thread }`).
+    view: Value,
 }
 
 /// A page run's node ids (`<embed>/<id>` inside an embed) with their kinds.
@@ -1154,11 +1362,13 @@ fn run_nodes(run: &oxplow_app::pages::runner::PageRun) -> Vec<(String, String)> 
 }
 
 /// Run page `id` (`<extension>/<slug>`) with `params` as a person would
-/// open it; the failure to run, or a loader that failed, as a message.
+/// open it from `ctx`; the failure to run, or a loader that failed, as a
+/// message.
 async fn run_page(
     host: &Host,
     id: &str,
     params: &Value,
+    ctx: &oxplow_app::extensions::ViewContext,
 ) -> Result<oxplow_app::pages::runner::PageRun, String> {
     use oxplow_app::pages::runner::{PageRunner, RunRequest, RunTarget};
     let params = params
@@ -1173,7 +1383,7 @@ async fn run_page(
         .run(RunRequest {
             target: RunTarget::Page(id.to_string()),
             params,
-            ctx: oxplow_app::extensions::ViewContext::default(),
+            ctx: ctx.clone(),
             viewer: Actor::Human,
         })
         .await
@@ -1188,11 +1398,63 @@ async fn run_page(
     Ok(run)
 }
 
-/// Run page `page` after the fixture's `given` steps, with its `params`;
-/// the run against `expect: { loaders?: { <name>: { rows: n | $any | [ { col:
-/// val } | [ val, … ] ], columns? } }, nodes?: [{ id, kind? }] }`. A row
-/// map matches when every column it names equals; a row list matches the
-/// loader's rows in order.
+/// The example's `view: { stream?, thread? }` (`str1`, `thr1` or their
+/// numbers) as the context its page runs in; `None`, with the error
+/// reported, when it isn't that shape.
+fn view_context(
+    ex: &Example<'_>,
+    report: &mut TestReport,
+) -> Option<oxplow_app::extensions::ViewContext> {
+    /// A view's id: its number, or its ref read by `parse` (`thr1`).
+    fn id(v: Option<&Value>, parse: fn(&str) -> Option<i64>) -> Result<Option<i64>, ()> {
+        match v {
+            None | Some(Value::Null) => Ok(None),
+            Some(Value::Number(n)) => n.as_i64().map(Some).ok_or(()),
+            Some(Value::String(s)) => parse(s).map(Some).ok_or(()),
+            Some(_) => Err(()),
+        }
+    }
+    let view = &ex.view;
+    if !(view.is_null() || view.is_object()) {
+        report.errors.push(format!(
+            "{}:1: `view` isn't `{{ stream?, thread? }}`",
+            ex.shown
+        ));
+        return None;
+    }
+    match (
+        id(view.get("stream"), |s| {
+            oxplow_domain::StreamId::try_from_str(s).map(|i| i.value())
+        }),
+        id(view.get("thread"), |s| {
+            oxplow_domain::ThreadId::try_from_str(s).map(|i| i.value())
+        }),
+    ) {
+        (Ok(stream_id), Ok(thread_id)) => Some(oxplow_app::extensions::ViewContext {
+            stream_id,
+            thread_id,
+            active: None,
+        }),
+        _ => {
+            report.errors.push(format!(
+                "{}:1: `view` names a stream or thread that isn't one — fix: `{{ stream: str1, \
+                 thread: thr1 }}`",
+                ex.shown
+            ));
+            None
+        }
+    }
+}
+
+/// Run page `page` after the fixture's `given` steps, with its `params`,
+/// and check it against `expect`; then each of its `steps:` in order — a
+/// `given` changes the state, an `expect` (with `params` over the
+/// example's, and `bind` to keep a value of the run) runs the page again
+/// and checks it. `expect: { loaders?: { <name>: { rows: n | $any | [ {
+/// col: val } | [ val, … ] ], columns? } }, nodes?: [{ id, kind?, actions?
+/// }], text?, alert?, badge?, inactive?, actions? }`. A row map matches when
+/// every column it names equals; a row list matches the loader's rows in
+/// order. Anything may use what was bound (`$name.path`).
 async fn page_example(
     host: &Host,
     ext: &Extension,
@@ -1201,7 +1463,13 @@ async fn page_example(
     report: &mut TestReport,
 ) {
     let shown = ex.shown;
-    if !ex.given.is_null() && !run_steps(host, ext, shown, "given", &ex.given, report).await {
+    let mut binds = Binds::default();
+    let Some(ctx) = view_context(ex, report) else {
+        return;
+    };
+    if !ex.given.is_null()
+        && !run_steps(host, ext, shown, "given", &ex.given, &mut binds, report).await
+    {
         return;
     }
     if !seed_rows(host, ext, ex, report).await {
@@ -1213,120 +1481,91 @@ async fn page_example(
         format!("{}/{page}", ext.name)
     };
     let params = ex.input.get("params").cloned().unwrap_or(Value::Null);
-    let run = match run_page(host, &id, &params).await {
-        Ok(run) => run,
-        Err(e) => {
+    let at = PageAt {
+        host,
+        shown,
+        page,
+        id: &id,
+        ctx: &ctx,
+    };
+    let steps = match &ex.steps {
+        None => Vec::new(),
+        Some(Value::Array(steps)) => steps.clone(),
+        Some(_) => {
             report.errors.push(format!(
-                "{shown}:1: page `{page}`: {e} — fix: the page, or the example's `params` and `given`"
+                "{shown}:1: `steps` isn't a list — fix: `steps: [{{ given: [..] }} | {{ expect, \
+                 params?, bind? }}]`"
             ));
             return;
         }
     };
-    if let Some(loaders) = ex.expect.get("loaders").and_then(Value::as_object) {
-        for (name, want) in loaders {
-            let Some(loader) = run.loaders.get(name) else {
-                report.errors.push(format!(
-                    "{shown}:1: page `{page}` has no loader `{name}` — fix: the example's `expect.loaders`"
-                ));
-                continue;
-            };
-            let rows = &loader.result.rows;
-            let cells = |row: &Vec<oxplow_db::SqlCell>| json!(row);
-            let by_column = |row: &Vec<oxplow_db::SqlCell>, want: &Value| -> Value {
-                let named: serde_json::Map<String, Value> = want
-                    .as_object()
-                    .into_iter()
-                    .flatten()
-                    .map(|(column, _)| {
-                        let at = loader.result.columns.iter().position(|c| c == column);
-                        (
-                            column.clone(),
-                            at.and_then(|i| row.get(i))
-                                .map_or(Value::Null, |c| json!(c)),
-                        )
-                    })
-                    .collect();
-                Value::Object(named)
-            };
-            let mut got = json!({ "rows": rows.len() });
-            if let Some(list) = want.get("rows").and_then(Value::as_array) {
-                got["rows"] = Value::Array(
-                    rows.iter()
-                        .enumerate()
-                        .map(|(i, row)| match list.get(i) {
-                            Some(w) if w.is_object() => by_column(row, w),
-                            _ => cells(row),
-                        })
-                        .collect(),
-                );
-            }
-            if want.get("columns").is_some() {
-                got["columns"] = json!(loader.result.columns);
-            }
-            if let Some((path, want, got)) = first_mismatch(want, &got) {
-                report.errors.push(format!(
-                    "{shown}:1: page `{page}` loader `{name}` returned {got} at `{path}`, the example \
-                     expects {want} — fix: the page, or the example's `expect.loaders.{name}` \
-                     (`{{ rows: n | $any | [..], columns? }}`)"
-                ));
+    if (ex.steps.is_none() || !ex.expect.is_null())
+        && at
+            .check(&params, &ex.expect, &binds, "", report)
+            .await
+            .is_none()
+    {
+        return;
+    }
+    for (index, step) in steps.iter().enumerate() {
+        let label = format!("steps[{index}]");
+        if let Some(given) = step.get("given") {
+            if !run_steps(
+                host,
+                ext,
+                shown,
+                &format!("{label}.given"),
+                given,
+                &mut binds,
+                report,
+            )
+            .await
+            {
+                return;
             }
         }
-    }
-    if let Some(want) = ex.expect.get("text") {
-        match oxplow_app::pages::text::page_text(&host.svc, &host.root, &run).await {
-            Err(e) => report.errors.push(format!(
-                "{shown}:1: page `{page}` has no text: {e} — fix: the page"
-            )),
-            Ok(text) => {
-                let missing: Vec<&str> = want
-                    .get("contains")
-                    .and_then(Value::as_array)
-                    .into_iter()
-                    .flatten()
-                    .filter_map(Value::as_str)
-                    .filter(|needle| !text.contains(*needle))
-                    .collect();
-                if matches!(want, Value::String(exact) if *exact != text) {
-                    report.errors.push(format!(
-                        "{shown}:1: page `{page}`'s text is {text:?}, the example expects {want} — \
-                         fix: the page, or `expect.text` (`{{ contains: [..] }}` or the exact text)"
-                    ));
-                }
-                for needle in missing {
-                    report.errors.push(format!(
-                        "{shown}:1: page `{page}`'s text doesn't contain {needle:?} — fix: the \
-                         page, or `expect.text.contains`; the text is:\n{text}"
-                    ));
-                }
-            }
-        }
-    }
-    if let Some(nodes) = ex.expect.get("nodes").and_then(Value::as_array) {
-        let present = run_nodes(&run);
-        for want in nodes {
-            let Some(id) = want.get("id").and_then(Value::as_str) else {
+        let Some(expect) = step.get("expect") else {
+            if step.get("given").is_none() {
                 report.errors.push(format!(
-                    "{shown}:1: `expect.nodes` entries are `{{ id, kind? }}`"
+                    "{shown}:1: `{label}` has no `given` or `expect` — fix: `{{ given: [..] }}` \
+                     or `{{ expect, params?, bind? }}`"
                 ));
-                continue;
-            };
-            match present.iter().find(|(have, _)| have == id) {
-                None => report.errors.push(format!(
-                    "{shown}:1: page `{page}` has no node `{id}` in this run (it has {}) — fix: the \
-                     example, or the page's view",
-                    present
-                        .iter()
-                        .map(|(n, _)| format!("`{n}`"))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                )),
-                Some((_, kind)) => {
-                    if let Some(k) = want.get("kind").and_then(Value::as_str) {
-                        if k != kind {
-                            report.errors.push(format!(
-                                "{shown}:1: page `{page}` node `{id}` is a `{kind}`, the example expects `{k}`"
-                            ));
-                        }
+                return;
+            }
+            continue;
+        };
+        let mut run_params = params.as_object().cloned().unwrap_or_default();
+        if let Some(over) = step.get("params").and_then(Value::as_object) {
+            run_params.extend(over.clone());
+        }
+        let Some(run) = at
+            .check(
+                &Value::Object(run_params),
+                expect,
+                &binds,
+                &format!("{label}: "),
+                report,
+            )
+            .await
+        else {
+            return;
+        };
+        if let Some(bind) = step.get("bind").and_then(Value::as_object) {
+            let seen = run_json(&run);
+            for (name, path) in bind {
+                match path
+                    .as_str()
+                    .and_then(|path| read_path(&seen, &format!(".{path}")))
+                {
+                    Some(value) => {
+                        binds.0.insert(name.clone(), value);
+                    }
+                    None => {
+                        report.errors.push(format!(
+                            "{shown}:1: {label}: `bind.{name}` reads nothing in the run — fix: a \
+                             path like `loaders.<name>.rows[0].<column>`"
+                        ));
+                        return;
                     }
                 }
             }
@@ -1334,16 +1573,233 @@ async fn page_example(
     }
 }
 
+/// Where a page example runs: its host, fixture, page and view.
+struct PageAt<'a> {
+    host: &'a Host,
+    shown: &'a str,
+    /// The page as the fixture names it.
+    page: &'a str,
+    /// `<extension>/<slug>`.
+    id: &'a str,
+    ctx: &'a oxplow_app::extensions::ViewContext,
+}
+
+impl PageAt<'_> {
+    /// Run the page with `params` and check it against `expect`, both
+    /// read through `binds`; findings start with `label`. The run, unless
+    /// it couldn't run.
+    async fn check(
+        &self,
+        params: &Value,
+        expect: &Value,
+        binds: &Binds,
+        label: &str,
+        report: &mut TestReport,
+    ) -> Option<oxplow_app::pages::runner::PageRun> {
+        let (shown, page) = (self.shown, self.page);
+        let (params, expect) = match (binds.substitute(params), binds.substitute(expect)) {
+            (Ok(params), Ok(expect)) => (params, expect),
+            (Err(e), _) | (_, Err(e)) => {
+                report.errors.push(format!("{shown}:1: {label}{e}"));
+                return None;
+            }
+        };
+        let run = match run_page(self.host, self.id, &params, self.ctx).await {
+            Ok(run) => run,
+            Err(e) => {
+                report.errors.push(format!(
+                    "{shown}:1: {label}page `{page}`: {e} — fix: the page, or the example's \
+                     `params` and `given`"
+                ));
+                return None;
+            }
+        };
+        if let Some(loaders) = expect.get("loaders").and_then(Value::as_object) {
+            for (name, want) in loaders {
+                let Some(loader) = run.loaders.get(name) else {
+                    report.errors.push(format!(
+                        "{shown}:1: {label}page `{page}` has no loader `{name}` — fix: the \
+                         example's `expect.loaders`"
+                    ));
+                    continue;
+                };
+                let rows = &loader.result.rows;
+                let cells = |row: &Vec<oxplow_db::SqlCell>| json!(row);
+                let by_column = |row: &Vec<oxplow_db::SqlCell>, want: &Value| -> Value {
+                    let named: serde_json::Map<String, Value> = want
+                        .as_object()
+                        .into_iter()
+                        .flatten()
+                        .map(|(column, _)| {
+                            let at = loader.result.columns.iter().position(|c| c == column);
+                            (
+                                column.clone(),
+                                at.and_then(|i| row.get(i))
+                                    .map_or(Value::Null, |c| json!(c)),
+                            )
+                        })
+                        .collect();
+                    Value::Object(named)
+                };
+                let mut got = json!({ "rows": rows.len() });
+                if let Some(list) = want.get("rows").and_then(Value::as_array) {
+                    got["rows"] = Value::Array(
+                        rows.iter()
+                            .enumerate()
+                            .map(|(i, row)| match list.get(i) {
+                                Some(w) if w.is_object() => by_column(row, w),
+                                _ => cells(row),
+                            })
+                            .collect(),
+                    );
+                }
+                if want.get("columns").is_some() {
+                    got["columns"] = json!(loader.result.columns);
+                }
+                if let Some((path, want, got)) = first_mismatch(want, &got) {
+                    report.errors.push(format!(
+                        "{shown}:1: {label}page `{page}` loader `{name}` returned {got} at \
+                         `{path}`, the example expects {want} — fix: the page, or the example's \
+                         `expect.loaders.{name}` (`{{ rows: n | $any | [..], columns? }}`)"
+                    ));
+                }
+            }
+        }
+        // The run's own parts, each compared on what the example names.
+        let parts = [
+            ("alert", json!(run.alert)),
+            ("badge", json!(run.badge)),
+            ("inactive", json!(run.inactive)),
+            (
+                "actions",
+                json!(run.page.actions.iter().map(|a| &a.id).collect::<Vec<_>>()),
+            ),
+        ];
+        for (key, got) in parts {
+            let Some(want) = expect.get(key) else {
+                continue;
+            };
+            if let Some((path, want, got)) = first_mismatch(want, &got) {
+                report.errors.push(format!(
+                    "{shown}:1: {label}page `{page}`'s {key} is {got} at `{key}{path}`, the \
+                     example expects {want} — fix: the page, or `expect.{key}`"
+                ));
+            }
+        }
+        if let Some(want) = expect.get("text") {
+            match oxplow_app::pages::text::page_text(&self.host.svc, &self.host.root, &run).await {
+                Err(e) => report.errors.push(format!(
+                    "{shown}:1: {label}page `{page}` has no text: {e} — fix: the page"
+                )),
+                Ok(text) => {
+                    let missing: Vec<&str> = want
+                        .get("contains")
+                        .and_then(Value::as_array)
+                        .into_iter()
+                        .flatten()
+                        .filter_map(Value::as_str)
+                        .filter(|needle| !text.contains(*needle))
+                        .collect();
+                    if matches!(want, Value::String(exact) if *exact != text) {
+                        report.errors.push(format!(
+                            "{shown}:1: {label}page `{page}`'s text is {text:?}, the example \
+                             expects {want} — fix: the page, or `expect.text` (`{{ contains: [..] \
+                             }}` or the exact text)"
+                        ));
+                    }
+                    for needle in missing {
+                        report.errors.push(format!(
+                            "{shown}:1: {label}page `{page}`'s text doesn't contain {needle:?} — \
+                             fix: the page, or `expect.text.contains`; the text is:\n{text}"
+                        ));
+                    }
+                }
+            }
+        }
+        if let Some(nodes) = expect.get("nodes").and_then(Value::as_array) {
+            let present = run_nodes(&run);
+            for want in nodes {
+                let Some(id) = want.get("id").and_then(Value::as_str) else {
+                    report.errors.push(format!(
+                        "{shown}:1: {label}`expect.nodes` entries are `{{ id, kind?, actions? }}`"
+                    ));
+                    continue;
+                };
+                let Some((_, kind)) = present.iter().find(|(have, _)| have == id) else {
+                    report.errors.push(format!(
+                        "{shown}:1: {label}page `{page}` has no node `{id}` in this run (it has \
+                         {}) — fix: the example, or the page's view",
+                        present
+                            .iter()
+                            .map(|(n, _)| format!("`{n}`"))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ));
+                    continue;
+                };
+                if let Some(k) = want.get("kind").and_then(Value::as_str) {
+                    if k != kind {
+                        report.errors.push(format!(
+                            "{shown}:1: {label}page `{page}` node `{id}` is a `{kind}`, the \
+                             example expects `{k}`"
+                        ));
+                    }
+                }
+                if let Some(want) = want.get("actions") {
+                    let got = json!(node_actions(&run, id));
+                    if let Some((path, want, got)) = first_mismatch(want, &got) {
+                        report.errors.push(format!(
+                            "{shown}:1: {label}page `{page}` node `{id}`'s actions are {got} at \
+                             `{path}`, the example expects {want} — fix: the page, or the node's \
+                             `actions` in `expect.nodes`"
+                        ));
+                    }
+                }
+            }
+        }
+        Some(run)
+    }
+}
+
+/// The ids of the actions node `id` of a run's page offers (a viz's), in
+/// the order it declares them.
+fn node_actions(run: &oxplow_app::pages::runner::PageRun, id: &str) -> Vec<String> {
+    let local = id.rsplit('/').next().unwrap_or(id);
+    run.page
+        .nodes()
+        .into_iter()
+        .find(|n| n.id == local)
+        .and_then(|n| match &n.kind {
+            oxplow_app::pages::schema::NodeKind::Viz { config, .. } => {
+                Some(config.actions.iter().map(|a| a.id.clone()).collect())
+            }
+            _ => None,
+        })
+        .unwrap_or_default()
+}
+
 /// Every page's `answers:` entry runs with its params: the page opens and
-/// none of its loaders fails.
+/// none of its loaders fails. A test case per page.
 async fn page_answers(host: &Host, ext: &Extension, report: &mut TestReport) {
     let rel = ext.path.trim_end_matches('/').to_string();
     let mut any = false;
+    // An answer may name the primary stream's thread.
+    if let Err(e) = host.svc.streams.ensure_primary().await {
+        report
+            .errors
+            .push(format!("{rel}: the primary thread: {e}"));
+        return;
+    }
+    let ctx = oxplow_app::extensions::ViewContext::default();
     for page in &ext.page_files {
+        if page.answers.is_empty() {
+            continue;
+        }
+        any = true;
+        let (before, started) = (report.errors.len(), std::time::Instant::now());
         for answer in &page.answers {
-            any = true;
             let params = json!(answer.params);
-            if let Err(e) = run_page(host, &page.id, &params).await {
+            if let Err(e) = run_page(host, &page.id, &params, &ctx).await {
                 report.errors.push(format!(
                     "{rel}/pages/{}.yaml:1: the answer to \"{}\" doesn't run: {e} — fix: the \
                      answer's `params`, or the page",
@@ -1351,6 +1807,7 @@ async fn page_answers(host: &Host, ext: &Extension, report: &mut TestReport) {
                 ));
             }
         }
+        report.finish_case(format!("answers {}", page.slug), before, started);
     }
     if any {
         report.ran.push("answers".into());
@@ -2791,6 +3248,7 @@ async fn suite(
 pub fn render(report: &TestReport, format: crate::Format) -> String {
     match format {
         crate::Format::Json => serde_json::to_string_pretty(report).expect("report serializes"),
+        crate::Format::Junit => junit(report),
         crate::Format::Text => {
             let mut out = String::new();
             for e in &report.errors {
@@ -2834,9 +3292,48 @@ pub fn render(report: &TestReport, format: crate::Format) -> String {
     }
 }
 
+/// `report` as one JUnit `<testsuite>` (no XML prolog, so a caller can
+/// put several in one `<testsuites>`): a `<testcase>` per case, a
+/// `<failure>` holding the errors it added.
+fn junit(report: &TestReport) -> String {
+    fn escape(text: &str) -> String {
+        text.replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+            .replace('"', "&quot;")
+    }
+    let failures = report.cases.iter().filter(|c| !c.ok).count();
+    let total_ms: u64 = report.cases.iter().map(|c| c.duration_ms).sum();
+    let seconds = |ms: u64| format!("{:.3}", ms as f64 / 1000.0);
+    let name = escape(&report.name);
+    let mut out = format!(
+        "<testsuite name=\"{name}\" tests=\"{}\" failures=\"{failures}\" time=\"{}\">\n",
+        report.cases.len(),
+        seconds(total_ms)
+    );
+    for case in &report.cases {
+        out.push_str(&format!(
+            "  <testcase name=\"{}\" classname=\"{name}\" time=\"{}\"",
+            escape(&case.name),
+            seconds(case.duration_ms)
+        ));
+        match &case.message {
+            Some(message) => out.push_str(&format!(
+                ">\n    <failure message=\"{}\">{}</failure>\n  </testcase>\n",
+                escape(message.lines().next().unwrap_or_default()),
+                escape(message)
+            )),
+            None => out.push_str("/>\n"),
+        }
+    }
+    out.push_str("</testsuite>\n");
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Format;
 
     fn write(root: &Path, rel: &str, body: &str) {
         let p = root.join(rel);
@@ -3787,7 +4284,7 @@ expect: {expect}
             root,
             // Runs at the page's defaults (no state); the answer's state
             // isn't JSON, so its run fails.
-            "SELECT title FROM v_work_item WHERE json_extract(:state, '$') IS NULL OR state = :state",
+            "SELECT json_extract(:state, '$') AS state",
             "{ state: open }",
             "{ loaders: { items: { rows: $any } } }",
         );
@@ -3837,5 +4334,228 @@ expect: {expect}
             errors.contains("the example expects \"nothing like it\""),
             "{errors}"
         );
+    }
+
+    /// Extension `paged` with page `items` (`page`, its YAML) and one
+    /// intent example per fixture, named by it.
+    fn paged(root: &Path, page: &str, fixtures: &[(&str, &str)]) {
+        let examples: String = fixtures
+            .iter()
+            .map(|(name, _)| {
+                format!("    - {{ name: {name}, input: {{ page: items }}, expect: it }}\n")
+            })
+            .collect();
+        write(
+            root,
+            ".oxplow/extensions/paged/extension.yaml",
+            &format!(
+                "manifest: 2\nname: paged\nintent:\n  purpose: Show work items.\n  examples:\n{examples}"
+            ),
+        );
+        write(root, ".oxplow/extensions/paged/pages/items.yaml", page);
+        for (name, body) in fixtures {
+            write(
+                root,
+                &format!(".oxplow/extensions/paged/fixtures/{name}.yaml"),
+                body,
+            );
+        }
+    }
+
+    /// A page of one work item by `uri`, with a row action.
+    const BY_URI: &str = "title: Items
+params: [{ name: uri }]
+data:
+  items: { sql: \"SELECT title, uri FROM v_work_item WHERE uri = :uri\" }
+view:
+  from: items
+  viz: table
+  actions:
+    - { id: start, label: Start, command: oxplow.work_item.transition, input: { uri: '{{row.uri}}', to: in_progress }, row: true }
+";
+
+    /// A fixture binds a step's result (`bind: <name>`) and a value of a
+    /// run (`steps[].bind`), and uses either as `$name.path` in a later
+    /// step's input, the params and the expectation; `steps` change the
+    /// state and run the page again.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_page_fixture_binds_values_and_runs_its_steps() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        paged(
+            root,
+            BY_URI,
+            &[(
+                "bound",
+                "given:
+  - { command: oxplow.work_item.create, input: { title: First }, bind: first }
+input: { page: items, params: { uri: $first.uri } }
+expect:
+  loaders: { items: { rows: [{ title: First, uri: $first.uri }] } }
+  nodes: [{ id: items, kind: viz, actions: [start] }]
+steps:
+  - expect: { loaders: { items: { rows: 1 } } }
+    bind: { title: 'loaders.items.rows[0].title' }
+  - given: [{ command: oxplow.work_item.create, input: { title: Second }, bind: second }]
+  - params: { uri: $second.uri }
+    expect: { loaders: { items: { rows: [{ title: Second }] } } }
+  - params: { uri: $first.uri }
+    expect: { loaders: { items: { rows: [{ title: $title }] } } }
+",
+            )],
+        );
+        let report = test_extension(root, "paged", false).await.unwrap();
+        assert_eq!(report.errors, Vec::<String>::new());
+
+        // A step that doesn't hold names its place in the scenario.
+        paged(
+            root,
+            BY_URI,
+            &[(
+                "bound",
+                "given:
+  - { command: oxplow.work_item.create, input: { title: First }, bind: first }
+input: { page: items, params: { uri: $first.uri } }
+steps:
+  - expect: { loaders: { items: { rows: [{ title: Other }] } } }
+",
+            )],
+        );
+        let errors = test_extension(root, "paged", false)
+            .await
+            .unwrap()
+            .errors
+            .join("\n");
+        assert!(
+            errors
+                .contains("fixtures/bound.yaml:1: steps[0]: page `items` loader `items` returned"),
+            "{errors}"
+        );
+
+        // A name nothing bound is a finding that says how to bind it.
+        paged(
+            root,
+            BY_URI,
+            &[(
+                "bound",
+                "input: { page: items, params: { uri: $nowhere.uri } }\n",
+            )],
+        );
+        let errors = test_extension(root, "paged", false)
+            .await
+            .unwrap()
+            .errors
+            .join("\n");
+        assert!(errors.contains("`$nowhere` isn't bound"), "{errors}");
+    }
+
+    /// Each example with `given` runs on an oxplow of its own: what one
+    /// made, the next doesn't see.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn page_fixtures_dont_see_each_others_data() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let fixture = "given: [{ command: oxplow.work_item.create, input: { title: Mine } }]
+input: { page: items }
+expect: { loaders: { items: { rows: 1 } } }
+";
+        paged(
+            root,
+            "title: Items
+data:
+  items: { sql: \"SELECT title FROM v_work_item WHERE title = 'Mine'\" }
+view: { from: items, viz: table }
+",
+            &[("one", fixture), ("two", fixture)],
+        );
+        let report = test_extension(root, "paged", false).await.unwrap();
+        assert_eq!(report.errors, Vec::<String>::new());
+    }
+
+    /// `confirmed: true` runs a step that asks for confirmation; `view:`
+    /// gives the run its stream and thread; `expect.alert` checks the alert.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_page_fixture_confirms_views_from_a_thread_and_checks_the_alert() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let page = "title: Items
+params: [{ name: thread_id }]
+data:
+  items: { sql: \"SELECT :thread_id AS thread\" }
+view: { from: items, viz: table }
+alert: { min_rows: 1, label: Configured }
+";
+        paged(
+            root,
+            page,
+            &[(
+                "viewed",
+                "view: { stream: str1, thread: thr1 }
+given:
+  - { command: oxplow.ai.set_provider, input: { id: spare, kind: anthropic, key: sk-ant-test } }
+  - { command: oxplow.ai.remove_provider, input: { id: spare }, confirmed: true }
+input: { page: items }
+expect:
+  loaders: { items: { rows: [{ thread: 1 }] } }
+  alert: { firing: true, count: 1, message: $any }
+",
+            )],
+        );
+        let report = test_extension(root, "paged", false).await.unwrap();
+        assert_eq!(report.errors, Vec::<String>::new());
+
+        paged(
+            root,
+            page,
+            &[(
+                "viewed",
+                "given:
+  - { command: oxplow.ai.set_provider, input: { id: spare, kind: anthropic, key: sk-ant-test } }
+  - { command: oxplow.ai.remove_provider, input: { id: spare } }
+input: { page: items }
+",
+            )],
+        );
+        let errors = test_extension(root, "paged", false)
+            .await
+            .unwrap()
+            .errors
+            .join("\n");
+        assert!(
+            errors.contains("`given[1]` `oxplow.ai.remove_provider` failed")
+                && errors.contains("confirmed: true"),
+            "{errors}"
+        );
+    }
+
+    /// The JUnit form has a case per thing that ran, a failure holding the
+    /// findings it added.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_report_renders_as_junit() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        pager(
+            root,
+            LIST,
+            "{}",
+            "{ loaders: { items: { rows: [{ title: Something else }] } } }",
+        );
+        let report = test_extension(root, "pager", false).await.unwrap();
+        let xml = render(&report, Format::Junit);
+        assert!(
+            xml.starts_with("<testsuite name=\"pager\" tests=\""),
+            "{xml}"
+        );
+        assert!(
+            xml.contains("<testcase name=\"check\" classname=\"pager\""),
+            "{xml}"
+        );
+        assert!(
+            xml.contains("<testcase name=\"example created\" classname=\"pager\"")
+                && xml.contains("<failure message=\"")
+                && xml.contains("Something else"),
+            "{xml}"
+        );
+        assert!(xml.contains("<testcase name=\"answers items\""), "{xml}");
     }
 }

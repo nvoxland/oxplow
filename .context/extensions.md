@@ -1927,19 +1927,43 @@ the project's database. It runs `check` there
 `intent.examples[*]` by its fixture `fixtures/<name>.yaml` (the event,
 job and component forms are in "The SDK"):
 
-- `input: { page: <slug | ext/slug>, params? }` with an optional
-  `given: [..]` beside `input`, `expect: { loaders?: { <name>: { rows: n |
-  $any | [ { col: val } | [ val, … ] ], columns? } }, nodes?: [{ id, kind? }]
-  }` — the page runs (`PageRunner`, as a person) after the `given` steps,
-  each `{ command, input?, as? }` or `{ rows: { <entity>: [..] } }`, run in
-  order on the extension's one throwaway database (so a later fixture sees
-  what an earlier one made). A row map matches when every column it names
-  equals (`$any` matches anything); a row list matches in order; `nodes`
-  ids are in the run's tree (`<embed>/<id>` inside an embed). A loader that
-  fails is a finding naming it. After the examples every page's `answers:`
-  entry runs (`ran: answers`): the page opens with its params and no loader
-  fails, else the finding names the page file and the question. `expect.text`
-  is `{ contains: [..] }` or the exact text, against `page_text`.
+- `input: { page: <slug | ext/slug>, params? }` with optional `given: [..]`,
+  `view: { stream?, thread? }` and `steps: [..]` beside `input`, and
+  `expect: { loaders?: { <name>: { rows: n | $any | [ { col: val } | [ val,
+  … ] ], columns? } }, nodes?: [{ id, kind?, actions? }], text?, alert?,
+  badge?, inactive?, actions? }` — the page runs (`PageRunner`, as a person,
+  from the `view`'s stream and thread) after the `given` steps, each `{
+  command, input?, as?, confirmed?, bind? }` or `{ rows: { <entity>: [..] }
+  }`, in order. A row map matches when every column it names equals (`$any`
+  matches anything); a row list matches in order; `nodes` ids are in the
+  run's tree (`<embed>/<id>` inside an embed) and a node's `actions` are its
+  viz's action ids; `alert`, `badge` and `inactive` are the run's own and
+  `actions` the page's, each compared on the keys named. A loader that fails
+  is a finding naming it. `expect.text` is `{ contains: [..] }` or the exact
+  text, against `page_text`.
+  - **Bind and reuse.** `bind: <name>` on a step keeps its command's result;
+    `$name.path` (`.key`, `[n]`) anywhere in a later step's `input`, the
+    `params` or an `expect` is that value, its type kept (`$any` is never a
+    name). A name nothing bound is a finding that says to bind it.
+  - **Scenarios.** `steps:` runs after the first check (no top-level
+    `expect`: no first run): `{ given: [..] }` changes the state, `{ expect,
+    params?, bind? }` runs the page again — `params` over the example's,
+    `bind: { <name>: loaders.<loader>.rows[0].<column> }` keeping a value of
+    that run — and findings name the step (`steps[3]: …`).
+  - **`confirmed: true`** runs a command that asks a person first.
+  - **One oxplow per page example that makes data.** A page example with
+    `given`, `steps` or `rows` runs on a fork of the throwaway
+    (`Host::fork`: the sources, settings and deployments copied, nothing
+    built again, a fresh in-memory database), so no example sees another's
+    data. The rest — `check`, the other examples, the answers — share one.
+  - **Answers.** After the examples every page's `answers:` entry runs on
+    that shared, clean host (`ran: answers`): the page opens with its params
+    and no loader fails, else the finding names the page file and the
+    question.
+  - **The report's cases.** `TestReport.cases` holds a `TestCase { name, ok,
+    message, duration_ms }` per thing that ran (`check`, `example <name>`,
+    `answers <page>`, `provider <id>`, `policy <id>`), and
+    `render(report, Format::Junit)` writes them as one `<testsuite>`.
 - `input: { collector: <id>, rows?, event? }`, `expect: { entities: { <name>:
   n | $any } }` — a derived collector runs over `rows` (standing in for
   its `input` query, `oxplow_preview_collector(…, event, rows)`) and `event`

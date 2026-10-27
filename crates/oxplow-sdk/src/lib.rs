@@ -1180,6 +1180,9 @@ pub enum Format {
     /// One finding per line: `error: <file:line: what — fix>`.
     Text,
     Json,
+    /// A `<testsuite>` per extension, a `<testcase>` per thing that ran
+    /// (`extension test`); a check has no cases and renders as `Text`.
+    Junit,
 }
 
 /// The report as text or JSON. Text is what an agent reads back from the
@@ -1316,7 +1319,8 @@ pub fn render_services(report: &CheckReport) -> String {
 pub fn render_findings(report: &CheckReport, format: Format) -> String {
     match format {
         Format::Json => serde_json::to_string_pretty(report).expect("report serializes"),
-        Format::Text => {
+        // A check runs nothing to report as a case.
+        Format::Text | Format::Junit => {
             let mut out = String::new();
             for e in &report.errors {
                 out.push_str("error: ");

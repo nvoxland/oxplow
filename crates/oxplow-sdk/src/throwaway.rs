@@ -27,6 +27,13 @@ pub(crate) struct Host {
     pub(crate) svc: Arc<oxplow_app::Services>,
     /// What its activation held back, and why (`<extension>: <reason>`).
     pub(crate) problems: Vec<String>,
+    /// How it was made, for [`Host::fork`]: the extensions on, where each
+    /// copied source is (relative to `root`), its programs' environment,
+    /// and whether built sources were deployed.
+    on: Vec<String>,
+    copied: std::collections::BTreeMap<String, PathBuf>,
+    env: HostEnv,
+    builds: bool,
 }
 
 impl Host {
@@ -69,7 +76,7 @@ impl Host {
                 sources.insert(name.clone(), rel.to_string_lossy().into_owned());
             }
             copy_dir(&source, &root.join(&rel)).map_err(|e| e.to_string())?;
-            copied.insert(name, root.join(rel));
+            copied.insert(name, rel);
         }
         // Which of them are on, and nothing else of its config: its
         // provider instances would start its programs here.
@@ -106,6 +113,39 @@ impl Host {
                 .map_err(|e| e.to_string())?;
             std::fs::write(root.join(".oxplow/personal.yaml"), yaml).map_err(|e| e.to_string())?;
         }
+        Self::boot(dir, root, on, copied, env, builds).await
+    }
+
+    /// Another throwaway like this one, with its own empty database: the
+    /// same sources, settings and deployments, copied, so nothing is built
+    /// again. What one example makes, the next one's fork doesn't see.
+    pub(crate) async fn fork(&self) -> Result<Host, String> {
+        let dir = tempfile::tempdir().map_err(|e| e.to_string())?;
+        let root = dir.path().to_path_buf();
+        copy_all(&self.root, &root).map_err(|e| e.to_string())?;
+        let host = Self::boot(
+            dir,
+            root,
+            self.on.clone(),
+            self.copied.clone(),
+            self.env.clone(),
+            self.builds,
+        )
+        .await?;
+        host.start_runtime()?;
+        Ok(host)
+    }
+
+    /// Open oxplow over `root` (sources copied, settings written) and
+    /// deploy what's on, as the author's own run would.
+    async fn boot(
+        dir: tempfile::TempDir,
+        root: PathBuf,
+        on: Vec<String>,
+        copied: std::collections::BTreeMap<String, PathBuf>,
+        env: HostEnv,
+        builds: bool,
+    ) -> Result<Host, String> {
         oxplow_app::vcs::GitProvider
             .init_repository(&root)
             .await
@@ -114,7 +154,7 @@ impl Host {
             &root,
             root.join(".oxplow/global-config"),
             Arc::new(oxplow_ai::secrets::MemorySecrets::default()),
-            env,
+            env.clone(),
         )
         .await
         .map_err(|e| e.to_string())?;
@@ -122,10 +162,10 @@ impl Host {
         // copied, as they would, confirmed.
         let mut deploys = Vec::new();
         for name in &on {
-            let Some(copied) = copied.get(name) else {
+            let Some(source) = copied.get(name) else {
                 continue;
             };
-            let built = oxplow_app::extension_store::Inputs::of(copied)
+            let built = oxplow_app::extension_store::Inputs::of(&root.join(source))
                 .run
                 .is_some();
             if builds || !built {
@@ -146,6 +186,10 @@ impl Host {
             root,
             svc,
             problems,
+            on,
+            copied,
+            env,
+            builds,
         })
     }
 
@@ -200,6 +244,29 @@ impl Host {
 /// Copy an extension's source; a folder its `build:` excludes
 /// (`node_modules`) is linked instead, so a build in the copy still finds
 /// it.
+/// Copy throwaway `from` to `to` whole but its git repository: symlinks
+/// stay symlinks, a deployment's read-only files stay read-only.
+fn copy_all(from: &Path, to: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(to)?;
+    for entry in std::fs::read_dir(from)? {
+        let entry = entry?;
+        let target = to.join(entry.file_name());
+        let kind = entry.file_type()?;
+        if kind.is_symlink() {
+            #[cfg(unix)]
+            std::os::unix::fs::symlink(std::fs::read_link(entry.path())?, &target)?;
+        } else if kind.is_dir() {
+            if from.join(".git") == entry.path() {
+                continue;
+            }
+            copy_all(&entry.path(), &target)?;
+        } else {
+            std::fs::copy(entry.path(), &target)?;
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn copy_dir(from: &Path, to: &Path) -> std::io::Result<()> {
     let exclude = oxplow_app::extension_store::Inputs::of(from).exclude;
     copy_tree(from, to, &exclude, "")
