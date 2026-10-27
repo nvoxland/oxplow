@@ -170,7 +170,8 @@ model the SQL reads and the command it runs. Prefer `answers:` on pages.
      `{ observe: { symbols: { path, items: [{ name, kind, container?, line? }] } } }`
      (the definitions the index read from it), `{ observe: { collect: {
      effort, collectors?: [key] } } }` (the fact collectors an effort's end
-     runs) and `{ observe: { retention: { days } } }` (the log's retention
+     runs), `{ observe: { facts: { measure, items: [{ value?, path?, line?, rule?, severity? }] } } }`
+     (findings of a measure, as a collector's capture records them) and `{ observe: { retention: { days } } }` (the log's retention
      sweep as it runs that many days from now: payloads expire, envelopes
      stay);
    - `rows: { <entity>: [ {…} ] }` in a page or job fixture fills your
