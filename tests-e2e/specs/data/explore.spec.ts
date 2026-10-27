@@ -13,8 +13,7 @@ async function writes(daemon: Parameters<typeof ipc>[0]): Promise<number> {
 // Explore Data is oxplow-foundation's custom page: the catalog is its rail
 // (a viz node picking the page's `model`), the SQL box its component, and
 // the result oxplow draws under it from the inline page the component
-// hands it, with Save as Page beside it. (A refused query's message is the
-// foundation's `ui` fixture's.)
+// hands it, with Save as Page beside it.
 test("explore a model, run SQL, and save it as a page", async ({ page, daemon }) => {
   await run(daemon, "oxplow.work_item.create", { title: "Echidna task", thread: daemon.thread });
   await page.goto("/");
@@ -36,4 +35,16 @@ test("explore a model, run SQL, and save it as a page", async ({ page, daemon })
   await expect(saved.getByTestId("viz-row-0")).toContainText("Echidna task");
   // The save was one `oxplow.extension.write_page`, whatever other specs wrote before it.
   expect(await writes(daemon)).toBe(before + 1);
+});
+
+// A refused query draws nothing under the explorer. (The message it shows
+// is the foundation's `ui` fixture's.)
+test("a query oxplow refuses draws nothing under the explorer", async ({ page }) => {
+  await page.goto("/");
+  await openFromLauncher(page, "Explore Data");
+  const frame = page.frameLocator('[data-testid="custom-component-frame"]');
+  await frame.getByTestId("explore-sql").fill("SELECT * FROM no_such_model");
+  await frame.getByTestId("explore-run").click();
+  await expect(frame.getByTestId("explore-error")).toBeVisible();
+  await expect(page.getByTestId("custom-page-spec")).toHaveCount(0);
 });

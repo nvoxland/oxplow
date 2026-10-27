@@ -1,8 +1,8 @@
 # A query oxplow refuses is the component's to show: it says why in the
-# explorer and hands the page nothing to draw.
+# explorer. (That nothing is drawn under it is the app's, in the e2e spec.)
 when: { page: explore-data }
 steps:
   - ui:
       - fill: { '[data-testid="explore-sql"]': "SELECT * FROM no_such_model" }
       - click: '[data-testid="explore-run"]'
-      - expect: { visible: ['[data-testid="explore-error"]'], shown: null }
+      - expect: { visible: ['[data-testid="explore-error"]'] }
