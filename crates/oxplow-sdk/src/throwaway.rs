@@ -50,12 +50,26 @@ impl Host {
             .await
             .unwrap_or_else(|| checkout.to_path_buf());
         let settings = oxplow_config::extension_settings(project);
+        // Each source goes where the checkout keeps it, so a finding names
+        // the file the author edits; one kept outside the checkout goes
+        // under `.oxplow/extensions/`.
+        let mut sources = std::collections::BTreeMap::new();
+        let mut copied = std::collections::BTreeMap::new();
         for name in oxplow_app::extensions::known_names(checkout, &settings) {
             let source = settings.source(checkout, &name);
-            if source.is_dir() {
-                copy_dir(&source, &root.join(EXTENSIONS_DIR).join(&name))
-                    .map_err(|e| e.to_string())?;
+            if !source.is_dir() {
+                continue;
             }
+            let default = Path::new(EXTENSIONS_DIR).join(&name);
+            let rel = source
+                .strip_prefix(checkout)
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|_| default.clone());
+            if rel != default {
+                sources.insert(name.clone(), rel.to_string_lossy().into_owned());
+            }
+            copy_dir(&source, &root.join(&rel)).map_err(|e| e.to_string())?;
+            copied.insert(name, root.join(rel));
         }
         // Which of them are on, and nothing else of its config: its
         // provider instances would start its programs here.
@@ -75,8 +89,10 @@ impl Host {
         }
         let config = root.join(".oxplow/project.yaml");
         std::fs::create_dir_all(config.parent().expect("a folder")).map_err(|e| e.to_string())?;
-        let yaml = serde_yaml::to_string(&serde_json::json!({ "extensions": on }))
-            .map_err(|e| e.to_string())?;
+        let yaml = serde_yaml::to_string(
+            &serde_json::json!({ "extensions": on, "extensionSources": sources }),
+        )
+        .map_err(|e| e.to_string())?;
         std::fs::write(config, yaml).map_err(|e| e.to_string())?;
         // And the ones the person turned off stay off in the copy.
         let off: Vec<&String> = settings
@@ -106,11 +122,13 @@ impl Host {
         // copied, as they would, confirmed.
         let mut deploys = Vec::new();
         for name in &on {
-            let copied = root.join(EXTENSIONS_DIR).join(name);
-            let built = oxplow_app::extension_store::Inputs::of(&copied)
+            let Some(copied) = copied.get(name) else {
+                continue;
+            };
+            let built = oxplow_app::extension_store::Inputs::of(copied)
                 .run
                 .is_some();
-            if copied.is_dir() && (builds || !built) {
+            if builds || !built {
                 if let Err(e) = oxplow_app::extension_deploy::deploy(&svc, name, true).await {
                     deploys.push(format!("{name}: {e}"));
                 }
@@ -262,5 +280,49 @@ mod tests {
             host.problems
         );
         assert!(host.root.join(EXTENSIONS_DIR).join("acme").is_dir());
+    }
+
+    /// An extension whose source the project keeps elsewhere
+    /// (`extensionSources`, as oxplow's own are kept in `extensions/`) is
+    /// copied to the same place in the throwaway, so every finding names the
+    /// file the author edits.
+    #[tokio::test]
+    async fn a_source_kept_elsewhere_is_reported_where_it_is() {
+        let project = tempfile::tempdir().unwrap();
+        oxplow_app::vcs::GitProvider
+            .init_repository(project.path())
+            .await
+            .unwrap();
+        write(
+            project.path(),
+            ".oxplow/project.yaml",
+            "extensionSources: { acme: extensions/acme }\n",
+        );
+        write(
+            project.path(),
+            "extensions/acme/extension.yaml",
+            "manifest: 2\nname: acme\nintent:\n  purpose: test\n  examples:\n    - { name: unpaired, input: { page: none }, expect: nothing }\n",
+        );
+
+        let host = Host::start(project.path(), "acme", Arc::new(|_: &str| None), false)
+            .await
+            .unwrap();
+        assert!(host.root.join("extensions/acme").is_dir());
+        let report = crate::extension_test::test_extension(project.path(), "acme", false)
+            .await
+            .unwrap();
+        assert!(
+            report
+                .warnings
+                .iter()
+                .any(|w| w.starts_with("extensions/acme/extension.yaml:")),
+            "{:?}",
+            report.warnings
+        );
+        assert!(
+            !report.warnings.iter().any(|w| w.contains(EXTENSIONS_DIR)),
+            "{:?}",
+            report.warnings
+        );
     }
 }

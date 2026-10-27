@@ -1919,7 +1919,10 @@ is held by a page with a whole-page action running that command.
 **`oxplow extension test <name>`** (`extension_test.rs`) runs on
 **a throwaway oxplow** (`Host`, "The SDK" above: activated as boot
 activates, its entities created empty, the fixture model answering every
-model call). It never opens the project's database. It runs `check` there
+model call). Each source is copied to where the checkout keeps it
+(`extensionSources`, so oxplow's own land at `extensions/<name>/`), and
+every finding names that path — the file the author edits. It never opens
+the project's database. It runs `check` there
 (with that registry, so `commands:` examples dry-run), then — only if `check` is clean — each
 `intent.examples[*]` by its fixture `fixtures/<name>.yaml` (the event,
 job and component forms are in "The SDK"):
