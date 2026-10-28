@@ -14,8 +14,12 @@ params:
 answers:
 - {"question":"What is this page made of, and where does each part come from?","params":{"of":"oxplow-foundation/commit"}}
 data:
+  # First: the tab's label reads its row.
   scope:
-    sql: SELECT uri_param(uri, 'id') AS stream FROM v_stream WHERE id = :stream_id
+    sql: |
+      SELECT uri_param(uri, 'id') AS stream,
+             coalesce((SELECT title FROM v_page WHERE id = :of), 'inline view') AS title
+      FROM v_stream WHERE id = :stream_id
   page:
     command: oxplow.page.definition
     args: { page: { param: of }, spec: { param: spec }, params: { param: params }, stream_id: { from: scope.stream } }

@@ -31,6 +31,9 @@ intent:
     - name: a person bookmarks a page for their thread
       input: { command: oxplow.bookmark.set, input: { uri: "oxplow:oxplow/page?page=git-dashboard", page_kind: git-dashboard, scope: thread, thread: "thr1" } }
       expect: the page in v_bookmark at the thread's scope, undone by oxplow.bookmark.remove
+    - name: definition-reads-a-pages-title-origin-and-nodes
+      input: { page: definition, params: { of: oxplow-foundation/commit } }
+      expect: the page's title first (the tab's label reads it), its extension and source, and its nodes in order
     - name: closed-threads-lists-closed-threads-with-their-work
       input: { page: closed-threads, params: { stream_id: 1 } }
       expect: the stream's closed threads only, each with a Reopen action

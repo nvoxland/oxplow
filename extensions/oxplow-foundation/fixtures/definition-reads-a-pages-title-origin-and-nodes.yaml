@@ -1,0 +1,17 @@
+# What a page is made of: the title the tab's label reads, where the page
+# comes from, and its nodes.
+when: { page: oxplow-foundation/definition, params: { of: oxplow-foundation/commit, stream_id: 1 } }
+expect:
+  loaders:
+    scope:
+      rows:
+        - { title: Commit }
+    page:
+      rows:
+        - { title: Commit, extension: oxplow-foundation }
+    nodes:
+      rows:
+        - { id: stack }
+        - { id: detail }
+        - { id: files }
+        - { id: sections }
