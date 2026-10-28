@@ -568,7 +568,7 @@ not a pick and isn't in the address.
   shows only the primary action and the `prominent` ones as buttons; the
   rest are items of its ☰ menu, so the bar stays short whatever a page and
   its extensions add. Mark an action prominent only when it is what a
-  person comes to the page to do (a list's New, the agent's Stop/Start, a
+  person comes to the page to do (a list's New, a
   timeline's Today/Fit). A button with an `icon` is the icon alone, its
   label the hover; give a prominent action one when the icon says it
   plainly. A section's actions are `PageAction[]` too, at its heading. A

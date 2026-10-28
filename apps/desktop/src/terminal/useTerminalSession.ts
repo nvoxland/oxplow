@@ -17,7 +17,6 @@ import { logUi } from "../logger.js";
 import {
   type ExitOutcome,
   failedLaunch,
-  isStopped,
   mayStartNow,
   readSessionMessage,
   reopened,
@@ -35,8 +34,6 @@ export interface TerminalSessionOptions {
   startOnActivate?: boolean;
   /** Its view is on screen. */
   shown: boolean;
-  /** The person stopped it: open nothing until it is started. */
-  stopped?: boolean;
   /** What it is bound to (an agent's conversation); a change opens it
    *  again once the running process has exited, or now if it had. */
   conversation?: string | null;
@@ -56,8 +53,6 @@ export interface TerminalSession {
   cwd(): Promise<string | null>;
   /** Its process exited (or never started): why. */
   ended: { exitCode: number | null; outcome: ExitOutcome } | null;
-  /** Stopped, by the row or as the open found out (another window). */
-  stopped: boolean;
 }
 
 export function useTerminalSession(uri: string, opts: TerminalSessionOptions): TerminalSession {
@@ -68,17 +63,11 @@ export function useTerminalSession(uri: string, opts: TerminalSessionOptions): T
   const endedRef = useRef(false);
   const launchFailedRef = useRef(false);
   const [ended, setEnded] = useState<{ exitCode: number | null; outcome: ExitOutcome } | null>(null);
-  const [stoppedHere, setStoppedHere] = useState(false);
-  const isStoppedNow = !!opts.stopped || stoppedHere;
-  const live = useRef({ shown: opts.shown, stopped: isStoppedNow, startOnActivate: !!opts.startOnActivate });
-  live.current = { shown: opts.shown, stopped: isStoppedNow, startOnActivate: !!opts.startOnActivate };
-
-  useEffect(() => {
-    if (!opts.stopped) setStoppedHere(false);
-  }, [opts.stopped]);
+  const live = useRef({ shown: opts.shown, startOnActivate: !!opts.startOnActivate });
+  live.current = { shown: opts.shown, startOnActivate: !!opts.startOnActivate };
 
   // The host moved it to another conversation: open that one once the
-  // stopped process has exited, or now if it already had.
+  // old process has exited, or now if it already had.
   const restartPendingRef = useRef(false);
   const conversationSeen = useRef(opts.conversation);
   useEffect(() => {
@@ -88,15 +77,8 @@ export function useTerminalSession(uri: string, opts: TerminalSessionOptions): T
     else restartPendingRef.current = true;
   }, [opts.conversation]);
 
-  // Started again: open it now (or again, if its process had ended).
   useEffect(() => {
-    if (isStoppedNow) return;
-    if (!live.current.shown && live.current.startOnActivate) return;
-    if (!activatedRef.current) activateRef.current?.();
-    else if (endedRef.current) reopenRef.current?.();
-  }, [isStoppedNow]);
-  useEffect(() => {
-    if (opts.shown && !live.current.stopped) activateRef.current?.();
+    if (opts.shown) activateRef.current?.();
   }, [opts.shown]);
 
   // Unmounted: detach, never kill (closing is the row's command).
@@ -173,10 +155,6 @@ export function useTerminalSession(uri: string, opts: TerminalSessionOptions): T
             logUi("info", "terminal session opened", { uri, sessionId, again });
           })
           .catch((error) => {
-            if (isStopped(error)) {
-              setStoppedHere(true);
-              return;
-            }
             logUi("error", "terminal session open failed", { uri, error: String(error) });
             // No process: say why where "Session ended" shows, with Retry.
             endedRef.current = true;
@@ -194,8 +172,8 @@ export function useTerminalSession(uri: string, opts: TerminalSessionOptions): T
         openSession(false);
       };
       reopenRef.current = () => openSession(true);
-      const { startOnActivate, shown, stopped } = live.current;
-      if (mayStartNow(startOnActivate, shown, stopped)) {
+      const { startOnActivate, shown } = live.current;
+      if (mayStartNow(startOnActivate, shown)) {
         activateRef.current();
       } else {
         // Hidden and not started: attach to one that already runs (a
@@ -245,7 +223,6 @@ export function useTerminalSession(uri: string, opts: TerminalSessionOptions): T
     reopen: () => reopenRef.current?.(),
     cwd,
     ended,
-    stopped: isStoppedNow,
   };
 }
 

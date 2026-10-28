@@ -42,24 +42,6 @@ fn has_a_terminal(session: &AgentSession) -> Result<(), IpcError> {
     Ok(())
 }
 
-/// The error code `open_terminal_session` answers for a session the
-/// person stopped: the pane shows Start Again instead of spawning.
-pub const STOPPED: &str = "STOPPED";
-
-/// A session the person stopped is not spawned again until they start it.
-fn not_stopped(session: &AgentSession) -> Result<(), IpcError> {
-    if session.stopped_by_user_at.is_some() {
-        return Err(IpcError {
-            code: STOPPED.into(),
-            message: format!("agent session {} was stopped", session.id),
-            cause: None,
-            field: None,
-            details: Vec::new(),
-        });
-    }
-    Ok(())
-}
-
 /// What every process oxplow starts for agent session `session` is told
 /// about itself: the hook endpoint, its session's bearer, and its stream,
 /// thread and session. The bearer alone tells the control plane who is
@@ -196,7 +178,6 @@ pub async fn open_terminal_session(
         .await?
         .ok_or_else(|| IpcError::invalid(format!("no agent session {session_id}")))?;
     has_a_terminal(&session)?;
-    not_stopped(&session)?;
     let thread = ctx
         .thread_store
         .get(&session.thread_id)
@@ -599,7 +580,6 @@ mod tests {
             updated_at: now,
             pid: None,
             last_seen_at: None,
-            stopped_by_user_at: None,
             native_title: String::new(),
             fork_next: false,
         };
@@ -617,33 +597,6 @@ mod tests {
         };
         let err = super::has_a_terminal(&closed).unwrap_err();
         assert!(err.message.contains("closed"), "msg: {}", err.message);
-    }
-
-    #[test]
-    fn a_session_the_person_stopped_is_not_spawned() {
-        use oxplow_domain::agent_session::{AgentSession, SessionKind};
-        let now = oxplow_domain::Timestamp::from_unix_ms(1);
-        let mut s = AgentSession {
-            id: oxplow_domain::AgentSessionId::new(3),
-            thread_id: oxplow_domain::ThreadId::new(1),
-            kind: SessionKind::Terminal,
-            harness: "claude".into(),
-            title: String::new(),
-            resume_session_id: String::new(),
-            host: None,
-            opened_at: now,
-            closed_at: None,
-            closed_reason: None,
-            updated_at: now,
-            pid: None,
-            last_seen_at: None,
-            stopped_by_user_at: None,
-            native_title: String::new(),
-            fork_next: false,
-        };
-        assert!(super::not_stopped(&s).is_ok());
-        s.stopped_by_user_at = Some(now);
-        assert_eq!(super::not_stopped(&s).unwrap_err().code, super::STOPPED);
     }
 
     /// A terminal's URI opens its shell in its stream's worktree, keyed by

@@ -1,5 +1,5 @@
 /// One terminal on screen: its surface, its session, and what the session
-/// says when it isn't running — stopped (Start), ended or failed to start
+/// says when it isn't running — ended or failed to start
 /// (Start Again / Retry), or unable to resume a saved conversation (Retry,
 /// Start Fresh). The agent's parts are `agent`'s; a shell has none.
 import { useRef, useState, type CSSProperties } from "react";
@@ -10,12 +10,8 @@ import { useShown } from "./useShown.js";
 import { useTerminalSession } from "./useTerminalSession.js";
 
 export interface AgentTerminal {
-  /** The person stopped it: nothing spawns until Start. */
-  stopped: boolean;
   /** What it is bound to: a change opens it again. */
   conversation: string | null;
-  /** Start it (`oxplow.agent_session.start`). */
-  onStart(): void;
   /** Begin a new conversation, the saved one dropped (confirmed here). */
   onStartFresh(): Promise<void>;
   /** Another saved conversation (where the harness lists them). */
@@ -39,7 +35,6 @@ export function TerminalView({ uri, agent, worktreePath, onOpenFile, isLinkableP
   const session = useTerminalSession(uri, {
     startOnActivate: !!agent,
     shown,
-    stopped: agent?.stopped,
     conversation: agent?.conversation ?? null,
   });
   const detach = useRef<(() => void) | null>(null);
@@ -62,16 +57,7 @@ export function TerminalView({ uri, agent, worktreePath, onOpenFile, isLinkableP
         onOpenFile={onOpenFile}
         isLinkablePath={isLinkablePath}
       />
-      {session.stopped ? (
-        <div data-testid="terminal-stopped" style={bannerStyle}>
-          <span>Stopped. The saved conversation is kept.</span>
-          {agent ? (
-            <button type="button" data-testid="terminal-start" onClick={agent.onStart}>
-              Start
-            </button>
-          ) : null}
-        </div>
-      ) : banner ? (
+      {banner ? (
         <div data-testid="terminal-ended" style={bannerStyle}>
           <span>{banner.text}</span>
           {banner.actions.map((action) =>

@@ -474,10 +474,9 @@ One agent slot a person opened on a thread (V32; `ses<n>`, ref
   harness's own session id: `claude --resume`), `host`
   (reserved; NULL is the local machine), `opened_at`, `closed_at`,
   `closed_reason` (`closed`, `thread_closed`, `stream_archived`),
-  `updated_at`, `pid` and `last_seen_at` (V49) and `stopped_by_user_at`
-  (V50: when the person deliberately stopped it — set by
-  `oxplow.agent_session.stop`, cleared by `start` / `start_fresh`; a
-  crash or restart leaves it NULL; while set, no terminal is spawned),
+  `updated_at`, `pid` and `last_seen_at` (V49; V122 dropped
+  `stopped_by_user_at`: a session ends by closing its tab and comes back
+  from Earlier sessions, with no stopped-but-kept state),
   `native_title` (V78: the name its harness gives the bound conversation —
   Claude's `/rename` or generated title, through a prompt hook's
   `session_title` — cleared when the slot moves to another, never

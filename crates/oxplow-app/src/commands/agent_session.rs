@@ -18,8 +18,7 @@ use std::sync::Arc;
 
 use oxplow_config::OxplowConfig;
 use oxplow_db::agent_session_store::{
-    bind_tx, get_tx, insert_tx, reopen_tx, set_fork_next_tx, set_stopped_tx, set_title_tx,
-    unbind_tx,
+    bind_tx, get_tx, insert_tx, reopen_tx, set_fork_next_tx, set_title_tx, unbind_tx,
 };
 use oxplow_domain::agent::registry::HarnessRegistry;
 use oxplow_domain::agent_session::BindingOrigin;
@@ -39,8 +38,6 @@ pub const OPEN: &str = "oxplow.agent_session.open";
 pub const RENAME: &str = "oxplow.agent_session.rename";
 pub const CLOSE: &str = "oxplow.agent_session.close";
 pub const REOPEN: &str = "oxplow.agent_session.reopen";
-pub const STOP: &str = "oxplow.agent_session.stop";
-pub const START: &str = "oxplow.agent_session.start";
 pub const START_FRESH: &str = "oxplow.agent_session.start_fresh";
 pub const RESUME_CONVERSATION: &str = "oxplow.agent_session.resume_conversation";
 pub const FORK_CONVERSATION: &str = "oxplow.agent_session.fork_conversation";
@@ -427,76 +424,9 @@ pub fn reopen_op() -> Op {
     )
 }
 
-/// `agent_session.stop { session }`: the person stopped the agent. The
-/// slot stays open and keeps its conversation, `stopped_by_user_at` is
-/// set — so the process is not spawned again until a person starts it —
-/// and the process stops after commit. Undone by `start`. A person's only:
-/// a crash or restart is not a stop and leaves the column alone.
-pub fn stop_op(processes: crate::agent_sessions::SessionProcesses) -> Op {
-    Op::new(
-        "agent_sessions.write",
-        "stop",
-        schema::<SessionInput>(),
-        true,
-        Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
-            let input: SessionInput = parse(input)?;
-            let session = load(ctx, &input.session)?;
-            in_own_stream(ctx, session.thread_id)?;
-            if !session.is_open() {
-                return Err(invalid("/session", "the session is closed"));
-            }
-            let now = Timestamp::now();
-            set_stopped_tx(ctx.conn, session.id, Some(now), now)?;
-            let after = get_tx(ctx.conn, session.id)?
-                .ok_or_else(|| invalid("/session", "the session vanished"))?;
-            let processes = processes.clone();
-            let id = session.id;
-            Ok(HandlerOutput {
-                inverse: (session.stopped_by_user_at.is_none())
-                    .then(|| call(START, json!({ "session": input.session })))
-                    .flatten(),
-                after_commit: Some(Box::new(move || processes.kill(id))),
-                ..result(&after)
-            })
-        })),
-    )
-}
-
-/// `agent_session.start { session }`: a person starts a stopped agent
-/// again. It clears the mark only — the UI spawns the process, as it does
-/// for any session (`open_terminal_session`), resuming the saved
-/// conversation. Undone by `stop`.
-pub fn start_op() -> Op {
-    Op::new(
-        "agent_sessions.write",
-        "start",
-        schema::<SessionInput>(),
-        true,
-        Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
-            let input: SessionInput = parse(input)?;
-            let session = load(ctx, &input.session)?;
-            in_own_stream(ctx, session.thread_id)?;
-            if !session.is_open() {
-                return Err(invalid("/session", "the session is closed"));
-            }
-            set_stopped_tx(ctx.conn, session.id, None, Timestamp::now())?;
-            let after = get_tx(ctx.conn, session.id)?
-                .ok_or_else(|| invalid("/session", "the session vanished"))?;
-            Ok(HandlerOutput {
-                inverse: session
-                    .stopped_by_user_at
-                    .is_some()
-                    .then(|| call(STOP, json!({ "session": input.session })))
-                    .flatten(),
-                ..result(&after)
-            })
-        })),
-    )
-}
-
 /// `agent_session.start_fresh { session }`: the one way a session gets a
-/// new conversation. It forgets the saved harness conversation and clears
-/// the stop mark; the UI then spawns the process. Destructive (the link
+/// new conversation. It forgets the saved harness conversation; the UI
+/// then spawns the process. Destructive (the link
 /// to the saved conversation is dropped) so it confirms, and not undoable.
 /// A person's only.
 pub fn start_fresh_op() -> Op {
@@ -514,7 +444,6 @@ pub fn start_fresh_op() -> Op {
             }
             let now = Timestamp::now();
             unbind_tx(ctx.conn, session.id, None, now)?;
-            set_stopped_tx(ctx.conn, session.id, None, now)?;
             let after = get_tx(ctx.conn, session.id)?
                 .ok_or_else(|| invalid("/session", "the session vanished"))?;
             Ok(result(&after))
@@ -588,7 +517,6 @@ pub fn resume_conversation_op(processes: crate::agent_sessions::SessionProcesses
                 BindingOrigin::Chosen,
                 now,
             )?;
-            set_stopped_tx(ctx.conn, session.id, None, now)?;
             let after = get_tx(ctx.conn, session.id)?
                 .ok_or_else(|| invalid("/session", "the session vanished"))?;
             let previous = session.resume_session_id.clone();
@@ -647,7 +575,6 @@ pub fn fork_conversation_op(processes: crate::agent_sessions::SessionProcesses) 
                 _ => {}
             }
             set_fork_next_tx(ctx.conn, session.id, true, now)?;
-            set_stopped_tx(ctx.conn, session.id, None, now)?;
             let after = get_tx(ctx.conn, session.id)?
                 .ok_or_else(|| invalid("/session", "the session vanished"))?;
             let processes = processes.clone();
@@ -673,8 +600,6 @@ pub fn ops(
         rename_op(chat, capabilities),
         close_op(processes.clone()),
         reopen_op(),
-        stop_op(processes.clone()),
-        start_op(),
         start_fresh_op(),
         resume_conversation_op(processes.clone()),
         fork_conversation_op(processes),
@@ -796,43 +721,8 @@ mod tests {
         );
     }
 
-    /// A person's stop marks the session and keeps the slot; start clears
-    /// it; start_fresh also forgets the saved conversation. An agent may
-    /// do all of them.
     #[tokio::test]
-    async fn stopping_marks_the_session_and_starting_clears_it() {
-        let fx = services_with_effort().await;
-        let me = serde_json::json!({ "session": fx.session.to_string() });
-        let stopped = run(&fx, &Actor::Human, STOP, me.clone(), false)
-            .await
-            .unwrap();
-        let s = get(&fx, fx.session).await;
-        assert!(s.is_open() && s.stopped_by_user_at.is_some());
-        // Undo of the stop is a start.
-        fx.svc
-            .commands
-            .undo(&Actor::Human, stopped.audit_id.unwrap(), true)
-            .await
-            .unwrap();
-        assert!(get(&fx, fx.session).await.stopped_by_user_at.is_none());
-
-        run(&fx, &Actor::Human, STOP, me.clone(), false)
-            .await
-            .unwrap();
-        run(&fx, &Actor::Human, START, me.clone(), false)
-            .await
-            .unwrap();
-        assert!(get(&fx, fx.session).await.stopped_by_user_at.is_none());
-
-        for name in [STOP, START, START_FRESH] {
-            run(&fx, &agent(&fx), name, me.clone(), true)
-                .await
-                .unwrap_or_else(|e| panic!("{name}: {e:?}"));
-        }
-    }
-
-    #[tokio::test]
-    async fn starting_fresh_forgets_the_conversation_and_the_stop() {
+    async fn starting_fresh_forgets_the_conversation() {
         let fx = services_with_effort().await;
         let me = serde_json::json!({ "session": fx.session.to_string() });
         let session = fx.session;
@@ -846,7 +736,6 @@ mod tests {
                     oxplow_domain::agent_session::BindingOrigin::Started,
                     Timestamp::now(),
                 )?;
-                set_stopped_tx(tx, session, Some(Timestamp::now()), Timestamp::now())?;
                 Ok(())
             })
             .await
@@ -856,11 +745,10 @@ mod tests {
             .unwrap();
         let s = get(&fx, fx.session).await;
         assert_eq!(s.resume_session_id, "");
-        assert!(s.stopped_by_user_at.is_none());
     }
 
     /// A person moves a session to a saved conversation of their choosing:
-    /// it is bound `chosen`, its stop clears, and undoing goes back to the
+    /// it is bound `chosen`, and undoing goes back to the
     /// one it was on. One open in another session is refused, naming it.
     /// An agent may do neither this nor a fork.
     #[tokio::test]

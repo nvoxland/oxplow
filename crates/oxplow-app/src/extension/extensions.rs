@@ -6145,7 +6145,14 @@ commands:
     fn a_terminal_node_names_its_rows() {
         let (_d, ext) = load_x(
             &[
-                ("t", &viz_page("", "SELECT 'oxplow:oxplow/terminal?id=trm1' AS u, 'One' AS t, 0 AS s, NULL AS c", "viz: terminal\nterminal: { of: u, title: t, stopped: s, conversation: c }\n")),
+                (
+                    "t",
+                    &viz_page(
+                        "",
+                        "SELECT 'oxplow:oxplow/terminal?id=trm1' AS u, 'One' AS t, NULL AS c",
+                        "viz: terminal\nterminal: { of: u, title: t, conversation: c }\n",
+                    ),
+                ),
                 ("noterminal", &viz_page("", "SELECT 1", "viz: terminal\n")),
             ],
             "",
@@ -6156,7 +6163,6 @@ commands:
             Some(VizTerminal {
                 of: Some("u".into()),
                 title: Some("t".into()),
-                stopped: Some("s".into()),
                 conversation: Some("c".into()),
                 thread: None,
             })

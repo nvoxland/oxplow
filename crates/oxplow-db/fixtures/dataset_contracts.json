@@ -16142,6 +16142,101 @@
         }
       ],
       "key": []
+    },
+    "10": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Session id (its URI is `oxplow:oxplow/agent_session?id=ses<id>`)."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "The thread it's on (v_thread.id)."
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "doc": "`terminal` (a harness in a PTY) or `action` (a one-shot session). (v7: `chat` is gone.)"
+        },
+        {
+          "name": "harness",
+          "type": "TEXT",
+          "doc": "What runs in it: `claude`, `codex`, `opencode`, or a harness an extension declares."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "What the person called it; empty until renamed."
+        },
+        {
+          "name": "resume_session_id",
+          "type": "TEXT",
+          "doc": "The harness's own session id, to resume it; empty when unknown."
+        },
+        {
+          "name": "host",
+          "type": "TEXT",
+          "doc": "The host it runs on; NULL is the local machine."
+        },
+        {
+          "name": "opened_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "closed_at",
+          "type": "TEXT",
+          "doc": "When its slot was closed; NULL while open."
+        },
+        {
+          "name": "closed_reason",
+          "type": "TEXT",
+          "doc": "`closed` (closed itself), `thread_closed` or `stream_archived`; NULL while open."
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "pid",
+          "type": "INTEGER",
+          "doc": "OS pid of the process the daemon spawned for it, rewritten on every spawn; NULL for a session with no process of its own (a chat) or not yet spawned. May be dead or reused: read it with last_seen_at. (v2)"
+        },
+        {
+          "name": "last_seen_at",
+          "type": "TEXT",
+          "doc": "The newest hook seen from it, to the 30 s (RFC 3339); NULL before the first. A live agent has a recent one and a pid that exists. (v2)"
+        },
+        {
+          "name": "uri",
+          "type": "TEXT",
+          "doc": "`oxplow:oxplow/agent_session?id=ses<id>`: its URI, the one place SQL spells it — select and join on this, never rebuild it. (v4)"
+        },
+        {
+          "name": "native_title",
+          "type": "TEXT",
+          "doc": "The name its harness gives the conversation it is bound to (Claude's `/rename`, a generated title); empty when it gave none, and cleared when the slot moves to another conversation. (v6)"
+        },
+        {
+          "name": "fork_next",
+          "type": "INTEGER",
+          "doc": "1 when its next launch forks the conversation it is bound to instead of resuming it. (v6)"
+        },
+        {
+          "name": "display_name",
+          "type": "TEXT",
+          "doc": "What a person calls it: its `title`, else its `native_title`, else the harness and the day it was opened. The one place a session is named. (v5; v6: the native title)"
+        },
+        {
+          "name": "bound_origin",
+          "type": "TEXT",
+          "doc": "How it came to its current conversation (v_agent_session_binding.origin); NULL when it is bound to none. (v6)"
+        }
+      ],
+      "key": []
     }
   },
   "agent_session_status": {

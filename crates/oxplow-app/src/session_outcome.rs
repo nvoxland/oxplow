@@ -28,8 +28,6 @@ pub struct LaunchInfo {
 pub struct ExitFacts {
     /// The session recorded a turn at or after the launch.
     pub turn_since_launch: bool,
-    /// The person stopped it.
-    pub stopped_by_user: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -44,8 +42,7 @@ pub enum UnableReason {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ExitOutcome {
-    /// An ordinary end: the agent quit, crashed after a turn, or was
-    /// stopped.
+    /// An ordinary end: the agent quit, or crashed after a turn.
     Ended,
     /// The resume of a saved conversation failed before a turn ran.
     UnableToResume {
@@ -60,7 +57,7 @@ pub fn classify_exit(launch: LaunchInfo, exit_code: Option<i32>, facts: ExitFact
     let Some(code) = exit_code.filter(|c| *c != 0) else {
         return ExitOutcome::Ended;
     };
-    if !launch.resumed || facts.stopped_by_user || facts.turn_since_launch {
+    if !launch.resumed || facts.turn_since_launch {
         return ExitOutcome::Ended;
     }
     ExitOutcome::UnableToResume {
@@ -97,8 +94,6 @@ pub fn exit_facts(
 ) -> Result<ExitFacts, DomainError> {
     Ok(ExitFacts {
         turn_since_launch: turn_since(conn, session, launched_at)?,
-        stopped_by_user: oxplow_db::agent_session_store::get_tx(conn, session)?
-            .is_some_and(|s| s.stopped_by_user_at.is_some()),
     })
 }
 
@@ -111,17 +106,16 @@ mod tests {
         transcript_missing: false,
     };
 
-    fn facts(turn: bool, stopped: bool) -> ExitFacts {
+    fn facts(turn: bool) -> ExitFacts {
         ExitFacts {
             turn_since_launch: turn,
-            stopped_by_user: stopped,
         }
     }
 
     #[test]
     fn a_resume_that_fails_before_a_turn_is_unable_to_resume() {
         assert_eq!(
-            classify_exit(RESUMED, Some(1), facts(false, false)),
+            classify_exit(RESUMED, Some(1), facts(false)),
             ExitOutcome::UnableToResume {
                 reason: UnableReason::ExitedEarly,
                 exit_code: 1
@@ -132,7 +126,7 @@ mod tests {
             ..RESUMED
         };
         assert_eq!(
-            classify_exit(missing, Some(1), facts(false, false)),
+            classify_exit(missing, Some(1), facts(false)),
             ExitOutcome::UnableToResume {
                 reason: UnableReason::TranscriptMissing,
                 exit_code: 1
@@ -144,26 +138,21 @@ mod tests {
     fn every_other_end_is_an_ordinary_end() {
         // A nonzero exit after a turn ran.
         assert_eq!(
-            classify_exit(RESUMED, Some(1), facts(true, false)),
+            classify_exit(RESUMED, Some(1), facts(true)),
             ExitOutcome::Ended
         );
         // A clean exit, or one with no code (a signal).
         assert_eq!(
-            classify_exit(RESUMED, Some(0), facts(false, false)),
+            classify_exit(RESUMED, Some(0), facts(false)),
             ExitOutcome::Ended
         );
         assert_eq!(
-            classify_exit(RESUMED, None, facts(false, false)),
-            ExitOutcome::Ended
-        );
-        // The person stopped it.
-        assert_eq!(
-            classify_exit(RESUMED, Some(129), facts(false, true)),
+            classify_exit(RESUMED, None, facts(false)),
             ExitOutcome::Ended
         );
         // It never resumed anything.
         assert_eq!(
-            classify_exit(LaunchInfo::default(), Some(1), facts(false, false)),
+            classify_exit(LaunchInfo::default(), Some(1), facts(false)),
             ExitOutcome::Ended
         );
     }

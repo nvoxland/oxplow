@@ -643,11 +643,6 @@ commands:
     scope: agent_sessions.write
     op: rename
     example: {"session": "ses3", "title": "Review pass"}
-  - name: agent_session.start
-    summary: "Start a stopped agent session again (`ses3`): clears the person's stop so its tab spawns the agent, resuming its saved conversation."
-    scope: agent_sessions.write
-    op: start
-    example: {"session": "ses3"}
   - name: agent_session.fork_conversation
     summary: "Fork a saved conversation into an agent session (`ses3`): its next launch continues a copy of the conversation it is on, or of `conversation`, and keeps the original saved. Its running process stops."
     scope: agent_sessions.write
@@ -659,15 +654,10 @@ commands:
     op: resume_conversation
     example: {"session": "ses3", "conversation": "7c1f0a52-3b1e-4d57-9a0e-5d2f6c8b9e11"}
   - name: agent_session.start_fresh
-    summary: "Give an agent session a new conversation (`ses3`): forgets its saved conversation and clears its stop. The only way a session gets a new conversation; resuming never does."
+    summary: "Give an agent session a new conversation (`ses3`): forgets its saved conversation. The only way a session gets a new conversation; resuming never does."
     scope: agent_sessions.write
     op: start_fresh
     confirm: destructive
-    example: {"session": "ses3"}
-  - name: agent_session.stop
-    summary: "Stop an agent session's process (`ses3`) and keep its slot and saved conversation. It stays stopped across tab changes, reconnects and reloads until a person starts it."
-    scope: agent_sessions.write
-    op: stop
     example: {"session": "ses3"}
   # agent_text.read
   - name: skill.read

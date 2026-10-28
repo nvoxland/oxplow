@@ -6,13 +6,13 @@
 /// closes (its `close` action, which asks first). `+` opens another
 /// (`oxplow.terminal.open`); a stream with none opens one the first time
 /// the page shows. A row whose URI is an agent session's is that agent:
-/// `stopped` and `conversation` (what it is bound to) come from the row,
-/// Start and Start Fresh are its commands, Escape logs its interrupt in
+/// `conversation` (what it is bound to) comes from the row, Start
+/// Fresh is its command, Escape logs its interrupt in
 /// the row's `thread`, and only real workspace files link.
 import { useEffect, useRef, useState } from "react";
 
 import { useVizActionRunner } from "./vizActionRunner.js";
-import { recordUserInterrupt, runCommand, startAgentSession, startAgentSessionFresh, type VizRun, type SqlCell } from "../api.js";
+import { recordUserInterrupt, runCommand, startAgentSessionFresh, type VizRun, type SqlCell } from "../api.js";
 import { CommandConfirm } from "../components/CommandConfirm.js";
 import { recordOpError } from "../opErrors.js";
 import { TerminalTabStrip } from "../terminal/TerminalTabStrip.js";
@@ -39,7 +39,6 @@ export function TerminalViz({ run, onSetParam }: { run: VizRun; onSetParam?(name
     .map((row) => ({ row, uri: String(at(row, t?.of) ?? ""), title: String(at(row, t?.title) ?? "") }))
     .filter((r) => r.uri);
   const isLinkablePath = useWorkspaceLinkIndex(list.some((r) => typeOf(r.uri) === "oxplow/agent_session") ? (stream?.id ?? undefined) : undefined);
-  const truthy = (v: SqlCell) => v !== null && v !== 0 && v !== "" && v !== false && v !== "0";
   const agentOf = (r: { row: SqlCell[]; uri: string }): AgentTerminal | undefined => {
     const session = idOf(r.uri, "oxplow/agent_session");
     if (session === null) return undefined;
@@ -47,9 +46,7 @@ export function TerminalViz({ run, onSetParam }: { run: VizRun; onSetParam?(name
     const thread = at(r.row, t?.thread);
     const threadId = typeof thread === "string" ? (idOf(thread, "oxplow/thread") ?? thread) : null;
     return {
-      stopped: truthy(at(r.row, t?.stopped)),
       conversation: conversation === null ? null : String(conversation),
-      onStart: () => void startAgentSession(session).catch(fail("Start Agent")),
       onStartFresh: () => startAgentSessionFresh(session, true),
       onInterrupt: () => {
         if (threadId) void recordUserInterrupt(session, threadId, stream?.id ?? null);

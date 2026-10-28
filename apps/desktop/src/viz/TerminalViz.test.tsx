@@ -22,16 +22,10 @@ mock.module("../api.js", () => ({
     commands.push([name, input]);
     return { result: { id: "trm9", uri: "oxplow:oxplow/terminal?id=trm9", title: "Terminal 9" }, audit_id: 1, event_id: null, inverse: null };
   },
-  startAgentSession: async (id: string) => void commands.push(["start", id]),
 }));
 mock.module("../terminal/TerminalView.js", () => ({
-  TerminalView: ({ uri, agent }: { uri: string; agent?: { stopped: boolean; conversation: string | null; onStart(): void } }) => (
-    <div data-testid={`view-${uri}`} data-stopped={agent ? String(agent.stopped) : "shell"} data-conversation={agent?.conversation ?? ""}>
-      {agent ? (
-        <button type="button" data-testid="start" onClick={agent.onStart}>
-          Start
-        </button>
-      ) : null}
+  TerminalView: ({ uri, agent }: { uri: string; agent?: { conversation: string | null } }) => (
+    <div data-testid={`view-${uri}`} data-agent={agent ? "yes" : "shell"} data-conversation={agent?.conversation ?? ""}>
       {uri}
     </div>
   ),
@@ -61,7 +55,7 @@ function runOf(rows: SqlCell[][], picked: SqlCell = null): VizRun {
     config: {
       id: "oxplow-foundation/terminal",
       viz: "terminal",
-      terminal: { of: "uri", title: "title", stopped: null, conversation: null },
+      terminal: { of: "uri", title: "title", conversation: null },
       columns: [{ key: "title", select: "terminal" }],
       params: [],
       actions: [
@@ -125,26 +119,24 @@ test("the strip's Close runs the viz's close action on that row", async () => {
   expect(actions[0]?.[1]).toEqual({ uri: B, title: "Two", terminal: "trm2" });
 });
 
-test("an agent session's row is its agent: stopped and what it's bound to come from the row, Start runs its command", async () => {
+test("an agent session's row is its agent: what it's bound to comes from the row", async () => {
   const S = "oxplow:oxplow/agent_session?id=ses4";
   const run = {
     config: {
       id: "oxplow-foundation/agent-session-terminal",
       viz: "terminal",
-      terminal: { of: "uri", title: null, stopped: "stopped", conversation: "conversation", thread: "thread" },
+      terminal: { of: "uri", title: null, conversation: "conversation", thread: "thread" },
       columns: [],
       params: [],
       actions: [],
     },
     params: { uri: S },
-    result: { columns: ["uri", "thread", "stopped", "conversation"], rows: [[S, "oxplow:oxplow/thread?id=thr1", 1, "abc:0"]], truncated: false, reads: { datasets: [], tables: [], measures: [] } },
+    result: { columns: ["uri", "thread", "conversation"], rows: [[S, "oxplow:oxplow/thread?id=thr1", "abc:0"]], truncated: false, reads: { datasets: [], tables: [], measures: [] } },
   } as unknown as VizRun;
   const v = view(run);
   const pane = v.getByTestId(`view-${S}`);
-  expect(pane.dataset.stopped).toBe("true");
+  expect(pane.dataset.agent).toBe("yes");
   expect(pane.dataset.conversation).toBe("abc:0");
-  fireEvent.click(v.getByTestId("start"));
-  await waitFor(() => expect(commands).toContainEqual(["start", "ses4"]));
   // A viz of an agent's terminal never opens a shell.
   expect(commands.some(([name]) => name === "oxplow.terminal.open")).toBe(false);
 });

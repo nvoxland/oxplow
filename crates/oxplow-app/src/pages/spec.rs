@@ -81,8 +81,7 @@ pub enum Viz {
     /// A terminal per row (`terminal.of`: an `oxplow/terminal` shell's URI
     /// or an `oxplow/agent_session`'s), kept running while hidden, at full
     /// size; `terminal.title` names it in the strip that picks among
-    /// several; an agent row's `stopped` and `conversation` say whether
-    /// the person stopped it and what it is bound to.
+    /// several; an agent row's `conversation` says what it is bound to.
     Terminal,
     /// A web page (`embed.url`, the first row's), opened in oxplow's
     /// sandboxed window: the page is a status panel with Open again, Open in
@@ -549,9 +548,6 @@ pub struct VizTerminal {
     pub of: Option<String>,
     #[serde(default)]
     pub title: Option<String>,
-    /// Truthy: the person stopped the agent.
-    #[serde(default)]
-    pub stopped: Option<String>,
     /// What the agent is bound to; a change opens it again.
     #[serde(default)]
     pub conversation: Option<String>,
@@ -1781,7 +1777,7 @@ impl VizConfig {
         }
         if let Some(t) = &self.terminal {
             out.extend(
-                [&t.of, &t.title, &t.stopped, &t.conversation, &t.thread]
+                [&t.of, &t.title, &t.conversation, &t.thread]
                     .into_iter()
                     .flatten()
                     .map(|k| ("terminal", k)),

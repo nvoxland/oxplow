@@ -1227,7 +1227,7 @@
     - { not_null: id }
     - { unique: id }
 - name: agent_session
-  version: 9
+  version: 10
   description: "Agent sessions: the agent slots a person opened on a thread — a terminal agent, or a one-shot action. The row is the slot, not the process: a harness process ending leaves it open; closing the session, its thread or its stream's archive closes it."
   fields:
     - { name: "id", type: "INTEGER", doc: "Session id (its URI is `oxplow:oxplow/agent_session?id=ses<id>`)." }
@@ -1243,7 +1243,6 @@
     - { name: "updated_at", type: "TEXT", doc: "RFC 3339 timestamp." }
     - { name: "pid", type: "INTEGER", doc: "OS pid of the process the daemon spawned for it, rewritten on every spawn; NULL for a session with no process of its own (a chat) or not yet spawned. May be dead or reused: read it with last_seen_at. (v2)" }
     - { name: "last_seen_at", type: "TEXT", doc: "The newest hook seen from it, to the 30 s (RFC 3339); NULL before the first. A live agent has a recent one and a pid that exists. (v2)" }
-    - { name: "stopped_by_user_at", type: "TEXT", doc: "When the person deliberately stopped it; NULL once started again, and after a crash or backend restart (which resume when the tab is shown). A stopped session is not spawned until a person starts it. (v3)" }
     - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/agent_session?id=ses<id>`: its URI, the one place SQL spells it — select and join on this, never rebuild it. (v4)" }
     - { name: "native_title", type: "TEXT", doc: "The name its harness gives the conversation it is bound to (Claude's `/rename`, a generated title); empty when it gave none, and cleared when the slot moves to another conversation. (v6)" }
     - { name: "fork_next", type: "INTEGER", doc: "1 when its next launch forks the conversation it is bound to instead of resuming it. (v6)" }

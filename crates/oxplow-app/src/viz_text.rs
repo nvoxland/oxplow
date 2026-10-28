@@ -1487,7 +1487,6 @@ mod tests {
                 l.terminal = Some(crate::pages::spec::VizTerminal {
                     of: Some("uri".into()),
                     title: Some("title".into()),
-                    stopped: None,
                     conversation: None,
                     thread: None,
                 })

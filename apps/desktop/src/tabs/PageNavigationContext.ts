@@ -189,7 +189,7 @@ export function useTabEditing({ dirty, save, find }: TabEditing): void {
 
 /**
  * Put the page's actions on its tab's right-click menu: one source for the
- * nav bar and the tab (an agent session's Rename…, Stop Agent). The latest
+ * nav bar and the tab (an agent session's Rename…, Fork Conversation…). The latest
  * actions are the ones run. A no-op outside a tab.
  */
 export function useTabActions(actions: readonly PageAction[]): void {

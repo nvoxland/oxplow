@@ -808,11 +808,6 @@ export async function openAgentSession(
   ).result as AgentSessionRecord;
 }
 
-/** The person starts a stopped agent again (its tab then spawns it). */
-export async function startAgentSession(sessionId: string): Promise<void> {
-  await runCommand("oxplow.agent_session.start", { session: sessionId });
-}
-
 /** The person gives an agent a new conversation, dropping the saved one.
  *  Destructive: the caller confirms first. */
 export async function startAgentSessionFresh(sessionId: string, confirmed: boolean): Promise<void> {

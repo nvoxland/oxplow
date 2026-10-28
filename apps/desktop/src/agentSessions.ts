@@ -31,13 +31,10 @@ export interface AgentSessionRow {
    *  the alias, else the native name, else the harness and the day. */
   displayName: string;
   openedAt: string;
-  /** The person stopped it, and hasn't started it again: its tab spawns
-   *  nothing until they do. */
-  stoppedByUser: boolean;
 }
 
 const COLUMNS =
-  "s.uri, (SELECT t.uri FROM v_thread t WHERE t.id = s.thread_id) AS thread_uri, s.kind, s.harness, s.title, s.native_title, s.display_name, s.opened_at, s.stopped_by_user_at";
+  "s.uri, (SELECT t.uri FROM v_thread t WHERE t.id = s.thread_id) AS thread_uri, s.kind, s.harness, s.title, s.native_title, s.display_name, s.opened_at";
 
 export function agentSessionsFromResult(result: SqlQueryResult): AgentSessionRow[] {
   const at = (row: SqlCell[], name: string) => row[result.columns.indexOf(name)] ?? null;
@@ -50,7 +47,6 @@ export function agentSessionsFromResult(result: SqlQueryResult): AgentSessionRow
     nativeTitle: String(at(row, "native_title") ?? ""),
     displayName: String(at(row, "display_name") ?? ""),
     openedAt: String(at(row, "opened_at")),
-    stoppedByUser: at(row, "stopped_by_user_at") != null,
   }));
 }
 

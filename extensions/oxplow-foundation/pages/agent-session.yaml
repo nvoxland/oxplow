@@ -1,5 +1,5 @@
 title: Agent Session
-description: An agent's session — its terminal, and what it asked for that waits on you. Rename it, move it to another of its saved conversations or fork one, or stop and start it.
+description: An agent's session — its terminal, and what it asked for that waits on you. Rename it, move it to another of its saved conversations or fork one.
 label: '{{row.display_name}}'
 for: oxplow/agent_session
 default: true
@@ -10,8 +10,6 @@ data:
   row:
     sql: |
       SELECT s.uri, 'ses' || s.id AS session, s.display_name, s.title, th.uri AS thread,
-             s.stopped_by_user_at IS NOT NULL AS stopped,
-             s.stopped_by_user_at IS NULL AS running,
              coalesce(s.resume_session_id, '') || ':' || coalesce(s.fork_next, 0) AS conversation,
              coalesce(json_extract(p.features, '$.conversation_list'), 0) = 1 AS can_choose,
              coalesce(json_extract(p.features, '$.conversation_fork'), 0) = 1 AS can_fork
@@ -31,12 +29,10 @@ data:
         from: row.thread
   agent_session_terminal:
     sql: |
-      SELECT :uri AS uri, :thread AS thread, :stopped AS stopped, :conversation AS conversation
+      SELECT :uri AS uri, :thread AS thread, :conversation AS conversation
     params:
       thread:
         from: row.thread
-      stopped:
-        from: row.stopped
       conversation:
         from: row.conversation
 view:
@@ -51,7 +47,6 @@ view:
     viz: terminal
     terminal:
       of: uri
-      stopped: stopped
       conversation: conversation
       thread: thread
 actions:
@@ -86,19 +81,3 @@ actions:
   choices:
     conversation: oxplow-foundation/agent-session-conversations
   when: can_fork
-- id: stop
-  label: Stop Agent
-  command: oxplow.agent_session.stop
-  input:
-    session: '{{row.session}}'
-  when: running
-  prominent: true
-  icon: circle-stop
-- id: start
-  label: Start Agent
-  command: oxplow.agent_session.start
-  input:
-    session: '{{row.session}}'
-  when: stopped
-  prominent: true
-  icon: play

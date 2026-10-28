@@ -59,7 +59,7 @@ test("a body's actions reach its tab, the latest one runs, and they clear when i
   const nav = { ...host([]), setTabActions: (a: readonly { id: string; run(): void }[] | null) => registered.push(a) } as PageNavigation;
   const ran: string[] = [];
   function Actions({ tag }: { tag: string }) {
-    useTabActions([{ id: "stop", label: "Stop Agent", run: () => ran.push(tag) }]);
+    useTabActions([{ id: "rename", label: "Rename…", run: () => ran.push(tag) }]);
     return null;
   }
   const { rerender, unmount } = render(

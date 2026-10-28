@@ -5929,8 +5929,7 @@ export type Viz =
  *  A terminal per row (`terminal.of`: an `oxplow/terminal` shell's URI
  *  or an `oxplow/agent_session`'s), kept running while hidden, at full
  *  size; `terminal.title` names it in the strip that picks among
- *  several; an agent row's `stopped` and `conversation` say whether
- *  the person stopped it and what it is bound to.
+ *  several; an agent row's `conversation` says what it is bound to.
  */
 "terminal" |
 /**
@@ -6208,8 +6207,6 @@ export type VizTerminal = {
 	/**  Its URI: an `oxplow/terminal` or `oxplow/agent_session`. */
 	of: string | null,
 	title?: string | null,
-	/**  Truthy: the person stopped the agent. */
-	stopped?: string | null,
 	/**  What the agent is bound to; a change opens it again. */
 	conversation?: string | null,
 	/**  The agent's thread (its URI): where its Escape interrupt is logged. */

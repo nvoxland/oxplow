@@ -1,6 +1,5 @@
 SELECT s.id, s.thread_id, s.kind, s.harness, s.title, s.resume_session_id, s.host,
        s.opened_at, s.closed_at, s.closed_reason, s.updated_at, s.pid, s.last_seen_at,
-       s.stopped_by_user_at,
        CAST(uri('oxplow/agent_session', 'id', 'ses' || s.id) AS TEXT) AS uri,
        s.native_title, s.fork_next,
        -- What a person calls it: their title, else the one its harness

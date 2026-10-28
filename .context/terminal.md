@@ -63,17 +63,17 @@ three pieces:
   Unmounting detaches; the process keeps running.
 - **`TerminalView.tsx`** — the two together, its visibility measured
   (`useShown`: a hidden tab is `display: none`, so its box has no size),
-  and what the session says when it isn't running: stopped (Start), ended
+  and what the session says when it isn't running: ended
   or failed to start (Start Again / Retry), unable to resume (Retry,
-  Start Fresh). An agent's parts (`agent`: stopped, its conversation,
-  Start, Start Fresh, the Escape interrupt) are given only for an agent
+  Start Fresh). An agent's parts (`agent`: its conversation,
+  Start Fresh, the Escape interrupt) are given only for an agent
   session; a shell has none, and Escape is an ordinary keystroke there.
 
 Two pages draw it:
 
 - **The Terminal page** is oxplow-foundation's `terminal` page over the
   kit's **`terminal` viz** (`viz/TerminalViz.tsx`, `terminal: { of,
-  title?, stopped?, conversation? }`): one `TerminalView` per row, all
+  title?, conversation?, thread? }`): one `TerminalView` per row, all
   mounted and kept warm (`display: none`), the picked one shown. With
   several, the strip picks — the page's selection (`select` on its
   `title` column), so Back un-picks — and its row menu renames (the page's
@@ -85,11 +85,11 @@ Two pages draw it:
   terminals' names, never their output.
 - **An agent session's page** is oxplow-foundation's `agent-session`
   document: its `agent-session-terminal` section is a `terminal` viz of one
-  row — the session's URI, `stopped`, `conversation` and `thread` — so the
-  viz gives its `TerminalView` the `agent` parts (Start, Start Fresh, the
+  row — the session's URI, `conversation` and `thread` — so the
+  viz gives its `TerminalView` the `agent` parts (Start Fresh, the
   Escape interrupt in the row's thread); its `agent-session-waiting`
   section above is the thread's `approvals`. Its actions (Rename…, Switch /
-  Fork Conversation…, Stop / Start Agent) are the nav bar's and the tab's
+  Fork Conversation…) are the nav bar's and the tab's
   right-click menu.
 
 The backend (`commands/terminal.rs`, `open_terminal_session { uri, cols,
@@ -131,17 +131,14 @@ restart kept the old window's size and drew its input and status lines
 past the pane's bottom, on top of each other, until the window was
 resized. Locked by `reattaching_resizes_the_live_session_to_the_new_pane`.
 
-**Stopped stays stopped.** `oxplow.agent_session.stop` (a person's only)
-sets `agent_session.stopped_by_user_at` and stops the process; the slot
-and its saved conversation stay. While it is set `open_terminal_session`
-refuses to spawn and answers the `STOPPED` code, the pane (given
-`stopped` from the session row, or finding out from that code) shows
-"Stopped" with **Start**, and `agent_session.start` clears it — the row
-change then opens the session, resuming the conversation. A crash or
-backend restart never sets it, so those resume when the tab is shown.
-Only the person stopping sets it: we do not infer a stop from an exit,
-because no harness tells us the person typed `/exit`. The agent-tab
-context menu has **Stop Agent** / **Start Agent**.
+**A session ends when its tab is closed.** There is no stop that keeps the
+slot: closing the tab (`oxplow.agent_session.close`) closes the session and
+stops its process, and **Earlier sessions** brings it back
+(`agent_session.reopen`, resuming its saved conversation). A crash or
+backend restart leaves the slot open, so the tab resumes when it is shown.
+A process that ended on its own shows the ended banner (Start Again /
+Retry). The process kill that `resume_conversation` and
+`fork_conversation` do is a move to another conversation, not a stop.
 
 **Resume outcomes.** A launch that resumes a saved conversation never
 falls back to a fresh one (`Resume::Saved` is `exec <agent> <resume args>`,

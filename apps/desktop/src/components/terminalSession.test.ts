@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { exitBanner, failedLaunch, isStopped, mayStartNow, readSessionMessage, reopened } from "./terminalSession.js";
+import { exitBanner, failedLaunch, mayStartNow, readSessionMessage, reopened } from "./terminalSession.js";
 
 // tsk1026: after the daemon restarted, the agent pane kept the dead session's
 // screen and swallowed keystrokes; an agent that exited said nothing.
@@ -40,17 +40,7 @@ test("a pane that starts on activation waits for its tab to be shown", () => {
 test("any other pane opens at once", () => {
   expect(mayStartNow(false, false)).toBe(true);
 });
-
-test("a session the person stopped is never started by showing it", () => {
-  expect(mayStartNow(true, true, true)).toBe(false);
-  expect(mayStartNow(false, true, true)).toBe(false);
-});
-
-test("a STOPPED open failure is read as a stop", () => {
-  expect(isStopped({ code: "STOPPED", message: "x" })).toBe(true);
-  expect(isStopped(new Error("terminal session not found"))).toBe(false);
-  expect(isStopped(null)).toBe(false);
-});
+;
 
 test("an exit message carries what the exit meant", () => {
   const unable = readSessionMessage(

@@ -99,9 +99,6 @@ pub struct AgentSession {
     pub pid: Option<u32>,
     /// The newest hook seen from the session.
     pub last_seen_at: Option<Timestamp>,
-    /// When the person deliberately stopped it; `None` once started again
-    /// and after a crash or restart (which resume on activation).
-    pub stopped_by_user_at: Option<Timestamp>,
     /// The name the harness gives the bound conversation; empty when it
     /// gave none.
     pub native_title: String,
@@ -207,7 +204,6 @@ mod tests {
             updated_at: at,
             pid: None,
             last_seen_at: None,
-            stopped_by_user_at: None,
             native_title: native_title.into(),
             fork_next: false,
         }
