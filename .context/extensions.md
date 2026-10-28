@@ -190,9 +190,9 @@ unavailable import withholds the page (and its slot mounts), and
 `extension test` skips the examples that run it. SQL grants still apply.
 `examples/extensions/effort-review` (producer: `exports` its `reviews`
 model) and `examples/extensions/review-badges` (consumer: an optional
-import read by its pages and a slot mount) are the working pair; their tests in
-`crates/oxplow-sdk/tests/examples.rs` cover available, disabled, missing
-and another version. `extension check` and `extension test` print one line per binding from
+import read by its pages and a slot mount) are the working pair; the
+review-badges test in `crates/oxplow-sdk/tests/examples.rs` covers available,
+disabled, missing and another version. `extension check` and `extension test` print one line per binding from
 `public_contracts.bindings` (`oxplow_sdk::import_lines`: available, or the
 `UnavailableReason::describe`, the one wording the load warning uses
 too). Withholding is reported once per cause: each unavailable optional
@@ -2857,7 +2857,7 @@ board), `work_item.list` (`compact-list`, a `viz: table` with Done and an
 `oxplow.work_item.update` with `uri` fixed). It reads `v_work_item` and
 changes items only through the interface commands, so it works with any
 list. `viz/swimlanes.test.ts` runs the bundle's script against its page;
-`oxplow-sdk/tests/examples.rs` checks it clean and runs its fixtures.
+`every_example_scaffolds_checks_and_tests_clean` checks it clean and runs its fixtures.
 
 A form (`FormViz`) re-reads its start values when it resets, so after a
 successful Save it shows what was saved, not the title it first opened
@@ -5228,7 +5228,7 @@ Each loads clean (`documented_examples_load_without_errors`):
   **resource**, `github/pr` — model `pull_request` (`uri`, `title`,
   `body`; it resolves and is searchable), the page `pr` (`for: github/pr`,
   given `uri=<uri>`), `[[pr:12]]`. `crates/oxplow-
-  sdk/tests/examples.rs` checks and tests it and opens a pull request.
+  sdk/tests/just_works.rs` checks and tests it; its `a-pull-request-resolves-and-opens-on-its-page` fixture opens a pull request.
 - **`session-history`** — a read-only page of the thread's earlier prompts
   from `v_agent_turn`, mounted at `new-session.sections` after `start`.
   `the_session_history_example_adds_a_section_to_the_new_session_page`

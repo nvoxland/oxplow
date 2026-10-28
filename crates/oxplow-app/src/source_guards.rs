@@ -1341,3 +1341,32 @@ fn no_lookup_by_name_prefers_an_origin() {
         found.join("\n")
     );
 }
+
+/// An example extension's tests go through `oxplow_sdk` only — what an
+/// extension author has. Behavior is the example's own fixtures; a test that
+/// reaches into oxplow's crates tests core, and belongs in core.
+#[test]
+fn the_examples_test_file_uses_only_the_sdk() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../oxplow-sdk/tests/examples.rs");
+    let text = std::fs::read_to_string(&path).expect("the examples test file");
+    let reaching: Vec<_> = text
+        .lines()
+        .enumerate()
+        .filter(|(_, line)| {
+            [
+                "oxplow_app::",
+                "oxplow_db::",
+                "oxplow_domain::",
+                "oxplow_config::",
+            ]
+            .iter()
+            .any(|krate| line.contains(krate))
+        })
+        .map(|(n, line)| format!("examples.rs:{}: {}", n + 1, line.trim()))
+        .collect();
+    assert!(
+        reaching.is_empty(),
+        "tests/examples.rs goes through oxplow_sdk only:\n{}",
+        reaching.join("\n")
+    );
+}
