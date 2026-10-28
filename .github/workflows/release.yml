@@ -161,6 +161,15 @@ jobs:
           releaseDraft: true
           prerelease: false
 
+      # The bundle just built, installed nowhere and run on a Python repo that
+      # is not this checkout: the CLI authors and tests an extension, and the
+      # daemon starts with foundation, bundled and code-metrics enabled from
+      # the copies compiled in. Catches a packaging regression the unit
+      # tests, which run from the source tree, cannot see.
+      - name: Smoke-test the installed bundle
+        if: matrix.os == 'macos-latest'
+        run: scripts/installed-smoke.sh target/release/bundle/macos/Oxplow.app
+
   # Rewrite the Homebrew Cask in the nvoxland/homebrew-oxplow tap
   # with the just-released version + the SHA256 of the arm64 DMG
   # asset attached to this release's still-draft tag, then commit +
