@@ -59,7 +59,7 @@ until you deploy it.
   machine. An extension that is on but never deployed here runs nothing
   until someone deploys it.
 - Which extensions are on: `extensions: [..]` in `.oxplow/project.yaml`
-  (absent means `[oxplow-bundled]`), plus `enableExtensions` and
+  (absent means `[oxplow-bundled, oxplow-code-metrics]`), plus `enableExtensions` and
   `disableExtensions` in `.oxplow/personal.yaml`.
   `oxplow.extension.enable`, `disable` and `remove` change the lists.
   `remove` never deletes the source.

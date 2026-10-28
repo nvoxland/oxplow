@@ -1005,8 +1005,9 @@ the user guide is `docs/guide/pages.md`.
   check` prints — for each enabled project extension, on open and on
   `extensionsChanged`, and lists its errors with the load errors, once
   each. Bundled extensions are checked where they're built.
-- **Bundled extensions.** There are two. `oxplow-foundation` is required: oxplow's own
-  commands, AI providers and harness implementations, code metrics, and the
+- **Bundled extensions.** There are three. `oxplow-foundation` is required: oxplow's own
+  commands, AI providers and harness implementations, the default work list,
+  effort policy, snapshots and wiki, and the
   measures, dimensions and metrics oxplow records itself (tokens, efforts, tests,
   coverage, analysis, work items: its `measures:` / `dimensions:` / `metrics:`,
   scope `extension:oxplow-foundation`; the producers' Rust only records the facts).
@@ -1014,7 +1015,16 @@ the user guide is `docs/guide/pages.md`.
   review packet, the analytics pages and the agent's advisories in one
   extension, because the point is building oxplow on its own extension
   platform, not letting people pick between its features. It can still be
-  disabled like any other.
+  disabled like any other. `oxplow-code-metrics` (not the crate of that name)
+  holds the code metrics measured from each snapshot's tree — TODO markers,
+  function count, complexity and length, doc coverage, duplicated lines and
+  the per-language idiom counts — with their collectors, metrics and the
+  measures only they write (`oxplow.todo`, `oxplow.ast_hit`,
+  `oxplow.duplicate_lines`, `oxplow.doc_coverage`). It is on by default
+  (`DEFAULT_EXTENSIONS`) and shares the `oxplow` namespace, so its scripts
+  and metrics name foundation's `oxplow.*` measures without a warning.
+  Complexity, function length and parameter count stay foundation's measures:
+  core's change analysis records them too.
   - Their sources live in the repo at `extensions/<name>/`, and they
     ship as described under "Shipped deployments" below.
   - `origin` is `bundled` and their path is `bundled:<name>`.
@@ -1249,7 +1259,7 @@ source directly: an edit changes nothing until it is deployed.
   under `.oxplow/runtime/`; it does watch `.oxplow/extensions/` (an agent's
   edits to a source are its work, snapshotted and given to its effort), and
   watching never activates anything.
-- **Shipped deployments:** `oxplow-foundation` and `oxplow-bundled` ship
+- **Shipped deployments:** `oxplow-foundation`, `oxplow-bundled` and `oxplow-code-metrics` ship
   inside oxplow (`bundled_extensions::BUNDLED`, each one's files through
   `BundledExtension::files()`) and are written to the store once per hash as
   their shipped deployment (`extension_store::extract_shipped`); they run

@@ -3612,8 +3612,13 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
         // (the project's or another extension's `measures:`) resolves
         // when the catalog is assembled, so that is a warning, not an
         // error — but a typo would be silent otherwise.
-        let measure_known =
-            |key: &str| ext.measures.iter().any(|mm| mm.key.as_deref() == Some(key));
+        // The `oxplow` namespace is shared by the extensions that ship with
+        // oxplow, so one of them may name a measure a sibling declares.
+        let shares = ext.namespace == oxplow_config::OXPLOW_NAMESPACE;
+        let measure_known = |key: &str| {
+            ext.measures.iter().any(|mm| mm.key.as_deref() == Some(key))
+                || (shares && key.starts_with("oxplow."))
+        };
         for spec in &ext.metrics {
             if let Some(sm) = spec.source_measure.as_deref() {
                 if !measure_known(sm) {
@@ -5184,7 +5189,12 @@ fn check_dependencies(ext: &mut Extension, others: &[Extension], files: &dyn Ext
                         })
                     })
                 };
-                if let Some(name) = word(&model) {
+                // Models are named by namespace, so extensions sharing one
+                // (oxplow's own shipped ones) can't be told apart by a name.
+                let by_model = (owner.namespace != ext.namespace)
+                    .then(|| word(&model))
+                    .flatten();
+                if let Some(name) = by_model {
                     note(&owner.name, format!("its model `{name}`"), at.clone());
                 } else if let Some(name) = word(&page) {
                     note(&owner.name, format!("its page `{name}`"), at.clone());
@@ -7382,10 +7392,9 @@ commands:
         assert!(misfit.is_empty(), "example doesn't fit: {misfit:#?}");
     }
 
-    /// Oxplow ships two extensions: `oxplow-foundation`, its own commands
-    /// over the scopes' operations, and `oxplow-bundled`: the
-    /// review packet, the analytics pages and the agent's advisories
-    /// together. They load clean and every page's SQL runs.
+    /// Oxplow ships three extensions: `oxplow-foundation`, its own commands
+    /// over the scopes' operations; `oxplow-bundled`: the review packet, the
+    /// analytics pages and the agent's advisories; and `oxplow-code-metrics`. They load clean and every page's SQL runs.
     #[tokio::test]
     async fn the_bundled_extensions_ship_and_load_clean() {
         let dir = tempfile::tempdir().unwrap();
@@ -7393,9 +7402,9 @@ commands:
         let bundled: Vec<&Extension> = exts.iter().filter(|e| e.origin == "bundled").collect();
         assert_eq!(
             bundled.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(),
-            ["oxplow-bundled", "oxplow-foundation"]
+            ["oxplow-bundled", "oxplow-code-metrics", "oxplow-foundation"]
         );
-        let foundation = bundled[1];
+        let foundation = bundled[2];
         assert!(foundation.errors.is_empty(), "{:?}", foundation.errors);
         assert!(foundation.warnings.is_empty(), "{:?}", foundation.warnings);
         assert_eq!(foundation.namespace, "oxplow");
@@ -7431,6 +7440,11 @@ commands:
                 "typesafe"
             ]
         );
+        let metrics = bundled[1];
+        assert!(metrics.errors.is_empty(), "{:?}", metrics.errors);
+        assert!(metrics.warnings.is_empty(), "{:?}", metrics.warnings);
+        assert_eq!(metrics.namespace, "oxplow");
+        assert_eq!(metrics.collectors.len(), 16);
         let b = bundled[0];
         assert!(b.errors.is_empty(), "{:?}", b.errors);
         // Its manifest is v2, with an intent, and clean.
@@ -7522,7 +7536,7 @@ commands:
         // own models compiled for the check, nothing published — and every
         // viz node's columns are its loader's.
         let svc = services(dir.path()).await;
-        for name in ["oxplow-bundled", "oxplow-foundation"] {
+        for name in ["oxplow-bundled", "oxplow-code-metrics", "oxplow-foundation"] {
             let v = validate_extension(&svc.sql, &svc.extension_catalog, dir.path(), name, None)
                 .await
                 .unwrap();
@@ -8923,7 +8937,7 @@ commands:
         let dir = tempfile::tempdir().unwrap();
         let exts = load_extensions(dir.path());
         let bundled: Vec<&Extension> = exts.iter().filter(|e| e.origin == "bundled").collect();
-        assert_eq!(bundled.len(), 2);
+        assert_eq!(bundled.len(), 3);
         for e in bundled {
             let layout = layout_only(&e.warnings);
             assert!(layout.is_empty(), "{}: {layout:#?}", e.name);

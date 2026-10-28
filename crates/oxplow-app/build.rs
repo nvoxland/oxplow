@@ -25,7 +25,7 @@ use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 /// The extensions that ship with oxplow, by folder name.
-const BUNDLED: &[&str] = &["oxplow-foundation", "oxplow-bundled"];
+const BUNDLED: &[&str] = &["oxplow-foundation", "oxplow-bundled", "oxplow-code-metrics"];
 
 fn main() {
     let manifest_dir =

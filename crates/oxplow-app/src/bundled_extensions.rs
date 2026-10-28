@@ -71,6 +71,11 @@ mod generated {
         FILES.get_or_init(|| read("oxplow-bundled"))
     }
 
+    pub fn oxplow_code_metrics() -> Files {
+        static FILES: OnceLock<Files> = OnceLock::new();
+        FILES.get_or_init(|| read("oxplow-code-metrics"))
+    }
+
     /// `extensions/<name>/`'s files, kept for the life of the process.
     fn read(name: &str) -> Files {
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -100,6 +105,11 @@ pub const BUNDLED: &[BundledExtension] = &[
     BundledExtension {
         name: "oxplow-bundled",
         files: generated::oxplow_bundled,
+        required: false,
+    },
+    BundledExtension {
+        name: "oxplow-code-metrics",
+        files: generated::oxplow_code_metrics,
         required: false,
     },
 ];
@@ -196,5 +206,56 @@ mod tests {
             )
             .await
             .expect("the wiki runs with bundled off");
+    }
+
+    /// The code metrics are `oxplow-code-metrics`': on by default, and with it
+    /// off the catalog has none of them while foundation's own (coverage,
+    /// tests, tokens) stay.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn code_metrics_off_leaves_the_catalog_without_its_metrics() {
+        async fn keys(disable: &str) -> Vec<String> {
+            let dir = tempfile::tempdir().unwrap();
+            crate::test_fixtures::init_git_repo(dir.path());
+            std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
+            std::fs::write(
+                dir.path().join(".oxplow/personal.yaml"),
+                format!("disableExtensions: [{disable}]\n"),
+            )
+            .unwrap();
+            let svc = crate::Services::in_memory(dir.path()).await.unwrap();
+            svc.streams.ensure_primary().await.unwrap();
+            crate::test_fixtures::activate(&svc).await;
+            svc.metrics
+                .catalog()
+                .await
+                .into_iter()
+                .map(|e| e.key)
+                .collect()
+        }
+        let on = keys("oxplow-bundled").await;
+        for key in [
+            "oxplow.todos",
+            "oxplow.rust.unsafe_blocks",
+            "oxplow.coverage.abs_pct",
+        ] {
+            assert!(on.iter().any(|k| k == key), "{key} in {on:?}");
+        }
+        let off = keys("oxplow-code-metrics").await;
+        assert!(
+            off.iter().any(|k| k == "oxplow.coverage.abs_pct"),
+            "{off:?}"
+        );
+        let gone: Vec<_> = off
+            .iter()
+            .filter(|k| {
+                k.starts_with("oxplow.todos")
+                    || k.starts_with("oxplow.rust.")
+                    || k.starts_with("oxplow.ts.")
+                    || k.as_str() == "oxplow.fn_count"
+                    || k.as_str() == "oxplow.doc_coverage"
+                    || k.as_str() == "oxplow.duplicate_lines"
+            })
+            .collect();
+        assert!(gone.is_empty(), "{gone:?}");
     }
 }

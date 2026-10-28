@@ -1834,7 +1834,7 @@ The mechanics behind those controls (unchanged by tsk117):
 - **The catalog is a registry of everything available**, NOT a list of metrics
   with recorded data — every metric the system can produce is listed via
   `list_metric_catalog`, even before any sample exists. `catalog()` unions
-  **four** sources, deduped by key: (1) the code metrics of oxplow-foundation
+  **four** sources, deduped by key: (1) the code metrics of oxplow-code-metrics
   and any other extension (toggleable); (2) project/global `metrics:` entries
   (toggleable); (3) the built-in always-on producers
   (`builtin_producer_metrics()` — tokens, tests, coverage, analysis, effort
@@ -2029,17 +2029,18 @@ metrics:                              # the read SPEC (the chartable metric)
 - **Two metric scopes** (`global`, `extension:<name>`), precedence global <
   each extension by key, with the project's `use:` layering thresholds
   (collectors' owner is always an extension name):
-  - **oxplow's code metrics** live in the required bundled extension
-    **oxplow-foundation** (`extensions/oxplow-foundation/extension.yaml`,
+  - **oxplow's code metrics** live in the bundled extension
+    **oxplow-code-metrics** (`extensions/oxplow-code-metrics/extension.yaml`,
     `collectors:` and `metrics:`; scripts under
-    `extensions/oxplow-foundation/collectors/<lang>/*.star`, `<lang>` being
+    `extensions/oxplow-code-metrics/collectors/<lang>/*.star`, `<lang>` being
     rust, ts, clojure, csharp, or `code` for the language-agnostic ones,
     embedded through `bundled_extensions.rs` like any bundled extension file).
-    Nothing is built in: oxplow's own are this extension's. Their scope is `extension:oxplow-foundation`, their collector refs
-    `collector:oxplow-foundation/<id>`. Each is authored through the **public**
+    Nothing is built in: oxplow's own are this extension's. Their scope is `extension:oxplow-code-metrics`, their collector refs
+    `collector:oxplow-code-metrics/<id>`. Each is authored through the **public**
     surface (`files()`/`ast_query()`) — no privileged Rust path — and verified by
-    golden tests over a fixture corpus (`foundation_collectors_tests.rs`, which
-    read each script from the bundled foundation by collector id). Each metric
+    fixtures in the extension (`extensions/oxplow-code-metrics/fixtures/`);
+    `foundation_collectors_tests.rs` keeps the effort test-outcome collector's
+    script (foundation's) honest. Each metric
     names its collector (`collector: <id>`) and the collector declares its
     `facts:`. Four are on by default (`oxplow.todos`, `fn_count`,
     `high_complexity_fns`, `long_functions`); the other 12 say `default: off`
