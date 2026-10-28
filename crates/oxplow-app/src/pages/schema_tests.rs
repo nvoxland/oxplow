@@ -35,6 +35,21 @@ fn a_pages_loaders_are_under_loaders_and_data_is_refused_naming_it() {
     assert!(why.contains("write `loaders:`"), "{why}");
 }
 
+/// A loader's SQL is read with the one SQL tokenizer: an apostrophe in a
+/// comment doesn't hide the loaders and params after it, a word or
+/// `:param` in a comment or a string isn't read, and a quoted identifier
+/// names its loader.
+#[test]
+fn a_loaders_sql_is_read_with_the_one_sql_tokenizer() {
+    let p = page(
+        "title: T\nloaders:\n  a: { rows: [{ x: 1 }] }\n  b: { rows: [{ y: 1 }] }\n  q:\n    sql: |\n      -- the block's fields, not b or :gone\n      SELECT x FROM \"a\" /* nor b's */\n      WHERE x = :kept AND 'b :not' <> x\nview: { viz: table, from: q }\n",
+    )
+    .expect("loads");
+    let q = p.loader("q").unwrap();
+    assert_eq!(q.reads_loaders, ["a"]);
+    assert_eq!(q.reads_params, ["kept"]);
+}
+
 /// A page that shows one query: one loader, one viz node bound to it.
 #[test]
 fn a_one_to_one_page_is_a_loader_and_a_viz_node() {

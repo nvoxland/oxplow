@@ -670,68 +670,41 @@ fn loader_name_problem(name: &str) -> Option<String> {
 
 /// The identifiers `sql` names as tables or columns, not functions or
 /// qualified columns: what an earlier loader's name is looked for among.
-fn sql_names(sql: &str) -> Vec<String> {
-    let bytes: Vec<char> = sql.chars().collect();
+/// Read with the one SQL tokenizer, so a string, a comment or a quoted
+/// identifier's quotes never hide or invent a name.
+fn sql_names(sql: &str) -> Result<Vec<String>, String> {
+    use oxplow_db::sql_tokens::{significant, tokenize, TokenKind};
+    let tokens = tokenize(sql).map_err(|e| e.to_string())?;
+    let sig: Vec<_> = significant(&tokens).collect();
     let mut out = Vec::new();
-    let mut i = 0;
-    while i < bytes.len() {
-        let c = bytes[i];
-        if c == '\'' {
-            // A string literal names nothing.
-            i += 1;
-            while i < bytes.len() && bytes[i] != '\'' {
-                i += 1;
-            }
-            i += 1;
-            continue;
+    for (i, t) in sig.iter().enumerate() {
+        let name = match t.kind {
+            TokenKind::Word => t.text,
+            TokenKind::QuotedIdent => &t.text[1..t.text.len() - 1],
+            _ => continue,
+        };
+        let qualified = i > 0 && sig[i - 1].is_punct('.');
+        let call = sig.get(i + 1).is_some_and(|n| n.is_punct('('));
+        if !qualified && !call {
+            out.push(name.to_ascii_lowercase());
         }
-        if c.is_ascii_alphabetic() || c == '_' {
-            let start = i;
-            while i < bytes.len() && (bytes[i].is_ascii_alphanumeric() || bytes[i] == '_') {
-                i += 1;
-            }
-            let word: String = bytes[start..i].iter().collect();
-            let after_dot = start > 0 && bytes[start - 1] == '.';
-            let bound = start > 0 && bytes[start - 1] == ':';
-            let mut j = i;
-            while j < bytes.len() && bytes[j] == ' ' {
-                j += 1;
-            }
-            let call = j < bytes.len() && bytes[j] == '(';
-            if !after_dot && !bound && !call {
-                out.push(word.to_ascii_lowercase());
-            }
-            continue;
-        }
-        i += 1;
     }
-    out
+    Ok(out)
 }
 
-/// The `:param` names `sql` binds.
-fn sql_params(sql: &str) -> Vec<String> {
-    let chars: Vec<char> = sql.chars().collect();
-    let mut out = Vec::new();
-    let mut i = 0;
-    while i < chars.len() {
-        if chars[i] == ':' && (i == 0 || chars[i - 1] != ':') {
-            let start = i + 1;
-            let mut j = start;
-            while j < chars.len() && (chars[j].is_ascii_alphanumeric() || chars[j] == '_') {
-                j += 1;
+/// The `:param` names `sql` binds, by the one SQL tokenizer.
+fn sql_params(sql: &str) -> Result<Vec<String>, String> {
+    use oxplow_db::sql_tokens::{tokenize, TokenKind};
+    let tokens = tokenize(sql).map_err(|e| e.to_string())?;
+    let mut out: Vec<String> = Vec::new();
+    for t in tokens.iter().filter(|t| t.kind == TokenKind::Param) {
+        if let Some(name) = t.text.strip_prefix(':') {
+            if !out.iter().any(|n| n == name) {
+                out.push(name.to_string());
             }
-            if j > start {
-                let name: String = chars[start..j].iter().collect();
-                if !out.contains(&name) {
-                    out.push(name);
-                }
-            }
-            i = j;
-            continue;
         }
-        i += 1;
     }
-    out
+    Ok(out)
 }
 
 fn parse_loaders(
@@ -809,7 +782,7 @@ fn parse_loaders(
             for arg in file.params.values() {
                 check_arg(arg, &mut reads_loaders, &mut reads_params)?;
             }
-            for word in sql_names(&sql) {
+            for word in sql_names(&sql).map_err(|e| format!("loader `{name}`: {e}"))? {
                 if word == name {
                     continue;
                 }
@@ -823,7 +796,7 @@ fn parse_loaders(
                     reads_loaders.push(word);
                 }
             }
-            for p in sql_params(&sql) {
+            for p in sql_params(&sql).map_err(|e| format!("loader `{name}`: {e}"))? {
                 if !reads_params.contains(&p) && !file.params.contains_key(&p) {
                     reads_params.push(p);
                 }

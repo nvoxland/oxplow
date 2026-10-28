@@ -313,7 +313,11 @@ that declares it). A page whose `needs` (a capability such as
 A `sql` loader reads the extension's settings through `config()`.
 Loaders run in order: a `sql`
 loader gets each earlier loader it names as a temp table of that name
-(`SqlQuery.temp`, beside `metric_grid()`'s); a `command` loader runs only
+(`SqlQuery.temp`, beside `metric_grid()`'s). The loaders it names and the
+`:param`s it binds — what reruns it and what it waits for — are read when
+the page loads with the one SQL tokenizer (`oxplow_db::sql_tokens`:
+strings, comments and quoted identifiers never hide or invent a name);
+SQLite judges the rest when it runs; a `command` loader runs only
 a command whose access is a read (`Access::reads_only`), as the viewer
 (`Actor::Page { page_id: <page>#<loader>, on_behalf_of }`), its result a `{ columns, rows }` table as is, objects a row
 each, else one `value`; a `page` loader runs that page and takes its
