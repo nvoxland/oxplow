@@ -5587,7 +5587,7 @@ def transform(input):
         write_project_extension(
             dir.path(),
             "measures:\n  - key: repo.kept\n    unit: count\n    \
-             temporalSemantics: semi-additive\nmetrics:\n  - key: repo.kept\n    \
+             temporalSemantics: semi-additive\n    fold: last\nmetrics:\n  - key: repo.kept\n    \
              title: Kept\n    sourceMeasure: repo.kept\n    aggregation: sum\n",
         );
         crate::test_fixtures::activate_with_problems(&svc).await;
@@ -5816,7 +5816,7 @@ def transform(input):
         std::fs::write(
             ext.join("extension.yaml"),
             "manifest: 2\nname: acme\nintent:\n  purpose: test\npermissions: { files: read }\n\
-             measures:\n  - { key: acme.todo, title: TODOs }\n\
+             measures:\n  - { key: acme.todo, title: TODOs, fold: last }\n\
              metrics:\n  - { key: acme.todos, title: TODOs, sourceMeasure: acme.todo, aggregation: sum }\n\
              collectors:\n  - { id: acme.todo_scan, runtime: starlark, entry: collectors/todo.star, facts: [acme.todo] }\n",
         )
@@ -5912,7 +5912,7 @@ def transform(input):
                 ext.join("extension.yaml"),
                 format!(
                     "manifest: 2\nname: {name}\nintent:\n  purpose: test\n\
-                     measures:\n  - {{ key: {measure}, title: TODOs }}\n\
+                     measures:\n  - {{ key: {measure}, title: TODOs, fold: last }}\n\
                      metrics:\n  - {{ key: shared.todos, title: TODOs, sourceMeasure: {measure}, aggregation: sum }}\n"
                 ),
             )
@@ -5939,6 +5939,52 @@ def transform(input):
             .unwrap()
             .expect("the first extension's metric is still active");
         assert_eq!(spec.scope, "oxplow:oxplow/extension?name=alpha");
+    }
+
+    /// A metric needs its measure to say how the series folds over time:
+    /// none declared, or `none`, is a check error naming both — never a
+    /// guessed sum or mean.
+    #[tokio::test]
+    async fn a_metric_over_a_measure_with_no_fold_is_refused() {
+        for (fold, aggregation) in [
+            ("", "sum"),
+            (", fold: none", "avg"),
+            (", fold: last", "sum"),
+        ] {
+            let (svc, dir) = fixture().await;
+            let ext = dir.path().join(".oxplow/extensions/acme");
+            std::fs::create_dir_all(&ext).unwrap();
+            std::fs::write(
+                ext.join("extension.yaml"),
+                format!(
+                    "manifest: 2\nname: acme\nintent:\n  purpose: test\n\
+                     measures:\n  - {{ key: acme.todo, title: TODOs{fold} }}\n\
+                     metrics:\n  - {{ key: acme.todos, title: TODOs, sourceMeasure: acme.todo, aggregation: {aggregation} }}\n"
+                ),
+            )
+            .unwrap();
+            crate::test_fixtures::activate_with_problems(&svc).await;
+            let errors: Vec<String> = svc
+                .listed_extensions(dir.path())
+                .await
+                .into_iter()
+                .flat_map(|e| e.errors)
+                .filter(|e| e.contains("acme.todos"))
+                .collect();
+            let spec = svc.fact_store.get_spec("acme.todos").await.unwrap();
+            if fold.contains("last") {
+                assert!(errors.is_empty(), "{errors:?}");
+                assert!(spec.is_some());
+            } else {
+                assert!(
+                    errors
+                        .iter()
+                        .any(|e| e.contains("acme.todo") && e.contains("fold")),
+                    "{fold:?}: {errors:?}"
+                );
+                assert!(spec.is_none(), "{fold:?}: refused, not seeded");
+            }
+        }
     }
 
     #[tokio::test]
@@ -5994,7 +6040,7 @@ def transform(input):
         std::fs::write(
             ext.join("extension.yaml"),
             "manifest: 2\nname: acme\nintent:\n  purpose: test\npermissions: { files: read }\n\
-             measures:\n  - { key: acme.todo, title: TODOs }\n\
+             measures:\n  - { key: acme.todo, title: TODOs, fold: last }\n\
              metrics:\n  - { key: acme.todos, title: TODOs, sourceMeasure: acme.todo, aggregation: sum, default: off, collector: acme.todo_scan }\n\
              collectors:\n  - { id: acme.todo_scan, runtime: starlark, entry: collectors/todo.star, facts: [acme.todo] }\n  \
              - { id: acme.always, runtime: starlark, entry: collectors/todo.star, facts: [acme.todo] }\n",

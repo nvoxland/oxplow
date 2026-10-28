@@ -49,11 +49,13 @@ measures:
     unit: comments
     subjectKind: file
     temporalSemantics: non-additive
+    fold: sum
     captureScope: per-path
   - key: triage.open_items
     title: Open work items
     unit: items
     temporalSemantics: non-additive
+    fold: sum
 metrics:
   # The TODOs counted; each one located, so the board and the drill-in
   # list them (`metric_findings('triage.todos')`).

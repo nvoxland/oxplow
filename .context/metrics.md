@@ -325,7 +325,8 @@ welded to collection.
   Σn/Σd, not a history blend (V50/tsk13 fixed coverage from V43's wrong
   `non-additive`); only the **accumulating** mean-across-closes ratios
   (cycle_time, effort — one observation per close, Σ over all captures =
-  the mean) are `non-additive`),
+  the mean) are `non-additive`), `fold` (`sum` | `last` | `first` | `avg` |
+  `none`, V116 — how the series becomes one number; see "Additivity"),
   `scope`, `description`. (Ratio components ride each fact's num/den; the
   dead V43 `component_role` column is dropped in place by V159, tsk865 —
   `ALTER TABLE … DROP COLUMN` rewrites the table without a rebuild, so the
@@ -813,8 +814,8 @@ NOT a store method — it lives in `metric_engine::aggregate_facts`.
   (`min_value` / `severity` / `dim_eq` — the count-over-threshold + slice filters).
 - Pure cores: `aggregate_series(facts, agg, filter, group_by)` → one `SeriesPoint`
   per capture (preserving time order), optionally one series per group-by
-  dimension value; `range_value(series, temporal)` collapses a series to one
-  number the additivity-correct way. An `avg` point carries `(Σvalues, count)`
+  dimension value; `range_value(series, fold)` collapses a series to one
+  number by the measure's declared `fold`. An `avg` point carries `(Σvalues, count)`
   as its ratio components so the non-additive collapse (Σn/Σd) yields the mean
   across ALL facts — the V47 mean-across-closes measures (cycle_time,
   effort) would otherwise collapse to a den=0 → 0.0 headline; `compute_rollup(facts, dimension, temporal,
@@ -930,10 +931,9 @@ NOT a store method — it lives in `metric_engine::aggregate_facts`.
   a lookup on every fact. They slice and filter (`dim_eq`) on the **fact path
   only**. The cube drops them from the promoted set: a capture's `effort_id`
   is stamped when the effort closes, after the cube may have folded it.
-- **Time buckets.** `metric_bucket::bucket_series(points, TimeBucket, temporal,
-  agg)` collapses points per (UTC day / Monday week / month, group). A level
-  (semi-additive) takes the bucket's last capture; events (additive) sum; the
-  rest (non-additive) average; ratios re-divide Σnum/Σden. Each point is
+- **Time buckets.** `metric_bucket::bucket_series(points, TimeBucket, fold)`
+  collapses points per (UTC day / Monday week / month, group) with the same
+  `fold` a headline uses; a bucket it has no answer for is dropped. Each point is
   stamped at the bucket start and carries the bucket's last `capture_id`.
 - **One spec read.** `MetricEngine::series_for_spec_read(spec, &SeriesRead
   {group_by, stream, window, dim_eq, bucket})` is the full-option read, and
@@ -1382,6 +1382,7 @@ measures:                          # custom fact TYPES a collector may emit
     unit: ms
     subjectKind: endpoint
     temporalSemantics: non-additive   # additive | semi-additive | non-additive
+    fold: sum                         # sum | last | first | avg | none (required by a metric)
 dimensions:                        # custom conformed slice axes
   - key: acme.license
     valueType: categorical            # categorical | numeric | temporal | entity-ref
@@ -1578,8 +1579,28 @@ run attributed after the close still yields a diff.
 ### Additivity
 
 Ratio metrics (coverage %, pass rate) store `numerator`+`denominator`. Roll-ups
-MUST re-aggregate from components (`aggregate_ratio` = Σnum/Σden), never naive-
-AVG a percentage. Non-ratio metrics use `default_agg`.
+MUST re-aggregate from components, never naive-AVG a percentage.
+
+**One fold over time.** A measure declares `fold: sum | last | first | avg |
+none` (`measure.fold`, V116; NULL is undeclared). `metric_engine::fold(points,
+fold) -> Option<Folded { value, numerator, denominator }>` is the ONLY rule for
+turning a series into one number; a headline (`range_value`) and a chart's time
+bucket (`metric_bucket::bucket_series`) both call it, so a chart and a grid
+cannot disagree.
+
+- `last` / `first` take that point; one with components reads its raw `n / d`.
+- `sum` / `avg` over points that carry components re-divide Σn / Σd (a mean
+  across closes is `Avg`-aggregated points carrying `(Σvalues, count)`). Σd = 0
+  is no data (`None`): the headline is empty and a bucket is left out, never 0.
+- `sum` / `avg` over plain points total or average the values.
+- `none` has no answer.
+
+A metric over a measure with no `fold`, or `none`, is a check error when the
+catalog is published (`metrics_service/generation.rs`): oxplow never guesses
+one. Derive it from `temporal_semantics` when writing a measure: `semi-additive`
+→ `last`, `additive` → `sum`, a non-additive ratio or mean → `sum` (Σn/Σd).
+`temporal_semantics` stays: it decides which captures are current
+(`current_capture_ids`), not how the series folds.
 
 ## Branch tracking
 
@@ -1963,6 +1984,7 @@ measures:                             # the fact TYPE the collector records
     subjectKind: file
     unit: count
     temporalSemantics: semi-additive  # additivity OVER TIME
+    fold: last                        # how a metric folds the series
 collectors:                           # the PRODUCER (runs a script, records facts)
   - id: repo.todo
     doc: TODO comment scan
@@ -1988,7 +2010,7 @@ metrics:                              # the read SPEC (the chartable metric)
 - A **metric** no longer computes anything — it's a pure spec (`sourceMeasure` +
   `aggregation` + optional `filter`, OR a `formula: {op,left,right}` over other
   metrics). Two-axis aggregation: `aggregation` combines facts *within a capture*;
-  the source measure's `temporalSemantics` governs the cross-time collapse. A
+  the source measure's `fold` governs the cross-time collapse. A
   `use:` may only re-target thresholds; the structural fields are inherent.
 - The **fact collector**'s script gets `input = {report?, rows?, event?}` (the
   parsed `report:`, the `input:` query's rows, the trigger event as the

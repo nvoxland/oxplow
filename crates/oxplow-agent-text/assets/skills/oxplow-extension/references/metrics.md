@@ -9,7 +9,7 @@ skill and oxplow's `new-metric` slash command cover it).
 
 ```yaml
 measures:
-  - { key: acme.todo, title: TODO comments }
+  - { key: acme.todo, title: TODO comments, fold: last }
 metrics:
   - { key: acme.todos, title: TODOs, sourceMeasure: acme.todo, aggregation: sum, direction: lower-better }
 collectors:

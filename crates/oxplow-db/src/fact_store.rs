@@ -47,6 +47,9 @@ pub struct Measure {
     pub subject_kind: Option<String>,
     /// `additive` | `semi-additive` | `non-additive` — additivity OVER TIME.
     pub temporal_semantics: String,
+    /// `sum` | `last` | `first` | `avg` | `none` — how the series folds OVER
+    /// TIME into one number; `None` is undeclared.
+    pub fold: Option<String>,
     /// `complete` | `per-path` | `per-subject` (V54 tsk41; per-subject V55
     /// tsk43) — what ONE capture restates. This is a SEPARATE AXIS from
     /// `temporal_semantics`: `complete` means a capture restates the whole
@@ -72,6 +75,8 @@ pub struct NewMeasure {
     pub unit: Option<String>,
     pub subject_kind: Option<String>,
     pub temporal_semantics: String,
+    /// See [`Measure::fold`].
+    pub fold: Option<String>,
     /// `complete` | `per-path` — see [`Measure::capture_scope`].
     pub capture_scope: String,
     pub scope: String,
@@ -88,6 +93,7 @@ impl NewMeasure {
             unit: None,
             subject_kind: None,
             temporal_semantics: "semi-additive".into(),
+            fold: Some("last".into()),
             capture_scope: "complete".into(),
             scope: "built-in".into(),
             description: None,
@@ -96,7 +102,7 @@ impl NewMeasure {
 }
 
 const MEASURE_COLS: &str = "id, key, title, unit, subject_kind, temporal_semantics, \
-     capture_scope, scope, description, created_at, updated_at, extension";
+     capture_scope, scope, description, created_at, updated_at, extension, fold";
 
 /// How a scope is stored: an extension's `oxplow:oxplow/extension?name=<name>` is kept as
 /// `scope = 'global'` plus the `extension` column (V84), because the scope
@@ -129,6 +135,7 @@ fn row_to_measure(row: &rusqlite::Row<'_>) -> rusqlite::Result<Measure> {
         temporal_semantics: row.get(5)?,
         capture_scope: row.get(6)?,
         scope: read_scope(row.get(7)?, row.get(11)?),
+        fold: row.get(12)?,
         description: row.get(8)?,
         created_at: string_to_ts(&created_at).map_err(ts_conv_err)?,
         updated_at: string_to_ts(&updated_at).map_err(ts_conv_err)?,
@@ -552,12 +559,13 @@ pub fn upsert_measure_tx(
     tx.execute(
         "INSERT INTO measure
            (key, title, unit, subject_kind, temporal_semantics, capture_scope,
-            scope, description, created_at, updated_at, extension)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9, ?10)
+            scope, description, created_at, updated_at, extension, fold)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9, ?10, ?11)
          ON CONFLICT(key) DO UPDATE SET
             title=excluded.title, unit=excluded.unit,
             subject_kind=excluded.subject_kind,
             temporal_semantics=excluded.temporal_semantics,
+            fold=excluded.fold,
             capture_scope=excluded.capture_scope,
             scope=excluded.scope, extension=excluded.extension,
             description=excluded.description, updated_at=excluded.updated_at",
@@ -572,6 +580,7 @@ pub fn upsert_measure_tx(
             m.description,
             now,
             extension,
+            m.fold,
         ],
     )
     .map_err(map_sql_err)?;

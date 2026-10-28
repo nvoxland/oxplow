@@ -878,6 +878,14 @@
           ],
           "default": null
         },
+        "fold": {
+          "description": "`sum` | `last` | `first` | `avg` | `none` — how the measure's series\nfolds OVER TIME into one number (what a chart's bucket and a headline\nboth apply). A metric over a measure with no `fold`, or `none`, is\nrefused when the extension is checked: oxplow never guesses one.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
         "captureScope": {
           "description": "`complete` | `per-path` — what ONE capture restates (default `complete`).\nA SEPARATE AXIS from `temporalSemantics`: `complete` means every capture\nrestates the whole population (a coverage report, a test run), so the\ntemporal fold applies directly. `per-path` means a capture restates only the\npaths in its snapshot — which is what a **tree collector over a per-commit delta**\ndoes. Such a measure is folded to the latest capture per (producer, path)\nbefore aggregating, so a repo-wide total stays correct while only changed\nfiles are rescanned. Set this on any measure a snapshot-triggered collector\nemits per-file facts on.",
           "type": [

@@ -452,6 +452,7 @@ measures:
     unit: lines
     subjectKind: effort
     temporalSemantics: additive
+    fold: sum
 metrics:
   - key: oxplow_bundled.effort_churn_lines
     title: Effort churn

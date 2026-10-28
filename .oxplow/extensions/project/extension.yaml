@@ -14,90 +14,112 @@ measures:
   unit: '%'
   subjectKind: repo
   temporalSemantics: semi-additive
+  fold: last
 - key: repo.rust_clone
   unit: count
   subjectKind: file
   temporalSemantics: semi-additive
+  fold: last
 - key: repo.rust_allow
   unit: count
   subjectKind: file
   temporalSemantics: semi-additive
+  fold: last
 - key: repo.eslint_disable
   unit: count
   subjectKind: file
   temporalSemantics: semi-additive
+  fold: last
 - key: repo.react_use_effect
   unit: count
   subjectKind: file
   temporalSemantics: semi-additive
+  fold: last
 - key: repo.rust_shared_state
   unit: count
   subjectKind: file
   temporalSemantics: semi-additive
+  fold: last
 - key: repo.rust_async_fn
   unit: count
   subjectKind: file
   temporalSemantics: semi-additive
+  fold: last
 - key: repo.ts_as_cast
   unit: count
   subjectKind: file
   temporalSemantics: semi-additive
+  fold: last
 - key: repo.dangerous_html
   unit: count
   subjectKind: file
   temporalSemantics: semi-additive
+  fold: last
 - key: repo.skipped_tests
   unit: count
   subjectKind: file
   temporalSemantics: semi-additive
+  fold: last
 - key: repo.focused_tests
   unit: count
   subjectKind: file
   temporalSemantics: semi-additive
+  fold: last
 - key: repo.file_loc
   unit: count
   subjectKind: file
   temporalSemantics: semi-additive
+  fold: last
 - key: repo.ts_as_any
   unit: count
   subjectKind: file
   temporalSemantics: semi-additive
+  fold: last
 - key: repo.eval_usage
   unit: count
   subjectKind: file
   temporalSemantics: semi-additive
+  fold: last
 - key: repo.rust_dyn
   unit: count
   subjectKind: file
   temporalSemantics: semi-additive
+  fold: last
 - key: repo.file_imports
   unit: count
   subjectKind: file
   temporalSemantics: semi-additive
+  fold: last
 - key: repo.innerhtml_assign
   unit: count
   subjectKind: file
   temporalSemantics: semi-additive
+  fold: last
 - key: repo.ts_hooks
   unit: count
   subjectKind: file
   temporalSemantics: semi-additive
+  fold: last
 - key: repo.hardcoded_secrets
   unit: count
   subjectKind: file
   temporalSemantics: semi-additive
+  fold: last
 - key: repo.hardcoded_colors
   unit: count
   subjectKind: file
   temporalSemantics: semi-additive
+  fold: last
 - key: repo.css_important
   unit: count
   subjectKind: file
   temporalSemantics: semi-additive
+  fold: last
 - key: repo.inline_styles
   unit: count
   subjectKind: file
   temporalSemantics: semi-additive
+  fold: last
 metrics:
 - key: repo.rust_clone
   title: .clone() calls

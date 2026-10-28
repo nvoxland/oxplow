@@ -34,7 +34,7 @@ use oxplow_db::{FactRow, FactSliceKey, Measure, MetricCapture, MetricSpec, Sqlit
 use oxplow_domain::{DomainError, Timestamp};
 
 /// How the subjects measured in a single capture combine into the capture's
-/// value. (Cross-time collapse is [`range_value`], driven by temporal semantics.)
+/// value. (Cross-time collapse is [`fold`], driven by the measure's `fold`.)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Aggregation {
     /// Number of facts (e.g. count of functions over a complexity threshold).
@@ -95,6 +95,119 @@ fn parse_temporal(measure_key: &str, temporal_semantics: &str) -> Result<Tempora
         DomainError::Invalid(format!(
             "measure `{measure_key}` has unknown temporal_semantics `{temporal_semantics}`"
         ))
+    })
+}
+
+/// How a measure's series combines OVER TIME into one number — the ONE rule
+/// a chart's bucket and a grid's headline both apply ([`fold`]). Declared by
+/// the measure (`fold:`); `temporal_semantics` stays only the gate for which
+/// captures are current.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Fold {
+    /// Total the captures (events); points carrying components re-divide Σn/Σd.
+    Sum,
+    /// The latest capture (a level: a count of hits, coverage).
+    Last,
+    /// The earliest capture.
+    First,
+    /// The mean of the captures (a scalar series; components re-divide too).
+    Avg,
+    /// The series has no meaningful single number: a metric over it is a
+    /// check error, and a read has no answer.
+    None,
+}
+
+impl Fold {
+    /// `sum` | `last` | `first` | `avg` | `none`.
+    pub fn parse(s: &str) -> Option<Self> {
+        Some(match s {
+            "sum" => Self::Sum,
+            "last" => Self::Last,
+            "first" => Self::First,
+            "avg" => Self::Avg,
+            "none" => Self::None,
+            _ => return None,
+        })
+    }
+
+    /// Whether a single number can come out of a series at all.
+    pub fn folds(self) -> bool {
+        self != Self::None
+    }
+}
+
+/// A measure's declared fold, naming the measure in the error: an unknown
+/// fold is a data-integrity problem, and an undeclared one is `Fold::None`
+/// (a metric over it is refused when the catalog is checked).
+pub(crate) fn parse_fold(measure: &Measure) -> Result<Fold, DomainError> {
+    match measure.fold.as_deref() {
+        None => Ok(Fold::None),
+        Some(s) => Fold::parse(s).ok_or_else(|| {
+            DomainError::Invalid(format!("measure `{}` has unknown fold `{s}`", measure.key))
+        }),
+    }
+}
+
+/// A series folded to one point: the number, and the components it was
+/// divided from (when the points carried any).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Folded {
+    pub value: f64,
+    pub numerator: Option<f64>,
+    pub denominator: Option<f64>,
+}
+
+/// Fold `points` (oldest first) by `how`. The one rule behind a chart's
+/// bucket and a grid's headline:
+///
+/// - `last` / `first` take that point; one with components reads its raw
+///   `n / d` (a percent spec scales downstream, once);
+/// - `sum` / `avg` over points that carry components re-divide Σn / Σd (never
+///   an average of ratios), and Σd = 0 is no data (`None`), never 0;
+/// - `sum` / `avg` over plain points total or average the values;
+/// - `none`, or no points, has no answer.
+pub fn fold(points: &[SeriesPoint], how: Fold) -> Option<Folded> {
+    let point = match how {
+        Fold::None => return None,
+        Fold::Last => points.last(),
+        Fold::First => points.first(),
+        Fold::Sum | Fold::Avg => None,
+    };
+    if points.is_empty() {
+        return None;
+    }
+    if let Some(p) = point {
+        let value = match (p.numerator, p.denominator) {
+            (Some(n), Some(d)) if d != 0.0 => n / d,
+            _ => p.value,
+        };
+        return Some(Folded {
+            value,
+            numerator: p.numerator,
+            denominator: p.denominator,
+        });
+    }
+    if points
+        .iter()
+        .any(|p| p.numerator.is_some() || p.denominator.is_some())
+    {
+        let num: f64 = points.iter().filter_map(|p| p.numerator).sum();
+        let den: f64 = points.iter().filter_map(|p| p.denominator).sum();
+        return (den != 0.0).then(|| Folded {
+            value: num / den,
+            numerator: Some(num),
+            denominator: Some(den),
+        });
+    }
+    let sum: f64 = points.iter().map(|p| p.value).sum();
+    let value = match how {
+        Fold::Avg => sum / points.len() as f64,
+        _ => sum,
+    };
+    Some(Folded {
+        value,
+        numerator: None,
+        denominator: None,
     })
 }
 
@@ -1112,54 +1225,14 @@ pub(crate) fn splice_zero_points(
     points
 }
 
-/// Collapse a time series to a single in-range number, respecting additivity OVER
-/// TIME: a semi-additive snapshot takes the LAST capture (summing snapshots across
-/// time double-counts) — re-deriving Σn/Σd from that capture's raw components for a
-/// level ratio like coverage (tsk13); an additive event SUMs the captures; a
-/// non-additive ratio re-derives Σnumerator / Σdenominator across ALL points (the
-/// accumulating mean-across-closes case). `None` for an empty series.
+/// A time series as one in-range number, by its measure's [`Fold`]. `None`
+/// for an empty series, a fold of `none`, or a ratio whose Σdenominator is 0.
 ///
 /// A `per-path` measure needs no new arm here: [`tree_state_series`] already makes
-/// every point the repo-wide value as of that capture, so `SemiAdditive`'s
-/// "take the last point" IS the current repo total.
-pub(crate) fn range_value(series: &[SeriesPoint], temporal: Temporal) -> Option<f64> {
-    if series.is_empty() {
-        return None;
-    }
-    match temporal {
-        // Level snapshot → the latest capture. For a level RATIO (coverage,
-        // tsk13) re-derive from the latest point's RAW Σn/Σd, not its `.value`
-        // (which a percent spec has already scaled ×100) — so the spec's
-        // presentation scale is applied exactly once downstream, matching the
-        // non-additive branch.
-        Temporal::SemiAdditive => series.last().map(|p| match (p.numerator, p.denominator) {
-            (Some(n), Some(d)) if d != 0.0 => n / d,
-            _ => p.value,
-        }),
-        Temporal::Additive => Some(series.iter().map(|p| p.value).sum()),
-        Temporal::NonAdditive => {
-            // Not a ratio-shaped read at all — e.g. `sum` over the non-additive
-            // `oxplow.token_waste` (task.tokens.wasted totals reverted spend).
-            // Temporal semantics govern how to combine ACROSS TIME; when the
-            // points carry no components the metric's own aggregation already
-            // decided how to combine, so total them rather than reporting NO
-            // DATA (tsk156).
-            if !series
-                .iter()
-                .any(|p| p.numerator.is_some() || p.denominator.is_some())
-            {
-                return Some(series.iter().map(|p| p.value).sum());
-            }
-            let num: f64 = series.iter().filter_map(|p| p.numerator).sum();
-            let den: f64 = series.iter().filter_map(|p| p.denominator).sum();
-            if den != 0.0 {
-                Some(num / den)
-            } else {
-                // Σden = 0 across every point is NO DATA, not 0 (tsk109).
-                None
-            }
-        }
-    }
+/// every point the repo-wide value as of that capture, so `last` IS the
+/// current repo total.
+pub(crate) fn range_value(series: &[SeriesPoint], how: Fold) -> Option<f64> {
+    fold(series, how).map(|f| f.value)
 }
 
 /// The CURRENT capture per (stream, producer): the newest capture in the union
@@ -1863,7 +1936,7 @@ impl MetricEngine {
             .await?;
         // Bucket before scaling: a ratio re-divides its raw parts.
         let mut series = match read.bucket {
-            Some(b) => self.bucket(measure_key, series, b, agg).await?,
+            Some(b) => self.bucket(measure_key, series, b).await?,
             None => series,
         };
         let scale = spec_value_scale(spec);
@@ -1994,14 +2067,14 @@ impl MetricEngine {
         measure_key: &str,
         series: Vec<SeriesPoint>,
         bucket: crate::metric_bucket::TimeBucket,
-        agg: Aggregation,
     ) -> Result<Vec<SeriesPoint>, DomainError> {
         let Some(measure) = self.facts.get_measure(measure_key).await? else {
             return Ok(Vec::new());
         };
-        let temporal = parse_temporal(measure_key, &measure.temporal_semantics)?;
         Ok(crate::metric_bucket::bucket_series(
-            series, bucket, temporal, agg,
+            series,
+            bucket,
+            parse_fold(&measure)?,
         ))
     }
 
@@ -2046,12 +2119,11 @@ impl MetricEngine {
         let Some(measure) = self.facts.get_measure(measure_key).await? else {
             return Ok(None);
         };
-        let temporal = parse_temporal(measure_key, &measure.temporal_semantics)?;
         // A ratio collapse (semi- or non-additive) re-derives from the RAW
         // components, so the spec's presentation scale applies exactly once
         // here — `range_value` never reads an already-scaled `.value` for a
         // measure carrying num/den.
-        Ok(range_value(series, temporal).map(|v| v * spec_value_scale(spec)))
+        Ok(range_value(series, parse_fold(&measure)?).map(|v| v * spec_value_scale(spec)))
     }
 
     /// The located items behind a spec — its filtered facts projected as
@@ -2315,7 +2387,7 @@ mod tests {
             vec![2.0, 1.0]
         );
         // A count metric is semi-additive: the in-range value is the LAST capture.
-        assert_eq!(range_value(&series, Temporal::SemiAdditive), Some(1.0));
+        assert_eq!(range_value(&series, Fold::Last), Some(1.0));
     }
 
     #[test]
@@ -2354,7 +2426,7 @@ mod tests {
             series[0].value
         );
         // Non-additive across time too: Σnum/Σden, never an average of ratios.
-        assert_eq!(range_value(&series, Temporal::NonAdditive), Some(0.25));
+        assert_eq!(range_value(&series, Fold::Sum), Some(0.25));
     }
 
     #[test]
@@ -2385,7 +2457,7 @@ mod tests {
             "the revert leg must survive as its own point"
         );
         // Σnum/Σden = 5000/5000: all metered spend was later reverted.
-        assert_eq!(range_value(&series, Temporal::NonAdditive), Some(1.0));
+        assert_eq!(range_value(&series, Fold::Sum), Some(1.0));
     }
 
     #[test]
@@ -2404,7 +2476,7 @@ mod tests {
         ];
         let series = aggregate_series(&facts, Aggregation::Sum, &FactFilter::default(), None);
         assert_eq!(series.len(), 2, "both captures emit a point");
-        assert_eq!(range_value(&series, Temporal::NonAdditive), Some(300.0));
+        assert_eq!(range_value(&series, Fold::Sum), Some(300.0));
     }
 
     #[test]
@@ -2445,9 +2517,9 @@ mod tests {
         ];
         let series = aggregate_series(&facts, Aggregation::Ratio, &FactFilter::default(), None);
         assert_eq!(series.len(), 2);
-        assert_eq!(range_value(&series, Temporal::SemiAdditive), Some(0.85));
+        assert_eq!(range_value(&series, Fold::Last), Some(0.85));
         // Contrast: non-additive accumulation blends across all captures.
-        let blend = range_value(&series, Temporal::NonAdditive).unwrap();
+        let blend = range_value(&series, Fold::Sum).unwrap();
         assert!((blend - 18.0 / 22.0).abs() < 1e-9, "got {blend}");
     }
 
@@ -2464,8 +2536,8 @@ mod tests {
         );
         // Additive over time: the in-range value SUMS the captures (350), unlike a
         // semi-additive snapshot which would take just the last (250).
-        assert_eq!(range_value(&series, Temporal::Additive), Some(350.0));
-        assert_eq!(range_value(&series, Temporal::SemiAdditive), Some(250.0));
+        assert_eq!(range_value(&series, Fold::Sum), Some(350.0));
+        assert_eq!(range_value(&series, Fold::Last), Some(250.0));
     }
 
     #[test]
@@ -3082,6 +3154,7 @@ mod tests {
         let facts = SqliteFactStore::new(db);
         let mut m = oxplow_db::NewMeasure::new("acme.tokens", "Tokens");
         m.temporal_semantics = "additive".into();
+        m.fold = Some("sum".into());
         let tokens = facts.upsert_measure(m).await.unwrap();
         for (at, effort, value) in [
             ("2026-06-30T10:00:00Z", 7, 10.0),
@@ -3395,7 +3468,7 @@ mod tests {
         );
         // Σn/Σd across points must be the mean across ALL closes (700/3) — not
         // 0.0 (a den=0 short-circuit) and not a mean of the capture means (200).
-        let collapsed = range_value(&series, Temporal::NonAdditive).unwrap();
+        let collapsed = range_value(&series, Fold::Sum).unwrap();
         assert!((collapsed - 700.0 / 3.0).abs() < 1e-9, "got {collapsed}");
     }
 

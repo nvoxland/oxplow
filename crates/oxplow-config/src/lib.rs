@@ -406,6 +406,12 @@ pub struct MeasureEntry {
     /// (default `semi-additive`).
     #[serde(rename = "temporalSemantics", default)]
     pub temporal_semantics: Option<String>,
+    /// `sum` | `last` | `first` | `avg` | `none` — how the measure's series
+    /// folds OVER TIME into one number (what a chart's bucket and a headline
+    /// both apply). A metric over a measure with no `fold`, or `none`, is
+    /// refused when the extension is checked: oxplow never guesses one.
+    #[serde(default)]
+    pub fold: Option<String>,
     /// `complete` | `per-path` — what ONE capture restates (default `complete`).
     /// A SEPARATE AXIS from `temporalSemantics`: `complete` means every capture
     /// restates the whole population (a coverage report, a test run), so the
@@ -431,6 +437,8 @@ pub struct ResolvedMeasure {
     pub unit: Option<String>,
     pub subject_kind: Option<String>,
     pub temporal_semantics: String,
+    /// See [`MeasureEntry::fold`]; `None` when undeclared.
+    pub fold: Option<String>,
     /// `complete` | `per-path` — see [`MeasureEntry::capture_scope`].
     pub capture_scope: String,
     /// `global` | `project` (built-ins are the migration seed, not config).
@@ -2645,6 +2653,8 @@ const METRIC_CATEGORIES: &[&str] = &[
 /// Additivity-over-time a `measures:` entry may declare (mirrors the `measure`
 /// table's CHECK).
 const MEASURE_TEMPORAL_SEMANTICS: &[&str] = &["additive", "semi-additive", "non-additive"];
+/// How a measure's series folds over time (`Fold` in the metric engine).
+pub const MEASURE_FOLDS: &[&str] = &["sum", "last", "first", "avg", "none"];
 /// What ONE capture restates (tsk41). Deliberately NOT mirrored as a DB CHECK —
 /// `temporal_semantics`' CHECK is exactly why adding a value there needs a
 /// `measure` table rebuild (which would cascade-wipe every fact), so
@@ -3264,6 +3274,17 @@ pub fn validate_measures(
             }
             None => None,
         };
+        let fold = match opt(e.fold) {
+            Some(s) => {
+                if !MEASURE_FOLDS.contains(&s.as_str()) {
+                    return Err(ConfigError::Invalid(format!(
+                        "measures[{i}] fold must be one of {MEASURE_FOLDS:?} (got \"{s}\")"
+                    )));
+                }
+                Some(s)
+            }
+            None => None,
+        };
         let capture_scope = match opt(e.capture_scope) {
             Some(s) => {
                 if !MEASURE_CAPTURE_SCOPES.contains(&s.as_str()) {
@@ -3282,6 +3303,7 @@ pub fn validate_measures(
             unit: opt(e.unit),
             subject_kind: opt(e.subject_kind),
             temporal_semantics,
+            fold,
             capture_scope,
             description: opt(e.description),
         });
@@ -3389,6 +3411,7 @@ pub fn resolve_measures(
                     .temporal_semantics
                     .clone()
                     .unwrap_or_else(|| "semi-additive".into()),
+                fold: e.fold.clone(),
                 capture_scope: e.capture_scope.clone().unwrap_or_else(|| "complete".into()),
                 scope: scope.clone(),
                 description: e.description.clone(),
@@ -5780,6 +5803,32 @@ metrics:
         assert!(check("[{key: acme.x}, {key: acme.x}]").is_err());
         // A minimal valid dimension parses (defaults to categorical).
         assert!(check("[{key: acme.x}]").is_ok());
+    }
+
+    /// A measure declares how its series folds over time; an unknown fold is
+    /// refused, and an undeclared one stays undeclared (never a guessed
+    /// default).
+    #[test]
+    fn a_measure_declares_its_fold_and_never_gets_a_default() {
+        let check = |yaml: &str| {
+            validate_measures(Some(measure_entries(yaml)), CatalogLayer::Extension("acme"))
+        };
+        for fold in MEASURE_FOLDS {
+            let kept = check(&format!("[{{key: acme.x, fold: {fold}}}]")).unwrap();
+            assert_eq!(kept[0].fold.as_deref(), Some(*fold));
+        }
+        assert!(check("[{key: acme.x, fold: median}]").is_err());
+        let resolved = resolve_measures(
+            &check("[{key: acme.x}, {key: acme.y, fold: last}]").unwrap(),
+            &[],
+        );
+        assert_eq!(
+            resolved
+                .iter()
+                .map(|m| m.fold.as_deref())
+                .collect::<Vec<_>>(),
+            vec![None, Some("last")]
+        );
     }
 
     #[test]

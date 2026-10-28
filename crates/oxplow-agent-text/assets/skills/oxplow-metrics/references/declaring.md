@@ -37,6 +37,7 @@ measures:
     subjectKind: file
     unit: count
     temporalSemantics: semi-additive  # additivity OVER TIME (see below)
+    fold: last                        # how the series becomes one number (required for a metric)
     captureScope: per-path            # a snapshot rescans only the files it changed
 
 dimensions:
@@ -82,6 +83,7 @@ Namespace every key (`<extension namespace>.<id>`, or `<vendor>.<id>` in the pro
 | `captureScope` | what ONE capture restates: `complete` (default; a whole population, e.g. a report) or `per-path` (only the paths in its snapshot; the fold keeps each path's latest fact, so a snapshot collector's per-file facts stay a repo-wide total while only changed files are rescanned). Set `per-path` on any measure a `snapshot.taken` collector records per-file facts on |
 | `unit` | `count` \| `%` \| `ms` \| `kb` \| `usd` … |
 | `temporalSemantics` | additivity **over time**: `additive` (SUM across captures — events/tokens), `semi-additive` (take the LAST capture — stocks/counts + level ratios like coverage, default), `non-additive` (re-derive Σnum/Σden across all captures — accumulating ratios) |
+| `fold` | how a metric over this measure turns its series into **one number**, in a chart's bucket and in a headline alike: `sum` (events; a ratio's parts re-divide Σn/Σd, Σd = 0 is no data), `last` (a level: the latest capture), `first`, `avg`, or `none` (no single number). A metric over a measure with no `fold`, or `none`, is a `check` error: oxplow never guesses one |
 
 ### `metrics:` (spec) fields
 
@@ -99,7 +101,7 @@ Namespace every key (`<extension namespace>.<id>`, or `<vendor>.<id>` in the pro
 | `sliceableDims` | conformed-dimension keys for group-by / drill-across |
 
 **Two-axis aggregation.** `aggregation` combines the facts inside one capture; the
-source measure's `temporalSemantics` governs how the series collapses across
+source measure's `fold` governs how the series collapses across
 time. A count-over-threshold is `aggregation: count` + a `filter: { minValue: N }`.
 
 ### `collectors:` fields (a fact collector)
