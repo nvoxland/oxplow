@@ -5280,6 +5280,17 @@ Each loads clean (`documented_examples_load_without_errors`):
 
 ## The `oxplow-bundled` extension
 
+**Two shipped extensions, on purpose** (decided 2026-10-28). oxplow ships
+`oxplow-foundation` (required) and `oxplow-bundled` (optional, on by
+default), both in the `oxplow` namespace so a contribution can move
+between them — or the two merge — without a rename. Foundation is kept
+as small as it can be while still useful: the host's pages, the default
+capability implementations (work items, effort policy, snapshots,
+knowledge) and the measures core's change analysis records. Everything
+optional — the review policy, analytics, the code metrics and their
+collectors — is bundled's, and turns off with it. Don't add a third
+shipped extension; bundled's contents are the next thing to sort out.
+
 Everything oxplow ships that measures, visualizes or reviews is this one
 extension (`extensions/oxplow-bundled/`): its namespace is
 `oxplow_bundled` (commands, event types, measures, collectors) and its
