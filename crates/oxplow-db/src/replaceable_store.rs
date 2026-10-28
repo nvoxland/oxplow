@@ -1,11 +1,11 @@
 //! `replaceable` (V57): the core sub-components an extension may replace
-//! (`oxplow_domain::replaceable::REPLACEABLE`), restated whole by the
+//! (`oxplow_domain::replaceable::all()`), restated whole by the
 //! app's `vocabulary_reactor` on each rebuild; read as `v_replaceable`.
 
 use rusqlite::{params, Connection};
 
 use crate::database::map_sql_err;
-use oxplow_domain::replaceable::REPLACEABLE;
+use oxplow_domain::replaceable::all as replaceable_all;
 use oxplow_domain::DomainError;
 
 /// Replace the table with the one table there is.
@@ -18,7 +18,7 @@ pub fn restate_tx(conn: &Connection) -> Result<(), DomainError> {
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         )
         .map_err(map_sql_err)?;
-    for r in REPLACEABLE {
+    for r in replaceable_all() {
         st.execute(params![
             r.target,
             r.capability,

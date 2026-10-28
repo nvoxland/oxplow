@@ -3,7 +3,7 @@ import { GitPullRequest } from "lucide-react";
 
 import { linkRef, parseMarkdownLink, preprocessWikilinks } from "./components/Markdown/MarkdownView.js";
 import { pageKindIconComponent, pageKindLabel } from "./pageKinds.js";
-import { extensionWikilinkRef, resourcesFromResult, setResources, type Resource } from "./resources.js";
+import { extensionWikilinkRef, resourceIcon, resourcesFromResult, setResources, type Resource } from "./resources.js";
 import { refFromTabId } from "./tabs/pageRefs.js";
 import { refTargetNow } from "./tabs/refOpener.js";
 import { effortUri, resourceUri } from "./uri/uri.js";
@@ -132,5 +132,20 @@ test("a core resource's row reads as one", () => {
     additional: false,
     icon: null,
     wikilink: null,
+  });
+});
+
+describe("a resource's icon", () => {
+  afterEach(() => setResources([]));
+
+  test("a name oxplow draws is its component, an svg the extension brought is drawn as an image", () => {
+    setResources([ACME_PR, { ...ACME_PR, resource: "acme/own", icon: "data:image/svg+xml;base64,PHN2Zy8+" }]);
+    expect(resourceIcon("acme/pr")).toBe(GitPullRequest);
+    const own = resourceIcon("acme/own");
+    expect(own).not.toBeNull();
+    expect(own).not.toBe(GitPullRequest);
+    // The same component for the same svg, so React keeps its state.
+    expect(resourceIcon("acme/own")).toBe(own);
+    expect(resourceIcon("acme/none")).toBeNull();
   });
 });

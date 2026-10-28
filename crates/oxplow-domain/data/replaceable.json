@@ -1,0 +1,82 @@
+[
+  {
+    "target": "work_item.board",
+    "capability": "work_items",
+    "bound_to_provider": false,
+    "version": 1,
+    "props": [
+      "scope",
+      "thread_id"
+    ],
+    "view": [],
+    "label": "board",
+    "about": "The Board's columns of cards (the `board-cards` part of the `board` document): `scope` is `thread`, `backlog` or `all`; `thread_id` the viewed thread, which applies when `scope` is `thread`. A view of the capability as a whole, so any extension may bring one: it reads `v_work_item` and runs the interface verbs (`oxplow.work_item.transition`, `reorder`, `update`, …), whichever list is active."
+  },
+  {
+    "target": "work_item.list",
+    "capability": "work_items",
+    "bound_to_provider": false,
+    "version": 1,
+    "props": [
+      "scope",
+      "thread_id"
+    ],
+    "view": [],
+    "label": "list",
+    "about": "The Tasks page's list (the `list` part of the `tasks` document): `scope` is `thread`, `stream` or `all`; `thread_id` the thread when `scope` is `thread`, else null. Its `stream_id` is the scope's stream. The page's filters, summary and backlog parts stay oxplow's."
+  },
+  {
+    "target": "work_item.detail",
+    "capability": "work_items",
+    "bound_to_provider": false,
+    "version": 1,
+    "props": [
+      "uri"
+    ],
+    "view": [],
+    "label": "description editor",
+    "about": "A work item's description editor (the `body` part of the `work-item` document): `uri` is the item. Its state, fields, About, links, comments, activity and mounts stay oxplow's."
+  },
+  {
+    "target": "work_item.detail.state",
+    "capability": "work_items",
+    "bound_to_provider": true,
+    "version": 1,
+    "props": [
+      "uri"
+    ],
+    "view": [],
+    "label": "state control",
+    "about": "A work item's state control (the `state` part of the `work-item` document; its Move To is never replaced, so an item can always move): `uri` is the item. The item's own provider's extension replaces it, whichever is active: it shows that provider's own states."
+  },
+  {
+    "target": "vcs.history.graph",
+    "capability": "vcs",
+    "bound_to_provider": false,
+    "version": 2,
+    "props": [
+      "head_sha",
+      "reveal_sha",
+      "limit"
+    ],
+    "view": [
+      "q",
+      "author",
+      "branch"
+    ],
+    "label": "history graph",
+    "about": "The commit history's graph (`GitHistoryPage`, the Git dashboard): `head_sha` the stream's head, `reveal_sha` a commit to scroll to and mark (or null), `limit` how many commits. Its view is Git History's filters (`q`, `author`, `branch`; v2), which core's own list reads too. Core's own is a plain list; the graph is oxplow-bundled's component."
+  },
+  {
+    "target": "effort.verdict",
+    "capability": "effort_policy",
+    "bound_to_provider": false,
+    "version": 1,
+    "props": [
+      "effort_id"
+    ],
+    "view": [],
+    "label": "effort verdict",
+    "about": "An effort's verdict, the first line of its review page (`DiffViewPage`): `effort_id` is the effort's row id. Core has no verdict of its own: what counts as tested, covered or backed is a review policy's, so with no replacement (or `oxplow` chosen) the page shows none. oxplow-bundled's is the default."
+  }
+]

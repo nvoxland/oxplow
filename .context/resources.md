@@ -161,7 +161,7 @@ resources:
     resolve: pull_request       # one of its models, with `uri` and `title`
     title: title                # the column of `resolve` that titles one
     searchable: pull_request    # a model with `uri`, `title`, `body`
-    icon: git-pull-request      # one of ICONS
+    icon: git-pull-request      # one of ICONS, or assets/<name>.svg in the extension
     wikilink: { prefix: pr, param: id }   # [[pr:12]]
 ```
 
