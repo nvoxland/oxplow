@@ -107,7 +107,7 @@ async fn the_notes_extension_passes_extension_test_with_its_server_by_url() {
     std::fs::write(
         ext.join("extension.yaml"),
         manifest
-            .replace("  process: true\n", "  network: [127.0.0.1]\n")
+            .replace("permissions: [process.run]\n", "permissions: [\"network:127.0.0.1\"]\n")
             .replace(by_command, &format!("      mcp: {{ url: \"{url}\" }}\n"))
             + "    network: [127.0.0.1]\n",
     )

@@ -50,8 +50,8 @@ fn write_extension(project: &Path, sim: &OAuthSim) {
         ext.join("extension.yaml"),
         manifest
             .replace(
-                "  process: true\n",
-                "  network: [127.0.0.1]\n  secrets: [NOTES_TOKEN]\n",
+                "permissions: [process.run]\n",
+                "permissions: [\"network:127.0.0.1\", \"secrets:NOTES_TOKEN\"]\n",
             )
             .replace(
                 by_command,
