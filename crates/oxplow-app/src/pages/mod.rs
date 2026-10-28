@@ -7,6 +7,7 @@ pub mod checks;
 pub mod open_runs;
 pub mod runner;
 pub mod schema;
+pub mod spec;
 pub mod text;
 
 #[cfg(test)]

@@ -24,9 +24,9 @@ use result_budget::ResultBudget;
 /// embeds and slot mounts. Page definitions, params and tree metadata are
 /// outside this result budget.
 pub(super) const MAX_RESULT_BYTES: usize = 5 * 1024 * 1024;
-use crate::extensions::{
-    bind_params, evaluate_alert, resolve_param_values, stream_head, AlertState, PageSlot, SlotAt,
-    SlotEdge, ViewContext,
+use crate::extensions::{stream_head, PageSlot, SlotAt, SlotEdge};
+use crate::pages::spec::{
+    bind_params, evaluate_alert, resolve_param_values, AlertState, ViewContext,
 };
 
 /// How deep embeds and page loaders may nest before a run stops: a cycle

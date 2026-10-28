@@ -411,7 +411,7 @@ fn page_request(page: &str, params: Vec<(&str, SqlCell)>) -> crate::pages::runne
             .into_iter()
             .map(|(k, v)| (k.to_string(), v))
             .collect(),
-        ctx: crate::extensions::ViewContext::default(),
+        ctx: crate::pages::spec::ViewContext::default(),
         viewer: oxplow_domain::Actor::Human,
     }
 }
@@ -602,7 +602,7 @@ async fn the_page_rows_carry_file_refs_to_the_path_and_line() {
         .find_map(|c| c.link.as_ref().map(|l| (c.key.as_str(), l)))
         .expect("a linked column");
     assert_eq!(link.0, "path");
-    assert_eq!(link.1.kind, crate::extensions::LinkKind::File);
+    assert_eq!(link.1.kind, crate::pages::spec::LinkKind::File);
     let (path_col, line_col) = (
         result.columns.iter().position(|c| c == "path").unwrap(),
         result

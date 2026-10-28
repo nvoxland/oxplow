@@ -1370,3 +1370,66 @@ fn the_examples_test_file_uses_only_the_sdk() {
         reaching.join("\n")
     );
 }
+
+/// The page and viz spec types live in `pages/spec.rs`. A page file
+/// reaches them there, never through `crate::extensions` (the loader), so
+/// pages do not depend on the loader for their own vocabulary.
+#[test]
+fn pages_take_spec_types_from_the_spec_module() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/pages");
+    let spec = std::fs::read_to_string(dir.join("spec.rs"))
+        .expect("pages/spec.rs holds the page and viz spec types");
+    let names: Vec<String> = spec
+        .lines()
+        .filter_map(|l| {
+            let l = l.strip_prefix("pub")?;
+            let l = l.strip_prefix("(crate)").unwrap_or(l).trim_start();
+            let rest = [
+                "struct ", "enum ", "fn ", "const ", "static ", "type ", "trait ",
+            ]
+            .iter()
+            .find_map(|k| l.strip_prefix(*k))?;
+            let end = rest.find(|c: char| !c.is_alphanumeric() && c != '_')?;
+            Some(rest[..end].to_string())
+        })
+        .collect();
+    assert!(names.len() > 40, "spec.rs lists its types: {names:?}");
+    let mut found = Vec::new();
+    for entry in std::fs::read_dir(&dir).expect("src/pages") {
+        let path = entry.expect("entry").path();
+        if path.extension().is_none_or(|e| e != "rs") {
+            continue;
+        }
+        let text = std::fs::read_to_string(&path).expect("page source");
+        // Every `crate::extensions::…` path, with a `{a, b}` group opened.
+        let mut rest = text.as_str();
+        while let Some(at) = rest.find("crate::extensions::") {
+            rest = &rest[at + "crate::extensions::".len()..];
+            let end = rest.find(';').unwrap_or(rest.len());
+            let used = rest[..end].split('\n').next().unwrap_or("");
+            let group = if used.trim_start().starts_with('{') {
+                &rest[..end]
+            } else {
+                used
+            };
+            for name in group
+                .split(|c: char| !c.is_alphanumeric() && c != '_')
+                .filter(|w| !w.is_empty())
+            {
+                if names.iter().any(|n| n == name) {
+                    found.push(format!(
+                        "{}: crate::extensions::…{name}",
+                        path.file_name().unwrap().to_string_lossy()
+                    ));
+                }
+            }
+        }
+    }
+    found.sort();
+    found.dedup();
+    assert!(
+        found.is_empty(),
+        "use crate::pages::spec for these:\n{}",
+        found.join("\n")
+    );
+}

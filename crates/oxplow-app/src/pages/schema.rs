@@ -19,11 +19,13 @@ use std::collections::BTreeMap;
 use oxplow_db::SqlCell;
 use serde::{Deserialize, Serialize};
 
-use crate::extensions::{
-    holds_one_row, parse_actions, shape_problem, typed, AlertFile, FormSpec, LauncherCategory,
-    PageAction, PageAlert, PageColumn, PageParam, PageProvenance, ParamRole, Renders, TileSize,
-    ViewContext, Viz, VizChart, VizCode, VizConfig, VizCustom, VizDiff, VizEditor, VizEmbed,
-    VizGroup, VizHunks, VizMarkdown, VizSteps, VizTerminal, VizTimeline, VizTree,
+use crate::extensions::{shape_problem, Renders, TileSize};
+
+use crate::pages::spec::{
+    holds_one_row, parse_actions, typed, AlertFile, FormSpec, LauncherCategory, PageAction,
+    PageAlert, PageColumn, PageParam, PageProvenance, ParamRole, ViewContext, Viz, VizChart,
+    VizCode, VizConfig, VizCustom, VizDiff, VizEditor, VizEmbed, VizGroup, VizHunks, VizMarkdown,
+    VizSteps, VizTerminal, VizTimeline, VizTree,
 };
 
 /// A loaded page.
@@ -461,7 +463,7 @@ pub fn parse_page(
         }
     }
     let params = typed(params);
-    if let Some(why) = crate::extensions::param_problem(&params) {
+    if let Some(why) = crate::pages::spec::param_problem(&params) {
         return Err(why);
     }
     let loaders = parse_loaders(file.data.unwrap_or_default(), &params)?;

@@ -509,7 +509,7 @@ pub async fn check_pages(
                     .run(RunRequest {
                         target: RunTarget::Spec(std::sync::Arc::new(page.clone())),
                         params,
-                        ctx: oxplow_app::extensions::ViewContext::default(),
+                        ctx: oxplow_app::pages::spec::ViewContext::default(),
                         viewer: oxplow_domain::Actor::Human,
                     })
                     .await;

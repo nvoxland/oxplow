@@ -812,7 +812,7 @@ mod tests {
                         oxplow_db::SqlCell::Text("primary".into()),
                     )]
                     .into(),
-                    ctx: oxplow_app::extensions::ViewContext::default(),
+                    ctx: oxplow_app::pages::spec::ViewContext::default(),
                     viewer: oxplow_domain::Actor::Human,
                 },
                 "window",

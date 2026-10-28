@@ -257,7 +257,7 @@ async fn a_scaffolded_metric_checks_tests_and_declares_its_blocks() {
             _ => None,
         })
         .expect("a linked column");
-    assert_eq!(link.kind, oxplow_app::extensions::LinkKind::File);
+    assert_eq!(link.kind, oxplow_app::pages::spec::LinkKind::File);
     assert_eq!(link.line.as_deref(), Some("line"));
 }
 

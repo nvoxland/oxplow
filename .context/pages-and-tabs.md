@@ -769,7 +769,7 @@ comment's time and the task panel use it, not their own copies.
 | **Custom** | what the kit can't express: editors, terminals, boards, git flows | a React page on `Page`, using kit parts where they fit | `viz: custom` (the sandboxed component), or a page whose `view:` is one `component` node (`PageComponent`) |
 
 A cell's match is drawn with the kit class `.ox-mark` (a column's
-`highlight`; `VizConfig` in `crates/oxplow-app/src/extensions.rs`).
+`highlight`; `VizConfig` in `crates/oxplow-app/src/pages/spec.rs`).
 
 The kit: `Section` (`id`, `title`, `description`, `actions`, `collapsible` / `defaultCollapsed` — a toggle in the heading, remembered per page, see usability.md "Collapsible page sections" — `source` —
 the extension that added it), `DataTable` (fixed `<col>` widths,

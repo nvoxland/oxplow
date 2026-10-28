@@ -10,7 +10,7 @@ use oxplow_domain::Actor;
 use super::open_runs::PageRuns;
 use super::runner::{RunRequest, RunTarget};
 use super::test_support::fixture;
-use crate::extensions::ViewContext;
+use crate::pages::spec::ViewContext;
 
 fn request(page: &str, params: &[(&str, SqlCell)]) -> RunRequest {
     RunRequest {

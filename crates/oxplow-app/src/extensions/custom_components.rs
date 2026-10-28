@@ -603,8 +603,9 @@ mod tests {
     }
 
     use super::{bundle_problems, bundle_warnings, page_problems};
-    use crate::extensions::{load_extensions, Extension, Viz, VizConfig};
+    use crate::extensions::{load_extensions, Extension};
     use crate::pages::schema::NodeKind;
+    use crate::pages::spec::{Viz, VizConfig};
     use std::path::Path;
 
     fn write(root: &Path, rel: &str, body: &str) {
@@ -1089,7 +1090,7 @@ mod tests {
             .into_iter()
             .find(|e| e.name == "x")
             .unwrap();
-        let run = crate::extensions::VizRun {
+        let run = crate::pages::spec::VizRun {
             config: custom_viz(&ext, "burn").clone(),
             params: Default::default(),
             result: oxplow_db::SqlQueryResult {

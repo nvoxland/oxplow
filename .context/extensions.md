@@ -505,8 +505,9 @@ over a database file); adversarial and concurrency coverage is still to do.
 ## What works today
 
 Code: `crates/oxplow-app/src/extensions.rs` (the loader),
-`crates/oxplow-app/src/pages/` (the page schema, runner, open runs,
-actions, checks and text renderings), `crates/oxplow-rpc/src/commands/extensions.rs`
+`crates/oxplow-app/src/pages/` (the page schema and spec types — `Viz`,
+`VizConfig`, `ViewContext` in `spec.rs` —, runner, open runs, actions,
+checks and text renderings), `crates/oxplow-rpc/src/commands/extensions.rs`
 and `pages.rs` (IPC), and the page tools in `crates/oxplow-mcp/src/lib.rs`.
 The authoring format, as agents learn it, is in the `oxplow-extension`
 skill's `references/` (`page-format.md`, `loaders.md`, `view-nodes.md`);
@@ -898,7 +899,7 @@ the user guide is `docs/guide/pages.md`.
     - The GitHub example's PR page has a Sync PRs action
       (`command: oxplow.collector.sync`).
   - **Viz** (`VizView.tsx`; the `Viz` enum and `VizConfig` in
-    `extensions.rs`): `table`, `list`, `number`, `markdown`, `bar`
+    `pages/spec.rs`): `table`, `list`, `number`, `markdown`, `bar`
     (`DailyBarChart`), `line` (`components/charts/TrendChart`, one chart per
     `chart.series`), `treemap` (two-level `components/charts/squarify`),
     `board`, and the structure components: `tree` (collapsible nesting by

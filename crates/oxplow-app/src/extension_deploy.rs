@@ -1892,7 +1892,7 @@ mod tests {
         assert_eq!(page.title, "Release health!");
         assert_eq!(
             page.category,
-            Some(crate::extensions::LauncherCategory::Dashboards)
+            Some(crate::pages::spec::LauncherCategory::Dashboards)
         );
         assert!(
             matches!(&page.view.kind, crate::pages::schema::NodeKind::Grid { children } if children.is_empty()),
@@ -2543,7 +2543,7 @@ mod tests {
                     RunRequest {
                         target: RunTarget::Page("oxplow-foundation/extensions-list".into()),
                         params: Default::default(),
-                        ctx: crate::extensions::ViewContext::default(),
+                        ctx: crate::pages::spec::ViewContext::default(),
                         viewer: oxplow_domain::Actor::Human,
                     },
                     "w",

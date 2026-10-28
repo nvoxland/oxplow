@@ -563,7 +563,7 @@ mod page_run_tests {
                 RunRequest {
                     target: RunTarget::Page("acme/numbers".into()),
                     params: [("n".to_string(), oxplow_db::SqlCell::Int(3))].into(),
-                    ctx: crate::extensions::ViewContext::default(),
+                    ctx: crate::pages::spec::ViewContext::default(),
                     viewer: Actor::Human,
                 },
                 "w1",

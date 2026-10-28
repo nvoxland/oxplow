@@ -2,7 +2,7 @@
 //! load-time check refuses.
 
 use super::schema::*;
-use crate::extensions::Viz;
+use crate::pages::spec::Viz;
 
 fn page(text: &str) -> Result<Page, String> {
     parse_page(
@@ -505,7 +505,7 @@ view:
     let role = |name: &str| p.params.iter().find(|q| q.name == name).unwrap().role;
     assert_eq!(
         role("commit"),
-        Some(crate::extensions::ParamRole::Selection)
+        Some(crate::pages::spec::ParamRole::Selection)
     );
     assert_eq!(role("path"), None);
 }

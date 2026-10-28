@@ -195,7 +195,7 @@ mod tests {
         let request = |target| RunRequest {
             target,
             params: Default::default(),
-            ctx: crate::extensions::ViewContext::default(),
+            ctx: crate::pages::spec::ViewContext::default(),
             viewer: oxplow_domain::Actor::Human,
         };
         let plain = PageRunner::of(svc)

@@ -618,7 +618,7 @@ pub async fn run_as_page(
     id: &str,
     params: &[(String, oxplow_db::SqlCell)],
 ) -> oxplow_db::SqlQueryResult {
-    run_as_page_in(svc, id, params, crate::extensions::ViewContext::default()).await
+    run_as_page_in(svc, id, params, crate::pages::spec::ViewContext::default()).await
 }
 
 /// [`run_as_page`] from a viewer's context (`view_context`).
@@ -626,7 +626,7 @@ pub async fn run_as_page_in(
     svc: &crate::Services,
     id: &str,
     params: &[(String, oxplow_db::SqlCell)],
-    ctx: crate::extensions::ViewContext,
+    ctx: crate::pages::spec::ViewContext,
 ) -> oxplow_db::SqlQueryResult {
     use crate::pages::runner::{PageRunner, RunRequest, RunTarget};
     let (extension, slug) = id.split_once('/').expect("<extension>/<slug>");

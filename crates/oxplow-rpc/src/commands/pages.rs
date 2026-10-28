@@ -6,10 +6,12 @@
 
 use std::collections::BTreeMap;
 
-use oxplow_app::extensions::{self, ViewContext};
+use oxplow_app::extensions;
+
 use oxplow_app::pages::open_runs::RunSnapshot;
 use oxplow_app::pages::runner::{PageRun, PageRunner, RunRequest, RunTarget};
 use oxplow_app::pages::schema::{parse_inline_page, Page};
+use oxplow_app::pages::spec::ViewContext;
 use oxplow_app::Services;
 use oxplow_db::SqlCell;
 use oxplow_domain::{Actor, DomainError};
@@ -41,7 +43,7 @@ fn target(page: Option<String>, spec_yaml: Option<String>) -> Result<RunTarget, 
 }
 
 async fn context(svc: &Services, stream_id: Option<&str>, thread_id: Option<&str>) -> ViewContext {
-    extensions::view_context(
+    oxplow_app::pages::spec::view_context(
         svc,
         stream_id.and_then(oxplow_domain::StreamId::try_from_str),
         thread_id.and_then(oxplow_domain::ThreadId::try_from_str),

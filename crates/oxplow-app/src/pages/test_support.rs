@@ -7,7 +7,7 @@ use oxplow_db::SqlCell;
 use oxplow_domain::Actor;
 
 use super::runner::*;
-use crate::extensions::ViewContext;
+use crate::pages::spec::ViewContext;
 
 pub(crate) fn write(root: &Path, rel: &str, text: &str) {
     let file = root.join(rel);
