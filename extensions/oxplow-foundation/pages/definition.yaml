@@ -1,5 +1,5 @@
 title: Definition
-description: What a page is made of, part by part — where it comes from, its params with the values this run used, the loaders that read its data, the nodes that show them (embedded pages and mounted slots included) and its actions. Its source opens in the file view. Every page's ☰ menu opens it as Show Definition.
+description: What a page is made of, part by part — where it comes from (its file opens in the file view), what it is for and how it is used, its params with the values this run used, the loaders that read its data, the nodes that show them (embedded pages and mounted slots included) and its actions. Every page's ☰ menu opens it as Show Definition.
 label: 'Definition: {{row.title}}'
 icon: file-text
 hidden: true
@@ -24,29 +24,52 @@ data:
     command: oxplow.page.definition
     args: { page: { param: of }, spec: { param: spec }, params: { param: params }, stream_id: { from: scope.stream } }
     reads: [page, extension_deployment]
+  # Where it comes from: an inline view has no file.
   about:
     sql: |
-      SELECT title, page AS id, extension, file,
-             (SELECT group_concat(value, ', ') FROM json_each(page."for")) AS shows,
-             CASE WHEN json_array_length(page."for") = 0 THEN NULL
-                  WHEN "default" THEN 'yes: it opens when one is opened'
-                  ELSE 'no: another page is the default' END AS is_default,
-             CASE WHEN category IS NOT NULL AND NOT hidden THEN 'the launcher, under ' || category
-                  WHEN json_array_length(page."for") > 0 THEN 'opening what it shows'
-                  ELSE 'links from other pages' END
-               || CASE WHEN pinned THEN '; its tabs are pinned' ELSE '' END AS found,
-             CASE WHEN tool IS NOT NULL THEN 'as the tool `' || tool || '`' ELSE 'through oxplow_run_page' END AS agents,
-             label,
-             CASE WHEN refresh THEN 'when its data changes, and on Refresh' ELSE 'when its data changes' END AS updates,
-             CASE WHEN comments THEN 'yes' ELSE 'no' END AS takes_comments,
+      SELECT title, page AS id, extension,
+             CASE WHEN :spec IS NULL AND file <> '' THEN file END AS file,
+             CASE WHEN bundled THEN 'ships with oxplow' ELSE 'yours' END AS origin,
              CASE WHEN deployment IS NULL THEN 'loaded from its source'
-                  ELSE 'deployment ' || substr(deployment, 1, 12) END AS runs,
-             CASE WHEN bundled THEN 'ships with oxplow' ELSE 'yours' END AS origin
+                  ELSE 'deployment ' || substr(deployment, 1, 12) END AS runs
       FROM page
-  source:
+  description:
+    sql: SELECT description AS text FROM page WHERE description <> ''
+  # How it is used, a line each: what it draws, how it is opened, its
+  # tab, when it updates, comments, how an agent reads it, and the
+  # questions an agent finds it by.
+  usage:
     sql: |
-      SELECT '[View source](' || uri('oxplow/file', 'path', file) || ') — `' || file || '`' AS text
-      FROM page WHERE :spec IS NULL AND file <> ''
+      WITH p AS (
+        SELECT *, json_array_length(page."for") AS draws,
+               (SELECT group_concat('`' || value || '`', ', ') FROM json_each(page."for")) AS kinds
+        FROM page
+      ),
+      lines(n, line) AS (
+        SELECT 1, CASE WHEN draws = 0 THEN NULL
+                       WHEN "default" THEN 'It draws ' || kinds || ' and is the page that opens one.'
+                       ELSE 'It draws ' || kinds || ', but another page is the one that opens.' END FROM p
+        UNION ALL
+        SELECT 2, CASE WHEN category IS NOT NULL AND NOT hidden THEN 'It is in the launcher, under ' || category || '.'
+                       WHEN draws > 0 AND "default" THEN 'It isn''t in the launcher: opening a ' || kinds || ' opens it.'
+                       ELSE 'It isn''t in the launcher: links from other pages open it.' END FROM p
+        UNION ALL
+        SELECT 3, CASE WHEN label IS NULL THEN 'Its tab is named by its title' ELSE 'Its tab is named `' || label || '`' END
+                  || CASE WHEN pinned THEN ' and stays pinned.' ELSE '.' END FROM p
+        UNION ALL
+        SELECT 4, CASE WHEN refresh THEN 'It runs again when its data changes, and has a Refresh button.'
+                       ELSE 'It runs again when its data changes.' END FROM p
+        UNION ALL
+        SELECT 5, CASE WHEN comments THEN 'People can comment on it.' ELSE 'People can''t comment on it.' END FROM p
+        UNION ALL
+        SELECT 6, CASE WHEN tool IS NOT NULL THEN 'Agents get it as the tool `' || tool || '`, and read it with `oxplow_run_page`.'
+                       ELSE 'An agent reads it with `oxplow_run_page`; it isn''t offered as a tool of its own.' END FROM p
+        UNION ALL
+        SELECT 7 + j.key, 'Agents find it for "' || (j.value ->> '$.question') || '"' FROM page, json_each(page.answers) j
+      )
+      SELECT line FROM lines WHERE line IS NOT NULL ORDER BY n
+  usage_text:
+    sql: SELECT group_concat('- ' || line, char(10)) AS text FROM usage
   params:
     sql: |
       SELECT j.value ->> '$.name' AS name, j.value ->> '$.label' AS label,
@@ -97,10 +120,6 @@ data:
              CASE WHEN j.value ->> '$.form' THEN 'yes' ELSE 'no' END AS form
       FROM page, json_each(page.actions) j
       ORDER BY j.key
-  answers:
-    sql: |
-      SELECT j.value ->> '$.question' AS question
-      FROM page, json_each(page.answers) j
   # An inline view has no file to open: its YAML, as written.
   yaml:
     sql: |
@@ -108,30 +127,28 @@ data:
       FROM page WHERE :spec IS NOT NULL
 view:
   stack:
-  - id: source
-    title: ''
-    viz: markdown
-    from: source
-    empty: ''
-    markdown: { text: text }
   - id: about
-    title: Page
+    title: ''
     viz: detail
     from: about
     columns:
     - { key: title, label: Title }
     - { key: id, label: Id }
     - { key: extension, label: Extension }
-    - { key: file, label: File }
-    - { key: shows, label: Shows }
-    - { key: is_default, label: Default for it }
-    - { key: found, label: Found in }
-    - { key: agents, label: Agents read it }
-    - { key: label, label: Tab label }
-    - { key: updates, label: Updates }
-    - { key: takes_comments, label: Takes comments }
-    - { key: runs, label: Runs }
+    - { key: file, label: File, link: { kind: file } }
     - { key: origin, label: Origin }
+    - { key: runs, label: Runs }
+  - id: description
+    title: Description
+    viz: markdown
+    from: description
+    empty: ''
+    markdown: { text: text }
+  - id: usage
+    title: How it's used
+    viz: markdown
+    from: usage_text
+    markdown: { text: text }
   - id: params
     title: Params
     viz: table
@@ -172,13 +189,6 @@ view:
     - { key: offered, label: Offered on }
     - { key: when, label: Only when }
     - { key: form, label: Opens a form }
-  - id: answers
-    title: Questions it answers
-    viz: list
-    from: answers
-    empty: It names no questions.
-    columns:
-    - { key: question }
   # Only an inline view's: nothing at all for a page with a file.
   - id: yaml
     title: ''

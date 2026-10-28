@@ -244,12 +244,14 @@ defines what the person sees:
   name is a plain identifier, never a dataset's (`v_*`, `m_*`).
 - **Show Definition** is foundation's hidden `definition` page (params
   `of`, the page id, or `spec`, an inline view's exact YAML, and `params`,
-  its params as JSON text), from one `oxplow.page.definition` call: a
-  View source link (the file view), where the page comes from and how it
-  is found, its params with this run's values, its loaders (what each
-  runs and reads, its rows), its node tree (embeds and slot mounts
-  included), its actions where they sit, and the questions it answers.
-  Only an inline view, which has no file, shows its YAML.
+  its params as JSON text), from one `oxplow.page.definition` call:
+  where the page comes from (its file a link to the file view), its
+  description, how it is used (a line each: what it draws, how it is
+  opened, its tab, updates, comments, how agents read and find it), its
+  params with this run's values, its loaders (what each runs and reads,
+  its rows), its node tree (embeds and slot mounts included) and its
+  actions where they sit. Only an inline view, which has no file, shows
+  its YAML.
 - **`view:`** (and an optional `rail:`) — a tree of nodes: `stack`,
   `grid` (children with `size`), `switch` (`{ param, children }`: the
   child whose id is the param's value), `viz` (+ `from: <loader>`, the

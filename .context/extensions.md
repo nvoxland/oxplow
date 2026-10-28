@@ -2268,7 +2268,7 @@ Where it lives, and what is loaded:
   files, so they say what to edit.
 - **Show Definition** is foundation's hidden `definition` page: the page
   part by part from `oxplow.page.definition` (where it comes from, params,
-  loaders, nodes, actions, answers) and a View source link to its file;
+  loaders, nodes, actions, answers), its file a link to the file view;
   only an inline view shows its YAML (pages-and-tabs.md).
 - **An inline page** (`parse_inline_page`: a markdown ` ```oxplow-page `
   block, an agent's `oxplow_show_page { spec }`) only reads: no `command`

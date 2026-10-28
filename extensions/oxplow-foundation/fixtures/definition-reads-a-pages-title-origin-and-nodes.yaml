@@ -1,5 +1,6 @@
 # What a page is made of, part by part: the title the tab's label reads,
-# where it comes from and a link to its source, its params with this
+# where it comes from (its file a link), what it is for, how it is used
+# (one line each), its params with this
 # run's values, its loaders, its nodes and its actions where they sit.
 # A page with a file shows no YAML: its source opens in the file view.
 when: { page: oxplow-foundation/definition, params: { of: oxplow-foundation/commit, params: '{"sha":"abc1234"}', stream_id: 1 } }
@@ -10,9 +11,18 @@ expect:
         - { title: Commit }
     about:
       rows:
-        - { title: Commit, id: oxplow-foundation/commit, extension: oxplow-foundation, shows: oxplow/commit }
-    source:
+        - { title: Commit, id: oxplow-foundation/commit, extension: oxplow-foundation, file: $any }
+    description:
       rows: 1
+    usage:
+      rows:
+        - { line: "It draws `oxplow/commit` and is the page that opens one." }
+        - { line: "It isn't in the launcher: opening a `oxplow/commit` opens it." }
+        - { line: $any }
+        - { line: "It runs again when its data changes." }
+        - { line: "People can't comment on it." }
+        - { line: "An agent reads it with `oxplow_run_page`; it isn't offered as a tool of its own." }
+        - { line: "Agents find it for \"What did this commit change?\"" }
     params:
       rows:
         - { name: uri }

@@ -16,9 +16,7 @@ expect:
   loaders:
     about:
       rows:
-        - { title: Inline release }
-    source:
-      rows: 0
+        - { title: Inline release, file: null }
     nodes:
       rows:
         - { id: layout, kind: stack }
