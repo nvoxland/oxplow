@@ -171,7 +171,7 @@ model the SQL reads and the command it runs. Prefer `answers:` on pages.
      deletions? }] } } }` (a commit the git indexer read), `{ observe: {
      change: { kind?, target, files?: [{ path, status?, additions?,
      deletions?, zone?, is_test? }], functions?: [{ path, symbol, status?,
-     body_changed?, length?, params_before?, params_after?,
+     body_changed?, length?, params_before?, params_after?, complexity?,
      complexity_delta?, … }] } } }` (what the change analysis stored for a
      change: `kind` is `commit` by default, an effort's `target` is its id
      like `eff1`; the models over a change read it, and the
@@ -200,7 +200,7 @@ model the SQL reads and the command it runs. Prefer `answers:` on pages.
      `oxplow.vcs.commit`, whose answer has the commit's `rev`), `{ observe: { refs: { branches?: [{ name, head, stream?, … }], tags?, heads? } } }`
      (what the git indexer read of branches, tags and the stream's head; a
      `snapshot` also takes `revision` and `branch`), `{ observe: { visit: { page, kind?, label?, thread?, duration_ms? } } }` (a
-     page the person opened, as the shell records it), `{ observe: { facts: { measure, items: [{ value?, path?, line?, rule?, severity? }] } } }`
+     page the person opened, as the shell records it), `{ observe: { facts: { measure, items: [{ value?, path?, line?, rule?, severity?, dims? }] } } }`
      (findings of a measure, as a collector's capture records them) and `{ observe: { retention: { days } } }` (the log's retention
      sweep as it runs that many days from now: payloads expire, envelopes
      stay);

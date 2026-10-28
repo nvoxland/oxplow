@@ -1,0 +1,44 @@
+# An effort changes a migration and adds a complex function; its tests
+# were reported, not observed. The collector's facts (the DDL in the
+# migration), core's test evidence and the analysis of its change make the
+# verdict, and the next snapshot's facts change it. (Oxplow's own work
+# list, effort policy and wiki are bundled's.)
+requires: [oxplow-bundled]
+given:
+  - observe: { turn: { prompt: Add users, during: [{ command: oxplow.effort.open, input: { thread: thr1 } }], tools: [{ name: Write, kind: edit, paths: [migrations/0001_users.sql, src/lib.rs], ok: true }], write: { path: migrations/0001_users.sql, body: "CREATE TABLE users (id INT);\nALTER TABLE accounts ADD owner INT;\n" } } }
+  - { command: oxplow.test.record_run, as: agent, input: { command: cargo test, passed: 3, failed: 0, total: 3 } }
+  - { command: oxplow.effort.close, input: { effort: eff1 } }
+  - observe: { change: { kind: effort, target: eff1, functions: [{ path: src/lib.rs, symbol: pick, status: added, complexity: 17 }] } }
+  - observe:
+      facts:
+        measure: schema_review.ddl
+        items:
+          - { path: migrations/0001_users.sql, value: 1, dims: { schema_review.ddl_kind: create } }
+          - { path: migrations/0001_users.sql, value: 1, dims: { schema_review.ddl_kind: alter } }
+when: { sql: "SELECT verdict, reasons, statements FROM v_schema_review_verdict WHERE effort_id = 1" }
+expect:
+  rows:
+    - verdict: changes requested
+      reasons: its last test run was only reported; a new function of complexity 17
+      statements: 2.0
+steps:
+  - when: { page: effort-verdict, params: { effort_id: 1 } }
+    expect:
+      loaders:
+        effort_verdict:
+          rows:
+            - { text: "Schema review: changes requested", tone: danger }
+            - { text: "• its last test run was only reported", tone: danger }
+            - { text: "• a new function of complexity 17", tone: danger }
+  # The migration drops a table now: the next snapshot's facts say so.
+  - given:
+      - observe:
+          facts:
+            measure: schema_review.ddl
+            items:
+              - { path: migrations/0001_users.sql, value: 1, dims: { schema_review.ddl_kind: create } }
+              - { path: migrations/0001_users.sql, value: 1, dims: { schema_review.ddl_kind: drop } }
+  - when: { sql: "SELECT reasons FROM v_schema_review_verdict WHERE effort_id = 1" }
+    expect:
+      rows:
+        - reasons: drops a table; its last test run was only reported; a new function of complexity 17
