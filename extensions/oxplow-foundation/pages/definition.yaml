@@ -31,10 +31,10 @@ data:
              CASE WHEN json_array_length(page."for") = 0 THEN NULL
                   WHEN "default" THEN 'yes: it opens when one is opened'
                   ELSE 'no: another page is the default' END AS is_default,
-             CASE WHEN category IS NOT NULL THEN 'the launcher, under ' || category
-                  WHEN hidden THEN 'only from other pages'
-                  ELSE 'the launcher' END
-               || CASE WHEN pinned THEN '; pinned' ELSE '' END AS found,
+             CASE WHEN category IS NOT NULL AND NOT hidden THEN 'the launcher, under ' || category
+                  WHEN json_array_length(page."for") > 0 THEN 'opening what it shows'
+                  ELSE 'links from other pages' END
+               || CASE WHEN pinned THEN '; its tabs are pinned' ELSE '' END AS found,
              CASE WHEN tool IS NOT NULL THEN 'as the tool `' || tool || '`' ELSE 'through oxplow_run_page' END AS agents,
              label,
              CASE WHEN refresh THEN 'when its data changes, and on Refresh' ELSE 'when its data changes' END AS updates,
@@ -104,7 +104,7 @@ data:
   # An inline view has no file to open: its YAML, as written.
   yaml:
     sql: |
-      SELECT '```yaml' || char(10) || yaml || char(10) || '```' AS text
+      SELECT '### YAML' || char(10) || char(10) || '```yaml' || char(10) || yaml || char(10) || '```' AS text
       FROM page WHERE :spec IS NOT NULL
 view:
   stack:
@@ -112,6 +112,7 @@ view:
     title: ''
     viz: markdown
     from: source
+    empty: ''
     markdown: { text: text }
   - id: about
     title: Page
@@ -178,8 +179,10 @@ view:
     empty: It names no questions.
     columns:
     - { key: question }
+  # Only an inline view's: nothing at all for a page with a file.
   - id: yaml
-    title: YAML
+    title: ''
     viz: markdown
     from: yaml
+    empty: ''
     markdown: { text: text }
