@@ -31,6 +31,7 @@ import { dirUri, fileLinesUri, fileUri, identityOf, isOxplowScheme, linkTarget, 
 import { extensionWikilinkRef, resourceInfo, useExtensionRefTitle, useResources } from "../../resources.js";
 import { attachPanZoom, loadMermaid } from "./mermaidRender.js";
 import { CopyCodeButton } from "./CopyCodeButton.js";
+import { rehypeHighlightCode } from "./codeHighlight.js";
 import { InlineView } from "./InlineView.js";
 import { followLink, linkMenu, type OpenRef } from "./links.js";
 
@@ -769,6 +770,7 @@ export function MarkdownView({ body, maxHeight, style, className }: MarkdownView
     <div ref={ref} className={wrapperClassName} style={wrapperStyle}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
+        rehypePlugins={[rehypeHighlightCode]}
         urlTransform={urlTransform}
         components={{
           pre: ({ node, children, ...props }) => {

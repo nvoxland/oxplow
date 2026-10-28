@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { NodeViewContent, NodeViewWrapper, ReactNodeViewRenderer } from "@tiptap/react";
 import type { NodeViewProps } from "@tiptap/react";
-import { CodeBlock } from "@tiptap/extension-code-block";
+import { CodeBlockLowlight } from "@tiptap/extension-code-block-lowlight";
 import { Pencil } from "lucide-react";
 import { renderMermaidInto } from "./mermaidRender.js";
 import { InlineView } from "./InlineView.js";
 import { CopyCodeButton } from "./CopyCodeButton.js";
+import { lowlight } from "./codeHighlight.js";
 
 /**
  * Tiptap node that renders fenced `mermaid` code blocks as live SVG
@@ -204,7 +205,9 @@ function PageNodeView({ node, editor, getPos }: NodeViewProps) {
   );
 }
 
-export const FencedBlock = CodeBlock.extend({
+// Highlighted as the viewer highlights (`codeHighlight.ts`): lowlight's
+// decorations over the editable text, so the stored fence is unchanged.
+export const FencedBlock = CodeBlockLowlight.configure({ lowlight }).extend({
   name: "codeBlock",
   addNodeView() {
     return ReactNodeViewRenderer((props) => {
@@ -220,19 +223,8 @@ export const FencedBlock = CodeBlock.extend({
           style={{ margin: "12px 0" }}
         >
           <CopyCodeButton read={() => props.node.textContent} />
-          <pre
-            style={{
-              margin: 0,
-              padding: "10px 12px",
-              background: "var(--surface-card)",
-              border: "1px solid var(--border-subtle)",
-              borderRadius: 6,
-              fontFamily: "var(--font-mono)",
-              fontSize: "var(--text-sm)",
-              color: "var(--text-primary)",
-              overflowX: "auto",
-            }}
-          >
+          {/* Drawn as the viewer draws a code block (`.oxplow-md pre`). */}
+          <pre>
             <NodeViewContent<"code"> as="code" />
           </pre>
         </NodeViewWrapper>

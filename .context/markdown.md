@@ -68,7 +68,11 @@ set**, and a surface never builds its own:
 - **`oxplow-page` fences** draw a live read-only page in either mode
   (`InlineView`, below). In the editor, **Edit YAML** opens the original
   fenced source; Escape or leaving the block returns to its live view.
-- **Code blocks** carry a Copy (`CopyCodeButton`, top-right on hover).
+- **Code blocks** carry a Copy (`CopyCodeButton`, top-right on hover),
+  and are highlighted by their fence's language (```` ```sql ````):
+  `codeHighlight.ts`'s one lowlight, through `rehypeHighlightCode` in the
+  viewer and `CodeBlockLowlight` (decorations, the text unchanged) in the
+  editor. No language, or one lowlight doesn't know: plain.
 - **GFM tables**, images with the lightbox, `.oxplow-md` typography.
 - **Headings** are `h2`/`h3` under `.oxplow-md`: a page's Contents rail
   lists them (either mode).

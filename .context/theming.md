@@ -127,6 +127,14 @@ anchored range in the editor / prose surfaces.
 
 `--diff-add-bg` / `--diff-add-fg`, `--diff-remove-bg` / `--diff-remove-fg`.
 
+### Syntax
+
+`--syntax-keyword`, `-string`, `-number`, `-comment`, `-function`,
+`-type`, `-variable`, `-meta`: a code block's highlighting in prose
+(`Markdown/codeHighlight.ts`, one lowlight for the viewer and the
+editor; the `.hljs-*` rules in `index.html`). Monaco's `vs-dark` colors,
+so code reads the same in a page and in the editor.
+
 ### Blame overlay
 
 Two hue tracks (local amber / git blue), four saturation steps for age,

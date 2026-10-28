@@ -63,6 +63,14 @@ for (const mode of ["view", "edit"] as const) {
       Object.defineProperty(navigator, "clipboard", { configurable: true, value: clipboard });
     }
   });
+
+  test(`${mode}: a fence's language highlights its code; its text stays as written`, async () => {
+    const view = render(<Markdown value={"```sql\nSELECT 1 AS n\n```\n"} {...props} />);
+    await settle();
+    const keyword = view.container.querySelector("pre .hljs-keyword");
+    expect(keyword?.textContent).toBe("SELECT");
+    expect(view.container.querySelector("pre")?.textContent?.trim()).toBe("SELECT 1 AS n");
+  });
 }
 
 test("the editor draws a mermaid fence as a diagram block, as the viewer does", async () => {

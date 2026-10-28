@@ -130,6 +130,16 @@
         --diff-add-fg: #a7f3d0;
         --diff-remove-bg: #3a1f25;
         --diff-remove-fg: #fda4af;
+        /* Syntax: a code block's highlighting (lowlight), in Monaco's
+           vs-dark colors so code reads the same in prose and the editor. */
+        --syntax-keyword: #569cd6;
+        --syntax-string: #ce9178;
+        --syntax-number: #b5cea8;
+        --syntax-comment: #6a9955;
+        --syntax-function: #dcdcaa;
+        --syntax-type: #4ec9b0;
+        --syntax-variable: #9cdcfe;
+        --syntax-meta: #c586c0;
 
         /* Legacy aliases — now mapped onto the unified semantic tier so
            components that haven't migrated still pick up the cool palette
@@ -391,14 +401,25 @@
         font-family: var(--font-mono);
         font-size: 0.85em;
         line-height: 1.5;
-        background: var(--surface-card);
-        border: 1px solid var(--border-subtle);
-        border-radius: 4px;
+        /* Raised off the page (and a card) so a block reads as code. */
+        background: var(--surface-elevated);
+        border: 1px solid var(--border-strong);
+        border-radius: 6px;
         padding: 10px 12px;
         overflow-x: auto;
         margin: 0 0 1em;
+        color: var(--text-primary);
       }
       .oxplow-md pre code { background: transparent; border: 0; padding: 0; }
+      /* highlight.js classes (codeHighlight.ts) on the theme's syntax colors. */
+      .oxplow-md .hljs-keyword, .oxplow-md .hljs-built_in, .oxplow-md .hljs-literal, .oxplow-md .hljs-selector-tag { color: var(--syntax-keyword); }
+      .oxplow-md .hljs-string, .oxplow-md .hljs-regexp, .oxplow-md .hljs-template-string { color: var(--syntax-string); }
+      .oxplow-md .hljs-number { color: var(--syntax-number); }
+      .oxplow-md .hljs-comment, .oxplow-md .hljs-quote { color: var(--syntax-comment); font-style: italic; }
+      .oxplow-md .hljs-title, .oxplow-md .hljs-title.function_ { color: var(--syntax-function); }
+      .oxplow-md .hljs-type, .oxplow-md .hljs-title.class_ { color: var(--syntax-type); }
+      .oxplow-md .hljs-variable, .oxplow-md .hljs-attr, .oxplow-md .hljs-property, .oxplow-md .hljs-params, .oxplow-md .hljs-symbol { color: var(--syntax-variable); }
+      .oxplow-md .hljs-meta, .oxplow-md .hljs-operator, .oxplow-md .hljs-subst { color: var(--syntax-meta); }
       /* A code block's Copy (viewer and editor): top-right, shown on hover. */
       .oxplow-md-code { position: relative; }
       .oxplow-md-code-copy {
