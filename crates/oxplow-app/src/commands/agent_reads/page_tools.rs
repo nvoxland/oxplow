@@ -615,6 +615,14 @@ struct DefinitionRow {
     kind: &'static str,
     /// A viz node's viz (`table`, `detail`, …).
     viz: Option<String>,
+    /// What another kind is set to: a switch's param, an embed's page, a
+    /// slot's name, a component's.
+    detail: Option<String>,
+    /// A viz's columns, `key` or `key (Label)`.
+    columns: Vec<String>,
+    /// The rest of a viz's settings as its YAML gives them: its role
+    /// block (`tree`, `terminal`, `markdown`, …), `empty`, row styling.
+    settings: Option<Value>,
     title: Option<String>,
     /// The page it belongs to (an embed's own page for its nodes).
     page: String,
@@ -700,6 +708,36 @@ fn definition_parts(run: &PageRun) -> (Vec<Value>, Vec<Value>, Vec<Value>) {
     (params, loaders, actions)
 }
 
+/// A viz's settings beyond what its row already says (its viz, columns,
+/// actions, where it comes from): what its YAML set, unset ones left out.
+fn viz_settings(config: &crate::pages::spec::VizConfig) -> Option<Value> {
+    const SAID: [&str; 10] = [
+        "id",
+        "extension",
+        "slug",
+        "title",
+        "viz",
+        "params",
+        "columns",
+        "actions",
+        "origin",
+        "fills",
+    ];
+    let Ok(Value::Object(all)) = serde_json::to_value(config) else {
+        return None;
+    };
+    let set: serde_json::Map<String, Value> = all
+        .into_iter()
+        .filter(|(k, v)| {
+            !SAID.contains(&k.as_str())
+                && !matches!(v, Value::Null | Value::Bool(false))
+                && v.as_array().is_none_or(|a| !a.is_empty())
+                && v.as_object().is_none_or(|o| !o.is_empty())
+        })
+        .collect();
+    (!set.is_empty()).then_some(Value::Object(set))
+}
+
 fn kind_name(kind: &NodeKind) -> &'static str {
     match kind {
         NodeKind::Stack { .. } => "stack",
@@ -738,6 +776,27 @@ fn definition_rows(
         ),
         _ => (None, None),
     };
+    let detail = match &def.kind {
+        NodeKind::Switch { param, .. } => Some(format!("on `{param}`")),
+        NodeKind::Embed { page, .. } => Some(format!("`{page}`")),
+        NodeKind::Slot { name } => Some(format!("`{}.{name}`", run.page.id)),
+        NodeKind::Component { component, .. } => Some(format!("`{component}`")),
+        _ => None,
+    };
+    let (columns, settings) = match &def.kind {
+        NodeKind::Viz { config, .. } => (
+            config
+                .columns
+                .iter()
+                .map(|c| match &c.label {
+                    Some(label) if label != &c.key => format!("{} ({label})", c.key),
+                    _ => c.key.clone(),
+                })
+                .collect(),
+            viz_settings(config),
+        ),
+        _ => (Vec::new(), None),
+    };
     let (loader_kind, source) = match from.as_deref().and_then(|f| run.page.loader(f)) {
         Some(d) => {
             let (kind, source) = loader_source(&d.loader);
@@ -752,6 +811,9 @@ fn definition_rows(
         parent: parent.map(str::to_string),
         kind: kind_name(&def.kind),
         viz,
+        detail,
+        columns,
+        settings,
         title: def.title.clone(),
         page: run.page.id.clone(),
         extension: run.page.extension.clone(),
@@ -1379,6 +1441,33 @@ mod definition_page_tests {
     // Comments, quoted strings and whitespace must survive Show Definition:
     // this is the exact inline YAML, not a serialization of the parsed page.
     const INLINE_SPEC: &str = "# authored inline, with its own comment\ntitle: 'Inline release'\ndata:\n  numbers: { sql: 'SELECT 7 AS n' }\nview:\n  id: layout\n  stack:\n    - { id: total, title: Total, viz: number, from: numbers }\n    - { id: note, markdown: 'A preserved note.' }\n";
+
+    /// A node says what it is set to, as its YAML does: a viz its columns
+    /// and its role block, a switch its param.
+    #[tokio::test]
+    async fn an_inline_definitions_nodes_say_what_they_are_set_to() {
+        const SPEC: &str = "title: Set\nparams: [{ name: area, role: filter, default: one }]\ndata:\n  items: { sql: \"SELECT 'a' AS id, NULL AS parent\" }\nview:\n  switch:\n    param: area\n    children:\n      - { id: one, viz: tree, from: items, tree: { id: id, parent: parent, label: id }, columns: [{ key: id, label: Item }], empty: None yet. }\n      - { id: two, markdown: 'Hi.' }\n";
+        let f = crate::test_fixtures::services_with_effort().await;
+        let out = f
+            .svc
+            .commands
+            .run(
+                &Actor::Human,
+                "oxplow.page.definition",
+                json!({ "spec": SPEC }),
+                false,
+            )
+            .await
+            .unwrap();
+        let nodes = out.result["nodes"].as_array().unwrap();
+        let switch = &nodes[0];
+        assert_eq!(switch["detail"], json!("on `area`"), "{switch}");
+        let one = nodes.iter().find(|n| n["id"] == "one").unwrap();
+        assert_eq!(one["columns"], json!(["id (Item)"]), "{one}");
+        assert_eq!(one["settings"]["tree"]["label"], json!("id"), "{one}");
+        assert_eq!(one["settings"]["empty"], json!("None yet."), "{one}");
+        assert!(one["settings"].get("columns").is_none(), "{one}");
+    }
 
     #[tokio::test]
     async fn an_inline_definition_preserves_its_exact_yaml_and_names_its_nodes() {

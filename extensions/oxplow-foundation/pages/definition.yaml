@@ -102,12 +102,30 @@ data:
       FROM loaders
   nodes:
     sql: |
-      SELECT j.value ->> '$.id' AS id, j.value ->> '$.parent' AS parent,
+      SELECT j.key AS n, j.value ->> '$.id' AS id, j.value ->> '$.parent' AS parent,
+             j.value ->> '$.depth' AS depth,
              j.value ->> '$.kind' AS kind, j.value ->> '$.viz' AS viz,
              j.value ->> '$.title' AS title, j.value ->> '$.loader' AS loader,
-             j.value ->> '$.page' AS page
+             j.value ->> '$.page' AS page, j.value ->> '$.detail' AS detail,
+             (SELECT group_concat(value, ', ') FROM json_each(j.value -> '$.columns')) AS columns,
+             (SELECT group_concat(key || ' `' || value || '`', ' · ') FROM json_each(j.value -> '$.settings')) AS settings
       FROM page, json_each(page.nodes) j
       ORDER BY j.key
+  # The view as an outline, a node a line, nested as the view nests: what
+  # it is, what it shows, its title, columns and settings (embedded
+  # pages' nodes say which page they are from).
+  view:
+    sql: |
+      SELECT group_concat(
+               substr('                                        ', 1, 2 * depth) || '- **' || id || '** — '
+               || CASE WHEN kind = 'viz' THEN 'a `' || viz || '` viz' || coalesce(' of loader `' || loader || '`', '')
+                       ELSE 'a ' || kind || coalesce(' ' || detail, '') END
+               || CASE WHEN title IS NOT NULL AND title <> '' THEN ', titled “' || title || '”' ELSE '' END
+               || CASE WHEN page <> (SELECT page FROM page) THEN ', from `' || page || '`' ELSE '' END
+               || coalesce(char(10) || substr('                                        ', 1, 2 * depth + 2) || 'columns: ' || columns, '')
+               || coalesce(char(10) || substr('                                        ', 1, 2 * depth + 2) || settings, ''),
+               char(10)) AS text
+      FROM (SELECT * FROM nodes ORDER BY n)
   actions:
     sql: |
       SELECT j.value ->> '$.label' AS label, j.value ->> '$.command' AS command,
@@ -168,16 +186,9 @@ view:
     markdown: { text: text }
   - id: nodes
     title: View
-    viz: tree
-    from: nodes
-    tree: { id: id, parent: parent, label: id }
-    columns:
-    - { key: id, label: Node }
-    - { key: kind, label: Kind }
-    - { key: viz, label: Viz }
-    - { key: title, label: Title }
-    - { key: loader, label: Shows }
-    - { key: page, label: Page }
+    viz: markdown
+    from: view
+    markdown: { text: text }
   - id: actions
     title: Actions
     viz: table

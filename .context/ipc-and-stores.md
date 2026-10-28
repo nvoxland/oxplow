@@ -927,7 +927,10 @@ The result is the page as the runner parsed it, flat: its metadata (`file`,
 `comments`, `needs`, `label`, `description`, origin), `params` (each with
 the value this run used), `loaders` (each with its kind and source, the
 loaders it `uses`, the datasets it `reads`, and the rows it gave or its
-error), `nodes` (parent, page, source file, viz, loader kind and source),
+error), `nodes` (parent, depth, page, source file, viz, loader kind and
+source, `detail` — a switch's param, an embed's page, a slot's name —
+`columns` as `key (Label)`, and `settings`: the rest of a viz's YAML,
+its role block, `empty` and row styling),
 `actions` (the page's and each viz node's, `on` saying where), `answers`,
 and `yaml`. For inline specs, `yaml` is the exact submitted text, including
 comments and formatting; for deployed pages it is the running file's text.

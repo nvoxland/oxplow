@@ -249,7 +249,8 @@ defines what the person sees:
   description, how it is used (a line each: what it draws, how it is
   opened, its tab, updates, comments, how agents read and find it), its
   params with this run's values, its loaders (what each runs and reads,
-  its rows), its node tree (embeds and slot mounts included) and its
+  its rows), its view as an outline (a node a line: its viz and loader,
+  title, columns and settings; embeds and slot mounts included) and its
   actions where they sit. Only an inline view, which has no file, shows
   its YAML.
 - **`view:`** (and an optional `rail:`) — a tree of nodes: `stack`,

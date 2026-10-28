@@ -36,9 +36,11 @@ expect:
     nodes:
       rows:
         - { id: stack, kind: stack }
-        - { id: detail, kind: viz, viz: detail, loader: detail }
-        - { id: files, kind: viz, viz: tree, loader: files }
-        - { id: sections, kind: slot }
+        - { id: detail, kind: viz, viz: detail, loader: detail, columns: "subject (Subject), body (Message), author (Author), committed_at (Date), sha (Version), parents (Parents)" }
+        - { id: files, kind: viz, viz: tree, loader: files, columns: name (File) }
+        - { id: sections, kind: slot, detail: "`oxplow-foundation/commit.sections`" }
+    view:
+      rows: 1
     actions:
       rows:
         - { label: Cherry-pick, command: oxplow.git.cherry_pick, on: detail }
