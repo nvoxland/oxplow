@@ -59,6 +59,20 @@ test("a whole-page action presses on the run, asking first when its command does
   await waitFor(() => expect(queryByTestId("page-action-confirm")).toBeNull());
 });
 
+test("a whole-page action with `when` is offered only while the page's row has that column truthy", async () => {
+  const run = tablePage({
+    actions: [
+      fakeAction({ id: "stop", label: "Stop", when: "running", oneRow: true }),
+      fakeAction({ id: "start", label: "Start", when: "stopped", oneRow: true }),
+    ],
+  });
+  run.loaders.items = loader(["id", "title", "running", "stopped"], [["a", "Alpha", 1, 0]]);
+  const { runs } = fakePageRuns(run);
+  const view = render(<PageHost pageKey={key} runs={runs} />);
+  await view.findByTestId("action-page-action-stop");
+  expect(view.queryByTestId("action-page-action-start")).toBeNull();
+});
+
 test("a whole-page form action opens its form from page_action_form and submits it as a press", async () => {
   const calls: unknown[][] = [];
   const press: RunPageAction = async (...args) => {

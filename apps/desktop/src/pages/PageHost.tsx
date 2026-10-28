@@ -24,6 +24,7 @@ import type { PageAction } from "../kit/actions.js";
 import { Loading } from "../kit/Loading.js";
 import { ActionForm, useVizActions } from "../viz/VizView.js";
 import { FormSourceContext } from "../viz/formSource.js";
+import { offeredWholePage } from "../viz/vizActions.js";
 import { VizActionRunnerContext } from "../viz/vizActionRunner.js";
 import { usePageRunsStore, usePageRunWith, type PageKey, type PageRuns } from "../pageRuns.js";
 import { Page } from "../tabs/Page.js";
@@ -64,6 +65,8 @@ export interface PageHostProps {
   /** Keep a shown view's exact source in its tab's history state. */
   onSpecYaml?(yaml: string): void;
 }
+
+const NO_ROWS = { columns: [], rows: [] };
 
 /** How long a page may take before it says it is reading. */
 export const LOADING_AFTER_MS = 150;
@@ -109,7 +112,11 @@ export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, re
   const pageRunner = useNodeActions(runId, null);
   const pageForms = useNodeForms(runId, null);
   const actions = useVizActions(target, streamId, pageRunner);
-  const offered = (page?.actions ?? []).filter((a) => !a.row && !a.group && !a.edit);
+  // One that reads the page's row (`when`, `{{row.*}}`) reads the first
+  // loader's one row, as the daemon does when it runs.
+  const firstLoader = page?.loaders[0]?.name;
+  const pageRows = (firstLoader ? run?.loaders[firstLoader]?.result : undefined) ?? NO_ROWS;
+  const offered = (page?.actions ?? []).filter((a) => offeredWholePage(a, pageRows));
   const reads = usePageReads();
   const [copied, setCopied] = useState(false);
   const copy = () => {
