@@ -649,7 +649,7 @@ fn switch_params(view: &serde_yaml::Value) -> Vec<String> {
 }
 
 /// A loader name: a plain lowercase identifier that can't be mistaken for
-/// (or shadow) a published dataset.
+/// (or shadow) a published dataset, or be a SQL keyword.
 fn loader_name_problem(name: &str) -> Option<String> {
     let plain = name.chars().next().is_some_and(|c| c.is_ascii_lowercase())
         && name
@@ -663,6 +663,12 @@ fn loader_name_problem(name: &str) -> Option<String> {
     if name.starts_with("v_") || name.starts_with("m_") || matches!(name, "temp" | "main") {
         return Some(format!(
             "loader `{name}`: that name is a dataset's (or the database's): name it something else"
+    if oxplow_db::sql_tokens::is_reserved_word(name) {
+        return Some(format!(
+            "loader `{name}`: that name is a SQL keyword, which SQL can't name a table by: \
+             name it something else"
+        ));
+    }
         ));
     }
     None

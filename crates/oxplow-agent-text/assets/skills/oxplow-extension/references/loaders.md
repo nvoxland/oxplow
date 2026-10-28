@@ -13,6 +13,8 @@ optional `columns` (keys, labels and formats its nodes default to) and
 
 **Names** are lowercase letters, digits and `_`, starting with a letter.
 Never `v_…`, `m_…`, `temp` or `main`: they must not look like a dataset.
+Never a SQL keyword SQL can't name a table by (`order`, `group`, `from`,
+`commit`, `add`; `row` and `key` are fine): check says which.
 
 **Args** (`params:` of a sql or page loader, `args:` of a command loader)
 are `{ param: <name> }` (a page param), `{ from: <loader>.<column> }` (an

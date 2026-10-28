@@ -15,7 +15,7 @@ loaders:
     - key: change_id
     - key: base_revision
     - key: head_revision
-  commit:
+  commit_form:
     sql: |
       SELECT 'str' || :stream_id AS stream, '' AS message
       WHERE EXISTS (SELECT 1 FROM v_change_file WHERE change_id = :change_id)
@@ -53,7 +53,7 @@ view:
   stack:
   - id: commit
     title: Commit
-    from: commit
+    from: commit_form
     viz: form
     form:
       command: oxplow.vcs.commit

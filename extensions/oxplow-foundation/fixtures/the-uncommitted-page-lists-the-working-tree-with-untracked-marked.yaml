@@ -17,4 +17,4 @@ expect:
         contains:
           - { id: tracked.txt, icon: modified }
           - { id: loose.txt, icon: added }
-    commit: { rows: [{ stream: str1 }] }
+    commit_form: { rows: [{ stream: str1 }] }

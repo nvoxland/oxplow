@@ -22,7 +22,7 @@ expect:
           can_prioritize: 1
           thread_ref: thr1
         - { title: Plain item }
-    add: { rows: [{ state: todo }] }
+    new_item: { rows: [{ state: todo }] }
 steps:
   - params: { q: plain }
     expect: { loaders: { items: { rows: [{ title: Plain item }] } } }

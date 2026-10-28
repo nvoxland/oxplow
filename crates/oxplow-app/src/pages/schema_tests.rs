@@ -96,6 +96,22 @@ view:
 }
 
 /// Later loaders read earlier ones as tables; a stack holds nodes, an
+/// A loader isn't named for a SQL keyword SQLite won't take as a table
+/// name (`order`, not `row`): the SQL that reads it couldn't name it, and
+/// a later loader's `ORDER BY` would read as reading it.
+#[test]
+fn a_loader_named_for_a_sql_keyword_is_refused() {
+    let why = refused(
+        "title: T\nloaders:\n  order: { rows: [{ a: 1 }] }\nview: { viz: table, from: order }\n",
+    );
+    assert!(why.contains("loader `order`"), "{why}");
+    assert!(why.contains("SQL keyword"), "{why}");
+    page(
+        "title: T\nloaders:\n  orders: { rows: [{ a: 1 }] }\nview: { viz: table, from: orders }\n",
+    )
+    .expect("a name that only starts like one is fine");
+}
+
 /// embed and a slot; ids are unique across the tree.
 #[test]
 fn a_composite_page_shares_its_loaders() {
