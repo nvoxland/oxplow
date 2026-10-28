@@ -37,7 +37,7 @@ ui:
 ## What a view may and may not do
 
 May:
-- read any published model (`v_work_item`, `v_thread`, …) through its
+- read any published dataset (`v_work_item`, `v_thread`, …) through its
   pages' loaders;
 - change work items through the commands it declares in
   `custom_components[].commands` (a table or form on a page uses `actions` /

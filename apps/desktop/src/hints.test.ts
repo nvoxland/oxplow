@@ -11,7 +11,7 @@ test("hints read from their nudge rows", () => {
         [4, "oxplow-bundled/landed-in-progress", "“t” is still in progress", "Main"],
         [2, "hint-muted", "muted", null],
       ],
-      reads: { models: [], sources: [] },
+      reads: { datasets: [], sources: [] },
       truncated: false,
     } as never),
   ).toEqual([

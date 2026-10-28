@@ -22,7 +22,7 @@ test("a committed change shows its hunk", async ({ page, daemon }) => {
   const commit = page.locator('[data-testid="page-file"]:visible');
   await expect(commit).toContainText("Add the emu file");
   // Its Change Analysis pages (oxplow-bundled's mounts in the page's
-  // `.sections` slot) read their extension's models (tsk977): once they
+  // `.sections` slot) read their extension's datasets (tsk977): once they
   // have rendered their runs, none failed.
   await expect(commit.locator(".ox-section-title").getByText("Change Analysis")).toBeVisible();
   await expect(commit).not.toContainText("no such table");

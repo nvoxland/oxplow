@@ -1,4 +1,4 @@
-# A synced pull request is a resource: its URI resolves to a model row and
+# A synced pull request is a resource: its URI resolves to a dataset row and
 # opens on the `pr` page, and the lifetimes page filters by state.
 given:
   - rows:

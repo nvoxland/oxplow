@@ -433,7 +433,7 @@ pub struct ComponentSql {
     pub sql: String,
     /// Positional (`?1`, `?2`).
     pub params: Vec<SqlCell>,
-    /// The stream the frame is shown in, for the live models.
+    /// The stream the frame is shown in, for the live datasets.
     pub stream: Option<i64>,
     /// Row cap: 1,000 by default, at most 10,000.
     pub limit: Option<usize>,
@@ -444,7 +444,7 @@ pub struct ComponentSql {
 }
 
 /// Run `call`'s SQL for a component that declares `sql: read`, at the
-/// version loaded now: read-only over the published models, as the
+/// version loaded now: read-only over the published datasets, as the
 /// component's run under its extension's permissions (`sql.read`),
 /// so the read is decided and recorded like a script's `sql.read`.
 pub async fn run_component_sql(
@@ -1438,7 +1438,7 @@ view:
         assert!(
             start
                 .reads
-                .models
+                .datasets
                 .iter()
                 .any(|m| m == "v_capability_provider"),
             "{:?}",
@@ -1904,7 +1904,7 @@ view:
     }
 
     /// A component that declares `sql: read` runs its own read-only SQL
-    /// over the models, held to its extension's `sql.read` permission; one that
+    /// over the datasets, held to its extension's `sql.read` permission; one that
     /// doesn't declare it is refused.
     #[tokio::test]
     async fn a_component_with_sql_read_queries_the_layer() {
@@ -1941,7 +1941,7 @@ view:
         let version = load_board(&fx, &root).await;
         let out = ask("SELECT ?1 AS n", version.clone()).await.unwrap();
         assert_eq!(out.rows, vec![vec![SqlCell::Int(2)]]);
-        // Read-only, as any query over the models is.
+        // Read-only, as any query over the datasets is.
         assert!(ask("DELETE FROM v_work_item", version).await.is_err());
     }
 

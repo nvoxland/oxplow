@@ -357,7 +357,7 @@ oxplow.connect().then(async (component) => {
 });
 ```
 
-`querySql` needs `sql: read` on the component and `permissions: [sql.read]` on the extension; it reads oxplow's models only, never writes.
+`querySql` needs `sql: read` on the component and `permissions: [sql.read]` on the extension; it reads oxplow's datasets only, never writes.
 `setTitle`, `setActions`, `openForm` and `showView` are a whole page's: a
 component inside another page's layout can't use them. `showView(yaml)` hands oxplow an
 inline page — `title`, read-only `sql` loaders under `data`, a `view`

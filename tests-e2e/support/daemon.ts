@@ -157,7 +157,7 @@ export async function startDaemon({ bin = process.env.OXPLOW_E2E_DAEMON, tmp = t
       env,
       stdio: ["pipe", "pipe", "pipe"],
       // Its own process group: what the daemon starts (a harness CLI asked
-      // for its models) can outlive it, and `stop` ends them with it.
+      // for its datasets) can outlive it, and `stop` ends them with it.
       detached: true,
     });
     child = spawned;
@@ -276,23 +276,23 @@ export async function settle(daemon: Daemon): Promise<void> {
 }
 
 /** Do `write`, and resolve with its result once the daemon has said every
- *  model in `models` changed (`modelsChanged`). The socket is open before
+ *  dataset in `datasets` changed (`datasetsChanged`). The socket is open before
  *  the write, and the daemon subscribes before it answers the upgrade
  *  (tsk995), so the event can't be missed. */
-export async function waitForModels<T>(daemon: Daemon, models: string[], write: () => Promise<T>): Promise<T> {
+export async function waitForModels<T>(daemon: Daemon, datasets: string[], write: () => Promise<T>): Promise<T> {
   const url = `${daemon.base.replace(/^http/, "ws")}/events?token=${encodeURIComponent(daemon.token)}`;
   const socket = new WebSocket(url);
   await new Promise<void>((resolve, reject) => {
     socket.addEventListener("open", () => resolve(), { once: true });
     socket.addEventListener("error", () => reject(new Error(`couldn't open ${url}`)), { once: true });
   });
-  const pending = new Set(models);
+  const pending = new Set(datasets);
   const changed = new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`no modelsChanged for ${[...pending].join(", ")}`)), 30_000);
+    const timer = setTimeout(() => reject(new Error(`no datasetsChanged for ${[...pending].join(", ")}`)), 30_000);
     socket.addEventListener("message", (msg) => {
-      const frame = JSON.parse(String(msg.data)) as { channel?: string; payload?: { kind?: string; models?: string[] } };
-      if (frame.channel !== "oxplow" || frame.payload?.kind !== "modelsChanged") return;
-      for (const m of frame.payload.models ?? []) pending.delete(m);
+      const frame = JSON.parse(String(msg.data)) as { channel?: string; payload?: { kind?: string; datasets?: string[] } };
+      if (frame.channel !== "oxplow" || frame.payload?.kind !== "datasetsChanged") return;
+      for (const m of frame.payload.datasets ?? []) pending.delete(m);
       if (pending.size === 0) {
         clearTimeout(timer);
         resolve();

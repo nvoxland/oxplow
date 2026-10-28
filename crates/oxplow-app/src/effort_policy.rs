@@ -13,7 +13,7 @@
 //! (`switch`): that is core's rule, whichever policy is active after.
 //!
 //! [`CommitOrSwitch`] is the built-in (`oxplow:commit-or-switch`). It uses
-//! only what any policy could: the `v_*` models and those commands.
+//! only what any policy could: the `v_*` datasets and those commands.
 //!
 //! Rule 1, linking and task switch:
 //! - an item moved to `in_progress` links the thread's open effort, opening
@@ -95,7 +95,7 @@ struct Open {
 }
 
 /// The built-in effort policy (`oxplow:commit-or-switch`): rules 1–3,
-/// reading through the `v_*` models and composing `effort.*` /
+/// reading through the `v_*` datasets and composing `effort.*` /
 /// `work_item.*` calls.
 pub struct CommitOrSwitch {
     /// The id it's declared under.

@@ -88,7 +88,7 @@ export interface OxplowComponent {
   /** Open one of oxplow's pages, in a new tab with `{ newTab: true }`.
    *  Rejects with an {@link OxplowError}. */
   navigate(ref: string, options?: { newTab?: boolean }): Promise<null>;
-  /** Run read-only SQL over oxplow's models (`?1` parameters). Needs
+  /** Run read-only SQL over oxplow's datasets (`?1` parameters). Needs
    *  `sql: read` on the component and `permissions.sql: read` on its
    *  extension. Rejects with an {@link OxplowError}. */
   querySql(sql: string, params?: OxplowCell[]): Promise<OxplowRows>;

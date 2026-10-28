@@ -204,11 +204,11 @@ fn a_loader_names_exactly_one_kind() {
 }
 
 #[test]
-fn a_loader_name_is_a_plain_identifier_and_not_a_model() {
+fn a_loader_name_is_a_plain_identifier_and_not_a_dataset() {
     let e = refused(
         "title: T\ndata:\n  v_commit: { sql: SELECT 1 }\nview: { viz: table, from: v_commit }\n",
     );
-    assert!(e.contains("`v_commit`") && e.contains("model"), "{e}");
+    assert!(e.contains("`v_commit`") && e.contains("dataset"), "{e}");
     let e = refused(
         "title: T\ndata:\n  Bad-Name: { sql: SELECT 1 }\nview: { viz: table, from: Bad-Name }\n",
     );

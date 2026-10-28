@@ -129,7 +129,7 @@ pub struct PageRunner<'a> {
 }
 
 /// An extension's draft: its source in a checkout other than the one that
-/// deploys, read over live data. Its queries read its models through an
+/// deploys, read over live data. Its queries read its datasets through an
 /// overlay; its commands are whatever is deployed (a draft's code never
 /// acts).
 #[derive(Debug, Clone)]
@@ -168,7 +168,7 @@ impl<'a> PageRunner<'a> {
     }
 
     /// The runner over `svc`'s data with `extension`'s draft in `checkout`:
-    /// its pages and its models as that checkout has them.
+    /// its pages and its datasets as that checkout has them.
     pub async fn draft(
         svc: &'a crate::Services,
         checkout: &Path,
@@ -535,7 +535,7 @@ impl<'a> PageRunner<'a> {
     /// `sql` with its `config('/key')` reads filled from `page`'s
     /// extension's settings, as they are stored now.
     async fn with_config(&self, page: &Page, sql: &str) -> Result<String, DomainError> {
-        if oxplow_db::models::config_reads(sql)?.is_empty() {
+        if oxplow_db::datasets::config_reads(sql)?.is_empty() {
             return Ok(sql.to_string());
         }
         match self.catalog.named(self.root, &page.extension) {
@@ -586,7 +586,7 @@ impl<'a> PageRunner<'a> {
                 .ok_or_else(|| format!("`{command}` returned no `{field}`"))?,
         };
         let mut result = rows_of(value);
-        result.reads.models = decl.reads.clone();
+        result.reads.datasets = decl.reads.clone();
         Ok(result)
     }
 
@@ -1125,7 +1125,7 @@ fn flow_params(
     out
 }
 
-/// The models a page param the run resolves itself reads: `head_sha`,
+/// The datasets a page param the run resolves itself reads: `head_sha`,
 /// when the page declares it, is the viewed stream's HEAD (`v_stream`), so
 /// a commit or a branch switch re-resolves it and re-runs what binds it.
 pub fn context_reads(page: &Page, param: &str) -> &'static [&'static str] {
@@ -1137,17 +1137,17 @@ pub fn context_reads(page: &Page, param: &str) -> &'static [&'static str] {
 }
 
 /// The loader runs of `run` (its embeds' and mounts' included) a change
-/// to `models` / `measures` doesn't reach, by key: a loader that read none
+/// to `datasets` / `measures` doesn't reach, by key: a loader that read none
 /// of them and reads no loader that did.
 pub fn unreached(
     run: &PageRun,
-    models: &[String],
+    datasets: &[String],
     measures: &[String],
 ) -> HashMap<String, LoaderRun> {
     let mut out = HashMap::new();
     fn walk(
         run: &PageRun,
-        models: &[String],
+        datasets: &[String],
         measures: &[String],
         out: &mut HashMap<String, LoaderRun>,
     ) {
@@ -1156,13 +1156,13 @@ pub fn unreached(
             let Some(r) = run.loaders.get(&decl.name) else {
                 continue;
             };
-            let reached = decl.reads.iter().any(|m| models.contains(m))
+            let reached = decl.reads.iter().any(|m| datasets.contains(m))
                 || decl.reads_params.iter().any(|p| {
                     context_reads(&run.page, p)
                         .iter()
-                        .any(|m| models.iter().any(|x| x == m))
+                        .any(|m| datasets.iter().any(|x| x == m))
                 })
-                || r.result.reads.models.iter().any(|m| models.contains(m))
+                || r.result.reads.datasets.iter().any(|m| datasets.contains(m))
                 || r.result.reads.measures.iter().any(|m| measures.contains(m))
                 || decl
                     .reads_loaders
@@ -1188,20 +1188,20 @@ pub fn unreached(
             nodes(rail, &mut embedded);
         }
         for e in embedded {
-            walk(e, models, measures, out);
+            walk(e, datasets, measures, out);
         }
     }
-    walk(run, models, measures, &mut out);
+    walk(run, datasets, measures, &mut out);
     out
 }
 
 /// The loaders of `page` that a change makes run again, in declaration
-/// order: those that read a changed model or bind a changed param, and
+/// order: those that read a changed dataset or bind a changed param, and
 /// every loader that reads one of those.
 pub fn dirty_loaders(
     page: &Page,
     run: &PageRun,
-    models: &[String],
+    datasets: &[String],
     params: &[String],
 ) -> Vec<String> {
     let mut dirty: Vec<String> = Vec::new();
@@ -1209,16 +1209,16 @@ pub fn dirty_loaders(
         let Some(r) = run.loaders.get(&decl.name) else {
             continue;
         };
-        let reads_model = r
+        let reads_dataset = r
             .result
             .reads
-            .models
+            .datasets
             .iter()
             .chain(decl.reads.iter())
-            .any(|m| models.contains(m));
+            .any(|m| datasets.contains(m));
         let binds_param = decl.reads_params.iter().any(|p| params.contains(p));
         let downstream = decl.reads_loaders.iter().any(|l| dirty.contains(l));
-        if reads_model || binds_param || downstream {
+        if reads_dataset || binds_param || downstream {
             dirty.push(decl.name.clone());
         }
     }

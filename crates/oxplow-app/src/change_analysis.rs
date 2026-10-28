@@ -452,7 +452,7 @@ pub(crate) fn hold_running_for_tests(svc: &crate::Services, id: i64) {
 /// consumer ([`refresh_change`]); this reads it, computing it the first
 /// time. While another call is computing the same change this returns it
 /// with status `running`; its rows' commit announces the results
-/// (`ModelsChanged` on `v_change`).
+/// (`DatasetsChanged` on `v_change`).
 pub async fn ensure_change(
     svc: &crate::Services,
     target: ChangeTarget,

@@ -11,14 +11,14 @@
 //!
 //! A [`Materializer`] names its asset and input tables and recomputes it.
 //! The [`Assets`] runner hears which tables each commit touched (from the
-//! one change loop in `models_changed.rs`), marks the materializers that
+//! one change loop in `datasets_changed.rs`), marks the materializers that
 //! read them dirty, and recomputes each once its inputs have been quiet
 //! for the coalesce window (a sweep's burst of writes is one recompute,
 //! not one per commit) — then records `asset_state { computed_at,
 //! events_to, snapshot_id, elapsed_ms }`. A recompute that fails is
 //! logged; the next change tries again.
 //!
-//! An asset on a **clock** (`every()`, a model's `materialize: { every: 1h }`,
+//! An asset on a **clock** (`every()`, a dataset's `materialize: { every: 1h }`,
 //! P8.B2) ignores its inputs' changes: it recomputes when its last
 //! recompute (`asset_state.computed_at`, persisted) is `every` old — at
 //! once when it never ran or is overdue, so a restart doesn't rebuild a
@@ -41,18 +41,18 @@ pub const COALESCE: Duration = Duration::from_secs(1);
 pub struct Recomputed {
     /// The snapshot it was computed against, when it has one.
     pub snapshot_id: Option<i64>,
-    /// For a materialized model: `full` or `incremental`.
+    /// For a materialized dataset: `full` or `incremental`.
     pub mode: Option<&'static str>,
-    /// For an incremental model: the highest watermark value it holds.
+    /// For an incremental dataset: the highest watermark value it holds.
     pub watermark: Option<i64>,
-    /// For a materialized model: how many rows it holds.
+    /// For a materialized dataset: how many rows it holds.
     pub row_count: Option<i64>,
 }
 
 /// One asset: its name, the tables it reads, and how to recompute it.
 #[async_trait]
 pub trait Materializer: Send + Sync {
-    /// `metric_cube`, or a materialized model's view.
+    /// `metric_cube`, or a materialized dataset's view.
     fn asset(&self) -> &str;
     /// The tables whose commits make it stale — or another asset by name:
     /// this one then recomputes after that one does, never while that one
@@ -62,20 +62,20 @@ pub trait Materializer: Send + Sync {
     fn every(&self) -> Option<Duration> {
         None
     }
-    /// A fingerprint of what it computes (a model's SELECT), recorded with
+    /// A fingerprint of what it computes (a dataset's SELECT), recorded with
     /// each recompute: a clocked asset whose definition changed is due at
     /// once. `None` when there's nothing to tell apart.
     fn definition(&self) -> Option<String> {
         None
     }
-    /// Tables it writes, when they're its own (a materialized model's):
+    /// Tables it writes, when they're its own (a materialized dataset's):
     /// a rebuilt or emptied one means it isn't current, whatever its
     /// inputs did.
     fn outputs(&self) -> Vec<String> {
         Vec::new()
     }
     /// `full`: refill whole — an input saw a rewrite, or this is the first
-    /// build since it registered. Only an incremental model does less
+    /// build since it registered. Only an incremental dataset does less
     /// otherwise.
     async fn recompute(&self, full: bool) -> Result<Recomputed, DomainError>;
 }
@@ -248,13 +248,13 @@ async fn run_once(db: &Database, entries: &Entries, entry: &Entry, now: &Now) {
     }
 }
 
-/// A materialized model as the registry has it: its compiled SELECT, its
+/// A materialized dataset as the registry has it: its compiled SELECT, its
 /// contract (the columns its table is made of) and the tables it reads,
 /// transitively. Any of them changing re-registers it, so a table the
 /// compiler recreated — its contract changed though its SELECT didn't (an
 /// input's column changed type) — gets its first build.
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct ModelAsset {
+struct DatasetAsset {
     sql: String,
     contract: Option<String>,
     tables: Vec<String>,
@@ -272,9 +272,9 @@ pub struct Assets {
     coalesce: Duration,
     now: Now,
     entries: Entries,
-    /// The materialized models registered from the model registry
-    /// ([`Assets::sync_models`]), by view.
-    models: Arc<tokio::sync::Mutex<BTreeMap<String, ModelAsset>>>,
+    /// The materialized datasets registered from the dataset registry
+    /// ([`Assets::sync_datasets`]), by view.
+    datasets: Arc<tokio::sync::Mutex<BTreeMap<String, DatasetAsset>>>,
     /// The searchable extension ref kinds whose index is registered
     /// ([`Assets::sync_search_kinds`], `kind_search`), by kind.
     pub(crate) search_kinds:
@@ -288,7 +288,7 @@ impl Assets {
             coalesce,
             now: Arc::new(Timestamp::now),
             entries: Arc::default(),
-            models: Arc::default(),
+            datasets: Arc::default(),
             search_kinds: Arc::default(),
         }
     }
@@ -365,7 +365,7 @@ impl Assets {
         *entry.task.lock().unwrap_or_else(|e| e.into_inner()) = Some(task);
     }
 
-    /// Stop and forget `asset` (a materialized model no longer published).
+    /// Stop and forget `asset` (a materialized dataset no longer published).
     pub fn remove(&self, asset: &str) {
         let mut entries = self.entries.write().unwrap_or_else(|e| e.into_inner());
         entries.retain(|e| {
@@ -379,33 +379,33 @@ impl Assets {
         });
     }
 
-    /// Keep one [`SqlModelMaterializer`] per model the registry says is
+    /// Keep one [`SqlDatasetMaterializer`] per dataset the registry says is
     /// `materialize: on_change` (P7.B2): new ones registered (their first
     /// recompute fills the table), gone or changed ones replaced or
     /// stopped. Run when the registry changes.
-    pub async fn sync_models(&self) -> Result<(), DomainError> {
-        let wanted = materialized_models(&self.db).await?;
-        let mut have = self.models.lock().await;
+    pub async fn sync_datasets(&self) -> Result<(), DomainError> {
+        let wanted = materialized_datasets(&self.db).await?;
+        let mut have = self.datasets.lock().await;
         for (view, old) in have.clone() {
             if wanted.get(&view) != Some(&old) {
                 self.remove(&view);
                 have.remove(&view);
             }
         }
-        for (view, model) in wanted {
+        for (view, dataset) in wanted {
             if have.contains_key(&view) {
                 continue;
             }
-            let policy = oxplow_db::models::recorded_materialize(&model.materialize)
-                .unwrap_or(oxplow_db::models::Materialize::ON_CHANGE);
-            self.register(Arc::new(SqlModelMaterializer::new(
+            let policy = oxplow_db::datasets::recorded_materialize(&dataset.materialize)
+                .unwrap_or(oxplow_db::datasets::Materialize::ON_CHANGE);
+            self.register(Arc::new(SqlDatasetMaterializer::new(
                 self.db.clone(),
                 &view,
-                &model.sql,
-                model.tables.clone(),
+                &dataset.sql,
+                dataset.tables.clone(),
                 &policy,
             )));
-            have.insert(view, model);
+            have.insert(view, dataset);
         }
         Ok(())
     }
@@ -436,7 +436,7 @@ impl Assets {
     /// Recompute every asset now, each after those it reads — one on a
     /// clock too, which ignores its inputs' changes — without waiting out
     /// the coalesce window: what a test, which has no clock to wait on and
-    /// reads right after it writes, reads models after.
+    /// reads right after it writes, reads datasets after.
     pub async fn recompute_all(&self) {
         let mut left: Vec<Arc<Entry>> = self
             .entries
@@ -484,11 +484,11 @@ impl Assets {
     }
 }
 
-/// The model registry as an asset reads it: each model's compiled SELECT,
+/// The dataset registry as an asset reads it: each dataset's compiled SELECT,
 /// its policy when materialized, its contract, and what each reads.
 struct Registry {
     /// view → (sql, materialize, contract columns).
-    models: BTreeMap<String, (String, Option<String>, Option<String>)>,
+    datasets: BTreeMap<String, (String, Option<String>, Option<String>)>,
     /// view → the views and tables it reads.
     inputs: BTreeMap<String, Vec<String>>,
 }
@@ -497,17 +497,17 @@ impl Registry {
     fn load(tx: &rusqlite::Connection) -> Result<Registry, DomainError> {
         let mut st = tx
             .prepare(
-                "SELECT m.view, m.sql, m.materialize, c.columns_json FROM model m
-                 LEFT JOIN model_contract c ON c.view = m.view AND c.version = m.version",
+                "SELECT m.view, m.sql, m.materialize, c.columns_json FROM dataset m
+                 LEFT JOIN dataset_contract c ON c.view = m.view AND c.version = m.version",
             )
             .map_err(oxplow_db::map_sql_err)?;
-        let models = st
+        let datasets = st
             .query_map([], |r| Ok((r.get(0)?, (r.get(1)?, r.get(2)?, r.get(3)?))))
             .map_err(oxplow_db::map_sql_err)?
             .collect::<rusqlite::Result<_>>()
             .map_err(oxplow_db::map_sql_err)?;
         let mut st = tx
-            .prepare("SELECT view, input FROM model_input")
+            .prepare("SELECT view, input FROM dataset_input")
             .map_err(oxplow_db::map_sql_err)?;
         let mut inputs: BTreeMap<String, Vec<String>> = BTreeMap::new();
         for row in st
@@ -517,11 +517,11 @@ impl Registry {
             let (view, input) = row.map_err(oxplow_db::map_sql_err)?;
             inputs.entry(view).or_default().push(input);
         }
-        Ok(Registry { models, inputs })
+        Ok(Registry { datasets, inputs })
     }
 
     /// The tables `view`'s SELECT reads: its inputs followed through live
-    /// models to tables — and to a materialized model's own table, which
+    /// datasets to tables — and to a materialized dataset's own table, which
     /// is where that one's changes come from.
     fn input_tables(&self, view: &str) -> Vec<String> {
         let mut tables = BTreeSet::new();
@@ -531,9 +531,9 @@ impl Registry {
             if !seen.insert(input.clone()) {
                 continue;
             }
-            match self.models.get(input) {
+            match self.datasets.get(input) {
                 Some((_, Some(_), _)) => {
-                    tables.insert(oxplow_db::models::materialized_table(input));
+                    tables.insert(oxplow_db::datasets::materialized_table(input));
                 }
                 Some((_, None, _)) => todo.extend(self.inputs.get(input).into_iter().flatten()),
                 None => {
@@ -545,17 +545,19 @@ impl Registry {
     }
 }
 
-/// The registry's materialized models, with the tables each reads.
-async fn materialized_models(db: &Database) -> Result<BTreeMap<String, ModelAsset>, DomainError> {
+/// The registry's materialized datasets, with the tables each reads.
+async fn materialized_datasets(
+    db: &Database,
+) -> Result<BTreeMap<String, DatasetAsset>, DomainError> {
     db.read(|tx| {
         let registry = Registry::load(tx)?;
         Ok(registry
-            .models
+            .datasets
             .iter()
             .filter_map(|(view, (sql, materialize, contract))| {
                 Some((
                     view.clone(),
-                    ModelAsset {
+                    DatasetAsset {
                         sql: sql.clone(),
                         contract: contract.clone(),
                         tables: registry.input_tables(view),
@@ -581,8 +583,8 @@ pub(crate) async fn tables_behind(
         Ok(views
             .into_iter()
             .filter_map(|view| {
-                let tables = match registry.models.get(&view)? {
-                    (_, Some(_), _) => vec![oxplow_db::models::materialized_table(&view)],
+                let tables = match registry.datasets.get(&view)? {
+                    (_, Some(_), _) => vec![oxplow_db::datasets::materialized_table(&view)],
                     (_, None, _) => registry.input_tables(&view),
                 };
                 Some((view, tables))
@@ -592,13 +594,13 @@ pub(crate) async fn tables_behind(
     .await
 }
 
-/// A materialized model (P7.B2): its table refilled, whole, from its
+/// A materialized dataset (P7.B2): its table refilled, whole, from its
 /// SELECT in one transaction — when an input changes, or on its `every:`
 /// clock (P8.B2). An incremental one (P8.B4) appends the rows past its
 /// watermark — its key — instead, unless a refill is asked for. Either
 /// fails on SQL that emits one key twice; the failure is the asset's in
 /// `asset_failure`, and the last good rows stand.
-pub struct SqlModelMaterializer {
+pub struct SqlDatasetMaterializer {
     db: Database,
     view: String,
     sql: String,
@@ -607,14 +609,14 @@ pub struct SqlModelMaterializer {
     incremental: Option<String>,
 }
 
-impl SqlModelMaterializer {
+impl SqlDatasetMaterializer {
     /// A materializer for `view`, stored in `m_<view>`, reading `tables`.
     pub fn new(
         db: Database,
         view: &str,
         sql: &str,
         tables: Vec<String>,
-        materialize: &oxplow_db::models::Materialize,
+        materialize: &oxplow_db::datasets::Materialize,
     ) -> Self {
         Self {
             db,
@@ -628,7 +630,7 @@ impl SqlModelMaterializer {
 
     /// Refill the table whole; report what it now holds.
     async fn refill(&self) -> Result<Recomputed, DomainError> {
-        let table = oxplow_db::models::materialized_table(&self.view);
+        let table = oxplow_db::datasets::materialized_table(&self.view);
         let sql = self.sql.clone();
         let watermark = self.incremental.clone();
         self.db
@@ -644,7 +646,7 @@ impl SqlModelMaterializer {
 
     /// Append the rows past the watermark the table holds.
     async fn append(&self, column: &str) -> Result<Recomputed, DomainError> {
-        let table = oxplow_db::models::materialized_table(&self.view);
+        let table = oxplow_db::datasets::materialized_table(&self.view);
         let sql = self.sql.clone();
         let column = column.to_string();
         self.db
@@ -705,7 +707,7 @@ fn held(
 }
 
 #[async_trait]
-impl Materializer for SqlModelMaterializer {
+impl Materializer for SqlDatasetMaterializer {
     fn asset(&self) -> &str {
         &self.view
     }
@@ -725,7 +727,7 @@ impl Materializer for SqlModelMaterializer {
     }
 
     fn outputs(&self) -> Vec<String> {
-        vec![oxplow_db::models::materialized_table(&self.view)]
+        vec![oxplow_db::datasets::materialized_table(&self.view)]
     }
 
     /// Refill whole, or append past the watermark. An append that hits
@@ -1228,7 +1230,7 @@ mod tests {
         );
     }
 
-    /// tsk780: a fresh record of a *different* definition (the model's
+    /// tsk780: a fresh record of a *different* definition (the dataset's
     /// SELECT was edited) doesn't hold the clock: it rebuilds at once.
     #[tokio::test(start_paused = true)]
     async fn a_clocked_asset_whose_definition_changed_rebuilds_at_once() {
@@ -1323,9 +1325,9 @@ mod tests {
         assert_eq!(*fulls.lock().unwrap(), vec![true, false, true]);
     }
 
-    /// A table `src` and the table of an incremental model over it, keyed
+    /// A table `src` and the table of an incremental dataset over it, keyed
     /// and watermarked on `id`.
-    async fn incremental_fixture() -> (Database, SqlModelMaterializer) {
+    async fn incremental_fixture() -> (Database, SqlDatasetMaterializer) {
         let db = Database::in_memory();
         db.transaction(|tx| {
             tx.execute_batch(
@@ -1336,12 +1338,12 @@ mod tests {
         })
         .await
         .unwrap();
-        let m = SqlModelMaterializer::new(
+        let m = SqlDatasetMaterializer::new(
             db.clone(),
             "v_inc",
             "SELECT id, v FROM src WHERE v % 3 != 0",
             vec!["src".into()],
-            &oxplow_db::models::Materialize::Incremental {
+            &oxplow_db::datasets::Materialize::Incremental {
                 incremental: "id".into(),
             },
         );
@@ -1384,11 +1386,11 @@ mod tests {
         .flatten()
     }
 
-    /// P8.B4: an incremental model's first build is whole, an insert
+    /// P8.B4: an incremental dataset's first build is whole, an insert
     /// appends, and a rewrite of an input (an UPDATE, as a payload expiry
     /// is) refills it whole.
     #[tokio::test]
-    async fn an_incremental_model_appends_until_an_input_is_rewritten() {
+    async fn an_incremental_dataset_appends_until_an_input_is_rewritten() {
         let (db, m) = incremental_fixture().await;
         let assets = Assets::new(db.clone(), Duration::from_millis(20));
         write(&db, "INSERT INTO src (v) VALUES (1), (2), (3);".into()).await;
@@ -1496,13 +1498,13 @@ mod tests {
         })
         .await
         .unwrap();
-        let m = SqlModelMaterializer::new(
+        let m = SqlDatasetMaterializer::new(
             db.clone(),
             "v_latest",
             "SELECT k, id AS seq FROM src s WHERE NOT EXISTS
                (SELECT 1 FROM src n WHERE n.k = s.k AND n.id > s.id)",
             vec!["src".into()],
-            &oxplow_db::models::Materialize::Incremental {
+            &oxplow_db::datasets::Materialize::Incremental {
                 incremental: "seq".into(),
             },
         );
@@ -1547,12 +1549,14 @@ mod tests {
         )
         .await;
         let assets = Assets::new(db.clone(), Duration::from_millis(10));
-        assets.register(Arc::new(SqlModelMaterializer::new(
+        assets.register(Arc::new(SqlDatasetMaterializer::new(
             db.clone(),
             "v_dup",
             "SELECT id, v FROM src",
             vec!["src".into()],
-            &oxplow_db::models::Materialize::Named(oxplow_db::models::MaterializePolicy::OnChange),
+            &oxplow_db::datasets::Materialize::Named(
+                oxplow_db::datasets::MaterializePolicy::OnChange,
+            ),
         )));
         tokio::time::sleep(Duration::from_millis(150)).await;
         let (error, _) = surfaced(&db, "v_dup").await;

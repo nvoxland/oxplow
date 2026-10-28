@@ -80,9 +80,9 @@ impl Grant {
                 "ai.compute" | "ai.discover" => p.ai,
                 _ => true,
             },
-            // A model's bounds are its declaration's; reading a model at all
+            // A dataset's bounds are its declaration's; reading a dataset at all
             // is decided where SQL is asked for (`Scope("sql.read")`).
-            Need::Model(_) => true,
+            Need::Dataset(_) => true,
             Need::Path(_) => p.files.is_some(),
             Need::Program(_) | Need::Files | Need::Env(_) => p.process,
             Need::Host(h) => p.host_allowed(h),
@@ -99,7 +99,7 @@ impl Grant {
                 "tree.read" => "files.read".to_string(),
                 _ => "ai.compute".to_string(),
             },
-            Need::Model(_) => "sql.read".to_string(),
+            Need::Dataset(_) => "sql.read".to_string(),
             Need::Path(_) => "files.read".to_string(),
             Need::Program(_) | Need::Files | Need::Env(_) => "process.run".to_string(),
             Need::Host(h) => format!("network:{h}"),
@@ -114,8 +114,8 @@ impl Grant {
 #[serde(tag = "need", content = "name", rename_all = "snake_case")]
 pub enum Need {
     Scope(String),
-    /// A published model, including a derived model's inputs.
-    Model(String),
+    /// A published dataset, including a derived dataset's inputs.
+    Dataset(String),
     /// One portable path from the captured tree.
     Path(String),
     Program(String),
@@ -187,9 +187,9 @@ pub fn decide(
             .scopes
             .iter()
             .any(|n| crate::service::need_scope(n) == s),
-        Need::Model(model) => {
+        Need::Dataset(dataset) => {
             allowed.scopes.contains("sql.read")
-                || allowed.scopes.contains(&format!("sql.read:{model}"))
+                || allowed.scopes.contains(&format!("sql.read:{dataset}"))
         }
         Need::Path(path) => {
             crate::service::valid_path(path)

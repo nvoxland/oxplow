@@ -80,7 +80,7 @@ test("a dynamic choice loads its options from its page with the page's params, g
           ["snap:2", "Second", "Snapshots"],
           ["working", "Working tree", null],
         ],
-        reads: { models: ["v_snapshot"], tables: [], measures: [] },
+        reads: { datasets: ["v_snapshot"], tables: [], measures: [] },
       } as unknown as SqlQueryResult;
     },
   };

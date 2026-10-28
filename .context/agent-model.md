@@ -660,7 +660,7 @@ outcomes" in [terminal.md](./terminal.md)). An absent project dir, or a
 stream on another host (no `HOME` passed), reads as unknown.
 
 What can be resumed is listed two ways, both reads of
-`AgentHarness::conversations` (`live_models::harness_conversations`):
+`AgentHarness::conversations` (`live_datasets::harness_conversations`):
 for an open session, the `agent-session-conversations` choices page over
 `v_agent_conversation` (the page's Switch / Fork Conversation… forms:
 "Choosing another conversation" in terminal.md); for a thread with no session in hand, the

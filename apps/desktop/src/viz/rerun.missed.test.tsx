@@ -24,10 +24,10 @@ const pause = (ms: number) => act(async () => void (await new Promise((r) => set
 
 test("a change announced before the run reported its reads re-runs the host once they match", async () => {
   let runs = 0;
-  let report: (models: string[]) => void = () => {};
+  let report: (datasets: string[]) => void = () => {};
   function Host() {
     const [reads, setReads] = useState(NO_READS);
-    report = (models) => setReads({ models, tables: [], measures: [] });
+    report = (datasets) => setReads({ datasets, tables: [], measures: [] });
     useRerunOnChange(reads, () => {
       runs++;
     });
@@ -35,10 +35,10 @@ test("a change announced before the run reported its reads re-runs the host once
   }
   render(<Host />);
   // The first run is in flight (its reads unknown): the write lands.
-  emit({ kind: "modelsChanged", models: ["v_work_item"] });
+  emit({ kind: "datasetsChanged", datasets: ["v_work_item"] });
   await pause(200);
   expect(runs).toBe(0);
-  // It reports what it read, and that includes the model that changed.
+  // It reports what it read, and that includes the dataset that changed.
   await act(async () => report(["v_work_item"]));
   await pause(200);
   expect(runs).toBe(1);
@@ -48,19 +48,19 @@ test("a change announced before the run reported its reads re-runs the host once
   expect(runs).toBe(1);
 });
 
-test("a change to a model the run didn't read asks for nothing", async () => {
+test("a change to a dataset the run didn't read asks for nothing", async () => {
   let runs = 0;
-  let report: (models: string[]) => void = () => {};
+  let report: (datasets: string[]) => void = () => {};
   function Host() {
     const [reads, setReads] = useState(NO_READS);
-    report = (models) => setReads({ models, tables: [], measures: [] });
+    report = (datasets) => setReads({ datasets, tables: [], measures: [] });
     useRerunOnChange(reads, () => {
       runs++;
     });
     return null;
   }
   render(<Host />);
-  emit({ kind: "modelsChanged", models: ["v_snapshot"] });
+  emit({ kind: "datasetsChanged", datasets: ["v_snapshot"] });
   await act(async () => report(["v_work_item"]));
   await pause(200);
   expect(runs).toBe(0);

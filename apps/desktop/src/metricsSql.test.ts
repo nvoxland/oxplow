@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { seriesPoints } from "./metricsSql.js";
 
-const reads = { models: [], tables: [], measures: [] };
+const reads = { datasets: [], tables: [], measures: [] };
 
 describe("metrics read through SQL", () => {
   test("rows become points", () => {

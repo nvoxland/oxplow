@@ -171,7 +171,7 @@ over the project's database (validation, audit and events as the app
 writes them; the acting thread is `$OXPLOW_THREAD_ID` or `--thread`), on
 a bus that checks nothing active. So it's the same tasks, and
 re-enabling the extension shows everything done meanwhile. The database
-is opened as it is (`Database::open_existing`: no migrating, no model
+is opened as it is (`Database::open_existing`: no migrating, no dataset
 recompile under the running app; refused at another schema version).
 The running app picks up the new events with its next pump pass; with
 the work list none, no effort policy reacts to them. Its reads (`list`,
@@ -222,7 +222,7 @@ The backend is Rust; the desktop frontend is React/Monaco/xterm.
   TS lives at the repo root anymore.
 - **Build from inside the tree.** `.cargo/config.toml` sets
   `LIBSQLITE3_FLAGS = -DSQLITE_ENABLE_MATH_FUNCTIONS` so the bundled
-  SQLite has `log2`, `pow`, … (SQL models use them). A build that
+  SQLite has `log2`, `pow`, … (SQL datasets use them). A build that
   doesn't read that file (a packager outside the tree) must set it
   itself: every `Database` open probes `log2` and refuses to start
   without it (`DbInitError::Build`, tsk726).
@@ -279,7 +279,7 @@ effort's "Coverage & tests" panel.
 An extension's behavior is a fixture in its extension, written first
 (`extensions.md` "`oxplow extension test`"): a page, a command, an
 event's effects, a job, a collector, an advisory, a query over its
-models, a custom component's own code (`ui:` steps, "Testing a
+datasets, a custom component's own code (`ui:` steps, "Testing a
 component"). Never a new Rust test: Rust tests are for core. A
 fixture runs on a throwaway oxplow — this build's schema, only the data
 it makes, only the extensions its own declares (a fixture's `requires:`
@@ -310,12 +310,12 @@ need `lint:collect` clean before they're pushed.
 **A test database comes from a migrated template**
 (`Database::in_memory()` restores `<temp>/oxplow-db-templates/<build+date>.sqlite`
 instead of running every migration, ~330 ms → a few ms). A new migration
-or model needs nothing: a rebuilt test binary is a new template key.
+or dataset needs nothing: a rebuilt test binary is a new template key.
 
 **Fixtures run the production activation.** `Services::in_memory`,
 `in_memory_on_machine` and the fixtures built on them (`test_fixtures::services_with_effort`, …) are
 async, return `Arc<Services>`, and end with `extension_activation.initialize`
-exactly as boot does; there is no test-only way to register commands, models or
+exactly as boot does; there is no test-only way to register commands, datasets or
 providers. A test that writes extension files or changes config after setup
 is standing in for the generation owner: it calls `test_fixtures::activate(&svc)`
 (asserts no extension was held back) or `activate_with_problems(&svc)` (returns

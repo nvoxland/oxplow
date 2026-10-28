@@ -10,7 +10,7 @@ const realApi = await import("../api.js");
 mock.module("../api.js", () => ({
   ...realApi,
   listExtensions: async () => [],
-  querySql: async () => ({ columns: [], rows: [], truncated: false, reads: { models: [], tables: [], measures: [] }, freshness: {} }),
+  querySql: async () => ({ columns: [], rows: [], truncated: false, reads: { datasets: [], tables: [], measures: [] }, freshness: {} }),
 }));
 const { VizView } = await import("./VizView.js");
 
@@ -48,7 +48,7 @@ const configOf = (viz: VizConfig["viz"]): VizConfig => ({
 });
 
 const failed: SourceCoverage = {
-  model: "v_my_gh_pull_request",
+  dataset: "v_my_gh_pull_request",
   source: "oxplow:oxplow/collector?collector=my-gh/gh",
   status: "failed",
   // Today, so the wording is the time alone.
@@ -63,7 +63,7 @@ const run = (viz: VizConfig["viz"], over: { truncated?: boolean; coverage?: Sour
     columns: ["title"],
     rows: [["One"], ["Two"]] as SqlCell[][],
     truncated: over.truncated ?? false,
-    reads: { models: [], tables: [], measures: [] },
+    reads: { datasets: [], tables: [], measures: [] },
     freshness: [],
     coverage: over.coverage,
   },

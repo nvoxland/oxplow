@@ -13,7 +13,7 @@ mock.module("./api.js", () => ({
         ["ai.roles.main", "null", "default", null, "The main role.", null],
       ],
       truncated: false,
-      reads: { models: ["v_config_value"], tables: [], measures: [] },
+      reads: { datasets: ["v_config_value"], tables: [], measures: [] },
       freshness: [],
     };
   },
@@ -35,5 +35,5 @@ test("every setting is read from v_config_value, its value and schema as JSON", 
     },
     { key: "ai.roles.main", value: null, origin: "default", extension: null, doc: "The main role.", schema: null },
   ]);
-  expect(reads.models).toEqual(["v_config_value"]);
+  expect(reads.datasets).toEqual(["v_config_value"]);
 });

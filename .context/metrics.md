@@ -188,10 +188,10 @@ welded to collection.
 >   Each metric reader in `api.ts` returns its rows with the query's `reads`,
 >   and every metric view (`MetricTile`, the Metric page, the Metrics page,
 >   the dashboard's spec and catalog load) re-runs through
->   `useRerunOnChange`, so a view refreshes only when a model or measure it
+>   `useRerunOnChange`, so a view refreshes only when a dataset or measure it
 >   read changed. An enable toggle or a `project.yaml` edit arrives as
->   `modelsChanged` for `v_metric_catalog` / `v_metric_spec`. The Metrics
->   page reads every metric's points in one live model, `v_metric_point`,
+>   `datasetsChanged` for `v_metric_catalog` / `v_metric_spec`. The Metrics
+>   page reads every metric's points in one live dataset, `v_metric_point`,
 >   which follows `MetricSamplesChanged` (below).
 > - **Cube read cache** (`cube_rows_for_measure`, tsk196). The read is memoized on
 >   a new **`metric_cube_epoch.version`** counter — distinct from the `epoch`
@@ -204,7 +204,7 @@ welded to collection.
 >   its own `source_measure` skips an event whose measures it doesn't read — so a
 >   token export stops waking a coverage tile. **Fail-open both ways:** an empty
 >   event list or an unscoped/formula consumer refreshes on anything. **One
->   emitter** (P7.B1): the change loop (`models_changed.rs`, `CaptureListener`)
+>   emitter** (P7.B1): the change loop (`datasets_changed.rs`, `CaptureListener`)
 >   announces it whenever a commit touches `metric_capture` or `fact`, per stream,
 >   naming the measures of the facts that landed since it last read; no recording
 >   site emits it, so none can forget or misname it (a source-tree test holds
@@ -1760,16 +1760,16 @@ just carries a Help blurb pointing there.
   dimension says it is not sliced. New metrics are the agent's work
   (`oxplow.metric.scaffold` + `/oxplow:new-metric`).
 
-> ### `v_metric_point` — a series per metric, one model (live)
+> ### `v_metric_point` — a series per metric, one dataset (live)
 >
 > One row per capture of a metric (and per group when sliced), newest
 > first: what `MEASURE('<key>')` over `metric_grid('capture')` reads, for
 > every metric at once, so a list's sparkline, a metric's chart and a
 > dashboard tile read the same rows. Columns: `metric`, `dimension`,
 > `capture_id`, `captured_at`, `value`, `group_value`, `branch`,
-> `stream_id`. It is a **live model** (`live_models.rs`; it follows
+> `stream_id`. It is a **live dataset** (`live_datasets.rs`; it follows
 > `MetricSamplesChanged`, a config or extension change, and the catalog
-> and spec models) because the engine computes the series, not a table:
+> and spec datasets) because the engine computes the series, not a table:
 > unpinned it lists every metric with a spec, each one's newest 200
 > captures; `WHERE metric = :key` lists one metric's newest 5000;
 > `AND dimension = 'oxplow.language'` slices it (a metric the dimension
@@ -2264,7 +2264,7 @@ lives).
 ## Coherent extension metric publication
 
 Production boot prepares metric declarations from the same immutable extension
-snapshot and captured project choices as models, commands and vocabulary.
+snapshot and captured project choices as datasets, commands and vocabulary.
 `metrics_service/generation.rs` resolves measures, dimensions, builtin/configured
 specs and the available catalog without writing. Candidates allow at most 4096
 entries per category and 16 MiB serialized metadata. Inside the publication

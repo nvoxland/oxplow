@@ -1,16 +1,16 @@
 //! `ui.decorators` (P6b.C5; stable since P10, on oxplow-bundled's verdict):
-//! labels from one of the extension's models shown on core refs — a chip
-//! on a page whose ref the model lists (`ref-chip`), a badge after a page
+//! labels from one of the extension's datasets shown on core refs — a chip
+//! on a page whose ref the dataset lists (`ref-chip`), a badge after a page
 //! cell that links to one (`row-badge`). Additive: a page is complete
 //! without them.
 //!
 //! ```yaml
 //! ui:
 //!   decorators:
-//!     - { model: flags, resource: oxplow/work_item, placement: ref-chip, label: label, color: color }
+//!     - { dataset: flags, resource: oxplow/work_item, placement: ref-chip, label: label, color: color }
 //! ```
 //!
-//! The model is `v_<extension>_<model>`; it must declare a `ref` column
+//! The dataset is `v_<extension>_<dataset>`; it must declare a `ref` column
 //! and the `label` (and `color`) columns named.
 
 use serde::{Deserialize, Serialize};
@@ -23,7 +23,7 @@ use super::manifest_v2::{at, item_lines, key_line, line_under};
 )]
 #[serde(rename_all = "kebab-case")]
 pub enum DecoratorPlacement {
-    /// A chip in the header of a page whose ref the model lists.
+    /// A chip in the header of a page whose ref the dataset lists.
     RefChip,
     /// A badge after a page cell that links to a listed ref.
     RowBadge,
@@ -36,7 +36,7 @@ pub struct UiDecorator {
     /// `<extension>/<n>`.
     pub id: String,
     pub extension: String,
-    /// The model's view (`v_<extension>_<model>`), which has a `ref` column.
+    /// The dataset's view (`v_<extension>_<dataset>`), which has a `ref` column.
     pub view: String,
     /// The resource it decorates (`oxplow/work_item`).
     pub resource: String,
@@ -51,7 +51,7 @@ pub struct UiDecorator {
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct DecoratorFile {
-    model: String,
+    dataset: String,
     resource: String,
     placement: DecoratorPlacement,
     label: String,
@@ -66,11 +66,11 @@ fn identifier(s: &str) -> bool {
         && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
 }
 
-/// Parse `ui.decorators` against the extension's models: the valid ones,
+/// Parse `ui.decorators` against the extension's datasets: the valid ones,
 /// and an error (`file:line: …`) for each broken one.
 pub fn parse_decorators(
     extension: &str,
-    models: &[oxplow_db::models::DatasetSource],
+    datasets: &[oxplow_db::datasets::DatasetSource],
     value: &serde_yaml::Value,
     file: &str,
     manifest: &str,
@@ -90,31 +90,38 @@ pub fn parse_decorators(
         let d: DecoratorFile = match serde_yaml::from_value(item.clone()) {
             Ok(d) => d,
             Err(e) => {
-                errors.push(at(file, item_line, format!("`ui.decorators`: {e}")));
+                // `model:` is the old name of `dataset:` (the manifest-wide
+                // renamed-key list can't say so: `model` is valid elsewhere).
+                let message = if item.get("model").is_some() && item.get("dataset").is_none() {
+                    "unknown key `model` — write `dataset:`".to_string()
+                } else {
+                    e.to_string()
+                };
+                errors.push(at(file, item_line, format!("`ui.decorators`: {message}")));
                 continue;
             }
         };
         let line = item_line;
-        let model = models.iter().find(|m| m.decl.name == d.model);
-        let has = |col: &str| model.is_some_and(|m| m.decl.fields.iter().any(|c| c.name == col));
+        let dataset = datasets.iter().find(|m| m.decl.name == d.dataset);
+        let has = |col: &str| dataset.is_some_and(|m| m.decl.fields.iter().any(|c| c.name == col));
         let wanted: Vec<&str> = ["uri", d.label.as_str()]
             .into_iter()
             .chain(d.color.as_deref())
             .collect();
         let problem = if let Some(why) = crate::extension_resources::resource_problem(&d.resource) {
             Some(format!("`resource: {}`: {why}", d.resource))
-        } else if model.is_none() {
+        } else if dataset.is_none() {
             Some(format!(
-                "`model: {}` isn't one of this extension's models (`models:`)",
-                d.model
+                "`dataset: {}` isn't one of this extension's datasets (`datasets:`)",
+                d.dataset
             ))
         } else if let Some(bad) = wanted.iter().find(|c| !identifier(c)) {
             Some(format!("`{bad}` isn't a column name"))
         } else if let Some(missing) = wanted.iter().find(|c| !has(c)) {
             Some(format!(
-                "model `{}` has no `{missing}` column (a decorator's model needs `uri` and the \
+                "dataset `{}` has no `{missing}` column (a decorator's dataset needs `uri` and the \
                  columns it names)",
-                d.model
+                d.dataset
             ))
         } else {
             None
@@ -126,7 +133,7 @@ pub fn parse_decorators(
         out.push(UiDecorator {
             id: format!("{extension}/{i}"),
             extension: extension.to_string(),
-            view: oxplow_db::models::extension_view(extension, &d.model),
+            view: oxplow_db::datasets::extension_view(extension, &d.dataset),
             resource: d.resource,
             placement: d.placement,
             label: d.label,
@@ -147,7 +154,7 @@ mod tests {
         std::fs::write(p, body).unwrap();
     }
 
-    /// Extension `flags` with a `flags` model and `decorators`.
+    /// Extension `flags` with a `flags` dataset and `decorators`.
     fn load(decorators: &str) -> Extension {
         let d = tempfile::tempdir().unwrap();
         write(
@@ -159,7 +166,7 @@ mod tests {
         );
         write(
             d.path(),
-            ".oxplow/extensions/flags/models/flags.sql",
+            ".oxplow/extensions/flags/datasets/flags.sql",
             "SELECT 'oxplow:oxplow/work_item?id=tsk1&provider=oxplow' AS uri, 'urgent' AS label, '#f00' AS color\n",
         );
         load_extensions(d.path())
@@ -169,8 +176,8 @@ mod tests {
     }
 
     #[test]
-    fn a_decorator_names_one_of_its_models_columns() {
-        let ext = load("    - { model: flags, resource: oxplow/work_item, placement: ref-chip, label: label, color: color }\n",
+    fn a_decorator_names_one_of_its_datasets_columns() {
+        let ext = load("    - { dataset: flags, resource: oxplow/work_item, placement: ref-chip, label: label, color: color }\n",
         );
         assert!(ext.errors.is_empty(), "{:?}", ext.errors);
         let d = &ext.ui.decorators[0];
@@ -179,23 +186,23 @@ mod tests {
         assert_eq!(d.color.as_deref(), Some("color"));
         for (entry, says) in [
             (
-                "{ model: nope, resource: oxplow/work_item, placement: ref-chip, label: label }",
-                "isn't one of this extension's models",
+                "{ dataset: nope, resource: oxplow/work_item, placement: ref-chip, label: label }",
+                "isn't one of this extension's datasets",
             ),
             (
-                "{ model: flags, resource: oxplow/nope, placement: ref-chip, label: label }",
+                "{ dataset: flags, resource: oxplow/nope, placement: ref-chip, label: label }",
                 "oxplow declares no such resource",
             ),
             (
-                "{ model: flags, resource: oxplow/work_item, placement: ref-chip, label: title }",
+                "{ dataset: flags, resource: oxplow/work_item, placement: ref-chip, label: title }",
                 "has no `title` column",
             ),
             (
-                "{ model: flags, resource: oxplow/work_item, placement: ref-chip, label: \"x; DROP\" }",
+                "{ dataset: flags, resource: oxplow/work_item, placement: ref-chip, label: \"x; DROP\" }",
                 "isn't a column name",
             ),
             (
-                "{ model: flags, resource: oxplow/work_item, placement: sidebar, label: label }",
+                "{ dataset: flags, resource: oxplow/work_item, placement: sidebar, label: label }",
                 "unknown variant",
             ),
         ] {
@@ -209,12 +216,25 @@ mod tests {
         }
     }
 
+    /// A decorator's old `model:` key says what to write.
+    #[test]
+    fn an_old_model_key_says_to_write_dataset() {
+        let ext = load("    - { model: flags, resource: oxplow/work_item, placement: ref-chip, label: label }\n");
+        let errs = ext.errors.join("\n");
+        assert!(
+            errs.contains("unknown key `model` — write `dataset:`")
+                && errs.contains("extension.yaml:"),
+            "{errs}"
+        );
+        assert!(ext.ui.decorators.is_empty());
+    }
+
     /// P10: stable, so a shared extension's decorators load like a
     /// private one's.
     #[test]
     fn a_shared_extension_may_declare_decorators() {
         let ext =
-            load("    - { model: flags, resource: oxplow/work_item, placement: ref-chip, label: label }\n");
+            load("    - { dataset: flags, resource: oxplow/work_item, placement: ref-chip, label: label }\n");
         assert_eq!(ext.errors, Vec::<String>::new());
         assert_eq!(ext.ui.decorators.len(), 1);
     }

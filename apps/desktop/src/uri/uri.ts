@@ -208,7 +208,7 @@ const KEY_PARAM: Record<string, string> = {
   consumer: "name",
   config: "key",
   nudge: "kind",
-  model: "model",
+  dataset: "dataset",
   measure: "measure",
   metric: "metric",
   dimension: "dimension",
@@ -383,7 +383,7 @@ export function collectorUri(owner: string, id: string): string {
 /** A contribution's URI as its resource (`oxplow/page`), its extension
  *  (null for a globally named kind) and its id; null for anything else. */
 const CONTRIBUTIONS = new Set([
-  "model", "measure", "metric", "dimension", "collector", "event_type", "ref_kind", "command", "job",
+  "dataset", "measure", "metric", "dimension", "collector", "event_type", "ref_kind", "command", "job",
   "ai_profile", "effect", "advisory", "skill", "implementation", "provider", "page", "panel",
 ]);
 const GLOBAL_CONTRIBUTIONS = new Set(["command", "measure", "metric", "dimension", "event_type", "ref_kind"]);

@@ -2,7 +2,7 @@ import { ipc, run, until, waitForModels, type Daemon } from "../../support/daemo
 import { expect, test } from "../../support/fixtures.js";
 import { openFromLauncher } from "../../support/ui.js";
 
-/** A one-value SQL read over the daemon's models. */
+/** A one-value SQL read over the daemon's datasets. */
 async function value(daemon: Daemon, sql: string, params: unknown[] = []): Promise<unknown> {
   const out = await ipc<{ rows: unknown[][] }>(daemon, "query_sql", { sql, params });
   return out.rows[0]?.[0] ?? null;

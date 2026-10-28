@@ -8,7 +8,7 @@ const run = {
   params: { stream_id: 1 },
   loaders: {
     items: {
-      result: { columns: ["title"], rows: [["Fix it"]], truncated: false, reads: { models: [], tables: [] }, freshness: [] },
+      result: { columns: ["title"], rows: [["Fix it"]], truncated: false, reads: { datasets: [], tables: [] }, freshness: [] },
       error: null,
       key: "items",
     },

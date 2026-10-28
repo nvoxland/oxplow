@@ -117,7 +117,7 @@ integer contract version:
 
 ```yaml
 exports:
-  - contribution: "oxplow:oxplow/model?model=review-data/items"
+  - contribution: "oxplow:oxplow/dataset?dataset=review-data/items"
     version: 1
     visibility: stable
 ```
@@ -127,7 +127,7 @@ The consumer chooses a local binding:
 ```yaml
 imports:
   - id: review_items
-    contribution: "oxplow:oxplow/model?model=review-data/items"
+    contribution: "oxplow:oxplow/dataset?dataset=review-data/items"
     version: 1
     optional: true
 import_guards:
@@ -135,19 +135,19 @@ import_guards:
     imports: [review_items]
 ```
 
-A model or page reads that binding with
+A dataset or page reads that binding with
 `SELECT * FROM import_ref('review_items')`. SQL references infer their own
 guard. An unavailable optional binding withholds the referring contribution;
-independent contributions remain usable. Explicit guards can name models,
+independent contributions remain usable. Explicit guards can name datasets,
 pages, collectors, commands, effects, advisories, skills or providers. Their
 exports and dependent mounts are withheld too. Each unavailable optional
 import is one warning naming why and everything it withheld:
-`` optional import `items` for `oxplow:oxplow/model?model=maker/items` v1 is unavailable: maker
+`` optional import `items` for `oxplow:oxplow/dataset?dataset=maker/items` v1 is unavailable: maker
 is disabled; withheld: `oxplow:oxplow/page?page=review-ui/items`, `oxplow:oxplow/slot?slot=review-ui/oxplow-foundation.work-item.sections-0` ``.
 Missing required imports and
 dependency cycles block the extension with source-located errors.
 
-Versions must match exactly. A model or event export must use its native
+Versions must match exactly. A dataset or event export must use its native
 contract version. Package `version` and host `engine` are separate.
 Visibility defaults to `private`, which other extensions cannot import.
 `experimental` and `stable` exports can be imported. Import targets resolve by canonical
@@ -276,7 +276,7 @@ collectors:
 | `jobs.read` | Read this extension's durable job status and result: scope("jobs.read", {id}). |  | yes |
 | `extension_config.read` | Read the resolved defaults, project and personal settings with their provenance: `scope("extension_config.read", {})`. |  | yes |
 | `state.read` | Read this extension's workflow state or cache: `scope("state.read", {scope, area})` returns a snapshot or null. |  | yes |
-| `sql.read` | Read-only SQL over the published models (`v_*`): `scope("sql.read", {sql, params?, page?})` returns every row, or one page. | `scope` | yes |
+| `sql.read` | Read-only SQL over the published datasets (`v_*`): `scope("sql.read", {sql, params?, page?})` returns every row, or one page. | `scope` | yes |
 | `tree.read` | The files of the snapshot the run is anchored to, with their syntax, metrics and duplicate blocks. | `files`, `source_files`, `duplicate_blocks` | yes |
 | `ai.compute` | Model calls on your AI provider: classify, score, summarize, extract, typed completion. Each answer is recorded, so the same question on the same text costs one call. | `ai_classify`, `ai_score`, `ai_summarize`, `ai_extract`, `ai_complete` | no |
 | `ai.discover` | Declared model identities, features and limits; no credentials or paid probes. | `ai_capabilities`, `ai_models` | yes |
@@ -398,14 +398,14 @@ commands:
   `uri.build(resource, **params)` makes one (`uri.build("oxplow/file",
   path = f["path"])`), and `uri.parse(u)` (`{resource, params, view}`),
   `uri.param(u, name)`, `uri.id(u, resource=)`, `uri.resource(u)` and
-  `uri.is_uri(v)` read one. In SQL, select a model's `uri` column and
+  `uri.is_uri(v)` read one. In SQL, select a dataset's `uri` column and
   compare URIs to URIs (`WHERE uri = :uri`); build one with
   `uri('oxplow/effort', 'id', json_extract(e.payload, '$.effort'))` and
   read a param with `uri_param(uri, 'id')`. Don't concatenate
   `'oxplow:oxplow/effort?id=' || id` or slice a URI. A field named for one
   resource (a command input `thread`, `effort`, `session`, `claim`, an event
   payload field) carries that resource's bare id, not a URI: a page or form
-  that feeds one selects `uri_param(x.uri, 'id')` (or the model's integer
+  that feeds one selects `uri_param(x.uri, 'id')` (or the dataset's integer
   `id` for a claim or decision), and a script builds a URI with
   `uri.build("oxplow/effort", id = e)` only where it becomes a link target
   or is compared with a `uri`. A URI can outlive what it names, so store it even when
@@ -469,11 +469,11 @@ deployed.
   refusal or error is answered to the model as `{error}` and the job goes
   on. A script tool answers its script's `result`. With `sql.read` the
   model also has `query_sql`, a read-only query over the published `v_*`
-  models. After `max_tool_rounds` rounds the job fails. A job never
+  datasets. After `max_tool_rounds` rounds the job fails. A job never
   writes: write from an effect on its end.
 - **Output.** What the model writes, each tool call and its answer, and
   each round's tokens are the job's output as they happen: the
-  `v_job_run_output` model (a page over it updates live), and `text` in the
+  `v_job_run_output` dataset (a page over it updates live), and `text` in the
   `snapshot`. `v_job_run` lists every job and its state.
 - **Its result** (`snapshot`'s `result`, once it ends): `{parts,
   finishReason, rounds, usage, aiCalls}`; a failure adds `error`; a
@@ -530,8 +530,8 @@ resources:
   - name: pr
     label: Pull request
     params: { id: { required: true, pattern: '^\d+$' } }
-    resolve: pull_request     # a model with `uri` and `title` columns
-    searchable: pull_request  # optional: a model with `uri`, `title`, `body`
+    resolve: pull_request     # a dataset with `uri` and `title` columns
+    searchable: pull_request  # optional: a dataset with `uri`, `title`, `body`
     icon: git-pull-request
     wikilink: { prefix: pr, param: id }   # [[pr:12]]
 ```
@@ -540,7 +540,7 @@ resources:
   anchored (`^…$`) and limited to plain characters, classes, `\d`, `\w`,
   escapes and quantifiers: no groups, alternation or `.`.
 - `resolve` gives each thing a title in links and backlinks. `searchable`
-  puts the model's rows in search; a row whose `uri` isn't a URI of this
+  puts the dataset's rows in search; a row whose `uri` isn't a URI of this
   resource is skipped.
 - A URI that nothing resolves (the extension is off, or the thing is
   gone) shows as its raw text. It never errors.
@@ -549,7 +549,7 @@ resources:
 - `about:` on a command or a prompt, and `resource:` on a decorator, take
   a resource name: `oxplow/work_item`, `github/pr`.
 
-`oxplow extension check` refuses an unknown model, a pattern
+`oxplow extension check` refuses an unknown dataset, a pattern
 outside that subset, an icon oxplow doesn't draw, and a resource or
 wikilink prefix that another extension already uses.
 
@@ -603,7 +603,7 @@ handing it props it doesn't know). An unbound view may be replaced by
 any extension — a person picks whose shows in Settings → Integrations
 (the project's `replacements: { <target>: <extension> | oxplow }`); a
 bound one only by the extension of the provider whose item it shows.
-The same table is the `v_replaceable` model.
+The same table is the `v_replaceable` dataset.
 
 <!-- replaceables:begin (generated from oxplow_domain::replaceable::REPLACEABLE; bless with OXPLOW_BLESS=1) -->
 | Target | What it is | Bound to a provider | Version | Props | View |
@@ -763,9 +763,9 @@ implementations:
 ## Checking and testing
 
 `oxplow extension check` loads the extension the way oxplow does and
-dry-runs its models, commands, pages and advisories. Each finding is
+dry-runs its datasets, commands, pages and advisories. Each finding is
 one line: `file:line: what — fix`. Each of its `imports:` gets a line
-saying how it resolved here: `` import `items` → model:maker/items v1:
+saying how it resolved here: `` import `items` → oxplow:oxplow/dataset?dataset=maker/items v1:
 available ``, or `unavailable (maker exports v2)` and the like, which is
 when an optional import's guarded contributions are withheld. `extension
 test` skips an example whose page, job, command or other target was

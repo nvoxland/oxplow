@@ -8,7 +8,7 @@
 //! network:api.github.com, secrets:GH_TOKEN, commands:oxplow.work_item.*]`.
 //!
 //! The baseline needs no declaration: pages and the rest of the
-//! declarative UI, its own models, its own commands and the scripts that
+//! declarative UI, its own datasets, its own commands and the scripts that
 //! compose them, a collector's `input:` query. Each permission names one
 //! thing a person decides about — running programs with their authority,
 //! reaching a host, reading a secret, spending their AI key, steering
@@ -17,7 +17,7 @@
 
 use serde::{Deserialize, Serialize};
 
-/// `sql: read`: ad-hoc read-only SQL over the `v_*` models.
+/// `sql: read`: ad-hoc read-only SQL over the `v_*` datasets.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
 )]
@@ -77,7 +77,7 @@ pub struct Permissions {
 /// The scopes a `permissions:` list may name: each alone, or (those ending
 /// in `:`) with its qualifier.
 pub const PERMISSION_IDS: &[(&str, &str)] = &[
-    ("sql.read", "ad-hoc read-only SQL over the `v_*` models"),
+    ("sql.read", "ad-hoc read-only SQL over the `v_*` datasets"),
     ("files.read", "read the project's files outside the bus"),
     (
         "files.write",

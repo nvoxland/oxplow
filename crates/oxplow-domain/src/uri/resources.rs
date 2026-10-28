@@ -32,7 +32,7 @@ pub const PAGE: &str = "oxplow/page";
 /// in memory by the daemon, opened like a page.
 pub const VIEW: &str = "oxplow/view";
 pub const METRIC: &str = "oxplow/metric";
-pub const MODEL: &str = "oxplow/model";
+pub const DATASET: &str = "oxplow/dataset";
 pub const AI_MODEL: &str = "oxplow/ai_model";
 pub const EXTENSION: &str = "oxplow/extension";
 pub const COMMAND: &str = "oxplow/command";
@@ -103,7 +103,7 @@ pub struct ResourceDecl {
 }
 
 /// A `resources:` entry as a manifest holds it. `resolve` and `searchable`
-/// name models as the manifest does; the app's loader turns them into the
+/// name datasets as the manifest does; the app's loader turns them into the
 /// views they publish as and checks them (`extension_resources`).
 #[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]

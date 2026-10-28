@@ -47,7 +47,7 @@ so running several writer sessions requires coordinating their edits.
 ## Shared observations and services
 
 Harness integrations feed turns, tool calls, status, usage, and changes
-into the shared record. Agents can read the same semantic models and use
+into the shared record. Agents can read the same semantic datasets and use
 the same audited commands through MCP. Generated integration files live
 under `.oxplow/runtime/` and are rewritten as needed; configure the
 project rather than editing those generated files.

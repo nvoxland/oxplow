@@ -5,7 +5,7 @@
 //!
 //! A collector is a program (`exec`, approved by a person), a sandboxed
 //! script (`starlark` / `jaq`, no I/O, no approval) or a provider's read
-//! (`read`). It writes **entities** (rows a model can `ref()`),
+//! (`read`). It writes **entities** (rows a dataset can `ref()`),
 //! **facts** (measurements on declared measures) or **records** (a test,
 //! coverage or analysis report it parses — the project's own, tsk863), and it
 //! runs when its **trigger** says: `manual`, `{ every: 15m }`,
@@ -288,7 +288,7 @@ pub enum CollectorRuntime {
     /// A sandboxed jq program: no I/O, so no approval.
     Jaq,
     /// A provider instance's collector (`oxplow.provider.sync`): its records
-    /// land in the capability's model (`v_work_item`).
+    /// land in the capability's dataset (`v_work_item`).
     Read,
 }
 

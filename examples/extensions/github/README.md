@@ -36,7 +36,7 @@ The repo comes from `git remote get-url origin`, or set
 - `pages/prs-by-task.yaml`: the page.
 - `pages/pr-lifetimes.yaml`, `components/pr-lifetimes/`: the lifetimes page
   and the bundle it renders (`custom_components:` in `extension.yaml`).
-- `models/pull_request.sql`, `pages/pr.yaml`: what a `github/pr` URI
+- `datasets/pull_request.sql`, `pages/pr.yaml`: what a `github/pr` URI
   resolves to, and the page it opens (`resources:` in `extension.yaml`).
 - `fixtures/pr-link.yaml`: `oxplow plugin test`'s check that `[[pr:12]]`
   names `oxplow:github/pr?id=12`.

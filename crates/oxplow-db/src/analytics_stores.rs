@@ -520,7 +520,7 @@ impl SqliteCodeQualityStore {
     }
 
     /// Finish scan `scan_id` as done with its `findings`, in one write
-    /// transaction (so one commit, one `ModelsChanged`): each finding, its
+    /// transaction (so one commit, one `DatasetsChanged`): each finding, its
     /// file edge in `page_ref`, the scan's status — and the older finished
     /// scans of the same tool and scope it replaces, with their findings
     /// and edges. Readers only ever want a scope's latest scan; a running

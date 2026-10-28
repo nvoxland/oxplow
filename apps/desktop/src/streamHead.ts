@@ -1,4 +1,4 @@
-/// Where a stream's workspace is, as the models say it (`v_stream.head_sha`
+/// Where a stream's workspace is, as the datasets say it (`v_stream.head_sha`
 /// and the local branch `v_branch` has checked out for it).
 import { gitRevision, type Revision } from "./revision.js";
 import type { SqlCell } from "./tauri-bridge/generated/bindings.js";

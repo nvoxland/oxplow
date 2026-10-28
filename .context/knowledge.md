@@ -47,7 +47,7 @@ by the desktop editor (the `Markdown` editor; a page's `markdown` viz saves thro
    them. The search index reads the body from the row (`wiki_page.body`),
    so it is the recorded one when its asset recomputes;
 
-(the UI re-reads on the `modelsChanged` the row write produces; there is
+(the UI re-reads on the `datasetsChanged` the row write produces; there is
 no wiki event of its own). `@version` literals in links are stripped from the
 body: a version is the edge's pin, not the prose's. `title` sets the
 body's `# ` heading.
@@ -145,11 +145,11 @@ written by command or by hand alike — reading the body from the row. The old e
 `wiki_page_fts` mirror is gone (V125).
 
 **The desktop** (`apps/desktop/src/knowledge.ts`) reads the index, a
-page and its freshness from these models and finds pages with the site
+page and its freshness from these datasets and finds pages with the site
 search (`resources: ["oxplow/wiki"]`, matches marked `«…»`); every read returns what
 it read (`reads`) and every wiki surface re-reads it through
 `useRerunOnChange` (the title cache through `readsChanged`) when one of
-those models changes — a drifting ref re-reads the freshness rows without
+those datasets changes — a drifting ref re-reads the freshness rows without
 reopening the page (the Freshness page re-runs the loaders whose reads changed). The RPCs
 `list_wiki_pages`, `read_wiki_page_body`, `search_wiki_titles` and
 `list_wiki_freshness` are gone.

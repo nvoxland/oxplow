@@ -1,5 +1,5 @@
-//! Live models (`.context/semantic-layer.md` "Live models"): published
-//! models whose rows are read from live state when a query names them,
+//! Live datasets (`.context/semantic-layer.md` "Live datasets"): published
+//! datasets whose rows are read from live state when a query names them,
 //! because that state has no change hook to restate it from — the keychain
 //! (is a key set), `ai.yaml` and `project.yaml` (edited by hand), the
 //! language-server process table and the binaries on disk, the
@@ -8,19 +8,19 @@
 //! restatement; reading when asked is always right.
 //!
 //! A query runs for a stream (`SqlQuery::stream`, a page's `stream_id`):
-//! a model of a worktree — its files, its conversations — reads that
+//! a dataset of a worktree — its files, its conversations — reads that
 //! stream's, and the primary checkout's when the query names none.
 //!
-//! What changes a live model is in [`follows`]: the events that change
-//! what it reads, and the models it reads through. The change loop
-//! announces it as changed with them (`models_changed`), so a page over
+//! What changes a live dataset is in [`follows`]: the events that change
+//! what it reads, and the datasets it reads through. The change loop
+//! announces it as changed with them (`datasets_changed`), so a page over
 //! it re-runs like one over a table.
 //!
 //! The mechanism is `metric_grid()`'s: the gateway, before it takes a
-//! connection, reads each live model its SQL names and hands the rows to
-//! the query as a temp table, with a temp view of the model's own name over
-//! it. The core model of that name is an empty typed stub, there for the
-//! contract (columns, docs, `v_dataset`) and to compile against; no model may
+//! connection, reads each live dataset its SQL names and hands the rows to
+//! the query as a temp table, with a temp view of the dataset's own name over
+//! it. The core dataset of that name is an empty typed stub, there for the
+//! contract (columns, docs, `v_dataset`) and to compile against; no dataset may
 //! read one (it would read the stub).
 
 use std::sync::{Arc, OnceLock};
@@ -35,7 +35,7 @@ use crate::ai_service::AiService;
 use crate::events::OxplowEvent;
 use crate::lsp_sessions::LspSessionManager;
 
-/// The live models, by name (`v_<name>`).
+/// The live datasets, by name (`v_<name>`).
 pub const NAMES: &[&str] = &[
     "ai_role",
     "ai_provider",
@@ -64,7 +64,7 @@ pub const NAMES: &[&str] = &[
     "provider_collector",
 ];
 
-/// The columns a live model's rows have, in order.
+/// The columns a live dataset's rows have, in order.
 pub fn columns(name: &str) -> &'static [&'static str] {
     match name {
         "ai_role" => &[
@@ -210,7 +210,7 @@ pub fn columns(name: &str) -> &'static [&'static str] {
     }
 }
 
-/// The columns a live model can read narrowed by: a query that says
+/// The columns a live dataset can read narrowed by: a query that says
 /// `<column> = <value>` of every row it reads is handed only those rows.
 pub fn pushdown(name: &str) -> &'static [&'static str] {
     match name {
@@ -221,7 +221,7 @@ pub fn pushdown(name: &str) -> &'static [&'static str] {
         "branch_divergence" | "commit_between" | "extension_change" => &["base", "head"],
         // One metric is one series read; the dimension is how it is sliced.
         "metric_point" => &["metric", "dimension"],
-        // Counting a model is a query of its own; counting an effect's
+        // Counting a dataset is a query of its own; counting an effect's
         // backfill reads the event log: each only for the one asked for.
         "data_entity" => &["name"],
         "effect_backfill" => &["effect"],
@@ -245,16 +245,16 @@ fn filters(
     oxplow_db::sql_tokens::text_filters(sql, &format!("v_{name}"), columns, params)
 }
 
-/// What can change a live model's rows.
+/// What can change a live dataset's rows.
 pub enum Change<'a> {
     /// An event about what it reads.
     Event(&'a OxplowEvent),
-    /// These models changed (`v_<name>`).
-    Models(&'a [String]),
+    /// These datasets changed (`v_<name>`).
+    Datasets(&'a [String]),
 }
 
-/// Whether `change` can change live model `name`'s rows: the events about
-/// the state it reads, and the models it reads through.
+/// Whether `change` can change live dataset `name`'s rows: the events about
+/// the state it reads, and the datasets it reads through.
 pub fn follows(name: &str, change: &Change<'_>) -> bool {
     use OxplowEvent as E;
     match change {
@@ -293,7 +293,7 @@ pub fn follows(name: &str, change: &Change<'_>) -> bool {
                 event,
                 E::WorkspaceChanged { .. } | E::VcsRefsChanged { .. } | E::ConfigChanged
             ),
-            // The catalog and the config decide what exists; a model's
+            // The catalog and the config decide what exists; a dataset's
             // rows are counted when asked for.
             "data_entity" | "effect_backfill" | "replacement" => {
                 matches!(event, E::ConfigChanged | E::ExtensionsChanged)
@@ -311,8 +311,8 @@ pub fn follows(name: &str, change: &Change<'_>) -> bool {
             ),
             _ => false,
         },
-        Change::Models(models) => {
-            let reads = |m: &str| models.iter().any(|x| x == m);
+        Change::Datasets(datasets) => {
+            let reads = |m: &str| datasets.iter().any(|x| x == m);
             match name {
                 // Its conversations change as sessions run.
                 "agent_conversation" => reads("v_agent_session") || reads("v_agent_turn"),
@@ -333,7 +333,7 @@ pub fn follows(name: &str, change: &Change<'_>) -> bool {
     }
 }
 
-/// What the live models read, bound once the app has built it all.
+/// What the live datasets read, bound once the app has built it all.
 pub struct LiveSources {
     pub ai: Arc<AiService>,
     pub lsp: LspSessionManager,
@@ -386,10 +386,10 @@ const BETWEEN_LIMIT: u32 = 100;
 const POINTS_UNPINNED: usize = 200;
 const POINTS_PINNED: usize = 5000;
 
-/// The gateway's handle on the live models: shared by every clone of it,
+/// The gateway's handle on the live datasets: shared by every clone of it,
 /// bound once.
 #[derive(Default)]
-pub struct LiveModels {
+pub struct LiveDatasets {
     sources: OnceLock<LiveSources>,
 }
 
@@ -417,7 +417,7 @@ fn wire_name(value: &impl serde::Serialize) -> String {
         .unwrap_or_default()
 }
 
-impl LiveModels {
+impl LiveDatasets {
     pub fn bind(&self, sources: LiveSources) {
         // Bound once, at build; a second bind has nothing to add.
         let _ = self.sources.set(sources);
@@ -427,7 +427,7 @@ impl LiveModels {
         self.sources.get().is_some()
     }
 
-    /// The live models `sql` names (`v_<name>`, bare or quoted).
+    /// The live datasets `sql` names (`v_<name>`, bare or quoted).
     pub fn named_in(sql: &str) -> Result<Vec<&'static str>, DomainError> {
         use oxplow_db::sql_tokens::{tokenize, TokenKind};
         let mut found: Vec<&'static str> = Vec::new();
@@ -437,10 +437,10 @@ impl LiveModels {
                 TokenKind::QuotedIdent => token.text.trim_matches(|c| "\"`[]".contains(c)),
                 _ => continue,
             };
-            let Some(model) = word.strip_prefix("v_").or_else(|| word.strip_prefix("V_")) else {
+            let Some(dataset) = word.strip_prefix("v_").or_else(|| word.strip_prefix("V_")) else {
                 continue;
             };
-            if let Some(name) = NAMES.iter().find(|n| n.eq_ignore_ascii_case(model)) {
+            if let Some(name) = NAMES.iter().find(|n| n.eq_ignore_ascii_case(dataset)) {
                 if !found.contains(name) {
                     found.push(name);
                 }
@@ -452,7 +452,7 @@ impl LiveModels {
     /// The temp table and view that stand for each of `names` in `sql`,
     /// run for `stream` (a row id; none: the primary checkout): the rows
     /// read now with the query's `params`, or none for a check (`None`),
-    /// which only compiles. A model reads only the rows `sql`'s conditions
+    /// which only compiles. A dataset reads only the rows `sql`'s conditions
     /// on its [`pushdown`] columns keep, when they certainly apply
     /// (`sql_tokens::equality_filters`).
     pub async fn materialize(
@@ -533,7 +533,7 @@ impl LiveModels {
                 sources.provider_instances(name, filters).await
             }
             other => Err(DomainError::Invalid(format!(
-                "`v_{other}` isn't a live model"
+                "`v_{other}` isn't a live dataset"
             ))),
         }
     }
@@ -1236,9 +1236,9 @@ impl LiveSources {
         Ok(rows)
     }
 
-    /// `v_data_entity`: every published model, then every entity the
+    /// `v_data_entity`: every published dataset, then every entity the
     /// enabled extensions declare but haven't synced (`kind` `sql`,
-    /// `entity` or `declared`). `row_count` is the model's row count, counted
+    /// `entity` or `declared`). `row_count` is the dataset's row count, counted
     /// only for the one the query pins as `name` (counting each is a
     /// query: the list leaves it NULL).
     async fn data_entities(
@@ -1331,7 +1331,7 @@ impl LiveSources {
     /// value is never here: whether one is set, and where a sign-in stands.
     async fn provider_instances(
         &self,
-        model: &str,
+        dataset: &str,
         filters: &[(String, String)],
     ) -> Result<Vec<Vec<SqlCell>>, DomainError> {
         use crate::providers::InstanceState;
@@ -1348,7 +1348,7 @@ impl LiveSources {
             if pinned.is_some_and(|p| *p != view.instance) {
                 continue;
             }
-            match model {
+            match dataset {
                 "provider_instance" => {
                     let detail = match &view.health.state {
                         InstanceState::Missing { reason }

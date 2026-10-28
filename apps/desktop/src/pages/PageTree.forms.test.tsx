@@ -19,7 +19,7 @@ const UPDATE = {
 } as unknown as CommandSpec;
 
 const start = (values: Record<string, unknown>): FormStart =>
-  ({ command: UPDATE, values, fixed: ["uri"], fields: ["title"], choices: {}, reads: { models: [], tables: [] } }) as unknown as FormStart;
+  ({ command: UPDATE, values, fixed: ["uri"], fields: ["title"], choices: {}, reads: { datasets: [], tables: [] } }) as unknown as FormStart;
 
 function fakes() {
   const calls: unknown[][] = [];

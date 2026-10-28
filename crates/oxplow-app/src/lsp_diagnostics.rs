@@ -2,7 +2,7 @@
 //! into `lsp_diagnostic`, so the semantic layer can read it as
 //! `v_diagnostic`. Diagnostics are live state: the table is cleared at boot
 //! and a server's rows are cleared when it (re)starts or stops; a view
-//! reading `v_diagnostic` re-runs on `ModelsChanged` like any other.
+//! reading `v_diagnostic` re-runs on `DatasetsChanged` like any other.
 //! Debounced, it logs `code.diagnostics.changed@1` once per changed file
 //! with its counts after the burst. See `.context/lsp.md`, `.context/semantic-layer.md`.
 
@@ -347,10 +347,10 @@ mod tests {
         let svc = Services::in_memory(dir.path()).await.unwrap();
         let stream = svc.streams.ensure_primary().await.unwrap();
         let mut events = svc.events.subscribe_ui();
-        // The renderer hears a diagnostics change as the model changing.
-        crate::models_changed::spawn(
+        // The renderer hears a diagnostics change as the dataset changing.
+        crate::datasets_changed::spawn(
             svc.db.clone(),
-            std::sync::Arc::new(crate::models_changed::ModelWatermarks::default()),
+            std::sync::Arc::new(crate::datasets_changed::DatasetWatermarks::default()),
             svc.events.clone(),
             svc.assets.clone(),
             svc.event_pump.clone(),
@@ -377,15 +377,15 @@ mod tests {
             async move {
                 tokio::time::timeout(Duration::from_secs(10), async {
                     loop {
-                        if let Ok(OxplowEvent::ModelsChanged { models }) = rx.recv().await {
-                            if models.iter().any(|m| m == "v_diagnostic") {
+                        if let Ok(OxplowEvent::DatasetsChanged { datasets }) = rx.recv().await {
+                            if datasets.iter().any(|m| m == "v_diagnostic") {
                                 return;
                             }
                         }
                     }
                 })
                 .await
-                .expect("ModelsChanged naming v_diagnostic");
+                .expect("DatasetsChanged naming v_diagnostic");
             }
         };
         // The subscriber may not be listening yet: publish until it lands.

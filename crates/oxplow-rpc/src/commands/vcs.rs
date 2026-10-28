@@ -1,7 +1,7 @@
 //! The person's version-control reads (`.context/vcs.md`): blame, the
 //! agent's read run as the person. History and branches are the agent's
 //! `oxplow.vcs.log` / `oxplow.vcs.branches` and the `v_commit` / `v_branch`
-//! models.
+//! datasets.
 
 use oxplow_app::Services;
 use oxplow_domain::vcs::{BlameLine, Revision};

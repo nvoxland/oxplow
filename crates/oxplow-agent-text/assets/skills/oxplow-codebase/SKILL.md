@@ -6,7 +6,7 @@ description: Answering questions about the project's history and code from oxplo
 # The project's history and code
 
 oxplow keeps the repository's history and the language servers' view of
-the code as SQL models. Read them with `oxplow_query_sql` before `git log`
+the code as SQL datasets. Read them with `oxplow_query_sql` before `git log`
 or grep: indexed, shared with pages, every stream. `v_field`
 documents each column.
 

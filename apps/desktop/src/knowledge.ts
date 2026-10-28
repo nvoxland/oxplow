@@ -1,5 +1,5 @@
 /**
- * Knowledge pages (the wiki) read through the models (P6.E2,
+ * Knowledge pages (the wiki) read through the datasets (P6.E2,
  * `.context/knowledge.md`): `v_knowledge_page` for the index,
  * `v_knowledge_body` for a page's markdown.
  * Writes are `knowledge.*` commands (`writeWikiPage`).
@@ -25,7 +25,7 @@ export interface WikiPageSummary {
 }
 
 // Every read returns what it read (`reads`); a consumer re-runs it through
-// `useRerunOnChange` (or `readsChanged`) when one of those models changes.
+// `useRerunOnChange` (or `readsChanged`) when one of those datasets changes.
 
 const cell = (result: SqlQueryResult, row: SqlCell[], name: string) => row[result.columns.indexOf(name)];
 

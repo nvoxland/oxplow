@@ -30,22 +30,22 @@ today's values as the defaults, so a project tunes them without forking:
 `oxplow.review_policy.read` returns the effective values and where each came
 from; `oxplow.review_policy.write` sets the project's or the person's layer
 (a compare-and-swap on the stamps `read` returns). A change takes effect
-without a restart: the models that read it are republished (and the
+without a restart: the datasets that read it are republished (and the
 materialized ones refilled), and the advisory reads it on its next run.
 
 ## What it reads
 
-- `v_claim` — what the agent's answers said about its work, as a model
+- `v_claim` — what the agent's answers said about its work, as a dataset
   read them when the effort finished (nothing the agent records), what
   each cites, and a reviewer's `review` (`verified`, `dismissed`, or NULL).
-  `v_oxplow_bundled_claim_status` (this extension's model) says whether
+  `v_oxplow_bundled_claim_status` (this extension's dataset) says whether
   something backs it: `verified = 0` means no `evidence`, no person's
   verification, and for a `tests_pass` claim no passing latest test run in
   the effort. A dismissed claim has no row there: it counts for nothing.
 - `v_decision` — the forks the agent resolved. `provenance = 'inferred'`
   rows are a model's guesses from the conversation, until a person
   confirms or dismisses them (below, "Decisions Oxplow Noticed").
-- `v_oxplow_bundled_deviation` (this extension's model) — files an effort
+- `v_oxplow_bundled_deviation` (this extension's dataset) — files an effort
   changed outside the area its work item names. A file is in the area
   when the item's title or body names it, or one of its directories at
   least two levels deep (`src/ui`). An item that names no area has none.

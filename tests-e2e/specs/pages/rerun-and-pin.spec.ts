@@ -2,9 +2,9 @@ import { ipc, run } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
 import { openFromLauncher } from "../../support/ui.js";
 
-// A page re-runs by itself when a model it reads changes, and Pin to
+// A page re-runs by itself when a dataset it reads changes, and Pin to
 // Dashboard makes a new dashboard page with it as an embed.
-test("a page re-runs when its model changes, and pins to a new dashboard", async ({ page, daemon }) => {
+test("a page re-runs when its dataset changes, and pins to a new dashboard", async ({ page, daemon }) => {
   await run(daemon, "oxplow.extension.write_page", {
     extension: "mine",
     page: "numbat-tasks",

@@ -86,7 +86,7 @@ impl WikiPagesWatcher {
                             continue;
                         };
                         // The row write is the announcement: the UI re-reads on
-                        // its `modelsChanged`.
+                        // its `datasetsChanged`.
                         if let Err(err) =
                             wiki_pages::sync_page(&db, &vocabulary, &project_dir, slug).await
                         {

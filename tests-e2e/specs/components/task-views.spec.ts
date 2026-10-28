@@ -33,7 +33,7 @@ async function choose(page: Page, target: string, who: string) {
 
 const TARGETS = ["work_item.board", "work_item.list", "work_item.detail"] as const;
 
-/** The state of the item titled `title`, from the models. */
+/** The state of the item titled `title`, from the datasets. */
 async function stateOf(daemon: Daemon, title: string): Promise<string | undefined> {
   const out = await ipc<{ rows: string[][] }>(daemon, "query_sql", {
     sql: "SELECT state FROM v_work_item WHERE title = ?1",
@@ -55,9 +55,9 @@ async function titled(daemon: Daemon, title: string): Promise<boolean> {
  *  is the Board's scope that shows the items. */
 async function swimlanes(page: Page, daemon: Workspace, scope: string) {
   await run(daemon, "oxplow.work_item.create", { title: "Card one", thread: daemon.thread });
-  // A tracker's items reach oxplow's models through its collector's read.
+  // A tracker's items reach oxplow's datasets through its collector's read.
   if (scope === "all") await run(daemon, "oxplow.provider.sync", { instance: "e2e/fake", collector: "work_items" });
-  await until("the item to be in the models", 30_000, () => titled(daemon, "Card one"));
+  await until("the item to be in the datasets", 30_000, () => titled(daemon, "Card one"));
   await page.goto("/");
   await choose(page, "work_item.board", "task-views");
   await openFromLauncher(page, "Board");

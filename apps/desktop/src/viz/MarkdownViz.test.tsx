@@ -75,7 +75,7 @@ const runOf = (body: string, actions: PageAction[] = [save]): VizRun =>
       origin: { extension: "", source: null, running: "", deployment: null, bundled: false },
     },
     params: {},
-    result: { columns: ["slug", "body"], rows: [["notes", body] as SqlCell[]], truncated: false, reads: { models: [], tables: [], measures: [] } },
+    result: { columns: ["slug", "body"], rows: [["notes", body] as SqlCell[]], truncated: false, reads: { datasets: [], tables: [], measures: [] } },
   }) as unknown as VizRun;
 
 /** A tab whose history state keeps the draft. */

@@ -1,4 +1,4 @@
-//! Scalar functions every connection registers, for the SQL that models,
+//! Scalar functions every connection registers, for the SQL that datasets,
 //! pages and migrations ship (`.context/semantic-layer.md`).
 //!
 //! - `uri(resource, key, value, …)` is the one way SQL spells an oxplow

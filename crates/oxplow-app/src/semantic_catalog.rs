@@ -1,9 +1,9 @@
 //! Settings → Data: what the semantic layer holds, who provides it, and how
-//! much. The catalog itself is the model registry (`v_dataset`,
+//! much. The catalog itself is the dataset registry (`v_dataset`,
 //! `v_field`, P4.2/P4.9) — read through SQL like everything else;
 //! this adds what SQL can't say: an entity an extension declares that
 //! hasn't synced yet. Row counts aren't here: one `count(*)` over a big
-//! model can outrun the query timeout, so the UI counts each row itself
+//! dataset can outrun the query timeout, so the UI counts each row itself
 //! (tsk1065). See `.context/semantic-layer.md`.
 
 use std::collections::BTreeSet;
@@ -20,13 +20,13 @@ pub struct DataEntity {
     pub name: String,
     /// `core`, or the extension that provides it.
     pub owner: String,
-    /// `sql` (a model file), `entity` (an extension's synced data), or
+    /// `sql` (a dataset file), `entity` (an extension's synced data), or
     /// `declared` (an entity whose source hasn't synced: no view yet).
     pub kind: String,
     pub description: String,
 }
 
-/// Every published model, then every entity the
+/// Every published dataset, then every entity the
 /// enabled extensions under `root` declare but haven't synced.
 pub async fn data_entities(
     layer: &crate::sql_gateway::SqlGateway,
@@ -37,7 +37,7 @@ pub async fn data_entities(
         SqlCell::Text(t) => t.clone(),
         _ => String::new(),
     };
-    let models = layer
+    let datasets = layer
         .query_sql(
             "SELECT view, owner, kind, description FROM v_dataset
               ORDER BY owner <> 'core', owner, view",
@@ -45,7 +45,7 @@ pub async fn data_entities(
             Some(oxplow_db::semantic_layer::MAX_ROW_LIMIT),
         )
         .await?;
-    let mut out: Vec<DataEntity> = models
+    let mut out: Vec<DataEntity> = datasets
         .rows
         .iter()
         .map(|row| DataEntity {
@@ -90,11 +90,11 @@ mod tests {
     use super::*;
     use oxplow_db::{Database, EntityColumn, EntityTable, SqliteCollectorStore, StoredType};
 
-    /// tsk517: Settings → Data lists every published model
+    /// tsk517: Settings → Data lists every published dataset
     /// — a synced entity once, from the registry, with its doc — and a
     /// declared entity that hasn't synced as `declared`.
     #[tokio::test]
-    async fn data_entities_cover_models_and_unsynced_entities() {
+    async fn data_entities_cover_datasets_and_unsynced_entities() {
         let root = tempfile::tempdir().unwrap();
         let ext = root.path().join(".oxplow/extensions/my-gh");
         std::fs::create_dir_all(&ext).unwrap();

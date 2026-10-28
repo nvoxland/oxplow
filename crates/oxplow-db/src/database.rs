@@ -416,8 +416,8 @@ fn init_connection(c: &Connection) -> rusqlite::Result<()> {
 }
 
 /// Refuse a SQLite built without its math functions (`log2`, `ln`, `pow`,
-/// …): SQL models and pages may use them (P7.B5: oxplow-bundled's
-/// `change_interest` scores with `log2`), and without them such a model
+/// …): SQL datasets and pages may use them (P7.B5: oxplow-bundled's
+/// `change_interest` scores with `log2`), and without them such a dataset
 /// only surfaces as an extension's compile error. The bundled SQLite gets
 /// them from `LIBSQLITE3_FLAGS = -DSQLITE_ENABLE_MATH_FUNCTIONS` in
 /// `.cargo/config.toml`, which a build from outside this tree doesn't
@@ -445,7 +445,7 @@ impl Database {
     }
 
     /// Open an existing project database to write, as it is: no migrating
-    /// and no recompiling its models — for a tool beside the running app
+    /// and no recompiling its datasets — for a tool beside the running app
     /// (the `oxplow-dev` helper), whose views it must not rebuild under
     /// it. Refuses a file whose schema version differs from this build's.
     pub fn open_existing(path: impl AsRef<Path>) -> Result<Self, DbInitError> {
@@ -544,7 +544,7 @@ impl Database {
         let mut attempt = 0;
         loop {
             match migrate_and_compile(&mut conn) {
-                Err(DbInitError::Models(m) | DbInitError::Migration(m))
+                Err(DbInitError::Datasets(m) | DbInitError::Migration(m))
                     if attempt < OPEN_RETRIES && m.contains("locked") =>
                 {
                     attempt += 1;
@@ -572,7 +572,7 @@ impl Database {
     /// Public so other crates' tests can build a Services graph
     /// without needing a tempfile.
     pub fn in_memory() -> Self {
-        Self::memory(|conn| load_migrated(conn).expect("in-memory migrations and models"))
+        Self::memory(|conn| load_migrated(conn).expect("in-memory migrations and datasets"))
     }
 
     /// A new in-memory database holding what this one (an in-memory one)
@@ -788,37 +788,37 @@ impl Database {
 }
 
 impl Database {
-    /// Compile the enabled extensions' models over the core ones
-    /// ([`crate::models::compile_extensions`]): each extension's errors.
-    pub async fn compile_extension_models(
+    /// Compile the enabled extensions' datasets over the core ones
+    /// ([`crate::datasets::compile_extensions`]): each extension's errors.
+    pub async fn compile_extension_datasets(
         &self,
-        extensions: Vec<crate::models::ExtensionModels>,
+        extensions: Vec<crate::datasets::ExtensionDatasets>,
     ) -> Result<std::collections::BTreeMap<String, Vec<String>>, oxplow_domain::DomainError> {
-        self.transaction(move |tx| crate::models::compile_extensions(tx, &extensions))
+        self.transaction(move |tx| crate::datasets::compile_extensions(tx, &extensions))
             .await
     }
 
-    /// Publish the complete candidate SQL model set, or retain the previous
+    /// Publish the complete candidate SQL dataset set, or retain the previous
     /// set with structured diagnostics. Validation rejection is never retried;
     /// storage contention uses the normal transaction retry. This coordinates
-    /// SQL models only, not the runtime's in-memory extension registries.
-    pub async fn replace_extension_models(
+    /// SQL datasets only, not the runtime's in-memory extension registries.
+    pub async fn replace_extension_datasets(
         &self,
-        extensions: Vec<crate::models::ExtensionModels>,
-    ) -> Result<(), TxError<crate::models::ExtensionModelErrors>> {
-        self.transaction_or(move |tx| crate::models::replace_extensions(tx, &extensions))
+        extensions: Vec<crate::datasets::ExtensionDatasets>,
+    ) -> Result<(), TxError<crate::datasets::ExtensionDatasetErrors>> {
+        self.transaction_or(move |tx| crate::datasets::replace_extensions(tx, &extensions))
             .await
     }
 
-    /// Check the extensions' models without publishing them — works on a
-    /// read-only database ([`crate::models::check_extensions`]); `stubs`
+    /// Check the extensions' datasets without publishing them — works on a
+    /// read-only database ([`crate::datasets::check_extensions`]); `stubs`
     /// stand in for declared entities that haven't synced.
-    pub async fn check_extension_models(
+    pub async fn check_extension_datasets(
         &self,
-        extensions: Vec<crate::models::ExtensionModels>,
-        stubs: Vec<crate::models::EntityStub>,
-    ) -> Result<crate::models::CheckedModels, oxplow_domain::DomainError> {
-        self.read(move |tx| crate::models::check_extensions(tx, &extensions, &stubs))
+        extensions: Vec<crate::datasets::ExtensionDatasets>,
+        stubs: Vec<crate::datasets::EntityStub>,
+    ) -> Result<crate::datasets::CheckedDatasets, oxplow_domain::DomainError> {
+        self.read(move |tx| crate::datasets::check_extensions(tx, &extensions, &stubs))
             .await
     }
 
@@ -1271,22 +1271,22 @@ pub enum DbInitError {
     Migration(String),
     #[error("sqlite: {0}")]
     Sqlite(rusqlite::Error),
-    #[error("models: {0}")]
-    Models(String),
+    #[error("datasets: {0}")]
+    Datasets(String),
     /// This build of oxplow lacks something the database needs.
     #[error("build: {0}")]
     Build(String),
 }
 
-/// Bring a database to this build: drop the model views, apply the
-/// migrations, then compile the models (P4.2). The views are recreated at
+/// Bring a database to this build: drop the dataset views, apply the
+/// migrations, then compile the datasets (P4.2). The views are recreated at
 /// every open, so a migration never works around one — and never creates
-/// one: a published view is a model file.
+/// one: a published view is a dataset file.
 /// `conn` (empty) as `migrate_and_compile` would leave it, restored from a
-/// migrated template kept on disk: 128 migrations and the core models
+/// migrated template kept on disk: 128 migrations and the core datasets
 /// cost ~300 ms, and every test builds a fresh database — in its own
 /// process under nextest, so only a file outlives one. The template is
-/// keyed by this executable's build and today's date (a model twin's
+/// keyed by this executable's build and today's date (a dataset twin's
 /// keep-until compares against today), written once and atomically.
 /// Without a usable temp dir it migrates directly.
 fn load_migrated(conn: &mut Connection) -> Result<(), DbInitError> {
@@ -1320,7 +1320,7 @@ fn template_path() -> Option<std::path::PathBuf> {
     exe.hash(&mut h);
     meta.len().hash(&mut h);
     meta.modified().ok()?.hash(&mut h);
-    crate::models::today().hash(&mut h);
+    crate::datasets::today().hash(&mut h);
     Some(
         std::env::temp_dir()
             .join("oxplow-db-templates")
@@ -1364,16 +1364,16 @@ fn write_template(path: &std::path::Path) -> Result<(), DbInitError> {
 }
 
 pub(crate) fn migrate_and_compile(conn: &mut Connection) -> Result<(), DbInitError> {
-    // A model's SQL may call the shared functions (`uri`).
+    // A dataset's SQL may call the shared functions (`uri`).
     crate::sql_functions::register(conn).map_err(DbInitError::Sqlite)?;
-    crate::models::drop_all(conn).map_err(|e| DbInitError::Models(e.to_string()))?;
+    crate::datasets::drop_all(conn).map_err(|e| DbInitError::Datasets(e.to_string()))?;
     with_foreign_keys_off(conn, |conn| {
         embedded::migrations::runner()
             .run(conn)
             .map(|report| !report.applied_migrations().is_empty())
             .map_err(|e| DbInitError::Migration(e.to_string()))
     })?;
-    crate::models::compile_core(conn).map_err(|e| DbInitError::Models(e.to_string()))
+    crate::datasets::compile_core(conn).map_err(|e| DbInitError::Datasets(e.to_string()))
 }
 
 /// Run `f` (the migrations) with foreign keys off, then, if it changed
@@ -1627,7 +1627,7 @@ mod tests {
         assert_eq!(db.write_transactions_open(), 0, "none left open");
     }
 
-    /// An existing database opens to write as it is — its models not
+    /// An existing database opens to write as it is — its datasets not
     /// rebuilt — and only at this build's schema version.
     #[tokio::test]
     async fn an_existing_database_opens_as_it_is() {
@@ -1990,7 +1990,7 @@ mod tests {
 
     /// tsk978: `Database::transaction` is the one write path — it begins
     /// IMMEDIATE and retries Busy. No store opens a transaction of its own
-    /// on a raw connection; the open-time model compile (`models.rs`, run
+    /// on a raw connection; the open-time dataset compile (`datasets.rs`, run
     /// before the pool serves anyone) and this file's own are the two.
     #[test]
     fn every_store_write_runs_in_the_retried_transaction() {
@@ -2015,7 +2015,7 @@ mod tests {
                     .to_string_lossy()
                     .to_string();
                 if production.contains(".transaction()")
-                    && !matches!(rel.as_str(), "database.rs" | "models.rs")
+                    && !matches!(rel.as_str(), "database.rs" | "datasets.rs")
                 {
                     own.push(rel);
                 }
@@ -2357,7 +2357,7 @@ mod tests {
     fn v105_keeps_changes_and_takes_a_range() {
         let mut conn = Connection::open_in_memory().unwrap();
         crate::sql_functions::register(&conn).unwrap();
-        crate::models::drop_all(&conn).unwrap();
+        crate::datasets::drop_all(&conn).unwrap();
         embedded::migrations::runner()
             .set_target(refinery::Target::Version(104))
             .run(&mut conn)
@@ -2420,7 +2420,7 @@ mod tests {
     fn v5_keeps_efforts_and_leaves_one_open_per_thread() {
         let mut conn = Connection::open_in_memory().unwrap();
         crate::sql_functions::register(&conn).unwrap();
-        crate::models::drop_all(&conn).unwrap();
+        crate::datasets::drop_all(&conn).unwrap();
         embedded::migrations::runner()
             .set_target(refinery::Target::Version(4))
             .run(&mut conn)
@@ -2481,7 +2481,7 @@ mod tests {
     fn v6_strips_effort_from_logged_work_item_payloads() {
         let mut conn = Connection::open_in_memory().unwrap();
         crate::sql_functions::register(&conn).unwrap();
-        crate::models::drop_all(&conn).unwrap();
+        crate::datasets::drop_all(&conn).unwrap();
         embedded::migrations::runner()
             .set_target(refinery::Target::Version(5))
             .run(&mut conn)
@@ -2524,7 +2524,7 @@ mod tests {
     fn v30_rewrites_work_item_events_in_the_interfaces_words() {
         let mut conn = Connection::open_in_memory().unwrap();
         crate::sql_functions::register(&conn).unwrap();
-        crate::models::drop_all(&conn).unwrap();
+        crate::datasets::drop_all(&conn).unwrap();
         embedded::migrations::runner()
             .set_target(refinery::Target::Version(29))
             .run(&mut conn)
@@ -2573,7 +2573,7 @@ mod tests {
     fn v31_moves_thread_note_events_to_v2() {
         let mut conn = Connection::open_in_memory().unwrap();
         crate::sql_functions::register(&conn).unwrap();
-        crate::models::drop_all(&conn).unwrap();
+        crate::datasets::drop_all(&conn).unwrap();
         embedded::migrations::runner()
             .set_target(refinery::Target::Version(30))
             .run(&mut conn)
@@ -2613,7 +2613,7 @@ mod tests {
     fn v100_rewrites_fixed_fields_to_bare_ids() {
         let mut conn = Connection::open_in_memory().unwrap();
         crate::sql_functions::register(&conn).unwrap();
-        crate::models::drop_all(&conn).unwrap();
+        crate::datasets::drop_all(&conn).unwrap();
         embedded::migrations::runner()
             .set_target(refinery::Target::Version(99))
             .run(&mut conn)
@@ -2660,6 +2660,69 @@ mod tests {
         );
     }
 
+    /// V121: the semantic layer's `model` storage is `dataset`, and every
+    /// stored `oxplow:oxplow/model?model=…` URI (and the `model` read need in
+    /// a run's decisions) is its `dataset` spelling.
+    #[test]
+    fn v121_renames_models_to_datasets() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        crate::sql_functions::register(&conn).unwrap();
+        crate::datasets::drop_all(&conn).unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(120))
+            .run(&mut conn)
+            .unwrap();
+        conn.execute_batch(
+            r#"INSERT INTO model (view, name, owner, version, description, sql, compiled_at)
+                 VALUES ('v_acme_items', 'items', 'acme', 1, 'd', 'SELECT 1 AS n', 't');
+               INSERT INTO model_input (view, input, kind) VALUES ('v_acme_items', 'effort', 'source');
+               INSERT INTO model_contract (view, version, columns_json, recorded_at)
+                 VALUES ('v_acme_items', 1, '[]', 't');
+               INSERT INTO model_test (view, test, state, ran_at)
+                 VALUES ('v_acme_items', 'not_null:n', 'passed', 't');
+               INSERT INTO page_ref (source_uri, target_uri, source_resource, target_resource, ref_type)
+                 VALUES ('oxplow:oxplow/page?page=wiki&slug=a', 'oxplow:oxplow/model?model=acme/items',
+                         'oxplow/page', 'oxplow/model', 'link');
+               INSERT INTO bookmark (uri, page_kind, scope, added_at)
+                 VALUES ('oxplow:oxplow/model?model=acme/items', 'resource', 'project', 't');
+               INSERT INTO extension_run (run_id, extension, contribution, kind, actor_kind, actor, mode,
+                   started_at, finished_at, outcome, wall_ms, cpu_ms, peak_bytes, ai_calls, scopes_json,
+                   decisions_json)
+                 VALUES ('r1', 'acme', 'oxplow:oxplow/collector?collector=acme/c', 'collector', 'system', 's',
+                   'pure', 't', 't', 'ok', 1, 1, 1, 0, '[]',
+                   '[{"need":"model","name":"v_effort","decision":"denied"},{"need":"scope","name":"sql.read","decision":"allowed"}]');"#,
+        )
+        .unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(121))
+            .run(&mut conn)
+            .unwrap();
+        let one = |sql: &str| -> String { conn.query_row(sql, [], |r| r.get(0)).unwrap() };
+        assert_eq!(one("SELECT view FROM dataset"), "v_acme_items");
+        assert_eq!(one("SELECT input FROM dataset_input"), "effort");
+        assert_eq!(
+            one("SELECT CAST(version AS TEXT) FROM dataset_contract"),
+            "1"
+        );
+        assert_eq!(one("SELECT test FROM dataset_test"), "not_null:n");
+        assert_eq!(
+            one("SELECT CAST(count(*) AS TEXT) FROM sqlite_master WHERE name IN ('model', 'model_input', 'model_contract', 'model_test')"),
+            "0"
+        );
+        assert_eq!(
+            one("SELECT target_uri || ' ' || target_resource FROM page_ref"),
+            "oxplow:oxplow/dataset?dataset=acme/items oxplow/dataset"
+        );
+        assert_eq!(
+            one("SELECT uri FROM bookmark"),
+            "oxplow:oxplow/dataset?dataset=acme/items"
+        );
+        assert_eq!(
+            one("SELECT decisions_json FROM extension_run"),
+            r#"[{"need":"dataset","name":"v_effort","decision":"denied"},{"need":"scope","name":"sql.read","decision":"allowed"}]"#
+        );
+    }
+
     /// V101: a URI is called one — the renamed columns, `work_item.recorded`
     /// at v3 with `item.uri` / `item.parent_uri`, and an undo's inverse with
     /// its renamed input keys.
@@ -2667,7 +2730,7 @@ mod tests {
     fn v101_names_uris_uri() {
         let mut conn = Connection::open_in_memory().unwrap();
         crate::sql_functions::register(&conn).unwrap();
-        crate::models::drop_all(&conn).unwrap();
+        crate::datasets::drop_all(&conn).unwrap();
         embedded::migrations::runner()
             .set_target(refinery::Target::Version(100))
             .run(&mut conn)
@@ -2732,7 +2795,7 @@ mod tests {
     fn v102_empties_the_page_visits() {
         let mut conn = Connection::open_in_memory().unwrap();
         crate::sql_functions::register(&conn).unwrap();
-        crate::models::drop_all(&conn).unwrap();
+        crate::datasets::drop_all(&conn).unwrap();
         embedded::migrations::runner()
             .set_target(refinery::Target::Version(101))
             .run(&mut conn)
@@ -2760,7 +2823,7 @@ mod tests {
     fn v70_rewrites_old_event_versions_to_the_newest() {
         let mut conn = Connection::open_in_memory().unwrap();
         crate::sql_functions::register(&conn).unwrap();
-        crate::models::drop_all(&conn).unwrap();
+        crate::datasets::drop_all(&conn).unwrap();
         embedded::migrations::runner()
             .set_target(refinery::Target::Version(69))
             .run(&mut conn)
@@ -2833,7 +2896,7 @@ mod tests {
     fn v71_relabels_backfilled_snapshot_ops_as_manual() {
         let mut conn = Connection::open_in_memory().unwrap();
         crate::sql_functions::register(&conn).unwrap();
-        crate::models::drop_all(&conn).unwrap();
+        crate::datasets::drop_all(&conn).unwrap();
         embedded::migrations::runner()
             .set_target(refinery::Target::Version(70))
             .run(&mut conn)
@@ -2875,7 +2938,7 @@ mod tests {
     fn v36_rewrites_plugin_names_to_extensions_and_contributions() {
         let mut conn = Connection::open_in_memory().unwrap();
         crate::sql_functions::register(&conn).unwrap();
-        crate::models::drop_all(&conn).unwrap();
+        crate::datasets::drop_all(&conn).unwrap();
         embedded::migrations::runner()
             .set_target(refinery::Target::Version(35))
             .run(&mut conn)
@@ -2958,7 +3021,7 @@ mod tests {
     fn v37_renames_the_plugin_zone_to_agents() {
         let mut conn = Connection::open_in_memory().unwrap();
         crate::sql_functions::register(&conn).unwrap();
-        crate::models::drop_all(&conn).unwrap();
+        crate::datasets::drop_all(&conn).unwrap();
         embedded::migrations::runner()
             .set_target(refinery::Target::Version(36))
             .run(&mut conn)
@@ -3003,7 +3066,7 @@ mod tests {
     fn v41_keys_ai_results_by_their_request() {
         let mut conn = Connection::open_in_memory().unwrap();
         crate::sql_functions::register(&conn).unwrap();
-        crate::models::drop_all(&conn).unwrap();
+        crate::datasets::drop_all(&conn).unwrap();
         embedded::migrations::runner()
             .set_target(refinery::Target::Version(40))
             .run(&mut conn)
@@ -3052,7 +3115,7 @@ mod tests {
     fn v32_moves_agent_columns_onto_one_session_per_thread() {
         let mut conn = Connection::open_in_memory().unwrap();
         crate::sql_functions::register(&conn).unwrap();
-        crate::models::drop_all(&conn).unwrap();
+        crate::datasets::drop_all(&conn).unwrap();
         embedded::migrations::runner()
             .set_target(refinery::Target::Version(31))
             .run(&mut conn)
@@ -3128,7 +3191,7 @@ mod tests {
     fn v81_drops_thread_status_and_adds_an_unset_mark() {
         let mut conn = Connection::open_in_memory().unwrap();
         crate::sql_functions::register(&conn).unwrap();
-        crate::models::drop_all(&conn).unwrap();
+        crate::datasets::drop_all(&conn).unwrap();
         embedded::migrations::runner()
             .set_target(refinery::Target::Version(80))
             .run(&mut conn)
@@ -3198,7 +3261,7 @@ mod tests {
     fn v80_closes_chat_sessions_and_drops_acp_agent() {
         let mut conn = Connection::open_in_memory().unwrap();
         crate::sql_functions::register(&conn).unwrap();
-        crate::models::drop_all(&conn).unwrap();
+        crate::datasets::drop_all(&conn).unwrap();
         embedded::migrations::runner()
             .set_target(refinery::Target::Version(79))
             .run(&mut conn)
@@ -3273,7 +3336,7 @@ mod tests {
     fn v8_moves_effort_events_to_v2_without_retroactive() {
         let mut conn = Connection::open_in_memory().unwrap();
         crate::sql_functions::register(&conn).unwrap();
-        crate::models::drop_all(&conn).unwrap();
+        crate::datasets::drop_all(&conn).unwrap();
         embedded::migrations::runner()
             .set_target(refinery::Target::Version(7))
             .run(&mut conn)
@@ -3319,7 +3382,7 @@ mod tests {
     fn v9_keeps_effort_marks_under_their_thread() {
         let mut conn = Connection::open_in_memory().unwrap();
         crate::sql_functions::register(&conn).unwrap();
-        crate::models::drop_all(&conn).unwrap();
+        crate::datasets::drop_all(&conn).unwrap();
         embedded::migrations::runner()
             .set_target(refinery::Target::Version(8))
             .run(&mut conn)
@@ -3364,7 +3427,7 @@ mod tests {
     fn v10_gives_nudges_an_audience_and_counts_evaluations() {
         let mut conn = Connection::open_in_memory().unwrap();
         crate::sql_functions::register(&conn).unwrap();
-        crate::models::drop_all(&conn).unwrap();
+        crate::datasets::drop_all(&conn).unwrap();
         embedded::migrations::runner()
             .set_target(refinery::Target::Version(9))
             .run(&mut conn)
@@ -3396,7 +3459,7 @@ mod tests {
     fn v13_counts_earlier_analyses_as_scanned() {
         let mut conn = Connection::open_in_memory().unwrap();
         crate::sql_functions::register(&conn).unwrap();
-        crate::models::drop_all(&conn).unwrap();
+        crate::datasets::drop_all(&conn).unwrap();
         embedded::migrations::runner()
             .set_target(refinery::Target::Version(12))
             .run(&mut conn)
@@ -3430,7 +3493,7 @@ mod tests {
     fn v26_rewrites_history_to_three_part_command_ids() {
         let mut conn = Connection::open_in_memory().unwrap();
         crate::sql_functions::register(&conn).unwrap();
-        crate::models::drop_all(&conn).unwrap();
+        crate::datasets::drop_all(&conn).unwrap();
         embedded::migrations::runner()
             .set_target(refinery::Target::Version(24))
             .run(&mut conn)
@@ -3489,7 +3552,7 @@ mod tests {
     fn v19_prunes_superseded_scans() {
         let mut conn = Connection::open_in_memory().unwrap();
         crate::sql_functions::register(&conn).unwrap();
-        crate::models::drop_all(&conn).unwrap();
+        crate::datasets::drop_all(&conn).unwrap();
         embedded::migrations::runner()
             .set_target(refinery::Target::Version(18))
             .run(&mut conn)
@@ -3545,7 +3608,7 @@ mod tests {
     fn v14_moves_config_changes_to_v2_in_the_project_layer() {
         let mut conn = Connection::open_in_memory().unwrap();
         crate::sql_functions::register(&conn).unwrap();
-        crate::models::drop_all(&conn).unwrap();
+        crate::datasets::drop_all(&conn).unwrap();
         embedded::migrations::runner()
             .set_target(refinery::Target::Version(13))
             .run(&mut conn)

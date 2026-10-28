@@ -105,7 +105,7 @@ registrations). Install/remove emit `OxplowEvent::LspServersChanged`.
   `publishDiagnostics` in `lsp_diagnostic`, read as `v_diagnostic`
   (see `.context/semantic-layer.md`). Cleared at boot and per server on
   restart/crash/stop; a view of `v_diagnostic` re-runs on
-  `ModelsChanged`. Debounced per stream, it logs **`code.diagnostics.changed@2 { stream, path, counts }`** once
+  `DatasetsChanged`. Debounced per stream, it logs **`code.diagnostics.changed@2 { stream, path, counts }`** once
   per changed file with its counts after the burst (a crash logs the
   files it cleared, at zero, and so does the boot clear, `clear_at_boot`;
   tsk571) — the durable record, on the event log.
@@ -152,7 +152,7 @@ registrations). Install/remove emit `OxplowEvent::LspServersChanged`.
   — thin calls into `Services.code_intel`, taking
   `{ stream_id, path, line, col }` (1-based) and answering typed JSON.
   They replaced the seven `lsp_*` tools that each built raw LSP requests.
-  `v_lsp_server` (a live model) lists the servers; installing is the
+  `v_lsp_server` (a live dataset) lists the servers; installing is the
   `oxplow.lsp.install_server` command. The
   symbol tools work for **any** configured LSP language, not just the
   tree-sitter set; the call hierarchy runs `prepareCallHierarchy` then
@@ -178,7 +178,7 @@ registrations). Install/remove emit `OxplowEvent::LspServersChanged`.
 
 ## Pages (P6.E3)
 
-The desktop reads code intelligence from the models, as foundation
+The desktop reads code intelligence from the datasets, as foundation
 pages (`extensions/oxplow-foundation/pages/`, declared under `pages:`):
 
 - **Problems** (the `problems` page) —
@@ -191,7 +191,7 @@ pages (`extensions/oxplow-foundation/pages/`, declared under `pages:`):
   symbol opens its file at its line.
 
 Both pages are in the launcher under Code. References and hover stay
-live (the MCP `code_*` tools and the editor) — no model holds them.
+live (the MCP `code_*` tools and the editor) — no dataset holds them.
 
 ## Testing
 

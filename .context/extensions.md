@@ -44,7 +44,7 @@ its `Display`; [resources.md](./resources.md) "Using URIs"): the resource
 — `oxplow:oxplow/job?job=effort-review/review`,
 `oxplow:oxplow/collector?collector=triage/todos`,
 `oxplow:oxplow/page?page=github/pr`,
-`oxplow:oxplow/model?model=effort-review/reviews` — or,
+`oxplow:oxplow/dataset?dataset=effort-review/reviews` — or,
 for a kind whose names are already global (`ContributionKind::global_name`:
 command, measure, metric, dimension, event type, resource),
 `oxplow:oxplow/<kind>?<kind>=<name>` —
@@ -75,7 +75,7 @@ version is oxplow's own. Every kind is described: collectors
 advisories, skills (global: the name), implementations (global:
 `<capability>/<id>`), providers (global: the id, which is also the default
 instance's id, its URIs' segment and its commands' namespace), measures,
-metrics and dimensions (global: the key), models (global: the
+metrics and dimensions (global: the key), datasets (global: the
 `v_<ext>_<name>` view), event types (global: the type string; one
 descriptor per type, its highest `v` the contract version), resources
 (global: `<extension>/<name>`), pages,
@@ -85,12 +85,12 @@ replacements and custom components (all mounted, no global name).
 The id rules each kind used to restate are the domain's: `valid_local`
 (effects, advisories, pages, panels, skills, custom components),
 `valid_extension_name`, `extension_namespace` (the `-`→`_` rule, used by
-command namespaces, model and entity views, entity tables, event types
+command namespaces, dataset and entity views, entity tables, event types
 and the SDK). Rules that stay their own on purpose:
 `refuse_shared_namespaces` refuses *both* extensions whose commands map
 to one namespace (a namespace is one extension's);
 `capability::instance_id_problem` keeps provider ids to snake_case (the
-id is also a command namespace); a model can't take a core model's name
+id is also a command namespace); a dataset can't take a core dataset's name
 or be declared twice in one extension; the event-type "two extensions
 make one namespace" check (unreachable with valid names, kept for an
 invalid-named folder, which still loads).
@@ -114,7 +114,7 @@ its *source on disk*. The config watcher (`config_watch.rs`) watches
 sources, under the activation lock and with no activation: nothing that runs
 changes. So `rm -rf` of an undeployed source drops its row at once, and a new
 source is listed at once. We restate rather than read live (as
-`v_extension_source` is) because a live model is materialized by name in the
+`v_extension_source` is) because a live dataset is materialized by name in the
 query, and `v_extension` is a stored table other views and pages join.
 Sources that `extensionSources` points outside the folder are not watched;
 they show at the next activation.
@@ -128,11 +128,11 @@ descriptors".
 
 **Public imports and exports.** The pure validator is `extensions/imports.rs`;
 `extensions/public_contracts.rs` normalizes manifest declarations, binds public
-model references and withholds contributions before catalog publication.
+dataset references and withholds contributions before catalog publication.
 Exports are explicit opt-in. A stable contribution kind or a legacy alias
 does not make a contribution public.
 
-- Targets are contribution URIs (`oxplow:oxplow/model?model=effort-review/reviews`). An
+- Targets are contribution URIs (`oxplow:oxplow/dataset?dataset=effort-review/reviews`). An
   import of a globally named kind (`oxplow:oxplow/command?command=acme.pr.merge`) is of
   whichever extension declares that name.
   An import has a consumer-local binding name, a positive integer contract
@@ -141,7 +141,7 @@ does not make a contribution public.
   letter or digit. Aliases and internal names never resolve a target.
 - Package `version` is release SemVer; `engine` is host compatibility;
   an export's positive integer version is its individual contract. Imports
-  require exact equality. A model/event export cannot relabel its native
+  require exact equality. A dataset/event export cannot relabel its native
   descriptor version. An export must name its owner's declared contribution.
 - Export visibility is `private` by default (not importable), `experimental`
   (private consumers only), or `stable` (private/shared consumers).
@@ -179,17 +179,17 @@ Manifest declarations are `exports: [{contribution, version, visibility}]`,
 `version` is optional: absent, whatever version the producer exports
 binds; given, it must equal the export's. The binding records the version
 it bound (`publicContracts.bindings[].version`). Guards name this
-extension's models, pages, collectors, commands, effects, advisories,
+extension's datasets, pages, collectors, commands, effects, advisories,
 skills or providers. A guard's bindings must be declared and nonempty; unknown or
-duplicate names are errors. Models and a page's `sql` loaders can read
-a public model with `import_ref('binding')`; tokenized calls infer a guard automatically. Strings,
-comments and qualified function names are untouched. A model's binding becomes
-an ordinary `ref('<producer>/<model>')`, retaining lineage and native contract
+duplicate names are errors. Datasets and a page's `sql` loaders can read
+a public dataset with `import_ref('binding')`; tokenized calls infer a guard automatically. Strings,
+comments and qualified function names are untouched. A dataset's binding becomes
+an ordinary `ref('<producer>/<dataset>')`, retaining lineage and native contract
 checks; a page loader's becomes its quoted published view. An
 unavailable import withholds the page (and its slot mounts), and
 `extension test` skips the examples that run it. SQL grants still apply.
 `examples/extensions/effort-review` (producer: `exports` its `reviews`
-model) and `examples/extensions/review-badges` (consumer: an optional
+dataset) and `examples/extensions/review-badges` (consumer: an optional
 import read by its pages and a slot mount) are the working pair; the
 review-badges test in `crates/oxplow-sdk/tests/examples.rs` covers available,
 disabled, missing and another version. `extension check` and `extension test` print one line per binding from
@@ -209,7 +209,7 @@ reserve a global name. Host manifest checks (including engine compatibility)
 also block candidates with explicit public contracts and their required
 consumers; an invalid candidate never reserves global names. Resolve imports,
 withhold guarded contributions, remove mounts that
-refer to absent pages/models/providers, withdraw their exports, and
+refer to absent pages/datasets/providers, withdraw their exports, and
 resolve again until no contribution is removed. Repeat resolution after global
 collision checks, then bind SQL and publish. Removal is monotonic within a
 load; a later reload starts from the source declarations. This also withdraws
@@ -227,10 +227,10 @@ published reference metadata; imports add no dynamic service-call surface.
 Authoring checks and impact review now build a read-only candidate catalog
 from fresh source declarations, replace only the candidate's matching origin,
 and resolve imports and guards before compiling the overlay. This snapshot
-supplies all enabled models and entity stubs; it does not reuse active views or
+supplies all enabled datasets and entity stubs; it does not reuse active views or
 publish registries. Previously active consumers blocked by the candidate report
 errors on that candidate, while unrelated existing failures are not attributed
-to it. Model compilation also reports errors from declared transitive consumers.
+to it. Dataset compilation also reports errors from declared transitive consumers.
 Disabled packages can be inspected without changing enablement or authority.
 
 Both impact sides resolve against current project dependencies, rather than a
@@ -341,7 +341,7 @@ declared version, so it is checked once on the result, not between steps. Any
 failure (a step that errors or returns a non-object, settings the schema refuses,
 a stored version no step starts from or newer than declared) names the
 extension and the step and rolls the whole candidate back: every layer stays at
-its old version and the extension is held back exactly like one whose model does
+its old version and the extension is held back exactly like one whose dataset does
 not compile (`Failed::hold`: its last working version keeps serving, on the
 settings that version reads; a first-time extension stays out), the problem
 shown in Settings → Extensions. Fixing the step and activating again migrates.
@@ -356,7 +356,7 @@ settings only.
 
 ### Configuration in SQL
 
-An extension's own SQL — its models, its pages' `sql` loaders and its
+An extension's own SQL — its datasets, its pages' `sql` loaders and its
 advisories' queries — reads its own configuration with
 `config('/pointer')`, a JSON pointer into the extension's effective values
 (`defaults < project < personal`, the `ConfigurationHost` resolution above):
@@ -368,19 +368,19 @@ advisories' queries — reads its own configuration with
   boolean 1 or 0). Nothing registers a global function, so there is no `v_*`
   view or `oxplow_query_sql` call that reads configuration, and no way to name
   another extension's: the owner is fixed by where the SQL is declared
-  (`ExtensionModels.config` for a model, the page's or advisory's own
+  (`ExtensionDatasets.config` for a dataset, the page's or advisory's own
   extension for those). Core SQL reads none. Settings are non-secret by
   construction; a literal in a view or a query is no more exposed than they
   are.
-- **Models** are compiled with the values read in the activation's own
+- **Datasets** are compiled with the values read in the activation's own
   transaction (`PreparedExtensionDatabase::replace_tx`), so the view carries
   the literal; a stored configuration that can't be resolved holds that
-  extension back like a model that doesn't compile. **A change republishes:**
-  the generation records the configuration the models were compiled against
+  extension back like a dataset that doesn't compile. **A change republishes:**
+  the generation records the configuration the datasets were compiled against
   (`ConfigSignature`, beside the entity signature), the entities consumer
   checks it after each `command.executed` (`request_config_refresh`; a write
   through `extension_config.write` is one) and requests an activation when it
-  differs; a changed definition refills a materialized model.
+  differs; a changed definition refills a materialized dataset.
 - **Pages and advisories** read the values stored now each time they run
   (`SqlGateway::with_extension_config`), so a change applies to the next
   run with no republish. A check (`oxplow extension check`, the effect report)
@@ -390,7 +390,7 @@ advisories' queries — reads its own configuration with
   string or boolean: an unknown key, an object or array, a read in an
   extension that declares no configuration, or a pointer that isn't a quoted
   string starting with `/` is a load error at the SQL, naming the key.
-- **A computed type.** A literal has no declared type to SQLite: a model
+- **A computed type.** A literal has no declared type to SQLite: a dataset
   column over a `config()` read declares `type: ""` (untyped), and integer
   division applies to an integer setting (write `1.0 * config(...)` to divide
   as a real).
@@ -398,7 +398,7 @@ advisories' queries — reads its own configuration with
 oxplow-bundled uses it for its review-policy constants (README "Settings");
 `oxplow.review_policy.read` / `.write` are its commands over the scope above.
 Pinned by `extension_sql_config_tests.rs` and
-`models::tests::config_reads_become_the_owners_literals`.
+`datasets::tests::config_reads_become_the_owners_literals`.
 
 ## Private state host boundary
 
@@ -415,7 +415,7 @@ with fixed diagnostics before payload access.
 Native commands may declare `scope: state.read`, `op: snapshot` to read their own
 namespace. This read returns null when absent or `{stamp, values}` when present;
 it has read access and its result is not copied into command audit. State remains absent from
-SQL models. Scripts may declare `needs: [state.read]` and call
+SQL datasets. Scripts may declare `needs: [state.read]` and call
 `scope("state.read", {"scope": "project", "area": "state"})`; collectors, fact
 collectors, effects and policies use a separate owned read for each call, with
 no transaction held while their worker waits. Command composers use the routing
@@ -583,7 +583,7 @@ the user guide is `docs/guide/pages.md`.
     page's definition with `oxplow_read`
     (`oxplow:oxplow/page?page=<ext>/<slug>`).
   - An agent lists pages, extensions and what each contributes with
-    models, not tools: `v_page`, `v_page_answer`, `v_page_param`,
+    datasets, not tools: `v_page`, `v_page_answer`, `v_page_param`,
     `v_extension` and `v_contribution` (restated with each extension
     generation from the active catalog, the live set; an extension that
     fails to load holds its generation back, so it is not a row —
@@ -657,10 +657,10 @@ the user guide is `docs/guide/pages.md`.
     loader: its `PageRun.inactive` says what it needs, and the page shows
     that instead of failing.
   - Refresh is opt-in: a page offers it only when it says `refresh: true`.
-    A page re-runs on its own when the models it read change, so Refresh is
+    A page re-runs on its own when the datasets it read change, so Refresh is
     for one that reads outside oxplow (an integration's list, a file on
     disk).
-  - The page re-runs when a model it read changed (`modelsChanged`), when
+  - The page re-runs when a dataset it read changed (`datasetsChanged`), when
     facts landed for a measure its `metric_grid()` read
     (`metricSamplesChanged`), when the live set changes, and after a
     reconnect (`onRemoteReconnect`): events sent while the daemon was
@@ -950,13 +950,13 @@ the user guide is `docs/guide/pages.md`.
   kit draws; the component holds only the editor and the pickers.
   - **The catalog** is the page's **rail**: a `rail:` node in the same
     page file (a `list` over `v_dataset`, oxplow's own first, its `view`
-    column selecting the `model` param, the picked row emphasized). A
-    pick pushes `#model=` (Back un-picks) and the component hears it.
-  - **The component** (`main.ts`, its pure half `model.ts`, tested from
-    the desktop as `viz/exploreDataModel.test.ts`): the picked model's
-    documented columns (`v_field`) and lineage (`v_model_lineage`:
-    the models it reads, links that pick them, the tables it reads, the
-    models that read it); the SQL box (a pick writes `SELECT * … LIMIT
+    column selecting the `dataset` param, the picked row emphasized). A
+    pick pushes `#dataset=` (Back un-picks) and the component hears it.
+  - **The component** (`main.ts`, its pure half `dataset.ts`, tested from
+    the desktop as `viz/exploreDataset.test.ts`): the picked dataset's
+    documented columns (`v_field`) and lineage (`v_dataset_lineage`:
+    the datasets it reads, links that pick them, the tables it reads, the
+    datasets that read it); the SQL box (a pick writes `SELECT * … LIMIT
     50`; any read-only query, metrics included — `SELECT bucket,
     MEASURE('<key>') FROM metric_grid('week')` — Cmd/Ctrl+Enter runs
     it); **Show as** (`table`, `list`, `number`, `markdown`, `bar`,
@@ -965,14 +965,14 @@ the user guide is `docs/guide/pages.md`.
     the explorer's metric query (`metricTemplate`: `metricSeriesSql` as a
     line) and, while the SQL is still it, **Slice By** regenerates it with
     a dimension (`v_dimension`, `sliceTemplate`); edited SQL is never
-    rewritten. Its view is the tab's `#` (`model`, `sql`, `viz`, `chart`,
+    rewritten. Its view is the tab's `#` (`dataset`, `sql`, `viz`, `chart`,
     `template`), the unrun draft its history state; it ignores the echoes
     of its own writes, so only a real move (Back) redraws. "Ask your agent
     to build one…" invokes `oxplow.page.draft_with_agent`, the one command
     it declares.
   - **The result** is core's: the component hands the page an inline
     page (`showView`, protocol 12: its query as one `sql` loader, its viz
-    over it — `specOf` in `src/explore-data/model.ts`), the page opens it
+    over it — `specOf` in `src/explore-data/dataset.ts`), the page opens it
     (`open_page { specYaml }`) and draws it under the frame with
     `PageTree` (`pages/PageComponent.tsx` `ShownView`), live, with **Save
     as Page** (`pages/SaveViewForm.tsx`: `oxplow.extension.write_page {
@@ -981,7 +981,7 @@ the user guide is `docs/guide/pages.md`.
     component `INVALID` with its field, and it shows the reason under the
     SQL box.
   - **No raw tables.** The React page's Raw tables switch read physical
-    tables over IPC; a component reads models only, as every page does.
+    tables over IPC; a component reads datasets only, as every page does.
     Raw reads stay the agent's `oxplow_query_sql`.
   - **What an agent shows.** An agent answers with a page rather than
     pasting rows: MCP **`oxplow_show_page { page | spec, params? }`** runs
@@ -1091,7 +1091,7 @@ the user guide is `docs/guide/pages.md`.
     says `verified = 0`: it cites nothing and no person verified it, and
     for a `tests_pass` claim its effort's latest test run didn't pass
     with at least one test — the bundled policy's rule; core keeps only
-    what a claim cites and its `review`; a model reads the claims from
+    what a claim cites and its `review`; a dataset reads the claims from
     the agent's answers, nothing records them), plus the dismissed ones
     (which count for nothing, shown so they can be reopened), each row
     with its review state and **Mark Verified**
@@ -1100,7 +1100,7 @@ the user guide is `docs/guide/pages.md`.
     (`oxplow.effort.reopen_claim`)
   - Decisions Oxplow Noticed's rows carry **Confirm** / **Dismiss**
     (`oxplow.effort.confirm_decision` / `oxplow.effort.dismiss_decision`)
-  - What Deviated (its own model `v_oxplow_bundled_deviation`: each
+  - What Deviated (its own dataset `v_oxplow_bundled_deviation`: each
     effort's files against its work item's title and body — a file is in
     the area when the text names it or one of its directories at least
     two levels deep; none when the item names no area. Live, not
@@ -1109,7 +1109,7 @@ the user guide is `docs/guide/pages.md`.
   - Tests Weakened (deleted test functions from `v_change_function`,
     fewer assertions and new skip markers from `v_change_test_file`;
     also mounted in the `oxplow-foundation/commit.sections` and `oxplow-foundation/uncommitted.sections` slots)
-  - Struggled Here (`v_oxplow_bundled_struggle`, the bundled model: a file edited 5+ times or 3+ failed shell commands per effort)
+  - Struggled Here (`v_oxplow_bundled_struggle`, the bundled dataset: a file edited 5+ times or 3+ failed shell commands per effort)
   - Review Prompt (a copyable markdown prompt for reviewing the effort
     with a second harness: the task, the agent's summary, the files it
     changed, its claims and recorded decisions, and what to report; an
@@ -1180,7 +1180,7 @@ the user guide is `docs/guide/pages.md`.
   and `effects:` ("Effects"), through one swappable vocabulary. A change
   is reviewed by its impact — rows, collector outputs, effects'
   reactions — at any revision, on the CLI (`extension check --impact`)
-  and in an effort's review ("Reviewing by impact"). Models declare keys and may materialize on a
+  and in an effort's review ("Reviewing by impact"). Datasets declare keys and may materialize on a
   clock or incrementally ([semantic-layer.md](./semantic-layer.md)).
   Changes go live with `oxplow.extension.deploy` ("Sources and deployments").
 
@@ -1252,7 +1252,7 @@ source directly: an edit changes nothing until it is deployed.
   always did), and its deployment holds those inputs and the built output,
   never the excluded folders ("Builds").
   Everything oxplow reads for a deployed extension — manifest, pages,
-  Starlark, models, component bundles, provider entries, skills — comes
+  Starlark, datasets, component bundles, provider entries, skills — comes
   from that folder. Its `Extension.path` is the folder's absolute path, so
   every `root.join(ext.path)` reader finds it. The file watcher never looks
   under `.oxplow/runtime/`; it does watch `.oxplow/extensions/` (an agent's
@@ -1476,9 +1476,9 @@ entry must be a valid extension name other than its own, and a cycle is a
 load error on each member (`refuse_requires_cycles`). A required bundled
 extension (foundation) always counts as on. Unlike `imports:`, `requires`
 names no contract: it is for composing another extension's commands or
-reading its models without an export. **Using another extension without
+reading its datasets without an export. **Using another extension without
 declaring it is an error** (`check_dependencies`, in `validate_extension`):
-reading its model (`v_<namespace>_…` in a page, a model or a script),
+reading its dataset (`v_<namespace>_…` in a page, a dataset or a script),
 naming its page (`<name>/…`), mounting at its slot or running its command
 (`<namespace>.…`, unless the required foundation shares the namespace) —
 one finding per extension, at the first place, `fix: requires: [x]`. The
@@ -1505,9 +1505,9 @@ An extension declares what it may reach beyond the **baseline** in its
 manifest's `permissions:` (`oxplow_domain::permissions::Permissions`); a
 person approves it when the extension is deployed. The baseline needs no
 declaration: pages, panels, slots, decorators, replacements; its
-own models; a collector's `input:` query (declared and reviewable); its
+own datasets; a collector's `input:` query (declared and reviewable); its
 own commands and the effects, jobs and commands whose scripts compose them;
-components that query their own models; Starlark and jaq collectors that
+components that query their own datasets; Starlark and jaq collectors that
 don't ask a model; `state.read`, `extension_config.read`, `jobs.read`.
 
 ```yaml
@@ -1575,7 +1575,7 @@ its first deploy here (Startup), which asks for what it declares.
 `extensions-list` and `extensions-deployments`; Settings → Extensions
 embeds the same two pages): `extensions-list` is every
 extension from `v_extension` joined to `v_extension_source` — the live
-model of each source as it is now, so an edit shows at once ("out of date"
+dataset of each source as it is now, so an edit shows at once ("out of date"
 when its hash isn't the running deployment's) — with its permissions and
 what it waits on, and the row actions Deploy (offered only when undeployed
 or out of date), Roll Back, Enable, Disable, Share with the Team, Stop
@@ -1621,10 +1621,10 @@ collectors:  [...]   # entity collectors (exec / starlark / jaq / read → entit
 ui:                  # what it adds to the core UI (a command's own `ui:` puts it in core menus: see "Commands")
   slots:             # pages mounted at other pages' slots; see "Slots"
     - { page: change-review, at: oxplow-foundation/diff-view.sections }
-  decorators: …      # labels from its models on core URIs (stable since P10; see "Decorators")
+  decorators: …      # labels from its datasets on core URIs (stable since P10; see "Decorators")
   replacements: …    # a page in place of a named core component (see "Replacements")
 advisories:  [...]   # see "Advisories"
-datasets:   [...]   # SQL datasets: DatasetDecl entries (`fields:`, optional `relationships: [{ from, to: <dataset>.<field> }]`) + models/<name>.sql → v_<ext>_<name>; `key: [fields]`; `materialize: on_change | { every: 1h } | { incremental: <field> }` stores one (semantic-layer.md "Models" vocabulary, "Extension models", "Materialized models"); the old `models:` / `columns:` are unknown keys with a hint
+datasets:   [...]   # SQL datasets: DatasetDecl entries (`fields:`, optional `relationships: [{ from, to: <dataset>.<field> }]`) + datasets/<name>.sql → v_<ext>_<name>; `key: [fields]`; `materialize: on_change | { every: 1h } | { incremental: <field> }` stores one (semantic-layer.md "Datasets" vocabulary, "Extension datasets", "Materialized datasets"); the old `datasets:` / `columns:` are unknown keys with a hint
 panels: …           # left-nav panels, each a page compact (see "Panels")
 commands:  [...]   # Starlark scripts composing core commands, a scope's or its provider's operations (see "Commands")
 resources: …        # kinds of thing a URI can name (see "Resources")
@@ -1726,7 +1726,7 @@ and one calling MCP read identical `file:line: what — fix` lines.
   The SDK carries them (`crates/oxplow-sdk/src/examples.rs`: compiled in by
   `build.rs` in a release build, read from the folder in a debug one, as
   `oxplow-app` does for `extensions/`). The copy keeps the example's name
-  (its commands and models are named by it); another name is refused:
+  (its commands and datasets are named by it); another name is refused:
   rename after copying. `every_example_scaffolds_checks_and_tests_clean`
   keeps each one passing `check` and `test`.
 - **`scaffold(root, kind, name, origin)`** (`extension new <kind> <name>`)
@@ -1741,8 +1741,8 @@ and one calling MCP read identical `file:line: what — fix` lines.
     `components/<name>/`) and a page whose `component` node it feeds;
     `panel` — a `panels:` entry whose `body` is a hidden page;
   - `collector` — a Starlark collector `items` over `v_work_item` declaring
-    entity `item`, a model `open_items` over `ref('item')` and a page over
-    the model; its example runs the collector over fixture rows;
+    entity `item`, a dataset `open_items` over `ref('item')` and a page over
+    the dataset; its example runs the collector over fixture rows;
   - `metric` — a code metric, built by `oxplow_app::metric_scaffold::
     extension_files` (the one template: `oxplow.metric.scaffold` hands the
     same files to the agent to write). `--language` (default `rust`; the
@@ -1776,7 +1776,7 @@ and one calling MCP read identical `file:line: what — fix` lines.
   (a provider once a program replaces its stub) —
   `crates/oxplow-sdk/tests/just_works.rs` holds each kind to it, through
   to loading in a real oxplow: the page's row action names a registered
-  command, the collector syncs and its model publishes, the command runs
+  command, the collector syncs and its dataset publishes, the command runs
   through the bus; a work list and an effort policy each pass the kit
   with the fake behind their stub, the policy with its scaffolded example.
 - **Recorded fresh-agent runs** (`crates/oxplow-sdk/fixtures/just-works/
@@ -1796,24 +1796,24 @@ and one calling MCP read identical `file:line: what — fix` lines.
   error at the collector's line) plus `extensions::validate_extension`'s
   dry run — **always** (P7.C6), and **never on the project's database**:
   on the throwaway oxplow — this build's schema, no data, what the
-  extension declares turned on, its models and metrics seeded so a page
+  extension declares turned on, its datasets and metrics seeded so a page
   may read `metric_grid()` / `metric_findings()` — or on the caller's own
   (`extension test`'s). What happens to be in a project's database is no
   part of a check, and a CLI older or newer than the app is never refused
   over its schema. The agent's `oxplow_validate_extension` checks the same
   way, starting a throwaway in the app. The dry run first compiles, in a rolled-back read,
-  the extension's models beside the other enabled extensions' (P4.9 —
+  the extension's datasets beside the other enabled extensions' (P4.9 —
   resolution, lineage, and the contract, so a changed contract at a
   published version fails here before it publishes) over **empty
   stand-ins for every declared entity that hasn't synced**
-  (`models::EntityStub`: a typed temp table under the entity's view);
-  `models::check_extensions` returns those views (`CheckedModels.views`).
+  (`datasets::EntityStub`: a typed temp table under the entity's view);
+  `datasets::check_extensions` returns those views (`CheckedDatasets.views`).
   Every later query of the check — command examples' reads,
   advisories, pages — reads through them as an **overlay**
   (`SqlGateway::with_overlay`, `SqlQuery::temp_views`: recreated on the
   query's own connection and dropped after), so a fresh collector →
-  model → page checks clean before its first sync and a page may read
-  its own unpublished model. The dry run of a page
+  dataset → page checks clean before its first sync and a page may read
+  its own unpublished dataset. The dry run of a page
   (`pages::checks::dry_run`, `extensions::viz_column_problems`) runs its
   `sql` loaders once with every param at its default (an earlier loader
   reads as a table; `command` and `page` loaders do not run, since a
@@ -1825,8 +1825,8 @@ and one calling MCP read identical `file:line: what — fix` lines.
   warnings, dry_run, extension }`; `render_findings` prints it as text
   (`error: <file:line …>` lines then a one-line summary) or JSON.
   `oxplow_validate_extension` also warns about a `fixtures/*.yaml` no intent
-  example names (`check_fixture_pairing`; `model-*` / `provider-*` belong
-  to a model or a provider); `extension test` warns about the reverse, an
+  example names (`check_fixture_pairing`; `dataset-*` / `provider-*` belong
+  to a dataset or a provider); `extension test` warns about the reverse, an
   example with no fixture (a fresh scaffold has some). Each names the file
   and the fix.
 - **`scaffold(…, Kind::Provider { capability }, …)`** (`extension new
@@ -1868,7 +1868,7 @@ and one calling MCP read identical `file:line: what — fix` lines.
   what examples need — the effect and collector triggers (each example
   delivers its event with `EventPump::settle`) and the job scheduler —
   and binds every AI role to the **fixture model** (`oxplow_ai::fixture`,
-  a host-registered kind no activation replaces): an example's `model: {
+  a host-registered kind no activation replaces): an example's `dataset: {
   replies }` is what it answers, in turn. No paid call, no provider.
   It runs `check`, then every intent example with a fixture
   (`fixtures/<name>.yaml`: `input`, `expect`, `$any` matching anything):
@@ -1908,14 +1908,14 @@ and one calling MCP read identical `file:line: what — fix` lines.
   command example that refuses or fails is `refused: <its reason>`. Then, per declared provider, the conformance kit
   ([providers.md](./providers.md) "The conformance kit"), the effort
   policy suite for a policy script, `questions.yaml` and incremental
-  models. `TestReport { ok, errors, warnings, blessed, ran, generation,
+  datasets. `TestReport { ok, errors, warnings, blessed, ran, generation,
   contributes, unsupported, left }`: `contributes` is the extension's
   descriptors by public id, `unsupported` what only the app shows
   (panels, decorators, replacements, skills; a slot mount runs in its
   host page's run, so a fixture of the host page checks it); `render`
   prints it like `check`'s. Exit 0 / 1 / 2 as `check`. `check` with no
   running oxplow asks a throwaway (with no environment) for its command
-  registry. `the_triage_example_reads_the_tree_the_layer_and_a_model`
+  registry. `the_triage_example_reads_the_tree_the_layer_and_a_dataset`
   runs the triage example's job, event and component this way and holds
   its `contributes` equal to a real oxplow's over the same project.
 - **The CLI** is `apps/desktop/src-tauri/src/extension_cli.rs`, dispatched
@@ -1945,13 +1945,13 @@ hidden pages that exist to hold a question (`collectors`, `zones`,
 is held by a page with a whole-page action running that command.
 
 - **`answerability::check_pages`** (with `live_pages` for the live half):
-  the answer's `skill` names every model the page's `sql` loaders read,
+  the answer's `skill` names every dataset the page's `sql` loaders read,
   every command its `command` loaders run and every command its whole-page
   actions run (no `skill`, a user extension's, skips that); the skill's text
-  is `skill_full_text`, so a model is named by the skill or any of its
+  is `skill_full_text`, so a dataset is named by the skill or any of its
   references, as a whole word in any case (`answerability::names`:
-  `v_commit_file` doesn't name `v_commit`); a model is a table the query
-  reads (`models_in`: after `FROM`, `JOIN` or a comma in a `FROM` list),
+  `v_commit_file` doesn't name `v_commit`); a dataset is a table the query
+  reads (`datasets_in`: after `FROM`, `JOIN` or a comma in a `FROM` list),
   never a `v_*` word in a string, a comment or an alias. An action's
   command must exist and its input fit the command's schema. The page runs
   with the answer's params with no loader failing (`RunTarget::Spec` over
@@ -1966,11 +1966,11 @@ is held by a page with a whole-page action running that command.
   `oxplow extension test` runs the second half for every extension's pages
   (`ran: answers`).
 - **Live** (`OXPLOW_LIVE_ANSWERABILITY=1`): `answerability::live_pages` asks
-  this machine's `decide` model (`AiService::for_this_machine`: the global
+  this machine's `decide` dataset (`AiService::for_this_machine`: the global
   `ai.yaml`, keychain read only), given only the skill text and the catalog
   (every `v_dataset` view, every command an agent may run and every tool it
   is offered), what it would reach for first; it must pick the page's first
-  loader's model or command.
+  loader's dataset or command.
 - **An extension's own** `questions.yaml` (`answerability::check`) runs in `oxplow extension test`:
   `skill` is a markdown file in the extension, SQL runs on the test's
   throwaway oxplow, and a command is one on its bus — core's or the
@@ -2043,8 +2043,8 @@ a `KINDS` entry and a `dispatch` arm. The forms:
     params?, bind? }` runs the page again — `params` over the example's,
     `bind: { <name>: loaders.<loader>.rows[0].<column> }` keeping a value of
     that run — and findings name the step (`steps[3]: …`).
-  - **Materialized models are current when read.** The throwaway runs
-    the change loop as boot does (`models_changed::spawn`), and before a
+  - **Materialized datasets are current when read.** The throwaway runs
+    the change loop as boot does (`datasets_changed::spawn`), and before a
     read — a page run, a query, a command (`Host::current`) — after any
     step changed something, every asset recomputes at once, each after
     those it reads, a clocked one (`every: 1h`) too, without waiting out
@@ -2123,7 +2123,7 @@ a `KINDS` entry and a `dispatch` arm. The forms:
   `evidence` (`EffortEvidenceStore::replace`), `commit`
   (`SqliteGitStore::upsert_commit`), `change` (a change's files and
   functions, `SqliteChangeStore::store_results`; it never runs a deep
-  analysis, and the materialized models over the commit index, like
+  analysis, and the materialized datasets over the commit index, like
   `co_change_pair`, fill on a recompute the throwaway doesn't start),
   `test_run` (a `tests` capture and its `oxplow.test_case` facts through
   `SqliteFactStore::record_facts`) and `snapshot` (one take in the
@@ -2153,8 +2153,8 @@ a `KINDS` entry and a `dispatch` arm. The forms:
   thread's open effort), its text line by line, heading included; on an
   oxplow of its own, since it records what it said (`once_per`).
 - `when: { sql, params? }`, `expect: { rows, columns? }` — a read-only query
-  over the published models, run as a page loader would (an inline page of
-  one `sql` loader, `sql_example`) and compared as a loader's: a model, a
+  over the published datasets, run as a page loader would (an inline page of
+  one `sql` loader, `sql_example`) and compared as a loader's: a dataset, a
   decorator's labels or a metric's `metric_grid` tested on its own.
 - `when: { collector: <id>, rows?, event? }`, `expect: { entities: { <name>:
   n | $any } }` — a derived collector runs over `rows` (standing in for
@@ -2215,14 +2215,14 @@ fixtures to it.
 - no fixture is a warning; an `input` naming none of these is an error.
 
 Then `questions.yaml`, each provider's conformance kit, and (P8.B5) each
-`materialize: { incremental: <column> }` model on its fixture
-`fixtures/model-<name>.yaml` — `before:` and `after:`, each `{ <table>:
+`materialize: { incremental: <column> }` dataset on its fixture
+`fixtures/dataset-<name>.yaml` — `before:` and `after:`, each `{ <table>:
 [{ column: value }] }`: in a rehearsal (rolled back), `before` is written
-and the model built whole into a temp table keyed like its `m_<view>`,
+and the dataset built whole into a temp table keyed like its `m_<view>`,
 `after` is written, the rows past its watermark are appended, and what
 it holds is compared with its SELECT's rows now
-(`models::incremental_matches_full`). A difference is an error at the
-model's line in `extension.yaml` ("misses n row(s) a full refill holds"
+(`datasets::incremental_matches_full`). A difference is an error at the
+dataset's line in `extension.yaml` ("misses n row(s) a full refill holds"
 — a watermark that doesn't grow as rows arrive drops a row below it
 unseen, which nothing at run time can tell); an append that hits the key
 passes (the runtime refills then); no fixture is a warning.
@@ -2348,7 +2348,7 @@ A param (`PageParam`) takes `name`, `label`, `default`, `options`,
   and the query says what an unknown value means. An agent's page tool
   (`agent_tools::params_schema`) emits no `enum` for it. A param named
   `uri`, `effort_id`, `thread_id` or `stream_id` draws as a picker over
-  the matching model, by title (`viz/vizParams.ts`); any other is typed.
+  the matching dataset, by title (`viz/vizParams.ts`); any other is typed.
 - **Implicit params.** A param named `stream_id` or `thread_id` is bound
   to the viewer's context (`ViewContext`, numeric ids) unless the caller
   supplies it. Precedence: supplied, then context, then `default`.
@@ -2369,16 +2369,16 @@ Named loaders, run in order; a loader reads only the ones before it
 (naming a later one is an error). A loader has exactly one of `sql`,
 `command`, `page` or `rows`, plus optional `columns` (keys, labels and
 formats its nodes default to) and `empty`. Its name is lowercase letters,
-digits and `_`, never a model's (`v_*`, `m_*`).
+digits and `_`, never a dataset's (`v_*`, `m_*`).
 
-- `sql`: one read-only statement over the `v_*` models and the extension's
+- `sql`: one read-only statement over the `v_*` datasets and the extension's
   own. `:param` binds a page param or a loader `params:` entry (`{ param
   }`, `{ from: <loader>.<column> }` (an earlier loader's first row) or a
   literal). An earlier loader it names reads as a temp table of that name
   (`SqlQuery.temp`). `config('/key')` reads the page's own extension's
   settings (`PageRunner::with_config`).
 - `command`: a read-only command, run as the viewer
-  (`Access::reads_only`). It says `reads` (models) or `refresh` (`manual`,
+  (`Access::reads_only`). It says `reads` (datasets) or `refresh` (`manual`,
   `{ every }`). Its result is a `{ columns, rows }` table as is, an array
   of objects (a row each), else one `value` row; `items: <field>` takes a
   list inside the result as the rows.
@@ -2399,7 +2399,7 @@ source of what it records). One run keeps at most 5 MiB of results
 loader says so. Do filtering and `LIMIT` in SQL.
 
 **Open runs** (`pages/open_runs.rs`): a window's open page keeps its run
-and the request that made it. A change to a model one of its loaders read
+and the request that made it. A change to a dataset one of its loaders read
 (a command loader's `reads`), or to a param it binds (`head_sha` reads
 `v_stream`), re-runs the loaders that depend on it (`dirty_loaders`).
 `OxplowEvent::PageRunChanged` names the loaders whose rows differ (an
@@ -2903,11 +2903,11 @@ with a `Change` (`added`, `removed`, `changed`, `unchanged`):
 
 - `pages` — each page's rendered text
   before and after (`PageImpact`);
-- `models` — each view, the parts that differ (`changed`: `query`,
+- `datasets` — each view, the parts that differ (`changed`: `query`,
   `columns`, `description`, `tests`, `version`, `deprecated`), its
   columns before and after, the first contract difference
   (`contract_change`; a SQL-only change keeps the contract) and its
-  `downstream` readers (`models_diff`). When the contract held, the
+  `downstream` readers (`datasets_diff`). When the contract held, the
   review names the parts ("its description and tests changed");
 - `collectors` — each collector's `Grants` (entry, runtime, hosts,
   credentials, env) before and after and the views it fills
@@ -2935,7 +2935,7 @@ rows.
 The report is built from the two loaded versions. **It never runs a
 program, an exec collector or an external provider** — a version that is
 not yet deployed has no permissions approved. What it does run is
-read-only or sandboxed: page and model queries on each version's
+read-only or sandboxed: page and dataset queries on each version's
 overlay, and derived collectors' and effects' scripts (below).
 
 `extension_impact::impact(layer, before, after)` builds it. Each
@@ -2946,17 +2946,17 @@ and `page` loaders do not run, because a check acts as no one. For the
 candidate these are the very runs `check_extension` made, so a review
 runs each page once. Each page is rendered from its dry run
 (`pages::checks::text`: each viz node under its title, through
-`viz_text::render`) against **its own version's models** (each side's
-overlay). So a page over a model that the candidate changes renders
+`viz_text::render`) against **its own version's datasets** (each side's
+overlay). So a page over a dataset that the candidate changes renders
 against the changed SQL. A page that fails the same way on both sides
-is `unchanged`. A model's `downstream` is its direct readers from
-`v_model_lineage` (`downstream_of`) other than this extension's own
+is `unchanged`. A dataset's `downstream` is its direct readers from
+`v_dataset_lineage` (`downstream_of`) other than this extension's own
 views, by exact name. A provider's declarations are read from each
 version's files. `extension_impact::summary` is the one wording that
 `extension check --impact` and an effort's review share: collectors'
 and providers' grants first ("now reaches x (was y)", a provider command
 added (destructive)), then what the collectors make of their inputs,
-then models with their readers and rows, then pages ("Page x: changed",
+then datasets with their readers and rows, then pages ("Page x: changed",
 "Page x: its query fails: …"), then the other contributions. A changed
 page carries its text before and after in the report (`before`,
 `after`); there is no line diff yet.
@@ -2975,16 +2975,16 @@ when that revision has no `extension.yaml`. This lets a review compare
 two revisions of an extension, neither of which needs to be on disk.
 
 **Each side on its own overlay.** A check is `prepare` →
-`Prepared { pages, overlay }`: the extension's models (with the other
+`Prepared { pages, overlay }`: the extension's datasets (with the other
 enabled extensions') compile to temp views, published nowhere, and its
 pages, advisories and commands read through that overlay. A review
 prepares **both** sides — the candidate and the version before it — so a
-page over a model whose SQL changed renders against each version's own
-SQL, whatever the database has published (a disabled extension, a model
+page over a dataset whose SQL changed renders against each version's own
+SQL, whatever the database has published (a disabled extension, a dataset
 that failed, another worktree's copy).
 
-**A model's rows.** Each changed, added or removed model's
-`ModelImpact.rows` is a `RowDiff { before, after, keyed?, note? }`: each
+**A dataset's rows.** Each changed, added or removed dataset's
+`DatasetImpact.rows` is a `RowDiff { before, after, keyed?, note? }`: each
 side's rows read through that side's own overlay (up to 10 000 — the read
 gateway's own cap, `MAX_ROW_LIMIT`; `ROW_DIFF_LIMIT`). When both versions
 declare the same non-empty `key`, it is a merge-join by key —
@@ -2994,8 +2994,8 @@ order is SQLite's: numbers by value, then text). Otherwise — past the
 limit, or when a side's key has a NULL part or repeats (one row would
 stand for several; the key test runs only at publish) — the review gives
 counts with a note that says why (or that a side's query failed). An
-unchanged model has none. These rows are the review's only reads of
-model data; nothing is written.
+unchanged dataset has none. These rows are the review's only reads of
+dataset data; nothing is written.
 
 **A collector's outputs.** Each derived collector (Starlark,
 jaq) whose script or declaration changed is dry-run on the same inputs
@@ -3033,7 +3033,7 @@ is in `ImpactReport.out_of_time` (`collector <id>`, `effect <id>`), with
 the line "Out of time: collector a and effect b — the review stops
 running scripts after 60s". Only the later side is *checked*
 (`prepare`: commands and their examples, components, advisories, page
-shapes); the earlier side is only *read* (`read_side`: its models'
+shapes); the earlier side is only *read* (`read_side`: its datasets'
 overlay and its pages dry-run on it) — what it was, not whether it
 was right.
 
@@ -3052,7 +3052,7 @@ report's lines; `--json` adds `impact` (the `ImpactReport`) and
 
 **On an effort's review.** The diff page (`oxplow-foundation/diff-view`)
 has an "Extension Changes" table, empty unless the range touched
-`.oxplow/extensions/**`. Its `extensions` loader reads the live model
+`.oxplow/extensions/**`. Its `extensions` loader reads the live dataset
 `v_extension_change` (pinned to `base` and `head`, each a `v_change`
 revision spelling; columns `name`, `change`, `errors`, `lines`,
 `page_changes`, `stream_id`). The server's
@@ -3256,7 +3256,7 @@ method: querySql, sql, params }` (positional SqlCells;
 `run_component_sql`: the component must declare `sql: read` and its
 extension hold `sql.read`; it runs as the component's `Mode::Pure`
 run under its extension's grant, `sql.read` decided and recorded,
-read-only over the published models, 1,000 rows by default); `{ id,
+read-only over the published datasets, 1,000 rows by default); `{ id,
 method: openForm, command, input }` (the host shows a declared command's
 form — `component_form` — in a slideover and runs the submission through
 `invoke_component_command`; closing it answers `CANCELLED`); `{ id,
@@ -3473,7 +3473,7 @@ command outside the extension's namespace, so the manifest declares
 asked again with a selected filter rather than drawn over it. A pull
 request whose dates cannot be read is left out and counted in a note,
 never blanking the rest. A rejected `connect()` is said in the status. A
-component author can use each of these as a model. The loader limits
+component author can use each of these as a dataset. The loader limits
 components to no kind of extension. The browser suite's
 `specs/components/pr-lifetimes.spec.ts` runs it in Chromium **and
 WebKit** (the engines of browser mode and the macOS window; the suite's
@@ -3525,27 +3525,27 @@ parser.
 ## Decorators
 
 `ui.decorators` (**stable**; `extensions/decorators.rs`) put labels from
-one of the extension's **models** on URIs of a resource:
+one of the extension's **datasets** on URIs of a resource:
 
 ```yaml
 ui:
   decorators:
-    - { model: flags, resource: oxplow/work_item, placement: ref-chip, label: label, color: color }
+    - { dataset: flags, resource: oxplow/work_item, placement: ref-chip, label: label, color: color }
 ```
 
-The model (`v_<extension>_<model>`) must declare a `uri` column and the
+The dataset (`v_<extension>_<dataset>`) must declare a `uri` column and the
 `label` (and optional `color`) columns named. This is checked at load
-against the model's declared columns, which are its contract. Column
+against the dataset's declared columns, which are its contract. Column
 names must be plain identifiers, since the desktop names them in its
 query. The desktop (`components/decorators.ts`, `useDecorations`) runs
 each decorator's queries over the URIs it shows (`SELECT uri, "<label>"
 AS label[, "<color>" AS color] FROM <view> WHERE uri IN (…)`), re-run
-when the model changes. **Bounded**: the URIs go 200 to a query
+when the dataset changes. **Bounded**: the URIs go 200 to a query
 (`REFS_PER_QUERY`), each query with a row limit that has room for all of
 them, so a large table loses no badge. One extension adds at most 3
 decorations to one URI (`MAX_DECORATIONS_PER_REF`), each label at most 40
 characters (`MAX_LABEL`, then `…`). `ref-chip`: a chip in the header of a
-page whose URI the model lists, after the page's own chips (`Page`, by
+page whose URI the dataset lists, after the page's own chips (`Page`, by
 the page's URI from its navigation context). `row-badge`: a `RefBadge`
 (tone `label`) after a table or list cell that links to a listed URI. A
 color is used only when it is a plain one (`#rgb…` or a CSS color name,
@@ -3554,7 +3554,7 @@ shows nothing.
 
 **Promoted to stable** on its first-party use: oxplow-bundled shows each
 effort's latest verdict on the effort — a `ref-chip` on its page and a
-`row-badge` where a row links to it. Its model `verdict` (`Accepted`,
+`row-badge` where a row links to it. Its dataset `verdict` (`Accepted`,
 `Accepted (forced)` or `Changes requested`; green, orange, red) reads
 `verdicts`, which keeps every verdict event (`materialize: {
 incremental: seq }`, appended as each lands; a rewrite of the log —
@@ -3589,9 +3589,9 @@ its scope trace.
 - **Modes are explicit.** `Pure` (a composer, an effect's or policy's
   script: it may be run again, no I/O but scope reads), `Transactional`
   (a `Tx` handler), `External` (may call a program, a provider, a
-  model). What a mode may use is the services table's (`modes`), enforced
+  dataset). What a mode may use is the services table's (`modes`), enforced
   by `RunContext::decide_service` ("Services" below): a pure run asking a
-  model is refused before its script runs.
+  dataset is refused before its script runs.
 - **A run is checked for authority, not for staleness.** `check_authority()`
   refuses a cancelled run or one a live guard fails (and cancels it). A
   generation going out of date is the activation's read lock (a run that pins
@@ -3622,7 +3622,7 @@ its scope trace.
   Routing and dispatch check run authority. This is handler attribution, not
   a coordinated DB/catalog activation or a new per-child command audit.
 - **Every contribution's run is recorded once** (`extension_run`,
-  `v_extension_run`; [data-model.md](./data-model.md) "extension_run"):
+  `v_extension_run`; [DATA_DATASET_X.md](./DATA_DATASET_X.md) "extension_run"):
   its identity, actor, anchors, cause, outcome, cost (`cpu_ms`,
   `peak_bytes`, from each script's `Ran`), the scopes it called and its
   model calls — never what it read or wrote. Nested work of the same
@@ -3702,12 +3702,12 @@ uses):
   `needs` stay `scope()` calls (`check_callable`: `host/call` answers
   `sql.read`).
 - **`scope("ai.discover", { role })`** (callable from an effect, a command
-  or any composing script that declares it) says whether a model serves
+  or any composing script that declares it) says whether a dataset serves
   `role` — a built-in, or the bare id of one of the run's extension's
   `ai_profiles`, qualified as `Role::parse_in` does — without spending:
   `{ role: "<qualified>", model: { provider, model }, problem: null }` when
   bound (an unbound profile reports its fallback's binding), or `{ role,
-  model: null, problem: "<why>" }` when no model is bound or no active
+  dataset: null, problem: "<why>" }` when no dataset is bound or no active
   extension declares the profile; any other settings failure is an error.
   It reads settings only (`AiService::binding_for`): no key, no capability
   probe. An effect uses it to skip, with a readable reason, instead of
@@ -3728,19 +3728,19 @@ uses):
   `needs` — fix: …". The router's refusals are the run-time backstop.
 - **Discovery.** `services::of_extension` lists each script's services
   (declared / implied / undeclared, used or not, permission) —
-  `CheckReport.services`, `oxplow extension check --services`; the live model `v_scope`
+  `CheckReport.services`, `oxplow extension check --services`; the live dataset `v_scope`
   lists every scope (id, access, host, summary) for an agent; `docs/reference/extensions.md`
   "Services" is generated from it (`the_reference_lists_every_service`,
   sharing `test_fixtures::generated_section` with the kinds table).
 - **Where a person sees them.** Settings → Extensions shows a line per
   script under each project extension's row — "Collector triage — Read the
-  captured tree · Ask a model (you approve it)" — worded from the service
+  captured tree · Ask a dataset (you approve it)" — worded from the service
   titles (`list_services`, one rpc over `SERVICES`; the surface-parity
   manifest has it as a UI read, with `v_scope` for the agent), a service its script uses without naming it
   in `needs` flagged "(not in its needs)". The row's lines come from the
   extension's check (`oxplow_validate_extension` → `CheckReport.services`).
   Bundled extensions show no
-  line (they are not checked in the section). Row model:
+  line (they are not checked in the section). Row dataset:
   `serviceLines` in `extensionRowModel.ts`. `oxplow extension new
   collector` scaffolds `needs: []` under a comment naming the three
   services.
@@ -3759,7 +3759,7 @@ uses):
   a `TreeSource` — the fact engine's, which reads the run's anchored
   snapshot, else its stream's latest, else the primary stream's, and
   keeps the last one — or `Trees::Fixed`, a fact collector's sweep or a
-  fixture) and the model (a `CollectorOracle` on the run, caller
+  fixture) and the dataset (a `CollectorOracle` on the run, caller
   `collector:<owner>/<id>`). A `sql.read` call is decided as it's made
   (`Calls::serve`), not twice. A caller with nothing to give (a command;
   a dry run, which is pure) says the service isn't available there. The
@@ -3821,21 +3821,21 @@ extension may reach (its `permissions:`, approved when it was deployed —
 - **What the loader already refused.** Most of this is decided before
   anything runs: an extension whose contents need a permission it doesn't
   declare doesn't load ("Permissions"). The runtime decisions are for what
-  only a run reveals — a script's composed commands, a path or model it
+  only a run reveals — a script's composed commands, a path or dataset it
   reads.
 - **Bounded reads.** `sql.read:v_work_item` names an exact published
-  model; use multiple needs for multiple models. SQLite preparation checks
-  the query's models and transitive registered `ref` inputs, including
-  materialized models, before evaluating rows. Bare `sql.read` preserves
+  dataset; use multiple needs for multiple datasets. SQLite preparation checks
+  the query's datasets and transitive registered `ref` inputs, including
+  materialized datasets, before evaluating rows. Bare `sql.read` preserves
   the explicit whole-layer grant. Bounded queries cannot currently use
   `metric_grid` / `metric_findings` because their host precomputation has
-  no model authority contract; query granted published models instead.
+  no dataset authority contract; query granted published datasets instead.
   `tree.read:src/main.rs` names a captured file; `tree.read:src/` names a
   directory. Absolute paths, traversal, backslashes and globs are refused.
   The host filters its captured tree before giving it to a script; these
   needs do not grant raw filesystem access. Bare `tree.read` grants the
   whole captured tree. A collector's `input:` query is the host's, under
-  its declared model bounds, and needs no `sql` permission.
+  its declared dataset bounds, and needs no `sql` permission.
 - **External execution.** Every external program (an exec collector, a
   fact program, a report parser, an external provider, a harness or MCP
   stdio server) runs from its extension's deployment — working directory
@@ -3975,7 +3975,7 @@ timeline carries who decided what, and another extension can react to it
 ("Reacting to another extension's types"). What makes the kind safe to
 promise is already built: a published `type@v` is a contract
 (`event_type_contract` refuses a changed schema — stronger than a
-model's drift warning), a new shape is a new version with an upcast, and
+dataset's drift warning), a new shape is a new version with an upcast, and
 a removed type's rows stay readable. It was promoted to a stable kind
 on that evidence; every kind is stable now (`ui.decorators` and
 `ref_kinds` (now `resources`) in P10, "Decorators" and "Resources"; `effects` and
@@ -4008,7 +4008,7 @@ itself) files has no `author` — it isn't the person's; its
 `author` is null). The loader limits effects to no kind of extension.
 
 **Retention** (P8.D5) is the namespace's window for payloads and large
-content (data-model.md "event_log" retention): either omitted part is the
+content (DATA_DATASET_X.md "event_log" retention): either omitted part is the
 default, and a longer one is a load error. The reactor records it in
 `extension_event_retention`, which keeps it after the extension is gone.
 
@@ -4024,7 +4024,7 @@ types and kinds plus every enabled extension's declarations — on the
 catalog's change signal and swaps it in (`VocabularyHandle`); a writer
 already in a transaction keeps its snapshot. Refused at that point,
 listed among the extension's errors (`Services::listed_extensions`, the
-one listing that adds model and vocabulary health):
+one listing that adds dataset and vocabulary health):
 - a schema that differs from the one `event_type_contract` recorded at
   that `type@v` — a published shape is a contract, so a new shape is a
   new version with an upcast;
@@ -4038,7 +4038,7 @@ The same pass restates `event_type_contract` (read as `v_event_type`:
 type, v, extension, summary, `registered`, `latest`, schema). A removed
 extension's types stay listed with `registered = 0`: their rows can't be
 appended any more but still read, and the pump delivers them at their
-logged version (`data-model.md` "event_log"). `registered` is 0 too for a
+logged version (`DATA_DATASET_X.md` "event_log"). `registered` is 0 too for a
 type whose extension is there but whose declaration was refused (a
 schema changed at a recorded version, a namespace collision) — its
 health says why (`v_event_type` v2's column doc says so).
@@ -4097,7 +4097,7 @@ its last good counts stay, and it isn't a failure toward a disable).
 `on: [...]` and an effect's `on:` may name core types, the
 extension's own declared ones, and **another extension's**
 (`acme_pr.merged` from an extension that isn't `acme-pr`). There is no
-`depends:` key: the qualified type name is the dependency, as a model's
+`depends:` key: the qualified type name is the dependency, as a dataset's
 `ref('<ext>/<name>')` is. `extensions::subscribes` sorts each name:
 - **known** — a core type or one the extension declares;
 - **foreign** — a well-formed name in a namespace that is neither core's
@@ -4126,13 +4126,13 @@ own types (`own_events` is unchanged), and the effects' loop guard
 already counts every extension's runs.
 
 **Health is the extension's errors, not `contribution_health`** — a refused
-declaration is a load problem, like a model's contract drift, not a
+declaration is a load problem, like a dataset's contract drift, not a
 failing run that counts toward a disable.
 
 ## Resources
 
 `resources:` declares what the extension's URIs name
-(`oxplow:<extension>/<resource>?<params>`): its params, the model that
+(`oxplow:<extension>/<resource>?<params>`): its params, the dataset that
 titles one, search, an icon and `[[prefix:…]]` sugar. oxplow-foundation
 declares oxplow's own the same way. The grammar, the registry, the
 vocabulary and the stored forms are in `.context/resources.md`
@@ -4145,14 +4145,14 @@ resources:
     label: Pull request
     params: { id: { required: true, pattern: '^\d+$' } }
     additional: false         # true: takes params beyond its own (page)
-    resolve: prs              # one of its models, with `uri` and `title` columns
+    resolve: prs              # one of its datasets, with `uri` and `title` columns
     title: title              # the column of `resolve` that titles one
-    searchable: found         # optional: one of its models, with `uri`, `title` and `body`
+    searchable: found         # optional: one of its datasets, with `uri`, `title` and `body`
     icon: git-pull-request    # one of ICONS
     wikilink: { prefix: pr, param: id }   # optional `[[pr:12]]` sugar
 ```
 
-**Loading** (`extension_resources.rs`, after models and pages) refuses, at
+**Loading** (`extension_resources.rs`, after datasets and pages) refuses, at
 `extension.yaml:<line>`: a resource declared twice, a param key that
 breaks the grammar, a broken or non-portable `pattern` (the desktop runs
 it in JS's backtracking engine, so it is held to a subset both engines
@@ -4168,7 +4168,7 @@ fenced by a character the first can't match — `^[A-Z]+-\d+$` loads,
 and no length needs capping. What is kept spells every set out — `\d` is
 `[0-9]`, never Rust's Unicode digits — escaping exactly what either
 engine reads as syntax), a `resolve` or `searchable` that isn't one of
-its models with the columns it needs, a `wikilink.param` that isn't one
+its datasets with the columns it needs, a `wikilink.param` that isn't one
 of its params, a `wikilink.prefix` that isn't lowercase letters, digits
 and `_`, and an icon that is neither in
 `ICONS` (lucide names the desktop maps; a list that only shrinks,
@@ -4185,12 +4185,12 @@ which refuses a second resource of a name and a second wikilink prefix
 know a resource while its extension is installed and not after. The pass
 restates the `resource` table, read as `v_resource` (resource, extension,
 label, params, additional, resolve, title, searchable, icon, wikilink;
-model v4 — V103 dropped `page`); unlike event types, a removed extension's resources leave, and
+dataset v4 — V103 dropped `page`); unlike event types, a removed extension's resources leave, and
 URIs to them dangle (they show as raw text).
 
 **The desktop** (`apps/desktop/src/resources.ts`) reads `v_resource`'s
 rows (core's too) once (`useResourcesLoader`, in `App`, re-read on
-`ModelsChanged`) into one process-wide list that the pure helpers consult
+`DatasetsChanged`) into one process-wide list that the pure helpers consult
 and `useResources` subscribes to:
 - `resourceIcon` / the page-kind helpers fall back to a resource's icon
   (`ICONS`, a lucide component per allowed name — a Rust test
@@ -4203,11 +4203,11 @@ and `useResources` subscribes to:
 - `preprocessWikilinks` turns `[[pr:12]]` into a link when the value
   matches the param's pattern (`extensionWikilinkRef`, as the backend's
   `canonical_wikilink` does), and the link's text becomes its title from
-  the `resolve` model (`useExtensionRefTitle`) unless the author
+  the `resolve` dataset (`useExtensionRefTitle`) unless the author
   labelled it.
 
-**Searchable resources** (P9.D3, `kind_search.rs`). `searchable: <model>`
-names one of the extension's models with `uri`, `title` and `body`
+**Searchable resources** (P9.D3, `kind_search.rs`). `searchable: <dataset>`
+names one of the extension's datasets with `uri`, `title` and `body`
 (checked at load, like `resolve`); `v_resource.searchable` is its view.
 Its rows are in the site-wide search index (`search_fts`) under the
 resource, so the launcher finds a pull request by its title or text and
@@ -4220,14 +4220,14 @@ and body of the changed rows only.
   `search_fts` owns the text it ranks (BM25 and `snippet()` need it in
   the index), and a UNION would run every extension's SQL per keystroke,
   unranked. One `Materializer` per searchable resource
-  (`search:<resource>`), its inputs the tables behind the model's view
-  (the registry's lineage; a materialized model's own table): a commit
+  (`search:<resource>`), its inputs the tables behind the dataset's view
+  (the registry's lineage; a materialized dataset's own table): a commit
   touching one re-reads the view after the assets' quiet window and
   restates the resource's entries in its own transaction — never the
   writer's.
 - `Assets::sync_search_kinds` keeps them in step with `resource` and the
-  model registry (the change loop runs it at start and when `resource`,
-  `model` or `model_input` change). A resource that stops being
+  dataset registry (the change loop runs it at start and when `resource`,
+  `dataset` or `dataset_input` change). A resource that stops being
   searchable — its extension removed, the key dropped — leaves the index
   with its entries; so does one that went while oxplow wasn't running (an
   `asset_state` row `search:<resource>` with no resource behind it).
@@ -4235,7 +4235,7 @@ and body of the changed rows only.
   isn't a URI of the resource is skipped (a hit must be something that
   opens), with a warning in the log. oxplow-foundation's resources aren't
   bounded.
-- Entries are project-global (`stream_id` NULL): a model is.
+- Entries are project-global (`stream_id` NULL): a dataset is.
 
 **Revisions.** A revision is a URI param (`rev=git:abc1234`), and only
 files, directories and symbols take one; no extension's resource has one.
@@ -4622,7 +4622,7 @@ namespace (other than `oxplow`) are both refused at load
 (`refuse_shared_namespaces`, after disabling applies). Each entry is
 checked at load, its error at its line (`entry_line`: the line whose
 `name:` is exactly that name — `a` never lands on `abc`; ids, pages,
-and models find their lines the same way): the name, `access`, `confirm`,
+and datasets find their lines the same way): the name, `access`, `confirm`,
 the schema compiles, each `needs` entry is a scope or a
 capability / feature, and the entry is a file in the
 extension that parses and defines `transform` (`check_starlark`), and
@@ -4674,7 +4674,7 @@ namespace at a time, all-or-nothing; registered by the generation at boot and on
 extension catalog's change signal (`ExtensionCatalog::changes`, P7.B6):
 a deploy, rollback, enable or disable publishes it, and the
 `config.extensions` reactor fires it for the `extensions` key.
-Editing a source fires nothing. The extension models, the provider registry and
+Editing a source fires nothing. The extension datasets, the provider registry and
 the metric catalog follow the same signal; a namespace something else
 already holds (a provider) is refused and kept as the extension's
 `problem`. Replacement is prepared against a cloned command registry and
@@ -4684,7 +4684,7 @@ package version and catalog identity, so provenance changes rebuild the batch
 without requiring a script change. Each handler captures version and generation
 from the same `CatalogSnapshot` as its declarations; a retained handler never
 looks up a newer candidate's identity when invoked. Other registries and SQL
-models still refresh independently. A launcher `{ command }` entry may name one.
+datasets still refresh independently. A launcher `{ command }` entry may name one.
 
 ## Contributing metrics (current)
 
@@ -5066,7 +5066,7 @@ page file, offered as `<namespace>_<name>` (the extension's `namespace:`):
 ```yaml
 commands:
   - name: sql.query
-    summary: Run ONE read-only SQL statement over the published `v_*` models. …
+    summary: Run ONE read-only SQL statement over the published `v_*` datasets. …
     scope: sql.read
     op: query
     tool: query_sql          # offered as oxplow_query_sql
@@ -5102,25 +5102,25 @@ tool: open_work              # offered as <namespace>_open_work
   share `oxplow`) — are refused at load, on each.
 - **Typed page tools.** `oxplow-foundation/pages/` holds the pages an
   agent asks for most, each `hidden: true` with a `tool:`: `catalog
-  { model? }` (every model with its columns), `thread_work { thread }` (the
+  { dataset? }` (every dataset with its columns), `thread_work { thread }` (the
   thread's items by state, with their efforts), `work_next { thread }` (what
   to pick up next; the bundled `/work-next` command calls it) and
   `effort_summary { effort }` (title and summary, item, files, test runs,
   claims, decisions as sections). Params take bare ids (`thr3`, `eff9`).
-  Each reads published `v_*` models only, so it works with the bundled
+  Each reads published `v_*` datasets only, so it works with the bundled
   extension off. For history, `oxplow_vcs_log` and `oxplow_diff` are
   commands, not pages.
 - Every agent-invokable command stays reachable through `run_command`
   whether or not it's a tool: a tool is a named entry for the ones an
   agent reaches for often, kept few so the list stays readable for weaker
-  models.
+  datasets.
 - Listing and dispatch: `oxplow_app::agent_tools` (`offered`, `tools_of`);
   the MCP server (`crates/oxplow-mcp`) lists and resolves them per caller.
 
 **Understanding the semantic layer**
 
-- `oxplow_query_sql`: read-only SQL over the published models. `v_dataset` /
-  `v_field` / `v_model_lineage` describe every view (core `v_*` and
+- `oxplow_query_sql`: read-only SQL over the published datasets. `v_dataset` /
+  `v_field` / `v_dataset_lineage` describe every view (core `v_*` and
   extension `v_<ext>_<entity>`) with its column docs and inputs;
   `v_dimension`, `v_metric_spec` and `v_measure` list the dimensions,
   metrics and measures, extension-declared ones included, each with its
@@ -5239,7 +5239,7 @@ tool: open_work              # offered as <namespace>_open_work
   preview_collector` runs the deployed entity collector through the same
   `produce` step (same permissions: an exec collector needs
   `process.run`, and so does a Starlark one that calls a
-  model need `ai`; other derived collectors need neither) and returns the coerced
+  dataset need `ai`; other derived collectors need neither) and returns the coerced
   rows per entity (first 50, plus totals), storing nothing and recording
   no run. A **fact collector** (`facts:` declared) previews through the fact
   engine instead (`MetricsService::preview_fact_collector_in`, the same
@@ -5269,7 +5269,7 @@ Each loads clean (`documented_examples_load_without_errors`):
 - **`github`** — an `exec` collector bringing pull requests in as the
   entity `v_github_pr`, with pages joining them to streams and tasks
   (`prs-by-task`, `pr-lifetimes`); and (P10) a pull request as a
-  **resource**, `github/pr` — model `pull_request` (`uri`, `title`,
+  **resource**, `github/pr` — dataset `pull_request` (`uri`, `title`,
   `body`; it resolves and is searchable), the page `pr` (`for: github/pr`,
   given `uri=<uri>`), `[[pr:12]]`. `crates/oxplow-
   sdk/tests/just_works.rs` checks and tests it; its `a-pull-request-resolves-and-opens-on-its-page` fixture opens a pull request.
@@ -5279,7 +5279,7 @@ Each loads clean (`documented_examples_load_without_errors`):
   checks the example and proves the mounted loader reads a recorded prompt.
 - **`schema-review`** — a review policy of its own: a fact collector
   counting DDL per migration file (its own measure and dimension), a
-  model joining those facts with core's evidence (`v_effort_file`,
+  dataset joining those facts with core's evidence (`v_effort_file`,
   `v_test_run` and its provenance, `v_effort_observation`'s diff
   coverage, `v_change_function`) into a verdict, and a page
   (`effort-verdict`) replacing `effort.verdict` with it — no core change.
@@ -5302,7 +5302,7 @@ shipped extension; bundled's contents are the next thing to sort out.
 Everything oxplow ships that measures, visualizes or reviews is this one
 extension (`extensions/oxplow-bundled/`): its namespace is
 `oxplow_bundled` (commands, event types, measures, collectors) and its
-models publish as `v_oxplow_bundled_*`.
+datasets publish as `v_oxplow_bundled_*`.
 
 What moved out of core, and what it is now. All of it is pages (files in
 `pages/`, read by `v_page`); oxplow-foundation's pages draw the app's own
@@ -5346,9 +5346,9 @@ screens and oxplow-bundled's add the review and analysis:
 
 **Owns what reads tables (P7.B5).** Derived data computed only from
 core's rows is the extension's, as SQL: the "look here first" score is
-its model `change_interest` (`v_oxplow_bundled_change_interest`, over
+its dataset `change_interest` (`v_oxplow_bundled_change_interest`, over
 `ref('change_file')` and `ref('change_function')`), which the
-`change-review` page reads; co-change surprises are its models
+`change-review` page reads; co-change surprises are its datasets
 `co_change_pair` (`materialize: { every: 1h }` over the commit index —
 "the last 180 days" moves with the clock) and
 `change_co_change`, which `change-review` reads — and the
@@ -5455,7 +5455,7 @@ Rejected candidates retain previous command handlers for the remaining owners.
 Disabled or removed sources are withdrawn independently, and captured command
 RunContexts recheck that their owner is still enabled before execution. The
 standalone command boundary remains separately usable; boot publishes its
-candidate with model views, vocabulary, providers and UI metadata through the
+candidate with dataset views, vocabulary, providers and UI metadata through the
 generation coordinator. Runtime lookup uses the active catalog rather than
 promoting current filesystem declarations. State hosts still enforce their
 namespace and revision checks.
@@ -5470,14 +5470,14 @@ recognizer diagnostic, restoring event contracts, retention and resource rows.
 A changed recorded event schema and a shared wikilink prefix are candidate
 errors; a candidate never publishes a partial result.
 
-`PreparedExtensionDatabase` captures models, vocabulary and enabled contribution
+`PreparedExtensionDatabase` captures datasets, vocabulary and enabled contribution
 descriptors from the same snapshot, and every entity the enabled collectors
 declare: its transaction first creates each entity that has no view yet, empty
 (`collector_store::ensure_entities_tx`; one that exists keeps its rows — they
-are the collector's), so a model over an entity compiles before the collector
-first runs. Without it an extension whose model reads its own collector's
+are the collector's), so a dataset over an entity compiles before the collector
+first runs. Without it an extension whose dataset reads its own collector's
 entity is held back forever, its collector never active to fill the entity
-(`the_documented_examples_activate`: the github example). Its transaction helper calls strict model
+(`the_documented_examples_activate`: the github example). Its transaction helper calls strict dataset
 and vocabulary replacement and contribution restatement inside a surrounding
 savepoint: any diagnostic or storage failure restores the whole candidate.
 `prepare_with_capabilities` also includes prepared capability rows and switch
@@ -5489,8 +5489,8 @@ separate from retryable contention. This helper executes no external work.
 
 The boot activation coordinator now uses these APIs with command, provider,
 capability, adapter, collection-feed and component-bundle candidates. The old
-capability, command, provider, model and vocabulary boot writers have been
-retired from this path; config/entity-triggered model work is routed through the
+capability, command, provider, dataset and vocabulary boot writers have been
+retired from this path; config/entity-triggered dataset work is routed through the
 coordinator. CapabilityRegistry holds core, declarations and external-instance metadata
 under one lock. Each read resolves selection, features, hidden command namespaces,
 recognition and database rows from one captured state. Candidate preparation
@@ -5523,7 +5523,7 @@ back on failure. Publication checks the original allocation identity and
 the supplied config's resolved choices and provenance; a changed registry
 or config requires restaging. A prepared candidate conveys no authority.
 `PreparedExtensionDatabase` can include those rows and switch events with
-the models, vocabulary and contribution descriptors in one savepoint
+the datasets, vocabulary and contribution descriptors in one savepoint
 (`prepare_with_capabilities`, above).
 
 ## Prepared native runtime adapters
@@ -5554,7 +5554,7 @@ their errors still reject the candidate. The held extensions and why are the
 activation's `problems` (Settings → Extensions), so the reason is visible
 while the last working version keeps running. A held extension's declarations
 are its last working ones; its scripts are read from disk as they are now.
-A failure later in staging that names one extension — a model whose SQL
+A failure later in staging that names one extension — a dataset whose SQL
 doesn't compile (checked inside the publication transaction, which rolls
 back), a provider or capability that can't stage — holds that extension the
 same way (`extension_catalog::Failed`) and the candidate is staged again; if
@@ -5612,7 +5612,7 @@ entrypoints still need a complete audit. Metric declaration rows now join the
 publication transaction; state-value recapture remains a post-publication reader. The renderer receives the published metadata change signal;
 a deploy, a rollback or a config change triggers candidate preparation (file changes never do). Until the first
 generation is activated (boot's `initialize`, before ingress opens), no reader is
-served: the generation is the only publisher of commands, models, vocabulary,
+served: the generation is the only publisher of commands, datasets, vocabulary,
 providers and capabilities.
 
 Custom component preparation hashes each bundle's files in its deployment and
@@ -5643,7 +5643,7 @@ active, so a new unpinned reader fails the suite where it first runs.
 
 - *Pinned* (`ExtensionActivation::read`, or the pin a `RunContext` carries):
   a reader that joins declarations to another generation-owned map —
-  commands, capabilities, providers, models. The agent-text refresh and the
+  commands, capabilities, providers, datasets. The agent-text refresh and the
   effort policy's owner lookup pin for exactly this. A task-local does not
   cross into `spawn_blocking`; use `ExtensionActivation::spawn_blocking`,
   which carries the caller's pins (the command router does).
@@ -5707,11 +5707,11 @@ commands:
 - **A tool** is one of the extension's own commands that admits a job
   (`job: true`), only reads (`access: read`) and has an
   `input_schema`; anything else is a load error. The model calls it by
-  its local name with `.` as `_` (`evidence_lookup`: model APIs allow no
+  its local name with `.` as `_` (`evidence_lookup`: dataset APIs allow no
   dots); its description is the command's `summary`, its parameters the
-  schema. `query_sql` is reserved: with `sql.read` the model gets it, a
-  read-only query over the published models (as MCP `oxplow_query_sql`; 200
-  rows). Core's commands admit no job, so a model reads oxplow through
+  schema. `query_sql` is reserved: with `sql.read` the dataset gets it, a
+  read-only query over the published datasets (as MCP `oxplow_query_sql`; 200
+  rows). Core's commands admit no job, so a dataset reads oxplow through
   `query_sql` and never writes: a job's writes come from an effect on
   its end.
 - **Permissions.** A job runs under its extension's `permissions:`
@@ -5723,11 +5723,11 @@ commands:
   deploy. Every model call also needs its AI provider's approval.
 - **Enqueue** (`jobs.write/enqueue`): `{ job, intentKey, request }`,
   `request` `{ schemaVersion: 1, role, messages, tools? }` — never a
-  model, endpoint or credential: the role's model is bound when it runs.
+  dataset, endpoint or credential: the role's dataset is bound when it runs.
   A job that declares `tools` takes none in its request. One intent key
   is one job (asking again returns it). At most 1024 queued or running
   in a project, 256 per extension. The request stays private (it isn't
-  in the audit or any model).
+  in the audit or any dataset).
 - **Running.** The scheduler (four at a time, polling each second)
   claims a queued job, resolves its authority afresh — the declaration
   and permissions as they are now, the thread's open-thread gate (a Write-scope need must be bound to an open thread: `JobExecution.needs_thread`) — and runs it
@@ -5738,7 +5738,7 @@ commands:
   attempt's **output** (`extension_job_output`, `v_job_run_output`): text
   coalesced into a row every 100 ms (or 4 KiB), each tool call and what
   it answered, each round's usage. Each write is its own short
-  transaction — none is held while the model writes — and the table
+  transaction — none is held while the dataset writes — and the table
   refuses rows for an attempt that has closed, so a worker that lost
   its attempt adds nothing.
 - **Tool rounds.** A reply with tool calls (from a job that declares
@@ -5765,7 +5765,7 @@ commands:
 - **Cancel.** `jobs.write/cancel` (the extension's own jobs) or
   `oxplow.job_run.cancel { job_run }` (any run).
   A queued job ends at once. A running one has its run cancelled: the
-  model's connection is dropped within 100 ms
+  dataset's connection is dropped within 100 ms
   (`oxplow_ai::client::unless_cancelled`), the attempt closes
   `cancelled` with what had come, and the call's `v_ai_call` row is
   `error: cancelled` with that partial reply. Disabling its
@@ -5806,7 +5806,7 @@ commands:
   can run for minutes, and an activation would wait on it): authorizing
   its claim, each tool call (the bus pins per command) and its
   publication each pin briefly, and each checks through the job's `live`
-  gate that its own extension is still that deployment and enabled. Its run's `ContributionRef.generation` is `None`. The model
+  gate that its own extension is still that deployment and enabled. Its run's `ContributionRef.generation` is `None`. The dataset
   call holds none either: `AiService::bind` resolves the role under a
   pin and returns a `Bound` (provider, model, the declaring profile), the
   `*_on` calls stream on it unpinned, and a recorded computation is keyed
@@ -5867,7 +5867,7 @@ commands:
   effect reads the result with `scope("jobs.read", { job_run })` and writes
   what it says (the triage example's `publish-summary`).
 - **Seeing job runs.** `v_job_run` (state, attempt, rounds, tool calls,
-  tokens so far, its `uri`) and `v_job_run_output` are published models, so
+  tokens so far, its `uri`) and `v_job_run_output` are published datasets, so
   a page or component over them follows a run live. oxplow-bundled's **Job
   Runs** page (Activity) lists the running and the last day's, with Cancel;
   a row opens its **Job Run Output**. A job run acts as `Actor::Job`, its
@@ -5885,8 +5885,8 @@ the built-in roles `main | summarize | decide` (required), `features` of
 `text | tool_calling | streaming | image`) into `Extension.ai_profiles`
 (`AiProfileDecl`), each a contribution `<ext>/ai_profile/<id>`
 (`ContributionKind::AiProfile`, `RunsOn::Declared`). It is a declaration
-only: the person binds `<extension>/<id>` to a model, else the fallback
-role's model serves it; `features` are what a bound model must support.
+only: the person binds `<extension>/<id>` to a dataset, else the fallback
+role's dataset serves it; `features` are what a bound dataset must support.
 The extension names it by its bare id — a job request's `role`
 (`extension_jobs::enqueue` qualifies it and stores `<ext>/<id>`, refusing
 a name the extension doesn't declare), a collector's `role=` (qualified
@@ -5914,7 +5914,7 @@ reference when none is given) and `oxplow.extension.revoke_secret { extension,
 reference }`, scope `credentials.write`. A secret is a kind of value, not a
 kind of actor (commands.md "Secrets"): `value` is `writeOnly`, so a person, an
 agent and a page for either may set one, and no record, event, result or
-model carries it. Presence is the live model `v_extension_secret` (`extension`,
+dataset carries it. Presence is the live dataset `v_extension_secret` (`extension`,
 `provider`, `name`, `reference` as JSON, `is_set`), read from the catalog's
 provider credentials and the keychain; it follows `CredentialChanged`. Secret
 bytes and keychain error details are never returned or audited. Values are

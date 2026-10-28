@@ -1,8 +1,8 @@
 //! The page runs windows have open: each run kept with the request that
-//! made it, re-run when a model one of its loaders read changes (or its
+//! made it, re-run when a dataset one of its loaders read changes (or its
 //! params change), so a window hears which loaders' rows changed
 //! (`OxplowEvent::PageRunChanged`) and fetches only those. The change loop
-//! (`models_changed::spawn`) tells it what changed; nothing here listens to
+//! (`datasets_changed::spawn`) tells it what changed; nothing here listens to
 //! the event bus.
 
 use std::collections::{BTreeMap, HashMap};
@@ -41,7 +41,7 @@ pub struct RunSnapshot {
 /// What the change loop tells the open runs.
 #[derive(Debug, Clone)]
 enum Signal {
-    Models(Vec<String>),
+    Datasets(Vec<String>),
     Measures(Vec<String>),
     Everything,
 }
@@ -52,7 +52,7 @@ enum Signal {
 struct Invalidations {
     serial: u64,
     everything: u64,
-    models: HashMap<String, u64>,
+    datasets: HashMap<String, u64>,
     measures: HashMap<String, u64>,
 }
 
@@ -61,9 +61,9 @@ impl Invalidations {
         self.serial += 1;
         match signal {
             Signal::Everything => self.everything = self.serial,
-            Signal::Models(names) => {
+            Signal::Datasets(names) => {
                 for name in names {
-                    self.models.insert(name.clone(), self.serial);
+                    self.datasets.insert(name.clone(), self.serial);
                 }
             }
             Signal::Measures(names) => {
@@ -79,7 +79,7 @@ impl Invalidations {
             || reads_any(
                 run,
                 &self
-                    .models
+                    .datasets
                     .iter()
                     .filter(|(_, serial)| **serial > since)
                     .map(|(name, _)| name.clone())
@@ -169,7 +169,7 @@ impl PageRuns {
         }
     }
 
-    /// Re-run open runs as the change loop says models change, and tell
+    /// Re-run open runs as the change loop says datasets change, and tell
     /// the windows (`PageRunChanged`), for the life of `svc`.
     pub fn start(&self, svc: &Arc<crate::Services>) {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Signal>();
@@ -187,16 +187,16 @@ impl PageRuns {
                 let changes = if signals.iter().any(|s| matches!(s, Signal::Everything)) {
                     runs.all_changed(&svc).await
                 } else {
-                    let mut models = Vec::new();
+                    let mut datasets = Vec::new();
                     let mut measures = Vec::new();
                     for s in signals {
                         match s {
-                            Signal::Models(m) => models.extend(m),
+                            Signal::Datasets(m) => datasets.extend(m),
                             Signal::Measures(m) => measures.extend(m),
                             Signal::Everything => {}
                         }
                     }
-                    runs.changed(&svc, &models, &measures).await
+                    runs.changed(&svc, &datasets, &measures).await
                 };
                 for change in changes {
                     svc.events
@@ -217,10 +217,10 @@ impl PageRuns {
         }
     }
 
-    /// The change loop: these published models changed.
-    pub fn notify_models(&self, models: &[String]) {
-        if !models.is_empty() {
-            self.signal(Signal::Models(models.to_vec()));
+    /// The change loop: these published datasets changed.
+    pub fn notify_datasets(&self, datasets: &[String]) {
+        if !datasets.is_empty() {
+            self.signal(Signal::Datasets(datasets.to_vec()));
         }
     }
 
@@ -386,7 +386,9 @@ impl PageRuns {
             open.req.params.extend(params);
             open.revision = open.revision.wrapping_add(1);
             let seed = match changed {
-                Some((models, measures)) => super::runner::unreached(&open.run, models, measures),
+                Some((datasets, measures)) => {
+                    super::runner::unreached(&open.run, datasets, measures)
+                }
                 None => HashMap::new(),
             };
             (open.revision, open.req.clone(), seed)
@@ -418,29 +420,34 @@ impl PageRuns {
         Ok((fresh, change))
     }
 
-    /// Re-run each open run one of whose loaders read one of `models`
+    /// Re-run each open run one of whose loaders read one of `datasets`
     /// (embedded pages' included). What changed, per run that changed.
-    pub async fn models_changed(&self, svc: &crate::Services, models: &[String]) -> Vec<RunChange> {
-        self.changed(svc, models, &[]).await
+    pub async fn datasets_changed(
+        &self,
+        svc: &crate::Services,
+        datasets: &[String],
+    ) -> Vec<RunChange> {
+        self.changed(svc, datasets, &[]).await
     }
 
-    /// Re-run each open run that read one of `models` or `measures`.
+    /// Re-run each open run that read one of `datasets` or `measures`.
     pub async fn changed(
         &self,
         svc: &crate::Services,
-        models: &[String],
+        datasets: &[String],
         measures: &[String],
     ) -> Vec<RunChange> {
-        self.invalidate(&Signal::Models(models.to_vec()));
+        self.invalidate(&Signal::Datasets(datasets.to_vec()));
         self.invalidate(&Signal::Measures(measures.to_vec()));
         let ids: Vec<String> = self
             .runs
             .lock()
             .iter()
-            .filter(|(_, r)| reads_any(&r.run, models, measures))
+            .filter(|(_, r)| reads_any(&r.run, datasets, measures))
             .map(|(id, _)| id.clone())
             .collect();
-        self.rerun_changed(svc, ids, Some((models, measures))).await
+        self.rerun_changed(svc, ids, Some((datasets, measures)))
+            .await
     }
 
     /// Re-run every open run (the catalog changed, or the change loop
@@ -455,7 +462,7 @@ impl PageRuns {
         self.rerun_changed(svc, ids, None).await
     }
 
-    /// Re-run `ids`; with `changed` (models, measures), keeping the loaders
+    /// Re-run `ids`; with `changed` (datasets, measures), keeping the loaders
     /// the change didn't reach.
     async fn rerun_changed(
         &self,
@@ -494,25 +501,25 @@ impl PageRuns {
 }
 
 /// Whether a loader of `run` (or of a page embedded in it) read one of
-/// `models`: a query's reads, a command loader's declared `reads`.
-fn reads_any(run: &PageRun, models: &[String], measures: &[String]) -> bool {
+/// `datasets`: a query's reads, a command loader's declared `reads`.
+fn reads_any(run: &PageRun, datasets: &[String], measures: &[String]) -> bool {
     let own = run.page.loaders.iter().any(|decl| {
-        decl.reads.iter().any(|m| models.contains(m))
+        decl.reads.iter().any(|m| datasets.contains(m))
             || decl.reads_params.iter().any(|p| {
                 super::runner::context_reads(&run.page, p)
                     .iter()
-                    .any(|m| models.iter().any(|x| x == m))
+                    .any(|m| datasets.iter().any(|x| x == m))
             })
             || run.loaders.get(&decl.name).is_some_and(|r| {
-                r.result.reads.models.iter().any(|m| models.contains(m))
+                r.result.reads.datasets.iter().any(|m| datasets.contains(m))
                     || r.result.reads.measures.iter().any(|m| measures.contains(m))
             })
     });
-    own || embeds(&run.tree).any(|e| reads_any(e, models, measures))
+    own || embeds(&run.tree).any(|e| reads_any(e, datasets, measures))
         || run
             .rail
             .as_ref()
-            .is_some_and(|r| embeds(r).any(|e| reads_any(e, models, measures)))
+            .is_some_and(|r| embeds(r).any(|e| reads_any(e, datasets, measures)))
 }
 
 fn embeds(node: &RunNode) -> Box<dyn Iterator<Item = &PageRun> + '_> {
@@ -654,7 +661,7 @@ mod diff_tests {
         let changes: [fn(&mut oxplow_db::SqlQueryResult); 3] = [
             |result| result.truncated = true,
             |result| result.generation = Some("generation-b".into()),
-            |result| result.reads.models.push("v_work_item".into()),
+            |result| result.reads.datasets.push("v_work_item".into()),
         ];
         for change in changes {
             let mut new = old.clone();

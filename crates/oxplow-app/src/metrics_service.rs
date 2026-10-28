@@ -15,7 +15,7 @@
 //! Best-effort, like the other producers (`token_usage.rs` / `collection.rs`):
 //! a compute/write error is logged via `tracing::warn!`, never propagated, and
 //! never blocks the host path. A recorded capture is announced by the change
-//! loop (`models_changed.rs`, the one maker of `MetricSamplesChanged`), not
+//! loop (`datasets_changed.rs`, the one maker of `MetricSamplesChanged`), not
 //! here.
 
 mod generation;
@@ -311,7 +311,7 @@ pub struct MetricsService {
     /// wire it: the run still records its capture.
     run_log: Option<crate::collector_runner::RunLog>,
     /// What a fact collector that declares `ai.compute` asks. `None` in
-    /// tests that don't wire it: such a collector is refused the model.
+    /// tests that don't wire it: such a collector is refused the dataset.
     ai: Option<Arc<crate::ai_compute::AiCompute>>,
 }
 
@@ -2248,7 +2248,7 @@ impl MetricsService {
 
     /// The services fact collector `collector`'s script is given on `run`
     /// (`services::prepare`): the tree it runs over, the semantic layer
-    /// and a model when it declares them and its run allows them.
+    /// and a dataset when it declares them and its run allows them.
     async fn given(
         &self,
         collector: &FactCollector,
@@ -2979,7 +2979,7 @@ mod tests {
                 .await
                 .unwrap();
             assert!(reads.tables.is_empty(), "{}: {:?}", spec.key, reads.tables);
-            assert!(!reads.models.is_empty(), "{}", spec.key);
+            assert!(!reads.datasets.is_empty(), "{}", spec.key);
         }
         for dim in crate::test_fixtures::foundation_declarations()
             .1

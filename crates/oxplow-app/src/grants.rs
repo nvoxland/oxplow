@@ -86,13 +86,13 @@ pub fn authority(ext: &Extension, declared: GrantRequest) -> Authority {
     }
 }
 
-/// Carry a run's model authority into SQLite preparation. The policy is
-/// host-owned and covers nested and materialized model references.
+/// Carry a run's dataset authority into SQLite preparation. The policy is
+/// host-owned and covers nested and materialized dataset references.
 pub fn bound_query(run: &oxplow_domain::run::RunContext, query: &mut oxplow_db::SqlQuery) {
-    if run.has_model_bounds() {
+    if run.has_dataset_bounds() {
         let run = run.clone();
-        query.model_policy = Some(oxplow_db::semantic_layer::ModelReadPolicy::new(
-            move |model| match run.decide(oxplow_domain::grant::Need::Model(model.into())) {
+        query.dataset_policy = Some(oxplow_db::semantic_layer::DatasetReadPolicy::new(
+            move |dataset| match run.decide(oxplow_domain::grant::Need::Dataset(dataset.into())) {
                 oxplow_domain::grant::Decision::Allowed => Ok(()),
                 oxplow_domain::grant::Decision::Denied(reason)
                 | oxplow_domain::grant::Decision::Unenforced(reason) => Err(reason),

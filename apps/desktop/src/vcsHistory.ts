@@ -1,10 +1,10 @@
 /**
- * History, branches and tags read through the models (P5.B5,
+ * History, branches and tags read through the datasets (P5.B5,
  * `.context/vcs.md`): `v_commit`, `v_branch`, `v_tag`. The commit indexer
  * keeps them from every stream's head, so a stream's history is a
  * recursive walk over `parents` from its head — no VCS call. Each read
  * returns what it read (`reads`) so a caller re-runs with
- * `useRerunOnChange` when a model changes.
+ * `useRerunOnChange` when a dataset changes.
  */
 import { querySql } from "./api.js";
 import type { Reads } from "./tauri-bridge/generated/bindings.js";

@@ -8,7 +8,7 @@ const result = (rows: SqlQueryResult["rows"]): SqlQueryResult =>
     columns: ["id", "uri", "created_at", "command", "input", "actor_kind", "actor_id", "thread_id", "thread_title", "key", "preview", "dry_run"],
     rows,
     truncated: false,
-    reads: { models: ["v_command_proposal"], tables: [], measures: [] },
+    reads: { datasets: ["v_command_proposal"], tables: [], measures: [] },
     freshness: {},
   }) as unknown as SqlQueryResult;
 

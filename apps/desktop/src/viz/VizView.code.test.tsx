@@ -149,7 +149,7 @@ function run(viz: Partial<VizConfig>, columns: string[], rows: SqlCell[][]): Viz
   return {
     config: { ...base, ...viz },
     params: {},
-    result: { columns, rows, truncated: false, reads: { models: [], tables: [], measures: [] }, freshness: {} },
+    result: { columns, rows, truncated: false, reads: { datasets: [], tables: [], measures: [] }, freshness: {} },
   } as unknown as VizRun;
 }
 

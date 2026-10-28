@@ -8,7 +8,7 @@ const realApi = await import("../../api.js");
 /** Any other read (the Go To section's wiki pages, …): no rows. Never the
  *  real call — with no Tauri host it throws, and the test would pass only
  *  where another file's mock answered first (tsk1012). */
-const noRows = { columns: [], rows: [], truncated: false, reads: { models: [], tables: [], measures: [] }, freshness: {} };
+const noRows = { columns: [], rows: [], truncated: false, reads: { datasets: [], tables: [], measures: [] }, freshness: {} };
 let extensionRows: unknown[][] = [];
 /** The failed operations `v_op_error` answers with. */
 let opErrorRows: unknown[][] = [];
@@ -37,7 +37,7 @@ mock.module("../../api.js", () => ({
         columns: ["name", "enabled", "errors", "deployment"],
         rows: extensionRows,
         truncated: false,
-        reads: { models: ["v_extension"], tables: [], measures: [] },
+        reads: { datasets: ["v_extension"], tables: [], measures: [] },
         freshness: {},
       };
     }
@@ -46,7 +46,7 @@ mock.module("../../api.js", () => ({
         columns: ["event_id", "at", "label", "command", "message", "exit_code", "signal", "duration_ms", "output_size", "seen"],
         rows: opErrorRows,
         truncated: false,
-        reads: { models: ["v_op_error"], tables: [], measures: [] },
+        reads: { datasets: ["v_op_error"], tables: [], measures: [] },
         freshness: {},
       };
     }
@@ -55,7 +55,7 @@ mock.module("../../api.js", () => ({
         columns: ["id", "kind", "message", "thread_title"],
         rows: [[4, "oxplow-bundled/landed-in-progress", "“t” is still in progress, but a commit landed its work.", "Main"]],
         truncated: false,
-        reads: { models: ["v_agent_nudge"], tables: [], measures: [] },
+        reads: { datasets: ["v_agent_nudge"], tables: [], measures: [] },
         freshness: {},
       };
     }
@@ -64,7 +64,7 @@ mock.module("../../api.js", () => ({
         columns: ["id", "uri", "created_at", "command", "input", "actor_kind", "actor_id", "thread_id", "key", "preview", "dry_run"],
         rows: [[7, "oxplow:oxplow/proposal?id=7", "t", "oxplow.config.set", '{"key":"zones","value":[]}', "agent", "thr3", 3, "oxplow:oxplow/config?key=zones", '{"command":"oxplow.config.set","summary":"Set zones","input":{},"destructive":false}', null]],
         truncated: false,
-        reads: { models: ["v_command_proposal"], tables: [], measures: [] },
+        reads: { datasets: ["v_command_proposal"], tables: [], measures: [] },
         freshness: {},
       };
     }
@@ -76,7 +76,7 @@ mock.module("../../api.js", () => ({
           [9, "contribution.repair", 42, "contribution.disabled", "boom", 1, "t"],
         ],
         truncated: false,
-        reads: { models: ["v_event_dead_letter"], tables: [], measures: [] },
+        reads: { datasets: ["v_event_dead_letter"], tables: [], measures: [] },
         freshness: {},
       };
     }

@@ -1,8 +1,8 @@
 # The core datasets: each one a published view `v_<name>`, compiled from
-# `<name>.sql` at every open (`crate::models`). A dataset reads only through
+# `<name>.sql` at every open (`crate::datasets`). A dataset reads only through
 # `ref('<dataset>')` and `source('<table>')`. `fields` is its contract: a
 # change to it needs a new `version`. See `.context/semantic-layer.md`
-# "Models".
+# "Datasets".
 - name: agent_nudge
   version: 3
   description: "Guidance oxplow raised — a hint (`<extension>/<id>`) or its own nudge (`report-less-run`) — for the coding agent, taken by its next prompt or tool call, or for a person, shown in Alerts until they dismiss it."
@@ -1255,7 +1255,7 @@
     - { relationships: { column: thread_id, to: thread, field: id } }
 - name: asset
   version: 1
-  description: "Each asset's last recompute: derived data computed from tables — the metric cube, a materialized model — recomputed when a commit touches one of its inputs, or on its clock; and its last failure, until one succeeds."
+  description: "Each asset's last recompute: derived data computed from tables — the metric cube, a materialized dataset — recomputed when a commit touches one of its inputs, or on its clock; and its last failure, until one succeeds."
   fields:
     - { name: "asset", type: "TEXT", doc: "The asset: `metric_cube`, or a materialized model's view (`v_<name>`)." }
     - { name: "computed_at", type: "TEXT", doc: "When it was last recomputed (RFC 3339)." }
@@ -1343,7 +1343,7 @@
 - name: contribution
   version: 6
   key: [uri]
-  description: "Every enabled extension's contributions, one row each, as their descriptors say: its URI (`<kind>:<extension>/<id>`, or `<kind>:<name>` for a command, metric, measure, dimension, event type or ref kind — the model that owns every contribution kind's URI), who contributed it and at what version, how it runs, what it needs, and the shared name it holds. What `list_extensions` counts and the reference documents. Kinds move onto descriptors one by one; a kind not yet listed here keeps its own listing."
+  description: "Every enabled extension's contributions, one row each, as their descriptors say: its URI (`<kind>:<extension>/<id>`, or `<kind>:<name>` for a command, metric, measure, dimension, event type or ref kind — the dataset that owns every contribution kind's URI), who contributed it and at what version, how it runs, what it needs, and the shared name it holds. What `list_extensions` counts and the reference documents. Kinds move onto descriptors one by one; a kind not yet listed here keeps its own listing."
   fields:
     - { name: "uri", type: "TEXT", doc: "Its ref: `oxplow:oxplow/job?job=effort-review/review`, `oxplow:oxplow/collector?collector=triage/todos`, `oxplow:oxplow/command?command=oxplow.review.accept`. (v3, was `id`)" }
     - { name: "extension", type: "TEXT", doc: "The extension that declares it." }
@@ -1772,7 +1772,7 @@
     - { relationships: { column: parent_uri, to: work_item, field: uri } }
 - name: work_item_link
   version: 3
-  description: "Links from the active work list's items (`oxplow.work_item.link`): to another item (`blocks`, `relates_to`, …) or to any ref (`about` a collector, an effort, a file). A target needn't resolve — what it names may have been deleted or its extension removed — so join it to its kind's model when you need it there."
+  description: "Links from the active work list's items (`oxplow.work_item.link`): to another item (`blocks`, `relates_to`, …) or to any ref (`about` a collector, an effort, a file). A target needn't resolve — what it names may have been deleted or its extension removed — so join it to its kind's dataset when you need it there."
   fields:
     - { name: "from_uri", type: "TEXT", doc: "The item the link is from." }
     - { name: "to_uri", type: "TEXT", doc: "What it points at: any ref." }
@@ -1859,7 +1859,7 @@
     - { relationships: { column: page, to: knowledge_page, field: uri } }
 - name: dataset
   version: 1
-  description: "Datasets: every published view, as compiled at this open — core ones and each extension's. Read a dataset's fields in `v_field`, what it reads in `v_model_lineage` and its declared tests' results in `v_model_test`."
+  description: "Datasets: every published view, as compiled at this open — core ones and each extension's. Read a dataset's fields in `v_field`, what it reads in `v_dataset_lineage` and its declared tests' results in `v_dataset_test`."
   fields:
     - { name: view, type: TEXT, doc: "The view to query (`v_work_item`)." }
     - { name: name, type: TEXT, doc: "The dataset's name within its owner (`work_item`)." }
@@ -1889,18 +1889,18 @@
     - { name: doc, type: "", doc: "What the field holds." }
     - { name: key_part, type: "", doc: "Its 1-based place in the dataset's key; null when it isn't part of the key." }
     - { name: ai_context, type: "", doc: "Guidance for an agent reading the field, as JSON `{\"instructions\", \"synonyms\", \"examples\"}`; NULL when none. Not part of the contract." }
-- name: model_lineage
+- name: dataset_lineage
   version: 2
-  description: "Model lineage: what each model reads directly — another model (`uri`, by view) or a table (`source`). Confirmed at compile against what SQLite reports the view reading."
+  description: "Dataset lineage: what each dataset reads directly — another dataset (`uri`, by view) or a table (`source`). Confirmed at compile against what SQLite reports the view reading."
   fields:
-    - { name: view, type: TEXT, doc: "The reading model's view." }
+    - { name: view, type: TEXT, doc: "The reading dataset's view." }
     - { name: input, type: TEXT, doc: "The view (`uri`) or table (`source`) it reads." }
     - { name: kind, type: TEXT, doc: "`uri` or `source`." }
-- name: model_test
+- name: dataset_test
   version: 1
-  description: "Model tests: the last result of each model's declared tests (`not_null`, `unique`, `accepted_values`, `relationships`, `sql`)."
+  description: "Dataset tests: the last result of each dataset's declared tests (`not_null`, `unique`, `accepted_values`, `relationships`, `sql`)."
   fields:
-    - { name: view, type: TEXT, doc: "The tested model's view." }
+    - { name: view, type: TEXT, doc: "The tested dataset's view." }
     - { name: test, type: TEXT, doc: "The test, e.g. `unique(id)`." }
     - { name: state, type: TEXT, doc: "`passed`, `failed` (rows break it) or `error` (it didn't run)." }
     - { name: detail, type: TEXT, doc: "How many rows broke it, or the error; NULL when passed." }
@@ -2093,7 +2093,7 @@
 - name: data_entity
   version: 1
   key: [name]
-  description: "What can be queried: every published dataset (`v_dataset`'s rows) and every entity an enabled extension declares but has not synced. Read live. `WHERE name = 'v_commit'` also counts that model's rows (`row_count`); the list leaves `row_count` NULL, since counting each is a query of its own."
+  description: "What can be queried: every published dataset (`v_dataset`'s rows) and every entity an enabled extension declares but has not synced. Read live. `WHERE name = 'v_commit'` also counts that dataset's rows (`row_count`); the list leaves `row_count` NULL, since counting each is a query of its own."
   fields:
     - { name: "name", type: "TEXT", doc: "The view to query (`v_work_item`, `v_my_gh_pr`)." }
     - { name: "owner", type: "TEXT", doc: "`core`, or the extension that provides it." }

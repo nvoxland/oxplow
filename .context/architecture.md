@@ -18,7 +18,7 @@ does not define the app the way it defines an IDE.
 
 Data collection, analysis, metrics and dimensions are central to this
 goal. Built-in sources and developer/agent-authored collectors feed a
-shared semantic layer. Models connect different sources; pages and
+shared semantic layer. Datasets connect different sources; pages and
 conversation describe what is happening and let the person drill down
 to evidence and code. The product should make it practical to work at
 that descriptive level rather than repeatedly reconstruct understanding
@@ -135,7 +135,7 @@ A new way for config to start a program must go through the same gate.
 
 > **Superseded direction (2026-09-28, epic tsk393).** The target is now
 > anchors + an event
-> log + SQL models, with commands and the scopes they call as the act side, and
+> log + SQL datasets, with commands and the scopes they call as the act side, and
 > everything pluggable through the kinds of contribution an extension declares. The section below
 > describes the current code, which that epic moves away from phase by
 > phase.

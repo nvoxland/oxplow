@@ -1,5 +1,5 @@
 /// Every setting's value now and where it comes from: `v_config_value`
-/// (a live model — the project keys, a person's own layer, the AI roles,
+/// (a live dataset — the project keys, a person's own layer, the AI roles,
 /// what extensions declare). What Settings shows, and what the rest of the
 /// window asks a setting's value of.
 import { querySql } from "./api.js";

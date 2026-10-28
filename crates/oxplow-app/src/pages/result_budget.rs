@@ -127,24 +127,24 @@ mod tests {
             rows: vec![vec![SqlCell::Int(1)]],
             ..Default::default()
         };
-        result.reads.models.push("v_work_item".into());
+        result.reads.datasets.push("v_work_item".into());
         assert!(ResultBudget::new(512).admit(&mut result).unwrap());
         assert!(result.columns.is_empty());
         assert!(result.rows.is_empty());
         assert!(result.truncated);
-        assert_eq!(result.reads.models, ["v_work_item"]);
+        assert_eq!(result.reads.datasets, ["v_work_item"]);
     }
 
     #[test]
     fn metadata_overflow_fails_with_a_bounded_diagnostic() {
         let mut result = SqlQueryResult::default();
-        result.reads.models.push("private-".repeat(1024));
+        result.reads.datasets.push("private-".repeat(1024));
         let error = ResultBudget::new(512).admit(&mut result).unwrap_err();
         assert_eq!(
             error.message(),
             "page result metadata exceeds the combined result budget"
         );
-        assert_eq!(result.reads.models.len(), 1);
+        assert_eq!(result.reads.datasets.len(), 1);
     }
 
     #[test]

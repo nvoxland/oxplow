@@ -436,7 +436,7 @@ pub const SCOPES: &[Scope] = &[
         access: Access::Read,
         host: Host::Daemon,
         spends: false,
-        summary: "Read oxplow's published models (`v_*`) with SQL: one read-only statement a call, \
+        summary: "Read oxplow's published datasets (`v_*`) with SQL: one read-only statement a call, \
               bound by named parameters.",
     },
     Scope {

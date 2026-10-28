@@ -39,7 +39,7 @@ pub(crate) struct Host {
     /// Its database as the deploys left it, before anything ran: what a
     /// fork starts from.
     deployed: oxplow_db::Database,
-    /// A step changed something its materialized models haven't caught up
+    /// A step changed something its materialized datasets haven't caught up
     /// with yet.
     stale: std::sync::atomic::AtomicBool,
 }
@@ -74,7 +74,7 @@ impl Host {
         // Which are on: the required foundation, the one tested, and what
         // each of those `requires:` or imports from, in turn. Not the default
         // extensions: oxplow's own pages run complete without them, and an
-        // extension that reads bundled's models says `requires:`. Never the project's list or
+        // extension that reads bundled's datasets says `requires:`. Never the project's list or
         // one person's: a test passes or fails on what the extension
         // declares, the same for everyone, and a sibling it doesn't name —
         // broken or not — isn't in it.
@@ -287,10 +287,10 @@ impl Host {
         // A config change reaches what runs, as at boot; what it asks to
         // publish, [`Host::settle`] publishes.
         oxplow_app::config_reactors::register(&self.svc);
-        // The one change loop, as at boot: materialized models refill.
-        oxplow_app::models_changed::spawn(
+        // The one change loop, as at boot: materialized datasets refill.
+        oxplow_app::datasets_changed::spawn(
             self.svc.db.clone(),
-            self.svc.model_watermarks.clone(),
+            self.svc.dataset_watermarks.clone(),
             self.svc.events.clone(),
             self.svc.assets.clone(),
             self.svc.event_pump.clone(),
@@ -305,7 +305,7 @@ impl Host {
 
     /// Let what the last step set off finish, as a person would wait for
     /// it: every reactor hears its events, and a generation one asked for
-    /// is published. The materialized models are refilled before the next
+    /// is published. The materialized datasets are refilled before the next
     /// read ([`Host::current`]).
     pub(crate) async fn settle(&self) {
         let wait = std::time::Duration::from_secs(10);
@@ -321,15 +321,15 @@ impl Host {
         self.stale.store(true, std::sync::atomic::Ordering::SeqCst);
     }
 
-    /// Every materialized model current, when a step changed anything
+    /// Every materialized dataset current, when a step changed anything
     /// since the last read — each refilled whatever its policy (`every 1h`
-    /// too: a test has no clock to wait on). Before anything reads models.
+    /// too: a test has no clock to wait on). Before anything reads datasets.
     pub(crate) async fn current(&self) {
         if self.stale.swap(false, std::sync::atomic::Ordering::SeqCst) {
             let assets = &self.svc.assets;
             // One that didn't register reads empty: the fixture reading it
             // says so.
-            let _ = assets.sync_models().await;
+            let _ = assets.sync_datasets().await;
             assets.recompute_all().await;
         }
     }

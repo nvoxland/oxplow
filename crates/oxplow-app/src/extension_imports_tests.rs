@@ -3,9 +3,9 @@
 
 use oxplow_domain::uri::build::keyed;
 
-/// The URI naming `owner`'s `items` model.
-fn model_ref(owner: &str) -> String {
-    keyed("oxplow/model", &format!("{owner}/items"))
+/// The URI naming `owner`'s `items` dataset.
+fn dataset_ref(owner: &str) -> String {
+    keyed("oxplow/dataset", &format!("{owner}/items"))
 }
 use std::{path::Path, sync::Arc};
 
@@ -18,9 +18,9 @@ fn write(root: &Path, rel: &str, body: &str) {
 #[derive(Clone)]
 struct Ext<'a> {
     name: &'a str,
-    /// The `items` model's contract version, and the version an export of it declares.
-    model_version: u32,
-    /// `(visibility, export version)` of its `items` model.
+    /// The `items` dataset's contract version, and the version an export of it declares.
+    dataset_version: u32,
+    /// `(visibility, export version)` of its `items` dataset.
     export: Option<(&'a str, u32)>,
     /// `(producer, version, optional)` read as `import_ref('dep')`; no
     /// version binds whatever the producer exports.
@@ -33,7 +33,7 @@ struct Ext<'a> {
     /// extension's contribution of that kind. A `guarded` command of its
     /// own is withheld with any of them.
     kind_imports: Vec<(&'a str, &'a str, Kind, u32, bool)>,
-    /// Mount the `seen` page in a slot (only when it imports a model).
+    /// Mount the `seen` page in a slot (only when it imports a dataset).
     mounted: bool,
 }
 
@@ -63,7 +63,7 @@ impl<'a> Ext<'a> {
     fn new(name: &'a str) -> Self {
         Ext {
             name,
-            model_version: 1,
+            dataset_version: 1,
             export: None,
             import: None,
             declares: Vec::new(),
@@ -100,13 +100,13 @@ impl<'a> Ext<'a> {
         self.mounted = true;
         self
     }
-    /// Export `items` at its own model version.
+    /// Export `items` at its own dataset version.
     fn exports(mut self, visibility: &'a str) -> Self {
-        self.export = Some((visibility, self.model_version));
+        self.export = Some((visibility, self.dataset_version));
         self
     }
     fn at_version(mut self, version: u32) -> Self {
-        self.model_version = version;
+        self.dataset_version = version;
         if let Some((_, v)) = self.export.as_mut() {
             *v = version;
         }
@@ -124,7 +124,7 @@ impl<'a> Ext<'a> {
 }
 
 /// Every extension has `items` (`v_<name>_items`: over the work items, or
-/// over its import), an always-available `plain` model and, when it imports,
+/// over its import), an always-available `plain` dataset and, when it imports,
 /// a `seen` page reading the import.
 fn put(root: &Path, e: &Ext) {
     put_in(&root.join(format!(".oxplow/extensions/{}", e.name)), e);
@@ -132,7 +132,7 @@ fn put(root: &Path, e: &Ext) {
 
 fn put_in(dir: &Path, e: &Ext) {
     let name = e.name;
-    let version = e.model_version;
+    let version = e.dataset_version;
     let mut manifest = format!("manifest: 2\nname: {name}\n");
     manifest += &format!(
         "intent:\n  purpose: p\ndatasets:\n  - name: items\n    version: {version}\n    description: Items.\n    fields:\n      - {{ name: uri, type: TEXT, doc: Work item ref. }}\n  - name: plain\n    version: 1\n    description: Plain.\n    fields:\n      - {{ name: uri, type: TEXT, doc: Work item ref. }}\n"
@@ -141,7 +141,7 @@ fn put_in(dir: &Path, e: &Ext) {
     if let Some((visibility, version)) = e.export {
         exports += &format!(
             "  - {{ contribution: {}, version: {version}, visibility: {visibility} }}\n",
-            model_ref(name)
+            dataset_ref(name)
         );
     }
     for (kind, visibility) in &e.kind_exports {
@@ -180,7 +180,7 @@ fn put_in(dir: &Path, e: &Ext) {
             .unwrap_or_default();
         imports += &format!(
             "  - {{ id: dep, contribution: {}{version}, optional: {optional} }}\n",
-            model_ref(target)
+            dataset_ref(target)
         );
         sql = "SELECT uri FROM import_ref('dep')";
         let params = if e.mounted {
@@ -225,8 +225,12 @@ fn put_in(dir: &Path, e: &Ext) {
     }
     write(dir, "extension.yaml", &manifest);
     write(dir, "handlers/get.star", HANDLER);
-    write(dir, "models/items.sql", sql);
-    write(dir, "models/plain.sql", "SELECT uri FROM ref('work_item')");
+    write(dir, "datasets/items.sql", sql);
+    write(
+        dir,
+        "datasets/plain.sql",
+        "SELECT uri FROM ref('work_item')",
+    );
 }
 
 const HANDLER: &str = "def transform(x):\n    return {\"commands\": [], \"result\": {}}\n";
@@ -292,9 +296,9 @@ fn disable(root: &Path, names: &str) {
     );
 }
 
-/// A stable model at a matching version is read by its consumer's model and page.
+/// A stable dataset at a matching version is read by its consumer's dataset and page.
 #[tokio::test]
-async fn a_consumer_of_a_compatible_stable_model_activates_and_reads_it() {
+async fn a_consumer_of_a_compatible_stable_dataset_activates_and_reads_it() {
     let (_dir, svc) = project(&[
         Ext::new("prod").at_version(2).exports("stable"),
         Ext::new("cons").imports("prod", 2, false),
@@ -323,7 +327,7 @@ async fn a_breaking_version_mismatch_blocks_only_the_consumer() {
     activate(&svc).await;
     let why = problem(&svc, "cons");
     assert!(
-        why.contains("`dep`") && why.contains("oxplow:oxplow/model?model=prod/items"),
+        why.contains("`dep`") && why.contains("oxplow:oxplow/dataset?dataset=prod/items"),
         "{why}"
     );
     assert!(!readable(&svc, "v_cons_items").await);
@@ -344,7 +348,7 @@ async fn a_missing_required_producer_blocks_only_the_consumer() {
     let why = problem(&svc, "cons");
     assert!(
         why.contains("`dep`")
-            && why.contains("oxplow:oxplow/model?model=gone/items")
+            && why.contains("oxplow:oxplow/dataset?dataset=gone/items")
             && why.contains("isn't here"),
         "{why}"
     );
@@ -443,7 +447,7 @@ async fn a_private_export_is_not_importable() {
 }
 
 #[tokio::test]
-async fn an_unexported_model_is_not_importable() {
+async fn an_unexported_dataset_is_not_importable() {
     let (_dir, svc) =
         project(&[Ext::new("prod"), Ext::new("cons").imports("prod", 1, false)]).await;
     activate(&svc).await;
@@ -516,7 +520,7 @@ async fn has_act(svc: &crate::Services, extension: &str) -> bool {
 const ALL_KINDS: [Kind; 3] = [Kind::Collector, Kind::EventType, Kind::Command];
 
 /// A stable collector, event type or command is importable as well as a
-/// model; the consumer's guarded command stays.
+/// dataset; the consumer's guarded command stays.
 #[tokio::test]
 async fn a_stable_contribution_of_every_kind_is_importable() {
     for kind in ALL_KINDS {

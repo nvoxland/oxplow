@@ -16,15 +16,15 @@ answer is still wrong, and the queries to start from.
 - **`truncated`**: more rows matched than `limit` (default 500). The rows
   you got are a prefix, not the answer. Never total, rank or average a
   truncated list; aggregate in SQL instead.
-- **`coverage`**: one entry per collector behind a collected model you
+- **`coverage`**: one entry per collector behind a collected dataset you
   read, with its status: `current`, `stale`, `failed`, `disabled`,
-  `needs_approval`, `never`. Core's own models have none (core keeps them
+  `needs_approval`, `never`. Core's own datasets have none (core keeps them
   current). A complete result over a `failed` or `never` collector is
   missing data, not showing zero. Say so.
 - **`generation`**: the extension catalog's fingerprint when the query
   ran. It changes when any extension does; it says nothing about the data.
   Compare it across two reads to see whether the catalog moved between them.
-- **`freshness`**: when each model last changed in this process. It is not
+- **`freshness`**: when each dataset last changed in this process. It is not
   a staleness check on a collector; `coverage` is.
 
 None of these says the query was *right*: they say how complete it was.
@@ -63,10 +63,10 @@ to read is neither.
 
 ## Scope your question
 
-Most models span every stream. Say which you mean: `stream_id` (and
+Most datasets span every stream. Say which you mean: `stream_id` (and
 `thread_id`) narrow to one; `branch` on test runs, captures and
 `v_test_case_stat` separates branches; a time window needs an explicit
-`WHERE` on the model's time column. A number without its stream, branch and
+`WHERE` on the dataset's time column. A number without its stream, branch and
 window is only true somewhere.
 
 ## Examples

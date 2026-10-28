@@ -24243,5 +24243,59 @@
       ],
       "key": []
     }
+  },
+  "dataset_lineage": {
+    "2": {
+      "columns": [
+        {
+          "name": "view",
+          "type": "TEXT",
+          "doc": "The reading dataset's view."
+        },
+        {
+          "name": "input",
+          "type": "TEXT",
+          "doc": "The view (`uri`) or table (`source`) it reads."
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "doc": "`uri` or `source`."
+        }
+      ],
+      "key": []
+    }
+  },
+  "dataset_test": {
+    "1": {
+      "columns": [
+        {
+          "name": "view",
+          "type": "TEXT",
+          "doc": "The tested dataset's view."
+        },
+        {
+          "name": "test",
+          "type": "TEXT",
+          "doc": "The test, e.g. `unique(id)`."
+        },
+        {
+          "name": "state",
+          "type": "TEXT",
+          "doc": "`passed`, `failed` (rows break it) or `error` (it didn't run)."
+        },
+        {
+          "name": "detail",
+          "type": "TEXT",
+          "doc": "How many rows broke it, or the error; NULL when passed."
+        },
+        {
+          "name": "ran_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 time it ran."
+        }
+      ],
+      "key": []
+    }
   }
 }

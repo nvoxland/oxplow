@@ -113,7 +113,7 @@ pub struct UiBlock {
     #[serde(default)]
     #[schemars(with = "Vec<Mount>")]
     pub mounts: Vec<Value>,
-    /// Labels from its models on core refs.
+    /// Labels from its datasets on core refs.
     #[serde(default)]
     #[schemars(with = "Option<Vec<super::decorators::DecoratorFile>>")]
     pub decorators: Option<Value>,
@@ -184,10 +184,10 @@ pub struct ManifestV2 {
     pub permissions: oxplow_domain::permissions::Permissions,
 
     // ---- kinds ----
-    /// Datasets: each with its SQL in `models/<name>.sql`, published as
+    /// Datasets: each with its SQL in `datasets/<name>.sql`, published as
     /// `v_<extension>_<name>`.
     #[serde(default)]
-    #[schemars(with = "Option<Vec<oxplow_db::models::DatasetDecl>>")]
+    #[schemars(with = "Option<Vec<oxplow_db::datasets::DatasetDecl>>")]
     pub datasets: Option<Value>,
     /// Measures, in `.oxplow/project.yaml`'s vocabulary.
     #[serde(default)]
@@ -215,8 +215,8 @@ pub struct ManifestV2 {
     #[serde(default)]
     #[schemars(with = "Option<Vec<super::jobs::JobFile>>")]
     pub jobs: Option<Value>,
-    /// Named model needs: the person binds `<extension>/<id>` to a model,
-    /// else the fallback role's model serves it.
+    /// Named dataset needs: the person binds `<extension>/<id>` to a dataset,
+    /// else the fallback role's dataset serves it.
     #[serde(default)]
     #[schemars(with = "Option<Vec<super::ai_profiles::AiProfileFile>>")]
     pub ai_profiles: Option<Value>,
@@ -779,7 +779,7 @@ mod tests {
     /// nested lists and other keys aside.
     #[test]
     fn each_items_line_is_found() {
-        let text = "manifest: 2\ncommands:\n  - name: a\n    examples:\n      - { name: x }\n  # gone\n  - name: b\nui:\n  slots: []\n  decorators:\n    - { model: m }\n    - { model: n }\neffects:\n- id: e\n";
+        let text = "manifest: 2\ncommands:\n  - name: a\n    examples:\n      - { name: x }\n  # gone\n  - name: b\nui:\n  slots: []\n  decorators:\n    - { dataset: m }\n    - { dataset: n }\neffects:\n- id: e\n";
         assert_eq!(item_lines(text, "commands"), vec![3, 7]);
         assert_eq!(item_lines(text, "ui.decorators"), vec![11, 12]);
         assert_eq!(item_lines(text, "effects"), vec![14]);

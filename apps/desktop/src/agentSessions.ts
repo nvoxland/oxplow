@@ -1,7 +1,7 @@
 /**
  * A thread's agent sessions (`v_agent_session`, `.context/data-model.md`
  * "agent_session"): the agent slots a person opened on it. Read from the
- * model and re-read when it changes; the rows are the truth, never a copy
+ * dataset and re-read when it changes; the rows are the truth, never a copy
  * the UI keeps.
  */
 import { useCallback, useEffect, useState } from "react";
@@ -64,7 +64,7 @@ export async function readThreadSessions(threadId: string): Promise<{ sessions: 
   return { sessions: agentSessionsFromResult(res), reads: res.reads };
 }
 
-/** A thread's open sessions, re-read when the model changes; `null` until
+/** A thread's open sessions, re-read when the dataset changes; `null` until
  *  the first read lands. */
 export function useThreadSessions(threadId: string | null): AgentSessionRow[] | null {
   const [sessions, setSessions] = useState<AgentSessionRow[] | null>(null);

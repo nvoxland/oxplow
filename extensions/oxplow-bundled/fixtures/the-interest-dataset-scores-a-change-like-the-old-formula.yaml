@@ -1,4 +1,4 @@
-# The "look here first" score is a model over a change's rows: size,
+# The "look here first" score is a dataset over a change's rows: size,
 # complexity spikes, parameter growth and long new functions, multiplied.
 given:
   - observe:

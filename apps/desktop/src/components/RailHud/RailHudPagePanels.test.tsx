@@ -32,7 +32,7 @@ mock.module("../../api.js", () => ({
     { name: "z", namespace: "z", enabled: true, pages: [], pageFiles: [pageOf("body"), pageOf("badge")], panels: [panel], ui: { slots: [], commands: [], decorators: [], replacements: [] } },
   ],
   subscribeOxplowEvents: () => () => {},
-  querySql: async () => ({ columns: [], rows: [], truncated: false, reads: { models: [], tables: [], measures: [] }, freshness: {} }),
+  querySql: async () => ({ columns: [], rows: [], truncated: false, reads: { datasets: [], tables: [], measures: [] }, freshness: {} }),
 }));
 const { RailHud } = await import("./RailHud.js");
 const { PanelRunsProvider } = await import("../Panels/PanelRunsContext.js");

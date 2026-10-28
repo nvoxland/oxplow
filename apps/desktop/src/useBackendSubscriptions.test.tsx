@@ -122,7 +122,7 @@ test("a change to the agent sessions re-reads the statuses: a closed one's drops
   render(<Harness />);
   expect(listAgentStatuses).toHaveBeenCalledTimes(1);
   await act(async () => {
-    for (const handler of oxplowHandlers) handler({ kind: "modelsChanged", models: ["v_agent_session"] });
+    for (const handler of oxplowHandlers) handler({ kind: "datasetsChanged", datasets: ["v_agent_session"] });
     await Promise.resolve();
   });
   expect(listAgentStatuses).toHaveBeenCalledTimes(2);
@@ -146,12 +146,12 @@ test("a change to v_thread re-reads every loaded stream's thread state, and noth
   render(<Harness />);
   getThreadState.mockClear();
   await act(async () => {
-    for (const handler of oxplowHandlers) handler({ kind: "modelsChanged", models: ["v_commit"] });
+    for (const handler of oxplowHandlers) handler({ kind: "datasetsChanged", datasets: ["v_commit"] });
     await Promise.resolve();
   });
   expect(getThreadState).toHaveBeenCalledTimes(0);
   await act(async () => {
-    for (const handler of oxplowHandlers) handler({ kind: "modelsChanged", models: ["v_thread"] });
+    for (const handler of oxplowHandlers) handler({ kind: "datasetsChanged", datasets: ["v_thread"] });
     await Promise.resolve();
   });
   expect(getThreadState.mock.calls.map((c) => (c as unknown[])[0])).toEqual(["str1", "str2"]);

@@ -14,7 +14,7 @@ test("oxplow's id params are pickers; anything else is typed", () => {
   expect(paramKind("days")).toBeNull();
 });
 
-test("each picker reads its model, newest first", () => {
+test("each picker reads its dataset, newest first", () => {
   expect(paramOptionsSql("work_item")).toContain("FROM v_work_item");
   expect(paramOptionsSql("effort")).toContain("FROM v_effort");
   expect(paramOptionsSql("thread")).toContain("FROM v_thread");
@@ -29,7 +29,7 @@ test("options are the rows' value and label", () => {
       [7, null],
     ],
     truncated: false,
-    reads: { models: [], tables: [], measures: [] },
+    reads: { datasets: [], tables: [], measures: [] },
     freshness: [],
   };
   expect(paramOptions(result)).toEqual([

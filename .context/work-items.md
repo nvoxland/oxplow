@@ -18,7 +18,7 @@ tools — reads work items through `v_work_item`, `v_work_item_link` and
 `v_work_item_comment`, and writes them with the `work_item.*` commands;
 nothing outside a work list's implementation reads that list's own
 tables (`oxplow-dev` is the one development exception). oxplow's tasks
-publish no model of their own — `v_task`, `v_task_link` and
+publish no dataset of their own — `v_task`, `v_task_link` and
 `v_task_note` were removed; their own fields are `native_state` and
 `native`. The views show **the active work list's items only**: one
 list at a time, whichever implementation it is, and nothing with none.
@@ -27,7 +27,7 @@ list at a time, whichever implementation it is, and nothing with none.
 `oxplow:oxplow/work_item?id=<id>&provider=<provider>`: `title`, `body`, a canonical `state`
 (`todo`, `in_progress`, `blocked`, `done`, `canceled`), the list's own
 `native_state` and `native` JSON, `parent_uri` (NULL when the parent is
-deleted: a deleted item isn't a live one, so the model's parent
+deleted: a deleted item isn't a live one, so the dataset's parent
 relationship holds; tsk572), and (V17) `thread_id` — the list it's on, a
 thread's or the backlog (NULL) — `rank` on that list and `closed_at`.
 `v_work_item_link` is its links (`to_uri`, its `to_kind`, `link_type`):
@@ -149,7 +149,7 @@ name, a built `oxplow/work_item` URI or `tsk` id parsing in desktop code.
 
 Every read returns what it read (`reads`), and a consumer re-runs it
 through `useRerunOnChange` — or `readsChanged` outside a component
-(`useBackendSubscriptions`, the title cache) — when one of those models
+(`useBackendSubscriptions`, the title cache) — when one of those datasets
 changes. With **none** active every read is empty and the screens show
 their empty states.
 
@@ -206,7 +206,7 @@ item). None of them belongs to an implementation, so the tool list never
 changes with a switch; with none they read empty. A source
 guard (`source_guards::only_oxplows_implementation_names_its_task_list`)
 pins the few production files that may name oxplow's task store,
-service or models.
+service or datasets.
 
 ## The capability
 

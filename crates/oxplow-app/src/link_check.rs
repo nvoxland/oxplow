@@ -51,7 +51,7 @@ pub fn check_links_in(world: &LinkWorld<'_>, body: &str) -> Vec<LinkWarning> {
     for link in classify_wikilinks(world.resources, body) {
         match (&link.reference, &link.canonical) {
             // A resource the vocabulary knows with no typed probe here: one a
-            // model holds (its `resolve:`)
+            // dataset holds (its `resolve:`)
             // is checked against it, any other is a link as it stands
             // (tsk894).
             (None, Some(canonical)) => {
@@ -241,8 +241,8 @@ fn exists(conn: &rusqlite::Connection, sql: &str, param: &dyn rusqlite::ToSql) -
 }
 
 /// `Some(reason)` when `canonical` is of a resource whose `resolve`
-/// model has no row for it (by its `ref` column). A resource with no
-/// `resolve` model, or one that can't be read, isn't probed.
+/// dataset has no row for it (by its `ref` column). A resource with no
+/// `resolve` dataset, or one that can't be read, isn't probed.
 fn unresolved_ref(
     world: &LinkWorld<'_>,
     canonical: &oxplow_domain::uri::OxplowUri,
@@ -340,9 +340,9 @@ mod tests {
     }
 
     /// tsk894: a ref of any kind the vocabulary knows is a link. One of a
-    /// kind no model holds (a shell page) is a link as it stands; one a
-    /// model holds — an effort, core's or an extension's — is checked
-    /// against that model's rows.
+    /// kind no dataset holds (a shell page) is a link as it stands; one a
+    /// dataset holds — an effort, core's or an extension's — is checked
+    /// against that dataset's rows.
     #[tokio::test]
     async fn accepts_refs_of_kinds_with_no_probe() {
         let dir = git_repo();

@@ -25,7 +25,7 @@ pub const RENAMED: &[(&str, &str)] = &[
     (
         "models",
         "write `datasets:` — `models: [{ name, columns: [..] }]` is \
-         `datasets: [{ name, fields: [..] }]`, each one's SQL still in `models/<name>.sql`",
+         `datasets: [{ name, fields: [..] }]`, each one's SQL moves to `datasets/<name>.sql`",
     ),
     (
         "columns",

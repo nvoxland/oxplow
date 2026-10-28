@@ -72,7 +72,7 @@ export function useViewParam<T extends SqlCell>(key: string, initial: T, opts?: 
 /** `""` as `string`, `false` as `boolean`: a param's type, not its default's. */
 type Widen<T> = T extends string ? string : T extends number ? number : T extends boolean ? boolean : T;
 
-/** A **view param** that is a pick (a row, a commit, a model): picking
+/** A **view param** that is a pick (a row, a commit, a dataset): picking
  *  pushes an entry, so Back un-selects; clearing replaces. */
 export function useViewSelection(key: string): [string | null, (next: string | null) => void] {
   return useViewValue<string | null>(key, null, (next) => next !== null);

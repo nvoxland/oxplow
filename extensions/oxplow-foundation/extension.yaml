@@ -5,7 +5,7 @@ namespace: oxplow
 description: oxplow's own commands, declared like any extension's — each backed by an operation of a scope. Required; it can't be disabled.
 engine: ">=0.7"
 # What it reaches beyond the baseline: its AI providers call models, its
-# effort collector reads the models with its own SQL, and the Timeline page
+# effort collector reads the datasets with its own SQL, and the Timeline page
 # reads them too.
 permissions: [sql.read, files.read, ai.compute, agent.write]
 # Its custom components are TypeScript (src/), built into dist/ when oxplow
@@ -15,7 +15,7 @@ custom_components:
   # Efforts, sessions, threads and commits on a zoomable time axis
   # (vis-timeline, which the kit has no viz for).
   - { id: timeline, title: Timeline, bundle: dist/timeline, sql: read }
-  # Explore Data: an SQL box and a viz picker over the models; oxplow draws
+  # Explore Data: an SQL box and a viz picker over the datasets; oxplow draws
   # the result under it with its own components (`showView`: an inline page).
   - { id: explore-data, title: Explore Data, bundle: dist/explore-data, sql: read, commands: [oxplow.page.draft_with_agent] }
   # Settings → Integrations: hand-written (no build), so it lives beside the
@@ -492,9 +492,9 @@ resources:
     label: Nudge
     params: { kind: { required: true } }
     icon: bell
-  - name: model
-    label: Model
-    params: { model: { required: true, pattern: '^[a-z][a-z0-9-]*/[a-z][a-z0-9_.-]*$' } }
+  - name: dataset
+    label: Dataset
+    params: { dataset: { required: true, pattern: '^[a-z][a-z0-9-]*/[a-z][a-z0-9_.-]*$' } }
     icon: database
   - name: measure
     label: Measure
@@ -1363,7 +1363,7 @@ commands:
     example: {"instance": "issues/issues", "name": "TOKEN", "sign_in": 3}
   # records.read
   - name: records.read
-    summary: "Read what a uri names. Its model's row (every column), what sits beside it (a work item's links and comments, a commit's or an effort's files) and, for a body no model holds, its content. `oxplow:oxplow/file?path=src/a.rs` reads the working tree; `oxplow:oxplow/file?path=src/a.rs&rev=git:HEAD#lines=10-40` a revision's lines (`@snap:<id>` a local-history snapshot); `oxplow:oxplow/event?id=<id>#part=output` (or `#input`, `#prompt`) one of your stream's events' stored bodies; `oxplow:oxplow/page?page=<ext>/<slug>` a page's definition (its YAML, source and deployment); `stream` reads a file or page in another stream's worktree. `oxplow:oxplow/ai_call?id=<id>#part=request` (or `#response`) a recorded model call's bodies. Any `uri` a model's column holds reads the same way (`work_item:…`, `oxplow:oxplow/commit?sha=…`, `oxplow:oxplow/effort?id=…`, `oxplow:oxplow/thread?id=…`, `oxplow:oxplow/wiki?slug=…`). Content stops at 64 KB, saying so."
+    summary: "Read what a uri names. Its dataset's row (every column), what sits beside it (a work item's links and comments, a commit's or an effort's files) and, for a body no dataset holds, its content. `oxplow:oxplow/file?path=src/a.rs` reads the working tree; `oxplow:oxplow/file?path=src/a.rs&rev=git:HEAD#lines=10-40` a revision's lines (`@snap:<id>` a local-history snapshot); `oxplow:oxplow/event?id=<id>#part=output` (or `#input`, `#prompt`) one of your stream's events' stored bodies; `oxplow:oxplow/page?page=<ext>/<slug>` a page's definition (its YAML, source and deployment); `stream` reads a file or page in another stream's worktree. `oxplow:oxplow/ai_call?id=<id>#part=request` (or `#response`) a recorded dataset call's bodies. Any `uri` a dataset's column holds reads the same way (`work_item:…`, `oxplow:oxplow/commit?sha=…`, `oxplow:oxplow/effort?id=…`, `oxplow:oxplow/thread?id=…`, `oxplow:oxplow/wiki?slug=…`). Content stops at 64 KB, saying so."
     scope: records.read
     op: read
     tool: read

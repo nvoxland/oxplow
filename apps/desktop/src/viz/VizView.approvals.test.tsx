@@ -33,10 +33,10 @@ mock.module("../api.js", () => ({
           columns,
           rows: [row(7, 3, "oxplow:oxplow/config?key=agentPromptAppend"), row(8, 9, "oxplow:oxplow/config?key=other")],
           truncated: false,
-          reads: { models: [], tables: [], measures: [] },
+          reads: { datasets: [], tables: [], measures: [] },
           freshness: {},
         }
-      : { columns: ["n"], rows: [[1]], truncated: false, reads: { models: [], tables: [], measures: [] }, freshness: {} },
+      : { columns: ["n"], rows: [[1]], truncated: false, reads: { datasets: [], tables: [], measures: [] }, freshness: {} },
   decideProposal: async (id: number, approve: boolean) => {
     decided.push([id, approve]);
     return null;

@@ -17,7 +17,7 @@ mock.module("../api.js", () => ({
   listExtensions: async () => extensions,
   subscribeOxplowEvents: () => () => {},
   querySql: async (sql: string) =>
-    readsSettings(sql) ? configValueResult([]) : { columns: [], rows: [], truncated: false, reads: { models: [], tables: [], measures: [] }, freshness: {} },
+    readsSettings(sql) ? configValueResult([]) : { columns: [], rows: [], truncated: false, reads: { datasets: [], tables: [], measures: [] }, freshness: {} },
   recordUsage: async () => {},
 }));
 const { PageTree } = await import("./PageTree.js");

@@ -7,7 +7,7 @@
 //!   - name: pr                    # oxplow:acme/pr?id=12
 //!     label: Pull request
 //!     params: { id: { required: true, pattern: '^[0-9]+$' } }
-//!     resolve: prs                # a model of its own with `ref` and `title`
+//!     resolve: prs                # a dataset of its own with `ref` and `title`
 //!     searchable: prs             # …and `body`, which search indexes
 //!     icon: git-pull-request
 //!     wikilink: { prefix: pr, param: id }   # [[pr:12]]
@@ -16,8 +16,8 @@
 //! A resource is `<extension>/<name>`, where the extension segment is the
 //! extension's name, or `oxplow` for the extension whose namespace is
 //! oxplow's (only a bundled one may be). That one resolves to core's
-//! models (`resolve: effort` is `v_effort`); any other to its own
-//! (`v_<extension>_<model>`). Collisions across extensions are the
+//! datasets (`resolve: effort` is `v_effort`); any other to its own
+//! (`v_<extension>_<dataset>`). Collisions across extensions are the
 //! vocabulary's to find.
 
 use std::collections::BTreeMap;
@@ -226,13 +226,13 @@ pub fn resource_extension(extension: &str, namespace: &str) -> String {
     }
 }
 
-/// Parse a `resources:` block against the extension's models (core's,
+/// Parse a `resources:` block against the extension's datasets (core's,
 /// for oxplow's namespace): the valid resources, and an error
 /// (`file:line: …`) for each broken one.
 pub fn parse_resources(
     extension: &str,
     namespace: &str,
-    models: &[oxplow_db::models::DatasetSource],
+    datasets: &[oxplow_db::datasets::DatasetSource],
     value: &serde_yaml::Value,
     file: &str,
     manifest: &str,
@@ -246,12 +246,12 @@ pub fn parse_resources(
     };
     let segment = resource_extension(extension, namespace);
     let core = namespace == CORE_NAMESPACE;
-    let core_models = if core {
-        oxplow_db::models::core_sources().unwrap_or_default()
+    let core_datasets = if core {
+        oxplow_db::datasets::core_sources().unwrap_or_default()
     } else {
         Vec::new()
     };
-    let models = if core { &core_models[..] } else { models };
+    let datasets = if core { &core_datasets[..] } else { datasets };
     let lines = item_lines(manifest, "resources");
     let mut out: Vec<ExtensionResource> = Vec::new();
     let mut errors = Vec::new();
@@ -273,7 +273,7 @@ pub fn parse_resources(
             continue;
         }
         let declared_at = at(file, line, "").trim_end_matches(": ").to_string();
-        match decl_of(&segment, extension, core, models, f) {
+        match decl_of(&segment, extension, core, datasets, f) {
             Ok(decl) => out.push(ExtensionResource { decl, declared_at }),
             Err(e) => errors.push(at(file, line, e)),
         }
@@ -285,7 +285,7 @@ fn decl_of(
     segment: &str,
     extension: &str,
     core: bool,
-    models: &[oxplow_db::models::DatasetSource],
+    datasets: &[oxplow_db::datasets::DatasetSource],
     f: ResourceFile,
 ) -> Result<ResourceDecl, String> {
     let declared = f.clone().into_decl(segment)?;
@@ -315,18 +315,18 @@ fn decl_of(
             },
         );
     }
-    // A model with these columns: the extension's own, or core's.
-    let view_with = |key: &str, model: &str, columns: &[&str], why: &str| {
-        let source = models
+    // A dataset with these columns: the extension's own, or core's.
+    let view_with = |key: &str, dataset: &str, columns: &[&str], why: &str| {
+        let source = datasets
             .iter()
-            .find(|m| m.decl.name == model)
+            .find(|m| m.decl.name == dataset)
             .ok_or_else(|| {
                 named(format!(
-                    "`{key}: {model}` isn't one of {} models",
+                    "`{key}: {dataset}` isn't one of {} datasets",
                     if core {
                         "core's"
                     } else {
-                        "this extension's (`models:`)"
+                        "this extension's (`datasets:`)"
                     }
                 ))
             })?;
@@ -335,13 +335,13 @@ fn decl_of(
             .find(|col| !source.decl.fields.iter().any(|c| c.name == **col))
         {
             return Err(named(format!(
-                "model `{model}` has no `{col}` column ({why})"
+                "dataset `{dataset}` has no `{col}` column ({why})"
             )));
         }
         Ok(if core {
-            oxplow_db::models::core_view(model)
+            oxplow_db::datasets::core_view(dataset)
         } else {
-            oxplow_db::models::extension_view(extension, model)
+            oxplow_db::datasets::extension_view(extension, dataset)
         })
     };
     let title = f.title.as_deref().unwrap_or("title");
@@ -434,7 +434,7 @@ resources:
     fn acme_with(manifest: &str, files: &[(&str, &str)]) -> crate::extensions::Extension {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().join(".oxplow/extensions/acme");
-        std::fs::create_dir_all(root.join("models")).unwrap();
+        std::fs::create_dir_all(root.join("datasets")).unwrap();
         std::fs::write(root.join("extension.yaml"), manifest).unwrap();
         for (rel, text) in files {
             let path = root.join(rel);
@@ -442,7 +442,7 @@ resources:
             std::fs::write(path, text).unwrap();
         }
         std::fs::write(
-            root.join("models/prs.sql"),
+            root.join("datasets/prs.sql"),
             "SELECT CAST('oxplow:acme/pr?id=1' AS TEXT) AS uri, CAST('One' AS TEXT) AS title",
         )
         .unwrap();
@@ -453,7 +453,7 @@ resources:
     }
 
     #[test]
-    fn a_resource_loads_under_its_extension_with_its_model() {
+    fn a_resource_loads_under_its_extension_with_its_dataset() {
         let ext = acme(MANIFEST);
         assert!(ext.errors.is_empty(), "{:?}", ext.errors);
         let r = &ext.resources[0];
@@ -583,20 +583,20 @@ resources:
     }
 
     #[test]
-    fn a_model_that_titles_nothing_is_refused() {
+    fn a_dataset_that_titles_nothing_is_refused() {
         let ext =
             acme(&MANIFEST.replace("      - { name: title, type: TEXT, doc: Its title. }\n", ""));
         let errors = ext.errors.join("\n");
         assert!(
-            errors.contains("model `prs` has no `title` column"),
+            errors.contains("dataset `prs` has no `title` column"),
             "{errors}"
         );
     }
 
     // oxplow's own resources are declared the same way, by
-    // oxplow-foundation, and resolve to core's models.
+    // oxplow-foundation, and resolve to core's datasets.
     #[test]
-    fn oxplows_resources_are_foundations_and_resolve_to_core_models() {
+    fn oxplows_resources_are_foundations_and_resolve_to_core_datasets() {
         let dir = tempfile::tempdir().unwrap();
         let foundation = load_extensions(dir.path())
             .into_iter()

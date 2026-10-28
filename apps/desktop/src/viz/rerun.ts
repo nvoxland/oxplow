@@ -1,5 +1,5 @@
 /// When a viz re-runs (P4.6, `.context/semantic-layer.md` "Subscriptions"):
-/// when a model it read changed (`modelsChanged`), when facts landed for a
+/// when a dataset it read changed (`datasetsChanged`), when facts landed for a
 /// measure its `metric_grid()` read (`metricSamplesChanged`), when a viz
 /// definition changed, or after a reconnect (anything may have changed while
 /// the socket was down). A run's `result.reads` says what it read. Every viz
@@ -10,12 +10,12 @@ import { useEffect, useRef } from "react";
 import { onRemoteReconnect, subscribeOxplowEvents } from "../api.js";
 import type { Reads } from "../tauri-bridge/generated/bindings.js";
 
-export const NO_READS: Reads = { models: [], tables: [], measures: [] };
+export const NO_READS: Reads = { datasets: [], tables: [], measures: [] };
 
-/** What a read of `models` (by their view names) depends on — for a view
- *  loaded through a bespoke IPC that still re-reads on `ModelsChanged`. */
-export function readsOf(...models: string[]): Reads {
-  return { models, tables: [], measures: [] };
+/** What a read of `datasets` (by their view names) depends on — for a view
+ *  loaded through a bespoke IPC that still re-reads on `DatasetsChanged`. */
+export function readsOf(...datasets: string[]): Reads {
+  return { datasets, tables: [], measures: [] };
 }
 
 /** The extension catalog changed — the daemon's own signal (tsk1030),
@@ -40,9 +40,9 @@ export function readsChanged(
   event: Readonly<Record<string, unknown>>,
   reads: Reads,
 ): boolean {
-  const models = event.models;
-  if (event.kind === "modelsChanged" && Array.isArray(models)) {
-    return models.some((m) => reads.models.includes(m as string));
+  const datasets = event.datasets;
+  if (event.kind === "datasetsChanged" && Array.isArray(datasets)) {
+    return datasets.some((m) => reads.datasets.includes(m as string));
   }
   if (event.kind === "metricSamplesChanged" && reads.measures.length > 0) {
     const measures = Array.isArray(event.measures) ? (event.measures as string[]) : [];
@@ -53,15 +53,15 @@ export function readsChanged(
 
 /** Everything several runs read. */
 export function unionReads(list: readonly (Reads | null | undefined)[]): Reads {
-  const models = new Set<string>();
+  const datasets = new Set<string>();
   const tables = new Set<string>();
   const measures = new Set<string>();
   for (const r of list) {
-    r?.models.forEach((m) => models.add(m));
+    r?.datasets.forEach((m) => datasets.add(m));
     r?.tables.forEach((t) => tables.add(t));
     r?.measures.forEach((m) => measures.add(m));
   }
-  return { models: [...models], tables: [...tables], measures: [...measures] };
+  return { datasets: [...datasets], tables: [...tables], measures: [...measures] };
 }
 
 /** A burst of commits (a hook's several writes) is one re-run. */

@@ -1,4 +1,4 @@
-//! The models that restate what the catalog and the page-ref graph hold, so
+//! The datasets that restate what the catalog and the page-ref graph hold, so
 //! an agent reads them with `oxplow_query_sql` instead of a tool: `v_page`,
 //! `v_extension`, `v_config_key` and `v_page_ref`.
 
@@ -27,9 +27,9 @@ fn write(root: &std::path::Path, rel: &str, body: &str) {
 }
 
 /// A project extension is a row once it activates, and the row follows
-/// it away when it's deleted (its pages: `pages_are_models_that_follow_the_catalog`).
+/// it away when it's deleted (its pages: `pages_are_datasets_that_follow_the_catalog`).
 #[tokio::test]
-async fn extensions_are_models_that_follow_the_catalog() {
+async fn extensions_are_datasets_that_follow_the_catalog() {
     let fx = services_with_effort().await;
     let root = fx.svc.layout.project_dir.clone();
     write(&root, "extension.yaml", MANIFEST);
@@ -75,7 +75,7 @@ const PAGE: &str = "title: Acme PR\ndescription: One acme PR.\nparams:\n  - { na
 /// A page file is a `v_page` row with its params and answers as rows, and
 /// a disabled extension lists none.
 #[tokio::test]
-async fn pages_are_models_that_follow_the_catalog() {
+async fn pages_are_datasets_that_follow_the_catalog() {
     let fx = services_with_effort().await;
     let root = fx.svc.layout.project_dir.clone();
     write(&root, "extension.yaml", MANIFEST);
@@ -141,18 +141,22 @@ async fn pages_are_models_that_follow_the_catalog() {
     crate::extension_deploy::set_enabled(&fx.svc, "acme", false, true)
         .await
         .unwrap();
-    for model in ["v_page", "v_page_answer", "v_page_param"] {
+    for dataset in ["v_page", "v_page_answer", "v_page_param"] {
         assert!(
             rows(
                 &fx,
                 &format!(
-                    "SELECT 1 FROM {model} WHERE {} LIKE '%acme/pr'",
-                    if model == "v_page" { "uri" } else { "page_uri" }
+                    "SELECT 1 FROM {dataset} WHERE {} LIKE '%acme/pr'",
+                    if dataset == "v_page" {
+                        "uri"
+                    } else {
+                        "page_uri"
+                    }
                 )
             )
             .await
             .is_empty(),
-            "{model}"
+            "{dataset}"
         );
     }
 }
@@ -191,7 +195,7 @@ async fn an_extensions_warnings_are_on_its_row() {
 
 /// `v_page_ref` is the edge list the backlinks tools returned, both ways.
 #[tokio::test]
-async fn page_ref_edges_are_a_model_in_both_directions() {
+async fn page_ref_edges_are_a_dataset_in_both_directions() {
     let fx = services_with_effort().await;
     fx.svc
         .db
@@ -234,11 +238,11 @@ async fn page_ref_edges_are_a_model_in_both_directions() {
     );
 }
 
-/// What a person can ask and what they can configure are models too:
+/// What a person can ask and what they can configure are datasets too:
 /// what every enabled extension's pages answer in `v_page_answer`,
 /// project.yaml's keys in `v_config_key`.
 #[tokio::test]
-async fn questions_and_config_keys_are_models() {
+async fn questions_and_config_keys_are_datasets() {
     let fx = services_with_effort().await;
     let root = fx.svc.layout.project_dir.clone();
     write(

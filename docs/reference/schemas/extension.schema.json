@@ -130,7 +130,7 @@
       ]
     },
     "datasets": {
-      "description": "Datasets: each with its SQL in `models/<name>.sql`, published as\n`v_<extension>_<name>`.",
+      "description": "Datasets: each with its SQL in `datasets/<name>.sql`, published as\n`v_<extension>_<name>`.",
       "type": [
         "array",
         "null"
@@ -207,7 +207,7 @@
       "default": null
     },
     "ai_profiles": {
-      "description": "Named model needs: the person binds `<extension>/<id>` to a model,\nelse the fallback role's model serves it.",
+      "description": "Named dataset needs: the person binds `<extension>/<id>` to a dataset,\nelse the fallback role's dataset serves it.",
       "type": [
         "array",
         "null"
@@ -534,7 +534,7 @@
       }
     },
     "DatasetDecl": {
-      "description": "One dataset as its owner declares it (an entry of `models.yaml`, or\nof an extension's `datasets:`).",
+      "description": "One dataset as its owner declares it (an entry of `datasets.yaml`, or\nof an extension's `datasets:`).",
       "type": "object",
       "properties": {
         "name": {
@@ -564,7 +564,7 @@
           "default": []
         },
         "key": {
-          "description": "The fields whose values name one row: declared fields,\npart of the contract. A key implies its test (never null, never\nrepeated), and a materialized model's table takes it as its\nprimary key.",
+          "description": "The fields whose values name one row: declared fields,\npart of the contract. A key implies its test (never null, never\nrepeated), and a materialized dataset's table takes it as its\nprimary key.",
           "type": "array",
           "items": {
             "type": "string"
@@ -599,7 +599,7 @@
           "default": null
         },
         "ai_context": {
-          "description": "Guidance for an agent reading the model. Not part of the contract.",
+          "description": "Guidance for an agent reading the dataset. Not part of the contract.",
           "anyOf": [
             {
               "$ref": "#/definitions/AiContext"
@@ -635,7 +635,7 @@
           "type": "string"
         },
         "ai_context": {
-          "description": "Guidance for an agent reading the column. Not part of the contract:\nleft out of `model_contract` and the golden, stored on the model.",
+          "description": "Guidance for an agent reading the column. Not part of the contract:\nleft out of `dataset_contract` and the golden, stored on the dataset.",
           "anyOf": [
             {
               "$ref": "#/definitions/AiContext"
@@ -777,7 +777,7 @@
           "type": "string"
         },
         "to": {
-          "description": "The model the column points into.",
+          "description": "The dataset the column points into.",
           "type": "string"
         },
         "field": {
@@ -792,7 +792,7 @@
       ]
     },
     "Deprecated": {
-      "description": "An earlier version kept after a breaking change: its SQL (in `file`,\nbeside the model's) still keeps the contract that version published,\nuntil `until` (`YYYY-MM-DD`).",
+      "description": "An earlier version kept after a breaking change: its SQL (in `file`,\nbeside the dataset's) still keeps the contract that version published,\nuntil `until` (`YYYY-MM-DD`).",
       "type": "object",
       "properties": {
         "version": {
@@ -815,7 +815,7 @@
       ]
     },
     "Materialize": {
-      "description": "A model's freshness policy beyond the default (computed on read):\n`on_change`, or `{ every: 1h }`.",
+      "description": "A dataset's freshness policy beyond the default (computed on read):\n`on_change`, or `{ every: 1h }`.",
       "anyOf": [
         {
           "description": "A named policy: `on_change`.",
@@ -2246,7 +2246,7 @@
           "default": []
         },
         "decorators": {
-          "description": "Labels from its models on core refs.",
+          "description": "Labels from its datasets on core refs.",
           "type": [
             "array",
             "null"
@@ -2372,7 +2372,7 @@
       "description": "A `ui.decorators` entry as the manifest holds it.",
       "type": "object",
       "properties": {
-        "model": {
+        "dataset": {
           "type": "string"
         },
         "resource": {
@@ -2394,7 +2394,7 @@
       },
       "additionalProperties": false,
       "required": [
-        "model",
+        "dataset",
         "resource",
         "placement",
         "label"
@@ -2404,7 +2404,7 @@
       "description": "Where a decoration shows.",
       "oneOf": [
         {
-          "description": "A chip in the header of a page whose ref the model lists.",
+          "description": "A chip in the header of a page whose ref the dataset lists.",
           "type": "string",
           "const": "ref-chip"
         },
@@ -2616,7 +2616,7 @@
       "additionalProperties": false
     },
     "ResourceEntry": {
-      "description": "A `resources:` entry as a manifest holds it. `resolve` and `searchable`\nname models as the manifest does; the app's loader turns them into the\nviews they publish as and checks them (`extension_resources`).",
+      "description": "A `resources:` entry as a manifest holds it. `resolve` and `searchable`\nname datasets as the manifest does; the app's loader turns them into the\nviews they publish as and checks them (`extension_resources`).",
       "type": "object",
       "properties": {
         "name": {
@@ -3267,7 +3267,7 @@
           "default": []
         },
         "sql": {
-          "description": "`read`: it runs its own read-only SQL over the models\n(`querySql`); its extension needs `sql.read` in `permissions:`.",
+          "description": "`read`: it runs its own read-only SQL over the datasets\n(`querySql`); its extension needs `sql.read` in `permissions:`.",
           "anyOf": [
             {
               "$ref": "#/definitions/SqlAccess"
@@ -3285,7 +3285,7 @@
       ]
     },
     "SqlAccess": {
-      "description": "`sql: read`: ad-hoc read-only SQL over the `v_*` models.",
+      "description": "`sql: read`: ad-hoc read-only SQL over the `v_*` datasets.",
       "type": "string",
       "enum": [
         "read"

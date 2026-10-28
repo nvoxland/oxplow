@@ -7,7 +7,7 @@ const result = (over: Partial<SqlQueryResult> = {}): SqlQueryResult => ({
   columns: ["a"],
   rows: [[1], [2]],
   truncated: false,
-  reads: { models: [], tables: [], measures: [] },
+  reads: { datasets: [], tables: [], measures: [] },
   freshness: [],
   ...over,
 });
@@ -17,7 +17,7 @@ const at = (h: number, m = 0, day = 9) => new Date(2026, 9, day, h, m).toISOStri
 const now = new Date(2026, 9, 9, 15, 0);
 
 const entry = (over: Partial<SourceCoverage> = {}): SourceCoverage => ({
-  model: "v_my_gh_pull_request",
+  dataset: "v_my_gh_pull_request",
   source: "oxplow:oxplow/collector?collector=my-gh/gh",
   status: "current",
   at: at(12),
@@ -61,8 +61,8 @@ describe("completeness", () => {
       result({
         coverage: [
           entry(),
-          entry({ model: "v_my_gh_issue", source: "oxplow:oxplow/collector?collector=my-gh/issues", status: "never", at: null }),
-          entry({ model: "v_other_thing", source: "oxplow:oxplow/collector?collector=other/thing", status: "failed", error: null }),
+          entry({ dataset: "v_my_gh_issue", source: "oxplow:oxplow/collector?collector=my-gh/issues", status: "never", at: null }),
+          entry({ dataset: "v_other_thing", source: "oxplow:oxplow/collector?collector=other/thing", status: "failed", error: null }),
         ],
       }),
       now,
@@ -73,9 +73,9 @@ describe("completeness", () => {
     ]);
   });
 
-  test("a model that isn't named after its extension keeps its name", () => {
+  test("a dataset that isn't named after its extension keeps its name", () => {
     const c = completeness(
-      result({ coverage: [entry({ model: "v_pull_requests", status: "never", at: null })] }),
+      result({ coverage: [entry({ dataset: "v_pull_requests", status: "never", at: null })] }),
       now,
     );
     expect(c.coverage[0]).toBe("Pull requests (collector my-gh/gh) hasn't run yet.");

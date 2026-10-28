@@ -68,4 +68,4 @@ ui:
     - { page: effort-verdict, at: effort.verdict, version: 1 }
     - { page: schema-changes, at: oxplow-foundation/diff-view.sections }
   decorators:
-    - { model: verdict, resource: oxplow/effort, placement: row-badge, label: label, color: color }
+    - { dataset: verdict, resource: oxplow/effort, placement: row-badge, label: label, color: color }

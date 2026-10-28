@@ -109,7 +109,7 @@ that runs each call under `spawn_blocking`. `Services.vcs` holds it as
   sent to the primary — and a path naming the workspace itself (`""`,
   `.`, `/`) is refused (`WholeWorkspace`), so an empty path can't delete
   the worktree. Reads still default to the primary. The desktop reads a
-  worktree's files from the live model `v_workspace_file` (one folder:
+  worktree's files from the live dataset `v_workspace_file` (one folder:
   `WHERE parent = ?`; the whole tree for Quick Open, the link index and the
   Project panel's search), through `workspaceFiles.ts`; the
   `list_workspace_entries` / `list_workspace_files` IPCs are gone. A
@@ -179,7 +179,7 @@ operation in progress), `branches`, `diff` and `blame`. `LogQuery` carries
 `from`, `path` and `after` for it, so any provider answers the same
 query (`vcs_conformance` "Log queries"). The stream is the caller's own
 unless the call names one; a named stream that doesn't exist is refused
-(`resolve_strict`), never read from the primary. The models keep the
+(`resolve_strict`), never read from the primary. The datasets keep the
 indexed history (`v_commit`) for joins.
 
 ## The stream's reads (P5.B4)
@@ -202,18 +202,18 @@ from the merge base (`v_branch_divergence.merge_base`) to the working tree, the 
 The page smoke tests render the commit page
 over a command Proxy that records any git-shaped call.
 
-## History and branches on the models (P5.B5)
+## History and branches on the datasets (P5.B5)
 
 The commit indexer walks every stream's head (`Vcs::log`, `revision`)
 into `v_commit` (with `parents`, v2) and `v_commit_file`, and restates
 `v_branch` (`is_default`, v2; `upstream` / `ahead` / `behind`, v2 of the
-model — a local branch's tracked branch and how far they have parted,
+dataset — a local branch's tracked branch and how far they have parted,
 from `Vcs::branches`) and `v_tag` from `Vcs::branches` / `tags`, and
 `v_stream.head_sha` (v4: each stream's workspace HEAD, detached or not,
 from the same scan, `commit_indexer::refresh_refs`).
-The desktop reads history from the models (`apps/desktop/src/vcsHistory.ts`):
+The desktop reads history from the datasets (`apps/desktop/src/vcsHistory.ts`):
 a stream's history is a recursive CTE over `json_each(parents)` from its
-head (`streamHead`: `v_stream.head_sha`), re-run on `modelsChanged` (`useRerunOnChange`), and
+head (`streamHead`: `v_stream.head_sha`), re-run on `datasetsChanged` (`useRerunOnChange`), and
 put in `topoOrder` — every child before its parents, else newest first:
 commit times are whole seconds and clocks skew, so a time order can list
 a rebase's parent before its child and break the graph's lanes (tsk565;
@@ -229,9 +229,9 @@ not the stream row, which the branch reconciler updates after (it
 writes only `branch`/`branch_ref`, `StreamStore::set_branch`, so a
 rename in between stays; tsk573). A `v_branch.name` is the branch's local name for both kinds
 (a remote-tracking branch's remote is its own column), so the picker
-checks out and shows `name` as is (`pickedBranch`, tsk567). What is computed stays live, as live models (`.context/semantic-layer.md` "Live models"): `v_branch_divergence` (any pair of revisions — `ahead`, `behind`, `merge_base`, `overlapping_files`, `readiness` from `Vcs::divergence`: a stream against the default branch, a remote branch against HEAD; a branch against its own upstream is `v_branch.ahead` / `behind`) and `v_commit_between` (`Vcs::revisions_between`, 100 per pair), both narrowed to the pair the query pins (`base`, `head`; one side pinned, the other ranges over `Vcs::branches`; neither, each local branch against the default) and announced on `VcsRefsChanged` and with `v_branch`. The Git Dashboard's `streams`, `readiness` and `between` pages read them. `vcs_file_history` (the index keeps 500
+checks out and shows `name` as is (`pickedBranch`, tsk567). What is computed stays live, as live datasets (`.context/semantic-layer.md` "Live datasets"): `v_branch_divergence` (any pair of revisions — `ahead`, `behind`, `merge_base`, `overlapping_files`, `readiness` from `Vcs::divergence`: a stream against the default branch, a remote branch against HEAD; a branch against its own upstream is `v_branch.ahead` / `behind`) and `v_commit_between` (`Vcs::revisions_between`, 100 per pair), both narrowed to the pair the query pins (`base`, `head`; one side pinned, the other ranges over `Vcs::branches`; neither, each local branch against the default) and announced on `VcsRefsChanged` and with `v_branch`. The Git Dashboard's `streams`, `readiness` and `between` pages read them. `vcs_file_history` (the index keeps 500
 commits per head; a file's full history can be older) stays an IPC, and agents read `v_commit`,
-`v_commit_file`, `v_branch` and the two live models through `oxplow_query_sql`. Git-native reads keep `git_` names:
+`v_commit_file`, `v_branch` and the two live datasets through `oxplow_query_sql`. Git-native reads keep `git_` names:
 `git_resolve_commit_ref_labels`,
 `git_list_recent_remote_branches`. Deleted: `get_git_log`,
 `get_commits_ahead_of`, `list_file_commits`, `list_branches`,

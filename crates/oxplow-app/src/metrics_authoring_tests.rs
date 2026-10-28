@@ -970,8 +970,8 @@ async fn a_page_joins_metric_facts_with_an_efforts_files() {
     );
 }
 
-/// The scaffold with guidance for an agent on a model, its column, the
-/// metric and the dimension; `models/dims.sql` reads the catalog.
+/// The scaffold with guidance for an agent on a dataset, its column, the
+/// metric and the dimension; `datasets/dims.sql` reads the catalog.
 fn with_ai_context(files: &mut Vec<ScaffoldFile>, bad_key: bool) {
     let manifest = file(files, "extension.yaml");
     manifest.content = manifest.content.replace(
@@ -990,15 +990,15 @@ fn with_ai_context(files: &mut Vec<ScaffoldFile>, bad_key: bool) {
          ai_context:\n          instructions: Pass to metric_grid.\n          examples: [complex_fns.area]\n"
     ));
     files.push(ScaffoldFile {
-        path: format!(".oxplow/extensions/{NAME}/models/dims.sql"),
+        path: format!(".oxplow/extensions/{NAME}/datasets/dims.sql"),
         content: "SELECT key AS dim_key FROM ref('dimension')\n".into(),
     });
 }
 
-/// A model, a column, a metric and a dimension each carry an `ai_context`
-/// block, and the four read models publish it.
+/// A dataset, a column, a metric and a dimension each carry an `ai_context`
+/// block, and the four read datasets publish it.
 #[tokio::test(flavor = "multi_thread")]
-async fn ai_context_is_published_on_a_model_a_column_a_metric_and_a_dimension() {
+async fn ai_context_is_published_on_a_dataset_a_column_a_metric_and_a_dimension() {
     let (p, _) = project(|files| with_ai_context(files, false)).await;
     let problems = p.svc.extension_activation.problems();
     assert!(problems.is_empty(), "{problems:?}");
@@ -1006,13 +1006,13 @@ async fn ai_context_is_published_on_a_model_a_column_a_metric_and_a_dimension() 
         let p = &p;
         async move { opt_text(&p.rows(&sql).await[0][0]) }
     };
-    let model = one(format!(
+    let dataset = one(format!(
         "SELECT ai_context FROM v_dataset WHERE owner = '{NAME}' AND name = 'dims'"
     ))
     .await
-    .expect("the model's block");
-    assert!(model.contains("Use to list slices."), "{model}");
-    assert!(model.contains("slices"), "{model}");
+    .expect("the dataset's block");
+    assert!(dataset.contains("Use to list slices."), "{dataset}");
+    assert!(dataset.contains("slices"), "{dataset}");
     let column = one(format!(
         "SELECT c.ai_context FROM v_field c JOIN v_dataset m ON m.view = c.view \
          WHERE m.owner = '{NAME}' AND c.name = 'dim_key'"

@@ -262,7 +262,7 @@ macro_rules! oxplow_command_table {
                 assistant_open => $crate::commands::assistant::assistant_open { stream: ::oxplow_domain::StreamId, thread: Option<::oxplow_domain::ThreadId>, context: Option<::oxplow_app::assistant::AssistantContext> } -> ::oxplow_app::assistant::AssistantOpened,
                 assistant_prompt => $crate::commands::assistant::assistant_prompt { id: String, text: String } -> (),
                 assistant_cancel => $crate::commands::assistant::assistant_cancel { id: String } -> (),
-                assistant_set => $crate::commands::assistant::assistant_set { id: String, model: Option<::oxplow_app::assistant::AssistantModelChoice>, allow_changes: Option<bool> } -> (),
+                assistant_set => $crate::commands::assistant::assistant_set { id: String, dataset: Option<::oxplow_app::assistant::AssistantModelChoice>, allow_changes: Option<bool> } -> (),
                 assistant_answer => $crate::commands::assistant::assistant_answer { id: String, ask: String, allow: bool } -> (),
                 assistant_snapshot => $crate::commands::assistant::assistant_snapshot { id: String, since: u32 } -> ::oxplow_app::assistant::AssistantSnapshot,
                 assistant_handoff => $crate::commands::assistant::assistant_handoff { id: String, to_thread: String } -> ::oxplow_domain::Json,
@@ -418,7 +418,7 @@ mod tests {
         assert!(out.is_array(), "expected a JSON array, got {out}");
     }
 
-    /// P6.E1b: the UI reads tasks through the models and writes them with
+    /// P6.E1b: the UI reads tasks through the datasets and writes them with
     /// `work_item.*` commands; the typed task RPCs are gone.
     #[tokio::test]
     async fn the_typed_task_rpcs_are_gone() {
@@ -443,7 +443,7 @@ mod tests {
         }
     }
 
-    /// P6.E2: the UI reads knowledge pages through the models.
+    /// P6.E2: the UI reads knowledge pages through the datasets.
     #[tokio::test]
     async fn the_wiki_read_rpcs_are_gone() {
         let (svc, _dir) = services().await;

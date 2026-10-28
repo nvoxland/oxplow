@@ -238,8 +238,8 @@ view:
 title: Mixed
 data:
   steady: { sql: "SELECT abs(random()) AS r" }
-  models: { sql: "SELECT count(*) AS n FROM v_dataset" }
-  after: { sql: "SELECT n, abs(random()) AS r FROM models" }
+  datasets: { sql: "SELECT count(*) AS n FROM v_dataset" }
+  after: { sql: "SELECT n, abs(random()) AS r FROM datasets" }
 view:
   stack:
     - { viz: number, from: steady }

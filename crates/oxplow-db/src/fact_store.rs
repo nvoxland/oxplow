@@ -4117,7 +4117,7 @@ mod tests {
         assert_eq!(in_stream.len(), all.len());
 
         // `v_fact` holds the same rows.
-        let model: Vec<(i64, String, f64)> = store
+        let dataset: Vec<(i64, String, f64)> = store
             .db
             .call(|conn| {
                 let mut st = conn.prepare(
@@ -4136,7 +4136,7 @@ mod tests {
             .map(|r| (r.capture_id, r.subject.clone().unwrap_or_default(), r.value))
             .collect();
         engine.sort_by(|a, b| (a.0, &a.1).cmp(&(b.0, &b.1)));
-        assert_eq!(model, engine);
+        assert_eq!(dataset, engine);
     }
 
     /// A scan that changed most of what it restates, or that ends a long
@@ -4312,10 +4312,10 @@ mod tests {
         store.record_facts(capture, rows).await.unwrap()
     }
 
-    /// P4.11 (tsk496): the `v_tree_fact` model is the engine's fold — for
+    /// P4.11 (tsk496): the `v_tree_fact` dataset is the engine's fold — for
     /// measure `m` (made per-path, which the model reads) on stream 1, the
     /// same facts `latest_tree_facts` returns.
-    async fn model_agrees(store: &SqliteFactStore, m: i64) {
+    async fn dataset_agrees(store: &SqliteFactStore, m: i64) {
         let mut engine: Vec<i64> = store
             .latest_tree_facts(m, Some(1))
             .await
@@ -4324,7 +4324,7 @@ mod tests {
             .map(|f| f.id)
             .collect();
         engine.sort();
-        let model: Vec<i64> = store
+        let dataset: Vec<i64> = store
             .db
             .call(move |conn| {
                 conn.execute(
@@ -4343,7 +4343,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(
-            model, engine,
+            dataset, engine,
             "v_tree_fact disagrees with the engine's fold"
         );
     }
@@ -4486,7 +4486,7 @@ mod tests {
         assert_eq!(total(&facts), 2.0, "a.rs superseded to 0; b.rs unchanged");
         assert_eq!(facts.len(), 1);
         assert_eq!(facts[0].path.as_deref(), Some("b.rs"));
-        model_agrees(&store, m).await;
+        dataset_agrees(&store, m).await;
     }
 
     #[tokio::test]
@@ -4512,7 +4512,7 @@ mod tests {
         let facts = store.latest_tree_facts(m, Some(1)).await.unwrap();
         assert_eq!(total(&facts), 2.0, "the deleted file's 3 is gone");
         assert_eq!(facts[0].path.as_deref(), Some("b.rs"));
-        model_agrees(&store, m).await;
+        dataset_agrees(&store, m).await;
     }
 
     #[tokio::test]
@@ -4549,7 +4549,7 @@ mod tests {
             total(&store.latest_tree_facts(m, Some(1)).await.unwrap()),
             12.0
         );
-        model_agrees(&store, m).await;
+        dataset_agrees(&store, m).await;
     }
 
     /// A `scan_kind = 'full'` capture by `producer` anchored to `snap_id` —
@@ -4642,9 +4642,9 @@ mod tests {
     }
 
     /// `v_tree_fact` and `v_fact` give the same lines the engine does.
-    async fn models_hold_the_same_lines(store: &SqliteFactStore, m: i64) {
+    async fn datasets_hold_the_same_lines(store: &SqliteFactStore, m: i64) {
         let engine = tree_shape(&store.latest_tree_facts(m, Some(1)).await.unwrap());
-        let model: Vec<(String, f64, Option<i64>)> = store
+        let dataset: Vec<(String, f64, Option<i64>)> = store
             .db
             .call(|conn| {
                 let mut st = conn.prepare(
@@ -4658,7 +4658,7 @@ mod tests {
             })
             .await
             .unwrap();
-        assert_eq!(model, engine, "v_tree_fact");
+        assert_eq!(dataset, engine, "v_tree_fact");
         let all = store.facts_for_measure(m).await.unwrap();
         let mut engine: Vec<(i64, String, f64, Option<i64>)> = all
             .iter()
@@ -4672,7 +4672,7 @@ mod tests {
             })
             .collect();
         engine.sort_by(|a, b| (a.0, &a.1).cmp(&(b.0, &b.1)));
-        let model: Vec<(i64, String, f64, Option<i64>)> = store
+        let dataset: Vec<(i64, String, f64, Option<i64>)> = store
             .db
             .call(|conn| {
                 let mut st = conn.prepare(
@@ -4686,7 +4686,7 @@ mod tests {
             })
             .await
             .unwrap();
-        assert_eq!(model, engine, "v_fact");
+        assert_eq!(dataset, engine, "v_fact");
     }
 
     async fn line_moves(store: &SqliteFactStore) -> i64 {
@@ -4711,7 +4711,7 @@ mod tests {
     /// A rescanned file stores only the functions that changed; one that
     /// only moved is recorded as a line move. Every capture still reads
     /// exactly what it scanned, lines included, and so do the fold and the
-    /// models.
+    /// datasets.
     #[tokio::test]
     async fn a_rescanned_file_stores_what_changed_and_holds_the_rest() {
         let store = fixture().await;
@@ -4763,8 +4763,8 @@ mod tests {
         let tree = tree_shape(&store.latest_tree_facts(m, Some(1)).await.unwrap());
         assert_eq!(tree.len(), 4);
         assert_eq!(tree[1], sym("g", 2.0, 12));
-        models_hold_the_same_lines(&store, m).await;
-        model_agrees(&store, m).await;
+        datasets_hold_the_same_lines(&store, m).await;
+        dataset_agrees(&store, m).await;
 
         // The file is rescanned empty, then as it was: the empty scan holds
         // nothing, and the next stores nothing new.
@@ -4792,7 +4792,7 @@ mod tests {
         assert_eq!(stored(&store, c4).await, 0);
         assert_eq!(read(c4).await, at_c2);
         assert_eq!(read(c2).await, at_c2);
-        models_hold_the_same_lines(&store, m).await;
+        datasets_hold_the_same_lines(&store, m).await;
     }
 
     /// A file that mostly changed, or whose holds ran 32 scans, is stored
@@ -4890,7 +4890,7 @@ mod tests {
             tree_shape(&store.latest_tree_facts(m, Some(1)).await.unwrap()),
             tree_before
         );
-        models_hold_the_same_lines(&store, m).await;
+        datasets_hold_the_same_lines(&store, m).await;
     }
 
     /// Retention keeps a held fact's last holder, and moves the facts an
@@ -4990,7 +4990,7 @@ mod tests {
         );
         assert_eq!(facts.len(), 1);
         assert_eq!(facts[0].path.as_deref(), Some("a.rs"));
-        model_agrees(&store, m).await;
+        dataset_agrees(&store, m).await;
     }
 
     #[tokio::test]
@@ -5028,7 +5028,7 @@ mod tests {
         assert_eq!(total(&facts), 1.0, "a rescanned to 1; deleted b gone");
         assert_eq!(facts.len(), 1);
         assert_eq!(facts[0].path.as_deref(), Some("a.rs"));
-        model_agrees(&store, m).await;
+        dataset_agrees(&store, m).await;
     }
 
     #[tokio::test]
@@ -5064,7 +5064,7 @@ mod tests {
 
         let facts = store.latest_tree_facts(m, Some(1)).await.unwrap();
         assert_eq!(total(&facts), 9.0, "a.rs updated to 7, b.rs's 2 untouched");
-        model_agrees(&store, m).await;
+        dataset_agrees(&store, m).await;
     }
 
     #[tokio::test]

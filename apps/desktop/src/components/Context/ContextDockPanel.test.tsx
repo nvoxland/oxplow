@@ -13,7 +13,7 @@ mock.module("../../api.js", () => ({
       columns: ["id", "kind", "source_uri", "label", "text", "delivered_at"],
       rows,
       truncated: false,
-      reads: { models: [], tables: [], measures: [] },
+      reads: { datasets: [], tables: [], measures: [] },
       freshness: {},
     }) as unknown as SqlQueryResult,
   runCommand: async (name: string, input: unknown) => {

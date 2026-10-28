@@ -13,8 +13,8 @@ system prompt, and only file tools plus `oxplow extension …` in Bash.
 - **What it built** (`produced/stale-work/`): a Starlark collector whose
   `input` query computes each open task's last touch (its edit, comment
   activity, efforts) and whole days idle in SQL; the script keeps those
-  idle a week or more. A model over the entity with `not_null`/`unique`
-  tests, and a page over the model with an alert and a Sync action.
+  idle a week or more. A dataset over the entity with `not_null`/`unique`
+  tests, and a page over the dataset with an alert and a Sync action.
 - **What the skill carried:** the sandbox has no clock, so the age is
   computed in the `input` query (the skill's Starlark rules); the
   collector example feeds `rows` instead of syncing ("don't sync just to

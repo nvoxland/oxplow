@@ -2070,10 +2070,10 @@ pub struct Extension {
     /// Dimensions it contributes (fact or entity), never promoted: an
     /// extension toggling would rebuild the metric cube each time.
     pub dimensions: Vec<oxplow_config::DimensionEntry>,
-    /// Its datasets (`datasets:` plus `models/<name>.sql`), published as
-    /// `v_<extension>_<name>` (`extension_models`). Empty when any
+    /// Its datasets (`datasets:` plus `datasets/<name>.sql`), published as
+    /// `v_<extension>_<name>` (`extension_datasets`). Empty when any
     /// declaration is broken (see `errors`).
-    pub datasets: Vec<oxplow_db::models::DatasetSource>,
+    pub datasets: Vec<oxplow_db::datasets::DatasetSource>,
     /// Left-nav panels it contributes (valid ones; invalid ones are in
     /// `errors`).
     pub panels: Vec<ExtensionPanel>,
@@ -2082,7 +2082,7 @@ pub struct Extension {
     pub commands: Vec<crate::extension_commands::ExtensionCommand>,
     /// Durable host operations declared by this extension.
     pub jobs: Vec<jobs::JobDecl>,
-    /// Named model needs this extension declares.
+    /// Named dataset needs this extension declares.
     pub ai_profiles: Vec<ai_profiles::AiProfileDecl>,
     /// Its `version:` (semver), when it declares one; required to share.
     pub version: Option<String>,
@@ -2172,7 +2172,7 @@ pub struct ExtensionUi {
     /// Pages mounted at other pages' slots (valid ones).
     #[serde(default)]
     pub page_slots: Vec<PageSlot>,
-    /// Labels from its models on core refs (valid ones).
+    /// Labels from its datasets on core refs (valid ones).
     pub decorators: Vec<decorators::UiDecorator>,
     /// Viz nodes that take the place of a core sub-component while its
     /// provider is the capability's active one (valid ones).
@@ -2967,7 +2967,7 @@ pub struct ReviewSide<'a> {
 
 /// What going from `before` (none: a first install) to `after` would
 /// change: each side on its own overlay — `after` checked,
-/// `before` only read — then compared: viz nodes, models and their rows,
+/// `before` only read — then compared: viz nodes, datasets and their rows,
 /// collectors and their outputs, providers, config. `after.extension`
 /// gets its check's errors.
 pub async fn impact_between(
@@ -3014,7 +3014,7 @@ pub async fn impact_between(
 
 /// An effect's or collector's `on:` naming an event type of another
 /// extension's namespace (P9.D1). The type's name is the dependency —
-/// there is no `depends:` key, as a model's `ref('<ext>/<name>')` has
+/// there is no `depends:` key, as a dataset's `ref('<ext>/<name>')` has
 /// none: it resolves when an enabled extension registers the type.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
@@ -3582,17 +3582,17 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             }
             Err(e) => ext.errors.push(err_at("metrics", e)),
         }
-        match parse_block::<oxplow_db::models::DatasetDecl>(m.datasets.clone()) {
+        match parse_block::<oxplow_db::datasets::DatasetDecl>(m.datasets.clone()) {
             Ok(decls) => {
-                let dir = format!("{rel}/models");
-                let joined = oxplow_db::models::join_sources(
+                let dir = format!("{rel}/datasets");
+                let joined = oxplow_db::datasets::join_sources(
                     decls.unwrap_or_default(),
                     &dir,
                     &file,
-                    |sql_file| files.read(&format!("models/{sql_file}")),
+                    |sql_file| files.read(&format!("datasets/{sql_file}")),
                     || {
                         files
-                            .list("models")
+                            .list("datasets")
                             .into_iter()
                             .filter_map(|f| f.strip_suffix(".sql").map(str::to_string))
                             .collect()
@@ -3607,6 +3607,14 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                 "datasets",
                 oxplow_domain::manifest_keys::hint_unknown(&format!("datasets: {e}")),
             )),
+        }
+        // `models/` is the old name of `datasets/`: not read, so say so.
+        if files.list("models").iter().any(|f| f.ends_with(".sql")) {
+            ext.errors.push(err_at(
+                "datasets",
+                "`models/` is now `datasets/`: move `models/<name>.sql` to `datasets/<name>.sql`"
+                    .to_string(),
+            ));
         }
         // Cross-references inside the catalog: a metric's source measure
         // and a collector's fact measures are normally ones this extension
@@ -3787,7 +3795,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
         ext.ui.replacements = replaced;
         ext.errors.extend(errors);
     }
-    // After models: a resource is titled by one.
+    // After datasets: a resource is titled by one.
     if let Some(v) = resource_files {
         let (resources, errors) = crate::extension_resources::parse_resources(
             name,
@@ -3984,10 +3992,10 @@ fn check_permissions(ext: &mut Extension, files: &dyn ExtensionFiles, file: &str
     ext.errors.extend(errors);
 }
 
-/// The SQL of `ext` that may read its own configuration — a model, a page's
+/// The SQL of `ext` that may read its own configuration — a dataset, a page's
 /// loader, an advisory — with where each is declared.
 fn config_sql(ext: &Extension) -> Vec<(String, &str)> {
-    let models = ext
+    let datasets = ext
         .datasets
         .iter()
         .map(|m| (m.file.clone(), m.sql.as_str()));
@@ -4003,7 +4011,7 @@ fn config_sql(ext: &Extension) -> Vec<(String, &str)> {
         .advisories
         .iter()
         .map(|a| (format!("advisory `{}`", a.id), a.query.as_str()));
-    models.chain(pages).chain(advisories).collect()
+    datasets.chain(pages).chain(advisories).collect()
 }
 
 /// A `config('/pointer')` read names a scalar key the extension's own
@@ -4013,7 +4021,7 @@ fn config_sql(ext: &Extension) -> Vec<(String, &str)> {
 fn check_config_reads(ext: &mut Extension) {
     let mut problems = Vec::new();
     for (place, sql) in config_sql(ext) {
-        let reads = match oxplow_db::models::config_reads(sql) {
+        let reads = match oxplow_db::datasets::config_reads(sql) {
             Ok(reads) => reads,
             Err(e) => {
                 problems.push(format!("{place}: {e}"));
@@ -5110,8 +5118,8 @@ pub async fn validate_extension(
     Ok(ext)
 }
 
-/// Another extension `ext` uses but doesn't declare — reads its model
-/// (`v_<namespace>_…` in a page or a model), mounts at or names its page
+/// Another extension `ext` uses but doesn't declare — reads its dataset
+/// (`v_<namespace>_…` in a page or a dataset), mounts at or names its page
 /// (`<name>/…`), runs its command (`<namespace>.…`) — is an error at the
 /// first place it does: a test runs `ext` with only what it declares
 /// (`requires:`, or the extension an import names), and a person may turn
@@ -5165,12 +5173,12 @@ fn check_dependencies(ext: &mut Extension, others: &[Extension], files: &dyn Ext
             );
         }
     }
-    // What its pages, models and scripts name.
+    // What its pages, datasets and scripts name.
     let mut paths = files.paths().unwrap_or_default();
     paths.sort();
     for rel in paths.iter().filter(|p| {
         (p.starts_with("pages/") && p.ends_with(".yaml"))
-            || (p.starts_with("models/") && p.ends_with(".sql"))
+            || (p.starts_with("datasets/") && p.ends_with(".sql"))
             || p.ends_with(".star")
     }) {
         let Some(text) = files.read(rel) else {
@@ -5179,7 +5187,7 @@ fn check_dependencies(ext: &mut Extension, others: &[Extension], files: &dyn Ext
         for (n, line) in text.lines().enumerate() {
             let at = format!("{base}/{rel}:{}", n + 1);
             for owner in &others {
-                let model = format!("v_{}_", owner.namespace);
+                let dataset = format!("v_{}_", owner.namespace);
                 let page = format!("{}/", owner.name);
                 let command = format!("{}.", owner.namespace);
                 let word = |token: &str| {
@@ -5197,13 +5205,13 @@ fn check_dependencies(ext: &mut Extension, others: &[Extension], files: &dyn Ext
                         })
                     })
                 };
-                // Models are named by namespace, so extensions sharing one
+                // Datasets are named by namespace, so extensions sharing one
                 // (oxplow's own shipped ones) can't be told apart by a name.
-                let by_model = (owner.namespace != ext.namespace)
-                    .then(|| word(&model))
+                let by_dataset = (owner.namespace != ext.namespace)
+                    .then(|| word(&dataset))
                     .flatten();
-                if let Some(name) = by_model {
-                    note(&owner.name, format!("its model `{name}`"), at.clone());
+                if let Some(name) = by_dataset {
+                    note(&owner.name, format!("its dataset `{name}`"), at.clone());
                 } else if let Some(name) = word(&page) {
                     note(&owner.name, format!("its page `{name}`"), at.clone());
                 } else if !shared.contains(&owner.namespace) {
@@ -5249,15 +5257,15 @@ fn check_credentials(ext: &mut Extension, files: &dyn ExtensionFiles) {
 /// A fixture runs only when an intent example names it, so a
 /// `fixtures/<name>.yaml` no example lists silently runs nothing (the
 /// reverse, an example with no fixture, is `extension test`'s warning: a
-/// fresh scaffold has such examples). `model-*` and `provider-*` fixtures
-/// belong to a model or a provider, not to an example.
+/// fresh scaffold has such examples). `dataset-*` and `provider-*` fixtures
+/// belong to a dataset or a provider, not to an example.
 fn check_fixture_pairing(ext: &mut Extension, files: &dyn ExtensionFiles) {
     let Some(intent) = &ext.intent else { return };
     let fixtures = files.list("fixtures");
     let mut orphans: Vec<&str> = fixtures
         .iter()
         .filter_map(|f| f.strip_suffix(".yaml"))
-        .filter(|n| !n.starts_with("model-") && !n.starts_with("provider-"))
+        .filter(|n| !n.starts_with("dataset-") && !n.starts_with("provider-"))
         .filter(|n| !intent.examples.iter().any(|e| e.name == *n))
         .collect();
     orphans.sort_unstable();
@@ -5361,11 +5369,11 @@ fn check_components(
 }
 
 /// The empty stand-ins a check gives `ext`'s declared entities (P7.C6).
-fn entity_stubs(ext: &Extension) -> Vec<oxplow_db::models::EntityStub> {
+fn entity_stubs(ext: &Extension) -> Vec<oxplow_db::datasets::EntityStub> {
     ext.collectors
         .iter()
         .flat_map(|c| &c.entities)
-        .map(|e| oxplow_db::models::EntityStub {
+        .map(|e| oxplow_db::datasets::EntityStub {
             owner: ext.name.clone(),
             name: e.name.clone(),
             view: e.view.clone(),
@@ -5378,14 +5386,14 @@ fn entity_stubs(ext: &Extension) -> Vec<oxplow_db::models::EntityStub> {
         .collect()
 }
 
-/// Dry-run a loaded extension's models, commands, advisories and viz nodes,
+/// Dry-run a loaded extension's datasets, commands, advisories and viz nodes,
 /// appending what's wrong to its `errors`. `root` names sources for an
 /// unsynced view. What it declares but hasn't published — its collectors'
-/// entities (empty), its models, the other enabled extensions' — is an
+/// entities (empty), its datasets, the other enabled extensions' — is an
 /// overlay of temp views every query reads through (P7.C6), so a fresh
 /// extension checks clean before its first sync.
 /// An extension version checked against a layer (P8.C2): its viz nodes, run
-/// through its own models, and that overlay — the temp views its models
+/// through its own datasets, and that overlay — the temp views its datasets
 /// (and the other enabled extensions') compile to, published nowhere —
 /// for whatever else reads this version (a review's row counts).
 pub struct Prepared {
@@ -5393,17 +5401,17 @@ pub struct Prepared {
     pub overlay: Vec<oxplow_db::TempView>,
 }
 
-/// The temp views `ext`'s models compile to — beside the other enabled
+/// The temp views `ext`'s datasets compile to — beside the other enabled
 /// extensions' — and what's wrong with them.
-async fn model_overlay(
+async fn dataset_overlay(
     layer: &crate::sql_gateway::SqlGateway,
     candidate: &candidates::CandidateCatalog,
 ) -> (Vec<oxplow_db::TempView>, Vec<String>) {
-    let models = candidate
+    let datasets = candidate
         .extensions
         .iter()
         .filter(|ext| ext.enabled && !ext.datasets.is_empty())
-        .map(|ext| oxplow_db::models::ExtensionModels {
+        .map(|ext| oxplow_db::datasets::ExtensionDatasets {
             extension: ext.name.clone(),
             sources: ext.datasets.clone(),
             config: ext.default_configuration(),
@@ -5415,7 +5423,7 @@ async fn model_overlay(
         .filter(|ext| ext.enabled)
         .flat_map(entity_stubs)
         .collect();
-    match layer.check_extension_models(models, stubs).await {
+    match layer.check_extension_datasets(datasets, stubs).await {
         Ok(checked) => {
             let target = &candidate.candidate().name;
             let errors = checked
@@ -5434,11 +5442,11 @@ async fn model_overlay(
                 .collect();
             (checked.views, errors)
         }
-        Err(e) => (Vec::new(), vec![format!("models: {e}")]),
+        Err(e) => (Vec::new(), vec![format!("datasets: {e}")]),
     }
 }
 
-/// The temp views `draft`'s models (and the other enabled extensions')
+/// The temp views `draft`'s datasets (and the other enabled extensions')
 /// compile to, read from `root`: what a draft page's queries read through,
 /// published nowhere.
 pub(crate) async fn draft_overlay(
@@ -5448,7 +5456,7 @@ pub(crate) async fn draft_overlay(
     draft: Extension,
 ) -> Vec<oxplow_db::TempView> {
     let candidate = catalog.candidate(root, draft);
-    model_overlay(layer, &candidate).await.0
+    dataset_overlay(layer, &candidate).await.0
 }
 
 async fn read_side(
@@ -5459,16 +5467,16 @@ async fn read_side(
 ) -> Prepared {
     let candidate = catalog.candidate(root, ext.clone());
     *ext = candidate.candidate().clone();
-    let (overlay, _) = model_overlay(layer, &candidate).await;
+    let (overlay, _) = dataset_overlay(layer, &candidate).await;
     let pages = crate::pages::checks::dry_run_all(&layer.with_overlay(overlay.clone()), ext).await;
     Prepared { pages, overlay }
 }
 
-/// Check `ext` — its commands, components, models, advisories and viz nodes —
-/// reading through its own models' overlay, and report what's wrong in
+/// Check `ext` — its commands, components, datasets, advisories and viz nodes —
+/// reading through its own datasets' overlay, and report what's wrong in
 /// `ext.errors`. `read` gives the files of the version under check (a
 /// component's page is linted as that version has it). Each side of a review prepares its own, so a viz renders
-/// against its version's models, whichever are published.
+/// against its version's datasets, whichever are published.
 async fn prepare(
     layer: &crate::sql_gateway::SqlGateway,
     catalog: &crate::extension_catalog::ExtensionCatalog,
@@ -5480,13 +5488,13 @@ async fn prepare(
     let candidate = catalog.candidate(root, ext.clone());
     *ext = candidate.candidate().clone();
     check_components(ext, read, commands);
-    let (overlay, errors) = model_overlay(layer, &candidate).await;
+    let (overlay, errors) = dataset_overlay(layer, &candidate).await;
     ext.errors.extend(errors);
     let layer = &layer.with_overlay(overlay.clone());
     crate::extension_commands::check_extension_commands(layer, ext, commands).await;
     for a in ext.advisories.clone() {
         // A check reads no stored settings: the declared defaults.
-        let query = match oxplow_db::models::substitute_config(
+        let query = match oxplow_db::datasets::substitute_config(
             &a.query,
             ext.default_configuration().as_ref(),
         ) {
@@ -5571,7 +5579,7 @@ async fn check_collector_inputs(
     for c in ext.collectors.clone() {
         let Some(input) = &c.input else { continue };
         let line = manifest_v2::entry_line(&manifest, "collectors", "id", &c.id);
-        let problem = match oxplow_db::models::substitute_config(
+        let problem = match oxplow_db::datasets::substitute_config(
             &input.sql,
             ext.default_configuration().as_ref(),
         ) {
@@ -5586,7 +5594,7 @@ async fn check_collector_inputs(
                         .collect();
                     (!tables.is_empty()).then(|| {
                         format!(
-                            "reads {tables:?}, which {} not published models — fix: read the `v_` views (`oxplow_catalog` lists them)",
+                            "reads {tables:?}, which {} not published datasets — fix: read the `v_` views (`oxplow_catalog` lists them)",
                             if tables.len() == 1 { "is" } else { "are" }
                         )
                     })
@@ -7196,7 +7204,7 @@ view:
     }
 
     /// The tally extension: a starlark collector declaring entity `thing`,
-    /// a model over it, pages over both, and a command reading the model.
+    /// a dataset over it, pages over both, and a command reading the dataset.
     fn write_tally(root: &Path, script: &str) {
         write(
             root,
@@ -7232,7 +7240,7 @@ commands:
         );
         write(
             root,
-            ".oxplow/extensions/tally/models/labelled.sql",
+            ".oxplow/extensions/tally/datasets/labelled.sql",
             "SELECT id, label FROM ref('thing') WHERE label IS NOT NULL\n",
         );
         write(
@@ -7258,10 +7266,10 @@ commands:
 
     /// P7.C6: a check sees what the extension declares before it ever ran
     /// or published — its collectors' entities (empty stand-ins) and its
-    /// own models (compiled for the check) — from its pages (and its
+    /// own datasets (compiled for the check) — from its pages (and its
     /// commands' examples' reads), on a database that has neither.
     #[tokio::test]
-    async fn a_check_sees_the_extensions_own_models_and_unsynced_entities() {
+    async fn a_check_sees_the_extensions_own_datasets_and_unsynced_entities() {
         let dir = tempfile::tempdir().unwrap();
         write_tally(
             dir.path(),
@@ -7272,7 +7280,7 @@ commands:
             .unwrap();
         assert!(v.errors.is_empty(), "{:?}", v.errors);
 
-        // Still a real check: a column the model doesn't have is an error.
+        // Still a real check: a column the dataset doesn't have is an error.
         write(
             dir.path(),
             ".oxplow/extensions/tally/pages/labelled.yaml",
@@ -7318,7 +7326,7 @@ commands:
             "manifest: 2\nname: x\nintent:\n  purpose: p\npermissions: [ai.compute]\neffects:\n  - { id: e, summary: s, on: [effort.finished], entry: effects/e.star, needs: [ai.discover] }\ncommands:\n  - { name: c.go, summary: s, entry: commands/c.star, needs: [ai.discover], input_schema: { type: object, additionalProperties: false } }\n",
         )
         .unwrap();
-        let script = "def transform(x):\n    r = scope(\"ai.discover\", {\"role\": \"summarize\"})\n    if not r[\"model\"]:\n        return {\"skip\": r[\"problem\"]}\n    return {\"commands\": []}\n";
+        let script = "def transform(x):\n    r = scope(\"ai.discover\", {\"role\": \"summarize\"})\n    if not r[\"dataset\"]:\n        return {\"skip\": r[\"problem\"]}\n    return {\"commands\": []}\n";
         std::fs::write(dir.join("effects/e.star"), script).unwrap();
         std::fs::write(dir.join("commands/c.star"), script).unwrap();
         let ext = load_extensions(d.path())
@@ -7505,10 +7513,10 @@ commands:
                 "shared-files-agent"
             ]
         );
-        let mut models: Vec<&str> = b.datasets.iter().map(|m| m.decl.name.as_str()).collect();
-        models.sort();
+        let mut datasets: Vec<&str> = b.datasets.iter().map(|m| m.decl.name.as_str()).collect();
+        datasets.sort();
         assert_eq!(
-            models,
+            datasets,
             [
                 "change_co_change",
                 "change_interest",
@@ -7538,7 +7546,7 @@ commands:
             .any(|c| c.id == "oxplow_bundled.effort_churn"));
         // Every shipped page's SQL and advisory runs against a real schema
         // (a running oxplow's, whose live views read its services) — its
-        // own models compiled for the check, nothing published — and every
+        // own datasets compiled for the check, nothing published — and every
         // viz node's columns are its loader's.
         let svc = services(dir.path()).await;
         for name in ["oxplow-bundled", "oxplow-foundation"] {
@@ -9175,7 +9183,7 @@ commands:
         );
     }
 
-    /// `datasets:` entries with their `models/<name>.sql`
+    /// `datasets:` entries with their `datasets/<name>.sql`
     /// load as the extension's datasets; a declaration without its file, a
     /// file without its declaration, and a malformed entry are errors.
     #[test]
@@ -9199,12 +9207,12 @@ commands:
         write(dir.path(), ".oxplow/extensions/x/extension.yaml", &manifest);
         write(
             dir.path(),
-            ".oxplow/extensions/x/models/late.sql",
+            ".oxplow/extensions/x/datasets/late.sql",
             "SELECT uri FROM ref('work_item') WHERE state = 'blocked'",
         );
         write(
             dir.path(),
-            ".oxplow/extensions/x/models/stray.sql",
+            ".oxplow/extensions/x/datasets/stray.sql",
             "SELECT 1",
         );
         let ext = project_extensions(dir.path()).remove(0);
@@ -9214,11 +9222,11 @@ commands:
                 .map(|m| m.decl.name.as_str())
                 .collect::<Vec<_>>(),
             Vec::<&str>::new(),
-            "a broken declaration set loads no models"
+            "a broken declaration set loads no datasets"
         );
         let errors = ext.errors.join("\n");
         assert!(
-            errors.contains(".oxplow/extensions/x/models/gone.sql is missing"),
+            errors.contains(".oxplow/extensions/x/datasets/gone.sql is missing"),
             "{errors}"
         );
 
@@ -9230,16 +9238,19 @@ commands:
                 "",
             ),
         );
-        std::fs::remove_file(dir.path().join(".oxplow/extensions/x/models/stray.sql")).unwrap();
+        std::fs::remove_file(dir.path().join(".oxplow/extensions/x/datasets/stray.sql")).unwrap();
         let ext = project_extensions(dir.path()).remove(0);
         assert!(ext.errors.is_empty(), "{:?}", ext.errors);
         assert_eq!(ext.datasets.len(), 1);
-        assert_eq!(ext.datasets[0].file, ".oxplow/extensions/x/models/late.sql");
+        assert_eq!(
+            ext.datasets[0].file,
+            ".oxplow/extensions/x/datasets/late.sql"
+        );
         assert!(ext.datasets[0].sql.contains("ref('work_item')"));
 
         write(
             dir.path(),
-            ".oxplow/extensions/x/models/stray.sql",
+            ".oxplow/extensions/x/datasets/stray.sql",
             "SELECT 1",
         );
         let ext = project_extensions(dir.path()).remove(0);
@@ -9254,6 +9265,31 @@ commands:
             ext.errors
                 .iter()
                 .any(|e| e.contains("datasets") && e.contains("colour")),
+            "{:?}",
+            ext.errors
+        );
+    }
+
+    /// A `models/` folder is the old name of `datasets/`: the load error
+    /// says to move each file, and the file is not read.
+    #[test]
+    fn an_old_models_folder_says_to_move_its_files() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            ".oxplow/extensions/x/extension.yaml",
+            "manifest: 2\nname: x\nintent:\n  purpose: test\ndatasets:\n  - { name: late, version: 1, description: d, fields: [] }\n",
+        );
+        write(
+            dir.path(),
+            ".oxplow/extensions/x/models/late.sql",
+            "SELECT 1 AS n",
+        );
+        let ext = project_extensions(dir.path()).remove(0);
+        assert!(
+            ext.errors
+                .iter()
+                .any(|e| e.contains("move `models/<name>.sql` to `datasets/<name>.sql`")),
             "{:?}",
             ext.errors
         );
@@ -10451,7 +10487,7 @@ commands:
     }
 
     /// The earlier side of a review is only read — its pages
-    /// rendered on its own models — never checked: its command examples
+    /// rendered on its own datasets — never checked: its command examples
     /// don't run (here, a runaway one the later version removed).
     #[tokio::test(flavor = "multi_thread")]
     async fn the_earlier_side_of_a_review_is_not_checked() {

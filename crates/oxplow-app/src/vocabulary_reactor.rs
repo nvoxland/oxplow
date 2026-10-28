@@ -7,7 +7,7 @@
 //! keep the snapshot they took.
 //!
 //! A pass runs at boot and on the extension catalog's signal, settled
-//! like `extension_models`, and does nothing when the declarations didn't
+//! like `extension_datasets`, and does nothing when the declarations didn't
 //! change. What it refuses is that extension's health (an error in the
 //! list), never a boot failure:
 //! - a declaration the registry refuses (`register_declared`);
@@ -471,10 +471,10 @@ mod tests {
     /// is listed while its extension is installed, and is unrecognized
     /// once it's gone.
     /// Core's kinds are listed with what core declares of them, as an
-    /// extension's are: the model that holds one and what search indexes
-    /// it from; a kind no model holds has none.
+    /// extension's are: the dataset that holds one and what search indexes
+    /// it from; a kind no dataset holds has none.
     #[tokio::test]
-    async fn core_kinds_are_listed_with_their_model_and_search_feed() {
+    async fn core_kinds_are_listed_with_their_dataset_and_search_feed() {
         let f = crate::test_fixtures::services_with_effort().await;
         crate::test_fixtures::activate_with_problems(&f.svc).await;
         let rows = f
@@ -595,10 +595,10 @@ resources:
     /// An extension `name` at `root` declaring the manifest `manifest`.
     fn write_ext(root: &Path, name: &str, manifest: &str) {
         let dir = root.join(".oxplow/extensions").join(name);
-        std::fs::create_dir_all(dir.join("models")).unwrap();
+        std::fs::create_dir_all(dir.join("datasets")).unwrap();
         std::fs::write(dir.join("extension.yaml"), manifest).unwrap();
         std::fs::write(
-            dir.join("models/prs.sql"),
+            dir.join("datasets/prs.sql"),
             "SELECT CAST('oxplow:acme/pr?id=1' AS TEXT) AS uri, CAST('One' AS TEXT) AS title",
         )
         .unwrap();

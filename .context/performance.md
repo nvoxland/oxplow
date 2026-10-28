@@ -130,7 +130,7 @@ last-touch lookup using `idx_git_commit_file_path`.
 
 ## oxplow-bundled's deviation model (P7.C5, 2026-10-02)
 
-`v_oxplow_bundled_deviation` (an extension model with a recursive CTE over
+`v_oxplow_bundled_deviation` (an extension dataset with a recursive CTE over
 every effort file's directory prefixes) computes all efforts at once:
 **0.21 s** over this repo's 658 efforts / 5,484 effort files (sqlite3 on
 the live database, the same SQL over the physical tables). It stays a
@@ -463,7 +463,7 @@ for a window it isn't drawing, while a real block starts after frames were
 running. A hidden document (`visibilitychange`) is still discounted. At
 most one tick right after a window is covered can still report.
 
-## A worktree's files as a live model (measured 2026-10-18)
+## A worktree's files as a live dataset (measured 2026-10-18)
 
 `v_workspace_file` reads a stream's worktree on every query: the VCS
 status, the filtered walk, and the rows into a temp table. On this repo
@@ -471,10 +471,10 @@ status, the filtered walk, and the rows into a temp table. On this repo
 ~2 ms — about 70 ms a query, and the walk grows with the tree. Listing one
 folder (what the old `list_workspace_entries` IPC did) costs the status and one
 `read_dir`, about 30 ms. So a query that names one folder (`WHERE parent =
-…`) reads that folder alone (`live_models::pushdown`, semantic-layer.md
-"Live models"): the status and one `read_dir`, as the IPC. The Project
+…`) reads that folder alone (`live_datasets::pushdown`, semantic-layer.md
+"Live datasets"): the status and one `read_dir`, as the IPC. The Project
 panel, Quick Open's file index and the Directory page can then read the
-model; the whole-tree walk is left to the queries that need the tree.
+dataset; the whole-tree walk is left to the queries that need the tree.
 
 ## Daemon transport: what a loopback HTTP hop costs (tsk255)
 
@@ -607,7 +607,7 @@ Measured on the 14-core dev Mac (under background load ~11, so expect
 **What the time was.** Rust test execution was throughput-bound, not
 latency-bound: ~1,045 test-seconds over 14 cores. ~2,000 tests each built
 a fresh database, and `Database::in_memory()` ran 128 migrations plus the
-core model compile — **~330 ms per test**, in its own process under
+core dataset compile — **~330 ms per test**, in its own process under
 nextest, so no in-process cache could help. Now it restores a migrated
 template from `<temp>/oxplow-db-templates/<build+date>.sqlite`
 (`database::load_migrated`: keyed by the test executable's path, size
@@ -741,7 +741,7 @@ capture range — instead of `idx_fact_measure_path`, which seeks the one
 file: the per-path history read went 2 s → 21 s and the fact-served specs
 24 s → 174 s, while the same join counted alone chose right. The chain
 and hold joins name their index (`INDEXED BY`), in `fact_chain.rs` and
-both models.
+both datasets.
 
 ## Related
 

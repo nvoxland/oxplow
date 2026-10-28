@@ -81,7 +81,7 @@ pub async fn resolve_ref(services: &Services, uri: &str) -> RefSummary {
     summary
 }
 
-/// A resource some model holds: its title, by its URI.
+/// A resource some dataset holds: its title, by its URI.
 async fn resolve_owned(
     services: &Services,
     mut summary: RefSummary,
@@ -415,11 +415,11 @@ mod tests {
         }
     }
 
-    /// Any resource a model resolves (its `resolve:`) resolves through
-    /// that model's `ref` and title; a URI nothing resolves — its
+    /// Any resource a dataset resolves (its `resolve:`) resolves through
+    /// that dataset's `ref` and title; a URI nothing resolves — its
     /// resource undeclared, its row gone — is a dead link, not an error.
     #[tokio::test]
-    async fn a_resource_resolves_through_its_model_or_is_unresolved() {
+    async fn a_resource_resolves_through_its_dataset_or_is_unresolved() {
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let summary = resolve_ref(&fx.svc, &build::effort_uri(fx.effort)).await;
         assert!(summary.resolved, "{summary:?}");

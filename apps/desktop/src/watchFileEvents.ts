@@ -32,8 +32,8 @@ export function watchFileEvents(streamId: string, onEvent: (event: FileEvent) =>
   };
   void read();
   const off = subscribeOxplowEvents((event) => {
-    const models = (event as { models?: unknown }).models;
-    if (event.kind === "modelsChanged" && Array.isArray(models) && models.includes("v_event")) void read();
+    const datasets = (event as { datasets?: unknown }).datasets;
+    if (event.kind === "datasetsChanged" && Array.isArray(datasets) && datasets.includes("v_event")) void read();
   });
   return () => {
     live = false;

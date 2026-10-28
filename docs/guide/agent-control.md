@@ -40,7 +40,7 @@ command or every file outside the stream read-only.
 
 ## MCP and commands
 
-Agents read published models through SQL and use commands for changes.
+Agents read published datasets through SQL and use commands for changes.
 Commands validate inputs and apply actor permissions, confirmation,
 audit, and transaction rules. The session/thread context identifies
 where a call came from.

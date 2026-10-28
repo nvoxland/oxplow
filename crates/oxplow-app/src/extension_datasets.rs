@@ -1,24 +1,24 @@
-//! Extensions' SQL models (P4.9, `.context/semantic-layer.md` "Models"):
+//! Extensions' SQL datasets (P4.9, `.context/semantic-layer.md` "Datasets"):
 //! compiled from the primary worktree's enabled extensions into
-//! `v_<extension>_<name>` views, after the core models, in one pass
-//! (`oxplow_db::models::compile_extensions`). Views are project-wide, like
+//! `v_<extension>_<name>` views, after the core datasets, in one pass
+//! (`oxplow_db::datasets::compile_extensions`). Views are project-wide, like
 //! source data, so a worktree stream's extension edits reach them only
 //! once merged.
 //!
-//! A collector run (`collector.synced`, the `extension_models.entities`
-//! consumer) may have registered an entity a model reads: it asks the
+//! A collector run (`collector.synced`, the `extension_datasets.entities`
+//! consumer) may have registered an entity a dataset reads: it asks the
 //! generation owner for a new generation when the entity signature moved.
-//! Compiling is the generation's (`extension_activation.rs`); a model that
+//! Compiling is the generation's (`extension_activation.rs`); a dataset that
 //! fails holds back its extension, never boot.
 
 use std::sync::Arc;
 
 use oxplow_domain::DomainError;
 
-/// `extension_models.entities` (P7.B6): a collector run may have
-/// registered an entity a model reads, so the models compile again (a
+/// `extension_datasets.entities` (P7.B6): a collector run may have
+/// registered an entity a dataset reads, so the datasets compile again (a
 /// no-op when nothing they read changed).
-pub const ENTITIES: &str = "extension_models.entities";
+pub const ENTITIES: &str = "extension_datasets.entities";
 
 pub(crate) type EntitySignature = Vec<(String, i64, String, String, String)>;
 
@@ -29,7 +29,7 @@ pub(crate) fn entity_signature_tx(
         .prepare(
             "SELECT m.view, m.version, m.sql, COALESCE(c.columns_json, ''),
                 COALESCE(c.key_json, '')
-         FROM model m LEFT JOIN model_contract c
+         FROM dataset m LEFT JOIN dataset_contract c
            ON c.view = m.view AND c.version = m.version
          WHERE m.kind = 'entity' ORDER BY m.view",
         )
@@ -62,7 +62,7 @@ impl crate::event_pump::AsyncEventConsumer for EntitiesConsumer {
 
     fn handles(&self, event_type: &str) -> bool {
         // A command ran: it may have changed an extension's configuration
-        // that its models read.
+        // that its datasets read.
         matches!(event_type, "collector.synced" | "command.executed")
     }
 
@@ -100,21 +100,21 @@ mod tests {
 
     const MANIFEST: &str = "manifest: 2\nname: late\nintent:\n  purpose: x\n  examples: [{ name: a }]\ndatasets:\n  - name: blocked\n    version: 1\n    description: Blocked work items.\n    fields:\n      - { name: uri, type: TEXT, doc: Work item ref. }\n  - name: broken\n    version: 1\n    description: Broken.\n    fields:\n      - { name: nope, doc: x }\n";
 
-    /// P4.9 (tsk494): an extension's model publishes its view; one that
+    /// P4.9 (tsk494): an extension's dataset publishes its view; one that
     /// doesn't compile is that extension's error in the list, not a boot
     /// failure; turning the extension off takes its views away.
     #[tokio::test]
-    async fn extension_models_publish_and_report_their_errors() {
+    async fn extension_datasets_publish_and_report_their_errors() {
         let f = crate::test_fixtures::services_with_effort().await;
         let svc = &f.svc;
         let root = svc.layout.project_dir.clone();
-        // `late` has a good model, `shaky` one that doesn't compile: the
+        // `late` has a good dataset, `shaky` one that doesn't compile: the
         // broken extension is held back with its error, the other publishes.
         let (good, broken) = MANIFEST.split_once("  - name: broken").unwrap();
         write(&root, ".oxplow/extensions/late/extension.yaml", good);
         write(
             &root,
-            ".oxplow/extensions/late/models/blocked.sql",
+            ".oxplow/extensions/late/datasets/blocked.sql",
             "SELECT uri FROM ref('work_item') WHERE state = 'blocked'",
         );
         write(
@@ -130,7 +130,7 @@ mod tests {
         );
         write(
             &root,
-            ".oxplow/extensions/shaky/models/broken.sql",
+            ".oxplow/extensions/shaky/datasets/broken.sql",
             "SELECT nope FROM ref('work_item')",
         );
         crate::test_fixtures::activate_with_problems(svc).await;
@@ -141,7 +141,10 @@ mod tests {
         let listed = svc.listed_extensions(&root).await;
         let shaky = listed.iter().find(|e| e.name == "shaky").unwrap();
         assert!(
-            shaky.errors.iter().any(|e| e.contains("models/broken.sql")),
+            shaky
+                .errors
+                .iter()
+                .any(|e| e.contains("datasets/broken.sql")),
             "{:?}",
             shaky.errors
         );
@@ -159,11 +162,11 @@ mod tests {
             .is_err());
     }
 
-    /// An author's page over a model nobody published yet answers through
+    /// An author's page over a dataset nobody published yet answers through
     /// its draft's overlay — what MCP `oxplow_run_page` on a draft reads
     /// through — where a plain run says the view isn't there.
     #[tokio::test]
-    async fn a_page_over_an_unpublished_model_answers_through_its_overlay() {
+    async fn a_page_over_an_unpublished_dataset_answers_through_its_overlay() {
         use crate::pages::runner::{PageRunner, RunRequest, RunTarget};
         let f = crate::test_fixtures::services_with_effort().await;
         let svc = &f.svc;
@@ -178,7 +181,7 @@ mod tests {
         );
         write(
             &root,
-            ".oxplow/extensions/late/models/counted.sql",
+            ".oxplow/extensions/late/datasets/counted.sql",
             "SELECT uri FROM ref('work_item')",
         );
         write(
@@ -232,7 +235,7 @@ mod tests {
         );
         write(
             &root,
-            ".oxplow/extensions/late/models/blocked.sql",
+            ".oxplow/extensions/late/datasets/blocked.sql",
             "SELECT uri FROM ref('work_item') WHERE state = 'blocked'",
         );
         crate::test_fixtures::activate_with_problems(svc).await;
@@ -257,7 +260,7 @@ mod tests {
         );
         write(
             &root,
-            ".oxplow/extensions/late/models/blocked.sql",
+            ".oxplow/extensions/late/datasets/blocked.sql",
             "SELECT uri, title FROM ref('work_item') WHERE state = 'blocked'",
         );
         let errors = validate().await;
@@ -267,7 +270,7 @@ mod tests {
         );
         write(
             &root,
-            ".oxplow/extensions/late/models/blocked.sql",
+            ".oxplow/extensions/late/datasets/blocked.sql",
             "SELECT uri, title FROM source('work_item')",
         );
         assert!(validate().await.contains("only its own extension's tables"));

@@ -16,7 +16,7 @@ mock.module("./knowledge.js", () => ({
     reads++;
     return {
       pages: [{ slug: "local-snapshots", title }],
-      reads: { models: ["v_knowledge_page"], tables: [], measures: [] },
+      reads: { datasets: ["v_knowledge_page"], tables: [], measures: [] },
     };
   },
 }));
@@ -33,7 +33,7 @@ function Title() {
   return <span data-testid="t">{useWikiTitle("local-snapshots") ?? "…"}</span>;
 }
 
-const changed = { kind: "modelsChanged", models: ["v_knowledge_page"] };
+const changed = { kind: "datasetsChanged", datasets: ["v_knowledge_page"] };
 
 test("a burst of wiki changes is one re-read, and the last change is seen", async () => {
   const view = render(<Title />);

@@ -1,11 +1,11 @@
 // Explore Data (oxplow-foundation's `explore-data` page, whose view is
-// this component): an editable SQL box over oxplow's models — metrics
+// this component): an editable SQL box over oxplow's datasets — metrics
 // too, through `metric_grid()` — with a viz picker. oxplow draws the
 // result under it with its own components (`showView`: an inline page of
 // the query), live, with Save as Page and Pin to Dashboard; the catalog is
-// the page's rail, whose pick sets the page's `model` param (heard as an
+// the page's rail, whose pick sets the page's `dataset` param (heard as an
 // update's `params`). What it shows is its view (the tab's address):
-// `sql`, `viz`, `chart`, `template` (and `model`, as it last picked one);
+// `sql`, `viz`, `chart`, `template` (and `dataset`, as it last picked one);
 // the SQL being edited, not yet run, is its history state.
 import {
   CHART_ROLES,
@@ -16,9 +16,9 @@ import {
   LINEAGE_SQL,
   METRICS_SQL,
   metricTemplate,
-  MODEL_COLUMNS_SQL,
-  MODEL_SQL,
-  modelColumns,
+  DATASET_FIELDS_SQL,
+  DATASET_SQL,
+  datasetFields,
   readView,
   rowObjects,
   sampleSql,
@@ -32,7 +32,7 @@ import {
   type MetricTemplate,
   type Rows,
   type Viz,
-} from "./model.js";
+} from "./dataset.js";
 
 interface Refusal {
   code?: string;
@@ -50,7 +50,7 @@ interface Component {
   setTitle(title: string): Promise<null>;
   /** Draw an inline page (its YAML) under the explorer; its first loader's rows. */
   showView(spec: string | null): Promise<Rows | null>;
-  /** The page's params: `model`, as the rail picked it. */
+  /** The page's params: `dataset`, as the rail picked it. */
   params: Record<string, Cell>;
   onUpdate(listener: (update: { params: Record<string, Cell> }) => void): () => void;
   applyTheme(): void;
@@ -74,9 +74,9 @@ void oxplow.connect().then((c) => {
   c.applyTheme();
   void c.setTitle("Explore Data");
   let view: ExploreView = readView(c.viewParams ?? {});
-  // The model the rail picked: the page's `model` param.
-  const pageModel = (params: Record<string, Cell>) => (typeof params.model === "string" ? params.model : "");
-  let picked = pageModel(c.params ?? {});
+  // The dataset the rail picked: the page's `dataset` param.
+  const pageDataset = (params: Record<string, Cell>) => (typeof params.dataset === "string" ? params.dataset : "");
+  let picked = pageDataset(c.params ?? {});
   // The columns of what was drawn last: the chart's pickers offer them.
   let columns: string[] = [];
 
@@ -164,7 +164,7 @@ void oxplow.connect().then((c) => {
   const set = (patch: Partial<ExploreView>) => {
     view = { ...view, ...patch };
     const params: Record<string, string | null> = {
-      model: view.model || null,
+      dataset: view.dataset || null,
       sql: view.sql || null,
       viz: view.viz === "table" ? null : view.viz,
       chart: view.chart ? JSON.stringify(view.chart) : null,
@@ -214,22 +214,22 @@ void oxplow.connect().then((c) => {
     void show();
   };
 
-  /** The picked model's documented columns and its lineage. */
-  const describe = async (model: string) => {
+  /** The picked dataset's documented columns and its lineage. */
+  const describe = async (dataset: string) => {
     about.replaceChildren();
     lineageLine.replaceChildren();
-    about.hidden = model === "";
-    lineageLine.hidden = model === "";
-    if (model === "") return;
-    const [m, cols, lin] = await Promise.all([c.querySql(MODEL_SQL, [model]), c.querySql(MODEL_COLUMNS_SQL, [model]), c.querySql(LINEAGE_SQL, [model])]);
+    about.hidden = dataset === "";
+    lineageLine.hidden = dataset === "";
+    if (dataset === "") return;
+    const [m, cols, lin] = await Promise.all([c.querySql(DATASET_SQL, [dataset]), c.querySql(DATASET_FIELDS_SQL, [dataset]), c.querySql(LINEAGE_SQL, [dataset])]);
     const description = String(rowObjects(m)[0]?.description ?? "");
-    about.append(el("summary", {}, el("strong", {}, model), ` — ${description}`));
+    about.append(el("summary", {}, el("strong", {}, dataset), ` — ${description}`));
     const table = el("table", { className: "ox-table" });
-    for (const col of modelColumns(cols)) {
+    for (const col of datasetFields(cols)) {
       table.append(el("tr", {}, el("td", {}, el("code", {}, col.name)), el("td", { className: "ox-muted" }, col.sqlType), el("td", {}, col.doc)));
     }
     about.append(table);
-    const { reads, readBy } = lineage(model, lin);
+    const { reads, readBy } = lineage(dataset, lin);
     const link = (name: string) => {
       const a = el("button", { type: "button", className: "ox-link ox-mono" }, name);
       a.addEventListener("click", () => pick(name));
@@ -245,11 +245,11 @@ void oxplow.connect().then((c) => {
     join("Read by", readBy.map(link));
   };
 
-  /** A model picked: its sample query, shown as a table. */
-  const pick = (model: string) => {
+  /** A dataset picked: its sample query, shown as a table. */
+  const pick = (dataset: string) => {
     void c.setHistoryState({ sql: null });
-    set({ model, viz: "table", chart: null, template: null, sql: sampleSql(model) });
-    void describe(model);
+    set({ dataset, viz: "table", chart: null, template: null, sql: sampleSql(dataset) });
+    void describe(dataset);
     void show();
   };
 
@@ -276,8 +276,8 @@ void oxplow.connect().then((c) => {
     if (view.template) applyTemplate(sliceTemplate(view.template, sliceSelect.value || null));
   });
 
-  // The tab moved (Back, Forward) or the rail picked a model. A pick
-  // changes `model` alone (the query the entry holds is the old model's);
+  // The tab moved (Back, Forward) or the rail picked a dataset. A pick
+  // changes `dataset` alone (the query the entry holds is the old dataset's);
   // a move changes the query with it.
   c.onViewParams((params) => {
     const next = readView(params);
@@ -288,23 +288,23 @@ void oxplow.connect().then((c) => {
       return;
     }
     if (keyOf(next) === keyOf(view)) return;
-    if (next.model !== view.model && next.sql === view.sql && next.model !== "") {
+    if (next.dataset !== view.dataset && next.sql === view.sql && next.dataset !== "") {
       view = next;
-      return pick(next.model);
+      return pick(next.dataset);
     }
-    const modelChanged = next.model !== view.model;
+    const datasetChanged = next.dataset !== view.dataset;
     view = next;
-    if (modelChanged) void describe(view.model);
+    if (datasetChanged) void describe(view.dataset);
     drawControls();
     void show();
   });
 
-  // The rail picked a model: the page's `model` param changed.
+  // The rail picked a dataset: the page's `dataset` param changed.
   c.onUpdate(({ params }) => {
-    const next = pageModel(params);
+    const next = pageDataset(params);
     if (next === picked) return;
     picked = next;
-    if (next !== "" && next !== view.model) pick(next);
+    if (next !== "" && next !== view.dataset) pick(next);
   });
 
   // The metric pickers: what can be charted and sliced.
@@ -320,11 +320,11 @@ void oxplow.connect().then((c) => {
     });
 
   drawControls();
-  if (picked !== "" && picked !== view.model && view.sql === "") {
-    // Opened on a model the rail picked, with nothing of its own yet.
+  if (picked !== "" && picked !== view.dataset && view.sql === "") {
+    // Opened on a dataset the rail picked, with nothing of its own yet.
     pick(picked);
   } else {
-    void describe(view.model);
+    void describe(view.dataset);
     if (view.sql) void show();
   }
 });

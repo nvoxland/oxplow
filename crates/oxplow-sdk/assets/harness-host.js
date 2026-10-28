@@ -77,7 +77,7 @@
 
   // src/uri/uri.ts
   var CONTRIBUTIONS = new Set([
-    "model",
+    "dataset",
     "measure",
     "metric",
     "dimension",
@@ -454,7 +454,7 @@
     columns: [],
     rows: [],
     truncated: false,
-    reads: { models: [], tables: [] },
+    reads: { datasets: [], tables: [] },
     freshness: []
   };
   function nodeRunOf(run, node) {

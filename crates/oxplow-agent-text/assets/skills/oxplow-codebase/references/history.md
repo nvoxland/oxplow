@@ -17,7 +17,7 @@ first.
 
 ## Two revisions compared
 
-Both models are read from the repository when a query names them, and
+Both datasets are read from the repository when a query names them, and
 narrowed by what it pins: `WHERE base = 'main' AND head = 'feature'` is
 one pair; pin one side and the other ranges over every branch (local and
 remote-tracking, `origin/x`); pin neither and each local branch is

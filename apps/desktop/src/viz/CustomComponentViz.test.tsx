@@ -156,7 +156,7 @@ test("an activated change reloads its bundle: a new version is a new frame", asy
   expect(view.getByTestId("custom-component-frame")).toBe(first);
 
   version = "v-2";
-  emit({ kind: "modelsChanged", models: ["v_x"] });
+  emit({ kind: "datasetsChanged", datasets: ["v_x"] });
   emit({ kind: "extensionsChanged" });
   await waitFor(() =>
     expect(view.getByTestId("custom-component-frame").getAttribute("src")).toBe("http://127.0.0.1:9/components/v/v-2/"),

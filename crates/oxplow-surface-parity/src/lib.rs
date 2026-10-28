@@ -26,14 +26,14 @@
 //!   selection or input, live state pushed to the UI, runtime infra (menus,
 //!   terminals, the LSP client, windows), an ancestry walk the VCS answers,
 //!   or workspace file I/O the agent does with its own Read/Write tools.
-//! - [`Exposure::Model`] — a UI read whose agent counterpart is published
-//!   models: an agent reads the same rows with `query_sql`. Each model
+//! - [`Exposure::Dataset`] — a UI read whose agent counterpart is published
+//!   datasets: an agent reads the same rows with `query_sql`. Each dataset
 //!   named must be published (`tests/parity.rs`).
 //! - [`Exposure::AgentOnly`] — intentionally agent-only (batch and
 //!   orchestration affordances).
 //!
 //! Every row is decided: there is no "build the MCP tool later" exposure.
-//! An agent's way to an IPC read is a tool (`Both`), a model (`Model`), or
+//! An agent's way to an IPC read is a tool (`Both`), a dataset (`Dataset`), or
 //! none, with the reason (`UiOnly`).
 
 /// Which adapter surface(s) a capability is expected to live on.
@@ -43,9 +43,9 @@ pub enum Exposure {
     Both { one: One },
     /// Intentionally UI-only: `why` an agent has no tool for it.
     UiOnly { why: &'static str },
-    /// A UI read an agent makes through these published models instead
+    /// A UI read an agent makes through these published datasets instead
     /// (`query_sql`).
-    Model { models: &'static [&'static str] },
+    Dataset { datasets: &'static [&'static str] },
     /// Intentionally agent-only.
     AgentOnly,
 }
@@ -69,7 +69,7 @@ pub struct Capability {
     pub exposure: Exposure,
     /// IPC command name, or `None` when the capability is agent-only.
     pub ipc: Option<&'static str>,
-    /// MCP tool name, or `None` when UI-only or read through models.
+    /// MCP tool name, or `None` when UI-only or read through datasets.
     pub mcp: Option<&'static str>,
 }
 
@@ -116,11 +116,11 @@ const fn ui(name: &'static str, why: &'static str) -> Capability {
         mcp: None,
     }
 }
-/// Helper for a UI read whose agent counterpart is published models.
-const fn model(name: &'static str, models: &'static [&'static str]) -> Capability {
+/// Helper for a UI read whose agent counterpart is published datasets.
+const fn dataset(name: &'static str, datasets: &'static [&'static str]) -> Capability {
     Capability {
         capability: name,
-        exposure: Model { models },
+        exposure: Dataset { datasets },
         ipc: Some(name),
         mcp: None,
     }
@@ -150,28 +150,28 @@ pub const MANIFEST: &[Capability] = &[
     agent("oxplow_get_skill"),
     // A dry run for an agent writing a source in its worktree.
     agent("oxplow_preview_collector"),
-    model("list_streams", &["v_stream"]),
+    dataset("list_streams", &["v_stream"]),
     // The work-item interface, read for the agent; the UI reads the
-    // models (`v_work_item`).
+    // datasets (`v_work_item`).
     // Per-effort metric roll-up for the task-page panel (tsk250): the
     // agent gets the same numbers as prompt text via oxplow-bundled's
     // `metric-deltas` advisory (over `v_effort_metric_delta`).
-    model("list_efforts_in_window", &["v_effort"]),
+    dataset("list_efforts_in_window", &["v_effort"]),
     // Metrics read through SQL (`v_metric_spec`, `v_fact`, `metric_grid()`)
     // on both surfaces, and change through the `metric.*` commands
     // (`run_command`); nothing metric-specific is left on MCP (P4.8).
     // Architectural zones (tsk251) — agent-only: the agent reads the table
     // here and writes it with `oxplow.config.set` (tsk411); the renderer only reads
     // it (it rides on `get_config`), so there is no IPC counterpart.
-    model("list_backlinks", &["v_page_ref"]),
-    model("list_outbound", &["v_page_ref"]),
+    dataset("list_backlinks", &["v_page_ref"]),
+    dataset("list_outbound", &["v_page_ref"]),
     // ---- the command bus (agent side; the UI reaches commands through
     // pages, the launcher and menus) ----
     agent("list_commands"),
     // The services an extension's script may use (`oxplow_domain::service`):
     // Settings and the reference show a person the table; an agent writing
     // an extension reads the scopes from `v_scope`.
-    model("list_services", &["v_scope"]),
+    dataset("list_services", &["v_scope"]),
     // The bus itself: an agent through MCP (as its verified thread), the
     // person through IPC (`Actor::Human`, confirming where asked).
     both_shaped(
@@ -222,9 +222,9 @@ pub const MANIFEST: &[Capability] = &[
     ),
     ui("get_panel_layout", "the person's left-nav layout (P6.G1)"),
     ui("set_panel_layout", "the person's left-nav layout (P6.G1)"),
-    model("get_ui_preferences", &["v_ui_preference"]),
+    dataset("get_ui_preferences", &["v_ui_preference"]),
     ui("set_ui_preference", "the person's page memory and app preferences, a UI pointer like the panel layout"),
-    model("list_extensions", &["v_extension", "v_contribution"]),
+    dataset("list_extensions", &["v_extension", "v_contribution"]),
     // A window's open page runs: it opens one, hears which loaders
     // changed and fetches them. An agent runs a page once (`run_page`).
     ui("open_page", "a window keeps a page run open to hear its changes"),
@@ -294,7 +294,7 @@ pub const MANIFEST: &[Capability] = &[
         "the desktop shell's loopback listener for a person's sign-in (P10)",
     ),
     agent("oxplow_ensure_change"),
-    model("ai_settings", &["v_ai_role", "v_ai_provider"]),
+    dataset("ai_settings", &["v_ai_role", "v_ai_provider"]),
     ui("read_ai_call", "a person's look at a recorded model call; an agent reads its own with `read`"),
     ui("assistant_open", "the Assistant's panel: a person's own conversation with oxplow's in-app agent; an agent has its own session"),
     ui("assistant_prompt", "the Assistant's panel: a person's own conversation with oxplow's in-app agent; an agent has its own session"),
@@ -309,7 +309,7 @@ pub const MANIFEST: &[Capability] = &[
     agent("oxplow_get_open_page"),
     agent("oxplow_list_tabs"),
     // ---- both (names diverge across surfaces) ----
-    model("list_threads", &["v_thread"]),
+    dataset("list_threads", &["v_thread"]),
     both_shaped(
         "comment.list",
         "list_comments_for_stream",
@@ -344,10 +344,10 @@ pub const MANIFEST: &[Capability] = &[
     ),
     agent("oxplow_vcs_branches"),
     // ---- snapshots / local history ----
-    model("list_snapshot_ops", &["v_snapshot_op"]),
-    model("list_files_for_snapshot", &["v_snapshot_file"]),
-    model("get_file_snapshot", &["v_snapshot_file"]),
-    model("get_snapshot_stats", &["v_snapshot_file"]),
+    dataset("list_snapshot_ops", &["v_snapshot_op"]),
+    dataset("list_files_for_snapshot", &["v_snapshot_file"]),
+    dataset("get_file_snapshot", &["v_snapshot_file"]),
+    dataset("get_snapshot_stats", &["v_snapshot_file"]),
     ui("read_event_content", "the event page's stored body; an agent reads the event's ref with `read`"),
     // ---- UI selection ----
     ui(
@@ -364,7 +364,7 @@ pub const MANIFEST: &[Capability] = &[
         "the renderer's console, forwarded to the daemon's log",
     ),
     // ---- streams ----
-    model("get_primary_stream", &["v_stream"]),
+    dataset("get_primary_stream", &["v_stream"]),
     ui(
         "get_current_stream",
         "the stream the person has selected; an agent works in its own",
@@ -379,14 +379,14 @@ pub const MANIFEST: &[Capability] = &[
         "the person's selected and active thread; an agent reads threads in `v_thread` and has no selection",
     ),
     // ---- comments (writes are knowledge.*) ----
-    model("list_comments_for_target", &["v_comment"]),
+    dataset("list_comments_for_target", &["v_comment"]),
     // ---- page visits ----
     ui(
         "record_page_visit",
         "records the pages the person opens, as they browse",
     ),
-    model("list_recent_page_visits", &["v_page_visit"]),
-    model("top_visited_pages", &["v_page_visit"]),
+    dataset("list_recent_page_visits", &["v_page_visit"]),
+    dataset("top_visited_pages", &["v_page_visit"]),
     ui(
         "forget_page",
         "forgetting a page they visited is the person's",
@@ -397,13 +397,13 @@ pub const MANIFEST: &[Capability] = &[
         "records the person's use of oxplow, as they work",
     ),
     // ---- snapshots (UI presentation helpers) ----
-    model("list_wiki_slugs_for_snapshots", &["v_snapshot_file"]),
+    dataset("list_wiki_slugs_for_snapshots", &["v_snapshot_file"]),
     ui(
         "get_blob_storage_bytes",
         "the blob store's size on disk, for Local History's storage card",
     ),
     // ---- git (presentation / worktree / remote helpers) ----
-    model("git_resolve_commit_ref_labels", &["v_branch", "v_tag"]),
+    dataset("git_resolve_commit_ref_labels", &["v_branch", "v_tag"]),
     // ---- hooks / agent lifecycle ----
     ui(
         "ingest_hook_event",
@@ -423,7 +423,7 @@ pub const MANIFEST: &[Capability] = &[
         "the window's project path and VCS state, for the shell",
     ),
     // ---- efforts ----
-    model("list_efforts_at_snapshots", &["v_effort"]),
+    dataset("list_efforts_at_snapshots", &["v_effort"]),
     // ---- workspace file I/O (agent uses Read/Write tools) ----
     ui(
         "read_workspace_file",
@@ -480,7 +480,7 @@ pub const MANIFEST: &[Capability] = &[
         "lsp_notify",
         "the editor's language-server client; an agent has the `code_*` tools",
     ),
-    model("list_lsp_servers", &["v_lsp_server"]),
+    dataset("list_lsp_servers", &["v_lsp_server"]),
     ui(
         "respond_lsp_apply_edit",
         "the editor answers a server's edit request",
@@ -547,7 +547,7 @@ pub fn manifest_shape_errors() -> Vec<String> {
         }
         let ok = match c.exposure {
             Both { .. } => c.ipc.is_some() && c.mcp.is_some(),
-            UiOnly { .. } | Model { .. } => c.ipc.is_some() && c.mcp.is_none(),
+            UiOnly { .. } | Dataset { .. } => c.ipc.is_some() && c.mcp.is_none(),
             AgentOnly => c.ipc.is_none() && c.mcp.is_some(),
         };
         if !ok {

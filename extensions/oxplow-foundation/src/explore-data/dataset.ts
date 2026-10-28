@@ -1,6 +1,6 @@
-// Explore Data's pure half: the queries it runs over oxplow's models and
-// what it makes of their rows. The model registry is the catalog —
-// `v_field` for a dataset's documented fields, `v_model_lineage` for
+// Explore Data's pure half: the queries it runs over oxplow's datasets and
+// what it makes of their rows. The dataset registry is the catalog —
+// `v_field` for a dataset's documented fields, `v_dataset_lineage` for
 // what it reads and what reads it — and a metric reads as a line through
 // `metric_grid()`. `main.ts` runs them over the bridge (`querySql`).
 
@@ -28,36 +28,36 @@ export interface Chart {
 export type Viz = "table" | "list" | "number" | "markdown" | "bar" | "line" | "treemap";
 export const VIZ_OPTIONS: Viz[] = ["table", "list", "number", "markdown", "bar", "line", "treemap"];
 
-/** One documented column of a model. */
-export interface ModelColumn {
+/** One documented column of a dataset. */
+export interface DatasetField {
   name: string;
   /** What SQLite reports; empty for a computed column. */
   sqlType: string;
   doc: string;
 }
 
-/** What one model reads, and what reads it. */
+/** What one dataset reads, and what reads it. */
 export interface Lineage {
-  /** Its inputs: other models (`ref`) and tables (`source`), by name. */
+  /** Its inputs: other datasets (`ref`) and tables (`source`), by name. */
   reads: { name: string; kind: string }[];
-  /** The models that read it. */
+  /** The datasets that read it. */
   readBy: string[];
 }
 
-export const MODEL_SQL = "SELECT view, owner, description FROM v_dataset WHERE view = ?1";
-export const MODEL_COLUMNS_SQL = "SELECT name, sql_type, doc FROM v_field WHERE view = ?1 ORDER BY position";
-export const LINEAGE_SQL = "SELECT view, input, kind FROM v_model_lineage WHERE view = ?1 OR input = ?1";
+export const DATASET_SQL = "SELECT view, owner, description FROM v_dataset WHERE view = ?1";
+export const DATASET_FIELDS_SQL = "SELECT name, sql_type, doc FROM v_field WHERE view = ?1 ORDER BY position";
+export const LINEAGE_SQL = "SELECT view, input, kind FROM v_dataset_lineage WHERE view = ?1 OR input = ?1";
 export const METRICS_SQL = "SELECT key, title FROM v_metric_catalog ORDER BY title";
 /** The dimensions a metric can be sliced by (`v_dimension`). */
 export const DIMENSIONS_SQL = "SELECT key, label FROM v_dimension ORDER BY label";
 
-/** Rows a picked model's sample shows. */
+/** Rows a picked dataset's sample shows. */
 export const SAMPLE_LIMIT = 50;
 
-/** The sample query a picked model starts from (its name is the
+/** The sample query a picked dataset starts from (its name is the
  *  registry's: `v_work_item`). */
-export function sampleSql(model: string): string {
-  return `SELECT * FROM ${model} LIMIT ${SAMPLE_LIMIT}`;
+export function sampleSql(dataset: string): string {
+  return `SELECT * FROM ${dataset} LIMIT ${SAMPLE_LIMIT}`;
 }
 
 const text = (v: Cell | undefined): string | null => (v === null || v === undefined ? null : String(v));
@@ -67,7 +67,7 @@ export function rowObjects(result: Rows): Record<string, Cell>[] {
   return result.rows.map((row) => Object.fromEntries(result.columns.map((c, i) => [c, row[i] ?? null])));
 }
 
-export function modelColumns(result: Rows): ModelColumn[] {
+export function datasetFields(result: Rows): DatasetField[] {
   return rowObjects(result).map((r) => ({
     name: text(r.name) ?? "",
     sqlType: text(r.sql_type) ?? "",
@@ -203,7 +203,7 @@ export function metricSeriesSql(key: string, groupBy?: string | null, ranged = f
 
 /** What the explorer shows: its view (the tab's address) as one value. */
 export interface ExploreView {
-  model: string;
+  dataset: string;
   sql: string;
   viz: Viz;
   chart: Chart | null;
@@ -214,7 +214,7 @@ export interface ExploreView {
 export function readView(params: Record<string, string>): ExploreView {
   const viz = (VIZ_OPTIONS as string[]).includes(params.viz ?? "") ? (params.viz as Viz) : "table";
   return {
-    model: params.model ?? "",
+    dataset: params.dataset ?? "",
     sql: params.sql ?? "",
     viz,
     chart: parseChart(params.chart ?? ""),

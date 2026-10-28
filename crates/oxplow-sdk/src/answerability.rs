@@ -13,19 +13,19 @@
 //!   shape: { columns: [sha, subject] }             # for sql
 //! ```
 //!
-//! For each: the skill's text names every model (`v_*`) the SQL reads and
+//! For each: the skill's text names every dataset (`v_*`) the SQL reads and
 //! the command or tool it runs; the SQL runs through the gateway and
 //! returns exactly `shape.columns`; a command's or tool's input validates
 //! against its spec (a tool must be one foundation, or the extension,
 //! declares).
 //! A page's `answers:` (`{ question, about?, params, skill? }`) are the same
 //! check from the page's side ([`check_pages`]): the named skill names
-//! every model a `sql` loader reads and every command a `command` loader
+//! every dataset a `sql` loader reads and every command a `command` loader
 //! runs (an answer with no `skill`, a user extension's, skips that), and
 //! the page runs with the answer's params with no loader failing.
 //! With `OXPLOW_LIVE_ANSWERABILITY=1`, [`live`] also asks the `decide`
-//! model, given only the skill text and the catalog, what it would reach
-//! for — it must pick the same model or command.
+//! dataset, given only the skill text and the catalog, what it would reach
+//! for — it must pick the same dataset or command.
 
 use std::collections::BTreeMap;
 
@@ -78,10 +78,10 @@ pub fn parse(yaml: &str) -> Result<Vec<Question>, String> {
     serde_yaml::from_str(yaml).map_err(|e| e.to_string())
 }
 
-/// The models (`v_*`) a query reads: the tables named after `FROM`,
+/// The datasets (`v_*`) a query reads: the tables named after `FROM`,
 /// `JOIN` or a comma in a `FROM` list, lowercased — never a `v_*` word in
 /// a string, a comment or an alias.
-pub fn models_in(sql: &str) -> Vec<String> {
+pub fn datasets_in(sql: &str) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     // The clause each open parenthesis interrupted, and the current one.
     let mut clauses: Vec<String> = Vec::new();
@@ -200,7 +200,7 @@ fn sql_tokens(sql: &str) -> Vec<SqlToken> {
     out
 }
 
-/// Whether `text` names `name` (a model or a command) as a whole word,
+/// Whether `text` names `name` (a dataset or a command) as a whole word,
 /// in any case: `v_commit_file` doesn't name `v_commit`, and a sentence's
 /// full stop after `oxplow.work_item.link` doesn't hide it.
 pub fn names(text: &str, name: &str) -> bool {
@@ -256,11 +256,11 @@ pub async fn check(file: &str, questions: &[Question], c: &Checker<'_>) -> Check
         };
         match (&q.reaches.sql, &q.reaches.command, &q.reaches.tool) {
             (Some(sql), None, None) => {
-                for model in models_in(sql) {
-                    if !names(&text, &model) {
+                for dataset in datasets_in(sql) {
+                    if !names(&text, &dataset) {
                         out.errors.push(format!(
-                            "{at}: skill `{}` never names `{model}` — fix: say in the skill what \
-                             `{model}` answers",
+                            "{at}: skill `{}` never names `{dataset}` — fix: say in the skill what \
+                             `{dataset}` answers",
                             q.skill
                         ));
                     }
@@ -349,7 +349,7 @@ pub async fn live(
     let mut out = Vec::new();
     for (i, q) in questions.iter().enumerate() {
         let want = match (&q.reaches.sql, &q.reaches.command, &q.reaches.tool) {
-            (Some(sql), _, _) => models_in(sql).into_iter().next(),
+            (Some(sql), _, _) => datasets_in(sql).into_iter().next(),
             (_, Some(command), _) => Some(command.clone()),
             (_, _, Some(tool)) => Some(tool.clone()),
             _ => None,
@@ -407,14 +407,14 @@ async fn reached(
     })
 }
 
-/// What a page's answers reach: the models its `sql` loaders read and the
+/// What a page's answers reach: the datasets its `sql` loaders read and the
 /// commands its `command` loaders run, in loader order.
 fn page_reaches(page: &oxplow_app::pages::schema::Page) -> Vec<String> {
     use oxplow_app::pages::schema::Loader;
     page.loaders
         .iter()
         .flat_map(|l| match &l.loader {
-            Loader::Sql { sql, .. } => models_in(sql),
+            Loader::Sql { sql, .. } => datasets_in(sql),
             Loader::Command { command, .. } => vec![command.clone()],
             _ => Vec::new(),
         })
@@ -581,12 +581,12 @@ pub async fn live_pages(
 mod tests {
     use super::*;
 
-    /// tsk570: a model is a table a query reads — not a `v_*` word in a
+    /// tsk570: a dataset is a table a query reads — not a `v_*` word in a
     /// string, a comment or an alias — whatever its case.
     #[test]
-    fn models_are_the_tables_a_query_reads() {
+    fn datasets_are_the_tables_a_query_reads() {
         assert_eq!(
-            models_in(
+            datasets_in(
                 "WITH x AS (SELECT 1 FROM V_Work_Item) \
                  SELECT a.n AS v_total, 'v_quoted' -- v_comment\n\
                  FROM v_commit a, v_branch b /* v_block */ \
@@ -596,7 +596,7 @@ mod tests {
         );
     }
 
-    /// tsk570: a skill names a model or command as a whole word, in any
+    /// tsk570: a skill names a dataset or command as a whole word, in any
     /// case — `v_commit_file` doesn't name `v_commit`.
     #[test]
     fn a_skill_names_a_thing_as_a_whole_word() {
@@ -616,9 +616,9 @@ mod tests {
     }
 
     #[test]
-    fn models_are_the_v_words_of_a_query() {
+    fn datasets_are_the_v_words_of_a_query() {
         assert_eq!(
-            models_in(
+            datasets_in(
                 "SELECT c.sha FROM v_commit c JOIN v_commit_file f ON f.sha = c.sha, xv_nope"
             ),
             vec!["v_commit", "v_commit_file"]
@@ -681,8 +681,8 @@ mod tests {
         }
     }
 
-    /// The mechanism: a page whose answer's skill names its model passes;
-    /// one whose skill doesn't fails naming the model; params that break
+    /// The mechanism: a page whose answer's skill names its dataset passes;
+    /// one whose skill doesn't fails naming the dataset; params that break
     /// the query fail too; an answer with no skill skips the naming.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_page_answer_must_be_named_by_its_skill_and_run() {
@@ -749,7 +749,7 @@ mod tests {
 
     /// P7.C5: a bundled extension's `questions.yaml` reaches what its
     /// skill (a markdown file in it) names, against a running oxplow — its
-    /// models published and its commands registered, as at boot.
+    /// datasets published and its commands registered, as at boot.
     #[tokio::test(flavor = "multi_thread")]
     async fn the_bundled_extensions_answer_their_questions() {
         let tmp = tempfile::tempdir().unwrap();
@@ -866,15 +866,15 @@ mod tests {
         );
     }
 
-    /// Every model and every command an agent may run: what the live check
-    /// offers the model.
+    /// Every dataset and every command an agent may run: what the live check
+    /// offers the dataset.
     async fn catalog(svc: &oxplow_app::Services) -> Vec<String> {
-        let models = svc
+        let datasets = svc
             .sql
             .query_sql("SELECT view FROM v_dataset ORDER BY view", vec![], None)
             .await
             .unwrap();
-        let mut out: Vec<String> = models
+        let mut out: Vec<String> = datasets
             .rows
             .into_iter()
             .filter_map(|r| match r.into_iter().next() {

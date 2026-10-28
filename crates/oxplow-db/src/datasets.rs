@@ -1,11 +1,11 @@
-//! Models (P4.2, `.context/semantic-layer.md` "Models"). A published view
-//! is a model: one `SELECT` in a file, reading only through
-//! `ref('<model>')` and `source('<table>')`, compiled to a view at every
+//! Datasets (P4.2, `.context/semantic-layer.md` "Datasets"). A published view
+//! is a dataset: one `SELECT` in a file, reading only through
+//! `ref('<dataset>')` and `source('<table>')`, compiled to a view at every
 //! open. The compiler resolves the references (an unknown one is an error
-//! at `file:line`), orders the models so each is created after what it
+//! at `file:line`), orders the datasets so each is created after what it
 //! reads (a cycle is an error), creates the views, and records them — the
-//! `model`, `model_input` and `model_contract` tables the `v_dataset*` views
-//! read. It holds each model to two promises:
+//! `dataset`, `dataset_input` and `dataset_contract` tables the `v_dataset*` views
+//! read. It holds each dataset to two promises:
 //!
 //! - **Lineage:** what SQLite reports the view reading (the recording
 //!   authorizer, `semantic_layer::ReadSession`) is exactly what it
@@ -16,9 +16,9 @@
 //!
 //! Declared tests (`not_null`, `unique`, `accepted_values`,
 //! `relationships`, `sql`) run on demand ([`run_tests`]) and record their
-//! result in `model_test`.
+//! result in `dataset_test`.
 //!
-//! A model declared `materialize: on_change` (P7.B1/B2) is checked like
+//! A dataset declared `materialize: on_change` (P7.B1/B2) is checked like
 //! any other — its SELECT against lineage and contract — and then
 //! published as a view over its own table, [`materialized_table`] (the
 //! contract's columns and types), which the asset runner refills when an
@@ -35,16 +35,16 @@ use crate::database::{map_sql_err, ts_to_string};
 use crate::semantic_layer::TempView;
 use crate::sql_tokens::{calls, line_col, string_literal};
 
-/// The core models, embedded from `crates/oxplow-db/models/` by the build
+/// The core datasets, embedded from `crates/oxplow-db/datasets/` by the build
 /// script.
 mod core_files {
-    include!(concat!(env!("OUT_DIR"), "/core_models.rs"));
+    include!(concat!(env!("OUT_DIR"), "/core_datasets.rs"));
 }
 
-/// The owner of the core models.
+/// The owner of the core datasets.
 pub const CORE: &str = "core";
 
-/// One dataset as its owner declares it (an entry of `models.yaml`, or
+/// One dataset as its owner declares it (an entry of `datasets.yaml`, or
 /// of an extension's `datasets:`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -61,7 +61,7 @@ pub struct DatasetDecl {
     pub relationships: Vec<RelationshipDecl>,
     /// The fields whose values name one row: declared fields,
     /// part of the contract. A key implies its test (never null, never
-    /// repeated), and a materialized model's table takes it as its
+    /// repeated), and a materialized dataset's table takes it as its
     /// primary key.
     #[serde(default)]
     pub key: Vec<String>,
@@ -76,12 +76,12 @@ pub struct DatasetDecl {
     /// stored and recomputed on that clock.
     #[serde(default)]
     pub materialize: Option<Materialize>,
-    /// Guidance for an agent reading the model. Not part of the contract.
+    /// Guidance for an agent reading the dataset. Not part of the contract.
     #[serde(default)]
     pub ai_context: Option<AiContext>,
 }
 
-/// A model's freshness policy beyond the default (computed on read):
+/// A dataset's freshness policy beyond the default (computed on read):
 /// `on_change`, or `{ every: 1h }`.
 #[derive(
     Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
@@ -115,7 +115,7 @@ impl Materialize {
     /// `materialize: on_change`.
     pub const ON_CHANGE: Materialize = Materialize::Named(MaterializePolicy::OnChange);
 
-    /// What `model.materialize` records: `on_change`, or `every 1h`.
+    /// What `dataset.materialize` records: `on_change`, or `every 1h`.
     pub fn recorded(&self) -> String {
         match self {
             Materialize::Named(MaterializePolicy::OnChange) => "on_change".into(),
@@ -126,7 +126,7 @@ impl Materialize {
         }
     }
 
-    /// The watermark column of an incremental model.
+    /// The watermark column of an incremental dataset.
     pub fn incremental(&self) -> Option<&str> {
         match self {
             Materialize::Incremental { incremental } => Some(incremental.trim()),
@@ -143,7 +143,7 @@ impl Materialize {
     }
 }
 
-/// The policy `model.materialize` recorded (`on_change`, `every 1h`).
+/// The policy `dataset.materialize` recorded (`on_change`, `every 1h`).
 pub fn recorded_materialize(text: &str) -> Option<Materialize> {
     if let Some(every) = text.strip_prefix("every ") {
         return Some(Materialize::Every {
@@ -158,19 +158,19 @@ pub fn recorded_materialize(text: &str) -> Option<Materialize> {
     (text == "on_change").then_some(Materialize::ON_CHANGE)
 }
 
-/// The table a materialized model's view reads: `m_<view>`.
+/// The table a materialized dataset's view reads: `m_<view>`.
 pub fn materialized_table(view: &str) -> String {
     format!("m_{view}")
 }
 
-/// Whether `table` is a materialized model's table — never a `source()`:
-/// a model reads another (or itself) through `ref()`.
+/// Whether `table` is a materialized dataset's table — never a `source()`:
+/// a dataset reads another (or itself) through `ref()`.
 fn is_materialized_table(table: &str) -> bool {
     table.starts_with("m_v_")
 }
 
 /// An earlier version kept after a breaking change: its SQL (in `file`,
-/// beside the model's) still keeps the contract that version published,
+/// beside the dataset's) still keeps the contract that version published,
 /// until `until` (`YYYY-MM-DD`).
 #[derive(
     Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
@@ -185,7 +185,7 @@ pub struct Deprecated {
 /// What a kept earlier version is a version of.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub struct Twin {
-    /// The model's name.
+    /// The dataset's name.
     pub of: String,
     pub until: String,
 }
@@ -205,7 +205,7 @@ pub struct DatasetField {
     pub sql_type: String,
     pub doc: String,
     /// Guidance for an agent reading the column. Not part of the contract:
-    /// left out of `model_contract` and the golden, stored on the model.
+    /// left out of `dataset_contract` and the golden, stored on the dataset.
     #[serde(default)]
     pub ai_context: Option<AiContext>,
 }
@@ -217,7 +217,7 @@ impl PartialEq for DatasetField {
 }
 
 /// `columns` as the contract records them (the golden and
-/// `model_contract`): name, type and doc, without their `ai_context`.
+/// `dataset_contract`): name, type and doc, without their `ai_context`.
 fn contract_columns(columns: &[DatasetField]) -> serde_json::Value {
     columns
         .iter()
@@ -226,7 +226,7 @@ fn contract_columns(columns: &[DatasetField]) -> serde_json::Value {
 }
 
 /// The columns' `ai_context` blocks as one JSON object keyed by column
-/// name (the `model.column_ai_context_json` column); `None` when no column
+/// name (the `dataset.column_ai_context_json` column); `None` when no column
 /// has one.
 fn column_ai_context_json(columns: &[DatasetField]) -> Option<String> {
     let map: serde_json::Map<String, serde_json::Value> = columns
@@ -287,16 +287,16 @@ impl RelationshipDecl {
 #[serde(deny_unknown_fields)]
 pub struct Relationship {
     pub column: String,
-    /// The model the column points into.
+    /// The dataset the column points into.
     pub to: String,
     pub field: String,
 }
 
-/// A model's declaration and its SQL file.
+/// A dataset's declaration and its SQL file.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 pub struct DatasetSource {
     pub decl: DatasetDecl,
-    /// Where the SQL came from, for error locations (`models/work_item.sql`).
+    /// Where the SQL came from, for error locations (`datasets/work_item.sql`).
     pub file: String,
     pub sql: String,
     /// For a kept earlier version (named `<name>_v<version>`): what it's a
@@ -309,16 +309,16 @@ fn invalid(msg: impl Into<String>) -> DomainError {
     DomainError::Invalid(msg.into())
 }
 
-/// The core models: `models.yaml` joined with each `<name>.sql`. Every
-/// declared model needs its file and every file its declaration.
+/// The core datasets: `datasets.yaml` joined with each `<name>.sql`. Every
+/// declared dataset needs its file and every file its declaration.
 pub fn core_sources() -> Result<Vec<DatasetSource>, DomainError> {
     let files: HashMap<&str, &str> = core_files::FILES.iter().copied().collect();
     let yaml = files
-        .get("models.yaml")
-        .ok_or_else(|| invalid("models/models.yaml is missing"))?;
+        .get("datasets.yaml")
+        .ok_or_else(|| invalid("datasets/datasets.yaml is missing"))?;
     sources_from(
         yaml,
-        "models",
+        "datasets",
         |name| files.get(name).map(|s| s.to_string()),
         || {
             files
@@ -331,12 +331,12 @@ pub fn core_sources() -> Result<Vec<DatasetSource>, DomainError> {
 }
 
 /// How the declared contracts differ from the pinned ones — the golden
-/// `model_contracts.json`, `{ "<name>": { "<version>": [columns] } }`,
-/// every version each core model has published. A model's columns at a
+/// `dataset_contracts.json`, `{ "<name>": { "<version>": [columns] } }`,
+/// every version each core dataset has published. A dataset's columns at a
 /// pinned version must equal the pin (a changed doc included: a
 /// database that recorded the version refuses to open otherwise); a
 /// version the golden lacks is new and needs blessing. One line per
-/// model that drifts.
+/// dataset that drifts.
 pub fn contract_drift(golden: &serde_json::Value, decls: &[DatasetDecl]) -> Vec<String> {
     let mut out = Vec::new();
     for d in decls {
@@ -364,7 +364,7 @@ pub fn contract_drift(golden: &serde_json::Value, decls: &[DatasetDecl]) -> Vec<
     out
 }
 
-/// `golden` with every declared model's current contract pinned at its
+/// `golden` with every declared dataset's current contract pinned at its
 /// version when that version isn't pinned yet — a pinned version is
 /// published and never rewritten, so a change to one still drifts (bump
 /// its version). Earlier versions are kept: the file is the publication
@@ -383,8 +383,8 @@ pub fn pin_contracts(golden: &serde_json::Value, decls: &[DatasetDecl]) -> serde
     serde_json::Value::Object(golden)
 }
 
-/// What a model version promises: its columns and its key (the golden's
-/// and `model_contract`'s shape).
+/// What a dataset version promises: its columns and its key (the golden's
+/// and `dataset_contract`'s shape).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Contract {
     pub columns: Vec<DatasetField>,
@@ -408,16 +408,16 @@ fn contract_json(d: &DatasetDecl) -> serde_json::Value {
     serde_json::json!({ "columns": contract_columns(&d.fields), "key": d.key })
 }
 
-/// The 1-based line of the declaration `name: <model>` in `text`.
-fn decl_line(text: &str, model: &str) -> Option<usize> {
+/// The 1-based line of the declaration `name: <dataset>` in `text`.
+fn decl_line(text: &str, dataset: &str) -> Option<usize> {
     text.lines().enumerate().find_map(|(i, line)| {
         let rest = line.trim_start().trim_start_matches("- ").trim_start();
         let value = rest.strip_prefix("name:")?.trim();
-        (value.trim_matches(|c| c == '"' || c == '\'') == model).then_some(i + 1)
+        (value.trim_matches(|c| c == '"' || c == '\'') == dataset).then_some(i + 1)
     })
 }
 
-/// An `every:` clock is one the grammar reads; an incremental model's
+/// An `every:` clock is one the grammar reads; an incremental dataset's
 /// watermark is its key — one INTEGER column, unique per row (a row id, a
 /// seq). Appending takes the rows past the table's highest watermark, so a
 /// value two rows shared would let the second slip under it unseen; a
@@ -459,7 +459,7 @@ fn check_materialize(decl: &DatasetDecl, at: &str) -> Result<(), DomainError> {
     }
 }
 
-/// An incremental model's SQL keeps a row once it has appeared and never
+/// An incremental dataset's SQL keeps a row once it has appeared and never
 /// rewrites one — a filter and projection over inner joins of append-only
 /// inputs: no grouping, de-duplication, window, cap, set operation, outer
 /// join, subquery (`EXISTS`, `IN (SELECT …)`, a scalar one — a row already
@@ -634,14 +634,14 @@ fn relationships_json(
 /// Record a published dataset's resolved relationships.
 fn record_relationships(conn: &Connection, view: &str, json: &str) -> Result<(), DomainError> {
     conn.execute(
-        "UPDATE model SET relationships_json = ?2 WHERE view = ?1",
+        "UPDATE dataset SET relationships_json = ?2 WHERE view = ?1",
         params![view, json],
     )
     .map_err(map_sql_err)?;
     Ok(())
 }
 
-/// Join a `models.yaml` with its SQL files (`file(name)` reads
+/// Join a `datasets.yaml` with its SQL files (`file(name)` reads
 /// `<name>.sql`; `sql_files()` lists the stems present).
 pub fn sources_from(
     yaml: &str,
@@ -650,8 +650,8 @@ pub fn sources_from(
     sql_files: impl Fn() -> Vec<String>,
 ) -> Result<Vec<DatasetSource>, DomainError> {
     let decls: Vec<DatasetDecl> =
-        serde_yaml::from_str(yaml).map_err(|e| invalid(format!("{dir}/models.yaml: {e}")))?;
-    let declared_in = format!("{dir}/models.yaml");
+        serde_yaml::from_str(yaml).map_err(|e| invalid(format!("{dir}/datasets.yaml: {e}")))?;
+    let declared_in = format!("{dir}/datasets.yaml");
     for d in &decls {
         let at = match decl_line(yaml, &d.name) {
             Some(line) => format!("{declared_in}:{line}"),
@@ -665,7 +665,7 @@ pub fn sources_from(
 }
 
 /// Join declarations (from `declared_in`) with their `<name>.sql` files in
-/// `dir`: every declared model needs its file and every file its
+/// `dir`: every declared dataset needs its file and every file its
 /// declaration.
 pub fn join_sources(
     decls: Vec<DatasetDecl>,
@@ -682,7 +682,7 @@ pub fn join_sources(
         check_materialize(&decl, declared_in)?;
         if !seen.insert(decl.name.clone()) {
             return Err(invalid(format!(
-                "{declared_in}: model `{}` is declared twice",
+                "{declared_in}: dataset `{}` is declared twice",
                 decl.name
             )));
         }
@@ -752,19 +752,19 @@ pub fn join_sources(
     Ok(out)
 }
 
-/// The view a core model publishes.
+/// The view a core dataset publishes.
 pub fn core_view(name: &str) -> String {
     format!("v_{name}")
 }
 
-/// A model resolved against the database: its view, its SQL with the
+/// A dataset resolved against the database: its view, its SQL with the
 /// references replaced, and what it declared it reads.
 #[derive(Debug, Clone)]
 struct Resolved<'a> {
     source: &'a DatasetSource,
     view: String,
     sql: String,
-    /// Views of the models it `ref()`s.
+    /// Views of the datasets it `ref()`s.
     refs: BTreeSet<String>,
     /// Tables it `source()`s.
     sources: BTreeSet<String>,
@@ -802,7 +802,7 @@ fn quote(name: &str) -> String {
     format!("\"{}\"", name.replace('"', "\"\""))
 }
 
-/// A host-owned public model binding used in extension SQL. The tokenizer
+/// A host-owned public dataset binding used in extension SQL. The tokenizer
 /// excludes comments, string literals and qualified function names.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImportReference {
@@ -935,7 +935,7 @@ fn resolve<'a>(
         .collect()
 }
 
-/// Resolve one model's `ref()`s (through `ref_view`: a name → its view,
+/// Resolve one dataset's `ref()`s (through `ref_view`: a name → its view,
 /// `None` when it names nothing) and `source()`s (`source_ok` says why a
 /// table can't be read, if it can't).
 fn resolve_one<'a>(
@@ -959,7 +959,7 @@ fn resolve_one<'a>(
         let target = only_name(src, &call, "ref")?;
         let Some(to) = ref_view(&target) else {
             return Err(invalid(format!(
-                "{}: ref('{target}') names no model",
+                "{}: ref('{target}') names no dataset",
                 at(src, call.start)
             )));
         };
@@ -972,8 +972,8 @@ fn resolve_one<'a>(
         let table = only_name(src, &call, "source")?;
         if is_materialized_table(&table) {
             return Err(invalid(format!(
-                "{}: source('{table}') is a materialized model's table; read the model through \
-                 ref() (a model may not read itself)",
+                "{}: source('{table}') is a materialized dataset's table; read the dataset through \
+                 ref() (a dataset may not read itself)",
                 at(src, call.start)
             )));
         }
@@ -1009,9 +1009,9 @@ fn stored_tables(conn: &Connection) -> Result<BTreeSet<String>, DomainError> {
     Ok(names)
 }
 
-/// The models in an order where each comes after every model it reads.
-fn ordered(models: Vec<Resolved<'_>>) -> Result<Vec<Resolved<'_>>, DomainError> {
-    let mut pending = models;
+/// The datasets in an order where each comes after every dataset it reads.
+fn ordered(datasets: Vec<Resolved<'_>>) -> Result<Vec<Resolved<'_>>, DomainError> {
+    let mut pending = datasets;
     let mut done: BTreeSet<String> = BTreeSet::new();
     let mut out = Vec::with_capacity(pending.len());
     while !pending.is_empty() {
@@ -1030,7 +1030,7 @@ fn ordered(models: Vec<Resolved<'_>>) -> Result<Vec<Resolved<'_>>, DomainError> 
                 })
                 .collect();
             return Err(invalid(format!(
-                "models read each other in a cycle: {}",
+                "datasets read each other in a cycle: {}",
                 cycle.join(", ")
             )));
         }
@@ -1054,13 +1054,13 @@ pub fn view_columns(conn: &Connection, view: &str) -> Result<Vec<(String, String
     Ok(cols)
 }
 
-/// Drop every compiled model's view (before the migrations run). An
+/// Drop every compiled dataset's view (before the migrations run). An
 /// extension's entity views stay: they are made when its sources sync,
 /// not at open. A database from before the registry has none recorded.
 pub fn drop_all(conn: &Connection) -> Result<(), DomainError> {
     let has_registry: bool = conn
         .query_row(
-            "SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'model')",
+            "SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'dataset')",
             [],
             |r| r.get(0),
         )
@@ -1068,10 +1068,10 @@ pub fn drop_all(conn: &Connection) -> Result<(), DomainError> {
     if !has_registry {
         return Ok(());
     }
-    // Before V109 every registered model was compiled.
+    // Before V109 every registered dataset was compiled.
     let has_kind: bool = conn
         .query_row(
-            "SELECT EXISTS (SELECT 1 FROM pragma_table_info('model') WHERE name = 'kind')",
+            "SELECT EXISTS (SELECT 1 FROM pragma_table_info('dataset') WHERE name = 'kind')",
             [],
             |r| r.get(0),
         )
@@ -1079,9 +1079,9 @@ pub fn drop_all(conn: &Connection) -> Result<(), DomainError> {
     let views: Vec<String> = {
         let mut st = conn
             .prepare(if has_kind {
-                "SELECT view FROM model WHERE kind = 'sql'"
+                "SELECT view FROM dataset WHERE kind = 'sql'"
             } else {
-                "SELECT view FROM model"
+                "SELECT view FROM dataset"
             })
             .map_err(map_sql_err)?;
         let rows = st
@@ -1095,11 +1095,11 @@ pub fn drop_all(conn: &Connection) -> Result<(), DomainError> {
         conn.execute_batch(&format!("DROP VIEW IF EXISTS {}", quote(&view)))
             .map_err(map_sql_err)?;
     }
-    // Extensions' models are recompiled after the open
+    // Extensions' datasets are recompiled after the open
     // (`compile_extensions`); until then the registry lists none of them.
     if has_kind {
         conn.execute(
-            "DELETE FROM model WHERE kind = 'sql' AND owner <> ?1",
+            "DELETE FROM dataset WHERE kind = 'sql' AND owner <> ?1",
             [CORE],
         )
         .map_err(map_sql_err)?;
@@ -1116,7 +1116,7 @@ enum Kept {
 }
 
 /// A source ready to compile: a kept earlier version gets the columns its
-/// version published (`model_contract`).
+/// version published (`dataset_contract`).
 fn fill_twin(
     conn: &Connection,
     src: &DatasetSource,
@@ -1156,15 +1156,15 @@ pub(crate) fn today() -> String {
         .collect()
 }
 
-/// Compile the core models on `conn` (after migrations, at every open).
+/// Compile the core datasets on `conn` (after migrations, at every open).
 pub fn compile_core(conn: &mut Connection) -> Result<(), DomainError> {
     let sources = core_sources()?;
     compile(conn, CORE, &sources, &core_view)
 }
 
-/// Compile `owner`'s models in one transaction: drop the views it had,
+/// Compile `owner`'s datasets in one transaction: drop the views it had,
 /// create the new ones in order, check each one's lineage and contract,
-/// and record them. Nothing changes if any model fails.
+/// and record them. Nothing changes if any dataset fails.
 pub fn compile(
     conn: &mut Connection,
     owner: &str,
@@ -1181,10 +1181,10 @@ pub fn compile(
         }
     }
     let sources = kept;
-    let models = ordered(resolve(&tx, &sources, view_of)?)?;
+    let datasets = ordered(resolve(&tx, &sources, view_of)?)?;
     let previous: Vec<String> = {
         let mut st = tx
-            .prepare("SELECT view FROM model WHERE owner = ?1 AND kind = 'sql'")
+            .prepare("SELECT view FROM dataset WHERE owner = ?1 AND kind = 'sql'")
             .map_err(map_sql_err)?;
         let rows = st
             .query_map([owner], |r| r.get::<_, String>(0))
@@ -1193,23 +1193,23 @@ pub fn compile(
             .map_err(map_sql_err)?;
         rows
     };
-    for view in previous.iter().chain(models.iter().map(|m| &m.view)) {
+    for view in previous.iter().chain(datasets.iter().map(|m| &m.view)) {
         tx.execute_batch(&format!("DROP VIEW IF EXISTS {}", quote(view)))
             .map_err(map_sql_err)?;
     }
     tx.execute(
-        "DELETE FROM model WHERE owner = ?1 AND kind = 'sql'",
+        "DELETE FROM dataset WHERE owner = ?1 AND kind = 'sql'",
         [owner],
     )
     .map_err(map_sql_err)?;
     let now = ts_to_string(oxplow_domain::Timestamp::now());
-    for m in &models {
+    for m in &datasets {
         publish(&tx, m, owner, &now, Pass::Publish)?;
     }
     // Every dataset is published now: a relationship may point at any.
-    let published: BTreeSet<String> = models.iter().map(|m| m.view.clone()).collect();
+    let published: BTreeSet<String> = datasets.iter().map(|m| m.view.clone()).collect();
     let target = |name: &str| Some(view_of(name)).filter(|v| published.contains(v));
-    for m in &models {
+    for m in &datasets {
         let (json, problems) = relationships_json(&tx, &m.source.decl, &target);
         if !problems.is_empty() {
             return Err(invalid(format!(
@@ -1225,7 +1225,7 @@ pub fn compile(
     tx.commit().map_err(map_sql_err)
 }
 
-/// Create one resolved model's view, check its lineage and contract, and
+/// Create one resolved dataset's view, check its lineage and contract, and
 /// record it.
 fn publish(
     conn: &Connection,
@@ -1261,7 +1261,7 @@ fn publish(
         .map_err(map_sql_err)?;
     }
     conn.execute(
-        "INSERT INTO model (view, name, owner, version, description, sql, compiled_at, materialize,
+        "INSERT INTO dataset (view, name, owner, version, description, sql, compiled_at, materialize,
                             ai_context_json, column_ai_context_json)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
         params![
@@ -1285,7 +1285,7 @@ fn publish(
         .chain(m.sources.iter().map(|s| (s, "source")))
     {
         conn.execute(
-            "INSERT INTO model_input (view, input, kind) VALUES (?1, ?2, ?3)",
+            "INSERT INTO dataset_input (view, input, kind) VALUES (?1, ?2, ?3)",
             params![m.view, input, kind],
         )
         .map_err(map_sql_err)?;
@@ -1293,7 +1293,7 @@ fn publish(
     Ok(())
 }
 
-/// The table a materialized model's view reads, with the contract's
+/// The table a materialized dataset's view reads, with the contract's
 /// columns and types: kept when it already has them (its rows are the
 /// last recompute's), else recreated empty for the first recompute to
 /// fill. Not STRICT: a computed (untyped) contract column stays untyped,
@@ -1351,14 +1351,14 @@ fn materialize_table(
     Ok(())
 }
 
-/// Drop the tables of materialized models that are no longer published
-/// (run once every model is registered: after the extensions' pass).
+/// Drop the tables of materialized datasets that are no longer published
+/// (run once every dataset is registered: after the extensions' pass).
 fn drop_orphaned_tables(conn: &Connection) -> Result<(), DomainError> {
     let orphans: Vec<String> = {
         let mut st = conn
             .prepare(
                 "SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'm\\_v\\_%' ESCAPE '\\'
-                   AND substr(name, 3) NOT IN (SELECT view FROM model WHERE materialize IS NOT NULL)",
+                   AND substr(name, 3) NOT IN (SELECT view FROM dataset WHERE materialize IS NOT NULL)",
             )
             .map_err(map_sql_err)?;
         let rows = st
@@ -1379,7 +1379,7 @@ fn drop_orphaned_tables(conn: &Connection) -> Result<(), DomainError> {
 /// `source()` — so lineage is complete. The other way round needs no
 /// check: each declared input is one of those calls in the SQL itself,
 /// substituted into it, so it's read by construction (and SQLite can't
-/// always say so: a model made only of CTEs reports its reads under the
+/// always say so: a dataset made only of CTEs reports its reads under the
 /// CTEs' names, never its view's).
 fn check_lineage(conn: &Connection, m: &Resolved<'_>) -> Result<(), DomainError> {
     let session = crate::semantic_layer::ReadSession::open(
@@ -1436,7 +1436,7 @@ fn check_contract(
                 .map_err(|e| invalid(e.to_string()))?;
             let key = serde_json::to_string(&decl.key).map_err(|e| invalid(e.to_string()))?;
             conn.execute(
-                "INSERT INTO model_contract (view, version, columns_json, key_json, recorded_at)
+                "INSERT INTO dataset_contract (view, version, columns_json, key_json, recorded_at)
                  VALUES (?1, ?2, ?3, ?4, ?5)",
                 params![m.view, decl.version, columns, key, now],
             )
@@ -1464,7 +1464,7 @@ fn stored_contract(
 ) -> Result<Option<Contract>, DomainError> {
     let row: Option<(String, String)> = conn
         .query_row(
-            "SELECT columns_json, key_json FROM model_contract WHERE view = ?1 AND version = ?2",
+            "SELECT columns_json, key_json FROM dataset_contract WHERE view = ?1 AND version = ?2",
             params![view, version],
             |r| Ok((r.get(0)?, r.get(1)?)),
         )
@@ -1521,8 +1521,8 @@ pub fn contract_change(before: &[DatasetField], after: &[DatasetField]) -> Strin
 /// object of column → value.
 pub type FixtureRows = Vec<(String, Vec<serde_json::Map<String, serde_json::Value>>)>;
 
-/// Whether an incremental model kept by appending holds what a full refill
-/// would (P8.B5): `before` written, the model built whole, `after` written,
+/// Whether an incremental dataset kept by appending holds what a full refill
+/// would (P8.B5): `before` written, the dataset built whole, `after` written,
 /// the rows past its watermark appended — then compared with the SELECT's
 /// rows now. `None` when they match; else what differs, or why the
 /// append failed. Run it in a rehearsal:
@@ -1537,10 +1537,10 @@ pub fn incremental_matches_full(
     let Some(watermark) = decl.materialize.as_ref().and_then(Materialize::incremental) else {
         return Ok(None);
     };
-    // As compiled; a model that didn't compile has no row (and `check`
+    // As compiled; a dataset that didn't compile has no row (and `check`
     // reported why).
     let sql: Option<String> = tx
-        .query_row("SELECT sql FROM model WHERE view = ?1", [view], |r| {
+        .query_row("SELECT sql FROM dataset WHERE view = ?1", [view], |r| {
             r.get(0)
         })
         .optional()
@@ -1658,7 +1658,7 @@ pub struct TestResult {
 }
 
 /// Run the declared tests of `sources` and record each result in
-/// `model_test`.
+/// `dataset_test`.
 pub fn run_tests(
     conn: &Connection,
     sources: &[DatasetSource],
@@ -1668,7 +1668,7 @@ pub fn run_tests(
     let mut out = Vec::new();
     for src in sources {
         let view = view_of(&src.decl.name);
-        conn.execute("DELETE FROM model_test WHERE view = ?1", [&view])
+        conn.execute("DELETE FROM dataset_test WHERE view = ?1", [&view])
             .map_err(map_sql_err)?;
         let key = (!src.decl.key.is_empty()).then(|| key_test(&src.decl.key, &view));
         let declared = src.decl.tests.iter().map(|t| {
@@ -1685,7 +1685,7 @@ pub fn run_tests(
                 Err(e) => ("error", Some(e.to_string())),
             };
             conn.execute(
-                "INSERT INTO model_test (view, test, state, detail, ran_at)
+                "INSERT INTO dataset_test (view, test, state, detail, ran_at)
                  VALUES (?1, ?2, ?3, ?4, ?5)",
                 params![view, name, state, detail, now],
             )
@@ -1777,21 +1777,21 @@ fn test_sql(
     })
 }
 
-/// One extension's models, as its manifest declares them.
+/// One extension's datasets, as its manifest declares them.
 #[derive(Debug, Clone)]
-pub struct ExtensionModels {
+pub struct ExtensionDatasets {
     pub extension: String,
     pub sources: Vec<DatasetSource>,
     /// The extension's effective configuration (`defaults < project <
-    /// personal`) that its models' `config('/pointer')` reads are compiled
+    /// personal`) that its datasets' `config('/pointer')` reads are compiled
     /// against; `None` when it declares none.
     pub config: Option<serde_json::Value>,
 }
 
 /// Source-located candidate diagnostics, grouped by owning extension.
-pub type ExtensionModelErrors = BTreeMap<String, Vec<String>>;
+pub type ExtensionDatasetErrors = BTreeMap<String, Vec<String>>;
 
-/// The view an extension's model (or entity) publishes:
+/// The view an extension's dataset (or entity) publishes:
 /// `v_<extension>_<name>`, dashes as underscores.
 pub fn extension_view(extension: &str, name: &str) -> String {
     format!(
@@ -1801,21 +1801,21 @@ pub fn extension_view(extension: &str, name: &str) -> String {
     )
 }
 
-/// Compile every enabled extension's models in one pass (P4.9), after the
-/// core models: returns each extension's errors, empty when all of its
-/// models compiled. A model that fails — and every model reading it —
+/// Compile every enabled extension's datasets in one pass (P4.9), after the
+/// core datasets: returns each extension's errors, empty when all of its
+/// datasets compiled. A dataset that fails — and every dataset reading it —
 /// is left out and reported; the others are published. In `tx`, which
 /// takes the write lock up front (`Database::transaction`): a pass that
 /// read first and wrote after another connection's commit failed
 /// (tsk977).
 pub fn compile_extensions(
     tx: &rusqlite::Transaction<'_>,
-    extensions: &[ExtensionModels],
+    extensions: &[ExtensionDatasets],
 ) -> Result<BTreeMap<String, Vec<String>>, DomainError> {
     // The last pass's views go first: the set is recompiled whole.
     let previous: Vec<String> = {
         let mut st = tx
-            .prepare("SELECT view FROM model WHERE kind = 'sql' AND owner <> ?1")
+            .prepare("SELECT view FROM dataset WHERE kind = 'sql' AND owner <> ?1")
             .map_err(map_sql_err)?;
         let rows = st
             .query_map([CORE], |r| r.get::<_, String>(0))
@@ -1829,38 +1829,38 @@ pub fn compile_extensions(
             .map_err(map_sql_err)?;
     }
     tx.execute(
-        "DELETE FROM model WHERE kind = 'sql' AND owner <> ?1",
+        "DELETE FROM dataset WHERE kind = 'sql' AND owner <> ?1",
         [CORE],
     )
     .map_err(map_sql_err)?;
     let errors = pass(tx, extensions, &[], Pass::Publish)?.errors;
-    // Every model is registered now (core's compiled at the open): a
-    // materialized table no published model reads goes.
+    // Every dataset is registered now (core's compiled at the open): a
+    // materialized table no published dataset reads goes.
     drop_orphaned_tables(tx)?;
     Ok(errors)
 }
 
-/// Replace the complete extension SQL model set only when the pass has no
+/// Replace the complete extension SQL dataset set only when the pass has no
 /// diagnostics. A failed candidate rolls back its own savepoint, including
 /// contracts, test records and materialized-table cleanup. No outer commit is
 /// made. A coordinator should propagate rejection to abort its other DB writes.
 pub fn replace_extensions(
     tx: &rusqlite::Transaction<'_>,
-    extensions: &[ExtensionModels],
-) -> Result<(), crate::TxError<ExtensionModelErrors>> {
-    tx.execute_batch("SAVEPOINT candidate_extension_models")
+    extensions: &[ExtensionDatasets],
+) -> Result<(), crate::TxError<ExtensionDatasetErrors>> {
+    tx.execute_batch("SAVEPOINT candidate_extension_datasets")
         .map_err(map_sql_err)?;
     let result = compile_extensions(tx, extensions);
     match result {
         Ok(mut errors) => {
             errors.retain(|_, messages| !messages.is_empty());
             if errors.is_empty() {
-                tx.execute_batch("RELEASE candidate_extension_models")
+                tx.execute_batch("RELEASE candidate_extension_datasets")
                     .map_err(map_sql_err)?;
                 Ok(())
             } else {
                 tx.execute_batch(
-                    "ROLLBACK TO candidate_extension_models; RELEASE candidate_extension_models",
+                    "ROLLBACK TO candidate_extension_datasets; RELEASE candidate_extension_datasets",
                 )
                 .map_err(map_sql_err)?;
                 Err(crate::TxError::Aborted(errors))
@@ -1868,7 +1868,7 @@ pub fn replace_extensions(
         }
         Err(error) => {
             tx.execute_batch(
-                "ROLLBACK TO candidate_extension_models; RELEASE candidate_extension_models",
+                "ROLLBACK TO candidate_extension_datasets; RELEASE candidate_extension_datasets",
             )
             .map_err(map_sql_err)?;
             Err(crate::TxError::Storage(error))
@@ -1877,7 +1877,7 @@ pub fn replace_extensions(
 }
 
 /// A declared entity a check stands in for before its collector ever
-/// ran (P7.C6): an empty view with its declared columns, which a model's
+/// ran (P7.C6): an empty view with its declared columns, which a dataset's
 /// `ref()` and a page can read.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EntityStub {
@@ -1890,15 +1890,15 @@ pub struct EntityStub {
 }
 
 /// What a check pass found: each extension's errors, and the temp views
-/// it compiled — the entity stand-ins and the models, in the order they
+/// it compiled — the entity stand-ins and the datasets, in the order they
 /// were created — for the check's queries to read (`SqlQuery::temp_views`).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct CheckedModels {
+pub struct CheckedDatasets {
     pub errors: BTreeMap<String, Vec<String>>,
     pub views: Vec<TempView>,
 }
 
-/// Check the extensions' models without publishing anything — what
+/// Check the extensions' datasets without publishing anything — what
 /// `oxplow extension check` runs, on a read-only database: the same
 /// resolution, lineage and contract checks as [`compile_extensions`] (a
 /// changed contract at a published version fails), against temp views.
@@ -1906,13 +1906,13 @@ pub struct CheckedModels {
 /// inside a transaction that's rolled back (`Database::read`).
 pub fn check_extensions(
     conn: &Connection,
-    extensions: &[ExtensionModels],
+    extensions: &[ExtensionDatasets],
     stubs: &[EntityStub],
-) -> Result<CheckedModels, DomainError> {
+) -> Result<CheckedDatasets, DomainError> {
     pass(conn, extensions, stubs, Pass::Check)
 }
 
-/// What a pass over the extensions' models does.
+/// What a pass over the extensions' datasets does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Pass {
     /// Create the views, record them and their contracts, run their tests.
@@ -1921,13 +1921,13 @@ enum Pass {
     Check,
 }
 
-/// One pass over the extensions' models (see [`compile_extensions`]).
+/// One pass over the extensions' datasets (see [`compile_extensions`]).
 fn pass(
     tx: &Connection,
-    extensions: &[ExtensionModels],
+    extensions: &[ExtensionDatasets],
     stubs: &[EntityStub],
     mode: Pass,
-) -> Result<CheckedModels, DomainError> {
+) -> Result<CheckedDatasets, DomainError> {
     let mut errors: BTreeMap<String, Vec<String>> = extensions
         .iter()
         .map(|e| (e.extension.clone(), Vec::new()))
@@ -1944,19 +1944,19 @@ fn pass(
                 Kept::No(why) => push(&mut errors, &e.extension, why),
             }
         }
-        ready.push(ExtensionModels {
+        ready.push(ExtensionDatasets {
             extension: e.extension.clone(),
             sources,
             config: e.config.clone(),
         });
     }
     let extensions = &ready;
-    // What a ref() can name: core models, extensions' entities, and the
-    // models declared in this pass (never the last pass's, which this one
+    // What a ref() can name: core datasets, extensions' entities, and the
+    // datasets declared in this pass (never the last pass's, which this one
     // replaces).
     let registered: Vec<(String, String, String)> = {
         let mut st = tx
-            .prepare("SELECT owner, name, view FROM model WHERE kind = 'entity' OR owner = ?1")
+            .prepare("SELECT owner, name, view FROM dataset WHERE kind = 'entity' OR owner = ?1")
             .map_err(map_sql_err)?;
         let rows = st
             .query_map([CORE], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
@@ -1978,7 +1978,7 @@ fn pass(
             continue; // it has synced: its view is real
         }
         // Here, a typed empty table under the view, as a synced entity has
-        // (so a model's lineage and contract check as they will); for the
+        // (so a dataset's lineage and contract check as they will); for the
         // check's queries, which only read its columns, an empty SELECT.
         let table = format!(
             "ext__{}__{}",
@@ -2026,7 +2026,7 @@ fn pass(
                     &mut errors,
                     &e.extension,
                     format!(
-                        "{}: `{view}` already belongs to `{owner}`; rename the model",
+                        "{}: `{view}` already belongs to `{owner}`; rename the dataset",
                         src.file
                     ),
                 );
@@ -2059,7 +2059,7 @@ fn pass(
         let source_ok = |table: &str| {
             if !table.starts_with(&own_prefix) {
                 Err(format!(
-                    "is not this extension's: an extension model reads only its own extension's tables \
+                    "is not this extension's: an extension dataset reads only its own extension's tables \
                      (`{own_prefix}*`); read oxplow's data through ref()"
                 ))
             } else if !tables.contains(table) {
@@ -2079,7 +2079,7 @@ fn pass(
             }
         }
     }
-    // Publish in dependency order; a model reading one that didn't compile
+    // Publish in dependency order; a dataset reading one that didn't compile
     // doesn't either.
     let now = ts_to_string(oxplow_domain::Timestamp::now());
     let in_pass: BTreeSet<String> = resolved.iter().map(|(_, m)| m.view.clone()).collect();
@@ -2108,11 +2108,11 @@ fn pass(
                 .iter()
                 .all(|r| !in_pass.contains(r) || done.contains(r))
             {
-                tx.execute_batch("SAVEPOINT extension_model")
+                tx.execute_batch("SAVEPOINT extension_dataset")
                     .map_err(map_sql_err)?;
                 match publish(tx, &m, &ext, &now, mode) {
                     Ok(()) => {
-                        tx.execute_batch("RELEASE extension_model")
+                        tx.execute_batch("RELEASE extension_dataset")
                             .map_err(map_sql_err)?;
                         if mode == Pass::Check {
                             views.push(TempView {
@@ -2124,8 +2124,10 @@ fn pass(
                         published.push((ext.clone(), m.source));
                     }
                     Err(err) => {
-                        tx.execute_batch("ROLLBACK TO extension_model; RELEASE extension_model")
-                            .map_err(map_sql_err)?;
+                        tx.execute_batch(
+                            "ROLLBACK TO extension_dataset; RELEASE extension_dataset",
+                        )
+                        .map_err(map_sql_err)?;
                         push(&mut errors, &ext, err.to_string());
                         failed.insert(m.view.clone());
                     }
@@ -2141,7 +2143,7 @@ fn pass(
                     &mut errors,
                     ext,
                     format!(
-                        "{}: models read each other in a cycle ({})",
+                        "{}: datasets read each other in a cycle ({})",
                         m.source.file,
                         m.first_ref_at.clone().unwrap_or_default()
                     ),
@@ -2209,7 +2211,7 @@ fn pass(
             push(&mut errors, &e.extension, problem);
         }
     }
-    Ok(CheckedModels { errors, views })
+    Ok(CheckedDatasets { errors, views })
 }
 
 fn push(errors: &mut BTreeMap<String, Vec<String>>, extension: &str, message: String) {
@@ -2288,7 +2290,7 @@ mod tests {
                 materialize: None,
                 ai_context: None,
             },
-            file: format!("models/{name}.sql"),
+            file: format!("datasets/{name}.sql"),
             sql: sql.into(),
             twin: None,
         }
@@ -2298,10 +2300,10 @@ mod tests {
         format!("v_t_{name}")
     }
 
-    /// P4.2 (tsk487): a core model compiles to its view with its documented
+    /// P4.2 (tsk487): a core dataset compiles to its view with its documented
     /// columns, and the registry records it and its input.
     #[test]
-    fn the_core_models_compile_and_are_recorded() {
+    fn the_core_datasets_compile_and_are_recorded() {
         let conn = fresh();
         let names: Vec<String> = view_columns(&conn, "v_stream")
             .unwrap()
@@ -2326,14 +2328,14 @@ mod tests {
         );
         let (owner, version): (String, i64) = conn
             .query_row(
-                "SELECT owner, version FROM model WHERE view = 'v_stream'",
+                "SELECT owner, version FROM dataset WHERE view = 'v_stream'",
                 [],
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
             .unwrap();
         assert_eq!((owner.as_str(), version), ("core", 6));
         let mut inputs: Vec<(String, String)> = conn
-            .prepare("SELECT input, kind FROM model_input WHERE view = 'v_stream'")
+            .prepare("SELECT input, kind FROM dataset_input WHERE view = 'v_stream'")
             .unwrap()
             .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
             .unwrap()
@@ -2362,11 +2364,11 @@ mod tests {
             })
         };
         let mut m = source("a", "SELECT id FROM source('streams')", &["id INTEGER"]);
-        m.decl.ai_context = ctx("about the model");
+        m.decl.ai_context = ctx("about the dataset");
         m.decl.fields[0].ai_context = ctx("about the column");
         compile(&mut conn, "t", std::slice::from_ref(&m), &view).unwrap();
         let read = |conn: &Connection| -> (Option<String>, Option<String>) {
-            let model = conn
+            let dataset = conn
                 .query_row(
                     "SELECT ai_context FROM v_dataset WHERE view = 'v_t_a'",
                     [],
@@ -2380,15 +2382,15 @@ mod tests {
                     |r| r.get(0),
                 )
                 .unwrap();
-            (model, column)
+            (dataset, column)
         };
-        let (model, column) = read(&conn);
-        assert!(model.unwrap().contains("about the model"));
+        let (dataset, column) = read(&conn);
+        assert!(dataset.unwrap().contains("about the dataset"));
         assert!(column.unwrap().contains("about the column"));
         // The contract recorded holds no guidance.
         let recorded: String = conn
             .query_row(
-                "SELECT columns_json FROM model_contract WHERE view = 'v_t_a'",
+                "SELECT columns_json FROM dataset_contract WHERE view = 'v_t_a'",
                 [],
                 |r| r.get(0),
             )
@@ -2398,7 +2400,7 @@ mod tests {
         m.decl.fields[0].ai_context = ctx("reworded");
         compile(&mut conn, "t", std::slice::from_ref(&m), &view).unwrap();
         assert!(read(&conn).1.unwrap().contains("reworded"));
-        // A model without any reads NULL.
+        // A dataset without any reads NULL.
         let mut bare = source("b", "SELECT id FROM source('streams')", &["id INTEGER"]);
         bare.decl.ai_context = None;
         compile(&mut conn, "t", &[m, bare], &view).unwrap();
@@ -2415,20 +2417,20 @@ mod tests {
     #[test]
     fn refs_are_resolved_in_order_and_recorded() {
         let mut conn = fresh();
-        let models = [
+        let datasets = [
             source("b", "SELECT id FROM ref('a') WHERE id > 0", &["id INTEGER"]),
             source("a", "SELECT id FROM source('streams')", &["id INTEGER"]),
         ];
-        compile(&mut conn, "t", &models, &view).unwrap();
+        compile(&mut conn, "t", &datasets, &view).unwrap();
         let inputs: Vec<(String, String)> = conn
-            .prepare("SELECT input, kind FROM model_input WHERE view = 'v_t_b'")
+            .prepare("SELECT input, kind FROM dataset_input WHERE view = 'v_t_b'")
             .unwrap()
             .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
             .unwrap()
             .collect::<rusqlite::Result<_>>()
             .unwrap();
         assert_eq!(inputs, vec![("v_t_a".to_string(), "ref".to_string())]);
-        // A count over a model reads it too (SQLite reports only the base
+        // A count over a dataset reads it too (SQLite reports only the base
         // table for that).
         compile(
             &mut conn,
@@ -2454,7 +2456,7 @@ mod tests {
         .unwrap_err();
         assert!(
             err.to_string()
-                .contains("models/a.sql:2:6: ref('nope') names no model"),
+                .contains("datasets/a.sql:2:6: ref('nope') names no dataset"),
             "{err}"
         );
         let err = compile(
@@ -2466,7 +2468,7 @@ mod tests {
         .unwrap_err();
         assert!(
             err.to_string()
-                .contains("models/a.sql:1:16: source('no_table') names no table"),
+                .contains("datasets/a.sql:1:16: source('no_table') names no table"),
             "{err}"
         );
         let err = compile(
@@ -2481,11 +2483,11 @@ mod tests {
         .unwrap_err();
         let msg = err.to_string();
         assert!(msg.contains("cycle"), "{msg}");
-        assert!(msg.contains("models/b.sql:2:3"), "{msg}");
+        assert!(msg.contains("datasets/b.sql:2:3"), "{msg}");
     }
 
     #[test]
-    fn a_read_the_model_didnt_declare_fails() {
+    fn a_read_the_dataset_didnt_declare_fails() {
         let mut conn = fresh();
         let err = compile(
             &mut conn,
@@ -2500,7 +2502,7 @@ mod tests {
         .unwrap_err();
         assert!(
             err.to_string()
-                .contains("models/a.sql: reads threads without ref()/source()"),
+                .contains("datasets/a.sql: reads threads without ref()/source()"),
             "{err}"
         );
     }
@@ -2599,8 +2601,8 @@ mod tests {
         );
     }
 
-    /// Every core model's contract is pinned at its version in
-    /// `fixtures/model_contracts.json`, so a change without a bump is red
+    /// Every core dataset's contract is pinned at its version in
+    /// `fixtures/dataset_contracts.json`, so a change without a bump is red
     /// here and not only against a database that recorded the version.
     /// `OXPLOW_BLESS=1` pins a new version (earlier ones stay).
     /// P8.B1: the key is part of the contract — declaring one at a pinned
@@ -2643,7 +2645,7 @@ mod tests {
         };
         let ok = sources_from(
             &yaml("2h"),
-            "models",
+            "datasets",
             |_| Some("SELECT id FROM source('streams')".into()),
             || vec!["a".into()],
         )
@@ -2656,7 +2658,7 @@ mod tests {
         compile(&mut conn, "t", &ok, &view).unwrap();
         let recorded: String = conn
             .query_row(
-                "SELECT materialize FROM model WHERE view = 'v_t_a'",
+                "SELECT materialize FROM dataset WHERE view = 'v_t_a'",
                 [],
                 |r| r.get(0),
             )
@@ -2665,23 +2667,23 @@ mod tests {
 
         let err = sources_from(
             &yaml("soon"),
-            "models",
+            "datasets",
             |_| Some("SELECT 1 AS id".into()),
             || vec!["a".into()],
         )
         .unwrap_err();
         assert!(
             err.to_string()
-                .contains("models/models.yaml:1: `a` materializes `every: soon`"),
+                .contains("datasets/datasets.yaml:1: `a` materializes `every: soon`"),
             "{err}"
         );
     }
 
-    /// P8.B4: an incremental model needs a key and an INTEGER watermark
+    /// P8.B4: an incremental dataset needs a key and an INTEGER watermark
     /// column, and SQL that appending past the watermark keeps right — each
     /// refusal at its line, pointing at `on_change`.
     #[test]
-    fn an_incremental_model_is_refused_what_appending_cant_keep_right() {
+    fn an_incremental_dataset_is_refused_what_appending_cant_keep_right() {
         let decl = |extra: &str| {
             format!(
                 "- name: a\n  version: 1\n  description: d\n  materialize: {{ incremental: id }}\n{extra}  fields:\n    - {{ name: id, type: INTEGER, doc: \"Row id.\" }}\n    - {{ name: v, type: TEXT, doc: \"A value.\" }}\n"
@@ -2691,7 +2693,7 @@ mod tests {
             let sql = sql.to_string();
             sources_from(
                 &yaml,
-                "models",
+                "datasets",
                 move |_| Some(sql.clone()),
                 || vec!["a".into()],
             )
@@ -2701,7 +2703,7 @@ mod tests {
         assert!(load(decl("  key: [id]\n"), plain).is_ok());
         assert!(
             err(decl(""), plain)
-                .contains("models/models.yaml:1: `a` is incremental but declares no key"),
+                .contains("datasets/datasets.yaml:1: `a` is incremental but declares no key"),
             "{}",
             err(decl(""), plain)
         );
@@ -2720,7 +2722,7 @@ mod tests {
             );
         let e = err(yaml, "SELECT id, v, 1 AS n FROM source('streams')");
         assert!(
-            e.contains("models/models.yaml:1: `a`'s watermark `n` must be its key"),
+            e.contains("datasets/datasets.yaml:1: `a`'s watermark `n` must be its key"),
             "{e}"
         );
         for (sql, what) in [
@@ -2766,7 +2768,7 @@ mod tests {
             let e = err(decl("  key: [id]\n"), sql);
             let line = if sql.contains('\n') { 2 } else { 1 };
             assert!(
-                e.contains(&format!("models/a.sql:{line}:"))
+                e.contains(&format!("datasets/a.sql:{line}:"))
                     && e.contains(what)
                     && e.contains("on_change"),
                 "{sql}: {e}"
@@ -2786,7 +2788,7 @@ mod tests {
         let load = |yaml: &str| {
             sources_from(
                 yaml,
-                "models",
+                "datasets",
                 |_| Some("SELECT 1 AS id".into()),
                 || vec!["a".into()],
             )
@@ -2795,14 +2797,14 @@ mod tests {
         let err = load(&decl("{ from: nope, to: work_item.id }")).unwrap_err();
         assert!(
             err.to_string().contains(
-                "models/models.yaml:1: `a`'s relationship from `nope` names no field it declares"
+                "datasets/datasets.yaml:1: `a`'s relationship from `nope` names no field it declares"
             ),
             "{err}"
         );
         let err = load(&decl("{ from: id, to: work_item }")).unwrap_err();
         assert!(
             err.to_string().contains(
-                "models/models.yaml:1: `a`'s relationship to `work_item` isn't `<dataset>.<field>`"
+                "datasets/datasets.yaml:1: `a`'s relationship to `work_item` isn't `<dataset>.<field>`"
             ),
             "{err}"
         );
@@ -2814,14 +2816,14 @@ mod tests {
         let yaml = "- name: a\n  version: 1\n  description: d\n  key: [nope]\n  fields:\n    - { name: id, type: INTEGER, doc: \"Row id.\" }\n";
         let err = sources_from(
             yaml,
-            "models",
+            "datasets",
             |_| Some("SELECT 1 AS id".into()),
             || vec!["a".into()],
         )
         .unwrap_err();
         assert!(
             err.to_string().contains(
-                "models/models.yaml:1: `a`'s key names `nope`, which isn't one of its columns"
+                "datasets/datasets.yaml:1: `a`'s key names `nope`, which isn't one of its columns"
             ),
             "{err}"
         );
@@ -2864,7 +2866,7 @@ mod tests {
         );
     }
 
-    /// A keyed materialized model's table carries the key as its primary
+    /// A keyed materialized dataset's table carries the key as its primary
     /// key.
     #[test]
     fn a_keyed_materialized_table_has_its_primary_key() {
@@ -2888,11 +2890,11 @@ mod tests {
     }
 
     #[test]
-    fn model_docs_carry_no_plan_labels() {
-        // tsk1044: a model's description is read by people (Catalog,
+    fn dataset_docs_carry_no_plan_labels() {
+        // tsk1044: a dataset's description is read by people (Catalog,
         // Explore Data) and agents; a plan code ("(P5.E1)") means nothing
         // to either.
-        let yaml = include_str!("../models/models.yaml");
+        let yaml = include_str!("../datasets/datasets.yaml");
         let bytes = yaml.as_bytes();
         let found: Vec<String> = (0..bytes.len().saturating_sub(1))
             .filter(|&i| {
@@ -2906,9 +2908,9 @@ mod tests {
     }
 
     #[test]
-    fn every_core_model_contract_is_pinned_at_its_version() {
-        let path =
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/model_contracts.json");
+    fn every_core_dataset_contract_is_pinned_at_its_version() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("fixtures/dataset_contracts.json");
         let decls: Vec<DatasetDecl> = core_sources()
             .unwrap()
             .into_iter()
@@ -2965,7 +2967,7 @@ mod tests {
         );
         let recorded: i64 = conn
             .query_row(
-                "SELECT count(*) FROM model_test WHERE view = 'v_t_a'",
+                "SELECT count(*) FROM dataset_test WHERE view = 'v_t_a'",
                 [],
                 |r| r.get(0),
             )
@@ -2974,7 +2976,7 @@ mod tests {
     }
 
     #[test]
-    fn every_core_model_passes_its_tests_on_an_empty_database() {
+    fn every_core_dataset_passes_its_tests_on_an_empty_database() {
         let conn = fresh();
         let sources = core_sources().unwrap();
         for r in run_tests(&conn, &sources, &core_view).unwrap() {
@@ -2985,7 +2987,7 @@ mod tests {
     /// One extensions' pass on `conn`, committed.
     fn publish(
         conn: &mut Connection,
-        extensions: &[ExtensionModels],
+        extensions: &[ExtensionDatasets],
     ) -> Result<BTreeMap<String, Vec<String>>, DomainError> {
         let tx = conn.transaction().map_err(map_sql_err)?;
         let errors = compile_extensions(&tx, extensions)?;
@@ -2993,10 +2995,10 @@ mod tests {
         Ok(errors)
     }
 
-    fn ext(extension: &str, models: Vec<DatasetSource>) -> ExtensionModels {
-        ExtensionModels {
+    fn ext(extension: &str, datasets: Vec<DatasetSource>) -> ExtensionDatasets {
+        ExtensionDatasets {
             extension: extension.into(),
-            sources: models
+            sources: datasets
                 .into_iter()
                 .map(|mut m| {
                     m.file = format!(".oxplow/extensions/{extension}/{}", m.file);
@@ -3010,8 +3012,8 @@ mod tests {
     fn published(conn: &Connection) -> Vec<(String, String, String)> {
         let mut st = conn
             .prepare(
-                "SELECT m.view, m.owner, group_concat(i.input) FROM model m
-                 LEFT JOIN model_input i USING (view)
+                "SELECT m.view, m.owner, group_concat(i.input) FROM dataset m
+                 LEFT JOIN dataset_input i USING (view)
                  WHERE m.owner <> 'core' GROUP BY m.view ORDER BY m.view",
             )
             .unwrap();
@@ -3041,12 +3043,12 @@ mod tests {
         .unwrap()
     }
 
-    /// P7.B2: an on-change model publishes as a view over its own table
+    /// P7.B2: an on-change dataset publishes as a view over its own table
     /// (the contract's columns), keeps the lineage its SELECT declared,
     /// keeps its rows across a recompile, and starts empty again when its
     /// contract changes.
     #[test]
-    fn an_on_change_model_is_a_view_over_its_table_and_keeps_its_lineage() {
+    fn an_on_change_dataset_is_a_view_over_its_table_and_keeps_its_lineage() {
         let mut conn = fresh();
         let busy = on_change(source(
             "busy",
@@ -3071,7 +3073,7 @@ mod tests {
         );
         let (materialize, input): (Option<String>, String) = conn
             .query_row(
-                "SELECT m.materialize, i.input FROM model m JOIN model_input i USING (view)
+                "SELECT m.materialize, i.input FROM dataset m JOIN dataset_input i USING (view)
                  WHERE m.view = 'v_t_busy'",
                 [],
                 |r| Ok((r.get(0)?, r.get(1)?)),
@@ -3092,7 +3094,7 @@ mod tests {
             .query_row("SELECT count(*) FROM v_t_busy", [], |r| r.get(0))
             .unwrap();
         assert_eq!(n, 1, "a recompile keeps the last recompute's rows");
-        // A query reads the model, never its table: the refusal names it.
+        // A query reads the dataset, never its table: the refusal names it.
         let refused = crate::semantic_layer::check_query_on(
             &conn,
             &crate::SqlQuery::new("SELECT * FROM m_v_t_busy"),
@@ -3114,10 +3116,10 @@ mod tests {
         assert_eq!(n, 0, "a changed contract starts the table empty");
     }
 
-    /// P7.B2: a model never reads a materialized model's table — its own
+    /// P7.B2: a dataset never reads a materialized dataset's table — its own
     /// or another's — through `source()`.
     #[test]
-    fn a_model_may_not_source_a_materialized_table() {
+    fn a_dataset_may_not_source_a_materialized_table() {
         let mut conn = fresh();
         compile(
             &mut conn,
@@ -3149,7 +3151,7 @@ mod tests {
     /// is mid-write as it starts and commits while it waits — a pass that
     /// read first and wrote second failed then (`SQLITE_BUSY_SNAPSHOT`,
     /// which no wait fixes), and a fresh project's boot pass never
-    /// published its extensions' models.
+    /// published its extensions' datasets.
     #[tokio::test(flavor = "multi_thread")]
     async fn an_extensions_pass_waits_out_another_writer() {
         let dir = tempfile::tempdir().unwrap();
@@ -3171,7 +3173,7 @@ mod tests {
             other.execute_batch("COMMIT").unwrap();
         });
         let errors = db
-            .compile_extension_models(vec![ext(
+            .compile_extension_datasets(vec![ext(
                 "acme",
                 vec![source(
                     "busy",
@@ -3185,13 +3187,13 @@ mod tests {
         assert_eq!(errors["acme"], Vec::<String>::new());
     }
 
-    /// P7.B2: checking an extension's on-change model (what `extension check`
+    /// P7.B2: checking an extension's on-change dataset (what `extension check`
     /// runs, read-only) creates no table; publishing does, and a table no
-    /// published model reads goes with the next extensions' pass.
+    /// published dataset reads goes with the next extensions' pass.
     #[test]
     fn a_check_creates_no_table_and_an_orphaned_one_goes() {
         let mut conn = fresh();
-        let models = [ext(
+        let datasets = [ext(
             "acme",
             vec![on_change(source(
                 "busy",
@@ -3200,23 +3202,23 @@ mod tests {
             ))],
         )];
         let tx = conn.transaction().unwrap();
-        let errors = check_extensions(&tx, &models, &[]).unwrap().errors;
+        let errors = check_extensions(&tx, &datasets, &[]).unwrap().errors;
         assert_eq!(errors["acme"], Vec::<String>::new());
         assert!(!table_exists(&tx, "m_v_acme_busy"));
         drop(tx);
-        let errors = publish(&mut conn, &models).unwrap();
+        let errors = publish(&mut conn, &datasets).unwrap();
         assert_eq!(errors["acme"], Vec::<String>::new());
         assert!(table_exists(&conn, "m_v_acme_busy"));
         publish(&mut conn, &[]).unwrap();
         assert!(!table_exists(&conn, "m_v_acme_busy"));
     }
 
-    /// P4.9 (tsk494): an extension's model reads core models through
+    /// P4.9 (tsk494): an extension's dataset reads core datasets through
     /// `ref()`, its own by bare name and another extension's as
     /// `ref('<ext>/<name>')`; each publishes `v_<ext>_<name>` in the
     /// registry. A recompile replaces the set.
     #[test]
-    fn extension_models_publish_views_over_core_and_each_other() {
+    fn extension_datasets_publish_views_over_core_and_each_other() {
         let mut conn = fresh();
         let errors = publish(
             &mut conn,
@@ -3296,10 +3298,10 @@ mod tests {
         assert!(conn.prepare("SELECT * FROM v_digest_late_titles").is_err());
     }
 
-    /// A broken model fails alone — with every model reading it — and its
+    /// A broken dataset fails alone — with every dataset reading it — and its
     /// extension's errors say where; an extension reads only its own tables.
     #[test]
-    fn a_broken_extension_model_fails_alone() {
+    fn a_broken_extension_dataset_fails_alone() {
         let mut conn = fresh();
         let errors = publish(
             &mut conn,
@@ -3333,17 +3335,17 @@ mod tests {
         .unwrap();
         let raw = errors["raw"].join("\n");
         assert!(
-            raw.contains(".oxplow/extensions/raw/models/items.sql:2:3"),
+            raw.contains(".oxplow/extensions/raw/datasets/items.sql:2:3"),
             "{raw}"
         );
         assert!(raw.contains("only its own extension's tables"), "{raw}");
         let shaky = errors["shaky"].join("\n");
-        assert!(shaky.contains("models/bad.sql"), "{shaky}");
+        assert!(shaky.contains("datasets/bad.sql"), "{shaky}");
         assert!(
             shaky.contains("reads `v_shaky_bad`, which didn't compile"),
             "{shaky}"
         );
-        assert!(shaky.contains("ref('missing') names no model"), "{shaky}");
+        assert!(shaky.contains("ref('missing') names no dataset"), "{shaky}");
         assert!(errors["loop"].join("\n").contains("cycle"), "{errors:?}");
         assert_eq!(
             published(&conn),
@@ -3438,11 +3440,11 @@ mod tests {
         );
     }
 
-    /// P4.9 (tsk494): an extension model's declared tests run after it
-    /// publishes; a failure is in `model_test` and the extension's errors,
+    /// P4.9 (tsk494): an extension dataset's declared tests run after it
+    /// publishes; a failure is in `dataset_test` and the extension's errors,
     /// and the view stays published.
     #[test]
-    fn an_extension_models_failing_test_is_reported_not_fatal() {
+    fn an_extension_datasets_failing_test_is_reported_not_fatal() {
         let mut conn = fresh();
         conn.execute_batch(
             "INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source, worktree_path, created_at, updated_at)
@@ -3468,7 +3470,7 @@ mod tests {
         assert!(!joined.contains("relationships"), "{joined}");
         let states: Vec<(String, String)> = {
             let mut st = conn
-                .prepare("SELECT test, state FROM model_test WHERE view = 'v_checks_streams' ORDER BY test")
+                .prepare("SELECT test, state FROM dataset_test WHERE view = 'v_checks_streams' ORDER BY test")
                 .unwrap();
             st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
                 .unwrap()
@@ -3519,7 +3521,7 @@ mod tests {
                 "late-work",
                 join_sources(
                     vec![v2.decl],
-                    "models",
+                    "datasets",
                     "extension.yaml",
                     |f| files.get(f).cloned(),
                     || vec!["late".into(), "late.v1".into()],
@@ -3577,7 +3579,7 @@ mod tests {
         let files: HashMap<String, String> = [("fresh.sql".to_string(), never.sql.clone())].into();
         let sources = join_sources(
             vec![never.decl],
-            "models",
+            "datasets",
             "extension.yaml",
             |f| files.get(f).cloned(),
             || vec!["fresh".into()],
@@ -3593,7 +3595,7 @@ mod tests {
     }
 
     /// P4.9 (tsk494): the check `oxplow extension check` runs works on a
-    /// read-only database and writes nothing: a good model passes, and a
+    /// read-only database and writes nothing: a good dataset passes, and a
     /// changed contract at a published version fails naming the column.
     #[tokio::test]
     async fn a_check_on_a_read_only_database_catches_a_breaking_change() {
@@ -3602,7 +3604,7 @@ mod tests {
         let late = |sql: &str, cols: &[&str]| ext("late-work", vec![source("late", sql, cols)]);
         {
             let db = crate::Database::open(&path).unwrap();
-            db.compile_extension_models(vec![late(
+            db.compile_extension_datasets(vec![late(
                 "SELECT uri FROM ref('work_item')",
                 &["uri TEXT"],
             )])
@@ -3611,7 +3613,7 @@ mod tests {
         }
         let ro = crate::Database::open_read_only(&path).unwrap();
         let errors = ro
-            .check_extension_models(
+            .check_extension_datasets(
                 vec![late(
                     "SELECT uri FROM ref('work_item') WHERE state = 'done'",
                     &["uri TEXT"],
@@ -3623,7 +3625,7 @@ mod tests {
             .errors;
         assert!(errors["late-work"].is_empty(), "{errors:?}");
         let errors = ro
-            .check_extension_models(
+            .check_extension_datasets(
                 vec![late(
                     "SELECT uri, title FROM ref('work_item')",
                     &["uri TEXT", "title TEXT"],
@@ -3636,11 +3638,11 @@ mod tests {
         let joined = errors["late-work"].join("\n");
         assert!(joined.contains("column `title` added"), "{joined}");
         assert!(joined.contains("bump its version"), "{joined}");
-        // Nothing was written: the published model is the one compiled.
+        // Nothing was written: the published dataset is the one compiled.
         let sql: String = ro
             .read(|tx| {
                 tx.query_row(
-                    "SELECT sql FROM model WHERE view = 'v_late_work_late'",
+                    "SELECT sql FROM dataset WHERE view = 'v_late_work_late'",
                     [],
                     |r| r.get(0),
                 )

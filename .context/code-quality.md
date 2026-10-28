@@ -174,7 +174,7 @@ in the background. `DuplicationRecorder::record`
   `findings` and `duplicate-blocks` pages);
 - **stored in one write** (`SqliteCodeQualityStore::finish_scan_with_findings`):
   the findings, their `finding → file` page refs and the scan's `done`
-  status commit together, so a scan announces one `ModelsChanged`, not
+  status commit together, so a scan announces one `DatasetsChanged`, not
   two per finding. That burst (`page_ref` feeds `v_knowledge_page` and
   `v_thread_work`) used to keep the webview re-reading the wiki and Work
   models for the whole store and made typing lag;
@@ -196,7 +196,7 @@ in the background. `DuplicationRecorder::record`
   never baselines the dominated-capture prune acts on (tsk709) —
   [metrics.md](./metrics.md) → "Three metric scopes";
 - a status-bar background task. Its rows' commits announce it
-  (`ModelsChanged` on `v_code_quality_scan`); the `CodeQualityScanned`
+  (`DatasetsChanged` on `v_code_quality_scan`); the `CodeQualityScanned`
   bus event is gone (P7.B4).
 
 The change's own `v_change_duplicate` rows are the findings anchored in
@@ -238,7 +238,7 @@ takes `{ path, base_content, head_content }` specs and calls
 `oxplow_code_metrics::analyze_file` per side (no tempdir, no subprocess).
 The change analyzer buckets the result into added / deleted /
 signature-changed / body-changed functions; a file's review priority is
-oxplow-bundled's model `change_interest` over those rows (P7.B5); see
+oxplow-bundled's dataset `change_interest` over those rows (P7.B5); see
 [semantic-layer.md](./semantic-layer.md) → "Change analysis".
 
 The result also carries a `churn: Vec<AnalyzedFileChurn>` rollup
@@ -356,12 +356,12 @@ changed-files tree without a restart.
 
 ### Co-change (oxplow-bundled, P7.B5)
 
-No longer core. oxplow-bundled's `co_change_pair` model, materialized
+No longer core. oxplow-bundled's `co_change_pair` dataset, materialized
 over the commit index (`v_commit_file`, every stream's head; see
 git-integration.md "Commit indexer"), holds each pair of files that
 shared at least 3 commits of 50 files or fewer (mass renames and
 formatter sweeps drown the signal) in the last 180 days; its
-`change_co_change` model flags a change's files that are dormant (no
+`change_co_change` dataset flags a change's files that are dormant (no
 commit in 90 days; never touched counts as 90) — checked first — or whose
 top three co-changers are all absent from the change. Measured on this
 repo's history (2,351 commits, 19k file rows): the pairs compute in

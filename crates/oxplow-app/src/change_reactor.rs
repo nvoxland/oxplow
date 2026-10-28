@@ -20,7 +20,7 @@
 //! reached it while it was open (tsk710; what `effort_churn`, `after:
 //! [change.analyze]`, reads). An effort with no start snapshot (opened and
 //! closed at once, after the fact) has no change, so its finish is done.
-//! The results land in `v_change*` (`ModelsChanged` announces them); an
+//! The results land in `v_change*` (`DatasetsChanged` announces them); an
 //! analysis already running for a change defers the event (`Busy`), and a
 //! failure is a dead letter naming the stream.
 //!

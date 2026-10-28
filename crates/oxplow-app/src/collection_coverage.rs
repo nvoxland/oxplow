@@ -1,9 +1,9 @@
 //! How current the collected data behind a query is
 //! (`.context/semantic-layer.md` "Completeness and coverage"). A query
 //! finishing says nothing about whether its sources were collected: this
-//! says, for each model a query read that a collector feeds, which
+//! says, for each dataset a query read that a collector feeds, which
 //! collector and how its last run went — observed, never inferred, and
-//! `never` when nothing has run. Models core keeps current itself carry no
+//! `never` when nothing has run. Datasets core keeps current itself carry no
 //! entry.
 //!
 //! [`Feeds`] maps each extension entity's view to the collectors that
@@ -18,27 +18,27 @@ use oxplow_db::Database;
 use oxplow_domain::DomainError;
 use rusqlite::OptionalExtension;
 
-/// A collector that feeds a model.
+/// A collector that feeds a dataset.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Feeder {
     owner: String,
     id: String,
 }
 
-/// Which collectors feed which models.
+/// Which collectors feed which datasets.
 #[derive(Default)]
 pub struct Feeds {
-    by_model: RwLock<BTreeMap<String, Vec<Feeder>>>,
+    by_dataset: RwLock<BTreeMap<String, Vec<Feeder>>>,
 }
 
 impl Feeds {
     /// Restate from the enabled extensions' collectors.
     pub fn restate(&self, extensions: &[crate::extensions::Extension]) {
-        let mut by_model: BTreeMap<String, Vec<Feeder>> = BTreeMap::new();
+        let mut by_dataset: BTreeMap<String, Vec<Feeder>> = BTreeMap::new();
         for ext in extensions.iter().filter(|e| e.enabled) {
             for c in &ext.collectors {
                 for entity in &c.entities {
-                    by_model
+                    by_dataset
                         .entry(oxplow_config::collectors::entity_view_name(
                             &ext.name,
                             &entity.name,
@@ -51,15 +51,15 @@ impl Feeds {
                 }
             }
         }
-        *self.by_model.write().unwrap_or_else(|e| e.into_inner()) = by_model;
+        *self.by_dataset.write().unwrap_or_else(|e| e.into_inner()) = by_dataset;
     }
 
-    fn feeders(&self, models: &[String]) -> Vec<(String, Feeder)> {
-        let by_model = self.by_model.read().unwrap_or_else(|e| e.into_inner());
-        models
+    fn feeders(&self, datasets: &[String]) -> Vec<(String, Feeder)> {
+        let by_dataset = self.by_dataset.read().unwrap_or_else(|e| e.into_inner());
+        datasets
             .iter()
             .flat_map(|m| {
-                by_model
+                by_dataset
                     .get(m)
                     .into_iter()
                     .flatten()
@@ -68,13 +68,13 @@ impl Feeds {
             .collect()
     }
 
-    /// The coverage of `models`: one entry per collector feeding each.
+    /// The coverage of `datasets`: one entry per collector feeding each.
     pub async fn coverage(
         &self,
         db: &Database,
-        models: &[String],
+        datasets: &[String],
     ) -> Result<Vec<SourceCoverage>, DomainError> {
-        let feeders = self.feeders(models);
+        let feeders = self.feeders(datasets);
         if feeders.is_empty() {
             return Ok(Vec::new());
         }
@@ -82,7 +82,7 @@ impl Feeds {
         db.read(move |c| {
             feeders
                 .into_iter()
-                .map(|(model, f)| status_of(c, &now, model, &f))
+                .map(|(dataset, f)| status_of(c, &now, dataset, &f))
                 .collect()
         })
         .await
@@ -92,7 +92,7 @@ impl Feeds {
 fn status_of(
     c: &rusqlite::Connection,
     now: &str,
-    model: String,
+    dataset: String,
     f: &Feeder,
 ) -> Result<SourceCoverage, DomainError> {
     let sql = |e: rusqlite::Error| DomainError::Storage(e.to_string());
@@ -129,7 +129,7 @@ fn status_of(
         (Some((_, at, _)), _) => ("current", Some(at.clone()), None),
     };
     Ok(SourceCoverage {
-        model,
+        dataset,
         source: oxplow_domain::uri::build::collector_uri(&f.owner, &f.id),
         status: status.into(),
         at,
@@ -170,14 +170,18 @@ mod tests {
         }
     }
 
-    /// A model a collector feeds says how the collector stands: never run,
+    /// A dataset a collector feeds says how the collector stands: never run,
     /// then its last run's failure, then current.
     #[tokio::test]
-    async fn a_fed_model_says_how_its_collection_stands() {
+    async fn a_fed_dataset_says_how_its_collection_stands() {
         let fx = fixture().await;
-        let models = vec!["v_my_gh_pr".to_string(), "v_effort".to_string()];
-        let coverage = fx.svc.feeds.coverage(&fx.svc.db, &models).await.unwrap();
-        assert_eq!(coverage.len(), 1, "core's models carry none: {coverage:?}");
+        let datasets = vec!["v_my_gh_pr".to_string(), "v_effort".to_string()];
+        let coverage = fx.svc.feeds.coverage(&fx.svc.db, &datasets).await.unwrap();
+        assert_eq!(
+            coverage.len(),
+            1,
+            "core's datasets carry none: {coverage:?}"
+        );
         assert_eq!(
             (coverage[0].source.as_str(), coverage[0].status.as_str()),
             ("oxplow:oxplow/collector?collector=my-gh/gh", "never")
@@ -187,11 +191,11 @@ mod tests {
             .record_run(run("error", Some("rate limited")))
             .await
             .unwrap();
-        let failed = fx.svc.feeds.coverage(&fx.svc.db, &models).await.unwrap();
+        let failed = fx.svc.feeds.coverage(&fx.svc.db, &datasets).await.unwrap();
         assert_eq!(failed[0].status, "failed");
         assert_eq!(failed[0].error.as_deref(), Some("rate limited"));
         store.record_run(run("ok", None)).await.unwrap();
-        let current = fx.svc.feeds.coverage(&fx.svc.db, &models).await.unwrap();
+        let current = fx.svc.feeds.coverage(&fx.svc.db, &datasets).await.unwrap();
         assert_eq!(current[0].status, "current");
         assert!(current[0].at.is_some());
     }

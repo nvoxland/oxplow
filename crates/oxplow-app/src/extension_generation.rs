@@ -1,7 +1,7 @@
 //! The database portion of an extension generation candidate. Runtime registry
 //! publication and compatible reader pinning belong to the activation owner.
 
-use oxplow_db::models::{self, ExtensionModels};
+use oxplow_db::datasets::{self, ExtensionDatasets};
 use oxplow_db::TxError;
 use oxplow_domain::{vocabulary::Vocabulary, DomainError, Timestamp};
 
@@ -12,36 +12,35 @@ use crate::vocabulary_reactor::{PreparedVocabulary, VocabularyErrors, Vocabulary
 /// Database declarations copied from one catalog snapshot. No external code
 /// runs during preparation, and nothing is published by constructing this.
 pub struct PreparedExtensionDatabase {
-    /// Declared entities, created empty when absent so models over them
+    /// Declared entities, created empty when absent so datasets over them
     /// compile before their collectors first run.
     entities: Vec<oxplow_db::collector_store::EntityTable>,
-    models: Vec<ExtensionModels>,
+    datasets: Vec<ExtensionDatasets>,
     vocabulary: PreparedVocabulary,
     contributions: Vec<oxplow_domain::contribution::Descriptor>,
     /// The enabled extensions' pages, every loaded extension, what a
     /// person can ask and what they can configure, listed.
     listing: oxplow_db::catalog_listing_store::CatalogListing,
     capabilities: Option<PreparedCapabilities>,
-    /// The declarations of the extensions whose models read their own
+    /// The declarations of the extensions whose datasets read their own
     /// configuration (`config()`): their effective values are resolved in the
     /// publishing transaction and compiled into the views.
     configurations: Vec<(String, crate::extensions::config_schema::ConfigurationFile)>,
 }
 
-/// The effective configuration the published models were compiled against,
+/// The effective configuration the published datasets were compiled against,
 /// per extension that reads any; a change in it republishes them.
 pub type ConfigSignature = std::collections::BTreeMap<String, String>;
 
-/// Whether any model of `extension` reads its configuration with `config()`.
+/// Whether any dataset of `extension` reads its configuration with `config()`.
 pub fn reads_configuration(extension: &crate::extensions::Extension) -> bool {
     extension.configuration.is_some()
-        && extension
-            .datasets
-            .iter()
-            .any(|model| models::config_reads(&model.sql).is_ok_and(|reads| !reads.is_empty()))
+        && extension.datasets.iter().any(|dataset| {
+            datasets::config_reads(&dataset.sql).is_ok_and(|reads| !reads.is_empty())
+        })
 }
 
-/// The effective configuration of each extension in `extensions` whose models
+/// The effective configuration of each extension in `extensions` whose datasets
 /// read theirs, as it is stored now. A configuration that can't be resolved
 /// signs as its failure, so repairing it republishes too.
 pub fn config_signature_tx(
@@ -100,11 +99,11 @@ impl PreparedExtensionDatabase {
         vocabulary: PreparedVocabulary,
         capabilities: Option<PreparedCapabilities>,
     ) -> Self {
-        let models = snapshot
+        let datasets = snapshot
             .extensions()
             .iter()
             .filter(|extension| extension.enabled && !extension.datasets.is_empty())
-            .map(|extension| ExtensionModels {
+            .map(|extension| ExtensionDatasets {
                 extension: extension.name.clone(),
                 sources: extension.datasets.clone(),
                 config: None,
@@ -140,7 +139,7 @@ impl PreparedExtensionDatabase {
         Self {
             configurations,
             entities: crate::collector_runner::declared_entity_tables(snapshot.extensions()),
-            models,
+            datasets,
             vocabulary,
             contributions,
             listing: oxplow_db::catalog_listing_store::CatalogListing {
@@ -188,7 +187,7 @@ impl PreparedExtensionDatabase {
         }
     }
 
-    /// Replace models, vocabulary, contributions and optional capability rows
+    /// Replace datasets, vocabulary, contributions and optional capability rows
     /// and switch events as one database candidate.
     /// Any rejection restores the candidate, even if a trusted caller catches
     /// the rejection. Storage/rollback failures require aborting the outer
@@ -206,7 +205,7 @@ impl PreparedExtensionDatabase {
             .map_err(oxplow_db::map_sql_err)?;
         let result = (|| {
             oxplow_db::collector_store::ensure_entities_tx(tx, &self.entities)?;
-            let mut candidate = self.models.clone();
+            let mut candidate = self.datasets.clone();
             for (extension, declaration) in &self.configurations {
                 let values =
                     crate::extension_configuration::effective_values(tx, extension, declaration)
@@ -214,16 +213,16 @@ impl PreparedExtensionDatabase {
                             TxError::Aborted(VocabularyErrors::from([(
                                 extension.clone(),
                                 vec![format!(
-                                    "its stored configuration can't be read for its models' \
+                                    "its stored configuration can't be read for its datasets' \
                                      config() ({error:?}); fix or reset it"
                                 )],
                             )]))
                         })?;
-                if let Some(models) = candidate.iter_mut().find(|m| &m.extension == extension) {
-                    models.config = Some(values);
+                if let Some(datasets) = candidate.iter_mut().find(|m| &m.extension == extension) {
+                    datasets.config = Some(values);
                 }
             }
-            models::replace_extensions(tx, &candidate)?;
+            datasets::replace_extensions(tx, &candidate)?;
             let vocabulary = self.vocabulary.replace_tx(tx, now)?;
             oxplow_db::contribution_store::reset_tx(tx, &self.contributions)?;
             oxplow_db::catalog_listing_store::reset_tx(tx, &self.listing)?;

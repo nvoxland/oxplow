@@ -1,5 +1,5 @@
 //! `sql.read/query { sql, params?, limit? }`: one read-only statement over
-//! the published models (`v_*`), through the semantic layer's gateway
+//! the published datasets (`v_*`), through the semantic layer's gateway
 //! (the limit and the timeout are its).
 
 use std::sync::Arc;
@@ -19,7 +19,7 @@ pub const SQL_QUERY: &str = "oxplow.sql.query";
 #[serde(deny_unknown_fields)]
 pub struct QuerySqlInput {
     /// One read-only `SELECT` or `WITH` statement over the published
-    /// models (`v_dataset` lists them, `v_field` documents their
+    /// datasets (`v_dataset` lists them, `v_field` documents their
     /// columns). Use `?1`, `?2`, … for parameters.
     pub sql: String,
     /// Positional parameter values for `?1`, `?2`, ….
@@ -86,11 +86,11 @@ mod tests {
         }
     }
 
-    /// A model reads through the bus with bound params and a row cap,
+    /// A dataset reads through the bus with bound params and a row cap,
     /// leaving no record; a write or a physical table is refused as
     /// invalid.
     #[tokio::test]
-    async fn a_model_queries_through_the_bus() {
+    async fn a_dataset_queries_through_the_bus() {
         let dir = tempfile::tempdir().unwrap();
         crate::test_fixtures::init_git_repo(dir.path());
         let svc = crate::Services::in_memory(dir.path()).await.unwrap();

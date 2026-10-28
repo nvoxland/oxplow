@@ -226,10 +226,10 @@ async fn a_disabled_extension_exposes_nothing() {
     assert_eq!(answer(&svc, "alpha").await, Ok(json!(1)));
 }
 
-/// A model whose SQL doesn't compile fails only its own extension: the
+/// A dataset whose SQL doesn't compile fails only its own extension: the
 /// candidate's other changes still activate.
 #[tokio::test(flavor = "multi_thread")]
-async fn a_model_that_does_not_compile_holds_back_only_its_extension() {
+async fn a_dataset_that_does_not_compile_holds_back_only_its_extension() {
     let (dir, svc) = project().await;
     write_ext(
         dir.path(),
@@ -237,10 +237,10 @@ async fn a_model_that_does_not_compile_holds_back_only_its_extension() {
         1,
         "datasets:\n  - name: blocked\n    version: 1\n    description: Blocked work items.\n    fields:\n      - { name: uri, type: TEXT, doc: Work item ref. }\n",
     );
-    std::fs::create_dir_all(dir.path().join(".oxplow/extensions/late/models")).unwrap();
+    std::fs::create_dir_all(dir.path().join(".oxplow/extensions/late/datasets")).unwrap();
     std::fs::write(
         dir.path()
-            .join(".oxplow/extensions/late/models/blocked.sql"),
+            .join(".oxplow/extensions/late/datasets/blocked.sql"),
         "SELECT no_such_column AS uri FROM ref('work_item')",
     )
     .unwrap();

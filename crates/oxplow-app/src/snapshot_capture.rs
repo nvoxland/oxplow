@@ -3128,7 +3128,7 @@ mod tests {
 
     #[tokio::test]
     async fn predrain_delay_lets_late_dirty_marks_join_the_capture() {
-        // Models the bug fix: a path marked dirty *after*
+        // Datasets the bug fix: a path marked dirty *after*
         // `request_snapshot` was already called must still land in the
         // same capture, provided it arrives within the predrain delay.
         // Without the delay (predrain=ZERO control), the late mark is

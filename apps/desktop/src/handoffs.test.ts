@@ -10,7 +10,7 @@ test("open handoffs are keyed by thread id, with the newest sender", () => {
       ["thr7", 1, "Docs"],
     ],
     truncated: false,
-    reads: { models: ["v_handoff"], tables: [], measures: [] },
+    reads: { datasets: ["v_handoff"], tables: [], measures: [] },
     freshness: {},
   } as never);
   expect(open).toEqual({

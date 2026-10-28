@@ -265,7 +265,7 @@ impl HookIngestService {
             .await?;
 
         // The activity log and the Work panel's live turn rows re-read
-        // `v_event` / `v_agent_turn` on the commit's `ModelsChanged`.
+        // `v_event` / `v_agent_turn` on the commit's `DatasetsChanged`.
         outcome.closed_turn = applied.closed_turn;
         outcome.harness = applied.harness.clone();
         match applied.status {

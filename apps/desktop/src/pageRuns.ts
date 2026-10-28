@@ -1,5 +1,5 @@
 /// A window's open page runs (`.context/pages-and-tabs.md` "Page files"):
-/// the daemon runs a page and re-runs it when a model one of its loaders
+/// the daemon runs a page and re-runs it when a dataset one of its loaders
 /// read changes; the window opens a run per page it shows, hears
 /// `pageRunChanged` (which loaders' rows differ, never the rows) and
 /// fetches the runs that changed, in one batch per burst. Nothing here
@@ -307,7 +307,7 @@ export function createPageRuns(transport: PageRunsTransport) {
     open,
     /** Run open run `runId` again as it is, for every host holding it:
      *  after the person's press on it, whose command may have changed
-     *  what no model change announces (a keychain entry). Unknown: nothing. */
+     *  what no dataset change announces (a keychain entry). Unknown: nothing. */
     refresh: async (runId: string): Promise<void> => {
       const entry = byRunId.get(runId);
       if (entry) await rerunWith(entry, (id) => transport.rerun(id));

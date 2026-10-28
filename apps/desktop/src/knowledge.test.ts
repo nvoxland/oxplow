@@ -4,7 +4,7 @@ import type { SearchHit, SqlQueryResult } from "./tauri-bridge/generated/binding
 import { knowledgeIsNone, NO_KNOWLEDGE_STORE, pagesFromResult } from "./knowledge.js";
 
 const result = (columns: string[], rows: SqlQueryResult["rows"]): SqlQueryResult =>
-  ({ columns, rows, truncated: false, reads: { models: [], tables: [], measures: [] }, freshness: {} }) as unknown as SqlQueryResult;
+  ({ columns, rows, truncated: false, reads: { datasets: [], tables: [], measures: [] }, freshness: {} }) as unknown as SqlQueryResult;
 
 test("the index reads v_knowledge_page rows", () => {
   const pages = pagesFromResult(

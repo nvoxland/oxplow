@@ -68,7 +68,7 @@ pub const CORE_CONSUMERS: &[&str] = &[
     "effort.lifecycle",
     "effort.observe",
     "effort.policy",
-    "extension_models.entities",
+    "extension_datasets.entities",
     "knowledge.records",
     "knowledge.switch",
     "metrics.entity_states",

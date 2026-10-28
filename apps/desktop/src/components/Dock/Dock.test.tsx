@@ -6,7 +6,7 @@ mock.module("../../api.js", () => ({
   ...realApi,
   listExtensions: async () => [],
   subscribeOxplowEvents: () => () => {},
-  querySql: async () => ({ columns: [], rows: [], truncated: false, reads: { models: [], tables: [], measures: [] }, freshness: {} }),
+  querySql: async () => ({ columns: [], rows: [], truncated: false, reads: { datasets: [], tables: [], measures: [] }, freshness: {} }),
 }));
 const { Dock } = await import("./Dock.js");
 const { dockStore } = await import("./dockStore.js");

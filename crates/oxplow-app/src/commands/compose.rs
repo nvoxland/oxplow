@@ -39,7 +39,7 @@ pub struct Composition {
     pub events: Vec<oxplow_domain::Envelope>,
 }
 
-/// What a composer reads through: the SQL gateway (the published models,
+/// What a composer reads through: the SQL gateway (the published datasets,
 /// the metric functions, extension state, configuration and jobs) and the
 /// database, from the blocking thread the bus routes on — so a read may
 /// block on `runtime`, and no connection is held while it does.

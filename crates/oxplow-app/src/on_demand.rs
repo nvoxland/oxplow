@@ -1,12 +1,12 @@
-//! Stored models made on demand (`.context/semantic-layer.md` "Made on
-//! demand"): a query that names one thing of such a model by its keys has
+//! Stored datasets made on demand (`.context/semantic-layer.md` "Made on
+//! demand"): a query that names one thing of such a dataset by its keys has
 //! that thing stored before it runs, when the store lacks it. A commit the
 //! index never reached (`v_commit`, `v_commit_file` by `sha`) is indexed;
 //! a change (`v_change` by `kind` and `target`) is created and its
 //! analysis started. So a page, or an agent's query, reads any commit git
-//! knows and any change it names, through the models it already reads.
+//! knows and any change it names, through the datasets it already reads.
 //!
-//! The stored-model twin of a live model's `pushdown`: the same certain
+//! The stored-dataset twin of a live dataset's `pushdown`: the same certain
 //! `<column> = <value>` conditions (`sql_tokens::text_filters`). A query
 //! that names the thing any other way (a join, an `OR`, a subquery) asks
 //! for nothing and reads what is stored.
@@ -25,22 +25,22 @@ use oxplow_domain::DomainError;
 
 use crate::commands::util::ServicesSlot;
 
-/// The models made on demand (`v_<name>`) and the columns a query pins,
+/// The datasets made on demand (`v_<name>`) and the columns a query pins,
 /// every one of them, to ask for one thing.
-pub fn keys(model: &str) -> &'static [&'static str] {
-    match model {
+pub fn keys(dataset: &str) -> &'static [&'static str] {
+    match dataset {
         "commit" | "commit_file" => &["sha"],
         "change" => &["kind", "target"],
         _ => &[],
     }
 }
 
-const MODELS: &[&str] = &["commit", "commit_file", "change"];
+const DATASETS: &[&str] = &["commit", "commit_file", "change"];
 
-/// One thing a query asks for: its model and each key's value.
+/// One thing a query asks for: its dataset and each key's value.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Request {
-    pub model: &'static str,
+    pub dataset: &'static str,
     pub keys: Vec<(String, String)>,
 }
 
@@ -53,14 +53,14 @@ impl Request {
     }
 }
 
-/// What `sql`, run with `params`, asks to be made: each model of [`keys`]
-/// it pins by all of that model's keys.
+/// What `sql`, run with `params`, asks to be made: each dataset of [`keys`]
+/// it pins by all of that dataset's keys.
 pub fn requests(sql: &str, params: &SqlParams) -> Result<Vec<Request>, DomainError> {
     let mut out = Vec::new();
-    for model in MODELS {
-        let wanted = keys(model);
+    for dataset in DATASETS {
+        let wanted = keys(dataset);
         let found =
-            oxplow_db::sql_tokens::text_filters(sql, &format!("v_{model}"), wanted, params)?;
+            oxplow_db::sql_tokens::text_filters(sql, &format!("v_{dataset}"), wanted, params)?;
         let mut pinned = Vec::new();
         for key in wanted {
             match found.iter().find(|(c, _)| c.eq_ignore_ascii_case(key)) {
@@ -70,7 +70,7 @@ pub fn requests(sql: &str, params: &SqlParams) -> Result<Vec<Request>, DomainErr
         }
         if pinned.len() == wanted.len() {
             out.push(Request {
-                model,
+                dataset,
                 keys: pinned,
             });
         }
@@ -102,7 +102,7 @@ impl OnDemand {
             let Some(svc) = self.services.get().and_then(|s| s.get().ok()) else {
                 return;
             };
-            let made = match request.model {
+            let made = match request.dataset {
                 "commit" | "commit_file" => match request.key("sha") {
                     Some(sha) => crate::commit_indexer::ensure_commit(&svc, stream, sha)
                         .await
@@ -176,9 +176,9 @@ mod tests {
         )
     }
 
-    fn request(model: &'static str, keys: &[(&str, &str)]) -> Request {
+    fn request(dataset: &'static str, keys: &[(&str, &str)]) -> Request {
         Request {
-            model,
+            dataset,
             keys: keys
                 .iter()
                 .map(|(k, v)| (k.to_string(), v.to_string()))
@@ -186,7 +186,7 @@ mod tests {
         }
     }
 
-    /// A query that pins a model by all its keys asks for that one thing;
+    /// A query that pins a dataset by all its keys asks for that one thing;
     /// by some of them, or any way but a plain condition, it asks for
     /// nothing.
     #[test]

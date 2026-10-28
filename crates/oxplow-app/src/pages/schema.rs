@@ -129,7 +129,7 @@ pub enum ArgSource {
     Literal(#[specta(type = oxplow_domain::Json)] serde_json::Value),
 }
 
-/// When a loader that reads outside the published models runs again.
+/// When a loader that reads outside the published datasets runs again.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema)]
 #[serde(untagged)]
 pub enum LoaderRefresh {
@@ -156,7 +156,7 @@ pub struct LoaderDecl {
     /// Column metadata its nodes default to, and the row columns it
     /// declares (what an embed or a slot mount may take by name).
     pub columns: Vec<PageColumn>,
-    /// The models a `command` loader reads, so it runs again when they
+    /// The datasets a `command` loader reads, so it runs again when they
     /// change (a `sql` loader's are what its query read).
     pub reads: Vec<String>,
     pub refresh: Option<LoaderRefresh>,
@@ -171,7 +171,7 @@ pub struct LoaderDecl {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum Loader {
-    /// A read-only query over the published models, binding `:param`s
+    /// A read-only query over the published datasets, binding `:param`s
     /// (the page's, and `params`: named values from earlier loaders or
     /// literals); an earlier loader reads as a table of its name.
     Sql {
@@ -646,7 +646,7 @@ fn switch_params(view: &serde_yaml::Value) -> Vec<String> {
 }
 
 /// A loader name: a plain lowercase identifier that can't be mistaken for
-/// (or shadow) a published model.
+/// (or shadow) a published dataset.
 fn loader_name_problem(name: &str) -> Option<String> {
     let plain = name.chars().next().is_some_and(|c| c.is_ascii_lowercase())
         && name
@@ -659,7 +659,7 @@ fn loader_name_problem(name: &str) -> Option<String> {
     }
     if name.starts_with("v_") || name.starts_with("m_") || matches!(name, "temp" | "main") {
         return Some(format!(
-            "loader `{name}`: that name is a model's (or the database's): name it something else"
+            "loader `{name}`: that name is a dataset's (or the database's): name it something else"
         ));
     }
     None
@@ -838,7 +838,7 @@ fn parse_loaders(
             if file.reads.is_empty() && file.refresh.is_none() {
                 return Err(format!(
                     "loader `{name}`: a command loader says what makes it run again: `reads` \
-                     (the models it reads) or `refresh` (`manual`, or `{{ every: 30s }}`)"
+                     (the datasets it reads) or `refresh` (`manual`, or `{{ every: 30s }}`)"
                 ));
             }
             Loader::Command {

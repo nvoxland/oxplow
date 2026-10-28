@@ -24,7 +24,7 @@ const decorator = (over: Partial<UiDecorator>): UiDecorator => ({
   ...over,
 });
 
-// P6b.C5: decorations are labels from an extension's model on core refs.
+// P6b.C5: decorations are labels from an extension's dataset on core refs.
 test("the enabled extensions' decorators for a placement", () => {
   const exts = [
     { name: "flags", enabled: true, ui: { slots: [], commands: [], decorators: [decorator({}), decorator({ id: "flags/1", placement: "row-badge" })] } },

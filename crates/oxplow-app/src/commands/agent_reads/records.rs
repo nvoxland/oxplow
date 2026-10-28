@@ -1,5 +1,5 @@
-//! `records.read/read { ref, stream? }`: what a ref names — its model's
-//! row, what sits beside it, or a body no model holds (a file at a
+//! `records.read/read { ref, stream? }`: what a ref names — its dataset's
+//! row, what sits beside it, or a body no dataset holds (a file at a
 //! revision, an event's output) — read for the actor's thread and stream
 //! (`ref_read::read`).
 

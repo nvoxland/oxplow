@@ -9,7 +9,7 @@ export const EMPTY_RESULT: SqlQueryResult = {
   columns: [],
   rows: [],
   truncated: false,
-  reads: { models: [], tables: [] } as unknown as SqlQueryResult["reads"],
+  reads: { datasets: [], tables: [] } as unknown as SqlQueryResult["reads"],
   freshness: [],
 };
 

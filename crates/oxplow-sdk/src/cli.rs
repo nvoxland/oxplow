@@ -21,7 +21,7 @@ usage:
       provider of --capability (work_items, the default, effort_policy,
       agent_harness, snapshots or knowledge)
       with its contract's declarations, a stub program and test config; a Starlark
-      collector with a model and a page over it; a code metric (--language,
+      collector with a dataset and a page over it; a code metric (--language,
       default rust, over --glob, default the language's files): a per-path
       measure, a collector counting each file's functions over a complexity
       limit, its area dimension, the metric and a page linking to the file
@@ -36,17 +36,17 @@ usage:
   oxplow extension new --list-examples
       copy an example extension oxplow ships (a working one: its pages,
       scripts and fixtures) into .oxplow/extensions/<example>/, then change
-      it. It keeps its name (its commands and models are named by it), so a
+      it. It keeps its name (its commands and datasets are named by it), so a
       different <name> is refused: rename after copying. --list-examples
       names them
   oxplow extension check <name|path> [--impact] [--against <rev>] [--services] [--json] [--root <dir>]
       load the extension and report every problem with file:line, dry-running
-      its models, commands, pages and advisories on a throwaway oxplow —
+      its datasets, commands, pages and advisories on a throwaway oxplow —
       this build's schema, no data, what the extension declares turned on
       (never the project's database); command names against the same.
       --impact also says what the working tree's version changes against
       git HEAD (or --against <rev>, which implies --impact): pages' text,
-      models and their rows, collectors' outputs, providers' grants —
+      datasets and their rows, collectors' outputs, providers' grants —
       writing nothing. --services lists, per script, the host services it
       uses (sql.read, tree.read, ai.compute) and whether it declared them
   oxplow extension test <name|path> [--bless] [--json] [--junit <file>] [--root <dir>]
@@ -949,8 +949,8 @@ mod tests {
     }
 
     /// `check --impact` compares the working tree with `git:HEAD`
-    /// (or `--against`): a page and a model edited in the worktree read as
-    /// changed, the model with its rows; `--json` carries the report; the
+    /// (or `--against`): a page and a dataset edited in the worktree read as
+    /// changed, the dataset with its rows; `--json` carries the report; the
     /// project's database isn't touched.
     #[test]
     fn check_impact_compares_the_worktree_with_head_and_writes_nothing() {
@@ -966,7 +966,7 @@ mod tests {
             "extension.yaml",
             "manifest: 2\nname: acme\nintent:\n  purpose: Count.\n  origin: \"oxplow:oxplow/thread?id=thr1\"\n  examples: []\ndatasets:\n  - name: x\n    version: 1\n    description: X.\n    fields:\n      - { name: n, type: \"\", doc: N. }\n",
         );
-        w("models/x.sql", "SELECT 1 AS n\n");
+        w("datasets/x.sql", "SELECT 1 AS n\n");
         w(
             "pages/count.yaml",
             "title: Count\ndata:\n  count:\n    sql: SELECT n FROM v_acme_x\nview:\n  from: count\n  viz: number\n",
@@ -980,13 +980,13 @@ mod tests {
         drop(oxplow_db::Database::open(&db_path).unwrap());
         let db_before = std::fs::read(&db_path).unwrap();
 
-        w("models/x.sql", "SELECT 2 AS n\n");
+        w("datasets/x.sql", "SELECT 2 AS n\n");
         let root_s = root.to_str().unwrap();
         let (code, out, err) = cli(&["check", "acme", "--root", root_s, "--impact"]);
         assert_eq!(code, 0, "{out}{err}");
         assert!(out.contains("impact against HEAD:"), "{out}");
         assert!(out.contains("Page acme/count: changed"), "{out}");
-        assert!(out.contains("Model v_acme_x rows: 1 → 1"), "{out}");
+        assert!(out.contains("Dataset v_acme_x rows: 1 → 1"), "{out}");
 
         let (code, out, _) = cli(&["check", "acme", "--root", root_s, "--impact", "--json"]);
         assert_eq!(code, 0);

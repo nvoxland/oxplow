@@ -20,8 +20,8 @@ use crate::Services;
 struct GenerationState {
     active: Option<Arc<CatalogSnapshot>>,
     unavailable: bool,
-    entities: crate::extension_models::EntitySignature,
-    /// The configuration the published models were compiled against.
+    entities: crate::extension_datasets::EntitySignature,
+    /// The configuration the published datasets were compiled against.
     configs: crate::extension_generation::ConfigSignature,
 }
 
@@ -224,14 +224,14 @@ impl ExtensionActivation {
     }
 
     /// Data changes do not require provider restarts. Only a changed entity
-    /// schema can make an otherwise unchanged model candidate compile.
+    /// schema can make an otherwise unchanged dataset candidate compile.
     pub(crate) async fn request_entity_refresh(
         &self,
         db: &oxplow_db::Database,
     ) -> Result<(), DomainError> {
         let pin = self.pin().await?;
         let entities = db
-            .read(crate::extension_models::entity_signature_tx)
+            .read(crate::extension_datasets::entity_signature_tx)
             .await?;
         if pin.state.entities != entities {
             self.request();
@@ -239,7 +239,7 @@ impl ExtensionActivation {
         Ok(())
     }
 
-    /// An extension's stored configuration only changes what its models were
+    /// An extension's stored configuration only changes what its datasets were
     /// compiled against when one of them reads it: republish when it has.
     pub(crate) async fn request_config_refresh(
         &self,
@@ -763,7 +763,7 @@ impl ExtensionActivation {
                         .map_err(TxError::Aborted)?;
                     providers.validate_live().map_err(TxError::Aborted)?;
                     let entities =
-                        crate::extension_models::entity_signature_tx(publication.transaction()?)?;
+                        crate::extension_datasets::entity_signature_tx(publication.transaction()?)?;
                     let configs = crate::extension_generation::config_signature_tx(
                         publication.transaction()?,
                         published.extensions(),
@@ -820,7 +820,7 @@ impl ExtensionActivation {
                 .await;
             match outcome {
                 Ok((published, retired)) => break (published, retired, held),
-                // A model or vocabulary that doesn't compile is checked in
+                // A dataset or vocabulary that doesn't compile is checked in
                 // the transaction, which rolled back: nothing was applied.
                 Err(TxError::Aborted(problems)) if failed.hold(&snapshot, &problems) => {}
                 // Publication panicked after its database state committed,

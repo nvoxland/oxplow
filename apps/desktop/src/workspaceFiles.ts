@@ -1,6 +1,6 @@
 /**
  * The stream's files as the app reads them: `v_workspace_file`, a live
- * model over the worktree (`.context/semantic-layer.md` "Live models").
+ * dataset over the worktree (`.context/semantic-layer.md` "Live datasets").
  * One folder is one read (`WHERE parent = ?`); the whole tree is a walk,
  * so the callers that need it all (Quick Open, the link index, the panel's
  * search and status markers) read it once and follow its `reads` with

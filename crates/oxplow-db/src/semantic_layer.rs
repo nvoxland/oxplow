@@ -1,6 +1,6 @@
 //! The semantic layer's read surface: `query_sql` over the published
-//! models (the `v_*` views `models.rs` compiles; `v_dataset` and
-//! `v_field` are their catalog). The models are the versioned
+//! datasets (the `v_*` views `datasets.rs` compiles; `v_dataset` and
+//! `v_field` are their catalog). The datasets are the versioned
 //! contract; physical tables stay internal. See
 //! `.context/semantic-layer.md`.
 
@@ -30,30 +30,30 @@ pub struct SqlQueryResult {
     pub truncated: bool,
     /// What the query read — what a caller subscribes to (P4.6).
     pub reads: Reads,
-    /// When each model it read last changed since the app started (the
-    /// SQL gateway fills it, P4.6); a model unchanged since then is absent.
-    pub freshness: Vec<ModelFreshness>,
+    /// When each dataset it read last changed since the app started (the
+    /// SQL gateway fills it, P4.6); a dataset unchanged since then is absent.
+    pub freshness: Vec<DatasetFreshness>,
     /// The extension catalog's generation the query ran against (the SQL
-    /// gateway fills it): what its models and their meaning were. Opaque;
+    /// gateway fills it): what its datasets and their meaning were. Opaque;
     /// equal generations read the same catalog.
     #[serde(default)]
     pub generation: Option<String>,
-    /// For each model it read that a collector feeds, how that collection
+    /// For each dataset it read that a collector feeds, how that collection
     /// stands (the SQL gateway fills it). A query finishing says nothing
-    /// about whether its sources were collected; this does. Models core
+    /// about whether its sources were collected; this does. Datasets core
     /// keeps current carry no entry.
     #[serde(default)]
     pub coverage: Vec<SourceCoverage>,
 }
 
-/// How one collector feeding a model a query read stands.
+/// How one collector feeding a dataset a query read stands.
 #[derive(
     Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
 )]
 #[serde(rename_all = "camelCase")]
 pub struct SourceCoverage {
-    /// The model it feeds (`v_acme_pull_request`).
-    pub model: String,
+    /// The dataset it feeds (`v_acme_pull_request`).
+    pub dataset: String,
     /// `oxplow:oxplow/collector?collector=<owner>/<id>`.
     pub source: String,
     /// `current`, `stale` (past its next due run), `failed` (its last run
@@ -65,13 +65,13 @@ pub struct SourceCoverage {
     pub error: Option<String>,
 }
 
-/// When one model last changed.
+/// When one dataset last changed.
 #[derive(
     Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
 )]
 #[serde(rename_all = "camelCase")]
-pub struct ModelFreshness {
-    pub model: String,
+pub struct DatasetFreshness {
+    pub dataset: String,
     /// RFC 3339.
     pub changed_at: String,
 }
@@ -84,7 +84,7 @@ pub struct ModelFreshness {
 #[serde(rename_all = "camelCase")]
 pub struct Reads {
     /// Views read, directly or through another view; sorted, distinct.
-    pub models: Vec<String>,
+    pub datasets: Vec<String>,
     /// Tables the query's own SQL read — not through a view (a temp table
     /// as `temp.<name>`); sorted, distinct. A physical table here is what
     /// the read contract refuses once enforced (P4.3).
@@ -106,7 +106,7 @@ impl Reads {
                 .collect()
         };
         Reads {
-            models: merge(|r| &r.models),
+            datasets: merge(|r| &r.datasets),
             tables: merge(|r| &r.tables),
             measures: merge(|r| &r.measures),
         }
@@ -133,27 +133,27 @@ pub struct SqlQuery {
     pub temp: Vec<TempTable>,
     /// Temp views this query reads, created in order on its connection
     /// after its temp tables and dropped before them (a check's overlay:
-    /// an extension's models and entities that aren't published, P7.C6).
+    /// an extension's datasets and entities that aren't published, P7.C6).
     pub temp_views: Vec<TempView>,
-    /// Host policy over prepared model lineage, before executing SQL.
+    /// Host policy over prepared dataset lineage, before executing SQL.
     /// Never supplied by the authored query or the extension itself.
-    pub model_policy: Option<ModelReadPolicy>,
+    pub dataset_policy: Option<DatasetReadPolicy>,
 }
 
-type ModelCheck = dyn Fn(&str) -> Result<(), String> + Send + Sync;
+type DatasetCheck = dyn Fn(&str) -> Result<(), String> + Send + Sync;
 
 #[derive(Clone)]
-pub struct ModelReadPolicy(std::sync::Arc<ModelCheck>);
+pub struct DatasetReadPolicy(std::sync::Arc<DatasetCheck>);
 
-impl ModelReadPolicy {
+impl DatasetReadPolicy {
     pub fn new(check: impl Fn(&str) -> Result<(), String> + Send + Sync + 'static) -> Self {
         Self(std::sync::Arc::new(check))
     }
 }
 
-impl std::fmt::Debug for ModelReadPolicy {
+impl std::fmt::Debug for DatasetReadPolicy {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("ModelReadPolicy")
+        f.write_str("DatasetReadPolicy")
     }
 }
 
@@ -194,7 +194,7 @@ impl SqlQuery {
             stream: None,
             temp: Vec::new(),
             temp_views: Vec::new(),
-            model_policy: None,
+            dataset_policy: None,
         }
     }
 
@@ -354,14 +354,14 @@ impl SemanticLayer {
         self.db.call_mut(|conn| view_names(conn)).await
     }
 
-    /// Check extensions' models compile, without publishing them (works
-    /// on a read-only database; see `models::check_extensions`).
-    pub async fn check_extension_models(
+    /// Check extensions' datasets compile, without publishing them (works
+    /// on a read-only database; see `datasets::check_extensions`).
+    pub async fn check_extension_datasets(
         &self,
-        extensions: Vec<crate::models::ExtensionModels>,
-        stubs: Vec<crate::models::EntityStub>,
-    ) -> Result<crate::models::CheckedModels, DomainError> {
-        self.db.check_extension_models(extensions, stubs).await
+        extensions: Vec<crate::datasets::ExtensionDatasets>,
+        stubs: Vec<crate::datasets::EntityStub>,
+    ) -> Result<crate::datasets::CheckedDatasets, DomainError> {
+        self.db.check_extension_datasets(extensions, stubs).await
     }
 }
 
@@ -369,9 +369,9 @@ fn invalid(e: rusqlite::Error) -> DomainError {
     DomainError::Invalid(format!("query_sql: {e}"))
 }
 
-/// A query that didn't prepare. An unknown table names the published model
+/// A query that didn't prepare. An unknown table names the published dataset
 /// it most likely meant (tsk1039: `v_tree_facts` → `v_tree_fact`); an
-/// unknown column names the columns of the models `sql` reads, and the
+/// unknown column names the columns of the datasets `sql` reads, and the
 /// nearest one — so the next query can be right without a discovery query.
 fn prepare_failed(conn: &rusqlite::Connection, sql: &str, e: rusqlite::Error) -> DomainError {
     let msg = e.to_string();
@@ -403,7 +403,7 @@ fn prepare_failed(conn: &rusqlite::Connection, sql: &str, e: rusqlite::Error) ->
 }
 
 /// For an unknown `column` (maybe `alias.name`): the nearest column of the
-/// published models `sql` names, and each one's columns.
+/// published datasets `sql` names, and each one's columns.
 fn column_hint(conn: &rusqlite::Connection, sql: &str, column: &str) -> Option<String> {
     let views = view_names(conn).ok()?;
     let mut named: Vec<String> = Vec::new();
@@ -517,8 +517,8 @@ fn view_names(
         .collect())
 }
 
-/// Table → the models whose view reads it (`model_input`, sources; a
-/// materialized model's own table → that model), the table's own model
+/// Table → the datasets whose view reads it (`dataset_input`, sources; a
+/// materialized dataset's own table → that dataset), the table's own dataset
 /// (`v_<table>`) first, then by name (tsk922). Empty before the registry
 /// exists.
 fn source_readers(
@@ -527,7 +527,7 @@ fn source_readers(
     let mut out: std::collections::HashMap<String, Vec<String>> = Default::default();
     let has: bool = conn
         .query_row(
-            "SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'model_input')",
+            "SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'dataset_input')",
             [],
             |r| r.get(0),
         )
@@ -537,19 +537,19 @@ fn source_readers(
     }
     let materialized: bool = conn
         .query_row(
-            "SELECT EXISTS (SELECT 1 FROM pragma_table_info('model') WHERE name = 'materialize')",
+            "SELECT EXISTS (SELECT 1 FROM pragma_table_info('dataset') WHERE name = 'materialize')",
             [],
             |r| r.get(0),
         )
         .map_err(crate::database::map_sql_err)?;
     let mut st = conn
         .prepare(if materialized {
-            "SELECT input, view FROM model_input WHERE kind = 'source'
+            "SELECT input, view FROM dataset_input WHERE kind = 'source'
              UNION ALL
-             SELECT 'm_' || view, view FROM model WHERE materialize IS NOT NULL
+             SELECT 'm_' || view, view FROM dataset WHERE materialize IS NOT NULL
              ORDER BY 2"
         } else {
-            "SELECT input, view FROM model_input WHERE kind = 'source' ORDER BY view"
+            "SELECT input, view FROM dataset_input WHERE kind = 'source' ORDER BY view"
         })
         .map_err(crate::database::map_sql_err)?;
     let rows = st
@@ -605,10 +605,10 @@ enum Denied {
 /// What the authorizer does with what it sees.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Access {
-    /// The read contract (P4.3): the query's own SQL reads only models
+    /// The read contract (P4.3): the query's own SQL reads only datasets
     /// (views) and temp tables; a view reads what it reads.
     Enforce,
-    /// Record every read, refuse none (the explorer's raw mode; a model's
+    /// Record every read, refuse none (the explorer's raw mode; a dataset's
     /// compile, which reads tables through `source()`).
     Record,
 }
@@ -620,12 +620,12 @@ pub(crate) enum Access {
 pub(crate) struct ReadSession<'c> {
     conn: &'c rusqlite::Connection,
     seen: std::sync::Arc<std::sync::Mutex<Seen>>,
-    /// Every view in the database, to tell a model read from a table read.
+    /// Every view in the database, to tell a dataset read from a table read.
     views: std::collections::HashSet<String>,
     /// Every stored table (and the schema tables), to tell a table read
     /// from a table-valued function's (`json_each`).
     tables: std::collections::HashSet<String>,
-    /// Table → the models that read it, to point a refused read at them.
+    /// Table → the datasets that read it, to point a refused read at them.
     readers: std::collections::HashMap<String, Vec<String>>,
     /// The statement's own CTEs (lowercased): a read in one of them is
     /// the statement's; in any other view or CTE, a view's.
@@ -642,7 +642,7 @@ impl<'c> ReadSession<'c> {
         let views = view_names(conn)?;
         // A read's accessor is the view or CTE it happened in. Any accessor
         // but one of the statement's own CTEs is inside a view — a view's
-        // own CTEs included — so a model built on CTEs reads, while the
+        // own CTEs included — so a dataset built on CTEs reads, while the
         // statement's own reads stay checked. (A statement CTE sharing a
         // name with a view's refuses more, never less.)
         let own_ctes = crate::sql_tokens::cte_names(sql)?;
@@ -733,7 +733,7 @@ impl<'c> ReadSession<'c> {
     }
 
     /// Why a statement didn't prepare: the authorizer's refusal, or the
-    /// error itself — read once the session has ended, so naming the model
+    /// error itself — read once the session has ended, so naming the dataset
     /// it most likely meant can read the schema (tsk1039).
     fn failed(self, conn: &rusqlite::Connection, sql: &str, e: rusqlite::Error) -> DomainError {
         let refused = self.refusal();
@@ -742,7 +742,7 @@ impl<'c> ReadSession<'c> {
     }
 
     /// Why the authorizer refused the statement, if it did: the read
-    /// contract in words, pointing a table at the models that read it.
+    /// contract in words, pointing a table at the datasets that read it.
     fn refusal(&self) -> Option<DomainError> {
         let seen = self.seen.lock().unwrap_or_else(|e| e.into_inner());
         let first = seen.denied.first()?;
@@ -750,12 +750,12 @@ impl<'c> ReadSession<'c> {
             Denied::Table(table) => {
                 let hint = match self.readers.get(table) {
                     Some(views) if !views.is_empty() => format!("read {}", views.join(" or ")),
-                    _ => "read a published model (see `v_dataset`)".to_string(),
+                    _ => "read a published dataset (see `v_dataset`)".to_string(),
                 };
-                format!("query_sql: `{table}` is a physical table, not a published model; {hint}")
+                format!("query_sql: `{table}` is a physical table, not a published dataset; {hint}")
             }
             Denied::Action(action) => {
-                format!("query_sql: only reads of published models are allowed, not {action}")
+                format!("query_sql: only reads of published datasets are allowed, not {action}")
             }
         }))
     }
@@ -768,23 +768,23 @@ impl<'c> ReadSession<'c> {
     }
 
     /// The reads so far, classified. A read of a view, or by one, is a
-    /// model read; a read whose accessor is a view happened inside it; anything
+    /// dataset read; a read whose accessor is a view happened inside it; anything
     /// else is the query's own SQL (a CTE's name can be the accessor too).
     /// SQLite reports `count(*)` over a view as an empty-column read of
     /// the view's base table at top level — that one belongs to the view.
     fn reads(&self) -> Reads {
         let seen = self.seen.lock().unwrap_or_else(|e| e.into_inner());
-        let mut models = std::collections::BTreeSet::new();
+        let mut datasets = std::collections::BTreeSet::new();
         let mut under = std::collections::HashSet::new();
         for (table, _, accessor) in &seen.reads {
             if self.views.contains(table) {
-                models.insert(table.clone());
+                datasets.insert(table.clone());
             }
             // A view that read something was read (`count(*)` over a view
             // reports only its base table's reads, with the view as
             // accessor).
             if let Some(view) = accessor.as_ref().filter(|a| self.views.contains(*a)) {
-                models.insert(view.clone());
+                datasets.insert(view.clone());
             }
             if self.nested(accessor) {
                 under.insert(table.clone());
@@ -801,14 +801,14 @@ impl<'c> ReadSession<'c> {
             .map(|(table, _, _)| table.clone())
             .collect::<std::collections::BTreeSet<_>>();
         Reads {
-            models: models.into_iter().collect(),
+            datasets: datasets.into_iter().collect(),
             tables: tables.into_iter().collect(),
             measures: Vec::new(),
         }
     }
 
     /// What the statement read itself, not through a view: `(views,
-    /// tables)` — a model's derived inputs. A view is direct when it was
+    /// tables)` — a dataset's derived inputs. A view is direct when it was
     /// read at top level, or read something (`count(*)`) without any read
     /// placing it inside another view.
     pub(crate) fn direct_inputs(
@@ -988,8 +988,8 @@ fn run_read_only(
     } else {
         Access::Enforce
     };
-    let dependencies = if query.model_policy.is_some() {
-        model_dependencies(conn)?
+    let dependencies = if query.dataset_policy.is_some() {
+        dataset_dependencies(conn)?
     } else {
         Default::default()
     };
@@ -1002,8 +1002,8 @@ fn run_read_only(
         return Err(read_only_only());
     }
     let reads = session.reads();
-    if let Some(policy) = &query.model_policy {
-        check_model_policy(&reads, policy, &dependencies)?;
+    if let Some(policy) = &query.dataset_policy {
+        check_dataset_policy(&reads, policy, &dependencies)?;
     }
     bind(&mut stmt, &query.params)?;
     session.query_only()?;
@@ -1064,7 +1064,7 @@ fn run_read_only(
 
 /// [`SemanticLayer::check_with`] on `conn` — for a command's handler,
 /// which checks an agent's SQL inside its own transaction: a single
-/// read-only `SELECT`/`WITH` over the published models (the `query_sql`
+/// read-only `SELECT`/`WITH` over the published datasets (the `query_sql`
 /// authorizer), compiled but not run. What it would read.
 pub fn check_query_on(conn: &rusqlite::Connection, query: &SqlQuery) -> Result<Reads, DomainError> {
     crate::sql_tokens::check_single_read(&query.sql)?;
@@ -1075,8 +1075,8 @@ pub fn check_query_on(conn: &rusqlite::Connection, query: &SqlQuery) -> Result<R
     } else {
         Access::Enforce
     };
-    let dependencies = if query.model_policy.is_some() {
-        model_dependencies(conn)?
+    let dependencies = if query.dataset_policy.is_some() {
+        dataset_dependencies(conn)?
     } else {
         Default::default()
     };
@@ -1092,20 +1092,20 @@ pub fn check_query_on(conn: &rusqlite::Connection, query: &SqlQuery) -> Result<R
     }
     let reads = session.reads();
     drop(session);
-    if let Some(policy) = &query.model_policy {
-        check_model_policy(&reads, policy, &dependencies)?;
+    if let Some(policy) = &query.dataset_policy {
+        check_dataset_policy(&reads, policy, &dependencies)?;
     }
     Ok(reads)
 }
 
 /// Read registry lineage before installing the authorizer. The connection
 /// is exclusively borrowed throughout preparation, policy and execution.
-fn model_dependencies(
+fn dataset_dependencies(
     conn: &rusqlite::Connection,
 ) -> Result<std::collections::BTreeMap<String, Vec<String>>, DomainError> {
     let has_registry: bool = conn
         .query_row(
-            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name = 'model_input')",
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name = 'dataset_input')",
             [],
             |row| row.get(0),
         )
@@ -1113,7 +1113,7 @@ fn model_dependencies(
     let mut dependencies: std::collections::BTreeMap<String, Vec<String>> = Default::default();
     if has_registry {
         let mut statement = conn
-            .prepare("SELECT view, input FROM model_input WHERE kind = 'ref'")
+            .prepare("SELECT view, input FROM dataset_input WHERE kind = 'ref'")
             .map_err(crate::database::map_sql_err)?;
         let rows = statement
             .query_map([], |row| {
@@ -1128,21 +1128,21 @@ fn model_dependencies(
     Ok(dependencies)
 }
 
-/// Materializing a public model must not hide its referenced models.
-fn check_model_policy(
+/// Materializing a public dataset must not hide its referenced datasets.
+fn check_dataset_policy(
     reads: &Reads,
-    policy: &ModelReadPolicy,
+    policy: &DatasetReadPolicy,
     dependencies: &std::collections::BTreeMap<String, Vec<String>>,
 ) -> Result<(), DomainError> {
-    let mut pending = reads.models.clone();
+    let mut pending = reads.datasets.clone();
     let mut checked = std::collections::BTreeSet::new();
-    while let Some(model) = pending.pop() {
-        if !checked.insert(model.clone()) {
+    while let Some(dataset) = pending.pop() {
+        if !checked.insert(dataset.clone()) {
             continue;
         }
-        (policy.0)(&model)
-            .map_err(|reason| DomainError::Invalid(format!("model `{model}`: {reason}")))?;
-        if let Some(inputs) = dependencies.get(&model) {
+        (policy.0)(&dataset)
+            .map_err(|reason| DomainError::Invalid(format!("dataset `{dataset}`: {reason}")))?;
+        if let Some(inputs) = dependencies.get(&dataset) {
             pending.extend(inputs.iter().cloned());
         }
     }
@@ -1244,7 +1244,7 @@ mod tests {
         };
         let unknown = err("SELECT nope FROM v_work_item").await;
         assert!(unknown.contains("no such column"), "{unknown}");
-        // It names the model's columns, so the next query can be right.
+        // It names the dataset's columns, so the next query can be right.
         assert!(unknown.contains("v_work_item has: "), "{unknown}");
         assert!(unknown.contains("title"), "{unknown}");
         // And the nearest one, when a column is close to one it has.
@@ -1324,14 +1324,14 @@ mod tests {
         };
         let r = reads("SELECT count(*) FROM v_work_item").await;
         assert_eq!(
-            (r.models, r.tables),
+            (r.datasets, r.tables),
             (vec!["v_work_item".to_string()], vec![])
         );
         let r =
             reads("WITH t AS (SELECT uri FROM v_work_item) SELECT * FROM t JOIN v_thread th ON 1")
                 .await;
         assert_eq!(
-            r.models,
+            r.datasets,
             vec!["v_thread".to_string(), "v_work_item".to_string()]
         );
         assert!(r.tables.is_empty(), "{:?}", r.tables);
@@ -1356,13 +1356,13 @@ mod tests {
             .check("SELECT uri FROM v_work_item WHERE uri = :uri")
             .await
             .unwrap();
-        assert_eq!(checked.models, vec!["v_work_item".to_string()]);
+        assert_eq!(checked.datasets, vec!["v_work_item".to_string()]);
     }
 
-    /// tsk1039: a misspelled model names the one it most likely meant —
+    /// tsk1039: a misspelled dataset names the one it most likely meant —
     /// an agent's page query and `extension check` read the same error.
     #[tokio::test]
-    async fn an_unknown_model_suggests_the_nearest_one() {
+    async fn an_unknown_dataset_suggests_the_nearest_one() {
         let (_db, sl) = seeded().await;
         let err = sl
             .query_sql("SELECT * FROM v_work_items", vec![], None)
@@ -1380,10 +1380,10 @@ mod tests {
     }
 
     /// P4.3 (tsk488): the read contract is enforced — a query's own SQL
-    /// reads only models, and a refused table points at the models over
+    /// reads only datasets, and a refused table points at the datasets over
     /// it; the explorer's raw mode reads anything, still recorded.
     #[tokio::test]
-    async fn a_physical_table_is_refused_naming_its_models() {
+    async fn a_physical_table_is_refused_naming_its_datasets() {
         let (db, sl) = seeded().await;
         let refused = |sql: &'static str| {
             let sl = sl.clone();
@@ -1395,11 +1395,11 @@ mod tests {
             }
         };
         let msg = refused("SELECT * FROM work_item").await;
-        // The table's own model comes first, before the others that read
+        // The table's own dataset comes first, before the others that read
         // it (an index feed, v_search_work_item).
         assert!(
             msg.contains(
-                "`work_item` is a physical table, not a published model; read v_work_item"
+                "`work_item` is a physical table, not a published dataset; read v_work_item"
             ),
             "{msg}"
         );
@@ -1413,7 +1413,7 @@ mod tests {
             .await
             .contains("`sqlite_master` is a physical table"));
         assert!(sl.check("SELECT uri FROM work_item").await.is_err());
-        // Models, counts over them, table-valued functions and temp tables
+        // Datasets, counts over them, table-valued functions and temp tables
         // are all fine.
         for ok in [
             "SELECT count(*) FROM v_work_item",
@@ -1432,7 +1432,7 @@ mod tests {
         sl.query_sql("SELECT x FROM scratch", vec![], None)
             .await
             .unwrap();
-        // A model built on a CTE reads fine: SQLite names the CTE, not the
+        // A dataset built on a CTE reads fine: SQLite names the CTE, not the
         // view, as the accessor of the reads inside it (P4.11).
         db.call(|c| {
             c.execute_batch(
@@ -1446,7 +1446,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(out.rows.len(), 2);
-        assert_eq!(out.reads.models, vec!["v_cte_probe".to_string()]);
+        assert_eq!(out.reads.datasets, vec!["v_cte_probe".to_string()]);
         assert!(out.reads.tables.is_empty(), "{:?}", out.reads.tables);
         // Raw reads the table, and says so.
         let out = sl
@@ -1466,7 +1466,7 @@ mod tests {
     }
 
     /// P4.5a (tsk490): a query's temp tables exist for it alone — created
-    /// and filled on its connection, read like a model, gone afterwards
+    /// and filled on its connection, read like a dataset, gone afterwards
     /// even when the query fails.
     #[tokio::test]
     async fn temp_tables_live_for_one_query() {

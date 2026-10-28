@@ -1,16 +1,16 @@
 //! Reviewing an extension by its **impact**: what installing or updating
-//! it would change — pages' rendered text, models and their contracts
+//! it would change — pages' rendered text, datasets and their contracts
 //! (and what reads them), collectors' and providers' grants, a provider's
 //! commands and features — rather than only
-//! what it declares, plus models' rows before and after, and derived
+//! what it declares, plus datasets' rows before and after, and derived
 //! collectors' and effects' dry runs on the same inputs — each version on
-//! its own models' overlay. It never runs a program, a provider or an exec
+//! its own datasets' overlay. It never runs a program, a provider or an exec
 //! collector (consent forbids running an unapproved version), and stores
 //! nothing. See `.context/extensions.md` → "Reviewing by impact".
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use oxplow_db::models::{contract_change, extension_view, DatasetSource};
+use oxplow_db::datasets::{contract_change, extension_view, DatasetSource};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
@@ -77,20 +77,20 @@ pub struct PageImpact {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
-pub struct ModelImpact {
+pub struct DatasetImpact {
     pub view: String,
     pub change: Change,
-    /// For a changed model, the parts that differ, in order: `query`,
+    /// For a changed dataset, the parts that differ, in order: `query`,
     /// `columns`, `description`, `tests`, `version`, `deprecated`.
     pub changed: Vec<String>,
     pub before_columns: Vec<String>,
     pub after_columns: Vec<String>,
     /// The first difference in its contract (columns, types, docs).
     pub contract_change: Option<String>,
-    /// Models that read it, which a contract change can break.
+    /// Datasets that read it, which a contract change can break.
     pub downstream: Vec<String>,
     /// What its rows would become, each side read through its own
-    /// models; `None` for an unchanged model.
+    /// datasets; `None` for an unchanged dataset.
     pub rows: Option<RowDiff>,
 }
 
@@ -102,7 +102,7 @@ pub const ROW_DIFF_LIMIT: usize = oxplow_db::semantic_layer::MAX_ROW_LIMIT;
 /// The most sample changes a keyed diff keeps.
 pub const ROW_DIFF_SAMPLES: usize = 20;
 
-/// A model's rows before and after.
+/// A dataset's rows before and after.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct RowDiff {
@@ -144,7 +144,7 @@ pub struct RowSample {
     pub after: Option<Value>,
 }
 
-/// One side's rows of a model.
+/// One side's rows of a dataset.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Rows {
     pub columns: Vec<String>,
@@ -163,7 +163,7 @@ impl Rows {
     }
 }
 
-/// Diff a model's rows: each side `(rows, its key)`. With the same
+/// Diff a dataset's rows: each side `(rows, its key)`. With the same
 /// non-empty key on both and neither past the limit, a merge-join by key;
 /// otherwise counts with a note saying why.
 pub fn row_diff(before: Option<(&Rows, &[String])>, after: Option<(&Rows, &[String])>) -> RowDiff {
@@ -496,7 +496,7 @@ async fn effect_outputs(
             (ReviewEvent::Logged(Box::new(e)), Answers::new()),
         );
     }
-    // Each side reads through its own models (its `sql.read` may read them)
+    // Each side reads through its own datasets (its `sql.read` may read them)
     // and its own event types.
     let (layer_b, layer_a) = (
         layer.with_overlay(before.map(|v| v.overlay.to_vec()).unwrap_or_default()),
@@ -724,11 +724,11 @@ pub struct ContributionImpact {
     pub differs: Vec<String>,
 }
 
-/// The kinds whose impact has detail of its own (page text, model rows,
+/// The kinds whose impact has detail of its own (page text, dataset rows,
 /// grants, dry runs): everything else gets a [`ContributionImpact`].
 const DETAILED: &[oxplow_domain::contribution::ContributionKind] = {
     use oxplow_domain::contribution::ContributionKind as K;
-    &[K::Page, K::Model, K::Collector, K::Provider, K::Effect]
+    &[K::Page, K::Dataset, K::Collector, K::Provider, K::Effect]
 };
 
 /// What differs between two versions' descriptors of the kinds without
@@ -786,7 +786,7 @@ pub fn contributions_diff(
 #[serde(rename_all = "camelCase")]
 pub struct ImpactReport {
     pub pages: Vec<PageImpact>,
-    pub models: Vec<ModelImpact>,
+    pub datasets: Vec<DatasetImpact>,
     pub collectors: Vec<CollectorImpact>,
     pub providers: Vec<ProviderImpact>,
     /// Its effects: what each reacts to, and what each version
@@ -986,7 +986,7 @@ fn ran_text(r: Option<&Ran>) -> String {
 
 /// The report as lines: collectors' and providers' grants first (what a
 /// person approves), then what the collectors make of their inputs, the
-/// models (and their rows) and the pages.
+/// datasets (and their rows) and the pages.
 pub fn summary(report: &ImpactReport) -> Vec<String> {
     let mut out = Vec::new();
     for c in &report.collectors {
@@ -1076,7 +1076,7 @@ pub fn summary(report: &ImpactReport) -> Vec<String> {
         }
     }
     for m in report
-        .models
+        .datasets
         .iter()
         .filter(|m| m.change != Change::Unchanged)
     {
@@ -1091,7 +1091,7 @@ pub fn summary(report: &ImpactReport) -> Vec<String> {
         } else {
             format!("; read by {}", m.downstream.join(", "))
         };
-        out.push(format!("Model {}: {what}{read_by}", m.view));
+        out.push(format!("Dataset {}: {what}{read_by}", m.view));
         if let Some(rows) = &m.rows {
             let side = |n: Option<i64>| n.map_or("—".into(), |n| n.to_string());
             let detail = match (&rows.keyed, &rows.note) {
@@ -1103,7 +1103,7 @@ pub fn summary(report: &ImpactReport) -> Vec<String> {
                 (None, None) => String::new(),
             };
             out.push(format!(
-                "Model {} rows: {} → {}{detail}",
+                "Dataset {} rows: {} → {}{detail}",
                 m.view,
                 side(rows.before),
                 side(rows.after)
@@ -1159,13 +1159,13 @@ fn pair_by<'a, T, K: Ord + Clone>(
     keys.into_iter().map(|(k, (b, a))| (k, b, a)).collect()
 }
 
-/// `extension`'s models before and after: added, removed, and a changed
+/// `extension`'s datasets before and after: added, removed, and a changed
 /// one's first contract difference (a SQL-only change keeps the contract).
-pub fn models_diff(
+pub fn datasets_diff(
     extension: &str,
     before: &[DatasetSource],
     after: &[DatasetSource],
-) -> Vec<ModelImpact> {
+) -> Vec<DatasetImpact> {
     let cols = |m: Option<&DatasetSource>| -> Vec<String> {
         m.map(|m| m.decl.fields.iter().map(|c| c.name.clone()).collect())
             .unwrap_or_default()
@@ -1200,7 +1200,7 @@ pub fn models_diff(
                 }
                 _ => None,
             };
-            ModelImpact {
+            DatasetImpact {
                 view: extension_view(extension, &name),
                 change,
                 changed,
@@ -1386,7 +1386,7 @@ async fn collector_outputs(
     if inputs.is_empty() && spec.input.is_some() {
         inputs.push(("input query".into(), None, None));
     }
-    // Each side reads through its own models (its `input:` may read them)
+    // Each side reads through its own datasets (its `input:` may read them)
     // and its own event types.
     let (layer_b, layer_a) = (
         layer.with_overlay(before.map(|v| v.overlay.to_vec()).unwrap_or_default()),
@@ -1611,12 +1611,12 @@ pub struct Version<'a> {
     pub read: &'a (dyn Fn(&str) -> Option<String> + Sync),
     /// Its pages' loaders, already dry-run once (`pages::checks`).
     pub pages: &'a crate::pages::checks::PageChecks,
-    /// The temp views its models compile to (`extensions::Prepared`), so
+    /// The temp views its datasets compile to (`extensions::Prepared`), so
     /// its rows are its own version's.
     pub overlay: &'a [oxplow_db::TempView],
 }
 
-/// A model's rows on one side, read through that side's overlay (up to
+/// A dataset's rows on one side, read through that side's overlay (up to
 /// [`ROW_DIFF_LIMIT`]); `Err` when the query failed.
 async fn rows_of(
     layer: &crate::sql_gateway::SqlGateway,
@@ -1662,11 +1662,11 @@ fn page_texts(
         .collect()
 }
 
-/// The views that read `view` directly (`v_model_lineage`).
+/// The views that read `view` directly (`v_dataset_lineage`).
 pub async fn downstream_of(layer: &crate::sql_gateway::SqlGateway, view: &str) -> Vec<String> {
     layer
         .query_sql(
-            "SELECT DISTINCT view FROM v_model_lineage WHERE input = ?1 AND kind = 'ref' ORDER BY view",
+            "SELECT DISTINCT view FROM v_dataset_lineage WHERE input = ?1 AND kind = 'ref' ORDER BY view",
             vec![oxplow_db::SqlCell::Text(view.to_string())],
             None,
         )
@@ -1685,7 +1685,7 @@ pub async fn downstream_of(layer: &crate::sql_gateway::SqlGateway, view: &str) -
 
 /// What installing `after` — over `before`, when one is installed — would
 /// change. Pages are rendered from each version's dry runs (on its own
-/// overlay); models' rows read and diffed; derived collectors and effects
+/// overlay); datasets' rows read and diffed; derived collectors and effects
 /// dry-run on the same inputs, within [`REVIEW_DEADLINE`]; exec
 /// collectors and providers only compared.
 pub async fn impact(
@@ -1738,14 +1738,14 @@ pub async fn impact_within(
         })
         .collect();
     let empty: Vec<DatasetSource> = Vec::new();
-    let mut models = models_diff(
+    let mut datasets = datasets_diff(
         name,
         before.as_ref().map_or(&empty, |b| &b.extension.datasets),
         &after.extension.datasets,
     );
     // Readers outside this extension: its own views, by exact name (a
     // prefix would also drop another extension's `v_<name>_<…>` views).
-    let own: BTreeSet<String> = models.iter().map(|m| m.view.clone()).collect();
+    let own: BTreeSet<String> = datasets.iter().map(|m| m.view.clone()).collect();
     let key_of = |v: &Version<'_>, view: &str| -> Vec<String> {
         v.extension
             .datasets
@@ -1754,7 +1754,7 @@ pub async fn impact_within(
             .map(|m| m.decl.key.clone())
             .unwrap_or_default()
     };
-    for m in &mut models {
+    for m in &mut datasets {
         m.downstream = downstream_of(layer, &m.view)
             .await
             .into_iter()
@@ -1845,7 +1845,7 @@ pub async fn impact_within(
     );
     let mut report = ImpactReport {
         pages,
-        models,
+        datasets,
         collectors,
         providers,
         effects,
@@ -1865,10 +1865,10 @@ pub async fn impact_within(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use oxplow_db::models::{DatasetDecl, DatasetField};
+    use oxplow_db::datasets::{DatasetDecl, DatasetField};
     use serde_json::json;
 
-    fn model(name: &str, columns: &[(&str, &str)], sql: &str) -> DatasetSource {
+    fn dataset(name: &str, columns: &[(&str, &str)], sql: &str) -> DatasetSource {
         DatasetSource {
             decl: DatasetDecl {
                 name: name.into(),
@@ -1890,27 +1890,27 @@ mod tests {
                 materialize: None,
                 ai_context: None,
             },
-            file: format!("models/{name}.sql"),
+            file: format!("datasets/{name}.sql"),
             sql: sql.into(),
             twin: None,
         }
     }
 
     #[test]
-    fn models_diff_names_added_removed_and_contract_changes() {
+    fn datasets_diff_names_added_removed_and_contract_changes() {
         let before = [
-            model("kept", &[("a", "TEXT")], "SELECT 1"),
-            model("sql_only", &[("a", "TEXT")], "SELECT 1"),
-            model("retyped", &[("a", "TEXT")], "SELECT 1"),
-            model("gone", &[("a", "TEXT")], "SELECT 1"),
+            dataset("kept", &[("a", "TEXT")], "SELECT 1"),
+            dataset("sql_only", &[("a", "TEXT")], "SELECT 1"),
+            dataset("retyped", &[("a", "TEXT")], "SELECT 1"),
+            dataset("gone", &[("a", "TEXT")], "SELECT 1"),
         ];
         let after = [
-            model("kept", &[("a", "TEXT")], "SELECT 1"),
-            model("sql_only", &[("a", "TEXT")], "SELECT 2"),
-            model("retyped", &[("a", "INTEGER")], "SELECT 1"),
-            model("new", &[("b", "TEXT")], "SELECT 1"),
+            dataset("kept", &[("a", "TEXT")], "SELECT 1"),
+            dataset("sql_only", &[("a", "TEXT")], "SELECT 2"),
+            dataset("retyped", &[("a", "INTEGER")], "SELECT 1"),
+            dataset("new", &[("b", "TEXT")], "SELECT 1"),
         ];
-        let out: BTreeMap<String, ModelImpact> = models_diff("my-ext", &before, &after)
+        let out: BTreeMap<String, DatasetImpact> = datasets_diff("my-ext", &before, &after)
             .into_iter()
             .map(|m| (m.view.clone(), m))
             .collect();
@@ -1933,8 +1933,8 @@ mod tests {
 
     /// A change outside the query and the columns still says what moved.
     #[test]
-    fn models_diff_names_each_part_that_changed() {
-        let base = model("m", &[("a", "TEXT")], "SELECT 1");
+    fn datasets_diff_names_each_part_that_changed() {
+        let base = dataset("m", &[("a", "TEXT")], "SELECT 1");
         let mut tests = base.clone();
         tests.decl.tests = serde_json::from_value(json!([{ "not_null": "a" }])).unwrap();
         let mut described = base.clone();
@@ -1944,7 +1944,7 @@ mod tests {
             (tests, vec!["tests"]),
             (described, vec!["description", "version"]),
         ] {
-            let out = models_diff("x", std::slice::from_ref(&base), &[after]);
+            let out = datasets_diff("x", std::slice::from_ref(&base), &[after]);
             assert_eq!(out[0].change, Change::Changed);
             assert_eq!(out[0].contract_change, None);
             assert_eq!(out[0].changed, want);
@@ -2233,13 +2233,13 @@ mod tests {
     #[tokio::test]
     async fn a_page_failing_the_same_way_on_both_sides_is_unchanged() {
         let layer = crate::sql_gateway::SqlGateway::new(oxplow_db::Database::in_memory());
-        let broken = "title: Broken\ndata:\n  rows: { sql: \"SELECT n FROM v_no_such_model\" }\nview: { viz: table, from: rows }\n";
+        let broken = "title: Broken\ndata:\n  rows: { sql: \"SELECT n FROM v_no_such_dataset\" }\nview: { viz: table, from: rows }\n";
         let (_b, before) = version(&[("broken", broken), ("moved", broken)]);
         let (_a, after) = version(&[
             ("broken", broken),
             (
                 "moved",
-                "title: Broken\ndata:\n  rows: { sql: \"SELECT n FROM v_another_missing_model\" }\nview: { viz: table, from: rows }\n",
+                "title: Broken\ndata:\n  rows: { sql: \"SELECT n FROM v_another_missing_dataset\" }\nview: { viz: table, from: rows }\n",
             ),
         ]);
         let none = |_: &str| None;
@@ -2283,7 +2283,7 @@ mod tests {
             ("count", "title: Count\ndata:\n  rows: { sql: \"SELECT 2 AS n\" }\nview: { viz: number, from: rows }\n"),
             (
                 "broken",
-                "title: Broken\ndata:\n  rows: { sql: \"SELECT n FROM v_no_such_model\" }\nview: { viz: table, from: rows }\n",
+                "title: Broken\ndata:\n  rows: { sql: \"SELECT n FROM v_no_such_dataset\" }\nview: { viz: table, from: rows }\n",
             ),
         ]);
         let none = |_: &str| None;
@@ -2320,7 +2320,7 @@ mod tests {
             by["x/broken"]
                 .error
                 .as_deref()
-                .is_some_and(|e| e.contains("v_no_such_model")),
+                .is_some_and(|e| e.contains("v_no_such_dataset")),
             "{:?}",
             by["x/broken"]
         );
@@ -2386,7 +2386,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn downstream_models_come_from_the_lineage() {
+    async fn downstream_datasets_come_from_the_lineage() {
         let fx = crate::test_fixtures::services_with_effort().await;
         let readers = downstream_of(&fx.svc.sql, "v_knowledge_pin").await;
         assert!(
@@ -2404,7 +2404,7 @@ mod tests {
         }
     }
 
-    /// With the same key on both sides, a changed model's rows are
+    /// With the same key on both sides, a changed dataset's rows are
     /// merge-joined — added, removed and changed counted, with samples.
     #[test]
     fn a_keyed_row_diff_counts_and_samples_each_change() {
@@ -2570,10 +2570,10 @@ mod tests {
         );
     }
 
-    /// tsk782: a collector's `input:` reads each side's own models — the
+    /// tsk782: a collector's `input:` reads each side's own datasets — the
     /// before side sees its version of a view, the after side its own.
     #[tokio::test]
-    async fn a_collectors_input_reads_each_sides_own_models() {
+    async fn a_collectors_input_reads_each_sides_own_datasets() {
         let (old, new) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
         let write = |root: &std::path::Path, label: &str| {
             let dir = root.join(".oxplow/extensions/acme");
@@ -2953,7 +2953,7 @@ mod tests {
     /// output differs; it never runs an exec collector's program (approved
     /// or not), and a model call is refused, not made.
     #[tokio::test]
-    async fn a_collectors_outputs_are_compared_without_running_a_program_or_a_model() {
+    async fn a_collectors_outputs_are_compared_without_running_a_program_or_a_dataset() {
         let (old, new, scratch) = (
             tempfile::tempdir().unwrap(),
             tempfile::tempdir().unwrap(),
@@ -3196,20 +3196,21 @@ mod tests {
             after: None,
             error: error.map(str::to_string),
         };
-        let model = |view: &str, changed: &[&str], contract: Option<&str>, downstream: &[&str]| {
-            ModelImpact {
-                view: view.into(),
-                change: Change::Changed,
-                changed: changed.iter().map(|c| c.to_string()).collect(),
-                before_columns: vec![],
-                after_columns: vec![],
-                contract_change: contract.map(str::to_string),
-                downstream: downstream.iter().map(|d| d.to_string()).collect(),
-                rows: None,
-            }
-        };
-        let mut rows_model = model("v_shared_r", &["query"], None, &[]);
-        rows_model.rows = Some(RowDiff {
+        let dataset =
+            |view: &str, changed: &[&str], contract: Option<&str>, downstream: &[&str]| {
+                DatasetImpact {
+                    view: view.into(),
+                    change: Change::Changed,
+                    changed: changed.iter().map(|c| c.to_string()).collect(),
+                    before_columns: vec![],
+                    after_columns: vec![],
+                    contract_change: contract.map(str::to_string),
+                    downstream: downstream.iter().map(|d| d.to_string()).collect(),
+                    rows: None,
+                }
+            };
+        let mut rows_dataset = dataset("v_shared_r", &["query"], None, &[]);
+        rows_dataset.rows = Some(RowDiff {
             before: Some(3),
             after: Some(3),
             keyed: Some(KeyedDiff {
@@ -3228,16 +3229,16 @@ mod tests {
                 page("shared/new", Change::Added, None),
                 page("shared/bad", Change::Added, Some("no such table")),
             ],
-            models: vec![
-                model(
+            datasets: vec![
+                dataset(
                     "v_shared_x",
                     &["columns"],
                     Some("column `y` added"),
                     &["v_b_y"],
                 ),
-                model("v_shared_z", &["query"], None, &[]),
-                model("v_shared_t", &["description", "tests"], None, &[]),
-                rows_model,
+                dataset("v_shared_z", &["query"], None, &[]),
+                dataset("v_shared_t", &["description", "tests"], None, &[]),
+                rows_dataset,
             ],
             collectors: vec![CollectorImpact {
                 id: "gh".into(),
@@ -3344,11 +3345,11 @@ mod tests {
                 "Effect on-done on fixture basic: runs [oxplow.work_item.comment] → skips (not today)",
                 "Effect ping: added — on vcs.head.moved",
                 "Collector gh on fixture two: 2 thing → fails (boom)",
-                "Model v_shared_x: column `y` added; read by v_b_y",
-                "Model v_shared_z: its query changed (same columns)",
-                "Model v_shared_t: its description and tests changed (same columns)",
-                "Model v_shared_r: its query changed (same columns)",
-                "Model v_shared_r rows: 3 → 3 (1 added, 1 removed, 1 changed)",
+                "Dataset v_shared_x: column `y` added; read by v_b_y",
+                "Dataset v_shared_z: its query changed (same columns)",
+                "Dataset v_shared_t: its description and tests changed (same columns)",
+                "Dataset v_shared_r: its query changed (same columns)",
+                "Dataset v_shared_r rows: 3 → 3 (1 added, 1 removed, 1 changed)",
                 "Page shared/count: changed",
                 "Page shared/new: added",
                 "Page shared/bad: added; its query fails: no such table",

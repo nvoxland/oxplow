@@ -1,7 +1,7 @@
-//! The live models: `v_ai_role`, `v_ai_provider`, `v_lsp_server`,
+//! The live datasets: `v_ai_role`, `v_ai_provider`, `v_lsp_server`,
 //! `v_collector_state`, `v_collector_credential`, `v_zone` and `v_zone_unmatched` read state that has no
 //! change hook (a keychain, a yaml file, a process table, the worktree's files), so the gateway
-//! reads it when a query names them (`crate::live_models`).
+//! reads it when a query names them (`crate::live_datasets`).
 
 use serde_json::{json, Value};
 
@@ -186,11 +186,11 @@ async fn collector_state_and_credentials_are_read_live() {
     assert!(!everything.contains("tok-very-secret"), "{everything}");
 }
 
-/// A live model's view is an empty, typed stub; a gateway with nothing
-/// bound to read it refuses rather than answering empty, and no model is
+/// A live dataset's view is an empty, typed stub; a gateway with nothing
+/// bound to read it refuses rather than answering empty, and no dataset is
 /// built on one (it would read the stub).
 #[tokio::test]
-async fn a_live_model_is_never_answered_empty_by_mistake() {
+async fn a_live_dataset_is_never_answered_empty_by_mistake() {
     let fx = services_with_effort().await;
     let bare = crate::sql_gateway::SqlGateway::new(fx.svc.db.clone());
     let err = bare
@@ -203,31 +203,31 @@ async fn a_live_model_is_never_answered_empty_by_mistake() {
         "a check compiles against the stub"
     );
 
-    let mut sources = oxplow_db::models::core_sources().unwrap();
-    sources.retain(|s| !crate::live_models::NAMES.contains(&s.decl.name.as_str()));
+    let mut sources = oxplow_db::datasets::core_sources().unwrap();
+    sources.retain(|s| !crate::live_datasets::NAMES.contains(&s.decl.name.as_str()));
     for source in &sources {
-        for name in crate::live_models::NAMES {
+        for name in crate::live_datasets::NAMES {
             assert!(
                 !source.sql.contains(&format!("v_{name}")),
-                "{} reads the live model {name}",
+                "{} reads the live dataset {name}",
                 source.decl.name
             );
         }
     }
 }
 
-/// The columns a live read returns are the columns its model declares.
+/// The columns a live read returns are the columns its dataset declares.
 #[test]
-fn every_live_model_reads_the_columns_it_declares() {
-    let sources = oxplow_db::models::core_sources().unwrap();
-    for name in crate::live_models::NAMES {
+fn every_live_dataset_reads_the_columns_it_declares() {
+    let sources = oxplow_db::datasets::core_sources().unwrap();
+    for name in crate::live_datasets::NAMES {
         let decl = &sources
             .iter()
             .find(|s| s.decl.name == *name)
-            .unwrap_or_else(|| panic!("no core model `{name}`"))
+            .unwrap_or_else(|| panic!("no core dataset `{name}`"))
             .decl;
         let declared: Vec<&str> = decl.fields.iter().map(|c| c.name.as_str()).collect();
-        assert_eq!(declared, crate::live_models::columns(name), "{name}");
+        assert_eq!(declared, crate::live_datasets::columns(name), "{name}");
     }
 }
 
@@ -699,10 +699,10 @@ async fn agent_conversations_are_each_harness_saved_ones() {
     );
 }
 
-/// A query over a live model says it read it, as over any model: what a
+/// A query over a live dataset says it read it, as over any dataset: what a
 /// page re-runs on.
 #[tokio::test]
-async fn a_query_over_a_live_model_reads_it() {
+async fn a_query_over_a_live_dataset_reads_it() {
     let fx = services_with_effort().await;
     let out = fx
         .svc
@@ -711,18 +711,18 @@ async fn a_query_over_a_live_model_reads_it() {
         .await
         .unwrap();
     assert!(
-        out.reads.models.contains(&"v_zone".to_string()),
+        out.reads.datasets.contains(&"v_zone".to_string()),
         "{:?}",
         out.reads
     );
 }
 
-/// A change to what a live model reads announces the model: the events
-/// that change it, and the models it reads through.
+/// A change to what a live dataset reads announces the dataset: the events
+/// that change it, and the datasets it reads through.
 #[test]
-fn a_change_names_the_live_models_that_follow_it() {
+fn a_change_names_the_live_datasets_that_follow_it() {
     use crate::events::OxplowEvent;
-    let after = |e: OxplowEvent| crate::models_changed::live_models_after(&e);
+    let after = |e: OxplowEvent| crate::datasets_changed::live_datasets_after(&e);
     let config = after(OxplowEvent::ConfigChanged);
     assert!(
         config.contains(&"v_config_value".to_string()) && config.contains(&"v_zone".to_string()),
@@ -740,7 +740,7 @@ fn a_change_names_the_live_models_that_follow_it() {
     );
     assert!(after(OxplowEvent::BackgroundTasksChanged).is_empty());
     assert_eq!(
-        crate::models_changed::live_models_reading(&["v_agent_session".to_string()]),
+        crate::datasets_changed::live_datasets_reading(&["v_agent_session".to_string()]),
         vec!["v_agent_conversation".to_string()]
     );
     // What a pair of branches compares moves with the refs, and the
@@ -748,10 +748,10 @@ fn a_change_names_the_live_models_that_follow_it() {
     let refs = after(OxplowEvent::VcsRefsChanged {
         stream_id: oxplow_domain::StreamId::new(1),
     });
-    let branches = crate::models_changed::live_models_reading(&["v_branch".to_string()]);
-    for model in ["v_branch_divergence", "v_commit_between"] {
-        assert!(refs.contains(&model.to_string()), "{refs:?}");
-        assert!(branches.contains(&model.to_string()), "{branches:?}");
+    let branches = crate::datasets_changed::live_datasets_reading(&["v_branch".to_string()]);
+    for dataset in ["v_branch_divergence", "v_commit_between"] {
+        assert!(refs.contains(&dataset.to_string()), "{refs:?}");
+        assert!(branches.contains(&dataset.to_string()), "{branches:?}");
     }
 }
 

@@ -275,7 +275,7 @@ mod tests {
     /// What a failed operation printed is `v_op_error_output`, a row per
     /// failure that captured some; one that captured nothing has none.
     #[tokio::test]
-    async fn a_failed_operations_output_is_read_through_its_model() {
+    async fn a_failed_operations_output_is_read_through_its_dataset() {
         let fx = crate::test_fixtures::services_with_effort().await;
         let svc = &fx.svc;
         let out = svc

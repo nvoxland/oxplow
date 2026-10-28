@@ -15,7 +15,7 @@ const actionRuns: { action: string; row: unknown }[] = [];
 mock.module("../api.js", () => ({
   ...realApi,
   listExtensions: async () => [],
-  querySql: async () => ({ columns: [], rows: [], truncated: false, reads: { models: [], tables: [], measures: [] }, freshness: {} }),
+  querySql: async () => ({ columns: [], rows: [], truncated: false, reads: { datasets: [], tables: [], measures: [] }, freshness: {} }),
 }));
 const { VizView } = await import("./VizView.js");
 

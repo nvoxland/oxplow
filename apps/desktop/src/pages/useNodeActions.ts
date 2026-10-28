@@ -30,7 +30,7 @@ const daemonRunPageAction: RunPageAction = async (runId, node, action, row, inpu
 export const PageActionContext = createContext<RunPageAction>(daemonRunPageAction);
 
 /** After a press on run `runId` ran: run it again, so what the command
- *  changed shows even when no model change announces it (a keychain
+ *  changed shows even when no dataset change announces it (a keychain
  *  entry). */
 export type AfterPress = (runId: string) => void;
 

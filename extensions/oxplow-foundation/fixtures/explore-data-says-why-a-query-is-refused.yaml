@@ -3,6 +3,6 @@
 when: { page: explore-data }
 steps:
   - ui:
-      - fill: { '[data-testid="explore-sql"]': "SELECT * FROM no_such_model" }
+      - fill: { '[data-testid="explore-sql"]': "SELECT * FROM no_such_dataset" }
       - click: '[data-testid="explore-run"]'
       - expect: { visible: ['[data-testid="explore-error"]'] }

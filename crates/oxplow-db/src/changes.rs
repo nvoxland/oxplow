@@ -5,7 +5,7 @@
 //!   plain update hook it fires for WITHOUT ROWID tables, and while it is set
 //!   SQLite skips the truncate shortcut, so a bare `DELETE FROM t` reports
 //!   too — and whether the change only inserted or **rewrote** (an UPDATE or
-//!   a DELETE, P8.B3): appending to an incremental model is only right when
+//!   a DELETE, P8.B3): appending to an incremental dataset is only right when
 //!   none of its inputs was rewritten;
 //! - a **commit** hook moves the connection's noted tables to the committed
 //!   set;
@@ -219,7 +219,7 @@ mod tests {
     }
 
     /// P8.B3: a commit also says which tables it rewrote — updated or
-    /// deleted rows in, not only inserted — so an incremental model knows
+    /// deleted rows in, not only inserted — so an incremental dataset knows
     /// when appending isn't enough.
     #[tokio::test]
     async fn commits_say_which_tables_they_rewrote() {

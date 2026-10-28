@@ -5,7 +5,7 @@
 //! - the scan and its findings in the code-quality store, read through
 //!   `v_code_quality_scan` / `v_code_quality_finding`;
 //! - a status-bar background task. Its rows' commits announce it
-//!   (`ModelsChanged` on `v_code_quality_scan`).
+//!   (`DatasetsChanged` on `v_code_quality_scan`).
 //!
 //! It writes no facts: a scan anchors only the change's files, and a
 //! capture from it would restate the whole tree from a slice (tsk365).

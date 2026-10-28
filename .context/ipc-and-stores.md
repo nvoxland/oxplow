@@ -15,7 +15,7 @@ RPC/MCP layers become thin callers of `CommandBus::run`. A write that
 must log a domain event appends it with `append_tx` in the same
 transaction as the state change ([data-model.md](./data-model.md)
 "event_log"); a commit that logged one wakes the pump (the change loop
-in `models_changed.rs` sees `event_log` among its tables), and the
+in `datasets_changed.rs` sees `event_log` among its tables), and the
 in-memory `EventBus` is only the renderer's channel (see "Event bus"). A new write path that bypasses the bus
 needs a reason recorded here — the table below.
 
@@ -25,7 +25,7 @@ command):
 | Write | Why it isn't a command |
 |---|---|
 | select a thread, switch stream, report the tabs a window shows | UI selection pointers, not project facts |
-| page visits, usage recording, forgetting a page | implicit navigation telemetry, not an intent: an audit row per tab switch would flood `command_audit`. Their views re-read `v_page_visit` / `v_usage_event` on `ModelsChanged` (P8.A10) |
+| page visits, usage recording, forgetting a page | implicit navigation telemetry, not an intent: an audit row per tab switch would flood `command_audit`. Their views re-read `v_page_visit` / `v_usage_event` on `DatasetsChanged` (P8.A10) |
 | background-task progress | in memory and transient |
 | the Assistant's prompt, stop, settings and card answers (`assistant_*`) | an in-memory conversation the person drives, gone on restart; what its tools change runs on the bus as the person (`via` the session) |
 | hook ingest, chat prompt / cancel / permission answers, terminal input | agent-session activity, born as `agent.*` events ([data-model.md](./data-model.md) "event_log"); oxplow never synthesizes agent input |
@@ -33,7 +33,7 @@ command):
 | the left-nav panel layout (`set_panel_layout`) | a UI layout pointer, like the selection pointers |
 | page memory and app preferences (`set_ui_preference`) | the person's UI memory, like the panel layout: a pointer, not an intent (`v_ui_preference` reads it) |
 | workspace file write / create / rename / delete, applying an LSP edit | the person's own hands on their worktree, like their terminal; snapshots record it |
-| a change's analysis (`oxplow_ensure_change`) | a derived cache, recomputed from the VCS on demand like a materialized model — not an intent |
+| a change's analysis (`oxplow_ensure_change`) | a derived cache, recomputed from the VCS on demand like a materialized dataset — not an intent |
 | a model call's record (`ai_call`, `ai_result`) | the computation as it happened (`AiCompute`), like a test run's capture — the run that asked for it is what's audited |
 | AI providers and roles, credentials | secrets: unreachable from `run_command`, so no invoker list can ever open them to an agent, and no audit row holds a secret |
 | a person's global external provider instances (`instances.yaml`, P9.B2: `oxplow.provider.add_instance` / `set_instance` / `remove_instance` on a global one) | the person's own machine-level settings, like `ai.yaml`: what runs in every project of theirs is theirs alone to say — the registry writes the file only for `Actor::Human` (a project's instances still go through `oxplow.config.set`) |
@@ -70,16 +70,16 @@ and tests that own them. Also:
 `ui_events_have_their_pinned_sources` pins which file may
 push each UI event (its `EMITTERS` table), and
 `every_ui_event_has_an_emitter` fails on a variant with none (a listener
-no one wakes — tsk789). What's left there is a signal no model carries —
+no one wakes — tsk789). What's left there is a signal no dataset carries —
 the config swap, agent status, an orphaned stream
 (`StreamOrphaned`), background tasks, the LSP server list, a snapshot take, VCS refs, the
 workspace, a provider sign-in finishing (`CredentialChanged`: the token
-is in the keychain, which no model reads); every other view re-reads a model on `ModelsChanged`
+is in the keychain, which no dataset reads); every other view re-reads a dataset on `DatasetsChanged`
 (P8.A2–A10).
 
 **Private extension state.** `extension_state_store` is a host persistence
 primitive, with both CAS write entry points denied to thin callers. Its opaque
-payloads have no SQL model or direct store RPC surface. Host services must derive
+payloads have no SQL dataset or direct store RPC surface. Host services must derive
 namespace identity from RunContext and enforce grants. `StateHost` now does this
 for its synchronous read and write adapters, including current contribution
 identity and live authority checks around each operation. Its write takes an
@@ -115,7 +115,7 @@ project and owning extension, including for globally configured instances.
 observation writes (sync and async) are denied to thin callers. The helpers
 require an existing transaction and propagate savepoint rollback failures;
 logical conflict/rejection must never leave attempt mutations if caught. Private
-request/result/evidence JSON has no SQL models or direct RPC. Queued/recovery
+request/result/evidence JSON has no SQL datasets or direct RPC. Queued/recovery
 pages carry bounded metadata only, history pages stop at row/payload budgets,
 and original-owner observations never grant publication. The dispatcher rechecks
 live grants and runs workers/cancellation waits outside transactions.
@@ -129,14 +129,14 @@ attempt-independent idempotency key. Public enqueue/cancel/snapshot native
 operations, a callable owned-result reader, completion events and bounded boot
 scheduling are integrated for typed AI jobs. Runtime validation remains pending.
 
-**Candidate model publication.** Both `Database::replace_extension_models`
-and `models::replace_extensions` are denied to thin callers. The latter is a
+**Candidate dataset publication.** Both `Database::replace_extension_datasets`
+and `datasets::replace_extensions` are denied to thin callers. The latter is a
 transaction helper with an inner savepoint, not an IPC write surface. A host
 generation coordinator owns strict candidate rejection and the larger DB /
 in-memory publication boundary; the legacy background compiler remains partial.
 
 **Database generation candidate.** The app's PreparedExtensionDatabase helper
-accepts a caller-owned Transaction and applies models, vocabulary and enabled
+accepts a caller-owned Transaction and applies datasets, vocabulary and enabled
 contribution descriptors inside a single surrounding savepoint. Its capability
 variant includes planned capability rows and switch events, with vocabulary
 recognition from the planned choice. Any structured rejection restores the whole
@@ -148,15 +148,15 @@ coordinator joins its publication to commands, capability/native/provider maps,
 metric declarations and component bundles under owned reader/writer guards.
 Complete reader coverage and failure-injection validation remain unfinished.
 
-**Then: is it a read of data a model can publish?** Reads are SQL
-(P4): a new read of project data is a **model** (a `models/<name>.sql`
-file with its `models.yaml` entry — [semantic-layer.md](./semantic-layer.md)
-"Models") that the UI (`query_sql`) and agents (`oxplow_query_sql`) query, not a
+**Then: is it a read of data a dataset can publish?** Reads are SQL
+(P4): a new read of project data is a **dataset** (a `datasets/<name>.sql`
+file with its `datasets.yaml` entry — [semantic-layer.md](./semantic-layer.md)
+"Datasets") that the UI (`query_sql`) and agents (`oxplow_query_sql`) query, not a
 bespoke IPC/MCP read. The result says what it read (`reads`), and the
-view refreshes through `useRerunOnChange` when `ModelsChanged` names a
-model it read — no per-feature event to add. A bespoke read stays for
+view refreshes through `useRerunOnChange` when `DatasetsChanged` names a
+dataset it read — no per-feature event to add. A bespoke read stays for
 what SQL can't answer (a git or LSP call, a file on disk, an entity an
-extension declared but hasn't synced) is a live model when the SQL layer can read it (`v_data_entity`: its row count is counted only for the one name the query pins, since one slow count would fail the whole list, tsk1065).
+extension declared but hasn't synced) is a live dataset when the SQL layer can read it (`v_data_entity`: its row count is counted only for the one name the query pins, since one slow count would fail the whole list, tsk1065).
 
 A new operation that the UI invokes and that mutates persistent state
 touches roughly seven files. They sit in this order:
@@ -274,11 +274,11 @@ which `oxplow_sdk::check` says a check never does.
 
 ## Worked example: `wiki_page`
 
-Reads of a persisted feature are models now (P6): the `wiki_page`
+Reads of a persisted feature are datasets now (P6): the `wiki_page`
 table is published as `v_knowledge_page` / `v_knowledge_body` /
 `v_knowledge_ref`, the desktop reads them with `querySql`
 (`knowledge.ts`), and writes are `knowledge.*` commands through the bus.
-A new feature follows that shape: a model for what the UI and agents
+A new feature follows that shape: a dataset for what the UI and agents
 read, a command for each write — no typed read RPC.
 
 **Arbitrary JSON across IPC is `oxplow_domain::Json`** (P5.A1). specta
@@ -310,8 +310,8 @@ write lock".
 ## Event bus
 
 **The bus is the renderer's channel and nothing else** (P7.B6,
-`ui_push.rs`). It carries `ModelsChanged` (a model's tables committed,
-`models_changed.rs`), what the `ui.push` pump consumer derives from the
+`ui_push.rs`). It carries `DatasetsChanged` (a dataset's tables committed,
+`datasets_changed.rs`), what the `ui.push` pump consumer derives from the
 event log (`snapshot.taken` / `vcs.head.moved` → `SnapshotTaken`), and the
 UI-only signals with no durable fact behind them (a toast, a stream
 orphaned, an agent's status, `ConfigChanged` for the Settings view).
@@ -319,9 +319,9 @@ orphaned, an agent's status, `ConfigChanged` for the Settings view).
 Settings list (Extensions, Data, Capabilities, Integrations) loads each
 part on its own trigger: the catalog or config change
 (`extensionsChanged`) for extensions and their checks, entities and
-collectors; `useRerunOnChange` over the models the part read (`v_collector_run` for
-the collector list, `v_extension_run` for the last runs); and a model's
-row count when that model's own `ModelsChanged` names it
+collectors; `useRerunOnChange` over the datasets the part read (`v_collector_run` for
+the collector list, `v_extension_run` for the last runs); and a dataset's
+row count when that dataset's own `DatasetsChanged` names it
 (each loader re-runs on its own reads). A collector run (frequent) therefore re-lists the collectors and nothing else.
 The daemon still re-reads `project.yaml` on each extension-catalog call;
 serving it from the loaded copy is open.
@@ -333,8 +333,8 @@ the `/events` forwarder subscribes (`EventBus::subscribe_ui`); the
 source-tree test `source_guards::the_bus_has_one_listener` fails on any
 other production caller. A new derived UI event goes in `ui.push` from
 the event that records the fact, not as an `emit` beside the write —
-and first ask whether the view can re-read a model instead
-(`useRerunOnChange` on `ModelsChanged`). Who may emit each variant is
+and first ask whether the view can re-read a dataset instead
+(`useRerunOnChange` on `DatasetsChanged`). Who may emit each variant is
 pinned (`source_guards::ui_events_have_their_pinned_sources`).
 
 `crates/oxplow-app/src/events.rs` defines the typed `OxplowEvent` discriminated
@@ -386,7 +386,7 @@ both together when adding a channel.
 
 ## Git dashboard / cross-worktree IPC
 
-The Git Dashboard is a foundation page over the models ([vcs.md](./vcs.md)); the cross-worktree IPCs left are:
+The Git Dashboard is a foundation page over the datasets ([vcs.md](./vcs.md)); the cross-worktree IPCs left are:
 
 - `vcsPush(streamId, { remote, branch })` / `vcsPull(streamId, { remote,
   branch })` — the `oxplow.vcs.push` / `oxplow.vcs.pull` commands aimed at a remote
@@ -707,13 +707,13 @@ store, runtime, IPC, and UI are tool-agnostic.
 The collection subsystem (`.context/collection.md`) follows the same
 7-layer shape with a couple of slice patterns worth calling out:
 
-- **Stored once, read as a model.** The `effort_evidence` asset computes
+- **Stored once, read as a dataset.** The `effort_evidence` asset computes
   each effort's observations and stores them (`v_effort_observation`); the
-  panel and an agent's `oxplow_query_sql` read the model
+  panel and an agent's `oxplow_query_sql` read the dataset
   (`SqliteEffortEvidenceStore::list_observations`). Mutations are the
   `oxplow.test.record_run` command and `oxplow.collector.sync` on a report collector
   (agents run them; P8.A8, tsk863) since the UI never writes observations. A view of them re-runs on
-  `ModelsChanged` (P8.A2: the bespoke `EffortObservationsChanged` had no
+  `DatasetsChanged` (P8.A2: the bespoke `EffortObservationsChanged` had no
   listener and is gone).
 - **The engine lives in `oxplow-app`, not a store.** `CollectionService`
   (`crates/oxplow-app/src/collection.rs`) owns the orchestration
@@ -739,7 +739,7 @@ schema in [data-model.md](./data-model.md), migration `V33`).
   There are no write IPCs — nudges are written exclusively by the service
   inside `on_shell_run`, best-effort (a persistence error is logged,
   never fails the hook).
-- **Change**: a view of `v_agent_nudge` re-runs on `ModelsChanged` when a
+- **Change**: a view of `v_agent_nudge` re-runs on `DatasetsChanged` when a
   record commits (P8.A2: the bespoke `AgentNudgesChanged` had no listener
   and is gone). Persistence happens AFTER the existing one-shot dedup
   gates, so a deduped nudge is never stored.
@@ -841,7 +841,7 @@ person's confirmation). The author is whoever runs the command, so no
 surface passes one. The reads stay RPCs (`list_comments_for_target`,
 `list_comments_for_stream`; MCP `oxplow_list_comments`).
 
-Views re-read on `ModelsChanged` naming `v_comment` (comments and their
+Views re-read on `DatasetsChanged` naming `v_comment` (comments and their
 messages) — `subscribeCommentEvents` in `api.ts`. The renderer's
 re-anchor after it re-finds a quote is `oxplow.knowledge.relocate_comment`
 (`relocateComment`, tsk861): recorded when the anchor moved; one already
@@ -851,14 +851,14 @@ field stores anchors only once the document settles (blur, leaving, not
 focused; tsk902), so typing above N comments doesn't run N commands per
 pause.
 
-## Search index (read model + indexer)
+## Search index (read dataset + indexer)
 
 The `search` command/tool is a read over `SqliteSearchStore`
 (`crates/oxplow-db/src/search_store.rs`) — a unified FTS5/BM25 index, not a
 per-domain store. It is **fed**, not written by its callers. Tasks,
-comments, thread notes and wiki pages are searchable resources derived from a model
+comments, thread notes and wiki pages are searchable resources derived from a dataset
 (`v_search_<kind>`): an asset per kind (`kind_search.rs`, tsk864)
-restates the kind whole when a table behind its model commits — a move, a
+restates the kind whole when a table behind its dataset commits — a move, a
 soft delete, a thread delete included — writing nothing when the rows are
 unchanged. File contents come from snapshot blobs, so the `search.index`
 pump consumer indexes them on `snapshot.taken` (durable, redelivered after

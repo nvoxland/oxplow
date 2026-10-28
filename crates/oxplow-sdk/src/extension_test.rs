@@ -233,9 +233,9 @@ pub async fn test_extension_in(
         page_answers(&host, &ext, &mut report).await;
         let (before, started) = (report.errors.len(), std::time::Instant::now());
         questions(&host, &ext, &mut report).await;
-        incremental_models(&host, &ext, &mut report).await;
+        incremental_datasets(&host, &ext, &mut report).await;
         if report.errors.len() > before {
-            report.finish_case("questions and models".into(), before, started);
+            report.finish_case("questions and datasets".into(), before, started);
         }
     }
     report.ok = report.errors.is_empty();
@@ -1652,7 +1652,7 @@ async fn observe(host: &Host, ext: &Extension, observed: &Value) -> Result<(), S
             ))
         }
     }?;
-    // What the log now holds reaches the models, as a command's events do;
+    // What the log now holds reaches the datasets, as a command's events do;
     // a reaction's own events (a checkpoint, a policy's answer to it) are
     // heard in turn.
     host.settle().await;
@@ -2720,7 +2720,7 @@ async fn observe_turn(host: &Host, body: &Value) -> Result<(), String> {
         call.tool = Some(used);
         ingest(call).await?;
     }
-    // The calls are in the models before the turn ends, as the app's pump
+    // The calls are in the datasets before the turn ends, as the app's pump
     // has them by then: the end's checkpoint counts them.
     svc.event_pump
         .deliver_projections()
@@ -3614,8 +3614,8 @@ async fn advisory_example(
     }
 }
 
-/// Read the published models with `when: { sql, params? }` as a page's
-/// loader would — a model, a decorator's labels, a metric's grid — through
+/// Read the published datasets with `when: { sql, params? }` as a page's
+/// loader would — a dataset, a decorator's labels, a metric's grid — through
 /// an inline page of one `sql` loader: `expect: { rows, columns? }`,
 /// compared as a loader's.
 async fn sql_example(host: &Host, ex: &Example<'_>, sql: &str, report: &mut TestReport) {
@@ -5036,22 +5036,22 @@ async fn collector_example(
     }
 }
 
-/// Each incremental model (P8.B5), on its fixture `fixtures/model-<name>.yaml`
+/// Each incremental dataset (P8.B5), on its fixture `fixtures/dataset-<name>.yaml`
 /// (`before:` and `after:`, each `{ <table>: [rows] }`): built whole on
 /// `before`, appended to past its watermark after `after` is written, and
 /// compared with a full refill — in a rehearsal, so nothing stays. A
 /// watermark that doesn't grow as rows arrive drops a row below it
 /// unseen; nothing at run time can tell, so this is where it shows.
-async fn incremental_models(host: &Host, ext: &Extension, report: &mut TestReport) {
+async fn incremental_datasets(host: &Host, ext: &Extension, report: &mut TestReport) {
     let rel = ext.path.trim_end_matches('/').to_string();
     let dir = host.root.join(&rel);
     let manifest = std::fs::read_to_string(dir.join("extension.yaml")).unwrap_or_default();
-    for model in &ext.datasets {
-        let decl = &model.decl;
+    for dataset in &ext.datasets {
+        let decl = &dataset.decl;
         if decl
             .materialize
             .as_ref()
-            .and_then(oxplow_db::models::Materialize::incremental)
+            .and_then(oxplow_db::datasets::Materialize::incremental)
             .is_none()
         {
             continue;
@@ -5061,17 +5061,17 @@ async fn incremental_models(host: &Host, ext: &Extension, report: &mut TestRepor
         )
         .unwrap_or(1);
         let at = format!("{rel}/extension.yaml:{line}");
-        let fixture = format!("fixtures/model-{}.yaml", decl.name);
+        let fixture = format!("fixtures/dataset-{}.yaml", decl.name);
         let Ok(text) = std::fs::read_to_string(dir.join(&fixture)) else {
             report.warnings.push(format!(
-                "{at}: incremental model `{}` has no {rel}/{fixture}, so appending isn't checked \
+                "{at}: incremental dataset `{}` has no {rel}/{fixture}, so appending isn't checked \
                  against a full refill — fix: write its `before:` and `after:` rows \
                  (`{{ <table>: [{{ column: value }}] }}`)",
                 decl.name
             ));
             continue;
         };
-        let rows = |doc: &Value, part: &str| -> Result<oxplow_db::models::FixtureRows, String> {
+        let rows = |doc: &Value, part: &str| -> Result<oxplow_db::datasets::FixtureRows, String> {
             let Some(tables) = doc.get(part) else {
                 return Ok(Vec::new());
             };
@@ -5108,24 +5108,24 @@ async fn incremental_models(host: &Host, ext: &Extension, report: &mut TestRepor
             }
         };
         report.ran.push(format!("incremental {}", decl.name));
-        let view = oxplow_db::models::extension_view(&ext.name, &decl.name);
+        let view = oxplow_db::datasets::extension_view(&ext.name, &decl.name);
         let decl_c = decl.clone();
         let checked = host
             .svc
             .db
             .rehearse(move |tx| {
-                oxplow_db::models::incremental_matches_full(tx, &view, &decl_c, &before, &after)
+                oxplow_db::datasets::incremental_matches_full(tx, &view, &decl_c, &before, &after)
             })
             .await;
         match checked {
             Ok(None) => {}
             Ok(Some(problem)) => report.errors.push(format!(
-                "{at}: incremental model `{}` {problem} — fix: `materialize: on_change`, or a \
+                "{at}: incremental dataset `{}` {problem} — fix: `materialize: on_change`, or a \
                  watermark that only grows as rows arrive",
                 decl.name
             )),
             Err(e) => report.errors.push(format!(
-                "{rel}/{fixture}:1: incremental model `{}` couldn't run on the fixture: {e} — \
+                "{rel}/{fixture}:1: incremental dataset `{}` couldn't run on the fixture: {e} — \
                  fix: the fixture's rows",
                 decl.name
             )),
@@ -6039,7 +6039,7 @@ mod tests {
         std::fs::write(p, body).unwrap();
     }
 
-    /// The tally extension: a starlark collector of `thing`s, a model and a
+    /// The tally extension: a starlark collector of `thing`s, a dataset and a
     /// page over them, a command noting one, a README and questions, and an
     /// intent example per kind, each with its fixture.
     fn tally(root: &Path, collector_expect: &str, command_expect: &str) {
@@ -6097,7 +6097,7 @@ commands:
         );
         write(
             root,
-            ".oxplow/extensions/tally/models/labelled.sql",
+            ".oxplow/extensions/tally/datasets/labelled.sql",
             "SELECT id, label FROM ref('thing') WHERE label IS NOT NULL\n",
         );
         write(
@@ -6234,18 +6234,18 @@ commands:
             root,
             ".oxplow/extensions/maker/extension.yaml",
             &format!(
-                "manifest: 2\nname: maker\nintent:\n  purpose: Make items.\ndatasets:\n  - name: items\n    version: {version}\n    description: Items.\n    fields:\n      - {{ name: uri, type: TEXT, doc: A work item. }}\nexports:\n  - {{ contribution: oxplow:oxplow/model?model=maker/items, version: {version}, visibility: stable }}\n"
+                "manifest: 2\nname: maker\nintent:\n  purpose: Make items.\ndatasets:\n  - name: items\n    version: {version}\n    description: Items.\n    fields:\n      - {{ name: uri, type: TEXT, doc: A work item. }}\nexports:\n  - {{ contribution: oxplow:oxplow/dataset?dataset=maker/items, version: {version}, visibility: stable }}\n"
             ),
         );
         write(
             root,
-            ".oxplow/extensions/maker/models/items.sql",
+            ".oxplow/extensions/maker/datasets/items.sql",
             "SELECT uri FROM ref('work_item')\n",
         );
         write(
             root,
             ".oxplow/extensions/reader/extension.yaml",
-            "manifest: 2\nname: reader\nintent:\n  purpose: Read the maker's items.\nimports:\n  - { id: items, contribution: oxplow:oxplow/model?model=maker/items, version: 1, optional: true }\n",
+            "manifest: 2\nname: reader\nintent:\n  purpose: Read the maker's items.\nimports:\n  - { id: items, contribution: oxplow:oxplow/dataset?dataset=maker/items, version: 1, optional: true }\n",
         );
         write(
             root,
@@ -6265,10 +6265,11 @@ commands:
         assert_eq!(report.errors, Vec::<String>::new());
         assert_eq!(
             report.imports,
-            ["`items` → oxplow:oxplow/model?model=maker/items v1: available"]
+            ["`items` → oxplow:oxplow/dataset?dataset=maker/items v1: available"]
         );
-        assert!(render(&report, crate::Format::Text)
-            .contains("import `items` → oxplow:oxplow/model?model=maker/items v1: available\n"));
+        assert!(render(&report, crate::Format::Text).contains(
+            "import `items` → oxplow:oxplow/dataset?dataset=maker/items v1: available\n"
+        ));
         let checked = crate::check(
             dir.path(),
             "reader",
@@ -6279,15 +6280,18 @@ commands:
         )
         .await
         .unwrap();
-        assert!(crate::render_findings(&checked, crate::Format::Text)
-            .contains("import `items` → oxplow:oxplow/model?model=maker/items v1: available\n"));
+        assert!(
+            crate::render_findings(&checked, crate::Format::Text).contains(
+                "import `items` → oxplow:oxplow/dataset?dataset=maker/items v1: available\n"
+            )
+        );
 
         let dir = tempfile::tempdir().unwrap();
         producer_and_consumer(dir.path(), 2);
         let report = test_extension(dir.path(), "reader", false).await.unwrap();
         assert_eq!(
             report.imports,
-            ["`items` → oxplow:oxplow/model?model=maker/items v1: unavailable (maker exports v2)"]
+            ["`items` → oxplow:oxplow/dataset?dataset=maker/items v1: unavailable (maker exports v2)"]
         );
 
         // A person's own disable doesn't change what a test runs with.
@@ -6301,7 +6305,7 @@ commands:
         let report = test_extension(dir.path(), "reader", false).await.unwrap();
         assert_eq!(
             report.imports,
-            ["`items` → oxplow:oxplow/model?model=maker/items v1: available"]
+            ["`items` → oxplow:oxplow/dataset?dataset=maker/items v1: available"]
         );
     }
 
@@ -6353,9 +6357,9 @@ commands:
         }
     }
 
-    /// An extension with one incremental model over page visits, watermarked
+    /// An extension with one incremental dataset over page visits, watermarked
     /// on `watermark`, and its `before` / `after` fixture.
-    /// The `visits` extension: an incremental model keyed and watermarked
+    /// The `visits` extension: an incremental dataset keyed and watermarked
     /// on `id`, with a fixture whose `before` visit has id `before` and whose
     /// later `after` visit has id `after`.
     fn visits(root: &Path, before: i64, after: i64) {
@@ -6381,12 +6385,12 @@ datasets:
         );
         write(
             root,
-            ".oxplow/extensions/visits/models/long_visits.sql",
+            ".oxplow/extensions/visits/datasets/long_visits.sql",
             "SELECT id, duration_ms FROM ref('page_visit') WHERE duration_ms IS NOT NULL\n",
         );
         write(
             root,
-            ".oxplow/extensions/visits/fixtures/model-long_visits.yaml",
+            ".oxplow/extensions/visits/fixtures/dataset-long_visits.yaml",
             &format!(
                 "before:
   page_visit:
@@ -6399,12 +6403,12 @@ after:
         );
     }
 
-    /// P8.B5: each incremental model is appended to on its fixture's
+    /// P8.B5: each incremental dataset is appended to on its fixture's
     /// `after` rows and checked against a full refill — a key that doesn't
     /// grow with arrivals (a row lands below the watermark, unseen) fails
-    /// at the model's line; one that does passes.
+    /// at the dataset's line; one that does passes.
     #[tokio::test(flavor = "multi_thread")]
-    async fn extension_test_checks_incremental_models_against_a_full_refill() {
+    async fn extension_test_checks_incremental_datasets_against_a_full_refill() {
         let dir = tempfile::tempdir().unwrap();
         visits(dir.path(), 1, 2);
         let report = test_extension(dir.path(), "visits", false).await.unwrap();
@@ -6422,7 +6426,7 @@ after:
         let errors = report.errors.join("\n");
         assert!(
             errors.contains(
-                ".oxplow/extensions/visits/extension.yaml:8: incremental model `long_visits`"
+                ".oxplow/extensions/visits/extension.yaml:8: incremental dataset `long_visits`"
             ) && errors.contains("1 row(s) a full refill holds"),
             "{errors}"
         );
@@ -6605,7 +6609,7 @@ expect:
     }
 
     /// `observe: { change }` stores a change's analysis as the change
-    /// analysis does: the files and functions the models read.
+    /// analysis does: the files and functions the datasets read.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_given_observes_a_changes_analysis() {
         let dir = tempfile::tempdir().unwrap();
@@ -7496,7 +7500,7 @@ resources:
         );
         write(
             root,
-            ".oxplow/extensions/acme/models/prs.sql",
+            ".oxplow/extensions/acme/datasets/prs.sql",
             "SELECT 'oxplow:acme/pr?id=1' AS uri, 'One' AS title",
         );
         write(
@@ -8091,11 +8095,11 @@ steps:
         assert_eq!(report.errors, Vec::<String>::new());
     }
 
-    /// `when: { sql }` reads the published models as a page loader would —
-    /// a model, a decorator's labels, a metric — its rows checked like a
+    /// `when: { sql }` reads the published datasets as a page loader would —
+    /// a dataset, a decorator's labels, a metric — its rows checked like a
     /// loader's.
     #[tokio::test(flavor = "multi_thread")]
-    async fn a_fixture_reads_the_models_with_sql() {
+    async fn a_fixture_reads_the_datasets_with_sql() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         write(
@@ -8117,7 +8121,7 @@ datasets:
         );
         write(
             root,
-            ".oxplow/extensions/acme/models/prs.sql",
+            ".oxplow/extensions/acme/datasets/prs.sql",
             "SELECT 'One' AS title UNION ALL SELECT 'Two'",
         );
         let fixture = |want: &str| {
@@ -8193,10 +8197,10 @@ expect: { ok: true }
         );
     }
 
-    /// A materialized model is refilled before a fixture reads it, as the
+    /// A materialized dataset is refilled before a fixture reads it, as the
     /// app's change loop refills it: what a step made is in it.
     #[tokio::test(flavor = "multi_thread")]
-    async fn a_materialized_model_is_current_when_a_fixture_reads_it() {
+    async fn a_materialized_dataset_is_current_when_a_fixture_reads_it() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         write(
@@ -8221,7 +8225,7 @@ datasets:
         );
         write(
             root,
-            ".oxplow/extensions/acme/models/titles.sql",
+            ".oxplow/extensions/acme/datasets/titles.sql",
             "SELECT uri AS id, title FROM ref('work_item')",
         );
         write(

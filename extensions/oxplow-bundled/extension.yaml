@@ -153,7 +153,7 @@ intent:
     - name: the-review-verbs-log-a-typed-verdict
       input: { command: review.request_changes }
       expect: each review verb logs its typed verdict, a refused one none
-    - name: the-interest-model-scores-a-change-like-the-old-formula
+    - name: the-interest-dataset-scores-a-change-like-the-old-formula
       input: { sql: v_oxplow_bundled_change_interest }
       expect: size, complexity spikes, parameter growth and long new functions multiply into a score and its reasons
     - name: an-efforts-churn-is-a-fact-from-its-change
@@ -311,8 +311,8 @@ ui:
     - { page: effort-verdict, at: effort.verdict, version: 1 }
   # The verdict where the effort is shown: it shows; it never acts.
   decorators:
-    - { model: verdict, resource: oxplow/effort, placement: ref-chip, label: label, color: color }
-    - { model: verdict, resource: oxplow/effort, placement: row-badge, label: label, color: color }
+    - { dataset: verdict, resource: oxplow/effort, placement: ref-chip, label: label, color: color }
+    - { dataset: verdict, resource: oxplow/effort, placement: row-badge, label: label, color: color }
 custom_components:
   - { id: history-graph, title: History graph }
 panels:
@@ -756,7 +756,7 @@ effects:
 commands:
   # This extension's review-policy settings (`configuration:` above), through
   # the host's configuration scope. A person sets them; a change republishes
-  # the models that read them.
+  # the datasets that read them.
   - name: review_policy.read
     summary: The review policy's effective settings, where each came from, and the stamps a write needs.
     scope: extension_config.read

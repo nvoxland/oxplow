@@ -17,7 +17,7 @@ pub const DEFAULT_TIMEOUT_SECS: u32 = 120;
 pub const MAX_TIMEOUT_SECS: u32 = 600;
 
 /// The tool a job with `sql.read` offers its model besides its own: a
-/// read-only query over the published models, as MCP `oxplow_query_sql` is.
+/// read-only query over the published datasets, as MCP `oxplow_query_sql` is.
 pub const QUERY_SQL_TOOL: &str = "query_sql";
 
 #[derive(
@@ -88,7 +88,7 @@ pub struct JobTool {
 }
 
 impl JobDecl {
-    /// Whether its model may read the published models (`query_sql`).
+    /// Whether its dataset may read the published datasets (`query_sql`).
     pub fn reads_sql(&self) -> bool {
         self.needs.iter().any(|need| need == "sql.read")
     }

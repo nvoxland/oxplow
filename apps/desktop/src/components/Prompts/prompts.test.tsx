@@ -20,7 +20,7 @@ mock.module("../../api.js", () => ({
   ...realApi,
   querySql: async (sql: string) =>
     sql.includes("v_page_answer")
-      ? { columns: ["source_kind", "source", "prompt", "about"], rows, truncated: false, reads: { models: ["v_page_answer"], tables: [], measures: [] } }
+      ? { columns: ["source_kind", "source", "prompt", "about"], rows, truncated: false, reads: { datasets: ["v_page_answer"], tables: [], measures: [] } }
       : realApi.querySql(sql),
 }));
 const { EmptyState } = await import("./EmptyState.js");

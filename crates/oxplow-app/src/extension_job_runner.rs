@@ -88,7 +88,7 @@ impl AiJob {
                 name: QUERY_SQL_TOOL.into(),
                 description: Some(
                     "Run one read-only SQL query (SELECT or WITH) over oxplow's published \
-                     models, the `v_*` views (`v_dataset` lists them, `v_field` documents \
+                     datasets, the `v_*` views (`v_dataset` lists them, `v_field` documents \
                      their columns). Positional `?1`, `?2` bind from `params`. At most 200 rows."
                         .into(),
                 ),

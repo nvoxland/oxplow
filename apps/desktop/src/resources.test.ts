@@ -110,7 +110,7 @@ describe("an extension's ref kind (P8.D7)", () => {
         ],
       ],
       truncated: false,
-      reads: { models: [], tables: [] },
+      reads: { datasets: [], tables: [] },
     } as never);
     expect(kinds).toEqual([ACME_PR]);
   });
@@ -122,7 +122,7 @@ test("a core resource's row reads as one", () => {
     columns: ["resource", "extension", "label", "params", "additional", "resolve", "title", "searchable", "icon", "wikilink"],
     rows: [["oxplow/handoff", "oxplow", "Handoff", '{"id":{"required":true,"pattern":"^hnd\\\\d+$"}}', 0, "v_handoff", null, null, null, null]],
     truncated: false,
-    reads: { models: [], tables: [] },
+    reads: { datasets: [], tables: [] },
   } as never);
   expect(kinds[0]).toMatchObject({
     resource: "oxplow/handoff",

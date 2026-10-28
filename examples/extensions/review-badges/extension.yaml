@@ -7,7 +7,7 @@ intent:
   purpose: >-
     Show what effort-review's model said about each work item — the latest
     review, how it ended and when — in one list and on the task's own
-    page. It reads effort-review's exported `reviews` model and writes
+    page. It reads effort-review's exported `reviews` dataset and writes
     nothing; without effort-review it shows nothing and says why in
     Settings → Extensions.
   origin: null
@@ -22,7 +22,7 @@ intent:
 # version, the two pages below are withheld (a warning in Settings →
 # Extensions) and nothing else changes.
 imports:
-  - { id: reviews, contribution: oxplow:oxplow/model?model=effort-review/reviews, version: 2, optional: true }
+  - { id: reviews, contribution: oxplow:oxplow/dataset?dataset=effort-review/reviews, version: 2, optional: true }
 ui:
   mounts:
     - { page: item-review, at: oxplow-foundation/work-item.sections }

@@ -486,7 +486,7 @@ function WikiLinkSpan({
   internalSlug: string | null;
   /** A work item's ref. */
   itemRef: string | null;
-  /** A ref of an extension's kind: titled from its kind's model. */
+  /** A ref of an extension's kind: titled from its kind's dataset. */
   extensionRef: string | null;
 }) {
   const cm = useRowContextMenu(items);

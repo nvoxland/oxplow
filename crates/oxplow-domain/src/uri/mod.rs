@@ -227,7 +227,7 @@ impl TryFrom<&OxplowUri> for Reference {
     type Error = ();
 
     /// The typed view for the six resources the link checker and graph
-    /// writers handle; others (`effort`, `model`, …) have no view yet.
+    /// writers handle; others (`effort`, `dataset`, …) have no view yet.
     fn try_from(u: &OxplowUri) -> Result<Self, ()> {
         let param = |name: &str| u.param(name).map(str::to_string).ok_or(());
         match u.resource().to_string().as_str() {

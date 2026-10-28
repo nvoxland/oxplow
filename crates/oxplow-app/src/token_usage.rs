@@ -26,7 +26,7 @@
 //! **A model fact's `subject` is `oxplow:oxplow/ai_model?name=<name>`** (`oxplow:oxplow/ai_model?name=claude-opus-4-8`,
 //! `build::ai_model_ref`): the model's name as its harness reports it. It is
 //! not the `model` ref kind, which names a published view
-//! (`oxplow:oxplow/model?model=v_work_item`). `subject_kind` is `ai_model`.
+//! (`oxplow:oxplow/dataset?dataset=v_work_item`). `subject_kind` is `ai_model`.
 //!
 //! Each harness reads its own transcript (`AgentHarness::turns`): Claude's
 //! is read; Codex's and opencode's formats aren't yet. We track

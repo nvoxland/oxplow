@@ -2,7 +2,7 @@
  * Every resource the vocabulary knows (`.context/resources.md`), read
  * from `v_resource`: oxplow's and those extensions declare. How the chrome
  * draws one (an extension's icon and label), how a `[[…]]` names one, and
- * which model holds it. What opens one is the page that renders it
+ * which dataset holds it. What opens one is the page that renders it
  * (`pages/renderers.ts`).
  *
  * One process-wide list, loaded by `useResourcesLoader` (mounted once, in
@@ -219,9 +219,9 @@ export function useResourcesLoader(): void {
   useRerunOnChange(reads, load);
 }
 
-/** The title of an extension's ref from its kind's `resolve` model
+/** The title of an extension's ref from its kind's `resolve` dataset
  *  (`SELECT title … WHERE ref = ?`); null while loading, or when the
- *  model has no row for it. */
+ *  dataset has no row for it. */
 export function useExtensionRefTitle(ref: string | null): string | null {
   const resources = useResources();
   const resource = ref ? resources.get(typeOf(ref) ?? "") : undefined;
@@ -230,15 +230,15 @@ export function useExtensionRefTitle(ref: string | null): string | null {
   const view = resource?.resolve ?? null;
   const column = resource?.title ?? "title";
   const load = useCallback(() => {
-    // View and column names are oxplow's (`v_<extension>_<model>`, a
-    // model's column); never text a person typed. Checked anyway: they're
+    // View and column names are oxplow's (`v_<extension>_<dataset>`, a
+    // dataset's column); never text a person typed. Checked anyway: they're
     // spliced into the query.
     if (!ref || !view || !/^v_[a-z0-9_]+$/.test(view) || !/^[a-z][a-z0-9_]*$/.test(column)) {
       setTitle(null);
       return;
     }
-    // URI-SWITCH: the model's key column becomes `uri`.
-    // A model's `uri` is the identity: the ref's view (`#part=…`) is the page's.
+    // URI-SWITCH: the dataset's key column becomes `uri`.
+    // A dataset's `uri` is the identity: the ref's view (`#part=…`) is the page's.
     void querySql(`SELECT ${column} FROM ${view} WHERE uri = ?1 LIMIT 1`, [identityOf(ref) ?? ref], 1)
       .then((res) => {
         const cell = res.rows[0]?.[0];

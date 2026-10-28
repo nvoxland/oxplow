@@ -20,7 +20,7 @@ CORS is permissive for exactly this (`.context/remote-daemon.md`).
   project before boot: a fake work-item provider (`bin/provider`, written
   then, runs the fake this checkout built; its `provider.json` is checked
   in and kept equal to the fake's declarations by
-  `the_suite_fixture_declares_what_the_fake_does`), an effect, a model, a
+  `the_suite_fixture_declares_what_the_fake_does`), an effect, a dataset, a
   page, and a resource. Private, since `providers` is still
   experimental. The effect comments on each created task; a title with
   `[fail]` makes it fail (Delivery, Retry) and one with `[delete]` makes it
@@ -44,7 +44,7 @@ CORS is permissive for exactly this (`.context/remote-daemon.md`).
   `settle()` waits until boot's background tasks are done; `waitForModels()`
   opens `/events` first (the daemon subscribes before answering the
   upgrade), does a write, and resolves once the daemon says each named
-  model changed — so a seeding write is never raced;
+  dataset changed — so a seeding write is never raced;
   `deploy()` deploys an extension from its source as the person,
   confirmed; `searchable()` waits until site
   search has indexed a write;
@@ -63,7 +63,7 @@ CORS is permissive for exactly this (`.context/remote-daemon.md`).
   - A workspace that fails while booting is stopped and removed; each
     fixture tears down in a `finally`.
   - `daemon` is settled before any page opens — boot's background tasks
-    done and the extensions' models published — and carries the `stream`
+    done and the extensions' datasets published — and carries the `stream`
     and `thread` its pages open on.
   - `storageState` points the page at that daemon (`connectedTo()` builds one
     for a context of a spec's own, e.g. with another token).

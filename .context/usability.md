@@ -81,7 +81,7 @@ markdown itself, nor edits it in a `<textarea>`.
   <param>`: the one section in view is the page, the others are its rail,
   a change of section is pushed (Back returns), and the launcher lists
   each section by name. On any page `#section=<id>` lands on that
-  section. A page that shows state from outside any model
+  section. A page that shows state from outside any dataset
   refreshes on the event that says it changed (Data on `extensionsChanged`; Integrations'
   page re-runs when the `v_provider_*` models change). Integrations
   also re-reads when an instance's health is recorded (`v_contribution_health`): Enable's own `configChanged` can be read
@@ -132,7 +132,7 @@ markdown itself, nor edits it in a `<textarea>`.
 - **Async-op failures don't `alert`.** Record them:
   `recordOpError({ label, command?, stderr?, stdout?, exitCode?,
   message? })` (`opErrors.ts`) reports it to the daemon, fire-and-forget,
-  as `oxplow.ui.report_error`, and the record is the model,
+  as `oxplow.ui.report_error`, and the record is the dataset,
   `v_op_error` — the client keeps nothing, so the list survives a reload
   and the agent reads the same rows (the always-on agent text and the
   `oxplow-codebase` skill say so, so "can you see that error?" needs no
@@ -166,7 +166,7 @@ markdown itself, nor edits it in a `<textarea>`.
   say why — a failed or stale run's `error`, a denied run's refusing decision
   from `decisions` ("host evil.example: it isn't in the grant"). An extension
   that has never run shows no line. `lastRuns` in `extensionRowModel.ts`; the
-  line re-reads when a run commits (`useRerunOnChange` on the read's models).
+  line re-reads when a run commits (`useRerunOnChange` on the read's datasets).
 - **Settings → Extensions says what each script is given.** Under the
   row, one muted line per Starlark script that has services: its name, then
   the service titles ("Collector triage — Read the captured tree · Ask a
@@ -245,7 +245,7 @@ markdown itself, nor edits it in a `<textarea>`.
   never `thr1`; a command by its label, its id only on hover; a
   capability by its title (`capability_title`), an area by its name
   ("Version control", `areaLabel`), not
-  `vcs`; no plan codes ("(P5.E1)") in model docs (`model_docs_carry_no_
+  `vcs`; no plan codes ("(P5.E1)") in dataset docs (`dataset_docs_carry_no_
   plan_labels`); no `TODO:` scaffold text a person sees (Keep This's
   `my-pages` gets a real description); counts agree in number ("1
   note"); a status says what happened ("Recorded facts", not "0 rows").

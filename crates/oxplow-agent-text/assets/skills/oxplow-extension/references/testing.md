@@ -14,7 +14,7 @@ It covers: manifest errors (YAML, unknown keys, a name/folder mismatch, a
 missing `intent`, a Starlark script that doesn't parse or define
 `transform`); cross-references that don't resolve (a slot mount naming a
 page that isn't there, a command that doesn't exist or an input that doesn't
-fit it, a loader reading one declared after it); the models compiled without
+fit it, a loader reading one declared after it); the datasets compiled without
 publishing (SQL errors, a `ref()` that doesn't resolve, columns that differ
 from the declared contract); and a dry run of every advisory and every command
 example. It **always** dry-runs, on this build's schema with no data —
@@ -34,7 +34,7 @@ deployed ones) and your own `stream_id`. The source runs nothing until
 An extension's own `questions.yaml` (`{ question, skill, reaches: { sql } |
 { command, input }, shape: { columns } }`, `skill` a markdown file in the
 extension) also runs under `$OXPLOW_BIN extension test`: the skill must name every
-model the SQL reads and the command it runs. Prefer `answers:` on pages.
+dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
 
 ## Testing the whole extension (`extension test`, fixtures)
 
@@ -42,7 +42,7 @@ model the SQL reads and the command it runs. Prefer `answers:` on pages.
    checkout (a worktree's draft as it is; `OXPLOW_BIN` is set in your
    session, else run `oxplow`), runs your whole extension in a throwaway
    oxplow, in a process of its own: activated as the app activates it
-   (your entities empty, your models, commands, effects, jobs and
+   (your entities empty, your datasets, commands, effects, jobs and
    components live), never the project's database or what is deployed,
    with only what your extension declares on (oxplow's own, and what it
    `requires:` or imports — never the person's own choices), and
@@ -174,8 +174,8 @@ model the SQL reads and the command it runs. Prefer `answers:` on pages.
      body_changed?, length?, params_before?, params_after?, complexity?,
      complexity_delta?, … }] } } }` (what the change analysis stored for a
      change: `kind` is `commit` by default, an effort's `target` is its id
-     like `eff1`; the models over a change read it, and the
-     materialized models that read the commit index need a step of their
+     like `eff1`; the datasets over a change read it, and the
+     materialized datasets that read the commit index need a step of their
      own to fill), `{ observe: { test_run: { effort, at?, cases?: [{ name,
      status }], asserted_failed? } } }` (a test run an effort recorded: a
      capture with a fact per case) and `{ observe: { snapshot: { trigger?,
@@ -238,9 +238,9 @@ model the SQL reads and the command it runs. Prefer `answers:` on pages.
      `expect: { ok: true, result?, commands?: [names] }` or `{ ok: false,
      refused: <part of the reason> }` — `commands` are the ones it ran (a
      script's) and what reacted. Make what it needs with `given:` first.
-   - a query: `when: { sql: "SELECT … FROM v_<ext>_<model>", params? }`,
-     `expect: { rows: [ { col: val } ] }` — reads the published models as a
-     page loader would, for a model, a decorator's labels or a metric
+   - a query: `when: { sql: "SELECT … FROM v_<ext>_<dataset>", params? }`,
+     `expect: { rows: [ { col: val } ] }` — reads the published datasets as a
+     page loader would, for a dataset, a decorator's labels or a metric
      (`metric_grid`) on its own.
    - a collector: `when: { collector: <id>, rows: [...], event? }`
      (`rows` stands in for its `input` query; `event` is the event an

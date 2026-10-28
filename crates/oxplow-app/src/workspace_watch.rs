@@ -289,7 +289,7 @@ fn classify(k: &WatchEventKind) -> WorkspaceChangeKind {
 /// Path-based ignores (`.git`, `.oxplow`, `.gitignore`, the project's
 /// `generated.exclude`) are the central [`oxplow_fs_watch::WorkspaceFilter`]'s
 /// job — this only catches the editor-noise suffixes the filter
-/// doesn't model.
+/// doesn't dataset.
 fn is_swap_file(path: &Path) -> bool {
     let s = path.to_string_lossy();
     s.ends_with('~') || s.ends_with(".swp") || s.ends_with(".tmp")

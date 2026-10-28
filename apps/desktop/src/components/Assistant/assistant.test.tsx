@@ -7,7 +7,7 @@ const realApi = await import("../../api.js");
 const undone: number[] = [];
 mock.module("../../api.js", () => ({
   ...realApi,
-  querySql: async () => ({ columns: [], rows: [], truncated: false, reads: { models: [], tables: [], measures: [] } }),
+  querySql: async () => ({ columns: [], rows: [], truncated: false, reads: { datasets: [], tables: [], measures: [] } }),
   undoCommand: async (id: number) => {
     undone.push(id);
     return {};

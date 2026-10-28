@@ -70,7 +70,7 @@ function runOf(rows: SqlCell[][], picked: SqlCell = null): VizRun {
       ],
     },
     params: { stream_id: 1, terminal: picked },
-    result: { columns: ["uri", "title", "terminal"], rows, truncated: false, reads: { models: [], tables: [], measures: [] } },
+    result: { columns: ["uri", "title", "terminal"], rows, truncated: false, reads: { datasets: [], tables: [], measures: [] } },
   } as unknown as VizRun;
 }
 
@@ -137,7 +137,7 @@ test("an agent session's row is its agent: stopped and what it's bound to come f
       actions: [],
     },
     params: { uri: S },
-    result: { columns: ["uri", "thread", "stopped", "conversation"], rows: [[S, "oxplow:oxplow/thread?id=thr1", 1, "abc:0"]], truncated: false, reads: { models: [], tables: [], measures: [] } },
+    result: { columns: ["uri", "thread", "stopped", "conversation"], rows: [[S, "oxplow:oxplow/thread?id=thr1", 1, "abc:0"]], truncated: false, reads: { datasets: [], tables: [], measures: [] } },
   } as unknown as VizRun;
   const v = view(run);
   const pane = v.getByTestId(`view-${S}`);

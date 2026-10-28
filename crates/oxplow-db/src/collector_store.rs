@@ -251,12 +251,12 @@ impl SqliteCollectorStore {
                         .map_err(map_sql_err)?;
                     rows.collect::<rusqlite::Result<_>>().map_err(map_sql_err)
                 };
-                // Its views, from the registry: entities and SQL models alike.
-                for view in names("SELECT view FROM model WHERE owner = ?1", &ext)? {
+                // Its views, from the registry: entities and SQL datasets alike.
+                for view in names("SELECT view FROM dataset WHERE owner = ?1", &ext)? {
                     tx.execute_batch(&format!("DROP VIEW IF EXISTS {}", quote(&view)))
                         .map_err(map_sql_err)?;
                 }
-                tx.execute("DELETE FROM model WHERE owner = ?1", [&ext])
+                tx.execute("DELETE FROM dataset WHERE owner = ?1", [&ext])
                     .map_err(map_sql_err)?;
                 // Its tables. An exact prefix, not LIKE: `_` is a LIKE
                 // wildcard, so `ext__gh__` would match `ext__gh_extra__` (tsk368).
@@ -448,7 +448,7 @@ fn validate_table(t: &EntityTable) -> Result<(), DomainError> {
     Ok(())
 }
 
-/// Record an entity view as its extension's model: owner, how it's made
+/// Record an entity view as its extension's dataset: owner, how it's made
 /// (`entity`), its description, the table it reads, and its columns with
 /// their docs as its contract. It follows the extension's declaration, so
 /// a changed one replaces it; an unchanged one writes nothing.
@@ -467,8 +467,8 @@ fn register_entity(
     .map_err(|e| DomainError::Invalid(e.to_string()))?;
     let current: Option<(String, String, Option<String>)> = tx
         .query_row(
-            "SELECT m.description, m.sql, c.columns_json FROM model m
-             LEFT JOIN model_contract c ON c.view = m.view AND c.version = m.version
+            "SELECT m.description, m.sql, c.columns_json FROM dataset m
+             LEFT JOIN dataset_contract c ON c.view = m.view AND c.version = m.version
              WHERE m.view = ?1",
             [&t.view],
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
@@ -486,7 +486,7 @@ fn register_entity(
     }
     let now = ts_to_string(oxplow_domain::Timestamp::now());
     tx.execute(
-        "INSERT INTO model (view, name, owner, version, description, sql, compiled_at, kind)
+        "INSERT INTO dataset (view, name, owner, version, description, sql, compiled_at, kind)
          VALUES (?1, ?2, ?3, 1, ?4, ?5, ?6, 'entity')
          ON CONFLICT (view) DO UPDATE SET description = excluded.description,
              sql = excluded.sql, compiled_at = excluded.compiled_at",
@@ -494,7 +494,7 @@ fn register_entity(
     )
     .map_err(map_sql_err)?;
     tx.execute(
-        "INSERT INTO model_contract (view, version, columns_json, recorded_at)
+        "INSERT INTO dataset_contract (view, version, columns_json, recorded_at)
          VALUES (?1, 1, ?2, ?3)
          ON CONFLICT (view, version) DO UPDATE SET columns_json = excluded.columns_json,
              recorded_at = excluded.recorded_at",
@@ -502,7 +502,7 @@ fn register_entity(
     )
     .map_err(map_sql_err)?;
     tx.execute(
-        "INSERT OR IGNORE INTO model_input (view, input, kind) VALUES (?1, ?2, 'source')",
+        "INSERT OR IGNORE INTO dataset_input (view, input, kind) VALUES (?1, ?2, 'source')",
         params![t.view, table],
     )
     .map_err(map_sql_err)?;
@@ -525,7 +525,7 @@ fn write_entity(
     // entity may be replaced; any other view by that name is refused.
     let owner: Option<(String, String)> = tx
         .query_row(
-            "SELECT owner, kind FROM model WHERE view = ?1",
+            "SELECT owner, kind FROM dataset WHERE view = ?1",
             [&t.view],
             |r| Ok((r.get(0)?, r.get(1)?)),
         )
@@ -688,7 +688,7 @@ mod tests {
             let mut st = tx
                 .prepare(
                     "SELECT m.view, m.owner, m.kind, coalesce(group_concat(i.input), '')
-                     FROM model m LEFT JOIN model_input i ON i.view = m.view
+                     FROM dataset m LEFT JOIN dataset_input i ON i.view = m.view
                      WHERE m.owner <> 'core' GROUP BY m.view ORDER BY m.view",
                 )
                 .map_err(map_sql_err)?;
@@ -703,12 +703,12 @@ mod tests {
         .unwrap()
     }
 
-    /// P4.9 (tsk494): an entity view is a model its extension owns — in the
+    /// P4.9 (tsk494): an entity view is a dataset its extension owns — in the
     /// registry with its table as input, so lineage and subscriptions see
-    /// it; kept across the open that recompiles the SQL models; gone with
+    /// it; kept across the open that recompiles the SQL datasets; gone with
     /// its extension. Another extension, or a core view, can't take the name.
     #[tokio::test]
-    async fn an_entity_view_is_a_model_its_extension_owns() {
+    async fn an_entity_view_is_a_dataset_its_extension_owns() {
         let db = Database::in_memory();
         let store = SqliteCollectorStore::new(db.clone());
         let t = pr_table(&[("number", StoredType::Integer), ("title", StoredType::Text)]);
@@ -743,7 +743,7 @@ mod tests {
             .await
             .unwrap_err();
         assert!(err.to_string().contains("belongs to `my-gh`"), "{err}");
-        // A core model's view.
+        // A core dataset's view.
         let core = EntityTable {
             extension: "effort".into(),
             entity: "file".into(),
@@ -762,7 +762,7 @@ mod tests {
             .unwrap_err();
         assert!(err.to_string().contains("belongs to `core`"), "{err}");
         // Its contract is the declared columns, docs included: the catalog
-        // (`v_field`) documents it like any model.
+        // (`v_field`) documents it like any dataset.
         let columns: Vec<(String, String, String)> = db
             .read(|tx| {
                 let mut st = tx
@@ -795,10 +795,10 @@ mod tests {
                 ),
             ]
         );
-        // The open that recompiles models keeps it.
+        // The open that recompiles datasets keeps it.
         db.call_mut(|conn| {
-            crate::models::drop_all(conn)?;
-            crate::models::compile_core(conn)
+            crate::datasets::drop_all(conn)?;
+            crate::datasets::compile_core(conn)
         })
         .await
         .unwrap();

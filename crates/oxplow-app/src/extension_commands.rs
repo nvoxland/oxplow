@@ -2204,7 +2204,7 @@ mod tests {
             .await
             .unwrap();
         assert!(v.errors.is_empty(), "{:?}", v.errors);
-        // A read of a table, not a published model, is refused.
+        // A read of a table, not a published dataset, is refused.
         let d = reads("SELECT title AS r FROM task");
         let v = validate_extension(&layer, &cat, d.path(), "x", Some(&schema))
             .await

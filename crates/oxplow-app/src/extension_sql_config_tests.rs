@@ -1,4 +1,4 @@
-//! An extension's SQL reads its own configuration: a model, a page and an
+//! An extension's SQL reads its own configuration: a dataset, a page and an
 //! advisory name a key with `config('/pointer')`, the value comes from the
 //! extension's effective settings, and a change of settings applies without a
 //! restart.
@@ -73,10 +73,10 @@ async fn set_threshold(fx: &EffortFixture, edits: i64) {
         .unwrap();
 }
 
-/// A project override changes what the model says: three edits are not
+/// A project override changes what the dataset says: three edits are not
 /// struggle at the default of five, and are once the project sets three.
 #[tokio::test(flavor = "multi_thread")]
-async fn a_project_setting_changes_a_bundled_models_result() {
+async fn a_project_setting_changes_a_bundled_datasets_result() {
     let fx = services_with_effort().await;
     three_edits(&fx).await;
     assert_eq!(struggles(&fx).await, json!([]), "the default is five");
@@ -86,10 +86,10 @@ async fn a_project_setting_changes_a_bundled_models_result() {
     assert_eq!(struggles(&fx).await, json!([["src/warm.rs", 3]]));
 }
 
-/// With the owner loop running, a settings write publishes the models that
+/// With the owner loop running, a settings write publishes the datasets that
 /// read it by itself: no restart and no explicit activation.
 #[tokio::test(flavor = "multi_thread")]
-async fn a_settings_change_republishes_the_models_that_read_it() {
+async fn a_settings_change_republishes_the_datasets_that_read_it() {
     let fx = services_with_effort().await;
     three_edits(&fx).await;
     fx.svc.extension_activation.spawn(&fx.svc);
@@ -109,7 +109,7 @@ async fn a_settings_change_republishes_the_models_that_read_it() {
         }
     })
     .await
-    .expect("the model republished on its own");
+    .expect("the dataset republished on its own");
     assert_eq!(struggles(&fx).await, json!([["src/warm.rs", 3]]));
 }
 
@@ -192,7 +192,7 @@ async fn an_extension_reads_only_its_own_settings() {
     // `struggle` is oxplow-bundled's key, not `mine`'s.
     write(
         &root,
-        ".oxplow/extensions/mine/models/limited.sql",
+        ".oxplow/extensions/mine/datasets/limited.sql",
         "SELECT config('/struggle/repeatedEdits') AS n",
     );
     let load_errors = held_errors(&fx, "mine").await;
@@ -213,7 +213,7 @@ async fn an_extension_reads_only_its_own_settings() {
     );
     write(
         &root,
-        ".oxplow/extensions/mine/models/limited.sql",
+        ".oxplow/extensions/mine/datasets/limited.sql",
         "SELECT config('/limit') AS n",
     );
     let load_errors = held_errors(&fx, "mine").await;
@@ -227,7 +227,7 @@ async fn held_errors(fx: &EffortFixture, name: &str) -> String {
     crate::test_fixtures::load_errors(&fx.svc, name).await
 }
 
-/// An extension's own key compiles into its model, and the reads are checked
+/// An extension's own key compiles into its dataset, and the reads are checked
 /// at load: an object value has no SQL literal.
 #[tokio::test(flavor = "multi_thread")]
 async fn an_own_key_reads_and_a_key_that_is_not_a_scalar_fails_the_load() {
@@ -236,7 +236,7 @@ async fn an_own_key_reads_and_a_key_that_is_not_a_scalar_fails_the_load() {
     write(&root, ".oxplow/extensions/mine/extension.yaml", CONFIGURED);
     write(
         &root,
-        ".oxplow/extensions/mine/models/limited.sql",
+        ".oxplow/extensions/mine/datasets/limited.sql",
         "SELECT config('/limit') AS n",
     );
     let problems = crate::test_fixtures::activate_with_problems(&fx.svc).await;
@@ -253,7 +253,7 @@ async fn an_own_key_reads_and_a_key_that_is_not_a_scalar_fails_the_load() {
 
     write(
         &root,
-        ".oxplow/extensions/mine/models/limited.sql",
+        ".oxplow/extensions/mine/datasets/limited.sql",
         "SELECT config('/nested') AS n",
     );
     let load_errors = held_errors(&fx, "mine").await;
@@ -263,10 +263,10 @@ async fn an_own_key_reads_and_a_key_that_is_not_a_scalar_fails_the_load() {
     );
 }
 
-/// A materialized model that reads a setting is refilled with the new value
+/// A materialized dataset that reads a setting is refilled with the new value
 /// when the setting changes, not left holding the old one until its timer.
 #[tokio::test(flavor = "multi_thread")]
-async fn a_materialized_model_is_refilled_when_its_setting_changes() {
+async fn a_materialized_dataset_is_refilled_when_its_setting_changes() {
     use oxplow_db::extension_config_store::{self, ConfigNamespace};
     use oxplow_domain::extension_state::Scope;
     let fx = services_with_effort().await;
@@ -281,7 +281,7 @@ async fn a_materialized_model_is_refilled_when_its_setting_changes() {
     );
     write(
         &root,
-        ".oxplow/extensions/mine/models/limited.sql",
+        ".oxplow/extensions/mine/datasets/limited.sql",
         "SELECT config('/limit') AS n",
     );
     let problems = crate::test_fixtures::activate_with_problems(&fx.svc).await;
@@ -297,7 +297,7 @@ async fn a_materialized_model_is_refilled_when_its_setting_changes() {
         .unwrap()
     };
     let assets = crate::assets::Assets::new(fx.svc.db.clone(), Duration::from_millis(50));
-    assets.sync_models().await.unwrap();
+    assets.sync_datasets().await.unwrap();
     tokio::time::sleep(Duration::from_millis(300)).await;
     assert_eq!(limit().await, json!([[7]]));
 
@@ -317,7 +317,7 @@ async fn a_materialized_model_is_refilled_when_its_setting_changes() {
         .await
         .unwrap();
     crate::test_fixtures::activate_with_problems(&fx.svc).await;
-    assets.sync_models().await.unwrap();
+    assets.sync_datasets().await.unwrap();
     tokio::time::sleep(Duration::from_millis(300)).await;
     assert_eq!(limit().await, json!([[9]]));
 }

@@ -1,5 +1,5 @@
 //! Open page runs: a window opens a run and hears which loaders changed;
-//! a change to a model one of its loaders read re-runs it; closing or the
+//! a change to a dataset one of its loaders read re-runs it; closing or the
 //! window going away drops it.
 
 use std::collections::BTreeMap;
@@ -161,10 +161,10 @@ async fn new_params_re_run_it_and_name_what_changed() {
     assert!(!changed.tree);
 }
 
-/// A model change re-runs the open runs that read it — only those — and
+/// A dataset change re-runs the open runs that read it — only those — and
 /// reports the loaders whose rows actually differ.
 #[tokio::test]
-async fn a_model_change_re_runs_the_runs_that_read_it() {
+async fn a_dataset_change_re_runs_the_runs_that_read_it() {
     let (_dir, svc) = fixture().await;
     let runs = PageRuns::default();
     let (reads, _) = runs
@@ -175,7 +175,9 @@ async fn a_model_change_re_runs_the_runs_that_read_it() {
         .open(&svc, request("acme/numbers", &[]), "w")
         .await
         .unwrap();
-    let changed = runs.models_changed(&svc, &["v_dataset".to_string()]).await;
+    let changed = runs
+        .datasets_changed(&svc, &["v_dataset".to_string()])
+        .await;
     let ids: Vec<&str> = changed.iter().map(|c| c.run_id.as_str()).collect();
     assert!(!ids.contains(&other.as_str()), "{ids:?}");
     // It re-ran; its rows are the same, so nothing is reported for it.
@@ -202,17 +204,18 @@ async fn a_clients_runs_go_with_it() {
     assert!(runs.get(&b).is_some());
 }
 
-/// A model change re-runs only the loaders that read it and the ones
+/// A dataset change re-runs only the loaders that read it and the ones
 /// downstream of them: a loader that read nothing changed keeps its rows.
 #[tokio::test]
-async fn a_model_change_re_runs_only_what_reads_it() {
+async fn a_dataset_change_re_runs_only_what_reads_it() {
     let (_dir, svc) = fixture().await;
     let runs = PageRuns::default();
     let (id, before) = runs
         .open(&svc, request("acme/mixed", &[]), "w")
         .await
         .unwrap();
-    runs.models_changed(&svc, &["v_dataset".to_string()]).await;
+    runs.datasets_changed(&svc, &["v_dataset".to_string()])
+        .await;
     let after = runs.get(&id).unwrap();
     let r = |run: &super::runner::PageRun, l: &str| run.loaders[l].result.rows.clone();
     assert_eq!(
@@ -223,11 +226,11 @@ async fn a_model_change_re_runs_only_what_reads_it() {
     assert_ne!(
         r(&before, "after"),
         r(&after, "after"),
-        "downstream of `models`, it ran again"
+        "downstream of `datasets`, it ran again"
     );
 }
 
-/// A read can finish before its model-change notification is processed.
+/// A read can finish before its dataset-change notification is processed.
 /// Opening must register interest before that read, including catalog-only
 /// invalidation, rather than waiting until it knows the loader's reads.
 #[tokio::test]
@@ -247,7 +250,7 @@ async fn changes_during_the_first_read_are_observed_before_publishing_the_run() 
         let attempts = calls.clone();
         let name = match (everything, relevant) {
             (true, _) => "oxplow.test.catalog_read",
-            (false, true) => "oxplow.test.model_read",
+            (false, true) => "oxplow.test.dataset_read",
             (false, false) => "oxplow.test.unrelated_read",
         };
         let mut spec = svc
@@ -272,7 +275,7 @@ async fn changes_during_the_first_read_are_observed_before_publishing_the_run() 
                             if everything {
                                 observed.notify_everything();
                             } else {
-                                observed.notify_models(&["v_dataset".into()]);
+                                observed.notify_datasets(&["v_dataset".into()]);
                             }
                         }
                         Box::pin(async move {
@@ -286,8 +289,8 @@ async fn changes_during_the_first_read_are_observed_before_publishing_the_run() 
                 .unwrap(),
             )
             .unwrap();
-        let model = if relevant { "v_dataset" } else { "v_page" };
-        let yaml = format!("title: Opening\ndata: {{ read: {{ command: {name}, reads: [{model}] }} }}\nview: {{ viz: number, from: read }}\n");
+        let dataset = if relevant { "v_dataset" } else { "v_page" };
+        let yaml = format!("title: Opening\ndata: {{ read: {{ command: {name}, reads: [{dataset}] }} }}\nview: {{ viz: number, from: read }}\n");
         let page =
             super::schema::parse_page("acme", "acme", "opening", "pages/opening.yaml", &yaml)
                 .unwrap();
@@ -305,7 +308,7 @@ async fn changes_during_the_first_read_are_observed_before_publishing_the_run() 
 }
 
 #[tokio::test]
-async fn a_slow_model_refresh_cannot_restore_older_params_after_a_newer_request() {
+async fn a_slow_dataset_refresh_cannot_restore_older_params_after_a_newer_request() {
     use crate::commands::{Command, Handler, HandlerOutput};
     use serde_json::json;
     use std::sync::{
@@ -362,7 +365,7 @@ async fn a_slow_model_refresh_cannot_restore_older_params_after_a_newer_request(
     let services = svc.clone();
     let pending = tokio::spawn(async move {
         refreshing
-            .models_changed(&services, &["v_dataset".into()])
+            .datasets_changed(&services, &["v_dataset".into()])
             .await
     });
     entered.notified().await;
@@ -381,11 +384,11 @@ async fn a_slow_model_refresh_cannot_restore_older_params_after_a_newer_request(
     assert_eq!(refreshed.params["n"], SqlCell::Int(3));
 }
 
-/// A live model changes with an event, not a table (a keychain write is
+/// A live dataset changes with an event, not a table (a keychain write is
 /// `CredentialChanged`, a config edit `ConfigChanged`): the event re-runs
-/// the open runs that read the model, as a table's change does.
+/// the open runs that read the dataset, as a table's change does.
 #[tokio::test]
-async fn an_event_a_live_model_follows_re_runs_what_reads_it() {
+async fn an_event_a_live_dataset_follows_re_runs_what_reads_it() {
     use crate::commands::{Command, Handler, HandlerOutput};
     use serde_json::json;
     use std::sync::{

@@ -17,7 +17,7 @@ and runs its fixtures; `tests/examples.rs` adds only what the SDK reports about 
 | [schema-review](schema-review/) | A review policy of its own: a collector's facts about migrations, joined with oxplow's test, coverage and code-analysis evidence into the effort's verdict, in place of oxplow-bundled's. |
 | [session-history](session-history/) | Adding a section to a core page: earlier prompts from the current thread, mounted on New Session after its start form. |
 | [commit-history](commit-history/) | A page with no code: typed params in the toolbar (a date range, a search, a switch) narrow the commits, and clicking one fills the next section with its files. |
-| [review-badges](review-badges/) | Building on another extension: an optional import of effort-review's exported model, shown as a list and on the task page, withheld with a warning when effort-review isn't there. |
+| [review-badges](review-badges/) | Building on another extension: an optional import of effort-review's exported dataset, shown as a list and on the task page, withheld with a warning when effort-review isn't there. |
 
 ## What the trials prove
 
@@ -47,7 +47,7 @@ A fourth proves a review isn't oxplow's to decide:
 - **An alternative review policy** (schema-review). Its collector's facts
   (DDL per migration file, by its own dimension) join core's evidence —
   the effort's files, its latest test run and its provenance, its diff
-  coverage, the functions its change added — in its own model, and its
+  coverage, the functions its change added — in its own dataset, and its
   page replaces the effort's verdict. A migration that starts dropping a
   table flips it. Test:
   `the_schema_review_example_joins_its_facts_with_core_evidence`.
@@ -103,14 +103,14 @@ Still open:
 - **Event order matters and isn't obvious.** `effort.closed` comes before
   the effort's evidence is refreshed; a reviewer must listen for
   `effort.finished`.
-- **No diff text** in any `v_*` model: a review sees per-file and
+- **No diff text** in any `v_*` dataset: a review sees per-file and
   per-function statistics, not the hunks.
 - **Not all evidence can be made in a fixture**: `setup` reaches what
   oxplow's commands make (work items, efforts, test runs), not collected
   reports like diff coverage, so that still needs a Rust test.
 - **`extension test` needs the folder under `.oxplow/extensions/`.**
 - **Names:** an extension's command namespace is its name with `-` as `_`
-  (`effort_review.review.ask`), while its contribution ids and model
+  (`effort_review.review.ask`), while its contribution ids and dataset
   views keep or translate the dash differently
   (`oxplow:oxplow/job?job=effort-review/review`, `v_effort_review_reviews`).
 - **The compare-exchange stamp isn't readable** through a public read, so

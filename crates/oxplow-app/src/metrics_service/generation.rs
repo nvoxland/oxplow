@@ -328,7 +328,7 @@ fn check_entity(
         |_| {
             rejected(
                 scope,
-                "entity metric or dimension does not compile against the candidate models",
+                "entity metric or dimension does not compile against the candidate datasets",
             )
         },
     )?;

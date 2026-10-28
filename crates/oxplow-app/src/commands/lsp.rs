@@ -3,7 +3,7 @@
 //! (the network and `.oxplow/lsp/`) and `Confirm::Always`: what binaries
 //! oxplow downloads and runs is a person's call — an agent's run becomes a
 //! proposal. Each pushes `LspServersChanged` so the settings list
-//! refreshes (the server list isn't a model).
+//! refreshes (the server list isn't a dataset).
 
 use oxplow_domain::Confirm;
 use std::sync::Arc;
@@ -106,7 +106,7 @@ pub fn remove_op(deps: LspDeps) -> Op {
     .confirm_at_least(Confirm::Always)
 }
 
-/// Once the run is recorded: the server list (not a model) re-reads.
+/// Once the run is recorded: the server list (not a dataset) re-reads.
 fn servers_changed(deps: &LspDeps) -> Box<dyn FnOnce() + Send + Sync> {
     let events = deps.events.clone();
     Box::new(move || events.emit(OxplowEvent::LspServersChanged))

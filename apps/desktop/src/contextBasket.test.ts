@@ -12,7 +12,7 @@ const result = {
     [3, "page", "oxplow:oxplow/page?page=tasks", "Tasks", null, "2026-10-24T10:00:00Z"],
   ],
   truncated: false,
-  reads: { models: [], tables: [], measures: [] },
+  reads: { datasets: [], tables: [], measures: [] },
   freshness: {},
 } as unknown as SqlQueryResult;
 

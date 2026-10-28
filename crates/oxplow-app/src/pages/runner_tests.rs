@@ -162,7 +162,7 @@ async fn an_unknown_param_is_refused() {
     assert!(err.to_string().contains("nope"), "{err}");
 }
 
-/// What a change makes run again: the loaders that read a changed model
+/// What a change makes run again: the loaders that read a changed dataset
 /// or bind a changed param, and every loader downstream of them.
 #[tokio::test]
 async fn a_change_dirties_what_reads_it_and_what_follows() {

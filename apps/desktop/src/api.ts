@@ -392,7 +392,7 @@ export async function searchSite(
 /// Run one read-only `SELECT`/`WITH` over the semantic layer's `v_*`
 /// views (see `.context/semantic-layer.md`). Positional `params` bind
 /// `?1`, `?2`, …; `limit` caps rows (default 500).
-/** One read over the published models. `raw` (the explorer only) reads
+/** One read over the published datasets. `raw` (the explorer only) reads
  *  physical tables too; the result's `reads` says what it read. */
 export async function querySql(
   sql: string,
@@ -437,7 +437,7 @@ export async function invokeComponentCommand(
 }
 
 /** A custom component that declares `sql: read` runs its own read-only SQL
- *  over the models (`querySql`), at the bundle version its frame loaded. */
+ *  over the datasets (`querySql`), at the bundle version its frame loaded. */
 export async function runComponentSql(
   id: string,
   sql: string,
@@ -967,8 +967,8 @@ export async function deleteComment(commentId: string): Promise<void> {
 /// or one of its messages), whoever wrote it. A view re-reads its list.
 export function subscribeCommentEvents(onChange: () => void): () => void {
   return subscribeOxplowEvents((event) => {
-    const models = (event as { models?: unknown }).models;
-    if (event.kind === "modelsChanged" && Array.isArray(models) && models.includes("v_comment")) {
+    const datasets = (event as { datasets?: unknown }).datasets;
+    if (event.kind === "datasetsChanged" && Array.isArray(datasets) && datasets.includes("v_comment")) {
       onChange();
     }
   });
@@ -984,15 +984,15 @@ export async function recordUsage(input: {
   unwrap(await commands.recordUsage(input.kind, JSON.stringify(input)));
 }
 
-/** Call `onChange` whenever a commit names one of `models` — how a view
+/** Call `onChange` whenever a commit names one of `datasets` — how a view
  *  re-reads what it shows, whoever wrote it. */
-function onModelsChanged(models: readonly string[], onChange: () => void): () => void {
+function onDatasetsChanged(datasets: readonly string[], onChange: () => void): () => void {
   return subscribeOxplowEvents((event) => {
-    const changed = (event as { models?: unknown }).models;
+    const changed = (event as { datasets?: unknown }).datasets;
     if (
-      event.kind === "modelsChanged" &&
+      event.kind === "datasetsChanged" &&
       Array.isArray(changed) &&
-      changed.some((m) => models.includes(m as string))
+      changed.some((m) => datasets.includes(m as string))
     ) {
       onChange();
     }
@@ -1642,7 +1642,7 @@ export async function topVisitedPages(opts: {
 
 /** Re-read visits whenever one is recorded or forgotten (`v_page_visit`). */
 export function subscribePageVisitEvents(onEvent: () => void): () => void {
-  return onModelsChanged(["v_page_visit"], onEvent);
+  return onDatasetsChanged(["v_page_visit"], onEvent);
 }
 
 /** Drop every visit row for a given page reference. Used when a page

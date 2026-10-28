@@ -7,7 +7,7 @@
 //! quiet. The same asset recomputes a **closed** effort whose
 //! claims moved since its evidence was stored (`effort_evidence_state`,
 //! tsk889): a run claimed after the close lands. Its own tables aren't inputs, so it can't loop. The
-//! renderer hears the rows move as `ModelsChanged`. See
+//! renderer hears the rows move as `DatasetsChanged`. See
 //! `.context/semantic-layer.md`.
 
 use std::sync::{Arc, Weak};

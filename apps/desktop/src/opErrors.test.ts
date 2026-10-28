@@ -63,7 +63,7 @@ test("v_op_error rows are failed operations, with whether the person has seen ea
       ["e2", "2026-10-22T09:00:00Z", "Save", null, "disk full", null, "SIGTERM", null, null, 0],
     ],
     truncated: false,
-    reads: { models: ["v_op_error"], tables: [], measures: [] },
+    reads: { datasets: ["v_op_error"], tables: [], measures: [] },
     freshness: {},
   } as never);
   expect(errors).toEqual([

@@ -37,7 +37,7 @@ struct Entry {
 }
 
 /// Loaded declarations and the fingerprint of the load that owns them.
-/// This pins catalog metadata, not database models or runtime registries.
+/// This pins catalog metadata, not database datasets or runtime registries.
 pub struct CatalogSnapshot {
     extensions: Arc<Vec<Extension>>,
     generation: String,

@@ -7,6 +7,6 @@ SELECT c.view,
          WHERE k.value = json_extract(j.value, '$.name')) AS key_part,
        json_extract(m.column_ai_context_json,
                     '$."' || json_extract(j.value, '$.name') || '"') AS ai_context
-FROM source('model_contract') c
-JOIN source('model') m ON m.view = c.view AND m.version = c.version,
+FROM source('dataset_contract') c
+JOIN source('dataset') m ON m.view = c.view AND m.version = c.version,
      json_each(c.columns_json) j

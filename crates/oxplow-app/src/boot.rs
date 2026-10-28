@@ -179,8 +179,8 @@ pub async fn run_boot_orchestration(
     crate::config_reactors::register(state);
     // Scripts run in workers bounded by the project's `scripts:` config.
     crate::config_reactors::apply_script_limits(&crate::config_service::read_config(&state.config));
-    // A collector that registered a new entity may let a model compile.
-    crate::extension_models::register(state);
+    // A collector that registered a new entity may let a dataset compile.
+    crate::extension_datasets::register(state);
     state.event_pump.clone().spawn();
     // `every:` collectors: the scheduler runs `oxplow.collector.sync` as the system.
     crate::collector_runner::spawn_scheduler(state);
@@ -393,7 +393,7 @@ pub async fn run_boot_orchestration(
                 changes.recv().await
             {
                 // A definition can change without any loader reading a
-                // changed model (a dashboard made only of embeds, for
+                // changed dataset (a dashboard made only of embeds, for
                 // example). Re-resolve runs after catalog publication.
                 page_runs.notify_everything();
                 events.emit(crate::events::OxplowEvent::ExtensionsChanged);
@@ -401,12 +401,12 @@ pub async fn run_boot_orchestration(
         });
     }
 
-    // The one change loop (P4.6, P7.B1, P7.B6): which models each commit
+    // The one change loop (P4.6, P7.B1, P7.B6): which datasets each commit
     // changed, which metric samples landed, which assets went stale, and
     // when the pump has a new event to read.
-    crate::models_changed::spawn(
+    crate::datasets_changed::spawn(
         state.db.clone(),
-        state.model_watermarks.clone(),
+        state.dataset_watermarks.clone(),
         event_bus.clone(),
         state.assets.clone(),
         state.event_pump.clone(),

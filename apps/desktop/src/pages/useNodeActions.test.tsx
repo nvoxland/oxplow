@@ -50,7 +50,7 @@ test("useNodeActions presses through the page's action context", async () => {
   expect(calls).toEqual([["run-9", "items", "go", { id: "a" }, null, null, false]]);
 });
 
-// What a command changed shows even when no model change announces it
+// What a command changed shows even when no dataset change announces it
 // (a keychain entry): the run is run again after the press.
 test("a press that ran runs its run again; one that failed doesn't", async () => {
   const { press } = recorder();

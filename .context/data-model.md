@@ -111,7 +111,7 @@ squash like that is the sanctioned way to drop history; editing a
 migration in place is not.
 
 A sweeping rename (an id, a column, a command) skips the applied
-migrations and the published model golden (`fixtures/model_contracts.json`,
+migrations and the published model golden (`fixtures/dataset_contracts.json`,
 semantic-layer.md "contract"): an applied migration is checksummed by
 refinery, so editing even its comment stops every database that ran it
 from opening. Rewrite what the old name left in the data with a new
@@ -142,7 +142,7 @@ holds ~1.4M facts, and a scan per row outlasts the daemon's 60s start.
 > happens. Don't remove that build script.
 
 **Migrations never create views (P4.2).** A published view is a model file
-(`crates/oxplow-db/models/`, see [semantic-layer.md](./semantic-layer.md)
+(`crates/oxplow-db/datasets/`, see [semantic-layer.md](./semantic-layer.md)
 "Models"). `migrate_and_compile` drops every model's view, runs the
 migrations, then compiles the models — so a migration that alters or drops
 a column never has to work around a view that reads it; the model that
@@ -152,27 +152,31 @@ it isn't. The build script embeds `models/` the same way
 
 **The model registry** (V105, V109): `model` (one row per published view
 — owner `core` or an extension, `kind` `sql` or `entity`, version,
-compiled SQL), `model_input` (its `ref`/`source` inputs), `model_contract`
+compiled SQL), `dataset_input` (its `ref`/`source` inputs), `dataset_contract`
 (the columns each view promised at each version, and since V141 its
 `key_json` — the declared `key:` columns, `'[]'` for the versions
 recorded before keys; outlives the view, so a changed contract or key at
-the same version is refused) and `model_test` (the last result of each
-declared test). `model.materialize` is `on_change`, `every <duration>`
+the same version is refused) and `dataset_test` (the last result of each
+declared test). `dataset.materialize` is `on_change`, `every <duration>`
 (V142) or `incremental <column>` (V143): SQLite can't widen a CHECK in
-place, so both rebuilt `model`, keeping `model_input` and `model_test`
-aside across the cascade. `model.relationships_json` (V120) holds a
+place, so both rebuilt `dataset`, keeping `dataset_input` and `dataset_test`
+aside across the cascade. `dataset.relationships_json` (V120) holds a
 dataset's declared relationships, resolved (`[{from, to, to_view,
 to_field}]`); V120 also dropped the recorded contracts of `v_model` and
 `v_model_column`, renamed `v_dataset` and `v_field`. Readable as
-`v_dataset`, `v_field`, `v_model_lineage`, `v_model_test`.
+`v_dataset`, `v_field`, `v_dataset_lineage`, `v_dataset_test`. V121 renamed
+the tables (`model` to `dataset`, `model_input`, `model_contract` and
+`model_test` likewise) and rewrote every stored `oxplow:oxplow/model?model=…`
+URI to `oxplow:oxplow/dataset?dataset=…`, and a run's decision need `model` to
+`dataset`.
 
 **Changed tables per commit** (P4.6, `crates/oxplow-db/src/changes.rs`):
 every pooled connection's init installs SQLite's preupdate, commit and
 rollback hooks; a commit's touched tables — and which of them it
 rewrote (updated or deleted in, P8.B3) — are published after each
 `Database::call` / `call_mut` / `transaction` / `read`
-(`Database::subscribe_changes`), and `models_changed` maps them to models
-through `model_input`. A write needs nothing to be seen — the hooks see
+(`Database::subscribe_changes`), and `datasets_changed` maps them to models
+through `dataset_input`. A write needs nothing to be seen — the hooks see
 every table, WITHOUT ROWID and a bare `DELETE` included.
 
 **DB dispatch is gated to the pool size (tsk131).** `Database::call`,
@@ -394,7 +398,7 @@ Each stream owns:
   standing instructions appended to the agent's system prompt after the
   global `agentPromptAppend` section. Set via the `oxplow.stream.set_prompt`
   command (`apps/desktop/src/api.ts`'s `setStreamPrompt`); the stream
-  list re-reads on `ModelsChanged` naming `v_stream`.
+  list re-reads on `DatasetsChanged` naming `v_stream`.
   V6 also dropped a legacy `summary` column that was carried over from
   the TS schema and never displayed; the prompt feature briefly
   piggybacked on that slot before getting its own column.
@@ -1634,7 +1638,7 @@ and are registered by `crate::boot` — a test that wants them calls their
 | `effort.evidence` / `effort.commits` | async | `effort.finished` | evidence rows, the commits that hold its work linked to its task (`commit_links`, tsk1035) | boot.rs |
 | `search.index` | async | `snapshot.taken` | the search index's file contents (the other kinds are assets, `kind_search.rs`) | boot.rs |
 | `config.extensions` / `config.providers` / `config.metrics` | async | `config.changed` (`extensions`; `extensionInstances`, `activeProviders`; any key) | after the in-memory swap: the extension catalog's change signal; the provider registry reconciles; the metric catalog reseeds (P7.B6) | boot.rs |
-| `extension_models.entities` | async | `collector.synced` | the extension models compile again (a new entity may let one) (P7.B6) | boot.rs |
+| `extension_datasets.entities` | async | `collector.synced` | the extension models compile again (a new entity may let one) (P7.B6) | boot.rs |
 | `change.analyze` | async | `snapshot.taken` (that recorded files), `vcs.head.moved` | re-analyzes the stream's working change and open efforts' changes, skipping an event a newer one supersedes; dead-letters a failure naming the stream (P7.B4) | boot.rs |
 | `collector.triggers` | async | what enabled collectors' `on:` name (never `collector.synced`) | runs each matching collector for the event, once per event (`collector_run.last_event_id`): an entity collector's rows, or a fact collector through the fact engine (`snapshot.taken`: a delta collector only when the take recorded files, a whole-tree one on every take; `effort.finished` over the effort's end snapshot; anything else over the stream's latest snapshot) — plus `collector_run` and `collector.synced@2` (P7.B3; replaced `effort.gauges` and the metrics bus `SnapshotTaken` arm) | boot.rs |
 
@@ -2077,7 +2081,7 @@ already-recorded usage. No FK (the transcript outlives any single row).
 Store methods: `record`, `list_for_effort`, `totals_for_effort`,
 `totals_for_thread`, `cursor`/`set_cursor`. There are no IPC reads: the UI
 reads `v_token_usage` through oxplow-bundled pages (`task-tokens`,
-`thread-tokens`, `usage`), which re-run on `ModelsChanged`.
+`thread-tokens`, `usage`), which re-run on `DatasetsChanged`.
 
 ### `panel_layout` — `SqlitePanelLayoutStore` (`crates/oxplow-db/src/panel_layout_store.rs`)
 
@@ -2419,7 +2423,7 @@ comments are never swept.
 
 Change fan-out: a comment's writes are the `knowledge.*` comment
 commands (P8.A6); the renderer re-reads the comment models on
-`ModelsChanged` — there is no comment-specific event.
+`DatasetsChanged` — there is no comment-specific event.
 
 ### `search_entry` + `search_fts` — `SqliteSearchStore` (`crates/oxplow-db/src/search_store.rs`, migration `V25__search_index.sql`)
 
@@ -2512,7 +2516,7 @@ un-blocked.
 Cross-store change fan-out is centralized on the typed EventBus
 (`crates/oxplow-app/src/events.rs`). Stores call `EventBus::emit(...)`
 with a coarse `OxplowEvent` variant (most views instead re-read on
-`ModelsChanged`); subscribers refetch the affected bucket on
+`DatasetsChanged`); subscribers refetch the affected bucket on
 receipt. The bus is a `tokio::sync::broadcast` channel, so a slow
 subscriber sees `RecvError::Lagged` rather than blocking publishers,
 and adding/removing subscribers is lock-free.

@@ -65,7 +65,7 @@ pub fn check_command_need(id: &str) -> Result<(), String> {
     if oxplow_domain::service::need_scope(id) == "tree.read" {
         return Err(
             "`needs`: `tree.read` can't be used here: a command's script decides what runs, \
-             reading oxplow's models (`sql.read`) — an effect or a collector can read the tree"
+             reading oxplow's datasets (`sql.read`) — an effect or a collector can read the tree"
                 .into(),
         );
     }

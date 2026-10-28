@@ -41,7 +41,7 @@ impl CommandBus {
             };
         }
         let spec = &command.spec;
-        // Proposals retain replayable inputs in a published read model.
+        // Proposals retain replayable inputs in a published read dataset.
         // An operation's private fields must never enter that storage. A
         // direct confirmed human invocation can use the ordinary redacted
         // audit path; unattended callers cannot retain a payload for approval.

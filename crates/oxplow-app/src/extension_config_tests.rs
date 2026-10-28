@@ -111,7 +111,7 @@ async fn a_failing_step_leaves_the_layers_alone_and_holds_the_extension_back() {
         reason.contains("alpha") && reason.contains("cannot cope") && reason.contains("1 -> 2"),
         "{reason}"
     );
-    // Held like a broken model: the version that worked keeps serving, on
+    // Held like a broken dataset: the version that worked keeps serving, on
     // settings still at the version it reads.
     let config = run(&fx, "alpha.config.inspect", json!({})).await.unwrap();
     assert_eq!(config["schema_version"], json!(1));

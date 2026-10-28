@@ -5,7 +5,7 @@
 //! (the single-read check, the recording authorizer, `query_only`, the
 //! row cap and timeout); the gateway is where what needs the rest of the
 //! app joins them — the metric functions (`metric_grid()`, P4.5;
-//! `metric_findings()`, P4.8) and model freshness (P4.6).
+//! `metric_findings()`, P4.8) and dataset freshness (P4.6).
 
 use oxplow_db::{
     Database, Reads, SemanticLayer, SqlCell, SqlQuery, SqlQueryResult, TempTable, TempView,
@@ -18,8 +18,8 @@ pub struct SqlGateway {
     /// What `metric_grid()` reads metrics through; `None` for a gateway
     /// that serves the engine itself (its entity metrics).
     engine: Option<std::sync::Arc<crate::metric_engine::MetricEngine>>,
-    /// When each model last changed, for a result's `freshness` (P4.6).
-    watermarks: Option<std::sync::Arc<crate::models_changed::ModelWatermarks>>,
+    /// When each dataset last changed, for a result's `freshness` (P4.6).
+    watermarks: Option<std::sync::Arc<crate::datasets_changed::DatasetWatermarks>>,
     /// Temp views every query recreates on its connection: a check's
     /// overlay of what an extension declares but hasn't published (P7.C6).
     overlay: std::sync::Arc<Vec<TempView>>,
@@ -31,16 +31,16 @@ pub struct SqlGateway {
     /// The event types the log speaks (the app's; core's unless set):
     /// what a review reads logged events through.
     vocabulary: oxplow_domain::vocabulary::VocabularyHandle,
-    /// What the live models (`crate::live_models`) are read from; shared by
+    /// What the live datasets (`crate::live_datasets`) are read from; shared by
     /// every clone, bound once by the app.
-    live: std::sync::Arc<crate::live_models::LiveModels>,
+    live: std::sync::Arc<crate::live_datasets::LiveDatasets>,
     /// What makes the stored things a query names by their keys
     /// (`crate::on_demand`); shared by every clone, bound once by the app.
     on_demand: std::sync::Arc<crate::on_demand::OnDemand>,
 }
 
 /// What a query result says about the data behind it: which collectors
-/// feed the models it read and how they stand, and the catalog's
+/// feed the datasets it read and how they stand, and the catalog's
 /// generation (`crate::collection_coverage`).
 pub struct Collection {
     pub jobs: std::sync::Arc<crate::extension_jobs::ExtensionJobs>,
@@ -61,13 +61,13 @@ impl SqlGateway {
             collection: None,
             activation: std::sync::Arc::new(crate::extension_activation::ExtensionActivation::new()),
             vocabulary: oxplow_domain::vocabulary::VocabularyHandle::core(),
-            live: std::sync::Arc::new(crate::live_models::LiveModels::default()),
+            live: std::sync::Arc::new(crate::live_datasets::LiveDatasets::default()),
             on_demand: std::sync::Arc::new(crate::on_demand::OnDemand::default()),
         }
     }
 
-    /// The handle the app binds the live models' sources through.
-    pub fn live_models(&self) -> &crate::live_models::LiveModels {
+    /// The handle the app binds the live datasets' sources through.
+    pub fn live_datasets(&self) -> &crate::live_datasets::LiveDatasets {
         &self.live
     }
 
@@ -183,7 +183,7 @@ impl SqlGateway {
     }
 
     /// A separate private state reader for script hosts sharing this project's
-    /// resources. State never enters `run`, overlays, models or SQL results.
+    /// resources. State never enters `run`, overlays, datasets or SQL results.
     pub(crate) fn state_source(&self) -> Option<crate::extension_state::StateSource> {
         self.collection.as_ref().map(|resources| {
             crate::extension_state::StateSource::new(
@@ -226,17 +226,17 @@ impl SqlGateway {
 
     /// This gateway with `views` created (in order) for every query it
     /// runs or checks — what a check reads an extension's unpublished
-    /// models and unsynced entities through.
+    /// datasets and unsynced entities through.
     pub fn with_overlay(&self, views: Vec<TempView>) -> Self {
         let mut out = self.clone();
         out.overlay = std::sync::Arc::new(views);
         out
     }
 
-    /// Say how fresh each read model is (P4.6).
+    /// Say how fresh each read dataset is (P4.6).
     pub fn with_watermarks(
         mut self,
-        watermarks: std::sync::Arc<crate::models_changed::ModelWatermarks>,
+        watermarks: std::sync::Arc<crate::datasets_changed::DatasetWatermarks>,
     ) -> Self {
         self.watermarks = Some(watermarks);
         self
@@ -244,7 +244,7 @@ impl SqlGateway {
 
     fn fresh(&self, mut out: SqlQueryResult) -> SqlQueryResult {
         if let Some(w) = &self.watermarks {
-            out.freshness = w.freshness(&out.reads.models);
+            out.freshness = w.freshness(&out.reads.datasets);
         }
         out
     }
@@ -264,12 +264,12 @@ impl SqlGateway {
     }
 
     async fn run_unpinned(&self, mut query: SqlQuery) -> Result<SqlQueryResult, DomainError> {
-        if query.model_policy.is_some()
+        if query.dataset_policy.is_some()
             && (crate::metric_grid::plan(&query.sql)?.is_some()
                 || crate::metric_findings::plan(&query.sql)?.is_some())
         {
             return Err(DomainError::Invalid(
-                "bounded model grants cannot use metric_grid()/metric_findings(); query granted published models instead".into()
+                "bounded dataset grants cannot use metric_grid()/metric_findings(); query granted published datasets instead".into()
             ));
         }
         // Boxed: the engine reads entity metrics through a gateway, so
@@ -283,7 +283,7 @@ impl SqlGateway {
         let mut out = self.layer.run(query).await?;
         out.reads.measures = measures;
         if let Some(c) = &self.collection {
-            out.coverage = c.feeds.coverage(&c.db, &out.reads.models).await?;
+            out.coverage = c.feeds.coverage(&c.db, &out.reads.datasets).await?;
             out.generation = Some(
                 self.activation
                     .current_pin()
@@ -300,7 +300,7 @@ impl SqlGateway {
         Ok(self.fresh(out))
     }
 
-    /// `sql` with its metric functions and live models computed (run with
+    /// `sql` with its metric functions and live datasets computed (run with
     /// `params`) or only resolved (a check, `None`): the rewritten SQL, its
     /// temp tables, and the measures behind them. Each function is planned
     /// over the SQL the previous one rewrote, so their offsets hold.
@@ -314,10 +314,10 @@ impl SqlGateway {
         let mut sql = sql.to_string();
         let mut temp = Vec::new();
         let mut measures = Vec::new();
-        // The live models it names are read now, before a connection is
+        // The live datasets it names are read now, before a connection is
         // taken. A run with nothing bound to read them is refused rather
         // than answered from the empty stub; a check only compiles.
-        let live = crate::live_models::LiveModels::named_in(&sql)?;
+        let live = crate::live_datasets::LiveDatasets::named_in(&sql)?;
         if with_rows && !live.is_empty() && !self.live.is_bound() {
             return Err(DomainError::Invalid(format!(
                 "v_{} is read live, and this gateway has nothing to read it from",
@@ -391,14 +391,14 @@ impl SqlGateway {
         Ok(reads)
     }
 
-    /// Check extensions' models compile, publishing nothing (P4.9); `stubs`
+    /// Check extensions' datasets compile, publishing nothing (P4.9); `stubs`
     /// stand in for declared entities that haven't synced (P7.C6).
-    pub async fn check_extension_models(
+    pub async fn check_extension_datasets(
         &self,
-        extensions: Vec<oxplow_db::models::ExtensionModels>,
-        stubs: Vec<oxplow_db::models::EntityStub>,
-    ) -> Result<oxplow_db::models::CheckedModels, DomainError> {
-        self.layer.check_extension_models(extensions, stubs).await
+        extensions: Vec<oxplow_db::datasets::ExtensionDatasets>,
+        stubs: Vec<oxplow_db::datasets::EntityStub>,
+    ) -> Result<oxplow_db::datasets::CheckedDatasets, DomainError> {
+        self.layer.check_extension_datasets(extensions, stubs).await
     }
 
     /// The latest `limit` events of any of `types`, newest first.
@@ -434,7 +434,7 @@ impl SqlGateway {
         ext: &crate::extensions::Extension,
         sql: &str,
     ) -> Result<String, DomainError> {
-        if oxplow_db::models::config_reads(sql)?.is_empty() {
+        if oxplow_db::datasets::config_reads(sql)?.is_empty() {
             return Ok(sql.to_string());
         }
         let values = match ext.configuration.clone() {
@@ -460,7 +460,7 @@ impl SqlGateway {
             }
             None => None,
         };
-        oxplow_db::models::substitute_config(sql, values.as_ref())
+        oxplow_db::datasets::substitute_config(sql, values.as_ref())
     }
 
     /// The name of every view in the database.

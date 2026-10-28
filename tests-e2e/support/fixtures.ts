@@ -38,9 +38,9 @@ async function workspace(): Promise<Workspace> {
     // The suite's extensions declare permissions, so boot waits for a
     // person to deploy them: deployed as they would, confirmed.
     for (const name of ["e2e", "github"]) await deploy(daemon, name);
-    // Extensions' models compile in the background after boot: the test
+    // Extensions' datasets compile in the background after boot: the test
     // extension's is published once they are.
-    await until("the extensions' models to publish", 60_000, async () => {
+    await until("the extensions' datasets to publish", 60_000, async () => {
       const out = await ipc<{ rows: unknown[][] }>(daemon, "query_sql", {
         sql: "SELECT 1 FROM v_dataset WHERE view = 'v_e2e_item'",
       });

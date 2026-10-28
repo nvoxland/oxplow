@@ -240,7 +240,7 @@ effects, effort policies and provider host calls, and pages on request
 (`page: { limit, offset }` → `{ rows, more, next_offset }`); a
 collector's `input` is complete or declares its `limit` and reads
 `input.complete`. Every gateway result carries `generation` and the
-observed `coverage` of the collected models it read, which MCP/RPC
+observed `coverage` of the collected datasets it read, which MCP/RPC
 `oxplow_query_sql` and page runs return and the page view shows
 (semantic-layer.md "Completeness and coverage").
 
@@ -286,7 +286,7 @@ run's decisions (`allowed`, `denied`, `unenforced`), recorded on
 `v_extension_run` — the usage record, with actor, cause, anchors, cost,
 scopes and model calls, never values or contents. A deployment's
 permissions cover its whole declaration, and a deployment is immutable.
-Per-model reads,
+Per-dataset reads,
 file confinement and a model-call limit are left to the enforcement
 item.
 
@@ -302,7 +302,7 @@ Prerequisites: Normalize contribution descriptors and public extension terminolo
 
 #### Enforce scoped grants across hosts and external execution
 
-Status: in progress. Model/path bounds, live-owner checks and pinned component
+Status: in progress. Dataset/path bounds, live-owner checks and pinned component
 authority are implemented; adversarial runtime validation and remaining host
 integration are still required. External-process confinement is shelved by
 the owner: a plan for later, not pursued now. Today every external program
@@ -315,7 +315,7 @@ Scope: Apply permitted authority at host-service calls and semantic reads, exter
 
 Acceptance: Path traversal/symlinks, redirects, subprocesses, stale component authority and changed scripts do not silently widen grants. Unsupported confinement fails closed for a restricted tier; an opt-in alternative honestly declares its broader access. Disabling an extension or deploying without a permission stops new sensitive calls and handles in-flight work by a defined policy. Secret references are resolved by the host and not returned as extension-readable values.
 
-Validation: Use adversarial fixtures for unauthorized semantic reads (including derived models), paths, destinations, redirects, credentials, child processes and bridge messages. Test the supported OS enforcement matrix and a redeploy or disable during execution.
+Validation: Use adversarial fixtures for unauthorized semantic reads (including derived datasets), paths, destinations, redirects, credentials, child processes and bridge messages. Test the supported OS enforcement matrix and a redeploy or disable during execution.
 
 Starting points: `crates/oxplow-app/src/grants.rs`, `crates/oxplow-app/src/collector_runner.rs`, `crates/oxplow-ai-providers/src/scripted.rs`, `apps/desktop/src/viz/CustomComponentViz.tsx`.
 
@@ -331,7 +331,7 @@ Acceptance: A developer can identify extension/contribution version, cause, acti
 
 Validation: Run successful, rejected, cancelled and retrying contributions through the common views; assert ownership/cause linkage, no sensitive values, bounded retention and accurate freshness after failure.
 
-Starting points: `crates/oxplow-app/src/extension_catalog.rs`, `crates/oxplow-db/src/effect_run_store.rs`, `crates/oxplow-app/src/collector_runner.rs`, `crates/oxplow-db/models`.
+Starting points: `crates/oxplow-app/src/extension_catalog.rs`, `crates/oxplow-db/src/effect_run_store.rs`, `crates/oxplow-app/src/collector_runner.rs`, `crates/oxplow-db/datasets`.
 
 Prerequisites: Introduce a shared extension RunContext; Compose declared host services through the shared context; Define scoped extension grants and usage audit contracts.
 
@@ -470,15 +470,15 @@ or retained backups on publication failure. Catalog metadata snapshots now pair
 load identity with declarations; command replacement swaps one registry atomically
 and retains prior handlers on registration failure with their original provenance.
 The bus also supplies atomic multi-source replacement, and the DB supplies
-strict model-set replacement with structured rejection and savepoint rollback.
+strict dataset-set replacement with structured rejection and savepoint rollback.
 Command reconciliation now stages all enabled replacements from one catalog
 snapshot, publishes with a registry identity fence, and rejects enabled load
 errors instead of exposing a partial command set. Explicit disable/removal and
 live owner guards remain independent of candidate acceptance. Publication races
 restage up to three times. A prepared database candidate now composes strict
-model and vocabulary replacement from one catalog snapshot; rejection of either
+dataset and vocabulary replacement from one catalog snapshot; rejection of either
 restores both inside the caller's transaction. Vocabulary candidates also reject
-enabled load errors and invalid host recognizers. Live model/vocabulary reactors
+enabled load errors and invalid host recognizers. Live dataset/vocabulary reactors
 remain partial until shared coordinator adoption. Capability reads now resolve
 one captured state; prepared capability replacements fence registry/choice
 changes. The database candidate also includes contribution descriptors and
@@ -499,7 +499,7 @@ Acceptance: A failed update leaves the last good activation usable and reports c
 
 Validation: Inject failure into each registration step and test hot update while queries/actions run. Assert rollback/last-good behavior and no mixed generation or leaked registration.
 
-Starting points: `crates/oxplow-app/src/extension_catalog.rs`, `crates/oxplow-app/src/extension_models.rs`, `crates/oxplow-app/src/config_reactors.rs`, `crates/oxplow-app/src/extensions/custom_components.rs`.
+Starting points: `crates/oxplow-app/src/extension_catalog.rs`, `crates/oxplow-app/src/extension_datasets.rs`, `crates/oxplow-app/src/config_reactors.rs`, `crates/oxplow-app/src/extensions/custom_components.rs`.
 
 Prerequisites: Normalize contribution descriptors and public extension terminology; Introduce a shared extension RunContext.
 
@@ -521,7 +521,7 @@ Prerequisites: Stage and activate one coherent extension generation; Provide dur
 
 Status: in progress. Canonical identity, visibility, exact contract versions,
 required/optional outcomes and deterministic dependency validation are fixed.
-The pure validator is integrated with manifest declarations, public model SQL
+The pure validator is integrated with manifest declarations, public dataset SQL
 bindings, optional contribution guards, export withdrawal and dependency
 diagnostics. Authoring/impact overlays resolve fresh
 candidate catalogs and reject downstream contract regressions. Coherent runtime
@@ -533,7 +533,7 @@ Acceptance: Two independent extensions can integrate without relying on internal
 
 Validation: Use producer/consumer fixtures with compatible, breaking, optional, missing and cyclic imports. Test disable/update compatibility and confirm the loader rejects dependency ambiguity.
 
-Starting points: `crates/oxplow-app/src/extensions/manifest_v2.rs`, `crates/oxplow-app/src/extension_models.rs`, `crates/oxplow-app/src/extension_event_types.rs`, `crates/oxplow-app/src/extension_commands.rs`.
+Starting points: `crates/oxplow-app/src/extensions/manifest_v2.rs`, `crates/oxplow-app/src/extension_datasets.rs`, `crates/oxplow-app/src/extension_event_types.rs`, `crates/oxplow-app/src/extension_commands.rs`.
 
 Prerequisites: Normalize contribution descriptors and public extension terminology.
 
@@ -675,7 +675,7 @@ Acceptance: At least one alternative review policy can combine test evidence, cu
 
 Validation: Compare default analysis results before/after extraction on a representative change; build an alternate domain-specific review and ensure it joins existing evidence with custom collected facts.
 
-Starting points: `crates/oxplow-app/src/change_reactor.rs`, `crates/oxplow-app/src/collector_runner.rs`, `crates/oxplow-db/models`, `extensions/oxplow-bundled/extension.yaml`.
+Starting points: `crates/oxplow-app/src/change_reactor.rs`, `crates/oxplow-app/src/collector_runner.rs`, `crates/oxplow-db/datasets`, `extensions/oxplow-bundled/extension.yaml`.
 
 Prerequisites: Normalize contribution descriptors and public extension terminology; Compose declared host services through the shared context.
 
@@ -771,9 +771,9 @@ only (`examples/extensions/README.md` lists them, the tests and the
 friction found): effort-review (a job started by an effect on
 `effort.finished`, its tool reading an effort's evidence, streamed,
 cancelled through `oxplow.job.cancel`, commented on the work item and
-exported as a model); triage's workflow state surviving restart
+exported as a dataset); triage's workflow state surviving restart
 and an edited bundle (`crates/oxplow-sdk/tests/trials.rs`, the
-browser spec); review-badges importing effort-review's model and
+browser spec); review-badges importing effort-review's dataset and
 degrading when it is disabled, missing or exports another version.
 Shared services added for them: a job's intent key as its subject
 (snapshot `intentKey`, `v_job_run.intent_key`), a command fixture's `expect:

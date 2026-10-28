@@ -3,7 +3,7 @@ import { bookmarkedElsewhere, bookmarksFromResult, bookmarksParams, moveBookmark
 import type { SqlQueryResult } from "../tauri-bridge/generated/bindings.js";
 
 const result = (rows: (string | null)[][]): SqlQueryResult =>
-  ({ columns: ["uri", "label", "scope"], rows, reads: { models: [] } }) as unknown as SqlQueryResult;
+  ({ columns: ["uri", "label", "scope"], rows, reads: { datasets: [] } }) as unknown as SqlQueryResult;
 
 describe("bookmarks", () => {
   test("rows become refs; an unparseable ref is skipped", () => {
@@ -17,7 +17,7 @@ describe("bookmarks", () => {
     expect(out[0]!.scope).toBe("thread");
   });
 
-  test("the viewer binds as model row ids", () => {
+  test("the viewer binds as dataset row ids", () => {
     expect(bookmarksParams({ threadId: "thr3", streamId: "str2" })).toEqual([3, 2]);
     expect(bookmarksParams({ threadId: null, streamId: null })).toEqual([null, null]);
   });

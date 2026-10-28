@@ -42,8 +42,8 @@ pub fn describe(ext: &Extension) -> Vec<Descriptor> {
         }
     };
     for m in ext.datasets.iter().filter(|m| m.twin.is_none()) {
-        let view = oxplow_db::models::extension_view(&ext.name, &m.decl.name);
-        let mut d = new(ContributionKind::Model, &m.decl.name, RunsOn::Query);
+        let view = oxplow_db::datasets::extension_view(&ext.name, &m.decl.name);
+        let mut d = new(ContributionKind::Dataset, &m.decl.name, RunsOn::Query);
         d.contract_version = Some(m.decl.version);
         d.global = Some(view.clone());
         d.source.file = format!("{}/{}", ext.path.trim_end_matches('/'), m.file);
@@ -488,7 +488,7 @@ fn remove_id(ext: &mut Extension, id: &ContributionId) {
 fn remove(ext: &mut Extension, c: &Collision) {
     let local = c.refused.local.as_str();
     match c.kind {
-        ContributionKind::Model => ext
+        ContributionKind::Dataset => ext
             .datasets
             .retain(|x| x.decl.name != local && x.twin.as_ref().is_none_or(|t| t.of != local)),
         ContributionKind::EventType => ext.event_types.types.retain(|x| x.event_type != local),
@@ -545,7 +545,7 @@ mod tests {
              panels:\n  - {{ id: inbox, title: Inbox, scope: project, body: open }}\n\
              resources:\n  - {{ name: pr, label: Pull request, params: {{ id: {{ required: true, pattern: '^[0-9]+$' }} }}, resolve: prs, icon: git-pull-request }}\n\
              custom_components:\n  - {{ id: chart }}\n\
-             ui:\n  mounts:\n    - {{ page: open, at: oxplow-foundation/diff.file-header }}\n    - {{ page: open, at: oxplow-foundation/diff.file-header }}\n  decorators:\n    - {{ model: prs, resource: oxplow/work_item, placement: ref-chip, label: title }}\n"
+             ui:\n  mounts:\n    - {{ page: open, at: oxplow-foundation/diff.file-header }}\n    - {{ page: open, at: oxplow-foundation/diff.file-header }}\n  decorators:\n    - {{ dataset: prs, resource: oxplow/work_item, placement: ref-chip, label: title }}\n"
         )
     }
 
@@ -554,7 +554,7 @@ mod tests {
         write(root, &format!("{dir}/extension.yaml"), &acme_manifest(name));
         write(
             root,
-            &format!("{dir}/models/prs.sql"),
+            &format!("{dir}/datasets/prs.sql"),
             "SELECT 'oxplow:oxplow/work_item?id=tsk1&provider=oxplow' AS uri, 'One' AS title",
         );
         write(
@@ -636,10 +636,13 @@ mod tests {
     }
 
     #[test]
-    fn a_model_is_a_query_named_by_its_view() {
+    fn a_dataset_is_a_query_named_by_its_view() {
         let ext = acme();
-        let d = one(&ext, K::Model);
-        assert_eq!(d.id.to_string(), "oxplow:oxplow/model?model=acme-pr/prs");
+        let d = one(&ext, K::Dataset);
+        assert_eq!(
+            d.id.to_string(),
+            "oxplow:oxplow/dataset?dataset=acme-pr/prs"
+        );
         assert_eq!(d.trigger, RunsOn::Query);
         assert_eq!(d.contract_version, Some(3));
         assert_eq!(d.global.as_deref(), Some("v_acme_pr_prs"));
@@ -765,11 +768,11 @@ mod tests {
         let mut second = acme();
         second.name = "acme-qr".into();
         second.path = ".oxplow/extensions/acme-qr".into();
-        // The model's view is named for its extension, so a second one's
+        // The dataset's view is named for its extension, so a second one's
         // never matches; claim it outright.
         second.contributions = describe(&second);
         for d in &mut second.contributions {
-            if d.id.kind == K::Model {
+            if d.id.kind == K::Dataset {
                 d.global = Some("v_acme_pr_prs".into());
             }
         }
@@ -799,7 +802,7 @@ mod tests {
         assert_eq!(first.datasets.len(), 1);
         assert_eq!(first.resources.len(), 1);
         assert_eq!(first.event_types.types.len(), 1);
-        for kind in [K::Model, K::EventType, K::Resource] {
+        for kind in [K::Dataset, K::EventType, K::Resource] {
             assert!(of(second, kind).is_empty(), "{kind:?}");
             assert_eq!(of(first, kind).len(), 1, "{kind:?}");
         }

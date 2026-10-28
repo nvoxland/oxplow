@@ -30,7 +30,7 @@ pub mod built_in_pages;
 pub mod bundled_extensions;
 pub mod capabilities;
 #[cfg(test)]
-mod catalog_models_tests;
+mod catalog_datasets_tests;
 pub mod change_analysis;
 pub mod change_reactor;
 pub mod chat;
@@ -57,6 +57,7 @@ pub mod context_watch;
 pub mod contribution_health;
 pub mod credential_lint;
 pub mod daemon_supervisor;
+pub mod datasets_changed;
 pub mod diagnostics;
 pub mod duplication_scan;
 #[cfg(test)]
@@ -90,6 +91,7 @@ pub mod extension_config_migration;
 #[cfg(test)]
 mod extension_config_tests;
 pub mod extension_configuration;
+pub mod extension_datasets;
 pub mod extension_deploy;
 pub mod extension_event_types;
 pub mod extension_generation;
@@ -113,7 +115,6 @@ mod extension_job_stream_tests;
 pub mod extension_jobs;
 #[cfg(test)]
 mod extension_jobs_tests;
-pub mod extension_models;
 #[cfg(test)]
 mod extension_private_state_tests;
 pub mod extension_resources;
@@ -141,9 +142,9 @@ pub mod kind_search;
 pub mod knowledge;
 pub mod knowledge_conformance;
 pub mod link_check;
-pub mod live_models;
+pub mod live_datasets;
 #[cfg(test)]
-mod live_models_tests;
+mod live_datasets_tests;
 pub mod lsp_diagnostics;
 #[cfg(test)]
 mod lsp_fake;
@@ -159,7 +160,6 @@ pub mod metric_visibility;
 #[cfg(test)]
 mod metrics_authoring_tests;
 pub mod metrics_service;
-pub mod models_changed;
 pub mod net_sandbox;
 pub mod observe_conformance;
 pub mod on_demand;
@@ -561,11 +561,11 @@ pub struct Services {
     pub event_log_store: Arc<SqliteEventLogStore>,
     /// The one way a query reaches the semantic layer (P4.1).
     pub sql: sql_gateway::SqlGateway,
-    /// When each model last changed (P4.6); `models_changed::spawn` keeps
-    /// it and announces `ModelsChanged`.
-    pub model_watermarks: Arc<models_changed::ModelWatermarks>,
+    /// When each dataset last changed (P4.6); `datasets_changed::spawn` keeps
+    /// it and announces `DatasetsChanged`.
+    pub dataset_watermarks: Arc<datasets_changed::DatasetWatermarks>,
     /// The assets (P7.B1): derived data recomputed when its input tables
-    /// change — the metric cube; `models_changed::spawn` tells them.
+    /// change — the metric cube; `datasets_changed::spawn` tells them.
     pub assets: assets::Assets,
     /// The page runs windows have open, re-run as the change loop says
     /// what changed (`pages::open_runs`).
@@ -588,7 +588,7 @@ pub struct Services {
     /// Custom components' bundles as their frames loaded them, by version
     /// (tsk984): what the daemon serves a frame, and what its invoke names.
     pub component_bundles: Arc<component_bundles::ComponentBundles>,
-    /// The primary worktree's extensions' SQL models, and their errors (P4.9).
+    /// The primary worktree's extensions' SQL datasets, and their errors (P4.9).
     /// Rebuilds `vocabulary` from the primary worktree's extensions, and
     /// their refused declarations (P8.D3).
     pub vocabulary_service: Arc<vocabulary_reactor::VocabularyService>,
@@ -624,7 +624,7 @@ pub struct Services {
     /// The knowledge implementations and the active one: oxplow's wiki
     /// (bundled), a provider's, or none (`.context/knowledge.md`).
     pub knowledge: Arc<oxplow_domain::knowledge::KnowledgeRegistry>,
-    /// Which collectors feed which models (`collection_coverage`).
+    /// Which collectors feed which datasets (`collection_coverage`).
     pub feeds: Arc<collection_coverage::Feeds>,
     /// Whether oxplow's wiki is the active store (its watch and repair
     /// run only then).
@@ -828,7 +828,7 @@ impl Services {
     }
 
     /// The extensions under `root` as listed: loaded, with what the
-    /// primary worktree's model compile and vocabulary refused added to
+    /// primary worktree's dataset compile and vocabulary refused added to
     /// each one's errors.
     pub async fn listed_extensions(&self, root: &std::path::Path) -> Vec<extensions::Extension> {
         match self
@@ -1018,7 +1018,7 @@ impl Services {
             .with_vocabulary(vocabulary.clone())
             .with_activation(extension_activation.clone());
         let event_bus = EventBus::new();
-        // A live model's event re-runs the open runs that read it.
+        // A live dataset's event re-runs the open runs that read it.
         let page_runs = pages::open_runs::PageRuns::default();
         event_bus.reach_open_runs(page_runs.clone());
         let ref_moves = ref_moves::RefMoves::new(event_bus.clone());
@@ -1080,11 +1080,11 @@ impl Services {
         ));
         let metric_engine = metric_engine::MetricEngine::new(SqliteFactStore::new(db.clone()))
             .with_visibility(metric_visibility.clone());
-        let model_watermarks = Arc::new(models_changed::ModelWatermarks::default());
+        let dataset_watermarks = Arc::new(datasets_changed::DatasetWatermarks::default());
         let assets = assets::Assets::new(db.clone(), assets::COALESCE);
         let sql = sql
             .with_engine(metric_engine.clone())
-            .with_watermarks(model_watermarks.clone());
+            .with_watermarks(dataset_watermarks.clone());
         let nudge_store = Arc::new(SqliteAgentNudgeStore::new(db.clone()));
         let terminal_store = Arc::new(oxplow_db::SqliteTerminalStore::new(db.clone()));
         let collector_store = Arc::new(oxplow_db::SqliteCollectorStore::new(db.clone()));
@@ -1276,8 +1276,8 @@ impl Services {
             })
         });
         let services_slot = commands::util::ServicesSlot::default();
-        // The live models (`live_models`) read these when a query names them.
-        sql.live_models().bind(live_models::LiveSources {
+        // The live datasets (`live_datasets`) read these when a query names them.
+        sql.live_datasets().bind(live_datasets::LiveSources {
             ai: ai.clone(),
             lsp: lsp.clone(),
             worktrees: worktrees.clone(),
@@ -1906,7 +1906,7 @@ impl Services {
             handoff_store,
             event_log_store,
             sql,
-            model_watermarks,
+            dataset_watermarks,
             page_runs,
             assets,
             vocabulary,

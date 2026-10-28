@@ -53,8 +53,8 @@ pub enum Kind {
     /// declarations from the capability's contract, a stub program to
     /// replace, and the fixtures `extension test` runs.
     Provider { capability: &'static str },
-    /// A derived (Starlark) collector of an entity, a model over it and a
-    /// page over the model.
+    /// A derived (Starlark) collector of an entity, a dataset over it and a
+    /// page over the dataset.
     Collector,
     /// A code metric: a per-path measure, a Starlark fact collector over the
     /// snapshot's files, the dimension its facts carry, the headline metric
@@ -157,7 +157,7 @@ pub fn scaffold(
 }
 
 /// Copy the example extension `example` (one oxplow ships) into
-/// `.oxplow/extensions/<example>/`. It keeps its name: its commands, models
+/// `.oxplow/extensions/<example>/`. It keeps its name: its commands, datasets
 /// and pages are namespaced by it, so a different `name` is refused —
 /// rename after copying. Refuses an existing folder.
 pub fn scaffold_example(
@@ -173,7 +173,7 @@ pub fn scaffold_example(
     })?;
     if let Some(name) = name.filter(|n| *n != found.name) {
         return Err(SdkError::Invalid(format!(
-            "`--from {example}` keeps the name `{example}` (its commands and models are named by it): copy it as `{example}`, then rename after copying (got `{name}`)"
+            "`--from {example}` keeps the name `{example}` (its commands and datasets are named by it): copy it as `{example}`, then rename after copying (got `{name}`)"
         )));
     }
     let rel_dir = format!("{EXTENSIONS_DIR}/{}", found.name);
@@ -635,7 +635,7 @@ pub fn scaffold_with(
                     .to_string(),
             )?;
             write(
-                &format!("{rel_dir}/models/open_items.sql"),
+                &format!("{rel_dir}/datasets/open_items.sql"),
                 "SELECT uri, title FROM ref('item')\n".to_string(),
             )?;
             write(
@@ -1251,7 +1251,7 @@ pub struct CheckReport {
 
 /// Load `name` under `root` and report everything wrong with it: the
 /// manifest's shape and lifecycle, every cross-reference, every page's
-/// shape, and a dry run of its models, commands, pages and advisories
+/// shape, and a dry run of its datasets, commands, pages and advisories
 /// against the semantic layer — `layer` (the project's), else a fresh
 /// in-memory database. This is what `oxplow_validate_extension` returns
 /// and what `oxplow extension check` prints. `commands` (the running app's
@@ -1342,9 +1342,9 @@ pub async fn check(
 
 /// What going from git revision `against` (`HEAD`, a branch, a sha) to the
 /// working tree changes for extension `name` — the review an
-/// install or an effort shows, on the CLI: pages, models and their rows,
+/// install or an effort shows, on the CLI: pages, datasets and their rows,
 /// collectors and their outputs, providers, config. It reads through
-/// `layer` and writes nothing: each side's models are temp views.
+/// `layer` and writes nothing: each side's datasets are temp views.
 async fn impact_against(
     root: &Path,
     name: &str,
@@ -2116,7 +2116,7 @@ mod tests {
     /// A fixture that no intent example names never runs, and an example
     /// without a fixture runs nothing: each is a finding that names the file
     /// or example and the fix, not a bare "not found" later.
-    /// An extension that reads another's model, mounts at its page or runs
+    /// An extension that reads another's dataset, mounts at its page or runs
     /// its command without declaring it (`requires:`, or importing what it
     /// reads) is a finding naming where and the fix: a test runs it
     /// without the other, and a person may turn the other off.
@@ -2130,7 +2130,7 @@ mod tests {
         );
         write(
             dir.path(),
-            ".oxplow/extensions/other/models/things.sql",
+            ".oxplow/extensions/other/datasets/things.sql",
             "SELECT 1 AS n",
         );
         write(
@@ -2183,7 +2183,7 @@ mod tests {
         let text = found(user("", false)).await;
         assert!(
             text.contains(
-                ".oxplow/extensions/user/pages/counted.yaml:3: uses `other` (its model `v_other_things`)"
+                ".oxplow/extensions/user/pages/counted.yaml:3: uses `other` (its dataset `v_other_things`)"
             ),
             "{text}"
         );
@@ -2199,7 +2199,7 @@ mod tests {
             ".oxplow/extensions/pairs/extension.yaml",
             "manifest: 2\nname: pairs\nengine: \">=0.1\"\nintent:\n  purpose: x\n  examples: [{ name: listed }, { name: missing }]\n",
         );
-        for fixture in ["listed", "orphan", "model-counts", "provider-feed"] {
+        for fixture in ["listed", "orphan", "dataset-counts", "provider-feed"] {
             write(
                 dir.path(),
                 &format!(".oxplow/extensions/pairs/fixtures/{fixture}.yaml"),
@@ -2235,7 +2235,7 @@ mod tests {
         );
         // A kit's fixtures aren't intent examples.
         assert!(
-            !text.contains("model-counts") && !text.contains("provider-feed"),
+            !text.contains("dataset-counts") && !text.contains("provider-feed"),
             "{text}"
         );
         assert!(!text.contains("`listed`"), "{text}");

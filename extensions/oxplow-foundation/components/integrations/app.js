@@ -60,7 +60,7 @@
     }
   }
 
-  /** The views the three models' rows make. */
+  /** The views the three datasets' rows make. */
   function assemble(instances, credentials, collectors) {
     const creds = records(credentials);
     const colls = records(collectors);

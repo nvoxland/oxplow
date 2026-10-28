@@ -1035,7 +1035,7 @@ mod tests {
             "{err:?}"
         );
 
-        // The catalog is SQL too: every model's columns are documented.
+        // The catalog is SQL too: every dataset's columns are documented.
         let cols: serde_json::Value = serde_json::from_str(&text_payload(
             call(
                 &server,

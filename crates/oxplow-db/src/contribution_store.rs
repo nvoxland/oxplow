@@ -107,10 +107,10 @@ mod tests {
         );
     }
 
-    /// Every kind is stable, so neither the table nor its model carries a
+    /// Every kind is stable, so neither the table nor its dataset carries a
     /// per-kind stability.
     #[tokio::test]
-    async fn the_table_and_its_model_have_no_stability_column() {
+    async fn the_table_and_its_dataset_have_no_stability_column() {
         let db = Database::in_memory();
         let (table, view): (Vec<String>, Vec<String>) = db
             .call(|c| {

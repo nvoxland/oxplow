@@ -150,15 +150,15 @@ fn emitters() -> BTreeSet<(String, String)> {
     out
 }
 
-/// Who may push each UI event. The renderer hears a model's change through
-/// `ModelsChanged` and the log's facts through `ui.push`; what's left is a
+/// Who may push each UI event. The renderer hears a dataset's change through
+/// `DatasetsChanged` and the log's facts through `ui.push`; what's left is a
 /// UI-only signal with no durable fact behind it (its reason in
 /// `.context/ipc-and-stores.md` → "Event bus"). Rows marked `P8.A` go as
-/// their writes move onto the command bus and the desktop reads the model.
+/// their writes move onto the command bus and the desktop reads the dataset.
 #[rustfmt::skip]
 const EMITTERS: &[(&str, &str)] = &[
     ("AgentStatusChanged", "crates/oxplow-app/src/agent_stall_watch.rs"),
-    // An Assistant session lives in memory: no model to re-read.
+    // An Assistant session lives in memory: no dataset to re-read.
     ("AssistantChanged", "crates/oxplow-app/src/assistant/session.rs"),
     ("AgentStatusChanged", "crates/oxplow-app/src/hook_ingest.rs"),
     ("BackgroundTasksChanged", "crates/oxplow-app/src/lib.rs"),
@@ -171,17 +171,17 @@ const EMITTERS: &[(&str, &str)] = &[
     ("CredentialChanged", "crates/oxplow-app/src/commands/credentials.rs"),
     ("CredentialChanged", "crates/oxplow-app/src/providers/registry.rs"),
     // The extension catalog's own signal (tsk1030): what extensions
-    // contribute isn't a model to re-read, and a file path was a guess.
+    // contribute isn't a dataset to re-read, and a file path was a guess.
     ("ExtensionsChanged", "crates/oxplow-app/src/boot.rs"),
     ("LspServersChanged", "crates/oxplow-app/src/commands/lsp.rs"),
-    ("MetricSamplesChanged", "crates/oxplow-app/src/models_changed.rs"),
-    ("ModelsChanged", "crates/oxplow-app/src/models_changed.rs"),
+    ("MetricSamplesChanged", "crates/oxplow-app/src/datasets_changed.rs"),
+    ("DatasetsChanged", "crates/oxplow-app/src/datasets_changed.rs"),
     // An open page run's loaders re-ran: names only, the window fetches.
     ("PageRunChanged", "crates/oxplow-app/src/pages/open_runs.rs"),
     ("SnapshotTaken", "crates/oxplow-app/src/ui_push.rs"),
     ("StreamOrphaned", "crates/oxplow-app/src/workspace_watch.rs"),
     ("VcsRefsChanged", "crates/oxplow-app/src/ref_moves.rs"),
-    // A restored file is on disk, in no model.
+    // A restored file is on disk, in no dataset.
     ("WorkspaceChanged", "crates/oxplow-app/src/commands/snapshot.rs"),
     ("WorkspaceChanged", "crates/oxplow-app/src/commands/vcs.rs"),
     ("WorkspaceChanged", "crates/oxplow-app/src/workspace_files.rs"),
@@ -190,7 +190,7 @@ const EMITTERS: &[(&str, &str)] = &[
 ];
 
 /// P8.A1: each UI event has the sources pinned in [`EMITTERS`] — a new
-/// push is a decision (is there a model to re-read instead?), not a
+/// push is a decision (is there a dataset to re-read instead?), not a
 /// convenience.
 #[test]
 fn ui_events_have_their_pinned_sources() {
@@ -203,7 +203,7 @@ fn ui_events_have_their_pinned_sources() {
     let gone: Vec<_> = pinned.difference(&found).collect();
     assert!(
         unlisted.is_empty() && gone.is_empty(),
-        "UI event sources changed.\nunlisted (add to EMITTERS with a reason, or read a model): {unlisted:#?}\nno longer emitted (drop from EMITTERS): {gone:#?}"
+        "UI event sources changed.\nunlisted (add to EMITTERS with a reason, or read a dataset): {unlisted:#?}\nno longer emitted (drop from EMITTERS): {gone:#?}"
     );
 }
 
@@ -372,7 +372,7 @@ fn event_kinds() -> Vec<String> {
 }
 
 /// P8.A2: every UI event has a listener in the renderer — one nobody hears
-/// is a write path's leftover, and its readers re-read a model instead.
+/// is a write path's leftover, and its readers re-read a dataset instead.
 #[test]
 fn every_ui_event_has_a_listener() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/desktop/src");
@@ -392,11 +392,11 @@ fn every_ui_event_has_a_listener() {
             }
         }
     }
-    // Read only inside the daemon: the live models that follow it
+    // Read only inside the daemon: the live datasets that follow it
     // (`v_workspace_file`, `v_branch_divergence`, …) and the snapshot
-    // capture. The renderer re-reads those models, so it needs no listener.
+    // capture. The renderer re-reads those datasets, so it needs no listener.
     // A credential's news (`v_provider_credential`, a sign-in's end) is the
-    // same: the models that follow it are re-read, and a sign-in's own end
+    // same: the datasets that follow it are re-read, and a sign-in's own end
     // is the host's answer to the component that asked.
     const DAEMON_ONLY: &[&str] = &["vcsRefsChanged", "credentialChanged"];
     let unheard: Vec<String> = event_kinds()
@@ -737,7 +737,7 @@ const SPECIAL_CASES: &[(&str, &str, &str)] = &[
     // about how to call one.
     ("crates/oxplow-domain/src/capability.rs", "== OXPLOW", "the reserved provider id"),
     // The URI grammar: a contribution's resource is oxplow's own
-    // (`oxplow/model`), whichever extension implements it — a fact of the
+    // (`oxplow/dataset`), whichever extension implements it — a fact of the
     // naming, not a decision about how to treat an implementation.
     ("crates/oxplow-domain/src/contribution.rs", "== \"oxplow\"", "a contribution's resource is oxplow's"),
     ("crates/oxplow-domain/src/uri/build.rs", "!= \"oxplow\"", "a contribution's key param is its kind's name"),
@@ -1127,7 +1127,7 @@ fn refs_are_built_and_parsed_through_the_grammar() {
     );
 }
 
-/// The scripts, page queries and model SQL the repo ships, and the Rust
+/// The scripts, page queries and dataset SQL the repo ships, and the Rust
 /// files that embed Starlark templates, as `(repo-relative path, text)`.
 fn script_and_sql_sources() -> Vec<(String, String)> {
     let root = repo_root();
@@ -1137,7 +1137,7 @@ fn script_and_sql_sources() -> Vec<(String, String)> {
         "examples/extensions",
         "oxplow/collectors",
         "crates/oxplow-script/src/metrics",
-        "crates/oxplow-db/models",
+        "crates/oxplow-db/datasets",
         "crates/oxplow-sdk/src",
     ]
     .iter()
@@ -1170,8 +1170,8 @@ fn script_and_sql_sources() -> Vec<(String, String)> {
     out
 }
 
-/// Every place a script, page query or model SQL spells or takes apart a
-/// ref of a core kind by hand, as `path:line text`. A kind's owning model
+/// Every place a script, page query or dataset SQL spells or takes apart a
+/// ref of a core kind by hand, as `path:line text`. A kind's owning dataset
 /// (a resource's `resolve` view) spells its prefix in its `uri`
 /// column and is exempt.
 fn hand_made_script_refs() -> Vec<String> {
@@ -1197,7 +1197,7 @@ fn hand_made_script_refs() -> Vec<String> {
         .filter_map(|r| r.resolve.as_ref())
         .map(|view| {
             format!(
-                "crates/oxplow-db/models/{}.sql",
+                "crates/oxplow-db/datasets/{}.sql",
                 view.trim_start_matches("v_")
             )
         })
@@ -1218,7 +1218,7 @@ fn hand_made_script_refs() -> Vec<String> {
 
 /// A URI's owner spells it and everyone else carries it: scripts build a
 /// URI with `uri.build` and read one with `uri.id` / `uri.parse`, and SQL
-/// selects or joins on the owning model's `uri` column — never
+/// selects or joins on the owning dataset's `uri` column — never
 /// `"file:" + path`, `'oxplow:oxplow/effort?id=eff' || id`, `startswith("oxplow:oxplow/effort?id=eff")`
 /// (`.context/resources.md`, "Using refs"). The kept list is empty.
 #[test]

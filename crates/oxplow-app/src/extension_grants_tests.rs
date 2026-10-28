@@ -38,7 +38,7 @@ async fn run(fx: &TaskEffortFixture, name: &str) -> Result<Value, CommandError> 
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_qualified_read_reaches_only_its_model_and_what_derives_from_it() {
+async fn a_qualified_read_reaches_only_its_dataset_and_what_derives_from_it() {
     let fx = services_with_task_effort().await;
     let root = fx.svc.layout.project_dir.clone();
     let commands = [
@@ -84,12 +84,12 @@ async fn a_qualified_read_reaches_only_its_model_and_what_derives_from_it() {
     );
     write(
         &root,
-        ".oxplow/extensions/acme/models/efforts.sql",
+        ".oxplow/extensions/acme/datasets/efforts.sql",
         "SELECT id FROM ref('effort')",
     );
     write(
         &root,
-        ".oxplow/extensions/acme/models/mine.sql",
+        ".oxplow/extensions/acme/datasets/mine.sql",
         "SELECT uri FROM ref('work_item')",
     );
     for (name, _, sql) in commands {
@@ -115,10 +115,10 @@ async fn a_qualified_read_reaches_only_its_model_and_what_derives_from_it() {
         run(&fx, "acme.read.items").await.unwrap()["result"],
         json!(1)
     );
-    // Refused, naming the model that isn't granted: a model it was not given,
-    // a join with one, an extension model derived from one, and an extension
-    // model it holds a grant for whose own inputs it does not.
-    for (name, model) in [
+    // Refused, naming the dataset that isn't granted: a dataset it was not given,
+    // a join with one, an extension dataset derived from one, and an extension
+    // dataset it holds a grant for whose own inputs it does not.
+    for (name, dataset) in [
         ("efforts", "v_effort"),
         ("joined", "v_effort"),
         ("derived", "v_effort"),
@@ -129,11 +129,11 @@ async fn a_qualified_read_reaches_only_its_model_and_what_derives_from_it() {
             .expect_err(name);
         let message = format!("{error:?}");
         assert!(
-            message.contains(&format!("model `{model}`: not declared")),
+            message.contains(&format!("dataset `{dataset}`: not declared")),
             "{name}: {message}"
         );
     }
-    // A bare `sql.read` reads anything published, derived models included,
+    // A bare `sql.read` reads anything published, derived datasets included,
     // and a grant for both ends of a lineage reads the derived one.
     for name in ["any", "both", "anyderived"] {
         assert!(
@@ -162,7 +162,9 @@ async fn a_qualified_read_reaches_only_its_model_and_what_derives_from_it() {
             .as_array()
             .unwrap()
             .iter()
-            .any(|d| d["need"] == "model" && d["name"] == "v_effort" && d["decision"] == "denied"),
+            .any(|d| d["need"] == "dataset"
+                && d["name"] == "v_effort"
+                && d["decision"] == "denied"),
         "{denied}"
     );
 }
@@ -208,7 +210,7 @@ async fn a_service_the_script_did_not_declare_is_refused() {
     // The declared service works for the same extension.
     assert!(run(&fx, "acme.read.sneak").await.is_ok());
 
-    // Fact collectors reaching for a model or the tree without declaring it.
+    // Fact collectors reaching for a dataset or the tree without declaring it.
     write(
         &root,
         ".oxplow/extensions/facts/extension.yaml",

@@ -470,7 +470,7 @@ invoked as a separate binary, never linked as a library.
 - Push, pull, fetch, merge and rebase are long: the desktop runs each
   command inside a `BackgroundTaskStore` row (`runAsBackgroundTask` in
   `api.ts`) so the bottom-bar `BackgroundTaskIndicator` shows progress.
-- History and branch lists read the models (`v_commit`, `v_branch`,
+- History and branch lists read the datasets (`v_commit`, `v_branch`,
   `v_tag`; P5.B5, [vcs.md](./vcs.md)); ahead/behind, divergence,
   commits-ahead and a file's history stay live on `vcs_divergence`,
   `vcs_revisions_between` and `vcs_file_history`; a local branch against its own
@@ -673,5 +673,5 @@ The cleanliness check and the head read go through the VCS capability
 - [data-model.md](./data-model.md) — schema overview, including the
   `page_ref` table the commit indexer writes into.
 - [agent-model.md](./agent-model.md) — commits are user-driven; the `v_page_ref`
-  model that reads the commit indexer's output.
+  dataset that reads the commit indexer's output.
 - [editor-and-monaco.md](./editor-and-monaco.md) — blame overlay UI.

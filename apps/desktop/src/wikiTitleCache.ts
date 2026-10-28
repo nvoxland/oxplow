@@ -10,7 +10,7 @@ import type { Reads } from "./tauri-bridge/generated/bindings.js";
  * title instead of the raw slug — readers should see "Local Snapshots"
  * not `local-snapshots`.
  *
- * One load on first subscribe; refreshed when a model the read read
+ * One load on first subscribe; refreshed when a dataset the read read
  * changes (`readsChanged` over the read's own `reads` — the one rerun
  * rule, outside a component), once a burst of such commits goes quiet
  * (`coalesce`) — a scan storing its findings is many commits, and each

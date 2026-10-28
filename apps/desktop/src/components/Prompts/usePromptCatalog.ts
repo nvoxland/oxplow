@@ -1,5 +1,5 @@
 /// What a person can ask (`v_page_answer`): what every enabled extension's
-/// pages say they answer, re-read when the model changes.
+/// pages say they answer, re-read when the dataset changes.
 import { useEffect, useState } from "react";
 
 import { querySql } from "../../api.js";
@@ -11,7 +11,7 @@ const SQL =
   "SELECT 'extension' AS source_kind, p.extension AS source, a.question AS prompt, a.about " +
   "FROM v_page_answer a JOIN v_page p ON p.uri = a.page_uri ORDER BY p.extension, p.id, a.position";
 
-/** The model's rows as prompts. Pure; exported for tests. */
+/** The dataset's rows as prompts. Pure; exported for tests. */
 export function promptsOf(rows: SqlCell[][]): CatalogPrompt[] {
   return rows.map(([, source, prompt, about]) => ({
     prompt: String(prompt),

@@ -14,8 +14,8 @@ working examples oxplow ships, and `new --from <example>` copies one (it
 keeps its name; rename after copying). Each passes `check` and `extension test` as written, so a
 failure after your edit is yours:
 - `page` — a page over open tasks with a row action (Start);
-- `collector` — a Starlark collector of an entity, a model over it
-  (`ref('item')`) and a page over the model;
+- `collector` — a Starlark collector of an entity, a dataset over it
+  (`ref('item')`) and a page over the dataset;
 - `metric` — a code metric: a per-path measure, a Starlark collector
   counting each file's functions over a complexity limit, the dimension
   its facts carry, the headline metric and a page linking to the file and

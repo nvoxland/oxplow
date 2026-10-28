@@ -174,7 +174,7 @@ pub(super) fn load(
     }
 }
 
-/// A manifest's contribution ref (`oxplow:oxplow/model?model=effort-review/reviews`,
+/// A manifest's contribution ref (`oxplow:oxplow/dataset?dataset=effort-review/reviews`,
 /// `oxplow:oxplow/command?command=acme.pr.merge`). A global name says no owner: in an export or
 /// guard it is the extension's own; in an import the owner is found when
 /// imports resolve ([`resolve_global_imports`]), until then its extension
@@ -227,18 +227,18 @@ pub(super) fn prepare(ext: &mut Extension) {
     let queries: Vec<_> = ext
         .datasets
         .iter()
-        .map(|model| {
+        .map(|dataset| {
             (
                 ContributionId::new(
                     &ext.name,
-                    ContributionKind::Model,
-                    model
+                    ContributionKind::Dataset,
+                    dataset
                         .twin
                         .as_ref()
-                        .map_or(model.decl.name.as_str(), |twin| twin.of.as_str()),
+                        .map_or(dataset.decl.name.as_str(), |twin| twin.of.as_str()),
                 ),
-                model.file.clone(),
-                model.sql.clone(),
+                dataset.file.clone(),
+                dataset.sql.clone(),
             )
         })
         .chain(ext.page_files.iter().flat_map(|page| {
@@ -256,7 +256,7 @@ pub(super) fn prepare(ext: &mut Extension) {
         if !sql.to_ascii_lowercase().contains("import_ref") {
             continue;
         }
-        match oxplow_db::models::import_references(&sql) {
+        match oxplow_db::datasets::import_references(&sql) {
             Ok(references) => {
                 for reference in references {
                     let source = DeclaredAt {
@@ -268,13 +268,15 @@ pub(super) fn prepare(ext: &mut Extension) {
                         .imports
                         .iter()
                         .find(|binding| binding.id == reference.binding)
-                        .is_some_and(|binding| binding.contribution.kind != ContributionKind::Model)
+                        .is_some_and(|binding| {
+                            binding.contribution.kind != ContributionKind::Dataset
+                        })
                     {
                         invalid(
                             ext,
                             &source,
                             format!(
-                                "import_ref('{}') must bind a model contribution",
+                                "import_ref('{}') must bind a dataset contribution",
                                 reference.binding
                             ),
                         );
@@ -307,7 +309,7 @@ pub(super) fn prepare(ext: &mut Extension) {
         }
         if !matches!(
             guard.contribution.kind,
-            ContributionKind::Model
+            ContributionKind::Dataset
                 | ContributionKind::Page
                 | ContributionKind::Collector
                 | ContributionKind::Command
@@ -317,7 +319,7 @@ pub(super) fn prepare(ext: &mut Extension) {
                 | ContributionKind::Skill
                 | ContributionKind::Provider
         ) {
-            invalid(ext, &guard.source, format!("import guard `{}` must name a model, page, collector, command, job, effect, advisory, skill or provider", guard.contribution));
+            invalid(ext, &guard.source, format!("import guard `{}` must name a dataset, page, collector, command, job, effect, advisory, skill or provider", guard.contribution));
         }
         if guard.imports.is_empty() {
             invalid(
@@ -630,8 +632,8 @@ fn resolve(extensions: &mut [Extension], publish: bool) {
 fn remove_guarded(ext: &mut Extension, id: &ContributionId) {
     let local = id.local.as_str();
     match id.kind {
-        ContributionKind::Model => ext.datasets.retain(|model| {
-            model.decl.name != local && model.twin.as_ref().is_none_or(|twin| twin.of != local)
+        ContributionKind::Dataset => ext.datasets.retain(|dataset| {
+            dataset.decl.name != local && dataset.twin.as_ref().is_none_or(|twin| twin.of != local)
         }),
         ContributionKind::Page => ext.page_files.retain(|page| page.slug != local),
         ContributionKind::Collector => ext.collectors.retain(|collector| collector.id != local),
@@ -656,7 +658,7 @@ fn remove_guarded(ext: &mut Extension, id: &ContributionId) {
 
 /// What a withheld contribution leaves without a part: a provider command
 /// without its provider, a panel, slot mount or replacement without its
-/// page, a resource or decorator without its model.
+/// page, a resource or decorator without its dataset.
 fn prune_mounts(extensions: &mut [Extension], blocked: &BTreeSet<String>) {
     {
         for ext in extensions
@@ -732,10 +734,10 @@ fn prune_mounts(extensions: &mut [Extension], blocked: &BTreeSet<String>) {
                     false
                 }
             });
-            let models: BTreeSet<_> = ext
+            let datasets: BTreeSet<_> = ext
                 .datasets
                 .iter()
-                .map(|model| oxplow_db::models::extension_view(&ext.name, &model.decl.name))
+                .map(|dataset| oxplow_db::datasets::extension_view(&ext.name, &dataset.decl.name))
                 .collect();
             let core = ext.namespace == super::CORE_NAMESPACE;
             ext.resources.retain(|resource| {
@@ -744,7 +746,7 @@ fn prune_mounts(extensions: &mut [Extension], blocked: &BTreeSet<String>) {
                     || [&decl.resolve, &decl.searchable]
                         .into_iter()
                         .flatten()
-                        .all(|view| models.contains(view))
+                        .all(|view| datasets.contains(view))
                 {
                     true
                 } else {
@@ -757,7 +759,7 @@ fn prune_mounts(extensions: &mut [Extension], blocked: &BTreeSet<String>) {
                 }
             });
             ext.ui.decorators.retain(|decorator| {
-                if models.contains(&decorator.view) {
+                if datasets.contains(&decorator.view) {
                     true
                 } else {
                     removed.insert(ContributionId::new(
@@ -779,8 +781,8 @@ fn prune_mounts(extensions: &mut [Extension], blocked: &BTreeSet<String>) {
 
 fn bind_sql(ext: &mut Extension) {
     let bindings = &ext.public_contracts.bindings;
-    for model in &mut ext.datasets {
-        model.sql = rewrite_sql(&model.sql, bindings, true);
+    for dataset in &mut ext.datasets {
+        dataset.sql = rewrite_sql(&dataset.sql, bindings, true);
     }
     for page in &mut ext.page_files {
         for decl in &mut page.loaders {
@@ -791,8 +793,8 @@ fn bind_sql(ext: &mut Extension) {
     }
 }
 
-fn rewrite_sql(sql: &str, bindings: &[PublicBinding], model: bool) -> String {
-    let Ok(references) = oxplow_db::models::import_references(sql) else {
+fn rewrite_sql(sql: &str, bindings: &[PublicBinding], dataset: bool) -> String {
+    let Ok(references) = oxplow_db::datasets::import_references(sql) else {
         return sql.to_owned();
     };
     let mut result = sql.to_owned();
@@ -801,7 +803,7 @@ fn rewrite_sql(sql: &str, bindings: &[PublicBinding], model: bool) -> String {
             .iter()
             .find(|binding| binding.id == reference.binding && binding.available)
         {
-            let replacement = if model {
+            let replacement = if dataset {
                 format!(
                     "ref('{}/{}')",
                     binding.contribution.extension, binding.contribution.local
@@ -809,7 +811,7 @@ fn rewrite_sql(sql: &str, bindings: &[PublicBinding], model: bool) -> String {
             } else {
                 format!(
                     "\"{}\"",
-                    oxplow_db::models::extension_view(
+                    oxplow_db::datasets::extension_view(
                         &binding.contribution.extension,
                         &binding.contribution.local
                     )

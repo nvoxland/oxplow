@@ -105,17 +105,17 @@ pub enum OxplowEvent {
     },
     /// An Assistant session changed (`assistant/`): its transcript, its
     /// status or its settings. The panel asks `assistant_snapshot { id,
-    /// since }` for what changed. In memory only: no model holds it.
+    /// since }` for what changed. In memory only: no dataset holds it.
     AssistantChanged {
         id: String,
         #[specta(type = oxplow_domain::JsNumber)]
         seq: u64,
     },
-    /// Published models (views) changed: a commit touched a table one of
-    /// them reads, directly or through other models (P4.6). A page re-runs
-    /// when a model it read is listed.
-    ModelsChanged { models: Vec<String> },
-    /// An open page run re-ran (a model one of its loaders read changed):
+    /// Published datasets (views) changed: a commit touched a table one of
+    /// them reads, directly or through other datasets (P4.6). A page re-runs
+    /// when a dataset it read is listed.
+    DatasetsChanged { datasets: Vec<String> },
+    /// An open page run re-ran (a dataset one of its loaders read changed):
     /// the loaders whose rows differ, for the window that opened it to
     /// fetch (`fetch_page_runs`). Never the rows themselves.
     PageRunChanged(crate::pages::open_runs::RunChange),
@@ -180,7 +180,7 @@ pub enum OxplowEvent {
     /// A sign-in for provider instance `instance`'s credential `name`
     /// finished (P9.B3): its token is in the keychain and the instance
     /// restarted on it — or, with `error`, it came to nothing and why.
-    /// The keychain is no model, so there is nothing to re-read but the
+    /// The keychain is no dataset, so there is nothing to re-read but the
     /// instances themselves (`v_provider_instance`).
     CredentialChanged {
         instance: String,
@@ -199,7 +199,7 @@ pub enum OxplowEvent {
 #[derive(Clone)]
 pub struct EventBus {
     sender: broadcast::Sender<OxplowEvent>,
-    /// The open page runs a live model's change re-runs
+    /// The open page runs a live dataset's change re-runs
     /// ([`EventBus::reach_open_runs`]).
     open_runs: std::sync::Arc<std::sync::OnceLock<crate::pages::open_runs::PageRuns>>,
 }
@@ -219,8 +219,8 @@ impl EventBus {
         }
     }
 
-    /// Tell `runs` what live models each posted event changes, so the
-    /// open runs that read one re-run: a live model has no table for the
+    /// Tell `runs` what live datasets each posted event changes, so the
+    /// open runs that read one re-run: a live dataset has no table for the
     /// change loop to see. Once, when the services are built.
     pub fn reach_open_runs(&self, runs: crate::pages::open_runs::PageRuns) {
         let _ = self.open_runs.set(runs);
@@ -234,18 +234,18 @@ impl EventBus {
         self.sender.subscribe()
     }
 
-    /// Post an event — and, when it changed what a live model reads, the
-    /// `ModelsChanged` naming that model (`models_changed::announced_after`),
+    /// Post an event — and, when it changed what a live dataset reads, the
+    /// `DatasetsChanged` naming that dataset (`datasets_changed::announced_after`),
     /// and re-run the open page runs that read it. Fire-and-forget: no
     /// receiver is fine.
     pub fn emit(&self, event: OxplowEvent) {
-        let then = crate::models_changed::announced_after(&event);
+        let then = crate::datasets_changed::announced_after(&event);
         let _ = self.sender.send(event);
         if let Some(then) = then {
-            if let (Some(runs), OxplowEvent::ModelsChanged { models }) =
+            if let (Some(runs), OxplowEvent::DatasetsChanged { datasets }) =
                 (self.open_runs.get(), &then)
             {
-                runs.notify_models(models);
+                runs.notify_datasets(datasets);
             }
             let _ = self.sender.send(then);
         }
@@ -256,11 +256,11 @@ impl EventBus {
 mod tests {
     use super::*;
 
-    /// An event about what a live model reads is followed on the bus by
-    /// the `ModelsChanged` naming it; one about nothing a live model reads
+    /// An event about what a live dataset reads is followed on the bus by
+    /// the `DatasetsChanged` naming it; one about nothing a live dataset reads
     /// is alone.
     #[tokio::test]
-    async fn a_change_a_live_model_reads_announces_the_model() {
+    async fn a_change_a_live_dataset_reads_announces_the_dataset() {
         let bus = EventBus::new();
         let mut rx = bus.subscribe_ui();
         bus.emit(OxplowEvent::ConfigChanged);
@@ -269,10 +269,13 @@ mod tests {
             OxplowEvent::ConfigChanged
         ));
         match rx.recv().await.unwrap() {
-            OxplowEvent::ModelsChanged { models } => {
-                assert!(models.contains(&"v_config_value".to_string()), "{models:?}")
+            OxplowEvent::DatasetsChanged { datasets } => {
+                assert!(
+                    datasets.contains(&"v_config_value".to_string()),
+                    "{datasets:?}"
+                )
             }
-            other => panic!("expected ModelsChanged, got {other:?}"),
+            other => panic!("expected DatasetsChanged, got {other:?}"),
         }
         bus.emit(OxplowEvent::BackgroundTasksChanged);
         assert!(matches!(

@@ -15,7 +15,7 @@ const ran: { action: string; row: unknown; drop: unknown; confirmed: boolean }[]
 mock.module("../api.js", () => ({
   ...realApi,
   listExtensions: async () => [],
-  querySql: async () => ({ columns: [], rows: [], truncated: false, reads: { models: [], tables: [], measures: [] }, freshness: {} }),
+  querySql: async () => ({ columns: [], rows: [], truncated: false, reads: { datasets: [], tables: [], measures: [] }, freshness: {} }),
 }));
 const { VizView } = await import("./VizView.js");
 
@@ -79,7 +79,7 @@ const rows: SqlCell[][] = [
   ["u3", "Three", "done"],
 ];
 const runOf = (viz: Partial<VizConfig>): VizRun =>
-  ({ config: { ...base, ...viz }, params: {}, result: { columns, rows, truncated: false, reads: { models: [], tables: [], measures: [] } } }) as unknown as VizRun;
+  ({ config: { ...base, ...viz }, params: {}, result: { columns, rows, truncated: false, reads: { datasets: [], tables: [], measures: [] } } }) as unknown as VizRun;
 const record = (i: number) => ({ uri: rows[i]![0], title: rows[i]![1], state: rows[i]![2] });
 
 /** A drag that carries what each `setData` set, for the drop to read. */

@@ -151,7 +151,7 @@ impl AgentSession {
 
     /// How the session is named everywhere: [`Self::given_name`], else the
     /// harness and the day it opened. This is the one rule in Rust; it
-    /// mirrors `display_name` in `models/agent_session.sql` (the other
+    /// mirrors `display_name` in `datasets/agent_session.sql` (the other
     /// place a name is spelled), so change them together.
     pub fn display_name(&self) -> String {
         self.given_name().unwrap_or_else(|| {
@@ -213,7 +213,7 @@ mod tests {
         }
     }
 
-    /// The one naming rule (it mirrors `models/agent_session.sql`): the
+    /// The one naming rule (it mirrors `datasets/agent_session.sql`): the
     /// person's title, else the harness's name for the conversation, else
     /// the harness and the day it opened.
     #[test]

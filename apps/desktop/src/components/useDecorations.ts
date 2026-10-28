@@ -8,7 +8,7 @@ import type { DecoratorPlacement, Reads } from "../tauri-bridge/generated/bindin
 import { decorationQueries, decorationsFromResult, decoratorsFor, type Decoration } from "./decorators.js";
 
 /** The decorations for `refs` in `placement`: each decorator's queries,
- *  re-run when a model it read changes or the extensions do. A decorator
+ *  re-run when a dataset it read changes or the extensions do. A decorator
  *  whose query fails shows nothing — decorations are additive. An answer
  *  for inputs that have since changed is dropped. */
 export function useDecorations(placement: DecoratorPlacement, refs: string[]): Decoration[] {

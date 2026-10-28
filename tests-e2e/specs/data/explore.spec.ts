@@ -11,17 +11,17 @@ async function writes(daemon: Parameters<typeof ipc>[0]): Promise<number> {
 }
 
 // Explore Data is oxplow-foundation's custom page: the catalog is its rail
-// (a viz node picking the page's `model`), the SQL box its component, and
+// (a viz node picking the page's `dataset`), the SQL box its component, and
 // the result oxplow draws under it from the inline page the component
 // hands it, with Save as Page beside it.
-test("explore a model, run SQL, and save it as a page", async ({ page, daemon }) => {
+test("explore a dataset, run SQL, and save it as a page", async ({ page, daemon }) => {
   await run(daemon, "oxplow.work_item.create", { title: "Echidna task", thread: daemon.thread });
   await page.goto("/");
   await openFromLauncher(page, "Explore Data");
   await expect(page.locator('[data-testid="page-host"]:visible [data-testid="custom-component"]')).toBeVisible();
   await page.locator('[data-node="explore-catalog"]:visible').getByText("v_work_item", { exact: true }).click();
   const frame = page.frameLocator('[data-testid="custom-component-frame"]');
-  // Picking a model writes its query; replace it once it's there.
+  // Picking a dataset writes its query; replace it once it's there.
   await expect(frame.getByTestId("explore-sql")).toHaveValue(/v_work_item/);
   await frame.getByTestId("explore-sql").fill("SELECT title FROM v_work_item WHERE title LIKE 'Echidna%'");
   await frame.getByTestId("explore-run").click();
@@ -43,7 +43,7 @@ test("a query oxplow refuses draws nothing under the explorer", async ({ page })
   await page.goto("/");
   await openFromLauncher(page, "Explore Data");
   const frame = page.frameLocator('[data-testid="custom-component-frame"]');
-  await frame.getByTestId("explore-sql").fill("SELECT * FROM no_such_model");
+  await frame.getByTestId("explore-sql").fill("SELECT * FROM no_such_dataset");
   await frame.getByTestId("explore-run").click();
   await expect(frame.getByTestId("explore-error")).toBeVisible();
   await expect(page.getByTestId("custom-page-spec")).toHaveCount(0);

@@ -21,6 +21,7 @@ pub mod comment_store;
 pub mod contribution_health_store;
 pub mod contribution_store;
 mod database;
+pub mod datasets;
 pub mod diagnostic_store;
 pub mod effect_run_store;
 pub mod effect_state_store;
@@ -39,7 +40,6 @@ mod fact_chain;
 pub mod fact_store;
 pub mod git_store;
 pub mod handoff_store;
-pub mod models;
 pub mod op_error_store;
 pub mod page_ref_projections;
 pub mod page_ref_store;
@@ -126,8 +126,8 @@ pub use reasoning_store::{
 };
 pub use search_store::{sanitize_query, SearchHit, SqliteSearchStore};
 pub use semantic_layer::{
-    ModelFreshness, Reads, SemanticLayer, SqlCell, SqlParams, SqlQuery, SqlQueryResult, TempTable,
-    TempView,
+    DatasetFreshness, Reads, SemanticLayer, SqlCell, SqlParams, SqlQuery, SqlQueryResult,
+    TempTable, TempView,
 };
 pub use snapshot_tree::{ContentHasher, SnapshotTree, TreeEntry};
 pub use stream_store::SqliteStreamStore;

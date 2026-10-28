@@ -1,17 +1,17 @@
-//! Search resources whose rows come from a model (P9.D3;
+//! Search resources whose rows come from a dataset (P9.D3;
 //! `.context/resources.md` "Searchable resources"): every resource
 //! `resource` lists with a `searchable` view — oxplow-foundation's and
-//! another extension's (`searchable: <model>`) alike — has that view's rows
+//! another extension's (`searchable: <dataset>`) alike — has that view's rows
 //! (`ref`, `title`, `body`, `stream_id`) in the site-wide index
 //! (`search_fts`) under the resource, each by its URI. Files aren't a
-//! model's: their input is snapshot blobs, so the `search.index` consumer
+//! dataset's: their input is snapshot blobs, so the `search.index` consumer
 //! indexes them.
 //!
 //! It is **index-time ingestion, as an asset** — not a query-time UNION:
 //! `search_fts` owns the text it ranks (BM25 and `snippet()` need it in
 //! the index), and a UNION would run every extension's SQL on each
 //! keystroke, unranked. The index of one kind is derived data whose
-//! inputs are tables (the model's, followed through the lineage), so it
+//! inputs are tables (the dataset's, followed through the lineage), so it
 //! is a [`Materializer`]: recomputed in its own transaction when a commit
 //! touches one of them — never in the writer's.
 //!
@@ -52,13 +52,13 @@ pub fn asset_name(kind: &str) -> String {
     format!("search:{kind}")
 }
 
-/// One searchable resource as `resource` and the model registry have it.
+/// One searchable resource as `resource` and the dataset registry have it.
 /// Any of it changing re-registers its index.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SearchableKind {
     /// The view its rows come from.
     view: String,
-    /// The view's SQL as compiled: an edit of the model changes it — and
+    /// The view's SQL as compiled: an edit of the dataset changes it — and
     /// what the index holds — without touching the tables (tsk851).
     sql: String,
     /// The tables behind the view.
@@ -378,9 +378,9 @@ impl Assets {
     /// removed — also those of a resource that went while oxplow wasn't
     /// running (an `asset_state` row with nothing behind it). A resource
     /// still declared searchable whose view isn't published — at start,
-    /// before the extension models compile again — keeps its entries:
+    /// before the extension datasets compile again — keeps its entries:
     /// "not compiled yet" isn't "gone". Run at start and when `resource`
-    /// or the model registry changes.
+    /// or the dataset registry changes.
     pub async fn sync_search_kinds(&self) -> Result<(), DomainError> {
         let Searchable {
             declared,
@@ -424,7 +424,7 @@ impl Assets {
                     .map_err(oxplow_db::map_sql_err)?
                     .collect::<rusqlite::Result<_>>()
                     .map_err(oxplow_db::map_sql_err)?;
-                // Files aren't a model's.
+                // Files aren't a dataset's.
                 let gone = found.iter().filter(|kind| {
                     !keep.contains(kind) && kind.as_str() != oxplow_domain::uri::resources::FILE
                 });
@@ -458,8 +458,8 @@ mod tests {
         std::fs::write(p, body).unwrap();
     }
 
-    /// `acme`: pull requests collected as `pr` rows, a `prs` model that
-    /// titles them, a `found` model that makes them searchable, and the
+    /// `acme`: pull requests collected as `pr` rows, a `prs` dataset that
+    /// titles them, a `found` dataset that makes them searchable, and the
     /// kind `acme/pr` (`searchable` as given).
     fn acme(root: &Path, searchable: &str) {
         write(
@@ -500,12 +500,12 @@ resources:
         );
         write(
             root,
-            ".oxplow/extensions/acme/models/prs.sql",
+            ".oxplow/extensions/acme/datasets/prs.sql",
             "SELECT CAST(uri('acme/pr', 'id', n) AS TEXT) AS uri, title FROM ref('pr')",
         );
         write(
             root,
-            ".oxplow/extensions/acme/models/found.sql",
+            ".oxplow/extensions/acme/datasets/found.sql",
             "SELECT CAST(uri('acme/pr', 'id', n) AS TEXT) AS uri, title, body FROM ref('pr')",
         );
         write(
@@ -526,7 +526,7 @@ resources:
     }
 
     /// Activate the extension written after setup: its `pr` entity is
-    /// created empty, so the models that read it compile.
+    /// created empty, so the datasets that read it compile.
     async fn declare_entities(svc: &std::sync::Arc<crate::Services>) {
         crate::test_fixtures::activate(svc).await;
     }
@@ -574,12 +574,12 @@ resources:
         hits
     }
 
-    /// P9.D3: a searchable kind's model rows are in the site-wide index
-    /// under the kind, following the model as it changes; a row whose ref
+    /// P9.D3: a searchable kind's dataset rows are in the site-wide index
+    /// under the kind, following the dataset as it changes; a row whose ref
     /// isn't one of the kind's is skipped; a kind that stops being
     /// searchable (or goes) takes its entries with it.
     #[tokio::test(flavor = "multi_thread")]
-    async fn a_searchable_kinds_rows_are_found_and_follow_the_model() {
+    async fn a_searchable_kinds_rows_are_found_and_follow_the_dataset() {
         let f = crate::test_fixtures::services_with_effort().await;
         let svc = &f.svc;
         let root = svc.layout.project_dir.clone();
@@ -615,9 +615,9 @@ resources:
 
         // The change loop, as boot runs it, over assets that settle fast.
         let assets = Assets::new(svc.db.clone(), Duration::from_millis(50));
-        crate::models_changed::spawn(
+        crate::datasets_changed::spawn(
             svc.db.clone(),
-            Arc::new(crate::models_changed::ModelWatermarks::default()),
+            Arc::new(crate::datasets_changed::DatasetWatermarks::default()),
             svc.events.clone(),
             assets.clone(),
             svc.event_pump.clone(),
@@ -648,7 +648,7 @@ resources:
             by_body[0]
         );
 
-        // The model's rows change: so does what is found.
+        // The dataset's rows change: so does what is found.
         rows(
             &root,
             r#"[{"n": "13", "title": "Gadget polish", "body": "Shinier gadgets."}]"#,
@@ -660,11 +660,11 @@ resources:
             vec![("13".to_string(), "Gadget polish".to_string())]
         );
 
-        // Its model's SQL changes, its tables don't (tsk851): the index
+        // Its dataset's SQL changes, its tables don't (tsk851): the index
         // follows the new SQL without waiting for a collector to write.
         write(
             &root,
-            ".oxplow/extensions/acme/models/found.sql",
+            ".oxplow/extensions/acme/datasets/found.sql",
             "SELECT CAST(uri('acme/pr', 'id', n) AS TEXT) AS uri, CAST(title || ' (open)' AS TEXT) AS title, body FROM ref('pr')",
         );
         crate::test_fixtures::activate_with_problems(svc).await;
@@ -693,7 +693,7 @@ resources:
     }
 
     /// tsk854: when the change listener lags it missed some batches — one
-    /// may have held the `resource` or `model` write — so it resyncs the
+    /// may have held the `resource` or `dataset` write — so it resyncs the
     /// registry as if those changed, not only the assets' inputs.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_lagged_listener_resyncs_the_searchable_kinds() {
@@ -710,13 +710,15 @@ resources:
         crate::test_fixtures::activate_with_problems(svc).await;
         // Nothing heard the `resource` write: the listener missed it.
         let assets = Assets::new(svc.db.clone(), Duration::from_millis(50));
-        let mut lineage = crate::models_changed::Lineage::load(&svc.db).await.unwrap();
-        crate::models_changed::react(
+        let mut lineage = crate::datasets_changed::Lineage::load(&svc.db)
+            .await
+            .unwrap();
+        crate::datasets_changed::react(
             &svc.db,
             &mut lineage,
             &assets,
             &svc.event_pump,
-            &crate::models_changed::Changed::Everything,
+            &crate::datasets_changed::Changed::Everything,
         )
         .await;
         assert_eq!(
@@ -725,7 +727,7 @@ resources:
         );
     }
 
-    /// tsk852: at start, extension models are dropped and compiled again,
+    /// tsk852: at start, extension datasets are dropped and compiled again,
     /// so for a moment a searchable kind's view isn't there. That is "not
     /// compiled yet", not "gone": its entries stay until `resource` stops
     /// saying it is searchable.
@@ -920,9 +922,9 @@ mod core_tests {
     /// The change loop, as boot runs it, over assets that settle fast.
     fn change_loop(svc: &Services) -> Assets {
         let assets = Assets::new(svc.db.clone(), Duration::from_millis(30));
-        crate::models_changed::spawn(
+        crate::datasets_changed::spawn(
             svc.db.clone(),
-            Arc::new(crate::models_changed::ModelWatermarks::default()),
+            Arc::new(crate::datasets_changed::DatasetWatermarks::default()),
             svc.events.clone(),
             assets.clone(),
             svc.event_pump.clone(),
@@ -1056,7 +1058,7 @@ mod core_tests {
         .await;
     }
 
-    /// tsk922: a core feed model is published like any other, so its `ref`
+    /// tsk922: a core feed dataset is published like any other, so its `ref`
     /// is a canonical ref — the one a hit opens — and its rows still index
     /// under the search kind.
     #[tokio::test]

@@ -1,7 +1,7 @@
 //! The UI push layer (P7.B6, `.context/ipc-and-stores.md`): the in-memory
 //! [`EventBus`] is the renderer's channel and nothing else. What it
-//! carries comes from three places — a model's tables committing
-//! (`ModelsChanged`, `models_changed.rs`), the event log (this module's
+//! carries comes from three places — a dataset's tables committing
+//! (`DatasetsChanged`, `datasets_changed.rs`), the event log (this module's
 //! `ui.push` consumer), and the few UI-only signals with no durable fact
 //! behind them (a toast, a stream orphaned, an agent's status). Backend
 //! work listens to none of it: it runs on the event pump, an asset, the

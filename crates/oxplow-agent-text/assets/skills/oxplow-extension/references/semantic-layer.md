@@ -31,7 +31,7 @@
   copies and the stream in each; `stream_id IS NULL` is adoptable). A stream's
   terminals — shells in its worktree, in order — are `v_terminal` (open one with
   `oxplow.terminal.open`). A page
-  over a live model re-runs when what it reads changes.
+  over a live dataset re-runs when what it reads changes.
 - Made when a query names it: `v_commit` / `v_commit_file` `WHERE sha =
   :sha` (the full sha) reads a commit however old, and `v_change WHERE
   kind = 'commit' AND target = :sha` (or `kind = 'working' AND target =
@@ -46,7 +46,7 @@ Everything in oxplow has one identity, its URI (`oxplow:oxplow/effort?id=eff12`,
 `oxplow:oxplow/work_item?id=<id>&provider=oxplow`, `oxplow:oxplow/file?path=src/a.rs`, `oxplow:oxplow/collector?collector=triage/todos`).
 Carry URIs; never assemble or dissect them:
 
-- **In SQL**, select the model's `uri` column (`v_effort.uri`,
+- **In SQL**, select the dataset's `uri` column (`v_effort.uri`,
   `v_decision.uri`, `v_thread.uri`, `v_work_item.uri`, …) — each an
   oxplow URI (`oxplow:oxplow/effort?id=eff12`) — and compare URIs to URIs:
   `WHERE uri = :uri`. To build one, `uri(resource, key1, value1, …)`:
@@ -78,7 +78,7 @@ Carry URIs; never assemble or dissect them:
 When other pages, extensions or agents should read a shaped set of rows —
 not just one page — publish it as a **dataset**: a documented, versioned
 view. Declare it under `datasets:` in `extension.yaml` and write its SQL in
-`models/<name>.sql`:
+`datasets/<name>.sql`:
 
 ```yaml
 datasets:
@@ -96,7 +96,7 @@ datasets:
 ```
 
 ```sql
--- models/blocked.sql
+-- datasets/blocked.sql
 SELECT uri, title FROM ref('work_item') WHERE state = 'blocked'
 ```
 
@@ -128,9 +128,9 @@ SELECT uri, title FROM ref('work_item') WHERE state = 'blocked'
   NULL when absent), and in the `catalog` tool.
 - Check runs the compile without publishing; oxplow publishes after
   the files change. A failing declared test shows in the extension's
-  errors and `v_model_test`, and the view stays up.
+  errors and `v_dataset_test`, and the view stays up.
 - **Let other extensions build on it** by exporting it:
-  `exports: [{ contribution: "oxplow:oxplow/model?model=<ext>/<name>", version: 1,
+  `exports: [{ contribution: "oxplow:oxplow/dataset?dataset=<ext>/<name>", version: 1,
   visibility: stable }]` (the version is the dataset's). Unexported, it's yours alone.
 
 ### Importing another extension's dataset
@@ -140,7 +140,7 @@ the binding:
 
 ```yaml
 imports:
-  - { id: reviews, contribution: "oxplow:oxplow/model?model=effort-review/reviews", version: 1, optional: true }
+  - { id: reviews, contribution: "oxplow:oxplow/dataset?dataset=effort-review/reviews", version: 1, optional: true }
 ```
 
 ```sql
@@ -148,17 +148,17 @@ SELECT work_item, review FROM import_ref('reviews')
 ```
 
 - `optional: true`: when the producer is missing, disabled or exports
-  another version, what reads the binding (a page, a model, a slot that
+  another version, what reads the binding (a page, a dataset, a slot that
   mounts the page) is withheld with a warning, and the rest of your
   extension still loads. Without it, your whole extension is blocked.
 - `$OXPLOW_BIN extension check` prints how each import resolved
-  (``import `reviews` → model:effort-review/reviews v2: available``, or
+  (``import `reviews` → oxplow:oxplow/dataset?dataset=effort-review/reviews v2: available``, or
   why not).
-- The producer bumping its model's version is a break: your import of
+- The producer bumping its dataset's version is a break: your import of
   the old version goes unavailable until you change it. Leave `version`
   off to bind whatever version it exports (fine for extensions you own
   together; pin it for one someone else changes).
 - An extension you need on but import nothing from (you run its
-  commands, read its models by name) goes in `requires: [<name>]`:
+  commands, read its datasets by name) goes in `requires: [<name>]`:
   deploying yours refuses while it's off, and turning it off refuses
   while yours is on.

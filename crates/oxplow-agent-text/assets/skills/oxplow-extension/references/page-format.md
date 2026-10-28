@@ -122,7 +122,7 @@ kind offers the question; "this" in the question means that thing).
 `params` make the page answer it: `$OXPLOW_BIN extension test` runs every answer
 and fails the page when it does not open or a loader fails (`testing.md`).
 Give every page at least one. oxplow's own extensions also name a `skill`
-that must name the models and commands the page reads.
+that must name the datasets and commands the page reads.
 
 ## Whole-page actions
 

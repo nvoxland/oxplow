@@ -107,7 +107,7 @@ desktop host"):
 3. Else the page with `default: true`; else the first.
 4. Else foundation's `resource` page (`pages/ResourcePage.tsx`): the
    resource's label and params, or the raw URI muted as a dead link when
-   nothing declares the resource or its model has no row. Never an
+   nothing declares the resource or its dataset has no row. Never an
    error, never a toast.
 
 **Open With** in the nav bar's ☰ (a submenu, `menu-item-page-open-with`,
@@ -237,11 +237,11 @@ defines what the person sees:
   before it: `sql` (binds `:param`s; an earlier loader reads as a table of
   its name), `command` (a read-only command run as the viewer, `args`
   each `{ param }`, `{ from: <loader>.<column> }` or a literal; it must
-  say `reads` (models) or `refresh` (`manual`, `{ every }`); `items:
+  say `reads` (datasets) or `refresh` (`manual`, `{ every }`); `items:
   <field>` takes a list inside its result as the rows, as the `definition`
   page reads `oxplow.page.definition`'s `nodes`), `page`
   (another page's `loader`, with `params`) or `rows` (inline). A loader's
-  name is a plain identifier, never a model's (`v_*`, `m_*`).
+  name is a plain identifier, never a dataset's (`v_*`, `m_*`).
 - **Show Definition** is foundation's hidden `definition` page (params
   `of`, the page id, or `spec`, an inline view's exact YAML, and `params`,
   its params as JSON text): the page's
@@ -333,12 +333,12 @@ pages take `stream_id` / `thread_id`), and a **replacement** names a
 page (`ui.mounts: [{ page, at: <target>, version }]`,
 `UiReplacement.page_id`), checked against the same props contract. Which replacement shows is decided by the page run
 (`PageRunner::replacement`: the person's choice, the only candidate, the item's provider), which runs it as the node's embed. `dirty_loaders` is what a change makes run again: loaders that
-read a changed model (a command loader's are its `reads`) or bind a
+read a changed dataset (a command loader's are its `reads`) or bind a
 changed param, and everything downstream of them.
 
 **Drafts** (`PageRunner::draft(svc, checkout, extension)`): the
 extension's source in another stream's checkout, run over live data —
-its pages found first, its models read through an overlay of temp views
+its pages found first, its datasets read through an overlay of temp views
 (`extensions::draft_overlay`), its commands whatever is deployed (a
 draft's code never acts). `oxplow.page.run { page, draft: true }` reads
 the caller's stream's draft; its text starts `Draft of <page> (stream
@@ -361,7 +361,7 @@ page's text.
 
 **Open runs** (`pages/open_runs.rs`, `Services.page_runs`): Interest starts
 before the first loader read: an invalidation revision is captured before execution
-and checked under the same fence as insertion. Model/measure invalidations which
+and checked under the same fence as insertion. Dataset/measure invalidations which
 reach the run's actual reads retry its initial execution; catalog-wide changes also
 retry. Unrelated writes (including records from its own command loaders) do not
 starve opening. A later change finds the published run. This closes the query/registration gap without a timed missed-event cache.
@@ -369,12 +369,12 @@ A window opens
 a run (`open_page { page | specYaml, params, streamId, threadId, client }`
 → `{ runId, run }`) and closes it (`close_page`); a pick, filter or
 switch is `set_page_params`, Refresh `rerun_page`. The change loop
-(`models_changed::spawn`) signals `PageRuns` as it tells the assets
-(never a second bus listener): models changed, measures landed, or
-everything (it lagged); the bus signals the live models an event changed
+(`datasets_changed::spawn`) signals `PageRuns` as it tells the assets
+(never a second bus listener): datasets changed, measures landed, or
+everything (it lagged); the bus signals the live datasets an event changed
 (`EventBus::reach_open_runs`: a keychain write, a config edit). A worker started at boot coalesces signals for
 100 ms and re-runs each open run one of whose loaders (embeds included)
-read a changed model or measure — a command loader's are its `reads` —
+read a changed dataset or measure — a command loader's are its `reads` —
 then emits `OxplowEvent::PageRunChanged { runId, seq, loaders, tree }`
 for each that changed: the loaders whose rows differ (an embed's as
 `<embed>/<loader>`), never the rows. A re-run of one run that takes 250 ms or
@@ -399,9 +399,9 @@ previously acknowledged runs which are now absent. The event socket's
 (`uiClientId.ts`, independent of the API/transport import graph), and its
 disconnect and client expiry reclaim owned runs. A reconnect clears the
 old roster and reopens its held runs; stale open replies are fenced out and
-closed instead of resurrecting old ids. A model change keeps the loaders it didn't reach:
+closed instead of resurrecting old ids. A dataset change keeps the loaders it didn't reach:
 the re-run is seeded (`PageRunner::run_seeded`) with every loader run —
-embeds' and mounts' too — that read none of the changed models or
+embeds' and mounts' too — that read none of the changed datasets or
 measures and reads no loader that did (`runner::unreached`), so only the
 rest query again. A param change or Refresh runs the page whole. Per-run request revisions fence
 asynchronous completions: a slow older refresh cannot replace newer params or rows.
@@ -477,7 +477,7 @@ asks is confirmed. **Copy** (standard, `page-copy`) puts the open run's
 text on the clipboard (`page_text(runId)`, through `PageReads.text`);
 Add to Context is the ☰'s own. After a press or a form submit on a run
 ran, the window runs that run again (`PageRuns.refresh(runId)`, from
-`useNodeActions` / `useNodeForms`): a command may change what no model
+`useNodeActions` / `useNodeForms`): a command may change what no dataset
 change announces (a keychain entry: a credential, an AI provider's key).
 An embedded page's own whole-page actions are buttons above its tree
 (`EmbeddedActions`, `viz-action-<id>`), pressed on the host's run naming
@@ -744,7 +744,7 @@ is a `PageAction` on its section (Alerts' "Clear failed operations" is
 `action-clear-ops`), and the Settings index scrolls to a section by its
 `data-section` id.
 Core tables are `DataTable` too (AI usage, Data entities, the Metrics list
-and a metric's recordings, a model's documented columns). A row built in a
+and a metric's recordings, a dataset's documented columns). A row built in a
 loop that opens a page takes its click from `routeDispatch(ref, ctxNav,
 options)` + `routeHandlers(dispatch)` (`tabs/RouteLink.tsx`, the same
 dispatch `useRouteDispatch` memoizes), not a hook per row.
@@ -901,7 +901,7 @@ zone grouping); each appears only when it has content:
 1. **Search trigger** — opens the launcher (`QuickOpenOverlay`), the
    single discovery surface. Always visible.
 2. **Work** — an `oxplow-bundled` panel, thread-scoped, over
-   its model `thread_work` (one row per line, per thread), which reads the
+   its dataset `thread_work` (one row per line, per thread), which reads the
    work-item interface (`v_work_item`): whichever list is active, nothing
    with none. The body page `work` groups the lines (`group`): "In
    progress" (the active item; under its epic, with the epic's other
@@ -910,7 +910,7 @@ zone grouping); each appears only when it has content:
    `created_at`) and "Finished" (5 done items, wiki pages and unlinked
    efforts, its heading opening the thread's activity, with a `clear`
    group action: `oxplow.work.clear_finished` records an event and the
-   `finished_cleared` model hides what finished before it — per thread,
+   `finished_cleared` dataset hides what finished before it — per thread,
    no longer browser-local). Status and kind show as row icons. Collapsed,
    the `work-line` page: the active item (with its epic), else the last
    finished. The header count (`work-count`) is in progress + ready, never
@@ -1330,7 +1330,7 @@ for every page, with no table: the `?` is identity, the `#` is view.
 `BUILT_IN_VIEW`, `pageIdentity` and `withView` are gone. A built-in page
 that has a filter (Tasks' scope and chips, Metrics' range, Git History's
 `q`, Files' `filter`) keeps it in the `#` — and so does a custom page
-(Explore Data's `model`, `sql`, `viz`); its
+(Explore Data's `dataset`, `sql`, `viz`); its
 `?` is only what it shows (a diff's path and sides, a dashboard's id, a
 metric's key), so two diffs in a tab are two pages. A param written in
 the wrong place is not read from there. A page param's `role`

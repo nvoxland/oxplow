@@ -12,7 +12,7 @@ optional `columns` (keys, labels and formats its nodes default to) and
 `empty` (text when it has no rows).
 
 **Names** are lowercase letters, digits and `_`, starting with a letter.
-Never `v_…`, `m_…`, `temp` or `main`: they must not look like a model.
+Never `v_…`, `m_…`, `temp` or `main`: they must not look like a dataset.
 
 **Args** (`params:` of a sql or page loader, `args:` of a command loader)
 are `{ param: <name> }` (a page param), `{ from: <loader>.<column> }` (an
@@ -29,11 +29,11 @@ data:
     params: { p: { from: open.id } }
 ```
 
-- One read-only statement over the `v_*` models (`oxplow_query_sql`'s rules;
+- One read-only statement over the `v_*` datasets (`oxplow_query_sql`'s rules;
   read column names from `v_field`, never guess).
 - `:name` binds a page param or a `params:` entry. An earlier loader reads
   as a **temp table of its name**; naming a later one is an error.
-- It runs again when a model it read changes.
+- It runs again when a dataset it read changes.
 - To open another page from a cell, select its URI: `uri('oxplow/commit',
   'sha', sha)`; see `semantic-layer.md`.
 
@@ -50,7 +50,7 @@ data:
 
 - Only a **read** command runs (access `View` or `Read`), as the viewer;
   writes are actions.
-- Say what makes it run again: `reads: [models]` or `refresh: manual` /
+- Say what makes it run again: `reads: [datasets]` or `refresh: manual` /
   `refresh: { every: 30s }`. Neither is an error.
 - The result is `{ columns, rows }` as is, an array of objects (a row each),
   else one `value` row. `items: <field>` takes the list inside the result's

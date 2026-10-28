@@ -176,7 +176,7 @@ export function useBackendSubscriptions(
     // A session opened or closed: re-read, so a closed one's status drops
     // out of its thread's dot.
     const unsubSessions = subscribeOxplowEvents((event) => {
-      if (event.kind === "modelsChanged" && event.models.includes("v_agent_session")) void seed();
+      if (event.kind === "datasetsChanged" && event.datasets.includes("v_agent_session")) void seed();
     });
     const unsubReconnect = onRemoteReconnect(() => void seed());
     return () => {

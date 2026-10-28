@@ -1,6 +1,6 @@
 //! A secret is a kind of value (`writeOnly` in a command's input schema):
 //! whoever sets it — a person, their agent, a page for either — it is
-//! written and never read back. No published model, no audit row, no
+//! written and never read back. No published dataset, no audit row, no
 //! event and no result carries it (`.context/commands.md` "Secrets").
 
 use oxplow_domain::Actor;
@@ -50,7 +50,7 @@ async fn a_secret_set_by_anyone_is_never_read_back() {
     leak_sweep(svc, &results, SECRET).await;
 }
 
-/// No result, audit row, event or published model carries `secret`.
+/// No result, audit row, event or published dataset carries `secret`.
 async fn leak_sweep(svc: &crate::Services, results: &[String], secret: &str) {
     let leaks = |what: &str, text: &str| {
         assert!(!text.contains(secret), "{what} carries the secret: {text}")
@@ -63,13 +63,13 @@ async fn leak_sweep(svc: &crate::Services, results: &[String], secret: &str) {
     let events = svc.event_log_store.read_after(0, 100_000).await.unwrap();
     leaks("the event log", &format!("{events:?}"));
 
-    // Every published model, read whole.
-    let models = svc
+    // Every published dataset, read whole.
+    let datasets = svc
         .sql
         .query_sql("SELECT name FROM v_dataset", vec![], None)
         .await
         .unwrap();
-    let names: Vec<String> = serde_json::to_value(&models.rows)
+    let names: Vec<String> = serde_json::to_value(&datasets.rows)
         .unwrap()
         .as_array()
         .unwrap()
@@ -78,7 +78,7 @@ async fn leak_sweep(svc: &crate::Services, results: &[String], secret: &str) {
         .collect();
     assert!(names.len() > 20, "{names:?}");
     for name in names {
-        // A model that needs params or a source this fixture lacks reads as
+        // A dataset that needs params or a source this fixture lacks reads as
         // an error, which carries no rows either.
         if let Ok(out) = svc
             .sql

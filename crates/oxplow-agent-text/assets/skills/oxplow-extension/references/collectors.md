@@ -118,7 +118,7 @@ services it lists in `needs:` (`v_scope` lists every scope with its access
 and summary):
 
 - `sql.read`: `scope("sql.read", {sql, params?, page?})`, read-only SQL
-  over the `v_*` models.
+  over the `v_*` datasets.
 - `tree.read`: `files()`, `source_files()`, `duplicate_blocks()`, the
   snapshot's files. A fact collector has it without declaring it.
 - `ai.compute`: the `ai_*` builtins. The extension declares `ai.compute`. An

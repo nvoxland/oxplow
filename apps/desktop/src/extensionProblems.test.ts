@@ -3,7 +3,7 @@ import { expect, test } from "bun:test";
 import { extensionProblemLine, problemsFromResult } from "./extensionProblems.js";
 
 const res = (rows: unknown[][]) =>
-  ({ columns: ["name", "enabled", "errors", "deployment"], rows, truncated: false, reads: { models: [], tables: [], measures: [] }, freshness: {} }) as never;
+  ({ columns: ["name", "enabled", "errors", "deployment"], rows, truncated: false, reads: { datasets: [], tables: [], measures: [] }, freshness: {} }) as never;
 
 test("rows become problems with parsed errors", () => {
   expect(problemsFromResult(res([["a", 0, '["x","y"]', null], ["b", 1, "oops", null]]))).toEqual([

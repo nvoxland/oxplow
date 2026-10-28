@@ -114,7 +114,7 @@ fn surface_parity() {
     if !unclassified_ipc.is_empty() {
         problems.push(format!(
             "IPC commands with no manifest row — classify each in MANIFEST \
-             (Both/UiOnly/Model): {unclassified_ipc:?}"
+             (Both/UiOnly/Dataset): {unclassified_ipc:?}"
         ));
     }
     let unclassified_mcp: Vec<&str> = mcp
@@ -161,7 +161,7 @@ fn surface_parity() {
                     problems.push(format!("Both `{}` missing MCP tool `{m}`", c.capability));
                 }
             }
-            Exposure::UiOnly { .. } | Exposure::Model { .. } => {
+            Exposure::UiOnly { .. } | Exposure::Dataset { .. } => {
                 // A leak is a tool that shares this command's name AND isn't
                 // already claimed by another row's `mcp` — the latter guards
                 // legitimate cross-surface name collisions.
@@ -242,25 +242,28 @@ fn a_bus_row_runs_its_command_from_the_ipc_adapter() {
     assert!(problems.is_empty(), "{}", problems.join("\n"));
 }
 
-/// P11 (tsk944): a row whose agent counterpart is a model names models the
+/// P11 (tsk944): a row whose agent counterpart is a dataset names datasets the
 /// core publishes — an agent reads them with `query_sql`.
 #[test]
-fn every_model_counterpart_is_published() {
-    let published: BTreeSet<String> = oxplow_db::models::core_sources()
-        .expect("the core models load")
+fn every_dataset_counterpart_is_published() {
+    let published: BTreeSet<String> = oxplow_db::datasets::core_sources()
+        .expect("the core datasets load")
         .into_iter()
         .filter(|m| m.twin.is_none())
-        .map(|m| oxplow_db::models::core_view(&m.decl.name))
+        .map(|m| oxplow_db::datasets::core_view(&m.decl.name))
         .collect();
     let mut missing = Vec::new();
     for c in MANIFEST {
-        if let Exposure::Model { models } = c.exposure {
-            if models.is_empty() {
-                missing.push(format!("`{}` names no model", c.capability));
+        if let Exposure::Dataset { datasets } = c.exposure {
+            if datasets.is_empty() {
+                missing.push(format!("`{}` names no dataset", c.capability));
             }
-            for m in models {
+            for m in datasets {
                 if !published.contains(*m) {
-                    missing.push(format!("`{}`: `{m}` isn't a published model", c.capability));
+                    missing.push(format!(
+                        "`{}`: `{m}` isn't a published dataset",
+                        c.capability
+                    ));
                 }
             }
         }

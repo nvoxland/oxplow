@@ -1,12 +1,12 @@
 //! `oxplow_read`: one reader for anything a URI names (`.context/resources.md`,
 //! `.context/agent-model.md` "The agent's tools"). The agent's single way to look at
-//! a thing it was pointed at or found in a model's `ref` column:
+//! a thing it was pointed at or found in a dataset's `ref` column:
 //!
-//! - the **row** of the model its resource resolves through (its
+//! - the **row** of the dataset its resource resolves through (its
 //!   declaration's `resolve:`), every column, by its `ref`;
 //! - what sits **beside** it, for the resources that have some: a work
 //!   item's links and comments, a commit's files, an effort's files;
-//! - its **content**, for the resources whose body no model holds: a file
+//! - its **content**, for the resources whose body no dataset holds: a file
 //!   at a revision (`oxplow:oxplow/file?path=src/a.rs&rev=git:HEAD#lines=10-40`;
 //!   the working tree when it names none, in the stream asked for else the
 //!   caller's), an event's stored body (`#part=input`, `output`, `prompt`,
@@ -41,13 +41,13 @@ pub struct RefRead {
     pub uri: String,
     /// Its resource (`oxplow/effort`).
     pub resource: String,
-    /// The resolving model's row, every column; `None` for a resource no
-    /// model holds (a file).
+    /// The resolving dataset's row, every column; `None` for a resource no
+    /// dataset holds (a file).
     pub row: Option<Map<String, Value>>,
     /// What sits beside it, by name (`links`, `comments`, `files`).
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub related: BTreeMap<&'static str, Vec<Map<String, Value>>>,
-    /// Its body, for a resource whose body no model holds.
+    /// Its body, for a resource whose body no dataset holds.
     pub content: Option<String>,
     /// The content was cut at [`MAX_CONTENT`].
     pub truncated: bool,
@@ -256,7 +256,7 @@ fn lines(text: &str, span: &str) -> Result<String, ReadError> {
         .join("\n"))
 }
 
-/// The row of the model `uri`'s resource resolves through, whose `ref`
+/// The row of the dataset `uri`'s resource resolves through, whose `ref`
 /// is `reference`.
 async fn owned_row(
     svc: &Services,
@@ -270,7 +270,7 @@ async fn owned_row(
         .and_then(|decl| decl.resolve.clone())
         .ok_or_else(|| {
             ReadError::Invalid(format!(
-                "no model holds `{}` URIs; `oxplow_query_sql` over `v_resource` lists the resources and what resolves each",
+                "no dataset holds `{}` URIs; `oxplow_query_sql` over `v_resource` lists the resources and what resolves each",
                 uri.resource()
             ))
         })?;
@@ -537,10 +537,10 @@ mod tests {
         assert_eq!(read.content, None);
     }
 
-    /// Any kind a model owns reads as that model's row; one no model owns,
+    /// Any kind a dataset owns reads as that dataset's row; one no dataset owns,
     /// or a ref that isn't there, says so.
     #[tokio::test(flavor = "multi_thread")]
-    async fn an_owned_kind_is_its_models_row() {
+    async fn an_owned_kind_is_its_datasets_row() {
         let (_dir, svc) = project().await;
         let stream = read(
             &svc,

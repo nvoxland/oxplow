@@ -474,7 +474,7 @@ mod tests {
     use oxplow_domain::work_items::WorkItemRecord;
     use oxplow_domain::Envelope;
 
-    /// `sql`'s rows as JSON, over the published models.
+    /// `sql`'s rows as JSON, over the published datasets.
     async fn rows(svc: &crate::Services, sql: &str) -> serde_json::Value {
         let out = svc.sql.query_sql(sql, vec![], None).await.unwrap();
         serde_json::to_value(out.rows).unwrap()

@@ -385,7 +385,7 @@ const result = (columns: string[], rows: (string | number | null)[][]) => ({
   columns,
   rows,
   truncated: false,
-  reads: { models: [], tables: [], measures: [] },
+  reads: { datasets: [], tables: [], measures: [] },
   freshness: [],
 });
 

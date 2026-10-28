@@ -19,7 +19,7 @@ const realApi = await import("../api.js");
 const runs: Array<{ action: string; row: unknown; input: unknown; confirmed: boolean }> = [];
 let invalidField: string | null = null;
 const submits: unknown[] = [];
-// What the item's title is in the models: a form viz starts from it.
+// What the item's title is in the datasets: a form viz starts from it.
 let storedTitle = "Old";
 let formStarts = 0;
 // When set, a form viz always starts from these values (not what was stored).
@@ -270,7 +270,7 @@ test("a form viz shows only its fields, keeps its fixed ones, and puts errors un
 });
 
 // An edit form shows what it saved: after a successful submit it starts
-// again from the models, not from the values it first opened with.
+// again from the datasets, not from the values it first opened with.
 test("a form viz starts again from the current values after it saves", async () => {
   const form: VizRun = {
     config: { ...viz, viz: "form", form: { command: "oxplow.work_item.update", defaults: null, fixed: ["uri"], fields: ["title"] }, actions: [] },

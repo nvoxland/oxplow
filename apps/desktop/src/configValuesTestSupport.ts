@@ -11,7 +11,7 @@ export function configValueResult(settings: FakeSetting[]) {
     columns: ["key", "value", "origin", "extension", "doc", "schema"],
     rows: settings.map((s) => [s.key, JSON.stringify(s.value ?? null), s.origin ?? "default", null, "", null]),
     truncated: false,
-    reads: { models: ["v_config_value"], tables: [], measures: [] },
+    reads: { datasets: ["v_config_value"], tables: [], measures: [] },
     freshness: [],
   };
 }

@@ -8,7 +8,7 @@ const result = (rows: SqlQueryResult["rows"]): SqlQueryResult =>
     columns: ["id", "consumer", "event_seq", "event_type", "error", "attempts", "last_failed_at"],
     rows,
     truncated: false,
-    reads: { models: ["v_event_dead_letter"], tables: [], measures: [] },
+    reads: { datasets: ["v_event_dead_letter"], tables: [], measures: [] },
     freshness: {},
   }) as unknown as SqlQueryResult;
 
@@ -39,7 +39,7 @@ test("failed reactions read from v_effect_run, and say what failed on what", () 
     columns: ["effect", "event_id", "event_seq", "attempt", "reason", "event_type", "retry_at"],
     rows: [["acme/mark-done", "e1", 41, 1, "interrupted: a step outside oxplow may have run", "work_item.state_changed", null]],
     truncated: false,
-    reads: { models: ["v_effect_run", "v_event"], tables: [], measures: [] },
+    reads: { datasets: ["v_effect_run", "v_event"], tables: [], measures: [] },
     freshness: {},
   } as unknown as SqlQueryResult;
   const [r] = reactionsFromResult(rows);

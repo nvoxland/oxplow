@@ -63,7 +63,7 @@ pub const SERVICES: &[ServiceSpec] = &[
     ServiceSpec {
         scope: "sql.read",
         title: "Read the semantic layer",
-        summary: "Read-only SQL over the published models (`v_*`): \
+        summary: "Read-only SQL over the published datasets (`v_*`): \
                   `scope(\"sql.read\", {sql, params?, page?})` returns every row, or one page.",
         builtins: &["scope"],
         modes: ALL,
@@ -106,10 +106,10 @@ pub fn service(scope: &str) -> Option<&'static ServiceSpec> {
 }
 
 /// A bounded read declaration, or an ordinary service name. Qualifiers
-/// are exact model names or relative file/directory paths, never SQL or globs.
+/// are exact dataset names or relative file/directory paths, never SQL or globs.
 pub fn need_scope(need: &str) -> &str {
     match need.split_once(':') {
-        Some(("sql.read", model)) if valid_model(model) => "sql.read",
+        Some(("sql.read", dataset)) if valid_dataset(dataset) => "sql.read",
         Some(("tree.read", path)) if valid_path(path) => "tree.read",
         _ => need,
     }
@@ -119,10 +119,10 @@ pub fn declares(needs: &[String], scope: &str) -> bool {
     needs.iter().any(|need| need_scope(need) == scope)
 }
 
-fn valid_model(model: &str) -> bool {
-    model.starts_with("v_")
-        && model.len() > 2
-        && model
+fn valid_dataset(dataset: &str) -> bool {
+    dataset.starts_with("v_")
+        && dataset.len() > 2
+        && dataset
             .bytes()
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'_')
 }

@@ -502,7 +502,7 @@ mod tests {
             .collect();
         let want: Vec<(i64, f64)> = series.iter().map(|p| (p.capture_id, p.value)).collect();
         assert_eq!(got, want);
-        assert!(out.reads.models.contains(&"v_capture".to_string()));
+        assert!(out.reads.datasets.contains(&"v_capture".to_string()));
     }
 
     #[tokio::test]

@@ -111,7 +111,7 @@ export async function readPendingProposals(): Promise<{ proposals: Proposal[]; r
   return { proposals: proposalsFromResult(res), reads: res.reads };
 }
 
-/** The pending proposals, re-read when the model changes. */
+/** The pending proposals, re-read when the dataset changes. */
 export function useProposals(): Proposal[] {
   const [proposals, setProposals] = useState<Proposal[]>([]);
   const [reads, setReads] = useState<Reads>(NO_READS);
@@ -189,7 +189,7 @@ export async function readThreadProposals(threadId: string): Promise<{ proposals
   return { proposals: proposalsFromResult(res), reads: res.reads };
 }
 
-/** A thread's proposals, re-read when the model changes: what waits for
+/** A thread's proposals, re-read when the dataset changes: what waits for
  *  the person where the conversation is (the Answers strip), and what became of the ones they decided. */
 export function useThreadProposals(threadId: string): Proposal[] {
   const [proposals, setProposals] = useState<Proposal[]>([]);

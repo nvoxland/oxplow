@@ -298,10 +298,10 @@ pub fn metric_uri(key: &str) -> String {
     keyed(r::METRIC, key)
 }
 
-/// One of core's published models by its name (`effort`, published as
+/// One of core's published datasets by its name (`effort`, published as
 /// `v_effort`); an extension's is `<extension>/<name>`.
-pub fn model_uri(name: &str) -> String {
-    keyed(r::MODEL, name)
+pub fn dataset_uri(name: &str) -> String {
+    keyed(r::DATASET, name)
 }
 
 /// One run of a declared job (`v_job_run.id`).
@@ -315,7 +315,7 @@ pub fn ai_call_uri(id: i64) -> String {
 }
 
 /// A language model by the name its harness or provider reports
-/// (`claude-opus-4-8`); not a `model`, a published view.
+/// (`claude-opus-4-8`); not a `dataset`, a published view.
 pub fn ai_model_uri(name: &str) -> String {
     keyed(r::AI_MODEL, name)
 }

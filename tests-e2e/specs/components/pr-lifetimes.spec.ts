@@ -58,7 +58,7 @@ const pr = (number: number, opened_at: string) => ({
 
 // A date that can't be read leaves that pull request out — said,
 // not every bar blanked — and a selected filter holds when the host runs
-// the page again (its models changed), rather than redrawing everything.
+// the page again (its datasets changed), rather than redrawing everything.
 test("a bad date is left out, and a filter holds across the host's re-run", async ({ fresh }) => {
   const { page, daemon } = fresh;
   await addPrs(daemon, [pr(11, "not a date")]);

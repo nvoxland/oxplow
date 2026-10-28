@@ -1,5 +1,5 @@
 /// What a viz result doesn't say by itself, as a person reads it (pure):
-/// that it shows only the first rows, and that a collector feeding a model
+/// that it shows only the first rows, and that a collector feeding a dataset
 /// it read hasn't run, failed or is out of date. `.context/semantic-layer.md`.
 
 import { idOf } from "../uri/uri.js";
@@ -27,18 +27,18 @@ function when(at: string, now: Date): { text: string; today: boolean } | null {
 /** A collector's URI → `my-gh/gh`. */
 const sourceName = (source: string) => idOf(source, "oxplow/collector") ?? source;
 
-/** The model as a noun: `v_my_gh_pull_request` fed by `my-gh/gh` is
+/** The dataset as a noun: `v_my_gh_pull_request` fed by `my-gh/gh` is
  *  "Pull request" (the extension's prefix goes, underscores become spaces). */
-function noun(model: string, source: string): string {
+function noun(dataset: string, source: string): string {
   const owner = sourceName(source).split("/")[0] ?? "";
   const prefix = `v_${owner.replace(/-/g, "_")}_`;
-  const bare = model.startsWith(prefix) ? model.slice(prefix.length) : model.replace(/^v_/, "");
+  const bare = dataset.startsWith(prefix) ? dataset.slice(prefix.length) : dataset.replace(/^v_/, "");
   const words = bare.replace(/_/g, " ");
   return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
 function line(c: SourceCoverage, now: Date): string | null {
-  const who = `${noun(c.model, c.source)} (collector ${sourceName(c.source)})`;
+  const who = `${noun(c.dataset, c.source)} (collector ${sourceName(c.source)})`;
   const ran = c.at ? when(c.at, now) : null;
   const why = c.error ? `: ${c.error}` : "";
   switch (c.status) {

@@ -8,7 +8,7 @@
 //! removed in place. Ranking is FTS5's built-in `bm25()` (title weighted
 //! above body); snippets via `snippet()`.
 //!
-//! Two writers drive it from `oxplow-app`: a kind indexed from a model
+//! Two writers drive it from `oxplow-app`: a kind indexed from a dataset
 //! (tasks, comments, notes, wiki pages, an extension's searchable kind) is
 //! restated by its asset (`kind_search`, [`restate_kind_tx`]: only the
 //! entries that changed are written); file
@@ -310,8 +310,8 @@ impl SqliteSearchStore {
     }
 
     /// Drop a stream's file rows (called when a stream is archived, so
-    /// its files don't linger). A kind indexed from a model follows the
-    /// model instead (`restate_kind_tx`).
+    /// its files don't linger). A kind indexed from a dataset follows the
+    /// dataset instead (`restate_kind_tx`).
     pub async fn purge_stream_files(&self, stream_id: &str) -> Result<(), DomainError> {
         let stream_id = stream_id.to_string();
         self.db
@@ -554,7 +554,7 @@ mod tests {
         s.upsert("oxplow/file", "b.rs", Some("s-b"), "b.rs", "widget")
             .await
             .unwrap();
-        // A model-derived kind's rows follow its model, not the purge.
+        // A dataset-derived kind's rows follow its dataset, not the purge.
         s.upsert("task", "tsk1", Some("s-a"), "widget task", "")
             .await
             .unwrap();

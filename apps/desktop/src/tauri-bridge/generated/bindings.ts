@@ -316,7 +316,7 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	assistantSet: (id: string, model: RoleDefault | AssistantModel | null, allowChanges: boolean | null) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("assistant_set", { id, model, allowChanges })),
+	assistantSet: (id: string, dataset: RoleDefault | AssistantModel | null, allowChanges: boolean | null) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("assistant_set", { id, dataset, allowChanges })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -1279,7 +1279,7 @@ export type CollectorRuntime =
 "jaq" |
 /**
  *  A provider instance's collector (`oxplow.provider.sync`): its records
- *  land in the capability's model (`v_work_item`).
+ *  land in the capability's dataset (`v_work_item`).
  */
 "read";
 
@@ -1714,7 +1714,7 @@ export type ContributionId = {
 };
 
 /**  Every kind of contribution a manifest can declare. */
-export type ContributionKind = "model" | "measure" | "metric" | "dimension" | "collector" | "event_type" | "resource" | "command" | "job" | "ai_profile" | "effect" | "advisory" | "skill" | "implementation" | "provider" | "page" | "panel" | "slot" | "decorator" | "replacement" | "custom_component";
+export type ContributionKind = "dataset" | "measure" | "metric" | "dimension" | "collector" | "event_type" | "resource" | "command" | "job" | "ai_profile" | "effect" | "advisory" | "skill" | "implementation" | "provider" | "page" | "panel" | "slot" | "decorator" | "replacement" | "custom_component";
 
 /**  One credential a provider declares. */
 export type CredentialDecl = {
@@ -1752,7 +1752,7 @@ export type CustomComponent_Deserialize = {
 	/**  Commands the component may invoke. */
 	commands: string[],
 	/**
-	 *  It runs its own read-only SQL over the models (`querySql`): needs
+	 *  It runs its own read-only SQL over the datasets (`querySql`): needs
 	 *  `sql.read` permission.
 	 */
 	sql?: SqlAccess | null,
@@ -1775,14 +1775,14 @@ export type CustomComponent_Serialize = {
 	/**  Commands the component may invoke. */
 	commands: string[],
 	/**
-	 *  It runs its own read-only SQL over the models (`querySql`): needs
+	 *  It runs its own read-only SQL over the datasets (`querySql`): needs
 	 *  `sql.read` permission.
 	 */
 	sql?: SqlAccess | null,
 };
 
 /**
- *  One dataset as its owner declares it (an entry of `models.yaml`, or
+ *  One dataset as its owner declares it (an entry of `datasets.yaml`, or
  *  of an extension's `datasets:`).
  */
 export type DatasetDecl = {
@@ -1800,7 +1800,7 @@ export type DatasetDecl = {
 	/**
 	 *  The fields whose values name one row: declared fields,
 	 *  part of the contract. A key implies its test (never null, never
-	 *  repeated), and a materialized model's table takes it as its
+	 *  repeated), and a materialized dataset's table takes it as its
 	 *  primary key.
 	 */
 	key?: string[],
@@ -1816,7 +1816,7 @@ export type DatasetDecl = {
 	 *  stored and recomputed on that clock.
 	 */
 	materialize?: Materialize | null,
-	/**  Guidance for an agent reading the model. Not part of the contract. */
+	/**  Guidance for an agent reading the dataset. Not part of the contract. */
 	ai_context?: AiContext | null,
 };
 
@@ -1837,15 +1837,22 @@ export type DatasetField = {
 	doc: string,
 	/**
 	 *  Guidance for an agent reading the column. Not part of the contract:
-	 *  left out of `model_contract` and the golden, stored on the model.
+	 *  left out of `dataset_contract` and the golden, stored on the dataset.
 	 */
 	ai_context?: AiContext | null,
 };
 
-/**  A model's declaration and its SQL file. */
+/**  When one dataset last changed. */
+export type DatasetFreshness = {
+	dataset: string,
+	/**  RFC 3339. */
+	changedAt: string,
+};
+
+/**  A dataset's declaration and its SQL file. */
 export type DatasetSource = {
 	decl: DatasetDecl,
-	/**  Where the SQL came from, for error locations (`models/work_item.sql`). */
+	/**  Where the SQL came from, for error locations (`datasets/work_item.sql`). */
 	file: string,
 	sql: string,
 	/**
@@ -1865,7 +1872,7 @@ export type DeclaredAt = {
 
 /**  Where a decoration shows. */
 export type DecoratorPlacement =
-/**  A chip in the header of a page whose ref the model lists. */
+/**  A chip in the header of a page whose ref the dataset lists. */
 "ref-chip" |
 /**  A badge after a page cell that links to a listed ref. */
 "row-badge";
@@ -1894,7 +1901,7 @@ export type Deployment =
 
 /**
  *  An earlier version kept after a breaking change: its SQL (in `file`,
- *  beside the model's) still keeps the contract that version published,
+ *  beside the dataset's) still keeps the contract that version published,
  *  until `until` (`YYYY-MM-DD`).
  */
 export type Deprecated = {
@@ -1908,7 +1915,7 @@ export type Descriptor = {
 	id: ContributionId,
 	owner: Owner,
 	/**
-	 *  The contract's own version (a model's, an event type's), when it
+	 *  The contract's own version (a dataset's, an event type's), when it
 	 *  has one.
 	 */
 	contract_version: number | null,
@@ -2301,7 +2308,7 @@ export type ExtensionResource = {
 export type ExtensionUi = {
 	/**  Pages mounted at other pages' slots (valid ones). */
 	pageSlots?: PageSlot[],
-	/**  Labels from its models on core refs (valid ones). */
+	/**  Labels from its datasets on core refs (valid ones). */
 	decorators: UiDecorator[],
 	/**
 	 *  Viz nodes that take the place of a core sub-component while its
@@ -2405,8 +2412,8 @@ export type Extension_Deserialize = {
 	 */
 	dimensions: DimensionEntry[],
 	/**
-	 *  Its datasets (`datasets:` plus `models/<name>.sql`), published as
-	 *  `v_<extension>_<name>` (`extension_models`). Empty when any
+	 *  Its datasets (`datasets:` plus `datasets/<name>.sql`), published as
+	 *  `v_<extension>_<name>` (`extension_datasets`). Empty when any
 	 *  declaration is broken (see `errors`).
 	 */
 	datasets: DatasetSource[],
@@ -2422,7 +2429,7 @@ export type Extension_Deserialize = {
 	commands: ExtensionCommand[],
 	/**  Durable host operations declared by this extension. */
 	jobs: JobDecl[],
-	/**  Named model needs this extension declares. */
+	/**  Named dataset needs this extension declares. */
 	aiProfiles: AiProfileDecl[],
 	/**  Its `version:` (semver), when it declares one; required to share. */
 	version: string | null,
@@ -2559,8 +2566,8 @@ export type Extension_Serialize = {
 	 */
 	dimensions: DimensionEntry[],
 	/**
-	 *  Its datasets (`datasets:` plus `models/<name>.sql`), published as
-	 *  `v_<extension>_<name>` (`extension_models`). Empty when any
+	 *  Its datasets (`datasets:` plus `datasets/<name>.sql`), published as
+	 *  `v_<extension>_<name>` (`extension_datasets`). Empty when any
 	 *  declaration is broken (see `errors`).
 	 */
 	datasets: DatasetSource[],
@@ -2576,7 +2583,7 @@ export type Extension_Serialize = {
 	commands: ExtensionCommand[],
 	/**  Durable host operations declared by this extension. */
 	jobs: JobDecl[],
-	/**  Named model needs this extension declares. */
+	/**  Named dataset needs this extension declares. */
 	aiProfiles: AiProfileDecl[],
 	/**  Its `version:` (semver), when it declares one; required to share. */
 	version: string | null,
@@ -2695,7 +2702,7 @@ export type FileSnapshotId = number;
 /**
  *  An effect's or collector's `on:` naming an event type of another
  *  extension's namespace (P9.D1). The type's name is the dependency —
- *  there is no `depends:` key, as a model's `ref('<ext>/<name>')` has
+ *  there is no `depends:` key, as a dataset's `ref('<ext>/<name>')` has
  *  none: it resolves when an enabled extension registers the type.
  */
 export type ForeignSubscription = {
@@ -3290,7 +3297,7 @@ export type LinkKind =
 
 export type Loader =
 /**
- *  A read-only query over the published models, binding `:param`s
+ *  A read-only query over the published datasets, binding `:param`s
  *  (the page's, and `params`: named values from earlier loaders or
  *  literals); an earlier loader reads as a table of its name.
  */
@@ -3317,7 +3324,7 @@ export type LoaderDecl = {
 	 */
 	columns: PageColumn[],
 	/**
-	 *  The models a `command` loader reads, so it runs again when they
+	 *  The datasets a `command` loader reads, so it runs again when they
 	 *  change (a `sql` loader's are what its query read).
 	 */
 	reads: string[],
@@ -3332,7 +3339,7 @@ export type LoaderDecl = {
 	readsParams: string[],
 };
 
-/**  When a loader that reads outside the published models runs again. */
+/**  When a loader that reads outside the published datasets runs again. */
 export type LoaderRefresh =
 /**  `manual`: only when the person refreshes the page. */
 RefreshKeyword |
@@ -3386,7 +3393,7 @@ export type LspServerListing = {
 export type LspServerSource = "yaml" | "installed";
 
 /**
- *  A model's freshness policy beyond the default (computed on read):
+ *  A dataset's freshness policy beyond the default (computed on read):
  *  `on_change`, or `{ every: 1h }`.
  */
 export type Materialize =
@@ -3609,13 +3616,6 @@ export type MetricEntry = {
 
 /**  Features callers may discover before requesting a model operation. */
 export type ModelFeature = "text" | "image" | "toolCalling" | "streaming";
-
-/**  When one model last changed. */
-export type ModelFreshness = {
-	model: string,
-	/**  RFC 3339. */
-	changedAt: string,
-};
 
 /**  A node of a page's view. */
 export type Node = Node_Serialize | Node_Deserialize;
@@ -3992,12 +3992,12 @@ export type OxplowConfig = {
  */
 export type OxplowEvent =
 /**  Background task progress. */
-({ kind: "backgroundTasksChanged" }) & { actor?: never; agentSessionId?: never; changeKind?: never; client?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; models?: never; name?: never; op?: never; path?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
+({ kind: "backgroundTasksChanged" }) & { actor?: never; agentSessionId?: never; changeKind?: never; client?: never; datasets?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; path?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
 /**
  *  The set of known language servers changed (Mason package
  *  installed or removed). Renderer refetches `list_lsp_servers`.
  */
-({ kind: "lspServersChanged" }) & { actor?: never; agentSessionId?: never; changeKind?: never; client?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; models?: never; name?: never; op?: never; path?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
+({ kind: "lspServersChanged" }) & { actor?: never; agentSessionId?: never; changeKind?: never; client?: never; datasets?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; path?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
 /**
  *  Per-thread per-pane agent status changed. `state` carries the
  *  derived status so the renderer can update without a refetch
@@ -4023,7 +4023,7 @@ agentSessionId: AgentSessionId | null; state: AgentStatusState;
  *  asked) when `state` is `AwaitingUser`, so the rail dot's tooltip
  *  can show it — `None` for every other transition.
  */
-detail: string | null }) & { actor?: never; changeKind?: never; client?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; models?: never; name?: never; op?: never; path?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
+detail: string | null }) & { actor?: never; changeKind?: never; client?: never; datasets?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; path?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
 /**
  *  A snapshot take recorded something new: a new snapshot (its
  *  `file_count` rows), or — `trigger: HeadMoved`, 0 files — the
@@ -4033,21 +4033,21 @@ detail: string | null }) & { actor?: never; changeKind?: never; client?: never; 
  *  `snapshot_op` row and the `snapshot.taken` / `vcs.head.moved`
  *  event in the log; this is the UI / reactor wake-up.
  */
-({ kind: "snapshotTaken"; streamId: StreamId; snapshotId: number; fileCount: number; trigger: SnapshotTrigger; threadId: ThreadId | null; turnId: number | null; effortId: EffortId | null }) & { actor?: never; agentSessionId?: never; changeKind?: never; client?: never; detail?: never; error?: never; id?: never; input?: never; instance?: never; measures?: never; models?: never; name?: never; op?: never; path?: never; scope?: never; seq?: never; signIn?: never; state?: never; title?: never; vcsEnabled?: never } |
+({ kind: "snapshotTaken"; streamId: StreamId; snapshotId: number; fileCount: number; trigger: SnapshotTrigger; threadId: ThreadId | null; turnId: number | null; effortId: EffortId | null }) & { actor?: never; agentSessionId?: never; changeKind?: never; client?: never; datasets?: never; detail?: never; error?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; path?: never; scope?: never; seq?: never; signIn?: never; state?: never; title?: never; vcsEnabled?: never } |
 /**
  *  An Assistant session changed (`assistant/`): its transcript, its
  *  status or its settings. The panel asks `assistant_snapshot { id,
- *  since }` for what changed. In memory only: no model holds it.
+ *  since }` for what changed. In memory only: no dataset holds it.
  */
-({ kind: "assistantChanged"; id: string; seq: number }) & { actor?: never; agentSessionId?: never; changeKind?: never; client?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; input?: never; instance?: never; measures?: never; models?: never; name?: never; op?: never; path?: never; scope?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
+({ kind: "assistantChanged"; id: string; seq: number }) & { actor?: never; agentSessionId?: never; changeKind?: never; client?: never; datasets?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; path?: never; scope?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
 /**
- *  Published models (views) changed: a commit touched a table one of
- *  them reads, directly or through other models (P4.6). A page re-runs
- *  when a model it read is listed.
+ *  Published datasets (views) changed: a commit touched a table one of
+ *  them reads, directly or through other datasets (P4.6). A page re-runs
+ *  when a dataset it read is listed.
  */
-({ kind: "modelsChanged"; models: string[] }) & { actor?: never; agentSessionId?: never; changeKind?: never; client?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; path?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
+({ kind: "datasetsChanged"; datasets: string[] }) & { actor?: never; agentSessionId?: never; changeKind?: never; client?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; path?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
 /**
- *  An open page run re-ran (a model one of its loaders read changed):
+ *  An open page run re-ran (a dataset one of its loaders read changed):
  *  the loaders whose rows differ, for the window that opened it to
  *  fetch (`fetch_page_runs`). Never the rows themselves.
  */
@@ -4061,13 +4061,13 @@ detail: string | null }) & { actor?: never; changeKind?: never; client?: never; 
  *  list is fail-open — "unknown, refresh anyway" — which is what the
  *  low-frequency emit sites still send. See `.context/metrics.md`.
  */
-({ kind: "metricSamplesChanged"; streamId: StreamId; measures?: string[] }) & { actor?: never; agentSessionId?: never; changeKind?: never; client?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; models?: never; name?: never; op?: never; path?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
+({ kind: "metricSamplesChanged"; streamId: StreamId; measures?: string[] }) & { actor?: never; agentSessionId?: never; changeKind?: never; client?: never; datasets?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; name?: never; op?: never; path?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
 /**
  *  `.oxplow/project.yaml` was reloaded from disk (external edit, e.g. the agent
  *  running `/oxplow:configure`). The in-memory config has been swapped;
  *  the renderer refetches `get_config`.
  */
-({ kind: "configChanged" }) & { actor?: never; agentSessionId?: never; changeKind?: never; client?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; models?: never; name?: never; op?: never; path?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
+({ kind: "configChanged" }) & { actor?: never; agentSessionId?: never; changeKind?: never; client?: never; datasets?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; path?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
 /**
  *  The extension catalog may have changed: a file under the primary
  *  worktree's `.oxplow/extensions/` did, or the `extensions` config key
@@ -4075,7 +4075,7 @@ detail: string | null }) & { actor?: never; changeKind?: never; client?: never; 
  *  extensions contribute — the launcher, pages, panels, slots —
  *  reloads, and a page re-runs its definition.
  */
-({ kind: "extensionsChanged" }) & { actor?: never; agentSessionId?: never; changeKind?: never; client?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; models?: never; name?: never; op?: never; path?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
+({ kind: "extensionsChanged" }) & { actor?: never; agentSessionId?: never; changeKind?: never; client?: never; datasets?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; path?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
 /**
  *  A command running on the daemon calls a scope the window
  *  hosts (`client_host.rs`): the window does `scope`'s `op` with
@@ -4089,24 +4089,24 @@ detail: string | null }) & { actor?: never; changeKind?: never; client?: never; 
  */
 client: string; threadId: ThreadId | null;
 /**  Who ran the command (`agent:thr3`, `human`). */
-actor: string; scope: string; op: string; input: unknown }) & { agentSessionId?: never; changeKind?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; instance?: never; measures?: never; models?: never; name?: never; path?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
+actor: string; scope: string; op: string; input: unknown }) & { agentSessionId?: never; changeKind?: never; datasets?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; instance?: never; measures?: never; name?: never; path?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
 /**
  *  `.git` directory appeared/disappeared at the project root —
  *  "is this a git workspace" flipped. Renderer hides/restores the
  *  git-aware UI on receipt.
  */
-({ kind: "workspaceContextChanged"; vcsEnabled: boolean }) & { actor?: never; agentSessionId?: never; changeKind?: never; client?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; models?: never; name?: never; op?: never; path?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never } |
+({ kind: "workspaceContextChanged"; vcsEnabled: boolean }) & { actor?: never; agentSessionId?: never; changeKind?: never; client?: never; datasets?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; path?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never } |
 /**
  *  A worktree file changed on disk. Renderer-wide: file tree, quick
  *  open, project panel, git dashboard, uncommitted changes view all
  *  refresh in response.
  */
-({ kind: "workspaceChanged"; streamId: StreamId; changeKind: WorkspaceChangeKind; path: string }) & { actor?: never; agentSessionId?: never; client?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; models?: never; name?: never; op?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
+({ kind: "workspaceChanged"; streamId: StreamId; changeKind: WorkspaceChangeKind; path: string }) & { actor?: never; agentSessionId?: never; client?: never; datasets?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
 /**
  *  A ref under `.git/refs/` changed. Drives history, branch list,
  *  and ahead/behind refreshes. Coarse per stream.
  */
-({ kind: "vcsRefsChanged"; streamId: StreamId }) & { actor?: never; agentSessionId?: never; changeKind?: never; client?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; models?: never; name?: never; op?: never; path?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
+({ kind: "vcsRefsChanged"; streamId: StreamId }) & { actor?: never; agentSessionId?: never; changeKind?: never; client?: never; datasets?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; path?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
 /**
  *  A non-primary stream's backing worktree was deleted out from
  *  under us (externally `rm -rf`'d, `git worktree remove`'d, etc.).
@@ -4115,12 +4115,12 @@ actor: string; scope: string; op: string; input: unknown }) & { agentSessionId?:
  *  rail row vanished. `title` carries the archived stream's display
  *  name.
  */
-({ kind: "streamOrphaned"; streamId: StreamId; title: string }) & { actor?: never; agentSessionId?: never; changeKind?: never; client?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; models?: never; name?: never; op?: never; path?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; threadId?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
+({ kind: "streamOrphaned"; streamId: StreamId; title: string }) & { actor?: never; agentSessionId?: never; changeKind?: never; client?: never; datasets?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; path?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; threadId?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
 /**
  *  A sign-in for provider instance `instance`'s credential `name`
  *  finished (P9.B3): its token is in the keychain and the instance
  *  restarted on it — or, with `error`, it came to nothing and why.
- *  The keychain is no model, so there is nothing to re-read but the
+ *  The keychain is no dataset, so there is nothing to re-read but the
  *  instances themselves (`v_provider_instance`).
  */
 ({ kind: "credentialChanged"; instance: string; name: string;
@@ -4129,7 +4129,7 @@ actor: string; scope: string; op: string; input: unknown }) & { agentSessionId?:
  *  a row waiting on another sign-in of the same credential
  *  ignores it.
  */
-signIn: number | null; error: string | null }) & { actor?: never; agentSessionId?: never; changeKind?: never; client?: never; detail?: never; effortId?: never; fileCount?: never; id?: never; input?: never; measures?: never; models?: never; op?: never; path?: never; scope?: never; seq?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never };
+signIn: number | null; error: string | null }) & { actor?: never; agentSessionId?: never; changeKind?: never; client?: never; datasets?: never; detail?: never; effortId?: never; fileCount?: never; id?: never; input?: never; measures?: never; op?: never; path?: never; scope?: never; seq?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never };
 
 /**
  *  When an `on:` collector runs after a triggering event. Empty,
@@ -4944,7 +4944,7 @@ export type PublicContracts = {
  */
 export type Reads = {
 	/**  Views read, directly or through another view; sorted, distinct. */
-	models: string[],
+	datasets: string[],
 	/**
 	 *  Tables the query's own SQL read — not through a view (a temp table
 	 *  as `temp.<name>`); sorted, distinct. A physical table here is what
@@ -4986,7 +4986,7 @@ export type RefreshKeyword = "manual";
 
 export type Relationship = {
 	column: string,
-	/**  The model the column points into. */
+	/**  The dataset the column points into. */
 	to: string,
 	field: string,
 };
@@ -5189,7 +5189,7 @@ export type RunsOn =
 { on: "run" } |
 /**  Called by name: a command, an implementation's verbs. */
 { on: "call" } |
-/**  Read by a query: a model, a measure, a metric, a dimension. */
+/**  Read by a query: a dataset, a measure, a metric, a dimension. */
 { on: "query" } |
 /**  Shown where it's mounted: a page, a slot. */
 { on: "mount" } |
@@ -5395,10 +5395,10 @@ export type SnapshotTrigger =
  */
 "run_measured";
 
-/**  How one collector feeding a model a query read stands. */
+/**  How one collector feeding a dataset a query read stands. */
 export type SourceCoverage = {
-	/**  The model it feeds (`v_acme_pull_request`). */
-	model: string,
+	/**  The dataset it feeds (`v_acme_pull_request`). */
+	dataset: string,
 	/**  `oxplow:oxplow/collector?collector=<owner>/<id>`. */
 	source: string,
 	/**
@@ -5412,7 +5412,7 @@ export type SourceCoverage = {
 	error: string | null,
 };
 
-/**  `sql: read`: ad-hoc read-only SQL over the `v_*` models. */
+/**  `sql: read`: ad-hoc read-only SQL over the `v_*` datasets. */
 export type SqlAccess = "read";
 
 /**
@@ -5433,20 +5433,20 @@ export type SqlQueryResult = {
 	/**  What the query read — what a caller subscribes to (P4.6). */
 	reads: Reads,
 	/**
-	 *  When each model it read last changed since the app started (the
-	 *  SQL gateway fills it, P4.6); a model unchanged since then is absent.
+	 *  When each dataset it read last changed since the app started (the
+	 *  SQL gateway fills it, P4.6); a dataset unchanged since then is absent.
 	 */
-	freshness: ModelFreshness[],
+	freshness: DatasetFreshness[],
 	/**
 	 *  The extension catalog's generation the query ran against (the SQL
-	 *  gateway fills it): what its models and their meaning were. Opaque;
+	 *  gateway fills it): what its datasets and their meaning were. Opaque;
 	 *  equal generations read the same catalog.
 	 */
 	generation?: string | null,
 	/**
-	 *  For each model it read that a collector feeds, how that collection
+	 *  For each dataset it read that a collector feeds, how that collection
 	 *  stands (the SQL gateway fills it). A query finishing says nothing
-	 *  about whether its sources were collected; this does. Models core
+	 *  about whether its sources were collected; this does. Datasets core
 	 *  keeps current carry no entry.
 	 */
 	coverage?: SourceCoverage[],
@@ -5743,7 +5743,7 @@ pacing?: Pacing } |
 
 /**  What a kept earlier version is a version of. */
 export type Twin = {
-	/**  The model's name. */
+	/**  The dataset's name. */
 	of: string,
 	until: string,
 };
@@ -5753,7 +5753,7 @@ export type UiDecorator = {
 	/**  `<extension>/<n>`. */
 	id: string,
 	extension: string,
-	/**  The model's view (`v_<extension>_<model>`), which has a `ref` column. */
+	/**  The dataset's view (`v_<extension>_<dataset>`), which has a `ref` column. */
 	view: string,
 	/**  The resource it decorates (`oxplow/work_item`). */
 	resource: string,

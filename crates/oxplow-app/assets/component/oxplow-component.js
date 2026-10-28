@@ -184,7 +184,7 @@
           newTab: !!(options && options.newTab),
           replace: !!(options && options.replace),
         }),
-      // Run read-only SQL over oxplow's models (`?1` parameters): needs
+      // Run read-only SQL over oxplow's datasets (`?1` parameters): needs
       // `sql: read` on the component. Resolves `{ columns, rows, truncated }`.
       querySql: (sql, params) => call({ method: "querySql", sql, params: params || [] }),
       // Open a declared command's form in oxplow, starting from `input`;

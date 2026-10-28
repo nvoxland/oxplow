@@ -15,7 +15,7 @@ explicitly not an IDE.
 
 Useful understanding requires more than a transcript or a diff. Oxplow
 connects development activity, code structure, changes, tests, metrics,
-decisions, claims, and knowledge. Collectors bring data in; models derive
+decisions, claims, and knowledge. Collectors bring data in; datasets derive
 and connect it; measures, metrics, and dimensions make comparisons
 possible; pages and the agent turn it into useful explanations and views.
 

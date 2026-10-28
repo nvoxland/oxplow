@@ -1,4 +1,4 @@
-# The verdicts model appends each verdict as it lands, and what it holds
+# The verdicts dataset appends each verdict as it lands, and what it holds
 # after an append is what a full refill of the log would build.
 before:
   event_log:

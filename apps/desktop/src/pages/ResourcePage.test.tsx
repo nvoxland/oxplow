@@ -2,7 +2,7 @@ import { afterEach, expect, mock, test } from "bun:test";
 import { cleanup, render, waitFor } from "@testing-library/react";
 
 // The fallback renderer: what a URI no page renders opens on. A URI of an
-// undeclared resource, and one whose `resolve` model has no row, both show as
+// undeclared resource, and one whose `resolve` dataset has no row, both show as
 // a dead link (the raw URI, muted); a resolvable one shows its params.
 
 const realApi = await import("../api.js");
@@ -17,7 +17,7 @@ mock.module("../api.js", () => ({
       columns: ["title"],
       rows: found ? [["Fix the thing"]] : [],
       truncated: false,
-      reads: { models: ["v_acme_prs"], tables: [], measures: [] },
+      reads: { datasets: ["v_acme_prs"], tables: [], measures: [] },
       freshness: {},
     };
   },
@@ -50,14 +50,14 @@ test("a URI of a resource nothing declares is a dead link, never an error", () =
   expect(view.queryByTestId("resource-params")).toBeNull();
 });
 
-test("a URI whose model has no row is a dead link", async () => {
+test("a URI whose dataset has no row is a dead link", async () => {
   setResources([PR]);
   const view = render(<ResourcePage uri="oxplow:acme/pr?id=99" />);
   await waitFor(() => expect(view.getByTestId("resource-dead-link")).toBeTruthy());
   expect(view.queryByTestId("resource-params")).toBeNull();
 });
 
-test("a URI its model resolves shows its title and params", async () => {
+test("a URI its dataset resolves shows its title and params", async () => {
   setResources([PR]);
   const view = render(<ResourcePage uri="oxplow:acme/pr?id=12" />);
   await waitFor(() => expect(view.getByTestId("resource-params").textContent).toContain("12"));

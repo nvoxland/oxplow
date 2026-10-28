@@ -21,7 +21,7 @@ const result = (rows: SqlQueryResult["rows"]): SqlQueryResult =>
     ],
     rows,
     truncated: false,
-    reads: { models: ["v_work_item", "v_work_item_comment"], tables: [], measures: [] },
+    reads: { datasets: ["v_work_item", "v_work_item_comment"], tables: [], measures: [] },
     freshness: {},
   }) as unknown as SqlQueryResult;
 
@@ -69,7 +69,7 @@ test("capability providers read with their features and fields; an unknown provi
       ["work_items", "fake", "tracker", '{"comments":true}', "[]", 0],
     ],
     truncated: false,
-    reads: { models: ["v_capability_provider"], tables: [], measures: [] },
+    reads: { datasets: ["v_capability_provider"], tables: [], measures: [] },
     freshness: {},
   } as unknown as SqlQueryResult);
   expect(featuresFor(providers, "oxplow")).toEqual({ hierarchy: true, comments: true, links: true, delete: true, idempotent_writes: false, ordering: true, lists: true });

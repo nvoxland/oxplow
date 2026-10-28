@@ -1,7 +1,7 @@
 /**
  * Operations that failed in front of the person (a merge, a push, a save,
  * a query): recorded on the daemon as `oxplow.ui.report_error`, read back
- * as `v_op_error`. The model is the one record — the Alerts page, the bell
+ * as `v_op_error`. The dataset is the one record — the Alerts page, the bell
  * and the toasts read it live, and an agent reads the same rows — so the
  * list survives a reload. The person's marks are commands:
  * `oxplow.op_error.mark_seen` (they opened its output) and

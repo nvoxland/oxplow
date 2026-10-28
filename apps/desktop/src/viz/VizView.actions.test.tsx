@@ -37,7 +37,7 @@ mock.module("../api.js", () => ({
       columns: ["uri", "label"],
       rows: [["oxplow:oxplow/work_item?id=tsk1&provider=oxplow", "flaky"]],
       truncated: false,
-      reads: { models: ["v_tracker_flags"], tables: [], measures: [] },
+      reads: { datasets: ["v_tracker_flags"], tables: [], measures: [] },
       freshness: {},
     };
   },

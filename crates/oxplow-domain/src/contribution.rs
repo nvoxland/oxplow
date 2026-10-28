@@ -17,7 +17,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 /// The namespace an extension's names live under: its name, `-` read as
-/// `_` (event types, ref kinds, model views, entity tables and command
+/// `_` (event types, ref kinds, dataset views, entity tables and command
 /// ids are snake_case). The one place the rule is written.
 pub fn extension_namespace(extension: &str) -> String {
     extension.replace('-', "_")
@@ -72,7 +72,7 @@ pub fn implementation_local(capability: &str, id: &str) -> String {
 )]
 #[serde(rename_all = "snake_case")]
 pub enum ContributionKind {
-    Model,
+    Dataset,
     Measure,
     Metric,
     Dimension,
@@ -136,7 +136,7 @@ const fn spec(
 /// Every kind, in the order the reference lists them.
 pub const KINDS: &[KindSpec] = &[
     spec(
-        ContributionKind::Model,
+        ContributionKind::Dataset,
         "datasets",
         "Dataset",
         "SQL views over oxplow's datasets, published as `v_<ext>_<name>`",
@@ -339,7 +339,7 @@ impl ContributionKind {
     /// key param.
     pub fn segment(self) -> &'static str {
         match self {
-            ContributionKind::Model => "model",
+            ContributionKind::Dataset => "dataset",
             ContributionKind::Measure => "measure",
             ContributionKind::Metric => "metric",
             ContributionKind::Dimension => "dimension",
@@ -583,7 +583,7 @@ pub enum RunsOn {
     Run,
     /// Called by name: a command, an implementation's verbs.
     Call,
-    /// Read by a query: a model, a measure, a metric, a dimension.
+    /// Read by a query: a dataset, a measure, a metric, a dimension.
     Query,
     /// Shown where it's mounted: a page, a slot.
     Mount,
@@ -606,7 +606,7 @@ pub struct DeclaredAt {
 pub struct Descriptor {
     pub id: ContributionId,
     pub owner: Owner,
-    /// The contract's own version (a model's, an event type's), when it
+    /// The contract's own version (a dataset's, an event type's), when it
     /// has one.
     pub contract_version: Option<u32>,
     pub trigger: RunsOn,

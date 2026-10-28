@@ -23,9 +23,9 @@
   `oxplow_find_page`/`oxplow.page.definition` on a page shows its slot
   nodes; read a page's loaders to learn the params it binds.
 
-- **`ui.decorators`** add a label to the URIs of one resource: `{ model,
+- **`ui.decorators`** add a label to the URIs of one resource: `{ dataset,
   resource: oxplow/work_item, placement: ref-chip | row-badge, label, color?
-  }` — the model (this extension's) needs a `uri` column plus the `label`
+  }` — the dataset (this extension's) needs a `uri` column plus the `label`
   (and `color`) columns; a chip shows on that URI's page, a badge after a
   linked cell in a row.
 

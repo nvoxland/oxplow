@@ -8,8 +8,8 @@ import {
   LINEAGE_SQL,
   metricSeriesSql,
   metricTemplate,
-  MODEL_COLUMNS_SQL,
-  modelColumns,
+  DATASET_FIELDS_SQL,
+  datasetFields,
   parseChart,
   parseTemplate,
   readView,
@@ -18,19 +18,19 @@ import {
   specOf,
   templateParam,
   type Rows,
-} from "../../../../extensions/oxplow-foundation/src/explore-data/model.js";
+} from "../../../../extensions/oxplow-foundation/src/explore-data/dataset.js";
 
 const result = (columns: string[], rows: (string | number | null)[][]): Rows => ({ columns, rows, truncated: false });
 
-test("a model's documented columns", () => {
-  expect(MODEL_COLUMNS_SQL).toContain("FROM v_field WHERE view = ?1");
-  expect(modelColumns(result(["name", "sql_type", "doc"], [["id", "INTEGER", "Task id."], ["n", null, "Count."]]))).toEqual([
+test("a dataset's documented columns", () => {
+  expect(DATASET_FIELDS_SQL).toContain("FROM v_field WHERE view = ?1");
+  expect(datasetFields(result(["name", "sql_type", "doc"], [["id", "INTEGER", "Task id."], ["n", null, "Count."]]))).toEqual([
     { name: "id", sqlType: "INTEGER", doc: "Task id." },
     { name: "n", sqlType: "", doc: "Count." },
   ]);
 });
 
-test("lineage splits what a model reads from what reads it", () => {
+test("lineage splits what a dataset reads from what reads it", () => {
   const rows = result(
     ["view", "input", "kind"],
     [
@@ -40,7 +40,7 @@ test("lineage splits what a model reads from what reads it", () => {
       ["v_claim_digest", "v_claim", "ref"],
     ],
   );
-  expect(LINEAGE_SQL).toContain("FROM v_model_lineage WHERE view = ?1 OR input = ?1");
+  expect(LINEAGE_SQL).toContain("FROM v_dataset_lineage WHERE view = ?1 OR input = ?1");
   expect(lineage("v_claim", rows)).toEqual({
     reads: [
       { name: "claim", kind: "source" },
@@ -87,9 +87,9 @@ test("a metric template and a chart ride in the address as text and read back", 
 });
 
 test("the view reads back from the tab's address, a chart viz only by name", () => {
-  expect(readView({})).toEqual({ model: "", sql: "", viz: "table", chart: null, template: null });
-  const v = readView({ model: "v_effort", sql: "SELECT 1", viz: "bar", chart: JSON.stringify({ x: "a", y: "b" }) });
-  expect(v).toMatchObject({ model: "v_effort", sql: "SELECT 1", viz: "bar", chart: { x: "a", y: "b" } });
+  expect(readView({})).toEqual({ dataset: "", sql: "", viz: "table", chart: null, template: null });
+  const v = readView({ dataset: "v_effort", sql: "SELECT 1", viz: "bar", chart: JSON.stringify({ x: "a", y: "b" }) });
+  expect(v).toMatchObject({ dataset: "v_effort", sql: "SELECT 1", viz: "bar", chart: { x: "a", y: "b" } });
   expect(readView({ viz: "pie" }).viz).toBe("table");
   expect(sampleSql("v_work_item")).toBe("SELECT * FROM v_work_item LIMIT 50");
 });

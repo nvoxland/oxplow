@@ -3,13 +3,13 @@ icon: database
 category: Data
 keywords: sql query schema semantic layer page
 params:
-- name: model
+- name: dataset
   label: Dataset
   default: ''
 data:
   explore_catalog:
     sql: |
-      SELECT view, owner, description, view = :model AS current
+      SELECT view, owner, description, view = :dataset AS current
       FROM v_dataset
       ORDER BY owner <> 'core', owner, view
 view:
@@ -23,7 +23,7 @@ rail:
   columns:
   - key: view
     label: Dataset
-    select: model
+    select: dataset
   - key: owner
     label: Owner
   - key: description

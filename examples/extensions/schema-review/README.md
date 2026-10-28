@@ -30,7 +30,7 @@ Only from oxplow's public contracts, so nothing in oxplow changed for it:
   every snapshot: a `schema_review.ddl` fact per file and kind, sliced by
   its own `schema_review.ddl_kind` dimension. It runs no program and asks
   no model, so it asks for nothing beyond `files: read`.
-- **oxplow's evidence.** The `verdict` model joins those facts to the
+- **oxplow's evidence.** The `verdict` dataset joins those facts to the
   effort's files (`v_effort_file`), its latest test run (`v_test_run`, with
   its provenance), its diff coverage (`v_effort_observation`) and the
   functions its change added (`v_change_function`).
@@ -42,4 +42,4 @@ Only from oxplow's public contracts, so nothing in oxplow changed for it:
 Copy `schema-review/` into your project's `.oxplow/extensions/`. Two
 review policies now offer an effort's verdict, oxplow-bundled's and this
 one: choose in **Settings → Integrations** ("effort verdict"). Change the
-rules by editing `models/verdict.sql`.
+rules by editing `datasets/verdict.sql`.

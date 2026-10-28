@@ -37,13 +37,13 @@ test("a loaded stream's threads re-read on a v_thread change, and only then", as
   expect(result.current.threadsByStream.str1?.length).toBe(1);
 
   await act(async () => {
-    for (const h of handlers) h({ kind: "modelsChanged", models: ["v_commit"] });
+    for (const h of handlers) h({ kind: "datasetsChanged", datasets: ["v_commit"] });
     await Promise.resolve();
   });
   expect(listThreads).toHaveBeenCalledTimes(1);
 
   await act(async () => {
-    for (const h of handlers) h({ kind: "modelsChanged", models: ["v_thread"] });
+    for (const h of handlers) h({ kind: "datasetsChanged", datasets: ["v_thread"] });
     await Promise.resolve();
   });
   expect(listThreads.mock.calls.map((c) => (c as unknown[])[0])).toEqual(["str1", "str1"]);

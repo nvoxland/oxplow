@@ -1,7 +1,7 @@
 //! P7.C6: "just works", deterministically. For each kind `oxplow extension
 //! new` makes: a temp project → scaffold → `check` (clean, no warnings) →
 //! `extension test` (clean) → it loads in a real oxplow and does its job —
-//! a page's row action binds, a collector's entity and model publish, a
+//! a page's row action binds, a collector's entity and dataset publish, a
 //! command runs through the bus. A provider's stub is red until a real
 //! program stands behind it (the fake).
 
@@ -172,12 +172,12 @@ async fn a_scaffolded_collector_checks_before_its_first_sync_and_runs() {
     assert!(tested(dir.path(), "open-items")
         .await
         .contains(&"example basic".to_string()));
-    // The extension's model reads its collector's entity: activation
-    // creates it empty, so the model compiles before the first run.
+    // The extension's dataset reads its collector's entity: activation
+    // creates it empty, so the dataset compiles before the first run.
     let svc = booted(dir.path()).await;
     let ext = loaded(&svc, dir.path(), "open-items");
     let collector = &ext.collectors[0];
-    // It runs for real: its entity, then its model, publish.
+    // It runs for real: its entity, then its dataset, publish.
     svc.commands
         .run(
             &oxplow_domain::Actor::Human,

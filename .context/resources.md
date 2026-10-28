@@ -13,7 +13,7 @@ web's: a URI names the thing, a page that shows it is one **renderer** of
 it, and how that renderer shows it (a line, a filter, a pick, a mode, an
 open panel) is its **view**: the `#`, never part of the identity. A page's
 `?` params name what it shows; the `#` is how. `oxplow_get_open_page`
-returns both, `page` (identity) and `view`. Model columns, command inputs and event
+returns both, `page` (identity) and `view`. Dataset columns, command inputs and event
 fields that hold a URI are named `uri` (V101); prose says URI.
 
 ## Using URIs (read this first)
@@ -38,14 +38,14 @@ fields that hold a URI are named `uri` (V101); prose says URI.
 | Where | Build | Read |
 |---|---|---|
 | Rust | `oxplow_domain::uri::build::{effort_uri, file_uri, wiki_uri, work_item_uri, …}`; `keyed(resource, value)` for a resource named by its key param; `of(resource, &[(k, v)])` / `of_with_view` for one known only at run time | `parse_as::<T>(uri, resource)` (the key, typed), `id_of` (the key), `param_of(uri, resource, name)`, `parse_resource` (keeps the view), `resource_of`, `work_item_of_uri` → `(provider, id)`, `file_of_uri` → `(path, rev, lines)`; resource names are `uri::resources::{EFFORT, FILE, …}` |
-| SQL (models, pages, scripts' queries) | the owning model's `uri` column; to build one, `uri('oxplow/effort', 'id', 'eff' \|\| id)` (a NULL value leaves its param out, so `uri()` is never NULL: over a `LEFT JOIN`, `CASE WHEN x.id IS NULL THEN NULL ELSE uri(…) END`) | `SELECT URI`, `WHERE uri = :uri`, `JOIN … ON x.uri = y.subject`; `uri_param(URI, 'id')`, `uri_resource(URI)` |
+| SQL (datasets, pages, scripts' queries) | the owning dataset's `uri` column; to build one, `uri('oxplow/effort', 'id', 'eff' \|\| id)` (a NULL value leaves its param out, so `uri()` is never NULL: over a `LEFT JOIN`, `CASE WHEN x.id IS NULL THEN NULL ELSE uri(…) END`) | `SELECT URI`, `WHERE uri = :uri`, `JOIN … ON x.uri = y.subject`; `uri_param(URI, 'id')`, `uri_resource(URI)` |
 | Starlark (commands, effects, collectors, policies, mappings) | `uri.build("oxplow/file", path = p, view = {"lines": "3-9"})` (a param a string or an int; `None` leaves it out) | `uri.parse(u)` → `{resource, params, view}`, `uri.param(u, name, resource=)`, `uri.id(u, resource=)`, `uri.resource(u)`, `uri.is_uri(v)`, `uri.contribution(u)` |
 | TS (desktop) | `uri/uri.ts` builders (`effortUri`, `wikiUri`, `workItemUri(provider, id)`, `fileUri(path, rev)`, `fileLinesUri`, `pageUri(page, params, view)`, `metricUri`, `withUriView`, `viewParamsOfUri`, `resourceUri(resource, params, view)`, …) | `parseUri`, `identityOf`, `typeOf` (the resource), `paramOf`, `viewOf`, `idOf(uri, resource)`, `keyOf`, `workItemOf`, `isExternal` |
 
 **Guards.** `apps/desktop/src/uri/uri.guard.test.ts` (TS),
 `source_guards::refs_are_built_and_parsed_through_the_grammar` (Rust) and
 `source_guards::scripts_and_sql_carry_refs_rather_than_spelling_them`
-(shipped `.star`, page and model SQL, embedded Starlark templates) refuse
+(shipped `.star`, page and dataset SQL, embedded Starlark templates) refuse
 a hand-built or hand-parsed URI outside the builders. When one fires, the
 fix is a builder or reader — never a string.
 
@@ -76,7 +76,7 @@ id is unique only with its provider. Models keep integer ids
 (`v_thread.id = 3`); SQL that feeds a fixed input reads the key from the
 row's URI (`uri_param(t.uri, 'id')`), never `'thr' || id`. In Starlark,
 build the URI (`uri.build("oxplow/effort", id = e)`) only where a bare id
-becomes a link or is compared with a model's `uri`.
+becomes a link or is compared with a dataset's `uri`.
 
 ## The grammar
 
@@ -158,17 +158,17 @@ resources:
     label: Pull request
     params: { id: { required: true, pattern: '^\d+$' } }
     additional: false           # true: takes params beyond its own (page)
-    resolve: pull_request       # one of its models, with `uri` and `title`
+    resolve: pull_request       # one of its datasets, with `uri` and `title`
     title: title                # the column of `resolve` that titles one
-    searchable: pull_request    # a model with `uri`, `title`, `body`
+    searchable: pull_request    # a dataset with `uri`, `title`, `body`
     icon: git-pull-request      # one of ICONS, or assets/<name>.svg in the extension
     wikilink: { prefix: pr, param: id }   # [[pr:12]]
 ```
 
 - **The extension segment** is the extension's name, or `oxplow` for the
   extension whose namespace is oxplow's (only a bundled one may take it).
-  `resolve` and `searchable` name the extension's own models
-  (`v_<ext>_<model>`), or core's for the oxplow namespace
+  `resolve` and `searchable` name the extension's own datasets
+  (`v_<ext>_<dataset>`), or core's for the oxplow namespace
   (`resolve: agent_turn`). A `pattern` is anchored and kept in one form
   both regex engines read alike (`param_pattern.rs`).
 - **Loading.** `crates/oxplow-app/src/extension_resources.rs` parses the
@@ -218,7 +218,7 @@ of work items, commits and efforts, a file's text at its `rev` (its
 definition.
 
 `link_check` checks a wikilink's URI against its resource's `resolve`
-model; `symbol_resolve` finds a symbol now (`v_symbol`) or at its `rev`.
+dataset; `symbol_resolve` finds a symbol now (`v_symbol`) or at its `rev`.
 
 ## `[[…]]` sugar
 
@@ -251,7 +251,7 @@ graph writer and the link checker never drift. The desktop's
   asset `search:<resource>`), the `search.index` consumer the files.
   A hit is `{ resource, uri, stream_id, title, snippet, score }`.
 - **Everything else** stores the URI string where it stored the old ref:
-  every model's `uri` column, `work_item.uri` / `parent_uri`, links,
+  every dataset's `uri` column, `work_item.uri` / `parent_uri`, links,
   efforts' `work_item`, claims, decisions, handoffs, bookmarks, page
   visits, ui-preference scopes, fact subjects, event subjects and payload
   fields, command inverses and pending proposals.
@@ -299,11 +299,11 @@ rows moved to v3 (`item.uri`, `item.parent_uri`) and
 `knowledge.page.recorded` rows to v2 (`page.uri`, `page.uris`). Undo
 inverses and pending proposals had their input keys renamed (`ref` to
 `uri`, `parent_ref`, `evidence_ref`, `refs` and the rest likewise). The
-core models, command inputs and results, templates (`{{uri}}`,
+core datasets, command inputs and results, templates (`{{uri}}`,
 `{{uri.id}}`, `{{row.uri}}`, `{{param.uri}}`), page params, the
 `?uri=` page param and a page `timeline: { uri }` follow.
 
-It left alone: `ref('<model>')` in model SQL (a model reference, not a
+It left alone: `ref('<dataset>')` in dataset SQL (a dataset reference, not a
 URI), git refs (`branch_ref`, `basis_ref`, `ref_moves`), `page_ref` and
 its `ref_type`, `v_knowledge_ref`, `TabRef`, and internal identifiers
 that sit on no wire (`resolve_ref`, `refOpener.ts`, `refFromTabId`).
@@ -318,11 +318,11 @@ is a renderer of a resource**: which one draws a URI comes from the
 `pages[].for` declarations, then the `#oxplow.renderer=` view key, then
 the page marked `default`, then the first (`pages/renderers.ts`,
 [pages-and-tabs.md](./pages-and-tabs.md) "Renderers"). A URI nothing
-renders (no page, or no row in its model) opens on foundation's
+renders (no page, or no row in its dataset) opens on foundation's
 fallback `resource` page: its label and params, or the raw URI muted as
 a dead link. It is never an error and never logged or toasted. The
 row is looked up by the URI's identity: its view (`#part=output`) is for
-the page, not the model.
+the page, not the dataset.
 **Where a URI opens is decided once**: `tabs/refOpener.ts` and
 `tabs/openRef.ts` (`openRef`, `PageNavigation.openRef`) — a wikilink, a
 page link, a backlink row, a search hit, a component's `navigate` and
@@ -341,7 +341,7 @@ from one catalog snapshot before writing. `PreparedVocabulary.replace_tx`
 rejects any event, resource, subscription or recognizer diagnostic and
 restores its database savepoint; it returns the candidate vocabulary
 without swapping `VocabularyHandle`. `PreparedExtensionDatabase` composes
-this with models and contribution descriptors, restoring the whole
+this with datasets and contribution descriptors, restoring the whole
 candidate on rejection. When prepared capabilities are included, its
 recognizer comes from the planned work-list selection rather than the
 prior live registry, and capability rows and switch events share that

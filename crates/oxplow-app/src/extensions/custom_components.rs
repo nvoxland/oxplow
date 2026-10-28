@@ -38,7 +38,7 @@ pub struct CustomComponent {
     pub bundle: String,
     /// Commands the component may invoke.
     pub commands: Vec<String>,
-    /// It runs its own read-only SQL over the models (`querySql`): needs
+    /// It runs its own read-only SQL over the datasets (`querySql`): needs
     /// `sql.read` permission.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sql: Option<oxplow_domain::permissions::SqlAccess>,
@@ -55,7 +55,7 @@ pub(crate) struct ComponentFile {
     bundle: Option<String>,
     #[serde(default)]
     commands: Vec<String>,
-    /// `read`: it runs its own read-only SQL over the models
+    /// `read`: it runs its own read-only SQL over the datasets
     /// (`querySql`); its extension needs `sql.read` in `permissions:`.
     #[serde(default)]
     sql: Option<oxplow_domain::permissions::SqlAccess>,

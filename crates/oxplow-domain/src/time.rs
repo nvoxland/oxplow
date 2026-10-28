@@ -95,7 +95,7 @@ impl<'de> Deserialize<'de> for Timestamp {
     }
 }
 
-/// The collectors' and models' duration grammar — `15m`, `2h` — as a
+/// The collectors' and datasets' duration grammar — `15m`, `2h` — as a
 /// duration; anything else (zero included) is `None`. One parser for
 /// `on: { every: … }` and `materialize: { every: … }`.
 /// A duration written `30s`, `5m` or `2h` (a positive whole number and a
