@@ -58,9 +58,35 @@ pub struct IntentFile {
     pub examples: Vec<Value>,
 }
 
-/// A slot mount: a page mounted at another page's slot.
+/// A mount: a page this extension places — at a page's slot
+/// (`at: <extension>/<page>.<slot>`) or in place of a core component
+/// (`at: <replaceable target>`, `v_replaceable`). One list, `ui.mounts`.
 #[derive(Debug, Clone, PartialEq, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
+pub struct Mount {
+    /// The page it places: a slug of this extension.
+    pub page: String,
+    /// Where: a page's slot (`oxplow-foundation/work-item.sections`) or a
+    /// replaceable core component (`work_item.board`).
+    pub at: String,
+    /// At a parts slot: where among the page's parts — `start`, `end`,
+    /// `{ after: <id> }`, `{ before: <id> }`. Default `end`.
+    #[serde(default)]
+    pub position: Option<super::SlotAt>,
+    /// At a slot: its heading in the page; else the page's title.
+    #[serde(default)]
+    pub title: Option<String>,
+    /// At a `.tiles` slot: the tile's size.
+    #[serde(default)]
+    pub size: Option<super::TileSize>,
+    /// In place of a core component: the props contract's version it was
+    /// written against.
+    #[serde(default)]
+    pub version: Option<u32>,
+}
+
+/// A mount at a page's slot, sorted out of `ui.mounts`.
+#[derive(Debug, Clone, PartialEq)]
 pub struct SlotMount {
     /// A page's slot (`<extension>/<page>.<slot>`).
     pub slot: String,
@@ -68,36 +94,29 @@ pub struct SlotMount {
     pub page: String,
     /// Where among the page's parts (a parts slot only): `start`, `end`,
     /// `{ after: <id> }`, `{ before: <id> }`. Default `end`.
-    #[serde(default)]
     pub at: Option<super::SlotAt>,
     /// Its heading in the page; else the mounted page's title.
-    #[serde(default)]
     pub title: Option<String>,
     /// A tile's size (a `.tiles` slot only).
-    #[serde(default)]
     pub size: Option<super::TileSize>,
 }
 
-/// `ui:` — everything an extension adds to the core UI: pages mounted at
-/// other pages' slots and core slots (`slots`), decorations on core refs (`decorators`) and
-/// replaced sub-components (`replacements`). Its commands
-/// meet a person through their own `ui` (`commands:`).
+/// `ui:` — everything an extension adds to the core UI: its pages placed
+/// at other pages' slots or in place of core components (`mounts`) and
+/// decorations on core refs (`decorators`). Its commands meet a person
+/// through their own `ui` (`commands:`).
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct UiBlock {
-    /// Pages mounted at slots: `{ slot, page, at? }`, typed one by one
-    /// ([`slots_of`]).
+    /// Its pages placed elsewhere: `{ page, at, … }`, typed one by one
+    /// ([`mounts_of`]).
     #[serde(default)]
-    #[schemars(with = "Vec<SlotMount>")]
-    pub slots: Vec<Value>,
+    #[schemars(with = "Vec<Mount>")]
+    pub mounts: Vec<Value>,
     /// Labels from its models on core refs.
     #[serde(default)]
     #[schemars(with = "Option<Vec<super::decorators::DecoratorFile>>")]
     pub decorators: Option<Value>,
-    /// A page in place of a named core component.
-    #[serde(default)]
-    #[schemars(with = "Option<Vec<super::replacements::ReplacementFile>>")]
-    pub replacements: Option<Value>,
 }
 
 /// `extension.yaml` at `manifest: 2`, as written on disk.
@@ -385,9 +404,72 @@ pub fn intent_of(m: &ManifestV2, file: &str, text: &str) -> (Option<Intent>, Vec
     (Some(intent), errors)
 }
 
-/// The manifest's `ui.slots`, typed one by one.
-pub fn slots_of(m: &ManifestV2, file: &str, text: &str) -> (Vec<SlotMount>, Vec<String>) {
-    entries(&m.ui.slots, "ui.slots", file, text)
+/// The manifest's `ui.mounts`, typed one by one and sorted by what `at`
+/// names: a page's slot (it has a `/`) or a core component. Each comes
+/// with its own line; what's wrong with one is an error at it.
+pub fn mounts_of(m: &ManifestV2, file: &str, text: &str) -> Mounts {
+    let lines = item_lines(text, "ui.mounts");
+    let block = line_under(text, "ui", "mounts:").or(key_line(text, "ui"));
+    let mut out = Mounts::default();
+    for (i, item) in m.ui.mounts.iter().enumerate() {
+        let line = lines.get(i).copied().or(block);
+        let mount: Mount = match serde_yaml::from_value(item.clone()) {
+            Ok(mount) => mount,
+            Err(e) => {
+                out.errors.push(at(file, line, format!("`ui.mounts`: {e}")));
+                continue;
+            }
+        };
+        if mount.at.contains('/') {
+            if mount.version.is_some() {
+                out.errors.push(at(
+                    file,
+                    line,
+                    format!(
+                        "`ui.mounts`: `version` goes with a core component; `{}` is a page's slot",
+                        mount.at
+                    ),
+                ));
+                continue;
+            }
+            out.slots.push((
+                line,
+                SlotMount {
+                    slot: mount.at,
+                    page: mount.page,
+                    at: mount.position,
+                    title: mount.title,
+                    size: mount.size,
+                },
+            ));
+        } else {
+            if mount.position.is_some() || mount.title.is_some() || mount.size.is_some() {
+                out.errors.push(at(
+                    file,
+                    line,
+                    format!(
+                        "`ui.mounts`: `position`, `title` and `size` go with a page's slot; `{}` is a core component",
+                        mount.at
+                    ),
+                ));
+                continue;
+            }
+            out.replacements.push((
+                line,
+                super::replacements::ReplacementFile::new(mount.at, mount.page, mount.version),
+            ));
+        }
+    }
+    out
+}
+
+/// `ui.mounts`, sorted: slot mounts and replacements, each with its line,
+/// in the order written; and what was wrong with the rest.
+#[derive(Default)]
+pub struct Mounts {
+    pub slots: Vec<(Option<usize>, SlotMount)>,
+    pub replacements: Vec<(Option<usize>, super::replacements::ReplacementFile)>,
+    pub errors: Vec<String>,
 }
 
 /// `file:line: message`, or `file: message` when no line is known.
@@ -733,7 +815,7 @@ mod tests {
 
     #[test]
     fn key_lines_are_one_based_and_nested_lookups_stay_in_their_block() {
-        let text = "manifest: 2\nname: a\nslot_mounts:\n  - { slot: rail, page: x }\n  - { slot: commit, page: y }\nadvisories: []\n";
+        let text = "manifest: 2\nname: a\nslot_mounts:\n  - { page: x, at: rail }\n  - { page: y, at: commit }\nadvisories: []\n";
         assert_eq!(key_line(text, "slot_mounts"), Some(3));
         assert_eq!(line_under(text, "slot_mounts", "page: y"), Some(5));
         assert_eq!(line_under(text, "slot_mounts", "advisories"), None);

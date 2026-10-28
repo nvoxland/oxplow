@@ -250,9 +250,9 @@ lists each declared reference with Set… and Revoke.
 | `providers` | an external program implementing a capability, such as the work list | [Provider protocol](provider-protocol.md) |
 | `pages/*.yaml` (files, not a key) | a page: its data loaders and the view that shows them | [Pages](../guide/pages.md) |
 | `panels` | a rail panel showing its pages compact |  |
-| `ui.slots` | a page mounted at another page's slot |  |
+| `ui.mounts` | a page placed at another page's slot (`at: <extension>/<page>.<slot>`) |  |
 | `ui.decorators` | labels on core refs |  |
-| `ui.replacements` | a page in place of a core component |  |
+| `ui.mounts` | a page placed in place of a core component (`at: <target>`, `v_replaceable`) |  |
 | `custom_components` | sandboxed HTML components a page draws, fed its loaders |  |
 <!-- kinds:end -->
 
@@ -595,8 +595,8 @@ view: { viz: table, from: pr }
 
 ### Replacing a core view
 
-A page can stand in for one of these core views (`ui.replacements: [{
-target, page, version? }]`). Its page declares every prop as a `param`
+A page can stand in for one of these core views (`ui.mounts: [{ page,
+at: <target>, version? }]`). Its page declares every prop as a `param`
 and gets them instead of any host state; `version`, when given, must be
 the contract's (a changed contract refuses an old declaration instead of
 handing it props it doesn't know). An unbound view may be replaced by

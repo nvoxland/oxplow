@@ -321,16 +321,16 @@ child in view (the param's value, else the first) and an embed to its
 page's run, its params by name: the embed's `params`, else the host's
 param of that name, else that column of the host loaders' first rows in
 order. A `slot` node shows the pages enabled extensions mount there
-(`ui.slots: [{ slot: <ext>/<page>.<name>, page: <slug>, at?, title?,
+(`ui.mounts: [{ page: <slug>, at: <ext>/<page>.<name>, position?, title?,
 size? }]`, loaded as `ExtensionUi.page_slots`): each runs as an embed, its
 params by name from the host, its node id the mounted page's id with `.`
-for `/` (`beta.extra`); by extension name; `at: start` puts it first
+for `/` (`beta.extra`); by extension name; `position: start` puts it first
 among the slot's siblings, `{ before | after: <sibling id> }` beside that
 sibling, otherwise it sits at the slot. A **panel**'s parts (`body`,
 `badge`, `collapsed`, `count`) each name one of its extension's pages
 (a badge page declares `badge` or `alert`; a stream or thread panel's
 pages take `stream_id` / `thread_id`), and a **replacement** names a
-page (`ui.replacements: [{ target, page, version }]`,
+page (`ui.mounts: [{ page, at: <target>, version }]`,
 `UiReplacement.page_id`), checked against the same props contract. Which replacement shows is decided by the page run
 (`PageRunner::replacement`: the person's choice, the only candidate, the item's provider), which runs it as the node's embed. `dirty_loaders` is what a change makes run again: loaders that
 read a changed model (a command loader's are its `reads`) or bind a
@@ -788,8 +788,8 @@ Lengths come from the spacing and radius tokens (theming.md).
 **Extensions add to a page through its `slot` nodes** (a `slot` node named
 `sections` in the foundation's `changes` page is
 `oxplow-foundation/changes.sections`; the id is `<extension>/<page>.<name>`).
-An extension lists `ui.slots: [{ slot, page, at }]` in its manifest. It
-mounts one of its own pages there, placed `at` the start, the end, or beside
+An extension lists `ui.mounts: [{ page, at, position }]` in its manifest. It
+mounts one of its own pages there, placed (`position`) at the start, the end, or beside
 a node by its stable id. A mount whose host slot is missing is a load
 warning. extensions.md "Slots".
 

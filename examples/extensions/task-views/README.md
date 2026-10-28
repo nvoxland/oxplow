@@ -12,10 +12,10 @@ work-item commands, so they work with whichever list is active.
 
 ```yaml
 ui:
-  replacements:
-    - { target: work_item.board, page: swimlanes, version: 1 }
-    - { target: work_item.list, page: compact-list, version: 1 }
-    - { target: work_item.detail, page: edit-item, version: 1 }
+  mounts:
+    - { page: swimlanes, at: work_item.board, version: 1 }
+    - { page: compact-list, at: work_item.list, version: 1 }
+    - { page: edit-item, at: work_item.detail, version: 1 }
 ```
 
 ## What the swimlanes do

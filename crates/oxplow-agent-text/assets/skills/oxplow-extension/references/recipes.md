@@ -79,8 +79,8 @@ view: { viz: list, from: stale, empty: No stale reviews. }
 ```yaml
 # extension.yaml
 ui:
-  slots:
-    - { slot: oxplow-foundation/work-item.sections, page: stale-reviews, at: { after: links }, title: Stale reviews }
+  mounts:
+    - { page: stale-reviews, at: oxplow-foundation/work-item.sections, position: { after: links }, title: Stale reviews }
 ```
 
 `slot: <extension>/<page>.<name>`; `at` is `start`, `end` (default) or `{

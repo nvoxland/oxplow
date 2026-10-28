@@ -54,9 +54,9 @@ page declares each prop as a param:
 
 ```yaml
 ui:
-  replacements:
-    - { target: work_item.board, page: swimlanes, version: 1 }   # props: scope, thread_id
-    - { target: work_item.detail, page: edit-item, version: 1 }  # props: uri
+  mounts:
+    - { page: swimlanes, at: work_item.board, version: 1 }   # props: scope, thread_id
+    - { page: edit-item, at: work_item.detail, version: 1 }  # props: uri
 ```
 
 - Read items from `v_work_item`; change them only through the interface

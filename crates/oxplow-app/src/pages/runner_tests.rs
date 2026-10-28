@@ -376,7 +376,7 @@ async fn a_replaceable_node_runs_the_replacement_that_stands_in_for_it() {
     );
     write(
         ".oxplow/extensions/beta/extension.yaml",
-        "manifest: 2\nname: beta\nintent:\n  purpose: test\nui:\n  replacements:\n    - { target: work_item.board, page: lanes }\n",
+        "manifest: 2\nname: beta\nintent:\n  purpose: test\nui:\n  mounts:\n    - { page: lanes, at: work_item.board }\n",
     );
     write(
         ".oxplow/extensions/beta/pages/lanes.yaml",

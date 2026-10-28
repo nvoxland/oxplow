@@ -13,8 +13,8 @@ It reads effort-review's exported `reviews` model and writes nothing.
 imports:
   - { id: reviews, contribution: oxplow:oxplow/model?model=effort-review/reviews, version: 2, optional: true }
 ui:
-  slots:
-    - { slot: oxplow-foundation/work-item.sections, page: item-review }
+  mounts:
+    - { page: item-review, at: oxplow-foundation/work-item.sections }
 ```
 
 Both pages read `import_ref('reviews')`, which is how an extension reads

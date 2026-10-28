@@ -279,7 +279,7 @@ pub(crate) async fn fixture() -> (tempfile::TempDir, Arc<crate::Services>) {
     write(
         dir.path(),
         ".oxplow/extensions/beta/extension.yaml",
-        "manifest: 2\nname: beta\nintent:\n  purpose: test\nui:\n  slots:\n    - { slot: acme/slotted.sections, page: extra }\n    - { slot: acme/slotted.sections, page: early, at: start }\n",
+        "manifest: 2\nname: beta\nintent:\n  purpose: test\nui:\n  mounts:\n    - { page: extra, at: acme/slotted.sections }\n    - { page: early, at: acme/slotted.sections, position: start }\n",
     );
     write(
         dir.path(),

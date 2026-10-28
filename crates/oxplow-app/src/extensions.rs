@@ -3236,7 +3236,6 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
     ext.warnings.extend(warnings);
     let panel_files = m.panels.clone();
     let decorator_files = m.ui.decorators.clone();
-    let replacement_files = m.ui.replacements.clone();
     let resource_files = m.resources.clone();
     let slot_files = {
         if let Some(v) = m.event_types.as_ref() {
@@ -3640,10 +3639,14 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                 }
             }
         }
-        let (slots, errors) = manifest_v2::slots_of(&m, &file, &manifest);
-        ext.errors.extend(errors);
-        slots
+        manifest_v2::mounts_of(&m, &file, &manifest)
     };
+    let manifest_v2::Mounts {
+        slots: slot_files,
+        replacements: replacement_files,
+        errors: mount_errors,
+    } = slot_files;
+    ext.errors.extend(mount_errors);
     // Lenses are pages now: an old `lenses/` folder is named, never read.
     if files
         .list("lenses")
@@ -3713,9 +3716,8 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
         }
     });
 
-    for s in slot_files {
+    for (mount_line, s) in slot_files {
         let page = s.page.clone();
-        let mount_line = entry_line(&manifest, "ui", "page", &page);
         if !ext.page_files.iter().any(|p| p.slug == page) {
             ext.errors.push(at(
                 &file,
@@ -3764,16 +3766,15 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
         ext.ui.decorators = decorators;
         ext.errors.extend(errors);
     }
-    if let Some(v) = replacement_files {
+    if !replacement_files.is_empty() {
         let capabilities: Vec<String> =
             ext.providers.iter().map(|p| p.capability.clone()).collect();
         let (replaced, errors) = replacements::parse_replacements(
             name,
             &capabilities,
             &ext.page_files,
-            &v,
+            replacement_files,
             &file,
-            &manifest,
         );
         ext.ui.replacements = replaced;
         ext.errors.extend(errors);
@@ -5775,7 +5776,7 @@ mod tests {
     #[test]
     fn a_broken_nested_entry_doesnt_sink_the_manifest() {
         let d = tempfile::tempdir().unwrap();
-        let manifest = "manifest: 2\nname: x\nintent:\n  purpose: p\n  examples:\n    - { name: a }\n    - { name: b, bogus: 1 }\nui:\n  slots:\n    - { slot: diff.file.header, page: l, bogus: 1 }\nskills:\n  - name: s\n    file: s.md\n";
+        let manifest = "manifest: 2\nname: x\nintent:\n  purpose: p\n  examples:\n    - { name: a }\n    - { name: b, bogus: 1 }\nui:\n  mounts:\n    - { page: l, at: diff.file.header, bogus: 1 }\nskills:\n  - name: s\n    file: s.md\n";
         std::fs::create_dir_all(d.path().join(".oxplow/extensions/x")).unwrap();
         std::fs::write(
             d.path().join(".oxplow/extensions/x/extension.yaml"),
@@ -7110,7 +7111,7 @@ view:
     #[test]
     fn a_slot_mount_to_a_missing_page_names_its_line() {
         let dir = tempfile::tempdir().unwrap();
-        let manifest = format!("{EXT_V2}ui:\n  slots:\n    - {{ slot: oxplow-foundation/diff.file-header, page: tasks }}\n    - {{ slot: oxplow-foundation/diff.file-header, page: nope }}\n");
+        let manifest = format!("{EXT_V2}ui:\n  mounts:\n    - {{ page: tasks, at: oxplow-foundation/diff.file-header }}\n    - {{ page: nope, at: oxplow-foundation/diff.file-header }}\n");
         write(
             dir.path(),
             ".oxplow/extensions/review/extension.yaml",
@@ -7573,7 +7574,7 @@ commands:
         write(
             dir.path(),
             ".oxplow/extensions/mine/extension.yaml",
-            "manifest: 2\nname: mine\nintent:\n  purpose: test\nui:\n  slots:\n    - { slot: acme/host.sections, page: nope }\n    - { slot: sidebar, page: a }\n    - { slot: acme/host.sections, page: a }\n",
+            "manifest: 2\nname: mine\nintent:\n  purpose: test\nui:\n  mounts:\n    - { page: nope, at: acme/host.sections }\n    - { page: a, at: sidebar }\n    - { page: a, at: acme/host.sections }\n",
         );
         write(
             dir.path(),
@@ -7619,7 +7620,7 @@ commands:
             ".oxplow/extensions/addon/extension.yaml",
             &ext_yaml(
                 "addon",
-                "ui:\n  slots:\n    - { slot: base/page.sections, page: extra, at: { after: a }, title: More }\n    - { slot: page.sections, page: extra }\n",
+                "ui:\n  mounts:\n    - { page: extra, at: base/page.sections, position: { after: a }, title: More }\n    - { page: extra, at: page.sections }\n",
             ),
         );
         write(
@@ -7646,7 +7647,10 @@ commands:
             }]
         );
         let errs = addon.errors.join("\n");
-        assert!(errs.contains("unknown slot `page.sections`"), "{errs}");
+        assert!(
+            errs.contains("`at: page.sections` is neither a page's slot"),
+            "{errs}"
+        );
     }
 
     /// The documented examples in `examples/extensions/` load cleanly, so
@@ -9413,18 +9417,18 @@ commands:
                 "c",
                 &viz_page("params: [{ name: change_id }]\n", "SELECT :change_id AS c", ""),
             )],
-            "manifest: 2\nintent:\n  purpose: p\nui:\n  slots:\n    - { slot: commit, page: c }\n    - { slot: commit.sections, page: c }\n",
+            "manifest: 2\nintent:\n  purpose: p\nui:\n  mounts:\n    - { page: c, at: commit }\n    - { page: c, at: commit.sections }\n",
         );
         assert!(ext.ui.page_slots.is_empty());
         let errs = ext.errors.join("\n");
         assert!(
-            errs.contains("slot `commit`: a page mounts at a page's slot")
-                && errs.contains("unknown slot `commit.sections`")
+            errs.contains("`at: commit` is neither a page's slot")
+                && errs.contains("`at: commit.sections` is neither a page's slot")
                 && errs.contains("extension.yaml:"),
             "{errs}"
         );
         // Keys that live under `ui:` are unknown at the top.
-        for key in ["slot_mounts", "decorators", "replacements"] {
+        for key in ["slot_mounts", "decorators", "mounts"] {
             let (_d, ext) = load_x(
                 &[],
                 &format!("manifest: 2\nintent:\n  purpose: p\n{key}: []\n"),

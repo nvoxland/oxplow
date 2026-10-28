@@ -545,7 +545,7 @@ mod tests {
              panels:\n  - {{ id: inbox, title: Inbox, scope: project, body: open }}\n\
              resources:\n  - {{ name: pr, label: Pull request, params: {{ id: {{ required: true, pattern: '^[0-9]+$' }} }}, resolve: prs, icon: git-pull-request }}\n\
              custom_components:\n  - {{ id: chart }}\n\
-             ui:\n  slots:\n    - {{ slot: oxplow-foundation/diff.file-header, page: open }}\n    - {{ slot: oxplow-foundation/diff.file-header, page: open }}\n  decorators:\n    - {{ model: prs, resource: oxplow/work_item, placement: ref-chip, label: title }}\n"
+             ui:\n  mounts:\n    - {{ page: open, at: oxplow-foundation/diff.file-header }}\n    - {{ page: open, at: oxplow-foundation/diff.file-header }}\n  decorators:\n    - {{ model: prs, resource: oxplow/work_item, placement: ref-chip, label: title }}\n"
         )
     }
 
