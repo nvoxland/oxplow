@@ -123,16 +123,7 @@ impl ExtensionSecrets {
     fn current_owner(&self, extension: &str) -> Result<(), DomainError> {
         valid_owner(extension)?;
         let snapshot = self.catalog.live_snapshot(&self.root);
-        let current = snapshot
-            .extensions()
-            .iter()
-            .find(|ext| ext.name == extension && ext.origin == "bundled")
-            .or_else(|| {
-                snapshot
-                    .extensions()
-                    .iter()
-                    .find(|ext| ext.name == extension)
-            });
+        let current = crate::extensions::owner(snapshot.extensions(), extension);
         if !current.is_some_and(|ext| ext.enabled) {
             return Err(DomainError::Invalid(
                 "extension secret owner is unavailable".into(),

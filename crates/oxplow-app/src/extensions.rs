@@ -2278,6 +2278,22 @@ fn shipped(project: &Path, b: &crate::bundled_extensions::BundledExtension) -> E
     }
 }
 
+/// The warning on a shipped extension whose name a project folder also has.
+fn ignored_folder(folder: &str, name: &str) -> String {
+    format!(
+        "{folder}: ignored — `{name}` ships with oxplow, which runs the copy built into it; \
+         give the folder another name"
+    )
+}
+
+/// The extension named `name` in `extensions`, a load's list. A load holds
+/// one entry per name (a project folder never stands in for an extension
+/// that ships with oxplow), so this is the one lookup by name: nothing
+/// tie-breaks on where an extension came from.
+pub fn owner<'a>(extensions: &'a [Extension], name: &str) -> Option<&'a Extension> {
+    extensions.iter().find(|ext| ext.name == name)
+}
+
 /// A listed extension that has nothing to run here.
 fn listed_only(name: &str, path: &str, deployment: Deployment) -> Extension {
     Extension {
@@ -2302,16 +2318,21 @@ pub(super) fn load_sources(
     let mut out = Vec::new();
     for name in known_names(root, settings) {
         let dir = settings.source(root, &name);
-        let bundled = crate::bundled_extensions::shipped(&name, settings);
-        if dir.is_dir() {
+        // A shipped oxplow runs the copy of its own extensions built into
+        // it: a folder with that name stands in for nothing.
+        if let Some(b) = crate::bundled_extensions::shipped(&name, settings) {
+            let mut ext = shipped(root, b);
+            if dir.is_dir() {
+                ext.warnings.push(ignored_folder(&shown(root, &dir), &name));
+            }
+            out.push(ext);
+        } else if dir.is_dir() {
             out.push(load_one(
                 &Disk(dir.clone()),
                 &name,
                 &shown(root, &dir),
                 origin_of(&name),
             ));
-        } else if let Some(b) = bundled {
-            out.push(shipped(root, b));
         } else if settings.is_enabled(&name) {
             out.push(listed_only(&name, &shown(root, &dir), Deployment::NotHere));
         }
@@ -2398,7 +2419,9 @@ fn locate(ext: &mut Extension, project: &Path, settings: &oxplow_config::Extensi
         _ => None,
     };
     let dir = settings.source(project, &ext.name);
-    let source = dir.is_dir().then(|| shown(project, &dir));
+    // A shipped copy has no source here: a folder with its name is ignored.
+    let shipped = matches!(ext.deployment, Deployment::Shipped { .. });
+    let source = (!shipped && dir.is_dir()).then(|| shown(project, &dir));
     // What it reports names the source files, the ones to edit, not the
     // copy that runs.
     if let Some(source) = source.as_ref().filter(|s| **s != ext.path) {
@@ -2578,17 +2601,14 @@ fn parse_block<T: serde::de::DeserializeOwned>(
 /// oxplow, its shipped deployment in `project`'s store.
 pub fn source_or_shipped(project: &Path, root: &Path, name: &str) -> String {
     let settings = oxplow_config::extension_settings(project);
-    let source = settings.source(root, name);
-    if !source.is_dir() {
-        if let Some(b) = crate::bundled_extensions::shipped(name, &settings) {
-            if let Ok(hash) = crate::extension_store::extract_shipped(project, b) {
-                return crate::extension_store::deployment_dir(project, name, &hash)
-                    .to_string_lossy()
-                    .into_owned();
-            }
+    if let Some(b) = crate::bundled_extensions::shipped(name, &settings) {
+        if let Ok(hash) = crate::extension_store::extract_shipped(project, b) {
+            return crate::extension_store::deployment_dir(project, name, &hash)
+                .to_string_lossy()
+                .into_owned();
         }
     }
-    shown(root, &source)
+    shown(root, &settings.source(root, name))
 }
 
 /// Extension `name` alone, from its default source folder under `root`
@@ -5053,8 +5073,7 @@ pub async fn validate_extension(
     let mut declared = load_sources(root, &settings);
     let index = declared
         .iter()
-        .position(|ext| ext.name == name && ext.origin == "bundled")
-        .or_else(|| declared.iter().position(|ext| ext.name == name))
+        .position(|ext| ext.name == name)
         .ok_or(DomainError::NotFound)?;
     let mut ext = declared.swap_remove(index);
     let path = ext.path.clone();
@@ -5832,6 +5851,43 @@ mod tests {
         let p = root.join(rel);
         fs::create_dir_all(p.parent().unwrap()).unwrap();
         fs::write(p, body).unwrap();
+    }
+
+    /// A shipped oxplow runs the copy of its own extensions built into it:
+    /// a project folder with a shipped name loads nothing in its place —
+    /// not as a source, not for a preview — and says it is ignored. Each
+    /// name is one entry, so a lookup by name needs no tie-break.
+    #[test]
+    fn a_project_folder_never_stands_in_for_a_shipped_extension() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            ".oxplow/extensions/oxplow-bundled/extension.yaml",
+            "manifest: 2\nname: oxplow-bundled\nintent:\n  purpose: p\n",
+        );
+        let all = load_extensions(dir.path());
+        let named: Vec<&Extension> = all.iter().filter(|e| e.name == "oxplow-bundled").collect();
+        assert_eq!(named.len(), 1, "{named:#?}");
+        let ext = named[0];
+        assert!(
+            matches!(ext.deployment, Deployment::Shipped { .. }),
+            "{:?}",
+            ext.deployment
+        );
+        assert!(
+            ext.warnings
+                .iter()
+                .any(|w| w.contains(".oxplow/extensions/oxplow-bundled")
+                    && w.contains("ships with oxplow")),
+            "{:?}",
+            ext.warnings
+        );
+        let preview = source_or_shipped(dir.path(), dir.path(), "oxplow-bundled");
+        assert!(!preview.starts_with(".oxplow/extensions"), "{preview}");
+        assert_eq!(
+            owner(&all, "oxplow-bundled").map(|e| &e.deployment),
+            Some(&ext.deployment)
+        );
     }
 
     /// `when` names a column a row action is offered on; it means nothing

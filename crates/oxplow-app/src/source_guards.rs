@@ -826,7 +826,6 @@ const WORKTREE_PATH_USERS: &[(&str, &str)] = &[
     ("crates/oxplow-app/src/commands/agent_reads/vcs.rs", "diffs the caller's worktree"),
     ("crates/oxplow-app/src/commands/agent_reads/page_tools.rs", "reads a stream's draft of an extension from its checkout"),
     ("crates/oxplow-app/src/commands/credentials.rs", "a collector's credential is declared by its extension in the primary checkout"),
-    ("crates/oxplow-rpc/src/commands/extensions.rs", "the extension RPCs"),
     ("crates/oxplow-rpc/src/commands/trees.rs", "the file-tree RPCs"),
 ];
 
@@ -1320,4 +1319,25 @@ fn shipped_scripts_that_react_to_a_versioned_type_prove_an_older_version() {
             }
         }
     }
+}
+
+/// An extension is found by name with `extensions::owner`, the one
+/// resolver: a load holds one entry per name, so no lookup tie-breaks on
+/// where an extension came from.
+#[test]
+fn no_lookup_by_name_prefers_an_origin() {
+    let found: Vec<String> = production_sources()
+        .into_iter()
+        .flat_map(|(path, text)| {
+            text.lines()
+                .filter(|l| l.contains(".name ==") && l.contains(".origin == \"bundled\""))
+                .map(|l| format!("{path}: {}", l.trim()))
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    assert!(
+        found.is_empty(),
+        "use extensions::owner:\n{}",
+        found.join("\n")
+    );
 }

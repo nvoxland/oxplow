@@ -348,18 +348,7 @@ fn current_descriptor(
     JobOperationKey::new(owner.clone(), "authority".into())
         .map_err(|_| JobAuthorityError::Denied)?;
     let snapshot = catalog.live_snapshot(project);
-    let extension = snapshot
-        .extensions()
-        .iter()
-        .find(|extension| {
-            extension.name == owner.contribution.extension && extension.origin == "bundled"
-        })
-        .or_else(|| {
-            snapshot
-                .extensions()
-                .iter()
-                .find(|extension| extension.name == owner.contribution.extension)
-        })
+    let extension = crate::extensions::owner(snapshot.extensions(), &owner.contribution.extension)
         .filter(|extension| extension.enabled && extension.version == owner.package_version)
         .ok_or(JobAuthorityError::Unavailable)?;
     extension

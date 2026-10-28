@@ -1280,6 +1280,14 @@ source directly: an edit changes nothing until it is deployed.
   `extensions/oxplow-foundation` resolves to the shipped deployment. A
   bundled extension with no active deployment of its own runs the shipped
   one (`Deployment::Shipped`).
+  - **A folder never stands in for one.** Outside development a source
+    load (`load_sources`, `source_or_shipped`) takes a shipped name's copy
+    built in, never `.oxplow/extensions/<name>/`: a project folder with
+    that name is ignored with a warning on the shipped extension, so a
+    cloned repo can't load its own `oxplow-bundled` as oxplow's. A load
+    therefore holds one entry per name, and `extensions::owner(list,
+    name)` is the one lookup by name — none tie-breaks on origin
+    (`source_guards::no_lookup_by_name_prefers_an_origin`).
 - **Developing oxplow (`enableBundledExtensions: false`):** in a dev
   build (`cfg!(debug_assertions)`; a release build logs and ignores it),
   oxplow's own extensions don't run from the copies built in: they load

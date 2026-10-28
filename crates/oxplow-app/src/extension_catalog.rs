@@ -555,12 +555,7 @@ impl ExtensionCatalog {
     /// unknown one is `NotFound`.
     pub fn named(&self, root: &Path, name: &str) -> Result<Extension, DomainError> {
         let all = self.unpinned(root, "a lookup by name reads one snapshot");
-        // A project extension using a bundled name never shadows it.
-        let ext = all
-            .iter()
-            .find(|e| e.name == name && e.origin == "bundled")
-            .or_else(|| all.iter().find(|e| e.name == name))
-            .ok_or(DomainError::NotFound)?;
+        let ext = extensions::owner(&all, name).ok_or(DomainError::NotFound)?;
         if !ext.enabled {
             if ext.public_contracts.blocked {
                 return Err(DomainError::Invalid(format!(
@@ -772,9 +767,17 @@ mod tests {
 
     /// oxplow's own required extension is held like any other: a broken
     /// one keeps its last working version, or is out when it has none.
+    /// Its source only runs while developing oxplow
+    /// (`enableBundledExtensions: false`); a shipped oxplow runs its copy.
     #[test]
     fn a_required_extension_that_cant_load_is_held_like_any_other() {
         let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
+        std::fs::write(
+            dir.path().join(".oxplow/project.yaml"),
+            "enableBundledExtensions: false\n",
+        )
+        .unwrap();
         let foundation = crate::bundled_extensions::find("oxplow-foundation").unwrap();
         let to = dir.path().join(".oxplow/extensions/oxplow-foundation");
         for (rel, bytes) in foundation.files() {

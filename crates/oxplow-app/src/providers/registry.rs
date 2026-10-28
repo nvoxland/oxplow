@@ -1631,10 +1631,7 @@ impl ProviderRegistry {
             .split_once('/')
             .filter(|(e, i)| !e.is_empty() && !i.is_empty())
             .ok_or_else(|| "an instance is `<extension>/<instance id>`".to_string())?;
-        let ext = extensions
-            .iter()
-            .find(|e| e.name == ext_name && e.origin == "bundled")
-            .or_else(|| extensions.iter().find(|e| e.name == ext_name))
+        let ext = crate::extensions::owner(extensions, ext_name)
             .filter(|e| e.enabled)
             .ok_or_else(|| format!("no enabled extension `{ext_name}`"))?;
         let wanted = provider.unwrap_or(id);
@@ -2030,16 +2027,7 @@ impl ProviderRegistry {
             == snapshot.source_generation();
         // Checks of unpublished candidates may start a process, but cannot
         // acquire private state under an active installation's identity.
-        let state = snapshot
-            .extensions()
-            .iter()
-            .find(|current| current.name == ext.name && current.origin == "bundled")
-            .or_else(|| {
-                snapshot
-                    .extensions()
-                    .iter()
-                    .find(|current| current.name == ext.name)
-            })
+        let state = crate::extensions::owner(snapshot.extensions(), &ext.name)
             .filter(|current| {
                 unchanged && *current == ext && current.enabled && current.providers.contains(spec)
             })

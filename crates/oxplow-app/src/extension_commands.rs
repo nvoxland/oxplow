@@ -1387,11 +1387,7 @@ impl ExtensionCommands {
                 let live: std::sync::Arc<dyn Fn() -> Result<(), String> + Send + Sync> =
                     std::sync::Arc::new(move || {
                         let snapshot = catalog.live_snapshot(&root);
-                        let current = snapshot
-                            .extensions()
-                            .iter()
-                            .find(|ext| ext.name == owner && ext.origin == "bundled")
-                            .or_else(|| snapshot.extensions().iter().find(|ext| ext.name == owner));
+                        let current = crate::extensions::owner(snapshot.extensions(), &owner);
                         if current.is_some_and(|ext| ext.enabled) {
                             Ok(())
                         } else {

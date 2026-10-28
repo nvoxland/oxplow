@@ -59,16 +59,7 @@ pub fn live_owner(
     let root = root.to_path_buf();
     std::sync::Arc::new(move || {
         let snapshot = catalog.live_snapshot(&root);
-        let current = snapshot
-            .extensions()
-            .iter()
-            .find(|ext| ext.name == owner.id.extension && ext.origin == "bundled")
-            .or_else(|| {
-                snapshot
-                    .extensions()
-                    .iter()
-                    .find(|ext| ext.name == owner.id.extension)
-            });
+        let current = crate::extensions::owner(snapshot.extensions(), &owner.id.extension);
         match current {
             Some(ext)
                 if ext.enabled

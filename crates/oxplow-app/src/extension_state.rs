@@ -214,17 +214,7 @@ impl StateHost {
                 "the owning catalog generation is not current",
             ));
         }
-        // A reserved bundled identity cannot be shadowed by a project package.
-        let ext = snapshot
-            .extensions()
-            .iter()
-            .find(|ext| ext.name == owner.id.extension && ext.origin == "bundled")
-            .or_else(|| {
-                snapshot
-                    .extensions()
-                    .iter()
-                    .find(|ext| ext.name == owner.id.extension)
-            })
+        let ext = crate::extensions::owner(snapshot.extensions(), &owner.id.extension)
             .filter(|ext| {
                 ext.enabled
                     && ext.version == owner.version
