@@ -13,8 +13,8 @@ import { openFromLauncher } from "../../support/ui.js";
 // extension adds — no replacement standing in for a node, no node an
 // extension mounts, no decorator's chip or badge, no panel in the rail, no
 // command in the ☰. The pages that read oxplow's own work list (Board, Tasks)
-// have no list to read here (it is `oxplow-bundled`'s, and their fixtures
-// run with it): they show their empty state, cleanly. The `ui`-less half of
+// read the list oxplow-foundation provides: a project that has no work items
+// yet shows their empty state, cleanly. The `ui`-less half of
 // this — what a page's run holds — is every foundation fixture's, which runs
 // with only foundation on.
 
@@ -74,7 +74,7 @@ test("oxplow's pages are complete with every enhancement off", async ({ fresh })
   await expect(host.getByText("dirty.txt").first()).toBeVisible();
   await nothingAdded(page);
 
-  // The work-list pages: no list here, so they say so, with no error.
+  // The work-list pages: the list is empty, so they say so, with no error.
   await openFromLauncher(page, "Board");
   await expect(host.getByText("No work items here.")).toBeVisible();
   await expect(host.getByRole("alert")).toHaveCount(0);

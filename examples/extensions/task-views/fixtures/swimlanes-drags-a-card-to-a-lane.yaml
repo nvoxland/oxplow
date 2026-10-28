@@ -1,8 +1,6 @@
 # The board is a lane per state. Dragging a card to a lane moves the item.
 # (Renaming through the title's form needs Enter to submit it; a `ui` key
 # step only sends the key event, so that is still the app spec's.)
-# (Oxplow's own work list, effort policy and wiki are bundled's.)
-requires: [oxplow-bundled]
 given:
   - { command: oxplow.work_item.create, input: { title: Card one, thread: thr1 } }
 when: { page: swimlanes, params: { scope: all } }

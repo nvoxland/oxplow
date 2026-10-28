@@ -87,7 +87,7 @@ logs the run, its canonical events and the records. The store's own
 async writes (tests) reach the interface only when restated
 (`test_fixtures::restate_task`).
 
-**A built-in list registers by declaration.** `oxplow-bundled` declares
+**A built-in list registers by declaration.** `oxplow-foundation` declares
 `implementations: [{ capability: work_items, id: oxplow, entry:
 "oxplow:tasks" }]`; `work_items::register_built_ins` registers the
 provider each declared built-in names (`built_in_provider`, the factory:
@@ -348,7 +348,7 @@ itself; the effort policy reacts to `state_changed`
 implementations, restated whole by the app's `CapabilityRegistry`
 (`crates/oxplow-app/src/capabilities.rs`) whenever what it holds or the
 choices change. oxplow's tasks are the `oxplow:tasks` built-in, which
-`oxplow-bundled` declares (`implementations:`), with its features from
+`oxplow-foundation` declares (`implementations:`), with its features from
 core's built-in table; an external provider's row is there while its
 instance runs (`ProviderRegistry::publish`, a work-items provider's
 features as `ExternalWorkItems` reads them). **`active`** is the

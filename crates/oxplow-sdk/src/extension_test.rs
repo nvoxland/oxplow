@@ -5747,7 +5747,7 @@ async fn policy_suite(
     let manifest = format!("{}/extension.yaml", ext.path.trim_end_matches('/'));
     report.ran.push(format!("{EFFORT_POLICY} suite"));
     let run = async {
-        // The suite files work, and oxplow's own work list is bundled's.
+        // The suite files work, so it runs on an oxplow with a work list.
         let with_list = with_work_list(host, ext).await?;
         let fork = with_list.fork().await?;
         let svc = &fork.svc;
@@ -6830,8 +6830,8 @@ expect:
     }
 
     /// A fixture's `requires` turns on extensions beyond the one tested
-    /// (and what they require): oxplow's own work list is bundled's, so a
-    /// fixture that makes work items asks for it.
+    /// (and what they require): what only oxplow-bundled adds (its pages)
+    /// is there when a fixture asks for it.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_fixture_requires_the_extensions_it_needs() {
         let dir = tempfile::tempdir().unwrap();
@@ -6839,9 +6839,8 @@ expect:
         let fixture = |requires: &str| {
             format!(
                 "{requires}given:
-  - {{ command: oxplow.work_item.create, input: {{ title: Mine, thread: thr1 }} }}
-when: {{ sql: SELECT title FROM v_work_item }}
-expect: {{ rows: [{{ title: Mine }}] }}
+when: {{ sql: SELECT count(*) > 0 AS here FROM v_page WHERE extension = 'oxplow-bundled' }}
+expect: {{ rows: [{{ here: 1 }}] }}
 "
             )
         };
@@ -6852,7 +6851,7 @@ expect: {{ rows: [{{ title: Mine }}] }}
         );
         let report = test_extension(dir.path(), "notes", false).await.unwrap();
         assert_eq!(report.errors, Vec::<String>::new());
-        // Without it there is no work list to make the item in.
+        // Without it its pages aren't there.
         std::fs::write(
             dir.path()
                 .join(".oxplow/extensions/notes/fixtures/basic.yaml"),

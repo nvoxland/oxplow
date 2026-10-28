@@ -4,8 +4,6 @@
 # then closed. The answer is matched to the tool's result (`when`), so it
 # comes only once the evidence carries the test run; the call, the tool's
 # answer and the reply are the job's output, in order.
-# (Oxplow's own work list, effort policy and wiki are bundled's.)
-requires: [oxplow-bundled]
 when:
   setup:
     - { command: oxplow.work_item.create, input: { title: Parse blocks } }

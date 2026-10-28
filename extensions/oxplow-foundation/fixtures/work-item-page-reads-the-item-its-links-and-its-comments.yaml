@@ -1,7 +1,5 @@
 # A work item's page: the parts read the item by its uri, its list's
 # features switch the gated buttons, and links show from both ends.
-# (Oxplow's own work list, effort policy and wiki are bundled's.)
-requires: [oxplow-bundled]
 given:
   - { command: oxplow.work_item.create, input: { title: The item, body: Some words., thread: thr1 }, bind: item }
   - { command: oxplow.work_item.create, input: { title: Its blocker, body: Some words., thread: thr1 }, bind: blocker }

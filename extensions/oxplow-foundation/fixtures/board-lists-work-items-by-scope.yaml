@@ -1,8 +1,6 @@
 # The Board: every work item in scope as a card in its state; the scope
 # narrows it to the thread's, the backlog's or everything; the page's row
 # says which scope its part draws.
-# (Oxplow's own work list, effort policy and wiki are bundled's.)
-requires: [oxplow-bundled]
 given:
   - { command: oxplow.work_item.create, input: { title: On the thread, thread: thr1 } }
   - { command: oxplow.work_item.create, input: { title: In the backlog } }

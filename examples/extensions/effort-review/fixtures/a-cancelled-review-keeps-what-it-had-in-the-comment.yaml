@@ -1,7 +1,5 @@
 # Cancelled while the model writes: the job ends cancelled, and the comment
-# on the work item keeps what it had and says so. (Oxplow's own work list,
-# effort policy and wiki are bundled's.)
-requires: [oxplow-bundled]
+# on the work item keeps what it had and says so.
 when:
   setup:
     - { command: oxplow.work_item.create, input: { title: Parse blocks } }
