@@ -39,7 +39,7 @@ pub struct CustomComponent {
     /// Commands the component may invoke.
     pub commands: Vec<String>,
     /// It runs its own read-only SQL over the models (`querySql`): needs
-    /// `permissions.sql`.
+    /// `sql.read` permission.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sql: Option<oxplow_domain::permissions::SqlAccess>,
 }
@@ -56,7 +56,7 @@ pub(crate) struct ComponentFile {
     #[serde(default)]
     commands: Vec<String>,
     /// `read`: it runs its own read-only SQL over the models
-    /// (`querySql`); its extension needs `permissions.sql: read`.
+    /// (`querySql`); its extension needs `sql.read` in `permissions:`.
     #[serde(default)]
     sql: Option<oxplow_domain::permissions::SqlAccess>,
 }
@@ -914,7 +914,7 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let ext = load_permitted(
             d.path(),
-            "permissions: { commands: [oxplow.work_item.transition] }\n",
+            "permissions: [commands:oxplow.work_item.transition]\n",
             "  - { id: burndown, title: Burndown, commands: [oxplow.work_item.transition] }\n",
         );
         assert!(ext.errors.is_empty(), "{:?}", ext.errors);
@@ -1054,7 +1054,7 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         load_permitted(
             d.path(),
-            "permissions: { commands: [nope.no.cmd, oxplow.work_item.transition] }\n",
+            "permissions: [commands:nope.no.cmd, commands:oxplow.work_item.transition]\n",
             "  - { id: burndown, commands: [nope.no.cmd, oxplow.work_item.transition] }\n",
         );
         write(

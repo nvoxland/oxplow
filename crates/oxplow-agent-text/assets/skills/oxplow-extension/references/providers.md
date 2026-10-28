@@ -27,7 +27,7 @@ An extension with an **external provider** (`providers:` — a program that
    token from the env var of that name — answer `Auth` (-32002) when the
    service refuses it and oxplow renews it and calls again). You can't
    sign in or set a credential yourself.
-   The extension declares `permissions.process` (and its `network`
+   The extension declares `process.run` (and its `network`
    hosts and `secrets`), which a person approves when it is deployed, and
    enables the provider in Settings → Integrations; you can't do either.
    A work-items provider is a **backend for the project's own work**,

@@ -31,7 +31,7 @@ the key, URL and model name before using them.
 Each provider kind is code in oxplow itself. The extension that declares a
 provider names its kind and the URL it calls by default. A call carries
 your key and your prompts, so that extension declares
-`permissions: { ai: true }`, including the extension that comes with
+`permissions: [ai.compute]`, including the extension that comes with
 oxplow. You approve that when you deploy the extension (Settings →
 Extensions).
 

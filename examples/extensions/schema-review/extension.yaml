@@ -4,7 +4,7 @@ description: Reviews an agent's schema migrations — a dropped table, untested 
 engine: ">=0.7"
 version: 0.1.0
 # Its collector reads the project's migration files.
-permissions: { files: read }
+permissions: [files.read]
 intent:
   purpose: >-
     A review policy of its own for work that touches database migrations.

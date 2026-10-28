@@ -57,7 +57,7 @@ failure after your edit is yours:
   as written, and runs under the extension's permissions;
 - `advisory` — guidance for you: a query run at a turn's end whose rows
   reach the agent (`audience: person` raises them in Alerts instead); a
-  an extension's advisories need `permissions.agent`;
+  an extension's advisories need `agent.write`;
 - `skill` — a skill (`SKILL.md` with `name:` and `description:`
   frontmatter) you load when it's relevant; `kind: command` makes it a
   slash command;

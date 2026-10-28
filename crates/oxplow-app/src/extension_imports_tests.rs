@@ -157,7 +157,7 @@ fn put_in(dir: &Path, e: &Ext) {
     for kind in &e.declares {
         match kind {
             Kind::Collector => {
-                manifest += "permissions: { files: read }\ncollectors:\n  - id: thing\n    runtime: starlark\n    entry: collectors/thing.star\n    on: [snapshot.taken]\n    facts: [x.y]\n";
+                manifest += "permissions: [files.read]\ncollectors:\n  - id: thing\n    runtime: starlark\n    entry: collectors/thing.star\n    on: [snapshot.taken]\n    facts: [x.y]\n";
                 write(
                     dir,
                     "collectors/thing.star",

@@ -7,8 +7,7 @@ intent:
     metrics: Rust and TypeScript idioms, type coverage, and the test,
     coverage and clippy reports its test and lint runs write.
 # Its scan collectors read this repository's code.
-permissions:
-  files: read
+permissions: [files.read]
 measures:
 - key: repo.type_coverage
   unit: '%'

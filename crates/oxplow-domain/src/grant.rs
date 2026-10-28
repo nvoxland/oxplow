@@ -71,7 +71,7 @@ impl Grant {
 
     /// Whether its permissions allow `need`; else the permission that
     /// would (`ai`, `process`, …).
-    pub fn permits(&self, need: &Need) -> Result<(), &'static str> {
+    pub fn permits(&self, need: &Need) -> Result<(), String> {
         let p = &self.permissions;
         let ok = match need {
             Need::Scope(s) => match crate::service::need_scope(s) {
@@ -92,18 +92,19 @@ impl Grant {
         if ok {
             return Ok(());
         }
+        // What to add to `permissions:`, as the list spells it.
         Err(match need {
             Need::Scope(s) => match crate::service::need_scope(s) {
-                "sql.read" => "sql",
-                "tree.read" => "files",
-                _ => "ai",
+                "sql.read" => "sql.read".to_string(),
+                "tree.read" => "files.read".to_string(),
+                _ => "ai.compute".to_string(),
             },
-            Need::Model(_) => "sql",
-            Need::Path(_) => "files",
-            Need::Program(_) | Need::Files | Need::Env(_) => "process",
-            Need::Host(_) => "network",
-            Need::Credential(_) => "secrets",
-            Need::Command(_) => "commands",
+            Need::Model(_) => "sql.read".to_string(),
+            Need::Path(_) => "files.read".to_string(),
+            Need::Program(_) | Need::Files | Need::Env(_) => "process.run".to_string(),
+            Need::Host(h) => format!("network:{h}"),
+            Need::Credential(c) => format!("secrets:{c}"),
+            Need::Command(c) => format!("commands:{c}"),
         })
     }
 }
@@ -212,7 +213,7 @@ pub fn decide(
     }
     if let Err(permission) = grant.permits(need) {
         return Decision::Denied(format!(
-            "needs `permissions.{permission}` in the extension's manifest"
+            "needs `{permission}` in the extension's `permissions:`"
         ));
     }
     match enforcement.gap(need) {
@@ -259,7 +260,7 @@ mod tests {
     #[test]
     fn a_need_is_decided_against_the_extensions_permissions() {
         let g = granted(
-            "process: true\nnetwork: [\"*.githubusercontent.com\", api.github.com]\nsecrets: [GH_TOKEN]\ncommands: [oxplow.work_item.*]",
+            "[process.run, \"network:*.githubusercontent.com\", network:api.github.com, secrets:GH_TOKEN, commands:oxplow.work_item.*]",
         );
         let declared = GrantRequest {
             scopes: ["ai.compute".to_string(), "sql.read".to_string()].into(),
@@ -274,11 +275,11 @@ mod tests {
         assert_eq!(d(Need::Program("bin/sync.sh".into())), Decision::Allowed);
         assert_eq!(
             d(Need::Scope("ai.compute".into())),
-            Decision::Denied("needs `permissions.ai` in the extension's manifest".into())
+            Decision::Denied("needs `ai.compute` in the extension's `permissions:`".into())
         );
         assert_eq!(
             d(Need::Scope("sql.read".into())),
-            Decision::Denied("needs `permissions.sql` in the extension's manifest".into())
+            Decision::Denied("needs `sql.read` in the extension's `permissions:`".into())
         );
         // Undeclared stays refused whatever is permitted.
         assert_eq!(
@@ -291,14 +292,16 @@ mod tests {
         );
         assert_eq!(
             d(Need::Command("oxplow.thread.close".into())),
-            Decision::Denied("needs `permissions.commands` in the extension's manifest".into())
+            Decision::Denied(
+                "needs `commands:oxplow.thread.close` in the extension's `permissions:`".into()
+            )
         );
     }
 
     /// Its own commands need no permission.
     #[test]
     fn a_command_in_the_own_namespace_needs_no_pattern() {
-        let g = granted("{}");
+        let g = granted("[]");
         let d = |c: &str| decide(&Need::Command(c.into()), &GrantRequest::default(), &g, MAC);
         assert_eq!(d("acme.notes.add"), Decision::Allowed);
         assert!(matches!(d("acmex.notes.add"), Decision::Denied(_)));
@@ -317,7 +320,7 @@ mod tests {
     /// as enforced.
     #[test]
     fn what_isnt_enforced_here_says_so() {
-        let g = granted("process: true\nnetwork: [api.github.com]");
+        let g = granted("[process.run, network:api.github.com]");
         assert!(matches!(
             decide(
                 &Need::Host("api.github.com".into()),

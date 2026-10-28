@@ -246,7 +246,7 @@ model the SQL reads and the command it runs. Prefer `answers:` on pages.
      (`rows` stands in for its `input` query; `event` is the event an
      `on:` collector reacts to), `expect: { entities: { <name>: n } }` —
      it runs your script and types its rows; an exec collector's example
-     isn't run (it is a program under `permissions.process`);
+     isn't run (it is a program under `process.run`);
    - a fact collector (one with `facts:`): `when: { collector: <id>,
      files: { "src/a.ts": "…" } }` (the tree its `files()` sees),
      `expect: { facts: [{ measure, value, path? }] }` — each fact is

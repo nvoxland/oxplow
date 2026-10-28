@@ -26,9 +26,7 @@ intent:
     - name: an-item-finished
       input: { implementation: prompt_efforts, event: { type: work_item.state_changed } }
       expect: the item's open effort closes
-permissions:
-  sql: read
-  commands: [oxplow.effort.open, oxplow.effort.close, oxplow.effort.link]
+permissions: [sql.read, commands:oxplow.effort.open, commands:oxplow.effort.close, commands:oxplow.effort.link]
 implementations:
   # The project's effort policy once chosen in Settings → Capabilities. It
   # runs under the permissions above, approved when it was deployed, and

@@ -41,11 +41,7 @@ intent:
     - name: the-board-decides-a-todo-from-its-card
       input: { page: todo-board }
       expect: a card per sorted TODO under its kind; a card's form records the decision
-permissions:
-  sql: read
-  ai: true
-  files: read
-  commands: [oxplow.command.sequence, oxplow.knowledge.write_page]
+permissions: [sql.read, files.read, ai.compute, commands:oxplow.command.sequence, commands:oxplow.knowledge.write_page]
 measures:
   - key: triage.todos
     title: TODO comments

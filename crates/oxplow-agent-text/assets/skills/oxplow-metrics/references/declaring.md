@@ -110,7 +110,7 @@ time. A count-over-threshold is `aggregation: count` + a `filter: { minValue: N 
 |---|---|
 | `id` | namespaced producer id (required) — the producer name its captures carry |
 | `doc` | one line on what it collects |
-| `runtime` | `starlark` \| `jaq` (sandboxed, no I/O) \| `exec` (a program; needs `permissions.process`, approved at deploy) |
+| `runtime` | `starlark` \| `jaq` (sandboxed, no I/O) \| `exec` (a program; needs `process.run`, approved at deploy) |
 | `entry` | the script or program, project-relative |
 | `trigger` | when it runs: `{ on: [snapshot.taken] }` (after a snapshot that recorded files — tree scans), `{ on: [effort.finished] }` (over the effort's end snapshot), `{ on: [<other event types>], where?: { field: value } }`, `{ every: 15m }`, or `manual` (only via `oxplow.collector.sync`) |
 | `facts` | the measure keys it may record facts on (declare-to-collect — a fact outside this list is dropped) |
@@ -129,7 +129,7 @@ A collector with `entities:` instead of `facts:` is an **entity collector**
   `.oxplow/extensions/project/extension.yaml` + scripts under its `collectors/`
   (checked into the repo, shared with the team; turn a metric on/off or set
   its target with `use:` / `enabled: false` in `.oxplow/project.yaml`) — for a collector that must be
-  an `exec` program under `permissions.process`, or a report-derived one.
+  an `exec` program under `process.run`, or a report-derived one.
 - **User-global** (cross-project): `*.yaml` files under the user's global config
   dir — a `measures/`, `metrics/` and `dimensions/` folder — hot-reloaded.
   Global measures are active in every project automatically; a global *metric*

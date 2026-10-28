@@ -1259,7 +1259,7 @@ mod tests {
         std::fs::create_dir_all(&ext).unwrap();
         std::fs::write(
             ext.join("extension.yaml"),
-            "manifest: 2\nname: work\nintent:\n  purpose: test\npermissions: { files: read }\ncollectors:\n  - id: files\n    runtime: starlark\n    entry: files.star\n    needs: [tree.read]\n    facts: [work.files]\n",
+            "manifest: 2\nname: work\nintent:\n  purpose: test\npermissions: [files.read]\ncollectors:\n  - id: files\n    runtime: starlark\n    entry: files.star\n    needs: [tree.read]\n    facts: [work.files]\n",
         )
         .unwrap();
         std::fs::write(

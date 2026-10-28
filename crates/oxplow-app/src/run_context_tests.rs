@@ -28,7 +28,7 @@ fn acme(root: &Path, task: &str) {
         root,
         ".oxplow/extensions/acme/extension.yaml",
         "manifest: 2\nname: acme\nversion: 1.2.0\nintent: { purpose: Runs., origin: null, examples: [] }\n\
-         permissions: { commands: [oxplow.work_item.update] }\n\
+         permissions: [commands:oxplow.work_item.update]\n\
          event_types:\n  types:\n    - { type: acme.merged, v: 1, schema: merged.json, summary: A merge. }\n\
          collectors:\n\
          \x20 - id: star\n    runtime: starlark\n    entry: star.star\n    on: [acme.merged]\n    entities:\n      - { name: seen, key: k, columns: { k: text } }\n\
@@ -254,7 +254,7 @@ async fn a_run_records_what_its_grant_decided() {
         &root,
         ".oxplow/extensions/acme/extension.yaml",
         "manifest: 2\nname: acme\nintent: { purpose: Runs., origin: null, examples: [] }\n\
-         permissions: { process: true, secrets: [GH_TOKEN], network: [api.github.com], sql: read, commands: [oxplow.work_item.update] }\n\
+         permissions: [sql.read, process.run, network:api.github.com, secrets:GH_TOKEN, commands:oxplow.work_item.update]\n\
          collectors:\n\
          \x20 - id: gh\n    runtime: exec\n    entry: sync.sh\n    credentials: [GH_TOKEN]\n    network: [api.github.com]\n    entities:\n      - { name: pr, key: n, columns: { n: int } }\n\
          commands:\n\

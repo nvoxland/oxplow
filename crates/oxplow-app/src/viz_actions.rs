@@ -445,7 +445,7 @@ pub struct ComponentSql {
 
 /// Run `call`'s SQL for a component that declares `sql: read`, at the
 /// version loaded now: read-only over the published models, as the
-/// component's run under its extension's permissions (`permissions.sql`),
+/// component's run under its extension's permissions (`sql.read`),
 /// so the read is decided and recorded like a script's `sql.read`.
 pub async fn run_component_sql(
     svc: &crate::Services,
@@ -487,7 +487,7 @@ fn prepare_component_sql(
         return Err(CommandError::Invalid {
             field: Some("/sql".into()),
             message: format!(
-                "component `{}` doesn't declare `sql: read`; add it (and `permissions.sql: read`) \
+                "component `{}` doesn't declare `sql: read`; add it (and `sql.read` to its extension's `permissions:`) \
                  to run its own SQL",
                 component.id
             ),
@@ -1668,7 +1668,7 @@ view:
         let ext = root.join(".oxplow/extensions/acme");
         std::fs::write(
             ext.join("extension.yaml"),
-            "manifest: 2\nname: acme\nintent:\n  purpose: test\npermissions: { commands: [oxplow.work_item.transition] }\ncustom_components:\n  - { id: board, commands: [oxplow.work_item.transition] }\n",
+            "manifest: 2\nname: acme\nintent:\n  purpose: test\npermissions: [commands:oxplow.work_item.transition]\ncustom_components:\n  - { id: board, commands: [oxplow.work_item.transition] }\n",
         )
         .unwrap();
         std::fs::create_dir_all(ext.join("components/board")).unwrap();
@@ -1830,7 +1830,7 @@ view:
         }
         std::fs::write(
             ext.join("extension.yaml"),
-            "manifest: 2\nname: acme\nintent:\n  purpose: test\npermissions: { commands: [oxplow.work_item.transition] }\ncustom_components:\n  - { id: board, bundle: components/Board, commands: [oxplow.work_item.transition] }\n",
+            "manifest: 2\nname: acme\nintent:\n  purpose: test\npermissions: [commands:oxplow.work_item.transition]\ncustom_components:\n  - { id: board, bundle: components/Board, commands: [oxplow.work_item.transition] }\n",
         )
         .unwrap();
         std::fs::write(ext.join("components/board/index.html"), "<!doctype html>").unwrap();
@@ -1904,7 +1904,7 @@ view:
     }
 
     /// A component that declares `sql: read` runs its own read-only SQL
-    /// over the models, held to its extension's `permissions.sql`; one that
+    /// over the models, held to its extension's `sql.read` permission; one that
     /// doesn't declare it is refused.
     #[tokio::test]
     async fn a_component_with_sql_read_queries_the_layer() {
@@ -1935,7 +1935,7 @@ view:
         );
         std::fs::write(
             ext.join("extension.yaml"),
-            "manifest: 2\nname: acme\nintent:\n  purpose: test\npermissions: { sql: read, commands: [oxplow.work_item.transition] }\ncustom_components:\n  - { id: board, commands: [oxplow.work_item.transition], sql: read }\n",
+            "manifest: 2\nname: acme\nintent:\n  purpose: test\npermissions: [sql.read, commands:oxplow.work_item.transition]\ncustom_components:\n  - { id: board, commands: [oxplow.work_item.transition], sql: read }\n",
         )
         .unwrap();
         let version = load_board(&fx, &root).await;
@@ -1952,7 +1952,7 @@ view:
         let ext = root.join(".oxplow/extensions/acme");
         std::fs::write(
             ext.join("extension.yaml"),
-            "manifest: 2\nname: acme\nintent:\n  purpose: test\npermissions: { sql: read, commands: [oxplow.work_item.transition] }\ncustom_components:\n  - { id: board, commands: [oxplow.work_item.transition], sql: read }\n",
+            "manifest: 2\nname: acme\nintent:\n  purpose: test\npermissions: [sql.read, commands:oxplow.work_item.transition]\ncustom_components:\n  - { id: board, commands: [oxplow.work_item.transition], sql: read }\n",
         )
         .unwrap();
         let version = load_board(&fx, &root).await;

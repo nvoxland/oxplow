@@ -3966,7 +3966,7 @@ fn check_permissions(ext: &mut Extension, files: &dyn ExtensionFiles, file: &str
                 at(
                     file,
                     line.or(fallback),
-                    format!("{what} needs {}", missing.join(", ")),
+                    format!("{what} needs {} in `permissions:`", missing.join(", ")),
                 )
             })
         })
@@ -6293,7 +6293,7 @@ mod tests {
         load_extension_at(dir, "acme")
             .errors
             .into_iter()
-            .filter(|e| e.contains("permissions."))
+            .filter(|e| e.contains("in `permissions:`"))
             .collect()
     }
 
@@ -6447,20 +6447,20 @@ mod tests {
         assert_eq!(errors.len(), 1, "{errors:?}");
         assert!(
             errors[0].contains("extension.yaml:6:")
-                && errors[0].contains("`permissions.process`")
-                && errors[0].contains("`permissions.network: [api.example.com]`")
+                && errors[0].contains("`process.run`")
+                && errors[0].contains("`network:api.example.com`")
                 && errors[0].contains("provider `tracker`"),
             "{errors:?}"
         );
         let errors = permission_errors(
             dir.path(),
-            &format!("manifest: 2\nname: acme\npermissions: {{ process: true, network: [api.example.com] }}\nintent:\n  purpose: x\n{body}"),
+            &format!("manifest: 2\nname: acme\npermissions: [process.run, network:api.example.com]\nintent:\n  purpose: x\n{body}"),
         );
         assert!(errors.is_empty(), "{errors:?}");
     }
 
     /// A component may invoke its own extension's commands; any other
-    /// command a `permissions.commands` pattern must name.
+    /// command a `commands:<pattern>` permission must name.
     #[test]
     fn a_component_may_invoke_only_its_own_or_a_declared_command() {
         let dir = tempfile::tempdir().unwrap();
@@ -6472,19 +6472,19 @@ mod tests {
         );
         assert_eq!(errors.len(), 1, "{errors:?}");
         assert!(
-            errors[0].contains("`permissions.commands: [oxplow.work_item.transition]`")
+            errors[0].contains("`commands:oxplow.work_item.transition`")
                 && errors[0].contains("component `board`"),
             "{errors:?}"
         );
         let errors = permission_errors(
             dir.path(),
-            &format!("manifest: 2\nname: acme\npermissions: {{ commands: [oxplow.work_item.*] }}\nintent:\n  purpose: x\n{body}"),
+            &format!("manifest: 2\nname: acme\npermissions: [commands:oxplow.work_item.*]\nintent:\n  purpose: x\n{body}"),
         );
         assert!(errors.is_empty(), "{errors:?}");
     }
 
     /// A component that runs its own SQL (`sql: read`) needs
-    /// `permissions.sql`, as a script's `sql.read` does.
+    /// `sql.read`, as a script's `sql.read` does.
     #[test]
     fn a_component_that_runs_sql_needs_the_sql_permission() {
         let dir = tempfile::tempdir().unwrap();
@@ -6496,13 +6496,14 @@ mod tests {
         );
         assert_eq!(errors.len(), 1, "{errors:?}");
         assert!(
-            errors[0].contains("`permissions.sql: read`")
-                && errors[0].contains("component `board`"),
+            errors[0].contains("`sql.read`") && errors[0].contains("component `board`"),
             "{errors:?}"
         );
         let errors = permission_errors(
             dir.path(),
-            &format!("manifest: 2\nname: acme\npermissions: {{ sql: read }}\nintent:\n  purpose: x\n{body}"),
+            &format!(
+                "manifest: 2\nname: acme\npermissions: [sql.read]\nintent:\n  purpose: x\n{body}"
+            ),
         );
         assert!(errors.is_empty(), "{errors:?}");
     }
@@ -6523,12 +6524,14 @@ mod tests {
         );
         assert_eq!(errors.len(), 1, "{errors:?}");
         assert!(
-            errors[0].contains("`permissions.ai`") && errors[0].contains("collector `sum`"),
+            errors[0].contains("`ai.compute`") && errors[0].contains("collector `sum`"),
             "{errors:?}"
         );
         let errors = permission_errors(
             dir.path(),
-            &format!("manifest: 2\nname: acme\npermissions: {{ ai: true }}\nintent:\n  purpose: x\n{body}"),
+            &format!(
+                "manifest: 2\nname: acme\npermissions: [ai.compute]\nintent:\n  purpose: x\n{body}"
+            ),
         );
         assert!(errors.is_empty(), "{errors:?}");
     }
@@ -6550,7 +6553,7 @@ mod tests {
         assert!(errors.is_empty(), "{errors:?}");
         let errors = permission_errors(dir.path(), &collector("    needs: [sql.read]\n"));
         assert_eq!(errors.len(), 1, "{errors:?}");
-        assert!(errors[0].contains("`permissions.sql: read`"), "{errors:?}");
+        assert!(errors[0].contains("`sql.read`"), "{errors:?}");
     }
 
     const EXT: &str =
@@ -7009,7 +7012,7 @@ view:
         write(
             dir.path(),
             ".oxplow/extensions/review/extension.yaml",
-            "manifest: 2\nname: review\nintent:\n  purpose: test\npermissions: { process: true }\ncollectors:\n  - id: gh\n    runtime: exec\n    entry: bin/sync.sh\n    entities:\n      - { name: pr, key: number, columns: { number: int, title: text } }\n  - id: bad\n    runtime: python\n    entry: x\n    entities: []\n",
+            "manifest: 2\nname: review\nintent:\n  purpose: test\npermissions: [process.run]\ncollectors:\n  - id: gh\n    runtime: exec\n    entry: bin/sync.sh\n    entities:\n      - { name: pr, key: number, columns: { number: int, title: text } }\n  - id: bad\n    runtime: python\n    entry: x\n    entities: []\n",
         );
         write(
             dir.path(),
@@ -7041,7 +7044,7 @@ view:
         write(
             dir.path(),
             ".oxplow/extensions/gh/extension.yaml",
-            "manifest: 2\nname: gh\nintent:\n  purpose: test\npermissions: { process: true }\ncollectors:\n  - id: prs\n    runtime: exec\n    entry: sync.sh\n    entities:\n      - { name: pr, key: number, columns: { number: int } }\n",
+            "manifest: 2\nname: gh\nintent:\n  purpose: test\npermissions: [process.run]\ncollectors:\n  - id: prs\n    runtime: exec\n    entry: sync.sh\n    entities:\n      - { name: pr, key: number, columns: { number: int } }\n",
         );
         write(dir.path(), ".oxplow/extensions/gh/sync.sh", "#!/bin/sh\n");
         write(
@@ -7294,7 +7297,7 @@ commands:
         std::fs::create_dir_all(dir.join("commands")).unwrap();
         std::fs::write(
             dir.join("extension.yaml"),
-            "manifest: 2\nname: x\nintent:\n  purpose: p\npermissions: { ai: true }\neffects:\n  - { id: e, summary: s, on: [effort.finished], entry: effects/e.star, needs: [ai.discover] }\ncommands:\n  - { name: c.go, summary: s, entry: commands/c.star, needs: [ai.discover], input_schema: { type: object, additionalProperties: false } }\n",
+            "manifest: 2\nname: x\nintent:\n  purpose: p\npermissions: [ai.compute]\neffects:\n  - { id: e, summary: s, on: [effort.finished], entry: effects/e.star, needs: [ai.discover] }\ncommands:\n  - { name: c.go, summary: s, entry: commands/c.star, needs: [ai.discover], input_schema: { type: object, additionalProperties: false } }\n",
         )
         .unwrap();
         let script = "def transform(x):\n    r = scope(\"ai.discover\", {\"role\": \"summarize\"})\n    if not r[\"model\"]:\n        return {\"skip\": r[\"problem\"]}\n    return {\"commands\": []}\n";
@@ -9288,7 +9291,7 @@ commands:
         write(
             dir.path(),
             ".oxplow/extensions/x/extension.yaml",
-            "manifest: 2\nname: x\nintent:\n  purpose: test\npermissions: { files: read }\nmeasures:\n  - { key: acme.todo }\ncollectors:\n  - { id: acme.todo_scan, runtime: starlark, entry: collectors/todo.star, on: [snapshot.taken], facts: [acme.todo] }\n",
+            "manifest: 2\nname: x\nintent:\n  purpose: test\npermissions: [files.read]\nmeasures:\n  - { key: acme.todo }\ncollectors:\n  - { id: acme.todo_scan, runtime: starlark, entry: collectors/todo.star, on: [snapshot.taken], facts: [acme.todo] }\n",
         );
         write(
             dir.path(),
@@ -10023,7 +10026,7 @@ commands:
     async fn advisories_parse_and_validate_their_columns() {
         let (d, ext) = load_x(
             &[],
-            "permissions: { agent: true }\nadvisories:\n  - id: low-coverage\n    on: post-tool-use\n    once_per: effort\n    query: SELECT 'add tests' AS message WHERE :effort_id IS NOT NULL\n  - id: crossings\n    on: prompt\n    once_per: row\n    heading: '# Metric thresholds'\n    query: SELECT 'x' AS message, 'k' AS key\n  - id: nokey\n    on: prompt\n    once_per: row\n    query: SELECT 'x' AS message\n  - id: Bad Id\n    on: prompt\n    query: SELECT 1\n",
+            "permissions: [agent.write]\nadvisories:\n  - id: low-coverage\n    on: post-tool-use\n    once_per: effort\n    query: SELECT 'add tests' AS message WHERE :effort_id IS NOT NULL\n  - id: crossings\n    on: prompt\n    once_per: row\n    heading: '# Metric thresholds'\n    query: SELECT 'x' AS message, 'k' AS key\n  - id: nokey\n    on: prompt\n    once_per: row\n    query: SELECT 'x' AS message\n  - id: Bad Id\n    on: prompt\n    query: SELECT 1\n",
         );
         let ids: Vec<&str> = ext.advisories.iter().map(|a| a.id.as_str()).collect();
         assert_eq!(ids, vec!["low-coverage", "crossings", "nokey"]);

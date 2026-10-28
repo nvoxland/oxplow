@@ -170,7 +170,7 @@ markdown itself, nor edits it in a `<textarea>`.
 - **Settings → Extensions says what each script is given.** Under the
   row, one muted line per Starlark script that has services: its name, then
   the service titles ("Collector triage — Read the captured tree · Ask a
-  model (needs `permissions.ai`)"). A service the script uses without naming it in
+  model (needs `ai.compute`)"). A service the script uses without naming it in
   `needs` says "(not in its needs)". The install/update review lists the
   same lines above the impact report. `serviceLines` in
   `extensionRowModel.ts`.

@@ -338,7 +338,7 @@ stopped when it runs past its time budget or its memory cap (`scripts:`
 in Settings reference). It needs no permission, with one exception:
 a Starlark script that calls a model (`ai_classify`, `ai_score`,
 `ai_summarize`, `ai_extract`) spends your AI provider's key every run,
-so the extension must declare `permissions: { ai: true }`. The loader
+so the extension must declare `permissions: [ai.compute]`. The loader
 refuses it otherwise.
 
 A collector that records facts declares `facts:` (the measures it writes)
@@ -459,7 +459,7 @@ is private and limited to 1 MiB and 64 nesting levels. `cancel` and
 per key: asking again with it returns the same job. Put the subject in it
 (`review:eff12`), and read it back as the snapshot's `intentKey` or
 `v_job_run.intent_key`. The host records intent before a worker starts, and
-the extension must declare `permissions: { ai: true }` before a job can
+the extension must declare `permissions: [ai.compute]` before a job can
 spend an AI provider key, and a person approves that when the extension is
 deployed.
 
@@ -726,7 +726,7 @@ implementations:
 - `baseUrl` is the URL a provider uses when the person names none in
   Settings → AI. It is the only `config` key.
 - The key always comes from the person's keychain.
-- Declaring a provider needs `permissions.ai`: it points a person's key
+- Declaring a provider needs `ai.compute`: it points a person's key
   at its URL. A person approves it when the extension is deployed.
 
 ### Effort policies

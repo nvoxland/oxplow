@@ -231,7 +231,7 @@ mod tests {
         std::fs::create_dir_all(&ext).unwrap();
         std::fs::write(
             ext.join("extension.yaml"),
-            "manifest: 2\nname: acme\nintent:\n  purpose: test\npermissions: { process: true, secrets: [TOKEN] }\ncollectors:\n  - id: s\n    runtime: exec\n    entry: sync.sh\n    credentials: [TOKEN]\n    entities:\n      - { name: row, key: id, columns: { id: int } }\n",
+            "manifest: 2\nname: acme\nintent:\n  purpose: test\npermissions: [process.run, secrets:TOKEN]\ncollectors:\n  - id: s\n    runtime: exec\n    entry: sync.sh\n    credentials: [TOKEN]\n    entities:\n      - { name: row, key: id, columns: { id: int } }\n",
         )
         .unwrap();
         std::fs::write(
@@ -352,7 +352,7 @@ mod tests {
         std::fs::write(
             ext.join("extension.yaml"),
             format!(
-                "manifest: 2\nname: tracker\nintent:\n  purpose: notes over MCP\n  examples: [{{ name: a }}]\npermissions: {{ process: true, network: [mcp.example.com], secrets: [OXPLOW_MCP_BEARER] }}\nproviders:\n  - id: notes\n    capability: work_items\n    network: [mcp.example.com]\n    adapter:\n      mcp: {{ url: \"https://mcp.example.com/mcp\", auth: OXPLOW_MCP_BEARER }}\n      mapping: mcp/x.star\n      tools: mcp/tools.json\n    credentials:\n      - {{ name: OXPLOW_MCP_BEARER, secretRef: {{ schemaVersion: 1, id: \"{id}\" }} }}\n    declarations: provider.json\n"
+                "manifest: 2\nname: tracker\nintent:\n  purpose: notes over MCP\n  examples: [{{ name: a }}]\npermissions: [process.run, network:mcp.example.com, secrets:OXPLOW_MCP_BEARER]\nproviders:\n  - id: notes\n    capability: work_items\n    network: [mcp.example.com]\n    adapter:\n      mcp: {{ url: \"https://mcp.example.com/mcp\", auth: OXPLOW_MCP_BEARER }}\n      mapping: mcp/x.star\n      tools: mcp/tools.json\n    credentials:\n      - {{ name: OXPLOW_MCP_BEARER, secretRef: {{ schemaVersion: 1, id: \"{id}\" }} }}\n    declarations: provider.json\n"
             ),
         )
         .unwrap();

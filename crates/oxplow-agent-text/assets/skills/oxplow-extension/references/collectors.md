@@ -32,7 +32,7 @@ Rules:
   (the script goes through a proxy; `curl`, `gh` and most HTTP clients
   pick it up from `HTTPS_PROXY`). A missing host shows up as a `403` from
   the proxy or a connection failure.
-- **A collector that runs a program needs `permissions.process`** (and the
+- **A collector that runs a program needs `process.run`** (and the
   `network` hosts and `secrets` it uses), which a person approves when the
   extension is deployed; you can't approve. Once it is deployed,
   `run_command` `oxplow.collector.sync { collector: "<extension>/<id>" }`
@@ -53,7 +53,7 @@ Rules:
   jaq: it only computes) runs that stream's own script over its latest
   snapshot and returns the facts it would record (`{ owner, id, facts }`). `oxplow.collector.sync` runs it for real
   (collected data is shared by the whole project). An exec collector's
-  preview needs the same `permissions.process`.
+  preview needs the same `process.run`.
 - A declared entity's view exists once its collector first runs.
 
 **Deriving data you already have (starlark / jaq collectors).** When the
@@ -72,7 +72,7 @@ to a read-only SQL query:
 - **Permissions.** It runs sandboxed (no network, files, env or credentials),
   so it needs none and you can run `oxplow.collector.sync` on it yourself —
   unless it calls a model (`ai_*`, "Asking a model" below): that spends the user's key on
-  every run, so the extension declares `permissions.ai` and the user approves
+  every run, so the extension declares `ai.compute` and the user approves
   it when it is deployed. Without it the loader refuses the extension.
 - **Input limits.** `input` can't read the collector's own views, and more
   than 10,000 input rows fails the run.
@@ -121,7 +121,7 @@ and summary):
   over the `v_*` models.
 - `tree.read`: `files()`, `source_files()`, `duplicate_blocks()`, the
   snapshot's files. A fact collector has it without declaring it.
-- `ai.compute`: the `ai_*` builtins. The extension declares `permissions.ai`. An
+- `ai.compute`: the `ai_*` builtins. The extension declares `ai.compute`. An
   entity collector that calls one has it without declaring it.
 - `ai.discover`: `scope("ai.discover", {role})` says whether a model
   serves a role (a built-in or your extension's `ai_profiles` id) —

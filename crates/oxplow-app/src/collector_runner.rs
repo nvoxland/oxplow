@@ -2422,7 +2422,7 @@ pub(crate) mod tests {
         std::fs::create_dir_all(&ext).unwrap();
         std::fs::write(
             ext.join("extension.yaml"),
-            "manifest: 2\nname: my-gh\nintent:\n  purpose: test\npermissions: { process: true }\ncollectors:\n  - id: gh\n    runtime: exec\n    entry: sync.sh\n    entities:\n      - { name: pr, key: number, columns: { number: int, title: text } }\n",
+            "manifest: 2\nname: my-gh\nintent:\n  purpose: test\npermissions: [process.run]\ncollectors:\n  - id: gh\n    runtime: exec\n    entry: sync.sh\n    entities:\n      - { name: pr, key: number, columns: { number: int, title: text } }\n",
         )
         .unwrap();
         script(
@@ -2570,7 +2570,7 @@ pub(crate) mod tests {
             std::fs::create_dir_all(&ext).unwrap();
             std::fs::write(
                 ext.join("extension.yaml"),
-                format!("manifest: 2\nname: {name}\nintent:\n  purpose: test\npermissions: {{ process: true, secrets: [TOKEN] }}\ncollectors:\n  - id: s\n    runtime: exec\n    entry: sync.sh\n    credentials: [TOKEN]\n    entities:\n      - {{ name: row, key: id, columns: {{ id: int, token: text }} }}\n"),
+                format!("manifest: 2\nname: {name}\nintent:\n  purpose: test\npermissions: [process.run, secrets:TOKEN]\ncollectors:\n  - id: s\n    runtime: exec\n    entry: sync.sh\n    credentials: [TOKEN]\n    entities:\n      - {{ name: row, key: id, columns: {{ id: int, token: text }} }}\n"),
             )
             .unwrap();
             script(
@@ -2735,7 +2735,7 @@ pub(crate) mod tests {
                         extension(
                             &svc.layout.project_dir,
                             "work",
-                            "manifest: 2\nname: work\nintent:\n  purpose: test\npermissions: { ai: true }\ncollectors:\n  - id: star\n    runtime: starlark\n    entry: kind.star\n    input: \"SELECT 'a' AS uri\"\n    entities:\n      - { name: kind, key: uri, columns: { uri: text, kind: text } }\n",
+                            "manifest: 2\nname: work\nintent:\n  purpose: test\npermissions: [ai.compute]\ncollectors:\n  - id: star\n    runtime: starlark\n    entry: kind.star\n    input: \"SELECT 'a' AS uri\"\n    entities:\n      - { name: kind, key: uri, columns: { uri: text, kind: text } }\n",
                             &[(
                                 "kind.star",
                                 "def transform(input):\n    rows = []\n    for r in input[\"rows\"]:\n        a = ai_classify(\"is this a bug?\", [\"bug\", \"feature\"])\n        rows.append({\"uri\": r[\"uri\"], \"kind\": a[\"label\"]})\n    return {\"entities\": {\"kind\": rows}}\n",
@@ -3114,7 +3114,7 @@ pub(crate) mod tests {
     /// calls on one text, one model call, recorded as the source, on the
     /// AI profile it names (bound to its own model). A script
     /// that calls a model spends the person's key each run, so its
-    /// extension declares `permissions: { ai: true }`.
+    /// extension declares `permissions: [ai.compute]`.
     #[tokio::test]
     async fn a_derived_sources_ai_classify_on_one_text_is_one_call() {
         use crate::ai_service::{ProviderConfig, Role, RoleBinding};
@@ -3123,7 +3123,7 @@ pub(crate) mod tests {
         extension(
             root.path(),
             "work",
-            "manifest: 2\nname: work\nintent:\n  purpose: test\npermissions: { ai: true }\nai_profiles:\n  - { id: sort, description: Sorts., fallback: decide }\ncollectors:\n  - id: star\n    runtime: starlark\n    entry: kind.star\n    input: \"SELECT uri, title FROM v_work_item\"\n    entities:\n      - { name: kind, key: uri, columns: { uri: text, kind: text } }\n",
+            "manifest: 2\nname: work\nintent:\n  purpose: test\npermissions: [ai.compute]\nai_profiles:\n  - { id: sort, description: Sorts., fallback: decide }\ncollectors:\n  - id: star\n    runtime: starlark\n    entry: kind.star\n    input: \"SELECT uri, title FROM v_work_item\"\n    entities:\n      - { name: kind, key: uri, columns: { uri: text, kind: text } }\n",
             &[(
                 "kind.star",
                 "def transform(input):\n    rows = []\n    for r in input[\"rows\"]:\n        a = ai_classify(\"is this a bug?\", [\"bug\", \"feature\"], role = \"sort\")\n        b = ai_classify(\"is this a bug?\", [\"bug\", \"feature\"], role = \"sort\")\n        rows.append({\"uri\": r[\"uri\"], \"kind\": a[\"label\"] if a == b else \"differs\"})\n    return {\"entities\": {\"kind\": rows}}\n",
@@ -3223,7 +3223,7 @@ pub(crate) mod tests {
         extension(
             root.path(),
             "work",
-            "manifest: 2\nname: work\nintent:\n  purpose: test\npermissions: { process: true }\ncollectors:\n  - id: star\n    runtime: starlark\n    entry: hot.star\n    input: \"SELECT uri, title, json_extract(native, '$.priority') AS priority FROM v_work_item WHERE state = 'todo'\"\n    entities:\n      - { name: hot, key: uri, columns: { uri: text, title: text } }\n  - id: sh\n    runtime: exec\n    entry: sync.sh\n    entities:\n      - { name: raw, key: id, columns: { id: int } }\n",
+            "manifest: 2\nname: work\nintent:\n  purpose: test\npermissions: [process.run]\ncollectors:\n  - id: star\n    runtime: starlark\n    entry: hot.star\n    input: \"SELECT uri, title, json_extract(native, '$.priority') AS priority FROM v_work_item WHERE state = 'todo'\"\n    entities:\n      - { name: hot, key: uri, columns: { uri: text, title: text } }\n  - id: sh\n    runtime: exec\n    entry: sync.sh\n    entities:\n      - { name: raw, key: id, columns: { id: int } }\n",
             &[(
                 "hot.star",
                 "def transform(input):\n    return {\"entities\": {\"hot\": [{\"uri\": r[\"uri\"], \"title\": r[\"title\"]} for r in input[\"rows\"] if r[\"priority\"] == \"high\"]}}\n",
@@ -3286,7 +3286,7 @@ pub(crate) mod tests {
         extension(
             root.path(),
             "inc",
-            "manifest: 2\nname: inc\nintent:\n  purpose: test\npermissions: { process: true }\ncollectors:\n  - id: s\n    runtime: exec\n    entry: sync.sh\n    sync: upsert\n    entities:\n      - { name: item, key: id, columns: { id: int, title: text } }\n      - { name: other, key: id, columns: { id: int } }\n",
+            "manifest: 2\nname: inc\nintent:\n  purpose: test\npermissions: [process.run]\ncollectors:\n  - id: s\n    runtime: exec\n    entry: sync.sh\n    sync: upsert\n    entities:\n      - { name: item, key: id, columns: { id: int, title: text } }\n      - { name: other, key: id, columns: { id: int } }\n",
             &[],
         );
         let ext = root.path().join(".oxplow/extensions/inc");
@@ -3402,7 +3402,7 @@ pub(crate) mod tests {
         extension(
             root.path(),
             "net",
-            "manifest: 2\nname: net\nintent:\n  purpose: test\npermissions: { process: true, network: [localhost] }\ncollectors:\n  - id: s\n    runtime: exec\n    entry: sync.sh\n    network: [localhost]\n    entities:\n      - { name: r, key: id, columns: { id: int, declared: text, undeclared: text, direct: text } }\n",
+            "manifest: 2\nname: net\nintent:\n  purpose: test\npermissions: [process.run, network:localhost]\ncollectors:\n  - id: s\n    runtime: exec\n    entry: sync.sh\n    network: [localhost]\n    entities:\n      - { name: r, key: id, columns: { id: int, declared: text, undeclared: text, direct: text } }\n",
             &[],
         );
         let ext = root.path().join(".oxplow/extensions/net");

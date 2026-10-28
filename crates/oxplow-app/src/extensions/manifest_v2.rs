@@ -664,12 +664,16 @@ mod tests {
     /// grant is an error, never silently nothing.
     #[test]
     fn permissions_parse_and_an_unknown_grant_is_an_error() {
-        let text = "manifest: 2\nname: acme\npermissions:\n  process: true\n  network: [api.github.com]\nintent:\n  purpose: x\n";
+        let text = "manifest: 2\nname: acme\npermissions: [process.run, network:api.github.com]\nintent:\n  purpose: x\n";
         let m = parse(text);
         assert!(m.permissions.process);
         assert_eq!(m.permissions.network, vec!["api.github.com".to_string()]);
         assert!(parse(OK).permissions.is_empty());
-        let text = "manifest: 2\nname: acme\npermissions:\n  proces: true\nintent:\n  purpose: x\n";
+        let text = "manifest: 2\nname: acme\npermissions: [proces.run]\nintent:\n  purpose: x\n";
+        assert!(serde_yaml::from_str::<ManifestV2>(text).is_err());
+        // The map it used to be is refused too.
+        let text =
+            "manifest: 2\nname: acme\npermissions:\n  process: true\nintent:\n  purpose: x\n";
         assert!(serde_yaml::from_str::<ManifestV2>(text).is_err());
     }
 

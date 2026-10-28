@@ -1329,7 +1329,7 @@ export type CollectorSpec = {
 	wholeTree?: boolean,
 	/**
 	 *  A report collector's kind: it parses `report` with `entry` and its
-	 *  output joins the run (`trigger: { on_run }`).
+	 *  output joins the run (`on: { run: … }`).
 	 */
 	records: Records | null,
 };
@@ -1754,7 +1754,7 @@ export type CustomComponent_Deserialize = {
 	commands: string[],
 	/**
 	 *  It runs its own read-only SQL over the models (`querySql`): needs
-	 *  `permissions.sql`.
+	 *  `sql.read` permission.
 	 */
 	sql?: SqlAccess | null,
 };
@@ -1777,7 +1777,7 @@ export type CustomComponent_Serialize = {
 	commands: string[],
 	/**
 	 *  It runs its own read-only SQL over the models (`querySql`): needs
-	 *  `permissions.sql`.
+	 *  `sql.read` permission.
 	 */
 	sql?: SqlAccess | null,
 };
@@ -2369,7 +2369,7 @@ export type Extension_Deserialize = {
 	 *  What its manifest declares it may reach beyond the baseline
 	 *  (`permissions:`).
 	 */
-	permissions?: Permissions_Deserialize,
+	permissions?: Permissions,
 	/**  The other extensions it needs on (`requires:`). */
 	requires?: string[],
 	/**  What a deploy builds before it copies (`build:`). */
@@ -2518,7 +2518,7 @@ export type Extension_Serialize = {
 	 *  What its manifest declares it may reach beyond the baseline
 	 *  (`permissions:`).
 	 */
-	permissions: Permissions_Serialize,
+	permissions: Permissions,
 	/**  The other extensions it needs on (`requires:`). */
 	requires: string[],
 	/**  What a deploy builds before it copies (`build:`). */
@@ -2615,12 +2615,6 @@ export type FileSnapshot = {
 
 /**  A `file_snapshot` row: one captured file under a snapshot. */
 export type FileSnapshotId = number;
-
-/**
- *  `files: read | write`: the project's files outside the bus. `write`
- *  includes `read`.
- */
-export type FilesAccess = "read" | "write";
 
 /**
  *  A fact predicate on a `metrics:` spec (the `filter:` block) — the config
@@ -4814,67 +4808,10 @@ export type PermissionOption = {
 
 /**
  *  What an extension may do beyond the baseline. Absent fields grant
- *  nothing.
+ *  nothing. Written (and stored) as the list of [`PERMISSION_IDS`] it
+ *  grants.
  */
-export type Permissions = Permissions_Serialize | Permissions_Deserialize;
-
-/**
- *  What an extension may do beyond the baseline. Absent fields grant
- *  nothing.
- */
-export type Permissions_Deserialize = {
-	/**  Ad-hoc SQL: a script's `scope("sql.read")`, a component's own query. */
-	sql?: SqlAccess | null,
-	/**
-	 *  Commands outside its own namespace it may run, as patterns:
-	 *  `oxplow.work_item.*` (`*` is one segment, `**` the rest).
-	 */
-	commands?: string[],
-	/**  The project's files outside the bus. */
-	files?: FilesAccess | null,
-	/**  Calling AI models, with the person's key. */
-	ai?: boolean,
-	/**  The hosts its programs may reach (`api.github.com`, `*.example.com`). */
-	network?: string[],
-	/**
-	 *  Running programs (providers, `exec` collectors). They run with the
-	 *  person's authority; oxplow doesn't confine them.
-	 */
-	process?: boolean,
-	/**  The secrets it may read, by name. */
-	secrets?: string[],
-	/**  Contributing to the agent's context: skills, advisories, prompts. */
-	agent?: boolean,
-};
-
-/**
- *  What an extension may do beyond the baseline. Absent fields grant
- *  nothing.
- */
-export type Permissions_Serialize = {
-	/**  Ad-hoc SQL: a script's `scope("sql.read")`, a component's own query. */
-	sql?: SqlAccess | null,
-	/**
-	 *  Commands outside its own namespace it may run, as patterns:
-	 *  `oxplow.work_item.*` (`*` is one segment, `**` the rest).
-	 */
-	commands?: string[],
-	/**  The project's files outside the bus. */
-	files?: FilesAccess | null,
-	/**  Calling AI models, with the person's key. */
-	ai?: boolean,
-	/**  The hosts its programs may reach (`api.github.com`, `*.example.com`). */
-	network?: string[],
-	/**
-	 *  Running programs (providers, `exec` collectors). They run with the
-	 *  person's authority; oxplow doesn't confine them.
-	 */
-	process?: boolean,
-	/**  The secrets it may read, by name. */
-	secrets?: string[],
-	/**  Contributing to the agent's context: skills, advisories, prompts. */
-	agent?: boolean,
-};
+export type Permissions = string[];
 
 /**  A person's `enableExtensions` and `disableExtensions`. */
 export type PersonalExtensions = {

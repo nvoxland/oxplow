@@ -3094,7 +3094,7 @@ mod tests {
         let permissions = if blocks.contains("permissions:") {
             ""
         } else {
-            "permissions: { files: read }\n"
+            "permissions: [files.read]\n"
         };
         std::fs::write(
             manifest,
@@ -3221,7 +3221,7 @@ mod tests {
             let trigger = trigger.to_string();
             async move {
                 write_project_extension(&root, &format!(
-                    "permissions: {{ files: read }}\ncollectors:\n  - {{ id: repo.seen, runtime: starlark, entry: seen.star, {trigger}, facts: [oxplow.ast_hit] }}\n"
+                    "permissions: [files.read]\ncollectors:\n  - {{ id: repo.seen, runtime: starlark, entry: seen.star, {trigger}, facts: [oxplow.ast_hit] }}\n"
                 ));
                 crate::test_fixtures::activate_with_problems(&svc).await;
             }
@@ -5813,7 +5813,7 @@ def transform(input):
         std::fs::create_dir_all(ext.join("collectors")).unwrap();
         std::fs::write(
             ext.join("extension.yaml"),
-            "manifest: 2\nname: acme\nintent:\n  purpose: test\npermissions: { files: read }\n\
+            "manifest: 2\nname: acme\nintent:\n  purpose: test\npermissions: [files.read]\n\
              measures:\n  - { key: acme.todo, title: TODOs, fold: last }\n\
              metrics:\n  - { key: acme.todos, title: TODOs, sourceMeasure: acme.todo, aggregation: sum }\n\
              collectors:\n  - { id: acme.todo_scan, runtime: starlark, entry: collectors/todo.star, facts: [acme.todo] }\n",
@@ -6037,7 +6037,7 @@ def transform(input):
         std::fs::create_dir_all(ext.join("collectors")).unwrap();
         std::fs::write(
             ext.join("extension.yaml"),
-            "manifest: 2\nname: acme\nintent:\n  purpose: test\npermissions: { files: read }\n\
+            "manifest: 2\nname: acme\nintent:\n  purpose: test\npermissions: [files.read]\n\
              measures:\n  - { key: acme.todo, title: TODOs, fold: last }\n\
              metrics:\n  - { key: acme.todos, title: TODOs, sourceMeasure: acme.todo, aggregation: sum, default: off, collector: acme.todo_scan }\n\
              collectors:\n  - { id: acme.todo_scan, runtime: starlark, entry: collectors/todo.star, facts: [acme.todo] }\n  \
@@ -6095,7 +6095,7 @@ def transform(input):
         std::fs::create_dir_all(&ext).unwrap();
         std::fs::write(
             ext.join("extension.yaml"),
-            "manifest: 2\nname: acme\nintent:\n  purpose: test\npermissions: { files: read }\n\
+            "manifest: 2\nname: acme\nintent:\n  purpose: test\npermissions: [files.read]\n\
              dimensions:\n  - { key: acme.status, label: Status, entity: v_work_item, expr: e.state }\n\
              metrics:\n  - { key: acme.tasks, title: Tasks, entity: v_work_item }\n",
         )
@@ -6152,7 +6152,7 @@ def transform(input):
         write_project_extension(
             dir.path(),
             &format!(
-                "permissions: {{ process: true }}\nmeasures:\n  - {{ key: repo.n, title: N }}\ncollectors:\n  {entry}\n"
+                "permissions: [process.run]\nmeasures:\n  - {{ key: repo.n, title: N }}\ncollectors:\n  {entry}\n"
             ),
         );
         crate::test_fixtures::activate_with_problems(&svc).await;

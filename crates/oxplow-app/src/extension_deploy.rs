@@ -1609,7 +1609,7 @@ mod tests {
         dir
     }
 
-    const AI: &str = "permissions: { ai: true }\n";
+    const AI: &str = "permissions: [ai.compute]\n";
 
     fn asked(result: Result<Deployed, DeployError>) -> Vec<String> {
         match result {
@@ -2419,8 +2419,8 @@ mod tests {
         assert!(!deployed.already);
     }
 
-    /// `v_extension` says what each extension declares it may reach:
-    /// `{}` for the baseline.
+    /// `v_extension` says what each extension declares it may reach, as
+    /// the list `permissions:` is: `[]` for the baseline.
     #[tokio::test]
     async fn v_extension_lists_each_extensions_permissions() {
         let fx = crate::test_fixtures::services_with_effort().await;
@@ -2442,13 +2442,11 @@ mod tests {
             vec![
                 vec![
                     oxplow_db::SqlCell::Text("acme".into()),
-                    oxplow_db::SqlCell::Text("{}".into())
+                    oxplow_db::SqlCell::Text("[]".into())
                 ],
                 vec![
                     oxplow_db::SqlCell::Text("oxplow-foundation".into()),
-                    oxplow_db::SqlCell::Text(
-                        "{\"sql\":\"read\",\"files\":\"read\",\"ai\":true}".into()
-                    )
+                    oxplow_db::SqlCell::Text("[\"sql.read\",\"files.read\",\"ai.compute\"]".into())
                 ],
             ]
         );

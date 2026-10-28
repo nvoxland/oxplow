@@ -73,7 +73,7 @@ I/O) — tagged `exec:<id>`. Only a non-bundled extension's collectors (e.g. the
 `.oxplow/extensions/project/`) may be `exec` (a bundled extension's fact
 collector is starlark or jaq), and it gets no
 `env` / `credentials` / `network`. Use it only when no in-process tier can
-compute it: the extension must declare `permissions: { process: true }`
+compute it: the extension must declare `permissions: [process.run]`
 (plus the `network` hosts and `secrets` it uses), and **the user approves that
 when the extension is deployed** (you can't; your deploy that adds a permission
 becomes a proposal). A change to the program is a redeploy.

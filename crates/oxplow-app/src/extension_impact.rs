@@ -2346,7 +2346,7 @@ mod tests {
         write(
             d.path(),
             ".oxplow/extensions/x/extension.yaml",
-            "manifest: 2\nname: x\nintent:\n  purpose: p\npermissions: { process: true, network: [api.example.com] }\nproviders:\n  - id: fake\n    capability: work_items\n    entry: bin/p\n    network: [api.example.com]\n    declarations: provider.json\n",
+            "manifest: 2\nname: x\nintent:\n  purpose: p\npermissions: [process.run, network:api.example.com]\nproviders:\n  - id: fake\n    capability: work_items\n    entry: bin/p\n    network: [api.example.com]\n    declarations: provider.json\n",
         );
         write(
             d.path(),
@@ -2540,7 +2540,7 @@ mod tests {
         };
         w(
             "extension.yaml",
-            "manifest: 2\nname: acme\nintent:\n  purpose: Things.\n  origin: thread:thr1\n  examples:\n    - { name: two, input: { collector: things }, expect: two things }\n    - { name: smart, input: { collector: smart }, expect: summaries }\npermissions: { process: true }\ncollectors:\n  - id: things\n    runtime: starlark\n    entry: collectors/things.star\n    entities:\n      - { name: thing, key: id, columns: { id: int, label: text } }\n  - id: shell\n    runtime: exec\n    entry: collectors/shell.sh\n    entities:\n      - { name: line, key: n, columns: { n: int } }\n  - id: smart\n    runtime: starlark\n    entry: collectors/smart.star\n    entities:\n      - { name: summary, key: id, columns: { id: int, text: text } }\n",
+            "manifest: 2\nname: acme\nintent:\n  purpose: Things.\n  origin: thread:thr1\n  examples:\n    - { name: two, input: { collector: things }, expect: two things }\n    - { name: smart, input: { collector: smart }, expect: summaries }\npermissions: [process.run]\ncollectors:\n  - id: things\n    runtime: starlark\n    entry: collectors/things.star\n    entities:\n      - { name: thing, key: id, columns: { id: int, label: text } }\n  - id: shell\n    runtime: exec\n    entry: collectors/shell.sh\n    entities:\n      - { name: line, key: n, columns: { n: int } }\n  - id: smart\n    runtime: starlark\n    entry: collectors/smart.star\n    entities:\n      - { name: summary, key: id, columns: { id: int, text: text } }\n",
         );
         w(
             "fixtures/two.yaml",

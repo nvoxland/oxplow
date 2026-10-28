@@ -126,5 +126,5 @@ the yaml. Prefer `jaq` (jq) — the host pre-parses the report
 (`format`) so the script just reshapes JSON. Use `starlark` for logic jq
 can't express, or `exec` (`entry` is the executable; the raw report on
 stdin, JSON on stdout) as a last resort: a program needs the extension to
-declare `permissions: { process: true }`, which a person approves when it
+declare `permissions: [process.run]`, which a person approves when it
 is deployed.

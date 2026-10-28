@@ -129,7 +129,7 @@ async fn language_servers_are_read_live() {
     );
 }
 
-const MANIFEST: &str = "manifest: 2\nname: acme\nintent:\n  purpose: Pull.\npermissions: { process: true, secrets: [TOKEN] }\ncollectors:\n  - id: pull\n    runtime: exec\n    entry: sync.sh\n    credentials: [TOKEN]\n    entities:\n      - { name: item, key: id, columns: { id: int } }\n";
+const MANIFEST: &str = "manifest: 2\nname: acme\nintent:\n  purpose: Pull.\npermissions: [process.run, secrets:TOKEN]\ncollectors:\n  - id: pull\n    runtime: exec\n    entry: sync.sh\n    credentials: [TOKEN]\n    entities:\n      - { name: item, key: id, columns: { id: int } }\n";
 
 /// A collector's state and its credentials' state (set or not, never the
 /// value) are read live.

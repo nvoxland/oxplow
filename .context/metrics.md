@@ -1072,12 +1072,12 @@ Durations are `30s` / `5m` / `2h` (`parse_duration`). Checked at load
   (`list_span_files`) — what running on each snapshot between would have
   scanned — so pacing never loses a file.
 
-### Exec fact collectors need `permissions.process`
+### Exec fact collectors need `process.run`
 
 Only an own extension's (the project's) fact collectors may be `runtime: exec`
 (any other extension's is starlark or jaq, and a fact collector gets no `env` /
 `credentials` / `network`). One loads only when its extension declares
-`permissions.process` (and the `network` / `secrets` it uses), which a person
+`process.run` (and the `network` / `secrets` it uses), which a person
 approved when they deployed it on this machine, like any exec collector; it
 runs from the extension's immutable deployment, so the content that runs is
 the content that was approved (checked in `MetricsService::fact_runner`).
@@ -1987,7 +1987,7 @@ measures:                             # the fact TYPE the collector records
 collectors:                           # the PRODUCER (runs a script, records facts)
   - id: repo.todo
     doc: TODO comment scan
-    runtime: starlark                 # starlark | jaq | exec (own extension only, needs permissions.process)
+    runtime: starlark                 # starlark | jaq | exec (own extension only, needs process.run in permissions)
     entry: collectors/todo.star       # relative to the extension folder
     on: [snapshot.taken] # manual | { every: 15m } | { on: [<types>], where?: {...}, settle?, at_most?, idle?, force? }
     facts: [repo.todo_count]          # declare-to-collect allow-list
@@ -2020,7 +2020,7 @@ metrics:                              # the read SPEC (the chartable metric)
   implies. It may also read the semantic layer (`scope("sql.read", …)`)
   or ask a model (`ai_*`) when it declares `needs: [sql.read]` /
   `[ai.compute]` — the latter only when its extension declares
-  `permissions.ai`; `MetricsService::given` builds them
+  `ai.compute`; `MetricsService::given` builds them
   (extensions.md "Services"). It returns `{ "facts": [
   {measure, value, subject?, path?, line?, rule?, num?, den?, dims?} ] }` —
   one atomic fact per subject (never a baked total). `facts_of` refuses any

@@ -352,7 +352,7 @@ an id, a description, a required `fallback` built-in role and optional
     what the role needs, with the key read for that handle only.
   - **Permission** (decided 2026-10-08). Declaring an AI provider points a
     person's key at the URL it names, so its extension must declare
-    `permissions.ai` (the loader refuses it otherwise), approved when the
+    `ai.compute` (the loader refuses it otherwise), approved when the
     extension is deployed — foundation's too.
   - TypeSafe Jev: `POST {base}/v1/systemone`, Bearer key, `{model, state,
     questions}`. A `noul` (yes/no) question has no criteria, a `choice`
@@ -551,7 +551,7 @@ a synchronous `dyn AiOracle`; the app's is `ai_compute::CollectorOracle`,
 which blocks the script's worker thread on the runtime and asks
 `AiCompute` as caller `collector:<owner>/<id>` — so every answer is a
 recorded computation (the same question on the same text is one call,
-ever). Only a script whose extension declares `permissions.ai` gets it: one that
+ever). Only a script whose extension declares `ai.compute` gets it: one that
 names an `ai_*` builtin is refused otherwise, like an exec program needing
 `process` ([semantic-layer.md](./semantic-layer.md) "Sandbox"). The script runs in a script worker
 ([collection.md](./collection.md) "Containing scripts"); each `ai_*` call
@@ -565,7 +565,7 @@ what it recorded, so its next run gets further (tsk559). Who gets a model is the
 services router's ([extensions.md](./extensions.md) "Services"): an
 entity collector whose script names an `ai_*` builtin implies
 `ai.compute`; a **fact collector** gets one when it declares
-`needs: [ai.compute]` and its extension declares `permissions.ai` (otherwise
+`needs: [ai.compute]` and its extension declares `ai.compute` (otherwise
 it is refused before it runs); a script that composes — a command's, an effect's, a
 policy's, a review's dry run — runs pure and is refused before it runs:
 "`ai_summarize()`: a pure run can't use `ai.compute` (ask a model): only

@@ -7,11 +7,7 @@ engine: ">=0.7"
 # What it reaches beyond the baseline: its effects and commands read with
 # their own SQL, its jobs and effects ask models, its churn collector reads
 # the project's files, and its advisories and skills speak to the agent.
-permissions:
-  sql: read
-  ai: true
-  files: read
-  agent: true
+permissions: [sql.read, files.read, ai.compute, agent.write]
 intent:
   purpose: >-
     Show what a reviewer must check before accepting an agent's work — the

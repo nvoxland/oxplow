@@ -2067,7 +2067,7 @@ mod tests {
         std::fs::create_dir_all(&ext).unwrap();
         let manifest = |base: &str| {
             format!(
-                "manifest: 2\nname: acme\nintent:\n  purpose: p\npermissions: {{ ai: true }}\nimplementations:\n  - {{ capability: ai_provider, id: acme, title: Acme, provider: openai_compatible, config: {{ baseUrl: \"{base}\" }} }}\n"
+                "manifest: 2\nname: acme\nintent:\n  purpose: p\npermissions: [ai.compute]\nimplementations:\n  - {{ capability: ai_provider, id: acme, title: Acme, provider: openai_compatible, config: {{ baseUrl: \"{base}\" }} }}\n"
             )
         };
         std::fs::write(ext.join("extension.yaml"), manifest(&first)).unwrap();

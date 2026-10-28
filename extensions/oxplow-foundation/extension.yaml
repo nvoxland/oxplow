@@ -7,10 +7,7 @@ engine: ">=0.7"
 # What it reaches beyond the baseline: its AI providers call models, its
 # code-metric collectors read the project's files, and the Timeline page
 # reads the models with its own SQL.
-permissions:
-  ai: true
-  files: read
-  sql: read
+permissions: [sql.read, files.read, ai.compute]
 # Its custom components are TypeScript (src/), built into dist/ when oxplow
 # is built and on every deploy; dist/ and node_modules/ aren't committed.
 build: { run: "bun install --frozen-lockfile && bun run build", output: dist, exclude: [node_modules] }

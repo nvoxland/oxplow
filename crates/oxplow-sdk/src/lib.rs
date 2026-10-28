@@ -341,16 +341,16 @@ pub fn scaffold_with(
             manifest.push_str(
                 "# A provider runs its program (bin/provider) with your authority:\n\
                  # oxplow doesn't confine it. Deploying it asks you first.\n\
-                 permissions:\n\
-                 \x20 process: true\n",
+                 permissions: [process.run",
             );
             if starter.needs.is_some_and(|needs| needs.contains("sql.read")) {
-                manifest.push_str("  sql: read\n");
+                manifest.push_str(", sql.read");
             }
             if capability == "effort_policy" {
                 // The efforts it opens, closes and links are core commands.
-                manifest.push_str("  commands: [oxplow.effort.*]\n");
+                manifest.push_str(", commands:oxplow.effort.*");
             }
+            manifest.push_str("]\n");
             manifest.push_str(&format!(
                 "providers:\n  - id: {provider_id}\n    capability: {capability}\n    entry: bin/provider\n    declarations: provider.json\n"
             ));
@@ -381,7 +381,7 @@ pub fn scaffold_with(
         )),
         Kind::Command => manifest.push_str(&format!(
             "# Its script runs core commands as the caller.\n\
-             permissions: {{ commands: [oxplow.work_item.comment] }}\n\
+             permissions: [commands:oxplow.work_item.comment]\n\
              commands:\n\
              \x20 # Registered as {ns}.notes.add (<namespace>.<area>.<verb>); its script composes core commands, run as the\n\
              \x20 # caller: in one transaction when every one can, else as steps (a work list's verbs run outside it).\n\
@@ -403,7 +403,7 @@ pub fn scaffold_with(
         )),
         Kind::Effect => manifest.push_str(
             "# Its script runs core commands as the caller.\n\
-             permissions: { commands: [oxplow.work_item.comment] }\n\
+             permissions: [commands:oxplow.work_item.comment]\n\
              effects:\n\
              \x20 # Reacts to a logged event by composing commands, run with an agent's\n\
              \x20 # rights under this extension's permissions, and only on events logged\n\
@@ -426,7 +426,7 @@ pub fn scaffold_with(
         Kind::Policy => manifest.push_str(&format!(
             "# Its script reads oxplow with its own SQL (`needs: [sql.read]`) and\n\
              # runs the core commands that open and close efforts.\n\
-             permissions: {{ sql: read, commands: [oxplow.effort.*] }}\n\
+             permissions: [sql.read, commands:oxplow.effort.*]\n\
              implementations:\n\
              \x20 # The project's effort policy, once chosen in Settings → Capabilities: its\n\
              \x20 # script hears core's events and composes the commands that open, close\n\
@@ -441,7 +441,7 @@ pub fn scaffold_with(
         )),
         Kind::Advisory => manifest.push_str(&format!(
             "# What an advisory says reaches the agent.\n\
-             permissions: {{ agent: true }}\n\
+             permissions: [agent.write]\n\
              advisories:\n\
              \x20 # A {advisory}: a query run at a moment (`on`: post-tool-use, prompt or\n\
              \x20 # turn-end) whose rows reach the agent (`audience: person` raises them in\n\
@@ -461,7 +461,7 @@ pub fn scaffold_with(
         )),
         Kind::Skill => manifest.push_str(&format!(
             "# A skill is text the agent reads.\n\
-             permissions: {{ agent: true }}\n\
+             permissions: [agent.write]\n\
              skills:\n\
              \x20 # A {skill} the coding agent loads when it's relevant; `kind: command`\n\
              \x20 # makes it a slash command a person runs. `needs: [work_items]` offers it only\n\
@@ -486,9 +486,7 @@ pub fn scaffold_with(
                 "# The model: a person binds `{name}/{ns}` in Settings → AI; until then it\n\
                  # uses their Summarize model. The job's script runs core commands as\n\
                  # the caller. Deploying approves the permissions below.\n\
-                 permissions:\n\
-                 \x20 ai: true\n\
-                 \x20 commands: [oxplow.work_item.comment]\n\
+                 permissions: [ai.compute, commands:oxplow.work_item.comment]\n\
                  ai_profiles:\n\
                  \x20 - id: {ns}\n\
                  \x20   description: \"TODO: what the model is asked to do.\"\n\

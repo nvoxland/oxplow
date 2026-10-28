@@ -133,7 +133,7 @@ commands: [{ name, input }] }` or `{ skip }` (events are refused).
 `effort_policy_script::ScriptedPolicy`, which `effects::run_over` runs
 under the effects' sandbox, its `scope("sql.read", …)` limited to its
 `needs`. It runs under its extension's permissions (a declared
-`sql.read` need requires `permissions.sql`; the loader refuses the extension
+`sql.read` need requires `sql.read`; the loader refuses the extension
 otherwise), as deployed: a failed event is dead-lettered by the pump —
 nothing falls back. Its reads are counted on a
 pure child of the policy's run. `examples/extensions/prompt-efforts` is one:

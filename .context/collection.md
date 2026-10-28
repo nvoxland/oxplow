@@ -78,7 +78,7 @@ section for the column.
   Now** (`oxplow.collector.sync { collector: "project/<id>" }`). A report collector with a
   bundled parser needs no permission (the loader doesn't look for an
   `oxplow:` entry file). An own extension's `exec` program needs
-  `permissions.process` (the loader refuses it otherwise) and runs from
+  `process.run` (the loader refuses it otherwise) and runs from
   the extension's deployment; its own jaq/starlark parser needs nothing.
   Every collector is readable as `v_collector` (trigger, `enabled`, `state`
   `disabled`/`failing`/`never_run`/`ok`, last run and its error; a plain view over
@@ -170,7 +170,7 @@ hook + MCP wiring):
   collector runner's `RunLog`, deduped per detected run) and counts toward
   its health — the third failed parse in a row disables it (P7.C2,
   `contribution_health`); an `exec` parser whose extension lacks
-  `permissions.process` doesn't load, so it doesn't run. A test run only reads `on_run: test`
+  `process.run` doesn't load, so it doesn't run. A test run only reads `on_run: test`
   collectors, an analyzer run only `on_run: analysis` ones. What they
   parsed merges by kind (`RunReports`): JUnit reports into one
   suite/case tree embedded in the `test-run` payload (`suites`) — the
@@ -513,7 +513,7 @@ JSON→JSON reshaping), `starlark` (general/imperative; note: standard Starlark
 forbids recursion + `while`, so deep tree-walks are impractical — jaq suits XML
 better), `exec` (external process, JSON stdin→stdout — the escape hatch; can do
 I/O, so it's tagged lower-trust, and **loads only when its extension declares
-`permissions.process`**, which a person approved when they deployed it on
+`process.run`**, which a person approved when they deployed it on
 this machine (see architecture.md → "A repo's config never runs a program
 without a deployed permission").
 
@@ -740,7 +740,7 @@ by hand) is how this fact collector runs.
 
 ## Authority for external report parsers
 
-Project `exec` parsers need their extension's `permissions.process`; they
+Project `exec` parsers need their extension's `process.run`; they
 run with the person's file, network and process authority, which oxplow
 doesn't confine (there is no execution tier). The parser carries a
 host-owned live authority guard, checked at launch, every 10 ms and before returning output. Execution

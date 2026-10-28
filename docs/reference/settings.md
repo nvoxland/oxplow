@@ -325,7 +325,7 @@ simplest for XML/JSON; `starlark` covers logic jq can't express; `exec`
 runs an external program — `entry` is the executable — (raw report on
 stdin, JSON on stdout) as a last resort. jaq and starlark run in-process
 and sandboxed, so their output is trusted as measured; an `exec` parser
-needs the extension to declare `permissions: { process: true }`, and its
+needs the extension to declare `permissions: [process.run]`, and its
 output is flagged lower-trust in the UI.
 
 An extension's permissions are what it may reach: programs (`process`),

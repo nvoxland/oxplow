@@ -204,7 +204,7 @@ mod tests {
     }
 
     /// Calling a model is the one service a pure run may not use, and
-    /// the one that spends the person's key (`permissions.ai`).
+    /// the one that spends the person's key (the `ai.compute` permission).
     #[test]
     fn only_a_run_that_may_call_out_asks_a_model() {
         let ai = service("ai.compute").unwrap();

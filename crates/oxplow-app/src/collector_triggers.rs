@@ -339,7 +339,7 @@ mod tests {
     use serde_json::json;
 
     const HEAD: &str =
-        "manifest: 2\nname: work\nintent: { purpose: t, origin: null, examples: [] }\npermissions: { process: true }\n";
+        "manifest: 2\nname: work\nintent: { purpose: t, origin: null, examples: [] }\npermissions: [process.run]\n";
 
     async fn extension(
         svc: &std::sync::Arc<Services>,

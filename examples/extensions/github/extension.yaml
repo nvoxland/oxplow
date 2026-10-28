@@ -22,11 +22,7 @@ intent:
     - name: settings-extensions-area-lists-health-and-credentials
       input: { page: oxplow-foundation/settings, params: { area: extensions } }
       expect: a collector disabled after failures says why; a declared credential is listed once, never its value
-permissions:
-  commands: [oxplow.collector.sync]
-  network: [api.github.com]
-  process: true
-  secrets: [GITHUB_TOKEN]
+permissions: [process.run, network:api.github.com, secrets:GITHUB_TOKEN, commands:oxplow.collector.sync]
 collectors:
   - id: prs
     doc: The repo's 100 most recent pull requests (open and closed).

@@ -17,7 +17,7 @@ fn manifest(version: &str) -> String {
         format!("version: {version}\n")
     };
     format!(
-        "manifest: 2\nname: acme\n{version}intent:\n  purpose: p\npermissions: {{ process: true }}\ncollectors:
+        "manifest: 2\nname: acme\n{version}intent:\n  purpose: p\npermissions: [process.run]\ncollectors:
   - id: sync
     runtime: exec
     entry: sync.sh

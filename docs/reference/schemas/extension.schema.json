@@ -512,81 +512,26 @@
       ]
     },
     "Permissions": {
-      "description": "What an extension may do beyond the baseline. Absent fields grant\nnothing.",
-      "type": "object",
-      "properties": {
-        "sql": {
-          "description": "Ad-hoc SQL: a script's `scope(\"sql.read\")`, a component's own query.",
-          "anyOf": [
-            {
-              "$ref": "#/definitions/SqlAccess"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "commands": {
-          "description": "Commands outside its own namespace it may run, as patterns:\n`oxplow.work_item.*` (`*` is one segment, `**` the rest).",
-          "type": "array",
-          "items": {
-            "type": "string"
+      "description": "The scopes a person approves at deploy, in a script's `needs:` grammar: `sql.read`, `files.read`, `files.write`, `ai.compute`, `process.run`, `agent.write`, `network:<host>`, `secrets:<name>`, `commands:<pattern>`.",
+      "type": "array",
+      "items": {
+        "anyOf": [
+          {
+            "enum": [
+              "sql.read",
+              "files.read",
+              "files.write",
+              "ai.compute",
+              "process.run",
+              "agent.write"
+            ]
+          },
+          {
+            "type": "string",
+            "pattern": "^(network|secrets|commands):.+$"
           }
-        },
-        "files": {
-          "description": "The project's files outside the bus.",
-          "anyOf": [
-            {
-              "$ref": "#/definitions/FilesAccess"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "ai": {
-          "description": "Calling AI models, with the person's key.",
-          "type": "boolean"
-        },
-        "network": {
-          "description": "The hosts its programs may reach (`api.github.com`, `*.example.com`).",
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "process": {
-          "description": "Running programs (providers, `exec` collectors). They run with the\nperson's authority; oxplow doesn't confine them.",
-          "type": "boolean"
-        },
-        "secrets": {
-          "description": "The secrets it may read, by name.",
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "agent": {
-          "description": "Contributing to the agent's context: skills, advisories, prompts.",
-          "type": "boolean"
-        }
-      },
-      "additionalProperties": false
-    },
-    "SqlAccess": {
-      "description": "`sql: read`: ad-hoc read-only SQL over the `v_*` models.",
-      "type": "string",
-      "enum": [
-        "read"
-      ]
-    },
-    "FilesAccess": {
-      "description": "`files: read | write`: the project's files outside the bus. `write`\nincludes `read`.",
-      "type": "string",
-      "enum": [
-        "read",
-        "write"
-      ]
+        ]
+      }
     },
     "ModelDecl": {
       "description": "One model as its owner declares it (an entry of `models.yaml`).",
@@ -3331,7 +3276,7 @@
           "default": []
         },
         "sql": {
-          "description": "`read`: it runs its own read-only SQL over the models\n(`querySql`); its extension needs `permissions.sql: read`.",
+          "description": "`read`: it runs its own read-only SQL over the models\n(`querySql`); its extension needs `sql.read` in `permissions:`.",
           "anyOf": [
             {
               "$ref": "#/definitions/SqlAccess"
@@ -3346,6 +3291,13 @@
       "additionalProperties": false,
       "required": [
         "id"
+      ]
+    },
+    "SqlAccess": {
+      "description": "`sql: read`: ad-hoc read-only SQL over the `v_*` models.",
+      "type": "string",
+      "enum": [
+        "read"
       ]
     }
   },

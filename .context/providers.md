@@ -642,7 +642,7 @@ One spelling everywhere, because the id is used as it stands:
 | Keyed on the **instance id** | Keyed on the **provider (program)** |
 |---|---|
 | the URI's `provider` param (`oxplow:oxplow/work_item?id=ENG-1&provider=issues_acme`) and `check_subject` | the extension's deployment (`.oxplow/runtime/extensions/<ext>/<hash>/`) |
-| an extension command's `instance` (`tracker.item.estimate { instance: issues_acme }`) | the extension's permissions (`permissions.process`, `network`, `secrets`) |
+| an extension command's `instance` (`tracker.item.estimate { instance: issues_acme }`) | the extension's permissions (`process.run`, `network`, `secrets`) |
 | the work-items registry id, `v_capability_provider.provider`, the `activeProviders` value | the Extensions page's provider row, `declaration_impact` |
 | `OXPLOW_PROVIDER_ID` (the provider is told which instance it is) | the kit's fixtures and transcripts (it tests the program, as its default instance) |
 | `contribution_health.contribution`, `provider_collector_state.instance` (the name) | |
@@ -1208,7 +1208,7 @@ next start as changed.
 
 **Tests** (`providers/tests.rs`) run the real fake binary (built beside
 the test binary by the workspace build) through a script entry in a
-temp extension: a provider whose extension doesn't declare `permissions.process` is refused
+temp extension: a provider whose extension doesn't declare `process.run` is refused
 at load and registers nothing; an edited declarations file is refused;
 the `bad-declarations` hook is refused naming `/commands` and disables
 the instance; an unconfigured instance can't be enabled (nothing

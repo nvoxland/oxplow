@@ -253,7 +253,7 @@ impl Router<'_> {
                     })?;
             super::offered(self.active, &command.spec, &name_field)?;
             // A script composes its own extension's commands freely; any
-            // other one its `permissions.commands` must name.
+            // other one a `commands:<pattern>` permission must name.
             if let oxplow_domain::grant::Decision::Denied(why) =
                 parent.decide(oxplow_domain::grant::Need::Command(call.name.clone()))
             {

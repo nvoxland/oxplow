@@ -6,7 +6,7 @@
 //! examples dry-run), then each intent example whose fixture names a page
 //! (`when: { page, params? }`, `expect: { columns?, rows }`), a derived
 //! collector (`when: { collector, rows? }`, `expect: { entities: { <name>:
-//! n }, events?: [{ type, payload? }] }`; one that calls a model runs against the fixture model in the throwaway; an exec collector's isn't run — it is a program under the extension's `permissions.process`),
+//! n }, events?: [{ type, payload? }] }`; one that calls a model runs against the fixture model in the throwaway; an exec collector's isn't run — it is a program under the extension's `process.run` permission),
 //! a fact collector (`when: { collector, files: { <path>: <text> } }`,
 //! `expect: { facts: [{ measure, value?, path?, … }] }`, tsk1047),
 //! or one of its own commands (`when: { command, input, rows? }`,
@@ -6053,7 +6053,7 @@ intent:
     - {{ name: labelled, input: {{ page: labelled }}, expect: no labelled things yet }}
     - {{ name: things, input: {{ collector: things }}, expect: one thing per input row }}
     - {{ name: shell, input: {{ collector: shell }}, expect: whatever the shell says }}
-permissions: {{ sql: read, ai: true, process: true }}
+permissions: [sql.read, ai.compute, process.run]
 collectors:
   - id: things
     runtime: starlark
@@ -7021,7 +7021,7 @@ intent:
     - { name: basic, expect: nothing to do }
     - { name: start, expect: its effort opens }
     - { name: finish, expect: its effort closes }
-permissions: { sql: read, commands: [oxplow.effort.*] }
+permissions: [sql.read, commands:oxplow.effort.*]
 implementations:
   - { capability: effort_policy, id: tidy, title: Tidy, entry: policies/tidy.star, needs: [sql.read] }
 ",
@@ -8253,7 +8253,7 @@ intent:
   purpose: Greets.
   examples:
     - { name: greeted, input: { advisory: hello }, expect: a greeting per item }
-permissions: { agent: true }
+permissions: [agent.write]
 advisories:
   - id: hello
     on: prompt
@@ -8316,7 +8316,7 @@ intent:
   purpose: Cards.
   examples:
     - { name: drawn, input: { page: board }, expect: cards }
-permissions: { commands: [oxplow.work_item.create] }
+permissions: [commands:oxplow.work_item.create]
 custom_components:
   - { id: cards, title: Cards, commands: [oxplow.work_item.create] }
 ",
@@ -8458,7 +8458,7 @@ intent:
   purpose: Cards.
   examples:
     - { name: drawn, input: { page: board }, expect: cards }
-permissions: { commands: [oxplow.work_item.create] }
+permissions: [commands:oxplow.work_item.create]
 custom_components:
   - { id: cards, title: Cards, commands: [oxplow.work_item.create] }
 ",

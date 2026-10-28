@@ -12,8 +12,7 @@ intent:
     - name: create
       input: { command: create, input: { title: First note } }
       expect: the new note's URI (oxplow:oxplow/work_item?id=N-<n>&provider=notes)
-permissions:
-  process: true
+permissions: [process.run]
 providers:
   - id: notes
     capability: work_items

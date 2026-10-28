@@ -1623,7 +1623,7 @@ mod tests {
         write(
             root,
             &format!(".oxplow/extensions/{name}/extension.yaml"),
-            &format!("manifest: 2\nname: {name}\nintent:\n  purpose: p\npermissions: {{ sql: read, commands: [oxplow.work_item.*] }}\ncommands:\n{commands}"),
+            &format!("manifest: 2\nname: {name}\nintent:\n  purpose: p\npermissions: [sql.read, commands:oxplow.work_item.*]\ncommands:\n{commands}"),
         );
         for (rel, body) in files {
             write(root, &format!(".oxplow/extensions/{name}/{rel}"), body);

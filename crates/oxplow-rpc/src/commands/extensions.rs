@@ -46,7 +46,7 @@ pub async fn list_services(_svc: &Services) -> Result<Vec<ServiceListing>, IpcEr
 }
 
 /// A custom component's frame runs its own read-only SQL (`querySql`):
-/// `id` declares `sql: read`, its extension `permissions.sql`.
+/// `id` declares `sql: read`, its extension the `sql.read` permission.
 pub async fn run_component_sql(
     svc: &Services,
     id: String,

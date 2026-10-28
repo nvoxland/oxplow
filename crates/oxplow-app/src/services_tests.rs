@@ -73,7 +73,7 @@ async fn a_collector_reads_the_tree_it_declares() {
         &root,
         ".oxplow/extensions/acme/extension.yaml",
         "manifest: 2\nname: acme\nintent: { purpose: Reads., origin: null, examples: [] }\n\
-         permissions: { files: read }\n\
+         permissions: [files.read]\n\
          collectors:\n\
          \x20 - id: paths\n    runtime: starlark\n    entry: paths.star\n    needs: [tree.read]\n    entities:\n      - { name: seen, key: k, columns: { k: text } }\n",
     );
@@ -100,7 +100,7 @@ async fn a_collector_reads_the_tree_it_declares() {
         &root,
         ".oxplow/extensions/acme/extension.yaml",
         "manifest: 2\nname: acme\nintent: { purpose: Reads., origin: null, examples: [] }\n\
-         permissions: { files: read }\n\
+         permissions: [files.read]\n\
          collectors:\n\
          \x20 - id: paths\n    runtime: starlark\n    entry: paths.star\n    needs: [tree.read]\n    entities:\n      - { name: seen, key: k, columns: { k: text } }\n\
          \x20 - id: peek\n    runtime: starlark\n    entry: paths.star\n    entities:\n      - { name: peeked, key: k, columns: { k: text } }\n",
@@ -170,7 +170,7 @@ async fn a_fact_collector_reads_the_layer_it_declares() {
         &root,
         ".oxplow/extensions/acme/extension.yaml",
         "manifest: 2\nname: acme\nintent: { purpose: Counts., origin: null, examples: [] }\n\
-         permissions: { sql: read, files: read, ai: true }\n\
+         permissions: [sql.read, files.read, ai.compute]\n\
          collectors:\n\
          \x20 - id: items\n    runtime: starlark\n    entry: items.star\n    needs: [sql.read]\n    facts: [acme.items]\n\
          \x20 - id: asks\n    runtime: starlark\n    entry: asks.star\n    needs: [ai.compute]\n    facts: [acme.items]\n",

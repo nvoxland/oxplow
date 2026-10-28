@@ -204,7 +204,7 @@ async fn a_provider_launched_session_is_recorded_canonically() {
     std::fs::create_dir_all(ext_dir.join("bin")).unwrap();
     std::fs::write(
         ext_dir.join("extension.yaml"),
-        "manifest: 2\nname: relay\nintent:\n  purpose: a harness over the protocol\n  examples: [{ name: a }]\npermissions: { process: true }\nproviders:\n  - id: relay\n    capability: agent_harness\n    entry: bin/provider\n    declarations: provider.json\n",
+        "manifest: 2\nname: relay\nintent:\n  purpose: a harness over the protocol\n  examples: [{ name: a }]\npermissions: [process.run]\nproviders:\n  - id: relay\n    capability: agent_harness\n    entry: bin/provider\n    declarations: provider.json\n",
     )
     .unwrap();
     let script = ext_dir.join("bin/provider");

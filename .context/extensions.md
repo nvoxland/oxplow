@@ -1502,16 +1502,24 @@ components that query their own models; Starlark and jaq collectors that
 don't ask a model; `state.read`, `extension_config.read`, `jobs.read`.
 
 ```yaml
-permissions:                    # every key optional; absent = baseline only
-  sql: read                     # ad-hoc read-only SQL (a script's `needs: [sql.read]`)
-  commands: [oxplow.work_item.*] # commands outside its own namespace (`*` one segment, `**` the rest)
-  files: read                   # or `write` (includes read): `needs: [tree.read]`
-  ai: true                      # models, with the person's key
-  network: [api.github.com]     # hosts its programs reach (`*.example.com` covers the names under it)
-  process: true                 # runs programs: providers, `runtime: exec` collectors
-  secrets: [GITHUB_TOKEN]       # secrets it reads, by name
-  agent: true                   # advisories and skills: text that reaches the agent
+# A list, in a script's `needs:` grammar (a scope id, or `<scope>:<qualifier>`);
+# absent or [] = baseline only. `oxplow_domain::permissions::PERMISSION_IDS`.
+permissions:
+  - sql.read                     # ad-hoc read-only SQL (a script's `needs: [sql.read]`)
+  - commands:oxplow.work_item.*  # commands outside its own namespace (`*` one segment, `**` the rest)
+  - files.read                   # or files.write (includes read): `needs: [tree.read]`
+  - ai.compute                   # models, with the person's key
+  - network:api.github.com       # hosts its programs reach (`network:*.example.com` covers the names under it)
+  - process.run                  # runs programs: providers, `runtime: exec` collectors
+  - secrets:GITHUB_TOKEN         # secrets it reads, by name
+  - agent.write                # advisories and skills: text that reaches the agent
 ```
+
+The map it used to be (`{ sql: read, process: true, … }`) is refused,
+the refusal naming the list (`oxplow_domain::manifest_keys`). Inside oxplow
+the declaration is still the typed `Permissions`; only its spelling is
+the list — and what a deployment stores (`v_extension.permissions`,
+`v_extension_deployment.permissions`, V117 rewrote the stored maps).
 
 `process` is declared, **not confined**: a program runs with the person's
 file, network and process authority (`.context/providers.md` "External
@@ -1521,7 +1529,7 @@ execution authority"), and what a deploy asks says so plainly.
 (`extensions::check_permissions`, at the end of `load_one`): each
 contribution that needs something the manifest doesn't declare is an error
 at the contribution's line, naming what to add —
-``provider `github` needs `permissions.process`, `permissions.network: [api.github.com]` ``.
+``provider `github` needs `process.run`, `network:api.github.com` `` in `permissions:`.
 What needs what (`needed_permissions`): a provider with an `entry` or an
 MCP `command` → `process`, its `network` and its credentials' names →
 `network`, `secrets` (a URL adapter runs oxplow's own adapter: only its
@@ -1586,7 +1594,7 @@ name: oxplow-bundled   # must equal the folder name
 namespace: oxplow      # its command ids' namespace (default: the name, `-` → `_`); `oxplow` only for oxplow's own
 description: …
 engine: ">=0.7"          # optional: the oxplow it targets
-permissions: { ai: true } # optional: what it reaches beyond the baseline ("Permissions")
+permissions: [ai.compute] # optional: what it reaches beyond the baseline ("Permissions")
 requires: [tracker]      # optional: other extensions it needs on ("Sources and deployments" → Requires)
 build: { run: bun run build, output: dist, exclude: [node_modules] } # optional: built at deploy ("Builds")
 intent:                  # required
@@ -3094,7 +3102,7 @@ read`) and the commands it may invoke (`commands`).
 **A component that acts runs under its extension's permissions.**
 `invoke` runs a command with the viewer's rights, so the commands a
 component declares are the only ones it can run. A command outside its
-extension's namespace needs `permissions.commands` in the manifest
+extension's namespace needs `commands:<pattern>` in the manifest
 ("Permissions"; the loader refuses the extension otherwise). A person
 approved those permissions when the extension was deployed. An `invoke`
 of a command that the loaded bundle does not declare is `Invalid`. An
@@ -3147,7 +3155,7 @@ custom_components:
     title: Burndown
     bundle: components/burndown        # default components/<id>; holds index.html
     commands: [oxplow.work_item.transition]
-    sql: read                          # optional: its own read-only SQL (querySql); needs permissions.sql
+    sql: read                          # optional: its own read-only SQL (querySql); needs sql.read in permissions
 ```
 ```yaml
 # pages/burn.yaml
@@ -3227,7 +3235,7 @@ command, input }`; `{ id, method: navigate, uri }` (an oxplow page only:
 outside tab would carry whatever the frame put in its URL out); `{ id,
 method: querySql, sql, params }` (positional SqlCells;
 `run_component_sql`: the component must declare `sql: read` and its
-extension hold `permissions.sql`; it runs as the component's `Mode::Pure`
+extension hold `sql.read`; it runs as the component's `Mode::Pure`
 run under its extension's grant, `sql.read` decided and recorded,
 read-only over the published models, 1,000 rows by default); `{ id,
 method: openForm, command, input }` (the host shows a declared command's
@@ -3442,7 +3450,7 @@ a bar from opened to merged — a range the kit's charts do not draw. Its
 `state` filter is a param of the page, drawn in the page's rail. A bar opens `oxplow:github/pr?id=<n>`
 (`navigate`), and Sync runs `oxplow.collector.sync` (`invoke`) — a
 command outside the extension's namespace, so the manifest declares
-`permissions.commands` for it. The host's own re-run (`onUpdate`) is
+`commands:<pattern>` for it. The host's own re-run (`onUpdate`) is
 asked again with a selected filter rather than drawn over it. A pull
 request whose dates cannot be read is left out and counted in a note,
 never blanking the rest. A rejected `connect()` is said in the status. A
@@ -3738,7 +3746,7 @@ uses):
   a dry run, which is pure) says the service isn't available there. The
   worker gets the result as its host set (`Given::onto`).
 - **Permission** stays the host's: a script that names a model-calling
-  builtin needs the extension's `permissions.ai` (the loader refuses it
+  builtin needs the extension's `ai.compute` (the loader refuses it
   otherwise, "Permissions"), for an entity collector and a fact collector
   alike.
   Metadata-only discovery does not spend a key or require that permission;
@@ -3776,7 +3784,7 @@ extension may reach (its `permissions:`, approved when it was deployed —
   `Unenforced(why)`, recorded on the run (`v_extension_run.decisions`).
   `grant::decide` refuses what the contribution didn't declare ("not
   declared"), then what its extension's permissions don't allow — the
-  refusal names the permission: ``needs `permissions.ai` in the
+  refusal names the permission: ``needs `ai.compute` in the
   extension's manifest`` (`Grant::permits`: `sql.read` → `sql`;
   `tree.read` and paths → `files`; `ai.compute`/`ai.discover` → `ai`; a
   program, its files and env → `process`; a host → `network`; a
@@ -3837,7 +3845,7 @@ extension may reach (its `permissions:`, approved when it was deployed —
   authority as an ordinary run; it never runs a program.
 - **Component authority.** Query messages carry the loaded bundle version.
   Asset and command allowlists come from that bundle; a component's
-  commands outside its namespace need `permissions.commands` (the loader
+  commands outside its namespace need `commands:<pattern>` (the loader
   checks them).
 - **Not yet:** OS confinement and model call-count/monetary budgets.
 - **Deliberately still open:**
@@ -4679,7 +4687,7 @@ is written elsewhere), and fact collectors (a `collectors:` entry with
     don't reference dimension rows, so nothing else is lost.
 - Fact collectors run `starlark` / `jaq` only, with no `env` /
   `credentials` / `network`. `exec` is refused unless the extension is the project's own: an own
-  extension's exec program needs `permissions.process` like any extension
+  extension's exec program needs `process.run` like any extension
   collector and runs from its deployment.
   `entry` must exist in the extension.
 - Precedence is global (the person's) < each extension, and the project's
@@ -4834,7 +4842,7 @@ implementations:
   `openai_compatible`, `openrouter`, `gemini`, `mistral`, `groq`,
   `deepseek`, `xai`, `ollama`, `llamacpp`, `typesafe`), an unknown one
   refused naming them. It takes `config: { baseUrl? }` (any other key is
-  refused), no `needs`, and needs `permissions.ai` ("Permissions"): it
+  refused), no `needs`, and needs `ai.compute` ("Permissions"): it
   points a person's key at that URL. Its `decide_native` feature is the
   kind's. The kinds and why they're Rust over Rig are
   [ai-providers.md](./ai-providers.md) "Rust kinds over Rig".
@@ -4976,7 +4984,7 @@ advisories:
   `once_per`. Marks are recorded only after every query ran. A failing
   query is logged and skipped.
 - **Permission.** An extension's advisories speak into the agent's
-  context, so the manifest must declare `permissions.agent`
+  context, so the manifest must declare `agent.write`
   ("Permissions"; the loader refuses it otherwise), approved when the
   extension is deployed. A bundled extension's ship under
   `shipped_permissions`.
@@ -5203,7 +5211,7 @@ tool: open_work              # offered as <namespace>_open_work
   deployed against that stream's files and data: `collector_runner::
   preview_collector` runs the deployed entity collector through the same
   `produce` step (same permissions: an exec collector needs
-  `permissions.process`, and so does a Starlark one that calls a
+  `process.run`, and so does a Starlark one that calls a
   model need `ai`; other derived collectors need neither) and returns the coerced
   rows per entity (first 50, plus totals), storing nothing and recording
   no run. A **fact collector** (`facts:` declared) previews through the fact
@@ -5670,7 +5678,7 @@ commands:
   its end.
 - **Permissions.** A job runs under its extension's `permissions:`
   ("Permissions"): the commands its tools name outside the extension's
-  namespace need `permissions.commands`, and its model calls need `ai`;
+  namespace need `commands:<pattern>`, and its model calls need `ai`;
   the loader refuses the extension otherwise. A person approved them when
   the extension was deployed, and a deployment is immutable, so a job
   runs the declaration that was deployed — a new tool arrives with a new

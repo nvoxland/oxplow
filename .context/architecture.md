@@ -90,7 +90,7 @@ committed config can name programs:
   agent's context. Bundled extensions' aren't gated.
 
 The consent is the deploy that admitted `process`: a repo's config alone
-never runs a program. The extension must declare `permissions.process`
+never runs a program. The extension must declare `process.run`
 (and the `network` hosts, `secrets`, `ai`, `agent`, … its contents need),
 the loader refuses contents that need an undeclared permission, and a
 person approved the deploy that added it. Nothing runs on a teammate's

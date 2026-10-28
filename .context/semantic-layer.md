@@ -963,14 +963,14 @@ extension's own declared event types, logged with the run (P9.D2;
 
 - An **entity collector** (`entities:`) writes rows published as
   `v_<owner>_<entity>`; `collector_runner` runs it. It may be `exec`
-  (needs `permissions.process`), `starlark` / `jaq` (derived, below; a Starlark one may call
-  `ai_*` with `permissions.ai`, and read the tree when it declares `tree.read`)
+  (needs `process.run`), `starlark` / `jaq` (derived, below; a Starlark one may call
+  `ai_*` with `ai.compute`, and read the tree when it declares `tree.read`)
   or `read`.
 - A **fact collector** (`facts: [<measure>, …]`) is what a *gauge* was
   until P7.B3. It runs in the fact engine (`MetricsService`,
   [metrics.md](./metrics.md)): its Starlark gets the snapshot tree
   (`files()` / `source_files()` / `ast_query()`, `tree.read`) and, when
-  it declares them, the semantic layer and a model (`permissions.ai`); its input is `{report?, rows?, event?}` (`report: { path,
+  it declares them, the semantic layer and a model (`ai.compute`); its input is `{report?, rows?, event?}` (`report: { path,
   format }` parsed — text | json | xml | lcov | lines; the `input:`
   query's rows; the trigger event); it returns `{"facts": [{measure,
   value, subject?, path?, line?, rule?, num?, den?, dims?}]}` and nothing
@@ -1003,7 +1003,7 @@ that metrics name runs only while one of them is on.
   folder).
 - **An extension's fact collector is sandboxed** (starlark or jaq). Only a
   non-bundled extension (the project's own) may declare an `exec` fact collector or
-  report collectors, and those need the extension to declare `permissions.process` like any
+  report collectors, and those need the extension to declare `process.run` like any
   exec collector (the loader refuses it otherwise), approved when the
   extension is deployed.
 - **A fact collector gets no `env` / `credentials` / `network`**, and
@@ -1075,7 +1075,7 @@ type without a `trigger` field:
   and no run lands without its record.
 - **Failure.** A failing collector is recorded and announced like any run
   and doesn't dead-letter the event: one broken collector never holds up
-  the rest. An exec collector whose extension doesn't declare `permissions.process`
+  the rest. An exec collector whose extension doesn't declare `process.run`
   doesn't load, so it never runs.
 - **Order.** A collector's `after:` names effects, collectors or core
   consumers (extensions.md "Ordering"); collectors of one event run level
@@ -1113,7 +1113,7 @@ entities from data already in the semantic layer:
   A model call spends the person's key — on an `every:` trigger, every few
   minutes, run as nobody — so a Starlark script that names an `ai_*`
   builtin (`oxplow_script::ai::calls_ai`: any identifier, so an alias
-  counts; Starlark reaches a global only by name) needs `permissions.ai`
+  counts; Starlark reaches a global only by name) needs `ai.compute`
   in its extension's manifest, approved when the extension is deployed: the
   loader refuses the extension without it, and the run's `ai.compute`
   decision is denied (`RunCollectorError::Denied`, recorded as the run's
@@ -1176,7 +1176,7 @@ entities from data already in the semantic layer:
     shadow `v_work_item`.
   - `drop_extension` removes an extension's tables, views and state.
 - **Permission.** An exec collector runs code, so its extension must
-  declare `permissions.process` (and the `network` hosts and `secrets` it
+  declare `process.run` (and the `network` hosts and `secrets` it
   uses); the loader refuses it otherwise.
   - A person approved it when the extension was deployed, and a deployment
     is immutable, so the script that runs is the script that was approved
@@ -1200,7 +1200,7 @@ entities from data already in the semantic layer:
   - **Pattern syntax.** Lowercase names; `*.` means subdomains only, not
     the bare domain.
   - **Part of the permission.** The hosts must sit under the extension's
-    `permissions.network`; widening the list needs the permission, so a
+    `network:<host>`; widening the list needs the permission, so a
     deploy that adds a host asks.
   - **macOS enforcement** (`net_sandbox::enforced()`: `/usr/bin/sandbox-exec`
     exists). The entry runs as
@@ -1241,7 +1241,7 @@ entities from data already in the semantic layer:
   - A name can't be in both `env` and `credentials`, or be `PATH`, `HOME`
     or `OXPLOW_*`.
   - A secret reaches the script only if its extension declares the name
-    in `permissions.secrets` and the person has set the value.
+    in `secrets:<name>` and the person has set the value.
   - `collector_runner::Collectors` bundles root, store, the
     database and event schemas, secrets and the gateway — the context
     every list/run/set call takes (`Collectors::of(svc, root)`).

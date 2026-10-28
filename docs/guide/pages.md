@@ -322,7 +322,7 @@ title, back and forward, bookmarks and the page's actions.
 
 ```yaml
 # extension.yaml
-permissions: { sql: read }              # it runs its own SQL
+permissions: [sql.read]              # it runs its own SQL
 custom_components:
   - { id: timeline, bundle: dist/timeline, sql: read }
 # pages/timeline.yaml
@@ -357,8 +357,7 @@ oxplow.connect().then(async (component) => {
 });
 ```
 
-`querySql` needs `sql: read` on the component and `permissions: { sql:
-read }` on the extension; it reads oxplow's models only, never writes.
+`querySql` needs `sql: read` on the component and `permissions: [sql.read]` on the extension; it reads oxplow's models only, never writes.
 `setTitle`, `setActions`, `openForm` and `showView` are a whole page's: a
 component inside another page's layout can't use them. `showView(yaml)` hands oxplow an
 inline page — `title`, read-only `sql` loaders under `data`, a `view`
@@ -470,8 +469,7 @@ The script prints:
 
 Column types are `text`, `int`, `real`, `bool` and `time` (an ISO timestamp).
 
-A collector runs code, so its extension must declare `permissions: { process:
-true }`, plus `network` and `secrets` for what it reaches. You approve them
+A collector runs code, so its extension must declare `permissions: [process.run]`, plus `network` and `secrets` for what it reaches. You approve them
 when you deploy the extension (Settings → Extensions). A teammate who pulls
 it deploys it themselves. A changed script needs a redeploy, which asks again
 only if it adds a permission. An agent's deploy becomes a proposal you decide.
@@ -517,7 +515,7 @@ def transform(input):
 
 Pure scripts cannot directly reach the network, files, environment, or
 keychain, so they need no permission. A collector that calls
-`ai.complete` or `ai.decide` also needs `permissions: { ai: true }`, an
+`ai.complete` or `ai.decide` also needs `permissions: [ai.compute]`, an
 AI provider, and a configured role. Those model calls can send data
 outside the project and use your provider account.
 

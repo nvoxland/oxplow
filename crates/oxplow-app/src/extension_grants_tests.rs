@@ -79,7 +79,7 @@ async fn a_qualified_read_reaches_only_its_model_and_what_derives_from_it() {
         &root,
         ".oxplow/extensions/acme/extension.yaml",
         &format!(
-            "manifest: 2\nname: acme\nintent:\n  purpose: p\npermissions: {{ sql: read }}\nmodels:\n  - name: efforts\n    version: 1\n    description: Efforts.\n    columns:\n      - {{ name: id, type: INTEGER, doc: Id. }}\n  - name: mine\n    version: 1\n    description: Items.\n    columns:\n      - {{ name: uri, type: TEXT, doc: Ref. }}\ncommands:\n{block}"
+            "manifest: 2\nname: acme\nintent:\n  purpose: p\npermissions: [sql.read]\nmodels:\n  - name: efforts\n    version: 1\n    description: Efforts.\n    columns:\n      - {{ name: id, type: INTEGER, doc: Id. }}\n  - name: mine\n    version: 1\n    description: Items.\n    columns:\n      - {{ name: uri, type: TEXT, doc: Ref. }}\ncommands:\n{block}"
         ),
     );
     write(
@@ -179,7 +179,7 @@ async fn a_service_the_script_did_not_declare_is_refused() {
         &root,
         ".oxplow/extensions/acme/extension.yaml",
         &format!(
-            "manifest: 2\nname: acme\nintent:\n  purpose: p\npermissions: {{ sql: read }}\ncommands:\n{}{}",
+            "manifest: 2\nname: acme\nintent:\n  purpose: p\npermissions: [sql.read]\ncommands:\n{}{}",
             reader("peek", "sql.read"),
             reader("sneak", "sql.read"),
         ),
@@ -212,7 +212,7 @@ async fn a_service_the_script_did_not_declare_is_refused() {
     write(
         &root,
         ".oxplow/extensions/facts/extension.yaml",
-        "manifest: 2\nname: facts\nintent:\n  purpose: p\npermissions: { sql: read, ai: true }\ncollectors:
+        "manifest: 2\nname: facts\nintent:\n  purpose: p\npermissions: [sql.read, ai.compute]\ncollectors:
   - id: asks
     runtime: starlark
     entry: asks.star
@@ -240,7 +240,8 @@ mod program_collectors {
     use super::*;
     use crate::collector_runner::{run_collector, Collectors, RunCollectorError, RunTrigger};
 
-    const MANIFEST: &str = "manifest: 2\nname: acme\nintent:\n  purpose: p\npermissions: { process: true }\ncollectors:
+    const MANIFEST: &str =
+        "manifest: 2\nname: acme\nintent:\n  purpose: p\npermissions: [process.run]\ncollectors:
   - id: sync
     runtime: exec
     entry: sync.sh
@@ -287,7 +288,7 @@ mod program_collectors {
             ".oxplow/extensions/acme/extension.yaml",
             &format!(
                 "{}commands:\n{}",
-                MANIFEST.replace("{ process: true }", "{ process: true, sql: read }"),
+                MANIFEST.replace("[process.run]", "[process.run, sql.read]"),
                 super::reader("all", "sql.read")
             ),
         );
@@ -471,7 +472,7 @@ mod program_collectors {
 }
 
 /// A script composes commands of its own extension freely; one outside its
-/// namespace needs a `permissions.commands` pattern naming it — what it
+/// namespace needs a `commands:<pattern>` permission naming it — what it
 /// may do with the person's rights is what was approved at deploy.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_script_composing_a_command_outside_its_namespace_needs_the_commands_permission() {
@@ -501,14 +502,14 @@ async fn a_script_composing_a_command_outside_its_namespace_needs_the_commands_p
         .expect_err("outside its namespace");
     let message = format!("{refused:?}");
     assert!(
-        message.contains("oxplow.work_item.comment") && message.contains("permissions.commands"),
+        message.contains("commands:oxplow.work_item.comment"),
         "{message}"
     );
 
     write(
         &root,
         ".oxplow/extensions/acme/extension.yaml",
-        &manifest("permissions: { commands: [oxplow.work_item.*] }\n"),
+        &manifest("permissions: [commands:oxplow.work_item.*]\n"),
     );
     crate::test_fixtures::activate(&fx.svc).await;
     run(&fx, "acme.notes.add")
