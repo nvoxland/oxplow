@@ -152,7 +152,7 @@ Everything else `.oxplow/project.yaml` accepts, with its default:
 | `ai.roles` | *empty* | This project's [AI role](../guide/ai-models.md) assignments, over your own, e.g. `summarize: { provider: openrouter, model: openai/gpt-5-mini }`. Add `restrict: [tools, sql, streaming, images]` to forbid a role's model any of those. |
 | `lsp.servers` | *empty* | Per-project language-server pins. |
 | `iconTint` | *unset* | Hex colour composited behind this project's app icon, so concurrent windows are tellable apart. See below. |
-| `extensions` | `[oxplow-bundled, oxplow-code-metrics]` | The extensions on for the whole team. `oxplow-foundation` is always on and never listed. Only a person can set it. |
+| `extensions` | `[oxplow-bundled]` | The extensions on for the whole team. `oxplow-foundation` is always on and never listed. Only a person can set it. |
 | `extensionSources` | *empty* | Where an extension's source is when it isn't `.oxplow/extensions/<name>/`: `{ <name>: <folder> }`. Only a person can set it. |
 | `enableBundledExtensions` | `true` | `false` runs oxplow's own extensions from their `extensionSources` folders, deployed like any extension, instead of the copies built into oxplow — how oxplow develops itself. Honored only by a development build; read when oxplow starts. Your own `.oxplow/personal.yaml` may set it too. Only a person can set it. |
 

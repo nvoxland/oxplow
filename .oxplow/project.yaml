@@ -132,7 +132,6 @@ extensions:
 extensionSources:
   oxplow-foundation: extensions/oxplow-foundation
   oxplow-bundled: extensions/oxplow-bundled
-  oxplow-code-metrics: extensions/oxplow-code-metrics
 # And runs them from those sources, deployed like any extension, instead of
 # the copies built into oxplow (a dev build only): editing foundation and
 # deploying it takes effect without rebuilding oxplow. Set it to true in

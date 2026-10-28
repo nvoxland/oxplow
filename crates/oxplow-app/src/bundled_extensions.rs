@@ -71,11 +71,6 @@ mod generated {
         FILES.get_or_init(|| read("oxplow-bundled"))
     }
 
-    pub fn oxplow_code_metrics() -> Files {
-        static FILES: OnceLock<Files> = OnceLock::new();
-        FILES.get_or_init(|| read("oxplow-code-metrics"))
-    }
-
     /// `extensions/<name>/`'s files, kept for the life of the process.
     fn read(name: &str) -> Files {
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -105,11 +100,6 @@ pub const BUNDLED: &[BundledExtension] = &[
     BundledExtension {
         name: "oxplow-bundled",
         files: generated::oxplow_bundled,
-        required: false,
-    },
-    BundledExtension {
-        name: "oxplow-code-metrics",
-        files: generated::oxplow_code_metrics,
         required: false,
     },
 ];
@@ -208,11 +198,11 @@ mod tests {
             .expect("the wiki runs with bundled off");
     }
 
-    /// The code metrics are `oxplow-code-metrics`': on by default, and with it
+    /// The code metrics are `oxplow-bundled`'s: on by default, and with it
     /// off the catalog has none of them while foundation's own (coverage,
-    /// tests, tokens) stay.
+    /// tests, tokens) stay and foundation's pages still open.
     #[tokio::test(flavor = "multi_thread")]
-    async fn code_metrics_off_leaves_the_catalog_without_its_metrics() {
+    async fn bundled_off_leaves_the_catalog_without_the_code_metrics() {
         async fn keys(disable: &str) -> Vec<String> {
             let dir = tempfile::tempdir().unwrap();
             crate::test_fixtures::init_git_repo(dir.path());
@@ -232,7 +222,7 @@ mod tests {
                 .map(|e| e.key)
                 .collect()
         }
-        let on = keys("oxplow-bundled").await;
+        let on = keys("").await;
         for key in [
             "oxplow.todos",
             "oxplow.rust.unsafe_blocks",
@@ -240,7 +230,7 @@ mod tests {
         ] {
             assert!(on.iter().any(|k| k == key), "{key} in {on:?}");
         }
-        let off = keys("oxplow-code-metrics").await;
+        let off = keys("oxplow-bundled").await;
         assert!(
             off.iter().any(|k| k == "oxplow.coverage.abs_pct"),
             "{off:?}"

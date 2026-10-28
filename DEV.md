@@ -518,6 +518,6 @@ gitignored. On a fresh clone, your IDE will report
 `scripts/installed-smoke.sh <Oxplow.app | folder holding oxplow and oxplow-daemon>`
 runs a built bundle on a small Python repo that is not this checkout: `oxplow
 --version`, `oxplow extension new page / check / test`, then `oxplow-daemon
---project <sample> --init` and its extension listing (foundation, bundled and
-code-metrics enabled, no errors). Release CI runs it on the macOS bundle after
+--project <sample> --init` and its extension listing (foundation and bundled
+enabled, no errors). Release CI runs it on the macOS bundle after
 `tauri build`; locally, point it at `target/debug` after `bun run build:dev`.

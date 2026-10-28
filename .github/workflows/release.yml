@@ -163,7 +163,7 @@ jobs:
 
       # The bundle just built, installed nowhere and run on a Python repo that
       # is not this checkout: the CLI authors and tests an extension, and the
-      # daemon starts with foundation, bundled and code-metrics enabled from
+      # daemon starts with foundation and bundled enabled from
       # the copies compiled in. Catches a packaging regression the unit
       # tests, which run from the source tree, cannot see.
       - name: Smoke-test the installed bundle

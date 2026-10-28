@@ -7393,9 +7393,9 @@ commands:
         assert!(misfit.is_empty(), "example doesn't fit: {misfit:#?}");
     }
 
-    /// Oxplow ships three extensions: `oxplow-foundation`, its own commands
-    /// over the scopes' operations; `oxplow-bundled`: the review packet, the
-    /// analytics pages and the agent's advisories; and `oxplow-code-metrics`. They load clean and every page's SQL runs.
+    /// Oxplow ships two extensions: `oxplow-foundation`, its own commands
+    /// over the scopes' operations; and `oxplow-bundled`: the review packet,
+    /// the analytics pages, the agent's advisories and the code metrics. They load clean and every page's SQL runs.
     #[tokio::test]
     async fn the_bundled_extensions_ship_and_load_clean() {
         let dir = tempfile::tempdir().unwrap();
@@ -7403,9 +7403,9 @@ commands:
         let bundled: Vec<&Extension> = exts.iter().filter(|e| e.origin == "bundled").collect();
         assert_eq!(
             bundled.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(),
-            ["oxplow-bundled", "oxplow-code-metrics", "oxplow-foundation"]
+            ["oxplow-bundled", "oxplow-foundation"]
         );
-        let foundation = bundled[2];
+        let foundation = bundled[1];
         assert!(foundation.errors.is_empty(), "{:?}", foundation.errors);
         assert!(foundation.warnings.is_empty(), "{:?}", foundation.warnings);
         assert_eq!(foundation.namespace, "oxplow");
@@ -7441,13 +7441,10 @@ commands:
                 "typesafe"
             ]
         );
-        let metrics = bundled[1];
-        assert!(metrics.errors.is_empty(), "{:?}", metrics.errors);
-        assert!(metrics.warnings.is_empty(), "{:?}", metrics.warnings);
-        assert_eq!(metrics.namespace, "oxplow");
-        assert_eq!(metrics.collectors.len(), 16);
         let b = bundled[0];
         assert!(b.errors.is_empty(), "{:?}", b.errors);
+        // The code metrics: 16 collectors beside its own churn one.
+        assert!(b.collectors.len() >= 17, "{}", b.collectors.len());
         // Its manifest is v2, with an intent, and clean.
         assert!(b.warnings.is_empty(), "{:?}", b.warnings);
         assert_eq!(b.manifest_version, 2);
@@ -7537,7 +7534,7 @@ commands:
         // own models compiled for the check, nothing published — and every
         // viz node's columns are its loader's.
         let svc = services(dir.path()).await;
-        for name in ["oxplow-bundled", "oxplow-code-metrics", "oxplow-foundation"] {
+        for name in ["oxplow-bundled", "oxplow-foundation"] {
             let v = validate_extension(&svc.sql, &svc.extension_catalog, dir.path(), name, None)
                 .await
                 .unwrap();
@@ -8941,7 +8938,7 @@ commands:
         let dir = tempfile::tempdir().unwrap();
         let exts = load_extensions(dir.path());
         let bundled: Vec<&Extension> = exts.iter().filter(|e| e.origin == "bundled").collect();
-        assert_eq!(bundled.len(), 3);
+        assert_eq!(bundled.len(), 2);
         for e in bundled {
             let layout = layout_only(&e.warnings);
             assert!(layout.is_empty(), "{}: {layout:#?}", e.name);

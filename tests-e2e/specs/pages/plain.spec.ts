@@ -19,7 +19,7 @@ import { openFromLauncher } from "../../support/ui.js";
 // with only foundation on.
 
 /** The other extensions that ship with, or are in, the e2e project. */
-const OTHERS = ["oxplow-bundled", "oxplow-code-metrics", "e2e", "github"];
+const OTHERS = ["oxplow-bundled", "e2e", "github"];
 
 /** A few commits (one a merge) and one file not committed. */
 function history(daemon: Daemon) {

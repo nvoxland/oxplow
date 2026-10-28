@@ -843,7 +843,7 @@ pub fn bundled_from_sources(requested: Option<bool>, dev_build: bool) -> bool {
 pub const EXTENSION_SOURCES_DIR: &str = ".oxplow/extensions";
 
 /// The team's list when `.oxplow/project.yaml` has no `extensions` key.
-pub const DEFAULT_EXTENSIONS: &[&str] = &["oxplow-bundled", "oxplow-code-metrics"];
+pub const DEFAULT_EXTENSIONS: &[&str] = &["oxplow-bundled"];
 
 fn default_extensions() -> Vec<String> {
     DEFAULT_EXTENSIONS.iter().map(|s| s.to_string()).collect()
@@ -1144,7 +1144,7 @@ struct RawConfig {
     /// AI role assignments `{ roles: { <role>: { provider, model } } }`, layered over the user's ai.yaml.
     #[serde(default)]
     ai: Option<RawAiBlock>,
-    /// The extensions on for the whole team: `[names]`; absent, `[oxplow-bundled, oxplow-code-metrics]`. Enables code. oxplow-foundation is always on and never listed; a person turns others on or off for themselves in `.oxplow/personal.yaml` (`enableExtensions`, `disableExtensions`).
+    /// The extensions on for the whole team: `[names]`; absent, `[oxplow-bundled]`. Enables code. oxplow-foundation is always on and never listed; a person turns others on or off for themselves in `.oxplow/personal.yaml` (`enableExtensions`, `disableExtensions`).
     #[serde(default)]
     extensions: Option<Vec<String>>,
     /// Where an extension's source is when it isn't `.oxplow/extensions/<name>/`: `{ <name>: <folder> }`, relative to the checkout or absolute (`~/` is the home folder). Enables code.
@@ -4736,13 +4736,10 @@ lsp:
             team_only.source(wt, "triage"),
             Path::new("/wt/tools/triage")
         );
-        // No list: the bundled extensions are on; an empty one turns it off.
+        // No list: the bundled extension is on; an empty one turns it off.
         assert_eq!(
             extension_settings(tempdir().unwrap().path()).enabled(),
-            vec![
-                ("oxplow-bundled".to_string(), EnabledBy::Team),
-                ("oxplow-code-metrics".to_string(), EnabledBy::Team)
-            ]
+            vec![("oxplow-bundled".to_string(), EnabledBy::Team)]
         );
         let none = tempdir().unwrap();
         std::fs::write(cfg_path(none.path()), "extensions: []\n").unwrap();

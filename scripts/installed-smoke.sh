@@ -8,11 +8,10 @@
 # small Python project, then:
 #   1. `oxplow --version` runs;
 #   2. `oxplow extension new page hello`, `check` and `test` are clean there
-#      (the SDK's throwaway oxplow activates foundation, bundled and
-#      code-metrics from the copies embedded in the binary);
+#      (the SDK's throwaway oxplow activates foundation and bundled from
+#      the copies embedded in the binary);
 #   3. `oxplow-daemon --project <sample> --init` starts, and its extension
-#      listing has oxplow-foundation, oxplow-bundled and oxplow-code-metrics
-#      enabled with no errors.
+#      listing has oxplow-foundation and oxplow-bundled enabled with no errors.
 # Nothing here reads the oxplow checkout. Exit 0 when every step holds.
 set -euo pipefail
 
@@ -100,7 +99,7 @@ try:
     if reply.get("status") != "ok":
         sys.exit("list_extensions: " + json.dumps(reply))
     by_name = {e["name"]: e for e in reply["data"]}
-    for name in ("oxplow-foundation", "oxplow-bundled", "oxplow-code-metrics"):
+    for name in ("oxplow-foundation", "oxplow-bundled"):
         e = by_name.get(name)
         if e is None:
             sys.exit(f"{name} is not listed: {sorted(by_name)}")
