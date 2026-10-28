@@ -13,7 +13,7 @@ edits change nothing on the person's screen until you deploy.
    it fails, for the reason you expect.
 2. Edit the source. Write as many files as the step needs.
 3. Check it after every edit: `oxplow_validate_extension` (the same report
-   as `oxplow extension check`), then run its fixtures with
+   as `$OXPLOW_BIN extension check`), then run its fixtures with
    `$OXPLOW_BIN extension test <name>` in your terminal until they pass.
    Both run on a throwaway oxplow — this build's schema, only the data a
    fixture makes, only the extensions yours declares (a fixture adds more with `requires:`) — so they need no
@@ -75,9 +75,9 @@ harnesses, Alerts, Settings and core's commands. If it isn't running, the
 app shows a dialog that says so, and `oxplow.extension.deploy` is
 unavailable (it is foundation's command). This happens when someone
 develops oxplow itself: a core change that foundation's recorded
-deployment doesn't activate against. The fix is outside oxplow: quit it,
-run `cargo run -q -p oxplow-dev -- extension deploy` in the oxplow
-repository, then start oxplow again.
+deployment doesn't activate against. The dialog says why it is held. The
+fix is outside oxplow: tell the person to reinstall oxplow (or update it),
+then start it again.
 
 ## What already exists
 

@@ -14,8 +14,8 @@ CI runs), add a **collector** to the extension:
 - Declare it under `collectors:` in `extension.yaml`, with its entities'
   typed columns and key, and when it runs: `trigger: { every: 15m }` or
   `trigger: manual` (the default).
-- `examples/extensions/github/` in the oxplow repo is a complete, working
-  example; copy its shape.
+- The `github` example oxplow ships is a complete, working collector;
+  copy its shape.
 - The entity becomes `v_<extension>_<entity>`. Join it to core views in
   pages.
 
@@ -135,10 +135,10 @@ Rules:
 - A command's, an effect's or a policy's script composes, so it never
   asks a model. A command's script can't read the tree, because oxplow
   composes it inside a transaction.
-- `oxplow extension check <name> --services` lists each script's
+- `$OXPLOW_BIN extension check <name> --services` lists each script's
   services and whether it declared them.
-- `examples/extensions/triage/` in the oxplow repo is a fact collector
-  that uses all three.
+- The `triage` example oxplow ships is a fact collector that uses all
+  three.
 
 **Incremental sync.** For a big or slow upstream, set `sync: upsert`:
 

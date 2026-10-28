@@ -46,6 +46,7 @@ pub const SHELL_ONLY_COMMANDS: &[&str] = &[
     "await_oauth_redirect",
     "clipboard_read_text",
     "create_project",
+    "install_cli",
     "list_recent_projects",
     "listen_for_oauth_redirect",
     "open_external_url",
@@ -243,6 +244,8 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::launch::create_project,
             commands::launch::setup_project,
             commands::launch::abort_setup,
+            // "Install `oxplow` command line…"
+            commands::install_cli::install_cli,
         ])
 }
 

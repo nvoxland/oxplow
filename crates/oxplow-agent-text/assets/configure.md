@@ -25,7 +25,7 @@ run**, at a stable repo-relative path in a standard format oxplow
 parses with a bundled parser: `cobertura` (XML), `lcov` (`.info`), or
 `jacoco` (XML) — named `entry: oxplow:<name>`.
 
-- **Rust** — `cargo llvm-cov --lcov --output-path target/coverage/lcov.info`. Parser `oxplow:lcov`.
+- **Rust** — `cargo-llvm-cov` with `--lcov --output-path target/coverage/lcov.info`. Parser `oxplow:lcov`.
 - **Python (pytest)** — `--cov --cov-report=xml:coverage.xml` in `addopts`. Parser `oxplow:cobertura`.
 - **JS/TS (jest / vitest / bun)** — enable the `cobertura`/`lcov` coverage reporter to a fixed path.
 - **Java / Kotlin** — JaCoCo plugin + XML report goal in `pom.xml`/`build.gradle`. Parser `oxplow:jacoco`.
@@ -38,7 +38,7 @@ run also emit **JUnit XML** at a stable path:
 - **Python (pytest)** — `--junit-xml=target/test-report.xml` in `addopts`.
 - **JS/TS** — jest: `jest-junit` reporter; vitest: `--reporter=junit --outputFile`; bun: `--reporter=junit --reporter-outfile=…`.
 - **Go** — `go-junit-report > target/test-report.xml`.
-- **Rust** — `cargo test` can't emit JUnit; use **cargo-nextest** with `[profile.<name>.junit] path = "junit.xml"` in `.config/nextest.toml` (lands at `target/nextest/<profile>/junit.xml`).
+- **Rust** — the stock test runner can't emit JUnit; use **cargo-nextest** with `[profile.<name>.junit] path = "junit.xml"` in `.config/nextest.toml` (lands at `target/nextest/<profile>/junit.xml`).
 
 Keep the tool's natural `classname` — oxplow builds the tree by
 splitting `classname`+`name` on `::` / `.`.
@@ -55,9 +55,9 @@ testing:
   command: "<command that runs the tests and writes the reports>"
   fastCommand: "<the same without coverage, taking a filter>"   # optional
   # Extra command substrings that count as a test (or analysis) run, on
-  # top of the built-in defaults (pytest, cargo test, jest, go test, …):
-  runPatterns: [bun test]
-  analysisPatterns: [lint:collect]
+  # top of the built-in defaults (pytest, jest, go test, …):
+  runPatterns: [make check]
+  analysisPatterns: [make lint]
   # Globs naming test files beyond the built-in conventions (spec/, it/ …):
   # testPaths: ["spec/**"]
   agentHint: "Run tests with <command>."   # injected into every agent prompt
@@ -78,12 +78,12 @@ intent:
     Measure what this repository cares about: its test, coverage and
     analysis reports, and any metrics of its own.
 collectors:
-  # Rust
-  - { id: tests.rust_coverage, records: coverage, entry: "oxplow:lcov", report: { path: target/coverage/lcov.info }, trigger: { on_run: test } }
-  - { id: tests.rust_junit, records: tests, entry: "oxplow:junit", report: { path: target/nextest/default/junit.xml }, trigger: { on_run: test } }
-  # Frontend
-  - { id: tests.desktop_coverage, records: coverage, entry: "oxplow:cobertura", report: { path: apps/desktop/coverage/cobertura-coverage.xml }, trigger: { on_run: test } }
-  - { id: tests.desktop_junit, records: tests, entry: "oxplow:junit", report: { path: apps/desktop/test-report.xml }, trigger: { on_run: test } }
+  # Python (pytest)
+  - { id: tests.py_coverage, records: coverage, entry: "oxplow:cobertura", report: { path: coverage.xml }, trigger: { on_run: test } }
+  - { id: tests.py_junit, records: tests, entry: "oxplow:junit", report: { path: target/test-report.xml }, trigger: { on_run: test } }
+  # Frontend (jest)
+  - { id: tests.web_coverage, records: coverage, entry: "oxplow:cobertura", report: { path: web/coverage/cobertura-coverage.xml }, trigger: { on_run: test } }
+  - { id: tests.web_junit, records: tests, entry: "oxplow:junit", report: { path: web/junit.xml }, trigger: { on_run: test } }
 ```
 
 `report.path` is project-relative. `records` is what the report holds: `tests` (JUnit), `coverage` or
@@ -92,7 +92,7 @@ parser: `junit`, `lcov`, `cobertura`, `jacoco`, `clippy`, `eslint`.
 `trigger: { on_run: test }` reads the report after each test run oxplow
 sees, when that run wrote it (an analyzer's report: `on_run: analysis`);
 without a trigger it runs only by hand (`oxplow.collector.sync { collector: "project/<id>" }`). So a frontend
-run uses the frontend reports, a Rust run the Rust reports, JUnit
+run uses the frontend reports, a Python run the Python reports, JUnit
 merging into the per-test tree and coverage into diff coverage. You
 never parse or report any of these numbers yourself — oxplow does, so
 they stay trustworthy (`observed`, not `asserted`).

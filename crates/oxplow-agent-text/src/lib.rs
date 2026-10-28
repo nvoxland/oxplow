@@ -230,15 +230,40 @@ mod tests {
         }
     }
 
-    /// `.context/` is this repo's own docs convention: it must never leak
-    /// into the text oxplow writes into a person's project.
+    /// The text oxplow writes into a person's project must work for a
+    /// project that is not oxplow's own checkout: no source paths, no dev
+    /// scripts, no `.context/`, and the CLI always as `$OXPLOW_BIN`.
     #[test]
-    fn the_agent_text_never_mentions_dot_context() {
+    fn the_agent_text_never_assumes_the_oxplow_checkout() {
+        let needles = [
+            "examples/extensions",
+            "extensions/oxplow-",
+            "crates/",
+            "tests-e2e",
+            "cargo ",
+            "bun run",
+            ".context",
+            // the CLI is `$OXPLOW_BIN extension …`: bare `oxplow` is on PATH
+            // only once the person installed the command line
+            "oxplow extension ",
+        ];
         let text = core_text();
+        let mut hits = Vec::new();
+        let mut scan = |name: &str, body: &str| {
+            for (n, line) in body.lines().enumerate() {
+                for needle in needles {
+                    if line.contains(needle) {
+                        hits.push(format!("{name}:{}: `{needle}`", n + 1));
+                    }
+                }
+            }
+        };
+        scan("working-in-oxplow", WORKING_IN_OXPLOW);
         for t in text.skills.iter().chain(&text.commands) {
             for t in std::iter::once(t).chain(&t.references) {
-                assert!(!t.body.contains(".context"), "{} mentions .context", t.name);
+                scan(&t.name, &t.body);
             }
         }
+        assert!(hits.is_empty(), "{}", hits.join("\n"));
     }
 }

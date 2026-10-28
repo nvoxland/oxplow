@@ -30,7 +30,7 @@ import {
   type Stream,
   type WorkspaceContext,
 } from "./api.js";
-import { buildMenuBar, buildNativeMenuSnapshots, menuItemById, OPEN_RECENT_PREFIX } from "./menuBar.js";
+import { buildMenuBar, buildNativeMenuSnapshots, INSTALL_CLI_ID, menuItemById, OPEN_RECENT_PREFIX } from "./menuBar.js";
 import type { EditorNavigationTarget } from "./lsp.js";
 import { Navigator } from "./components/Navigator.js";
 import { StatusBar } from "./components/StatusBar.js";
@@ -72,7 +72,7 @@ import { getPageDetailStore } from "./tabs/openPageDetail.js";
 import { MissingPage } from "./pages/MissingPage.js";
 import { kindForTabId } from "./pageKinds.js";
 import { useExtensions } from "./extensionsStore.js";
-import { foundationDown, FOUNDATION, RECOVERY_COMMAND } from "./foundationDown.js";
+import { foundationDown, foundationDownText } from "./foundationDown.js";
 import { PanelRunsProvider } from "./components/Panels/PanelRunsContext.js";
 import { useAlerts } from "./components/Alerts/useAlerts.js";
 import { useAlertToasts } from "./components/Alerts/useAlertToasts.js";
@@ -114,7 +114,7 @@ import {
   type Session,
   type Tab,
 } from "./tabs/session.js";
-import { openProject, createProject, listRecentProjects, shellAvailable } from "./api.js";
+import { installCli, openProject, createProject, listRecentProjects, shellAvailable } from "./api.js";
 import { onRemoteReconnect, triggerRemoteResync } from "./api.js";
 import type { CommandOutcome, Page as PageFile, RecentProjectView } from "./tauri-bridge/generated/bindings.js";
 import { pickFolder } from "./tauri-bridge/nativeDialog.js";
@@ -907,6 +907,13 @@ export function App() {
             message: e instanceof Error ? e.message : String(e),
           });
         });
+        return;
+      }
+      if (commandId === INSTALL_CLI_ID) {
+        installCli().then(
+          (done) => showToast({ message: `Installed ${done.path}. ${done.hint ?? ""}`.trim() }),
+          (e: unknown) => recordOpError({ label: "Install command line", message: e instanceof Error ? e.message : String(e) }),
+        );
         return;
       }
       const command = menuItemById(menuGroups, commandId);
@@ -2042,8 +2049,8 @@ function isEditableTarget(target: EventTarget | null): boolean {
 
 /**
  * Shown when the required foundation extension isn't running. The deploy
- * command is foundation's own, so the shell can't run it: the dialog says
- * what to run outside. Dismissal is local; a new problem text (the key)
+ * command is foundation's own, so the shell can't run it: the dialog shows
+ * the backend's reason it is held. Dismissal is local; a new problem text (the key)
  * shows it again.
  */
 function FoundationDownDialog({ errors }: { errors: string[] }) {
@@ -2056,6 +2063,7 @@ function FoundationDownDialog({ errors }: { errors: string[] }) {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
   if (dismissed) return null;
+  const lines = foundationDownText(errors);
   const button = { padding: "8px 14px", borderRadius: 4, cursor: "pointer", fontFamily: "inherit" } as const;
   return (
     <div
@@ -2080,36 +2088,21 @@ function FoundationDownDialog({ errors }: { errors: string[] }) {
           boxShadow: "0 0 0 1px rgba(255,255,255,0.12), 0 12px 40px rgba(0, 0, 0, 0.4)",
         }}
       >
-        <div style={{ fontSize: 18, fontWeight: 600, marginBottom: 8 }}>{FOUNDATION} isn't running</div>
-        <div style={{ color: "var(--muted)", lineHeight: 1.5, marginBottom: 12 }}>
-          Agents, Alerts, Settings and the core commands need it.
-        </div>
+        <div style={{ fontSize: 18, fontWeight: 600, marginBottom: 8 }}>{lines[0]}</div>
+        <div style={{ color: "var(--muted)", lineHeight: 1.5, marginBottom: 12 }}>{lines[1]}</div>
         <ul style={{ margin: "0 0 12px", paddingLeft: 20, lineHeight: 1.5 }}>
           {errors.map((line, i) => (
             <li key={i}>{line}</li>
           ))}
         </ul>
-        <div style={{ marginBottom: 8 }}>Quit oxplow, run this in the repo, then start oxplow again:</div>
-        <code
-          style={{
-            display: "block",
-            padding: 8,
-            marginBottom: 16,
-            background: "var(--bg-1)",
-            border: "1px solid var(--border)",
-            borderRadius: 4,
-            userSelect: "all",
-          }}
-        >
-          {RECOVERY_COMMAND}
-        </code>
+        <div style={{ marginBottom: 16 }}>{lines[lines.length - 1]}</div>
         <div style={{ display: "flex", gap: 8 }}>
           <button
             type="button"
-            onClick={() => void navigator.clipboard.writeText(RECOVERY_COMMAND).catch(() => {})}
+            onClick={() => void navigator.clipboard.writeText(lines.join("\n")).catch(() => {})}
             style={{ ...button, background: "var(--accent)", color: "#fff", border: "none" }}
           >
-            Copy command
+            Copy
           </button>
           <button
             type="button"

@@ -128,3 +128,35 @@ pub fn is_required(name: &str) -> bool {
 pub fn is_reserved(name: &str) -> bool {
     find(name).is_some()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// What oxplow ships runs in other people's projects: its text and
+    /// examples must not name this repository's docs or build.
+    #[test]
+    fn shipped_text_never_names_the_checkout() {
+        let needles = [".context/", "crates/", "cargo "];
+        let mut hits = Vec::new();
+        for b in BUNDLED {
+            for (path, bytes) in b.files() {
+                // Fixtures are test data, and `dist/` is built output.
+                if path.starts_with("fixtures/") || path.starts_with("dist/") {
+                    continue;
+                }
+                let Ok(text) = std::str::from_utf8(bytes) else {
+                    continue;
+                };
+                for (n, line) in text.lines().enumerate() {
+                    for needle in needles {
+                        if line.contains(needle) {
+                            hits.push(format!("{}/{path}:{}: `{needle}`", b.name, n + 1));
+                        }
+                    }
+                }
+            }
+        }
+        assert!(hits.is_empty(), "{}", hits.join("\n"));
+    }
+}

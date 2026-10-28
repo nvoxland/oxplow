@@ -67,7 +67,7 @@ Tell the person the title and that it is under Dashboards (Cmd+P).
 
 When no viz draws it (a graph, a timeline, a board of your own), declare a
 component and show it with a `component` node (`commands-and-forms.md` has
-the manifest keys; `oxplow extension new component <name>` scaffolds a
+the manifest keys; `$OXPLOW_BIN extension new component <name>` scaffolds a
 working one):
 
 ```yaml
@@ -122,10 +122,10 @@ for a page): it runs in a sandbox, so adapt it first:
 - Data comes from what oxplow feeds it (`component.data`, `onUpdate`), never
   from rows pasted into the file: pasted rows are a snapshot.
 - Colours from the theme (`applyTheme`, the kit's classes), not fixed hex.
-- A library: write TypeScript, import it, declare `build: { run: "bun
-  install --frozen-lockfile && bun run build", output: dist, exclude:
+- A library: write TypeScript, import it, declare `build: { run: "<the
+  project's install and build command>", output: dist, exclude:
   [node_modules] }` with `bundle: dist/<id>` (bundle to one classic script,
-  `bun build --format iife`). The person approves the build command at
+  with whatever bundler the project uses, as an IIFE). The person approves the build command at
   deploy (`repair-and-sharing.md`).
 
 A **whole-page component** is a page whose view is one component node; it

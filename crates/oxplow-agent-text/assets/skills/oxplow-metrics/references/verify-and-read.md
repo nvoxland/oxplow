@@ -2,8 +2,8 @@
 
 ## Step 5 — verify
 
-1. **Check and test the extension:** `oxplow extension check <name>` (no
-   errors, no warnings; it dry-runs the page) and `oxplow extension test
+1. **Check and test the extension:** `$OXPLOW_BIN extension check <name>` (no
+   errors, no warnings; it dry-runs the page) and `$OXPLOW_BIN extension test
    <name>` (the collector over the fixture returns the expected facts).
 2. **Run the collector now:** the `oxplow.collector.sync` command,
    `{ "collector": "<extension name>/<ns>.scan" }` (`project/<id>`

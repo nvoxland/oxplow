@@ -4,7 +4,7 @@
 
 A metric you author is an **extension** (a source under `.oxplow/extensions/<name>/`; it runs after `oxplow.extension.deploy { name }`). Get it from the
 `oxplow.metric.scaffold` command (`run_command`), which writes nothing and
-returns the files (`oxplow extension new metric <name> [--language rust]
+returns the files (`$OXPLOW_BIN extension new metric <name> [--language rust]
 [--glob '**/*.rs'] [--origin <your effort ref>]` writes the same ones from a
 terminal):
 
@@ -28,7 +28,7 @@ a fixture that proves the collector:
 Change the collector to what the user asked for and **change the fixture with
 it** (a small corpus and the exact facts it yields); `extension test` runs the
 collector over the fixture and fails when the facts differ, so it is the proof.
-`oxplow extension check <name>` must report no errors and no warnings. The
+`$OXPLOW_BIN extension check <name>` must report no errors and no warnings. The
 blocks look like this:
 
 ```yaml

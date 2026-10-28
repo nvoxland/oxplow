@@ -11,6 +11,7 @@ export const SHELL_COMMANDS = [
   "await_oauth_redirect",
   "clipboard_read_text",
   "create_project",
+  "install_cli",
   "list_recent_projects",
   "listen_for_oauth_redirect",
   "open_external_url",

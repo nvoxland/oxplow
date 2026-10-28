@@ -8,9 +8,12 @@ description: Build oxplow pages and extensions on request: views over oxplow's d
 A **page** (`pages/<slug>.yaml`) is named queries (`data:`) plus a tree of
 nodes that shows them (`view:`); it updates as the work changes. Pages live
 in **extensions**: plain-file folders at `.oxplow/extensions/<name>/` the
-user can keep and share. Scaffold with `oxplow extension new <kind> <name>
+user can keep and share. Scaffold with `$OXPLOW_BIN extension new <kind> <name>
 --origin <your effort ref>` or write a page with `oxplow.extension.write_page`.
 Nothing runs a source until `oxplow.extension.deploy { name }`.
+
+`$OXPLOW_BIN` is the oxplow command line (set in sessions oxplow starts;
+elsewhere `oxplow`, once the person ran "Install `oxplow` command line…").
 
 **Before building, look:** `oxplow_find_page { question }` finds the page
 that already answers it; `oxplow_show_page { page }` shows it. **To answer

@@ -118,8 +118,7 @@ Notifications about a request in flight, by its `id`:
 - `$/state { id, state }`: a checkpoint. oxplow commits the records
   before it, with the checkpoint, and the next read resumes from it.
 
-The JSON Schema of every message is checked in under
-`crates/oxplow-provider-protocol/schemas/`, and `oxplow extension test`
+The JSON Schema of every message is part of the protocol, and `oxplow extension test`
 validates every message against them.
 
 ### Errors

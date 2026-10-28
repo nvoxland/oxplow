@@ -1,5 +1,5 @@
 title: Context Read
-description: The project docs (.context/*.md) the agent read during this effort. Compare with what it changed.
+description: The project docs the agent read during this effort. Compare with what it changed.
 hidden: true
 params:
 - name: effort_id
@@ -19,4 +19,4 @@ view:
     label: Doc
     link:
       kind: file
-  empty: The agent read no .context docs during this effort.
+  empty: The agent read no project docs during this effort.

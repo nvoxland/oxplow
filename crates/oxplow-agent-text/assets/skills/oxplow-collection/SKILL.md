@@ -19,7 +19,7 @@ commands are in the `testing:` block of `.oxplow/project.yaml`, and its report
 collectors in the project's own extension, `.oxplow/extensions/project/extension.yaml`.
 
 - **Run tests through a report-emitting command.** A bare
-  `bun test <file>` / `cargo test <name>` writes no report, so the run
+  test-runner call (say `pytest <file>`) writes no report, so the run
   never reaches the Tests panel.
 
     - **`fastCommand`** (when the project declares one) emits the test
@@ -31,7 +31,7 @@ collectors in the project's own extension, `.oxplow/extensions/project/extension
     If the project declares no `fastCommand`, `command` is the
     report-emitting run. If that's too slow to use the way you want, say
     so and offer to add one — rather than falling back to a bare
-    `cargo test`, which oxplow can't see.
+    test runner, which oxplow can't see.
 - **Run it in the FOREGROUND, never backgrounded.** The PostToolUse hook fires
   when the Bash call *returns*; a backgrounded run returns at launch (before
   the reports regenerate), so its reports are never ingested and the effort

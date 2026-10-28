@@ -135,7 +135,7 @@ SELECT work_item, review FROM import_ref('reviews')
   another version, what reads the binding (a page, a model, a slot that
   mounts the page) is withheld with a warning, and the rest of your
   extension still loads. Without it, your whole extension is blocked.
-- `oxplow extension check` prints how each import resolved
+- `$OXPLOW_BIN extension check` prints how each import resolved
   (``import `reviews` → model:effort-review/reviews v2: available``, or
   why not).
 - The producer bumping its model's version is a break: your import of

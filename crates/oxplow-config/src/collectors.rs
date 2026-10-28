@@ -158,7 +158,7 @@ pub enum RunKind {
 }
 
 /// What a report collector records: its parser's typed output, merged
-/// into the run (`.context/collection.md`).
+/// into the run.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
 )]

@@ -4085,8 +4085,8 @@ impl PageAt<'_> {
         let Some(shell) = shell() else {
             report.warnings.push(format!(
                 "{shown}:1: {label}: its `ui` steps, and the steps after them, aren't run: no \
-                 oxplow app here to draw them — fix: set OXPLOW_SHELL to the app, or build it \
-                 (`bun run build:dev`)"
+                 oxplow app here to draw them — fix: install the Oxplow app, or set \
+                 OXPLOW_SHELL to it"
             ));
             return false;
         };
@@ -5312,8 +5312,8 @@ async fn test_provider(
     let recorded = client.finish().await;
     for v in &recorded.violations {
         report.errors.push(format!(
-            "{manifest}:1: provider `{}`: {v} — fix: send what the protocol's schemas describe \
-             (crates/oxplow-provider-protocol/schemas)",
+            "{manifest}:1: provider `{}`: {v} — fix: send what the provider protocol's JSON schemas \
+             describe (`initialize`, `discover`, `check`, …)",
             spec.id
         ));
     }

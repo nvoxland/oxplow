@@ -71,50 +71,15 @@ mechanism to work around.
 
 ## Option 2: build from source
 
-Prerequisites:
-
-- **Bun** ≥ 1.4.2 — package manager + JS runtime.
-- **Rust stable** — `mise.toml` pins the version the project builds
-  with (currently 1.98.1); `rust-toolchain.toml` pins the channel. rustup
-  installs the right toolchain automatically.
-- **Platform Tauri deps**:
-    - macOS: `xcode-select --install`
-    - Linux: `libwebkit2gtk-4.1-dev`, `libayatana-appindicator3-dev`,
-      `librsvg2-dev`, `patchelf`, `build-essential`
-    - Windows: WebView2 (preinstalled on modern Windows; otherwise
-      Microsoft's redistributable) plus the MSVC build tools
-- **Git** — oxplow expects the workspace root to be a repo.
-- **An agent CLI** — install and authenticate Claude Code (`claude`),
-  Codex (`codex`), OpenCode (`opencode`), or any combination. Oxplow
-  launches the CLI assigned to each
-  thread; enabling an agent does not install it or configure provider
-  credentials.
-
-If you use [mise](https://mise.jdx.dev), `mise install` picks up
-bun / node / rust from `mise.toml`.
-
-```bash
-git clone https://github.com/nvoxland/oxplow
-cd oxplow
-bun install --frozen-lockfile     # frontend deps (React, Monaco, xterm)
-bun run build:dev                 # builds the frontend and the Rust shell
-./target/debug/oxplow .           # runs it on this directory
-```
-
-Working on oxplow itself? This repository runs oxplow's own extensions
-from their sources, and nothing deploys them for you: before the first
-run, and after a core change, quit oxplow and run `cargo run -q -p
-oxplow-dev -- extension deploy`. For everything else — packaged builds,
-the release flow — see [`DEV.md`](https://github.com/nvoxland/oxplow/blob/main/DEV.md).
+To build oxplow yourself, follow [`DEV.md`](https://github.com/nvoxland/oxplow/blob/main/DEV.md)
+("Run from source"). It lists the prerequisites and the commands.
 
 ## After install
 
 1. Launch oxplow and open the directory you want to work in. The
-   prebuilt app prompts you to pick a project on first launch; from
-   source, run `<oxplow checkout>/target/debug/oxplow .` in that
-   directory (it opens `$PWD`). See
-   [`DEV.md`](https://github.com/nvoxland/oxplow/blob/main/DEV.md)
-   for other run modes.
+   app prompts you to pick a project on first launch. To start it from a
+   terminal, run **Install `oxplow` command line…** from the app's menu
+   once, then `oxplow .` in the directory (it opens `$PWD`).
 2. The opened directory **is** the workspace. Oxplow does not
    climb upward looking for an enclosing repo (workspace
    isolation rule).

@@ -62,6 +62,11 @@ jobs:
       - name: Sources are searchable (no NUL bytes)
         run: bun run lint:searchable
 
+      # docs/ and README.md are read by people who installed oxplow: no cargo,
+      # bun run, .context/ or source paths (the dev loop is DEV.md's).
+      - name: User docs name no part of the checkout
+        run: bun run lint:docs
+
       # Frontend unit + component tests (happy-dom harness lives in
       # apps/desktop/bunfig.toml, so run from there).
       - name: Frontend tests
