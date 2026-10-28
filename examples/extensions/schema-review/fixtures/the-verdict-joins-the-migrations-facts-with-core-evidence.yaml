@@ -1,9 +1,7 @@
 # An effort changes a migration and adds a complex function; its tests
 # were reported, not observed. The collector's facts (the DDL in the
 # migration), core's test evidence and the analysis of its change make the
-# verdict, and the next snapshot's facts change it. (Oxplow's own work
-# list, effort policy and wiki are bundled's.)
-requires: [oxplow-bundled]
+# verdict, and the next snapshot's facts change it.
 given:
   - observe: { turn: { prompt: Add users, during: [{ command: oxplow.effort.open, input: { thread: thr1 } }], tools: [{ name: Write, kind: edit, paths: [migrations/0001_users.sql, src/lib.rs], ok: true }], write: { path: migrations/0001_users.sql, body: "CREATE TABLE users (id INT);\nALTER TABLE accounts ADD owner INT;\n" } } }
   - { command: oxplow.test.record_run, as: agent, input: { command: cargo test, passed: 3, failed: 0, total: 3 } }

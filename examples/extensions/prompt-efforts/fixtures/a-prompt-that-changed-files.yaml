@@ -1,7 +1,5 @@
 # A turn that wrote a file closes the thread's open effort as of the turn's
 # start and opens a new one for the turn, keeping the effort's work item.
-# (Oxplow's own work list, effort policy and wiki are bundled's.)
-requires: [oxplow-bundled]
 given:
   - { command: oxplow.capability.choose, input: { capability: effort_policy, provider: prompt_efforts }, confirmed: true }
   - { command: oxplow.work_item.create, input: { title: Parse blocks, thread: thr1 }, bind: item }

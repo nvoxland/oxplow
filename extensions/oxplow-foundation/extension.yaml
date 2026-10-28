@@ -7,7 +7,7 @@ engine: ">=0.7"
 # What it reaches beyond the baseline: its AI providers call models, its
 # code-metric collectors read the project's files, and the Timeline page
 # reads the models with its own SQL.
-permissions: [sql.read, files.read, ai.compute]
+permissions: [sql.read, files.read, ai.compute, agent.write]
 # Its custom components are TypeScript (src/), built into dist/ when oxplow
 # is built and on every deploy; dist/ and node_modules/ aren't committed.
 build: { run: "bun install --frozen-lockfile && bun run build", output: dist, exclude: [node_modules] }
@@ -256,9 +256,20 @@ intent:
     - name: a-configured-language-server-is-listed-and-not-suggested-again
       input: { page: settings, params: { area: lsp } }
       expect: a language server of project.yaml is listed, can't be removed, and isn't suggested again
-# The agent harnesses and AI providers oxplow runs: core's
-# built-ins, many of each at once (every one declared here is active).
+# What the coding agent reads about the work list: its commands (with no
+# list they're a sink), and oxplow's tasks' ready queue while they are it.
+skills:
+  - { name: work-items, file: skills/work-items/SKILL.md }
+  - { name: work-next, kind: command, file: commands/work-next.md }
+# What oxplow runs by default: the work list, the effort policy, snapshots
+# and the wiki (a project chooses another provider in Settings), and the agent
+# harnesses and AI providers — core's built-ins, many of each at once (every
+# one of those declared here is active).
 implementations:
+  - { capability: work_items, id: oxplow, entry: "oxplow:tasks", skills: [work-next] }
+  - { capability: effort_policy, id: oxplow, entry: "oxplow:commit-or-switch" }
+  - { capability: snapshots, id: hashes, entry: "oxplow:snapshot-hashes" }
+  - { capability: knowledge, id: oxplow, entry: "oxplow:wiki" }
   - { capability: agent_harness, id: claude, entry: "oxplow:claude-code", title: Claude, icon: icons/claude.svg }
   - { capability: agent_harness, id: codex, entry: "oxplow:codex-cli", title: Codex, icon: icons/codex.svg }
   - { capability: agent_harness, id: opencode, entry: "oxplow:opencode", title: OpenCode, icon: icons/opencode.svg }

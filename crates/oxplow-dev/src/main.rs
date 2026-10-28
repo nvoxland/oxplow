@@ -5,8 +5,7 @@
 //! has active).
 //!
 //! `oxplow-dev task …` reads and changes oxplow's tasks while the project
-//! has no work list active (the bundled extension disabled to strip oxplow
-//! to its core). It runs oxplow's own `work_item.*` commands on a command
+//! has no work list active (none chosen in Settings → Capabilities). It runs oxplow's own `work_item.*` commands on a command
 //! bus over the project's database, as the app would — validation, audit,
 //! events and all — on a bus that doesn't check what's active. So the rows
 //! and the log are the task system's own, and turning the extension back

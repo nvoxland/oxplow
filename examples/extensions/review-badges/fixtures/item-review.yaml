@@ -1,6 +1,4 @@
 # An item with no review shows no row.
-# (Oxplow's own work list, effort policy and wiki are bundled's.)
-requires: [oxplow-bundled]
 when:
   page: item-review
   params: { uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow" }

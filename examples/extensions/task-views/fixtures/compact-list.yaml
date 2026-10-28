@@ -1,6 +1,4 @@
 # The list reads v_work_item; a fresh project has no items yet.
-# (Oxplow's own work list, effort policy and wiki are bundled's.)
-requires: [oxplow-bundled]
 when:
   page: compact-list
   params: { scope: all }

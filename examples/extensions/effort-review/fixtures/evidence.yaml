@@ -1,8 +1,6 @@
 # The effort's evidence in one bundle: its work item, the files its edits
 # claimed and the test runs its shell calls made. What the effort hasn't
 # got (functions, observations, metrics, findings) is empty.
-# (Oxplow's own work list, effort policy and wiki are bundled's.)
-requires: [oxplow-bundled]
 given:
   - { command: oxplow.work_item.create, input: { title: Parse blocks }, bind: item }
   - { command: oxplow.effort.open, input: { thread: thr1, work_item: $item.uri } }

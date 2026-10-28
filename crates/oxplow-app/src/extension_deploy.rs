@@ -2446,7 +2446,9 @@ mod tests {
                 ],
                 vec![
                     oxplow_db::SqlCell::Text("oxplow-foundation".into()),
-                    oxplow_db::SqlCell::Text("[\"sql.read\",\"files.read\",\"ai.compute\"]".into())
+                    oxplow_db::SqlCell::Text(
+                        "[\"sql.read\",\"files.read\",\"ai.compute\",\"agent.write\"]".into()
+                    )
                 ],
             ]
         );

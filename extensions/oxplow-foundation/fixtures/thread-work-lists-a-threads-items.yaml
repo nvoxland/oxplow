@@ -1,7 +1,5 @@
 # A thread's work: the open items, then the finished ones newest first by
 # when they closed.
-# (Oxplow's own work list, effort policy and wiki are bundled's.)
-requires: [oxplow-bundled]
 given:
   - { command: oxplow.work_item.create, input: { title: older done, thread: thr1 }, bind: older }
   - { command: oxplow.work_item.create, input: { title: newer done, thread: thr1 }, bind: newer }

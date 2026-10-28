@@ -543,7 +543,7 @@ pub fn scaffold_with(
         // is made first.
         let (given, when) = match kind {
             Kind::Command => (
-                "# Oxplow's own work list is bundled's.\nrequires: [oxplow-bundled]\ngiven: [{ command: oxplow.work_item.create, input: { title: First }, bind: item }]\n",
+                "given: [{ command: oxplow.work_item.create, input: { title: First }, bind: item }]\n",
                 format!("{{ command: {ns}.notes.add, input: {{ uri: $item.uri }} }}"),
             ),
             _ => ("", example_input.clone()),
@@ -764,8 +764,7 @@ pub fn scaffold_with(
                 &format!("{rel_dir}/fixtures/published.yaml"),
                 format!(
                     "# The finished job reaches `publish`, which comments the reply on the work\n\
-                     # item its intent key names. (Oxplow's own work list is bundled's.)\n\
-                     requires: [oxplow-bundled]\n\
+                     # item its intent key names.\n\
                      given: [{{ command: oxplow.work_item.create, input: {{ title: First }} }}]\n\
                      when:\n\
                      \x20 job: run\n\

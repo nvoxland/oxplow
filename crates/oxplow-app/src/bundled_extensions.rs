@@ -159,4 +159,42 @@ mod tests {
         }
         assert!(hits.is_empty(), "{}", hits.join("\n"));
     }
+
+    /// The default work list, effort policy, snapshots and wiki are
+    /// oxplow-foundation's: with oxplow-bundled off they still run.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_work_list_and_wiki_run_with_bundled_off() {
+        let dir = tempfile::tempdir().unwrap();
+        crate::test_fixtures::init_git_repo(dir.path());
+        std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
+        std::fs::write(
+            dir.path().join(".oxplow/personal.yaml"),
+            "disableExtensions: [oxplow-bundled]\n",
+        )
+        .unwrap();
+        let svc = crate::Services::in_memory(dir.path()).await.unwrap();
+        svc.streams.ensure_primary().await.unwrap();
+        crate::test_fixtures::activate(&svc).await;
+        let human = oxplow_domain::Actor::Human;
+        let item = svc
+            .commands
+            .run(
+                &human,
+                "oxplow.work_item.create",
+                serde_json::json!({ "title": "Still here" }),
+                true,
+            )
+            .await
+            .expect("the work list runs with bundled off");
+        assert!(item.result["uri"].is_string(), "{}", item.result);
+        svc.commands
+            .run(
+                &human,
+                "oxplow.knowledge.write_page",
+                serde_json::json!({ "slug": "notes", "title": "Notes", "body": "Hello." }),
+                true,
+            )
+            .await
+            .expect("the wiki runs with bundled off");
+    }
 }

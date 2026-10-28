@@ -1620,7 +1620,7 @@ panels: …           # left-nav panels, each a page compact (see "Panels")
 commands:  [...]   # Starlark scripts composing core commands, a scope's or its provider's operations (see "Commands")
 resources: …        # kinds of thing a URI can name (see "Resources")
 event_types: …      # its own namespace's event types (stable; see "Event types", P8)
-implementations: …  # capability implementations it declares (oxplow-bundled declares the defaults)
+implementations: …  # capability implementations it declares (oxplow-foundation declares the defaults)
 skills: …           # skills and slash commands for the coding agent
 providers: [...]    # external providers over the provider protocol — a program, or an MCP server behind oxplow's adapter (providers.md)
 effects: …          # scripts reacting to logged events by composing commands (see "Effects")
@@ -1979,10 +1979,11 @@ from, in turn — and a fixture's own `requires: [<ext>…]` (a fixture key,
 same meaning as the manifest's) adds more, on an oxplow of that fixture's
 own (an unknown name is a finding). The default extensions are not on:
 oxplow's own pages run complete without them. Oxplow's own work list,
-effort policy and wiki are bundled's, so a fixture that makes work items,
-efforts or wiki pages says `requires: [oxplow-bundled]`, and an effort
-policy's conformance suite, which files work, runs on an oxplow of its own
-with bundled on — deployed in that order,
+effort policy and wiki are foundation's (always on), so a fixture that makes
+work items, efforts or wiki pages needs nothing extra (`requires:
+[oxplow-bundled]` only for what bundled adds: its review pages, verdict and
+replacements), and an effort policy's conformance suite, which files work,
+runs on an oxplow of its own — deployed in that order,
 what one requires before it (`Host::start`). Never the project's list or
 one person's `enableExtensions` / `disableExtensions`, and never a
 sibling it doesn't name: a fixture passes or fails the same for everyone
@@ -4867,10 +4868,12 @@ implementations:
 - A required capability's default is core's own: `CapabilityRegistry::new`
   registers it (snapshots' `oxplow`, `oxplow:snapshots`), so it's there
   whatever is disabled, and a manifest declaring that id is an error.
-- `oxplow-bundled` declares the optional defaults (the work list, the
-  effort policy and knowledge's wiki, `oxplow:wiki`). Disabled, nothing
-  declares them and all three resolve to none (`capabilities::CapabilityRegistry::resolve`,
-  `.context/work-tracking.md`). It also offers snapshots' `hashes`
+- `oxplow-foundation` declares the default implementations (the work list,
+  the effort policy and knowledge's wiki, `oxplow:wiki`), so they run with
+  `oxplow-bundled` off; turning the list off is choosing another provider
+  (or none) in Settings → Capabilities, not disabling an extension
+  (`capabilities::CapabilityRegistry::resolve`, `.context/work-tracking.md`).
+  It also offers snapshots' `hashes`
   (`oxplow:snapshot-hashes`, "Track changes only": no `contents`); a
   chosen `hashes` with bundled disabled falls back to core's `oxplow`.
 
@@ -4886,8 +4889,8 @@ empty state. An advisory whose
 needs aren't met doesn't run. A context built without `Services` (param
 checks) checks nothing. A capability's none declares every feature (it
 takes everything, keeping nothing), so a feature need is met by none and
-only a need of the capability itself (`work_items`) isn't. `oxplow-bundled`
-declares no `work_items` need: with no list its task pages, hint and
+only a need of the capability itself (`work_items`) isn't. `oxplow-foundation`
+declares no `work_items` need: with no list chosen its task pages, hint and
 skill just find nothing.
 
 **What an implementation owns.** A provider instance owns its command
@@ -4924,7 +4927,7 @@ implementations:
   already on disk (`refresh_agent_text` → each harness's `refresh_text`). A skill folder oxplow wrote
   carries a `.oxplow` marker, so one no longer offered is removed and a
   person's own stay; the Claude `commands/` folder is oxplow's whole.
-- `oxplow-bundled` gives the `work-items` skill (any work list) and the
+- `oxplow-foundation` gives the `work-items` skill (any work list) and the
   `work-next` command (oxplow's tasks' ready queue).
 
 ## Advisories

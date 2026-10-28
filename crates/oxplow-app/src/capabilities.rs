@@ -1557,10 +1557,9 @@ mod tests {
         );
     }
 
-    /// With `oxplow-bundled` disabled, nothing declares the optional
-    /// defaults: the work list and the effort policy fall to none, while
-    /// snapshots — required — keep core's own default, published as the
-    /// active row; filing says what it needs.
+    /// With `oxplow-bundled` disabled, the defaults still run: the work
+    /// list, the effort policy and snapshots are `oxplow-foundation`'s
+    /// (core's own snapshots default is the active row); filing works.
     #[tokio::test]
     async fn disabling_the_bundled_extension_leaves_core_usable() {
         let fx = crate::test_fixtures::services_with_effort().await;
@@ -1575,8 +1574,8 @@ mod tests {
         svc.extension_catalog.changed();
         crate::test_fixtures::activate_with_problems(svc).await;
         let config = crate::config_service::read_config(&svc.config);
-        assert_eq!(svc.capabilities.active(&config, "work_items"), NONE);
-        assert_eq!(svc.capabilities.active(&config, "effort_policy"), NONE);
+        assert_eq!(svc.capabilities.active(&config, "work_items"), "oxplow");
+        assert_eq!(svc.capabilities.active(&config, "effort_policy"), "oxplow");
         let snapshots = svc.capabilities.resolve(&config, "snapshots");
         assert_eq!(
             (snapshots.id.as_str(), snapshots.chosen_by),
@@ -1594,10 +1593,9 @@ mod tests {
             .unwrap();
         assert_eq!(
             serde_json::to_value(&rows.rows).unwrap(),
-            serde_json::json!([["oxplow", 1, 1, "builtin"]])
+            serde_json::json!([["hashes", 0, 1, "builtin"], ["oxplow", 1, 1, "builtin"]])
         );
-        let out = svc
-            .commands
+        svc.commands
             .run(
                 &oxplow_domain::Actor::Human,
                 crate::commands::work_item::CREATE,
@@ -1605,8 +1603,7 @@ mod tests {
                 false,
             )
             .await
-            .unwrap();
-        assert_eq!(out.result["tracked"], serde_json::json!(false));
+            .expect("the work list runs with bundled off");
     }
 
     /// The rows say which is active and why, and a choice that isn't

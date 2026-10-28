@@ -1,7 +1,5 @@
 # A review that finishes is commented on the effort's work item, and the
-# effort's `reviews` row carries what the model wrote. (Oxplow's own work
-# list, effort policy and wiki are bundled's.)
-requires: [oxplow-bundled]
+# effort's `reviews` row carries what the model wrote.
 when:
   setup:
     - { command: oxplow.work_item.create, input: { title: Parse blocks } }

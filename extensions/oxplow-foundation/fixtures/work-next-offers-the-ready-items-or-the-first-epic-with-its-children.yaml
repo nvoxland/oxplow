@@ -1,8 +1,6 @@
 # What to pick up next on a thread's list: ready items in list order, an
 # open blocker holding one until it closes, and a ready epic first coming
 # with its ready descendants as one unit.
-# (Oxplow's own work list, effort policy and wiki are bundled's.)
-requires: [oxplow-bundled]
 when: { page: work-next, params: { thread: thr1 } }
 steps:
   - expect: { loaders: { work_next: { rows: 0 } } }

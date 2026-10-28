@@ -1,7 +1,5 @@
 # Renaming an item through the board goes through: the update answers
 # with the item.
-# (Oxplow's own work list, effort policy and wiki are bundled's.)
-requires: [oxplow-bundled]
 when:
   component: swimlanes
   items: [Fix the parser]

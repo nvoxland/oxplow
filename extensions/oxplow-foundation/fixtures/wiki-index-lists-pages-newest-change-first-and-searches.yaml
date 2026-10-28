@@ -1,8 +1,6 @@
 # The wiki: pages not visited, newest change first; a search lists the pages
 # whose title or body holds it, with the text around the match; the visited
 # pages list apart.
-# (Oxplow's own work list, effort policy and wiki are bundled's.)
-requires: [oxplow-bundled]
 given:
   - { command: oxplow.knowledge.write_page, input: { slug: alpha, title: Alpha, body: "# Alpha\n\nThe quick brown fox jumps.\n" } }
   - { command: oxplow.knowledge.write_page, input: { slug: beta, title: Beta, body: "# Beta\n\nNothing here.\n" } }

@@ -1,8 +1,6 @@
 # The job runs in the throwaway host; the event it logs when it ends
 # reaches `publish-summary` (running there too), which writes the model's
 # answer to the `triage-summary` page.
-# (Oxplow's own work list, effort policy and wiki are bundled's.)
-requires: [oxplow-bundled]
 when:
   job: summarize
   intentKey: summary-2
