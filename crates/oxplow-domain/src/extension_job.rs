@@ -82,6 +82,11 @@ pub struct JobOwner {
     /// Optional public operation contract version, independent of package
     /// version and engine compatibility.
     pub contract_version: Option<u32>,
+    /// The hash of the deployment whose declaration owns the job. A
+    /// redeploy is another deployment whatever its version says; a queued
+    /// job is rebound to it ([`JobEvent::Rebind`]), a running one stops.
+    #[serde(default)]
+    pub deployment: Option<String>,
 }
 
 impl JobOwner {
@@ -94,6 +99,10 @@ impl JobOwner {
                 .as_deref()
                 .is_some_and(|version| !valid_owner_identity(version))
             || self.contract_version == Some(0)
+            || self
+                .deployment
+                .as_deref()
+                .is_some_and(|hash| !valid_owner_identity(hash))
         {
             return Err(TransitionError::InvalidOwner);
         }
@@ -244,6 +253,12 @@ pub enum JobEvent {
     RetryInterrupted {
         now_ms: i64,
         intent_key: IntentKey,
+    },
+    /// Its extension was redeployed before this attempt ran: the new
+    /// deployment of the same contribution and contract owns it.
+    Rebind {
+        now_ms: i64,
+        owner: JobOwner,
     },
 }
 
@@ -518,6 +533,19 @@ impl ExtensionJob {
                 next.state = JobState::Queued;
                 next.updated_at_ms = now_ms;
             }
+            JobEvent::Rebind { now_ms, owner } => {
+                next.check_time(now_ms)?;
+                owner.validate()?;
+                if next.state != JobState::Queued
+                    || next.cancellation_requested_at_ms.is_some()
+                    || owner.contribution != next.owner.contribution
+                    || owner.contract_version != next.owner.contract_version
+                {
+                    return Err(TransitionError::InvalidTransition);
+                }
+                next.owner = owner;
+                next.updated_at_ms = now_ms;
+            }
         }
 
         next.validate()?;
@@ -603,6 +631,7 @@ mod tests {
                 contribution: ContributionId::new("acme", ContributionKind::Job, "review"),
                 package_version: None,
                 contract_version: Some(1),
+                deployment: Some("d1".into()),
             },
             RunId::generate(),
             key(),
@@ -640,6 +669,51 @@ mod tests {
 
     /// An idempotent job cut off is queued again, keeping its attempt; its
     /// next claim is the next attempt, under a new fence.
+    /// A queued job whose deployment is replaced is rebound to the new
+    /// one of the same contribution and contract; nothing else moves, and
+    /// a running job, another contribution or another contract can't be.
+    #[test]
+    fn a_queued_job_is_rebound_to_its_new_deployment() {
+        let job = queued(ReplayPolicy::Never);
+        let mut owner = job.owner.clone();
+        owner.deployment = Some("d2".into());
+        owner.package_version = Some("1.0.1".into());
+        let next = job
+            .transition(JobEvent::Rebind {
+                now_ms: 1,
+                owner: owner.clone(),
+            })
+            .unwrap()
+            .job;
+        assert_eq!(next.owner, owner);
+        assert_eq!(
+            (next.state, next.attempt, next.fence),
+            (JobState::Queued, 0, 0)
+        );
+
+        let mut other = owner.clone();
+        other.contract_version = Some(2);
+        assert_eq!(
+            job.transition(JobEvent::Rebind {
+                now_ms: 1,
+                owner: other
+            }),
+            Err(TransitionError::InvalidTransition)
+        );
+        let running = job
+            .transition(JobEvent::Claim {
+                now_ms: 1,
+                lease_ms: LEASE,
+                intent_key: key(),
+            })
+            .unwrap()
+            .job;
+        assert_eq!(
+            running.transition(JobEvent::Rebind { now_ms: 2, owner }),
+            Err(TransitionError::InvalidTransition)
+        );
+    }
+
     #[test]
     fn an_interrupted_idempotent_job_is_queued_again_for_its_next_attempt() {
         let interrupted = claimed_then_expired(queued(ReplayPolicy::Idempotent), 10);

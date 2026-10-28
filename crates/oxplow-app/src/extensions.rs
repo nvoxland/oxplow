@@ -59,6 +59,16 @@ pub enum Deployment {
     NotHere,
 }
 
+impl Deployment {
+    /// The hash of the files that run: a shipped or a deployed copy's.
+    pub fn hash(&self) -> Option<&str> {
+        match self {
+            Deployment::Shipped { hash } | Deployment::Deployed { hash } => Some(hash),
+            Deployment::Source | Deployment::Undeployed | Deployment::NotHere => None,
+        }
+    }
+}
+
 /// How a viz renders its rows.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,

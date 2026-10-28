@@ -551,6 +551,7 @@ fn owner(fx: &EffortFixture, generation: Option<String>) -> ContributionRef {
         id,
         version: ext.version.clone(),
         generation: Some(snapshot.generation().to_string()),
+        deployment: ext.deployment.hash().map(str::to_owned),
     };
     if generation.is_some() {
         owner.generation = generation;

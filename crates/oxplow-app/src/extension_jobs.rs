@@ -117,6 +117,7 @@ impl ExtensionJobs {
                     ),
                     package_version: extension.version.clone(),
                     contract_version: Some(job.version),
+                    deployment: extension.deployment.hash().map(str::to_owned),
                 };
                 let key = JobOperationKey::new(owner, job.operation.as_str().into())
                     .map_err(|_| job_problem())?;
@@ -179,6 +180,7 @@ impl ExtensionJobs {
                                 ),
                                 package_version: extension.version.clone(),
                                 contract_version: Some(job.version),
+                                deployment: extension.deployment.hash().map(str::to_owned),
                             },
                             job.operation.as_str().to_owned(),
                             replay(job.replay),

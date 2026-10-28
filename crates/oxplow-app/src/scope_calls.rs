@@ -809,6 +809,7 @@ mod tests {
                 id: ContributionId::new("acme", ContributionKind::Effect, "e"),
                 version: None,
                 generation: None,
+                deployment: None,
             },
             oxplow_domain::Actor::Human,
             oxplow_domain::run::Mode::External,

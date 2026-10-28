@@ -2055,6 +2055,7 @@ impl ProviderRegistry {
                         ),
                         version: ext.version.clone(),
                         generation: Some(snapshot.generation().to_string()),
+                        deployment: ext.deployment.hash().map(str::to_owned),
                     },
                 )
             });

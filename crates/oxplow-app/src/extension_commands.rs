@@ -1133,6 +1133,8 @@ struct RegisteredCommands {
     grant: oxplow_domain::grant::Grant,
     commands: Vec<ExtensionCommand>,
     version: Option<String>,
+    /// The hash of the deployment its handlers run from.
+    deployment: Option<String>,
     generation: String,
 }
 
@@ -1219,6 +1221,7 @@ impl ExtensionCommands {
                         grant: crate::grants::grant_of(e),
                         commands: e.commands.clone(),
                         version: e.version.clone(),
+                        deployment: e.deployment.hash().map(str::to_owned),
                         generation: snapshot.generation().to_string(),
                     },
                 )
@@ -1368,6 +1371,7 @@ impl ExtensionCommands {
                     ),
                     version: registration.version.clone(),
                     generation: Some(registration.generation.clone()),
+                    deployment: registration.deployment.clone(),
                 };
                 // An operation's backing scope is implicit in its command
                 // spec, and must also be present in the captured authority.
@@ -1379,19 +1383,23 @@ impl ExtensionCommands {
                 }
                 let declared = crate::grants::script_request(&needs);
                 let grant = registration.grant.clone();
-                let (catalog, root, owner) = (
+                let (catalog, root, owner, deployment) = (
                     self.catalog.clone(),
                     self.root.clone(),
                     extension.to_string(),
+                    registration.deployment.clone(),
                 );
                 let live: std::sync::Arc<dyn Fn() -> Result<(), String> + Send + Sync> =
                     std::sync::Arc::new(move || {
                         let snapshot = catalog.live_snapshot(&root);
                         let current = crate::extensions::owner(snapshot.extensions(), &owner);
-                        if current.is_some_and(|ext| ext.enabled) {
+                        if current.is_some_and(|ext| {
+                            ext.enabled && ext.deployment.hash() == deployment.as_deref()
+                        }) {
                             Ok(())
                         } else {
-                            Err("the command's owning extension is disabled or removed".into())
+                            Err("the command's owning extension was redeployed, disabled or removed"
+                                .into())
                         }
                     });
                 let named: std::sync::Arc<crate::commands::ContributionOf> =

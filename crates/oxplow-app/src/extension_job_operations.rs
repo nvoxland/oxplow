@@ -272,6 +272,26 @@ impl JobOperationRegistry {
             .cloned()
             .ok_or(JobOperationError::Unavailable)
     }
+
+    /// The registration that replaced `owner`'s: the same contribution,
+    /// contract version and operation under another deployment (or
+    /// version) of its extension — what a queued job is rebound to.
+    pub fn successor(
+        &self,
+        owner: &JobOwner,
+        operation: &str,
+    ) -> Option<Arc<RegisteredJobOperation>> {
+        self.operations
+            .iter()
+            .find(|registered| {
+                let next = &registered.key.owner;
+                next.contribution == owner.contribution
+                    && next.contract_version == owner.contract_version
+                    && next != owner
+                    && registered.key.operation == operation
+            })
+            .cloned()
+    }
 }
 
 fn validate_owner(owner: &JobOwner) -> Result<(), JobOperationError> {

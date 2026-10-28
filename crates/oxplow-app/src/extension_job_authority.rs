@@ -314,9 +314,10 @@ impl JobAuthorityHost {
             ContributionRef {
                 id: job.job.owner.contribution.clone(),
                 version: job.job.owner.package_version.clone(),
-                // A job belongs to its extension's version, not to one
-                // catalog generation: `live` checks that version is current.
+                // A job belongs to its extension's deployment, not to one
+                // catalog generation: `live` checks that deployment is current.
                 generation: None,
+                deployment: job.job.owner.deployment.clone(),
             },
             identity,
             provenance,
@@ -349,7 +350,11 @@ fn current_descriptor(
         .map_err(|_| JobAuthorityError::Denied)?;
     let snapshot = catalog.live_snapshot(project);
     let extension = crate::extensions::owner(snapshot.extensions(), &owner.contribution.extension)
-        .filter(|extension| extension.enabled && extension.version == owner.package_version)
+        .filter(|extension| {
+            extension.enabled
+                && extension.version == owner.package_version
+                && extension.deployment.hash() == owner.deployment.as_deref()
+        })
         .ok_or(JobAuthorityError::Unavailable)?;
     extension
         .contributions

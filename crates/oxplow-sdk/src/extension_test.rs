@@ -2022,6 +2022,7 @@ async fn observe_run(host: &Host, body: &Value) -> Result<(), String> {
             id: ContributionId::new(extension, kind, local),
             version: None,
             generation: None,
+            deployment: None,
         },
         Actor::System,
         Mode::External,

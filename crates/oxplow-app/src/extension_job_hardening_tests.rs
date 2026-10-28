@@ -185,6 +185,50 @@ async fn a_queued_job_runs_after_another_extension_changes() {
     assert_eq!(completions(&fx, &id).await, ["succeeded"]);
 }
 
+/// Rewrite the triage extension's manifest in place, keeping its version
+/// and its job's contract: another deployment all the same.
+async fn redeploy_same_version(fx: &Fixture) {
+    std::fs::write(
+        fx._dir
+            .path()
+            .join(".oxplow/extensions/triage/extension.yaml"),
+        format!("{MANIFEST}# redeployed\n"),
+    )
+    .unwrap();
+    crate::test_fixtures::activate_with_problems(&fx.svc).await;
+}
+
+/// A job queued before its own extension is redeployed runs under the new
+/// deployment: nothing of it ran under the old one, and it isn't stranded.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_queued_job_is_rebound_across_a_redeploy_of_its_extension() {
+    let fx = fixture_idle(MANIFEST, vec![reply("rebound")]).await;
+    let id = ask(&fx, "redeploy").await;
+    redeploy_same_version(&fx).await;
+
+    fx.svc
+        .jobs
+        .spawn(fx.svc.extension_activation.clone(), fx.svc.commands.clone());
+    let done = until(&fx, &id, |s| s["state"] == json!("succeeded")).await;
+    assert_eq!(done["text"], json!("rebound"), "{done}");
+    assert_eq!(completions(&fx, &id).await, ["succeeded"]);
+}
+
+/// A redeploy that keeps the version still stops a running job: what it
+/// had isn't published as the new deployment's.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_running_job_stops_across_a_same_version_redeploy() {
+    let fx = fixture(MANIFEST, vec![slow(&words(40), 50)]).await;
+    let id = ask(&fx, "same-version").await;
+    streaming(&fx, &id).await;
+
+    redeploy_same_version(&fx).await;
+
+    let done = until(&fx, &id, |s| s["state"] != json!("running")).await;
+    assert_eq!(done["state"], json!("cancelled"), "{done}");
+    assert_eq!(completions(&fx, &id).await, ["cancelled"]);
+}
+
 /// A running job holds no catalog: another extension's change activates
 /// while it streams, and the job goes on to succeed.
 #[tokio::test(flavor = "multi_thread")]

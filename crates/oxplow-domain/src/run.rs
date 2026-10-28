@@ -207,6 +207,11 @@ pub struct ContributionRef {
     pub version: Option<String>,
     /// The extension catalog's generation the run was built against.
     pub generation: Option<String>,
+    /// The hash of the deployment whose files the run executes (shipped or
+    /// deployed); `None` for a source load (a check, a test). A redeploy is
+    /// another deployment whatever its version says.
+    #[serde(default)]
+    pub deployment: Option<String>,
 }
 
 /// One run of extension (or core) code. Built by a named constructor;
@@ -706,6 +711,7 @@ mod tests {
             id: ContributionId::new("acme", ContributionKind::Effect, "note"),
             version: Some("1.2.0".into()),
             generation: Some(generation.into()),
+            deployment: None,
         }
     }
 

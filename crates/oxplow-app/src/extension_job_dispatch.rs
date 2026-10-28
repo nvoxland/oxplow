@@ -189,7 +189,7 @@ impl ExtensionJobDispatcher {
     /// pin the generation for themselves, and each checks the job's own
     /// extension is still the version that queued it.
     pub async fn run_one(&self, id: JobId) -> Result<DispatchOutcome, DispatchError> {
-        let stored = self.store.get(id.clone()).await?;
+        let mut stored = self.store.get(id.clone()).await?;
         if stored.job.state != JobState::Queued || stored.job.cancellation_requested_at_ms.is_some()
         {
             return Ok(if stored.job.state == JobState::Cancelled {
@@ -205,16 +205,40 @@ impl ExtensionJobDispatcher {
             }
             Err(error) => return Err(error.into()),
         };
-        let registration = match self
-            .host
-            .registry()
-            .find(&stored.job.owner, &stored.operation)
-        {
-            Ok(registration) if registration.replay_policy() == stored.job.replay_policy => {
-                registration
-            }
-            _ => return Ok(DispatchOutcome::Skipped),
+        let registry = self.host.registry();
+        let registration = match registry.find(&stored.job.owner, &stored.operation) {
+            Ok(registration) => registration,
+            // Its extension was redeployed before this attempt ran: the new
+            // deployment of the same contribution and contract owns it now
+            // (a redeploy is another deployment whatever its version says).
+            Err(_) => match registry.successor(&stored.job.owner, &stored.operation) {
+                Some(next) => {
+                    match self
+                        .transition_announced(
+                            id.clone(),
+                            stored.revision,
+                            JobEvent::Rebind {
+                                now_ms: now_ms(),
+                                owner: next.key().owner().clone(),
+                            },
+                            None,
+                        )
+                        .await
+                    {
+                        Ok(rebound) => stored = rebound,
+                        Err(ExtensionJobStoreError::Conflict) => {
+                            return Ok(DispatchOutcome::Skipped)
+                        }
+                        Err(error) => return Err(error.into()),
+                    }
+                    next
+                }
+                None => return Ok(DispatchOutcome::Skipped),
+            },
         };
+        if registration.replay_policy() != stored.job.replay_policy {
+            return Ok(DispatchOutcome::Skipped);
+        }
 
         // Derive the would-be token from the pure transition and authorize it
         // before the durable claim. Claim itself remains a revision CAS.
@@ -789,7 +813,8 @@ fn event_at(mut event: JobEvent, now: i64) -> JobEvent {
         | JobEvent::RequestCancellation { now_ms }
         | JobEvent::ConfirmStopped { now_ms, .. }
         | JobEvent::RecoverExpired { now_ms }
-        | JobEvent::RetryInterrupted { now_ms, .. } => *now_ms = now,
+        | JobEvent::RetryInterrupted { now_ms, .. }
+        | JobEvent::Rebind { now_ms, .. } => *now_ms = now,
     }
     event
 }

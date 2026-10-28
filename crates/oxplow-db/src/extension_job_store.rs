@@ -397,16 +397,17 @@ pub fn enqueue_tx(conn: &Connection, new_job: &NewExtensionJob) -> StoreResult<E
 
     let request_json = canonical_json(&new_job.request)?;
     let job = &new_job.job;
-    let (contribution_id, package_version, contract_version) = owner_columns(&job.owner);
+    let (contribution_id, package_version, contract_version, deployment_hash) =
+        owner_columns(&job.owner);
     let savepoint = Savepoint::new(conn)?;
     let insert = conn.execute(
         "INSERT INTO extension_job (
             id, contribution_id, package_version, contract_version,
             operation, invoker, run_id, intent_key, replay_policy, state, attempt,
             fence, lease_until_ms, cancellation_requested_at_ms, created_at_ms,
-            updated_at_ms, revision, request_json
+            updated_at_ms, revision, request_json, deployment_hash
          ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11,
-                   ?12, ?13, ?14, ?15, ?16, 1, ?17)",
+                   ?12, ?13, ?14, ?15, ?16, 1, ?17, ?18)",
         params![
             job.id.as_str(),
             contribution_id,
@@ -424,7 +425,8 @@ pub fn enqueue_tx(conn: &Connection, new_job: &NewExtensionJob) -> StoreResult<E
             job.cancellation_requested_at_ms,
             job.created_at_ms,
             job.updated_at_ms,
-            request_json
+            request_json,
+            deployment_hash
         ],
     );
     match insert {
@@ -469,7 +471,7 @@ pub fn get_tx(conn: &Connection, id: &JobId) -> StoreResult<Option<StoredExtensi
             "SELECT id, contribution_id, package_version, contract_version,
                     operation, invoker, run_id, intent_key, replay_policy, state, attempt,
                     fence, lease_until_ms, cancellation_requested_at_ms, created_at_ms,
-                    updated_at_ms, revision, request_json
+                    updated_at_ms, revision, request_json, deployment_hash
              FROM extension_job WHERE id = ?1",
             [id.as_str()],
             decode_stored_job,
@@ -487,7 +489,7 @@ pub fn metadata_tx(conn: &Connection, id: &JobId) -> StoreResult<Option<Recovery
             "SELECT j.id, j.contribution_id, j.package_version, j.contract_version,
                     j.run_id, j.intent_key, j.replay_policy, j.state, j.attempt, j.fence,
                     j.lease_until_ms, j.cancellation_requested_at_ms, j.created_at_ms,
-                    j.updated_at_ms, j.operation, j.invoker, j.revision
+                    j.updated_at_ms, j.operation, j.invoker, j.revision, j.deployment_hash
              FROM extension_job j WHERE j.id = ?1",
             [id.as_str()],
             read_recovery_candidate,
@@ -539,7 +541,8 @@ pub fn transition_tx(
         let changed = conn
             .execute(
                 "UPDATE extension_job SET state=?1, attempt=?2, fence=?3, lease_until_ms=?4,
-                cancellation_requested_at_ms=?5, updated_at_ms=?6, revision=?7
+                cancellation_requested_at_ms=?5, updated_at_ms=?6, revision=?7,
+                package_version=?16, deployment_hash=?17
          WHERE id=?8 AND revision=?9 AND state=?10 AND attempt=?11 AND fence=?12
              AND lease_until_ms IS ?13 AND cancellation_requested_at_ms IS ?14
              AND updated_at_ms=?15",
@@ -560,6 +563,8 @@ pub fn transition_tx(
                     current.job.lease_until_ms,
                     current.job.cancellation_requested_at_ms,
                     current.job.updated_at_ms,
+                    next.owner.package_version,
+                    next.owner.deployment,
                 ],
             )
             .map_err(map_sql_err)?;
@@ -907,7 +912,7 @@ fn candidates_tx(
         "SELECT j.id, j.contribution_id, j.package_version, j.contract_version,
                 j.run_id, j.intent_key, j.replay_policy, j.state, j.attempt, j.fence,
                 j.lease_until_ms, j.cancellation_requested_at_ms, j.created_at_ms,
-                j.updated_at_ms, j.operation, j.invoker, j.revision
+                j.updated_at_ms, j.operation, j.invoker, j.revision, j.deployment_hash
          FROM extension_job j
          WHERE {predicate}
            AND (j.updated_at_ms>?2 OR (j.updated_at_ms=?2 AND j.id>?3))
@@ -967,6 +972,7 @@ struct RawStoredJob {
     updated_at_ms: i64,
     revision: i64,
     request_json: String,
+    deployment_hash: Option<String>,
 }
 
 // Check borrowed SQLite bytes before allocating a String or decoding JSON.
@@ -1024,6 +1030,7 @@ fn decode_stored_job(row: &Row<'_>) -> rusqlite::Result<RawStoredJob> {
         updated_at_ms: row.get(15)?,
         revision: row.get(16)?,
         request_json: read_text(row, 17, 1048576)?,
+        deployment_hash: read_optional_text(row, 18, 256)?,
     })
 }
 
@@ -1043,6 +1050,7 @@ fn decode_stored_job_data(raw: RawStoredJob) -> StoreResult<StoredExtensionJob> 
         cancellation_requested_at_ms: raw.cancellation_requested_at_ms,
         created_at_ms: raw.created_at_ms,
         updated_at_ms: raw.updated_at_ms,
+        deployment_hash: raw.deployment_hash,
     })?;
     validate_metadata(&raw.operation)?;
     validate_metadata(&raw.invoker)?;
@@ -1075,6 +1083,7 @@ struct JobColumns {
     cancellation_requested_at_ms: Option<i64>,
     created_at_ms: i64,
     updated_at_ms: i64,
+    deployment_hash: Option<String>,
 }
 
 fn decode_job(columns: JobColumns) -> StoreResult<ExtensionJob> {
@@ -1093,6 +1102,7 @@ fn decode_job(columns: JobColumns) -> StoreResult<ExtensionJob> {
         cancellation_requested_at_ms,
         created_at_ms,
         updated_at_ms,
+        deployment_hash,
     } = columns;
     let id = parse_job_id(&id)?;
     let contribution = contribution_id
@@ -1106,6 +1116,7 @@ fn decode_job(columns: JobColumns) -> StoreResult<ExtensionJob> {
         contract_version: contract_version
             .map(|v| u32::try_from(v).map_err(|_| ExtensionJobStoreError::InvalidData))
             .transpose()?,
+        deployment: deployment_hash,
     };
     let job = ExtensionJob {
         id,
@@ -1167,7 +1178,9 @@ fn apply_attempt_change(
         JobEvent::RecoverExpired { now_ms } => {
             close_attempt(conn, old, *now_ms, "interrupted", None)?
         }
-        JobEvent::RequestCancellation { .. } | JobEvent::RetryInterrupted { .. } => {}
+        JobEvent::RequestCancellation { .. }
+        | JobEvent::RetryInterrupted { .. }
+        | JobEvent::Rebind { .. } => {}
     }
     Ok(())
 }
@@ -1332,6 +1345,7 @@ type RawRecovery = (
     String,
     String,
     i64,
+    Option<String>,
 );
 
 fn read_recovery_candidate(row: &Row<'_>) -> rusqlite::Result<RawRecovery> {
@@ -1353,6 +1367,7 @@ fn read_recovery_candidate(row: &Row<'_>) -> rusqlite::Result<RawRecovery> {
         read_text(row, 14, 256)?,
         read_text(row, 15, 256)?,
         row.get(16)?,
+        read_optional_text(row, 17, 256)?,
     ))
 }
 
@@ -1375,6 +1390,7 @@ fn decode_recovery_candidate(raw: RawRecovery) -> StoreResult<RecoveryCandidate>
         operation,
         invoker,
         revision,
+        deployment_hash,
     ) = raw;
     let job = decode_job(JobColumns {
         id,
@@ -1391,6 +1407,7 @@ fn decode_recovery_candidate(raw: RawRecovery) -> StoreResult<RecoveryCandidate>
         cancellation_requested_at_ms: cancellation,
         created_at_ms: created,
         updated_at_ms: updated,
+        deployment_hash,
     })?;
     validate_metadata(&operation)?;
     validate_metadata(&invoker)?;
@@ -1663,11 +1680,12 @@ fn get_by_intent_tx(
     .transpose()
 }
 
-fn owner_columns(owner: &JobOwner) -> (String, Option<String>, Option<i64>) {
+fn owner_columns(owner: &JobOwner) -> (String, Option<String>, Option<i64>, Option<String>) {
     (
         owner.contribution.to_string(),
         owner.package_version.clone(),
         owner.contract_version.map(i64::from),
+        owner.deployment.clone(),
     )
 }
 

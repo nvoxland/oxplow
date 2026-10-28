@@ -26,12 +26,13 @@ pub fn contribution(
         id: ContributionId::new(&ext.name, kind, local),
         version: ext.version.clone(),
         generation: Some(catalog.live_snapshot(root).generation().to_string()),
+        deployment: ext.deployment.hash().map(str::to_owned),
     }
 }
 
-/// `ext`'s contribution `kind`/`local`, at its version, for a run that
+/// `ext`'s contribution `kind`/`local`, at its deployment, for a run that
 /// holds no catalog generation while it goes on (a collector's, an effect's):
-/// it belongs to its extension's version, which [`live_owner`] rechecks.
+/// it belongs to its extension's deployment, which [`live_owner`] rechecks.
 pub fn unpinned_contribution(
     ext: &Extension,
     kind: ContributionKind,
@@ -41,6 +42,7 @@ pub fn unpinned_contribution(
         id: ContributionId::new(&ext.name, kind, local),
         version: ext.version.clone(),
         generation: None,
+        deployment: ext.deployment.hash().map(str::to_owned),
     }
 }
 
@@ -49,8 +51,9 @@ pub fn unpinned_contribution(
 pub type LiveCheck = std::sync::Arc<dyn Fn() -> Result<(), String> + Send + Sync>;
 
 /// The live check of a run that holds no generation: its own extension is
-/// still enabled, still at the version the run started with, and still
-/// declares the contribution. Run at each host call and at publication.
+/// still enabled, still the deployment the run started with (a redeploy is
+/// another one whatever its version says), and still declares the
+/// contribution. Run at each host call and at publication.
 pub fn live_owner(
     catalog: std::sync::Arc<ExtensionCatalog>,
     root: &Path,
@@ -64,6 +67,7 @@ pub fn live_owner(
             Some(ext)
                 if ext.enabled
                     && ext.version == owner.version
+                    && ext.deployment.hash() == owner.deployment.as_deref()
                     && ext.contributions.iter().any(|item| item.id == owner.id) =>
             {
                 Ok(())

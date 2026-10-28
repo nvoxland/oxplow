@@ -3560,8 +3560,8 @@ its scope trace.
 - **A run is checked for authority, not for staleness.** `check_authority()`
   refuses a cancelled run or one a live guard fails (and cancels it). A
   generation going out of date is the activation's read lock (a run that pins
-  a generation holds it; one that doesn't belongs to its extension's version,
-  `run_context::live_owner`), so a run carries no "stale" outcome: it ends
+  a generation holds it; one that doesn't belongs to its extension's
+  deployment, `run_context::live_owner`), so a run carries no "stale" outcome: it ends
   `cancelled`.
 - **Who carries it:** the bus (`run_in`, `TxCtx::run`, `Invocation::run`
   — an `External` call's run is a child of the command's), scope calls
@@ -3817,8 +3817,8 @@ extension may reach (its `permissions:`, approved when it was deployed —
   reads refuse special files and files larger than 16 MiB; Unix opens
   refuse a final symlink and avoid blocking on replacement FIFOs.
 - **Live checks.** A run that outlives a generation holds a
-  `run_context::LiveCheck` (`live_owner`: its extension still enabled, at
-  its version, still declaring it), composed through nested runs and
+  `run_context::LiveCheck` (`live_owner`: its extension still enabled, the
+  same deployment, still declaring it), composed through nested runs and
   rechecked before sensitive calls and publication. A program's process
   group is killed when it fails (`external_process`); an in-process script
   runs under `run_context::watch_authority(run)`, which sets the run's
@@ -5725,16 +5725,25 @@ commands:
   ended as above. A running job whose
   declaration changes or whose extension is disabled is cancelled with
   what it had, never completed under the new declaration.
-- **A job belongs to its extension's version, not to a catalog
-  generation.** Its owner is the extension, its package version and the
-  job's contract `version`; nothing records the generation it was queued
-  under, so another extension's change neither strands a queued job nor
-  stops a running one. A job holds no generation pin while it runs (it
+- **A job belongs to its extension's deployment, not to a catalog
+  generation.** Its owner is the extension, its package version, the
+  job's contract `version` and the deployment's hash
+  (`JobOwner.deployment`, `extension_job.deployment_hash`); nothing records
+  the generation it was queued under, so another extension's change
+  neither strands a queued job nor stops a running one. A redeploy of its
+  own extension is another deployment whatever its version says (a
+  private extension may have none; a bundled one carries oxplow's): a
+  running job's `live` gate fails and it ends `cancelled`; a queued one —
+  nothing of its attempt ran — is rebound to the new deployment of the
+  same contribution and contract (`JobEvent::Rebind`, the only change the
+  job row's owner may take, queued to queued) and runs there. A changed
+  contract leaves it queued with no operation to run. Pinned by
+  `a_queued_job_is_rebound_across_a_redeploy_of_its_extension` and
+  `a_running_job_stops_across_a_same_version_redeploy`. A job holds no generation pin while it runs (it
   can run for minutes, and an activation would wait on it): authorizing
   its claim, each tool call (the bus pins per command) and its
   publication each pin briefly, and each checks through the job's `live`
-  gate that its own extension is still that version, enabled
-  and running as deployed. Its run's `ContributionRef.generation` is `None`. The model
+  gate that its own extension is still that deployment and enabled. Its run's `ContributionRef.generation` is `None`. The model
   call holds none either: `AiService::bind` resolves the role under a
   pin and returns a `Bound` (provider, model, the declaring profile), the
   `*_on` calls stream on it unpinned, and a recorded computation is keyed
@@ -5744,8 +5753,9 @@ commands:
 - **Collector and effect runs hold no generation either.** The same
   pattern: a run's `ContributionRef.generation` is `None`
   (`run_context::unpinned_contribution`) and `run_context::live_owner` is a
-  `guarded` check that its own extension is still enabled, at the version
-  the run started with and still declaring the contribution, run at each
+  `guarded` check that its own extension is still enabled, the deployment
+  the run started under (`ContributionRef.deployment`; a same-version or
+  unversioned redeploy is another one) and still declaring the contribution, run at each
   host call and at publication (a collector's rows commit inside
   `read_generation` after `check_authority`; a fact collector's capture
   likewise). A change to or the revocation of the run's extension stops it

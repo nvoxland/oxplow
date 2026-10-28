@@ -99,6 +99,7 @@ mod tests {
                 id: ContributionId::new("acme", ContributionKind::Effect, "note"),
                 version: Some("1.0.0".into()),
                 generation: Some("g1".into()),
+                deployment: None,
             },
             Actor::System,
             Mode::External,

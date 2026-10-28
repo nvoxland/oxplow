@@ -11,8 +11,13 @@ use serde_json::json;
 use crate::test_fixtures::{services_with_task_effort, TaskEffortFixture};
 
 fn manifest(version: &str) -> String {
+    let version = if version.is_empty() {
+        String::new()
+    } else {
+        format!("version: {version}\n")
+    };
     format!(
-        "manifest: 2\nname: acme\nversion: {version}\nintent:\n  purpose: p\npermissions: {{ process: true }}\ncollectors:
+        "manifest: 2\nname: acme\n{version}intent:\n  purpose: p\npermissions: {{ process: true }}\ncollectors:
   - id: sync
     runtime: exec
     entry: sync.sh
@@ -30,11 +35,16 @@ fn write(root: &Path, rel: &str, body: &str) {
 
 /// A program that says it started, waits to be released, then reports a row.
 async fn long_collector(fx: &TaskEffortFixture) {
+    long_collector_at(fx, "1.0.0").await;
+}
+
+/// [`long_collector`] with the extension at `version` (none when empty).
+async fn long_collector_at(fx: &TaskEffortFixture, version: &str) {
     let root = fx.svc.layout.project_dir.clone();
     write(
         &root,
         ".oxplow/extensions/acme/extension.yaml",
-        &manifest("1.0.0"),
+        &manifest(version),
     );
     let started = root.join("started");
     let release = root.join("release");
@@ -137,6 +147,53 @@ async fn a_collector_does_not_publish_across_a_change_to_its_extension() {
         &fx.svc.layout.project_dir,
         ".oxplow/extensions/acme/extension.yaml",
         &manifest("1.0.1"),
+    );
+    crate::test_fixtures::activate_with_problems(&fx.svc).await;
+
+    release(&fx);
+    let error = run.await.unwrap().expect_err("the old run is refused");
+    assert!(
+        error.to_string().contains("changed or was revoked"),
+        "{error}"
+    );
+    assert_eq!(seen(&fx).await, json!([[0]]));
+}
+
+/// A redeploy that keeps the version is still another deployment: the run
+/// started under the old one doesn't publish under the new one.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_collector_does_not_publish_across_a_same_version_redeploy() {
+    let fx = services_with_task_effort().await;
+    long_collector(&fx).await;
+    let run = start(&fx).await;
+
+    write(
+        &fx.svc.layout.project_dir,
+        ".oxplow/extensions/acme/extension.yaml",
+        &format!("{}# edited, same version\n", manifest("1.0.0")),
+    );
+    crate::test_fixtures::activate_with_problems(&fx.svc).await;
+
+    release(&fx);
+    let error = run.await.unwrap().expect_err("the old run is refused");
+    assert!(
+        error.to_string().contains("changed or was revoked"),
+        "{error}"
+    );
+    assert_eq!(seen(&fx).await, json!([[0]]));
+}
+
+/// An extension with no version is pinned by its deployment too.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_collector_does_not_publish_across_an_unversioned_redeploy() {
+    let fx = services_with_task_effort().await;
+    long_collector_at(&fx, "").await;
+    let run = start(&fx).await;
+
+    write(
+        &fx.svc.layout.project_dir,
+        ".oxplow/extensions/acme/extension.yaml",
+        &format!("{}# edited\n", manifest("")),
     );
     crate::test_fixtures::activate_with_problems(&fx.svc).await;
 
