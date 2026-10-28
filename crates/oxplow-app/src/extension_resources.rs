@@ -85,6 +85,12 @@ pub const ICONS: &[&str] = &[
     "zap",
 ];
 
+/// Where an extension keeps the svg a resource's `icon:` may name.
+const SVG_ICON_DIR: &str = "assets/";
+
+/// The largest svg a resource may bring.
+const MAX_SVG_BYTES: usize = 32 * 1024;
+
 /// Wikilink sugar oxplow-foundation declares (`dir:`,
 /// `finding:`): another extension's `wikilink.prefix` may not take it. A work
 /// list's own ids (`tsk42`) are its id pattern's, not a prefix core keeps.
@@ -108,6 +114,94 @@ pub fn resource_problem(name: &str) -> Option<String> {
             .get(&parsed)
             .is_none())
     .then(|| "oxplow declares no such resource".to_string())
+}
+
+/// Why `svg` can't be drawn as an icon: not an svg, too big, or not inert
+/// (script, an event handler, foreign content), which an `<img>` would not
+/// run but a file shared with a team should never carry.
+fn svg_problem(svg: &str) -> Option<String> {
+    if svg.len() > MAX_SVG_BYTES {
+        return Some(format!("an icon is at most {} KiB", MAX_SVG_BYTES / 1024));
+    }
+    let lower = svg.to_ascii_lowercase();
+    let body = lower.trim_start();
+    let body = match body.strip_prefix("<?xml") {
+        Some(rest) => rest.split_once("?>").map_or("", |(_, r)| r.trim_start()),
+        None => body,
+    };
+    if !body.starts_with("<svg") {
+        return Some("the file isn't an svg (it starts with `<svg`)".into());
+    }
+    let handler = lower.match_indices("on").any(|(i, _)| {
+        let before = lower[..i].chars().next_back();
+        let after = &lower[i + 2..];
+        before.is_some_and(|c| c.is_whitespace() || c == '"' || c == '\'')
+            && after
+                .trim_start_matches(|c: char| c.is_ascii_lowercase())
+                .starts_with('=')
+            && after.chars().next().is_some_and(|c| c.is_ascii_lowercase())
+    });
+    if lower.contains("<script")
+        || lower.contains("javascript:")
+        || lower.contains("<foreignobject")
+        || handler
+    {
+        return Some(
+            "an icon is inert: no script, event handlers (`onload=`) or `foreignObject`".into(),
+        );
+    }
+    None
+}
+
+/// Read the svg each `icon: assets/<x>.svg` names, and publish it in the
+/// resource as a `data:` URI (the desktop draws it as an image). One that
+/// isn't there, isn't inside the extension, isn't an svg or isn't inert is
+/// an error at the resource's line, and the resource is dropped.
+pub(crate) fn inline_svg_icons(
+    resources: Vec<ExtensionResource>,
+    errors: &mut Vec<String>,
+    files: &dyn crate::extensions::ExtensionFiles,
+) -> Vec<ExtensionResource> {
+    use base64::Engine as _;
+    resources
+        .into_iter()
+        .filter_map(|mut r| {
+            let Some(path) = r.decl.icon.clone().filter(|i| i.starts_with(SVG_ICON_DIR)) else {
+                return Some(r);
+            };
+            let why = (|| {
+                if path.contains("..") || !oxplow_domain::service::valid_path(&path) {
+                    return Some("the icon must be a file inside the extension".to_string());
+                }
+                if !path.ends_with(".svg") {
+                    return Some("an icon file is an svg (`assets/<name>.svg`)".to_string());
+                }
+                match files.read(&path) {
+                    None => Some(format!("no file `{path}` in the extension")),
+                    Some(svg) => {
+                        if let Some(why) = svg_problem(&svg) {
+                            return Some(format!("`{path}`: {why}"));
+                        }
+                        r.decl.icon = Some(format!(
+                            "data:image/svg+xml;base64,{}",
+                            base64::engine::general_purpose::STANDARD.encode(svg)
+                        ));
+                        None
+                    }
+                }
+            })();
+            match why {
+                None => Some(r),
+                Some(why) => {
+                    errors.push(format!(
+                        "{}: resource `{}`: {why}",
+                        r.declared_at, r.decl.name
+                    ));
+                    None
+                }
+            }
+        })
+        .collect()
 }
 
 /// A resource an extension declares (valid ones; invalid ones are in its
@@ -292,9 +386,11 @@ fn decl_of(
         }
     }
     if let Some(icon) = &f.icon {
-        if !ICONS.contains(&icon.as_str()) {
+        // An `assets/<x>.svg` is the extension's own, read when it loads
+        // ([`inline_svg_icons`]); any other is a name oxplow draws.
+        if !icon.starts_with(SVG_ICON_DIR) && !ICONS.contains(&icon.as_str()) {
             return Err(named(format!(
-                "`icon: {icon}` isn't one oxplow draws; use one of {}",
+                "`icon: {icon}` isn't one oxplow draws; use one of {} (or `assets/<name>.svg`, an svg in the extension)",
                 ICONS.join(", ")
             )));
         }
@@ -331,10 +427,20 @@ resources:
 ";
 
     fn acme(manifest: &str) -> crate::extensions::Extension {
+        acme_with(manifest, &[])
+    }
+
+    /// `acme` with more files written in its folder first.
+    fn acme_with(manifest: &str, files: &[(&str, &str)]) -> crate::extensions::Extension {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().join(".oxplow/extensions/acme");
         std::fs::create_dir_all(root.join("models")).unwrap();
         std::fs::write(root.join("extension.yaml"), manifest).unwrap();
+        for (rel, text) in files {
+            let path = root.join(rel);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, text).unwrap();
+        }
         std::fs::write(
             root.join("models/prs.sql"),
             "SELECT CAST('oxplow:acme/pr?id=1' AS TEXT) AS uri, CAST('One' AS TEXT) AS title",
@@ -387,6 +493,93 @@ resources:
                 "{to}: {errors}"
             );
         }
+    }
+
+    const SVG: &str = "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\"><circle cx=\"12\" cy=\"12\" r=\"9\"/></svg>";
+
+    /// A resource may name its own svg in the extension's folder; it is read
+    /// at load and published with the resource as a data URI, so the
+    /// desktop draws it without a request.
+    #[test]
+    fn a_resource_may_bring_its_own_svg_icon() {
+        let ext = acme_with(
+            &MANIFEST.replace("icon: git-pull-request", "icon: assets/pr.svg"),
+            &[("assets/pr.svg", SVG)],
+        );
+        assert!(ext.errors.is_empty(), "{:?}", ext.errors);
+        let icon = ext.resources[0].decl.icon.clone().unwrap();
+        let encoded = icon
+            .strip_prefix("data:image/svg+xml;base64,")
+            .unwrap_or_else(|| panic!("{icon}"));
+        let svg =
+            base64::Engine::decode(&base64::engine::general_purpose::STANDARD, encoded).unwrap();
+        assert_eq!(String::from_utf8(svg).unwrap(), SVG);
+    }
+
+    /// The file must be there, inside the extension, an svg, and inert.
+    #[test]
+    fn a_resource_icon_file_is_checked_when_the_extension_loads() {
+        let icon =
+            |path: &str| MANIFEST.replace("icon: git-pull-request", &format!("icon: {path}"));
+        for (manifest, files, says) in [
+            (icon("assets/gone.svg"), vec![], "assets/gone.svg"),
+            (
+                icon("assets/../extension.yaml"),
+                vec![],
+                "inside the extension",
+            ),
+            (
+                icon("assets/pr.png"),
+                vec![("assets/pr.png", SVG)],
+                "an svg",
+            ),
+            (
+                icon("assets/pr.svg"),
+                vec![("assets/pr.svg", "<html></html>")],
+                "isn't an svg",
+            ),
+            (
+                icon("assets/pr.svg"),
+                vec![("assets/pr.svg", "<svg><script>alert(1)</script></svg>")],
+                "script",
+            ),
+            (
+                icon("assets/pr.svg"),
+                vec![("assets/pr.svg", "<svg onload=\"x()\"></svg>")],
+                "script",
+            ),
+        ] {
+            let ext = acme_with(&manifest, &files);
+            let errors = ext.errors.join("\n");
+            assert!(ext.resources.is_empty(), "{says}: {:?}", ext.resources);
+            assert!(errors.contains(says), "{says}: {errors}");
+        }
+    }
+
+    /// The icons oxplow draws itself only shrink: an extension brings its own
+    /// svg instead of a new name here. A name missing from the golden is a
+    /// new built-in icon; a golden name missing from the list is one that
+    /// left — take it out of the golden too.
+    #[test]
+    fn the_core_icons_only_shrink() {
+        let golden: Vec<String> =
+            serde_json::from_str(include_str!("../fixtures/core_icons.json")).unwrap();
+        let added: Vec<&&str> = super::ICONS
+            .iter()
+            .filter(|i| !golden.iter().any(|g| g == **i))
+            .collect();
+        assert!(
+            added.is_empty(),
+            "new core icons {added:?}: bring an svg instead"
+        );
+        let left: Vec<&String> = golden
+            .iter()
+            .filter(|g| !super::ICONS.contains(&g.as_str()))
+            .collect();
+        assert!(
+            left.is_empty(),
+            "left the list: {left:?} — remove it from the golden"
+        );
     }
 
     #[test]

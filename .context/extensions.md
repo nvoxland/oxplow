@@ -2734,7 +2734,9 @@ ui:
     - { page: swimlanes, at: work_item.board, version: 1 }
 ```
 
-The targets are one table, `oxplow_domain::replaceable::REPLACEABLE`:
+The targets are one table of data, `crates/oxplow-domain/data/replaceable.json`
+(read by `oxplow_domain::replaceable::all()`; `fixtures/replaceable.json` pins
+its targets so it only shrinks):
 each a `target`, the `capability` it belongs to, whether it is **bound to
 a provider**, its contract's **version**, its **props contract** — the
 params the replacement page is given instead of any host state — and its
@@ -4168,8 +4170,13 @@ and no length needs capping. What is kept spells every set out — `\d` is
 engine reads as syntax), a `resolve` or `searchable` that isn't one of
 its models with the columns it needs, a `wikilink.param` that isn't one
 of its params, a `wikilink.prefix` that isn't lowercase letters, digits
-and `_`, and an icon not in
-`ICONS` (lucide names the desktop maps).
+and `_`, and an icon that is neither in
+`ICONS` (lucide names the desktop maps; a list that only shrinks,
+`fixtures/core_icons.json`) nor an `assets/<name>.svg` of the extension's own
+(it must exist, sit inside the extension, be an svg of at most 32 KiB and inert: no
+script, event handler or `foreignObject`). Such a file is read at load and
+published as a `data:image/svg+xml;base64,…` icon, which the desktop draws as an
+`<img>`.
 
 **Registering** is the vocabulary reactor's: oxplow-foundation's
 resources plus each enabled extension's go into one `ResourceRegistry`,
@@ -4187,7 +4194,8 @@ rows (core's too) once (`useResourcesLoader`, in `App`, re-read on
 and `useResources` subscribes to:
 - `resourceIcon` / the page-kind helpers fall back to a resource's icon
   (`ICONS`, a lucide component per allowed name — a Rust test
-  keeps the two lists equal) and label;
+  keeps the two lists equal; or the extension's own svg, drawn as an image)
+  and label;
 - opening a URI of the resource (`openRef`, resources.md "The desktop")
   opens it as itself, drawn by the renderer the `pages[].for`
   declarations pick (`pages/renderers.ts`); a page renderer is run with

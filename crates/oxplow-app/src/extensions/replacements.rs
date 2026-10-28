@@ -470,7 +470,7 @@ mod tests {
     /// Every target has a label a person reads, and no two share one.
     #[test]
     fn every_replaceable_target_has_its_own_label() {
-        let labels: Vec<&str> = oxplow_domain::replaceable::REPLACEABLE
+        let labels: Vec<&str> = oxplow_domain::replaceable::all()
             .iter()
             .map(|r| r.label)
             .collect();
@@ -545,7 +545,7 @@ mod tests {
         let mut table = String::from(
             "| Target | What it is | Bound to a provider | Version | Props | View |\n|---|---|---|---|---|---|\n",
         );
-        for r in oxplow_domain::replaceable::REPLACEABLE {
+        for r in oxplow_domain::replaceable::all() {
             table.push_str(&format!(
                 "| `{}` | {} | {} | {} | {} | {} |\n",
                 r.target,

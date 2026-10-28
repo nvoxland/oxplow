@@ -12,7 +12,7 @@
  * `useResources` so they redraw when it changes.
  */
 import type { LucideIcon } from "lucide-react";
-import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import { createElement, useCallback, useEffect, useState, useSyncExternalStore, type CSSProperties } from "react";
 
 import { ICONS } from "./icons.js";
 import { querySql } from "./api.js";
@@ -110,10 +110,27 @@ export function resourceInfo(resource: string): Resource | null {
 
 
 
-/** The icon of a resource, or null. */
+const SVG_ICON_PREFIX = "data:image/svg+xml;base64,";
+const svgIcons = new Map<string, LucideIcon>();
+
+/** An svg an extension brought (published as a `data:` URI), as an icon
+ *  component that sizes like the built-in ones. An `<img>` runs no script. */
+function svgIcon(src: string): LucideIcon {
+  let icon = svgIcons.get(src);
+  if (!icon) {
+    icon = (({ size = 16, className, style }: { size?: number | string; className?: string; style?: CSSProperties }) =>
+      createElement("img", { src, alt: "", width: size, height: size, className, style })) as unknown as LucideIcon;
+    svgIcons.set(src, icon);
+  }
+  return icon;
+}
+
+/** The icon of a resource, or null: a name oxplow draws, or the svg its
+ *  extension brought. */
 export function resourceIcon(resource: string): LucideIcon | null {
   const icon = current.get(resource)?.icon;
-  return icon ? (ICONS[icon] ?? null) : null;
+  if (!icon) return null;
+  return icon.startsWith(SVG_ICON_PREFIX) ? svgIcon(icon) : (ICONS[icon] ?? null);
 }
 
 /** Whether `id` is a value `param` of `resource` may hold. The pattern runs

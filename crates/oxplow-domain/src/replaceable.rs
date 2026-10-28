@@ -6,7 +6,7 @@
 //! it, as everywhere.)
 //! Whole pages are never replaceable.
 //!
-//! One table for the extension loader (which checks a declaration against
+//! One table — `data/replaceable.json`, data not code — for the extension loader (which checks a declaration against
 //! it), the project config (whose `replacements` names targets), and
 //! `v_replaceable`, which publishes it so an author finds the contracts
 //! where everything else is: in SQL.
@@ -36,106 +36,75 @@ pub struct Replaceable {
     pub view: &'static [&'static str],
     /// What a person calls it ("board"): the one name the UI shows it by.
     pub label: &'static str,
+    /// What it is, for a person or an agent reading the table.
+    pub about: &'static str,
 }
 
-/// Every replaceable sub-component.
-pub const REPLACEABLE: &[Replaceable] = &[
-    // The Board's columns of cards (the `board-cards` part of the `board`
-    // document): `scope` is `thread`, `backlog` or `all`; `thread_id` the
-    // viewed thread, which applies when `scope` is `thread`. A view of the capability as a whole, so any extension
-    // may bring one: it reads `v_work_item` and runs the interface verbs
-    // (`oxplow.work_item.transition`, `reorder`, `update`, …), whichever
-    // list is active.
-    Replaceable {
-        target: "work_item.board",
-        capability: "work_items",
-        bound_to_provider: false,
-        version: 1,
-        props: &["scope", "thread_id"],
-        view: &[],
-        label: "board",
-    },
-    // The Tasks page's list (the `list` part of the `tasks` document):
-    // `scope` is `thread`, `stream` or `all`; `thread_id` the thread when
-    // `scope` is `thread`, else null. Its `stream_id` is the scope's
-    // stream. The page's filters, summary and backlog parts stay oxplow's.
-    Replaceable {
-        target: "work_item.list",
-        capability: "work_items",
-        bound_to_provider: false,
-        version: 1,
-        props: &["scope", "thread_id"],
-        view: &[],
-        label: "list",
-    },
-    // A work item's description editor (the `body` part of the `work-item`
-    // document): `uri` is the item. Its state, fields, About, links,
-    // comments, activity and mounts stay oxplow's.
-    Replaceable {
-        target: "work_item.detail",
-        capability: "work_items",
-        bound_to_provider: false,
-        version: 1,
-        props: &["uri"],
-        view: &[],
-        label: "description editor",
-    },
-    // A work item's state control (the `state` part of the `work-item`
-    // document; its Move To is never replaced, so an item can always
-    // move): `uri` is the item. The item's own provider's extension
-    // replaces it, whichever is active: it shows that provider's own
-    // states.
-    Replaceable {
-        target: "work_item.detail.state",
-        capability: "work_items",
-        bound_to_provider: true,
-        version: 1,
-        props: &["uri"],
-        view: &[],
-        label: "state control",
-    },
-    // The commit history's graph (`GitHistoryPage`, the Git dashboard):
-    // `head_sha` the stream's head, `reveal_sha` a commit to scroll to and
-    // mark (or null), `limit` how many commits. Its view is Git History's
-    // filters (`q`, `author`, `branch`; v2), which core's own list reads
-    // too. Core's own is a plain list; the graph is oxplow-bundled's
-    // component.
-    Replaceable {
-        target: "vcs.history.graph",
-        capability: "vcs",
-        bound_to_provider: false,
-        version: 2,
-        props: &["head_sha", "reveal_sha", "limit"],
-        view: &["q", "author", "branch"],
-        label: "history graph",
-    },
-    // An effort's verdict, the first line of its review page
-    // (`DiffViewPage`): `effort_id` is the effort's row id. Core has no
-    // verdict of its own: what counts as tested, covered or backed is a
-    // review policy's, so with no replacement (or `oxplow` chosen) the
-    // page shows none. oxplow-bundled's is the default.
-    Replaceable {
-        target: "effort.verdict",
-        capability: "effort_policy",
-        bound_to_provider: false,
-        version: 1,
-        props: &["effort_id"],
-        view: &[],
-        label: "effort verdict",
-    },
-];
+#[derive(serde::Deserialize)]
+struct Row {
+    target: String,
+    capability: String,
+    bound_to_provider: bool,
+    version: u32,
+    props: Vec<String>,
+    view: Vec<String>,
+    label: String,
+    #[serde(default)]
+    about: String,
+}
+
+/// Leak a string for the life of the process: the table is read once.
+fn keep(s: String) -> &'static str {
+    Box::leak(s.into_boxed_str())
+}
+
+fn keep_all(v: Vec<String>) -> &'static [&'static str] {
+    Box::leak(
+        v.into_iter()
+            .map(keep)
+            .collect::<Vec<_>>()
+            .into_boxed_slice(),
+    )
+}
+
+/// Every replaceable sub-component, read from `data/replaceable.json`. The
+/// list only shrinks (`fixtures/replaceable.json` pins its targets): a
+/// target leaves it when a page stops being replaceable, and a new one is a
+/// decision, not a line.
+pub fn all() -> &'static [Replaceable] {
+    static TABLE: std::sync::OnceLock<&'static [Replaceable]> = std::sync::OnceLock::new();
+    TABLE.get_or_init(|| {
+        let rows: Vec<Row> = serde_json::from_str(include_str!("../data/replaceable.json"))
+            .expect("data/replaceable.json is the replaceable table");
+        Box::leak(
+            rows.into_iter()
+                .map(|r| Replaceable {
+                    target: keep(r.target),
+                    capability: keep(r.capability),
+                    bound_to_provider: r.bound_to_provider,
+                    version: r.version,
+                    props: keep_all(r.props),
+                    view: keep_all(r.view),
+                    label: keep(r.label),
+                    about: keep(r.about),
+                })
+                .collect::<Vec<_>>()
+                .into_boxed_slice(),
+        )
+    })
+}
 
 /// The `replacements:` value that keeps oxplow's own component.
 pub const OXPLOWS_OWN: &str = "oxplow";
 
 /// The replaceable sub-component named `target`.
 pub fn replaceable(target: &str) -> Option<&'static Replaceable> {
-    REPLACEABLE.iter().find(|r| r.target == target)
+    all().iter().find(|r| r.target == target)
 }
 
 /// Every target, for an error that lists them.
 pub fn targets() -> String {
-    REPLACEABLE
+    all()
         .iter()
         .map(|r| r.target)
         .collect::<Vec<_>>()
@@ -146,19 +115,48 @@ pub fn targets() -> String {
 mod tests {
     use super::*;
 
+    /// The replaceable targets only shrink: a new one is a decision (a page
+    /// that may be replaced), not a line in the data. A target missing from
+    /// the golden is new; a golden name missing from the table left — take
+    /// it out of the golden too.
+    #[test]
+    fn the_replaceable_targets_only_shrink() {
+        let golden: Vec<String> =
+            serde_json::from_str(include_str!("../fixtures/replaceable.json"))
+                .expect("the golden is a JSON list");
+        let added: Vec<&str> = all()
+            .iter()
+            .map(|r| r.target)
+            .filter(|t| !golden.iter().any(|g| g == t))
+            .collect();
+        assert!(added.is_empty(), "new replaceable targets {added:?}");
+        let left: Vec<&String> = golden
+            .iter()
+            .filter(|g| !all().iter().any(|r| r.target == g.as_str()))
+            .collect();
+        assert!(
+            left.is_empty(),
+            "left the table: {left:?} — remove it from the golden"
+        );
+        assert!(
+            all().iter().all(|r| !r.about.is_empty()),
+            "each says what it is"
+        );
+    }
+
     /// Every target is its own name and label, versioned from 1, with
     /// at least one prop; `stream_id` is never one.
     #[test]
     fn the_table_holds() {
-        let mut targets: Vec<&str> = REPLACEABLE.iter().map(|r| r.target).collect();
-        let mut labels: Vec<&str> = REPLACEABLE.iter().map(|r| r.label).collect();
+        let mut targets: Vec<&str> = all().iter().map(|r| r.target).collect();
+        let mut labels: Vec<&str> = all().iter().map(|r| r.label).collect();
         targets.sort_unstable();
         labels.sort_unstable();
         targets.dedup();
         labels.dedup();
-        assert_eq!(targets.len(), REPLACEABLE.len());
-        assert_eq!(labels.len(), REPLACEABLE.len());
-        for r in REPLACEABLE {
+        assert_eq!(targets.len(), all().len());
+        assert_eq!(labels.len(), all().len());
+        for r in all() {
             assert!(r.version >= 1, "{}", r.target);
             assert!(!r.props.is_empty(), "{}", r.target);
             assert!(!r.props.contains(&"stream_id"), "{}", r.target);
@@ -187,7 +185,7 @@ mod tests {
     /// props, and the history graph shares Git History's filters.
     #[test]
     fn a_view_key_is_the_host_pages_not_a_prop() {
-        for r in REPLACEABLE {
+        for r in all() {
             for key in r.view {
                 assert!(!r.props.contains(key), "{}: {key}", r.target);
             }

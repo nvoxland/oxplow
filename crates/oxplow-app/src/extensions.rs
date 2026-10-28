@@ -3794,7 +3794,8 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             &file,
             &manifest,
         );
-        ext.resources = resources;
+        let mut errors = errors;
+        ext.resources = crate::extension_resources::inline_svg_icons(resources, &mut errors, files);
         ext.errors.extend(errors);
     }
     // After resources: a page that renders one is checked against it.
