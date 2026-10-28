@@ -107,14 +107,15 @@
 .ox-card { background: var(--surface-app); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: var(--space-2); margin-top: var(--space-2); cursor: grab; }
 .ox-board:focus-within .ox-card[data-cursor="true"] { border-color: var(--accent); }
 
-/* Tables: header in small secondary text, a rule under every row. A
-   table with <col> widths is laid out fixed, so columns line up and a
-   long cell is cut (`ox-truncate`) instead of pushing the others. */
+/* Tables: a header row raised off the rows (a markdown table's look), a
+   rule under every row. A table with <col> widths is laid out fixed, so
+   columns line up and a long cell is cut (`ox-truncate`) instead of
+   pushing the others. */
 .ox-table { width: 100%; border-collapse: collapse; font-size: var(--text-sm); }
 .ox-table.ox-fixed { table-layout: fixed; }
 .ox-table th,
 .ox-table td { padding: var(--space-2); text-align: left; vertical-align: top; border-bottom: 1px solid var(--border-subtle); }
-.ox-table th { padding-block: var(--space-1); color: var(--text-secondary); font-size: var(--text-xs); font-weight: var(--weight-medium); }
+.ox-table th { padding-block: var(--space-2); background: var(--surface-elevated); border-bottom-color: var(--border-strong); color: var(--text-primary); font-size: var(--text-xs); font-weight: var(--weight-medium); }
 .ox-table .ox-group { padding: 0; }
 .ox-table tr.ox-clickable { cursor: pointer; }
 .ox-table tr.ox-clickable:hover,
