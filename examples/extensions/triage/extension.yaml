@@ -60,8 +60,8 @@ metrics:
   # list them (`metric_findings('triage.todos')`).
   - key: triage.todos
     title: TODO comments
-    sourceMeasure: triage.todos
-    aggregation: sum
+    measure: triage.todos
+    expression: "SUM(value)"
     direction: lower-better
     unit: comments
     displayKind: findings

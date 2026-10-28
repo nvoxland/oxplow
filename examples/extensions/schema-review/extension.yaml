@@ -35,8 +35,8 @@ dimensions:
 metrics:
   - key: schema_review.ddl
     title: DDL statements
-    sourceMeasure: schema_review.ddl
-    aggregation: sum
+    measure: schema_review.ddl
+    expression: "SUM(value)"
     direction: lower-better
     unit: statements
     displayKind: findings

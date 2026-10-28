@@ -107,6 +107,7 @@ mod tests {
             aggregation: "last".into(),
             filter_json: None,
             formula: None,
+            expression: None,
             sliceable_dims_json: None,
             direction: "neutral".into(),
             target: None,

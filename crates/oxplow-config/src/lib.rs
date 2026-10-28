@@ -14,6 +14,7 @@ use tracing::info;
 
 pub mod collectors;
 pub mod keys;
+pub mod metric_expr;
 
 pub mod recent;
 pub use recent::{RecentProject, RecentProjects};
@@ -213,12 +214,12 @@ pub struct FormulaConfig {
 
 /// One entry in the top-level `metrics:` block — a **pure read-time SPEC** over a
 /// measure. A metric no longer *computes* anything: it names a
-/// `sourceMeasure` + an `aggregation` (+ optional `filter`), or a `formula` over
+/// `measure` + an `expression` (an aggregate with an optional filter), or a formula over
 /// other metrics, and the engine aggregates the durable facts a `collectors:` entry
 /// emitted. Two forms, distinguished by which key is set:
 /// - **`use:`** — enable an existing catalog metric by key (built-in/global),
 ///   optionally overriding `target`/thresholds for this project.
-/// - **`key:`** — define a NEW spec (`sourceMeasure` + `aggregation`, or `formula`).
+/// - **`key:`** — define a NEW spec (a `measure` + an aggregate `expression`, or a formula `expression`).
 ///
 /// Resolved across the three scopes into [`ResolvedSpec`]s. All non-discriminant
 /// fields are optional so both forms share one struct; validation enforces the
@@ -252,20 +253,28 @@ pub struct MetricEntry {
     #[serde(default)]
     pub title: Option<String>,
     /// The measure whose facts this metric aggregates (required for a `key:`
-    /// metric unless it sets `formula`). NULL for a pure formula metric.
-    #[serde(rename = "sourceMeasure", default)]
+    /// metric with an aggregate `expression`). None for a formula metric.
+    #[serde(rename = "measure", default)]
     pub source_measure: Option<String>,
-    /// `count` | `sum` | `avg` | `min` | `max` | `last` | `ratio` (default `last`).
-    /// Combines the facts WITHIN a capture; cross-time collapse is governed by the
-    /// source measure's `temporalSemantics`.
+    /// How the metric reads its facts, in one closed expression
+    /// ([`metric_expr`]): an aggregate with an optional filter
+    /// (`COUNT(*) FILTER (WHERE value >= 11)`, `SUM(value) FILTER (WHERE
+    /// dim('oxplow.rule') = 'x')`, `RATIO(num, den)`), or a formula over
+    /// other metrics (`METRIC('a') / METRIC('b')`). It combines the facts
+    /// WITHIN a capture; the cross-time collapse is the measure's `fold`.
+    #[serde(default)]
+    pub expression: Option<String>,
+    /// An ENTITY metric's aggregation (`count` | `sum` | … over its rows). A
+    /// measure metric's is part of its `expression`; this is then what the
+    /// expression compiled to.
     #[serde(default)]
     pub aggregation: Option<String>,
-    /// Fact predicate applied before aggregation (`minValue` / `severity` / `dimEq`).
-    #[serde(default)]
+    /// What a measure metric's `expression` compiled to: the fact predicate
+    /// applied before aggregation. Never written in a manifest.
+    #[serde(skip)]
     pub filter: Option<FilterConfig>,
-    /// Derived-metric formula over other metric keys (mutually exclusive with
-    /// `sourceMeasure`).
-    #[serde(default)]
+    /// What a formula `expression` compiled to. Never written in a manifest.
+    #[serde(skip)]
     pub formula: Option<FormulaConfig>,
     #[serde(default)]
     pub unit: Option<String>,
@@ -337,6 +346,8 @@ pub struct ResolvedSpec {
     pub aggregation: String,
     pub filter: Option<FilterConfig>,
     pub formula: Option<FormulaConfig>,
+    /// The canonical expression of a measure or formula metric ([`metric_expr`]).
+    pub expression: Option<String>,
     pub unit: Option<String>,
     pub direction: String,
     pub display_kind: String,
@@ -2815,13 +2826,57 @@ pub fn validate_metrics(
             }
         }
         let source_measure = opt(e.source_measure);
-        let filter = e.filter.map(|f| validate_filter(i, f)).transpose()?;
-        let formula = e.formula.map(|f| validate_formula(i, f)).transpose()?;
+        let expression = opt(e.expression);
+        let mut aggregation = aggregation;
+        let mut filter = e.filter.map(|f| validate_filter(i, f)).transpose()?;
+        let mut formula = e.formula.map(|f| validate_formula(i, f)).transpose()?;
+        if entity.is_none() {
+            match &expression {
+                Some(x) => {
+                    // Compile, never interpret: the stored form is what the
+                    // engine reads.
+                    match metric_expr::compile(x)
+                        .map_err(|why| ConfigError::Invalid(format!("metrics[{i}] {why}")))?
+                    {
+                        metric_expr::Compiled::Measure {
+                            aggregation: a,
+                            filter: f,
+                        } => {
+                            aggregation = Some(a);
+                            filter = f.map(|f| validate_filter(i, f)).transpose()?;
+                            formula = None;
+                        }
+                        metric_expr::Compiled::Formula(f) => {
+                            aggregation = None;
+                            filter = None;
+                            formula = Some(validate_formula(i, f)?);
+                        }
+                    }
+                }
+                None if is_define && aggregation.is_some() => {
+                    let a = aggregation.as_deref().unwrap_or("last");
+                    let eq = metric_expr::render(&metric_expr::Compiled::Measure {
+                        aggregation: a.to_string(),
+                        filter: filter.clone(),
+                    });
+                    return Err(ConfigError::Invalid(format!(
+                        "metrics[{i}] `aggregation` is gone for a measure metric — write `expression: \"{eq}\"`"
+                    )));
+                }
+                None => {}
+            }
+        } else if expression.is_some() {
+            return Err(ConfigError::Invalid(format!(
+                "metrics[{i}] is an entity metric; its `aggregation` and `value` say what it \
+                 reads, not an `expression`"
+            )));
+        }
 
         // The structural spec fields (measure/aggregation/filter/formula) are
         // inherent to the DEFINITION; a `use:` may only re-target thresholds.
         if !is_define
             && (source_measure.is_some()
+                || expression.is_some()
                 || aggregation.is_some()
                 || filter.is_some()
                 || formula.is_some()
@@ -2832,7 +2887,7 @@ pub fn validate_metrics(
         {
             return Err(ConfigError::Invalid(format!(
                 "metrics[{i}] is a `use:` entry; it may only override target/warnAt/failAt, \
-                 not the measure/aggregation/filter/formula (those are inherent to the definition)"
+                 not the measure or expression (those are inherent to the definition)"
             )));
         }
         // A `key:` metric is either a measure aggregation OR a formula, never both,
@@ -2851,7 +2906,7 @@ pub fn validate_metrics(
             if source_measure.is_some() || formula.is_some() || filter.is_some() {
                 return Err(ConfigError::Invalid(format!(
                     "metrics[{i}] is an entity metric; it can't also set \
-                     `sourceMeasure`, `formula` or `filter` (use `where`)"
+                     `measure`, a formula or a filter (use `where`)"
                 )));
             }
             let agg = aggregation.as_deref().unwrap_or("count");
@@ -2864,13 +2919,19 @@ pub fn validate_metrics(
             match (source_measure.is_some(), formula.is_some()) {
                 (true, true) => {
                     return Err(ConfigError::Invalid(format!(
-                        "metrics[{i}] sets both `sourceMeasure` and `formula`; use exactly one"
+                        "metrics[{i}] sets a `measure` and a formula `expression` (METRIC(…) …); use exactly one"
                     )))
                 }
                 (false, false) => {
                     return Err(ConfigError::Invalid(format!(
-                        "metrics[{i}] defines key \"{the_key}\" but sets neither `sourceMeasure` \
-                         (a measure aggregation) nor `formula` (a derived metric)"
+                        "metrics[{i}] defines key \"{the_key}\" but sets no `expression` (an aggregate \
+                         over a `measure`, or a formula over other metrics)"
+                    )))
+                }
+                (true, false) if expression.is_none() => {
+                    return Err(ConfigError::Invalid(format!(
+                        "metrics[{i}] has a `measure` but no `expression` — say how its facts \
+                         combine, e.g. `expression: \"SUM(value)\"`"
                     )))
                 }
                 _ => {}
@@ -2902,6 +2963,7 @@ pub fn validate_metrics(
             collector,
             title: opt(e.title),
             source_measure,
+            expression,
             aggregation,
             filter,
             formula,
@@ -3116,6 +3178,25 @@ fn scoped_layers<'a, T>(
 /// optionally layering threshold overrides from a `use:` entry `over`. Only the
 /// thresholds (`target`/`warnAt`/`failAt`) are overridable — the structural spec
 /// (measure/aggregation/filter/formula) is inherent to the definition.
+/// The canonical expression a measure or formula metric reads as: the one it
+/// was written with, else what its stored parts say.
+fn expression_of(def: &MetricEntry) -> Option<String> {
+    use metric_expr::{render, Compiled};
+    if let Some(x) = &def.expression {
+        if let Ok(c) = metric_expr::compile(x) {
+            return Some(render(&c));
+        }
+    }
+    if let Some(f) = &def.formula {
+        return Some(render(&Compiled::Formula(f.clone())));
+    }
+    def.source_measure.as_ref()?;
+    Some(render(&Compiled::Measure {
+        aggregation: def.aggregation.clone().unwrap_or_else(|| "last".into()),
+        filter: def.filter.clone(),
+    }))
+}
+
 fn resolve_one(
     key: &str,
     scope: &str,
@@ -3125,13 +3206,33 @@ fn resolve_one(
     let pick_f64 = |get: fn(&MetricEntry) -> Option<f64>| -> Option<f64> {
         over.and_then(get).or_else(|| get(def))
     };
+    // The expression is the source of truth for a measure or formula metric.
+    let compiled = def
+        .entity
+        .is_none()
+        .then(|| {
+            def.expression
+                .as_deref()
+                .and_then(|x| metric_expr::compile(x).ok())
+        })
+        .flatten();
     ResolvedSpec {
         key: key.to_string(),
         title: def.title.clone().unwrap_or_else(|| key.to_string()),
         source_measure: def.source_measure.clone(),
-        aggregation: def.aggregation.clone().unwrap_or_else(|| "last".into()),
-        filter: def.filter.clone(),
-        formula: def.formula.clone(),
+        aggregation: match &compiled {
+            Some(metric_expr::Compiled::Measure { aggregation, .. }) => aggregation.clone(),
+            _ => def.aggregation.clone().unwrap_or_else(|| "last".into()),
+        },
+        filter: match &compiled {
+            Some(metric_expr::Compiled::Measure { filter, .. }) => filter.clone(),
+            _ => def.filter.clone(),
+        },
+        formula: match &compiled {
+            Some(metric_expr::Compiled::Formula(f)) => Some(f.clone()),
+            _ => def.formula.clone(),
+        },
+        expression: def.entity.is_none().then(|| expression_of(def)).flatten(),
         unit: def.unit.clone(),
         direction: def.direction.clone().unwrap_or_else(|| "neutral".into()),
         display_kind: def.display_kind.clone().unwrap_or_else(|| "gauge".into()),
@@ -4223,10 +4324,8 @@ dimensions:
             bad("[{key: a.b, entity: v_work_item, aggregation: ratio, value: x}]")
                 .contains("entity aggregation")
         );
-        assert!(
-            bad("[{key: a.b, entity: v_work_item, sourceMeasure: m}]").contains("can't also set")
-        );
-        assert!(bad("[{key: a.b, sourceMeasure: m, where: x}]").contains("without `entity`"));
+        assert!(bad("[{key: a.b, entity: v_work_item, measure: m}]").contains("can't also set"));
+        assert!(bad("[{key: a.b, measure: m, where: x}]").contains("without `entity`"));
         assert!(bad("[{use: a.b, time: x}]").contains("`use:` entry"));
         let dim = |yaml: &str| {
             let e: Vec<DimensionEntry> = serde_yaml::from_str(yaml).unwrap();
@@ -5236,7 +5335,7 @@ testing:
     #[test]
     fn a_project_metric_definition_is_refused_but_a_use_loads() {
         let err = load_from_yaml(
-            "metrics:\n  - key: acme.loc\n    sourceMeasure: acme.m\n    aggregation: count\n",
+            "metrics:\n  - key: acme.loc\n    measure: acme.m\n    expression: \"COUNT(*)\"\n",
         )
         .unwrap_err()
         .to_string();
@@ -5279,14 +5378,20 @@ testing:
     fn a_metric_names_its_dimensions_by_their_namespaced_keys() {
         let metric = |extra: &str| -> Result<Vec<MetricEntry>, ConfigError> {
             let e: Vec<MetricEntry> = serde_yaml::from_str(&format!(
-                "[{{key: repo.x, title: X, sourceMeasure: acme.m, aggregation: sum, {extra}}}]"
+                "[{{key: repo.x, title: X, measure: acme.m, {extra}}}]"
             ))
             .unwrap();
             validate_metrics(Some(e), CatalogLayer::Global)
         };
         for (extra, bare) in [
-            ("sliceableDims: [language]", "language"),
-            ("filter: { dimEq: [branch, main] }", "branch"),
+            (
+                "expression: \"SUM(value)\", sliceableDims: [language]",
+                "language",
+            ),
+            (
+                "expression: \"SUM(value) FILTER (WHERE dim('branch') = 'main')\"",
+                "branch",
+            ),
         ] {
             let err = metric(extra).unwrap_err().to_string();
             assert!(
@@ -5295,7 +5400,7 @@ testing:
             );
         }
         // `subject` is the raw-subject pseudo-dimension, not a catalog key.
-        metric("sliceableDims: [subject, oxplow.language], filter: { dimEq: [acme.zone, api] }")
+        metric("expression: \"SUM(value) FILTER (WHERE dim('acme.zone') = 'api')\", sliceableDims: [subject, oxplow.language]")
             .unwrap();
     }
 
@@ -5306,13 +5411,12 @@ testing:
 metrics:
   - key: repo.unsafe_blocks
     title: "unsafe blocks"
-    sourceMeasure: acme.ast_hit
-    aggregation: sum
+    measure: acme.ast_hit
+    expression: "SUM(value) FILTER (WHERE dim('acme.rule') = 'unsafe_block')"
     direction: lower-better
     unit: count
     displayKind: findings
     sliceableDims: [acme.rule]
-    filter: { dimEq: [acme.rule, unsafe_block] }
   - use: myglobal.todo_density
     target: 5
 "#,
@@ -5331,6 +5435,23 @@ metrics:
         assert_eq!(metrics[1].target, Some(5.0));
     }
 
+    /// A measure metric's `aggregation` is gone: the refusal writes the
+    /// expression that says the same.
+    #[test]
+    fn an_old_aggregation_is_refused_with_its_expression() {
+        let err =
+            global_metrics("metrics:\n  - key: a.b\n    measure: acme.m\n    aggregation: count\n")
+                .unwrap_err();
+        assert!(err.contains("`expression: \"COUNT(*)\"`"), "{err}");
+        let err = global_metrics(
+            "metrics:\n  - key: a.b\n    measure: acme.m\n    expression: \"SUM(value) FILTER (WHERE value > 1)\"\n",
+        )
+        .unwrap_err();
+        assert!(err.contains("value >= n"), "{err}");
+        let err = global_metrics("metrics:\n  - key: a.b\n    measure: acme.m\n").unwrap_err();
+        assert!(err.contains("no `expression`"), "{err}");
+    }
+
     #[test]
     fn parses_formula_metric() {
         let metrics = global_metrics(
@@ -5338,7 +5459,7 @@ metrics:
 metrics:
   - key: acme.bugs_per_kloc
     title: "bugs per KLOC"
-    formula: { op: div, left: acme.bug_count, right: acme.kloc }
+    expression: "METRIC('acme.bug_count') / METRIC('acme.kloc')"
 "#,
         )
         .unwrap();
@@ -5351,18 +5472,18 @@ metrics:
 
     #[test]
     fn formula_op_is_one_of_add_sub_mul_div() {
-        for op in ["add", "sub", "mul", "div"] {
+        for op in ["+", "-", "*", "/"] {
             assert!(
                 global_metrics(&format!(
-                    "metrics:\n  - key: a.b\n    formula: {{ op: {op}, left: a.c, right: a.d }}\n"
+                    "metrics:\n  - key: a.b\n    expression: \"METRIC('a.c') {op} METRIC('a.d')\"\n"
                 ))
                 .is_ok(),
                 "{op}"
             );
         }
-        // `div` is the only ratio primitive; there is no alias for it.
+        // `/` is the only ratio primitive; there is no alias for it.
         assert!(global_metrics(
-            "metrics:\n  - key: a.b\n    formula: { op: ratio, left: a.c, right: a.d }\n"
+            "metrics:\n  - key: a.b\n    expression: \"METRIC('a.c') % METRIC('a.d')\"\n"
         )
         .is_err());
     }
@@ -5370,37 +5491,42 @@ metrics:
     #[test]
     fn metric_validation_rejects_bad_entries() {
         // Reserved namespace for a definition.
-        assert!(
-            global_metrics("metrics:\n  - key: oxplow.foo\n    sourceMeasure: acme.m\n").is_err()
-        );
-        // `key:` with neither sourceMeasure nor formula.
-        assert!(global_metrics("metrics:\n  - key: acme.foo\n    displayKind: gauge\n").is_err());
-        // `key:` with BOTH sourceMeasure and formula.
         assert!(global_metrics(
-            "metrics:\n  - key: a.b\n    sourceMeasure: acme.m\n    formula: { op: div, left: a.c, right: a.d }\n"
+            "metrics:\n  - key: oxplow.foo\n    measure: acme.m\n    expression: \"LAST(value)\"\n"
         )
         .is_err());
-        // `use:` carrying a structural field (sourceMeasure).
-        assert!(
-            global_metrics("metrics:\n  - use: acme.foo\n    sourceMeasure: acme.m\n").is_err()
-        );
+        // `key:` with no expression.
+        assert!(global_metrics("metrics:\n  - key: acme.foo\n    displayKind: gauge\n").is_err());
+        // `key:` with a `measure` and a formula expression.
+        assert!(global_metrics(
+            "metrics:\n  - key: a.b\n    measure: acme.m\n    expression: \"METRIC('a.c') / METRIC('a.d')\"\n"
+        )
+        .is_err());
+        // `use:` carrying a structural field (measure).
+        assert!(global_metrics(
+            "metrics:\n  - use: acme.foo\n    measure: acme.m\n    expression: \"LAST(value)\"\n"
+        )
+        .is_err());
         // both use and key.
         assert!(global_metrics("metrics:\n  - use: a.b\n    key: c.d\n").is_err());
         // un-namespaced key.
-        assert!(global_metrics("metrics:\n  - key: foo\n    sourceMeasure: acme.m\n").is_err());
+        assert!(global_metrics(
+            "metrics:\n  - key: foo\n    measure: acme.m\n    expression: \"LAST(value)\"\n"
+        )
+        .is_err());
         // bad aggregation.
         assert!(global_metrics(
-            "metrics:\n  - key: a.b\n    sourceMeasure: acme.m\n    aggregation: median\n"
+            "metrics:\n  - key: a.b\n    measure: acme.m\n    expression: \"MEDIAN(value)\"\n"
         )
         .is_err());
         // bad displayKind.
         assert!(global_metrics(
-            "metrics:\n  - key: a.b\n    sourceMeasure: acme.m\n    displayKind: sparkline\n"
+            "metrics:\n  - key: a.b\n    measure: acme.m\n    expression: \"LAST(value)\"\n    displayKind: sparkline\n"
         )
         .is_err());
         // a full valid spec is accepted.
         assert!(global_metrics(
-            "metrics:\n  - key: a.b\n    sourceMeasure: acme.m\n    aggregation: count\n    displayKind: findings\n    category: static-quality\n"
+            "metrics:\n  - key: a.b\n    measure: acme.m\n    expression: \"COUNT(*)\"\n    displayKind: findings\n    category: static-quality\n"
         )
         .is_ok());
         // every category the built-in producer specs emit must round-trip: the app
@@ -5410,24 +5536,24 @@ metrics:
         for cat in METRIC_CATEGORIES {
             assert!(
                 global_metrics(&format!(
-                    "metrics:\n  - key: a.b\n    sourceMeasure: acme.m\n    category: {cat}\n"
+                    "metrics:\n  - key: a.b\n    measure: acme.m\n    expression: \"LAST(value)\"\n    category: {cat}\n"
                 ))
                 .is_ok(),
                 "category {cat} should validate"
             );
         }
         assert!(global_metrics(
-            "metrics:\n  - key: a.b\n    sourceMeasure: acme.m\n    category: coverage\n"
+            "metrics:\n  - key: a.b\n    measure: acme.m\n    expression: \"LAST(value)\"\n    category: coverage\n"
         )
         .is_ok());
         // the same key declared twice (a `key:` define + a `use:`).
         assert!(global_metrics(
-            "metrics:\n  - key: a.b\n    sourceMeasure: acme.m\n  - use: a.b\n    target: 5\n"
+            "metrics:\n  - key: a.b\n    measure: acme.m\n    expression: \"LAST(value)\"\n  - use: a.b\n    target: 5\n"
         )
         .is_err());
         // the same key defined twice.
         assert!(global_metrics(
-            "metrics:\n  - key: a.b\n    sourceMeasure: acme.m\n  - key: a.b\n    sourceMeasure: acme.n\n"
+            "metrics:\n  - key: a.b\n    measure: acme.m\n    expression: \"LAST(value)\"\n  - key: a.b\n    measure: acme.n\n    expression: \"LAST(value)\"\n"
         )
         .is_err());
     }
@@ -5436,7 +5562,7 @@ metrics:
         MetricEntry {
             key: Some(key.into()),
             source_measure: Some("acme.m".into()),
-            aggregation: Some("count".into()),
+            expression: Some("COUNT(*)".into()),
             target,
             ..Default::default()
         }
@@ -5686,7 +5812,7 @@ metrics:
         std::fs::create_dir_all(&metrics_dir).unwrap();
         std::fs::write(
             metrics_dir.join("a.yaml"),
-            "metrics:\n  - key: myglobal.todo\n    sourceMeasure: myglobal.m\n    aggregation: count\n",
+            "metrics:\n  - key: myglobal.todo\n    measure: myglobal.m\n    expression: \"COUNT(*)\"\n",
         )
         .unwrap();
         // A malformed file is skipped, not fatal.

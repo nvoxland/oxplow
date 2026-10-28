@@ -55,8 +55,8 @@ collectors:
 metrics:
   - key: acme.todo_count            # the SPEC (the chartable metric)
     title: "TODO comments"
-    sourceMeasure: acme.todo_count
-    aggregation: sum                # combine the per-file facts WITHIN a capture
+    measure: acme.todo_count
+    expression: "SUM(value)"        # combine the per-file facts WITHIN a capture
     direction: lower-better
     unit: count
     displayKind: findings           # located facts: the drill-in lists the files
@@ -90,10 +90,8 @@ Namespace every key (`<extension namespace>.<id>`, or `<vendor>.<id>` in the pro
 | field | meaning |
 |---|---|
 | `key` / `use` | define a new spec / enable a catalog one (exactly one) |
-| `sourceMeasure` | the measure whose facts this aggregates (required for a `key:` metric, unless `formula`) |
-| `aggregation` | combine facts **within a capture**: `count` \| `sum` \| `avg` \| `min` \| `max` \| `last` \| `ratio` |
-| `filter` | keep only matching facts before aggregating: `{ minValue?, severity?, dimEq?: [key, value] }` |
-| `formula` | a derived metric over OTHER metrics: `{ op: add\|sub\|mul\|div, left: <metricKey>, right: <metricKey> }` (no `sourceMeasure`) |
+| `measure` | the measure whose facts this aggregates (an aggregate `expression` needs it; a formula takes none) |
+| `expression` | how it reads: an aggregate over a measure's facts **within a capture** — `COUNT(*)`, `SUM(value)`, `AVG(value)`, `MIN(value)`, `MAX(value)`, `LAST(value)` or `RATIO(num, den)` — optionally `FILTER (WHERE …)` joining `value >= n`, `value <= n`, `severity = 's'` and `dim('key') = 's'` with AND (one of each); or a formula over OTHER metrics, `METRIC('a') / METRIC('b')` (`+ - * /`). Anything else is a load error that quotes this grammar |
 | `direction` | `higher-better` \| `lower-better` \| `neutral` — red/green sense |
 | `target` / `warnAt` / `failAt` | thresholds (via `direction`) — coloring + the Stop-hook nudge |
 | `displayKind` | read presentation: `gauge` \| `findings` \| `test` \| `coverage` \| `event` |
@@ -102,7 +100,7 @@ Namespace every key (`<extension namespace>.<id>`, or `<vendor>.<id>` in the pro
 
 **Two-axis aggregation.** `aggregation` combines the facts inside one capture; the
 source measure's `fold` governs how the series collapses across
-time. A count-over-threshold is `aggregation: count` + a `filter: { minValue: N }`.
+time. A count-over-threshold is `expression: "COUNT(*) FILTER (WHERE value >= N)"`.
 
 ### `collectors:` fields (a fact collector)
 

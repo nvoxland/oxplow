@@ -11,7 +11,7 @@ skill and oxplow's `new-metric` slash command cover it).
 measures:
   - { key: acme.todo, title: TODO comments, fold: last }
 metrics:
-  - { key: acme.todos, title: TODOs, sourceMeasure: acme.todo, aggregation: sum, direction: lower-better }
+  - { key: acme.todos, title: TODOs, measure: acme.todo, expression: "SUM(value)", direction: lower-better }
 collectors:
   - id: acme.todo_scan
     runtime: starlark

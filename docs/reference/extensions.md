@@ -350,8 +350,8 @@ The metrics over those facts are declared under `metrics:`:
 ```yaml
 metrics:
   - key: acme.todos
-    sourceMeasure: acme.todo
-    aggregation: count
+    measure: acme.todo
+    expression: "COUNT(*)"
     collector: acme.todo_scan   # the collector in this extension that computes it
     default: off                # on only once the project lists it with `use:`
 ```

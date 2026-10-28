@@ -200,8 +200,8 @@ pub fn extension_files(
          \x20 # The headline: the per-file facts, added up.\n\
          \x20 - key: {measure}\n\
          \x20   title: \"{title}: functions over the limit\"\n\
-         \x20   sourceMeasure: {measure}\n\
-         \x20   aggregation: sum\n\
+         \x20   measure: {measure}\n\
+         \x20   expression: \"SUM(value)\"\n\
          \x20   direction: lower-better\n\
          \x20   unit: count\n\
          \x20   displayKind: findings  # its facts are located, so the drill-in lists the files\n\

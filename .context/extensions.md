@@ -1613,7 +1613,7 @@ intent:                  # required
     - { name: …, input: {…}, expect: … }
 # kinds
 measures:    [...]   # also what the project's own extension declares
-metrics:     [...]   # `key:` definitions; sourceMeasure must be declared here or oxplow.*
+metrics:     [...]   # `key:` definitions; `measure:` must be declared here or oxplow.*
 dimensions:  [...]
 collectors:  [...]   # entity collectors (exec / starlark / jaq / read → entities) and
                      # fact collectors (`facts:`; starlark / jaq only; facts must be declared here or oxplow.*)
@@ -1669,7 +1669,7 @@ delete the YAML files in `lenses/`: they are what the loader refuses.
   is not loaded, or has no such slot node, is a warning (it shows
   nowhere); a `panels` body and a replacement's page are the extension's
   own pages; a replacement page declares every prop of its target's
-  contract. A metric's `sourceMeasure` or a fact collector's `facts` that
+  contract. A metric's `measure` or a fact collector's `facts` that
   is neither declared in the extension nor an `oxplow.*` built-in is a
   **warning** (it may come from the project's or another extension's
   `measures:`, which resolves when the catalog is assembled).

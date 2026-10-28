@@ -235,6 +235,10 @@ pub struct MetricSpec {
     pub filter_json: Option<String>,
     /// Derived-metric formula referencing other metric keys; `None` for a base.
     pub formula: Option<String>,
+    /// The `expression:` it was written as (canonical): an aggregate with a
+    /// filter, or a formula. `aggregation`, `filter_json` and `formula` are
+    /// what it compiled to. `None` for an entity metric.
+    pub expression: Option<String>,
     /// Conformed dims this metric may be sliced by (JSON array of dim keys).
     pub sliceable_dims_json: Option<String>,
     /// `higher-better` | `lower-better` | `neutral`.
@@ -267,6 +271,8 @@ pub struct NewMetricSpec {
     pub aggregation: String,
     pub filter_json: Option<String>,
     pub formula: Option<String>,
+    /// See [`MetricSpec::expression`].
+    pub expression: Option<String>,
     pub sliceable_dims_json: Option<String>,
     pub direction: String,
     pub target: Option<f64>,
@@ -296,6 +302,7 @@ impl NewMetricSpec {
             aggregation: self.aggregation.clone(),
             filter_json: self.filter_json.clone(),
             formula: self.formula.clone(),
+            expression: self.expression.clone(),
             sliceable_dims_json: self.sliceable_dims_json.clone(),
             direction: self.direction.clone(),
             target: self.target,
@@ -329,6 +336,7 @@ impl NewMetricSpec {
             aggregation: aggregation.into(),
             filter_json: None,
             formula: None,
+            expression: None,
             sliceable_dims_json: None,
             direction: "neutral".into(),
             target: None,
@@ -347,7 +355,8 @@ impl NewMetricSpec {
 
 const SPEC_COLS: &str = "id, key, title, unit, source_measure, aggregation, filter_json, \
      formula, sliceable_dims_json, direction, target, warn_at, fail_at, description, \
-     category, language, scope, display_kind, created_at, updated_at, extension, entity_json";
+     category, language, scope, display_kind, created_at, updated_at, extension, entity_json, \
+     expression";
 
 fn row_to_spec(row: &rusqlite::Row<'_>) -> rusqlite::Result<MetricSpec> {
     let created_at: String = row.get(18)?;
@@ -372,6 +381,7 @@ fn row_to_spec(row: &rusqlite::Row<'_>) -> rusqlite::Result<MetricSpec> {
         scope: read_scope(row.get(16)?, row.get(20)?),
         display_kind: row.get(17)?,
         entity_json: row.get(21)?,
+        expression: row.get(22)?,
         created_at: string_to_ts(&created_at).map_err(ts_conv_err)?,
         updated_at: string_to_ts(&updated_at).map_err(ts_conv_err)?,
     })
@@ -668,9 +678,9 @@ pub fn upsert_spec_tx(
            (key, title, unit, source_measure, aggregation, filter_json, formula,
             sliceable_dims_json, direction, target, warn_at, fail_at, description,
             category, language, scope, display_kind, created_at, updated_at, extension,
-            entity_json, ai_context_json)
+            entity_json, ai_context_json, expression)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15,
-                 ?16, ?17, ?18, ?18, ?19, ?20, ?21)
+                 ?16, ?17, ?18, ?18, ?19, ?20, ?21, ?22)
          ON CONFLICT(key) DO UPDATE SET
             title=excluded.title, unit=excluded.unit,
             source_measure=excluded.source_measure, aggregation=excluded.aggregation,
@@ -681,7 +691,7 @@ pub fn upsert_spec_tx(
             description=excluded.description, category=excluded.category,
             language=excluded.language, scope=excluded.scope,
             extension=excluded.extension, entity_json=excluded.entity_json,
-            ai_context_json=excluded.ai_context_json,
+            ai_context_json=excluded.ai_context_json, expression=excluded.expression,
             display_kind=excluded.display_kind, updated_at=excluded.updated_at",
         params![
             s.key,
@@ -705,6 +715,7 @@ pub fn upsert_spec_tx(
             extension,
             s.entity_json,
             AiContext::to_column(&s.ai_context),
+            s.expression,
         ],
     )
     .map_err(map_sql_err)?;

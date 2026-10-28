@@ -18,9 +18,9 @@ shape** — one atomic fact per subject, NOT a pre-aggregated total:
 - `subject` is one URI, built with `uri.build` (`oxplow:oxplow/file?path=src/a.rs`, `oxplow:oxplow/symbol?path=src/a.rs&symbol=foo`). A
   subject that is not a URI is refused (the run fails, naming the measure and the string).
 - `rule` is a conformed slice value read as the `oxplow.rule` dimension (so a spec
-  can `filter: { dimEq: [oxplow.rule, …] }` or slice by it).
+  can filter by it with `FILTER (WHERE dim('oxplow.rule') = '…')` or slice by it).
 - `num`/`den` (optional) are ratio components — supply them when the measure is a
-  ratio base so a `aggregation: ratio` metric re-derives Σnum/Σden (coverage %,
+  ratio base so a `RATIO(num, den)` metric re-derives Σnum/Σden (coverage %,
   pass rate) instead of averaging pre-divided values.
 
 The Starlark entry is `def transform(input): … return { "facts": [...] }`.
@@ -61,7 +61,7 @@ def transform(input):
     return {"facts": facts}
 ```
 
-The `metrics:` spec `aggregation: sum` re-adds the per-file facts into the headline.
+The `metrics:` spec `expression: "SUM(value)"` re-adds the per-file facts into the headline.
 
 **B) Report-derived** — reshape a build/tool report with jaq or starlark:
 `runtime: jaq`, `entry: …jq`, `report: { path: path/to/report.json, format: json }`;

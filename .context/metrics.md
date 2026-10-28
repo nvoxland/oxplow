@@ -957,7 +957,7 @@ view) plus:
 A `dimensions:` entry with `entity`, `expr` and an optional `join` is an
 entity dimension. `EntitySpec` / `EntityDimensionSpec` live in
 `oxplow-config`. A `use:` can't set the entity fields, and an entity metric
-can't also set `sourceMeasure`, `formula` or `filter`. SQL fragments see
+can't also set a `measure` or an `expression`. SQL fragments see
 the view aliased `e`.
 
 **Storage.** V88 ADD COLUMNs `entity_json` on `metric_spec` and
@@ -1276,7 +1276,7 @@ emits facts on, with conformed dims (not extra measures) distinguishing variants
 token in/out slice `oxplow.tokens` by `oxplow.token_kind`; tests slice
 `oxplow.test_case` by `oxplow.status`; analysis filters `oxplow.lint_hit` by
 severity; coverage is a `ratio` over `oxplow.coverage`. Each entry holds its
-`sourceMeasure`, `aggregation` and `filter`; the producers' Rust only records
+`measure` and `expression`; the producers' Rust only records
 the facts. Equivalence tests pin
 each spec's engine headline to the baked total (tokens, tests). New V46 measures:
 `oxplow.turn`, `oxplow.task_effort` (now `oxplow.work_item_effort`, V23), `oxplow.nudge` (the producers with no prior
@@ -2006,20 +2006,24 @@ collectors:                           # the PRODUCER (runs a script, records fac
     # input: "SELECT … :effort_id"    # starlark/jaq: rows as input.rows
 metrics:                              # the read SPEC (the chartable metric)
   - key: repo.todo_count              # DEFINE — a measure aggregation
-    sourceMeasure: repo.todo_count
-    aggregation: sum                  # count|sum|avg|min|max|last|ratio (within a capture)
+    measure: repo.todo_count
+    expression: "SUM(value) FILTER (WHERE value >= 1)"  # an aggregate within a capture, optional filter
     direction: lower-better
     unit: count
     displayKind: gauge                # gauge|findings|test|coverage|event
-    filter: { minValue: 1 }           # optional predicate before aggregating
     sliceableDims: [oxplow.language]
   - use: myglobal.todo_density        # ENABLE a catalog metric (+ threshold overrides)
     target: 5
 ```
 
-- A **metric** no longer computes anything — it's a pure spec (`sourceMeasure` +
-  `aggregation` + optional `filter`, OR a `formula: {op,left,right}` over other
-  metrics). Two-axis aggregation: `aggregation` combines facts *within a capture*;
+- A **metric** no longer computes anything — it's a pure spec (a `measure` + an
+  `expression`: `COUNT(*)`/`SUM(value)`/`AVG`/`MIN`/`MAX`/`LAST(value)`/`RATIO(num, den)` with an
+  optional `FILTER (WHERE value >= n AND value <= n AND severity = 's' AND dim('k') = 's')`, OR a
+  formula `METRIC('a') / METRIC('b')` over other metrics). The expression is **compiled** by
+  `oxplow_config::metric_expr` into the stored form the engine reads
+  (`metric_spec.aggregation`, `filter_json`, `formula`; `metric_spec.expression` keeps the
+  canonical text, V119) — a closed grammar, anything else is a load error. Two-axis
+  aggregation: the expression combines facts *within a capture*;
   the source measure's `fold` governs the cross-time collapse. A
   `use:` may only re-target thresholds; the structural fields are inherent.
 - The **fact collector**'s script gets `input = {report?, rows?, event?}` (the
@@ -2120,7 +2124,7 @@ metrics:                              # the read SPEC (the chartable metric)
 - Validation mirrors the extension rules: namespaced keys, extension-relative
   `entry` (no `..`), known runtime/aggregation/displayKind/trigger/direction;
   `report` only on a fact collector; `entities` or `facts`, not both;
-  a `key:` metric must set exactly one of `sourceMeasure`/`formula`; a `use:` with
+  a `key:` metric must set an `expression` (an aggregate with a `measure`, or a formula); a `use:` with
   an unknown key resolves to a warning (skipped), not an error.
 
 The in-oxplow agent authors these on request via the **`oxplow-metrics`** skill

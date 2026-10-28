@@ -23,8 +23,8 @@ extension, `.oxplow/extensions/project/extension.yaml`) has four orthogonal metr
 | `metrics:` | a **read-time SPEC** — aggregates a measure (or a formula over metrics) | one measure → many metrics |
 | `dimensions:` | a **conformed slice axis** for drill-across (`acme.rule`) | shared by many facts |
 
-A metric no longer *computes* anything — it names a `sourceMeasure` + an
-`aggregation`. The number comes from re-aggregating the facts a collector recorded.
+A metric no longer *computes* anything — it names a `measure` + an
+`expression` (`SUM(value)`: declaring.md). The number is those facts, re-aggregated.
 
 ## Step 1 — is there already a metric? (`use:`)
 

@@ -122,8 +122,8 @@ measures:
 metrics:
 - key: repo.rust_clone
   title: .clone() calls
-  sourceMeasure: repo.rust_clone
-  aggregation: sum
+  measure: repo.rust_clone
+  expression: "SUM(value)"
   unit: count
   direction: neutral
   displayKind: gauge
@@ -132,8 +132,8 @@ metrics:
   description: .clone() call sites — allocation/perf awareness.
 - key: repo.rust_allow
   title: Rust lint suppressions
-  sourceMeasure: repo.rust_allow
-  aggregation: sum
+  measure: repo.rust_allow
+  expression: "SUM(value)"
   unit: count
   direction: lower-better
   displayKind: gauge
@@ -142,8 +142,8 @@ metrics:
   description: '#[allow(...)] attributes — Rust lints being hidden.'
 - key: repo.eslint_disable
   title: ESLint suppressions
-  sourceMeasure: repo.eslint_disable
-  aggregation: sum
+  measure: repo.eslint_disable
+  expression: "SUM(value)"
   unit: count
   direction: lower-better
   displayKind: gauge
@@ -152,8 +152,8 @@ metrics:
   description: eslint-disable directives — TS/JS lints being hidden.
 - key: repo.react_use_effect
   title: useEffect calls
-  sourceMeasure: repo.react_use_effect
-  aggregation: sum
+  measure: repo.react_use_effect
+  expression: "SUM(value)"
   unit: count
   direction: neutral
   displayKind: gauge
@@ -162,8 +162,8 @@ metrics:
   description: useEffect call sites — a re-render/complexity signal.
 - key: repo.rust_shared_state
   title: Arc/Mutex/RwLock usages
-  sourceMeasure: repo.rust_shared_state
-  aggregation: sum
+  measure: repo.rust_shared_state
+  expression: "SUM(value)"
   unit: count
   direction: neutral
   displayKind: gauge
@@ -172,8 +172,8 @@ metrics:
   description: Arc/Mutex/RwLock type usages — shared-state / concurrency-complexity signal.
 - key: repo.rust_async_fn
   title: async fn count
-  sourceMeasure: repo.rust_async_fn
-  aggregation: sum
+  measure: repo.rust_async_fn
+  expression: "SUM(value)"
   unit: count
   direction: neutral
   displayKind: gauge
@@ -182,8 +182,8 @@ metrics:
   description: '`async fn` definitions — async surface density.'
 - key: repo.ts_as_cast
   title: as-cast assertions
-  sourceMeasure: repo.ts_as_cast
-  aggregation: sum
+  measure: repo.ts_as_cast
+  expression: "SUM(value)"
   unit: count
   direction: lower-better
   displayKind: gauge
@@ -192,8 +192,8 @@ metrics:
   description: '`x as T` type-assertion casts — a type-safety escape hatch.'
 - key: repo.dangerous_html
   title: dangerouslySetInnerHTML
-  sourceMeasure: repo.dangerous_html
-  aggregation: sum
+  measure: repo.dangerous_html
+  expression: "SUM(value)"
   unit: count
   direction: lower-better
   displayKind: gauge
@@ -202,8 +202,8 @@ metrics:
   description: dangerouslySetInnerHTML usages — XSS-injection surface.
 - key: repo.skipped_tests
   title: Skipped / ignored tests
-  sourceMeasure: repo.skipped_tests
-  aggregation: sum
+  measure: repo.skipped_tests
+  expression: "SUM(value)"
   unit: count
   direction: lower-better
   displayKind: gauge
@@ -211,8 +211,8 @@ metrics:
   description: '`#[ignore]` (Rust) + `.skip`/`.todo` (TS test files) — hidden test debt.'
 - key: repo.complexity_max
   title: Max cyclomatic complexity
-  sourceMeasure: oxplow.complexity
-  aggregation: max
+  measure: oxplow.complexity
+  expression: "MAX(value)"
   unit: count
   direction: lower-better
   displayKind: gauge
@@ -220,8 +220,8 @@ metrics:
   description: The single most cyclomatically-complex function in the tree.
 - key: repo.complexity_avg
   title: Avg cyclomatic complexity
-  sourceMeasure: oxplow.complexity
-  aggregation: avg
+  measure: oxplow.complexity
+  expression: "AVG(value)"
   unit: count
   direction: lower-better
   displayKind: gauge
@@ -229,8 +229,8 @@ metrics:
   description: Mean cyclomatic complexity across all functions.
 - key: repo.fn_length_max
   title: Longest function
-  sourceMeasure: oxplow.fn_length
-  aggregation: max
+  measure: oxplow.fn_length
+  expression: "MAX(value)"
   unit: lines
   direction: lower-better
   displayKind: gauge
@@ -238,8 +238,8 @@ metrics:
   description: Length (lines) of the longest function in the tree.
 - key: repo.focused_tests
   title: Focused (.only) tests
-  sourceMeasure: repo.focused_tests
-  aggregation: sum
+  measure: repo.focused_tests
+  expression: "SUM(value)"
   unit: count
   direction: lower-better
   displayKind: gauge
@@ -247,8 +247,8 @@ metrics:
   description: '`.only` focused tests — a committed one disables the rest of the suite.'
 - key: repo.total_loc
   title: Total lines of code
-  sourceMeasure: repo.file_loc
-  aggregation: sum
+  measure: repo.file_loc
+  expression: "SUM(value)"
   unit: lines
   direction: neutral
   displayKind: gauge
@@ -256,8 +256,8 @@ metrics:
   description: Total lines across .rs/.ts/.tsx source files — a size trend.
 - key: repo.max_file_loc
   title: Largest file
-  sourceMeasure: repo.file_loc
-  aggregation: max
+  measure: repo.file_loc
+  expression: "MAX(value)"
   unit: lines
   direction: lower-better
   displayKind: gauge
@@ -265,8 +265,8 @@ metrics:
   description: Line count of the largest source file (god-file / generated-blob detector).
 - key: repo.ts_as_any
   title: as-any casts
-  sourceMeasure: repo.ts_as_any
-  aggregation: sum
+  measure: repo.ts_as_any
+  expression: "SUM(value)"
   unit: count
   direction: lower-better
   displayKind: gauge
@@ -275,8 +275,8 @@ metrics:
   description: '`x as any` casts — silences all type-checking on the value.'
 - key: repo.eval_usage
   title: eval() usage
-  sourceMeasure: repo.eval_usage
-  aggregation: sum
+  measure: repo.eval_usage
+  expression: "SUM(value)"
   unit: count
   direction: lower-better
   displayKind: gauge
@@ -285,8 +285,8 @@ metrics:
   description: '`eval(...)` calls — dynamic-code-execution / injection surface.'
 - key: repo.parameter_count_max
   title: Most parameters
-  sourceMeasure: oxplow.parameter_count
-  aggregation: max
+  measure: oxplow.parameter_count
+  expression: "MAX(value)"
   unit: count
   direction: lower-better
   displayKind: gauge
@@ -294,8 +294,8 @@ metrics:
   description: Largest parameter list of any function in the tree.
 - key: repo.rust_dyn
   title: dyn dispatch usages
-  sourceMeasure: repo.rust_dyn
-  aggregation: sum
+  measure: repo.rust_dyn
+  expression: "SUM(value)"
   unit: count
   direction: neutral
   displayKind: gauge
@@ -304,8 +304,8 @@ metrics:
   description: '`dyn Trait` dynamic-dispatch usages — runtime-dispatch / indirection signal.'
 - key: repo.total_imports
   title: Total imports
-  sourceMeasure: repo.file_imports
-  aggregation: sum
+  measure: repo.file_imports
+  expression: "SUM(value)"
   unit: count
   direction: neutral
   displayKind: gauge
@@ -314,8 +314,8 @@ metrics:
   description: Total `import` statements across TS files — module-coupling trend.
 - key: repo.max_file_imports
   title: Most imports in a file
-  sourceMeasure: repo.file_imports
-  aggregation: max
+  measure: repo.file_imports
+  expression: "MAX(value)"
   unit: count
   direction: lower-better
   displayKind: gauge
@@ -324,8 +324,8 @@ metrics:
   description: Import count of the most-coupled TS file (fan-out hotspot).
 - key: repo.innerhtml_assign
   title: innerHTML assignments
-  sourceMeasure: repo.innerhtml_assign
-  aggregation: sum
+  measure: repo.innerhtml_assign
+  expression: "SUM(value)"
   unit: count
   direction: lower-better
   displayKind: gauge
@@ -334,8 +334,8 @@ metrics:
   description: '`x.innerHTML = …` assignments — XSS-injection surface.'
 - key: repo.ts_hooks
   title: React hook calls
-  sourceMeasure: repo.ts_hooks
-  aggregation: sum
+  measure: repo.ts_hooks
+  expression: "SUM(value)"
   unit: count
   direction: neutral
   displayKind: gauge
@@ -344,8 +344,8 @@ metrics:
   description: React hook call sites (useState/useEffect/useMemo/…) — re-render/complexity density.
 - key: repo.hardcoded_secrets
   title: Hardcoded secrets
-  sourceMeasure: repo.hardcoded_secrets
-  aggregation: sum
+  measure: repo.hardcoded_secrets
+  expression: "SUM(value)"
   unit: count
   direction: lower-better
   displayKind: gauge
@@ -353,8 +353,8 @@ metrics:
   description: String literals matching AWS/GitHub/Slack/PEM/Google secret shapes — should be 0.
 - key: repo.hardcoded_colors
   title: Hardcoded colors
-  sourceMeasure: repo.hardcoded_colors
-  aggregation: sum
+  measure: repo.hardcoded_colors
+  expression: "SUM(value)"
   unit: count
   direction: lower-better
   displayKind: gauge
@@ -363,8 +363,8 @@ metrics:
   description: Hex/rgb color literals in TS/TSX — should be a var(--…), see theming.md.
 - key: repo.css_important
   title: '!important uses'
-  sourceMeasure: repo.css_important
-  aggregation: sum
+  measure: repo.css_important
+  expression: "SUM(value)"
   unit: count
   direction: lower-better
   displayKind: gauge
@@ -372,8 +372,8 @@ metrics:
   description: '!important declarations — the specificity escape hatch (theming.md).'
 - key: repo.inline_styles
   title: Inline style objects
-  sourceMeasure: repo.inline_styles
-  aggregation: sum
+  measure: repo.inline_styles
+  expression: "SUM(value)"
   unit: count
   direction: neutral
   displayKind: gauge
@@ -382,8 +382,8 @@ metrics:
   description: style={…} JSX attributes — inline-style density / migration pressure (theming.md).
 - key: repo.type_coverage
   title: Type coverage
-  sourceMeasure: repo.type_coverage
-  aggregation: ratio
+  measure: repo.type_coverage
+  expression: "RATIO(num, den)"
   unit: '%'
   direction: higher-better
   displayKind: coverage

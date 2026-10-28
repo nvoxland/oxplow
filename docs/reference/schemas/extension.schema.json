@@ -905,7 +905,7 @@
       "additionalProperties": false
     },
     "MetricEntry": {
-      "description": "One entry in the top-level `metrics:` block — a **pure read-time SPEC** over a\nmeasure. A metric no longer *computes* anything: it names a\n`sourceMeasure` + an `aggregation` (+ optional `filter`), or a `formula` over\nother metrics, and the engine aggregates the durable facts a `collectors:` entry\nemitted. Two forms, distinguished by which key is set:\n- **`use:`** — enable an existing catalog metric by key (built-in/global),\n  optionally overriding `target`/thresholds for this project.\n- **`key:`** — define a NEW spec (`sourceMeasure` + `aggregation`, or `formula`).\n\nResolved across the three scopes into [`ResolvedSpec`]s. All non-discriminant\nfields are optional so both forms share one struct; validation enforces the\nper-form rules.",
+      "description": "One entry in the top-level `metrics:` block — a **pure read-time SPEC** over a\nmeasure. A metric no longer *computes* anything: it names a\n`measure` + an `expression` (an aggregate with an optional filter), or a formula over\nother metrics, and the engine aggregates the durable facts a `collectors:` entry\nemitted. Two forms, distinguished by which key is set:\n- **`use:`** — enable an existing catalog metric by key (built-in/global),\n  optionally overriding `target`/thresholds for this project.\n- **`key:`** — define a NEW spec (a `measure` + an aggregate `expression`, or a formula `expression`).\n\nResolved across the three scopes into [`ResolvedSpec`]s. All non-discriminant\nfields are optional so both forms share one struct; validation enforces the\nper-form rules.",
       "type": "object",
       "properties": {
         "use": {
@@ -959,8 +959,16 @@
           ],
           "default": null
         },
-        "sourceMeasure": {
-          "description": "The measure whose facts this metric aggregates (required for a `key:`\nmetric unless it sets `formula`). NULL for a pure formula metric.",
+        "measure": {
+          "description": "The measure whose facts this metric aggregates (required for a `key:`\nmetric with an aggregate `expression`). None for a formula metric.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "expression": {
+          "description": "How the metric reads its facts, in one closed expression\n([`metric_expr`]): an aggregate with an optional filter\n(`COUNT(*) FILTER (WHERE value >= 11)`, `SUM(value) FILTER (WHERE\ndim('oxplow.rule') = 'x')`, `RATIO(num, den)`), or a formula over\nother metrics (`METRIC('a') / METRIC('b')`). It combines the facts\nWITHIN a capture; the cross-time collapse is the measure's `fold`.",
           "type": [
             "string",
             "null"
@@ -968,34 +976,10 @@
           "default": null
         },
         "aggregation": {
-          "description": "`count` | `sum` | `avg` | `min` | `max` | `last` | `ratio` (default `last`).\nCombines the facts WITHIN a capture; cross-time collapse is governed by the\nsource measure's `temporalSemantics`.",
+          "description": "An ENTITY metric's aggregation (`count` | `sum` | … over its rows). A\nmeasure metric's is part of its `expression`; this is then what the\nexpression compiled to.",
           "type": [
             "string",
             "null"
-          ],
-          "default": null
-        },
-        "filter": {
-          "description": "Fact predicate applied before aggregation (`minValue` / `severity` / `dimEq`).",
-          "anyOf": [
-            {
-              "$ref": "#/definitions/FilterConfig"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "formula": {
-          "description": "Derived-metric formula over other metric keys (mutually exclusive with\n`sourceMeasure`).",
-          "anyOf": [
-            {
-              "$ref": "#/definitions/FormulaConfig"
-            },
-            {
-              "type": "null"
-            }
           ],
           "default": null
         },
@@ -1131,74 +1115,6 @@
       "enum": [
         "on",
         "off"
-      ]
-    },
-    "FilterConfig": {
-      "description": "A fact predicate on a `metrics:` spec (the `filter:` block) — the config\nmirror of the engine's `FactFilter`. A conjunctive predicate\nkeeping only the facts that match before aggregation: `minValue` for a\ncount-over-threshold (complexity ≥ N), `severity` for a lint slice, `dimEq`\nfor a conformed-dimension slice (`[oxplow.rule, unsafe_block]`).",
-      "type": "object",
-      "properties": {
-        "minValue": {
-          "description": "Keep facts with `value >= minValue`.",
-          "type": [
-            "number",
-            "null"
-          ],
-          "format": "double",
-          "default": null
-        },
-        "maxValue": {
-          "description": "Keep facts with `value <= maxValue` (`0`: the untested files).",
-          "type": [
-            "number",
-            "null"
-          ],
-          "format": "double",
-          "default": null
-        },
-        "severity": {
-          "description": "Keep facts whose reported severity equals this (e.g. `error`).",
-          "type": [
-            "string",
-            "null"
-          ],
-          "default": null
-        },
-        "dimEq": {
-          "description": "Keep facts whose dimension `[key]` equals `[value]` — a 2-element list.",
-          "type": [
-            "array",
-            "null"
-          ],
-          "items": {
-            "type": "string"
-          },
-          "default": null
-        }
-      },
-      "additionalProperties": false
-    },
-    "FormulaConfig": {
-      "description": "A derived-metric formula on a `metrics:` spec (the `formula:` block) — a\nconstrained binary op over two OTHER metric keys (no source measure). The\nengine aligns the two metrics on their shared rollup key and applies `op`\n(`div` is the ratio primitive: bugs-per-KLOC, cost-per-token).",
-      "type": "object",
-      "properties": {
-        "op": {
-          "description": "`add` | `sub` | `mul` | `div`.",
-          "type": "string"
-        },
-        "left": {
-          "description": "The left operand metric key.",
-          "type": "string"
-        },
-        "right": {
-          "description": "The right operand metric key.",
-          "type": "string"
-        }
-      },
-      "additionalProperties": false,
-      "required": [
-        "op",
-        "left",
-        "right"
       ]
     },
     "DimensionEntry": {
