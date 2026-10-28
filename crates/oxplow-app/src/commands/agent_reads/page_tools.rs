@@ -613,6 +613,8 @@ struct DefinitionRow {
     /// The node it sits in (none at the root).
     parent: Option<String>,
     kind: &'static str,
+    /// A viz node's viz (`table`, `detail`, …).
+    viz: Option<String>,
     title: Option<String>,
     /// The page it belongs to (an embed's own page for its nodes).
     page: String,
@@ -623,6 +625,79 @@ struct DefinitionRow {
     loader: Option<String>,
     loader_kind: Option<&'static str>,
     source: Option<String>,
+}
+
+/// What a loader is and what it runs: its SQL, its command, the page
+/// loader it takes (`<page>#<loader>`), or nothing for inline rows.
+fn loader_source(loader: &crate::pages::schema::Loader) -> (&'static str, Option<String>) {
+    use crate::pages::schema::Loader;
+    match loader {
+        Loader::Sql { sql, .. } => ("sql", Some(sql.clone())),
+        Loader::Command { command, .. } => ("command", Some(command.clone())),
+        Loader::Page { page, loader, .. } => ("page", Some(format!("{page}#{loader}"))),
+        Loader::Rows { .. } => ("rows", None),
+    }
+}
+
+/// The parts of a page run its definition lists, flat: its params with
+/// the values this run used, its loaders with what they read and the
+/// rows they gave, and its actions where they sit (`page`, or the viz
+/// node's id).
+fn definition_parts(run: &PageRun) -> (Vec<Value>, Vec<Value>, Vec<Value>) {
+    let page = &run.page;
+    let params = page
+        .params
+        .iter()
+        .map(|p| {
+            json!({
+                "name": p.name,
+                "label": p.label,
+                "role": p.role,
+                "type": p.kind,
+                "default": p.default,
+                "value": run.params.get(&p.name),
+            })
+        })
+        .collect();
+    let loaders = page
+        .loaders
+        .iter()
+        .map(|d| {
+            let (kind, source) = loader_source(&d.loader);
+            let ran = run.loaders.get(&d.name);
+            json!({
+                "name": d.name,
+                "kind": kind,
+                "source": source,
+                "reads": d.reads,
+                "uses": d.reads_loaders,
+                "rows": ran.map(|r| r.result.rows.len()),
+                "error": ran.and_then(|r| r.error.clone()),
+            })
+        })
+        .collect();
+    let on_nodes = page.nodes().into_iter().filter_map(|n| match &n.kind {
+        NodeKind::Viz { config, .. } => Some((n.id.as_str(), &config.actions)),
+        _ => None,
+    });
+    let actions = std::iter::once(("page", &page.actions))
+        .chain(on_nodes)
+        .flat_map(|(on, actions)| {
+            actions.iter().map(move |a| {
+                json!({
+                    "id": a.id,
+                    "label": a.label,
+                    "command": a.command,
+                    "on": on,
+                    "row": a.row,
+                    "when": a.when,
+                    "form": a.form,
+                    "prominent": a.prominent,
+                })
+            })
+        })
+        .collect();
+    (params, loaders, actions)
 }
 
 fn kind_name(kind: &NodeKind) -> &'static str {
@@ -646,7 +721,6 @@ fn definition_rows(
     depth: usize,
     out: &mut Vec<DefinitionRow>,
 ) {
-    use crate::pages::schema::Loader;
     let Some(def) = crate::pages::text::node(&run.page, &at.id) else {
         // A page another extension mounted at a slot.
         if let Some(e) = &at.embed {
@@ -655,16 +729,20 @@ fn definition_rows(
         }
         return;
     };
-    let from = match &def.kind {
-        NodeKind::Viz { from, .. } => from.clone(),
-        _ => None,
+    let (from, viz) = match &def.kind {
+        NodeKind::Viz { from, config } => (
+            from.clone(),
+            serde_json::to_value(config.viz)
+                .ok()
+                .and_then(|v| v.as_str().map(str::to_string)),
+        ),
+        _ => (None, None),
     };
-    let decl = from.as_deref().and_then(|f| run.page.loader(f));
-    let (loader_kind, source) = match decl.map(|d| &d.loader) {
-        Some(Loader::Sql { sql, .. }) => (Some("sql"), Some(sql.clone())),
-        Some(Loader::Command { command, .. }) => (Some("command"), Some(command.clone())),
-        Some(Loader::Page { page, loader, .. }) => (Some("page"), Some(format!("{page}#{loader}"))),
-        Some(Loader::Rows { .. }) => (Some("rows"), None),
+    let (loader_kind, source) = match from.as_deref().and_then(|f| run.page.loader(f)) {
+        Some(d) => {
+            let (kind, source) = loader_source(&d.loader);
+            (Some(kind), source)
+        }
         None => (None, None),
     };
     let id = format!("{prefix}{}", at.id);
@@ -673,6 +751,7 @@ fn definition_rows(
         id: id.clone(),
         parent: parent.map(str::to_string),
         kind: kind_name(&def.kind),
+        viz,
         title: def.title.clone(),
         page: run.page.id.clone(),
         extension: run.page.extension.clone(),
@@ -718,6 +797,7 @@ fn definition_op(services: ServicesSlot) -> Op {
                     .map_err(|e| page_error(&label, e))?;
                 let mut rows = Vec::new();
                 definition_rows(&run, &run.tree, "", None, 0, &mut rows);
+                let (params, loaders, actions) = definition_parts(&run);
                 let page = &run.page;
                 // The file it runs from, as written.
                 let yaml = p.spec.or_else(|| {
@@ -732,8 +812,22 @@ fn definition_op(services: ServicesSlot) -> Op {
                         "running": page.origin.running,
                         "deployment": page.origin.deployment,
                         "bundled": page.origin.bundled,
-                        "params": page.params,
-                        "loaders": page.loaders,
+                        "file": page.origin.source.clone().unwrap_or_else(|| page.origin.running.clone()),
+                        "description": page.description,
+                        "label": page.label,
+                        "for": page.renders,
+                        "default": page.default,
+                        "pinned": page.pinned,
+                        "hidden": page.hidden,
+                        "category": page.category,
+                        "tool": page.tool,
+                        "refresh": page.refresh,
+                        "comments": page.comments,
+                        "needs": page.needs,
+                        "params": params,
+                        "loaders": loaders,
+                        "actions": actions,
+                        "answers": page.answers,
                         "yaml": yaml,
                         "nodes": rows,
                     }),
@@ -1069,6 +1163,59 @@ mod tests {
         assert_eq!(def["page"], json!("acme/numbers"));
     }
 
+    /// Every part of the page, flat, as the definition page lists it: its
+    /// params with this run's values, its loaders with what they read
+    /// and how many rows they gave, and its actions wherever they sit.
+    #[tokio::test]
+    async fn a_pages_definition_lists_its_params_loaders_and_actions() {
+        let (_dir, svc) = fixture().await;
+        let def = run(
+            &svc,
+            "oxplow.page.definition",
+            json!({ "page": "acme/acts" }),
+        )
+        .await;
+        let params = def["params"].as_array().unwrap();
+        assert_eq!(params[0]["name"], json!("t"), "{def}");
+        assert_eq!(params[0]["value"], json!("from-page"), "{def}");
+        let loaders = def["loaders"].as_array().unwrap();
+        assert_eq!(loaders[0]["name"], json!("names"), "{def}");
+        assert_eq!(loaders[0]["kind"], json!("sql"), "{def}");
+        assert_eq!(loaders[0]["rows"], json!(2), "{def}");
+        let actions = def["actions"].as_array().unwrap();
+        let on: Vec<_> = actions
+            .iter()
+            .map(|a| {
+                (
+                    a["id"].as_str().unwrap(),
+                    a["on"].as_str().unwrap(),
+                    a["row"].as_bool().unwrap(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            on,
+            [("add", "page", false), ("add-row", "names", true)],
+            "{def}"
+        );
+        assert_eq!(actions[0]["command"], json!("oxplow.work_item.create"));
+        // A loader that reads another names it.
+        let def = run(
+            &svc,
+            "oxplow.page.definition",
+            json!({ "page": "acme/bound" }),
+        )
+        .await;
+        let echo = def["loaders"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|l| l["name"] == json!("echo"))
+            .unwrap_or_else(|| panic!("{def}"));
+        assert_eq!(echo["uses"], json!(["row"]), "{def}");
+        assert_eq!(echo["rows"], json!(1), "{def}");
+    }
+
     #[tokio::test]
     async fn an_agent_presses_a_pages_row_action() {
         let (_dir, svc) = fixture().await;
@@ -1226,7 +1373,6 @@ mod show_tests {
 
 #[cfg(test)]
 mod definition_page_tests {
-    use oxplow_db::SqlCell;
     use oxplow_domain::{Actor, CommandError};
     use serde_json::json;
 
@@ -1261,54 +1407,8 @@ mod definition_page_tests {
         assert_eq!(total["page"], json!("inline"));
         assert_eq!(total["loader"], json!("numbers"));
         assert_eq!(total["loader_kind"], json!("sql"));
+        assert_eq!(total["viz"], json!("number"));
         assert_eq!(total["source"], json!("SELECT 7 AS n"));
-    }
-
-    #[tokio::test]
-    async fn the_definition_page_renders_an_inline_views_source_and_node_tree() {
-        let f = crate::test_fixtures::services_with_effort().await;
-        let run = crate::pages::runner::PageRunner::of(&f.svc)
-            .run(crate::pages::runner::RunRequest {
-                target: crate::pages::runner::RunTarget::Page(
-                    "oxplow-foundation/definition".into(),
-                ),
-                // No `of`: the command loader receives null for `page`
-                // and the exact inline spec for `spec`.
-                params: [("spec".to_string(), SqlCell::Text(INLINE_SPEC.into()))].into(),
-                ctx: crate::pages::spec::view_context(&f.svc, None, Some(f.thread)).await,
-                viewer: Actor::Human,
-            })
-            .await
-            .unwrap();
-        for (name, loader) in &run.loaders {
-            assert_eq!(loader.error, None, "{name}");
-        }
-        let about = &run.loaders["about"].result;
-        let title = about.columns.iter().position(|c| c == "title").unwrap();
-        assert_eq!(about.rows[0][title], SqlCell::Text("Inline release".into()));
-        let nodes = &run.loaders["nodes"].result;
-        let id = nodes.columns.iter().position(|c| c == "id").unwrap();
-        let parent = nodes.columns.iter().position(|c| c == "parent").unwrap();
-        assert!(
-            nodes.rows.iter().any(|row| {
-                row[id] == SqlCell::Text("total".into())
-                    && row[parent] == SqlCell::Text("layout".into())
-            }),
-            "{:?}",
-            nodes.rows
-        );
-        let yaml = &run.loaders["yaml"].result;
-        let text = yaml.columns.iter().position(|c| c == "text").unwrap();
-        assert_eq!(
-            yaml.rows[0][text],
-            SqlCell::Text(format!("```yaml\n{INLINE_SPEC}\n```"))
-        );
-        let text = crate::pages::text::page_text(&f.svc, &f.svc.layout.project_dir, &run)
-            .await
-            .unwrap();
-        assert!(text.contains("Inline release"), "{text}");
-        assert!(text.contains(INLINE_SPEC), "{text}");
-        assert!(text.contains("total"), "{text}");
     }
 
     #[tokio::test]
@@ -1350,62 +1450,6 @@ mod definition_page_tests {
                 .unwrap_err();
             assert!(matches!(&error, CommandError::Invalid { .. }), "{error:?}");
             assert!(error.to_string().contains(why), "{error}");
-        }
-    }
-
-    /// Foundation's `definition` page (Show Definition): a page's info,
-    /// its node tree with each node's parent, and its YAML.
-    #[tokio::test]
-    async fn the_definition_page_shows_what_a_page_is_made_of() {
-        let f = crate::test_fixtures::services_with_effort().await;
-        let run = crate::pages::runner::PageRunner::of(&f.svc)
-            .run(crate::pages::runner::RunRequest {
-                target: crate::pages::runner::RunTarget::Page(
-                    "oxplow-foundation/definition".into(),
-                ),
-                params: [
-                    (
-                        "of".to_string(),
-                        SqlCell::Text("oxplow-foundation/commit".into()),
-                    ),
-                    (
-                        "params".to_string(),
-                        SqlCell::Text(r#"{"sha":"abc1234"}"#.into()),
-                    ),
-                ]
-                .into(),
-                ctx: crate::pages::spec::ViewContext::default(),
-                viewer: oxplow_domain::Actor::Human,
-            })
-            .await
-            .unwrap();
-        for (name, loader) in &run.loaders {
-            assert_eq!(loader.error, None, "{name}");
-        }
-        let cell = |loader: &str, column: &str| {
-            let r = &run.loaders[loader].result;
-            let at = r.columns.iter().position(|c| c == column).unwrap();
-            r.rows[0][at].clone()
-        };
-        assert_eq!(cell("about", "title"), SqlCell::Text("Commit".into()));
-        assert_eq!(
-            cell("about", "extension"),
-            SqlCell::Text("oxplow-foundation".into())
-        );
-        let nodes = &run.loaders["nodes"].result;
-        assert!(nodes.rows.len() > 3, "{:?}", nodes.rows);
-        let id = nodes.columns.iter().position(|c| c == "id").unwrap();
-        assert!(
-            nodes
-                .rows
-                .iter()
-                .any(|r| r[id] == SqlCell::Text("files".into())),
-            "{:?}",
-            nodes.rows
-        );
-        match cell("yaml", "text") {
-            SqlCell::Text(t) => assert!(t.starts_with("```yaml\ntitle: Commit"), "{t}"),
-            other => panic!("{other:?}"),
         }
     }
 }

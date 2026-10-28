@@ -33,7 +33,10 @@ intent:
       expect: the page in v_bookmark at the thread's scope, undone by oxplow.bookmark.remove
     - name: definition-reads-a-pages-title-origin-and-nodes
       input: { page: definition, params: { of: oxplow-foundation/commit } }
-      expect: the page's title first (the tab's label reads it), its extension and source, and its nodes in order
+      expect: the page's title first (the tab's label reads it), where it comes from, its params, loaders, nodes and actions, and no YAML
+    - name: definition-shows-an-inline-views-yaml
+      input: { page: definition, params: { spec: "title: Inline" } }
+      expect: an inline view's YAML as written, and its nodes
     - name: closed-threads-lists-closed-threads-with-their-work
       input: { page: closed-threads, params: { stream_id: 1 } }
       expect: the stream's closed threads only, each with a Reopen action

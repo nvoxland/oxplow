@@ -1,17 +1,37 @@
-# What a page is made of: the title the tab's label reads, where the page
-# comes from, and its nodes.
-when: { page: oxplow-foundation/definition, params: { of: oxplow-foundation/commit, stream_id: 1 } }
+# What a page is made of, part by part: the title the tab's label reads,
+# where it comes from and a link to its source, its params with this
+# run's values, its loaders, its nodes and its actions where they sit.
+# A page with a file shows no YAML: its source opens in the file view.
+when: { page: oxplow-foundation/definition, params: { of: oxplow-foundation/commit, params: '{"sha":"abc1234"}', stream_id: 1 } }
 expect:
   loaders:
     scope:
       rows:
         - { title: Commit }
-    page:
+    about:
       rows:
-        - { title: Commit, extension: oxplow-foundation }
+        - { title: Commit, id: oxplow-foundation/commit, extension: oxplow-foundation, shows: oxplow/commit }
+    source:
+      rows: 1
+    params:
+      rows:
+        - { name: uri }
+        - { name: sha, value: abc1234 }
+        - { name: stream_id }
+    loaders:
+      rows:
+        - { name: row, kind: sql }
+        - { name: detail, kind: sql }
+        - { name: files, kind: sql, uses: row }
     nodes:
       rows:
-        - { id: stack }
-        - { id: detail }
-        - { id: files }
-        - { id: sections }
+        - { id: stack, kind: stack }
+        - { id: detail, kind: viz, viz: detail, loader: detail }
+        - { id: files, kind: viz, viz: tree, loader: files }
+        - { id: sections, kind: slot }
+    actions:
+      rows:
+        - { label: Cherry-pick, command: oxplow.git.cherry_pick, on: detail }
+        - { label: Revert, command: oxplow.git.revert, on: detail }
+    yaml:
+      rows: 0

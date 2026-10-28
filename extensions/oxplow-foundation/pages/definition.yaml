@@ -1,5 +1,5 @@
 title: Definition
-description: What a page is made of — its extension, source file and deployment, each node with the page and file it comes from and the loader it shows (embedded pages and mounted slots included), and its YAML. Every page's ☰ menu opens it as Show Definition.
+description: What a page is made of, part by part — where it comes from, its params with the values this run used, the loaders that read its data, the nodes that show them (embedded pages and mounted slots included) and its actions. Its source opens in the file view. Every page's ☰ menu opens it as Show Definition.
 label: 'Definition: {{row.title}}'
 icon: file-text
 hidden: true
@@ -24,47 +24,160 @@ data:
     command: oxplow.page.definition
     args: { page: { param: of }, spec: { param: spec }, params: { param: params }, stream_id: { from: scope.stream } }
     reads: [page, extension_deployment]
-  nodes:
-    command: oxplow.page.definition
-    args: { page: { param: of }, spec: { param: spec }, params: { param: params }, stream_id: { from: scope.stream } }
-    items: nodes
-    reads: [page, extension_deployment]
   about:
     sql: |
-      SELECT title, extension, coalesce(source, running) AS file,
+      SELECT title, page AS id, extension, file,
+             (SELECT group_concat(value, ', ') FROM json_each(page."for")) AS shows,
+             CASE WHEN json_array_length(page."for") = 0 THEN NULL
+                  WHEN "default" THEN 'yes: it opens when one is opened'
+                  ELSE 'no: another page is the default' END AS is_default,
+             CASE WHEN category IS NOT NULL THEN 'the launcher, under ' || category
+                  WHEN hidden THEN 'only from other pages'
+                  ELSE 'the launcher' END
+               || CASE WHEN pinned THEN '; pinned' ELSE '' END AS found,
+             CASE WHEN tool IS NOT NULL THEN 'as the tool `' || tool || '`' ELSE 'through oxplow_run_page' END AS agents,
+             label,
+             CASE WHEN refresh THEN 'when its data changes, and on Refresh' ELSE 'when its data changes' END AS updates,
+             CASE WHEN comments THEN 'yes' ELSE 'no' END AS takes_comments,
              CASE WHEN deployment IS NULL THEN 'loaded from its source'
                   ELSE 'deployment ' || substr(deployment, 1, 12) END AS runs,
              CASE WHEN bundled THEN 'ships with oxplow' ELSE 'yours' END AS origin
       FROM page
+  source:
+    sql: |
+      SELECT '[View source](' || uri('oxplow/file', 'path', file) || ') — `' || file || '`' AS text
+      FROM page WHERE :spec IS NULL AND file <> ''
+  params:
+    sql: |
+      SELECT j.value ->> '$.name' AS name, j.value ->> '$.label' AS label,
+             coalesce(j.value ->> '$.role', 'resource') AS role, j.value ->> '$.type' AS type,
+             j.value ->> '$.default' AS "default", j.value ->> '$.value' AS value
+      FROM page, json_each(page.params) j
+      ORDER BY j.key
+  loaders:
+    sql: |
+      SELECT j.value ->> '$.name' AS name, j.value ->> '$.kind' AS kind,
+             (SELECT group_concat(value, ', ') FROM json_each(j.value -> '$.uses')) AS uses,
+             (SELECT group_concat(value, ', ') FROM json_each(j.value -> '$.reads')) AS reads,
+             j.value ->> '$.rows' AS rows, j.value ->> '$.error' AS error,
+             j.value ->> '$.source' AS source
+      FROM page, json_each(page.loaders) j
+      ORDER BY j.key
+  queries:
+    sql: |
+      SELECT group_concat(
+               '**`' || name || '`** — ' || kind
+               || CASE WHEN uses IS NOT NULL THEN ' · uses `' || replace(uses, ', ', '`, `') || '`' ELSE '' END
+               || CASE WHEN reads IS NOT NULL THEN ' · runs again when `' || replace(reads, ', ', '`, `') || '` change' ELSE '' END
+               || ' · ' || CASE WHEN error IS NOT NULL THEN 'failed: ' || error
+                                WHEN rows IS NULL THEN 'not run'
+                                WHEN rows = 1 THEN '1 row' ELSE rows || ' rows' END
+               || CASE WHEN source IS NULL THEN ''
+                       WHEN kind = 'sql' THEN char(10) || char(10) || '```sql' || char(10) || source || char(10) || '```'
+                       ELSE ': `' || source || '`' END,
+               char(10) || char(10)) AS text
+      FROM loaders
+  nodes:
+    sql: |
+      SELECT j.value ->> '$.id' AS id, j.value ->> '$.parent' AS parent,
+             j.value ->> '$.kind' AS kind, j.value ->> '$.viz' AS viz,
+             j.value ->> '$.title' AS title, j.value ->> '$.loader' AS loader,
+             j.value ->> '$.page' AS page
+      FROM page, json_each(page.nodes) j
+      ORDER BY j.key
+  actions:
+    sql: |
+      SELECT j.value ->> '$.label' AS label, j.value ->> '$.command' AS command,
+             j.value ->> '$.on' AS "on",
+             CASE WHEN j.value ->> '$.on' = 'page' THEN
+                    CASE WHEN j.value ->> '$.prominent' THEN 'a button in the nav bar' ELSE 'the ☰ menu' END
+                  WHEN j.value ->> '$.row' THEN 'each row of `' || (j.value ->> '$.on') || '`'
+                  ELSE 'the `' || (j.value ->> '$.on') || '` section' END AS offered,
+             j.value ->> '$.when' AS "when",
+             CASE WHEN j.value ->> '$.form' THEN 'yes' ELSE 'no' END AS form
+      FROM page, json_each(page.actions) j
+      ORDER BY j.key
+  answers:
+    sql: |
+      SELECT j.value ->> '$.question' AS question
+      FROM page, json_each(page.answers) j
+  # An inline view has no file to open: its YAML, as written.
   yaml:
     sql: |
-      SELECT '```yaml' || char(10) || coalesce(yaml, '(the file is not readable here)') || char(10) || '```' AS text
-      FROM page
+      SELECT '```yaml' || char(10) || yaml || char(10) || '```' AS text
+      FROM page WHERE :spec IS NOT NULL
 view:
   stack:
+  - id: source
+    title: ''
+    viz: markdown
+    from: source
+    markdown: { text: text }
   - id: about
     title: Page
     viz: detail
     from: about
     columns:
     - { key: title, label: Title }
+    - { key: id, label: Id }
     - { key: extension, label: Extension }
     - { key: file, label: File }
+    - { key: shows, label: Shows }
+    - { key: is_default, label: Default for it }
+    - { key: found, label: Found in }
+    - { key: agents, label: Agents read it }
+    - { key: label, label: Tab label }
+    - { key: updates, label: Updates }
+    - { key: takes_comments, label: Takes comments }
     - { key: runs, label: Runs }
     - { key: origin, label: Origin }
+  - id: params
+    title: Params
+    viz: table
+    from: params
+    empty: It takes no params.
+    columns:
+    - { key: name, label: Name }
+    - { key: label, label: Label }
+    - { key: role, label: Role }
+    - { key: type, label: Type }
+    - { key: default, label: Default }
+    - { key: value, label: This run }
+  - id: data
+    title: Data
+    viz: markdown
+    from: queries
+    markdown: { text: text }
   - id: nodes
-    title: Nodes
+    title: View
     viz: tree
     from: nodes
     tree: { id: id, parent: parent, label: id }
     columns:
     - { key: id, label: Node }
     - { key: kind, label: Kind }
+    - { key: viz, label: Viz }
     - { key: title, label: Title }
+    - { key: loader, label: Shows }
     - { key: page, label: Page }
-    - { key: loader, label: Loader }
-    - { key: loader_kind, label: Reads }
-    - { key: file, label: File }
+  - id: actions
+    title: Actions
+    viz: table
+    from: actions
+    empty: It offers no actions.
+    columns:
+    - { key: label, label: Action }
+    - { key: command, label: Command }
+    - { key: offered, label: Offered on }
+    - { key: when, label: Only when }
+    - { key: form, label: Opens a form }
+  - id: answers
+    title: Questions it answers
+    viz: list
+    from: answers
+    empty: It names no questions.
+    columns:
+    - { key: question }
   - id: yaml
     title: YAML
     viz: markdown

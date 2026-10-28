@@ -922,9 +922,15 @@ the same `parse_inline_page` restrictions as one-off views: actions and command
 loaders are refused before a run opens. Reading a definition grants no acting
 authority.
 
-The result contains page metadata, loader declarations, flattened node rows
-(including parent, page, source file, loader kind and source), and `yaml`.
-For inline specs, `yaml` is the exact submitted text, including comments and
-formatting. For deployed pages it is the running file's text. Foundation's
-`definition` page uses the same command loaders for both targets; its `spec`
-param carries an ephemeral view's YAML when no deployed page is named.
+The result is the page as the runner parsed it, flat: its metadata (`file`,
+`for`, `default`, `category`, `hidden`, `pinned`, `tool`, `refresh`,
+`comments`, `needs`, `label`, `description`, origin), `params` (each with
+the value this run used), `loaders` (each with its kind and source, the
+loaders it `uses`, the datasets it `reads`, and the rows it gave or its
+error), `nodes` (parent, page, source file, viz, loader kind and source),
+`actions` (the page's and each viz node's, `on` saying where), `answers`,
+and `yaml`. For inline specs, `yaml` is the exact submitted text, including
+comments and formatting; for deployed pages it is the running file's text.
+Foundation's `definition` page calls it once (its `page` loader) and
+expands those lists in SQL with `json_each`; its `spec` param carries an
+ephemeral view's YAML when no deployed page is named.

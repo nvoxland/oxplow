@@ -1,0 +1,27 @@
+# An inline view has no file to open: its definition shows its YAML as
+# written, and its nodes.
+when:
+  page: oxplow-foundation/definition
+  params:
+    stream_id: 1
+    spec: |
+      title: 'Inline release'
+      data:
+        numbers: { sql: 'SELECT 7 AS n' }
+      view:
+        id: layout
+        stack:
+          - { id: total, title: Total, viz: number, from: numbers }
+expect:
+  loaders:
+    about:
+      rows:
+        - { title: Inline release }
+    source:
+      rows: 0
+    nodes:
+      rows:
+        - { id: layout, kind: stack }
+        - { id: total, parent: layout, viz: number, loader: numbers }
+    yaml:
+      rows: 1

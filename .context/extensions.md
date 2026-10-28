@@ -2266,10 +2266,10 @@ Where it lives, and what is loaded:
   changed after the deployment was made). `v_page` has `source`, not the
   running path. A deployed extension's errors and warnings name its source
   files, so they say what to edit.
-- **Show Definition** is foundation's hidden `definition` page: the page's
-  extension, file and deployment, its node tree from
-  `oxplow.page.definition` (each node's parent, page, file and loader;
-  embeds and slot mounts included) and its YAML as written.
+- **Show Definition** is foundation's hidden `definition` page: the page
+  part by part from `oxplow.page.definition` (where it comes from, params,
+  loaders, nodes, actions, answers) and a View source link to its file;
+  only an inline view shows its YAML (pages-and-tabs.md).
 - **An inline page** (`parse_inline_page`: a markdown ` ```oxplow-page `
   block, an agent's `oxplow_show_page { spec }`) only reads: no `command`
   loaders, no actions, forms, terminals, editors, components or slots.
