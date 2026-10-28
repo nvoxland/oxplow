@@ -13,6 +13,9 @@ intent:
     - name: thread-history
       input: { page: thread-history, params: { thread_id: 1 } }
       expect: no rows for a thread with no recorded prompts
+    - name: new-session-gets-the-section
+      input: { page: oxplow-foundation/new-session, params: { stream_id: 1, thread_id: 1 } }
+      expect: the New Session page shows the thread's earlier prompts after its start section
 # A section of a core page, placed by the page's stable section ids
 # (`start`, `earlier`), so it stays put as the page changes.
 ui:
