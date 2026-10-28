@@ -25,6 +25,7 @@ measures:
     unit: statements
     subjectKind: file
     temporalSemantics: non-additive
+    fold: sum
     captureScope: per-path
 dimensions:
   - { key: schema_review.ddl_kind, label: DDL kind, valueType: categorical }

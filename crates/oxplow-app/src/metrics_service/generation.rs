@@ -3,6 +3,7 @@
 use super::*;
 use crate::vocabulary_reactor::VocabularyErrors;
 use oxplow_db::{fact_store, TxError};
+use rusqlite::OptionalExtension;
 use std::collections::{BTreeMap, BTreeSet};
 
 pub(crate) struct PreparedMetricCatalog {
@@ -40,6 +41,7 @@ impl MetricsService {
                 unit: measure.unit,
                 subject_kind: measure.subject_kind,
                 temporal_semantics: measure.temporal_semantics,
+                fold: measure.fold,
                 capture_scope: measure.capture_scope,
                 scope: measure.scope,
                 description: measure.description,
@@ -169,6 +171,20 @@ impl PreparedMetricCatalog {
                     .map_err(oxplow_db::map_sql_err)?;
                 continue;
             }
+            if let (Some(measure), None) = (&spec.source_measure, &spec.entity_json) {
+                if !declared_fold(tx, &self.measures, measure)? {
+                    let why = format!(
+                        "metric `{key}` needs measure `{measure}` to declare a `fold` \
+                         (sum, last, first or avg): it says how the series combines over time"
+                    );
+                    if oxplow_config::scope_extension(&spec.scope).is_some() {
+                        return Err(rejected(&spec.scope, &why));
+                    }
+                    tx.execute("DELETE FROM metric_spec WHERE key = ?1", [key])
+                        .map_err(oxplow_db::map_sql_err)?;
+                    continue;
+                }
+            }
             if let Some(json) = &spec.entity_json {
                 let entity: oxplow_config::EntitySpec = serde_json::from_str(json)
                     .map_err(|_| rejected(&spec.scope, "invalid entity metric declaration"))?;
@@ -196,6 +212,7 @@ impl PreparedMetricCatalog {
                             unit: spec.unit.clone(),
                             subject_kind: None,
                             temporal_semantics: "semi-additive".into(),
+                            fold: Some("last".into()),
                             capture_scope: "complete".into(),
                             scope: spec.scope.clone(),
                             description: spec.description.clone(),
@@ -262,6 +279,33 @@ fn rejected(scope: &str, message: &str) -> TxError<VocabularyErrors> {
         &oxplow_config::scope_extension(scope).unwrap_or_else(|| "<host>".into()),
         message,
     ))
+}
+
+/// Whether measure `key` (one of this generation's, else one already stored)
+/// declares a fold a metric can use. A measure nobody defines is not this
+/// check's to refuse.
+fn declared_fold(
+    tx: &rusqlite::Transaction<'_>,
+    measures: &[NewMeasure],
+    key: &str,
+) -> Result<bool, TxError<VocabularyErrors>> {
+    let fold = match measures.iter().find(|m| m.key == key) {
+        Some(m) => m.fold.clone(),
+        None => match tx
+            .query_row("SELECT fold FROM measure WHERE key = ?1", [key], |r| {
+                r.get::<_, Option<String>>(0)
+            })
+            .optional()
+            .map_err(oxplow_db::map_sql_err)?
+        {
+            Some(fold) => fold,
+            None => return Ok(true),
+        },
+    };
+    Ok(fold
+        .as_deref()
+        .and_then(crate::metric_engine::Fold::parse)
+        .is_some_and(crate::metric_engine::Fold::folds))
 }
 
 fn check_entity(

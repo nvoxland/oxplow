@@ -7113,6 +7113,51 @@
         }
       ],
       "key": []
+    },
+    "2": {
+      "columns": [
+        {
+          "name": "key",
+          "type": "TEXT",
+          "doc": "Namespaced key, e.g. `oxplow.coverage`."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "Display name."
+        },
+        {
+          "name": "unit",
+          "type": "TEXT",
+          "doc": "Unit of value, if any."
+        },
+        {
+          "name": "subject_kind",
+          "type": "TEXT",
+          "doc": "What a fact is about: `symbol`, `file`, `test`, `model`, …"
+        },
+        {
+          "name": "temporal_semantics",
+          "type": "TEXT",
+          "doc": "How values combine over time: `additive`, `semi-additive` or `non-additive`."
+        },
+        {
+          "name": "scope",
+          "type": "TEXT",
+          "doc": "`built-in`, `global` or `project`."
+        },
+        {
+          "name": "description",
+          "type": "TEXT",
+          "doc": "What the measure means."
+        },
+        {
+          "name": "fold",
+          "type": "TEXT",
+          "doc": "How the series folds over time into one number: `sum`, `last`, `first`, `avg` or `none`; empty when the measure declares none."
+        }
+      ],
+      "key": []
     }
   },
   "metric_spec": {

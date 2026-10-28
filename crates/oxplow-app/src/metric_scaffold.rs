@@ -180,6 +180,7 @@ pub fn extension_files(
          \x20   unit: count\n\
          \x20   subjectKind: file\n\
          \x20   temporalSemantics: semi-additive\n\
+         \x20   fold: last\n\
          \x20   captureScope: per-path\n\
          dimensions:\n\
          \x20 # Facts carry it in `dims`; metrics slice by it (`metric_grid('day', '{area}')`).\n\

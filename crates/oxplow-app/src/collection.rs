@@ -7001,6 +7001,7 @@ mod tests {
                 .upsert_measure({
                     let mut mm = oxplow_db::NewMeasure::new("oxplow.tokens", "Tokens");
                     mm.temporal_semantics = "additive".into();
+                    mm.fold = Some("sum".into());
                     mm
                 })
                 .await

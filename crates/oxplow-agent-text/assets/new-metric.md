@@ -64,6 +64,7 @@ measures:
     subjectKind: file
     unit: count
     temporalSemantics: semi-additive     # the latest count is the answer
+    fold: last                           # a metric over it reads the latest capture
     captureScope: per-path               # a snapshot rescans only the files it changed
 dimensions:
   - key: complex_fns.area                # the slice axis the facts' dims use

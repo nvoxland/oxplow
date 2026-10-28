@@ -672,7 +672,7 @@
     - { name: "captured_at", type: "TEXT", doc: "From the capture." }
     - { name: "branch", type: "TEXT", doc: "From the capture." }
 - name: measure
-  version: 1
+  version: 2
   description: "Measures: the catalog of fact types (what a v_fact.value means)."
   columns:
     - { name: "key", type: "TEXT", doc: "Namespaced key, e.g. `oxplow.coverage`." }
@@ -682,6 +682,7 @@
     - { name: "temporal_semantics", type: "TEXT", doc: "How values combine over time: `additive`, `semi-additive` or `non-additive`." }
     - { name: "scope", type: "TEXT", doc: "`built-in`, `global` or `project`." }
     - { name: "description", type: "TEXT", doc: "What the measure means." }
+    - { name: "fold", type: "TEXT", doc: "How the series folds over time into one number: `sum`, `last`, `first`, `avg` or `none`; empty when the measure declares none." }
 - name: metric_spec
   version: 1
   description: "Metric definitions: what each metric aggregates, which direction is good, and its target / warn / fail thresholds. Whether a metric is enabled here is `v_metric_catalog.enabled`."

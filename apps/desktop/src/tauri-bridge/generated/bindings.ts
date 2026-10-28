@@ -3407,6 +3407,13 @@ export type MeasureEntry = {
 	 */
 	temporalSemantics?: string | null,
 	/**
+	 *  `sum` | `last` | `first` | `avg` | `none` — how the measure's series
+	 *  folds OVER TIME into one number (what a chart's bucket and a headline
+	 *  both apply). A metric over a measure with no `fold`, or `none`, is
+	 *  refused when the extension is checked: oxplow never guesses one.
+	 */
+	fold?: string | null,
+	/**
 	 *  `complete` | `per-path` — what ONE capture restates (default `complete`).
 	 *  A SEPARATE AXIS from `temporalSemantics`: `complete` means every capture
 	 *  restates the whole population (a coverage report, a test run), so the
