@@ -238,6 +238,9 @@ intent:
     - name: the-files-page-lists-a-folder-or-the-changed-files
       input: { page: files-scopes, params: { stream_id: 1 } }
       expect: all files a folder at a time, or the changed files in their folders, each opening a diff
+    - name: the-directory-lists-a-folders-folders-then-its-files
+      input: { page: directory, params: { stream_id: 1, path: src } }
+      expect: the folder's folders, then its files by name, each opening its folder or file
     - name: the-capabilities-area-lists-the-implementations-and-choosing-one-is-a-config-write
       input: { page: settings, params: { area: integrations } }
       expect: each capability's implementations and a default row; choosing writes the layer's choice
