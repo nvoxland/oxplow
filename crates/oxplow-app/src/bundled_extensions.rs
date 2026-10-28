@@ -76,7 +76,7 @@ mod generated {
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../extensions")
             .join(name);
-        let files = crate::extension_store::shipped_files(&dir)
+        let files = crate::extension::extension_store::shipped_files(&dir)
             .unwrap_or_else(|e| panic!("reading {}: {e}", dir.display()));
         let files: Vec<(&'static str, &'static [u8])> = files
             .into_iter()

@@ -81,19 +81,19 @@ pub type Reader<'a> =
     dyn FnMut(oxplow_db::SqlQuery) -> Result<oxplow_db::SqlQueryResult, DomainError> + 'a;
 
 pub type StateReader<'a> = dyn FnMut(
-        crate::extension_state::ReadInput,
+        crate::extension::extension_state::ReadInput,
     ) -> Result<
         Option<oxplow_domain::extension_state::Snapshot>,
-        crate::extension_state::StateHostError,
+        crate::extension::extension_state::StateHostError,
     > + 'a;
 
 pub type ConfigurationReader<'a> = dyn FnMut() -> Result<
-        crate::extension_configuration::ConfigurationSnapshot,
-        crate::extension_configuration::ConfigurationError,
+        crate::extension::extension_configuration::ConfigurationSnapshot,
+        crate::extension::extension_configuration::ConfigurationError,
     > + 'a;
 
-pub type JobReader<'a> =
-    dyn FnMut(crate::extension_jobs::JobInput) -> Result<Value, oxplow_domain::CommandError> + 'a;
+pub type JobReader<'a> = dyn FnMut(crate::extension::extension_jobs::JobInput) -> Result<Value, oxplow_domain::CommandError>
+    + 'a;
 
 /// Whether a model serves a role: given the role as the script names it,
 /// its answer (`{ role, model, problem }`).
@@ -173,7 +173,7 @@ impl<'a> Calls<'a> {
     /// each call. The worker waits here while the DB owns only the read itself.
     pub fn with_state_source(
         self,
-        source: Option<crate::extension_state::StateSource>,
+        source: Option<crate::extension::extension_state::StateSource>,
         runtime: &tokio::runtime::Handle,
     ) -> Self {
         match source {
@@ -197,7 +197,7 @@ impl<'a> Calls<'a> {
 
     pub fn with_configuration_source(
         self,
-        source: Option<crate::extension_configuration::ConfigurationSource>,
+        source: Option<crate::extension::extension_configuration::ConfigurationSource>,
         runtime: &tokio::runtime::Handle,
     ) -> Self {
         match source {
@@ -219,7 +219,7 @@ impl<'a> Calls<'a> {
 
     pub fn with_jobs_source(
         self,
-        source: Option<std::sync::Arc<crate::extension_jobs::ExtensionJobs>>,
+        source: Option<std::sync::Arc<crate::extension::extension_jobs::ExtensionJobs>>,
         runtime: &tokio::runtime::Handle,
     ) -> Self {
         match source {
@@ -288,7 +288,7 @@ impl<'a> Calls<'a> {
         // derived exclusively by StateHost from the captured run.
         let state_input = if id == "state.read" {
             Some(
-                crate::extension_state::ReadInput::deserialize(&args).map_err(|_| {
+                crate::extension::extension_state::ReadInput::deserialize(&args).map_err(|_| {
                     "`state.read` takes { scope: project|personal, area: state|cache }".to_string()
                 })?,
             )
@@ -296,12 +296,12 @@ impl<'a> Calls<'a> {
             None
         };
         if id == "extension_config.read" {
-            crate::extension_configuration::ReadInput::deserialize(&args)
+            crate::extension::extension_configuration::ReadInput::deserialize(&args)
                 .map_err(|_| "`extension_config.read` takes {}".to_string())?;
         }
         let job_input = if id == "jobs.read" {
             Some(
-                serde_json::from_value::<crate::extension_jobs::JobInput>(args.clone())
+                serde_json::from_value::<crate::extension::extension_jobs::JobInput>(args.clone())
                     .map_err(|_| "jobs.read takes { job_run }".to_string())?,
             )
         } else {
@@ -366,7 +366,10 @@ impl<'a> Calls<'a> {
         self.busy.take()
     }
 
-    fn state_read(&mut self, input: crate::extension_state::ReadInput) -> Result<Value, String> {
+    fn state_read(
+        &mut self,
+        input: crate::extension::extension_state::ReadInput,
+    ) -> Result<Value, String> {
         let reader = self
             .state
             .as_mut()
@@ -374,7 +377,7 @@ impl<'a> Calls<'a> {
         match reader(input) {
             Ok(snapshot) => serde_json::to_value(snapshot)
                 .map_err(|_| "extension state snapshot could not be encoded".into()),
-            Err(crate::extension_state::StateHostError::State(
+            Err(crate::extension::extension_state::StateHostError::State(
                 oxplow_domain::extension_state::StateError::Storage(DomainError::Busy(message)),
             )) => {
                 self.busy = Some(message.clone());
@@ -392,7 +395,7 @@ impl<'a> Calls<'a> {
         match reader() {
             Ok(snapshot) => serde_json::to_value(snapshot)
                 .map_err(|_| "extension configuration could not be encoded".into()),
-            Err(crate::extension_configuration::ConfigurationError::Store(
+            Err(crate::extension::extension_configuration::ConfigurationError::Store(
                 oxplow_db::extension_config_store::ConfigStoreError::Storage(DomainError::Busy(
                     message,
                 )),

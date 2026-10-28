@@ -19,7 +19,7 @@ use std::collections::BTreeMap;
 use oxplow_db::SqlCell;
 use serde::{Deserialize, Serialize};
 
-use crate::extensions::{shape_problem, Renders, TileSize};
+use crate::extension::extensions::{shape_problem, Renders, TileSize};
 
 use crate::pages::spec::{
     holds_one_row, parse_actions, typed, AlertFile, FormSpec, LauncherCategory, PageAction,
@@ -522,7 +522,7 @@ pub fn parse_page(
     }
     let tool = file
         .tool
-        .map(|t| crate::extension_commands::tool_name(namespace, &t))
+        .map(|t| crate::extension::extension_commands::tool_name(namespace, &t))
         .transpose()?;
     let page = Page {
         id,
@@ -1202,7 +1202,7 @@ fn check_page(page: &Page) -> Result<(), String> {
 /// — `oxplow:oxplow/page?page=<slug>` names a page without its extension —
 /// so a slug two of them declare is ambiguous. The first in load order
 /// keeps it; each later one loses that page and says why.
-pub fn refuse_shared_core_pages(extensions: &mut [crate::extensions::Extension]) {
+pub fn refuse_shared_core_pages(extensions: &mut [crate::extension::extensions::Extension]) {
     let mut owner: std::collections::BTreeMap<String, String> = Default::default();
     for ext in extensions.iter_mut() {
         if !ext.enabled || ext.namespace != oxplow_domain::OXPLOW_NAMESPACE {

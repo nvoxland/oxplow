@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use oxplow_domain::CommandError;
 
-use crate::extension_state::{ReadInput, StateHost, StateHostError, WriteInput};
+use crate::extension::extension_state::{ReadInput, StateHost, StateHostError, WriteInput};
 
 use super::ops::Op;
 use super::util::schema;

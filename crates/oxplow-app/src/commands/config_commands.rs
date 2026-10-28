@@ -573,7 +573,7 @@ mod tests {
         for op in ops(target.clone()) {
             bus.add_op(op).unwrap();
         }
-        crate::extension_commands::register_declared(&bus);
+        crate::extension::extension_commands::register_declared(&bus);
         // The thread `agent()` runs in (the bus resolves an agent's stream
         // from it); a test that runs a handler by hand has no runtime and
         // no need.

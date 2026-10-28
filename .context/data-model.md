@@ -70,7 +70,7 @@ write entry points.
 
 Extension migration code must run on a copy outside a DB transaction, then
 publish with that same CAS. Host
-identity/grant checks are now supplied by `oxplow-app/src/extension_state.rs`:
+identity/grant checks are now supplied by `oxplow-app/src/extension/extension_state.rs`:
 derive the namespace from a valid declared RunContext contribution, match its
 current catalog generation/version and enabled descriptor, and recheck live
 authority before and after the store operation. Read inputs select only scope

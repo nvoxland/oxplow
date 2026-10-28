@@ -12,7 +12,7 @@ use super::{
     HostError, Instance, InstanceState, Live, PreparedProviderCapability, ProviderRegistry, Scope,
 };
 use crate::capabilities::{Implementation, Source};
-use crate::extension_catalog::CatalogSnapshot;
+use crate::extension::extension_catalog::CatalogSnapshot;
 use crate::vocabulary_reactor::VocabularyErrors;
 
 struct Staged {
@@ -630,7 +630,10 @@ impl ProviderGenerationReservation<'_> {
 
 /// The same extension as far as a running provider is concerned: its place
 /// among the other extensions (the order they activate in) is not part of it.
-fn same_extension(a: &crate::extensions::Extension, b: &crate::extensions::Extension) -> bool {
+fn same_extension(
+    a: &crate::extension::extensions::Extension,
+    b: &crate::extension::extensions::Extension,
+) -> bool {
     let mut b = b.clone();
     b.public_contracts.activation_index = a.public_contracts.activation_index;
     *a == b

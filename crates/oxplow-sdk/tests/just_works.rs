@@ -11,7 +11,7 @@ mod common;
 
 use std::path::{Path, PathBuf};
 
-use oxplow_app::extension_catalog::ExtensionCatalog;
+use oxplow_app::extension::extension_catalog::ExtensionCatalog;
 use oxplow_sdk::extension_test::{test_extension, test_extension_in};
 use oxplow_sdk::{check, render_findings, scaffold, Format, Kind};
 
@@ -52,7 +52,7 @@ fn loaded(
     svc: &oxplow_app::Services,
     root: &Path,
     name: &str,
-) -> oxplow_app::extensions::Extension {
+) -> oxplow_app::extension::extensions::Extension {
     let ext = svc
         .extension_catalog
         .get(root)

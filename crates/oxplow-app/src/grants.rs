@@ -8,7 +8,7 @@ use oxplow_config::collectors::{CollectorRuntime, CollectorSpec};
 use oxplow_domain::grant::{Enforcement, Grant, GrantRequest};
 use oxplow_domain::run::Authority;
 
-use crate::extensions::Extension;
+use crate::extension::extensions::Extension;
 
 /// Where a grant is held here: network egress only where the sandbox
 /// confines it (`net_sandbox`).

@@ -27,7 +27,7 @@ pub struct SqlGateway {
     collection: Option<std::sync::Arc<Collection>>,
     /// The project's activation boundary. A gateway built alone has its own,
     /// which nothing has activated: it serves the current load.
-    activation: std::sync::Arc<crate::extension_activation::ExtensionActivation>,
+    activation: std::sync::Arc<crate::extension::extension_activation::ExtensionActivation>,
     /// The event types the log speaks (the app's; core's unless set):
     /// what a review reads logged events through.
     vocabulary: oxplow_domain::vocabulary::VocabularyHandle,
@@ -43,11 +43,11 @@ pub struct SqlGateway {
 /// feed the datasets it read and how they stand, and the catalog's
 /// generation (`crate::collection_coverage`).
 pub struct Collection {
-    pub jobs: std::sync::Arc<crate::extension_jobs::ExtensionJobs>,
+    pub jobs: std::sync::Arc<crate::extension::extension_jobs::ExtensionJobs>,
     pub ai: std::sync::Arc<crate::ai_service::AiService>,
     pub feeds: std::sync::Arc<crate::collection_coverage::Feeds>,
     pub db: Database,
-    pub catalog: std::sync::Arc<crate::extension_catalog::ExtensionCatalog>,
+    pub catalog: std::sync::Arc<crate::extension::extension_catalog::ExtensionCatalog>,
     pub root: std::path::PathBuf,
 }
 
@@ -59,7 +59,9 @@ impl SqlGateway {
             watermarks: None,
             overlay: std::sync::Arc::new(Vec::new()),
             collection: None,
-            activation: std::sync::Arc::new(crate::extension_activation::ExtensionActivation::new()),
+            activation: std::sync::Arc::new(
+                crate::extension::extension_activation::ExtensionActivation::new(),
+            ),
             vocabulary: oxplow_domain::vocabulary::VocabularyHandle::core(),
             live: std::sync::Arc::new(crate::live_datasets::LiveDatasets::default()),
             on_demand: std::sync::Arc::new(crate::on_demand::OnDemand::default()),
@@ -116,7 +118,7 @@ impl SqlGateway {
     /// project's other services share. Set before the gateway is cloned.
     pub fn with_activation(
         mut self,
-        activation: std::sync::Arc<crate::extension_activation::ExtensionActivation>,
+        activation: std::sync::Arc<crate::extension::extension_activation::ExtensionActivation>,
     ) -> Self {
         self.activation = activation;
         self
@@ -140,7 +142,7 @@ impl SqlGateway {
         async move {
             let run = self.activation.pin_run(run).await?;
             let pin = run
-                .host_generation::<crate::extension_activation::GenerationPin>()
+                .host_generation::<crate::extension::extension_activation::GenerationPin>()
                 .expect("pinned gateway context");
             self.activation.read_pinned(pin, future).await
         }
@@ -175,7 +177,7 @@ impl SqlGateway {
     ) -> Result<SqlQueryResult, DomainError> {
         let run = self.activation.pin_run(run).await?;
         let pin = run
-            .host_generation::<crate::extension_activation::GenerationPin>()
+            .host_generation::<crate::extension::extension_activation::GenerationPin>()
             .expect("pinned gateway context");
         self.activation
             .read_pinned(pin, self.run_unpinned(query))
@@ -184,10 +186,10 @@ impl SqlGateway {
 
     /// A separate private state reader for script hosts sharing this project's
     /// resources. State never enters `run`, overlays, datasets or SQL results.
-    pub(crate) fn state_source(&self) -> Option<crate::extension_state::StateSource> {
+    pub(crate) fn state_source(&self) -> Option<crate::extension::extension_state::StateSource> {
         self.collection.as_ref().map(|resources| {
-            crate::extension_state::StateSource::new(
-                crate::extension_state::StateHost::new(
+            crate::extension::extension_state::StateSource::new(
+                crate::extension::extension_state::StateHost::new(
                     resources.catalog.clone(),
                     resources.root.clone(),
                 ),
@@ -198,7 +200,7 @@ impl SqlGateway {
 
     pub(crate) fn jobs_source(
         &self,
-    ) -> Option<std::sync::Arc<crate::extension_jobs::ExtensionJobs>> {
+    ) -> Option<std::sync::Arc<crate::extension::extension_jobs::ExtensionJobs>> {
         self.collection
             .as_ref()
             .map(|resources| resources.jobs.clone())
@@ -212,10 +214,10 @@ impl SqlGateway {
 
     pub(crate) fn configuration_source(
         &self,
-    ) -> Option<crate::extension_configuration::ConfigurationSource> {
+    ) -> Option<crate::extension::extension_configuration::ConfigurationSource> {
         self.collection.as_ref().map(|resources| {
-            crate::extension_configuration::ConfigurationSource::new(
-                crate::extension_configuration::ConfigurationHost::new(
+            crate::extension::extension_configuration::ConfigurationSource::new(
+                crate::extension::extension_configuration::ConfigurationHost::new(
                     resources.catalog.clone(),
                     resources.root.clone(),
                 ),
@@ -431,7 +433,7 @@ impl SqlGateway {
     /// no such call. A change of settings applies to the next run.
     pub(crate) async fn with_extension_config(
         &self,
-        ext: &crate::extensions::Extension,
+        ext: &crate::extension::extensions::Extension,
         sql: &str,
     ) -> Result<String, DomainError> {
         if oxplow_db::datasets::config_reads(sql)?.is_empty() {
@@ -444,7 +446,7 @@ impl SqlGateway {
                     self.layer
                         .database()
                         .read(move |conn| {
-                            crate::extension_configuration::effective_values(
+                            crate::extension::extension_configuration::effective_values(
                                 conn,
                                 &name,
                                 &declaration,

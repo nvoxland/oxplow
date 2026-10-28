@@ -62,7 +62,7 @@ async fn extensions_are_datasets_that_follow_the_catalog() {
     );
 
     std::fs::remove_dir_all(root.join(".oxplow/extensions/acme")).unwrap();
-    crate::extension_deploy::remove(&fx.svc, "acme")
+    crate::extension::extension_deploy::remove(&fx.svc, "acme")
         .await
         .unwrap();
     assert!(rows(&fx, "SELECT 1 FROM v_extension WHERE name = 'acme'")
@@ -138,7 +138,7 @@ async fn pages_are_datasets_that_follow_the_catalog() {
         ]]
     );
 
-    crate::extension_deploy::set_enabled(&fx.svc, "acme", false, true)
+    crate::extension::extension_deploy::set_enabled(&fx.svc, "acme", false, true)
         .await
         .unwrap();
     for dataset in ["v_page", "v_page_answer", "v_page_param"] {
@@ -291,7 +291,7 @@ async fn questions_and_config_keys_are_datasets() {
     );
 
     std::fs::remove_dir_all(root.join(".oxplow/extensions/acme")).unwrap();
-    crate::extension_deploy::remove(&fx.svc, "acme")
+    crate::extension::extension_deploy::remove(&fx.svc, "acme")
         .await
         .unwrap();
     assert!(rows(

@@ -480,7 +480,7 @@ pub struct CollectionService {
     vcs: Arc<dyn oxplow_domain::vcs::Vcs>,
     config: Arc<RwLock<OxplowConfig>>,
     /// The project's extensions: its own declare its report collectors.
-    extensions: Arc<crate::extension_catalog::ExtensionCatalog>,
+    extensions: Arc<crate::extension::extension_catalog::ExtensionCatalog>,
     /// Where a report collector's run is recorded (`collector_run`,
     /// `collector.synced`) and its health kept (tsk863). Without one (unit
     /// harnesses) a report is still read, its run unrecorded.
@@ -656,7 +656,7 @@ impl CollectionService {
             content,
             vcs,
             config,
-            extensions: Arc::new(crate::extension_catalog::ExtensionCatalog::new()),
+            extensions: Arc::new(crate::extension::extension_catalog::ExtensionCatalog::new()),
             run_log: None,
             metric_engine,
             delta_memo: Default::default(),
@@ -687,7 +687,7 @@ impl CollectionService {
     /// The extension catalog report collectors are read from.
     pub fn with_extensions(
         mut self,
-        extensions: Arc<crate::extension_catalog::ExtensionCatalog>,
+        extensions: Arc<crate::extension::extension_catalog::ExtensionCatalog>,
     ) -> Self {
         self.extensions = extensions;
         self

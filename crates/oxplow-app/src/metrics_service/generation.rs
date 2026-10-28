@@ -18,7 +18,7 @@ pub(crate) struct PreparedMetricCatalog {
 impl MetricsService {
     pub(crate) fn prepare_generation(
         &self,
-        snapshot: &Arc<crate::extension_catalog::CatalogSnapshot>,
+        snapshot: &Arc<crate::extension::extension_catalog::CatalogSnapshot>,
         config: &OxplowConfig,
     ) -> Result<PreparedMetricCatalog, VocabularyErrors> {
         let mut frozen = self.clone();
@@ -26,10 +26,12 @@ impl MetricsService {
         frozen.config = Arc::new(RwLock::new(config.clone()));
         frozen.published_inputs = Arc::default();
         frozen.global_catalog = Arc::new(std::sync::Mutex::new(None));
-        frozen.extensions_cache = Arc::new(crate::extension_catalog::ExtensionCatalog::staged(
-            &self.project_dir,
-            snapshot.clone(),
-        ));
+        frozen.extensions_cache = Arc::new(
+            crate::extension::extension_catalog::ExtensionCatalog::staged(
+                &self.project_dir,
+                snapshot.clone(),
+            ),
+        );
         let ext = frozen.extension_catalog();
         let (global_measures, global_dims) = frozen
             .with_global_catalog(|global| (global.measures.clone(), global.dimensions.clone()));

@@ -18,9 +18,9 @@ use std::sync::Arc;
 
 use oxplow_domain::DomainError;
 
-use crate::extension_catalog::CatalogSnapshot;
-use crate::extensions::custom_components::CustomComponent;
-use crate::extensions::Extension;
+use crate::extension::extension_catalog::CatalogSnapshot;
+use crate::extension::extensions::custom_components::CustomComponent;
+use crate::extension::extensions::Extension;
 use crate::vocabulary_reactor::VocabularyErrors;
 
 /// One component's bundle as it was loaded.
@@ -204,7 +204,7 @@ fn build_snapshot(
         component.bundle.trim_end_matches('/')
     );
     let invalid = |e: std::io::Error| DomainError::Invalid(format!("{folder}: {e}"));
-    let source = crate::extensions::files_at(root, &folder).map_err(invalid)?;
+    let source = crate::extension::extensions::files_at(root, &folder).map_err(invalid)?;
     let files: BTreeSet<String> = source.paths().map_err(invalid)?.into_iter().collect();
     if !files.contains("index.html") {
         return Err(DomainError::Invalid(format!("{folder}: no `index.html`")));
@@ -227,7 +227,7 @@ fn build_snapshot(
 /// so a mounted frame of the old one reloads.
 pub(crate) fn bundle_version(
     component: &CustomComponent,
-    files: &dyn crate::extensions::ExtensionFiles,
+    files: &dyn crate::extension::extensions::ExtensionFiles,
 ) -> std::io::Result<String> {
     use sha2::{Digest, Sha256};
     let contents = files
@@ -235,7 +235,7 @@ pub(crate) fn bundle_version(
         .into_iter()
         .map(|rel| Ok((files.bytes(&rel)?, rel)))
         .collect::<std::io::Result<Vec<_>>>()?;
-    let tree = crate::extension_store::files_hash(
+    let tree = crate::extension::extension_store::files_hash(
         contents
             .iter()
             .map(|(bytes, rel)| (rel.as_str(), bytes.as_slice())),
@@ -270,7 +270,7 @@ mod tests {
     #[test]
     fn declaring_sql_is_a_new_version() {
         let dir = tempfile::tempdir().unwrap();
-        let catalog = crate::extension_catalog::ExtensionCatalog::new();
+        let catalog = crate::extension::extension_catalog::ExtensionCatalog::new();
         let snapshot = catalog.snapshot(dir.path());
         let ext = snapshot
             .extensions()
@@ -296,7 +296,7 @@ mod tests {
     #[test]
     fn a_bundled_component_is_staged_and_served_from_its_shipped_deployment() {
         let dir = tempfile::tempdir().unwrap();
-        let catalog = crate::extension_catalog::ExtensionCatalog::new();
+        let catalog = crate::extension::extension_catalog::ExtensionCatalog::new();
         let snapshot = catalog.snapshot(dir.path());
         let ext = snapshot
             .extensions()

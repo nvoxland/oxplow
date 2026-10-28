@@ -101,7 +101,7 @@ async fn a_signed_in_bearer_renews_once_when_its_server_stops_taking_it() {
 
     // The person deploys it (boot deploys nothing) and
     // enables the instance.
-    oxplow_app::extension_deploy::deploy(&svc, "notes", true)
+    oxplow_app::extension::extension_deploy::deploy(&svc, "notes", true)
         .await
         .unwrap();
     let hosted = svc

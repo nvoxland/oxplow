@@ -421,7 +421,9 @@ fn show_op(services: ServicesSlot) -> Op {
                         let core = svc
                             .extension_catalog
                             .named(&svc.layout.project_dir, ext)
-                            .is_ok_and(|e| e.namespace == crate::extensions::CORE_NAMESPACE);
+                            .is_ok_and(|e| {
+                                e.namespace == crate::extension::extensions::CORE_NAMESPACE
+                            });
                         let named = if core { slug.to_string() } else { page.clone() };
                         let values: Vec<(String, String)> = p
                             .params

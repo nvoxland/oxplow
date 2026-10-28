@@ -157,7 +157,7 @@ impl AgentContext {
         crate::advisories::for_thread(
             &svc.advisory_deps(),
             thread_id,
-            crate::extensions::AdvisoryOn::Prompt,
+            crate::extension::extensions::AdvisoryOn::Prompt,
             None,
         )
         .await;

@@ -4,7 +4,7 @@
 //! `oxplow.extension.validate` (the CLI's `check`), not an IPC read. See
 //! `.context/extensions.md` "Reading".
 
-use oxplow_app::extensions::Extension;
+use oxplow_app::extension::extensions::Extension;
 use oxplow_app::Services;
 use oxplow_db::SqlCell;
 

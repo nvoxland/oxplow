@@ -1377,11 +1377,11 @@ pub(crate) fn parse_actions(
                     .iter()
                     .any(|(scope, _)| scope == "row"));
         if let Some(icon) = &f.icon {
-            if !crate::extension_resources::ICONS.contains(&icon.as_str()) {
+            if !crate::extension::extension_resources::ICONS.contains(&icon.as_str()) {
                 return Err(format!(
                     "actions: `{}`: `icon: {icon}` isn't one oxplow draws; use one of {}",
                     f.id,
-                    crate::extension_resources::ICONS.join(", ")
+                    crate::extension::extension_resources::ICONS.join(", ")
                 ));
             }
         }
@@ -1718,7 +1718,7 @@ impl PageProvenance {
         let Some(dir) = file.parent().and_then(Path::parent) else {
             return false;
         };
-        crate::extension_store::source_hash(dir).is_ok_and(|hash| &hash != deployment)
+        crate::extension::extension_store::source_hash(dir).is_ok_and(|hash| &hash != deployment)
     }
 
     /// As an agent reads it: these fields and `outOfDate`.

@@ -495,12 +495,12 @@ pub struct CapabilityRegistry {
     /// alone belongs to no project and offers everything it holds. This does
     /// not change the frozen registry state or candidate preparation.
     catalog: Option<(
-        Arc<crate::extension_catalog::ExtensionCatalog>,
+        Arc<crate::extension::extension_catalog::ExtensionCatalog>,
         std::path::PathBuf,
     )>,
     /// The project's activation boundary; its published config applies once
     /// a generation has been activated.
-    activation: Arc<crate::extension_activation::ExtensionActivation>,
+    activation: Arc<crate::extension::extension_activation::ExtensionActivation>,
 }
 
 /// Frozen capability declarations, selections and database rows for one catalog
@@ -635,7 +635,9 @@ impl CapabilityRegistry {
             }),
             vocabulary,
             catalog: None,
-            activation: Arc::new(crate::extension_activation::ExtensionActivation::new()),
+            activation: Arc::new(
+                crate::extension::extension_activation::ExtensionActivation::new(),
+            ),
         }
     }
 
@@ -663,7 +665,7 @@ impl CapabilityRegistry {
     /// snapshot. Preparation neither registers adapters nor publishes rows.
     pub fn prepare(
         &self,
-        snapshot: &crate::extension_catalog::CatalogSnapshot,
+        snapshot: &crate::extension::extension_catalog::CatalogSnapshot,
         config: &OxplowConfig,
     ) -> Result<PreparedCapabilities, crate::vocabulary_reactor::VocabularyErrors> {
         self.prepare_candidate(snapshot, config, None)
@@ -673,7 +675,7 @@ impl CapabilityRegistry {
     /// capability map instead of the currently published instances.
     pub fn prepare_with_external(
         &self,
-        snapshot: &crate::extension_catalog::CatalogSnapshot,
+        snapshot: &crate::extension::extension_catalog::CatalogSnapshot,
         config: &OxplowConfig,
         external: Vec<Implementation>,
     ) -> Result<PreparedCapabilities, crate::vocabulary_reactor::VocabularyErrors> {
@@ -682,7 +684,7 @@ impl CapabilityRegistry {
 
     fn prepare_candidate(
         &self,
-        snapshot: &crate::extension_catalog::CatalogSnapshot,
+        snapshot: &crate::extension::extension_catalog::CatalogSnapshot,
         config: &OxplowConfig,
         external: Option<Vec<Implementation>>,
     ) -> Result<PreparedCapabilities, crate::vocabulary_reactor::VocabularyErrors> {
@@ -789,9 +791,9 @@ impl CapabilityRegistry {
     /// Bind live reads to one project's catalog and activation boundary.
     pub(crate) fn with_project(
         mut self,
-        catalog: Arc<crate::extension_catalog::ExtensionCatalog>,
+        catalog: Arc<crate::extension::extension_catalog::ExtensionCatalog>,
         root: std::path::PathBuf,
-        activation: Arc<crate::extension_activation::ExtensionActivation>,
+        activation: Arc<crate::extension::extension_activation::ExtensionActivation>,
     ) -> Self {
         self.catalog = Some((catalog, root));
         self.activation = activation;
@@ -1135,7 +1137,7 @@ fn switches(before: &[CapabilityProvider], now: &[(&str, Resolved)]) -> Vec<Capa
 }
 
 /// The implementations `extensions` declare, as the registry holds them.
-pub fn declared_by(extensions: &[crate::extensions::Extension]) -> Vec<Implementation> {
+pub fn declared_by(extensions: &[crate::extension::extensions::Extension]) -> Vec<Implementation> {
     extensions
         .iter()
         .filter(|e| e.enabled)
@@ -1168,8 +1170,8 @@ pub fn declared_by(extensions: &[crate::extensions::Extension]) -> Vec<Implement
 /// An AI provider, as the registry holds it: the Rust kind it is. Its one
 /// feature is whether the kind answers typed questions natively.
 fn provider_implementation(
-    e: &crate::extensions::Extension,
-    d: &crate::extensions::implementations::ImplementationDecl,
+    e: &crate::extension::extensions::Extension,
+    d: &crate::extension::extensions::implementations::ImplementationDecl,
     kind: &str,
 ) -> Option<Implementation> {
     let kind = oxplow_ai_rig::kind(kind).ok()?;
@@ -1190,8 +1192,8 @@ fn provider_implementation(
 /// An implementation written as a script (an effort policy), as the
 /// registry holds it; it declares no features.
 fn scripted_implementation(
-    e: &crate::extensions::Extension,
-    d: &crate::extensions::implementations::ImplementationDecl,
+    e: &crate::extension::extensions::Extension,
+    d: &crate::extension::extensions::implementations::ImplementationDecl,
     script: &str,
 ) -> Implementation {
     Implementation {
@@ -1223,7 +1225,7 @@ pub fn agent_text(svc: &crate::Services) -> oxplow_domain::agent::text::AgentTex
     let extensions = svc.extension_catalog.get(project_dir).to_vec();
     let config = crate::config_service::read_config(&svc.config);
     offered_text(&svc.capabilities, &config, &extensions, |path, file| {
-        crate::extensions::read_extension_file(project_dir, path, file)
+        crate::extension::extensions::read_extension_file(project_dir, path, file)
     })
 }
 
@@ -1297,12 +1299,12 @@ impl crate::event_pump::AsyncEventConsumer for AgentTextRefresh {
 pub fn offered_text(
     registry: &CapabilityRegistry,
     config: &OxplowConfig,
-    extensions: &[crate::extensions::Extension],
+    extensions: &[crate::extension::extensions::Extension],
     // `(extension's path, file)`: a file of a skill, read through its
     // extension's folder.
     read: impl Fn(&str, &str) -> Option<String>,
 ) -> oxplow_domain::agent::text::AgentText {
-    use crate::extensions::skills::SkillKind;
+    use crate::extension::extensions::skills::SkillKind;
     let active = registry.snapshot(config);
     let mut text = oxplow_agent_text::core_text();
     for ext in extensions.iter().filter(|e| e.enabled) {

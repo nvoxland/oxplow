@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use oxplow_domain::CommandError;
 
-use crate::extension_configuration::{
+use crate::extension::extension_configuration::{
     ConfigurationError, ConfigurationHost, ReadInput, WriteInput,
 };
 

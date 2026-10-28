@@ -535,23 +535,25 @@ impl CommandBus {
         let (c, input, run) = (compose.clone(), input.clone(), run.clone());
         let (sql, db) = (self.sql.clone(), self.db.clone());
         let runtime = tokio::runtime::Handle::current();
-        let routed = crate::extension_activation::ExtensionActivation::spawn_blocking(move || {
-            let composing = super::compose::Composing {
-                sql: &sql,
-                db: &db,
-                runtime: &runtime,
-            };
-            let mut router = Router {
-                registry: &registry,
-                composing: &composing,
-                active: active.as_ref(),
-                prechecks: Vec::new(),
-                run: &run,
-            };
-            router
-                .route(&c, &input, "", 0, "")
-                .map(|routed| (routed, router.prechecks))
-        })
+        let routed = crate::extension::extension_activation::ExtensionActivation::spawn_blocking(
+            move || {
+                let composing = super::compose::Composing {
+                    sql: &sql,
+                    db: &db,
+                    runtime: &runtime,
+                };
+                let mut router = Router {
+                    registry: &registry,
+                    composing: &composing,
+                    active: active.as_ref(),
+                    prechecks: Vec::new(),
+                    run: &run,
+                };
+                router
+                    .route(&c, &input, "", 0, "")
+                    .map(|routed| (routed, router.prechecks))
+            },
+        )
         .await
         .map_err(|e| CommandError::Failed {
             message: format!("composing failed: {e}"),

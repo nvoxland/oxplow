@@ -24,7 +24,7 @@ use result_budget::ResultBudget;
 /// embeds and slot mounts. Page definitions, params and tree metadata are
 /// outside this result budget.
 pub(super) const MAX_RESULT_BYTES: usize = 5 * 1024 * 1024;
-use crate::extensions::{stream_head, PageSlot, SlotAt, SlotEdge};
+use crate::extension::extensions::{stream_head, PageSlot, SlotAt, SlotEdge};
 use crate::pages::spec::{
     bind_params, evaluate_alert, resolve_param_values, AlertState, ViewContext,
 };
@@ -115,7 +115,7 @@ pub struct RunNode {
 /// Runs pages over one oxplow's data.
 pub struct PageRunner<'a> {
     pub sql: crate::sql_gateway::SqlGateway,
-    pub catalog: &'a crate::extension_catalog::ExtensionCatalog,
+    pub catalog: &'a crate::extension::extension_catalog::ExtensionCatalog,
     pub commands: &'a crate::commands::CommandBus,
     /// The checkout whose catalog pages are found in.
     pub root: &'a Path,
@@ -179,7 +179,7 @@ impl<'a> PageRunner<'a> {
         let loaded = {
             let (source, name) = (source.clone(), extension.to_string());
             tokio::task::spawn_blocking(move || {
-                crate::extensions::load_extension_at(&source, &name)
+                crate::extension::extensions::load_extension_at(&source, &name)
             })
             .await
             .map_err(|e| DomainError::Storage(e.to_string()))?
@@ -191,9 +191,13 @@ impl<'a> PageRunner<'a> {
             )));
         }
         let pages = loaded.page_files.clone();
-        let overlay =
-            crate::extensions::draft_overlay(&svc.sql, &svc.extension_catalog, checkout, loaded)
-                .await;
+        let overlay = crate::extension::extensions::draft_overlay(
+            &svc.sql,
+            &svc.extension_catalog,
+            checkout,
+            loaded,
+        )
+        .await;
         let mut runner = Self::of(svc);
         runner.sql = svc.sql.with_overlay(overlay);
         runner.draft = Some(Draft {
@@ -771,16 +775,17 @@ impl PageRunner<'_> {
         &self,
         target: &str,
         params: &BTreeMap<String, SqlCell>,
-    ) -> Option<crate::extensions::replacements::UiReplacement> {
+    ) -> Option<crate::extension::extensions::replacements::UiReplacement> {
         let extensions = self
             .catalog
             .unpinned(self.root, "a replaceable node reads one snapshot");
-        let candidates: Vec<&crate::extensions::replacements::UiReplacement> = extensions
-            .iter()
-            .filter(|e| e.enabled)
-            .flat_map(|e| e.ui.replacements.iter())
-            .filter(|r| r.target == target)
-            .collect();
+        let candidates: Vec<&crate::extension::extensions::replacements::UiReplacement> =
+            extensions
+                .iter()
+                .filter(|e| e.enabled)
+                .flat_map(|e| e.ui.replacements.iter())
+                .filter(|r| r.target == target)
+                .collect();
         let first = candidates.first()?;
         let provider_extension = match (first.bound_to_provider, params.get("uri")) {
             (true, Some(SqlCell::Text(uri))) => {
@@ -795,7 +800,7 @@ impl PageRunner<'_> {
             }
             _ => None,
         };
-        crate::extensions::replacements::chosen(
+        crate::extension::extensions::replacements::chosen(
             &candidates,
             self.replacements.get(target).map(String::as_str),
             provider_extension.as_deref(),

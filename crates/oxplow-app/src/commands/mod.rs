@@ -492,7 +492,7 @@ pub type WriteGate =
 /// What a run is, beyond the call itself: the undo of an audited run, or
 /// the approval of a proposal. Either is marked in the run's own
 /// transaction (a `Tx` handler) or claimed before it (an `External` one).
-impl crate::extensions::RunningCommands for CommandBus {
+impl crate::extension::extensions::RunningCommands for CommandBus {
     fn input_schema(&self, name: &str) -> Option<Value> {
         CommandBus::input_schema(self, name)
     }
@@ -831,7 +831,7 @@ pub struct CommandBus {
     )>,
     /// The project's activation boundary; a bus built alone has its own,
     /// which nothing has activated.
-    activation: Arc<crate::extension_activation::ExtensionActivation>,
+    activation: Arc<crate::extension::extension_activation::ExtensionActivation>,
 }
 
 impl CommandBus {
@@ -855,13 +855,15 @@ impl CommandBus {
             write_gate: None,
             sql: crate::sql_gateway::SqlGateway::new(sql_db),
             capabilities: None,
-            activation: Arc::new(crate::extension_activation::ExtensionActivation::new()),
+            activation: Arc::new(
+                crate::extension::extension_activation::ExtensionActivation::new(),
+            ),
         }
     }
 
     pub fn with_activation(
         mut self,
-        activation: Arc<crate::extension_activation::ExtensionActivation>,
+        activation: Arc<crate::extension::extension_activation::ExtensionActivation>,
     ) -> Self {
         self.activation = activation;
         self
@@ -1234,7 +1236,7 @@ impl CommandBus {
                     .await
                     .map_err(CommandError::from)?;
                 let pin = run
-                    .host_generation::<crate::extension_activation::GenerationPin>()
+                    .host_generation::<crate::extension::extension_activation::GenerationPin>()
                     .expect("pinned command context")
                     .clone();
                 self.activation
@@ -1272,7 +1274,7 @@ impl CommandBus {
                 .await
                 .map_err(CommandError::from)?;
             let pin = run
-                .host_generation::<crate::extension_activation::GenerationPin>()
+                .host_generation::<crate::extension::extension_activation::GenerationPin>()
                 .expect("pinned command context")
                 .clone();
             self.activation

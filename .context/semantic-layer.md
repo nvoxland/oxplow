@@ -264,7 +264,7 @@ extension's is refused naming the owner — and recreates a missing view
 without dropping its table. `drop_extension` drops the extension's views
 by the registry. V109 registered the entity views synced before it.
 
-**Extension datasets** (P4.9, `crates/oxplow-app/src/extension_datasets.rs`).
+**Extension datasets** (P4.9, `crates/oxplow-app/src/extension/extension_datasets.rs`).
 An extension declares `datasets:` in `extension.yaml` — each entry the same
 `DatasetDecl` as `datasets.yaml` (name, version, description, fields,
 relationships, key, tests) — with its SQL in `datasets/<name>.sql` (`datasets::join_sources`;

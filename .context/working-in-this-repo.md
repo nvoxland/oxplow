@@ -494,6 +494,15 @@ ending the turn:
    only use it when the lint genuinely doesn't apply (e.g. a public
    API that intentionally has many args).
 
+3. **`pub(crate)` by default.** A module is `pub` only when another
+   crate imports it. A `pub(crate)` module shows its dead code to the
+   compiler, so unused items surface at once; a `pub` one hides them.
+   `oxplow-app` groups the extension machinery in `src/extension/`
+   (`mod.rs` lists which modules the other crates reach), and
+   `source_guards.rs` pins the count of `pub mod` in its `lib.rs`: it only
+   goes down. Page and viz spec types live in `pages/spec.rs`; page files
+   never take them from `extension/extensions.rs`, the loader.
+
 Both checks have no functional test signal — they're purely
 formatting/lint hygiene, and drift accumulates silently between
 commits. The durable fix is a PostToolUse hook on `Edit`/`Write` that

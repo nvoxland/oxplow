@@ -76,7 +76,7 @@ pub async fn activate_with_problems(
     let mut attempts = 0;
     loop {
         attempts += 1;
-        let changes = crate::extension_deploy::stage_sources(svc).await;
+        let changes = crate::extension::extension_deploy::stage_sources(svc).await;
         match svc
             .extension_activation
             .activate_live(svc.clone(), &changes)
@@ -176,7 +176,7 @@ pub async fn services_developing_oxplow() -> EffortFixture {
     )
     .unwrap();
     let svc = crate::Services::in_memory(dir.path()).await.unwrap();
-    crate::extension_deploy::deploy(&svc, "oxplow-foundation", true)
+    crate::extension::extension_deploy::deploy(&svc, "oxplow-foundation", true)
         .await
         .expect("foundation deploys from its source");
     with_effort(dir, svc).await
@@ -601,10 +601,10 @@ pub fn conversation(id: &str, minute: u32) -> oxplow_domain::agent::harness::Nat
 /// The extensions that ship with oxplow, loaded as a project with none of
 /// its own loads them (each from its shipped deployment, written once to a
 /// store that lasts the test run).
-pub fn shipped_extensions() -> Vec<crate::extensions::Extension> {
+pub fn shipped_extensions() -> Vec<crate::extension::extensions::Extension> {
     static PROJECT: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
     let project = PROJECT.get_or_init(|| tempfile::tempdir().unwrap());
-    crate::extensions::load_extensions(project.path())
+    crate::extension::extensions::load_extensions(project.path())
 }
 
 /// A bundled page, run with `params`, and the rows of the loader

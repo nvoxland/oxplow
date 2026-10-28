@@ -343,7 +343,7 @@ pub struct LiveSources {
     pub db: oxplow_db::Database,
     pub vocabulary: oxplow_domain::vocabulary::VocabularyHandle,
     pub secrets: Arc<dyn oxplow_ai::secrets::SecretStore>,
-    pub catalog: Arc<crate::extension_catalog::ExtensionCatalog>,
+    pub catalog: Arc<crate::extension::extension_catalog::ExtensionCatalog>,
     pub config: Arc<std::sync::RwLock<oxplow_config::OxplowConfig>>,
     pub workspace_files: Arc<crate::workspace_files::WorkspaceFiles>,
     pub streams: Arc<dyn oxplow_domain::stores::StreamStore>,
@@ -699,7 +699,7 @@ impl LiveSources {
                     let Some(reference) = &credential.secret_ref else {
                         continue;
                     };
-                    let account = crate::extension_secrets::account(
+                    let account = crate::extension::extension_secrets::account(
                         &self.project,
                         &extension.name,
                         reference,
@@ -729,17 +729,17 @@ impl LiveSources {
         let project = self.worktrees.project_dir().to_path_buf();
         tokio::task::spawn_blocking(move || {
             let settings = oxplow_config::extension_settings(&project);
-            crate::extensions::known_names(&project, &settings)
+            crate::extension::extensions::known_names(&project, &settings)
                 .into_iter()
                 .filter_map(|name| {
                     let dir = settings.source(&project, &name);
                     if !dir.join("extension.yaml").is_file() {
                         return None;
                     }
-                    let hash = crate::extension_store::source_hash(&dir).ok()?;
+                    let hash = crate::extension::extension_store::source_hash(&dir).ok()?;
                     Some(vec![
                         text(name),
-                        text(crate::extensions::shown(&project, &dir)),
+                        text(crate::extension::extensions::shown(&project, &dir)),
                         text(hash),
                     ])
                 })
@@ -1135,8 +1135,13 @@ impl LiveSources {
             .services
             .get()
             .map_err(|e| DomainError::Invalid(e.to_string()))?;
-        let changes =
-            crate::extensions::extension_changes_between(&svc, &ws, start.as_ref(), &end).await?;
+        let changes = crate::extension::extensions::extension_changes_between(
+            &svc,
+            &ws,
+            start.as_ref(),
+            &end,
+        )
+        .await?;
         Ok(changes
             .into_iter()
             .map(|c| {
@@ -1149,7 +1154,12 @@ impl LiveSources {
                     .impact
                     .iter()
                     .flat_map(|i| i.pages.iter())
-                    .filter(|l| !matches!(l.change, crate::extension_impact::Change::Unchanged))
+                    .filter(|l| {
+                        !matches!(
+                            l.change,
+                            crate::extension::extension_impact::Change::Unchanged
+                        )
+                    })
                     .map(|l| serde_json::json!({ "id": l.id, "change": wire_name(&l.change) }))
                     .collect();
                 vec![

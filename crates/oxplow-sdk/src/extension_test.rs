@@ -33,7 +33,7 @@ use oxplow_domain::events::EventView;
 use std::path::Path;
 use std::sync::Arc;
 
-use oxplow_app::extensions::Extension;
+use oxplow_app::extension::extensions::Extension;
 use oxplow_app::providers::host::{self, Launch};
 use oxplow_app::providers::{self, ProviderSpec};
 use oxplow_domain::Actor;
@@ -264,8 +264,9 @@ async fn examples(shared: &Arc<Host>, ext: &Extension, report: &mut TestReport) 
     let rel = ext.path.trim_end_matches('/').to_string();
     // Read as the extension's files are everywhere: a bundled extension's
     // fixtures are embedded with it, not on disk.
-    let read =
-        |file: &str| oxplow_app::extensions::read_extension_file(&shared.root, &ext.path, file);
+    let read = |file: &str| {
+        oxplow_app::extension::extensions::read_extension_file(&shared.root, &ext.path, file)
+    };
     let examples = ext
         .intent
         .as_ref()
@@ -1118,7 +1119,7 @@ async fn job_example(
     id: &str,
     report: &mut TestReport,
 ) {
-    use oxplow_app::extension_commands::CommandHandler;
+    use oxplow_app::extension::extension_commands::CommandHandler;
     let shown = ex.shown;
     let by_op = |scope: &str, op: &str| {
         ext.commands
@@ -4553,10 +4554,10 @@ fn answers(
 async fn command_example(
     host: &Host,
     ex: &Example<'_>,
-    cmd: &oxplow_app::extension_commands::ExtensionCommand,
+    cmd: &oxplow_app::extension::extension_commands::ExtensionCommand,
     report: &mut TestReport,
 ) {
-    use oxplow_app::extension_commands::{call_names, dry_run, Composed};
+    use oxplow_app::extension::extension_commands::{call_names, dry_run, Composed};
     let shown = ex.shown;
     let Some(answers) = answers(ex, &format!("command `{}`", cmd.name), report) else {
         return;
@@ -4762,10 +4763,11 @@ async fn policy_example(
         Reaction::Run { events, .. } if !events.is_empty() => {
             Err("it appends events, and a policy emits nothing".to_string())
         }
-        Reaction::Run { calls, .. } => {
-            oxplow_app::extension_commands::check_calls(host.svc.commands.as_ref(), calls)
-                .map(|()| reaction)
-        }
+        Reaction::Run { calls, .. } => oxplow_app::extension::extension_commands::check_calls(
+            host.svc.commands.as_ref(),
+            calls,
+        )
+        .map(|()| reaction),
         Reaction::Skip(_) => Ok(reaction),
     });
     if let Some(p) = reaction_problem(&ex.expect, decided) {
@@ -5056,7 +5058,7 @@ async fn incremental_datasets(host: &Host, ext: &Extension, report: &mut TestRep
         {
             continue;
         }
-        let line = oxplow_app::extensions::manifest_v2::entry_line(
+        let line = oxplow_app::extension::extensions::manifest_v2::entry_line(
             &manifest, "datasets", "name", &decl.name,
         )
         .unwrap_or(1);
@@ -5705,7 +5707,7 @@ async fn publish_generation(svc: &Arc<oxplow_app::Services>) -> Result<(), Strin
 /// `work_items` implementation or provider. None is an error the suite
 /// reports.
 async fn with_work_list(host: &Host, ext: &Extension) -> Result<Host, String> {
-    let mut lists: Vec<String> = oxplow_app::extensions::load_extensions(&host.checkout)
+    let mut lists: Vec<String> = oxplow_app::extension::extensions::load_extensions(&host.checkout)
         .into_iter()
         .filter(|e| {
             e.implementations
@@ -5741,7 +5743,7 @@ async fn with_work_list(host: &Host, ext: &Extension) -> Result<Host, String> {
 async fn policy_suite(
     host: &Host,
     ext: &Extension,
-    decl: &oxplow_app::extensions::implementations::ImplementationDecl,
+    decl: &oxplow_app::extension::extensions::implementations::ImplementationDecl,
     report: &mut TestReport,
 ) {
     let manifest = format!("{}/extension.yaml", ext.path.trim_end_matches('/'));
@@ -6273,7 +6275,7 @@ commands:
         let checked = crate::check(
             dir.path(),
             "reader",
-            &oxplow_app::extension_catalog::ExtensionCatalog::new(),
+            &oxplow_app::extension::extension_catalog::ExtensionCatalog::new(),
             None,
             None,
             None,

@@ -6,7 +6,7 @@
 
 use std::collections::BTreeMap;
 
-use oxplow_app::extensions;
+use oxplow_app::extension::extensions;
 
 use oxplow_app::pages::open_runs::RunSnapshot;
 use oxplow_app::pages::runner::{PageRun, PageRunner, RunRequest, RunTarget};

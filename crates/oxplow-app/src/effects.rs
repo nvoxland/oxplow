@@ -23,7 +23,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::extensions::manifest_v2::{at, item_lines, key_line};
+use crate::extension::extensions::manifest_v2::{at, item_lines, key_line};
 
 /// An effect as loaded (valid ones; invalid ones are in the extension's
 /// `errors`).
@@ -242,7 +242,7 @@ pub enum Reaction {
     /// Run these commands, and append these of its extension's events.
     Run {
         calls: Vec<oxplow_domain::CommandCall>,
-        events: Vec<crate::extension_commands::ComposedEvent>,
+        events: Vec<crate::extension::extension_commands::ComposedEvent>,
     },
 }
 
@@ -265,7 +265,7 @@ pub fn reaction(value: serde_json::Value) -> Result<Reaction, String> {
         #[serde(default)]
         commands: Option<Vec<Call>>,
         #[serde(default)]
-        events: Vec<crate::extension_commands::ComposedEvent>,
+        events: Vec<crate::extension::extension_commands::ComposedEvent>,
         #[serde(default)]
         skip: Option<String>,
     }
@@ -317,7 +317,7 @@ pub fn run_script(
 ) -> Result<Reaction, String> {
     let run = calls.run().clone();
     let mut serve = |id: &str, args: serde_json::Value| calls.serve(id, args);
-    let out = crate::extension_commands::run_command_script(
+    let out = crate::extension::extension_commands::run_command_script(
         script,
         serde_json::json!({ "event": event }),
         given,
@@ -339,7 +339,7 @@ pub async fn dry_run(
     script: &str,
     event: serde_json::Value,
     answers: &BTreeMap<String, Vec<serde_json::Value>>,
-    registry: Option<crate::extensions::CommandSchemas<'_>>,
+    registry: Option<crate::extension::extensions::CommandSchemas<'_>>,
 ) -> Result<Reaction, String> {
     let run = oxplow_domain::run::RunContext::core(
         oxplow_domain::Actor::System,
@@ -356,7 +356,7 @@ pub async fn dry_run(
     )
     .await?;
     if let (Some(registry), Reaction::Run { calls, .. }) = (registry, &reaction) {
-        crate::extension_commands::check_calls(registry, calls)?;
+        crate::extension::extension_commands::check_calls(registry, calls)?;
     }
     Ok(reaction)
 }
@@ -522,7 +522,7 @@ pub(crate) mod tests {
     }
 
     use super::*;
-    use crate::extensions::{load_extensions, Extension};
+    use crate::extension::extensions::{load_extensions, Extension};
     use std::path::Path;
 
     pub(crate) const MANIFEST: &str = "manifest: 2
@@ -642,7 +642,7 @@ effects:
         let before = log().await;
         assert_eq!(gate_at(svc, before).await, Gate::NotStarted);
 
-        crate::extension_deploy::deploy(svc, "acme", true)
+        crate::extension::extension_deploy::deploy(svc, "acme", true)
             .await
             .unwrap();
         assert_eq!(gate_at(svc, before).await, Gate::BeforeStart);
@@ -650,7 +650,7 @@ effects:
         assert_eq!(gate_at(svc, after).await, Gate::Runs);
 
         write_acme(&root, MANIFEST, &format!("{SCRIPT}# edited\n"));
-        crate::extension_deploy::deploy(svc, "acme", true)
+        crate::extension::extension_deploy::deploy(svc, "acme", true)
             .await
             .unwrap();
         assert_eq!(gate_at(svc, after).await, Gate::Runs);

@@ -16,7 +16,7 @@ use std::collections::BTreeMap;
 use oxplow_domain::{Actor, DomainError};
 use serde_json::{json, Map, Value};
 
-use crate::extensions::Extension;
+use crate::extension::extensions::Extension;
 use crate::Services;
 
 /// What a tool runs.

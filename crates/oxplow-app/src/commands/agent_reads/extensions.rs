@@ -124,12 +124,13 @@ pub fn ops(services: ServicesSlot) -> Vec<Op> {
                     .resolve(stream.as_deref())
                     .await
                     .into_local_path();
-                let diff = crate::extension_deploy::source_diff(&svc, &checkout, &p.name)
-                    .await
-                    .map_err(|e| match e {
-                        oxplow_domain::DomainError::Invalid { .. } => not_found(&p.name),
-                        other => failed(other),
-                    })?;
+                let diff =
+                    crate::extension::extension_deploy::source_diff(&svc, &checkout, &p.name)
+                        .await
+                        .map_err(|e| match e {
+                            oxplow_domain::DomainError::Invalid { .. } => not_found(&p.name),
+                            other => failed(other),
+                        })?;
                 let mut report = serde_json::to_value(&diff).map_err(failed)?;
                 report["stream"] = stream.into();
                 report["checkout"] = checkout.to_string_lossy().into_owned().into();
@@ -251,7 +252,7 @@ mod tests {
             "pages/one.yaml",
             "title: one\ndata:\n  n: { sql: \"SELECT 1 AS n\" }\nview: { viz: number, from: n }\n",
         );
-        crate::extension_deploy::deploy(svc, "acme", true)
+        crate::extension::extension_deploy::deploy(svc, "acme", true)
             .await
             .unwrap();
 

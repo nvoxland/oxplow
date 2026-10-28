@@ -504,7 +504,8 @@ over a database file); adversarial and concurrency coverage is still to do.
 
 ## What works today
 
-Code: `crates/oxplow-app/src/extensions.rs` (the loader),
+Code: `crates/oxplow-app/src/extension/` (the extension machinery: the
+loader `extensions.rs`, activation, catalog, deploy, jobs, resources),
 `crates/oxplow-app/src/pages/` (the page schema and spec types — `Viz`,
 `VizConfig`, `ViewContext` in `spec.rs` —, runner, open runs, actions,
 checks and text renderings), `crates/oxplow-rpc/src/commands/extensions.rs`
@@ -532,7 +533,7 @@ the user guide is `docs/guide/pages.md`.
   advisories, `oxplow_show_page` and `oxplow_get_open_page`. A stream's
   `stream_id` only scopes the data a page reads (`:stream_id` /
   `:thread_id`). Reads go through `Services.extension_catalog`
-  (`crates/oxplow-app/src/extension_catalog.rs`). `find_page`, the page
+  (`crates/oxplow-app/src/extension/extension_catalog.rs`). `find_page`, the page
   tools and the advisory/metric/source readers take the catalog; the
   authoring checks (`oxplow_validate_extension`, preview) load the source
   instead. `ExtensionCatalog::snapshot` returns immutable declarations with
@@ -1594,7 +1595,7 @@ agent: true }`.
 
 ## `extension.yaml`
 
-Manifest **version 2** (P1.11; `crates/oxplow-app/src/extensions/manifest_v2.rs`).
+Manifest **version 2** (P1.11; `crates/oxplow-app/src/extension/extensions/manifest_v2.rs`).
 Every contribution is declared as data, unknown keys are errors, and the
 loader resolves cross-references with `file:line` messages.
 

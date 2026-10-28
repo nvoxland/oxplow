@@ -100,7 +100,7 @@ pub struct Collectors<'a> {
     /// What a derived collector's `input` is read through.
     pub layer: crate::sql_gateway::SqlGateway,
     /// The loaded-extensions cache (`Services.extension_catalog`).
-    pub catalog: &'a Arc<crate::extension_catalog::ExtensionCatalog>,
+    pub catalog: &'a Arc<crate::extension::extension_catalog::ExtensionCatalog>,
     /// What a derived collector's `ai_*` builtins ask (recorded computations).
     pub ai: std::sync::Arc<crate::ai_compute::AiCompute>,
     /// Where a script that reads the tree (`tree.read`) reads it; `None`
@@ -123,7 +123,7 @@ pub struct Listing<'a> {
     pub db: oxplow_db::Database,
     pub vocabulary: VocabularyHandle,
     pub secrets: &'a dyn SecretStore,
-    pub catalog: &'a Arc<crate::extension_catalog::ExtensionCatalog>,
+    pub catalog: &'a Arc<crate::extension::extension_catalog::ExtensionCatalog>,
 }
 
 impl Collectors<'_> {
@@ -398,7 +398,7 @@ pub struct ScriptOutput {
     /// (P9.D2): an observation worth reacting to ("a pull request
     /// merged"), not a way to act — see [`plan_events`].
     #[serde(default)]
-    pub events: Vec<crate::extension_commands::ComposedEvent>,
+    pub events: Vec<crate::extension::extension_commands::ComposedEvent>,
 }
 
 impl ScriptOutput {
@@ -621,8 +621,8 @@ pub async fn dry_run_collector(
     let Some(script) = script else {
         return DryRun::Failed(format!("entry `{}` doesn't exist", entry_of(spec)));
     };
-    let run =
-        crate::run_context::for_dry_run().within(crate::extension_commands::COMMAND_SCRIPT_BUDGET);
+    let run = crate::run_context::for_dry_run()
+        .within(crate::extension::extension_commands::COMMAND_SCRIPT_BUDGET);
     let given = match given(spec, &run, &script, &crate::services::Sources::default()).await {
         Ok(given) => given,
         Err(e) => return DryRun::Failed(e),
@@ -1040,7 +1040,9 @@ fn collector_context(
     let (ext, spec) = find_collector(ctx, owner, id)?;
     // What it may do: its declaration, within its extension's permissions.
     let script = (spec.runtime == CollectorRuntime::Starlark)
-        .then(|| crate::extensions::read_extension_file(ctx.root, &ext.path, entry_of(&spec)))
+        .then(|| {
+            crate::extension::extensions::read_extension_file(ctx.root, &ext.path, entry_of(&spec))
+        })
         .flatten();
     let needs = crate::services::collector_needs(&spec, script.as_deref());
     // It holds no catalog generation while it runs (it can take minutes): it
@@ -1230,7 +1232,7 @@ fn plan_events(
     vocabulary: &oxplow_domain::vocabulary::Vocabulary,
     owner: &str,
     spec: &CollectorSpec,
-    events: Vec<crate::extension_commands::ComposedEvent>,
+    events: Vec<crate::extension::extension_commands::ComposedEvent>,
 ) -> Result<Vec<Envelope>, String> {
     use oxplow_config::collectors::Trigger;
     if events.is_empty() {
@@ -1253,8 +1255,9 @@ fn plan_events(
         }
     }
     let source = oxplow_domain::uri::build::collector_uri(owner, id);
-    let envelopes = crate::extension_commands::own_events(vocabulary, owner, &source, events)
-        .map_err(|e| format!("collector `{owner}/{id}`: {e}"))?;
+    let envelopes =
+        crate::extension::extension_commands::own_events(vocabulary, owner, &source, events)
+            .map_err(|e| format!("collector `{owner}/{id}`: {e}"))?;
     // What the append would refuse (a payload its schema doesn't take) is
     // this run's error, before anything is written.
     for e in &envelopes {
@@ -1652,7 +1655,7 @@ pub fn find_collector(
     ctx: &Collectors<'_>,
     owner: &str,
     id: &str,
-) -> Result<(crate::extensions::Extension, CollectorSpec), RunCollectorError> {
+) -> Result<(crate::extension::extensions::Extension, CollectorSpec), RunCollectorError> {
     let ext = ctx
         .catalog
         .unpinned(
@@ -1693,7 +1696,8 @@ async fn produce(
         )));
     }
     if spec.runtime.is_derived() {
-        let Some(script) = crate::extensions::read_extension_file(root, &ext.path, entry_of(&spec))
+        let Some(script) =
+            crate::extension::extensions::read_extension_file(root, &ext.path, entry_of(&spec))
         else {
             let missing = format!(
                 "collector `{id}`: entry `{}` doesn't exist in the extension",
@@ -1776,7 +1780,7 @@ pub struct CollectorRunner {
     pub vocabulary: VocabularyHandle,
     pub secrets: Arc<dyn SecretStore>,
     pub layer: crate::sql_gateway::SqlGateway,
-    pub catalog: Arc<crate::extension_catalog::ExtensionCatalog>,
+    pub catalog: Arc<crate::extension::extension_catalog::ExtensionCatalog>,
     pub ai: Arc<crate::ai_compute::AiCompute>,
     pub worktrees: Arc<crate::worktrees::WorktreeRouter>,
     /// Runs the project's report collectors (`records:`, tsk863).
@@ -2028,7 +2032,7 @@ async fn exec_from_deployment(
 /// own database: it replaces what was collected.
 pub async fn publish_declared_rows(
     db: &oxplow_db::Database,
-    ext: &crate::extensions::Extension,
+    ext: &crate::extension::extensions::Extension,
     rows: &BTreeMap<String, Vec<serde_json::Value>>,
 ) -> Result<(), DomainError> {
     let mut writes = Vec::new();
@@ -2066,7 +2070,7 @@ pub async fn publish_declared_rows(
 }
 
 pub(crate) fn declared_entity_tables(
-    extensions: &[crate::extensions::Extension],
+    extensions: &[crate::extension::extensions::Extension],
 ) -> Vec<EntityTable> {
     extensions
         .iter()
@@ -2246,7 +2250,7 @@ pub(crate) mod tests {
             "def transform(x):\n    return {}\n",
         )
         .unwrap();
-        let ext = crate::extensions::load_extensions(dir.path())
+        let ext = crate::extension::extensions::load_extensions(dir.path())
             .into_iter()
             .find(|e| e.name == "my-gh")
             .unwrap();
@@ -2441,7 +2445,7 @@ pub(crate) mod tests {
             db: db.clone(),
             vocabulary: VocabularyHandle::core(),
             layer: crate::sql_gateway::SqlGateway::new(db.clone()),
-            catalog: &Arc::new(crate::extension_catalog::ExtensionCatalog::new()),
+            catalog: &Arc::new(crate::extension::extension_catalog::ExtensionCatalog::new()),
             ai: no_ai(),
             trees: None,
         };
@@ -2596,7 +2600,7 @@ pub(crate) mod tests {
             db: db.clone(),
             vocabulary: VocabularyHandle::core(),
             layer: crate::sql_gateway::SqlGateway::new(db.clone()),
-            catalog: &Arc::new(crate::extension_catalog::ExtensionCatalog::new()),
+            catalog: &Arc::new(crate::extension::extension_catalog::ExtensionCatalog::new()),
             ai: no_ai(),
             trees: None,
         };
@@ -2626,7 +2630,7 @@ pub(crate) mod tests {
             db: db.clone(),
             vocabulary: VocabularyHandle::core(),
             layer: crate::sql_gateway::SqlGateway::new(db.clone()),
-            catalog: &Arc::new(crate::extension_catalog::ExtensionCatalog::new()),
+            catalog: &Arc::new(crate::extension::extension_catalog::ExtensionCatalog::new()),
             ai: no_ai(),
             trees: None,
         };
@@ -3073,7 +3077,7 @@ pub(crate) mod tests {
             db: db.clone(),
             vocabulary: VocabularyHandle::core(),
             layer: crate::sql_gateway::SqlGateway::new(db.clone()),
-            catalog: &Arc::new(crate::extension_catalog::ExtensionCatalog::new()),
+            catalog: &Arc::new(crate::extension::extension_catalog::ExtensionCatalog::new()),
             ai: no_ai(),
             trees: None,
         };
@@ -3139,7 +3143,7 @@ pub(crate) mod tests {
         .await;
         // One project boundary: the layer and the model calls share it.
         let activation =
-            std::sync::Arc::new(crate::extension_activation::ExtensionActivation::new());
+            std::sync::Arc::new(crate::extension::extension_activation::ExtensionActivation::new());
         let ai = std::sync::Arc::new(
             crate::ai_service::AiService::new(
                 crate::ai_service::test_providers(),
@@ -3184,7 +3188,7 @@ pub(crate) mod tests {
             db: db.clone(),
             vocabulary: VocabularyHandle::core(),
             layer: crate::sql_gateway::SqlGateway::new(db.clone()).with_activation(activation),
-            catalog: &Arc::new(crate::extension_catalog::ExtensionCatalog::new()),
+            catalog: &Arc::new(crate::extension::extension_catalog::ExtensionCatalog::new()),
             ai: std::sync::Arc::new(crate::ai_compute::AiCompute::new(
                 ai,
                 oxplow_db::SqliteAiResultStore::new(db.clone()),
@@ -3245,7 +3249,7 @@ pub(crate) mod tests {
             db: db.clone(),
             vocabulary: VocabularyHandle::core(),
             layer: crate::sql_gateway::SqlGateway::new(db.clone()),
-            catalog: &Arc::new(crate::extension_catalog::ExtensionCatalog::new()),
+            catalog: &Arc::new(crate::extension::extension_catalog::ExtensionCatalog::new()),
             ai: no_ai(),
             trees: None,
         };
@@ -3301,7 +3305,7 @@ pub(crate) mod tests {
             db: db.clone(),
             vocabulary: VocabularyHandle::core(),
             layer: crate::sql_gateway::SqlGateway::new(db.clone()),
-            catalog: &Arc::new(crate::extension_catalog::ExtensionCatalog::new()),
+            catalog: &Arc::new(crate::extension::extension_catalog::ExtensionCatalog::new()),
             ai: no_ai(),
             trees: None,
         };
@@ -3427,7 +3431,7 @@ printf '{{"entities":{{"r":[{{"id":1,"declared":"%s","undeclared":"%s","direct":
             db: db.clone(),
             vocabulary: VocabularyHandle::core(),
             layer: crate::sql_gateway::SqlGateway::new(db.clone()),
-            catalog: &Arc::new(crate::extension_catalog::ExtensionCatalog::new()),
+            catalog: &Arc::new(crate::extension::extension_catalog::ExtensionCatalog::new()),
             ai: no_ai(),
             trees: None,
         };

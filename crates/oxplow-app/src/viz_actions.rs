@@ -13,7 +13,7 @@ use oxplow_db::SqlCell;
 use oxplow_domain::{Actor, CommandError, CommandOutcome};
 use serde_json::Value;
 
-use crate::extensions;
+use crate::extension::extensions;
 
 /// Where a dragged row landed: the rows on either side of the drop
 /// (`before`: the one below it, `after`: the one above), the row it was
@@ -1809,7 +1809,7 @@ view:
             Some(&b"<!doctype html><p>2</p>"[..])
         );
 
-        crate::extension_store::remove(&root, "acme", &[first_hash]);
+        crate::extension::extension_store::remove(&root, "acme", &[first_hash]);
         assert_eq!(file(&first), None);
         assert!(file(&second).is_some());
     }

@@ -187,7 +187,7 @@ pub struct AiService {
     profiles: std::sync::RwLock<ProfilesSource>,
     /// The project's activation boundary; a service built alone has its own,
     /// which nothing has activated.
-    activation: Arc<crate::extension_activation::ExtensionActivation>,
+    activation: Arc<crate::extension::extension_activation::ExtensionActivation>,
     identity: Arc<()>,
 }
 
@@ -215,7 +215,9 @@ impl AiService {
             config_dir,
             overrides: Arc::new(BTreeMap::new),
             profiles: std::sync::RwLock::new(Arc::new(Vec::new)),
-            activation: Arc::new(crate::extension_activation::ExtensionActivation::new()),
+            activation: Arc::new(
+                crate::extension::extension_activation::ExtensionActivation::new(),
+            ),
             identity: Arc::new(()),
         }
     }
@@ -256,7 +258,7 @@ impl AiService {
 
     pub fn with_activation(
         mut self,
-        activation: Arc<crate::extension_activation::ExtensionActivation>,
+        activation: Arc<crate::extension::extension_activation::ExtensionActivation>,
     ) -> Self {
         self.activation = activation;
         self
@@ -296,7 +298,7 @@ impl AiService {
             AiServiceError::Config("extension generation context is unavailable".into())
         })?;
         let pin = run
-            .host_generation::<crate::extension_activation::GenerationPin>()
+            .host_generation::<crate::extension::extension_activation::GenerationPin>()
             .expect("pinned AI context");
         self.activation
             .read_pinned(pin, self.read_configured(future))
@@ -1320,7 +1322,7 @@ fn forbidden_by(
         AiRestriction::Sql => request
             .tools
             .iter()
-            .any(|t| t.name == crate::extensions::jobs::QUERY_SQL_TOOL),
+            .any(|t| t.name == crate::extension::extensions::jobs::QUERY_SQL_TOOL),
         AiRestriction::Streaming => streaming,
         AiRestriction::Images => parts().any(|p| matches!(p, PartV1::Image { .. })),
     };
@@ -2754,7 +2756,7 @@ mod typed_tests {
             .await
             .expect("another tool is allowed");
         let mut sql = mixed_request();
-        sql.tools[0].name = crate::extensions::jobs::QUERY_SQL_TOOL.into();
+        sql.tools[0].name = crate::extension::extensions::jobs::QUERY_SQL_TOOL.into();
         let err = fx
             .svc
             .complete_typed_as(&Role::SUMMARIZE, CallSite::new("t"), &sql)

@@ -180,7 +180,7 @@ pub async fn run_boot_orchestration(
     // Scripts run in workers bounded by the project's `scripts:` config.
     crate::config_reactors::apply_script_limits(&crate::config_service::read_config(&state.config));
     // A collector that registered a new entity may let a dataset compile.
-    crate::extension_datasets::register(state);
+    crate::extension::extension_datasets::register(state);
     state.event_pump.clone().spawn();
     // `every:` collectors: the scheduler runs `oxplow.collector.sync` as the system.
     crate::collector_runner::spawn_scheduler(state);

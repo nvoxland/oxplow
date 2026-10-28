@@ -30,7 +30,7 @@ pub struct DataEntity {
 /// enabled extensions under `root` declare but haven't synced.
 pub async fn data_entities(
     layer: &crate::sql_gateway::SqlGateway,
-    catalog: &crate::extension_catalog::ExtensionCatalog,
+    catalog: &crate::extension::extension_catalog::ExtensionCatalog,
     root: &Path,
 ) -> Result<Vec<DataEntity>, DomainError> {
     let text = |c: &SqlCell| match c {
@@ -106,7 +106,7 @@ mod tests {
         std::fs::write(ext.join("sync.sh"), "#!/bin/sh\n").unwrap();
         let db = Database::in_memory();
         let layer = crate::sql_gateway::SqlGateway::new(db.clone());
-        let catalog = crate::extension_catalog::ExtensionCatalog::new();
+        let catalog = crate::extension::extension_catalog::ExtensionCatalog::new();
         let all = data_entities(&layer, &catalog, root.path()).await.unwrap();
         let get = |all: &[DataEntity], n: &str| {
             all.iter()

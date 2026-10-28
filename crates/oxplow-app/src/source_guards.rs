@@ -1372,7 +1372,7 @@ fn the_examples_test_file_uses_only_the_sdk() {
 }
 
 /// The page and viz spec types live in `pages/spec.rs`. A page file
-/// reaches them there, never through `crate::extensions` (the loader), so
+/// reaches them there, never through `crate::extension::extensions` (the loader), so
 /// pages do not depend on the loader for their own vocabulary.
 #[test]
 fn pages_take_spec_types_from_the_spec_module() {
@@ -1401,10 +1401,10 @@ fn pages_take_spec_types_from_the_spec_module() {
             continue;
         }
         let text = std::fs::read_to_string(&path).expect("page source");
-        // Every `crate::extensions::…` path, with a `{a, b}` group opened.
+        // Every `crate::extension::extensions::…` path, with a `{a, b}` group opened.
         let mut rest = text.as_str();
-        while let Some(at) = rest.find("crate::extensions::") {
-            rest = &rest[at + "crate::extensions::".len()..];
+        while let Some(at) = rest.find("crate::extension::extensions::") {
+            rest = &rest[at + "crate::extension::extensions::".len()..];
             let end = rest.find(';').unwrap_or(rest.len());
             let used = rest[..end].split('\n').next().unwrap_or("");
             let group = if used.trim_start().starts_with('{') {
@@ -1418,7 +1418,7 @@ fn pages_take_spec_types_from_the_spec_module() {
             {
                 if names.iter().any(|n| n == name) {
                     found.push(format!(
-                        "{}: crate::extensions::…{name}",
+                        "{}: crate::extension::extensions::…{name}",
                         path.file_name().unwrap().to_string_lossy()
                     ));
                 }
@@ -1431,5 +1431,25 @@ fn pages_take_spec_types_from_the_spec_module() {
         found.is_empty(),
         "use crate::pages::spec for these:\n{}",
         found.join("\n")
+    );
+}
+
+/// Modules are `pub(crate)` unless another crate imports them. The count of
+/// `pub mod` in `lib.rs` only goes down: lower the number when a module
+/// stops being public, and never raise it — make the module `pub(crate)`
+/// and re-export nothing, or put it under a facade such as `extension/`.
+#[test]
+fn the_crate_root_exposes_no_more_modules() {
+    const PUB_MODS: usize = 147;
+    let lib = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/lib.rs"))
+        .expect("lib.rs");
+    let count = lib.lines().filter(|l| l.starts_with("pub mod ")).count();
+    assert!(
+        count <= PUB_MODS,
+        "lib.rs has {count} `pub mod`, the limit is {PUB_MODS}: make the new module pub(crate)"
+    );
+    assert!(
+        count >= PUB_MODS,
+        "lib.rs has {count} `pub mod`: lower PUB_MODS in this test to {count}"
     );
 }

@@ -16,7 +16,7 @@ use oxplow_code_metrics::{language_for_path, language_from_name, language_suppor
 use oxplow_domain::contribution::extension_namespace;
 use serde_json::json;
 
-use crate::extensions::{self, EXTENSIONS_DIR};
+use crate::extension::extensions::{self, EXTENSIONS_DIR};
 
 /// Cyclomatic complexity above which a function counts, in the starter
 /// collector's `LIMIT`.

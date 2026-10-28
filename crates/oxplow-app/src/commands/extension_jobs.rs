@@ -2,7 +2,7 @@
 //! declarations bind these to their own package; inputs contain no owner or grant.
 
 use super::{ops::Op, util::schema, Handler, HandlerOutput};
-use crate::extension_jobs::{EnqueueInput, ExtensionJobs, JobInput};
+use crate::extension::extension_jobs::{EnqueueInput, ExtensionJobs, JobInput};
 use oxplow_domain::CommandError;
 use std::sync::Arc;
 

@@ -80,7 +80,7 @@ pub async fn dry_run(layer: &crate::sql_gateway::SqlGateway, page: &Page) -> Loa
 /// Every page of `ext`, dry-run.
 pub async fn dry_run_all(
     layer: &crate::sql_gateway::SqlGateway,
-    ext: &crate::extensions::Extension,
+    ext: &crate::extension::extensions::Extension,
 ) -> PageChecks {
     let mut out = PageChecks::new();
     for page in &ext.page_files {

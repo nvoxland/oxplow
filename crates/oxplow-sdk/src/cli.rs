@@ -9,8 +9,8 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use crate::{Format, Kind};
-use oxplow_app::extension_catalog::ExtensionCatalog;
-use oxplow_app::extensions::EXTENSIONS_DIR;
+use oxplow_app::extension::extension_catalog::ExtensionCatalog;
+use oxplow_app::extension::extensions::EXTENSIONS_DIR;
 
 const USAGE: &str = "\
 usage:
