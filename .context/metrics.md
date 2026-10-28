@@ -1367,6 +1367,17 @@ takes none and the latest is read. Pinned by `collector_sync_sees_a_file_written
 A stream defaults to the caller's, else the primary; an agent may only
 name its own.
 
+### `ai_context` on metrics and dimensions
+
+A metric (`MetricEntry`) and a dimension (`DimensionEntry`) may carry an
+`ai_context:` block: `instructions`, `synonyms`, `examples`, all optional,
+unknown keys refused (`oxplow_domain::AiContext`). It is guidance an agent
+reads, not part of the definition: it flows through `ResolvedSpec` /
+`ResolvedDimension` to `NewMetricSpec` / `NewDimension` and is stored as
+`metric_spec.ai_context_json` / `dimension.ai_context_json`. Agents read it as
+`ai_context` in `v_metric_spec` and `v_dimension` (JSON text, NULL when
+absent). A `use:` entry cannot override it.
+
 ### Catalog authoring surface (`measures:` / `dimensions:` — workstream E)
 
 Custom fact types and slice axes are **pluggable**, namespaced exactly like

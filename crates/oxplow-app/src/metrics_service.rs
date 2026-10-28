@@ -2648,6 +2648,7 @@ pub(crate) fn spec_to_new_spec(s: &ResolvedSpec) -> NewMetricSpec {
         scope: s.scope.clone(),
         display_kind: s.display_kind.clone(),
         entity_json: None,
+        ai_context: s.ai_context.clone(),
     };
     match &s.entity {
         Some(entity) => as_entity_spec(spec, entity),

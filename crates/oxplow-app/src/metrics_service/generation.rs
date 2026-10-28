@@ -62,6 +62,7 @@ impl MetricsService {
                     .entity
                     .as_ref()
                     .map(|entity| serde_json::to_string(entity).expect("entity serializes")),
+                ai_context: dim.ai_context,
             })
             .collect();
         let mut specs = BTreeMap::new();

@@ -589,6 +589,18 @@
             }
           ],
           "default": null
+        },
+        "ai_context": {
+          "description": "Guidance for an agent reading the model. Not part of the contract.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AiContext"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "additionalProperties": false,
@@ -600,7 +612,7 @@
       ]
     },
     "ColumnDecl": {
-      "description": "One promised column.",
+      "description": "One promised column.\n\nEquality is the contract's: `ai_context` is guidance for an agent, not\na promise, so two columns that differ only in it are equal and editing it\nnever needs a version bump.",
       "type": "object",
       "properties": {
         "name": {
@@ -613,6 +625,18 @@
         },
         "doc": {
           "type": "string"
+        },
+        "ai_context": {
+          "description": "Guidance for an agent reading the column. Not part of the contract:\nleft out of `model_contract` and the golden, stored on the model.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AiContext"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "additionalProperties": false,
@@ -620,6 +644,37 @@
         "name",
         "doc"
       ]
+    },
+    "AiContext": {
+      "description": "The `ai_context:` block. All keys are optional.",
+      "type": "object",
+      "properties": {
+        "instructions": {
+          "description": "When to use this and how to read it.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "synonyms": {
+          "description": "Other names a person or agent may call it.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "examples": {
+          "description": "Example questions it answers.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        }
+      },
+      "additionalProperties": false
     },
     "TestDecl": {
       "description": "One declared test, written as a one-key map: `{ not_null: id }`,\n`{ unique: id }`, `{ accepted_values: { column, values } }`,\n`{ relationships: { column, to, field } }` or `{ sql: \"SELECT …\" }` (a\nquery returning the failing rows).",
@@ -1054,6 +1109,18 @@
             "null"
           ],
           "default": null
+        },
+        "ai_context": {
+          "description": "Guidance for an agent reading the metric. Inherent to the\ndefinition — a `use:` can't override.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AiContext"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "additionalProperties": false
@@ -1203,6 +1270,18 @@
           "type": [
             "string",
             "null"
+          ],
+          "default": null
+        },
+        "ai_context": {
+          "description": "Guidance for an agent reading the dimension.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AiContext"
+            },
+            {
+              "type": "null"
+            }
           ],
           "default": null
         }

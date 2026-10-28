@@ -156,6 +156,18 @@ the URI lacks it or isn't one) and `uri_resource(uri)` its resource
 (`oxplow/work_item`). Other URIs are selected from their owning model's
 `uri` column (`.context/resources.md` "Using URIs").
 
+A model, and each of its columns, may carry an `ai_context:` block
+(`oxplow_domain::AiContext`: `instructions`, `synonyms`, `examples`, all
+optional, unknown keys refused): guidance for an agent reading the catalog,
+borrowed from Apache Ossie. It is not part of any contract. `ColumnDecl`'s
+equality ignores it, the contract recorded in `model_contract` and the golden
+leave it out, so editing it never needs a version bump. It is stored as
+`model.ai_context_json` and, for the columns, one object keyed by column name
+in `model.column_ai_context_json`. `v_model.ai_context` and
+`v_model_column.ai_context` publish it (JSON text, NULL when absent), and the
+`catalog` tool returns both. Metrics and dimensions carry the same block
+(`metric_spec.ai_context_json`, `dimension.ai_context_json`).
+
 Extension models and pages may use `import_ref('binding')` for a model declared
 in the extension's explicit public `imports`. The host resolves the canonical
 target and exact native version before exposing the contribution; an unavailable

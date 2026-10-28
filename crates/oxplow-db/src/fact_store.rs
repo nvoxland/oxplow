@@ -20,7 +20,7 @@ use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
-use oxplow_domain::{DomainError, Timestamp};
+use oxplow_domain::{AiContext, DomainError, Timestamp};
 
 use crate::database::{map_sql_err, Database};
 use crate::database::{string_to_ts, ts_to_string};
@@ -176,6 +176,8 @@ pub struct NewDimension {
     pub promoted: bool,
     /// Set for an entity dimension: `{view, expr, join?}` (V88).
     pub entity_json: Option<String>,
+    /// Guidance for an agent reading the dimension.
+    pub ai_context: Option<AiContext>,
 }
 
 impl NewDimension {
@@ -190,6 +192,7 @@ impl NewDimension {
             scope: "built-in".into(),
             promoted: false,
             entity_json: None,
+            ai_context: None,
         }
     }
 }
@@ -275,6 +278,8 @@ pub struct NewMetricSpec {
     pub scope: String,
     pub display_kind: String,
     pub entity_json: Option<String>,
+    /// Guidance for an agent reading the metric.
+    pub ai_context: Option<AiContext>,
 }
 
 impl NewMetricSpec {
@@ -335,6 +340,7 @@ impl NewMetricSpec {
             scope: "built-in".into(),
             display_kind: "gauge".into(),
             entity_json: None,
+            ai_context: None,
         }
     }
 }
@@ -621,15 +627,15 @@ pub fn upsert_dimension_tx(
         .optional()
         .map_err(map_sql_err)?;
     tx.execute(
-        "INSERT INTO dimension (key, label, value_type, subject_kind, vocabulary_json, scope, promoted, entity_json, extension)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+        "INSERT INTO dimension (key, label, value_type, subject_kind, vocabulary_json, scope, promoted, entity_json, extension, ai_context_json)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
          ON CONFLICT(key) DO UPDATE SET
             label=excluded.label, value_type=excluded.value_type,
             subject_kind=excluded.subject_kind,
             vocabulary_json=excluded.vocabulary_json, scope=excluded.scope,
             promoted=excluded.promoted, entity_json=excluded.entity_json,
-            extension=excluded.extension",
-        params![d.key, d.label, d.value_type, d.subject_kind, d.vocabulary_json, scope, d.promoted, d.entity_json, extension],
+            extension=excluded.extension, ai_context_json=excluded.ai_context_json",
+        params![d.key, d.label, d.value_type, d.subject_kind, d.vocabulary_json, scope, d.promoted, d.entity_json, extension, AiContext::to_column(&d.ai_context)],
     )
     .map_err(map_sql_err)?;
     let grain_changed = match prior {
@@ -662,9 +668,9 @@ pub fn upsert_spec_tx(
            (key, title, unit, source_measure, aggregation, filter_json, formula,
             sliceable_dims_json, direction, target, warn_at, fail_at, description,
             category, language, scope, display_kind, created_at, updated_at, extension,
-            entity_json)
+            entity_json, ai_context_json)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15,
-                 ?16, ?17, ?18, ?18, ?19, ?20)
+                 ?16, ?17, ?18, ?18, ?19, ?20, ?21)
          ON CONFLICT(key) DO UPDATE SET
             title=excluded.title, unit=excluded.unit,
             source_measure=excluded.source_measure, aggregation=excluded.aggregation,
@@ -675,6 +681,7 @@ pub fn upsert_spec_tx(
             description=excluded.description, category=excluded.category,
             language=excluded.language, scope=excluded.scope,
             extension=excluded.extension, entity_json=excluded.entity_json,
+            ai_context_json=excluded.ai_context_json,
             display_kind=excluded.display_kind, updated_at=excluded.updated_at",
         params![
             s.key,
@@ -697,6 +704,7 @@ pub fn upsert_spec_tx(
             now,
             extension,
             s.entity_json,
+            AiContext::to_column(&s.ai_context),
         ],
     )
     .map_err(map_sql_err)?;

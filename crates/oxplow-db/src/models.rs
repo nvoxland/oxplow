@@ -27,7 +27,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
-use oxplow_domain::DomainError;
+use oxplow_domain::{AiContext, DomainError};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
@@ -70,6 +70,9 @@ pub struct ModelDecl {
     /// stored and recomputed on that clock.
     #[serde(default)]
     pub materialize: Option<Materialize>,
+    /// Guidance for an agent reading the model. Not part of the contract.
+    #[serde(default)]
+    pub ai_context: Option<AiContext>,
 }
 
 /// A model's freshness policy beyond the default (computed on read):
@@ -182,9 +185,11 @@ pub struct Twin {
 }
 
 /// One promised column.
-#[derive(
-    Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
-)]
+///
+/// Equality is the contract's: `ai_context` is guidance for an agent, not
+/// a promise, so two columns that differ only in it are equal and editing it
+/// never needs a version bump.
+#[derive(Debug, Clone, Eq, Serialize, Deserialize, specta::Type, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ColumnDecl {
     pub name: String,
@@ -193,6 +198,36 @@ pub struct ColumnDecl {
     #[serde(rename = "type", default)]
     pub sql_type: String,
     pub doc: String,
+    /// Guidance for an agent reading the column. Not part of the contract:
+    /// left out of `model_contract` and the golden, stored on the model.
+    #[serde(default)]
+    pub ai_context: Option<AiContext>,
+}
+
+impl PartialEq for ColumnDecl {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name && self.sql_type == other.sql_type && self.doc == other.doc
+    }
+}
+
+/// `columns` as the contract records them (the golden and
+/// `model_contract`): name, type and doc, without their `ai_context`.
+fn contract_columns(columns: &[ColumnDecl]) -> serde_json::Value {
+    columns
+        .iter()
+        .map(|c| serde_json::json!({ "name": c.name, "type": c.sql_type, "doc": c.doc }))
+        .collect()
+}
+
+/// The columns' `ai_context` blocks as one JSON object keyed by column
+/// name (the `model.column_ai_context_json` column); `None` when no column
+/// has one.
+fn column_ai_context_json(columns: &[ColumnDecl]) -> Option<String> {
+    let map: serde_json::Map<String, serde_json::Value> = columns
+        .iter()
+        .filter_map(|c| Some((c.name.clone(), c.ai_context.as_ref()?.to_value())))
+        .collect();
+    (!map.is_empty()).then(|| serde_json::Value::Object(map).to_string())
 }
 
 /// One declared test, written as a one-key map: `{ not_null: id }`,
@@ -343,7 +378,7 @@ impl Contract {
 }
 
 fn contract_json(d: &ModelDecl) -> serde_json::Value {
-    serde_json::json!({ "columns": d.columns, "key": d.key })
+    serde_json::json!({ "columns": contract_columns(&d.columns), "key": d.key })
 }
 
 /// The 1-based line of the declaration `name: <model>` in `text`.
@@ -578,6 +613,7 @@ pub fn join_sources(
                     key: Vec::new(),
                     tests: Vec::new(),
                     materialize: None,
+                    ai_context: None,
                     deprecated: Vec::new(),
                 },
                 file: format!("{dir}/{}", d.file),
@@ -1099,8 +1135,9 @@ fn publish(
         .map_err(map_sql_err)?;
     }
     conn.execute(
-        "INSERT INTO model (view, name, owner, version, description, sql, compiled_at, materialize)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        "INSERT INTO model (view, name, owner, version, description, sql, compiled_at, materialize,
+                            ai_context_json, column_ai_context_json)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
         params![
             m.view,
             decl.name,
@@ -1109,7 +1146,9 @@ fn publish(
             decl.description,
             m.sql,
             now,
-            decl.materialize.as_ref().map(Materialize::recorded)
+            decl.materialize.as_ref().map(Materialize::recorded),
+            AiContext::to_column(&decl.ai_context),
+            column_ai_context_json(&decl.columns)
         ],
     )
     .map_err(map_sql_err)?;
@@ -1267,8 +1306,8 @@ fn check_contract(
     match stored_contract(conn, &m.view, decl.version)? {
         None if !record => Ok(()),
         None => {
-            let columns =
-                serde_json::to_string(&decl.columns).map_err(|e| invalid(e.to_string()))?;
+            let columns = serde_json::to_string(&contract_columns(&decl.columns))
+                .map_err(|e| invalid(e.to_string()))?;
             let key = serde_json::to_string(&decl.key).map_err(|e| invalid(e.to_string()))?;
             conn.execute(
                 "INSERT INTO model_contract (view, version, columns_json, key_json, recorded_at)
@@ -2093,6 +2132,7 @@ mod tests {
                             name: n.into(),
                             sql_type: t.into(),
                             doc: format!("{n}."),
+                            ai_context: None,
                         }
                     })
                     .collect(),
@@ -2100,6 +2140,7 @@ mod tests {
                 tests: vec![],
                 deprecated: vec![],
                 materialize: None,
+                ai_context: None,
             },
             file: format!("models/{name}.sql"),
             sql: sql.into(),
@@ -2160,6 +2201,69 @@ mod tests {
                 ("streams".to_string(), "source".to_string())
             ]
         );
+    }
+
+    /// Guidance for an agent is not a promise: editing a column's
+    /// `ai_context` at a published version is no contract change, and the
+    /// edit reaches `v_model_column`.
+    #[test]
+    fn a_columns_ai_context_is_published_and_editing_it_needs_no_bump() {
+        let mut conn = fresh();
+        let ctx = |text: &str| {
+            Some(AiContext {
+                instructions: Some(text.into()),
+                ..AiContext::default()
+            })
+        };
+        let mut m = source("a", "SELECT id FROM source('streams')", &["id INTEGER"]);
+        m.decl.ai_context = ctx("about the model");
+        m.decl.columns[0].ai_context = ctx("about the column");
+        compile(&mut conn, "t", std::slice::from_ref(&m), &view).unwrap();
+        let read = |conn: &Connection| -> (Option<String>, Option<String>) {
+            let model = conn
+                .query_row(
+                    "SELECT ai_context FROM v_model WHERE view = 'v_t_a'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            let column = conn
+                .query_row(
+                    "SELECT ai_context FROM v_model_column WHERE view = 'v_t_a'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            (model, column)
+        };
+        let (model, column) = read(&conn);
+        assert!(model.unwrap().contains("about the model"));
+        assert!(column.unwrap().contains("about the column"));
+        // The contract recorded holds no guidance.
+        let recorded: String = conn
+            .query_row(
+                "SELECT columns_json FROM model_contract WHERE view = 'v_t_a'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(!recorded.contains("ai_context"), "{recorded}");
+        // Reworded at the same version: accepted, and published anew.
+        m.decl.columns[0].ai_context = ctx("reworded");
+        compile(&mut conn, "t", std::slice::from_ref(&m), &view).unwrap();
+        assert!(read(&conn).1.unwrap().contains("reworded"));
+        // A model without any reads NULL.
+        let mut bare = source("b", "SELECT id FROM source('streams')", &["id INTEGER"]);
+        bare.decl.ai_context = None;
+        compile(&mut conn, "t", &[m, bare], &view).unwrap();
+        let none: Option<String> = conn
+            .query_row(
+                "SELECT ai_context FROM v_model_column WHERE view = 'v_t_b'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(none, None);
     }
 
     #[test]

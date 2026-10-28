@@ -110,6 +110,15 @@ SELECT uri, title FROM ref('work_item') WHERE state = 'blocked'
   the old shape for readers, keep its SQL in another file and list it:
   `deprecated: [{ version: 1, file: blocked.v1.sql, until: 2027-01-01 }]`
   publishes `v_<ext>_blocked_v1` until then.
+- **`ai_context`** is optional guidance for an agent that reads the
+  catalog, on a model, on one of its columns, on a metric and on a
+  dimension: `ai_context: { instructions: "When to use it and how to read it.",
+  synonyms: [tickets], examples: ["open items by assignee"] }`. Every key
+  is optional; an unknown key is refused. It is not part of a column's
+  contract: changing it never needs a `version` bump. Agents read it in
+  `v_model.ai_context`, `v_model_column.ai_context`,
+  `v_metric_spec.ai_context` and `v_dimension.ai_context` (a JSON text,
+  NULL when absent), and in the `catalog` tool.
 - Check runs the compile without publishing; oxplow publishes after
   the files change. A failing declared test shows in the extension's
   errors and `v_model_test`, and the view stays up.

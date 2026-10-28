@@ -8,6 +8,7 @@
 pub mod agent;
 pub mod agent_session;
 pub mod ai;
+pub mod ai_context;
 pub mod capability;
 pub mod code_intel;
 pub mod commands;
@@ -47,6 +48,7 @@ pub mod vocabulary;
 pub mod when;
 pub mod work_items;
 
+pub use ai_context::AiContext;
 pub use commands::{
     namespace_of, Access, Actor, Atomicity, CommandCall, CommandError, CommandOutcome, CommandSpec,
     CommandUi, Confirm, InputValidator, Invoker, Lifecycle, MenuPlace, OpRef, Preview,

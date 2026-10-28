@@ -6,6 +6,7 @@
 
 use std::path::{Path, PathBuf};
 
+use oxplow_domain::AiContext;
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use thiserror::Error;
@@ -309,6 +310,10 @@ pub struct MetricEntry {
     /// Entity metric: the value expression aggregated (not needed for `count`).
     #[serde(default)]
     pub value: Option<String>,
+    /// Guidance for an agent reading the metric. Inherent to the
+    /// definition — a `use:` can't override.
+    #[serde(default)]
+    pub ai_context: Option<AiContext>,
 }
 
 /// Whether an extension's metric is active before the project says
@@ -355,6 +360,8 @@ pub struct ResolvedSpec {
     /// Set for an entity metric (tsk322); `aggregation` is then one of
     /// [`ENTITY_METRIC_AGGS`].
     pub entity: Option<EntitySpec>,
+    /// Guidance for an agent reading the metric.
+    pub ai_context: Option<AiContext>,
 }
 
 /// The entity half of an entity metric: SQL over one `v_*` view.
@@ -488,6 +495,9 @@ pub struct DimensionEntry {
     /// `LEFT JOIN v_thread t ON t.id = e.thread_id`.
     #[serde(default)]
     pub join: Option<String>,
+    /// Guidance for an agent reading the dimension.
+    #[serde(default)]
+    pub ai_context: Option<AiContext>,
 }
 
 /// A fully-resolved dimension — the flat form the boot seeder upserts into the
@@ -504,6 +514,7 @@ pub struct ResolvedDimension {
     pub scope: String,
     pub promote: bool,
     pub entity: Option<EntityDimensionSpec>,
+    pub ai_context: Option<AiContext>,
 }
 
 /// How this project's tests run (the `testing:` block), written by
@@ -2914,6 +2925,7 @@ pub fn validate_metrics(
             where_,
             time,
             value,
+            ai_context: e.ai_context,
         });
     }
     Ok(out)
@@ -3142,6 +3154,7 @@ fn resolve_one(
             value: def.value.clone(),
             aggregation: def.aggregation.clone().unwrap_or_else(|| "count".into()),
         }),
+        ai_context: def.ai_context.clone(),
     }
 }
 
@@ -3380,6 +3393,7 @@ pub fn validate_dimensions(
             entity,
             expr,
             join,
+            ai_context: e.ai_context,
         });
     }
     Ok(out)
@@ -3454,6 +3468,7 @@ pub fn resolve_dimensions(
                     expr: e.expr.clone().unwrap_or_default(),
                     join: e.join.clone(),
                 }),
+                ai_context: e.ai_context.clone(),
             };
             match pos.get(key) {
                 Some(&i) => out[i] = resolved,

@@ -684,7 +684,7 @@
     - { name: "description", type: "TEXT", doc: "What the measure means." }
     - { name: "fold", type: "TEXT", doc: "How the series folds over time into one number: `sum`, `last`, `first`, `avg` or `none`; empty when the measure declares none." }
 - name: metric_spec
-  version: 1
+  version: 2
   description: "Metric definitions: what each metric aggregates, which direction is good, and its target / warn / fail thresholds. Whether a metric is enabled here is `v_metric_catalog.enabled`."
   columns:
     - { name: "key", type: "TEXT", doc: "Metric key, e.g. `oxplow.coverage.abs_pct`." }
@@ -703,6 +703,7 @@
     - { name: "display_kind", type: "TEXT", doc: "`gauge`, `findings`, `test`, `coverage` or `event`." }
     - { name: "extension", type: "TEXT", doc: "The extension that declares it, when `scope` is `extension`." }
     - { name: "entity_json", type: "TEXT", doc: "For an entity metric, what it reads: `{\"view\", \"where\", \"time\", \"value\", \"aggregation\"}`; NULL for a fact metric. (v2)" }
+    - { name: ai_context, type: TEXT, doc: "Guidance for an agent reading the metric, as JSON `{\"instructions\", \"synonyms\", \"examples\"}`; NULL when none. Not part of the contract. (v2)" }
 - name: page_visit
   version: 3
   description: "Pages the human opened in oxplow, and for how long — what they've been looking at."
@@ -1856,7 +1857,7 @@
     - { not_null: page }
     - { relationships: { column: page, to: knowledge_page, field: uri } }
 - name: model
-  version: 2
+  version: 3
   description: "Models: every published view, as compiled at this open — core ones and each extension's. Read a model's columns in `v_model_column`, what it reads in `v_model_lineage` and its declared tests' results in `v_model_test`."
   columns:
     - { name: view, type: TEXT, doc: "The view to query (`v_work_item`)." }
@@ -1871,11 +1872,12 @@
     - { name: computed_at, type: TEXT, doc: "For a materialized model: when it was last recomputed (RFC 3339); NULL otherwise." }
     - { name: events_to, type: INTEGER, doc: "For a materialized model: the event log's highest seq when that recompute began — what its inputs had seen." }
     - { name: mode, type: TEXT, doc: "For a materialized model: how its last recompute ran — `full` or `incremental`." }
+    - { name: ai_context, type: TEXT, doc: "Guidance for an agent reading the model, as JSON `{\"instructions\", \"synonyms\", \"examples\"}`; NULL when none. Not part of the contract. (v3)" }
   tests:
     - { not_null: view }
     - { unique: view }
 - name: model_column
-  version: 1
+  version: 2
   description: "Model columns: each model's contract at its current version, in column order."
   columns:
     - { name: view, type: TEXT, doc: "The model's view (`v_model.view`)." }
@@ -1884,6 +1886,7 @@
     - { name: sql_type, type: "", doc: "The column's SQLite declared type; empty for a computed column." }
     - { name: doc, type: "", doc: "What the column holds." }
     - { name: key_part, type: "", doc: "Its 1-based place in the model's key; null when it isn't part of the key." }
+    - { name: ai_context, type: "", doc: "Guidance for an agent reading the column, as JSON `{\"instructions\", \"synonyms\", \"examples\"}`; NULL when none. Not part of the contract. (v2)" }
 - name: model_lineage
   version: 2
   description: "Model lineage: what each model reads directly — another model (`uri`, by view) or a table (`source`). Confirmed at compile against what SQLite reports the view reading."
@@ -1901,7 +1904,7 @@
     - { name: detail, type: TEXT, doc: "How many rows broke it, or the error; NULL when passed." }
     - { name: ran_at, type: TEXT, doc: "RFC 3339 time it ran." }
 - name: dimension
-  version: 1
+  version: 2
   description: "Dimensions: what metrics can be sliced by — `metric_grid('<bucket>', '<dimension>')` groups by one of these keys."
   columns:
     - { name: key, type: TEXT, doc: "The dimension key, e.g. `zone`; `oxplow.*` keys are built in." }
@@ -1913,6 +1916,7 @@
     - { name: promoted, type: INTEGER, doc: "1 when facts carry it as a column (fast to group by), else 0." }
     - { name: entity_json, type: TEXT, doc: "For an entity dimension, the view and expression it slices (`{\"view\", \"expr\"}`)." }
     - { name: extension, type: TEXT, doc: "The extension that declared it; NULL for core." }
+    - { name: ai_context, type: TEXT, doc: "Guidance for an agent reading the dimension, as JSON `{\"instructions\", \"synonyms\", \"examples\"}`; NULL when none. Not part of the contract. (v2)" }
   tests:
     - { not_null: key }
     - { unique: key }
