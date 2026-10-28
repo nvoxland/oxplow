@@ -284,25 +284,25 @@ collectors:
   # The code metrics: scripts over the snapshot's tree, through the same
   # public surface (`source_files()`, `code_metrics()`, `ast_query()`) any
   # collector has. Each one's metrics name it, so it runs only while one is on.
-  - { id: oxplow.todos, doc: "TODO / FIXME markers", runtime: starlark, entry: collectors/code/todos.star, trigger: { on: [snapshot.taken] }, facts: [oxplow.todo] }
-  - { id: oxplow.fn_count, doc: "function count", runtime: starlark, entry: collectors/code/fn_count.star, trigger: { on: [snapshot.taken] }, facts: [oxplow.parameter_count] }
-  - { id: oxplow.high_complexity_fns, doc: "high-complexity functions", runtime: starlark, entry: collectors/code/high_complexity_fns.star, trigger: { on: [snapshot.taken] }, facts: [oxplow.complexity] }
-  - { id: oxplow.long_functions, doc: "long functions (>60 lines)", runtime: starlark, entry: collectors/code/long_functions.star, trigger: { on: [snapshot.taken] }, facts: [oxplow.fn_length] }
-  - { id: oxplow.doc_coverage, doc: "Doc coverage", runtime: starlark, entry: collectors/code/doc_coverage.star, trigger: { on: [snapshot.taken] }, facts: [oxplow.doc_coverage] }
+  - { id: oxplow.todos, doc: "TODO / FIXME markers", runtime: starlark, entry: collectors/code/todos.star, on: [snapshot.taken], facts: [oxplow.todo] }
+  - { id: oxplow.fn_count, doc: "function count", runtime: starlark, entry: collectors/code/fn_count.star, on: [snapshot.taken], facts: [oxplow.parameter_count] }
+  - { id: oxplow.high_complexity_fns, doc: "high-complexity functions", runtime: starlark, entry: collectors/code/high_complexity_fns.star, on: [snapshot.taken], facts: [oxplow.complexity] }
+  - { id: oxplow.long_functions, doc: "long functions (>60 lines)", runtime: starlark, entry: collectors/code/long_functions.star, on: [snapshot.taken], facts: [oxplow.fn_length] }
+  - { id: oxplow.doc_coverage, doc: "Doc coverage", runtime: starlark, entry: collectors/code/doc_coverage.star, on: [snapshot.taken], facts: [oxplow.doc_coverage] }
   # A whole-tree scan is minutes of CPU on a large tree, and a commit or
   # rebase moves several refs at once: one scan of the latest tree once
   # they settle, on a uri move (`trigger: git_refs`) rather than every save.
-  - { id: oxplow.duplicate_lines, doc: "Duplicated lines", runtime: starlark, entry: collectors/code/duplicate_lines.star, whole_tree: true, trigger: { on: [snapshot.taken], where: { trigger: git_refs }, settle: 60s, at_most: 15m }, facts: [oxplow.duplicate_lines] }
-  - { id: oxplow.rust.unsafe_blocks, doc: "unsafe blocks", runtime: starlark, entry: collectors/rust/unsafe_blocks.star, trigger: { on: [snapshot.taken] }, facts: [oxplow.ast_hit] }
-  - { id: oxplow.rust.unwrap_expect_calls, doc: "unwrap / expect calls", runtime: starlark, entry: collectors/rust/unwrap_expect_calls.star, trigger: { on: [snapshot.taken] }, facts: [oxplow.ast_hit] }
-  - { id: oxplow.rust.panic_macros, doc: "panic-family macros", runtime: starlark, entry: collectors/rust/panic_macros.star, trigger: { on: [snapshot.taken] }, facts: [oxplow.ast_hit] }
-  - { id: oxplow.ts.any_usage, doc: "any usage", runtime: starlark, entry: collectors/ts/any_usage.star, trigger: { on: [snapshot.taken] }, facts: [oxplow.ast_hit] }
-  - { id: oxplow.ts.non_null_assertions, doc: "non-null assertions", runtime: starlark, entry: collectors/ts/non_null_assertions.star, trigger: { on: [snapshot.taken] }, facts: [oxplow.ast_hit] }
-  - { id: oxplow.ts.console_calls, doc: "console.* calls", runtime: starlark, entry: collectors/ts/console_calls.star, trigger: { on: [snapshot.taken] }, facts: [oxplow.ast_hit] }
-  - { id: oxplow.ts.ts_ignore, doc: "ts-ignore / ts-expect-error", runtime: starlark, entry: collectors/ts/ts_ignore.star, trigger: { on: [snapshot.taken] }, facts: [oxplow.ast_hit] }
-  - { id: oxplow.clojure.defn_count, doc: "defn count", runtime: starlark, entry: collectors/clojure/defn_count.star, trigger: { on: [snapshot.taken] }, facts: [oxplow.ast_hit] }
-  - { id: oxplow.csharp.empty_catch, doc: "empty catch blocks", runtime: starlark, entry: collectors/csharp/empty_catch.star, trigger: { on: [snapshot.taken] }, facts: [oxplow.ast_hit] }
-  - { id: oxplow.csharp.blocking_async_calls, doc: "blocking async calls (.Result / .Wait())", runtime: starlark, entry: collectors/csharp/blocking_async_calls.star, trigger: { on: [snapshot.taken] }, facts: [oxplow.ast_hit] }
+  - { id: oxplow.duplicate_lines, doc: "Duplicated lines", runtime: starlark, entry: collectors/code/duplicate_lines.star, whole_tree: true, on: [snapshot.taken], where: { trigger: git_refs }, settle: 60s, at_most: 15m, facts: [oxplow.duplicate_lines] }
+  - { id: oxplow.rust.unsafe_blocks, doc: "unsafe blocks", runtime: starlark, entry: collectors/rust/unsafe_blocks.star, on: [snapshot.taken], facts: [oxplow.ast_hit] }
+  - { id: oxplow.rust.unwrap_expect_calls, doc: "unwrap / expect calls", runtime: starlark, entry: collectors/rust/unwrap_expect_calls.star, on: [snapshot.taken], facts: [oxplow.ast_hit] }
+  - { id: oxplow.rust.panic_macros, doc: "panic-family macros", runtime: starlark, entry: collectors/rust/panic_macros.star, on: [snapshot.taken], facts: [oxplow.ast_hit] }
+  - { id: oxplow.ts.any_usage, doc: "any usage", runtime: starlark, entry: collectors/ts/any_usage.star, on: [snapshot.taken], facts: [oxplow.ast_hit] }
+  - { id: oxplow.ts.non_null_assertions, doc: "non-null assertions", runtime: starlark, entry: collectors/ts/non_null_assertions.star, on: [snapshot.taken], facts: [oxplow.ast_hit] }
+  - { id: oxplow.ts.console_calls, doc: "console.* calls", runtime: starlark, entry: collectors/ts/console_calls.star, on: [snapshot.taken], facts: [oxplow.ast_hit] }
+  - { id: oxplow.ts.ts_ignore, doc: "ts-ignore / ts-expect-error", runtime: starlark, entry: collectors/ts/ts_ignore.star, on: [snapshot.taken], facts: [oxplow.ast_hit] }
+  - { id: oxplow.clojure.defn_count, doc: "defn count", runtime: starlark, entry: collectors/clojure/defn_count.star, on: [snapshot.taken], facts: [oxplow.ast_hit] }
+  - { id: oxplow.csharp.empty_catch, doc: "empty catch blocks", runtime: starlark, entry: collectors/csharp/empty_catch.star, on: [snapshot.taken], facts: [oxplow.ast_hit] }
+  - { id: oxplow.csharp.blocking_async_calls, doc: "blocking async calls (.Result / .Wait())", runtime: starlark, entry: collectors/csharp/blocking_async_calls.star, on: [snapshot.taken], facts: [oxplow.ast_hit] }
   # What an effort's test runs came to, recorded when it finishes: the
   # quality gate, the worst run, the tests it broke, the red runs and the time
   # to the first green (`oxplow.tests.*`, `effort.time_to_green_ms`). Its
@@ -312,8 +312,7 @@ collectors:
     doc: An effort's test outcome, when it finishes.
     runtime: starlark
     entry: collectors/effort/test_outcome.star
-    trigger:
-      on: [effort.finished]
+    on: [effort.finished]
     input: |
       SELECT r.id AS run,
              COALESCE(r.failed, 0) AS failed,

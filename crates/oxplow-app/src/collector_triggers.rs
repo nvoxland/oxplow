@@ -1,5 +1,5 @@
 //! The `collector.triggers` pump consumer (P7.B3): runs each enabled
-//! collector whose `trigger: { on: [...] }` names a logged event.
+//! collector whose `on: [...]` names a logged event.
 //!
 //! One async consumer for every `on:` collector. For each event it runs
 //! the collectors whose types include the event's and whose `where`
@@ -58,35 +58,8 @@ pub fn register(svc: &Arc<Services>) {
 /// Whether `spec` runs for `event`: its `on:` names the event's type and
 /// its `where` matches the payload.
 pub fn triggered_by(spec: &CollectorSpec, event: &StoredEvent) -> bool {
-    matches!(&spec.trigger, Trigger::On { events, .. } if events.contains(&event.envelope.event_type))
-        && matches_where(&spec.trigger, event)
-}
-
-/// Whether each `where` field of `event`'s payload equals its value (an
-/// `on:` trigger without one matches every event of its types).
-pub fn matches_where(trigger: &Trigger, event: &StoredEvent) -> bool {
-    let Trigger::On { filter, .. } = trigger else {
-        return false;
-    };
-    payload_matches(filter, &event.envelope.payload)
-}
-
-/// Whether `payload` has each `filter` field equal to its value. The value
-/// is the YAML text: a string matches exactly, a boolean by `true`/`false`, a
-/// number by value (`1` matches `1.0`). A field the payload lacks, or holds
-/// as an object, list or null, never matches.
-pub fn payload_matches(
-    filter: &std::collections::BTreeMap<String, String>,
-    payload: &serde_json::Value,
-) -> bool {
-    filter.iter().all(|(field, want)| match payload.get(field) {
-        Some(serde_json::Value::String(s)) => s == want,
-        Some(serde_json::Value::Bool(b)) => want.parse::<bool>().ok() == Some(*b),
-        Some(serde_json::Value::Number(n)) => {
-            matches!((n.as_f64(), want.parse::<f64>()), (Some(a), Ok(b)) if a == b)
-        }
-        _ => false,
-    })
+    spec.trigger
+        .fires(&event.envelope.event_type, &event.envelope.payload)
 }
 
 /// Hand `event` to the fact engine, which runs the fact collectors it
@@ -297,7 +270,7 @@ impl CollectorTriggers {
             .metrics
             .fact_collectors()
             .into_iter()
-            .filter(|c| c.runs_on(event_type) && matches_where(&c.trigger, &event))
+            .filter(|c| c.runs_on(event_type) && c.trigger.where_fits(&event.envelope.payload))
             .collect();
         // The paced ones wait, recorded pending (`crate::pacing`).
         for c in facts.iter().filter(|c| c.defers(event_type)) {
@@ -390,7 +363,7 @@ mod tests {
 
     fn on_claims(filter: &str) -> String {
         format!(
-            "  - id: seen\n    runtime: starlark\n    entry: seen.star\n    trigger: {{ on: [effort.claim_verified]{filter} }}\n    input: \"SELECT :effort_id AS effort, :event_seq AS ev, :event_id AS id\"\n    sync: upsert\n    entities:\n      - {{ name: seen, key: ev, columns: {{ ev: int, id: text, effort: int, kind: text }} }}\n"
+            "  - id: seen\n    runtime: starlark\n    entry: seen.star\n    on: [effort.claim_verified]{filter}\n    input: \"SELECT :effort_id AS effort, :event_seq AS ev, :event_id AS id\"\n    sync: upsert\n    entities:\n      - {{ name: seen, key: ev, columns: {{ ev: int, id: text, effort: int, kind: text }} }}\n"
         )
     }
 
@@ -424,20 +397,32 @@ mod tests {
                 .collect()
         };
         let payload = json!({ "file_count": 1.0, "unchanged": false, "trigger": "git_refs" });
-        assert!(payload_matches(&filter(&[("file_count", "1")]), &payload));
-        assert!(payload_matches(&filter(&[("file_count", "1.0")]), &payload));
-        assert!(!payload_matches(&filter(&[("file_count", "2")]), &payload));
-        assert!(payload_matches(
+        assert!(oxplow_config::collectors::payload_matches(
+            &filter(&[("file_count", "1")]),
+            &payload
+        ));
+        assert!(oxplow_config::collectors::payload_matches(
+            &filter(&[("file_count", "1.0")]),
+            &payload
+        ));
+        assert!(!oxplow_config::collectors::payload_matches(
+            &filter(&[("file_count", "2")]),
+            &payload
+        ));
+        assert!(oxplow_config::collectors::payload_matches(
             &filter(&[("unchanged", "false")]),
             &payload
         ));
-        assert!(payload_matches(
+        assert!(oxplow_config::collectors::payload_matches(
             &filter(&[("trigger", "git_refs")]),
             &payload
         ));
-        assert!(!payload_matches(&filter(&[("missing", "x")]), &payload));
+        assert!(!oxplow_config::collectors::payload_matches(
+            &filter(&[("missing", "x")]),
+            &payload
+        ));
         assert!(
-            payload_matches(&filter(&[]), &payload),
+            oxplow_config::collectors::payload_matches(&filter(&[]), &payload),
             "no filter matches every event"
         );
     }
@@ -490,7 +475,12 @@ mod tests {
     #[tokio::test]
     async fn a_settled_collector_waits_then_runs_once_for_the_latest_event() {
         let fx = crate::test_fixtures::services_with_effort().await;
-        extension(&fx.svc, &on_claims(", settle: 30s"), &[("seen.star", SEEN)]).await;
+        extension(
+            &fx.svc,
+            &on_claims("\n    settle: 30s"),
+            &[("seen.star", SEEN)],
+        )
+        .await;
         let consumer = CollectorTriggers::new(Arc::downgrade(&fx.svc));
         let first = log(&fx.svc, fx.effort, "reviewer").await;
         consumer.handle(&first).await.unwrap();
@@ -529,7 +519,12 @@ mod tests {
     #[tokio::test]
     async fn an_idle_collector_waits_out_a_running_turn() {
         let fx = crate::test_fixtures::services_with_effort().await;
-        extension(&fx.svc, &on_claims(", idle: 2m"), &[("seen.star", SEEN)]).await;
+        extension(
+            &fx.svc,
+            &on_claims("\n    idle: 2m"),
+            &[("seen.star", SEEN)],
+        )
+        .await;
         let consumer = CollectorTriggers::new(Arc::downgrade(&fx.svc));
         consumer
             .handle(&log(&fx.svc, fx.effort, "reviewer").await)
@@ -577,7 +572,7 @@ mod tests {
         let fx = crate::test_fixtures::services_with_effort().await;
         extension(
             &fx.svc,
-            &on_claims(", where: { evidence: reviewer }"),
+            &on_claims("\n    where: { evidence: reviewer }"),
             &[("seen.star", SEEN)],
         )
         .await;
@@ -869,7 +864,7 @@ mod tests {
                 "number",
             ),
             (
-                "    trigger: { on: [acme_pr.merged] }\n",
+                "    on: [acme_pr.merged]\n",
                 "[{\"type\": \"acme_pr.merged\", \"payload\": {\"number\": 1}}]".to_string(),
                 "a type it runs on",
             ),
@@ -918,7 +913,7 @@ mod tests {
         let fx = crate::test_fixtures::services_with_effort().await;
         let svc = &fx.svc;
         let echo = |id: &str, on: &str| {
-            format!("  - id: {id}\n    runtime: starlark\n    entry: {id}.star\n    trigger: {{ on: [acme_pr.{on}] }}\n    sync: upsert\n    entities:\n      - {{ name: {id}, key: n, columns: {{ n: int }} }}\n")
+            format!("  - id: {id}\n    runtime: starlark\n    entry: {id}.star\n    on: [acme_pr.{on}]\n    sync: upsert\n    entities:\n      - {{ name: {id}, key: n, columns: {{ n: int }} }}\n")
         };
         let script = |id: &str| {
             format!("def transform(input):\n    n = input[\"event\"][\"payload\"][\"number\"] + 1\n    return {{\"entities\": {{\"{id}\": [{{\"n\": n}}]}}, \"events\": [{{\"type\": \"acme_pr.{id}\", \"payload\": {{\"number\": n}}}}]}}\n")

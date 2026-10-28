@@ -31,7 +31,7 @@ fn acme(root: &Path, task: &str) {
          permissions: { commands: [oxplow.work_item.update] }\n\
          event_types:\n  types:\n    - { type: acme.merged, v: 1, schema: merged.json, summary: A merge. }\n\
          collectors:\n\
-         \x20 - id: star\n    runtime: starlark\n    entry: star.star\n    trigger: { on: [acme.merged] }\n    entities:\n      - { name: seen, key: k, columns: { k: text } }\n\
+         \x20 - id: star\n    runtime: starlark\n    entry: star.star\n    on: [acme.merged]\n    entities:\n      - { name: seen, key: k, columns: { k: text } }\n\
          effects:\n\
          \x20 - id: note\n    summary: Note a merge.\n    on: [acme.merged]\n    entry: note.star\n\
          commands:\n\

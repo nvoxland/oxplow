@@ -16,7 +16,7 @@ An extension with an **external provider** (`providers:` — a program that
    A `resources:` entry may add `searchable: <model>` (a model of yours
    with `uri`, `title`, `body`): its rows are then found by the launcher's
    search and open on the resource's renderer.
-   An effect's `on:` (and a collector's `trigger: { on: [...] }`) may
+   An effect's `on:` (and a collector's `on: [...]`) may
    name another extension's event type (`acme_pr.merged`): `check` warns,
    and the extension shows an error while no enabled extension registers
    that type. The payload you get is at the owner's newest version.

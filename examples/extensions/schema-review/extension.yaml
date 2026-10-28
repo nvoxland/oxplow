@@ -44,7 +44,7 @@ collectors:
   - id: ddl
     runtime: starlark
     entry: collectors/ddl.star
-    trigger: { on: [snapshot.taken] }
+    on: [snapshot.taken]
     facts: [schema_review.ddl]
 models:
   - name: verdict

@@ -16,7 +16,7 @@ collectors:
   - id: acme.todo_scan
     runtime: starlark
     entry: collectors/todo.star
-    trigger: { on: [snapshot.taken] }
+    on: [snapshot.taken]
     facts: [acme.todo]
 ```
 

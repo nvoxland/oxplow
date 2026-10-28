@@ -32,7 +32,7 @@ collectors:
     doc: The repo's 100 most recent pull requests (open and closed).
     runtime: exec
     entry: sync.sh
-    trigger: { every: 15m }
+    on: { every: 15m }
     # Optional. Set GITHUB_TOKEN under this collector in Settings →
     # Extensions (it's stored in your keychain); without it the script
     # uses the `gh` CLI's own login.

@@ -17,7 +17,7 @@ collectors:
   - id: todos
     runtime: starlark
     entry: collectors/todos.star
-    trigger: { on: [snapshot.taken] }
+    on: [snapshot.taken]
     needs: [sql.read, ai.compute]
     facts: [triage.todos, triage.open_items]
 ```

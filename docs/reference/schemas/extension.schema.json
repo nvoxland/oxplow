@@ -1308,11 +1308,58 @@
           ],
           "default": null
         },
-        "trigger": {
-          "description": "When it runs by itself; absent, `manual`.",
+        "on": {
+          "description": "When it runs by itself: `manual` (the default), the event types it\nruns on, `{ every: 15m }`, or a report collector's `{ run: test }`.",
           "anyOf": [
             {
-              "$ref": "#/definitions/TriggerFile"
+              "$ref": "#/definitions/OnFile"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "where": {
+          "description": "With event types in `on`: payload fields and the values they must equal.",
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": {
+            "$ref": "#/definitions/PayloadScalar"
+          },
+          "default": null
+        },
+        "settle": {
+          "description": "With event types in `on`: run once no triggering event has arrived\nfor this long.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "at_most": {
+          "description": "With event types in `on`: run at most this often.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "idle": {
+          "description": "With event types in `on`: run once nothing has happened for this long.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "force": {
+          "description": "With a pacing key: event types that run at once.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/EventTypeList"
             },
             {
               "type": "null"
@@ -1453,14 +1500,20 @@
         "collector"
       ]
     },
-    "TriggerFile": {
-      "description": "`trigger:` as written: `manual`, or a map of a trigger's keys.",
+    "OnFile": {
+      "description": "`on:` as written: `manual`, the event types it runs on, a clock or a\nreport collector's run.",
       "anyOf": [
         {
           "$ref": "#/definitions/Manual"
         },
         {
-          "$ref": "#/definitions/TriggerMap"
+          "$ref": "#/definitions/EventTypeList"
+        },
+        {
+          "$ref": "#/definitions/EveryFile"
+        },
+        {
+          "$ref": "#/definitions/RunFile"
         }
       ]
     },
@@ -1470,92 +1523,6 @@
       "enum": [
         "manual"
       ]
-    },
-    "TriggerMap": {
-      "description": "A trigger's keys. Which go together `parse_trigger` checks, and says\nin its own words.",
-      "type": "object",
-      "properties": {
-        "every": {
-          "description": "A clock: `15m`, `2h`.",
-          "type": [
-            "string",
-            "null"
-          ],
-          "default": null
-        },
-        "on": {
-          "description": "The event types it runs on.",
-          "anyOf": [
-            {
-              "$ref": "#/definitions/EventTypeList"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "where": {
-          "description": "With `on`: payload fields and the values they must equal.",
-          "type": [
-            "object",
-            "null"
-          ],
-          "additionalProperties": {
-            "$ref": "#/definitions/PayloadScalar"
-          },
-          "default": null
-        },
-        "on_run": {
-          "description": "A report collector's: after a `test` or `analysis` run.",
-          "anyOf": [
-            {
-              "$ref": "#/definitions/RunKind"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "settle": {
-          "description": "With `on`: run once no triggering event has arrived for this long.",
-          "type": [
-            "string",
-            "null"
-          ],
-          "default": null
-        },
-        "at_most": {
-          "description": "With `on`: run at most this often.",
-          "type": [
-            "string",
-            "null"
-          ],
-          "default": null
-        },
-        "idle": {
-          "description": "With `on`: run once nothing has happened for this long.",
-          "type": [
-            "string",
-            "null"
-          ],
-          "default": null
-        },
-        "force": {
-          "description": "With `on` and a pacing key: event types that run at once.",
-          "anyOf": [
-            {
-              "$ref": "#/definitions/EventTypeList"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        }
-      },
-      "additionalProperties": false
     },
     "EventTypeList": {
       "description": "One event type, or a list of them.",
@@ -1571,6 +1538,41 @@
         }
       ]
     },
+    "EveryFile": {
+      "description": "`{ every: 15m }`: on a clock.",
+      "type": "object",
+      "properties": {
+        "every": {
+          "description": "A duration: `15m`, `2h`.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "every"
+      ]
+    },
+    "RunFile": {
+      "description": "`{ run: test }`: a report collector's, after a `test` or `analysis` run.",
+      "type": "object",
+      "properties": {
+        "run": {
+          "$ref": "#/definitions/RunKind"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "run"
+      ]
+    },
+    "RunKind": {
+      "description": "The kind of run a report collector reads after.",
+      "type": "string",
+      "enum": [
+        "test",
+        "analysis"
+      ]
+    },
     "PayloadScalar": {
       "description": "A `where:` value.",
       "anyOf": [
@@ -1584,14 +1586,6 @@
           "type": "number",
           "format": "double"
         }
-      ]
-    },
-    "RunKind": {
-      "description": "The kind of run a report collector reads after.",
-      "type": "string",
-      "enum": [
-        "test",
-        "analysis"
       ]
     },
     "RawInput": {
@@ -3254,7 +3248,7 @@
       ]
     },
     "EffectFile": {
-      "description": "An `effects:` entry as the manifest holds it; `on` and `where` are read\nby the collectors' trigger rules (`parse_trigger`).",
+      "description": "An `effects:` entry as the manifest holds it; `on` and `where` are read\nby the one trigger grammar (`collectors::parse_trigger`), as a\ncollector's are.",
       "type": "object",
       "properties": {
         "id": {

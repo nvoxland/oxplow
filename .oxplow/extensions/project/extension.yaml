@@ -398,260 +398,233 @@ collectors:
   entry: oxplow:lcov
   report:
     path: target/coverage/lcov.info
-  trigger:
-    on_run: test
+  on: { run: test }
 - id: tests.rust_junit
   doc: The Rust test cases (nextest JUnit).
   records: tests
   entry: oxplow:junit
   report:
     path: target/nextest/default/junit.xml
-  trigger:
-    on_run: test
+  on: { run: test }
 - id: tests.extension_junit
   doc: The extensions' tests (`bun run test:ext`, JUnit).
   records: tests
   entry: oxplow:junit
   report:
     path: target/extension-tests/junit.xml
-  trigger:
-    on_run: test
+  on: { run: test }
 - id: tests.desktop_junit
   doc: The desktop test cases (bun JUnit).
   records: tests
   entry: oxplow:junit
   report:
     path: apps/desktop/test-report.xml
-  trigger:
-    on_run: test
+  on: { run: test }
 - id: lint.clippy
   doc: Clippy findings (lint:collect).
   records: analysis
   entry: oxplow:clippy
   report:
     path: target/clippy.json
-  trigger:
-    on_run: analysis
+  on: { run: analysis }
 - id: repo.scan_clone
   doc: Rust .clone() scan
   runtime: starlark
   entry: collectors/repo_clone.star
-  trigger:
-    on:
-    - snapshot.taken
-    settle: 30s
+  on:
+  - snapshot.taken
+  settle: 30s
   facts:
   - repo.rust_clone
 - id: repo.scan_allow
   doc: Rust
   runtime: starlark
   entry: collectors/repo_allow.star
-  trigger:
-    on:
-    - snapshot.taken
-    settle: 30s
+  on:
+  - snapshot.taken
+  settle: 30s
   facts:
   - repo.rust_allow
 - id: repo.scan_use_effect
   doc: React useEffect scan
   runtime: starlark
   entry: collectors/repo_use_effect.star
-  trigger:
-    on:
-    - snapshot.taken
-    settle: 30s
+  on:
+  - snapshot.taken
+  settle: 30s
   facts:
   - repo.react_use_effect
 - id: repo.scan_eslint
   doc: ESLint suppression scan
   runtime: starlark
   entry: collectors/repo_eslint.star
-  trigger:
-    on:
-    - snapshot.taken
-    settle: 30s
+  on:
+  - snapshot.taken
+  settle: 30s
   facts:
   - repo.eslint_disable
 - id: repo.scan_shared_state
   doc: Rust Arc/Mutex/RwLock scan
   runtime: starlark
   entry: collectors/repo_shared_state.star
-  trigger:
-    on:
-    - snapshot.taken
-    settle: 30s
+  on:
+  - snapshot.taken
+  settle: 30s
   facts:
   - repo.rust_shared_state
 - id: repo.scan_async_fn
   doc: Rust async fn scan
   runtime: starlark
   entry: collectors/repo_async_fn.star
-  trigger:
-    on:
-    - snapshot.taken
-    settle: 30s
+  on:
+  - snapshot.taken
+  settle: 30s
   facts:
   - repo.rust_async_fn
 - id: repo.scan_as_cast
   doc: TS as-cast scan
   runtime: starlark
   entry: collectors/repo_as_cast.star
-  trigger:
-    on:
-    - snapshot.taken
-    settle: 30s
+  on:
+  - snapshot.taken
+  settle: 30s
   facts:
   - repo.ts_as_cast
 - id: repo.scan_dangerous_html
   doc: dangerouslySetInnerHTML scan
   runtime: starlark
   entry: collectors/repo_dangerous_html.star
-  trigger:
-    on:
-    - snapshot.taken
-    settle: 30s
+  on:
+  - snapshot.taken
+  settle: 30s
   facts:
   - repo.dangerous_html
 - id: repo.scan_skipped_tests
   doc: Skipped/ignored test scan
   runtime: starlark
   entry: collectors/repo_skipped_tests.star
-  trigger:
-    on:
-    - snapshot.taken
-    settle: 30s
+  on:
+  - snapshot.taken
+  settle: 30s
   facts:
   - repo.skipped_tests
 - id: repo.scan_focused_tests
   doc: Focused (.only) test scan
   runtime: starlark
   entry: collectors/repo_focused_tests.star
-  trigger:
-    on:
-    - snapshot.taken
-    settle: 30s
+  on:
+  - snapshot.taken
+  settle: 30s
   facts:
   - repo.focused_tests
 - id: repo.scan_file_loc
   doc: File LOC scan
   runtime: starlark
   entry: collectors/repo_file_loc.star
-  trigger:
-    on:
-    - snapshot.taken
-    settle: 30s
+  on:
+  - snapshot.taken
+  settle: 30s
   facts:
   - repo.file_loc
 - id: repo.scan_as_any
   doc: TS as-any scan
   runtime: starlark
   entry: collectors/repo_as_any.star
-  trigger:
-    on:
-    - snapshot.taken
-    settle: 30s
+  on:
+  - snapshot.taken
+  settle: 30s
   facts:
   - repo.ts_as_any
 - id: repo.scan_eval
   doc: eval() scan
   runtime: starlark
   entry: collectors/repo_eval.star
-  trigger:
-    on:
-    - snapshot.taken
-    settle: 30s
+  on:
+  - snapshot.taken
+  settle: 30s
   facts:
   - repo.eval_usage
 - id: repo.scan_dyn
   doc: Rust dyn dispatch scan
   runtime: starlark
   entry: collectors/repo_dyn.star
-  trigger:
-    on:
-    - snapshot.taken
-    settle: 30s
+  on:
+  - snapshot.taken
+  settle: 30s
   facts:
   - repo.rust_dyn
 - id: repo.scan_imports
   doc: TS import scan
   runtime: starlark
   entry: collectors/repo_imports.star
-  trigger:
-    on:
-    - snapshot.taken
-    settle: 30s
+  on:
+  - snapshot.taken
+  settle: 30s
   facts:
   - repo.file_imports
 - id: repo.scan_innerhtml
   doc: innerHTML assignment scan
   runtime: starlark
   entry: collectors/repo_innerhtml.star
-  trigger:
-    on:
-    - snapshot.taken
-    settle: 30s
+  on:
+  - snapshot.taken
+  settle: 30s
   facts:
   - repo.innerhtml_assign
 - id: repo.scan_hooks
   doc: React hook scan
   runtime: starlark
   entry: collectors/repo_hooks.star
-  trigger:
-    on:
-    - snapshot.taken
-    settle: 30s
+  on:
+  - snapshot.taken
+  settle: 30s
   facts:
   - repo.ts_hooks
 - id: repo.scan_secrets
   doc: Hardcoded-secret scan
   runtime: starlark
   entry: collectors/repo_secrets.star
-  trigger:
-    on:
-    - snapshot.taken
-    settle: 30s
-    at_most: 5m
+  on:
+  - snapshot.taken
+  settle: 30s
+  at_most: 5m
   facts:
   - repo.hardcoded_secrets
 - id: repo.scan_hardcoded_colors
   doc: Hardcoded-color scan
   runtime: starlark
   entry: collectors/repo_hardcoded_colors.star
-  trigger:
-    on:
-    - snapshot.taken
-    settle: 30s
-    at_most: 5m
+  on:
+  - snapshot.taken
+  settle: 30s
+  at_most: 5m
   facts:
   - repo.hardcoded_colors
 - id: repo.scan_css_important
   doc: css !important scan
   runtime: starlark
   entry: collectors/repo_css_important.star
-  trigger:
-    on:
-    - snapshot.taken
-    settle: 30s
+  on:
+  - snapshot.taken
+  settle: 30s
   facts:
   - repo.css_important
 - id: repo.scan_inline_styles
   doc: Inline style-object scan
   runtime: starlark
   entry: collectors/repo_inline_styles.star
-  trigger:
-    on:
-    - snapshot.taken
-    settle: 30s
+  on:
+  - snapshot.taken
+  settle: 30s
   facts:
   - repo.inline_styles
 - id: repo.scan_type_coverage
   doc: TypeScript type coverage
   runtime: jaq
   entry: collectors/type_coverage.jq
-  trigger:
-    on:
-    - snapshot.taken
-    settle: 30s
+  on:
+  - snapshot.taken
+  settle: 30s
   report:
     path: target/type-coverage.json
     format: text

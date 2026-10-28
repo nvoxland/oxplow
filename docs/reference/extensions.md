@@ -319,7 +319,7 @@ collectors:
     runtime: starlark        # starlark | jaq | exec
     entry: collectors/prs.star
     input: "SELECT uri, title FROM v_work_item"
-    trigger: { every: 15m }  # or manual (the default), or { on: [event types] }
+    on: { every: 15m }  # or manual (the default), or { on: [event types] }
     entities:
       - { name: pr, key: number, columns: { number: int, title: text } }
 ```

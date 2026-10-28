@@ -946,7 +946,7 @@ mod ordering_tests {
             yaml.push_str("collectors:\n");
             for (id, after) in collectors {
                 yaml.push_str(&format!(
-                    "  - {{ id: {id}, runtime: starlark, entry: c.star, trigger: {{ on: [work_item.state_changed] }}, after: [{after}], entities: [{{ name: {id}, key: k, columns: {{ k: text }} }}] }}\n"
+                    "  - {{ id: {id}, runtime: starlark, entry: c.star, on: [work_item.state_changed], after: [{after}], entities: [{{ name: {id}, key: k, columns: {{ k: text }} }}] }}\n"
                 ));
             }
         }

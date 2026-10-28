@@ -79,17 +79,17 @@ intent:
     analysis reports, and any metrics of its own.
 collectors:
   # Python (pytest)
-  - { id: tests.py_coverage, records: coverage, entry: "oxplow:cobertura", report: { path: coverage.xml }, trigger: { on_run: test } }
-  - { id: tests.py_junit, records: tests, entry: "oxplow:junit", report: { path: target/test-report.xml }, trigger: { on_run: test } }
+  - { id: tests.py_coverage, records: coverage, entry: "oxplow:cobertura", report: { path: coverage.xml }, on: { run: test } }
+  - { id: tests.py_junit, records: tests, entry: "oxplow:junit", report: { path: target/test-report.xml }, on: { run: test } }
   # Frontend (jest)
-  - { id: tests.web_coverage, records: coverage, entry: "oxplow:cobertura", report: { path: web/coverage/cobertura-coverage.xml }, trigger: { on_run: test } }
-  - { id: tests.web_junit, records: tests, entry: "oxplow:junit", report: { path: web/junit.xml }, trigger: { on_run: test } }
+  - { id: tests.web_coverage, records: coverage, entry: "oxplow:cobertura", report: { path: web/coverage/cobertura-coverage.xml }, on: { run: test } }
+  - { id: tests.web_junit, records: tests, entry: "oxplow:junit", report: { path: web/junit.xml }, on: { run: test } }
 ```
 
 `report.path` is project-relative. `records` is what the report holds: `tests` (JUnit), `coverage` or
 `analysis` (linter findings). `entry: "oxplow:<parser>"` names a bundled
 parser: `junit`, `lcov`, `cobertura`, `jacoco`, `clippy`, `eslint`.
-`trigger: { on_run: test }` reads the report after each test run oxplow
+`on: { run: test }` reads the report after each test run oxplow
 sees, when that run wrote it (an analyzer's report: `on_run: analysis`);
 without a trigger it runs only by hand (`oxplow.collector.sync { collector: "project/<id>" }`). So a frontend
 run uses the frontend reports, a Python run the Python reports, JUnit
@@ -116,7 +116,7 @@ collectors:
     runtime: jaq                        # jaq (jq) | starlark | exec
     entry: collectors/clover.jq         # the script file, relative to .oxplow/extensions/project/
     report: { path: target/clover.xml, format: xml }   # host pre-parse: text | json | xml | lcov | lines
-    trigger: { on_run: test }
+    on: { run: test }
 ```
 
 The script goes in its own file under

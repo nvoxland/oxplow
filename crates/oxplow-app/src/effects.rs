@@ -60,7 +60,8 @@ impl EffectDecl {
 }
 
 /// An `effects:` entry as the manifest holds it; `on` and `where` are read
-/// by the collectors' trigger rules (`parse_trigger`).
+/// by the one trigger grammar (`collectors::parse_trigger`), as a
+/// collector's are.
 #[derive(Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct EffectFile {
@@ -146,16 +147,17 @@ fn decl_of(
         ));
     }
     let named = |m: String| format!("effect `{}`: {m}", f.id);
-    let mut trigger = serde_yaml::Mapping::new();
-    trigger.insert("on".into(), f.on.clone());
-    if let Some(w) = &f.filter {
-        trigger.insert("where".into(), w.clone());
-    }
+    // The collectors' grammar for `on`/`where`; an effect reacts to each
+    // event, so it has no clock, no report run and no pacing.
     let (on, filter) = match oxplow_config::collectors::parse_trigger(
-        Some(&serde_yaml::Value::Mapping(trigger)),
+        oxplow_config::collectors::TriggerKeys {
+            on: Some(&f.on),
+            filter: f.filter.as_ref(),
+            ..Default::default()
+        },
         knows_event,
     )
-    .map_err(|e| named(e.replacen("trigger: ", "", 1)))?
+    .map_err(named)?
     {
         oxplow_config::collectors::Trigger::On { events, filter, .. } => (events, filter),
         _ => return Err(named("`on` lists the event types it reacts to".into())),
@@ -300,8 +302,7 @@ pub fn reaction(value: serde_json::Value) -> Result<Reaction, String> {
 /// Whether `decl` reacts to an event of `event_type` with `payload`: its
 /// `on` names the type and its `where` matches.
 pub fn reacts_to(decl: &EffectDecl, event_type: &str, payload: &serde_json::Value) -> bool {
-    decl.on.iter().any(|t| t == event_type)
-        && crate::collector_triggers::payload_matches(&decl.filter, payload)
+    oxplow_config::collectors::fires(&decl.on, &decl.filter, event_type, payload)
 }
 
 /// Run `script` over `{ event }`, sandboxed with a command script's budget,

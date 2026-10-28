@@ -735,7 +735,7 @@ async fn extension_test_runs_the_snapshot_suite_over_a_snapshots_provider() {
     std::fs::create_dir_all(&tree).unwrap();
     std::fs::write(tree.join("a.txt"), "alpha").unwrap();
     let mark = format!(
-        "{{ command: mark, input: {{ stream: 'oxplow:oxplow/stream?id=str1', worktree: '{}', trigger: manual, parent: null }} }}",
+        "{{ command: mark, input: {{ stream: 'oxplow:oxplow/stream?id=str1', worktree: '{}', on: manual, parent: null }} }}",
         tree.display()
     );
     std::fs::write(

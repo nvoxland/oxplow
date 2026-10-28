@@ -58,8 +58,8 @@ fn extensions(root: &Path, with_v2: bool) {
         "manifest: 2\nname: acme\nintent: { purpose: Reads merges., origin: null, examples: [] }\n\
          permissions: { process: true }\n\
          collectors:\n\
-         \x20 - id: star\n    runtime: starlark\n    entry: star.star\n    trigger: { on: [acme_pr.merged] }\n    entities:\n      - { name: seen_star, key: k, columns: { k: text, event: text } }\n\
-         \x20 - id: prog\n    runtime: exec\n    entry: prog.sh\n    trigger: { on: [acme_pr.merged] }\n    entities:\n      - { name: seen_prog, key: k, columns: { k: text, event: text } }\n\
+         \x20 - id: star\n    runtime: starlark\n    entry: star.star\n    on: [acme_pr.merged]\n    entities:\n      - { name: seen_star, key: k, columns: { k: text, event: text } }\n\
+         \x20 - id: prog\n    runtime: exec\n    entry: prog.sh\n    on: [acme_pr.merged]\n    entities:\n      - { name: seen_prog, key: k, columns: { k: text, event: text } }\n\
          effects:\n\
          \x20 - id: note\n    summary: Note a merge.\n    on: [acme_pr.merged]\n    entry: note.star\n",
     );

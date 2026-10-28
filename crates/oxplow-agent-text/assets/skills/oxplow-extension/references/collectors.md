@@ -12,8 +12,8 @@ CI runs), add a **collector** to the extension:
   never a type the collector itself runs on. Use it to say what the
   collector saw; put what should *happen* in an effect that reacts to it.
 - Declare it under `collectors:` in `extension.yaml`, with its entities'
-  typed columns and key, and when it runs: `trigger: { every: 15m }` or
-  `trigger: manual` (the default).
+  typed columns and key, and when it runs: `on: { every: 15m }` or
+  `on: manual` (the default).
 - The `github` example oxplow ships is a complete, working collector;
   copy its shape.
 - The entity becomes `v_<extension>_<entity>`. Join it to core views in

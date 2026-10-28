@@ -1037,12 +1037,11 @@ The UI shows the entity aggregation (`specAggregation`).
 An `on:` trigger may pace its runs instead of running on every event:
 
 ```yaml
-trigger:
-  on: [snapshot.taken, effort.finished]
-  settle: 30s        # once no triggering event has arrived for 30s
-  at_most: 5m        # not more often than every 5m (a run always follows)
-  idle: 2m           # once no agent turn runs and nothing changed for 2m
-  force: [effort.finished]   # these run at once, past the rest
+on: [snapshot.taken, effort.finished]
+settle: 30s        # once no triggering event has arrived for 30s
+at_most: 5m        # not more often than every 5m (a run always follows)
+idle: 2m           # once no agent turn runs and nothing changed for 2m
+force: [effort.finished]   # these run at once, past the rest
 ```
 
 Any combination; without them every event runs at once, as before.
@@ -1133,7 +1132,7 @@ Landed:
 | effort token spend (tsk73) | `effort_service.rs::project_effort_lifecycle_metrics` (a close-time sub-producer) | one **`oxplow.effort_tokens`** fact per closed effort: Σ of ALL token kinds from its effort-stamped otel captures (num=value/den=1, non-additive → `task.tokens` reads the MEAN tokens per close — the cost of a unit of work, in tokens). No fact when the effort has no token captures (unmetered ≠ zero) |
 | wasted tokens (tsk77) | close-time producer + `collection.rs::record_token_waste_for_reverts` (fires on any landed commit incl. `git revert`, via `detect_git_revert` — revert never says "commit") | **`oxplow.token_waste`** is an append-only ratio measure with two writers: a metered CLOSE emits (num 0, den = the effort's spend, value 0) — rides inside the effort_tokens gate since the denominator IS that spend — and a detected revert emits (num = spend, den 0, value = spend) for the ONE closed effort whose window contains the reverted commit (`This reverts commit <sha>` trailers in HEAD; 0/ambiguous candidates → no attribution; idempotency key `token-waste:<effort>` → one waste fact per effort ever; commit times are seconds-granular so containment spans the whole second). `task.tokens.wasted` = SUM over values (closes are 0); `task.tokens.wasted_pct` = ratio Σn/Σd = wasted ÷ all metered spend. V1 is coarse: one reverted commit flags the effort's FULL spend. Pre-V61 closes never entered the denominator |
 | effort steering (tsk76) | same close-time producer | one **`oxplow.effort_steering`** fact per closed effort (num=value/den=1, non-additive → `task.steering` reads the MEAN per close — the autonomy number, lower = more autonomous): user prompt submissions (`agent_turn` rows opened in the effort window, newest-1000 scan) + Stop-hook nudges (Σ of the effort's `oxplow.nudge` facts) + non-`agent`-authored comment threads opened in the effort's thread during the window. **Zero IS emitted** — a fully autonomous effort is real data. Interrupts are NOT counted (nothing records them yet). Needs `with_steering_sources` (agent-turn + comment stores) wired, as boot does |
-| effort test outcome + time-to-green | oxplow-foundation's **`oxplow.effort_test_outcome` collector** (`collectors/effort/test_outcome.star`, `trigger: { on: [effort.finished] }`; core computes none of it) | Four **`oxplow.effort_test_outcome`** facts per finished effort, sliced by `oxplow.tests_stat` — `at_close` (failed count of the last run = quality gate), `peak` (max failed in any run), `distinct_failed` (distinct cases red in ≥1 run; asserted failures have no identity, so it never reports fewer than `peak`), `red_runs` (runs with ≥1 failure) — and one **`oxplow.effort_time_to_green`**: ms from the FIRST red run to the first green after it, only when that transition exists (never red or never recovered is "no data", not a zero). `effort.time_to_green_ms` reads the mean. All `num=value, den=1` (non-additive → the mean per effort), subject the effort ref, the capture stamped with the effort, thread and branch (`oxplow.tests.*` slice by `oxplow.branch`). **Its `input:`** is the effort's measured runs — `tests` captures (`v_capture`, not the record-only `test-run`) joined to `v_test_run` and their failed `v_test_case` rows, oldest first; a run that listed no cases and asserted `failed` counts that many anonymous failures; a run with no failed case (a green repeat that wrote none) still counts. These "within-effort" aggregates are **not expressible** as a metric spec (the engine's temporal collapse is only sum/last/Σn÷Σd), so a collector materializes them; no result means no facts. Pinned by `foundation_collectors_tests.rs` (the script over row fixtures) and `bundled_extensions::tests::the_test_outcome_collector_writes_what_the_producer_did` |
+| effort test outcome + time-to-green | oxplow-foundation's **`oxplow.effort_test_outcome` collector** (`collectors/effort/test_outcome.star`, `on: [effort.finished]`; core computes none of it) | Four **`oxplow.effort_test_outcome`** facts per finished effort, sliced by `oxplow.tests_stat` — `at_close` (failed count of the last run = quality gate), `peak` (max failed in any run), `distinct_failed` (distinct cases red in ≥1 run; asserted failures have no identity, so it never reports fewer than `peak`), `red_runs` (runs with ≥1 failure) — and one **`oxplow.effort_time_to_green`**: ms from the FIRST red run to the first green after it, only when that transition exists (never red or never recovered is "no data", not a zero). `effort.time_to_green_ms` reads the mean. All `num=value, den=1` (non-additive → the mean per effort), subject the effort ref, the capture stamped with the effort, thread and branch (`oxplow.tests.*` slice by `oxplow.branch`). **Its `input:`** is the effort's measured runs — `tests` captures (`v_capture`, not the record-only `test-run`) joined to `v_test_run` and their failed `v_test_case` rows, oldest first; a run that listed no cases and asserted `failed` counts that many anonymous failures; a run with no failed case (a green repeat that wrote none) still counts. These "within-effort" aggregates are **not expressible** as a metric spec (the engine's temporal collapse is only sum/last/Σn÷Σd), so a collector materializes them; no result means no facts. Pinned by `foundation_collectors_tests.rs` (the script over row fixtures) and `bundled_extensions::tests::the_test_outcome_collector_writes_what_the_producer_did` |
 | turns — transcript (tsk22) | `token_usage.rs::record_token_metrics`, from `on_stop` | a `oxplow.turn` fact per model per Stop (turn COUNT = genuine user prompts). The transcript path **no longer projects `oxplow.tokens`** (OTEL owns those); it still records the per-turn `agent_token_usage` rows (with prompt text OTEL lacks). The Claude harness's transcript parse counts each `message.id` once (tsk22), which removed the ~2–3× overcount from Claude repeating a message's `usage` on every content-block line |
 | effort lifecycle (T-B) | `effort_service.rs::project_effort_lifecycle_metrics` | one `oxplow.cycle_time` fact per close (subject=effort) + one `oxplow.work_item_effort` fact (subject=work_item, the effort's work-item ref; the efforts-so-far redo signal, none while unlinked); both carry `numerator=value, denominator=1` (the measures are non-additive per V47, so Σn/Σd across time = the MEAN across closes, tsk42); capture **stamps `effort_id`** (unambiguous — this producer knows the exact effort). (The effort's test outcome and time-to-green are not written here: oxplow-foundation's `oxplow.effort_test_outcome` collector records them when the effort finishes.) |
 | nudges (T-B) | `collection.rs::project_nudge_metric` | one `oxplow.nudge` event fact per fired nudge (value 1, subject=the nudge kind) — the `agent.nudges.fired` spec is `Sum(oxplow.nudge)` |
@@ -1937,7 +1936,7 @@ name with `_` for `-`):
   files, `<ns>.complex_functions` — per-path because a snapshot's collector
   rescans only the files it changed, semi-additive because the latest
   count is the answer;
-- `collectors:` `<ns>.scan`, Starlark, `trigger: { on: [snapshot.taken] }`,
+- `collectors:` `<ns>.scan`, Starlark, `on: [snapshot.taken]`,
   over `source_files()` + `code_metrics()` (the starter counts each
   file's functions over `LIMIT`, records one fact per file with the worst
   function's `line` and `dims: { <ns>.area: <top folder> }`; a clean file
@@ -1974,7 +1973,7 @@ resolved in `crates/oxplow-config/src/lib.rs` (`MetricEntry`→`ResolvedSpec` +
 `extension.yaml` — see
 [semantic-layer.md](./semantic-layer.md) "Collectors"). The fact engine
 (`MetricsService`) seeds a `metric_spec` per resolved metric and runs each
-**fact collector** on its `trigger`. (Until P7.B3 the producer block was
+**fact collector** on its `on`. (Until P7.B3 the producer block was
 `gauges:`; it is now an unknown key, tsk865.)
 
 ```yaml
@@ -1990,7 +1989,7 @@ collectors:                           # the PRODUCER (runs a script, records fac
     doc: TODO comment scan
     runtime: starlark                 # starlark | jaq | exec (own extension only, needs permissions.process)
     entry: collectors/todo.star       # relative to the extension folder
-    trigger: { on: [snapshot.taken] } # manual | { every: 15m } | { on: [<types>], where?: {...}, settle?, at_most?, idle?, force? }
+    on: [snapshot.taken] # manual | { every: 15m } | { on: [<types>], where?: {...}, settle?, at_most?, idle?, force? }
     facts: [repo.todo_count]          # declare-to-collect allow-list
     # report: { path: target/x.json, format: json }   # text|json|xml|lcov|lines
     # input: "SELECT … :effort_id"    # starlark/jaq: rows as input.rows

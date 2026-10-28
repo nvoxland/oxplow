@@ -306,7 +306,7 @@ pub fn scaffold_with(
         }
         Kind::Collector => manifest.push_str(&format!(
             "collectors:\n\
-             \x20 # Runs its script over its `input` rows when synced (`trigger: manual`;\n\
+             \x20 # Runs its script over its `input` rows when synced (`on: manual`;\n\
              \x20 # `{{ every: 15m }}` or `{{ on: [snapshot.taken] }}` run it by themselves).\n\
              \x20 - id: items\n\
              \x20   runtime: starlark\n\
@@ -750,7 +750,7 @@ fn provider_starter(capability: &str) -> ProviderStarter {
         },
         "snapshots" => ProviderStarter {
             // A small tree beside the fixtures (`fixtures/tree`) stands in for a worktree.
-            input: "{ command: mark, input: { stream: str1, worktree: fixtures/tree, trigger: manual, parent: null } }"
+            input: "{ command: mark, input: { stream: str1, worktree: fixtures/tree, on: manual, parent: null } }"
                 .to_string(),
             expect: "a handle for the marked state",
             fixture: "{ handle: $any, unchanged: false, file_count: 1 }".to_string(),

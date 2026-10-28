@@ -1,0 +1,52 @@
+//! Keys an `extension.yaml` no longer has, and what took their place: the
+//! whole migration story for a private extension. A manifest with one is
+//! refused like any unknown key, and the refusal names the new spelling
+//! (`hint_unknown`), so `oxplow extension check` says what to write.
+
+/// An old key and how to write what it said now.
+pub const RENAMED: &[(&str, &str)] = &[(
+    "trigger",
+    "write `on:` on the entry itself — `trigger: { on: [x], where: {…}, settle: 30s }` is \
+     `on: [x]` with `where:` and `settle:` beside it, `trigger: { every: 15m }` is \
+     `on: { every: 15m }`, `trigger: { on_run: test }` is `on: { run: test }`, \
+     `trigger: manual` is `on: manual`",
+)];
+
+/// `message` (a parser's) with the new spelling added when it refuses a
+/// key in [`RENAMED`]: ``unknown field `trigger`, expected …`` becomes
+/// ``unknown key `trigger` — write `on:` …``. Any other message is kept.
+pub fn hint_unknown(message: &str) -> String {
+    for (old, hint) in RENAMED {
+        let needle = format!("unknown field `{old}`");
+        if let Some(at) = message.find(&needle) {
+            let rest = &message[at + needle.len()..];
+            let tail = rest.find(" at line ").map_or("", |i| &rest[i..]);
+            return format!("{}unknown key `{old}` — {hint}{tail}", &message[..at]);
+        }
+    }
+    message.to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// An old key's refusal says what to write instead, keeping where it
+    /// is; any other message passes through.
+    #[test]
+    fn an_old_key_is_unknown_with_its_new_spelling() {
+        let hinted = hint_unknown(
+            "collectors[0]: unknown field `trigger`, expected one of `id`, `on` at line 4 column 5",
+        );
+        assert!(
+            hinted.starts_with("collectors[0]: unknown key `trigger` — write `on:`"),
+            "{hinted}"
+        );
+        assert!(hinted.ends_with(" at line 4 column 5"), "{hinted}");
+        assert!(!hinted.contains("expected one of"), "{hinted}");
+        assert_eq!(
+            hint_unknown("unknown field `bogus`, expected `id`"),
+            "unknown field `bogus`, expected `id`"
+        );
+    }
+}
