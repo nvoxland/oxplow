@@ -595,6 +595,29 @@ says something true — not per commit. Commit what it writes (`run.json`,
 `recorded_agent_runs_still_check_and_test_clean` replays `produced/`, and
 a `prompt.md` with nothing recorded fails it.
 
+## What oxplow ships must work in another person's project
+
+Oxplow is used on repos that are not oxplow's checkout. Three guards keep
+this checkout out of what it ships:
+
+- `the_agent_text_never_assumes_the_oxplow_checkout`
+  (`crates/oxplow-agent-text/src/lib.rs`): no skill, reference, asset or
+  slash command names `examples/extensions`, `extensions/oxplow-`,
+  `crates/`, `tests-e2e`, `cargo `, `bun run`, `.context`, or a bare
+  `oxplow extension …`. The CLI is `$OXPLOW_BIN extension …` (`oxplow` on
+  PATH only once the person ran "Install `oxplow` command line…").
+  `.oxplow/extensions/` is the project's own folder and stays legal.
+- `shipped_text_never_names_the_checkout`
+  (`crates/oxplow-app/src/bundled_extensions.rs`): the same for the
+  shipped extensions' manifests, pages and scripts (not fixtures or
+  `dist/`).
+- `bun run lint:docs` (`scripts/check-docs-portable.py`, CI): `docs/` and
+  `README.md` hold no dev-loop text. `DEV.md` "Run from source" is where
+  building and running from source go.
+
+The generated `docs/reference/schemas/extension.schema.json` cites no
+`.context/` doc either (a schemars doc comment is published text).
+
 ## Sources must stay searchable
 
 CI runs `bun run lint:searchable` (`scripts/check-control-chars.py`),

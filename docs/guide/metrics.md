@@ -179,5 +179,5 @@ An effort's tests, coverage, metric changes, and agent nudges show on
 its diff page, from `oxplow-bundled`, the extension that ships with oxplow.
 
 The catch worth knowing: only test runs oxplow can see get recorded.
-If your project's configured command is `bun run test:collect`, a
-bare `bun test` produces no reports and the effort shows nothing.
+If your project's configured command is `make test-report`, a
+bare `pytest` produces no reports and the effort shows nothing.

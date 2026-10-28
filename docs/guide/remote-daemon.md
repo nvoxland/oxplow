@@ -12,14 +12,15 @@ there are no accounts, tokens, or TLS to configure.
 
 ## Start the daemon on the remote box
 
-Build and run `oxplow-daemon` against a project that's already an
-oxplow project (it has a `.oxplow/` directory — open it once in the
-desktop app on that machine, or copy one over):
+Run `oxplow-daemon` (it ships beside the app's binary) against a project
+that's already an oxplow project (it has a `.oxplow/` directory — open it
+once in the desktop app on that machine, or copy one over):
 
 ```bash
-cargo build --release -p oxplow-daemon
-./target/release/oxplow-daemon --project ~/src/myproject
+oxplow-daemon --project ~/src/myproject
 ```
+
+To build the daemon yourself, see [`DEV.md`](https://github.com/nvoxland/oxplow/blob/main/DEV.md).
 
 It prints the listen address (default `127.0.0.1:7420`; override with
 `--bind`) and the tunnel command to run from your laptop. The daemon

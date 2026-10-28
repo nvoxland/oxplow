@@ -74,8 +74,8 @@ code drill-down. Read contracts connect data from different sources;
 commands provide the action side.
 
 See the [architecture vision](docs/philosophy/architecture-vision.md)
-for the product direction and [.context/](.context/) for internal design
-and implementation notes.
+for the product direction. Internal design and implementation notes are in
+[DEV.md](DEV.md).
 
 ## Running
 
@@ -87,7 +87,7 @@ See [DEV.md](DEV.md) for building and running from source and
 Oxplow is early and actively evolving. Broader extension compatibility,
 execution containment, and authoring ergonomics are still being improved.
 Database migrations are the forward path for stored data. The next work
-is specified in the [foundation roadmap](.context/foundation-roadmap.md).
+is tracked in the repository's issues.
 
 ## License
 

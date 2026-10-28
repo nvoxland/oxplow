@@ -12,9 +12,9 @@ analysis, presentation, integration, or workflow.
 
 Repository code is untrusted regardless of who authored or shared it.
 Declared permissions that a person approves at deploy, immutable deployments,
-command gates, and component isolation provide guardrails. Current in-process script timeouts stop
-waiting for a result but may leave computation running: they are not yet
-CPU/memory containment. External-program isolation also depends on the
+command gates, and component isolation provide guardrails. A script runs in
+its own worker process, which oxplow kills when the script passes its time
+limit or its memory cap. External-program isolation depends on the
 platform; see [collector limits](../guide/pages.md#collectors-bringing-in-outside-data).
 
 ```sh
@@ -736,7 +736,7 @@ to a work item. oxplow's own opens one per commit or task switch; a
 script can be yours instead. `oxplow extension new policy <name>`
 writes one that opens an item's effort when an agent starts it on a
 thread and closes it when the item is done. For a fuller one, see
-`examples/extensions/prompt-efforts`: it gives every prompt that changes
+the `prompt-efforts` example oxplow ships: it gives every prompt that changes
 files an effort of its own, reacting to each turn's `thread.checkpoint`.
 
 ```yaml

@@ -48,6 +48,16 @@ cargo run -q -p oxplow-dev -- extension deploy   # deploy what changed (oxplow q
 ./target/debug/oxplow .                          # run it
 ```
 
+To run the daemon from source (for the remote mode in the user docs):
+
+```
+cargo build --release -p oxplow-daemon
+./target/release/oxplow-daemon --project ~/src/myproject
+```
+
+To run a built oxplow on a project from a terminal, use the path above;
+an installed app does it with "Install `oxplow` command line…".
+
 To open a project, pass its directory as the **first positional arg**
 (`oxplow <dir>`) or set `OXPLOW_PROJECT_DIR`. A bare launch shows the
 project picker. There is no cwd fallback, and flag-style args like

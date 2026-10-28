@@ -387,7 +387,7 @@ memory** (yours, in every tab of the component; JSON, 64 KB a value and
 `localStorage` or `sessionStorage`. A component written in
 TypeScript or with a library declares a `build:` ("Extensions" → "Builds"),
 so only its sources are committed. oxplow-foundation's Timeline page is a
-working example (`extensions/oxplow-foundation/src/timeline/`): it reads
+working example: it reads
 its window from `from` and `to`, writes every change of it back with
 `setViewParams`, and follows `onViewParams` when Back or Forward moves the
 tab. A default it computes ("the last week") stays out of the address, so
@@ -423,9 +423,9 @@ the page's `q`, `author` and `branch`, so a custom graph reads them from
 changes items needs its commands declared like any component, and the
 extension must declare the permissions for them.
 
-[`examples/extensions/task-views`](../../examples/extensions/task-views) is a
-working set of all three: swimlanes you drag cards between, a compact list
-with row actions, and a plain editor form. Copy it and change it.
+The `task-views` example that oxplow ships is a working set of all three:
+swimlanes you drag cards between, a compact list with row actions, and a
+plain editor form. Copy it and change it.
 
 ## Sharing
 
@@ -560,5 +560,4 @@ can read them in `v_event`. Limits:
   shape is a new `v` with an `upcast` script.
 
 A complete example, which pulls this repo's pull requests and a page that
-matches them to tasks, is in
-[`examples/extensions/github`](https://github.com/nvoxland/oxplow/tree/main/examples/extensions/github).
+matches them to tasks, is the `github` example that oxplow ships.

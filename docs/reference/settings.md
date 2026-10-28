@@ -272,10 +272,10 @@ up per stack. Run `/oxplow:configure` to wire this up automatically.
 ```yaml
 # .oxplow/project.yaml
 testing:
-  command: bun run test:collect      # surfaced to the agent
-  fastCommand: bun run test:fast     # the same without coverage, for iterating
-  runPatterns: [bun test]            # extra substrings that count as a test run
-  agentHint: Run tests with bun run test:collect.
+  command: make test-report          # surfaced to the agent
+  fastCommand: make test-fast        # the same without coverage, for iterating
+  runPatterns: [pytest]              # extra substrings that count as a test run
+  agentHint: Run tests with make test-report.
 ```
 
 The collectors are declared in the project's own extension, not in
@@ -336,9 +336,8 @@ confined: a program reads and writes files as you, and its network is
 confined only on macOS. Every run is recorded in `v_extension_run`, with
 what each permission decided.
 
-The full authoring reference — host helpers, the exact output schemas,
-a worked example — lives in `.context/collection.md` in the oxplow
-source.
+Ask the agent for the details: the `oxplow-collection` skill covers host
+helpers, the exact output schemas and a worked example.
 
 ### LSP servers
 
@@ -354,8 +353,8 @@ binary to whichever stream asked. Which server serves a file is
 resolved by language id, not by root markers.
 
 You can also pin servers per project under an `lsp.servers` block
-in `.oxplow/project.yaml`. If a server you need isn't packaged, the
-Mason-backed installer lives in `crates/oxplow-lsp-installer/`.
+in `.oxplow/project.yaml`. If a server you need isn't packaged, use the Mason-backed installer
+(**Language servers** in Settings).
 
 ### Theme
 
