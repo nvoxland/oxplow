@@ -1,5 +1,5 @@
 title: Data catalog
-description: 'What oxplow''s data holds: every model (`v_*` view) with its owner, what it holds and its columns (name and type); name one (`v_effort` or `effort`) for its columns'' docs and key. Query them with `oxplow_query_sql`; metrics are read with `MEASURE(''<key>'')` over `metric_grid()` (their units and aggregation are in `v_metric_spec`).'
+description: 'What oxplow''s data holds: every model (`v_*` view) with its owner, what it holds and its columns (name and type); name one (`v_effort` or `effort`) for its columns'' docs, key and any `ai_context` guidance for reading it (a JSON `{instructions, synonyms, examples}`). Query them with `oxplow_query_sql`; metrics are read with `MEASURE(''<key>'')` over `metric_grid()` (their units and aggregation are in `v_metric_spec`).'
 hidden: true
 tool: catalog
 params:
@@ -9,11 +9,13 @@ params:
 data:
   catalog:
     sql: |
-      SELECT m.view, m.owner, m.description,
+      SELECT m.view, m.owner,
+             m.description || CASE WHEN m.ai_context IS NOT NULL THEN ' [ai_context: ' || m.ai_context || ']' ELSE '' END AS description,
              (SELECT group_concat(
                        c.name || ' ' || coalesce(c.sql_type, '')
                        || CASE WHEN :model <> '' AND c.doc IS NOT NULL THEN ' — ' || c.doc ELSE '' END
-                       || CASE WHEN :model <> '' AND c.key_part IS NOT NULL THEN ' (key)' ELSE '' END,
+                       || CASE WHEN :model <> '' AND c.key_part IS NOT NULL THEN ' (key)' ELSE '' END
+                       || CASE WHEN :model <> '' AND c.ai_context IS NOT NULL THEN ' [ai_context: ' || c.ai_context || ']' ELSE '' END,
                        CASE WHEN :model <> '' THEN char(10) ELSE ', ' END)
                 FROM (SELECT * FROM v_model_column c WHERE c.view = m.view ORDER BY c.position) c) AS columns
       FROM v_model m

@@ -1,5 +1,5 @@
 SELECT key, title, unit, source_measure, aggregation, direction, target,
        warn_at, fail_at, description, category, language,
        CASE WHEN extension IS NOT NULL THEN 'extension' ELSE scope END AS scope,
-       display_kind, extension, entity_json
+       display_kind, extension, entity_json, ai_context_json AS ai_context
 FROM source('metric_spec')

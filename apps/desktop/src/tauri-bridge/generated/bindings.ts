@@ -918,6 +918,16 @@ export type AiCallBody =
 /**  An `ai_call` row. */
 export type AiCallId = number;
 
+/**  The `ai_context:` block. All keys are optional. */
+export type AiContext = {
+	/**  When to use this and how to read it. */
+	instructions?: string | null,
+	/**  Other names a person or agent may call it. */
+	synonyms?: string[],
+	/**  Example questions it answers. */
+	examples?: string[],
+};
+
 /**  A named model need of one extension. */
 export type AiProfileDecl = {
 	id: string,
@@ -1344,7 +1354,13 @@ export type CollectorSync =
  */
 "upsert";
 
-/**  One promised column. */
+/**
+ *  One promised column.
+ *
+ *  Equality is the contract's: `ai_context` is guidance for an agent, not
+ *  a promise, so two columns that differ only in it are equal and editing it
+ *  never needs a version bump.
+ */
 export type ColumnDecl = {
 	name: string,
 	/**
@@ -1353,6 +1369,11 @@ export type ColumnDecl = {
 	 */
 	type?: string,
 	doc: string,
+	/**
+	 *  Guidance for an agent reading the column. Not part of the contract:
+	 *  left out of `model_contract` and the golden, stored on the model.
+	 */
+	ai_context?: AiContext | null,
 };
 
 /**  How a column's value reads in the UI. An agent reads the raw value. */
@@ -1907,6 +1928,8 @@ export type DimensionEntry = {
 	 *  `LEFT JOIN v_thread t ON t.id = e.thread_id`.
 	 */
 	join?: string | null,
+	/**  Guidance for an agent reading the dimension. */
+	ai_context?: AiContext | null,
 };
 
 /**
@@ -2281,8 +2304,8 @@ export type Extension_Deserialize = {
 	 */
 	resources: ExtensionResource[],
 	/**
-	 *  Effects it declares (valid ones — each runs only once a person
-	 *  approves it, `effects`).
+	 *  Effects it declares (valid ones; each reacts once the extension is
+	 *  deployed, `effects`).
 	 */
 	effects: EffectDecl[],
 	/**
@@ -2435,8 +2458,8 @@ export type Extension_Serialize = {
 	 */
 	resources: ExtensionResource[],
 	/**
-	 *  Effects it declares (valid ones — each runs only once a person
-	 *  approves it, `effects`).
+	 *  Effects it declares (valid ones; each reacts once the extension is
+	 *  deployed, `effects`).
 	 */
 	effects: EffectDecl[],
 	/**
@@ -3555,6 +3578,11 @@ export type MetricEntry = {
 	time?: string | null,
 	/**  Entity metric: the value expression aggregated (not needed for `count`). */
 	value?: string | null,
+	/**
+	 *  Guidance for an agent reading the metric. Inherent to the
+	 *  definition — a `use:` can't override.
+	 */
+	ai_context?: AiContext | null,
 };
 
 /**  One model as its owner declares it (an entry of `models.yaml`). */
@@ -3583,6 +3611,8 @@ export type ModelDecl = {
 	 *  stored and recomputed on that clock.
 	 */
 	materialize?: Materialize | null,
+	/**  Guidance for an agent reading the model. Not part of the contract. */
+	ai_context?: AiContext | null,
 };
 
 /**  Features callers may discover before requesting a model operation. */

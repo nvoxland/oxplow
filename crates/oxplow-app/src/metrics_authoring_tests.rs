@@ -969,3 +969,87 @@ async fn a_page_joins_metric_facts_with_an_efforts_files() {
         [("engine/plan.rs".to_string(), 2, "updated".to_string())]
     );
 }
+
+/// The scaffold with guidance for an agent on a model, its column, the
+/// metric and the dimension; `models/dims.sql` reads the catalog.
+fn with_ai_context(files: &mut Vec<ScaffoldFile>, bad_key: bool) {
+    let manifest = file(files, "extension.yaml");
+    manifest.content = manifest.content.replace(
+        "    valueType: categorical\n",
+        "    valueType: categorical\n    ai_context:\n      instructions: The top folder of a file.\n      synonyms: [folder]\n",
+    );
+    manifest.content = manifest.content.replace(
+        "    displayKind: findings",
+        "    ai_context:\n      instructions: Lower is better.\n      examples: [which files are too complex]\n    displayKind: findings",
+    );
+    let unknown = if bad_key { "      hint: nope\n" } else { "" };
+    manifest.content.push_str(&format!(
+        "models:\n  - name: dims\n    version: 1\n    description: The dimensions.\n    \
+         ai_context:\n      instructions: Use to list slices.\n      synonyms: [slices]\n{unknown}    \
+         columns:\n      - name: dim_key\n        type: TEXT\n        doc: The key.\n        \
+         ai_context:\n          instructions: Pass to metric_grid.\n          examples: [complex_fns.area]\n"
+    ));
+    files.push(ScaffoldFile {
+        path: format!(".oxplow/extensions/{NAME}/models/dims.sql"),
+        content: "SELECT key AS dim_key FROM ref('dimension')\n".into(),
+    });
+}
+
+/// A model, a column, a metric and a dimension each carry an `ai_context`
+/// block, and the four read models publish it.
+#[tokio::test(flavor = "multi_thread")]
+async fn ai_context_is_published_on_a_model_a_column_a_metric_and_a_dimension() {
+    let (p, _) = project(|files| with_ai_context(files, false)).await;
+    let problems = p.svc.extension_activation.problems();
+    assert!(problems.is_empty(), "{problems:?}");
+    let one = |sql: String| {
+        let p = &p;
+        async move { opt_text(&p.rows(&sql).await[0][0]) }
+    };
+    let model = one(format!(
+        "SELECT ai_context FROM v_model WHERE owner = '{NAME}' AND name = 'dims'"
+    ))
+    .await
+    .expect("the model's block");
+    assert!(model.contains("Use to list slices."), "{model}");
+    assert!(model.contains("slices"), "{model}");
+    let column = one(format!(
+        "SELECT c.ai_context FROM v_model_column c JOIN v_model m ON m.view = c.view \
+         WHERE m.owner = '{NAME}' AND c.name = 'dim_key'"
+    ))
+    .await
+    .expect("the column's block");
+    assert!(column.contains("Pass to metric_grid."), "{column}");
+    let metric = one(format!(
+        "SELECT ai_context FROM v_metric_spec WHERE key = '{MEASURE}'"
+    ))
+    .await
+    .expect("the metric's block");
+    assert!(metric.contains("which files are too complex"), "{metric}");
+    let dim = one(format!(
+        "SELECT ai_context FROM v_dimension WHERE key = '{AREA}'"
+    ))
+    .await
+    .expect("the dimension's block");
+    assert!(dim.contains("The top folder of a file."), "{dim}");
+    // A declaration without a block reads NULL.
+    let (bare, _) = project(|_| {}).await;
+    assert_eq!(
+        opt_text(
+            &bare
+                .rows(&format!(
+                    "SELECT ai_context FROM v_dimension WHERE key = '{AREA}'"
+                ))
+                .await[0][0]
+        ),
+        None
+    );
+}
+
+/// An unknown key under `ai_context` is a load error, not ignored.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_unknown_key_under_ai_context_is_a_load_error() {
+    let (p, _) = project(|files| with_ai_context(files, true)).await;
+    let problems = format!("{:?}", p.svc.extension_activation.problems());
+    assert!(problems.contains("unknown field `hint`"), "{problems}");
+}
