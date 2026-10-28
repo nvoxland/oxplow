@@ -7335,6 +7335,101 @@
         }
       ],
       "key": []
+    },
+    "3": {
+      "columns": [
+        {
+          "name": "key",
+          "type": "TEXT",
+          "doc": "Metric key, e.g. `oxplow.coverage.abs_pct`."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "Display name."
+        },
+        {
+          "name": "unit",
+          "type": "TEXT",
+          "doc": "Unit, e.g. `%`, `ms`; NULL for counts."
+        },
+        {
+          "name": "source_measure",
+          "type": "TEXT",
+          "doc": "Measure whose facts it aggregates; NULL for a formula metric."
+        },
+        {
+          "name": "aggregation",
+          "type": "TEXT",
+          "doc": "How facts combine within a capture: count, sum, avg, min, max, last, p95, ratio, …"
+        },
+        {
+          "name": "direction",
+          "type": "TEXT",
+          "doc": "`higher-better`, `lower-better` or `neutral`."
+        },
+        {
+          "name": "target",
+          "type": "REAL",
+          "doc": "Goal value, if any."
+        },
+        {
+          "name": "warn_at",
+          "type": "REAL",
+          "doc": "Warning threshold, if any (read with `direction`)."
+        },
+        {
+          "name": "fail_at",
+          "type": "REAL",
+          "doc": "Failure threshold, if any (read with `direction`)."
+        },
+        {
+          "name": "description",
+          "type": "TEXT",
+          "doc": "What it measures."
+        },
+        {
+          "name": "category",
+          "type": "TEXT",
+          "doc": "Grouping on the Metrics page."
+        },
+        {
+          "name": "language",
+          "type": "TEXT",
+          "doc": "Language it applies to, if language-specific."
+        },
+        {
+          "name": "scope",
+          "type": "",
+          "doc": "`built-in`, `global`, `project` or `extension`."
+        },
+        {
+          "name": "display_kind",
+          "type": "TEXT",
+          "doc": "`gauge`, `findings`, `test`, `coverage` or `event`."
+        },
+        {
+          "name": "extension",
+          "type": "TEXT",
+          "doc": "The extension that declares it, when `scope` is `extension`."
+        },
+        {
+          "name": "entity_json",
+          "type": "TEXT",
+          "doc": "For an entity metric, what it reads: `{\"view\", \"where\", \"time\", \"value\", \"aggregation\"}`; NULL for a fact metric. (v2)"
+        },
+        {
+          "name": "ai_context",
+          "type": "TEXT",
+          "doc": "Guidance for an agent reading the metric, as JSON `{\"instructions\", \"synonyms\", \"examples\"}`; NULL when none. Not part of the contract. (v2)"
+        },
+        {
+          "name": "expression",
+          "type": "TEXT",
+          "doc": "How a measure or formula metric reads its facts, in its canonical `expression:` text (`COUNT(*) FILTER (WHERE value >= 11)`, `METRIC('a') / METRIC('b')`); NULL for an entity metric. (v3)"
+        }
+      ],
+      "key": []
     }
   },
   "page_visit": {

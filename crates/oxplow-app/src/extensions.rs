@@ -3627,7 +3627,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                     ext.warnings.push(err_at(
                         "metrics",
                         format!(
-                            "metric `{}`: sourceMeasure `{sm}` is not a measure this extension declares; it must come from the project's or another extension's `measures:`",
+                            "metric `{}`: measure `{sm}` is not a measure this extension declares; it must come from the project's or another extension's `measures:`",
                             spec.key.clone().unwrap_or_default()
                         ),
                     ));
@@ -7155,7 +7155,7 @@ view:
     fn a_metric_naming_a_measure_from_elsewhere_is_a_warning() {
         let dir = tempfile::tempdir().unwrap();
         let manifest = format!(
-            "{EXT_V2}measures:\n  - {{ key: review.todo, title: TODOs, unit: count, subjectKind: file, fold: last }}\nmetrics:\n  - {{ key: review.todo_total, title: TODO total, sourceMeasure: review.todo, aggregation: sum }}\n  - {{ key: review.bad, title: Bad, sourceMeasure: review.missing, aggregation: sum }}\n"
+            "{EXT_V2}measures:\n  - {{ key: review.todo, title: TODOs, unit: count, subjectKind: file, fold: last }}\nmetrics:\n  - {{ key: review.todo_total, title: TODO total, measure: review.todo, expression: \"SUM(value)\" }}\n  - {{ key: review.bad, title: Bad, measure: review.missing, expression: \"SUM(value)\" }}\n"
         );
         write(
             dir.path(),
@@ -7167,7 +7167,7 @@ view:
         let warn = e
             .warnings
             .iter()
-            .find(|m| m.contains("sourceMeasure `review.missing`"))
+            .find(|m| m.contains("measure `review.missing`"))
             .unwrap_or_else(|| panic!("{:?}", e.warnings));
         assert!(warn.contains("extension.yaml:"), "{warn}");
         assert_eq!(e.metrics.len(), 2, "both specs still load");
@@ -9097,7 +9097,7 @@ commands:
         let (_d, ext) = load_x(
             &[],
             "measures:\n  - { key: oxplow.loc, title: Lines }\n\
-             metrics:\n  - { key: acme.loc, title: Lines, sourceMeasure: acme.x, aggregation: sum, collector: acme.nope }\n",
+             metrics:\n  - { key: acme.loc, title: Lines, measure: acme.x, expression: \"SUM(value)\", collector: acme.nope }\n",
         );
         assert!(ext.metrics.is_empty(), "{:?}", ext.metrics);
         for needle in [
@@ -9118,7 +9118,7 @@ commands:
             "measures:",
             "  - { key: acme.todo, title: TODOs }",
             "metrics:",
-            "  - { key: acme.todos, title: TODOs, sourceMeasure: acme.todo, aggregation: sum }",
+            "  - { key: acme.todos, title: TODOs, measure: acme.todo, expression: \"SUM(value)\" }",
             "  - { use: oxplow.rust.unsafe_blocks }",
             "collectors:",
             "  - { id: acme.missing, runtime: starlark, entry: collectors/nope.star, facts: [acme.todo] }",

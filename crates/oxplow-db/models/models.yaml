@@ -684,7 +684,7 @@
     - { name: "description", type: "TEXT", doc: "What the measure means." }
     - { name: "fold", type: "TEXT", doc: "How the series folds over time into one number: `sum`, `last`, `first`, `avg` or `none`; empty when the measure declares none." }
 - name: metric_spec
-  version: 2
+  version: 3
   description: "Metric definitions: what each metric aggregates, which direction is good, and its target / warn / fail thresholds. Whether a metric is enabled here is `v_metric_catalog.enabled`."
   fields:
     - { name: "key", type: "TEXT", doc: "Metric key, e.g. `oxplow.coverage.abs_pct`." }
@@ -704,6 +704,7 @@
     - { name: "extension", type: "TEXT", doc: "The extension that declares it, when `scope` is `extension`." }
     - { name: "entity_json", type: "TEXT", doc: "For an entity metric, what it reads: `{\"view\", \"where\", \"time\", \"value\", \"aggregation\"}`; NULL for a fact metric. (v2)" }
     - { name: ai_context, type: TEXT, doc: "Guidance for an agent reading the metric, as JSON `{\"instructions\", \"synonyms\", \"examples\"}`; NULL when none. Not part of the contract. (v2)" }
+    - { name: expression, type: TEXT, doc: "How a measure or formula metric reads its facts, in its canonical `expression:` text (`COUNT(*) FILTER (WHERE value >= 11)`, `METRIC('a') / METRIC('b')`); NULL for an entity metric. (v3)" }
 - name: page_visit
   version: 3
   description: "Pages the human opened in oxplow, and for how long — what they've been looking at."

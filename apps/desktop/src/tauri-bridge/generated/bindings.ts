@@ -2693,24 +2693,6 @@ export type FileSnapshot = {
 export type FileSnapshotId = number;
 
 /**
- *  A fact predicate on a `metrics:` spec (the `filter:` block) — the config
- *  mirror of the engine's `FactFilter`. A conjunctive predicate
- *  keeping only the facts that match before aggregation: `minValue` for a
- *  count-over-threshold (complexity ≥ N), `severity` for a lint slice, `dimEq`
- *  for a conformed-dimension slice (`[oxplow.rule, unsafe_block]`).
- */
-export type FilterConfig = {
-	/**  Keep facts with `value >= minValue`. */
-	minValue?: number | null,
-	/**  Keep facts with `value <= maxValue` (`0`: the untested files). */
-	maxValue?: number | null,
-	/**  Keep facts whose reported severity equals this (e.g. `error`). */
-	severity?: string | null,
-	/**  Keep facts whose dimension `[key]` equals `[value]` — a 2-element list. */
-	dimEq?: string[] | null,
-};
-
-/**
  *  An effect's or collector's `on:` naming an event type of another
  *  extension's namespace (P9.D1). The type's name is the dependency —
  *  there is no `depends:` key, as a model's `ref('<ext>/<name>')` has
@@ -2922,21 +2904,6 @@ export type FormStart_Serialize = {
 	 *  again.
 	 */
 	reads: Reads,
-};
-
-/**
- *  A derived-metric formula on a `metrics:` spec (the `formula:` block) — a
- *  constrained binary op over two OTHER metric keys (no source measure). The
- *  engine aligns the two metrics on their shared rollup key and applies `op`
- *  (`div` is the ratio primitive: bugs-per-KLOC, cost-per-token).
- */
-export type FormulaConfig = {
-	/**  `add` | `sub` | `mul` | `div`. */
-	op: string,
-	/**  The left operand metric key. */
-	left: string,
-	/**  The right operand metric key. */
-	right: string,
 };
 
 /**
@@ -3539,12 +3506,12 @@ export type MetricDefault = "on" | "off";
 /**
  *  One entry in the top-level `metrics:` block — a **pure read-time SPEC** over a
  *  measure. A metric no longer *computes* anything: it names a
- *  `sourceMeasure` + an `aggregation` (+ optional `filter`), or a `formula` over
+ *  `measure` + an `expression` (an aggregate with an optional filter), or a formula over
  *  other metrics, and the engine aggregates the durable facts a `collectors:` entry
  *  emitted. Two forms, distinguished by which key is set:
  *  - **`use:`** — enable an existing catalog metric by key (built-in/global),
  *    optionally overriding `target`/thresholds for this project.
- *  - **`key:`** — define a NEW spec (`sourceMeasure` + `aggregation`, or `formula`).
+ *  - **`key:`** — define a NEW spec (a `measure` + an aggregate `expression`, or a formula `expression`).
  *
  *  Resolved across the three scopes into [`ResolvedSpec`]s. All non-discriminant
  *  fields are optional so both forms share one struct; validation enforces the
@@ -3578,22 +3545,24 @@ export type MetricEntry = {
 	title?: string | null,
 	/**
 	 *  The measure whose facts this metric aggregates (required for a `key:`
-	 *  metric unless it sets `formula`). NULL for a pure formula metric.
+	 *  metric with an aggregate `expression`). None for a formula metric.
 	 */
-	sourceMeasure?: string | null,
+	measure?: string | null,
 	/**
-	 *  `count` | `sum` | `avg` | `min` | `max` | `last` | `ratio` (default `last`).
-	 *  Combines the facts WITHIN a capture; cross-time collapse is governed by the
-	 *  source measure's `temporalSemantics`.
+	 *  How the metric reads its facts, in one closed expression
+	 *  ([`metric_expr`]): an aggregate with an optional filter
+	 *  (`COUNT(*) FILTER (WHERE value >= 11)`, `SUM(value) FILTER (WHERE
+	 *  dim('oxplow.rule') = 'x')`, `RATIO(num, den)`), or a formula over
+	 *  other metrics (`METRIC('a') / METRIC('b')`). It combines the facts
+	 *  WITHIN a capture; the cross-time collapse is the measure's `fold`.
+	 */
+	expression?: string | null,
+	/**
+	 *  An ENTITY metric's aggregation (`count` | `sum` | … over its rows). A
+	 *  measure metric's is part of its `expression`; this is then what the
+	 *  expression compiled to.
 	 */
 	aggregation?: string | null,
-	/**  Fact predicate applied before aggregation (`minValue` / `severity` / `dimEq`). */
-	filter?: FilterConfig | null,
-	/**
-	 *  Derived-metric formula over other metric keys (mutually exclusive with
-	 *  `sourceMeasure`).
-	 */
-	formula?: FormulaConfig | null,
 	unit?: string | null,
 	/**  `higher-better` | `lower-better` | `neutral` (default `neutral`). */
 	direction?: string | null,

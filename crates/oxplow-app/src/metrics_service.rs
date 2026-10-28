@@ -2636,6 +2636,7 @@ pub(crate) fn spec_to_new_spec(s: &ResolvedSpec) -> NewMetricSpec {
         aggregation: s.aggregation.clone(),
         filter_json: s.filter.as_ref().map(filter_to_json),
         formula: s.formula.as_ref().map(formula_to_json),
+        expression: s.expression.clone(),
         sliceable_dims_json: (!s.sliceable_dims.is_empty())
             .then(|| serde_json::to_string(&s.sliceable_dims).unwrap_or_else(|_| "[]".into())),
         direction: s.direction.clone(),
@@ -5489,7 +5490,7 @@ def transform(input):
         let (svc, dir) = fixture().await;
         write_project_extension(
             dir.path(),
-            "metrics:\n  - key: repo.loc\n    title: \"lines\"\n    sourceMeasure: acme.lines\n    aggregation: sum\n",
+            "metrics:\n  - key: repo.loc\n    title: \"lines\"\n    measure: acme.lines\n    expression: \"SUM(value)\"\n",
         );
         crate::test_fixtures::activate_with_problems(&svc).await;
         let spec = svc
@@ -5587,7 +5588,7 @@ def transform(input):
             dir.path(),
             "measures:\n  - key: repo.kept\n    unit: count\n    \
              temporalSemantics: semi-additive\n    fold: last\nmetrics:\n  - key: repo.kept\n    \
-             title: Kept\n    sourceMeasure: repo.kept\n    aggregation: sum\n",
+             title: Kept\n    measure: repo.kept\n    expression: \"SUM(value)\"\n",
         );
         crate::test_fixtures::activate_with_problems(&svc).await;
 
@@ -5649,11 +5650,11 @@ def transform(input):
         write_project_extension(
             dir.path(),
             "metrics:\n  - key: repo.latency_p95\n    title: \"p95\"\n    \
-             sourceMeasure: acme.latency\n    aggregation: p95\n",
+             measure: acme.latency\n    expression: \"P95(value)\"\n",
         );
         let problems = crate::test_fixtures::activate_with_problems(&svc).await;
         assert!(
-            format!("{problems:?}").contains("aggregation must be one of"),
+            format!("{problems:?}").contains("the grammar is"),
             "the extension names the allowed vocabulary, got: {problems:?}"
         );
         // The bad extension never loaded: nothing reaches the catalog or the
@@ -5822,7 +5823,7 @@ def transform(input):
             ext.join("extension.yaml"),
             "manifest: 2\nname: acme\nintent:\n  purpose: test\npermissions: [files.read]\n\
              measures:\n  - { key: acme.todo, title: TODOs, fold: last }\n\
-             metrics:\n  - { key: acme.todos, title: TODOs, sourceMeasure: acme.todo, aggregation: sum }\n\
+             metrics:\n  - { key: acme.todos, title: TODOs, measure: acme.todo, expression: \"SUM(value)\" }\n\
              collectors:\n  - { id: acme.todo_scan, runtime: starlark, entry: collectors/todo.star, facts: [acme.todo] }\n",
         )
         .unwrap();
@@ -5918,7 +5919,7 @@ def transform(input):
                 format!(
                     "manifest: 2\nname: {name}\nintent:\n  purpose: test\n\
                      measures:\n  - {{ key: {measure}, title: TODOs, fold: last }}\n\
-                     metrics:\n  - {{ key: shared.todos, title: TODOs, sourceMeasure: {measure}, aggregation: sum }}\n"
+                     metrics:\n  - {{ key: shared.todos, title: TODOs, measure: {measure}, expression: \"SUM(value)\" }}\n"
                 ),
             )
             .unwrap();
@@ -5952,9 +5953,9 @@ def transform(input):
     #[tokio::test]
     async fn a_metric_over_a_measure_with_no_fold_is_refused() {
         for (fold, aggregation) in [
-            ("", "sum"),
-            (", fold: none", "avg"),
-            (", fold: last", "sum"),
+            ("", "SUM(value)"),
+            (", fold: none", "AVG(value)"),
+            (", fold: last", "SUM(value)"),
         ] {
             let (svc, dir) = fixture().await;
             let ext = dir.path().join(".oxplow/extensions/acme");
@@ -5964,7 +5965,7 @@ def transform(input):
                 format!(
                     "manifest: 2\nname: acme\nintent:\n  purpose: test\n\
                      measures:\n  - {{ key: acme.todo, title: TODOs{fold} }}\n\
-                     metrics:\n  - {{ key: acme.todos, title: TODOs, sourceMeasure: acme.todo, aggregation: {aggregation} }}\n"
+                     metrics:\n  - {{ key: acme.todos, title: TODOs, measure: acme.todo, expression: \"{aggregation}\" }}\n"
                 ),
             )
             .unwrap();
@@ -6039,7 +6040,7 @@ def transform(input):
             ext.join("extension.yaml"),
             "manifest: 2\nname: acme\nintent:\n  purpose: test\npermissions: [files.read]\n\
              measures:\n  - { key: acme.todo, title: TODOs, fold: last }\n\
-             metrics:\n  - { key: acme.todos, title: TODOs, sourceMeasure: acme.todo, aggregation: sum, default: off, collector: acme.todo_scan }\n\
+             metrics:\n  - { key: acme.todos, title: TODOs, measure: acme.todo, expression: \"SUM(value)\", default: off, collector: acme.todo_scan }\n\
              collectors:\n  - { id: acme.todo_scan, runtime: starlark, entry: collectors/todo.star, facts: [acme.todo] }\n  \
              - { id: acme.always, runtime: starlark, entry: collectors/todo.star, facts: [acme.todo] }\n",
         )

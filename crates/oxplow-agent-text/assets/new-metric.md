@@ -76,8 +76,8 @@ collectors:
     facts: [complex_fns.complex_functions]
 metrics:
   - key: complex_fns.complex_functions   # the SPEC
-    sourceMeasure: complex_fns.complex_functions
-    aggregation: sum
+    measure: complex_fns.complex_functions
+    expression: "SUM(value)"
     direction: lower-better
     displayKind: findings
     sliceableDims: [complex_fns.area]

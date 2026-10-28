@@ -33,6 +33,22 @@ pub const RENAMED: &[(&str, &str)] = &[
          `fields: [{ name, type, doc }]`",
     ),
     (
+        "sourceMeasure",
+        "a metric's `measure:` names the measure and its one `expression:` says how its facts \
+         combine — `sourceMeasure: M, aggregation: sum` is `measure: M, expression: \"SUM(value)\"`",
+    ),
+    (
+        "filter",
+        "a metric's filter is part of its `expression:` — `filter: { minValue: 11 }` is \
+         `expression: \"COUNT(*) FILTER (WHERE value >= 11)\"`, `filter: { dimEq: [k, v] }` is \
+         `FILTER (WHERE dim('k') = 'v')`, `filter: { severity: s }` is `FILTER (WHERE severity = 's')`",
+    ),
+    (
+        "formula",
+        "a derived metric is an `expression:` — `formula: { op: div, left: a, right: b }` is \
+         `expression: \"METRIC('a') / METRIC('b')\"` (`add` is `+`, `sub` `-`, `mul` `*`)",
+    ),
+    (
     "trigger",
     "write `on:` on the entry itself — `trigger: { on: [x], where: {…}, settle: 30s }` is \
      `on: [x]` with `where:` and `settle:` beside it, `trigger: { every: 15m }` is \
@@ -65,6 +81,26 @@ pub fn hint_unknown(message: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The metric keys that became `measure:` and `expression:` say so, with
+    /// the equivalent expression.
+    #[test]
+    fn the_old_metric_keys_say_what_an_expression_is() {
+        for (old, says) in [
+            ("sourceMeasure", "measure: M, expression:"),
+            ("filter", "FILTER (WHERE value >= 11)"),
+            ("formula", "METRIC('a') / METRIC('b')"),
+        ] {
+            let hinted = hint_unknown(&format!(
+                "metrics[0]: unknown field `{old}`, expected one of `key`, `expression` at line 3 column 5"
+            ));
+            assert!(
+                hinted.starts_with(&format!("metrics[0]: unknown key `{old}` — ")),
+                "{hinted}"
+            );
+            assert!(hinted.contains(says), "{old}: {hinted}");
+        }
+    }
 
     /// An old key's refusal says what to write instead, keeping where it
     /// is; any other message passes through.
