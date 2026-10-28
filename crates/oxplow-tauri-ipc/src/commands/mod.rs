@@ -12,6 +12,7 @@ pub mod config;
 pub mod effort;
 pub mod generated;
 pub mod hooks;
+pub mod install_cli;
 pub mod launch;
 pub mod log;
 pub mod lsp;

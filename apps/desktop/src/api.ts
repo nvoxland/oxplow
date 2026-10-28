@@ -726,6 +726,12 @@ export async function listRecentProjects(): Promise<RecentProjectView[]> {
   return unwrap(await commands.listRecentProjects());
 }
 
+/// Put the `oxplow` command on the PATH (a link to this app); the hint, when
+/// set, says what to add to the PATH.
+export async function installCli(): Promise<{ path: string; hint: string | null }> {
+  return unwrap(await commands.installCli());
+}
+
 /// Forget a project from the recent list.
 export async function removeRecentProject(path: string): Promise<void> {
   unwrap(await commands.removeRecentProject(path));

@@ -615,6 +615,12 @@ this checkout out of what it ships:
   `README.md` hold no dev-loop text. `DEV.md` "Run from source" is where
   building and running from source go.
 
+The shell's File ▸ "Install `oxplow` command line…" (`install_cli`,
+`crates/oxplow-tauri-ipc/src/commands/install_cli.rs`) links the running
+app's binary as `oxplow` in `/usr/local/bin`, else `~/.local/bin` (with a
+PATH hint). The foundation-down dialog shows only the backend's held
+reason, never a dev command (`apps/desktop/src/foundationDown.ts`).
+
 The generated `docs/reference/schemas/extension.schema.json` cites no
 `.context/` doc either (a schemars doc comment is published text).
 

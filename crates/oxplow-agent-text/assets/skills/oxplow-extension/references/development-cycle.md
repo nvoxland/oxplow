@@ -75,9 +75,9 @@ harnesses, Alerts, Settings and core's commands. If it isn't running, the
 app shows a dialog that says so, and `oxplow.extension.deploy` is
 unavailable (it is foundation's command). This happens when someone
 develops oxplow itself: a core change that foundation's recorded
-deployment doesn't activate against. Settings → Extensions shows why it
-is held. The fix is outside oxplow: tell the person to reinstall oxplow
-(or update it), then start it again.
+deployment doesn't activate against. The dialog says why it is held. The
+fix is outside oxplow: tell the person to reinstall oxplow (or update it),
+then start it again.
 
 ## What already exists
 

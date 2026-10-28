@@ -463,6 +463,7 @@ pub const MANIFEST: &[Capability] = &[
     ui("open_project", "the launcher opens a project window"),
     ui("create_project", "the launcher creates a project window"),
     ui("setup_project", "a person confirms a project's first-run setup"),
+    ui("install_cli", "a person puts the oxplow command on their PATH"),
     ui("abort_setup", "a person declines a project's first-run setup"),
 ];
 

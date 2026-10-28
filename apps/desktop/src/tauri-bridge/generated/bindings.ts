@@ -766,6 +766,11 @@ export const commands = {
 	setupProject: (path: string) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("setup_project", { path })),
 	/**  Decline first-run setup: close this window. */
 	abortSetup: () => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("abort_setup")),
+	/**
+	 *  Make `oxplow` run this app: a symlink in `/usr/local/bin`, else in
+	 *  `~/.local/bin`.
+	 */
+	installCli: () => typedError<InstalledCli, IpcError_Serialize>(__TAURI_INVOKE("install_cli")),
 };
 
 /* Types */
@@ -1708,10 +1713,7 @@ export type CommandSpec = {
 	unrecorded?: string[],
 };
 
-/**
- *  A command as a person meets it (`.context/commands.md` "Offering a
- *  command to a person"). Agents ignore it.
- */
+/**  A command as a person meets it. Agents ignore it. */
 export type CommandUi = {
 	/**  What a person reads: `Pull Changes`, `New Task…`. */
 	label: string,
@@ -3354,6 +3356,14 @@ export type ImportGuard = {
 	contribution: ContributionId,
 	imports: string[],
 	source: DeclaredAt,
+};
+
+/**  Where the command went, and what the person still has to do. */
+export type InstalledCli = {
+	/**  The symlink, `<folder>/oxplow`. */
+	path: string,
+	/**  Set when the folder isn't on the PATH: what to add. */
+	hint: string | null,
 };
 
 export type InstalledLspPackage = {
@@ -5387,7 +5397,7 @@ export type RecentProjectView = {
 
 /**
  *  What a report collector records: its parser's typed output, merged
- *  into the run (`.context/collection.md`).
+ *  into the run.
  */
 export type Records =
 /**  A suite/case tree of test outcomes (a `test-run`). */

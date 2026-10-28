@@ -84,6 +84,9 @@ export function menuItemById(groups: MenuGroup[], id: string): MenuItem | undefi
 /// trailing path in a new window.
 export const OPEN_RECENT_PREFIX = "project.openRecent:";
 
+/// The File item that puts the `oxplow` command on the PATH (the shell's).
+export const INSTALL_CLI_ID = "shell.install_cli";
+
 /// The File item Open Recent follows.
 const OPEN_RECENT_AFTER = "oxplow.project.open_in_new_window";
 
@@ -113,6 +116,13 @@ export function buildNativeMenuSnapshots(
       };
       const afterIdx = items.findIndex((i) => i.id === OPEN_RECENT_AFTER);
       items.splice(afterIdx >= 0 ? afterIdx + 1 : items.length, 0, openRecent);
+      items.push({
+        id: INSTALL_CLI_ID,
+        label: "Install `oxplow` command line…",
+        shortcut: null,
+        enabled: true,
+        checked: null,
+      });
     }
     return { id: group.id, label: group.label, items };
   });

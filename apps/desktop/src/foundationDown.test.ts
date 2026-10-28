@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 
 import type { Extension } from "./api.js";
-import { FOUNDATION, foundationDown } from "./foundationDown.js";
+import { FOUNDATION, foundationDown, foundationDownText } from "./foundationDown.js";
 
 const ext = (name: string, enabled: boolean, errors: string[] = []) =>
   ({ name, enabled, errors }) as unknown as Extension;
@@ -28,4 +28,11 @@ test("a loaded listing without foundation reports it missing", () => {
 
 test("an empty listing (one that failed to load) is not reported", () => {
   expect(foundationDown([])).toBeNull();
+});
+
+test("the dialog shows the held reason and no developer command", () => {
+  const text = foundationDownText(["held: needs 0.8"]).join("\n");
+  expect(text).toContain("held: needs 0.8");
+  expect(text).not.toContain("cargo");
+  expect(text).not.toContain("oxplow-dev");
 });

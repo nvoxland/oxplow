@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { buildMenuBar, buildNativeMenuSnapshots, menuItemById, OPEN_RECENT_PREFIX } from "./menuBar.js";
+import { buildMenuBar, buildNativeMenuSnapshots, INSTALL_CLI_ID, menuItemById, OPEN_RECENT_PREFIX } from "./menuBar.js";
 import type { CommandEntry } from "./components/quickOpenResults.js";
 import type { MenuItemSnapshot } from "./tauri-bridge/generated/bindings.js";
 
@@ -110,8 +110,16 @@ test("the native menu is the shell's own snapshot shape, with Open Recent", () =
     "oxplow.project.open_in_new_window",
     "project.openRecent",
     "oxplow.editor.save",
+    INSTALL_CLI_ID,
   ]);
   expect(file.items[2].submenu).toEqual([
     { id: `${OPEN_RECENT_PREFIX}/p/a`, label: "A", shortcut: null, enabled: true, checked: null },
   ]);
+});
+
+test("File ▸ Install `oxplow` command line… is in the native menu", () => {
+  const file = buildNativeMenuSnapshots(buildMenuBar([]), []).find((g) => g.id === "file")!;
+  const item = file.items.find((i) => i.id === INSTALL_CLI_ID);
+  expect(item?.label).toBe("Install `oxplow` command line…");
+  expect(item?.enabled).toBe(true);
 });
