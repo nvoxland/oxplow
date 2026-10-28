@@ -139,14 +139,12 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::page_form,
             commands::generated::submit_page_form,
             commands::generated::page_action_form,
-            commands::generated::validate_extension,
             commands::generated::report_tabs,
             // The sign-in redirect, caught by the shell (P10).
             commands::oauth_redirect::listen_for_oauth_redirect,
             commands::oauth_redirect::await_oauth_redirect,
             commands::oauth_redirect::answer_oauth_redirect,
             commands::oauth_redirect::stop_oauth_redirect,
-            commands::generated::ensure_change,
             commands::generated::ai_settings,
             commands::generated::read_ai_call,
             // the Assistant's panel
@@ -213,8 +211,6 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::read_workspace_file,
             commands::generated::files_at,
             commands::generated::vcs_blame,
-            commands::generated::vcs_log,
-            commands::generated::vcs_branches,
             // background tasks
             commands::generated::list_background_tasks,
             commands::generated::get_background_task,

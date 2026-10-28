@@ -170,27 +170,12 @@ async fn primary_and_thread(app: &TestApp) -> (Stream, Thread) {
     (stream, thread)
 }
 
-// ---- branch commands ----
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn vcs_branches_include_the_default_branch() {
-    let app = TestApp::build().await;
-    let branches = commands::generated::vcs_branches(app.state(), None)
-        .await
-        .unwrap();
-    assert!(
-        branches.iter().any(|b| b.is_default),
-        "a repo with one commit has its default branch: {branches:?}"
-    );
-}
-
 // ---- git read commands ----
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn git_reads_over_primary_worktree() {
     let app = TestApp::build().await;
     let s = app.state();
-    let _ = commands::generated::vcs_log(s.clone(), None, Some(10), false).await;
     let _ = commands::generated::read_at(
         s.clone(),
         None,

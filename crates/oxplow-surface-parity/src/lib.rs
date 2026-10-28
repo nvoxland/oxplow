@@ -15,7 +15,12 @@
 //! matching row fails the test, forcing an explicit classification.
 //!
 //! ## The four exposures
-//! - [`Exposure::Both`] — present on IPC and MCP (names may diverge per surface).
+//! - [`Exposure::Both`] — present on IPC and MCP (names may diverge per
+//!   surface), with [`One`] saying how the two stay one operation: the
+//!   IPC adapter runs the agent's bus command as the person
+//!   ([`One::Bus`], which `tests/parity.rs` checks in the adapter's
+//!   source), or the person's shape differs from the agent's and both
+//!   call the same service ([`One::Shape`], saying why).
 //! - [`Exposure::UiOnly`] — intentionally UI-only, saying why an agent has
 //!   no tool for it: a person's consent or setting, the person's own
 //!   selection or input, live state pushed to the UI, runtime infra (menus,
@@ -34,8 +39,8 @@
 /// Which adapter surface(s) a capability is expected to live on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Exposure {
-    /// Live on both the IPC (UI) and MCP (agent) surfaces.
-    Both,
+    /// Live on both the IPC (UI) and MCP (agent) surfaces, one operation.
+    Both { one: One },
     /// Intentionally UI-only: `why` an agent has no tool for it.
     UiOnly { why: &'static str },
     /// A UI read an agent makes through these published models instead
@@ -43,6 +48,17 @@ pub enum Exposure {
     Model { models: &'static [&'static str] },
     /// Intentionally agent-only.
     AgentOnly,
+}
+
+/// How a [`Exposure::Both`] row is one operation on two front doors.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum One {
+    /// The IPC adapter runs this bus command as the person, so the bus
+    /// validates and answers for both.
+    Bus { command: &'static str },
+    /// The person's call has another shape (an open run, a UI-only
+    /// switch); both sides call the same service. `why` says what differs.
+    Shape { why: &'static str },
 }
 
 /// One domain capability and the name it carries on each surface.
@@ -59,20 +75,34 @@ pub struct Capability {
 
 use Exposure::*;
 
-/// Helper for `Both` rows whose name is identical on both surfaces.
-const fn both(name: &'static str) -> Capability {
-    Capability {
-        capability: name,
-        exposure: Both,
-        ipc: Some(name),
-        mcp: Some(name),
-    }
-}
-/// Helper for `Both` rows whose name diverges across surfaces.
-const fn both_named(capability: &'static str, ipc: &'static str, mcp: &'static str) -> Capability {
+/// A `Both` row whose IPC adapter runs the agent's bus `command`.
+const fn via_bus(
+    capability: &'static str,
+    ipc: &'static str,
+    mcp: &'static str,
+    command: &'static str,
+) -> Capability {
     Capability {
         capability,
-        exposure: Both,
+        exposure: Both {
+            one: One::Bus { command },
+        },
+        ipc: Some(ipc),
+        mcp: Some(mcp),
+    }
+}
+/// A `Both` row whose person's call has another shape; `why`.
+const fn both_shaped(
+    capability: &'static str,
+    ipc: &'static str,
+    mcp: &'static str,
+    why: &'static str,
+) -> Capability {
+    Capability {
+        capability,
+        exposure: Both {
+            one: One::Shape { why },
+        },
         ipc: Some(ipc),
         mcp: Some(mcp),
     }
@@ -144,7 +174,12 @@ pub const MANIFEST: &[Capability] = &[
     model("list_services", &["v_scope"]),
     // The bus itself: an agent through MCP (as its verified thread), the
     // person through IPC (`Actor::Human`, confirming where asked).
-    both("run_command"),
+    both_shaped(
+        "run_command",
+        "run_command",
+        "run_command",
+        "the bus itself: any command, run as the caller",
+    ),
     ui(
         "command_open_after",
         "binds the page a person's run opens next (`ui.open_after`), for the window",
@@ -178,8 +213,13 @@ pub const MANIFEST: &[Capability] = &[
         "decide_proposal",
         "approving or declining an agent's proposal is a person's (P6b)",
     ),
-    both_named("search", "search", "oxplow_search"),
-    both_named("query_sql", "query_sql", "oxplow_query_sql"),
+    via_bus("search", "search", "oxplow_search", "oxplow.search.find"),
+    both_shaped(
+        "query_sql",
+        "query_sql",
+        "oxplow_query_sql",
+        "the explorer's `raw` switch reads tables, which no agent may; both read through the one gateway",
+    ),
     ui("get_panel_layout", "the person's left-nav layout (P6.G1)"),
     ui("set_panel_layout", "the person's left-nav layout (P6.G1)"),
     model("get_ui_preferences", &["v_ui_preference"]),
@@ -192,7 +232,12 @@ pub const MANIFEST: &[Capability] = &[
     ui("set_page_params", "a pick, filter or switch in the page a window shows"),
     ui("rerun_page", "Refresh on the page a window shows"),
     ui("fetch_page_runs", "a window fetches the open runs it heard changed"),
-    both_named("run_page", "run_page", "oxplow_run_page"),
+    both_shaped(
+        "run_page",
+        "run_page",
+        "oxplow_run_page",
+        "a window draws the run's tree; an agent reads its text, a draft or one loader; both run the one PageRunner",
+    ),
     // An agent finds the pages that answer a question; a person has the
     // launcher and the catalog page.
     agent("oxplow_find_page"),
@@ -202,7 +247,12 @@ pub const MANIFEST: &[Capability] = &[
     ui("page_text", "Copy's text on the page a window shows"),
     ui("get_page", "the page a window draws; an agent reads a page's ref with `read`"),
     ui("page_spec", "the source YAML a window edits; agents read page definitions through `read`"),
-    both_named("run_page_action", "run_page_action", "oxplow_run_page_action"),
+    both_shaped(
+        "run_page_action",
+        "run_page_action",
+        "oxplow_run_page_action",
+        "a person presses a button on a run a window holds, and confirms; an agent opens a run and never confirms; both press through pages::actions",
+    ),
     ui("page_form", "a form node is the person's form; an agent runs the command itself"),
     ui("submit_page_form", "a form node is the person's form; an agent runs the command itself"),
     ui("page_action_form", "a form action's form is the person's; an agent runs the command itself"),
@@ -222,7 +272,7 @@ pub const MANIFEST: &[Capability] = &[
         "component_form",
         "the form of a custom component's command, which the host shows the person when its frame asks",
     ),
-    both_named("validate_extension", "validate_extension", "oxplow_validate_extension"),
+    agent("oxplow_validate_extension"),
     ui(
         "report_tabs",
         "the tabs a window shows, which an agent reads with `list_tabs` and `get_open_page`",
@@ -243,7 +293,7 @@ pub const MANIFEST: &[Capability] = &[
         "stop_oauth_redirect",
         "the desktop shell's loopback listener for a person's sign-in (P10)",
     ),
-    both_named("ensure_change", "ensure_change", "oxplow_ensure_change"),
+    agent("oxplow_ensure_change"),
     model("ai_settings", &["v_ai_role", "v_ai_provider"]),
     ui("read_ai_call", "a person's look at a recorded model call; an agent reads its own with `read`"),
     ui("assistant_open", "the Assistant's panel: a person's own conversation with oxplow's in-app agent; an agent has its own session"),
@@ -260,7 +310,12 @@ pub const MANIFEST: &[Capability] = &[
     agent("oxplow_list_tabs"),
     // ---- both (names diverge across surfaces) ----
     model("list_threads", &["v_thread"]),
-    both_named("comment.list", "list_comments_for_stream", "oxplow_list_comments"),
+    both_shaped(
+        "comment.list",
+        "list_comments_for_stream",
+        "oxplow_list_comments",
+        "the comment layer draws a stream's threads itself; an agent's read filters by status and resolves what each names; both read the one store",
+    ),
     // ---- agent-only (orchestration / agent affordances) ----
     // One reader for anything a ref names.
     agent("oxplow_read"),
@@ -280,14 +335,14 @@ pub const MANIFEST: &[Capability] = &[
     // ---- git ----
     agent("oxplow_vcs_status"),
     agent("oxplow_diff"),
-    both_named("vcs_log", "vcs_log", "oxplow_vcs_log"),
-    both_named("vcs_blame", "vcs_blame", "oxplow_vcs_blame"),
+    agent("oxplow_vcs_log"),
+    via_bus("vcs_blame", "vcs_blame", "oxplow_vcs_blame", "oxplow.vcs.blame"),
     ui("read_at", "the editor's file at a revision; an agent reads a file ref at that revision with `read`"),
     ui(
         "resolve_symbol",
         "opening a symbol link; an agent reads v_symbol, and `read` for a pinned version",
     ),
-    both_named("vcs_branches", "vcs_branches", "oxplow_vcs_branches"),
+    agent("oxplow_vcs_branches"),
     // ---- snapshots / local history ----
     model("list_snapshot_ops", &["v_snapshot_op"]),
     model("list_files_for_snapshot", &["v_snapshot_file"]),
@@ -490,7 +545,7 @@ pub fn manifest_shape_errors() -> Vec<String> {
             }
         }
         let ok = match c.exposure {
-            Both => c.ipc.is_some() && c.mcp.is_some(),
+            Both { .. } => c.ipc.is_some() && c.mcp.is_some(),
             UiOnly { .. } | Model { .. } => c.ipc.is_some() && c.mcp.is_none(),
             AgentOnly => c.ipc.is_none() && c.mcp.is_some(),
         };

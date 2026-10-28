@@ -1,13 +1,12 @@
 //! Cores for the `extensions` command module — project extensions and
 //! their components. What the app shows is the main worktree's, whichever
-//! stream is open; only the authoring call (`validate_extension`) reads a
-//! stream's working copy. See
+//! stream is open. Checking an extension is the agent's
+//! `oxplow.extension.validate` (the CLI's `check`), not an IPC read. See
 //! `.context/extensions.md` "Reading".
 
 use oxplow_app::extensions::Extension;
 use oxplow_app::Services;
 use oxplow_db::SqlCell;
-use oxplow_domain::DomainError;
 
 use crate::error::IpcError;
 
@@ -15,12 +14,6 @@ use crate::error::IpcError;
 /// stream. A stream's `stream_id` only scopes the data a page reads.
 fn root(svc: &Services) -> &std::path::Path {
     svc.worktrees.project_dir()
-}
-
-/// The working copy an authoring call checks: the stream's worktree, or
-/// the main one when `stream_id` is omitted.
-async fn working_copy(svc: &Services, stream_id: Option<&str>) -> std::path::PathBuf {
-    svc.worktrees.resolve(stream_id).await.into_local_path()
 }
 
 /// Every extension the app shows, with per-extension load errors.
@@ -136,34 +129,6 @@ pub async fn invoke_component_command(
     .await?)
 }
 
-/// Load one extension and dry-run each page, returning every problem —
-/// the SDK's `check`, the same report `oxplow extension check` prints.
-pub async fn validate_extension(
-    svc: &Services,
-    name: String,
-    stream_id: Option<String>,
-) -> Result<oxplow_sdk::CheckReport, IpcError> {
-    let root = working_copy(svc, stream_id.as_deref()).await;
-    oxplow_sdk::check(
-        &root,
-        &name,
-        &svc.extension_catalog,
-        Some(&svc.sql),
-        Some(svc.commands.as_ref()),
-        None,
-    )
-    .await
-    .map_err(sdk_error)
-}
-
-fn sdk_error(e: oxplow_sdk::SdkError) -> IpcError {
-    match e {
-        oxplow_sdk::SdkError::NotFound(_) => DomainError::NotFound.into(),
-        oxplow_sdk::SdkError::Domain(d) => d.into(),
-        other => DomainError::Invalid(other.to_string()).into(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -250,11 +215,6 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(rows(&run, "streams"), json!([]));
-
-        let v = crate::dispatch("validate_extension", json!({ "name": "demo" }), &svc)
-            .await
-            .unwrap();
-        assert_eq!(v["errors"], json!([]));
     }
 
     /// A worktree stream at `dir` (a git worktree of the project, adopted

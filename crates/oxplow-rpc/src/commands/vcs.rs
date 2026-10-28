@@ -1,48 +1,38 @@
-//! A stream's version-control reads, neutral (P5.B4, `.context/vcs.md`):
-//! the head, status, blame, a revision's detail and a merge base — each
-//! over the `Vcs` capability, naming versions as `Revision`s.
+//! The person's version-control reads (`.context/vcs.md`): blame, the
+//! agent's read run as the person. History and branches are the agent's
+//! `oxplow.vcs.log` / `oxplow.vcs.branches` and the `v_commit` / `v_branch`
+//! models.
 
-use oxplow_app::vcs::reads;
 use oxplow_app::Services;
-use oxplow_domain::vcs::{BlameLine, Branch, Revision, RevisionInfo};
+use oxplow_domain::vcs::{BlameLine, Revision};
 
 use crate::error::IpcError;
 
+/// The blame of `path` at `revision`: the agent's `oxplow.vcs.blame`, run
+/// as the person.
 pub async fn vcs_blame(
     svc: &Services,
     stream_id: Option<String>,
     path: String,
     revision: Revision,
 ) -> Result<Vec<BlameLine>, IpcError> {
-    Ok(reads::blame(svc, stream_id.as_deref(), &path, &revision).await?)
-}
-
-pub async fn vcs_log(
-    svc: &Services,
-    stream_id: Option<String>,
-    limit: Option<u32>,
-    all: bool,
-) -> Result<Vec<RevisionInfo>, IpcError> {
-    let query = oxplow_domain::vcs::LogQuery {
-        limit,
-        all,
-        ..Default::default()
-    };
-    Ok(reads::log(svc, stream_id.as_deref(), query).await?)
-}
-
-pub async fn vcs_branches(
-    svc: &Services,
-    stream_id: Option<String>,
-) -> Result<Vec<Branch>, IpcError> {
-    Ok(reads::branches(svc, stream_id.as_deref()).await?)
+    crate::commands::bus::read_as_person(
+        svc,
+        "oxplow.vcs.blame",
+        serde_json::json!({
+            "stream_id": stream_id,
+            "path": path,
+            "revision": revision.to_string(),
+        }),
+    )
+    .await
 }
 
 #[cfg(test)]
 mod tests {
     use serde_json::json;
 
-    /// P5.B4 (tsk523): the neutral reads dispatch with revision strings.
+    /// The neutral read dispatches with a revision string.
     #[tokio::test]
     async fn the_vcs_reads_dispatch() {
         let (svc, dir) = crate::test_support::services().await;
@@ -69,20 +59,21 @@ mod tests {
         )
         .await;
         assert_eq!(blame[0]["revision"], json!(sha));
-        let log = call(
-            "vcs_log",
-            json!({ "streamId": null, "limit": 5, "all": false }),
+    }
+
+    /// The person's blame is the agent's: a stream id that isn't one is
+    /// refused at its field.
+    #[tokio::test]
+    async fn blame_refuses_a_thread_id_as_the_stream() {
+        let (svc, _dir) = crate::test_support::services().await;
+        let err = crate::dispatch(
+            "vcs_blame",
+            json!({ "streamId": "thr1", "path": "a.txt", "revision": "working" }),
+            &svc,
         )
-        .await;
-        assert_eq!(log[0]["subject"], json!("c1"));
-        let branches = call("vcs_branches", json!({ "streamId": null })).await;
-        assert!(
-            branches
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(|b| b["is_default"] == json!(true)),
-            "{branches}"
-        );
+        .await
+        .unwrap_err();
+        assert_eq!(err.code, "INVALID", "{err:?}");
+        assert_eq!(err.field.as_deref(), Some("/stream_id"), "{err:?}");
     }
 }

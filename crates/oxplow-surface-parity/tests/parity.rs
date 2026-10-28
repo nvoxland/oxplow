@@ -6,7 +6,7 @@ use std::cell::RefCell;
 use std::collections::BTreeSet;
 use std::path::Path;
 
-use oxplow_surface_parity::{manifest_shape_errors, Exposure, MANIFEST};
+use oxplow_surface_parity::{manifest_shape_errors, Exposure, One, MANIFEST};
 
 /// A throwaway `tauri_specta` export target that, instead of writing a file,
 /// captures the registered command names off the builder configuration. This
@@ -152,7 +152,7 @@ fn surface_parity() {
     // (b) Both rows present on both surfaces; (c) UiOnly/AgentOnly don't leak.
     for c in MANIFEST {
         match c.exposure {
-            Exposure::Both => {
+            Exposure::Both { .. } => {
                 let (i, m) = (c.ipc.unwrap(), c.mcp.unwrap());
                 if !ipc.contains(i) {
                     problems.push(format!("Both `{}` missing IPC command `{i}`", c.capability));
@@ -192,6 +192,54 @@ fn surface_parity() {
         mcp.len(),
         problems.join("\n")
     );
+}
+
+/// A `Both` row that says its IPC adapter runs the agent's bus command
+/// does: the adapter (the function the RPC table names) calls
+/// `read_as_person` with that command, so the bus validates and answers
+/// for both front doors.
+#[test]
+fn a_bus_row_runs_its_command_from_the_ipc_adapter() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let table = std::fs::read_to_string(root.join("crates/oxplow-rpc/src/lib.rs")).unwrap();
+    let mut problems = Vec::new();
+    for c in MANIFEST {
+        let Exposure::Both {
+            one: One::Bus { command },
+        } = c.exposure
+        else {
+            continue;
+        };
+        let ipc = c.ipc.unwrap();
+        let prefix = format!("{ipc} => $crate::commands::");
+        let Some(line) = table
+            .lines()
+            .map(str::trim)
+            .find(|l| l.starts_with(&prefix))
+        else {
+            problems.push(format!("`{ipc}` has no row in the RPC command table"));
+            continue;
+        };
+        let path = line[prefix.len()..].split_whitespace().next().unwrap();
+        let (module, func) = path.split_once("::").unwrap();
+        let source = std::fs::read_to_string(
+            root.join(format!("crates/oxplow-rpc/src/commands/{module}.rs")),
+        )
+        .unwrap();
+        let start = source
+            .find(&format!("pub async fn {func}("))
+            .unwrap_or_else(|| panic!("no `{func}` in commands/{module}.rs"));
+        let body = &source[start..];
+        let body = &body[..body[1..].find("\npub ").map_or(body.len(), |i| i + 1)];
+        if !body.contains("read_as_person") || !body.contains(&format!("\"{command}\"")) {
+            problems.push(format!(
+                "`{}`: commands/{module}.rs `{func}` must run `{command}` through \
+                 `bus::read_as_person`",
+                c.capability
+            ));
+        }
+    }
+    assert!(problems.is_empty(), "{}", problems.join("\n"));
 }
 
 /// P11 (tsk944): a row whose agent counterpart is a model names models the

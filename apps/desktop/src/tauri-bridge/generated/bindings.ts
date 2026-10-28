@@ -252,11 +252,6 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	validateExtension: (name: string, streamId: string | null) => typedError<CheckReport_Serialize, IpcError_Serialize>(__TAURI_INVOKE("validate_extension", { name, streamId })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
 	reportTabs: (report: TabReport) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("report_tabs", { report })),
 	/**
 	 *  Listen on loopback for a sign-in's redirect — on `port` when the
@@ -284,11 +279,6 @@ export const commands = {
 	 *  same port at once.
 	 */
 	stopOauthRedirect: (listener: number) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("stop_oauth_redirect", { listener })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	ensureChange: (target: ChangeTarget) => typedError<ChangeRow, IpcError_Serialize>(__TAURI_INVOKE("ensure_change", { target })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -602,16 +592,6 @@ export const commands = {
 	 *  implementation and its docs live on the core.
 	 */
 	vcsBlame: (streamId: string | null, path: string, revision: string) => typedError<BlameLine[], IpcError_Serialize>(__TAURI_INVOKE("vcs_blame", { streamId, path, revision })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	vcsLog: (streamId: string | null, limit: number | null, all: boolean) => typedError<RevisionInfo[], IpcError_Serialize>(__TAURI_INVOKE("vcs_log", { streamId, limit, all })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	vcsBranches: (streamId: string | null) => typedError<Branch[], IpcError_Serialize>(__TAURI_INVOKE("vcs_branches", { streamId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -1166,26 +1146,6 @@ export type BlameLine = {
 	summary: string,
 };
 
-/**  A branch. */
-export type Branch = {
-	name: string,
-	/**  The remote it tracks a copy of; `None` for a local branch. */
-	remote: string | null,
-	/**  The revision it points at, when it resolves. */
-	head: string | null,
-	/**  The repository's default branch (`main`). */
-	is_default: boolean,
-	/**
-	 *  For a local branch that tracks one, its remote-tracking branch
-	 *  (`origin/main`).
-	 */
-	upstream: string | null,
-	/**  Commits the branch has that its upstream lacks; 0 without one. */
-	ahead: number,
-	/**  Commits its upstream has that the branch lacks; 0 without one. */
-	behind: number,
-};
-
 /**
  *  What a deploy builds before it copies: `run` in the source folder, as
  *  the person, then `output` is copied into the deployment. The hash is of
@@ -1245,120 +1205,6 @@ export type BuiltinRole = "main" | "summarize" | "decide" | "assistant";
 /**  A size in bytes (the blob store's total, say). */
 export type ByteSize = number;
 
-/**  How one thing differs between the installed version and the candidate. */
-export type Change = "added" | "removed" | "changed" | "unchanged";
-
-/**  A change's identity and state. */
-export type ChangeRow = {
-	id: number,
-	streamId: number,
-	kind: string,
-	target: string,
-	/**
-	 *  The older side (`oxplow_domain::vcs::Revision`); `None` for a
-	 *  root commit.
-	 */
-	baseRevision: string | null,
-	/**  The newer side. */
-	headRevision: string | null,
-	status: string,
-	error: string | null,
-	computedAt: string | null,
-	/**  The stream's snapshot the analysis was computed against. */
-	snapshotId: number | null,
-	/**  The event log's highest seq when the analysis began. */
-	eventsTo: number | null,
-	/**
-	 *  What the analysis was computed from (the build, its trees, an
-	 *  effort's own files); a rerun from the same needn't recompute.
-	 */
-	analyzedFrom: string | null,
-};
-
-/**
- *  Stored rows for the surprising files (normal ones are left out).
- *  What to analyze.
- */
-export type ChangeTarget =
-/**  The stream's uncommitted work: HEAD → the working tree. */
-{ kind: "working"; streamId: string } |
-/**
- *  One commit against its first parent. `stream_id` picks the repo
- *  (default: the primary stream's).
- */
-{ kind: "commit"; sha: string; streamId?: string | null } |
-/**
- *  An effort: its start snapshot → its end snapshot (or the working
- *  tree while it's open).
- */
-{ kind: "effort"; effortId: string } |
-/**
- *  An agent turn: its start snapshot → its end snapshot, "what changed
- *  this turn" (P2.10). A turn still running has no end: `NotFound`.
- */
-{ kind: "turn"; turnId: string } |
-/**
- *  Any two revisions, each spelled as a `rev` is (`working`,
- *  `snap:<id>`, `git:<rev>`); no base is the whole tree at `head`.
- *  Keyed `<base>..<head>` by the sides as resolved (a git side by its
- *  full sha). `stream_id` picks the repo (default: the primary
- *  stream's).
- */
-{ kind: "range"; streamId?: string | null; base?: string | null; head: string };
-
-/**  What `check` found. */
-export type CheckReport = CheckReport_Serialize | CheckReport_Deserialize;
-
-/**  What `check` found. */
-export type CheckReport_Deserialize = {
-	name: string,
-	/**  No errors (warnings don't fail a check). */
-	ok: boolean,
-	/**  `file:line: what — fix` lines. */
-	errors: string[],
-	warnings: string[],
-	extension: Extension_Deserialize,
-	/**
-	 *  With `--impact`: what going from `against` to the working
-	 *  tree changes; `null` without it.
-	 */
-	impact: ImpactReport | null,
-	/**  The revision `impact` compares the working tree with. */
-	against: string | null,
-	/**
-	 *  The services each of its Starlark scripts uses or declares
-	 *  (`--services` prints them).
-	 */
-	services: ScriptServices[],
-	/**  What serves each of its `ai_profiles:` here ([`profile_lines`]). */
-	profiles: string[],
-};
-
-/**  What `check` found. */
-export type CheckReport_Serialize = {
-	name: string,
-	/**  No errors (warnings don't fail a check). */
-	ok: boolean,
-	/**  `file:line: what — fix` lines. */
-	errors: string[],
-	warnings: string[],
-	extension: Extension_Serialize,
-	/**
-	 *  With `--impact`: what going from `against` to the working
-	 *  tree changes; `null` without it.
-	 */
-	impact: ImpactReport | null,
-	/**  The revision `impact` compares the working tree with. */
-	against: string | null,
-	/**
-	 *  The services each of its Starlark scripts uses or declares
-	 *  (`--services` prints them).
-	 */
-	services: ScriptServices[],
-	/**  What serves each of its `ai_profiles:` here ([`profile_lines`]). */
-	profiles: string[],
-};
-
 /**
  *  One choice for a form field: the value it submits, what the person
  *  reads, and the heading it sits under.
@@ -1378,28 +1224,6 @@ export type ChoiceOption = {
 /**  How a client authenticates to a token endpoint. */
 export type ClientAuth = "basic" | "post";
 
-export type CollectorImpact = {
-	id: string,
-	change: Change,
-	before: Grants | null,
-	after: Grants | null,
-	/**  The views it fills. */
-	entities: string[],
-	/**
-	 *  What each version makes of the same inputs — its fixtures
-	 *  and the latest events it'd run on — for a derived collector whose
-	 *  script or declaration changed; storing nothing, asking no model.
-	 */
-	outputs: CollectorOutput[],
-	/**
-	 *  Why it wasn't run: it runs a program or reads a provider, which a
-	 *  review never does, approved or not.
-	 */
-	notRun: string | null,
-	/**  Its entry's text changed though its declaration didn't (tsk783). */
-	scriptChanged: boolean,
-};
-
 /**
  *  A derived collector's input query (`input`): read-only SQL over the
  *  semantic layer, handed over as `input.rows`.
@@ -1412,15 +1236,6 @@ export type CollectorInput = {
 	 *  input is every row or the run fails.
 	 */
 	limit: number | null,
-};
-
-/**  One input, run on each version. */
-export type CollectorOutput = {
-	/**  `fixture <name>`, `event #<seq>` or `input query`. */
-	input: string,
-	change: Change,
-	before: Ran | null,
-	after: Ran | null,
 };
 
 /**  Outcome of one run, as reported to the UI / agent. */
@@ -1584,14 +1399,6 @@ export type ColumnType = "text" | "int" | "real" | "bool" |
 export type CommandCall = {
 	name: string,
 	input: unknown,
-};
-
-/**  One of a provider's declared commands, or of its pinned MCP tools. */
-export type CommandChange = {
-	name: string,
-	change: Change,
-	before: unknown | null,
-	after: unknown | null,
 };
 
 /**
@@ -1852,16 +1659,6 @@ export type CommitRefLabel = {
 
 export type CommitRefLabelKind = "branch" | "tag";
 
-/**  What one version's effect makes of an event. */
-export type Composes = {
-	/**  The commands it runs, by name. */
-	commands: string[],
-	/**  Why it skips. */
-	skip: string | null,
-	/**  Why it fails. */
-	error: string | null,
-};
-
 /**
  *  One step of a configuration schema migration: a pure Starlark
  *  `transform(values) -> values` (the extension's `entry`, relative to its
@@ -1913,26 +1710,6 @@ export type ContributionId = {
 	extension: string,
 	kind: ContributionKind,
 	local: string,
-};
-
-/**
- *  A contribution of a kind with no impact detail of its own, by its
- *  descriptors before and after.
- */
-export type ContributionImpact = {
-	kind: ContributionKind,
-	/**  The kind as a person names it (`Event type`). */
-	title: string,
-	/**  its ref (`<kind>:<extension>/<id>`, `command:<bus id>`). */
-	id: string,
-	/**  The part of the id after the kind: what a row is called. */
-	local: string,
-	change: Change,
-	/**
-	 *  For a change: which of `version`, `needs`, `runs_on` and `global`
-	 *  differ.
-	 */
-	differs: string[],
 };
 
 /**  Every kind of contribution a manifest can declare. */
@@ -2002,8 +1779,6 @@ export type CustomComponent_Serialize = {
 	 */
 	sql?: SqlAccess | null,
 };
-
-export type Declared = "declared" | "implied" | "undeclared";
 
 /**  Where in the manifest it was declared. */
 export type DeclaredAt = {
@@ -2179,38 +1954,6 @@ export type EffectDecl = {
 	after: string[],
 	/**  `file:line` of the declaration. */
 	declaredAt: string,
-};
-
-/**  An effect before and after: when it reacts, and what it composes. */
-export type EffectImpact = {
-	id: string,
-	change: Change,
-	before: EffectTrigger | null,
-	after: EffectTrigger | null,
-	/**
-	 *  What each version composes on the same inputs — its fixtures and
-	 *  the latest events it'd react to — when its script or declaration
-	 *  changed; running nothing.
-	 */
-	outputs: EffectOutput[],
-};
-
-/**  One input, composed by each version. */
-export type EffectOutput = {
-	/**  `fixture <name>` or `event #<seq>`. */
-	input: string,
-	change: Change,
-	before: Composes | null,
-	after: Composes | null,
-};
-
-/**  When an effect reacts, and what it reads. */
-export type EffectTrigger = {
-	on: string[],
-	/**  Its `where`. */
-	filter: { [key in string]: string },
-	/**  The scopes its script calls. */
-	needs: string[],
 };
 
 export type Effort = {
@@ -3142,23 +2885,6 @@ export type GeneratedConfig = {
 	include?: string[],
 };
 
-/**  What a program may reach: what a person approves. */
-export type Grants = {
-	entry: string,
-	runtime: CollectorRuntime,
-	args: string[],
-	hosts: string[],
-	credentials: string[],
-	env: string[],
-	/**  The scopes it may call (a provider's `needs`). */
-	scopes: string[],
-	/**
-	 *  What approving it grants that this machine can't hold it to
-	 *  (`grants::gaps`).
-	 */
-	unenforced: string[],
-};
-
 /**  One registered harness, as the session picker and Settings see it. */
 export type HarnessListing = {
 	/**  Its key (what `agents:` and a session's `harness` name). */
@@ -3271,35 +2997,6 @@ export type HookKind =
  *  silently where a worktree path is reached (`WorktreeRoot::local_path`).
  */
 export type HostId = string;
-
-/**  Everything installing or updating an extension would change. */
-export type ImpactReport = {
-	pages: PageImpact[],
-	models: ModelImpact[],
-	collectors: CollectorImpact[],
-	providers: ProviderImpact[],
-	/**
-	 *  Its effects: what each reacts to, and what each version
-	 *  composes on the same events.
-	 */
-	effects: EffectImpact[],
-	/**
-	 *  Every other contribution it adds, removes or changes, from the
-	 *  descriptors: the kinds above have their own detail, these a
-	 *  generic row.
-	 */
-	contributions: ContributionImpact[],
-	/**
-	 *  What its dry runs didn't get to (`collector <id>`, `effect <id>`):
-	 *  the review stops running scripts at its deadline.
-	 */
-	outOfTime: string[],
-	/**
-	 *  The report as lines ([`summary`]): what the install review, `extension
-	 *  check --impact` and an effort's review say, in one wording.
-	 */
-	lines: string[],
-};
 
 /**  One implementation as the extension declares it. */
 export type ImplementationDecl = {
@@ -3502,15 +3199,6 @@ export type JobTool = {
 	 *  commands it composed are its own business).
 	 */
 	script: boolean,
-};
-
-export type KeyedDiff = {
-	key: string[],
-	added: number,
-	removed: number,
-	changed: number,
-	/**  Up to [`ROW_DIFF_SAMPLES`] of them, in key order. */
-	samples: RowSample[],
 };
 
 /**
@@ -3894,27 +3582,6 @@ export type ModelFreshness = {
 	model: string,
 	/**  RFC 3339. */
 	changedAt: string,
-};
-
-export type ModelImpact = {
-	view: string,
-	change: Change,
-	/**
-	 *  For a changed model, the parts that differ, in order: `query`,
-	 *  `columns`, `description`, `tests`, `version`, `deprecated`.
-	 */
-	changed: string[],
-	beforeColumns: string[],
-	afterColumns: string[],
-	/**  The first difference in its contract (columns, types, docs). */
-	contractChange: string | null,
-	/**  Models that read it, which a contract change can break. */
-	downstream: string[],
-	/**
-	 *  What its rows would become, each side read through its own
-	 *  models; `None` for an unchanged model.
-	 */
-	rows: RowDiff | null,
 };
 
 /**  A model's declaration and its SQL file. */
@@ -4794,16 +4461,6 @@ export type PageColumn = {
 	expand?: string | null,
 };
 
-/**  A page, by its rendered text before and after. */
-export type PageImpact = {
-	id: string,
-	change: Change,
-	before: string | null,
-	after: string | null,
-	/**  Why a side couldn't render (its query failed). */
-	error: string | null,
-};
-
 /**  A page that didn't run for want of a capability. */
 export type PageInactive = {
 	/**  The needs that aren't met (`work_items`, `knowledge`). */
@@ -5220,25 +4877,6 @@ export type PlanStatus = "pending" | "in_progress" | "completed";
 /**  A `command_proposal` row: an agent's run waiting on a person. */
 export type ProposalId = number;
 
-export type ProviderImpact = {
-	id: string,
-	capability: string,
-	change: Change,
-	before: Grants | null,
-	after: Grants | null,
-	commands: CommandChange[],
-	/**  Behind the MCP adapter: each pinned tool of its server. */
-	tools: CommandChange[],
-	featuresBefore: unknown | null,
-	featuresAfter: unknown | null,
-	/**
-	 *  For a changed provider, where its spec and declarations first
-	 *  differ — what a person reads when no grant, command or feature
-	 *  line shows the change.
-	 */
-	firstDifference: string | null,
-};
-
 /**  A kind of provider, as the Settings form offers it. */
 export type ProviderKindInfo = {
 	/**  What a provider's `kind:` names. */
@@ -5336,21 +4974,6 @@ export type PublicContracts = {
 	 *  another extension).
 	 */
 	withheld?: Withheld[],
-};
-
-/**  What one version's collector made of an input. */
-export type Ran = {
-	/**  Rows per entity. */
-	counts: { [key in string]: number },
-	/**  The rows per entity (the first 20). */
-	rows: unknown,
-	/**
-	 *  The events it would log, counted per type — as the script
-	 *  returned them: whether it may emit them is checked when it runs.
-	 */
-	events: { [key in string]: number },
-	/**  Why it failed (a model call it tried was refused, say). */
-	error: string | null,
 };
 
 /**
@@ -5471,18 +5094,6 @@ export type RetentionWindow = {
 	contentDays: number,
 };
 
-/**  One revision, as a list shows it. */
-export type RevisionInfo = {
-	id: string,
-	short_id: string,
-	author: string,
-	email: string,
-	/**  Seconds since the Unix epoch. */
-	time: number,
-	subject: string,
-	parents: string[],
-};
-
 export type RoleBinding = {
 	/**  A provider `id`. */
 	provider: string,
@@ -5520,25 +5131,6 @@ export type RoleStatus = {
 	 *  active extension declares, or a model lacking a feature it needs.
 	 */
 	problem: string | null,
-};
-
-/**  A model's rows before and after. */
-export type RowDiff = {
-	/**  Rows on each side (`None`: it isn't on that side). */
-	before: number | null,
-	after: number | null,
-	/**  Row by row, when both sides declare the same key. */
-	keyed: KeyedDiff | null,
-	/**  Why the diff is only counts, or that a side's query failed. */
-	note: string | null,
-};
-
-export type RowSample = {
-	change: Change,
-	/**  The row's key, column → value. */
-	key: unknown,
-	before: unknown | null,
-	after: unknown | null,
 };
 
 /**
@@ -5635,18 +5227,6 @@ export type RunsOn =
 { on: "declared" };
 
 /**
- *  One script of an extension and the services it uses or declares:
- *  what `oxplow extension check --services` prints.
- */
-export type ScriptServices = {
-	/**  What runs it: `collector \`paths\``, `command \`note.sum\``. */
-	script: string,
-	/**  Its file, in the extension folder. */
-	entry: string,
-	services: ServiceUse[],
-};
-
-/**
  *  The limits on the processes that run extension and project scripts
  *  (the `scripts:` block): how many run at once, host-wide, and how much
  *  memory one may use before it is stopped.
@@ -5704,15 +5284,6 @@ export type ServiceListing = {
 	/**  "Read the captured tree". */
 	title: string,
 	summary: string,
-};
-
-/**  One service of a script. */
-export type ServiceUse = {
-	scope: string,
-	/**  `declared` in its `needs`, `implied` by its kind, or `undeclared`. */
-	declared: Declared,
-	/**  Its script names one of the service's builtins. */
-	used: boolean,
 };
 
 /**  How handing a redirect to a sign-in went (`oxplow.provider.complete_sign_in`). */

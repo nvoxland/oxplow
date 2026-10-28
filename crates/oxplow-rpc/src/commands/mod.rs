@@ -21,7 +21,6 @@ pub mod app;
 pub mod assistant;
 pub mod background;
 pub mod bus;
-pub mod changes;
 pub mod comments;
 pub mod config;
 pub mod effort;
