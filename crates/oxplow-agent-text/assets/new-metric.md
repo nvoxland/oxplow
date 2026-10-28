@@ -37,7 +37,7 @@ oxplow.metric.scaffold { name: "complex-fns", language: "rust", glob: "src/**/*.
     "files": [ { "path": ".oxplow/extensions/complex-fns/extension.yaml", "content": "…" }, … ] }
 ```
 
-(From a terminal, `oxplow extension new metric complex-fns --language rust
+(From a terminal, `$OXPLOW_BIN extension new metric complex-fns --language rust
 --glob 'src/**/*.rs' --origin <ref>` writes the same files.) Write each file
 with your file tools, then change them into what the user asked for:
 
@@ -85,14 +85,14 @@ metrics:
 Read the `oxplow-metrics` skill for the four-block model, the full builtin
 surface (`files`/`ast_query`/`code_metrics`/`regex_find`/…) and when a
 project-level `exec` or report-derived collector is the right home instead.
-The scripts in `extensions/oxplow-foundation/collectors/<lang>/` are
-copy-paste templates.
+The scripts that `$OXPLOW_BIN extension new metric --language <lang>`
+scaffolds are copy-paste templates.
 
 ## 4. Verify
 
-1. `oxplow extension check <name>` — no errors and no warnings (or
+1. `$OXPLOW_BIN extension check <name>` — no errors and no warnings (or
    `oxplow_validate_extension`). It dry-runs the page, so a bad query shows here.
-2. `oxplow extension test <name>` — the collector runs over the fixture's
+2. `$OXPLOW_BIN extension test <name>` — the collector runs over the fixture's
    files and must return the facts the example expects.
 3. Deploy it: `oxplow.extension.deploy { name: "<name>" }` (`run_command`). It returns once the extension is live. Then `oxplow.collector.sync { collector:
    "<name>/<ns>.scan" }` (`run_command`) runs the collector now and returns the

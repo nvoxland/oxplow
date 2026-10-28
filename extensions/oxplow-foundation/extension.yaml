@@ -381,7 +381,7 @@ metrics:
   - {"key":"work.open_tasks","title":"Open tasks","entity":"v_work_item","where":"state IN ('todo', 'in_progress', 'blocked')","aggregation":"count","unit":"tasks","category":"operational","description":"Work items ready, in progress or blocked, captured over time."}
 # What oxplow's URIs name (`oxplow:oxplow/<resource>?<params>`): declared
 # here like any extension's resources, so none is special
-# (.context/resources.md). A param's `pattern` matches its decoded value.
+# (the resource URI grammar). A param's `pattern` matches its decoded value.
 resources:
   - name: project
     label: Project
@@ -1192,7 +1192,7 @@ commands:
     scope: knowledge.read
     op: drift
     tool: wiki_ref_drift
-    example: {"slug": "architecture", "path": "crates/oxplow-app/src/lib.rs"}
+    example: {"slug": "architecture", "path": "src/app/main.py"}
   # knowledge.write
   - name: knowledge.add_comment
     summary: "Comment on a span of a page (its `target`), with a first message. `intent`: `note` (the agent leaves it alone) or `followup` (the agent should act on it). An agent comments on its own stream, in its own thread."
@@ -1306,7 +1306,7 @@ commands:
     summary: "A starter for a new metric, as an extension of its own; writes nothing. Returns `name`, `dir` (`.oxplow/extensions/<name>`) and `files`, each with its project-relative path: the extension.yaml (a measure, a Starlark fact collector, the metric), the collector script, a page and an example with its fixture. Write them with your own tools, check it (`oxplow_validate_extension`), then deploy it (`oxplow.extension.deploy`); its collector runs only once a person approves it. `oxplow.metric.enable` turns the metric on or off in .oxplow/project.yaml."
     scope: metrics.read
     op: scaffold
-    example: {"name": "complex-fns", "language": "rust", "glob": "crates/**/*.rs"}
+    example: {"name": "complex-fns", "language": "python", "glob": "src/**/*.py"}
   # metrics.write
   - name: metric.enable
     summary: "Turn metrics on or off in this project (.oxplow/project.yaml `metrics:`); logged as config.changed, undo restores the previous list."
@@ -1509,7 +1509,7 @@ commands:
     summary: "Record a test run with pass/fail counts oxplow couldn't read from its output, marked `asserted`. oxplow records runs it sees in shell commands itself; this is for runs it couldn't parse. The run is the thread's open effort's. Returns `{ recorded, observationId }`."
     scope: test_runs.write
     op: record_run
-    example: {"command": "cargo nextest run -p oxplow-app", "passed": 120, "failed": 0, "total": 120, "duration_ms": 41200}
+    example: {"command": "pytest tests/app", "passed": 120, "failed": 0, "total": 120, "duration_ms": 41200}
   # threads.write
   - name: thread.close
     summary: "Close a thread (`thr12`) — history, reopenable. Its open effort and its agent sessions close, and their processes stop. An agent closes only its own thread."

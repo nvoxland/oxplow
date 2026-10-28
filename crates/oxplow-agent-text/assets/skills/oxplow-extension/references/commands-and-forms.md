@@ -37,8 +37,8 @@
   schema (a script's first example that runs, unless it declares one;
   give one to a command over a `scope:` op). `access: read` makes a command that only reads
   and returns a `result` (it composes nothing). A command on a URI's menu (`ui.about`) gets `{ uri }` unless its
-  `ui.input` says otherwise, so name its input field `uri`. `extensions/oxplow-bundled/` (bundled) is a
-  working example.
+  `ui.input` says otherwise, so name its input field `uri`. The `oxplow-bundled` extension (see it in
+  Settings → Extensions) is a working example.
 - **`custom_components:`** (stable; not in a bundled extension) are web bundles a
   component node renders: `{ id, title?, bundle?: components/<id>,
   commands: [names] }`. The bundle (an `index.html`
@@ -53,7 +53,7 @@
   (no modules: a sandboxed frame can't load them), and the script calls
   `oxplow.connect().then((component) => …)` for `component.data` (each
   loader's rows by name), `onUpdate(({ data, changed }) => …)`, `invoke` and `navigate`; it never
-  fetches (a page loader feeds it). `oxplow extension new
+  fetches (a page loader feeds it). `$OXPLOW_BIN extension new
   component <name>` scaffolds a working one; `docs/guide/pages.md` has
   the reference; `dashboards.md` has an example. A component written in TypeScript or with a library is
   built at deploy: a `build:` block, with `bundle:` under its `output`

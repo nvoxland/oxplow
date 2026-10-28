@@ -775,7 +775,7 @@ commands:
     examples:
       - name: a file outside the area
         input: { effort: "eff1" }
-        answers: { sql.read: [[{ work_item: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", unverified: "[]", inferred: "[]", deviated: '["crates/db/store.rs"]' }]] }
+        answers: { sql.read: [[{ work_item: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", unverified: "[]", inferred: "[]", deviated: '["src/db/store.py"]' }]] }
         expect_commands: [oxplow.work_item.comment, oxplow.work_item.transition]
       - name: nothing to ask for
         input: { effort: "eff1" }

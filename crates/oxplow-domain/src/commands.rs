@@ -227,8 +227,7 @@ pub struct OpRef {
     pub op: String,
 }
 
-/// A command as a person meets it (`.context/commands.md` "Offering a
-/// command to a person"). Agents ignore it.
+/// A command as a person meets it. Agents ignore it.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, Type, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CommandUi {

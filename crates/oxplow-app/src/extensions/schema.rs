@@ -74,6 +74,19 @@ mod tests {
         );
     }
 
+    /// The schema is published for people editing their own extensions: its
+    /// descriptions must not point at this repository's `.context/` docs.
+    #[test]
+    fn the_manifest_schema_never_cites_the_checkouts_docs() {
+        let text = serde_json::to_string_pretty(&manifest_schema()).unwrap();
+        let hits: Vec<_> = text
+            .lines()
+            .filter(|l| l.contains(".context/"))
+            .map(str::trim)
+            .collect();
+        assert!(hits.is_empty(), "{hits:#?}");
+    }
+
     fn yaml_json(text: &str) -> Value {
         let yaml: serde_yaml::Value = serde_yaml::from_str(text).expect("YAML parses");
         serde_json::to_value(yaml).expect("YAML is JSON")

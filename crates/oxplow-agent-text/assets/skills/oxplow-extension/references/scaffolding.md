@@ -6,7 +6,7 @@ folders of plain files in `.oxplow/extensions/<name>/`. A source runs only
 after `oxplow.extension.deploy { name }`. The user can use a page
 themselves or share the extension with their team (`oxplow.extension.share`).
 
-You build them with your normal file tools. `oxplow extension new <kind>
+You build them with your normal file tools. `$OXPLOW_BIN extension new <kind>
 <name> --origin <your effort ref>` scaffolds the folder with a v2 manifest,
 an intent, one example and its fixture, and a working starter for the
 kind; then edit. Each passes `check` and `extension test` as written, so a

@@ -19,7 +19,7 @@ in `v_contribution_health` (`extension`, `contribution`, `kind`, `state` = `ok` 
   found; its title is only for people. When the user asks you to repair an
   extension, read that item first.
 - **Fix it, then prove it.** Change the script or declaration, run
-  `oxplow extension check` and `oxplow extension test`, then `oxplow.collector.sync`
+  `$OXPLOW_BIN extension check` and `$OXPLOW_BIN extension test`, then `oxplow.collector.sync`
   (`run_command`) — a refusal while it's disabled is expected.
 - **You can't enable it again.** `oxplow.contribution.enable` (and `enable_all`) is the user's: tell them
   to press **Enable Again** (or **Enable All Disabled**) in Settings → Extensions once your fix is in.

@@ -104,14 +104,14 @@
       ]
     },
     "requires": {
-      "description": "The other extensions it needs on (`.context/extensions.md`\n\"Requires\"): deploying or turning it on refuses while one is off,\nand turning one off refuses while this is on.",
+      "description": "The other extensions it needs on: deploying or turning it on refuses while one is off,\nand turning one off refuses while this is on.",
       "type": "array",
       "items": {
         "type": "string"
       }
     },
     "build": {
-      "description": "A command a deploy runs in the source folder before it copies\n(`.context/extensions.md` \"Builds\"). Read raw so a broken block is\nits own error at its line.",
+      "description": "A command a deploy runs in the source folder before it copies.\nRead raw so a broken block is\nits own error at its line.",
       "anyOf": [
         {
           "$ref": "#/definitions/Build"
@@ -122,7 +122,7 @@
       ]
     },
     "permissions": {
-      "description": "What it may reach beyond the baseline (`.context/extensions.md`\n\"Permissions\"): checked against what it contains when it loads,\napproved when it is deployed.",
+      "description": "What it may reach beyond the baseline:\nchecked against what it contains when it loads,\napproved when it is deployed.",
       "allOf": [
         {
           "$ref": "#/definitions/Permissions"
@@ -1749,7 +1749,7 @@
       ]
     },
     "Records": {
-      "description": "What a report collector records: its parser's typed output, merged\ninto the run (`.context/collection.md`).",
+      "description": "What a report collector records: its parser's typed output, merged\ninto the run.",
       "oneOf": [
         {
           "description": "A suite/case tree of test outcomes (a `test-run`).",
@@ -1888,7 +1888,7 @@
       ]
     },
     "CommandUi": {
-      "description": "A command as a person meets it (`.context/commands.md` \"Offering a\ncommand to a person\"). Agents ignore it.",
+      "description": "A command as a person meets it. Agents ignore it.",
       "type": "object",
       "properties": {
         "label": {

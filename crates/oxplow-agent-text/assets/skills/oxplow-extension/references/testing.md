@@ -2,14 +2,14 @@
 
 A page's behavior is tested here, by fixtures in its extension — what its
 loaders return after some steps, in which state — not by tests in another
-language. `oxplow extension test` runs them in seconds on a throwaway
+language. `$OXPLOW_BIN extension test` runs them in seconds on a throwaway
 oxplow, so write the fixture first and watch it fail.
 
 ## Check after every edit
 
 **Run `oxplow_validate_extension(name, stream_id)` after every edit**, not
 once at the end. It is cheap, and each message names the file and line and
-says what to change (`oxplow extension check <name>` is the same report).
+says what to change (`$OXPLOW_BIN extension check <name>` is the same report).
 It covers: manifest errors (YAML, unknown keys, a name/folder mismatch, a
 missing `intent`, a Starlark script that doesn't parse or define
 `transform`); cross-references that don't resolve (a slot mount naming a
@@ -33,7 +33,7 @@ deployed ones) and your own `stream_id`. The source runs nothing until
 
 An extension's own `questions.yaml` (`{ question, skill, reaches: { sql } |
 { command, input }, shape: { columns } }`, `skill` a markdown file in the
-extension) also runs under `oxplow extension test`: the skill must name every
+extension) also runs under `$OXPLOW_BIN extension test`: the skill must name every
 model the SQL reads and the command it runs. Prefer `answers:` on pages.
 
 ## Testing the whole extension (`extension test`, fixtures)
@@ -159,7 +159,7 @@ model the SQL reads and the command it runs. Prefer `answers:` on pages.
      context?: { tokens, window? } } } }` — one turn on the thread, as its
      harness's hooks report it: the prompt, the commands made `during` it
      (an effort opened mid-turn), each tool call (a finished call; a shell
-     `cargo test` also records a test run), the file the turn wrote (with a
+     test command also records a test run), the file the turn wrote (with a
      snapshot before and after, so the turn's checkpoint says `changed`) and
      the turn's end with the agent's last message. Read the result with
      `when: { sql }` (`v_tool_call`, `v_agent_turn`, `v_effort`, …).

@@ -44,8 +44,8 @@ effects:
 - Show it running with a page over `v_job_run_output` (`WHERE job_id = (SELECT id FROM v_job_run WHERE uri = :job_run)`):
   it updates as the model writes. oxplow's own Job Runs page lists every run
   with Cancel.
-- `examples/extensions/triage/` in the oxplow repo has one, with its
-  fixtures (a tool round, a cancel); `examples/extensions/effort-review/`
+- The `triage` example oxplow ships has one, with its fixtures (a tool
+  round, a cancel); the `effort-review` example
   starts one per finished effort, its tool reading the effort's evidence,
   and comments the answer on the work item.
 - Your command namespace is your name with `-` as `_`: extension
@@ -58,5 +58,5 @@ When a job or script needs "a model for X" that a person may want to
 choose, declare `ai_profiles: [{ id, description, fallback: main|summarize|decide,
 features? }]` rather than hard-coding a role, and name it by its id: a job
 request's `role: <id>`, a collector's `ai_classify(..., role = "<id>")`.
-`oxplow extension check` shows what serves it. Until a person binds
+`$OXPLOW_BIN extension check` shows what serves it. Until a person binds
 `<extension>/<id>` in Settings → AI, the fallback role's model is used.

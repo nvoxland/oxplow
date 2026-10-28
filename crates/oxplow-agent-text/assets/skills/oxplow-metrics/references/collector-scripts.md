@@ -78,6 +78,6 @@ compute it: the extension must declare `permissions: { process: true }`
 when the extension is deployed** (you can't; your deploy that adds a permission
 becomes a proposal). A change to the program is a redeploy.
 
-The bundled collector scripts in
-`extensions/oxplow-foundation/collectors/<lang>/*.star` are the canonical
-copy-paste templates — each emits per-item facts.
+The collector scripts that `$OXPLOW_BIN extension new metric --language <lang>`
+scaffolds are the canonical copy-paste templates — each emits per-item
+facts.

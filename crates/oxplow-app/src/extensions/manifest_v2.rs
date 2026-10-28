@@ -145,19 +145,18 @@ pub struct ManifestV2 {
         skip_serializing_if = "Option::is_none"
     )]
     pub configuration: Option<Value>,
-    /// The other extensions it needs on (`.context/extensions.md`
-    /// "Requires"): deploying or turning it on refuses while one is off,
+    /// The other extensions it needs on: deploying or turning it on refuses while one is off,
     /// and turning one off refuses while this is on.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub requires: Vec<String>,
-    /// A command a deploy runs in the source folder before it copies
-    /// (`.context/extensions.md` "Builds"). Read raw so a broken block is
+    /// A command a deploy runs in the source folder before it copies.
+    /// Read raw so a broken block is
     /// its own error at its line.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "Option<Build>")]
     pub build: Option<Value>,
-    /// What it may reach beyond the baseline (`.context/extensions.md`
-    /// "Permissions"): checked against what it contains when it loads,
+    /// What it may reach beyond the baseline:
+    /// checked against what it contains when it loads,
     /// approved when it is deployed.
     #[serde(
         default,

@@ -2,8 +2,8 @@
 
 An extension with an **external provider** (`providers:` — a program that
    connects an outside system, such as an issue tracker; private
-   extensions only) is tested with `oxplow extension test <name>`:
-   `oxplow extension new provider <name> [--capability <cap>]` scaffolds
+   extensions only) is tested with `$OXPLOW_BIN extension test <name>`:
+   `$OXPLOW_BIN extension new provider <name> [--capability <cap>]` scaffolds
    one (its `provider.json` declarations from the capability's contract, a
    stub `bin/provider` to replace, and the fixtures).
    The test runs `check`, then the provider: its `initialize` must equal
@@ -33,9 +33,8 @@ An extension with an **external provider** (`providers:` — a program that
    A work-items provider is a **backend for the project's own work**,
    with the visibility the person wants (a local tracker like beads), not
    a team's tracker: when it's the active one, every new item goes there.
-   In the oxplow repo, `tests-e2e/fixtures/extension/` (its manifest and
-   `provider.json`) and `crates/oxplow-provider-fake` (the program) are a
-   complete one: copy their shape.
+   `$OXPLOW_BIN extension new provider` scaffolds a complete one (manifest,
+   `provider.json` and a fake program): change its shape.
    An existing **MCP server** can be the provider instead of a program:
    `adapter: { mcp: { command: [bin/server] }, mapping: mcp/x.star,
    tools: mcp/tools.json }` in place of `entry` — oxplow's adapter runs
