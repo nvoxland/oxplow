@@ -4,7 +4,7 @@ hidden: true
 params:
 - name: uri
   label: From thread
-data:
+loaders:
   handoff_items:
     sql: |
       SELECT w.uri AS value, w.title AS label

@@ -10,7 +10,7 @@ params:
   label: Search
   default: ''
 - name: thread_id
-data:
+loaders:
   add:
     sql: |
       SELECT 'todo' AS state

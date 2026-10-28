@@ -5,7 +5,7 @@ needs:
 - vcs
 answers:
 - {"question":"Which worktrees of this repository could a new stream adopt?","params":{},"skill":"oxplow-extension"}
-data:
+loaders:
   new_stream_worktrees:
     sql: |
       SELECT w.path AS value,

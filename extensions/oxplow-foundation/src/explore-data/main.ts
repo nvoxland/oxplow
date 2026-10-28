@@ -121,7 +121,7 @@ void oxplow.connect().then((c) => {
   const showError = (message: string | null, field: string | null = null) => {
     error.hidden = message === null;
     error.textContent = message ?? "";
-    sql.setAttribute("aria-invalid", field === "/data/rows/sql" ? "true" : "false");
+    sql.setAttribute("aria-invalid", field === "/loaders/rows/sql" ? "true" : "false");
   };
   const drawControls = () => {
     if (document.activeElement !== sql) sql.value = draft() ?? view.sql;

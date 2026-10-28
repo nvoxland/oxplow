@@ -187,7 +187,7 @@ mod tests {
         write(
             &root,
             ".oxplow/extensions/late/pages/counted.yaml",
-            "title: Counted\ndata:\n  n: { sql: SELECT count(*) AS n FROM v_late_counted }\n\
+            "title: Counted\nloaders:\n  n: { sql: SELECT count(*) AS n FROM v_late_counted }\n\
              view: { viz: number, from: n }\n",
         );
         let draft = PageRunner::draft(svc, &root, "late").await.unwrap();

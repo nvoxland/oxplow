@@ -4,7 +4,7 @@ import { openFromLauncher } from "../../support/ui.js";
 
 const spec = `title: Form Numbat
 category: Data
-data:
+loaders:
   filed:
     sql: SELECT title FROM v_work_item WHERE title LIKE 'Form numbat %' ORDER BY title
 view:

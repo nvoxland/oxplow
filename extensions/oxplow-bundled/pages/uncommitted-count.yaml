@@ -4,7 +4,7 @@ hidden: true
 params:
 - name: stream_id
   label: Stream
-data:
+loaders:
   uncommitted_count:
     sql: |
       SELECT count(*) AS files

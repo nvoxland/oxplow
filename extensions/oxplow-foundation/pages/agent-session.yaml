@@ -6,7 +6,7 @@ default: true
 pinned: true
 params:
 - name: uri
-data:
+loaders:
   row:
     sql: |
       SELECT s.uri, 'ses' || s.id AS session, s.display_name, s.title, th.uri AS thread,

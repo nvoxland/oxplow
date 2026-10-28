@@ -8,7 +8,7 @@ params:
   default: ""
 answers:
 - {"question":"How far has this branch moved from main, and would it merge cleanly?","params":{"base":"main","head":"feature"},"skill":"oxplow-codebase"}
-data:
+loaders:
   divergence:
     sql: "SELECT ahead, behind, readiness, overlapping_files FROM v_branch_divergence WHERE base = :base AND head = :head"
 view: { viz: table, from: divergence }

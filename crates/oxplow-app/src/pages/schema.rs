@@ -1,6 +1,6 @@
 //! The page file (`pages/<id>.yaml` in an extension): what a page is
 //! (its metadata: title, params, what it renders, its actions and the
-//! questions it answers), where its data comes from (`data:`, named
+//! questions it answers), where its data comes from (`loaders:`, named
 //! loaders), and how it shows it (`view:`, a tree of nodes bound to the
 //! loaders by name). Parsed and checked here, one file at a time; what
 //! needs the whole extension (an embed's page, a component) is checked
@@ -328,7 +328,7 @@ struct PageFile {
     badge: Option<Badge>,
     /// Its loaders, in order (a mapping keeps it).
     #[serde(default)]
-    data: Option<serde_yaml::Mapping>,
+    loaders: Option<serde_yaml::Mapping>,
     view: serde_yaml::Value,
     #[serde(default)]
     rail: Option<serde_yaml::Value>,
@@ -446,7 +446,8 @@ pub fn parse_page(
     rel: &str,
     text: &str,
 ) -> Result<Page, String> {
-    let file: PageFile = serde_yaml::from_str(text).map_err(|e| e.to_string())?;
+    let file: PageFile = serde_yaml::from_str(text)
+        .map_err(|e| oxplow_domain::manifest_keys::hint_unknown_page(&e.to_string()))?;
     let id = format!("{extension}/{slug}");
     let origin = PageProvenance {
         extension: extension.to_string(),
@@ -466,7 +467,7 @@ pub fn parse_page(
     if let Some(why) = crate::pages::spec::param_problem(&params) {
         return Err(why);
     }
-    let loaders = parse_loaders(file.data.unwrap_or_default(), &params)?;
+    let loaders = parse_loaders(file.loaders.unwrap_or_default(), &params)?;
     let mut ids = Ids::default();
     let mut ctx = NodeCtx {
         extension,
@@ -734,18 +735,18 @@ fn sql_params(sql: &str) -> Vec<String> {
 }
 
 fn parse_loaders(
-    data: serde_yaml::Mapping,
+    loaders: serde_yaml::Mapping,
     params: &[PageParam],
 ) -> Result<Vec<LoaderDecl>, String> {
-    let names: Vec<String> = data
+    let names: Vec<String> = loaders
         .keys()
         .map(|k| k.as_str().unwrap_or_default().to_string())
         .collect();
     let mut out: Vec<LoaderDecl> = Vec::new();
-    for (index, (key, value)) in data.into_iter().enumerate() {
+    for (index, (key, value)) in loaders.into_iter().enumerate() {
         let name = key
             .as_str()
-            .ok_or_else(|| "data: a loader's name is text".to_string())?
+            .ok_or_else(|| "loaders: a loader's name is text".to_string())?
             .to_string();
         if let Some(why) = loader_name_problem(&name) {
             return Err(why);
@@ -1147,7 +1148,7 @@ fn check_page(page: &Page) -> Result<(), String> {
             NodeKind::Viz { from, config: cfg } => match from {
                 Some(from) if page.loader(from).is_none() => {
                     return Err(format!(
-                        "node `{}` shows `{from}`, but there is no loader `{from}` in `data:`",
+                        "node `{}` shows `{from}`, but there is no loader `{from}` in `loaders:`",
                         node.id
                     ));
                 }
@@ -1175,7 +1176,7 @@ fn check_page(page: &Page) -> Result<(), String> {
     if let Some(b) = &page.badge {
         if page.loader(&b.loader).is_none() {
             return Err(format!(
-                "badge: there is no loader `{}` in `data:`",
+                "badge: there is no loader `{}` in `loaders:`",
                 b.loader
             ));
         }

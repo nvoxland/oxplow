@@ -4,7 +4,7 @@ icon: circle-check
 category: Work
 params:
 - name: thread_id
-data:
+loaders:
   done_work:
     sql: |
       SELECT w.uri, w.title, w.state, w.closed_at

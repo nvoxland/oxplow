@@ -99,7 +99,7 @@ test("the view reads back from the tab's address, a chart viz only by name", () 
 test("the view shown is an inline page of the query's viz over one sql loader", () => {
   expect(JSON.parse(specOf("SELECT 1", "table", null))).toEqual({
     title: "Explore",
-    data: { rows: { sql: "SELECT 1" } },
+    loaders: { rows: { sql: "SELECT 1" } },
     view: { id: "rows", viz: "table", from: "rows" },
   });
   const chart = { x: "day", y: "n", series: null };

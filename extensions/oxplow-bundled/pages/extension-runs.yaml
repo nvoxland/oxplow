@@ -3,7 +3,7 @@ description: One extension's runs in the last 7 days, newest first — which con
 hidden: true
 params:
 - name: extension
-data:
+loaders:
   extension_runs:
     sql: |
       SELECT contribution || ' (' || kind || ')' AS contribution,

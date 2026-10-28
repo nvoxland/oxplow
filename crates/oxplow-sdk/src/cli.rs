@@ -969,7 +969,7 @@ mod tests {
         w("datasets/x.sql", "SELECT 1 AS n\n");
         w(
             "pages/count.yaml",
-            "title: Count\ndata:\n  count:\n    sql: SELECT n FROM v_acme_x\nview:\n  from: count\n  viz: number\n",
+            "title: Count\nloaders:\n  count:\n    sql: SELECT n FROM v_acme_x\nview:\n  from: count\n  viz: number\n",
         );
         git(root, &["init", "-q", "-b", "main"]);
         git(root, &["add", "."]);

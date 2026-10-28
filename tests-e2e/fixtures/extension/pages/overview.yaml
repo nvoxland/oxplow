@@ -1,7 +1,7 @@
 title: Item overview
 description: Every item — the extension's own route page.
 category: Work
-data:
+loaders:
   items:
     sql: SELECT title FROM v_e2e_item ORDER BY title
 view: { from: items, viz: table, empty: No items. }

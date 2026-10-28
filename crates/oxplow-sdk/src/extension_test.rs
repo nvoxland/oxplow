@@ -3631,7 +3631,7 @@ async fn sql_example(host: &Host, ex: &Example<'_>, sql: &str, report: &mut Test
     let spec = json!({
         "title": "Query",
         "params": declared,
-        "data": { "rows": { "sql": sql } },
+        "loaders": { "rows": { "sql": sql } },
         "view": { "viz": "table", "from": "rows" },
     });
     let page = serde_yaml::to_string(&spec)
@@ -6110,7 +6110,7 @@ commands:
         write(
             root,
             ".oxplow/extensions/tally/pages/labelled.yaml",
-            "title: Labelled\ndata:\n  labelled: { sql: \"SELECT id, label FROM v_tally_labelled\" }\n\
+            "title: Labelled\nloaders:\n  labelled: { sql: \"SELECT id, label FROM v_tally_labelled\" }\n\
              view: { viz: table, from: labelled }\n",
         );
         write(
@@ -6252,7 +6252,7 @@ commands:
         write(
             root,
             ".oxplow/extensions/reader/pages/seen.yaml",
-            "title: Seen\ndata:\n  seen: { sql: \"SELECT uri FROM import_ref('items')\" }\n\
+            "title: Seen\nloaders:\n  seen: { sql: \"SELECT uri FROM import_ref('items')\" }\n\
              view: { viz: table, from: seen }\n",
         );
     }
@@ -7418,12 +7418,12 @@ event_types:
         write(
             root,
             ".oxplow/extensions/acme/pages/titles.yaml",
-            "title: Titles\ndata:\n  titles: { sql: \"SELECT title FROM v_work_item\" }\nview: { viz: table, from: titles }\n",
+            "title: Titles\nloaders:\n  titles: { sql: \"SELECT title FROM v_work_item\" }\nview: { viz: table, from: titles }\n",
         );
         write(
             root,
             ".oxplow/extensions/acme/pages/count.yaml",
-            "title: Count\ndata:\n  n: { sql: \"SELECT COUNT(*) AS n FROM v_work_item\" }\nview: { viz: number, from: n }\n",
+            "title: Count\nloaders:\n  n: { sql: \"SELECT COUNT(*) AS n FROM v_work_item\" }\nview: { viz: number, from: n }\n",
         );
         write(
             root,
@@ -7509,7 +7509,7 @@ resources:
             root,
             ".oxplow/extensions/acme/pages/pr.yaml",
             "title: Pull request\ncategory: Work\nfor: acme/pr\ndefault: true\nparams: [{ name: id }]\n\
-             data:\n  n: { sql: \"SELECT 1 AS n\" }\nview: { viz: table, from: n }\n",
+             loaders:\n  n: { sql: \"SELECT 1 AS n\" }\nview: { viz: table, from: n }\n",
         );
         write(
             root,
@@ -7580,7 +7580,7 @@ intent:
         write(
             root,
             ".oxplow/extensions/editor/pages/edit-item.yaml",
-            "title: Edit\nparams: [{ name: uri }]\ndata:\n  item: { sql: \"SELECT title, body FROM v_work_item WHERE uri = :uri\" }\n\
+            "title: Edit\nparams: [{ name: uri }]\nloaders:\n  item: { sql: \"SELECT title, body FROM v_work_item WHERE uri = :uri\" }\n\
              view: { viz: form, from: item, form: { command: oxplow.work_item.update, defaults: { uri: '{{param.uri}}' }, fixed: [uri], fields: [title, body] } }\n",
         );
         write(
@@ -7633,7 +7633,7 @@ intent:
             &format!(
                 "title: Items
 params: [{{ name: state }}]
-data:
+loaders:
   items: {{ sql: \"{query}\" }}
 view:
   stack:
@@ -7800,7 +7800,7 @@ expect: {expect}
     /// A page of one work item by `uri`, with a row action.
     const BY_URI: &str = "title: Items
 params: [{ name: uri }]
-data:
+loaders:
   items: { sql: \"SELECT title, uri FROM v_work_item WHERE uri = :uri\" }
 view:
   from: items
@@ -7892,7 +7892,7 @@ steps:
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         let page = "title: Items
-data:
+loaders:
   items: { sql: \"SELECT title, uri FROM v_work_item ORDER BY title\" }
 view:
   from: items
@@ -7959,7 +7959,7 @@ when: { page: items }
         let root = dir.path();
         let page = "title: Items
 params: [{ name: uri }]
-data:
+loaders:
   items: { sql: \"SELECT title, uri, state FROM v_work_item WHERE uri = :uri\" }
 view:
   from: items
@@ -8038,7 +8038,7 @@ steps:
         paged(
             root,
             "title: New item
-data:
+loaders:
   items: { sql: \"SELECT title FROM v_work_item\" }
 view:
   stack:
@@ -8076,7 +8076,7 @@ steps:
         write(
             root,
             ".oxplow/extensions/host/pages/items.yaml",
-            "title: Items\ndata:\n  n: { sql: \"SELECT 1 AS n\" }\nview:\n  stack:\n    - { id: count, viz: number, from: n }\n    - { slot: extra }\n",
+            "title: Items\nloaders:\n  n: { sql: \"SELECT 1 AS n\" }\nview:\n  stack:\n    - { id: count, viz: number, from: n }\n    - { slot: extra }\n",
         );
         write(
             root,
@@ -8086,7 +8086,7 @@ steps:
         write(
             root,
             ".oxplow/extensions/beta/pages/extra.yaml",
-            "title: Extra\ndata:\n  words: { sql: \"SELECT 'hello' AS word\" }\nview: { viz: table, from: words }\n",
+            "title: Extra\nloaders:\n  words: { sql: \"SELECT 'hello' AS word\" }\nview: { viz: table, from: words }\n",
         );
         write(
             root,
@@ -8331,7 +8331,7 @@ custom_components:
         write(
             root,
             ".oxplow/extensions/cards/pages/board.yaml",
-            "title: Board\ndata:\n  items: { sql: \"SELECT title FROM v_work_item ORDER BY title\" }\nview: { component: { id: cards, props: { heading: Work } } }\n",
+            "title: Board\nloaders:\n  items: { sql: \"SELECT title FROM v_work_item ORDER BY title\" }\nview: { component: { id: cards, props: { heading: Work } } }\n",
         );
         write(
             root,
@@ -8476,7 +8476,7 @@ custom_components:
             "title: Board
 params:
   - { name: kind, role: filter, default: all }
-data:
+loaders:
   items: { sql: \"SELECT title FROM v_work_item WHERE :kind = 'all' OR title LIKE :kind || '%' ORDER BY title\" }
 view: { component: { id: cards } }
 ",
@@ -8603,7 +8603,7 @@ steps:
             root,
             "oxplow.connect().then(function (c) {
   var spec = function (sql) {
-    return 'title: Out\\ndata:\\n  rows: { sql: \"' + sql + '\" }\\nview: { from: rows, viz: table }\\n';
+    return 'title: Out\\nloaders:\\n  rows: { sql: \"' + sql + '\" }\\nview: { from: rows, viz: table }\\n';
   };
   var button = function (id, run) {
     var b = document.createElement('button');
@@ -8632,14 +8632,14 @@ steps:
       - click: "#bad"
       - expect: { shown: null }
       - click: "#good"
-      - expect: { shown: "title: Out\ndata:\n  rows: { sql: \"SELECT 1 AS n\" }\nview: { from: rows, viz: table }\n" }
+      - expect: { shown: "title: Out\nloaders:\n  rows: { sql: \"SELECT 1 AS n\" }\nview: { from: rows, viz: table }\n" }
       - click: "#bad"
       - expect: { shown: null }
       - click: "#good"
       - click: "#clear"
       - expect: { shown: null }
       - click: "#burst"
-      - expect: { shown: "title: Out\ndata:\n  rows: { sql: \"SELECT 2 AS n\" }\nview: { from: rows, viz: table }\n" }
+      - expect: { shown: "title: Out\nloaders:\n  rows: { sql: \"SELECT 2 AS n\" }\nview: { from: rows, viz: table }\n" }
 "##,
         );
         let report = test_extension(root, "cards", false).await.unwrap();
@@ -8665,7 +8665,7 @@ steps:
         write(
             root,
             ".oxplow/extensions/host/pages/board.yaml",
-            "title: Board\nparams: [{ name: scope, default: all }, { name: thread_id }]\ndata:\n  own: { sql: \"SELECT 1 AS n\" }\nview: { id: cards, viz: table, from: own, replaceable: work_item.board }\n",
+            "title: Board\nparams: [{ name: scope, default: all }, { name: thread_id }]\nloaders:\n  own: { sql: \"SELECT 1 AS n\" }\nview: { id: cards, viz: table, from: own, replaceable: work_item.board }\n",
         );
         write(
             root,
@@ -8687,7 +8687,7 @@ ui:
         write(
             root,
             ".oxplow/extensions/lanes/pages/board.yaml",
-            "title: Lanes\nparams: [{ name: scope }, { name: thread_id }]\ndata:\n  items: { sql: \"SELECT title FROM v_work_item ORDER BY title\" }\nview: { id: board, component: { id: lanes } }\n",
+            "title: Lanes\nparams: [{ name: scope }, { name: thread_id }]\nloaders:\n  items: { sql: \"SELECT title FROM v_work_item ORDER BY title\" }\nview: { id: board, component: { id: lanes } }\n",
         );
         write(
             root,
@@ -8733,7 +8733,7 @@ steps:
         let root = dir.path();
         paged(
             root,
-            "title: Items\ndata:\n  items: { sql: \"SELECT 1 AS n\" }\nview: { viz: table, from: items }\n",
+            "title: Items\nloaders:\n  items: { sql: \"SELECT 1 AS n\" }\nview: { viz: table, from: items }\n",
             &[("empty", "when: { page: items }\nexpect: { loaders: { items: { rows: [] } } }\n")],
         );
         let errors = test_extension(root, "paged", false)
@@ -8757,7 +8757,7 @@ expect: { loaders: { items: { rows: 1 } } }
         paged(
             root,
             "title: Items
-data:
+loaders:
   items: { sql: \"SELECT title FROM v_work_item WHERE title = 'Mine'\" }
 view: { from: items, viz: table }
 ",
@@ -8775,7 +8775,7 @@ view: { from: items, viz: table }
         let root = dir.path();
         let page = "title: Items
 params: [{ name: thread_id }]
-data:
+loaders:
   items: { sql: \"SELECT :thread_id AS thread\" }
 view: { from: items, viz: table }
 alert: { min_rows: 1, label: Configured }
@@ -8864,7 +8864,7 @@ when: { page: items }
         paged(
             root,
             "title: Items
-data:
+loaders:
   items: { sql: \"SELECT title FROM v_work_item\" }
 view: { from: items, viz: table }
 ",

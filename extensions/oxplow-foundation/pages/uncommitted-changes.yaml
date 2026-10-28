@@ -6,7 +6,7 @@ params:
 - name: stream_id
 answers:
 - {"question":"Which uncommitted files are staged, and which does git not track yet?","params":{"stream_id":1},"skill":"oxplow-codebase"}
-data:
+loaders:
   row:
     sql: |
       SELECT id AS change_id, base_revision, head_revision

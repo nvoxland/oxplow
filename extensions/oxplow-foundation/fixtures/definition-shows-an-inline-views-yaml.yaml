@@ -6,7 +6,7 @@ when:
     stream_id: 1
     spec: |
       title: 'Inline release'
-      data:
+      loaders:
         numbers: { sql: 'SELECT 7 AS n' }
       view:
         id: layout

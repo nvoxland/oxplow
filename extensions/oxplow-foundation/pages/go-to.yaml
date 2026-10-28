@@ -5,7 +5,7 @@ category: Work
 keywords: bookmarks visits recent history
 params:
 - name: thread_id
-data:
+loaders:
   bookmarks:
     sql: |
       SELECT coalesce(nullif(trim(w.title), ''), nullif(trim(b.label), ''), b.uri) AS title,

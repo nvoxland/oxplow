@@ -10,7 +10,7 @@ params:
   label: Thread
 - name: stream_id
   label: Stream
-data:
+loaders:
   compact_list:
     sql: |
       SELECT w.uri, w.title, w.state, w.updated_at

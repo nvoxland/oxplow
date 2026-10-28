@@ -6,7 +6,7 @@ params:
   default: "oxplow:oxplow/thread?id=thr1"
 answers:
 - {"question":"What standing instructions did the person set for this thread and its stream?","about":"oxplow/thread","params":{"thread":"oxplow:oxplow/thread?id=thr1"},"skill":"oxplow-runtime"}
-data:
+loaders:
   instructions:
     sql: "SELECT s.prompt AS stream_prompt, t.prompt AS thread_prompt FROM v_thread t JOIN v_stream s ON s.id = t.stream_id WHERE t.uri = :thread"
 view: { viz: table, from: instructions }

@@ -3,7 +3,7 @@ description: One failed operation's command, exit and message, and its captured 
 hidden: true
 params:
 - name: event_id
-data:
+loaders:
   alerts_operation:
     sql: |
       SELECT e.command, e.message, e.exit_code, e.signal, e.duration_ms,

@@ -4,7 +4,7 @@ import { openFromLauncher } from "../../support/ui.js";
 
 const list = `title: Expand Wallaby
 category: Data
-data:
+loaders:
   animals:
     sql: SELECT 'wallaby' AS id, 'Wallaby' AS name UNION ALL SELECT 'bilby', 'Bilby' ORDER BY 1 DESC
 view:
@@ -21,7 +21,7 @@ const detail = `title: Wallaby detail
 hidden: true
 params:
 - name: id
-data:
+loaders:
   rows:
     sql: SELECT 'Habitat of ' || :id AS habitat UNION ALL SELECT 'Diet of ' || :id
 view:

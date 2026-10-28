@@ -6,7 +6,7 @@ params:
   role: filter
   label: State (open / merged / all)
   default: all
-data:
+loaders:
   pr_lifetimes:
     sql: |
       SELECT pr.number, pr.title, pr.state, pr.author, pr.opened_at, pr.merged_at

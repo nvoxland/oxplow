@@ -5,7 +5,7 @@ params:
 - name: stream_id
 - name: end
   default: ''
-data:
+loaders:
   changes_starts:
     sql: |
       SELECT value, label, "group" FROM (

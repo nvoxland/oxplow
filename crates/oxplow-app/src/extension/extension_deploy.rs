@@ -1568,7 +1568,7 @@ mod tests {
             &dir,
             "pages/one.yaml",
             &format!(
-                "title: {title}\ndata:\n  n: {{ sql: \"SELECT 1 AS n\" }}\nview: {{ viz: number, from: n }}\n"
+                "title: {title}\nloaders:\n  n: {{ sql: \"SELECT 1 AS n\" }}\nview: {{ viz: number, from: n }}\n"
             ),
         );
         dir
@@ -1692,7 +1692,7 @@ mod tests {
         write(
             &svc.layout.project_dir.join(".oxplow/extensions/acme"),
             "pages/new.yaml",
-            "title: N\ndata:\n  n: { sql: \"SELECT 1 AS n\" }\nview: { viz: table, from: n }\n",
+            "title: N\nloaders:\n  n: { sql: \"SELECT 1 AS n\" }\nview: { viz: table, from: n }\n",
         );
         let second = deploy(svc, "acme", true).await.unwrap();
         assert_eq!(
@@ -1731,7 +1731,7 @@ mod tests {
                 &dir,
                 &format!("pages/{slug}.yaml"),
                 &format!(
-                    "title: {slug}\ndata:\n  n: {{ sql: \"{query}\" }}\nview: {{ viz: number, from: n }}\n"
+                    "title: {slug}\nloaders:\n  n: {{ sql: \"{query}\" }}\nview: {{ viz: number, from: n }}\n"
                 ),
             );
         }
@@ -1771,7 +1771,7 @@ mod tests {
         write(
             &svc.layout.project_dir.join(".oxplow/extensions/acme"),
             "pages/keep.yaml",
-            "title: keep\ndata:\n  n: { sql: \"SELECT 1 AS n\" }\nview: { viz: table, from: n }\n",
+            "title: keep\nloaders:\n  n: { sql: \"SELECT 1 AS n\" }\nview: { viz: table, from: n }\n",
         );
         deploy(svc, "acme", true).await.unwrap();
         let other = tempfile::tempdir().unwrap();
@@ -1798,7 +1798,7 @@ mod tests {
         write(
             &dir,
             "pages/two.yaml",
-            "title: two\ndata:\n  n: { sql: \"SELECT 1 AS n\" }\nview: { viz: table, from: n }\n",
+            "title: two\nloaders:\n  n: { sql: \"SELECT 1 AS n\" }\nview: { viz: table, from: n }\n",
         );
         let second = deploy(svc, "acme", true).await.unwrap();
         assert!(
@@ -1811,7 +1811,7 @@ mod tests {
     }
 
     const PAGE_SPEC: &str =
-        "title: Overview\ndata:\n  a: { sql: \"SELECT 1 AS n\" }\nview: { viz: table, from: a }\n";
+        "title: Overview\nloaders:\n  a: { sql: \"SELECT 1 AS n\" }\nview: { viz: table, from: a }\n";
 
     /// A page written into a new extension scaffolds its manifest, loads,
     /// and is deployed when asked.
@@ -2051,7 +2051,7 @@ mod tests {
         write(
             &dir,
             "pages/one.yaml",
-            "title: T\ndata:\n  n: { sql: \"SELECT 1 AS n\" }\nview: { viz: table, from: n }\n",
+            "title: T\nloaders:\n  n: { sql: \"SELECT 1 AS n\" }\nview: { viz: table, from: n }\n",
         );
     }
 
@@ -2427,7 +2427,7 @@ mod tests {
         write(
             &dir,
             "pages/extra.yaml",
-            "title: Extra\ndata:\n  n: { sql: \"SELECT 1 AS n\" }\nview: { viz: table, from: n }\n",
+            "title: Extra\nloaders:\n  n: { sql: \"SELECT 1 AS n\" }\nview: { viz: table, from: n }\n",
         );
         let deployed = deploy(svc, "oxplow-bundled", false).await.unwrap();
         assert!(!deployed.already);
@@ -3095,7 +3095,7 @@ mod tests {
         write(
             dir.path(),
             ".oxplow/extensions/acme/pages/one.yaml",
-            "title: One\ndata:\n  n: { sql: \"SELECT 1 AS n\" }\nview: { viz: table, from: n }\n",
+            "title: One\nloaders:\n  n: { sql: \"SELECT 1 AS n\" }\nview: { viz: table, from: n }\n",
         );
         // Built after the files: the mode is read when it is made.
         let svc = {

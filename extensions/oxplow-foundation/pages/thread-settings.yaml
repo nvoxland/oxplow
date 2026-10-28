@@ -5,7 +5,7 @@ icon: settings
 params:
 - name: thread
   label: Thread
-data:
+loaders:
   row:
     sql: |
       SELECT t.title AS title FROM v_thread t WHERE t.uri = uri('oxplow/thread', 'id', :thread)

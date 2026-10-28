@@ -432,7 +432,7 @@ test("componentRefusal is a refused invoke's reason, and nothing else's", () => 
 // A page shows an inline page the host draws (`showView`, protocol 12),
 // and says how tall its content is.
 test("showView and size parse; anything else in their place doesn't", () => {
-  const spec = "title: Explore\ndata: { rows: { sql: SELECT 1 AS n } }\nview: { viz: number, from: rows }\n";
+  const spec = "title: Explore\nloaders: { rows: { sql: SELECT 1 AS n } }\nview: { viz: number, from: rows }\n";
   expect(parseFrameMessage({ id: "1", method: "showView", spec })).toEqual({ type: "request", request: { id: "1", method: "showView", spec } });
   expect(parseFrameMessage({ id: "2", method: "showView", spec: null })).toEqual({ type: "request", request: { id: "2", method: "showView", spec: null } });
   expect(parseFrameMessage({ id: "3", method: "showView", spec: { title: "E" } })).toBeNull();
@@ -447,7 +447,7 @@ test("a page's showView answers its first loader's rows once drawn, or the host'
   const heights: number[] = [];
   const h = harness({
     showView: async (spec) => {
-      if (spec?.includes("bad")) throw Object.assign(new Error("no such table: nope"), { code: "INVALID", field: "/data/rows/sql" });
+      if (spec?.includes("bad")) throw Object.assign(new Error("no such table: nope"), { code: "INVALID", field: "/loaders/rows/sql" });
       shown.push(spec);
       return spec ? { columns: ["n"], rows: [[1]], truncated: false } : null;
     },
@@ -460,7 +460,7 @@ test("a page's showView answers its first loader's rows once drawn, or the host'
   await h.settle();
   expect(h.received).toEqual([
     { id: "a", ok: true, result: { columns: ["n"], rows: [[1]], truncated: false } },
-    { id: "b", ok: false, error: { code: "INVALID", message: "no such table: nope", field: "/data/rows/sql" } },
+    { id: "b", ok: false, error: { code: "INVALID", message: "no such table: nope", field: "/loaders/rows/sql" } },
     { id: "c", ok: true, result: null },
   ]);
   expect(shown).toEqual(["good", null]);

@@ -1,7 +1,7 @@
 title: TODO Board
 description: The code's TODO comments as a board, a column for each thing they ask for — bugs, cleanup and features.
 category: Code
-data:
+loaders:
   todo_board:
     sql: |
       SELECT path, line, rule AS kind

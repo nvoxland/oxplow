@@ -13,7 +13,7 @@ params:
 - name: stream_id
 answers:
 - {"question":"What is in the src folder of this stream's worktree, and which of its files changed?","params":{"stream_id":1,"path":"src"},"skill":"oxplow-extension"}
-data:
+loaders:
   directory:
     sql: |
       SELECT name, kind, status,

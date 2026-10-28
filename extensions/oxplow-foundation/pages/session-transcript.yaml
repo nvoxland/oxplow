@@ -14,7 +14,7 @@ params:
   default: 1
 answers:
 - {"question":"What happened in this agent session, turn by turn?","params":{"session":"ses1"},"skill":"oxplow-runtime"}
-data:
+loaders:
   session_transcript:
     sql: |
       WITH s AS (SELECT * FROM v_agent_session WHERE uri = uri('oxplow/agent_session', 'id', :session)),

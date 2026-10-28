@@ -3,7 +3,7 @@ description: The session's harness's saved conversations for its worktree, newes
 hidden: true
 params:
 - name: uri
-data:
+loaders:
   agent_session_conversations:
     sql: |
       SELECT c.native_id AS value,

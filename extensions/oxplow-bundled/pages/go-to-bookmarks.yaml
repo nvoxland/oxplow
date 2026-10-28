@@ -4,7 +4,7 @@ hidden: true
 params:
 - name: thread_id
   label: Thread
-data:
+loaders:
   go_to_bookmarks:
     sql: |
       SELECT coalesce(nullif(trim(w.title), ''), nullif(trim(b.label), ''), b.uri) AS title, b.page_kind, b.uri

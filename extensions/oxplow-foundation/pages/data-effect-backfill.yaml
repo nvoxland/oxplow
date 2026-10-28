@@ -3,7 +3,7 @@ description: The matching events an effect never reacted to - those logged befor
 hidden: true
 params:
 - name: effect
-data:
+loaders:
   data_effect_backfill:
     sql: |
       SELECT effect, planned, to_seq, batch,

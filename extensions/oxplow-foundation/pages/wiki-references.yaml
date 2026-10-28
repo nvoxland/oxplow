@@ -10,7 +10,7 @@ answers:
 - {"question":"Save what I just learned as a wiki page.","params":{},"skill":"oxplow-wiki-capture"}
 actions:
 - {"id":"save","label":"Save as a wiki page","command":"oxplow.knowledge.write_page","input":{"slug":"auth-flow","body":"# Auth flow\n\nHow a login becomes a session."}}
-data:
+loaders:
   stale:
     sql: "SELECT uri, title, stale_ref_count FROM v_knowledge_page WHERE stale_ref_count > 0"
   about_file:

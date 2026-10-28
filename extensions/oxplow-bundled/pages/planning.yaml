@@ -1,7 +1,7 @@
 title: Planning
 description: What's ready to pick up, what's parked in the backlog, and the notes that changed lately.
 category: Work
-data:
+loaders:
   ready_tasks:
     sql: |
       SELECT w.uri, w.title, th.title AS thread

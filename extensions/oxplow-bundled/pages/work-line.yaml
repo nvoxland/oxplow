@@ -4,7 +4,7 @@ hidden: true
 params:
 - name: thread_id
   label: Thread
-data:
+loaders:
   work_line:
     sql: |
       SELECT title, icon, uri, depth, active

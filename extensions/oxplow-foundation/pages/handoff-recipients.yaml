@@ -4,7 +4,7 @@ hidden: true
 params:
 - name: uri
   label: From thread
-data:
+loaders:
   handoff_recipients:
     sql: |
       SELECT uri_param(t.uri, 'id') AS value, t.title AS label, s.title AS "group"

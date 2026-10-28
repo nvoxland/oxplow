@@ -12,7 +12,7 @@ Each recipe: write the file, check it, deploy, test.
    params: [{ name: state, default: todo }]
    answers:
      - { question: "What work is open?", params: { state: todo } }
-   data:
+   loaders:
      items: { sql: "SELECT title, state FROM v_work_item WHERE state = :state" }
    view: { viz: table, from: items }
    ```
@@ -35,7 +35,7 @@ Each recipe: write the file, check it, deploy, test.
 ```yaml page
 title: New item
 params: [{ name: t, default: "" }]
-data:
+loaders:
   states: { rows: [{ value: todo, label: To do }, { value: done, label: Done }] }
 view:
   viz: form
@@ -71,7 +71,7 @@ title: Stale reviews
 params: [{ name: uri }]            # the params the host passes, by name
 answers:
   - { question: "Which reviews of this work item are stale?", about: oxplow/work_item }
-data:
+loaders:
   stale: { sql: "SELECT title FROM v_review WHERE item = :uri AND age_days > 7" }
 view: { viz: list, from: stale, empty: No stale reviews. }
 ```

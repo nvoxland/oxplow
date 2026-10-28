@@ -238,7 +238,7 @@ export function useInlineView(store: PageRuns, streamId: string | null, threadId
       const first = name !== null ? state.run.loaders[name] : undefined;
       if (name !== null && first?.error) {
         handle.close();
-        throw Object.assign(new Error(first.error), { code: "INVALID", field: `/data/${name}/sql` });
+        throw Object.assign(new Error(first.error), { code: "INVALID", field: `/loaders/${name}/sql` });
       }
       held.current?.close();
       held.current = handle;

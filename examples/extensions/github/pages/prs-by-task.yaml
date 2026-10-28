@@ -6,7 +6,7 @@ params:
   role: filter
   label: State (open / closed / all)
   default: all
-data:
+loaders:
   prs_by_task:
     sql: |
       SELECT pr.number, pr.title, pr.state, pr.author, w.uri AS item_ref, w.title AS item

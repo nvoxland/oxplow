@@ -33,7 +33,7 @@ category: Dashboards
 icon: layout-dashboard
 answers:
   - { question: "How is work going?" }
-data:
+loaders:
   open:   { sql: "SELECT count(*) AS n FROM v_work_item WHERE state != 'done'" }
   by_day: { sql: "SELECT date(created_at) AS day, count(*) AS n FROM v_work_item GROUP BY 1 ORDER BY 1" }
 view:
@@ -79,7 +79,7 @@ custom_components:
 ```yaml page
 # pages/burndown.yaml
 title: Burndown
-data:
+loaders:
   red: { sql: "SELECT bucket, MEASURE('oxplow.tests.red_runs') AS red FROM metric_grid('day') ORDER BY bucket" }
 view: { component: { id: burndown } }
 ```

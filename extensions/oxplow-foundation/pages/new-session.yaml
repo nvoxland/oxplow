@@ -8,7 +8,7 @@ params:
   role: filter
   label: Find an earlier session
   type: search
-data:
+loaders:
   start:
     sql: |
       SELECT uri_param(t.uri, 'id') AS thread,

@@ -1,7 +1,7 @@
 title: Shared work
 description: 'Where two threads hold the same thing: a work item with open efforts on both, a file both changed in the last day, an epic whose children sit on different threads.'
 category: Work
-data:
+loaders:
   shared_work:
     sql: |
       WITH open_work AS (

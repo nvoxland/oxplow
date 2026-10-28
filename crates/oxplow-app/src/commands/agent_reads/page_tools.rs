@@ -32,7 +32,7 @@ pub struct RunPageInput {
     /// The page: `<extension>/<slug>` (see `oxplow.page.find`, `v_page`).
     #[serde(default)]
     pub page: Option<String>,
-    /// Or an inline page of your own, as YAML: `title`, `data:` (sql /
+    /// Or an inline page of your own, as YAML: `title`, `loaders:` (sql /
     /// rows / page loaders) and `view:` — it only reads.
     #[serde(default)]
     pub spec: Option<String>,
@@ -386,7 +386,7 @@ pub struct ShowPageInput {
     /// Its param values by name (as for `oxplow.page.run`).
     #[serde(default)]
     pub params: Option<BTreeMap<String, Value>>,
-    /// Or a page of your own as YAML (`title`, `data:` with sql / rows /
+    /// Or a page of your own as YAML (`title`, `loaders:` with sql / rows /
     /// page loaders, `view:`; it only reads): kept as a view the person
     /// can save to the wiki or as a page.
     #[serde(default)]
@@ -993,7 +993,7 @@ mod tests {
         let inline = run(
             &svc,
             "oxplow.page.run",
-            json!({ "spec": "title: Mine\ndata:\n  a: { sql: SELECT 5 AS five }\nview: { viz: number, from: a }\n", "format": "json" }),
+            json!({ "spec": "title: Mine\nloaders:\n  a: { sql: SELECT 5 AS five }\nview: { viz: number, from: a }\n", "format": "json" }),
         )
         .await;
         assert_eq!(inline["loaders"]["a"]["rows"], json!([[5]]), "{inline}");
@@ -1071,7 +1071,8 @@ mod tests {
             .collect()
     }
 
-    const BODY: &str = "data:\n  a: { sql: \"SELECT 1 AS n\" }\nview: { viz: number, from: a }\n";
+    const BODY: &str =
+        "loaders:\n  a: { sql: \"SELECT 1 AS n\" }\nview: { viz: number, from: a }\n";
 
     /// Answer x3, title x2, description and keywords x1.
     #[tokio::test]
@@ -1321,7 +1322,7 @@ mod draft_tests {
         write(
             wt.path(),
             ".oxplow/extensions/acme/pages/numbers.yaml",
-            "title: Numbers Draft\ndata:\n  big: { sql: \"SELECT 99 AS n\" }\nview: { viz: table, from: big }\n",
+            "title: Numbers Draft\nloaders:\n  big: { sql: \"SELECT 99 AS n\" }\nview: { viz: table, from: big }\n",
         );
         let mut other = svc.stream_store.list().await.unwrap().pop().unwrap();
         other.id = StreamId::placeholder();
@@ -1387,7 +1388,7 @@ mod show_tests {
             .run(
                 &Actor::Human,
                 "oxplow.page.show",
-                json!({ "spec": "title: Mine\ndata:\n  a: { sql: SELECT 5 AS five }\nview: { viz: number, from: a }\n" }),
+                json!({ "spec": "title: Mine\nloaders:\n  a: { sql: SELECT 5 AS five }\nview: { viz: number, from: a }\n" }),
                 false,
             )
             .await
@@ -1440,13 +1441,13 @@ mod definition_page_tests {
 
     // Comments, quoted strings and whitespace must survive Show Definition:
     // this is the exact inline YAML, not a serialization of the parsed page.
-    const INLINE_SPEC: &str = "# authored inline, with its own comment\ntitle: 'Inline release'\ndata:\n  numbers: { sql: 'SELECT 7 AS n' }\nview:\n  id: layout\n  stack:\n    - { id: total, title: Total, viz: number, from: numbers }\n    - { id: note, markdown: 'A preserved note.' }\n";
+    const INLINE_SPEC: &str = "# authored inline, with its own comment\ntitle: 'Inline release'\nloaders:\n  numbers: { sql: 'SELECT 7 AS n' }\nview:\n  id: layout\n  stack:\n    - { id: total, title: Total, viz: number, from: numbers }\n    - { id: note, markdown: 'A preserved note.' }\n";
 
     /// A node says what it is set to, as its YAML does: a viz its columns
     /// and its role block, a switch its param.
     #[tokio::test]
     async fn an_inline_definitions_nodes_say_what_they_are_set_to() {
-        const SPEC: &str = "title: Set\nparams: [{ name: area, role: filter, default: one }]\ndata:\n  items: { sql: \"SELECT 'a' AS id, NULL AS parent\" }\nview:\n  switch:\n    param: area\n    children:\n      - { id: one, viz: tree, from: items, tree: { id: id, parent: parent, label: id }, columns: [{ key: id, label: Item }], empty: None yet. }\n      - { id: two, markdown: 'Hi.' }\n";
+        const SPEC: &str = "title: Set\nparams: [{ name: area, role: filter, default: one }]\nloaders:\n  items: { sql: \"SELECT 'a' AS id, NULL AS parent\" }\nview:\n  switch:\n    param: area\n    children:\n      - { id: one, viz: tree, from: items, tree: { id: id, parent: parent, label: id }, columns: [{ key: id, label: Item }], empty: None yet. }\n      - { id: two, markdown: 'Hi.' }\n";
         let f = crate::test_fixtures::services_with_effort().await;
         let out = f
             .svc
@@ -1522,7 +1523,7 @@ mod definition_page_tests {
                 "actions",
             ),
             (
-                "title: Command loader\ndata:\n  tasks:\n    command: oxplow.work_item.create\n    args: { title: Hidden loader }\n    reads: [work_item]\nview: { viz: table, from: tasks }\n",
+                "title: Command loader\nloaders:\n  tasks:\n    command: oxplow.work_item.create\n    args: { title: Hidden loader }\n    reads: [work_item]\nview: { viz: table, from: tasks }\n",
                 "not a command",
             ),
         ] {

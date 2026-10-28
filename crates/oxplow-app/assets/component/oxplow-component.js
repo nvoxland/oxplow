@@ -216,7 +216,7 @@
       // with Pin to Dashboard; null clears it. Resolves with
       // its first loader's rows (`{ columns, rows, truncated }`; null when
       // cleared), for the page's own controls. Rejects `INVALID` with the
-      // `field` it is about (`/data/<loader>/sql`) for a page oxplow refuses
+      // `field` it is about (`/loaders/<loader>/sql`) for a page oxplow refuses
       // or a loader that failed. A page only.
       showView: (spec) => call({ method: "showView", spec: spec === undefined ? null : spec }),
       // The page's actions — `[{ id, label, primary?, disabled? }]` — drawn

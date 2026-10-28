@@ -11,7 +11,7 @@ test("a page re-runs when its dataset changes, and pins to a new dashboard", asy
     spec: [
       "title: Numbat tasks",
       "category: Data",
-      "data:",
+      "loaders:",
       "  numbats:",
       "    sql: SELECT title FROM v_work_item WHERE title LIKE 'Numbat%' ORDER BY created_at",
       "view: { from: numbats, viz: table, empty: No numbats yet. }",

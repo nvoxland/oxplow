@@ -568,7 +568,7 @@ default: true           # the page a plain open uses
 accepts: { id: '^\d+$' }   # optional: only URIs whose params fit
 label: "PR #{{param.id}}"  # optional: what its tab says
 params: [{ name: uri }, { name: id }]   # filled from the URI
-data:
+loaders:
   pr: { sql: "SELECT * FROM v_github_pr WHERE number = :id" }
 view: { viz: table, from: pr }
 ```

@@ -5,7 +5,7 @@ import { openFromLauncher } from "../../support/ui.js";
 
 const host = `title: Slot Possum
 category: Data
-data:
+loaders:
   possum:
     sql: SELECT 'ringtail' AS kind
 view:
@@ -19,7 +19,7 @@ const mounted = `title: Possum extras
 hidden: true
 params:
 - name: kind
-data:
+loaders:
   extra:
     sql: SELECT 'Mounted ' || :kind AS line
 view:

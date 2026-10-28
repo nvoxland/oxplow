@@ -3,7 +3,7 @@ description: How the effort moved the metrics oxplow tracks. Tests, coverage, an
 hidden: true
 params:
 - name: effort_id
-data:
+loaders:
   effort_metric_deltas:
     sql: |
       SELECT key, title, unit,

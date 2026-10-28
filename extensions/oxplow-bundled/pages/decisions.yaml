@@ -4,7 +4,7 @@ hidden: true
 params:
 - name: effort_id
   label: Effort
-data:
+loaders:
   decisions:
     sql: |
       SELECT question, choice,

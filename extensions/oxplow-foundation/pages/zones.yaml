@@ -4,7 +4,7 @@ hidden: true
 answers:
 - {"question":"Which zone rules does this project have, and how many files does each claim?","params":{},"skill":"oxplow-extension"}
 - {"question":"Which files fall outside every zone rule?","params":{},"skill":"oxplow-extension"}
-data:
+loaders:
   zones:
     sql: "SELECT position, zone, patterns, files FROM v_zone ORDER BY position IS NULL, position"
   unmatched:

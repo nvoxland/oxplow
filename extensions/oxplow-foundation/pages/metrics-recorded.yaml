@@ -38,7 +38,7 @@ params:
   label: Slice by
   options_from: oxplow-foundation/metrics-dimensions
   default: ''
-data:
+loaders:
   metrics:
     sql: |
       WITH pts AS (

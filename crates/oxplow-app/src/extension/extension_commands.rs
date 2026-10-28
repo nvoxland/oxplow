@@ -1769,7 +1769,7 @@ mod tests {
     #[test]
     fn a_command_or_a_page_is_offered_as_a_tool_under_its_namespace() {
         let d = tempfile::tempdir().unwrap();
-        let page = "title: Waiting\ndata:\n  n: { sql: SELECT 1 AS n }\nview: { viz: number, from: n }\ntool: waiting\n";
+        let page = "title: Waiting\nloaders:\n  n: { sql: SELECT 1 AS n }\nview: { viz: number, from: n }\ntool: waiting\n";
         write_ext(
             d.path(),
             "my-review",
@@ -1799,7 +1799,7 @@ mod tests {
                     (
                         "pages/waiting.yaml",
                         &format!(
-                            "title: Waiting\ndata:\n  n: {{ sql: SELECT 1 AS n }}\n\
+                            "title: Waiting\nloaders:\n  n: {{ sql: SELECT 1 AS n }}\n\
                              view: {{ viz: number, from: n }}\ntool: {page_tool}\n"
                         ),
                     ),
@@ -1827,7 +1827,7 @@ mod tests {
             write(
                 d.path(),
                 &format!(".oxplow/extensions/{name}/pages/waiting.yaml"),
-                "title: Waiting\ndata:\n  n: { sql: SELECT 1 AS n }\nview: { viz: number, from: n }\ntool: waiting\n",
+                "title: Waiting\nloaders:\n  n: { sql: SELECT 1 AS n }\nview: { viz: number, from: n }\ntool: waiting\n",
             );
         }
         let mut exts: Vec<Extension> = load_extensions(d.path())

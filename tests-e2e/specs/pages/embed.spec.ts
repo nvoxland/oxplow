@@ -4,7 +4,7 @@ import { openFromLauncher } from "../../support/ui.js";
 
 const outer = `title: Embed Echidna
 category: Data
-data:
+loaders:
   intro:
     sql: SELECT 'Outer echidna' AS line
 view:
@@ -17,7 +17,7 @@ const inner = `title: Echidna inner
 hidden: true
 params:
 - name: name
-data:
+loaders:
   facts:
     sql: SELECT 'Inner ' || :name AS line
 view:

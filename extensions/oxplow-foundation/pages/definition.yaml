@@ -13,7 +13,7 @@ params:
 - name: stream_id
 answers:
 - {"question":"What is this page made of, and where does each part come from?","params":{"of":"oxplow-foundation/commit"}}
-data:
+loaders:
   # First: the tab's label reads its row.
   scope:
     sql: |
@@ -195,8 +195,8 @@ view:
     - { key: type, label: Type }
     - { key: default, label: Default }
     - { key: value, label: This run }
-  - id: data
-    title: Data
+  - id: loaders
+    title: Data Loaders
     viz: markdown
     from: queries
     markdown: { text: text }

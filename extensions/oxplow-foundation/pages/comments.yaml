@@ -29,7 +29,7 @@ params:
   - value: '365'
     label: Resolved in the last year
 - name: comment
-data:
+loaders:
   threads:
     sql: |
       SELECT 'cmt' || c.id AS cid, c.uri, c.target,

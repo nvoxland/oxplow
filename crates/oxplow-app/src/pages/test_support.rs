@@ -24,7 +24,7 @@ keywords: digits counting
 params: [{ name: n, default: 2 }]
 answers:
   - { question: "Which numbers are big?", params: { n: 2 } }
-data:
+loaders:
   base: { sql: "SELECT 1 AS n UNION ALL SELECT 2 UNION ALL SELECT 3" }
   big: { sql: "SELECT n FROM base WHERE n >= :n ORDER BY n" }
   count: { sql: "SELECT count(*) AS total FROM big" }
@@ -39,7 +39,7 @@ view:
         r#"
 title: Picked
 params: [{ name: total }]
-data:
+loaders:
   echo: { sql: "SELECT :total AS got" }
 view: { viz: number, from: echo }
 "#,
@@ -48,7 +48,7 @@ view: { viz: number, from: echo }
         "host",
         r#"
 title: Host
-data:
+loaders:
   first: { sql: "SELECT 3 AS total" }
   borrowed: { page: acme/numbers, loader: count, params: { n: 1 } }
   colors: { rows: [{ state: failed }, { state: passed }] }
@@ -64,7 +64,7 @@ view:
         r#"
 title: Areas
 params: [{ name: area, role: filter, default: one }]
-data:
+loaders:
   one: { sql: "SELECT 'one' AS a" }
   two: { sql: "SELECT 'two' AS a" }
 view:
@@ -79,7 +79,7 @@ view:
         "queried",
         r#"
 title: Queried
-data:
+loaders:
   q:
     command: oxplow.sql.query
     args: { sql: "SELECT 7 AS seven" }
@@ -91,7 +91,7 @@ view: { viz: table, from: q }
         "listed",
         r#"
 title: Listed
-data:
+loaders:
   nodes:
     command: oxplow.page.definition
     args: { page: acme/numbers }
@@ -109,7 +109,7 @@ view: { viz: table, from: nodes }
         "bound",
         r#"
 title: Bound
-data:
+loaders:
   row: { sql: "SELECT 42 AS answer" }
   echo:
     sql: "SELECT :answer AS got"
@@ -122,7 +122,7 @@ view: { viz: number, from: echo }
         r#"
 title: Acts
 params: [{ name: t, default: from-page }]
-data:
+loaders:
   names: { sql: "SELECT 'alpha' AS name UNION ALL SELECT 'beta'" }
 actions:
   - { id: add, label: Add, command: oxplow.work_item.create, input: { title: "{{param.t}}" } }
@@ -142,7 +142,7 @@ for: oxplow/commit
 params: [{ name: uri }, { name: sha }]
 answers:
   - { question: "What did this commit change?", about: oxplow/commit }
-data:
+loaders:
   a: { sql: "SELECT :sha AS s" }
 view: { viz: number, from: a }
 "#,
@@ -152,7 +152,7 @@ view: { viz: number, from: a }
         r#"
 title: Needy
 needs: [work_items]
-data:
+loaders:
   q: { sql: "SELECT 1 AS n" }
 view: { viz: table, from: q }
 "#,
@@ -162,7 +162,7 @@ view: { viz: table, from: q }
         r#"
 title: Headed
 params: [{ name: head_sha }, { name: stream_id }]
-data:
+loaders:
   at: { sql: "SELECT :head_sha AS head" }
   other: { sql: "SELECT 1 AS n" }
 view: { viz: table, from: at }
@@ -172,7 +172,7 @@ view: { viz: table, from: at }
         "rename",
         r#"
 title: Rename
-data:
+loaders:
   row: { sql: "SELECT 'sess-1' AS session" }
 actions:
   - { id: rename, label: Rename…, command: oxplow.work_item.create, input: { title: "{{row.session}}" }, form: true }
@@ -193,7 +193,7 @@ view:
         "session",
         r#"
 title: Session
-data:
+loaders:
   row: { sql: "SELECT 'sess-1' AS session, 1 AS running" }
   other: { sql: "SELECT 1 AS n UNION ALL SELECT 2" }
 actions:
@@ -206,7 +206,7 @@ view: { viz: table, from: other }
         r#"
 title: New Item
 params: [{ name: t, default: drafted }]
-data:
+loaders:
   states:
     rows: [{ value: todo, label: To do }, { value: done, label: Done }]
 view:
@@ -222,7 +222,7 @@ view:
         r#"
 title: Slotted
 params: [{ name: n, default: 4 }]
-data:
+loaders:
   first: { sql: "SELECT 1 AS a" }
   last: { sql: "SELECT 2 AS b" }
 view:
@@ -236,7 +236,7 @@ view:
         "mixed",
         r#"
 title: Mixed
-data:
+loaders:
   steady: { sql: "SELECT abs(random()) AS r" }
   datasets: { sql: "SELECT count(*) AS n FROM v_dataset" }
   after: { sql: "SELECT n, abs(random()) AS r FROM datasets" }
@@ -250,7 +250,7 @@ view:
         "writes",
         r#"
 title: Writes
-data:
+loaders:
   w:
     command: oxplow.work_item.create
     args: { title: nope }
@@ -284,12 +284,12 @@ pub(crate) async fn fixture() -> (tempfile::TempDir, Arc<crate::Services>) {
     write(
         dir.path(),
         ".oxplow/extensions/beta/pages/extra.yaml",
-        "title: Extra\nparams: [{ name: n }]\ndata:\n  echo: { sql: \"SELECT :n AS got\" }\nview: { viz: number, from: echo }\n",
+        "title: Extra\nparams: [{ name: n }]\nloaders:\n  echo: { sql: \"SELECT :n AS got\" }\nview: { viz: number, from: echo }\n",
     );
     write(
         dir.path(),
         ".oxplow/extensions/beta/pages/early.yaml",
-        "title: Early\ndata:\n  e: { sql: \"SELECT 0 AS e\" }\nview: { viz: number, from: e }\n",
+        "title: Early\nloaders:\n  e: { sql: \"SELECT 0 AS e\" }\nview: { viz: number, from: e }\n",
     );
     let svc = crate::Services::in_memory(dir.path()).await.unwrap();
     let problems = crate::test_fixtures::activate_with_problems(&svc).await;

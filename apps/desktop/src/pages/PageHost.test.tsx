@@ -24,7 +24,7 @@ test("every page offers Show definition with the page and the run's actual param
 });
 
 test("an inline view offers saves without requiring a single SQL viz", async () => {
-  const yaml = "title: Snapshot\ndata: { items: { rows: [{ title: Alpha }] } }\nview: { viz: table, from: items }\n";
+  const yaml = "title: Snapshot\nloaders: { items: { rows: [{ title: Alpha }] } }\nview: { viz: table, from: items }\n";
   const kept: string[] = [];
   const { runs } = fakePageRuns(gridPage());
   const view = render(<PageHost pageKey={{ ...key, page: undefined, specYaml: yaml }} runs={runs} onSpecYaml={(source) => kept.push(source)} />);

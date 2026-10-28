@@ -4,7 +4,7 @@ hidden: true
 params:
 - name: change_id
   label: Change
-data:
+loaders:
   tests_weakened:
     sql: |
       SELECT * FROM (

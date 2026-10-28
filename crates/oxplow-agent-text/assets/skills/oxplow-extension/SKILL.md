@@ -5,7 +5,7 @@ description: Build oxplow pages and extensions on request: views over oxplow's d
 
 # Building oxplow pages
 
-A **page** (`pages/<slug>.yaml`) is named queries (`data:`) plus a tree of
+A **page** (`pages/<slug>.yaml`) is named queries (`loaders:`) plus a tree of
 nodes that shows them (`view:`); it updates as the work changes. Pages live
 in **extensions**: plain-file folders at `.oxplow/extensions/<name>/` the
 user can keep and share. Scaffold with `$OXPLOW_BIN extension new <kind> <name>
@@ -36,7 +36,7 @@ shows a draft page over the project's real data: a look, not a test.
 `oxplow_get_skill` with `name: oxplow-extension` and `reference: <name>`):
 
 - `references/page-format.md`: manifest, page metadata, params, answers. Start here.
-- `references/loaders.md`: `data:`: sql, command, page, rows.
+- `references/loaders.md`: `loaders:`: sql, command, page, rows.
 - `references/view-nodes.md`: `view:`: layout, viz, columns, actions, embed, slot.
 - `references/recipes.md`: data to page, a form, a dashboard, a slot mount.
 - `references/dashboards.md`: dashboards are pages of embeds; Pin.

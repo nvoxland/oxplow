@@ -795,7 +795,7 @@ mod tests {
         std::fs::write(
             p.join("kinds.yaml"),
             "title: Kinds\nparams:\n  - { name: kind, default: worktree }\n\
-             data:\n  kinds: { sql: \"SELECT kind FROM v_stream WHERE kind = :kind\" }\n\
+             loaders:\n  kinds: { sql: \"SELECT kind FROM v_stream WHERE kind = :kind\" }\n\
              view: { viz: table, from: kinds }\n",
         )
         .unwrap();
@@ -883,12 +883,12 @@ mod tests {
         );
         w(
             ".oxplow/extensions/demo/pages/review.yaml",
-            "title: Review\nparams:\n  - { name: path }\ndata:\n  r: { sql: SELECT :path AS effort }\nview: { viz: table, from: r }\n",
+            "title: Review\nparams:\n  - { name: path }\nloaders:\n  r: { sql: SELECT :path AS effort }\nview: { viz: table, from: r }\n",
         );
         w(
             ".oxplow/extensions/demo/pages/streams.yaml",
             "title: Streams\nparams:\n  - { name: kind, default: primary }\n\
-             data:\n  streams: { sql: \"SELECT kind FROM v_stream WHERE kind = :kind\" }\n\
+             loaders:\n  streams: { sql: \"SELECT kind FROM v_stream WHERE kind = :kind\" }\n\
              view: { viz: table, from: streams }\n",
         );
         deploy_sources(&services).await;
@@ -965,7 +965,7 @@ mod tests {
         // A page whose query fails is the check's error.
         w(
             ".oxplow/extensions/demo/pages/broken.yaml",
-            "title: Broken\ndata:\n  b: { sql: SELECT x FROM v_nope }\nview: { viz: table, from: b }\n",
+            "title: Broken\nloaders:\n  b: { sql: SELECT x FROM v_nope }\nview: { viz: table, from: b }\n",
         );
         let v: serde_json::Value = serde_json::from_str(&text_payload(
             call(
@@ -1832,7 +1832,7 @@ mod tests {
                 &as_primary_thread(&services).await,
                 "oxplow_show_page",
                 serde_json::json!({
-                    "spec": "title: Streams\ndata:\n  s: { sql: SELECT kind FROM v_stream }\nview: { viz: table, from: s }\n",
+                    "spec": "title: Streams\nloaders:\n  s: { sql: SELECT kind FROM v_stream }\nview: { viz: table, from: s }\n",
                 }),
             )
             .await
@@ -2250,7 +2250,7 @@ mod tests {
                 &anon,
                 "oxplow_show_page",
                 serde_json::json!({
-                    "spec": "title: T\ndata:\n  a: { sql: SELECT 1 AS n }\nview: { viz: table, from: a }\n",
+                    "spec": "title: T\nloaders:\n  a: { sql: SELECT 1 AS n }\nview: { viz: table, from: a }\n",
                 }),
             )
             .await

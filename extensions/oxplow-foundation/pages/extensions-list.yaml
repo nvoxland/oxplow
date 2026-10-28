@@ -4,7 +4,7 @@ hidden: true
 answers:
 - {"question":"Which extensions are loaded, are they enabled, and did they load cleanly?","params":{},"skill":"oxplow-extension"}
 - {"question":"Which extensions wait on a person to approve their permissions?","params":{},"skill":"oxplow-extension"}
-data:
+loaders:
   extensions_list:
     sql: |
       SELECT e.name, e.origin, e.enabled, e.deployment,

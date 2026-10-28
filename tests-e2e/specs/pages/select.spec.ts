@@ -7,7 +7,7 @@ category: Data
 params:
 - name: animal
   label: Animal
-data:
+loaders:
   animals:
     sql: SELECT 'quokka' AS id, 'Quokka' AS name UNION ALL SELECT 'numbat', 'Numbat' ORDER BY 1 DESC
   facts:

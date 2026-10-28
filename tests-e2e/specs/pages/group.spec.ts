@@ -4,7 +4,7 @@ import { openFromLauncher } from "../../support/ui.js";
 
 const spec = `title: Group Marsupial
 category: Data
-data:
+loaders:
   animals:
     sql: SELECT 'Quokka' AS name, 'Small' AS size UNION ALL SELECT 'Kangaroo', 'Large' ORDER BY 2 DESC
 view:

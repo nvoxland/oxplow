@@ -21,7 +21,7 @@ params:
   label: To
   default: ''
 - name: stream_id
-data:
+loaders:
   row:
     sql: |
       WITH res AS (

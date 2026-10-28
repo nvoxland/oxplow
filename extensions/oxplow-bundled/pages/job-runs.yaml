@@ -1,7 +1,7 @@
 title: Job Runs
 description: Each job run — running and queued first, then the last day's — with what it has used so far. Open one to follow its output; Cancel stops it.
 category: Activity
-data:
+loaders:
   job_runs:
     sql: |
       SELECT uri,

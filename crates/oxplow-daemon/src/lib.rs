@@ -888,7 +888,7 @@ mod tests {
         let (mut one, _) = tokio_tungstenite::connect_async(url("one")).await.unwrap();
         let (mut two, _) = tokio_tungstenite::connect_async(url("two")).await.unwrap();
         let yaml =
-            "title: Open\ndata: { a: { sql: SELECT 1 AS n } }\nview: { viz: number, from: a }\n";
+            "title: Open\nloaders: { a: { sql: SELECT 1 AS n } }\nview: { viz: number, from: a }\n";
         let first = oxplow_rpc::commands::pages::open_page(
             &svc,
             None,

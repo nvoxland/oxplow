@@ -18,7 +18,7 @@ params:
   default: none
 - name: folder
   default: ''
-data:
+loaders:
   row:
     sql: |
       SELECT s.branch AS branch,

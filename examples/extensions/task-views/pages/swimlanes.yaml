@@ -8,7 +8,7 @@ params:
   default: all
 - name: thread_id
   label: Thread
-data:
+loaders:
   swimlanes:
     sql: |
       SELECT w.uri, w.title, w.state, w.rank

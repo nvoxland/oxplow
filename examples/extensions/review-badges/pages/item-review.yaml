@@ -3,7 +3,7 @@ description: The latest model review of this work item, if effort-review has wri
 hidden: true
 params:
 - name: uri
-data:
+loaders:
   item_review:
     sql: |
       SELECT r.state, r.reviewed_at, r.review

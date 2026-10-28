@@ -3,7 +3,7 @@ description: Diff coverage on the effort's changed lines, the test runs it made,
 hidden: true
 params:
 - name: effort_id
-data:
+loaders:
   effort_coverage:
     sql: |
       SELECT printf('**%d%%** of changed lines covered · %d/%d',

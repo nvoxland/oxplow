@@ -6,7 +6,7 @@ params:
 - name: dataset
   label: Dataset (`v_effort`); empty for all
   default: ''
-data:
+loaders:
   catalog:
     sql: |
       SELECT m.view, m.owner,

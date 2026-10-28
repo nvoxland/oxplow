@@ -3,7 +3,7 @@ description: What this thread holds together with another thread — items with 
 hidden: true
 params:
 - name: thread_id
-data:
+loaders:
   thread_shared_work:
     sql: |
       WITH open_work AS (

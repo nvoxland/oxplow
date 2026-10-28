@@ -4,7 +4,7 @@ icon: archive
 category: System
 params:
 - name: stream_id
-data:
+loaders:
   closed_threads:
     sql: |
       SELECT t.uri, t.title, t.closed_at,

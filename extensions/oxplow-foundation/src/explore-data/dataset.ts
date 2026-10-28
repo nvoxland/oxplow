@@ -228,7 +228,7 @@ export function readView(params: Record<string, string>): ExploreView {
 export function specOf(sql: string, viz: Viz, chart: Chart | null): string {
   return JSON.stringify({
     title: "Explore",
-    data: { rows: { sql } },
+    loaders: { rows: { sql } },
     view: { id: "rows", viz, from: "rows", ...(chart ? { chart } : {}) },
   });
 }

@@ -5,7 +5,7 @@ needs:
 - work_items
 params:
 - name: thread_id
-data:
+loaders:
   new_task_parents:
     sql: |
       SELECT w.uri AS value, w.title AS label

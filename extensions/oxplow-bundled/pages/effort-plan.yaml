@@ -3,7 +3,7 @@ description: The plans the agent put to the person during this effort, newest fi
 hidden: true
 params:
 - name: effort_id
-data:
+loaders:
   effort_plan:
     sql: |
       SELECT group_concat(

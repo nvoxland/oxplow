@@ -10,7 +10,7 @@ In markdown (a wiki page) write a fenced block:
 ````markdown
 ```oxplow-page
 title: Failing tests
-data:
+loaders:
   t: { sql: "SELECT name, status FROM v_test_case WHERE status = 'failed'" }
 view: { viz: table, from: t }
 ```

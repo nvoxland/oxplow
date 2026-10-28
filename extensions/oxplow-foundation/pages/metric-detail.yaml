@@ -30,7 +30,7 @@ params:
   default: ''
 answers:
 - {"question":"How has this metric moved, newest capture first?","about":"oxplow/metric","params":{"metric":"oxplow.coverage.abs_pct"},"skill":"oxplow-metrics"}
-data:
+loaders:
   row:
     sql: |
       SELECT c.title AS title FROM v_metric_catalog c WHERE c.key = :metric

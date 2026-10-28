@@ -260,7 +260,7 @@ mod tests {
         );
     }
 
-    const BOARD: &str = "title: Board\nparams: [{ name: scope }, { name: thread_id }]\ndata:\n  rows: { sql: \"SELECT uri, title, state FROM v_work_item\" }\nview: { viz: table, from: rows }\n";
+    const BOARD: &str = "title: Board\nparams: [{ name: scope }, { name: thread_id }]\nloaders:\n  rows: { sql: \"SELECT uri, title, state FROM v_work_item\" }\nview: { viz: table, from: rows }\n";
 
     /// Extension `tracker`, with `providers` (YAML, or none),
     /// a `board` page taking the Board's whole contract, a `partial` one
@@ -293,27 +293,27 @@ mod tests {
         write(
             d.path(),
             ".oxplow/extensions/tracker/pages/partial.yaml",
-            "title: Partial\nparams: [{ name: scope }]\ndata:\n  rows: { sql: \"SELECT 1 AS n\" }\nview: { viz: table, from: rows }\n",
+            "title: Partial\nparams: [{ name: scope }]\nloaders:\n  rows: { sql: \"SELECT 1 AS n\" }\nview: { viz: table, from: rows }\n",
         );
         write(
             d.path(),
             ".oxplow/extensions/tracker/pages/state.yaml",
-            "title: State\nparams: [{ name: uri }]\ndata:\n  rows: { sql: \"SELECT :uri AS uri\" }\nview: { viz: table, from: rows }\n",
+            "title: State\nparams: [{ name: uri }]\nloaders:\n  rows: { sql: \"SELECT :uri AS uri\" }\nview: { viz: table, from: rows }\n",
         );
         write(
             d.path(),
             ".oxplow/extensions/tracker/pages/graph.yaml",
-            "title: Graph\nparams: [{ name: head_sha }, { name: reveal_sha }, { name: limit }]\ndata:\n  rows: { sql: \"SELECT :head_sha AS sha\" }\nview: { viz: table, from: rows }\n",
+            "title: Graph\nparams: [{ name: head_sha }, { name: reveal_sha }, { name: limit }]\nloaders:\n  rows: { sql: \"SELECT :head_sha AS sha\" }\nview: { viz: table, from: rows }\n",
         );
         write(
             d.path(),
             ".oxplow/extensions/tracker/pages/verdict.yaml",
-            "title: Verdict\nparams: [{ name: effort_id }]\ndata:\n  rows: { sql: \"SELECT :effort_id AS effort_id\" }\nview: { viz: table, from: rows }\n",
+            "title: Verdict\nparams: [{ name: effort_id }]\nloaders:\n  rows: { sql: \"SELECT :effort_id AS effort_id\" }\nview: { viz: table, from: rows }\n",
         );
         write(
             d.path(),
             ".oxplow/extensions/tracker/pages/board-page.yaml",
-            "title: Board\nparams: [{ name: scope }, { name: thread_id }]\ndata:\n  items: { sql: \"SELECT uri, title, state FROM v_work_item\" }\nview: { viz: table, from: items }\n",
+            "title: Board\nparams: [{ name: scope }, { name: thread_id }]\nloaders:\n  items: { sql: \"SELECT uri, title, state FROM v_work_item\" }\nview: { viz: table, from: items }\n",
         );
         load_extensions(d.path())
             .into_iter()

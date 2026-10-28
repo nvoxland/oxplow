@@ -4,7 +4,7 @@ hidden: true
 params:
 - name: effort_id
 - name: effort
-data:
+loaders:
   changes_effort:
     sql: |
       SELECT e.title, 'eff' || e.id AS effort, e.work_item AS item_ref, w.title AS item,

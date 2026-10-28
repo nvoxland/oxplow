@@ -8,7 +8,7 @@ test("a wiki page's inline page fence reads live data and refreshes after a comm
   });
   const spec = [
     "title: Live signal",
-    "data:",
+    "loaders:",
     "  signal:",
     "    sql: SELECT title FROM v_knowledge_page WHERE slug = 'page-block-signal'",
     "view:",

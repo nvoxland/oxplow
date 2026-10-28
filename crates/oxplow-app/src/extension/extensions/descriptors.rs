@@ -561,7 +561,7 @@ mod tests {
             root,
             &format!("{dir}/pages/open.yaml"),
             "title: Open\nparams:\n  - { name: path, label: Path, default: \"\" }\n\
-             data:\n  n: { sql: \"SELECT 1 AS n WHERE :path = :path\" }\nview: { viz: number, from: n }\n",
+             loaders:\n  n: { sql: \"SELECT 1 AS n WHERE :path = :path\" }\nview: { viz: number, from: n }\n",
         );
         write(root, &format!("{dir}/merged.json"), NUMBER_SCHEMA);
         write(

@@ -4,7 +4,7 @@ import { openFromLauncher } from "../../support/ui.js";
 
 const page = `title: Component Quoll
 category: Data
-data:
+loaders:
   quolls:
     sql: SELECT 'spotted' AS kind UNION ALL SELECT 'northern'
 view:

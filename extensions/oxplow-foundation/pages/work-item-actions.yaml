@@ -7,7 +7,7 @@ answers:
 actions:
 - {"id":"done","label":"Mark done","command":"oxplow.work_item.transition","input":{"uri":"work_item:oxplow:tsk1","to":"done"}}
 - {"id":"blocks","label":"Record a block","command":"oxplow.work_item.link","input":{"uri":"work_item:oxplow:tsk1","target":"work_item:oxplow:tsk2","link_type":"blocks"}}
-data:
+loaders:
   states:
     sql: "SELECT state, count(*) AS n FROM v_work_item GROUP BY state"
 view: { viz: table, from: states }

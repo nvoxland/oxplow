@@ -4,7 +4,7 @@ hidden: true
 params:
 - name: stream_id
   label: Stream
-data:
+loaders:
   comments:
     sql: |
       SELECT who, open, uri('oxplow/page', 'page', 'comments') AS inbox FROM (

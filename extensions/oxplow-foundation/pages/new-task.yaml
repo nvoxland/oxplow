@@ -6,7 +6,7 @@ needs:
 params:
 - name: thread_id
 - name: parent
-data:
+loaders:
   new_task:
     sql: |
       SELECT 'todo' AS state, :parent AS parent_uri,

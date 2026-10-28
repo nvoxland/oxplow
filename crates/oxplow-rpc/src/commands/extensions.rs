@@ -149,7 +149,7 @@ mod tests {
             root,
             ".oxplow/extensions/demo/pages/streams.yaml",
             "title: Streams\nparams:\n  - { name: kind, default: primary }\n\
-             data:\n  streams: { sql: \"SELECT kind FROM v_stream WHERE kind = :kind\" }\n\
+             loaders:\n  streams: { sql: \"SELECT kind FROM v_stream WHERE kind = :kind\" }\n\
              view: { viz: table, from: streams }\n",
         );
     }
@@ -165,7 +165,7 @@ mod tests {
         let (svc, _dir) = crate::test_support::services().await;
         let run = crate::dispatch(
             "run_page",
-            json!({ "specYaml": "title: Explore\ndata:\n  a: { sql: SELECT 1 AS n }\nview: { viz: number, from: a }\n" }),
+            json!({ "specYaml": "title: Explore\nloaders:\n  a: { sql: SELECT 1 AS n }\nview: { viz: number, from: a }\n" }),
             &svc,
         )
         .await

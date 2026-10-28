@@ -10,7 +10,7 @@ params:
   role: filter
   label: Search titles + bodies
   default: ''
-data:
+loaders:
   visited:
     sql: |
       SELECT p.slug, p.title, max(v.visited_at) AS visited_at

@@ -774,7 +774,7 @@ mod tests {
 params:
   - { name: item, default: "" }
   - { name: open, default: "0" }
-data:
+loaders:
   items:
     sql: |
       SELECT uri, title,
@@ -798,7 +798,7 @@ view:
             ext.join("pages/one.yaml"),
             r#"title: One
 params: [{ name: n, default: "1" }, { name: item, default: "" }]
-data:
+loaders:
   one:
     sql: |
       SELECT 'Made' AS title, CAST(:n AS INTEGER) = 1 AS open WHERE CAST(:n AS INTEGER) <> 0
@@ -817,7 +817,7 @@ view:
         std::fs::write(
             ext.join("pages/board.yaml"),
             r#"title: Board
-data:
+loaders:
   items: { sql: "SELECT uri, title, state FROM v_work_item" }
 view:
   viz: board
@@ -833,7 +833,7 @@ view:
         std::fs::write(
             ext.join("pages/note.yaml"),
             r#"title: Note
-data:
+loaders:
   items: { sql: "SELECT uri, body FROM v_work_item" }
 view:
   viz: markdown
@@ -1495,13 +1495,13 @@ view:
         let item = work_item_ref(fx.task);
         std::fs::write(
             root.join(".oxplow/extensions/acme/pages/leaky.yaml"),
-            "title: Leaky\nparams: [{ name: uri }]\ndata:\n  item: { sql: SELECT title FROM v_work_item WHERE uri = :uri }\n\
+            "title: Leaky\nparams: [{ name: uri }]\nloaders:\n  item: { sql: SELECT title FROM v_work_item WHERE uri = :uri }\n\
              view: { viz: form, from: item, form: { command: oxplow.work_item.update, defaults: { uri: '{{param.uri}}' }, fixed: [uri], fields: [{ name: title, secret: true }] } }\n",
         )
         .unwrap();
         std::fs::write(
             root.join(".oxplow/extensions/acme/pages/kept.yaml"),
-            "title: Kept\ndata:\n  file: { sql: \"SELECT 'notes.txt' AS path, 'what was there' AS content\" }\n\
+            "title: Kept\nloaders:\n  file: { sql: \"SELECT 'notes.txt' AS path, 'what was there' AS content\" }\n\
              view: { viz: form, from: file, form: { command: oxplow.file.create, fields: [path, { name: content, secret: true }] } }\n",
         )
         .unwrap();
@@ -1530,7 +1530,7 @@ view:
         let item = work_item_ref(fx.task);
         std::fs::write(
             root.join(".oxplow/extensions/acme/pages/edit.yaml"),
-            "title: Edit\nparams: [{ name: uri }]\ndata:\n  item: { sql: SELECT title FROM v_work_item WHERE uri = :uri }\n\
+            "title: Edit\nparams: [{ name: uri }]\nloaders:\n  item: { sql: SELECT title FROM v_work_item WHERE uri = :uri }\n\
              view: { viz: form, from: item, form: { command: oxplow.work_item.update, defaults: { uri: '{{param.uri}}' }, fixed: [uri], fields: [title] } }\n",
         )
         .unwrap();
@@ -1658,7 +1658,7 @@ view:
     }
 
     /// The page showing `acme/board`.
-    const VIEW_PAGE: &str = "title: View\ndata:\n  n: { sql: SELECT 1 AS n }\n\
+    const VIEW_PAGE: &str = "title: View\nloaders:\n  n: { sql: SELECT 1 AS n }\n\
                              view: { viz: custom, from: n, custom: { component: board } }\n";
 
     /// P6b.D2: a private extension with a component (`board`) that may

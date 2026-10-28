@@ -345,7 +345,7 @@ test("showView resolves with its first loader's rows once the host drew it, and 
   const shown: unknown[] = [];
   const h = harness({
     showView: async (spec) => {
-      if (spec?.includes("bad")) throw Object.assign(new Error("no such table: nope"), { code: "INVALID", field: "/data/rows/sql" });
+      if (spec?.includes("bad")) throw Object.assign(new Error("no such table: nope"), { code: "INVALID", field: "/loaders/rows/sql" });
       shown.push(spec);
       return spec ? { columns: ["n"], rows: [[1]], truncated: false } : null;
     },
@@ -353,11 +353,11 @@ test("showView resolves with its first loader's rows once the host drew it, and 
   const connecting = connect({ target: h.frame });
   h.init();
   const c = await connecting;
-  expect(await c.showView("title: E\ndata: { rows: { sql: SELECT 1 AS n } }\nview: { viz: number, from: rows }\n")).toEqual({ columns: ["n"], rows: [[1]], truncated: false });
+  expect(await c.showView("title: E\nloaders: { rows: { sql: SELECT 1 AS n } }\nview: { viz: number, from: rows }\n")).toEqual({ columns: ["n"], rows: [[1]], truncated: false });
   expect(await c.showView(null)).toBeNull();
   expect(await c.showView()).toBeNull();
   const refused = await c.showView("bad").catch((e: unknown) => e);
-  expect(refused).toEqual({ code: "INVALID", message: "no such table: nope", field: "/data/rows/sql" });
+  expect(refused).toEqual({ code: "INVALID", message: "no such table: nope", field: "/loaders/rows/sql" });
   expect(shown.length).toBe(3);
   expect("showSpec" in c).toBe(false);
   h.close();

@@ -2235,13 +2235,13 @@ mod tests {
     #[tokio::test]
     async fn a_page_failing_the_same_way_on_both_sides_is_unchanged() {
         let layer = crate::sql_gateway::SqlGateway::new(oxplow_db::Database::in_memory());
-        let broken = "title: Broken\ndata:\n  rows: { sql: \"SELECT n FROM v_no_such_dataset\" }\nview: { viz: table, from: rows }\n";
+        let broken = "title: Broken\nloaders:\n  rows: { sql: \"SELECT n FROM v_no_such_dataset\" }\nview: { viz: table, from: rows }\n";
         let (_b, before) = version(&[("broken", broken), ("moved", broken)]);
         let (_a, after) = version(&[
             ("broken", broken),
             (
                 "moved",
-                "title: Broken\ndata:\n  rows: { sql: \"SELECT n FROM v_another_missing_dataset\" }\nview: { viz: table, from: rows }\n",
+                "title: Broken\nloaders:\n  rows: { sql: \"SELECT n FROM v_another_missing_dataset\" }\nview: { viz: table, from: rows }\n",
             ),
         ]);
         let none = |_: &str| None;
@@ -2276,16 +2276,16 @@ mod tests {
     async fn a_changed_page_renders_before_and_after_text() {
         let layer = crate::sql_gateway::SqlGateway::new(oxplow_db::Database::in_memory());
         let (_b, before) = version(&[
-            ("same", "title: Same\ndata:\n  rows: { sql: \"SELECT 1 AS n\" }\nview: { viz: number, from: rows }\n"),
-            ("count", "title: Count\ndata:\n  rows: { sql: \"SELECT 1 AS n\" }\nview: { viz: number, from: rows }\n"),
-            ("old", "title: Old\ndata:\n  rows: { sql: \"SELECT 1 AS n\" }\nview: { viz: table, from: rows }\n"),
+            ("same", "title: Same\nloaders:\n  rows: { sql: \"SELECT 1 AS n\" }\nview: { viz: number, from: rows }\n"),
+            ("count", "title: Count\nloaders:\n  rows: { sql: \"SELECT 1 AS n\" }\nview: { viz: number, from: rows }\n"),
+            ("old", "title: Old\nloaders:\n  rows: { sql: \"SELECT 1 AS n\" }\nview: { viz: table, from: rows }\n"),
         ]);
         let (_a, after) = version(&[
-            ("same", "title: Same\ndata:\n  rows: { sql: \"SELECT 1 AS n\" }\nview: { viz: number, from: rows }\n"),
-            ("count", "title: Count\ndata:\n  rows: { sql: \"SELECT 2 AS n\" }\nview: { viz: number, from: rows }\n"),
+            ("same", "title: Same\nloaders:\n  rows: { sql: \"SELECT 1 AS n\" }\nview: { viz: number, from: rows }\n"),
+            ("count", "title: Count\nloaders:\n  rows: { sql: \"SELECT 2 AS n\" }\nview: { viz: number, from: rows }\n"),
             (
                 "broken",
-                "title: Broken\ndata:\n  rows: { sql: \"SELECT n FROM v_no_such_dataset\" }\nview: { viz: table, from: rows }\n",
+                "title: Broken\nloaders:\n  rows: { sql: \"SELECT n FROM v_no_such_dataset\" }\nview: { viz: table, from: rows }\n",
             ),
         ]);
         let none = |_: &str| None;

@@ -522,7 +522,7 @@ the user guide is `docs/guide/pages.md`.
   - `pages/<slug>.yaml` is one page: metadata (`title`, `description`,
     `label`, `icon`, `category`, `keywords`, `params`, `answers`, `actions`,
     `alert`, `badge`, `needs`, `for` / `accepts` / `default` / `pinned`,
-    `comments`, `refresh`, `hidden`, `tool`), `data:` (named loaders: `sql`,
+    `comments`, `refresh`, `hidden`, `tool`), `loaders:` (named loaders: `sql`,
     `command`, `page`, `rows`) and `view:` (a tree of nodes, with an optional
     `rail:`). Details: [pages-and-tabs.md](./pages-and-tabs.md) "Page files".
   - Unknown keys are errors, so typos surface instead of being ignored.
@@ -1645,7 +1645,7 @@ load error that says to rewrite each file as a page.
 
 To move an old extension over: each file in `lenses/` becomes a page
 (a document's sections go into `view.stack`, its queries into named
-`data:` loaders); fixtures and `intent.examples` name `page:` instead of
+`loaders:` loaders); fixtures and `intent.examples` name `page:` instead of
 `lens:`, with table expectations under `expect.loaders.<loader>`. Then
 delete the YAML files in `lenses/`: they are what the loader refuses.
 `oxplow extension check/test <name>` says when it loads again.
@@ -2251,7 +2251,7 @@ a typo is an error at the line):
   `category`, `keywords`, `params`, `for` / `accepts` / `default` /
   `pinned` (a renderer), `comments`, `refresh`, `hidden`, `needs`,
   `actions`, `alert`, `tool`, `answers`, `badge`.
-- **`data:`**: named loaders ("Loaders" below).
+- **`loaders:`**: named loaders ("Loaders" below).
 - **`view:`**, and an optional `rail:`: a tree of nodes ("View nodes").
 
 Where it lives, and what is loaded:
@@ -2365,7 +2365,7 @@ A param (`PageParam`) takes `name`, `label`, `default`, `options`,
   The run reads `v_stream` for it (`context_reads`), so a commit or a
   branch switch re-runs the loaders that bind it.
 
-### Loaders (`data:`)
+### Loaders (`loaders:`)
 
 Named loaders, run in order; a loader reads only the ones before it
 (naming a later one is an error). A loader has exactly one of `sql`,
@@ -3181,7 +3181,7 @@ custom_components:
 ```yaml
 # pages/burn.yaml
 title: Burndown
-data:
+loaders:
   burndown:
     sql: SELECT day, remaining FROM v_x_burndown WHERE stream_id = :stream_id
 params: [{ name: stream_id }]
@@ -3288,7 +3288,7 @@ read-only, `parse_inline_page`, that the page opens as a run of its own
 under the frame with `PageTree`, with Save as Page when it is one viz
 over one `sql` loader). `showView` answers its first loader's rows, for
 the frame's own pickers, or `INVALID` — the open's refusal, or a failed
-loader with `field: /data/<loader>/sql`. A null spec clears it. While a
+loader with `field: /loaders/<loader>/sql`. A null spec clears it. While a
 view shows, the frame sits at its content's height: the library posts
 `{ type: size, height }` (a message, not a request, from a
 `ResizeObserver` on its root; a component leaves `html` and `body` at

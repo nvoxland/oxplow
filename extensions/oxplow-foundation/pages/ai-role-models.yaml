@@ -3,7 +3,7 @@ description: "The model each AI role would use now and whether its provider has 
 hidden: true
 answers:
 - {"question":"Which model would each AI role use now, and does its provider have a key?","params":{},"skill":"oxplow-extension"}
-data:
+loaders:
   roles:
     sql: "SELECT role, effective_provider, effective_model, key_set FROM v_ai_role ORDER BY role"
 view: { viz: table, from: roles }

@@ -4,7 +4,7 @@ hidden: true
 params:
 - name: effort_id
   label: Effort
-data:
+loaders:
   session_files:
     sql: |
       SELECT CASE WHEN f.shared = 1 THEN 'Shared'

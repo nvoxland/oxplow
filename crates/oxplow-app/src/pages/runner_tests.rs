@@ -236,7 +236,7 @@ async fn the_page_result_budget_omits_an_oversized_single_cell_and_marks_truncat
     let (_dir, svc) = fixture().await;
     let page = budget_page(
         "huge-cell",
-        "title: Huge cell\ndata:\n  huge: { sql: \"SELECT hex(zeroblob(3000000)) AS payload\" }\nview: { viz: table, from: huge }\n",
+        "title: Huge cell\nloaders:\n  huge: { sql: \"SELECT hex(zeroblob(3000000)) AS payload\" }\nview: { viz: table, from: huge }\n",
     );
     let run = PageRunner::of(&svc)
         .run(RunRequest {
@@ -260,7 +260,7 @@ async fn downstream_loaders_read_only_rows_admitted_to_the_page_result_budget() 
     let (_dir, svc) = fixture().await;
     let page = budget_page(
         "cropped-input",
-        "title: Cropped input\ndata:\n  huge:\n    sql: \"WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n WHERE x < 8) SELECT x, hex(zeroblob(500000)) AS payload FROM n\"\n  count: { sql: \"SELECT count(*) AS n FROM huge\" }\nview: { viz: number, from: count }\n",
+        "title: Cropped input\nloaders:\n  huge:\n    sql: \"WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n WHERE x < 8) SELECT x, hex(zeroblob(500000)) AS payload FROM n\"\n  count: { sql: \"SELECT count(*) AS n FROM huge\" }\nview: { viz: number, from: count }\n",
     );
     let run = PageRunner::of(&svc)
         .run(RunRequest {
@@ -284,7 +284,7 @@ async fn the_page_result_budget_is_shared_by_embeds_including_memo_copies_on_rer
     let (dir, svc) = fixture().await;
     let child = budget_page(
         "large-child",
-        "title: Large child\ndata:\n  payload: { sql: \"SELECT hex(zeroblob(1500000)) AS payload\" }\nview: { viz: table, from: payload }\n",
+        "title: Large child\nloaders:\n  payload: { sql: \"SELECT hex(zeroblob(1500000)) AS payload\" }\nview: { viz: table, from: payload }\n",
     );
     let page = budget_page(
         "repeated-embeds",
@@ -325,11 +325,11 @@ async fn a_page_loader_does_not_double_charge_its_transient_source_page_results(
     let (dir, svc) = fixture().await;
     let child = budget_page(
         "large-source",
-        "title: Large source\ndata:\n  payload: { sql: \"SELECT hex(zeroblob(2000000)) AS payload\" }\nview: { viz: table, from: payload }\n",
+        "title: Large source\nloaders:\n  payload: { sql: \"SELECT hex(zeroblob(2000000)) AS payload\" }\nview: { viz: table, from: payload }\n",
     );
     let page = budget_page(
         "borrow-large",
-        "title: Borrow large\ndata:\n  borrowed: { page: acme/large-source, loader: payload }\nview: { viz: table, from: borrowed }\n",
+        "title: Borrow large\nloaders:\n  borrowed: { page: acme/large-source, loader: payload }\nview: { viz: table, from: borrowed }\n",
     );
     let mut runner = PageRunner::of(&svc);
     runner.draft = Some(Draft {
@@ -372,7 +372,7 @@ async fn a_replaceable_node_runs_the_replacement_that_stands_in_for_it() {
     );
     write(
         ".oxplow/extensions/acme/pages/board.yaml",
-        "title: Board\nparams: [{ name: scope, default: all }, { name: thread_id }]\ndata:\n  own: { sql: \"SELECT 1 AS n\" }\nview: { id: cards, viz: table, from: own, replaceable: work_item.board }\n",
+        "title: Board\nparams: [{ name: scope, default: all }, { name: thread_id }]\nloaders:\n  own: { sql: \"SELECT 1 AS n\" }\nview: { id: cards, viz: table, from: own, replaceable: work_item.board }\n",
     );
     write(
         ".oxplow/extensions/beta/extension.yaml",
@@ -380,7 +380,7 @@ async fn a_replaceable_node_runs_the_replacement_that_stands_in_for_it() {
     );
     write(
         ".oxplow/extensions/beta/pages/lanes.yaml",
-        "title: Lanes\nparams: [{ name: scope }, { name: thread_id }]\ndata:\n  echo: { sql: \"SELECT :scope AS scope\" }\nview: { viz: table, from: echo }\n",
+        "title: Lanes\nparams: [{ name: scope }, { name: thread_id }]\nloaders:\n  echo: { sql: \"SELECT :scope AS scope\" }\nview: { viz: table, from: echo }\n",
     );
     let svc = crate::Services::in_memory(dir.path()).await.unwrap();
     let problems = crate::test_fixtures::activate_with_problems(&svc).await;

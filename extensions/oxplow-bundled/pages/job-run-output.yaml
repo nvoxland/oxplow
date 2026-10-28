@@ -3,7 +3,7 @@ description: What a job run produced as it ran, in order — its model's text as
 hidden: true
 params:
 - name: job_run
-data:
+loaders:
   job_run_output:
     sql: |
       SELECT o.attempt,

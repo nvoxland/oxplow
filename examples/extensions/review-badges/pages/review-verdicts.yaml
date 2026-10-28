@@ -1,7 +1,7 @@
 title: Review Verdicts
 description: The latest model review of each work item — the effort reviewed, how the review ended, when, and how it opens.
 category: Work
-data:
+loaders:
   review_verdicts:
     sql: |
       WITH latest AS (

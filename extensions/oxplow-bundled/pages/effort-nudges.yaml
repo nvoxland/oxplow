@@ -3,7 +3,7 @@ description: What oxplow told the agent during this effort.
 hidden: true
 params:
 - name: effort_id
-data:
+loaders:
   effort_nudges:
     sql: |
       SELECT created_at AS at, kind, message, trigger

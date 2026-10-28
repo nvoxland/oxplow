@@ -614,7 +614,7 @@ mod tests {
         std::fs::write(p, body).unwrap();
     }
 
-    const PAGE: &str = "title: Burn\ndata:\n  burn: { sql: \"SELECT 1 AS day, 3 AS remaining\" }\n\
+    const PAGE: &str = "title: Burn\nloaders:\n  burn: { sql: \"SELECT 1 AS day, 3 AS remaining\" }\n\
                         view:\n  from: burn\n  viz: custom\n  custom: { component: burndown, props: { color: accent } }\n";
 
     /// The config of the first custom viz node of `ext`'s page `slug`.
@@ -1030,11 +1030,11 @@ mod tests {
     fn a_custom_viz_needs_one_of_its_extensions_components() {
         for (page, says) in [
             (
-                "title: B\ndata:\n  b: { sql: SELECT 1 }\nview: { from: b, viz: custom }\n",
+                "title: B\nloaders:\n  b: { sql: SELECT 1 }\nview: { from: b, viz: custom }\n",
                 "needs `custom: { component: <id> }`",
             ),
             (
-                "title: B\ndata:\n  b: { sql: SELECT 1 }\nview: { from: b, viz: custom, custom: { component: nope } }\n",
+                "title: B\nloaders:\n  b: { sql: SELECT 1 }\nview: { from: b, viz: custom, custom: { component: nope } }\n",
                 "isn't one of this extension's `custom_components`",
             ),
         ] {
@@ -1061,7 +1061,7 @@ mod tests {
         write(
             d.path(),
             ".oxplow/extensions/x/pages/burn.yaml",
-            "title: Burn\ndata:\n  burn: { sql: \"SELECT 1 AS day, 3 AS remaining\" }\n\
+            "title: Burn\nloaders:\n  burn: { sql: \"SELECT 1 AS day, 3 AS remaining\" }\n\
              view:\n  from: burn\n  viz: custom\n  custom: { component: burndown }\n  chart: { x: day, y: remaining }\n",
         );
         let layer = crate::sql_gateway::SqlGateway::new(oxplow_db::Database::in_memory());

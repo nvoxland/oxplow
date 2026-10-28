@@ -3,7 +3,7 @@ description: The open work items, by title.
 hidden: true
 needs:
 - work_items
-data:
+loaders:
   changes_link_items:
     sql: |
       SELECT w.uri AS value, w.title AS label

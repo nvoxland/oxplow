@@ -1,7 +1,7 @@
 title: Branches and tags
 description: What a file can be compared with - a branch, a remote branch or a tag.
 hidden: true
-data:
+loaders:
   files_refs:
     sql: |
       SELECT 'none' AS value, 'No comparison' AS label, NULL AS "group"

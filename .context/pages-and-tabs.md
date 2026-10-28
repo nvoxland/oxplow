@@ -233,7 +233,7 @@ defines what the person sees:
   skill? }`: what agents find a page by and what `extension test`
   runs) and `badge`
   (`{ loader, column? }`).
-- **`data:`** — named **loaders**, in order; a loader reads only the ones
+- **`loaders:`** — named **loaders**, in order; a loader reads only the ones
   before it: `sql` (binds `:param`s; an earlier loader reads as a table of
   its name), `command` (a read-only command run as the viewer, `args`
   each `{ param }`, `{ from: <loader>.<column> }` or a literal; it must
@@ -1478,8 +1478,8 @@ A page is a file, not core code:
 
 1. Add `pages/<slug>.yaml` to the extension (oxplow's own:
    oxplow-foundation's) with its `title`, `icon`, `category` (or
-   none, if it's only opened from elsewhere), `params`, its `data`
-   loaders and a `view`. Nothing in the desktop changes: the launcher, icons,
+   none, if it's only opened from elsewhere), `params`, its `loaders:`
+   (named loaders) and a `view`. Nothing in the desktop changes: the launcher, icons,
    labels, tab titles, visits and bookmarks all read the page file. The
    manifest lists no pages.
 2. Open it with `pageTabRef(slug, params)` (oxplow's) or

@@ -11,7 +11,7 @@ params:
 - name: path
 - name: lines
   role: filter
-data:
+loaders:
   editor:
     sql: |
       SELECT :path AS path, :lines AS lines

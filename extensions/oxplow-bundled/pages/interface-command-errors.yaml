@@ -3,7 +3,7 @@ description: The most common errors one command gave agents in the last 30 days,
 hidden: true
 params:
 - name: command
-data:
+loaders:
   interface_command_errors:
     sql: |
       SELECT outcome,

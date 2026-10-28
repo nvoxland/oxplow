@@ -513,7 +513,7 @@ resources:
             ".oxplow/extensions/acme/pages/pr.yaml",
             "title: Pull request\ncategory: Work\nfor: acme/pr\ndefault: true\n\
              params: [{ name: id }]\n\
-             data:\n  open: { sql: \"SELECT 1 AS n\" }\nview: { viz: table, from: open }\n",
+             loaders:\n  open: { sql: \"SELECT 1 AS n\" }\nview: { viz: table, from: open }\n",
         );
     }
 

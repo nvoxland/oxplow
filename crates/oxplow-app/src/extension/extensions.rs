@@ -1997,7 +1997,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
     {
         ext.errors.push(format!(
             "{rel}/lenses/: lenses are pages now — rewrite each as `pages/<slug>.yaml` \
-             (metadata, `data:` loaders and a `view:`; the oxplow-extension skill's \
+             (metadata, `loaders:` loaders and a `view:`; the oxplow-extension skill's \
              page format) and remove the folder"
         ));
     }
@@ -4608,7 +4608,7 @@ title: Items by state
 description: Every work item in a given state.
 params:
   - { name: state, label: State, default: in_progress }
-data:
+loaders:
   items:
     sql: |
       SELECT uri, title FROM v_work_item WHERE state = :state ORDER BY title
@@ -4647,7 +4647,7 @@ view:
             "  viz: table\n"
         };
         let node: String = node.lines().map(|l| format!("  {l}\n")).collect();
-        format!("{title}{head}data:\n  q:\n    sql: {sql:?}\nview:\n  from: q\n{viz}{node}")
+        format!("{title}{head}loaders:\n  q:\n    sql: {sql:?}\nview:\n  from: q\n{viz}{node}")
     }
 
     /// Page `slug` of `ext`, when it loaded.
@@ -5658,7 +5658,7 @@ commands:
         write(
             dir.path(),
             ".oxplow/extensions/base/pages/page.yaml",
-            "title: Page\nparams: [{ name: stream_id }]\ndata:\n  a: { sql: \"SELECT :stream_id AS n\" }\n  b: { sql: \"SELECT 2 AS n\" }\nview:\n  stack:\n    - { viz: number, from: a }\n    - { slot: sections }\n    - { viz: number, from: b }\n",
+            "title: Page\nparams: [{ name: stream_id }]\nloaders:\n  a: { sql: \"SELECT :stream_id AS n\" }\n  b: { sql: \"SELECT 2 AS n\" }\nview:\n  stack:\n    - { viz: number, from: a }\n    - { slot: sections }\n    - { viz: number, from: b }\n",
         );
         write(
             dir.path(),
@@ -5772,7 +5772,7 @@ commands:
             ("bare", "needs `from`: the loader whose rows it shows"),
             (
                 "stray",
-                "shows `nope`, but there is no loader `nope` in `data:`",
+                "shows `nope`, but there is no loader `nope` in `loaders:`",
             ),
         ] {
             assert!(page_of(&ext, slug).is_none(), "{slug} loaded");

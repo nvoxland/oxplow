@@ -984,7 +984,7 @@ commands:
     summary: "Write a page file into an extension's source. The `spec` is the page's YAML text; it must parse as a page or nothing is written. Creates the extension when it is missing and replaces the page when it exists. With `deploy: true` it then deploys. Refused for a bundled extension, and from another stream when the source is inside the project. Returns `{ page, path, deployed }`."
     scope: pages.author
     op: write_page
-    example: {"extension": "my-pages", "page": "overview", "spec": "title: Overview\ndata:\n  a: { sql: \"SELECT 1 AS n\" }\nview: { viz: table, from: a }\n", "deploy": true}
+    example: {"extension": "my-pages", "page": "overview", "spec": "title: Overview\nloaders:\n  a: { sql: \"SELECT 1 AS n\" }\nview: { viz: table, from: a }\n", "deploy": true}
   - name: extension.new_dashboard
     summary: "Start a new, empty dashboard. It is a page in the Dashboards launcher category whose view is an empty grid, written into `extension` (default `my-pages`, created when missing) with its name taken from the title, and deployed. Its tiles are other pages, embedded, which the person adds with Pin to Dashboard. Refused when a page by that name exists. Returns `{ page, path, deployed }`."
     scope: pages.author
@@ -1243,7 +1243,7 @@ commands:
     example: {"key": "complex_fns.count", "value": 12, "subject": "oxplow:oxplow/file?path=src/auth.rs"}
   # pages.read
   - name: page.run
-    summary: "Read what a page shows. Give `page` (`<extension>/<slug>`, from `oxplow.page.find` or `v_page`) or `spec` (an inline page of your own as YAML: `title`, `data:` with sql / rows / page loaders, `view:`; it only reads), `params` by name (the rest take your thread's context or their defaults). `format: \"text\"` (default) is the page's text, each node under `[node <id>]` (an embedded page's nodes `[node <embed>/<id>]`), so you can point the person at one with `oxplow_navigate` and `#node=<id>`; `format: \"json\"` is each loader's columns and rows (up to 200, with `truncated`) and the tree; `loader` narrows json to one loader. `draft: true` reads your stream's draft of the page's extension (its source in your worktree, not deployed) over live data; its commands are the deployed ones."
+    summary: "Read what a page shows. Give `page` (`<extension>/<slug>`, from `oxplow.page.find` or `v_page`) or `spec` (an inline page of your own as YAML: `title`, `loaders:` with sql / rows / page loaders, `view:`; it only reads), `params` by name (the rest take your thread's context or their defaults). `format: \"text\"` (default) is the page's text, each node under `[node <id>]` (an embedded page's nodes `[node <embed>/<id>]`), so you can point the person at one with `oxplow_navigate` and `#node=<id>`; `format: \"json\"` is each loader's columns and rows (up to 200, with `truncated`) and the tree; `loader` narrows json to one loader. `draft: true` reads your stream's draft of the page's extension (its source in your worktree, not deployed) over live data; its commands are the deployed ones."
     scope: pages.read
     op: run
     tool: run_page
@@ -1255,11 +1255,11 @@ commands:
     tool: find_page
     example: {"question": "which tests failed this week"}
   - name: page.show
-    summary: "Show the person a page beside the conversation. Give `page` (`<extension>/<slug>`, from `oxplow.page.find`) with `params`, or `spec`: a page of your own as YAML (`title`, `data:` with sql / rows / page loaders, `view:` with table, list, chart, tree, number or markdown nodes; it only reads) — kept as a view (`oxplow:oxplow/view?id=…`) the person can save to the wiki or as a page. It opens as a tab of your thread when their window is open (`opened`), and returns the page's text so you can keep your prose short."
+    summary: "Show the person a page beside the conversation. Give `page` (`<extension>/<slug>`, from `oxplow.page.find`) with `params`, or `spec`: a page of your own as YAML (`title`, `loaders:` with sql / rows / page loaders, `view:` with table, list, chart, tree, number or markdown nodes; it only reads) — kept as a view (`oxplow:oxplow/view?id=…`) the person can save to the wiki or as a page. It opens as a tab of your thread when their window is open (`opened`), and returns the page's text so you can keep your prose short."
     scope: pages.show
     op: show
     tool: show_page
-    example: {"spec": "title: Failing tests\ndata:\n  t: { sql: \"SELECT name, status FROM v_test_case WHERE status = 'failed'\" }\nview: { viz: table, from: t }\n"}
+    example: {"spec": "title: Failing tests\nloaders:\n  t: { sql: \"SELECT name, status FROM v_test_case WHERE status = 'failed'\" }\nview: { viz: table, from: t }\n"}
   - name: page.definition
     summary: "What a page is made of. Its extension, source file and deployment, its params, its loaders (each one's sql, command, page or rows) and its node tree, each node with the page and file it comes from and the loader it shows — embedded pages and mounted slots included: what the person sees under Show Definition."
     scope: pages.read

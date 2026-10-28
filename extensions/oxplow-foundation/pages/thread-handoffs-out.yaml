@@ -3,7 +3,7 @@ description: Work this thread handed to others, and how each ended. Withdraw one
 hidden: true
 params:
 - name: thread_id
-data:
+loaders:
   thread_handoffs_out:
     sql: |
       SELECT h.uri, h.state, tt.title AS to_thread, w.title AS item, w.uri AS item_ref,

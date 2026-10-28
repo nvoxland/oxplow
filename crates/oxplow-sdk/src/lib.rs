@@ -600,7 +600,7 @@ pub fn scaffold_with(
                  answers:\n\
                  \x20 # Questions this page answers, in a person's words: how an agent finds it.\n\
                  \x20 - {{ question: \"TODO: what is open in this stream?\", params: {{ stream_id: 1 }} }}\n\
-                 data:\n\
+                 loaders:\n\
                  \x20 items:\n\
                  \x20   sql: |\n\
                  \x20     SELECT w.uri, w.title, w.state, w.updated_at\n\
@@ -646,7 +646,7 @@ pub fn scaffold_with(
                      category: Work\n\
                      answers:\n\
                      \x20 - {{ question: \"TODO: what has been collected?\" }}\n\
-                     data:\n\
+                     loaders:\n\
                      \x20 items:\n\
                      \x20   sql: SELECT uri, title FROM v_{ns}_open_items ORDER BY title\n\
                      view:\n\
@@ -719,7 +719,7 @@ pub fn scaffold_with(
                     "title: {title}\n\
                      description: \"TODO: what this page answers.\"\n\
                      category: Work\n\
-                     data:\n\
+                     loaders:\n\
                      \x20 # One row per run; `output` is what the model has written so far, so the\n\
                      \x20 # page follows a running job live.\n\
                      \x20 runs:\n\
@@ -818,7 +818,7 @@ pub fn scaffold_with(
                      \x20 - {{ name: stream_id, label: Stream }}\n\
                      answers:\n\
                      \x20 - {{ question: \"TODO: how many open tasks are there?\", params: {{ stream_id: 1 }} }}\n\
-                     data:\n\
+                     loaders:\n\
                      \x20 # The rows the component is fed (`component.data.items`), and what an\n\
                      \x20 # agent reads: agents always see the table, never the frame.\n\
                      \x20 items:\n\
@@ -876,7 +876,7 @@ pub fn scaffold_with(
                  \x20 - {{ name: stream_id, label: Stream }}\n\
                  answers:\n\
                  \x20 - {{ question: \"TODO: what is open in this stream?\", params: {{ stream_id: 1 }} }}\n\
-                 data:\n\
+                 loaders:\n\
                  \x20 items:\n\
                  \x20   sql: |\n\
                  \x20     SELECT w.uri, w.title, w.state\n\
@@ -2136,7 +2136,7 @@ mod tests {
         write(
             dir.path(),
             ".oxplow/extensions/other/pages/home.yaml",
-            "title: Home\ndata:\n  n: { sql: \"SELECT 1 AS n\" }\nview:\n  stack:\n    - { id: n, viz: number, from: n }\n    - { slot: more }\n",
+            "title: Home\nloaders:\n  n: { sql: \"SELECT 1 AS n\" }\nview:\n  stack:\n    - { id: n, viz: number, from: n }\n    - { slot: more }\n",
         );
         let user = |requires: &str, mounts: bool| {
             let slots = if mounts {
@@ -2149,7 +2149,7 @@ mod tests {
         write(
             dir.path(),
             ".oxplow/extensions/user/pages/counted.yaml",
-            "title: Counted\ndata:\n  n: { sql: \"SELECT n FROM v_other_things\" }\nview: { viz: number, from: n }\n",
+            "title: Counted\nloaders:\n  n: { sql: \"SELECT n FROM v_other_things\" }\nview: { viz: number, from: n }\n",
         );
         let found = |manifest: String| {
             write(

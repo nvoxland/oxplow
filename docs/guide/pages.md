@@ -51,7 +51,7 @@ params:
   - { name: thread_id, label: Thread }
 answers:
   - { question: "What is blocked?" }
-data:
+loaders:
   blocked:
     sql: |
       SELECT uri, title, updated_at FROM v_work_item
@@ -238,7 +238,7 @@ custom_components:
 ```yaml
 # pages/burndown.yaml
 title: Burndown
-data:
+loaders:
   burndown:
     sql: SELECT day, remaining FROM v_my_ext_burndown
 view: { component: { id: burndown, props: { color: accent } } }
@@ -360,11 +360,11 @@ oxplow.connect().then(async (component) => {
 `querySql` needs `sql: read` on the component and `permissions: [sql.read]` on the extension; it reads oxplow's datasets only, never writes.
 `setTitle`, `setActions`, `openForm` and `showView` are a whole page's: a
 component inside another page's layout can't use them. `showView(yaml)` hands oxplow an
-inline page — `title`, read-only `sql` loaders under `data`, a `view`
+inline page — `title`, read-only `sql` loaders under `loaders:`, a `view`
 (JSON is YAML too) — to draw under the page with its own components,
 live, with Save as Page and Pin to Dashboard when it is one viz over one
 `sql` loader. It resolves with its first loader's rows, and a loader that
-fails rejects `INVALID` with `field: "/data/<loader>/sql"`. A component is
+fails rejects `INVALID` with `field: "/loaders/<loader>/sql"`. A component is
 fed its page's data: `component.data` holds each loader's `{ columns,
 rows, truncated }` by name, `component.params` what they ran with, and
 `onUpdate(({ data, params, changed }) => …)` hears each change. While one shows, the frame takes its content's height:

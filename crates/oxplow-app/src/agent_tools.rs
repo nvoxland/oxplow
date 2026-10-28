@@ -332,14 +332,14 @@ mod tests {
             "title: Open Work\ndescription: The items still open.\n\
              params:\n  - { name: state, label: State, default: todo, options: [{ value: todo, label: To do }, { value: done, label: Done }] }\n\
              \x20 - { name: owner, label: Owner, options_from: owners }\n\
-             data:\n  items:\n    sql: SELECT :state AS state\n\
+             loaders:\n  items:\n    sql: SELECT :state AS state\n\
              view:\n  viz: table\n  from: items\n\
              tool: open_work\n",
         )
         .unwrap();
         std::fs::write(
             root.join("pages/owners.yaml"),
-            "title: Owners\ndata:\n  owners:\n    sql: SELECT 'me' AS value, 'Me' AS label\n\
+            "title: Owners\nloaders:\n  owners:\n    sql: SELECT 'me' AS value, 'Me' AS label\n\
              view:\n  viz: table\n  from: owners\n",
         )
         .unwrap();
@@ -383,7 +383,7 @@ mod tests {
             root.join("pages/open.yaml"),
             "title: Open Work\ndescription: The items still open.\n\
              params:\n  - { name: state, label: State, default: todo, options: [{ value: todo, label: To do }, { value: done, label: Done }] }\n\
-             data:\n  items:\n    sql: SELECT :state AS state\n\
+             loaders:\n  items:\n    sql: SELECT :state AS state\n\
              view:\n  viz: table\n  from: items\n\
              tool: open_work\n",
         )

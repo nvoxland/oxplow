@@ -6,7 +6,7 @@ params:
 - name: head
 answers:
 - {"question":"Which commits does this branch have that main lacks?","params":{"base":"main","head":"feature"},"skill":"oxplow-codebase"}
-data:
+loaders:
   git_dashboard_between:
     sql: |
       SELECT c.subject, uri('oxplow/commit', 'sha', c.sha) AS commit_ref, c.author, c.committed_at

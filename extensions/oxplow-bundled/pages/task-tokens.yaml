@@ -3,7 +3,7 @@ description: What the agent was asked while working this work item, and what eac
 hidden: true
 params:
 - name: uri
-data:
+loaders:
   task_token_summary:
     sql: |
       SELECT printf('**%,d** tokens · %d turn%s · in %,d · out %,d · cache-write %,d · cache-read %,d',

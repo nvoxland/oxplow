@@ -1,7 +1,7 @@
 title: Usage
 description: Where your attention and your agents' tokens went over the last 30 days.
 category: Activity
-data:
+loaders:
   token_total:
     sql: |
       SELECT sum(input_tokens + output_tokens + cache_creation_input_tokens + cache_read_input_tokens)

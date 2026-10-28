@@ -3,7 +3,7 @@ description: "The settings this project sets itself."
 hidden: true
 answers:
 - {"question":"Which settings does this project set itself, rather than leaving them at their default?","params":{},"skill":"oxplow-extension"}
-data:
+loaders:
   settings:
     sql: "SELECT key, value FROM v_config_value WHERE origin = 'project' ORDER BY key"
 view: { viz: table, from: settings }

@@ -6,7 +6,7 @@ needs:
 - vcs
 params:
 - name: stream_id
-data:
+loaders:
   row:
     sql: |
       SELECT s.branch AS branch FROM v_stream s WHERE s.id = :stream_id

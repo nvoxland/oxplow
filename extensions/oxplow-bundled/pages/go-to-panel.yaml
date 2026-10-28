@@ -13,7 +13,7 @@ params:
     label: Recent
   - value: top
     label: Most visited
-data:
+loaders:
   go_to:
     sql: |
       WITH

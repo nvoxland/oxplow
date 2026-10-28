@@ -7,7 +7,7 @@ params:
 answers:
 - {"question":"List this effort's files without writing SQL.","about":"oxplow/effort","params":{"effort":"eff1"},"skill":"oxplow-runtime"}
 - {"question":"Which files did this effort touch?","about":"oxplow/effort","params":{"effort":"eff1"},"skill":"oxplow-runtime"}
-data:
+loaders:
   effort_files:
     sql: |
       SELECT f.path, f.change_kind, f.source

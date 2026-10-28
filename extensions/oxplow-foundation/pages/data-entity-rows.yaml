@@ -3,7 +3,7 @@ description: How many rows one entity holds.
 hidden: true
 params:
 - name: name
-data:
+loaders:
   data_entity_rows:
     sql: |
       SELECT CASE WHEN row_count IS NULL THEN 'Not synced yet' ELSE row_count || ' rows' END AS rows

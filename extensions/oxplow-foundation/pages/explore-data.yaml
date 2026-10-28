@@ -6,7 +6,7 @@ params:
 - name: dataset
   label: Dataset
   default: ''
-data:
+loaders:
   explore_catalog:
     sql: |
       SELECT view, owner, description, view = :dataset AS current

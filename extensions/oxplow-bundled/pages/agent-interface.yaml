@@ -1,7 +1,7 @@
 title: Agent Interface
 description: How agents use oxplow's interface over the last 30 days — which tools they call, which commands they run and how often those are refused or fail, and which hints fire.
 category: Activity
-data:
+loaders:
   interface_tool_calls:
     sql: |
       SELECT replace(t.tool, 'mcp__oxplow__', '') AS tool,

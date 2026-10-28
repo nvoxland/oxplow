@@ -1,7 +1,10 @@
-//! Keys an `extension.yaml` no longer has, and what took their place: the
-//! whole migration story for a private extension. A manifest with one is
-//! refused like any unknown key, and the refusal names the new spelling
-//! (`hint_unknown`), so `oxplow extension check` says what to write.
+//! Keys an `extension.yaml` or a page file no longer has, and what took
+//! their place: the whole migration story for a private extension. A
+//! manifest (`RENAMED`, `hint_unknown`) or a page (`PAGE_RENAMED`,
+//! `hint_unknown_page`) with one is refused like any unknown key, and the
+//! refusal names the new spelling, so `oxplow extension check` says what to
+//! write. Pages have their own table: a manifest's `columns` and a page's
+//! `columns` are different keys.
 
 /// An old key and how to write what it said now.
 pub const RENAMED: &[(&str, &str)] = &[
@@ -57,13 +60,28 @@ pub const RENAMED: &[(&str, &str)] = &[
     ),
 ];
 
+/// An old top-level key of a page file and how to write what it said now.
+pub const PAGE_RENAMED: &[(&str, &str)] = &[(
+    "data",
+    "write `loaders:` — a page's `data: { name: {...} }` is `loaders: { name: {...} }`",
+)];
+
+/// [`hint_unknown`] for a page file's parser message.
+pub fn hint_unknown_page(message: &str) -> String {
+    hint_with(PAGE_RENAMED, message)
+}
+
 /// `message` (a parser's) with the new spelling added when it refuses a
 /// key in [`RENAMED`] — as unknown (``unknown field `trigger`, expected
 /// …`` becomes ``unknown key `trigger` — write `on:` …``) or as the map it
 /// used to be (``permissions: invalid type: map, expected a sequence``).
 /// Any other message is kept.
 pub fn hint_unknown(message: &str) -> String {
-    for (old, hint) in RENAMED {
+    hint_with(RENAMED, message)
+}
+
+fn hint_with(table: &[(&str, &str)], message: &str) -> String {
+    for (old, hint) in table {
         for needle in [
             format!("unknown field `{old}`"),
             format!("{old}: invalid type: map"),

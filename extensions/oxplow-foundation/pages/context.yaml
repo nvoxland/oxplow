@@ -5,7 +5,7 @@ category: Work
 keywords: basket collected agent prompt
 params:
 - name: thread_id
-data:
+loaders:
   waiting:
     sql: |
       SELECT c.id, c.kind,

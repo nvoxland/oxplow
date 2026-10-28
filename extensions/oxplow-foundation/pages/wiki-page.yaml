@@ -7,7 +7,7 @@ comments: true
 params:
 - name: uri
 - name: slug
-data:
+loaders:
   body:
     sql: |
       SELECT :slug AS slug, coalesce(b.body, '') AS body

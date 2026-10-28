@@ -7,7 +7,7 @@ params:
   label: Thread (`thr3`)
 answers:
 - {"question":"What should I pick up next on this thread?","params":{"thread":"thr1"},"skill":"work-items"}
-data:
+loaders:
   work_next:
     sql: |
       WITH items AS (

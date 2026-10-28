@@ -23,7 +23,7 @@ params:
   default: false
 - name: commit
   label: Commit
-data:
+loaders:
   commits:
     sql: |
       SELECT sha, subject, author, committed_at

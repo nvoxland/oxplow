@@ -1,7 +1,7 @@
 title: Effort Reviews
 description: Each finished effort a model reviewed — its work item, its review's state and what it wrote. Open the output to follow a running one; Cancel stops it.
 category: Work
-data:
+loaders:
   reviews:
     sql: |
       SELECT job_run,

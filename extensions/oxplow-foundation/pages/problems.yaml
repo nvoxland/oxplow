@@ -21,7 +21,7 @@ params:
     label: Hints
 answers:
 - {"question":"Which files have compiler errors right now?","params":{"stream_id":1,"severity":"error"},"skill":"oxplow-codebase"}
-data:
+loaders:
   problems:
     sql: |
       WITH shown AS (

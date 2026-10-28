@@ -3,7 +3,7 @@ description: The active work list's own fields (priority, labels, ...), one row 
 hidden: true
 needs:
 - work_items
-data:
+loaders:
   work_item_fields:
     sql: |
       SELECT json_extract(f.value, '$.name') AS name,

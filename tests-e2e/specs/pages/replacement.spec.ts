@@ -9,7 +9,7 @@ hidden: true
 params:
 - name: scope
 - name: thread_id
-data:
+loaders:
   mine:
     sql: SELECT 'Wombat list for ' || coalesce(:scope, 'nothing') AS line
 view:

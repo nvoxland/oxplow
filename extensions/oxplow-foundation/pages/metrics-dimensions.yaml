@@ -1,7 +1,7 @@
 title: Dimensions to slice by
 description: The dimensions a metric can be split by, for the Metrics list's Slice By.
 hidden: true
-data:
+loaders:
   metrics_dimensions:
     sql: |
       SELECT '' AS value, 'No slicing' AS label

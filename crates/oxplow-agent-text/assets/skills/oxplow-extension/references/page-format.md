@@ -48,12 +48,12 @@ description: Test cases that failed in the last run.
 params: [{ name: suite, default: all }]
 answers:
   - { question: "Which tests are failing?", params: { suite: all } }
-data:
+loaders:
   failing: { sql: "SELECT name, status FROM v_test_case WHERE status = 'failed'" }
 view: { viz: table, from: failing }
 ```
 
-`loaders.md` is `data:`; `view-nodes.md` is `view:`; `recipes.md` has worked
+`loaders.md` is `loaders:`; `view-nodes.md` is `view:`; `recipes.md` has worked
 examples.
 
 ## Metadata

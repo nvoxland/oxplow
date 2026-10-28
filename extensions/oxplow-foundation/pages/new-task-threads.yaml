@@ -1,7 +1,7 @@
 title: Threads for a new item
 description: The open threads an item can be filed on, by stream; no thread files it on the backlog.
 hidden: true
-data:
+loaders:
   new_task_threads:
     sql: |
       SELECT uri_param(t.uri, 'id') AS value, t.title AS label, s.title AS "group"

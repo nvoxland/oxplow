@@ -4,7 +4,7 @@ hidden: true
 params:
 - name: effort_id
   label: Effort
-data:
+loaders:
   effort_verdict:
     sql: |
       WITH runs AS (

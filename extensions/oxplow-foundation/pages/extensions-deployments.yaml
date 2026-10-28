@@ -1,7 +1,7 @@
 title: Deployments
 description: 'Each deployment in the store (v_extension_deployment), newest first: the copy of a source a deploy made, what it was approved to reach, and which one runs. Roll back makes an earlier one run again (asking first when it reaches further).'
 hidden: true
-data:
+loaders:
   extensions_deployments:
     sql: |
       SELECT d.name, substr(d.hash, 1, 7) AS deployment, d.hash, d.deployed_at,

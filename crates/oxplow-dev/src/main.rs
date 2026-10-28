@@ -1024,7 +1024,7 @@ mod tests {
         .unwrap();
         std::fs::write(
             acme.join("pages/one.yaml"),
-            "title: One\ndata:\n  q: { sql: \"SELECT 1 AS n\" }\nview: { viz: table, from: q }\n",
+            "title: One\nloaders:\n  q: { sql: \"SELECT 1 AS n\" }\nview: { viz: table, from: q }\n",
         )
         .unwrap();
         std::fs::write(
@@ -1122,7 +1122,7 @@ mod tests {
         );
         write(
             ".oxplow/extensions/acme/pages/items.yaml",
-            "title: Items\ndata:\n  items: { sql: \"SELECT 1 AS n\" }\nview: { from: items, viz: table }\n",
+            "title: Items\nloaders:\n  items: { sql: \"SELECT 1 AS n\" }\nview: { from: items, viz: table }\n",
         );
         write(
             ".oxplow/extensions/acme/fixtures/one.yaml",

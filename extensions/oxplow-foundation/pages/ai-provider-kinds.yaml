@@ -1,7 +1,7 @@
 title: AI provider kinds
 description: The registered model providers a provider can be.
 hidden: true
-data:
+loaders:
   ai_provider_kinds:
     sql: |
       SELECT provider AS value, coalesce(title, provider) AS label

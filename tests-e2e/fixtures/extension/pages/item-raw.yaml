@@ -4,7 +4,7 @@ for: e2e/item
 hidden: true
 params:
 - name: uri
-data:
+loaders:
   raw:
     sql: SELECT :uri AS raw_uri
 view: { from: raw, viz: table, empty: No such item. }

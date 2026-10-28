@@ -3,7 +3,7 @@ description: Events a consumer couldn't take. Retry runs the event through its c
 hidden: true
 answers:
 - {"question":"Which events couldn't be delivered to their consumer?","params":{},"skill":"oxplow-extension"}
-data:
+loaders:
   alerts_deliveries:
     sql: |
       SELECT id, consumer || ' couldn''t take ' || event_type || ' (event ' || event_seq || '), '

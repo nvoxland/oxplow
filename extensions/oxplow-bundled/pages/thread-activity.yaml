@@ -4,7 +4,7 @@ hidden: true
 params:
 - name: thread_id
   label: Thread
-data:
+loaders:
   thread_activity:
     sql: |
       WITH turns AS (

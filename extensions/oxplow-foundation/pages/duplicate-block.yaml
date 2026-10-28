@@ -9,7 +9,7 @@ params:
 - name: right
 - name: right_lines
 - name: right_at
-data:
+loaders:
   duplicate_block:
     sql: |
       SELECT :left AS path, coalesce(:left_at, 'working') AS rev, :left_lines AS lines

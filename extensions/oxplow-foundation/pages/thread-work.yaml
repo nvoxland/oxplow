@@ -7,7 +7,7 @@ params:
   label: Thread (`thr3`)
 answers:
 - {"question":"What is on this thread's list, by state?","params":{"thread":"thr1"},"skill":"work-items"}
-data:
+loaders:
   thread_work:
     sql: |
       SELECT w.uri, w.title, w.state,

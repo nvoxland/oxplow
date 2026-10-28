@@ -7,7 +7,7 @@ params:
   label: Effort (`eff9`)
 answers:
 - {"question":"Give me a summary of this effort.","about":"oxplow/effort","params":{"effort":"eff1"},"skill":"oxplow-runtime"}
-data:
+loaders:
   effort_summary:
     sql: |
       WITH e AS (SELECT * FROM v_effort WHERE uri = uri('oxplow/effort', 'id', :effort))

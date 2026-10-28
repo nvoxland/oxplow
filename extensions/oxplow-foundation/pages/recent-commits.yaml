@@ -8,7 +8,7 @@ params:
   default: 20
 answers:
 - {"question":"What were the latest commits on this stream?","params":{},"skill":"oxplow-codebase"}
-data:
+loaders:
   recent_commits:
     sql: |
       SELECT c.sha, c.committed_at, c.author, c.subject

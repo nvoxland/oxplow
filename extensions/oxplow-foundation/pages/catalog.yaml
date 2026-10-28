@@ -3,7 +3,7 @@ description: What oxplow knows and can do — what you can ask its agent, the da
 icon: book-open
 category: System
 keywords: ask prompts questions what can i help data config
-data:
+loaders:
   ask:
     sql: |
       SELECT a.question AS prompt, a.about,

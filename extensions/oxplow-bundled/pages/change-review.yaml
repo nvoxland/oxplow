@@ -3,7 +3,7 @@ description: What changed and where to look first — files by review priority, 
 hidden: true
 params:
 - name: change_id
-data:
+loaders:
   change_summary:
     sql: |
       WITH f AS (

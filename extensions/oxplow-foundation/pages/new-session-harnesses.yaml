@@ -3,7 +3,7 @@ description: The agents the project enables, its first choice first.
 hidden: true
 answers:
 - {"question":"Which agents does the project enable, and which is a new session's default?","params":{},"skill":"oxplow-extension"}
-data:
+loaders:
   new_session_harnesses:
     sql: |
       SELECT h.id AS value, h.title AS label

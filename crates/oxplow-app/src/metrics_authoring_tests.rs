@@ -903,7 +903,7 @@ async fn a_page_joins_metric_facts_with_an_efforts_files() {
             path: format!("{dir}pages/touched.yaml"),
             content: format!(
                 "title: Touched and complex\ndescription: \"The files an effort changed, with their functions over the limit.\"\n\
-                 data:\n  touched:\n    sql: |\n      SELECT f.path AS path, f.value AS functions, e.change_kind AS change\n      FROM metric_findings('{MEASURE}') f\n      JOIN v_effort_file e ON e.path = f.path\n      ORDER BY f.path\n\
+                 loaders:\n  touched:\n    sql: |\n      SELECT f.path AS path, f.value AS functions, e.change_kind AS change\n      FROM metric_findings('{MEASURE}') f\n      JOIN v_effort_file e ON e.path = f.path\n      ORDER BY f.path\n\
                  view:\n  viz: table\n  from: touched\n  columns:\n    - {{ key: path, label: File }}\n    - {{ key: functions, label: Functions over the limit }}\n    - {{ key: change, label: Change }}\n"
             ),
         });

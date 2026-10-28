@@ -3,7 +3,7 @@ description: The newest prompts recorded on this thread.
 hidden: true
 params:
 - name: thread_id
-data:
+loaders:
   thread_history:
     sql: |
       SELECT started_at, prompt

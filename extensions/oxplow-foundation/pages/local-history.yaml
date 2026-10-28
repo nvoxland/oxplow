@@ -18,7 +18,7 @@ params:
   label: Show every snapshot
   type: bool
   default: false
-data:
+loaders:
   recent:
     sql: |
       WITH snaps AS (

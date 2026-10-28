@@ -5,7 +5,7 @@ needs:
 - vcs
 answers:
 - {"question":"Which branches exist, and which is the default?","params":{},"skill":"oxplow-codebase"}
-data:
+loaders:
   new_stream_branches:
     sql: |
       SELECT b.name AS value, b.name AS label, 'Branches' AS "group"

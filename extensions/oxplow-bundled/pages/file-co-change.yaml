@@ -3,7 +3,7 @@ description: The files that most often changed in the same commits as this one o
 hidden: true
 params:
 - name: path
-data:
+loaders:
   file_co_change:
     sql: |
       SELECT p.other AS path, p.together

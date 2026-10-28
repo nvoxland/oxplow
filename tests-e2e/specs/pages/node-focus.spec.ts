@@ -4,7 +4,7 @@ import { openFromLauncher } from "../../support/ui.js";
 
 // A tall page: sixty rows above the node a link lands on.
 const spec = `title: Focus Wombat
-data:
+loaders:
   rows:
     sql: WITH RECURSIVE c(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM c WHERE n < 60) SELECT n FROM c
   one:

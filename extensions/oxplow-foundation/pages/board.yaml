@@ -17,7 +17,7 @@ params:
     label: Backlog
   - value: all
     label: Everything
-data:
+loaders:
   row:
     sql: |
       SELECT CASE WHEN :show = 'backlog' THEN 'backlog'

@@ -4,7 +4,7 @@ for: github/pr
 default: true
 params:
 - name: uri
-data:
+loaders:
   pr:
     sql: |
       SELECT printf('**#%d %s** · %s · by %s · from `%s`%s', pr.number, pr.title, pr.state,

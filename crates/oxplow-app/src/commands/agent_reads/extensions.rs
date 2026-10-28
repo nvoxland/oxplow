@@ -250,7 +250,7 @@ mod tests {
         write(
             &ext,
             "pages/one.yaml",
-            "title: one\ndata:\n  n: { sql: \"SELECT 1 AS n\" }\nview: { viz: number, from: n }\n",
+            "title: one\nloaders:\n  n: { sql: \"SELECT 1 AS n\" }\nview: { viz: number, from: n }\n",
         );
         crate::extension::extension_deploy::deploy(svc, "acme", true)
             .await
@@ -262,7 +262,7 @@ mod tests {
         write(
             &draft,
             "pages/two.yaml",
-            "title: two\ndata:\n  n: { sql: \"SELECT 1 AS n\" }\nview: { viz: number, from: n }\n",
+            "title: two\nloaders:\n  n: { sql: \"SELECT 1 AS n\" }\nview: { viz: number, from: n }\n",
         );
         let mut other = svc.stream_store.list().await.unwrap().pop().unwrap();
         other.id = oxplow_domain::StreamId::placeholder();

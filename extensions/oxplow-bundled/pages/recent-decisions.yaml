@@ -4,7 +4,7 @@ category: Work
 params:
 - name: stream_id
   label: Stream
-data:
+loaders:
   recent_decisions:
     sql: |
       SELECT d.question, d.choice, d.confidence, d.provenance, t.title AS thread, d.work_item, d.created_at

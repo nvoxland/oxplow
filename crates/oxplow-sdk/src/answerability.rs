@@ -705,7 +705,7 @@ mod tests {
             std::fs::write(
                 dir.join("pages/items.yaml"),
                 format!(
-                    "title: Items\nparams: [{{ name: state }}]\ndata:\n  items: {{ sql: \"{query}\" }}\nview: {{ viz: table, from: items }}\nanswers:\n  - {{ question: \"What is open?\", {answer} }}\n"
+                    "title: Items\nparams: [{{ name: state }}]\nloaders:\n  items: {{ sql: \"{query}\" }}\nview: {{ viz: table, from: items }}\nanswers:\n  - {{ question: \"What is open?\", {answer} }}\n"
                 ),
             )
             .unwrap();

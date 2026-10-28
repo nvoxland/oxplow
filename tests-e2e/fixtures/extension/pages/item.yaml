@@ -5,7 +5,7 @@ default: true
 hidden: true
 params:
 - name: uri
-data:
+loaders:
   item:
     sql: SELECT title FROM v_e2e_item WHERE uri = :uri
 view: { from: item, viz: table, empty: No such item. }

@@ -5,7 +5,7 @@ category: Data
 keywords: dashboard tiles grid overview
 answers:
 - question: Which dashboards can I open?
-data:
+loaders:
   dashboards:
     sql: |
       SELECT title, description, uri, 'dashboard' AS kind

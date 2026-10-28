@@ -1,6 +1,6 @@
-# Loaders (`data:`)
+# Loaders (`loaders:`)
 
-`data:` is a mapping of named loaders. Each gets rows; a node shows one by
+`loaders:` is a mapping of named loaders. Each gets rows; a node shows one by
 `from: <name>`. Loaders run **in order** and a loader reads only the ones
 **before** it. One that fails carries its error and the rest of the page
 still shows. A loader no visible node shows still runs when a later loader,
@@ -21,7 +21,7 @@ earlier loader's **first row**) or a literal.
 ## `sql`
 
 ```yaml
-data:
+loaders:
   base:  { sql: "SELECT id, state FROM v_work_item" }
   open:  { sql: "SELECT * FROM base WHERE state = :state" }   # base is a table
   child:
@@ -40,7 +40,7 @@ data:
 ## `command`
 
 ```yaml
-data:
+loaders:
   defs:
     command: oxplow.page.definition
     args: { page: { param: of } }
@@ -59,7 +59,7 @@ data:
 ## `page`
 
 ```yaml
-data:
+loaders:
   count: { page: acme/numbers, loader: count, params: { n: 1 } }
 ```
 
@@ -69,7 +69,7 @@ the same definition with the same inputs runs once per run, embeds included.
 ## `rows`
 
 ```yaml
-data:
+loaders:
   colors: { rows: [{ state: failed, tone: danger }, { state: passed, tone: success }] }
 ```
 

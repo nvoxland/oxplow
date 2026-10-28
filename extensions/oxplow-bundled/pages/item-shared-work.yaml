@@ -3,7 +3,7 @@ description: Whether another thread holds this item, changed the files its effor
 hidden: true
 params:
 - name: uri
-data:
+loaders:
   item_shared_work:
     sql: |
       WITH open_work AS (

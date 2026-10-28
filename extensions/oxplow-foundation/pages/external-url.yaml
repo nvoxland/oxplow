@@ -8,7 +8,7 @@ for:
 default: true
 params:
 - name: uri
-data:
+loaders:
   web_page:
     sql: |
       SELECT :uri AS url

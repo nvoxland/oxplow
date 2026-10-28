@@ -5,7 +5,7 @@ import { expandRailSection } from "../../support/ui.js";
 
 const body = `title: Glider body
 hidden: true
-data:
+loaders:
   gliders:
     sql: SELECT title FROM v_work_item WHERE title LIKE 'Glider %' ORDER BY title
 view:
@@ -18,7 +18,7 @@ view:
 
 const count = `title: Glider count
 hidden: true
-data:
+loaders:
   n:
     sql: SELECT count(*) AS n FROM v_work_item WHERE title LIKE 'Glider %'
 badge: { loader: n, column: n }

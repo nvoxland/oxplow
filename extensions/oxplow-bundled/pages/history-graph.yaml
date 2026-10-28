@@ -14,7 +14,7 @@ params:
   role: filter
   label: Commits
   default: 500
-data:
+loaders:
   history_graph:
     sql: |
       WITH RECURSIVE reach(sha) AS (

@@ -7,7 +7,7 @@ params:
 - name: terminal
 answers:
 - {"question":"Which terminals are open in this stream?","params":{"stream_id":1},"skill":"oxplow-extension"}
-data:
+loaders:
   terminal:
     sql: |
       SELECT uri, title, 'trm' || id AS terminal

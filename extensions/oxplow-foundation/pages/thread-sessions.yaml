@@ -7,7 +7,7 @@ params:
   default: ''
 answers:
 - {"question":"Which agent sessions are on this thread, and what are their subagents doing?","about":"oxplow/thread","params":{"thread":"thr1"},"skill":"oxplow-runtime"}
-data:
+loaders:
   thread_sessions:
     sql: |
       WITH ss AS (

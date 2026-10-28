@@ -9,7 +9,7 @@ params:
 answers:
 - {"question":"What points at this file — pages, commits, work items?","about":"oxplow/file","params":{"target":"oxplow:oxplow/file?path=src/lib.rs"},"skill":"oxplow-wiki-capture"}
 - {"question":"What does this wiki page point at?","params":{"source":"oxplow:oxplow/wiki?slug=auth-flow"},"skill":"oxplow-wiki-capture"}
-data:
+loaders:
   pointing_at:
     sql: "SELECT source_uri, ref_type FROM v_page_ref WHERE target_uri = :target ORDER BY source_uri"
   points_to:

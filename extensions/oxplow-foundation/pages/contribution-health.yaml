@@ -9,7 +9,7 @@ params:
 answers:
 - {"question":"Which extension providers or collectors are failing or disabled, and why?","params":{},"skill":"oxplow-extension"}
 - {"question":"Which repair work item describes this disabled collector?","params":{"extension":"tracker","contribution":"issues"},"skill":"oxplow-extension"}
-data:
+loaders:
   unhealthy:
     sql: "SELECT extension, contribution, kind, state, reason, last_error FROM v_contribution_health WHERE state <> 'ok'"
   repair:

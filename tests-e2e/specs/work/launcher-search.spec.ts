@@ -39,7 +39,7 @@ test("a page added while the window is open is in the launcher", async ({ page, 
   );
   writeFileSync(
     join(dir, "pages", "wombats.yaml"),
-    "title: Wombat Tasks\ncategory: Work\ndata:\n  items: { sql: SELECT uri FROM v_work_item }\nview: { from: items, viz: table }\n",
+    "title: Wombat Tasks\ncategory: Work\nloaders:\n  items: { sql: SELECT uri FROM v_work_item }\nview: { from: items, viz: table }\n",
   );
   await deploy(daemon, "wombat");
   await expect(async () => {

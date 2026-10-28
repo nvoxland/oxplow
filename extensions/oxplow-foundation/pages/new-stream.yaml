@@ -3,7 +3,7 @@ description: A stream is its own worktree and its own threads. Put it on a branc
 icon: plus
 needs:
 - vcs
-data:
+loaders:
   new_stream:
     sql: |
       SELECT 'Stream ' || (SELECT count(*) + 1 FROM v_stream WHERE archived_at IS NULL) AS title,

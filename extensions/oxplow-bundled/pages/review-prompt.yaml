@@ -4,7 +4,7 @@ hidden: true
 params:
 - name: effort_id
   label: Effort
-data:
+loaders:
   review_prompt:
     sql: |
       WITH e AS (

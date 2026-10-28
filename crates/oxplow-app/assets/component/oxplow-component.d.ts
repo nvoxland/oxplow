@@ -118,7 +118,7 @@ export interface OxplowComponent {
    *  loaders under `data`, a `view` — live, with Pin to
    *  Dashboard; null clears it. Resolves with its first loader's rows
    *  (null when cleared). Rejects `INVALID` with the `field` it is about
-   *  (`/data/<loader>/sql`) for a page oxplow refuses or a loader that
+   *  (`/loaders/<loader>/sql`) for a page oxplow refuses or a loader that
    *  failed. A page only. While one shows, the frame sits at its
    *  content's height: leave `html` and `body` at `height: auto`. */
   showView(spec?: string | null): Promise<OxplowRows | null>;

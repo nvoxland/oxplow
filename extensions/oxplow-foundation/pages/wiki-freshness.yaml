@@ -6,7 +6,7 @@ params:
 - name: slug
   role: filter
   label: Wiki page (its slug)
-data:
+loaders:
   wiki_freshness:
     sql: |
       SELECT p.slug,

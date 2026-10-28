@@ -8,7 +8,7 @@ answers:
 - {"question":"Which credentials has a collector declared that have no value yet?","params":{},"skill":"oxplow-extension"}
 actions:
 - {"id":"sync","label":"Run again","command":"oxplow.collector.sync","input":{"collector":"tracker/issues"}}
-data:
+loaders:
   runs:
     sql: "SELECT owner, id, status, last_run_at, error FROM v_collector_run"
   collectors:

@@ -6,7 +6,7 @@ import { openFromLauncher } from "../../support/ui.js";
 type Daemon = Parameters<typeof run>[0];
 const source = (title: string, prefix: string) => `# Keep the source comment
 title: ${title}
-data:
+loaders:
   count:
     sql: SELECT count(*) AS n FROM v_work_item WHERE title LIKE '${prefix}%'
 view: { id: count, viz: number, from: count }

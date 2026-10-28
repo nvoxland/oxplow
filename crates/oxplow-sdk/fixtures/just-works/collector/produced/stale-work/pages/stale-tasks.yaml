@@ -4,7 +4,7 @@ category: Work
 alert: { min_rows: 1, label: Stale tasks }
 actions:
   - { id: sync, label: Sync, command: oxplow.collector.sync, input: { collector: "collector:stale-work/stale_tasks" } }
-data:
+loaders:
   stale_tasks:
     sql: |
       SELECT id, title, status, priority, days_idle, last_touched_at

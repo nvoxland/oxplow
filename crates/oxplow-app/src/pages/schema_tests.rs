@@ -18,6 +18,23 @@ fn refused(text: &str) -> String {
     page(text).expect_err("refused")
 }
 
+/// A page's loaders are under `loaders:`; the old `data:` is refused, and
+/// the refusal says what to write.
+#[test]
+fn a_pages_loaders_are_under_loaders_and_data_is_refused_naming_it() {
+    let body = "view:\n  viz: table\n  from: q\n";
+    let ok = page(&format!(
+        "title: T\nloaders:\n  q: {{ rows: [{{ a: 1 }}] }}\n{body}"
+    ))
+    .expect("loads");
+    assert_eq!(ok.loaders.len(), 1);
+    let why = refused(&format!(
+        "title: T\ndata:\n  q: {{ rows: [{{ a: 1 }}] }}\n{body}"
+    ));
+    assert!(why.contains("unknown key `data`"), "{why}");
+    assert!(why.contains("write `loaders:`"), "{why}");
+}
+
 /// A page that shows one query: one loader, one viz node bound to it.
 #[test]
 fn a_one_to_one_page_is_a_loader_and_a_viz_node() {
@@ -32,7 +49,7 @@ params:
     role: filter
     default: all
     options: [{ value: all, label: All }, { value: error, label: Errors }]
-data:
+loaders:
   problems:
     sql: SELECT path, message FROM v_diagnostic WHERE stream_id = :stream_id
 view:
@@ -74,7 +91,7 @@ label: "{{param.sha|short}}"
 for: oxplow/commit
 default: true
 params: [{ name: uri }, { name: sha }, { name: stream_id }]
-data:
+loaders:
   change:
     sql: SELECT id AS change_id, base_revision FROM v_change WHERE target = :sha
     columns: [{ key: change_id }, { key: base_revision }]
@@ -121,7 +138,7 @@ fn command_and_rows_loaders_and_a_component_node() {
         r#"
 title: PR
 params: [{ name: number }]
-data:
+loaders:
   checks:
     command: acme.ci.checks
     args: { pr: { param: number }, limit: 5 }
@@ -169,7 +186,7 @@ fn a_switch_shows_one_child_by_a_filter_param() {
 title: Settings
 params:
   - { name: area, role: filter, default: agents }
-data:
+loaders:
   agents: { sql: SELECT 1 AS n }
   ai: { sql: SELECT 2 AS n }
 view:
@@ -193,24 +210,24 @@ view:
 #[test]
 fn a_loader_names_exactly_one_kind() {
     let e = refused(
-        "title: T\ndata:\n  x: { sql: SELECT 1, rows: [] }\nview: { viz: table, from: x }\n",
+        "title: T\nloaders:\n  x: { sql: SELECT 1, rows: [] }\nview: { viz: table, from: x }\n",
     );
     assert!(
         e.contains("loader `x`") && e.contains("exactly one of"),
         "{e}"
     );
-    let e = refused("title: T\ndata:\n  x: {}\nview: { viz: table, from: x }\n");
+    let e = refused("title: T\nloaders:\n  x: {}\nview: { viz: table, from: x }\n");
     assert!(e.contains("exactly one of"), "{e}");
 }
 
 #[test]
 fn a_loader_name_is_a_plain_identifier_and_not_a_dataset() {
     let e = refused(
-        "title: T\ndata:\n  v_commit: { sql: SELECT 1 }\nview: { viz: table, from: v_commit }\n",
+        "title: T\nloaders:\n  v_commit: { sql: SELECT 1 }\nview: { viz: table, from: v_commit }\n",
     );
     assert!(e.contains("`v_commit`") && e.contains("dataset"), "{e}");
     let e = refused(
-        "title: T\ndata:\n  Bad-Name: { sql: SELECT 1 }\nview: { viz: table, from: Bad-Name }\n",
+        "title: T\nloaders:\n  Bad-Name: { sql: SELECT 1 }\nview: { viz: table, from: Bad-Name }\n",
     );
     assert!(e.contains("`Bad-Name`"), "{e}");
 }
@@ -218,39 +235,40 @@ fn a_loader_name_is_a_plain_identifier_and_not_a_dataset() {
 #[test]
 fn a_loader_reads_only_earlier_loaders() {
     let e = refused(
-        "title: T\ndata:\n  a: { sql: SELECT * FROM b }\n  b: { sql: SELECT 1 AS n }\nview: { viz: table, from: a }\n",
+        "title: T\nloaders:\n  a: { sql: SELECT * FROM b }\n  b: { sql: SELECT 1 AS n }\nview: { viz: table, from: a }\n",
     );
     assert!(
         e.contains("loader `a` reads `b`") && e.contains("before"),
         "{e}"
     );
     let e = refused(
-        "title: T\ndata:\n  a: { command: acme.ci.x, args: { n: { from: b.n } }, reads: [v_x] }\n  b: { sql: SELECT 1 AS n }\nview: { viz: table, from: a }\n",
+        "title: T\nloaders:\n  a: { command: acme.ci.x, args: { n: { from: b.n } }, reads: [v_x] }\n  b: { sql: SELECT 1 AS n }\nview: { viz: table, from: a }\n",
     );
     assert!(e.contains("loader `a`") && e.contains("`b`"), "{e}");
 }
 
 #[test]
 fn a_node_binds_a_loader_that_exists() {
-    let e = refused("title: T\ndata:\n  a: { sql: SELECT 1 }\nview: { viz: table, from: nope }\n");
+    let e =
+        refused("title: T\nloaders:\n  a: { sql: SELECT 1 }\nview: { viz: table, from: nope }\n");
     assert!(e.contains("`nope`") && e.contains("no loader"), "{e}");
-    let e = refused("title: T\ndata:\n  a: { sql: SELECT 1 }\nview: { viz: table }\n");
+    let e = refused("title: T\nloaders:\n  a: { sql: SELECT 1 }\nview: { viz: table }\n");
     assert!(e.contains("needs `from`"), "{e}");
 }
 
 #[test]
 fn a_command_loader_says_what_refreshes_it() {
     let e =
-        refused("title: T\ndata:\n  a: { command: acme.ci.x }\nview: { viz: table, from: a }\n");
+        refused("title: T\nloaders:\n  a: { command: acme.ci.x }\nview: { viz: table, from: a }\n");
     assert!(e.contains("`reads`") && e.contains("`refresh`"), "{e}");
-    page("title: T\ndata:\n  a: { command: acme.ci.x, refresh: manual }\nview: { viz: table, from: a }\n")
+    page("title: T\nloaders:\n  a: { command: acme.ci.x, refresh: manual }\nview: { viz: table, from: a }\n")
         .unwrap();
 }
 
 #[test]
 fn an_arg_comes_from_a_param_an_earlier_column_or_a_literal() {
     let e = refused(
-        "title: T\ndata:\n  a: { command: acme.ci.x, args: { n: { param: nope } }, reads: [v_x] }\nview: { viz: table, from: a }\n",
+        "title: T\nloaders:\n  a: { command: acme.ci.x, args: { n: { param: nope } }, reads: [v_x] }\nview: { viz: table, from: a }\n",
     );
     assert!(e.contains("param `nope`"), "{e}");
 }
@@ -258,7 +276,7 @@ fn an_arg_comes_from_a_param_an_earlier_column_or_a_literal() {
 #[test]
 fn node_ids_are_unique() {
     let e = refused(
-        "title: T\ndata:\n  a: { sql: SELECT 1 }\nview:\n  stack:\n    - { viz: table, from: a }\n    - { viz: list, from: a }\n",
+        "title: T\nloaders:\n  a: { sql: SELECT 1 }\nview:\n  stack:\n    - { viz: table, from: a }\n    - { viz: list, from: a }\n",
     );
     assert!(e.contains("node id `a`") && e.contains("twice"), "{e}");
 }
@@ -266,7 +284,7 @@ fn node_ids_are_unique() {
 #[test]
 fn a_switch_param_is_a_declared_filter_and_its_children_have_ids() {
     let e = refused(
-        "title: T\ndata:\n  a: { sql: SELECT 1 }\nview: { switch: { param: area, children: [{ id: a, viz: table, from: a }] } }\n",
+        "title: T\nloaders:\n  a: { sql: SELECT 1 }\nview: { switch: { param: area, children: [{ id: a, viz: table, from: a }] } }\n",
     );
     assert!(e.contains("param `area`"), "{e}");
 }
@@ -274,25 +292,25 @@ fn a_switch_param_is_a_declared_filter_and_its_children_have_ids() {
 #[test]
 fn a_select_names_a_page_param() {
     let e = refused(
-        "title: T\ndata:\n  a: { sql: SELECT 1 AS n }\nview: { viz: table, from: a, columns: [{ key: n, select: nope }] }\n",
+        "title: T\nloaders:\n  a: { sql: SELECT 1 AS n }\nview: { viz: table, from: a, columns: [{ key: n, select: nope }] }\n",
     );
     assert!(e.contains("nope") && e.contains("select"), "{e}");
 }
 
 #[test]
 fn a_viz_node_has_what_its_viz_needs() {
-    let e = refused("title: T\ndata:\n  a: { sql: SELECT 1 }\nview: { viz: tree, from: a }\n");
+    let e = refused("title: T\nloaders:\n  a: { sql: SELECT 1 }\nview: { viz: tree, from: a }\n");
     assert!(e.contains("tree"), "{e}");
 }
 
 #[test]
 fn badges_and_answers_name_what_the_page_has() {
     let e = refused(
-        "title: T\ndata:\n  a: { sql: SELECT 1 }\nview: { viz: table, from: a }\nbadge: { loader: nope }\n",
+        "title: T\nloaders:\n  a: { sql: SELECT 1 }\nview: { viz: table, from: a }\nbadge: { loader: nope }\n",
     );
     assert!(e.contains("badge") && e.contains("`nope`"), "{e}");
     let e = refused(
-        "title: T\ndata:\n  a: { sql: SELECT 1 }\nview: { viz: table, from: a }\nanswers: [{ question: Why, params: { nope: 1 } }]\n",
+        "title: T\nloaders:\n  a: { sql: SELECT 1 }\nview: { viz: table, from: a }\nanswers: [{ question: Why, params: { nope: 1 } }]\n",
     );
     assert!(e.contains("answer") && e.contains("`nope`"), "{e}");
 }
@@ -302,7 +320,7 @@ fn unknown_keys_are_refused() {
     let e = refused("title: T\nquery: SELECT 1\nview: { markdown: hi, id: m }\n");
     assert!(e.contains("query"), "{e}");
     let e = refused(
-        "title: T\ndata:\n  a: { sql: SELECT 1 }\nview: { viz: table, from: a, sections: [] }\n",
+        "title: T\nloaders:\n  a: { sql: SELECT 1 }\nview: { viz: table, from: a, sections: [] }\n",
     );
     assert!(e.contains("sections"), "{e}");
 }
@@ -311,17 +329,17 @@ fn unknown_keys_are_refused() {
 #[test]
 fn an_inline_page_only_reads() {
     let ok = parse_inline_page(
-        "title: T\ndata:\n  a: { sql: SELECT 1 AS n }\nview: { viz: bar, from: a, chart: { x: n, y: n } }\n",
+        "title: T\nloaders:\n  a: { sql: SELECT 1 AS n }\nview: { viz: bar, from: a, chart: { x: n, y: n } }\n",
     )
     .unwrap();
     assert_eq!(ok.id, "inline");
     for (text, why) in [
         (
-            "title: T\ndata:\n  a: { command: acme.ci.x, refresh: manual }\nview: { viz: table, from: a }\n",
+            "title: T\nloaders:\n  a: { command: acme.ci.x, refresh: manual }\nview: { viz: table, from: a }\n",
             "command",
         ),
         (
-            "title: T\ndata:\n  a: { sql: SELECT 1 }\nview: { viz: table, from: a }\nactions: [{ id: x, label: X, command: acme.ci.x, input: {} }]\n",
+            "title: T\nloaders:\n  a: { sql: SELECT 1 }\nview: { viz: table, from: a }\nactions: [{ id: x, label: X, command: acme.ci.x, input: {} }]\n",
             "actions",
         ),
         (
@@ -353,7 +371,7 @@ fn an_extensions_page_files_load_and_a_broken_one_names_its_file() {
     .unwrap();
     std::fs::write(
         ext.join("pages/busy.yaml"),
-        "title: Busy\ndata:\n  a: { sql: SELECT 1 AS n }\nview: { viz: table, from: a }\n",
+        "title: Busy\nloaders:\n  a: { sql: SELECT 1 AS n }\nview: { viz: table, from: a }\n",
     )
     .unwrap();
     std::fs::write(
@@ -385,7 +403,7 @@ fn an_extensions_page_files_load_and_a_broken_one_names_its_file() {
 #[test]
 fn a_sql_loader_binds_named_values_from_earlier_loaders() {
     let p = page(
-        "title: T\ndata:\n  row: { sql: SELECT 'abc' AS head }\n  files:\n    sql: SELECT :head AS h\n    params: { head: { from: row.head } }\nview: { viz: table, from: files }\n",
+        "title: T\nloaders:\n  row: { sql: SELECT 'abc' AS head }\n  files:\n    sql: SELECT :head AS h\n    params: { head: { from: row.head } }\nview: { viz: table, from: files }\n",
     )
     .unwrap();
     let Loader::Sql { params, .. } = &p.loaders[1].loader else {
@@ -399,7 +417,7 @@ fn a_sql_loader_binds_named_values_from_earlier_loaders() {
     );
     assert_eq!(p.loaders[1].reads_loaders, ["row"]);
     let e = refused(
-        "title: T\ndata:\n  a: { sql: SELECT :x, params: { x: { from: b.x } } }\n  b: { sql: SELECT 1 AS x }\nview: { viz: table, from: a }\n",
+        "title: T\nloaders:\n  a: { sql: SELECT :x, params: { x: { from: b.x } } }\n  b: { sql: SELECT 1 AS x }\nview: { viz: table, from: a }\n",
     );
     assert!(e.contains("loader `a`") && e.contains("`b`"), "{e}");
 }
@@ -418,12 +436,12 @@ fn a_panel_names_its_extensions_pages() {
     .unwrap();
     std::fs::write(
         ext.join("pages/list.yaml"),
-        "title: List\nparams: [{ name: stream_id }]\ndata:\n  a: { sql: SELECT 1 AS n }\nview: { viz: table, from: a }\n",
+        "title: List\nparams: [{ name: stream_id }]\nloaders:\n  a: { sql: SELECT 1 AS n }\nview: { viz: table, from: a }\n",
     )
     .unwrap();
     std::fs::write(
         ext.join("pages/count.yaml"),
-        "title: Count\nparams: [{ name: stream_id }]\ndata:\n  c: { sql: SELECT 3 AS n }\nview: { viz: number, from: c }\nbadge: { loader: c }\n",
+        "title: Count\nparams: [{ name: stream_id }]\nloaders:\n  c: { sql: SELECT 3 AS n }\nview: { viz: number, from: c }\nbadge: { loader: c }\n",
     )
     .unwrap();
     let loaded = crate::extension::extensions::load_extension_at(&ext, "acme");
@@ -459,7 +477,7 @@ fn two_core_named_extensions_cannot_declare_one_page() {
         super::test_support::write(
             d.path(),
             &format!(".oxplow/extensions/{name}/pages/comments.yaml"),
-            "title: Comments\ndata:\n  rows:\n    sql: SELECT 1 AS n\nview:\n  viz: table\n  from: rows\n",
+            "title: Comments\nloaders:\n  rows:\n    sql: SELECT 1 AS n\nview:\n  viz: table\n  from: rows\n",
         );
     }
     let mut exts: Vec<crate::extension::extensions::Extension> =
@@ -491,7 +509,7 @@ title: Commits
 params:
   - { name: commit }
   - { name: path }
-data:
+loaders:
   commits:
     sql: SELECT sha FROM v_commit
 view:
@@ -517,7 +535,7 @@ view:
 fn a_replaceable_node_names_a_known_target_once() {
     let page_with = |a: &str, b: &str| {
         format!(
-            "title: T\ndata:\n  q: {{ sql: \"SELECT 1 AS n\" }}\nview:\n  stack:\n    - {{ id: a, viz: table, from: q, replaceable: {a} }}\n    - {{ id: b, viz: table, from: q, replaceable: {b} }}\n"
+            "title: T\nloaders:\n  q: {{ sql: \"SELECT 1 AS n\" }}\nview:\n  stack:\n    - {{ id: a, viz: table, from: q, replaceable: {a} }}\n    - {{ id: b, viz: table, from: q, replaceable: {b} }}\n"
         )
     };
     assert!(refused(&page_with("nope.thing", "work_item.board"))
@@ -532,7 +550,7 @@ fn params_are_checked_on_any_page_and_inline_pages_hold_no_web_page() {
     let why = refused("title: T\nparams:\n  - { name: section }\nview:\n  markdown: hi\n");
     assert!(why.contains("view key"), "{why}");
     let why = parse_inline_page(
-        "title: T\ndata:\n  q: { sql: \"SELECT 'https://x' AS url\" }\nview:\n  viz: embed\n  from: q\n  embed: { url: url }\n",
+        "title: T\nloaders:\n  q: { sql: \"SELECT 'https://x' AS url\" }\nview:\n  viz: embed\n  from: q\n  embed: { url: url }\n",
     )
     .expect_err("refused");
     assert!(why.contains("a web page"), "{why}");

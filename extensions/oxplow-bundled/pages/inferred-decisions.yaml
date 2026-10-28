@@ -6,7 +6,7 @@ params:
   label: Effort
 - name: effort
   label: Effort id
-data:
+loaders:
   inferred_decisions:
     sql: |
       SELECT question, choice,

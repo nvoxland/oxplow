@@ -3,7 +3,7 @@ description: Work other threads handed to this one. Take it on (its work item mo
 hidden: true
 params:
 - name: thread_id
-data:
+loaders:
   thread_handoffs_in:
     sql: |
       SELECT h.uri, h.state, ft.title AS from_thread,

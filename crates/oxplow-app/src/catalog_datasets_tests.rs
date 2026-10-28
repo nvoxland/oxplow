@@ -70,7 +70,7 @@ async fn extensions_are_datasets_that_follow_the_catalog() {
         .is_empty());
 }
 
-const PAGE: &str = "title: Acme PR\ndescription: One acme PR.\nparams:\n  - { name: number, label: PR }\n  - { name: view, options: [{ value: all, label: All }, { value: open, label: Open }], default: all }\ndata:\n  a: { sql: \"SELECT 1 AS n\" }\nview: { viz: table, from: a }\nanswers:\n  - { question: \"Which checks failed on this PR?\", params: { number: 12 } }\n";
+const PAGE: &str = "title: Acme PR\ndescription: One acme PR.\nparams:\n  - { name: number, label: PR }\n  - { name: view, options: [{ value: all, label: All }, { value: open, label: Open }], default: all }\nloaders:\n  a: { sql: \"SELECT 1 AS n\" }\nview: { viz: table, from: a }\nanswers:\n  - { question: \"Which checks failed on this PR?\", params: { number: 12 } }\n";
 
 /// A page file is a `v_page` row with its params and answers as rows, and
 /// a disabled extension lists none.
@@ -182,7 +182,7 @@ async fn an_extensions_warnings_are_on_its_row() {
     write(
         &root,
         "pages/bad.yaml",
-        "title: Bad\ndata:\n  a: { sql: SELECT 1 }\nview: { viz: nonsense, from: a }\n",
+        "title: Bad\nloaders:\n  a: { sql: SELECT 1 }\nview: { viz: nonsense, from: a }\n",
     );
     crate::test_fixtures::activate_with_problems(&fx.svc).await;
     assert!(
@@ -253,7 +253,7 @@ async fn questions_and_config_keys_are_datasets() {
     write(
         &root,
         "pages/changed.yaml",
-        "title: Changed\nanswers:\n  - { question: Which acme things changed?, about: oxplow/file }\ndata:\n  a: { sql: \"SELECT 1 AS n\" }\nview: { viz: table, from: a }\n",
+        "title: Changed\nanswers:\n  - { question: Which acme things changed?, about: oxplow/file }\nloaders:\n  a: { sql: \"SELECT 1 AS n\" }\nview: { viz: table, from: a }\n",
     );
     crate::test_fixtures::activate(&fx.svc).await;
 

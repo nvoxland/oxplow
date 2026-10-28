@@ -192,7 +192,7 @@ fn put_in(dir: &Path, e: &Ext) {
             dir,
             "pages/seen.yaml",
             &format!(
-                "title: Seen\n{params}data:\n  seen: {{ sql: \"SELECT uri FROM import_ref('dep')\" }}\n\
+                "title: Seen\n{params}loaders:\n  seen: {{ sql: \"SELECT uri FROM import_ref('dep')\" }}\n\
                  view: {{ viz: table, from: seen }}\n"
             ),
         );

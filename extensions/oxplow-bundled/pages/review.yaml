@@ -1,7 +1,7 @@
 title: Review
 description: Recent local-history snapshots and code-quality findings.
 category: Code
-data:
+loaders:
   recent_snapshots:
     sql: |
       SELECT id, created_at, coalesce(branch, '—') AS branch, substr(revision, instr(revision, ':') + 1, 7) AS commit_sha,

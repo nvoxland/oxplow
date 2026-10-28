@@ -3,7 +3,7 @@ description: Which files the Files page lists - all of them, or only those chang
 hidden: true
 params:
 - name: stream_id
-data:
+loaders:
   files_scopes:
     sql: |
       SELECT 'all' AS value, 'All files' AS label

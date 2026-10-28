@@ -283,7 +283,7 @@ mod tests {
     #[tokio::test]
     async fn fetched_page_runs_pair_the_current_result_with_its_actual_sequence() {
         let (ctx, _dir) = crate::test_support::services().await;
-        let yaml = "title: Param\nparams: [{ name: n, default: 7 }]\ndata:\n  value: { sql: 'SELECT :n AS n' }\nview: { viz: number, from: value }\n";
+        let yaml = "title: Param\nparams: [{ name: n, default: 7 }]\nloaders:\n  value: { sql: 'SELECT :n AS n' }\nview: { viz: number, from: value }\n";
         let opened = open_page(
             &ctx,
             None,
@@ -326,7 +326,7 @@ mod tests {
         );
     }
 
-    const INLINE: &str = "# Exact source\ntitle: An inline view\ndata:\n  value: { sql: 'SELECT 7 AS n' }\nview: { viz: table, from: value }\n";
+    const INLINE: &str = "# Exact source\ntitle: An inline view\nloaders:\n  value: { sql: 'SELECT 7 AS n' }\nview: { viz: table, from: value }\n";
 
     #[tokio::test]
     async fn an_ephemeral_view_returns_its_exact_yaml_and_reopens_from_tab_history() {

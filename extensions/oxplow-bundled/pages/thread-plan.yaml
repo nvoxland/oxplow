@@ -3,7 +3,7 @@ description: The plans this thread's agent put to the person, newest first. Whet
 hidden: true
 params:
 - name: thread_id
-data:
+loaders:
   thread_plan:
     sql: |
       SELECT group_concat(

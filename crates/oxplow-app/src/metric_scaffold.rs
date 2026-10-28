@@ -211,7 +211,7 @@ pub fn extension_files(
         "title: {title}\n\
          description: \"TODO: what this page answers. The files with functions over the limit, worst first.\"\n\
          category: Code\n\
-         data:\n\
+         loaders:\n\
          \x20 # The current facts behind the metric: one row per file, its worst function's line.\n\
          \x20 findings:\n\
          \x20   sql: |\n\

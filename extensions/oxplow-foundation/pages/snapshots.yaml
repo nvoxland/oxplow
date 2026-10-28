@@ -11,7 +11,7 @@ params:
   default: 20
 answers:
 - {"question":"What snapshots has this stream taken lately?","params":{},"skill":"oxplow-codebase"}
-data:
+loaders:
   snapshots:
     sql: |
       SELECT o.snapshot_id, o.at, o.parent_snapshot_id, o.trigger, o.over_budget, o.elapsed_ms, o.file_count

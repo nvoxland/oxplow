@@ -622,7 +622,7 @@ mod diff_tests {
             "acme",
             slug,
             "diff-test.yaml",
-            "title: Diff test\ndata:\n  value: { rows: [{ n: 1 }] }\nview: { viz: table, from: value }\nrail: { id: rail-embed, embed: { page: acme/child } }\n",
+            "title: Diff test\nloaders:\n  value: { rows: [{ n: 1 }] }\nview: { viz: table, from: value }\nrail: { id: rail-embed, embed: { page: acme/child } }\n",
         )
         .unwrap();
         let tree = RunNode {

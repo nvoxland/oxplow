@@ -688,7 +688,7 @@ mod tests {
     const EXT: &str =
         "manifest: 2\nname: review\nintent:\n  purpose: x\n  examples: [{ name: a }]\n";
     const PAGE: &str =
-        "title: Tasks\ndata:\n  items: { sql: SELECT uri FROM v_work_item }\nview: { viz: table, from: items }\n";
+        "title: Tasks\nloaders:\n  items: { sql: SELECT uri FROM v_work_item }\nview: { viz: table, from: items }\n";
 
     fn names(snapshot: &CatalogSnapshot) -> Vec<String> {
         let mut names: Vec<String> = snapshot
@@ -884,7 +884,7 @@ mod tests {
         write(
             dir.path(),
             ".oxplow/extensions/review/pages/tasks.yaml",
-            "title: Tasks by status\ndata:\n  items: { sql: SELECT uri FROM v_work_item }\nview: { viz: table, from: items }\n",
+            "title: Tasks by status\nloaders:\n  items: { sql: SELECT uri FROM v_work_item }\nview: { viz: table, from: items }\n",
         );
         assert_eq!(
             catalog.find_page(dir.path(), "review/tasks").unwrap().title,

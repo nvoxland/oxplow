@@ -4,7 +4,7 @@ import { RememberedContext, createRememberedStore } from "../prefs/remembered.js
 import { SaveViewCommandContext, SaveViewForm } from "./SaveViewForm.js";
 
 afterEach(cleanup);
-const spec = "# Comment\ntitle: View\ndata: { items: { rows: [{ title: Alpha }] } }\nview: { viz: table, from: items }\n";
+const spec = "# Comment\ntitle: View\nloaders: { items: { rows: [{ title: Alpha }] } }\nview: { viz: table, from: items }\n";
 
 function form(kind: "page" | "wiki", command: (name: string, input: unknown) => Promise<unknown>) {
   const opened: string[] = [];

@@ -440,7 +440,7 @@ async fn show_view(ctx: &Ctx, spec: &str) -> Value {
         Ok(run) => match run.loaders.iter().next() {
             Some((name, loader)) => match &loader.error {
                 Some(e) => json!({ "ok": false, "error": {
-                    "code": "INVALID", "message": e, "field": format!("/data/{name}/sql"),
+                    "code": "INVALID", "message": e, "field": format!("/loaders/{name}/sql"),
                 } }),
                 None => json!({ "ok": true, "result": {
                     "columns": loader.result.columns,

@@ -3,7 +3,7 @@ description: "The saved agent conversations that could be resumed here and the h
 hidden: true
 answers:
 - {"question":"Which saved agent conversations could be resumed here, and which harness keeps each?","params":{},"skill":"oxplow-extension"}
-data:
+loaders:
   conversations:
     sql: "SELECT harness, native_id, title, updated_at FROM v_agent_conversation WHERE native_id IS NOT NULL ORDER BY updated_at DESC"
 view: { viz: table, from: conversations }

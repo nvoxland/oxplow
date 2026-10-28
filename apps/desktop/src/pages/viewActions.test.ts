@@ -3,7 +3,7 @@ import { definitionUri, pageSlug, titledPage, viewWikiBody } from "./viewActions
 import { paramOf } from "../uri/uri.js";
 
 test("a saved page keeps comments and ordered loaders when its title changes", () => {
-  const yaml = titledPage("# Keep this\ntitle: Before\ndata:\n  source: { rows: [] }\n  dependent: { sql: SELECT * FROM source }\nview: { viz: table, from: dependent }\n", "After");
+  const yaml = titledPage("# Keep this\ntitle: Before\nloaders:\n  source: { rows: [] }\n  dependent: { sql: SELECT * FROM source }\nview: { viz: table, from: dependent }\n", "After");
   expect(yaml).toContain("# Keep this");
   expect(yaml).toContain("title: After");
   expect(yaml.indexOf("source:")).toBeLessThan(yaml.indexOf("dependent:"));

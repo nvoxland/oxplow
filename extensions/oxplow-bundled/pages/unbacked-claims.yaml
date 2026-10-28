@@ -4,7 +4,7 @@ category: Work
 params:
 - name: stream_id
   label: Stream
-data:
+loaders:
   unbacked_claims:
     sql: |
       SELECT c.statement, c.kind, t.title AS thread, c.work_item, c.created_at
