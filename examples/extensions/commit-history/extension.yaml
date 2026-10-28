@@ -17,3 +17,6 @@ intent:
     - name: files
       input: { page: history, params: { commit: "0000000" } }
       expect: no rows for a commit that isn't there
+    - name: the-filters-narrow-the-commits-and-a-commit-lists-its-files
+      input: { page: history, params: { range: all } }
+      expect: search and merges-only narrow the commits; the selected commit fills the files
