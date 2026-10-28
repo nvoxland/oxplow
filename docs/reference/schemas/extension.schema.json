@@ -2214,14 +2214,14 @@
       ]
     },
     "UiBlock": {
-      "description": "`ui:` — everything an extension adds to the core UI: pages mounted at\nother pages' slots and core slots (`slots`), decorations on core refs (`decorators`) and\nreplaced sub-components (`replacements`). Its commands\nmeet a person through their own `ui` (`commands:`).",
+      "description": "`ui:` — everything an extension adds to the core UI: its pages placed\nat other pages' slots or in place of core components (`mounts`) and\ndecorations on core refs (`decorators`). Its commands meet a person\nthrough their own `ui` (`commands:`).",
       "type": "object",
       "properties": {
-        "slots": {
-          "description": "Pages mounted at slots: `{ slot, page, at? }`, typed one by one\n([`slots_of`]).",
+        "mounts": {
+          "description": "Its pages placed elsewhere: `{ page, at, … }`, typed one by one\n([`mounts_of`]).",
           "type": "array",
           "items": {
-            "$ref": "#/definitions/SlotMount"
+            "$ref": "#/definitions/Mount"
           },
           "default": []
         },
@@ -2235,35 +2235,24 @@
             "$ref": "#/definitions/DecoratorFile"
           },
           "default": null
-        },
-        "replacements": {
-          "description": "A page in place of a named core component.",
-          "type": [
-            "array",
-            "null"
-          ],
-          "items": {
-            "$ref": "#/definitions/ReplacementFile"
-          },
-          "default": null
         }
       },
       "additionalProperties": false
     },
-    "SlotMount": {
-      "description": "A slot mount: a page mounted at another page's slot.",
+    "Mount": {
+      "description": "A mount: a page this extension places — at a page's slot\n(`at: <extension>/<page>.<slot>`) or in place of a core component\n(`at: <replaceable target>`, `v_replaceable`). One list, `ui.mounts`.",
       "type": "object",
       "properties": {
-        "slot": {
-          "description": "A page's slot (`<extension>/<page>.<slot>`).",
-          "type": "string"
-        },
         "page": {
-          "description": "The page it mounts: a slug of this extension.",
+          "description": "The page it places: a slug of this extension.",
           "type": "string"
         },
         "at": {
-          "description": "Where among the page's parts (a parts slot only): `start`, `end`,\n`{ after: <id> }`, `{ before: <id> }`. Default `end`.",
+          "description": "Where: a page's slot (`oxplow-foundation/work-item.sections`) or a\nreplaceable core component (`work_item.board`).",
+          "type": "string"
+        },
+        "position": {
+          "description": "At a parts slot: where among the page's parts — `start`, `end`,\n`{ after: <id> }`, `{ before: <id> }`. Default `end`.",
           "anyOf": [
             {
               "$ref": "#/definitions/SlotAt"
@@ -2275,7 +2264,7 @@
           "default": null
         },
         "title": {
-          "description": "Its heading in the page; else the mounted page's title.",
+          "description": "At a slot: its heading in the page; else the page's title.",
           "type": [
             "string",
             "null"
@@ -2283,7 +2272,7 @@
           "default": null
         },
         "size": {
-          "description": "A tile's size (a `.tiles` slot only).",
+          "description": "At a `.tiles` slot: the tile's size.",
           "anyOf": [
             {
               "$ref": "#/definitions/TileSize"
@@ -2293,12 +2282,22 @@
             }
           ],
           "default": null
+        },
+        "version": {
+          "description": "In place of a core component: the props contract's version it was\nwritten against.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0,
+          "default": null
         }
       },
       "additionalProperties": false,
       "required": [
-        "slot",
-        "page"
+        "page",
+        "at"
       ]
     },
     "SlotAt": {
@@ -2394,34 +2393,6 @@
           "type": "string",
           "const": "row-badge"
         }
-      ]
-    },
-    "ReplacementFile": {
-      "description": "A `ui.replacements` entry as the manifest holds it.",
-      "type": "object",
-      "properties": {
-        "target": {
-          "type": "string"
-        },
-        "page": {
-          "description": "The page that renders instead: a slug of this extension.",
-          "type": "string"
-        },
-        "version": {
-          "description": "The props contract's version it was written against; checked\nagainst the table's, so a changed contract refuses it rather than\nhanding it props it doesn't know.",
-          "type": [
-            "integer",
-            "null"
-          ],
-          "format": "uint32",
-          "minimum": 0,
-          "default": null
-        }
-      },
-      "additionalProperties": false,
-      "required": [
-        "target",
-        "page"
       ]
     },
     "AdvisoryFile": {

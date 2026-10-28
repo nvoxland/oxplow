@@ -273,9 +273,9 @@ pub const KINDS: &[KindSpec] = &[
     ),
     spec(
         ContributionKind::Slot,
-        "ui.slots",
+        "ui.mounts",
         "Slot mount",
-        "a page mounted at another page's slot",
+        "a page placed at another page's slot (`at: <extension>/<page>.<slot>`)",
         true,
         true,
     ),
@@ -289,9 +289,9 @@ pub const KINDS: &[KindSpec] = &[
     ),
     spec(
         ContributionKind::Replacement,
-        "ui.replacements",
+        "ui.mounts",
         "Replacement",
-        "a page in place of a core component",
+        "a page placed in place of a core component (`at: <target>`, `v_replaceable`)",
         true,
         false,
     ),
@@ -313,10 +313,6 @@ impl ContributionKind {
             .expect("every kind is in KINDS")
     }
 
-    /// The kind whose manifest key is `key`.
-    pub fn of_key(key: &str) -> Option<ContributionKind> {
-        KINDS.iter().find(|s| s.key == key).map(|s| s.kind)
-    }
 
     /// Its id segment (`metric`, `custom_component`).
     /// Whether its contributions are named globally — by a name unique
@@ -851,13 +847,21 @@ mod tests {
 
     #[test]
     fn every_kind_is_in_the_table_once() {
-        let mut keys: Vec<_> = KINDS.iter().map(|k| k.key).collect();
-        keys.sort();
-        keys.dedup();
-        assert_eq!(keys.len(), KINDS.len());
+        let mut kinds: Vec<_> = KINDS.iter().map(|k| k.kind).collect();
+        kinds.dedup();
+        assert_eq!(kinds.len(), KINDS.len());
         for k in KINDS {
             assert_eq!(k.kind.spec().key, k.key);
-            assert_eq!(ContributionKind::of_key(k.key), Some(k.kind));
         }
+        // One manifest list may place several kinds: `ui.mounts` holds slot
+        // mounts and replacements, told apart by what `at` names. No other
+        // key is shared.
+        let mut shared: Vec<&str> = KINDS
+            .iter()
+            .map(|k| k.key)
+            .filter(|key| KINDS.iter().filter(|k| k.key == *key).count() > 1)
+            .collect();
+        shared.dedup();
+        assert_eq!(shared, ["ui.mounts"]);
     }
 }

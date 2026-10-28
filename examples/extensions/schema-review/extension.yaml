@@ -64,9 +64,8 @@ models:
       - { name: color, type: TEXT, doc: "`green` or `red`." }
 ui:
   # The effort's verdict on its page, in place of oxplow-bundled's.
-  replacements:
-    - { target: effort.verdict, page: effort-verdict, version: 1 }
-  slots:
-    - { slot: oxplow-foundation/diff-view.sections, page: schema-changes }
+  mounts:
+    - { page: effort-verdict, at: effort.verdict, version: 1 }
+    - { page: schema-changes, at: oxplow-foundation/diff-view.sections }
   decorators:
     - { model: verdict, resource: oxplow/effort, placement: row-badge, label: label, color: color }

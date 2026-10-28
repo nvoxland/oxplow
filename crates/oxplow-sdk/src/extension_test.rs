@@ -8075,7 +8075,7 @@ steps:
         write(
             root,
             ".oxplow/extensions/beta/extension.yaml",
-            "manifest: 2\nname: beta\nintent:\n  purpose: Mounts.\n  examples:\n    - { name: mounted, input: { page: host/items }, expect: it }\nrequires: [host]\nui:\n  slots:\n    - { slot: host/items.extra, page: extra }\n",
+            "manifest: 2\nname: beta\nintent:\n  purpose: Mounts.\n  examples:\n    - { name: mounted, input: { page: host/items }, expect: it }\nrequires: [host]\nui:\n  mounts:\n    - { page: extra, at: host/items.extra }\n",
         );
         write(
             root,
@@ -8674,8 +8674,8 @@ requires: [host]
 custom_components:
   - { id: lanes, title: Lanes }
 ui:
-  replacements:
-    - { target: work_item.board, page: board }
+  mounts:
+    - { page: board, at: work_item.board }
 ",
         );
         write(

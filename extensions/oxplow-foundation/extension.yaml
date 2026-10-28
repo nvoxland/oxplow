@@ -586,9 +586,9 @@ resources:
     params: { custom_component: { required: true, pattern: '^[a-z][a-z0-9-]*/[a-z][a-z0-9_.-]*$' } }
     icon: box
 ui:
-  slots:
-    - { slot: oxplow-foundation/tasks.sections, page: thread-handoffs-in, at: { before: list } }
-    - { slot: oxplow-foundation/tasks.sections, page: thread-handoffs-out, at: { before: list } }
+  mounts:
+    - { page: thread-handoffs-in, at: oxplow-foundation/tasks.sections, position: { before: list } }
+    - { page: thread-handoffs-out, at: oxplow-foundation/tasks.sections, position: { before: list } }
 commands:
   # agent_input.write — the window's agent input.
   - name: agent.draft

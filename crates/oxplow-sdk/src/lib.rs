@@ -2140,7 +2140,7 @@ mod tests {
         );
         let user = |requires: &str, mounts: bool| {
             let slots = if mounts {
-                "ui:\n  slots:\n    - { slot: other/home.more, page: counted }\n"
+                "ui:\n  mounts:\n    - { page: counted, at: other/home.more }\n"
             } else {
                 ""
             };

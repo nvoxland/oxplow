@@ -6,6 +6,16 @@
 /// An old key and how to write what it said now.
 pub const RENAMED: &[(&str, &str)] = &[
     (
+        "slots",
+        "`ui.mounts` places a page — `ui.slots: [{ slot: X, page: P, at: POS }]` is \
+         `ui.mounts: [{ page: P, at: X, position: POS }]`",
+    ),
+    (
+        "replacements",
+        "`ui.mounts` places a page — `ui.replacements: [{ target: T, page: P, version: V }]` \
+         is `ui.mounts: [{ page: P, at: T, version: V }]`",
+    ),
+    (
         "permissions",
         "`permissions:` is a list of scopes, in a script's `needs:` grammar — `{ sql: read, files: \
          read, ai: true, process: true, agent: true, network: [h], secrets: [S], commands: [p] }` \

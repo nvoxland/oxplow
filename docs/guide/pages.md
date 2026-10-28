@@ -141,12 +141,12 @@ couldn't.
 
 An `embed` node shows another page inline, handing it params by name. A
 `slot` node is a place other extensions mount their pages at. To mount yours
-into a foundation page, list it under `ui.slots` in `extension.yaml`:
+into a foundation page, list it under `ui.mounts` in `extension.yaml`:
 
 ```yaml
 ui:
-  slots:
-    - { slot: oxplow-foundation/work-item.sections, page: item-tokens }
+  mounts:
+    - { page: item-tokens, at: oxplow-foundation/work-item.sections }
 ```
 
 The mounted page gets the host's params by name, so it declares the ones it
@@ -404,8 +404,8 @@ works with whichever list is active.
 ```yaml
 # extension.yaml
 ui:
-  replacements:
-    - { target: work_item.board, page: swimlanes, version: 1 }
+  mounts:
+    - { page: swimlanes, at: work_item.board, version: 1 }
 ```
 
 The page gets the view's props as params and must declare all of them: the

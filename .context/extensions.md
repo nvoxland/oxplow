@@ -1621,7 +1621,7 @@ collectors:  [...]   # entity collectors (exec / starlark / jaq / read → entit
                      # see semantic-layer.md "Collectors"
 ui:                  # what it adds to the core UI (a command's own `ui:` puts it in core menus: see "Commands")
   slots:             # pages mounted at other pages' slots; see "Slots"
-    - { slot: oxplow-foundation/diff-view.sections, page: change-review }
+    - { page: change-review, at: oxplow-foundation/diff-view.sections }
   decorators: …      # labels from its models on core URIs (stable since P10; see "Decorators")
   replacements: …    # a page in place of a named core component (see "Replacements")
 advisories:  [...]   # see "Advisories"
@@ -1665,7 +1665,7 @@ delete the YAML files in `lenses/`: they are what the loader refuses.
   over 200 characters, a `stack` of more than 8 sections, a table of
   more than 8 columns, a param no loader reads);
 - lifecycle: `engine`, when given, is `>=MAJOR.MINOR[.PATCH]`;
-- cross-references: a `ui.slots` page is in `pages/` and its slot name
+- cross-references: a `ui.mounts` page is in `pages/` and its slot name
   has the shape `<extension>/<page>.<name>`; a slot mount whose host page
   is not loaded, or has no such slot node, is a warning (it shows
   nowhere); a `panels` body and a replacement's page are the extension's
@@ -1678,12 +1678,12 @@ delete the YAML files in `lenses/`: they are what the loader refuses.
 **Each entry's error is at its own line.** Every list block — `commands`,
 `effects`, `collectors`, `panels`, `implementations`, `skills`,
 `resources`, `custom_components`, `event_types.types`,
-`ui.decorators`, `ui.replacements` — and the manifest's own nested lists
-(`intent.examples`, `ui.slots`) type their entries one
+`ui.decorators` — and the manifest's own nested lists
+(`intent.examples`, `ui.mounts`) type their entries one
 at a time: a broken entry is left out with an error at its own line
 (`manifest_v2::item_lines`, the line of each `- ` item, so a shape error
 with no name to look the entry up by lands there too), and the rest of
-the extension loads. `intent` and `ui.slots` are read raw
+the extension loads. `intent` and `ui.mounts` are read raw
 (`IntentFile`, `Vec<Value>`) and typed by `intent_of` / `slots_of`,
 which `check` and the loader share.
 
@@ -2668,8 +2668,8 @@ nothing. A mount is an entry in the mounting extension's manifest:
 
 ```yaml
 ui:
-  slots:
-    - { slot: oxplow-foundation/work-item.sections, page: item-tokens, at: { before: links }, title: Tokens }
+  mounts:
+    - { page: item-tokens, at: oxplow-foundation/work-item.sections, position: { before: links }, title: Tokens }
 ```
 
 `slot` is the host's slot name; `page` is a slug of the mounting
@@ -2719,13 +2719,20 @@ The launcher is not a slot: a page lists itself with `category`.
 
 ## Replacements
 
-`ui.replacements` puts a **page in place of a named core
-sub-component** — never a whole page:
+A `ui.mounts` entry whose `at` names a core component (no `/`; one of
+`v_replaceable`) puts a **page in place of that named core
+sub-component** — never a whole page. The same list mounts a page at
+another page's slot (`at: <extension>/<page>.<slot>`, with `position`,
+`title`, `size`); `version` goes only with a core component, the slot
+keys only with a slot. The old `ui.slots` / `ui.replacements` keys are
+refused, the refusal naming the `ui.mounts` spelling. Panels stay their
+own `panels:` declaration: a panel is a thing with an id, title, icon and
+scope made of part-pages, not a placement of one page.
 
 ```yaml
 ui:
-  replacements:
-    - { target: work_item.board, page: swimlanes, version: 1 }
+  mounts:
+    - { page: swimlanes, at: work_item.board, version: 1 }
 ```
 
 The targets are one table, `oxplow_domain::replaceable::REPLACEABLE`:
@@ -3972,7 +3979,7 @@ a removed type's rows stay readable. It was promoted to a stable kind
 on that evidence; every kind is stable now (`ui.decorators` and
 `ref_kinds` (now `resources`) in P10, "Decorators" and "Resources"; `effects` and
 `custom_components` in P11, below and "Custom components";
-`ui.replacements` with oxplow-bundled's history graph; `providers` once
+a `ui.mounts` replacement with oxplow-bundled's history graph; `providers` once
 the provider host was), so a kind carries no stability.
 
 **`effects` is stable** (P11), on the evidence rule: a bundled
@@ -5297,7 +5304,7 @@ screens and oxplow-bundled's add the review and analysis:
 - **Metric nudges.** The `threshold-crossed` advisory (with
   `metric-deltas`).
 - **Git History's commit graph.** The `history-graph` component, replacing
-  core's plain commit list (`vcs.history.graph`, a `ui.replacements`
+  core's plain commit list (`vcs.history.graph`, a `ui.mounts`
   entry).
 - **The app's screens.** foundation's `alerts`, `backlog`, `board`,
   `catalog`, `changes-effort`, `comments`, `commit`, `dashboards`,
