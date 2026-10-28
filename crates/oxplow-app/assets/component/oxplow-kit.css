@@ -237,10 +237,14 @@
 .ox-stat-big .ox-stat-value { font-size: var(--text-3xl); }
 
 /* A record's facts: labels beside their values. */
-.ox-facts { display: grid; grid-template-columns: max-content 1fr; gap: var(--space-1) var(--space-3); margin: 0; font-size: var(--text-sm); }
+/* A property sheet: a row a fact, apart and ruled, the label quiet and
+   the value what the eye lands on. */
+.ox-facts { display: grid; grid-template-columns: max-content 1fr; column-gap: var(--space-4); margin: 0; font-size: var(--text-sm); line-height: var(--leading-snug, 1.4); }
 .ox-fact { display: contents; }
+.ox-fact dt, .ox-fact dd { padding: var(--space-2) 0; border-bottom: 1px solid var(--border-subtle); }
+.ox-fact:last-child dt, .ox-fact:last-child dd { border-bottom: 0; }
 .ox-fact dt { color: var(--text-secondary); }
-.ox-fact dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.ox-fact dd { margin: 0; min-width: 0; overflow-wrap: anywhere; color: var(--text-primary); font-weight: var(--weight-medium); }
 
 /* Dashboards: a responsive grid of tiles; a tile spans by its size and
    is a titled card. 400px: a chart's labelled axis must fit. */
