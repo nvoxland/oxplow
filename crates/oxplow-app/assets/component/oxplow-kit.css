@@ -137,9 +137,10 @@
 .ox-title { margin: 0; font-size: var(--text-2xl); font-weight: var(--weight-bold); line-height: var(--leading-tight); color: var(--text-primary); }
 .ox-intro { margin: var(--space-2) 0 0; color: var(--text-secondary); }
 .ox-section { margin-top: var(--space-6); }
-/* A section whose heading is hidden and whose body draws nothing takes no space. */
+/* A section that drew nothing under its heading (not one folded shut)
+   takes no space; the rail's Contents skips it too. */
 .ox-section:empty,
-.ox-section[data-title-hidden]:not(:has(> :not(.ox-section-head))) { display: none; }
+.ox-section:not([data-collapsed]):not(:has(> :not(.ox-section-head))) { display: none; }
 .ox-section-head {
   display: flex;
   align-items: baseline;

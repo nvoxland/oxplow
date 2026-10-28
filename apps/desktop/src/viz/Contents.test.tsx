@@ -38,3 +38,29 @@ test("a section whose heading is visually hidden is still listed, in order", asy
   const items = Array.from(view.getByTestId("viz-rail-contents").querySelectorAll("button")).map((b) => b.textContent);
   expect(items).toEqual(["Hidden", "Section 0", "Section 1", "Section 2"]);
 });
+
+// A section that drew nothing (its viz had nothing to say) is hidden, so
+// it isn't listed — and can't be the one marked as in view.
+test("a section with nothing under its heading is not listed", async () => {
+  const root = body(4);
+  root.insertAdjacentHTML(
+    "beforeend",
+    `<section class="ox-section" data-title-hidden="true"><div class="ox-section-head ox-sr-only"><h2 class="ox-section-title ox-sr-only">YAML</h2></div></section>`,
+  );
+  const view = render(<Contents root={root} />);
+  await waitFor(() => expect(view.getByTestId("viz-rail-contents")).toBeTruthy());
+  const items = Array.from(view.getByTestId("viz-rail-contents").querySelectorAll("button")).map((b) => b.textContent);
+  expect(items).toEqual(["Section 0", "Section 1", "Section 2", "Section 3"]);
+});
+
+test("a section folded shut is still listed", async () => {
+  const root = body(3);
+  root.insertAdjacentHTML(
+    "beforeend",
+    `<section class="ox-section" data-collapsed="true"><div class="ox-section-head"><h2 class="ox-section-title">Folded</h2></div></section>`,
+  );
+  const view = render(<Contents root={root} />);
+  await waitFor(() => expect(view.getByTestId("viz-rail-contents")).toBeTruthy());
+  const items = Array.from(view.getByTestId("viz-rail-contents").querySelectorAll("button")).map((b) => b.textContent);
+  expect(items).toEqual(["Section 0", "Section 1", "Section 2", "Folded"]);
+});

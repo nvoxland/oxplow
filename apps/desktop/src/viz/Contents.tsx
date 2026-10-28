@@ -31,8 +31,19 @@ function scrollParent(el: HTMLElement): HTMLElement | null {
   return null;
 }
 
+/** A section that drew nothing under its heading (not one folded shut):
+ *  hidden (the kit's `.ox-section` rule), so not a place to go to. */
+function emptySection(el: HTMLElement): boolean {
+  const section = el.closest<HTMLElement>(".ox-section");
+  return (
+    !!section &&
+    !section.hasAttribute("data-collapsed") &&
+    Array.from(section.children).every((c) => c.classList.contains("ox-section-head"))
+  );
+}
+
 function headingsIn(root: HTMLElement): Heading[] {
-  const all = Array.from(root.querySelectorAll<HTMLElement>(HEADINGS));
+  const all = Array.from(root.querySelectorAll<HTMLElement>(HEADINGS)).filter((el) => !emptySection(el));
   const sections = all.filter((el) => el.classList.contains(SECTION_HEADING)).length;
   return all
     .filter((el) => sections >= CONTENTS_FROM || !el.classList.contains(SECTION_HEADING))

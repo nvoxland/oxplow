@@ -52,6 +52,8 @@ export function Section({
       className="ox-section"
       data-section={id}
       data-title-hidden={hideTitle ? "true" : undefined}
+      // Folded shut: its heading alone is all it shows, not an empty section.
+      data-collapsed={open ? undefined : "true"}
       data-testid={testId ?? (collapse ? `${collapse.prefix}-group-${id}` : undefined)}
       style={fill ? (hideTitle ? hiddenFillStyle : fillStyle) : undefined}
     >
