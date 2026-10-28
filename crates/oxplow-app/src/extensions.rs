@@ -3135,8 +3135,8 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
         ));
         return ext;
     }
-    let parsed: Result<ManifestV2, String> =
-        serde_yaml::from_str::<ManifestV2>(&manifest).map_err(|e| e.to_string());
+    let parsed: Result<ManifestV2, String> = serde_yaml::from_str::<ManifestV2>(&manifest)
+        .map_err(|e| oxplow_domain::manifest_keys::hint_unknown(&e.to_string()));
     let m = match parsed {
         Ok(m) if m.name != name => {
             ext.errors.push(format!(
@@ -9288,7 +9288,7 @@ commands:
         write(
             dir.path(),
             ".oxplow/extensions/x/extension.yaml",
-            "manifest: 2\nname: x\nintent:\n  purpose: test\npermissions: { files: read }\nmeasures:\n  - { key: acme.todo }\ncollectors:\n  - { id: acme.todo_scan, runtime: starlark, entry: collectors/todo.star, trigger: { on: [snapshot.taken] }, facts: [acme.todo] }\n",
+            "manifest: 2\nname: x\nintent:\n  purpose: test\npermissions: { files: read }\nmeasures:\n  - { key: acme.todo }\ncollectors:\n  - { id: acme.todo_scan, runtime: starlark, entry: collectors/todo.star, on: [snapshot.taken], facts: [acme.todo] }\n",
         );
         write(
             dir.path(),

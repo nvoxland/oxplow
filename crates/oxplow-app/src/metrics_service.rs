@@ -1270,7 +1270,7 @@ impl MetricsService {
             .filter(|g| {
                 event
                     .as_ref()
-                    .is_none_or(|e| crate::collector_triggers::matches_where(&g.trigger, e))
+                    .is_none_or(|e| g.trigger.where_fits(&e.envelope.payload))
             })
             .collect();
         let collectors = self.runnable(collectors, event.as_deref()).await;
@@ -1487,7 +1487,7 @@ impl MetricsService {
             .filter(|g| {
                 event
                     .as_ref()
-                    .is_none_or(|e| crate::collector_triggers::matches_where(&g.trigger, e))
+                    .is_none_or(|e| g.trigger.where_fits(&e.envelope.payload))
             })
             .collect();
         let collectors = self.runnable(collectors, event.as_deref()).await;
@@ -1580,9 +1580,7 @@ impl MetricsService {
             .fact_collectors()
             .into_iter()
             .filter(|c| {
-                select(c)
-                    && c.runs_on(&event_type)
-                    && crate::collector_triggers::matches_where(&c.trigger, &event)
+                select(c) && c.runs_on(&event_type) && c.trigger.where_fits(&event.envelope.payload)
             })
             .collect();
         let collectors = self.runnable(collectors, Some(&event)).await;
@@ -3133,7 +3131,7 @@ mod tests {
         .unwrap();
         declare_project_collectors(
                 dir.path(),
-                "- { id: repo.once, runtime: starlark, entry: once.star, trigger: { on: [snapshot.taken] }, facts: [oxplow.ast_hit] }",
+                "- { id: repo.once, runtime: starlark, entry: once.star, on: [snapshot.taken], facts: [oxplow.ast_hit] }",
             );
         crate::test_fixtures::activate_with_problems(&svc).await;
         let snap =
@@ -3174,7 +3172,7 @@ mod tests {
         .unwrap();
         declare_project_collectors(
                 dir.path(),
-                "- { id: repo.seen, runtime: starlark, entry: seen.star, trigger: { on: [snapshot.taken] }, facts: [oxplow.ast_hit] }",
+                "- { id: repo.seen, runtime: starlark, entry: seen.star, on: [snapshot.taken], facts: [oxplow.ast_hit] }",
             );
         crate::test_fixtures::activate_with_problems(&svc).await;
         let snap =
@@ -3223,7 +3221,7 @@ mod tests {
             let trigger = trigger.to_string();
             async move {
                 write_project_extension(&root, &format!(
-                    "permissions: {{ files: read }}\ncollectors:\n  - {{ id: repo.seen, runtime: starlark, entry: seen.star, trigger: {trigger}, facts: [oxplow.ast_hit] }}\n"
+                    "permissions: {{ files: read }}\ncollectors:\n  - {{ id: repo.seen, runtime: starlark, entry: seen.star, {trigger}, facts: [oxplow.ast_hit] }}\n"
                 ));
                 crate::test_fixtures::activate_with_problems(&svc).await;
             }
@@ -3231,14 +3229,14 @@ mod tests {
         let consumer = crate::collector_triggers::CollectorTriggers::new(Arc::downgrade(&svc));
         use crate::event_pump::AsyncEventConsumer as _;
         // A baseline, run at once.
-        configure("{ on: [snapshot.taken] }").await;
+        configure("on: [snapshot.taken]").await;
         let base = snapshot_with_content(&svc, &[("src/z.rs", Some("z"))]).await;
         consumer
             .handle(&log_take(&svc, base, SnapshotTrigger::TurnEnd, false, 1).await)
             .await
             .unwrap();
         // Now paced: two takes, each recording another file, both deferred.
-        configure("{ on: [snapshot.taken], settle: 30s }").await;
+        configure("on: [snapshot.taken], settle: 30s").await;
         let one = snapshot_with_content(&svc, &[("src/a.rs", Some("a"))]).await;
         consumer
             .handle(&log_take(&svc, one, SnapshotTrigger::TurnEnd, false, 1).await)
@@ -3569,7 +3567,7 @@ mod tests {
         .unwrap();
         declare_project_collectors(
                 dir.path(),
-                "- { id: repo.once, runtime: starlark, entry: once.star, trigger: { on: [snapshot.taken] }, facts: [oxplow.ast_hit] }",
+                "- { id: repo.once, runtime: starlark, entry: once.star, on: [snapshot.taken], facts: [oxplow.ast_hit] }",
             );
         crate::test_fixtures::activate_with_problems(&svc).await;
         let snap =
@@ -3640,7 +3638,7 @@ mod tests {
         .unwrap();
         declare_project_collectors(
                 dir.path(),
-                "- { id: repo.bare, runtime: starlark, entry: bare.star, trigger: { on: [snapshot.taken] }, facts: [oxplow.ast_hit] }",
+                "- { id: repo.bare, runtime: starlark, entry: bare.star, on: [snapshot.taken], facts: [oxplow.ast_hit] }",
             );
         crate::test_fixtures::activate_with_problems(&svc).await;
         let snap =
@@ -3705,7 +3703,7 @@ mod tests {
         write_project_extension(
             dir.path(),
             &format!(
-                "{measures}collectors:\n  - {{ id: repo.{id}, runtime: starlark, entry: {id}.star, trigger: {{ on: [snapshot.taken] }}, facts: [{measure}] }}\n"
+                "{measures}collectors:\n  - {{ id: repo.{id}, runtime: starlark, entry: {id}.star, on: [snapshot.taken], facts: [{measure}] }}\n"
             ),
         );
         crate::test_fixtures::activate_with_problems(svc).await;
@@ -4712,7 +4710,7 @@ def transform(input):
         .unwrap();
         declare_project_collectors(
                 dir.path(),
-                "- { id: acme.effcollector, runtime: starlark, entry: metrics/eff.star, trigger: { on: [effort.finished] }, facts: [oxplow.ast_hit] }",
+                "- { id: acme.effcollector, runtime: starlark, entry: metrics/eff.star, on: [effort.finished], facts: [oxplow.ast_hit] }",
             );
         crate::test_fixtures::activate_with_problems(&svc).await;
         svc.effort_store

@@ -4118,7 +4118,7 @@ pub(crate) mod test_support {
         run: &str,
     ) -> String {
         let yaml = format!(
-            "- {{ id: {id}, records: {records}, entry: \"{entry}\", report: {{ path: \"{path}\" }}, trigger: {{ on_run: {run} }} }}"
+            "- {{ id: {id}, records: {records}, entry: \"{entry}\", report: {{ path: \"{path}\" }}, on: {{ run: {run} }} }}"
         );
         let value: serde_yaml::Value = serde_yaml::from_str(&yaml).unwrap();
         let (specs, errors) = oxplow_config::collectors::parse_collectors(
@@ -7388,7 +7388,7 @@ mod tests {
             .unwrap();
             std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
             std::fs::write(dir.join("out.txt"), "whatever the tool wrote").unwrap();
-            let entry = "- { id: tests.parse, records: tests, runtime: exec, entry: tools/parse.sh, report: { path: out.txt }, trigger: { on_run: test } }";
+            let entry = "- { id: tests.parse, records: tests, runtime: exec, entry: tools/parse.sh, report: { path: out.txt }, on: { run: test } }";
             let value: serde_yaml::Value = serde_yaml::from_str(entry).unwrap();
             let (_, errors) = oxplow_config::collectors::parse_collectors(
                 &oxplow_config::collectors::Declarer::own("project"),
@@ -8384,7 +8384,7 @@ mod tests {
                     ),
                     "- { id: lint.entry, records: analysis, runtime: jaq, entry: p.jq, \
                      report: { path: reports/ok.json, format: json }, \
-                     trigger: { on_run: analysis } }"
+                     on: { run: analysis } }"
                         .to_string(),
                 ],
             );

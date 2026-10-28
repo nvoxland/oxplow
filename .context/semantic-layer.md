@@ -73,9 +73,14 @@ A **collector** (the target design called it a *source*) records one of:
   project's report collectors, tsk863).
 
 Extensions (oxplow's own code metrics are oxplow-foundation's) and the project
-declare collectors in the same format. A collector runs on its `trigger`: `manual`,
-`{ every: <dur> }`, `{ on: [<event types>] }` or, for a report collector,
-`{ on_run: test | analysis }`; its runtime is `exec`, `starlark`, `jaq` or
+declare collectors in the same format. A collector runs on its `on`: `manual`
+(the default), `{ every: <dur> }`, `[<event types>]` (with `where`,
+`settle`, `at_most`, `idle`, `force` beside it on the entry) or, for a
+report collector, `{ run: test | analysis }`. An effect's `on`/`where` are
+the same grammar, read by one parser and one matcher
+(`collectors::parse_trigger`, `Trigger::fires`); the old nested
+`trigger:` key is refused, its refusal naming the new spelling
+(`oxplow_domain::manifest_keys`). Its runtime is `exec`, `starlark`, `jaq` or
 `read` (`crates/oxplow-config/src/collectors.rs`; "Collectors" below).
 
 ### 2. Dimensions slice data
@@ -923,7 +928,7 @@ A **collector** brings data in: a program (`exec`), a sandboxed script
 declared measures) or **records** (a test / coverage / analysis report it
 parses — an own extension's report collectors, tsk863), one of the three. One declaration, `oxplow_config::collectors`
 (`CollectorSpec`, `parse_collectors`), serves `extension.yaml` (v1
-`sources:` is migrated to it, each `schedule:` becoming a `trigger:`),
+`sources:` is migrated to it, each `schedule:` becoming an `on:`),
 parsed with a `Declarer { extension, namespace, own }`; `.oxplow/project.yaml`
 has no `collectors:` (it is refused). The real, tested example
 is `examples/extensions/github/` (PRs from the GitHub API via `gh` or
@@ -935,7 +940,7 @@ collectors:
     doc: The repo's recent pull requests.
     runtime: exec              # or starlark / jaq (derived, below) / read
     entry: sync.sh             # relative, inside the extension folder
-    trigger: { every: 15m }    # or manual; { on: [<event type>], where?: {field: value} }
+    on: { every: 15m }    # or manual; { on: [<event type>], where?: {field: value} }
     env: [GITHUB_REPOSITORY]   # host env vars passed through; nothing else is
     credentials: [GITHUB_TOKEN] # keychain secrets, set in Settings → Extensions
     entities:
@@ -979,7 +984,7 @@ extension's own declared event types, logged with the run (P9.D2;
   `.oxplow/extensions/project/`): it parses one `report:` file with a bundled
   parser (`entry: "oxplow:<junit|lcov|cobertura|jacoco|clippy|eslint>"`)
   or its own jaq / Starlark / exec script (paths relative to the extension
-  folder; `report.path` relative to the project root), on `trigger: { on_run: test |
+  folder; `report.path` relative to the project root), on `on: { run: test |
   analysis }` — when the `collection` reactor detects that kind of run and
   the run wrote the report — or by hand (`oxplow.collector.sync`, which records
   in a thread). The collection service runs it and merges its output into

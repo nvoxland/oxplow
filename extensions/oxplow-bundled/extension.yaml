@@ -467,8 +467,7 @@ collectors:
     doc: An effort's churn, from its change, when it finishes.
     runtime: starlark
     entry: collectors/effort_churn.star
-    trigger:
-      on: [effort.finished]
+    on: [effort.finished]
     after: [change.analyze]
     input: |
       SELECT f.path, f.additions, f.deletions

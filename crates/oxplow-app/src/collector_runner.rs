@@ -2871,7 +2871,7 @@ pub(crate) mod tests {
         extension(
             &root,
             "work",
-            "manifest: 2\nname: work\nintent:\n  purpose: test\ncollectors:\n  - id: star\n    runtime: starlark\n    entry: hot.star\n    trigger: { every: 10m }\n    input: \"SELECT uri, title FROM v_work_item\"\n    entities:\n      - { name: hot, key: uri, columns: { uri: text, title: text } }\n",
+            "manifest: 2\nname: work\nintent:\n  purpose: test\ncollectors:\n  - id: star\n    runtime: starlark\n    entry: hot.star\n    on: { every: 10m }\n    input: \"SELECT uri, title FROM v_work_item\"\n    entities:\n      - { name: hot, key: uri, columns: { uri: text, title: text } }\n",
             &[(
                 "hot.star",
                 "def transform(input):\n    return {\"entities\": {\"hot\": [{\"uri\": r[\"uri\"], \"title\": r[\"title\"]} for r in input[\"rows\"]]}}\n",
@@ -3005,7 +3005,7 @@ pub(crate) mod tests {
         extension(
             &root,
             "work",
-            "manifest: 2\nname: work\nintent:\n  purpose: test\ncollectors:\n  - id: seen\n    runtime: starlark\n    entry: seen.star\n    trigger: { on: [thread.checkpoint] }\n    entities:\n      - { name: seen, key: k, columns: { k: text, v: int, source: text, turn: int } }\n",
+            "manifest: 2\nname: work\nintent:\n  purpose: test\ncollectors:\n  - id: seen\n    runtime: starlark\n    entry: seen.star\n    on: [thread.checkpoint]\n    entities:\n      - { name: seen, key: k, columns: { k: text, v: int, source: text, turn: int } }\n",
             &[(
                 "seen.star",
                 "def transform(input):\n    e = input[\"event\"]\n    return {\"entities\": {\"seen\": [{\"k\": \"x\", \"v\": e[\"v\"], \"source\": e[\"source\"], \"turn\": e[\"anchors\"][\"turn_id\"]}]}}\n",

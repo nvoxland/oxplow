@@ -72,7 +72,7 @@ collectors:
   - id: complex_fns.scan                 # the PRODUCER
     runtime: starlark
     entry: collectors/complex_functions.star
-    trigger: { on: [snapshot.taken] }
+    on: [snapshot.taken]
     facts: [complex_fns.complex_functions]
 metrics:
   - key: complex_fns.complex_functions   # the SPEC

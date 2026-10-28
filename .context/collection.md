@@ -54,7 +54,7 @@ section for the column.
   which refuses `collectors:`) with `records: tests |
   coverage | analysis`, the `report: { path }` it reads (relative to the
   project root, the checkout), a parser in
-  `entry`, and `trigger: { on_run: test | analysis }` (or none: by hand).
+  `entry`, and `on: { run: test | analysis }` (or none: by hand).
   One declaration, runtime, permissions and run log for "read a report file",
   shared with every other collector (`.context/semantic-layer.md`
   "Collectors"). Validation (`crates/oxplow-config/src/collectors.rs`,
@@ -68,8 +68,8 @@ section for the column.
 
   ```yaml
   collectors:
-    - { id: tests.rust_coverage, records: coverage, entry: "oxplow:lcov", report: { path: target/coverage/lcov.info }, trigger: { on_run: test } }
-    - { id: lint.clippy, records: analysis, entry: "oxplow:clippy", report: { path: target/clippy.json }, trigger: { on_run: analysis } }
+    - { id: tests.rust_coverage, records: coverage, entry: "oxplow:lcov", report: { path: target/coverage/lcov.info }, on: { run: test } }
+    - { id: lint.clippy, records: analysis, entry: "oxplow:clippy", report: { path: target/clippy.json }, on: { run: analysis } }
   ```
   **Listed in Settings → Data → Collectors** beside the extensions' (owner
   `project`, the project's own extension, as `v_collector_state` lists every
@@ -274,7 +274,7 @@ hook + MCP wiring):
   `status` is `stored`, or why nothing landed: `no_stream`, `no_cases`
   (tests), `no_coverage` (nothing instrumented, or no coverage measure),
   `metric_off` (no enabled metric reads analysis). A failed write is an
-  error, never `stored`. The run is the collector's (`trigger: manual`). It
+  error, never `stored`. The run is the collector's (`on: manual`). It
   replaced `test.ingest_coverage` / `test.ingest_analysis` (P8.A8). **No
   baseline gate** for analysis: findings are *absolute* (current-file),
   so they store even when the effort has no start snapshot (tsk86).
@@ -687,7 +687,7 @@ collectors:
     runtime: jaq                 # jaq | starlark | exec
     entry: collectors/clover.jq
     report: { path: target/clover.xml, format: xml }   # text | json | xml | lcov | lines
-    trigger: { on_run: test }
+    on: { run: test }
 ```
 
 ```jq
@@ -734,7 +734,7 @@ built on the JS compiler API, so it's a pinned root devDependency whose
 `typescript` peer resolves to the root's `typescript@6` (the last JS release).
 Don't run it via `bunx type-coverage@latest` — bunx auto-installs the newest
 `typescript` as the peer and it crashes on TS 7 (`ts.SyntaxKind` undefined).
-`trigger: { on: [snapshot.taken] }` re-reads the report each snapshot — there
+`on: [snapshot.taken]` re-reads the report each snapshot — there
 is no "report written" event, so a snapshot trigger (or `oxplow.collector.sync`
 by hand) is how this fact collector runs.
 

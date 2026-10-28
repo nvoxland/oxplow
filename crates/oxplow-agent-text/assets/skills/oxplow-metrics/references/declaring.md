@@ -49,7 +49,7 @@ collectors:
     doc: TODO comment scan
     runtime: starlark
     entry: collectors/todo.star     # relative to the extension
-    trigger: { on: [snapshot.taken] }   # runs after each snapshot that recorded files
+    on: [snapshot.taken]   # runs after each snapshot that recorded files
     facts: [acme.todo_count]        # declare-to-collect: it may only record these
 
 metrics:

@@ -702,7 +702,7 @@ resources:
         let dir = tempfile::tempdir().unwrap();
         let collector = |on: &str| {
             format!(
-                "{MANIFEST}collectors:\n  - {{ id: tally, runtime: starlark, entry: tally.star, trigger: {{ on: [{on}] }}, entities: [{{ name: tally, key: id, columns: {{ id: int }} }}] }}\n"
+                "{MANIFEST}collectors:\n  - {{ id: tally, runtime: starlark, entry: tally.star, on: [{on}], entities: [{{ name: tally, key: id, columns: {{ id: int }} }}] }}\n"
             )
         };
         write(
@@ -809,7 +809,7 @@ resources:
 
     /// `beta`: an effect and a collector that react to `acme_pr.merged`,
     /// a type of another extension's.
-    const SUBSCRIBER: &str = "manifest: 2\nname: beta\nintent: { purpose: Follows merges., origin: null, examples: [] }\neffects:\n  - id: note\n    summary: Note a merge.\n    on: [acme_pr.merged]\n    entry: note.star\npermissions: { process: true }\ncollectors:\n  - id: pull\n    runtime: exec\n    entry: pull.sh\n    trigger: { on: [acme_pr.merged] }\n    entities:\n      - { name: pr, key: n, columns: { n: int } }\n";
+    const SUBSCRIBER: &str = "manifest: 2\nname: beta\nintent: { purpose: Follows merges., origin: null, examples: [] }\neffects:\n  - id: note\n    summary: Note a merge.\n    on: [acme_pr.merged]\n    entry: note.star\npermissions: { process: true }\ncollectors:\n  - id: pull\n    runtime: exec\n    entry: pull.sh\n    on: [acme_pr.merged]\n    entities:\n      - { name: pr, key: n, columns: { n: int } }\n";
 
     async fn listed(svc: &crate::Services, name: &str) -> Extension {
         svc.listed_extensions(&svc.layout.project_dir)

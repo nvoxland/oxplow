@@ -452,7 +452,7 @@ collectors:
   - id: prs
     runtime: exec
     entry: sync.sh               # inside the extension folder
-    trigger: { every: 15m }      # or: manual
+    on: { every: 15m }      # or: manual
     env: [GITHUB_REPOSITORY]     # passed through from your environment
     credentials: [GITHUB_TOKEN]  # secrets from your keychain
     network: [api.github.com]    # the only host it may reach
@@ -556,7 +556,7 @@ can read them in `v_event`. Limits:
 
 - A collector can only emit types its own extension declares.
 - At most 100 events a run.
-- It can't emit a type it also runs on (`trigger: { on: [...] }`).
+- It can't emit a type it also runs on (`on: [...]`).
 - Once a `type` at a version has been recorded, its schema is fixed. A new
   shape is a new `v` with an `upcast` script.
 

@@ -26,6 +26,7 @@ pub mod hook;
 pub mod ids;
 pub mod json;
 pub mod knowledge;
+pub mod manifest_keys;
 pub mod ordering;
 pub mod permissions;
 pub mod replaceable;

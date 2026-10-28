@@ -287,9 +287,9 @@ markers). Create `.oxplow/extensions/project/extension.yaml` with a
 ```yaml
 # .oxplow/extensions/project/extension.yaml
 collectors:
-  - { id: tests.rust_coverage, records: coverage, entry: "oxplow:lcov", report: { path: target/coverage/lcov.info }, trigger: { on_run: test } }
-  - { id: tests.rust_junit, records: tests, entry: "oxplow:junit", report: { path: target/nextest/default/junit.xml }, trigger: { on_run: test } }
-  - { id: tests.desktop_junit, records: tests, entry: "oxplow:junit", report: { path: apps/desktop/test-report.xml }, trigger: { on_run: test } }
+  - { id: tests.rust_coverage, records: coverage, entry: "oxplow:lcov", report: { path: target/coverage/lcov.info }, on: { run: test } }
+  - { id: tests.rust_junit, records: tests, entry: "oxplow:junit", report: { path: target/nextest/default/junit.xml }, on: { run: test } }
+  - { id: tests.desktop_junit, records: tests, entry: "oxplow:junit", report: { path: apps/desktop/test-report.xml }, on: { run: test } }
 ```
 
 `records` is `tests`, `coverage` or `analysis`. The bundled parsers are
@@ -314,7 +314,7 @@ collectors:
     runtime: jaq                        # jaq (jq) | starlark | exec
     entry: collectors/clover.jq         # the script file, relative to the extension folder
     report: { path: target/clover.xml, format: xml }   # pre-parse: text | json | xml | lcov | lines
-    trigger: { on_run: test }
+    on: { run: test }
 ```
 
 The script lives in its own file (`entry`, relative to the extension folder, e.g.

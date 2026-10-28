@@ -11,7 +11,7 @@
 //! runs when its **trigger** says: `manual`, `{ every: 15m }`,
 //! `{ on: [<event types>], where: { <payload field>: <value> } }` — when
 //! such an event is logged, after the consumers named in `after:` have
-//! handled it — or, for a report collector, `{ on_run: test | analysis }`:
+//! handled it — or, for a report collector, `{ run: test | analysis }`:
 //! when the agent runs the project's tests or an analyzer.
 //!
 //! ```yaml
@@ -19,12 +19,12 @@
 //!   - id: repo.scan_clone            # a dotted id keeps a producer's name
 //!     runtime: starlark
 //!     entry: collectors/repo_clone.star
-//!     trigger: { on: [snapshot.taken] }
+//!     on: [snapshot.taken]
 //!     facts: [repo.rust_clone]
 //!   - id: prs
 //!     runtime: exec
 //!     entry: sync.sh
-//!     trigger: { every: 15m }
+//!     on: { every: 15m }
 //!     credentials: [GITHUB_TOKEN]
 //!     network: [api.github.com]
 //!     entities: [...]
@@ -32,7 +32,7 @@
 //!     records: coverage
 //!     entry: oxplow:lcov              # a bundled parser
 //!     report: { path: target/coverage/lcov.info }
-//!     trigger: { on_run: test }
+//!     on: { run: test }
 //! ```
 //!
 //! This module parses and validates; running one is the app's
@@ -133,6 +133,46 @@ pub struct Pacing {
     pub at_most_secs: Option<u32>,
     pub idle_secs: Option<u32>,
     pub force: Vec<String>,
+}
+
+impl Trigger {
+    /// Whether an event of `event_type` with `payload` sets it off.
+    pub fn fires(&self, event_type: &str, payload: &serde_json::Value) -> bool {
+        matches!(self, Trigger::On { events, filter, .. } if fires(events, filter, event_type, payload))
+    }
+
+    /// Whether `payload` has what its `where` asks (an `on:` trigger
+    /// without one takes every payload; any other trigger none).
+    pub fn where_fits(&self, payload: &serde_json::Value) -> bool {
+        matches!(self, Trigger::On { filter, .. } if payload_matches(filter, payload))
+    }
+}
+
+/// Whether an event of `event_type` with `payload` sets off an entry whose
+/// `on` lists `events` and whose `where` is `filter`: the one matcher, a
+/// collector's (`Trigger::On`) and an effect's alike.
+pub fn fires(
+    events: &[String],
+    filter: &BTreeMap<String, String>,
+    event_type: &str,
+    payload: &serde_json::Value,
+) -> bool {
+    events.iter().any(|t| t == event_type) && payload_matches(filter, payload)
+}
+
+/// Whether `payload` has each `filter` field equal to its value. The value
+/// is the YAML text: a string matches exactly, a boolean by `true`/`false`, a
+/// number by value (`1` matches `1.0`). A field the payload lacks, or holds
+/// as an object, list or null, never matches.
+pub fn payload_matches(filter: &BTreeMap<String, String>, payload: &serde_json::Value) -> bool {
+    filter.iter().all(|(field, want)| match payload.get(field) {
+        Some(serde_json::Value::String(s)) => s == want,
+        Some(serde_json::Value::Bool(b)) => want.parse::<bool>().ok() == Some(*b),
+        Some(serde_json::Value::Number(n)) => {
+            matches!((n.as_f64(), want.parse::<f64>()), (Some(a), Ok(b)) if a == b)
+        }
+        _ => false,
+    })
 }
 
 impl Pacing {
@@ -399,7 +439,7 @@ pub struct CollectorSpec {
     #[serde(default)]
     pub whole_tree: bool,
     /// A report collector's kind: it parses `report` with `entry` and its
-    /// output joins the run (`trigger: { on_run }`).
+    /// output joins the run (`on: { run: … }`).
     pub records: Option<Records>,
 }
 
@@ -515,7 +555,10 @@ pub fn parse_collectors_indexed(
         let raw: RawCollector = match serde_yaml::from_value(item.clone()) {
             Ok(r) => r,
             Err(e) => {
-                errors.push((Some(i), e.to_string()));
+                errors.push((
+                    Some(i),
+                    oxplow_domain::manifest_keys::hint_unknown(&e.to_string()),
+                ));
                 continue;
             }
         };
@@ -570,10 +613,32 @@ pub struct RawCollector {
     /// For `read`: the provider collector it runs.
     #[serde(default)]
     provider: Option<ProviderRead>,
-    /// When it runs by itself; absent, `manual`.
+    /// When it runs by itself: `manual` (the default), the event types it
+    /// runs on, `{ every: 15m }`, or a report collector's `{ run: test }`.
     #[serde(default)]
-    #[schemars(with = "Option<TriggerFile>")]
-    trigger: Option<serde_yaml::Value>,
+    #[schemars(with = "Option<OnFile>")]
+    on: Option<serde_yaml::Value>,
+    /// With event types in `on`: payload fields and the values they must equal.
+    #[serde(default, rename = "where")]
+    #[schemars(with = "Option<PayloadFilter>")]
+    filter: Option<serde_yaml::Value>,
+    /// With event types in `on`: run once no triggering event has arrived
+    /// for this long.
+    #[serde(default)]
+    #[schemars(with = "Option<String>")]
+    settle: Option<serde_yaml::Value>,
+    /// With event types in `on`: run at most this often.
+    #[serde(default)]
+    #[schemars(with = "Option<String>")]
+    at_most: Option<serde_yaml::Value>,
+    /// With event types in `on`: run once nothing has happened for this long.
+    #[serde(default)]
+    #[schemars(with = "Option<String>")]
+    idle: Option<serde_yaml::Value>,
+    /// With a pacing key: event types that run at once.
+    #[serde(default)]
+    #[schemars(with = "Option<EventTypeList>")]
+    force: Option<serde_yaml::Value>,
     #[serde(default)]
     after: Vec<String>,
     #[serde(default)]
@@ -660,12 +725,15 @@ pub enum ColumnShape {
     Full(RawColumn),
 }
 
-/// `trigger:` as written: `manual`, or a map of a trigger's keys.
+/// `on:` as written: `manual`, the event types it runs on, a clock or a
+/// report collector's run.
 #[derive(Deserialize, schemars::JsonSchema)]
 #[serde(untagged)]
-pub enum TriggerFile {
+pub enum OnFile {
     Manual(Manual),
-    Map(Box<TriggerMap>),
+    Events(EventTypeList),
+    Every(EveryFile),
+    Run(RunFile),
 }
 
 /// `manual`: only when someone runs it.
@@ -675,42 +743,42 @@ pub enum Manual {
     Manual,
 }
 
-/// A trigger's keys. Which go together `parse_trigger` checks, and says
-/// in its own words.
+/// `{ every: 15m }`: on a clock.
 #[derive(Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct TriggerMap {
-    /// A clock: `15m`, `2h`.
-    #[serde(default)]
-    #[schemars(with = "Option<String>")]
+pub struct EveryFile {
+    /// A duration: `15m`, `2h`.
+    pub every: String,
+}
+
+/// `{ run: test }`: a report collector's, after a `test` or `analysis` run.
+#[derive(Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RunFile {
+    pub run: RunKind,
+}
+
+/// The keys on an entry that say when it runs: a collector's and (`on`
+/// and `where` only) an effect's. One grammar, read by [`parse_trigger`].
+#[derive(Debug, Clone, Copy, Default)]
+pub struct TriggerKeys<'a> {
+    pub on: Option<&'a serde_yaml::Value>,
+    pub filter: Option<&'a serde_yaml::Value>,
+    pub settle: Option<&'a serde_yaml::Value>,
+    pub at_most: Option<&'a serde_yaml::Value>,
+    pub idle: Option<&'a serde_yaml::Value>,
+    pub force: Option<&'a serde_yaml::Value>,
+}
+
+/// [`TriggerKeys`] sorted into what each shape takes.
+struct TriggerMap {
     every: Option<serde_yaml::Value>,
-    /// The event types it runs on.
-    #[serde(default)]
-    #[schemars(with = "Option<EventTypeList>")]
     on: Option<serde_yaml::Value>,
-    /// With `on`: payload fields and the values they must equal.
-    #[serde(default, rename = "where")]
-    #[schemars(with = "Option<PayloadFilter>")]
     filter: Option<serde_yaml::Value>,
-    /// A report collector's: after a `test` or `analysis` run.
-    #[serde(default)]
-    #[schemars(with = "Option<RunKind>")]
     on_run: Option<serde_yaml::Value>,
-    /// With `on`: run once no triggering event has arrived for this long.
-    #[serde(default)]
-    #[schemars(with = "Option<String>")]
     settle: Option<serde_yaml::Value>,
-    /// With `on`: run at most this often.
-    #[serde(default)]
-    #[schemars(with = "Option<String>")]
     at_most: Option<serde_yaml::Value>,
-    /// With `on`: run once nothing has happened for this long.
-    #[serde(default)]
-    #[schemars(with = "Option<String>")]
     idle: Option<serde_yaml::Value>,
-    /// With `on` and a pacing key: event types that run at once.
-    #[serde(default)]
-    #[schemars(with = "Option<EventTypeList>")]
     force: Option<serde_yaml::Value>,
 }
 
@@ -763,28 +831,68 @@ fn parse_type(t: &str) -> Option<ColumnType> {
     })
 }
 
-/// The `trigger:` value: `manual`, `{ every: 15m }` or
-/// `{ on: [types], where?: { field: value } }`. An extension's effect
-/// (`effects:`) reads its `on`/`where` through it too.
+/// When an entry runs, from its keys: `on: manual` (or no `on`),
+/// `on: { every: 15m }`, `on: [<event types>]` with `where`, `settle`,
+/// `at_most`, `idle` and `force` beside it, or a report collector's
+/// `on: { run: test | analysis }`. An effect's `on`/`where` are read by it
+/// too.
 pub fn parse_trigger(
-    value: Option<&serde_yaml::Value>,
+    keys: TriggerKeys<'_>,
     knows_event: &dyn Fn(&str) -> bool,
 ) -> Result<Trigger, String> {
     use serde_yaml::Value;
-    let shapes = "use `manual`, `{ every: 15m }`, `{ on: [<event type>], where?: {…}, \
-                  settle?: 30s, at_most?: 5m, idle?: 2m, force?: [<event type>] }` or \
-                  `{ on_run: test | analysis }`";
-    let Some(value) = value else {
-        return Ok(Trigger::Manual);
+    let shapes = "`on` is `manual`, `{ every: 15m }`, `[<event type>]` (with `where:`, \
+                  `settle:`, `at_most:`, `idle:`, `force:` beside it) or `{ run: test | analysis }`";
+    let beside = [
+        keys.filter,
+        keys.settle,
+        keys.at_most,
+        keys.idle,
+        keys.force,
+    ];
+    let alone = || beside.iter().all(Option::is_none);
+    let cloned = |v: Option<&Value>| v.cloned();
+    let t = match keys.on {
+        None if alone() => return Ok(Trigger::Manual),
+        None => {
+            return Err(
+                "`where`, `settle`, `at_most`, `idle` and `force` go with event types in `on`"
+                    .into(),
+            )
+        }
+        Some(Value::String(s)) if s == "manual" => {
+            if !alone() {
+                return Err(format!("`on: manual` stands alone; {shapes}"));
+            }
+            return Ok(Trigger::Manual);
+        }
+        Some(Value::Mapping(map)) => {
+            let get = |k: &str| map.get(Value::String(k.into())).cloned();
+            if map.len() != 1 || (get("every").is_none() && get("run").is_none()) {
+                return Err(shapes.to_string());
+            }
+            TriggerMap {
+                every: get("every"),
+                on: None,
+                filter: cloned(keys.filter),
+                on_run: get("run"),
+                settle: cloned(keys.settle),
+                at_most: cloned(keys.at_most),
+                idle: cloned(keys.idle),
+                force: cloned(keys.force),
+            }
+        }
+        Some(on) => TriggerMap {
+            every: None,
+            on: Some(on.clone()),
+            filter: cloned(keys.filter),
+            on_run: None,
+            settle: cloned(keys.settle),
+            at_most: cloned(keys.at_most),
+            idle: cloned(keys.idle),
+            force: cloned(keys.force),
+        },
     };
-    if value.as_str() == Some("manual") {
-        return Ok(Trigger::Manual);
-    }
-    if !value.is_mapping() {
-        return Err(format!("trigger: {shapes}"));
-    }
-    let t: TriggerMap =
-        serde_yaml::from_value(value.clone()).map_err(|e| format!("trigger: {e}; {shapes}"))?;
     if let Some(run) = &t.on_run {
         let alone = [
             &t.every, &t.on, &t.filter, &t.settle, &t.at_most, &t.idle, &t.force,
@@ -792,34 +900,34 @@ pub fn parse_trigger(
         .iter()
         .all(|v| v.is_none());
         if !alone {
-            return Err(format!("trigger: `on_run` stands alone; {shapes}"));
+            return Err(format!("`on: {{ run: … }}` stands alone; {shapes}"));
         }
         return match run.as_str() {
             Some("test") => Ok(Trigger::OnRun { run: RunKind::Test }),
             Some("analysis") => Ok(Trigger::OnRun {
                 run: RunKind::Analysis,
             }),
-            _ => Err("trigger: `on_run` is `test` or `analysis`".into()),
+            _ => Err("`on: { run: … }` is `test` or `analysis`".into()),
         };
     }
     match (&t.every, &t.on) {
         (Some(every), None) => {
             if t.filter.is_some() {
-                return Err("trigger: `where` goes with `on`".into());
+                return Err("`where` goes with event types in `on`".into());
             }
             if [&t.settle, &t.at_most, &t.idle, &t.force]
                 .iter()
                 .any(|v| v.is_some())
             {
-                return Err("trigger: `settle`, `at_most`, `idle` and `force` go with `on`".into());
+                return Err(
+                    "`settle`, `at_most`, `idle` and `force` go with event types in `on`".into(),
+                );
             }
             let minutes = every
                 .as_str()
                 .and_then(oxplow_domain::time::parse_every)
                 .and_then(|d| u32::try_from(d.as_secs() / 60).ok())
-                .ok_or_else(|| {
-                    "trigger: `every` takes a duration like `15m` or `2h`".to_string()
-                })?;
+                .ok_or_else(|| "`every` takes a duration like `15m` or `2h`".to_string())?;
             Ok(Trigger::Every { minutes })
         }
         (None, Some(on)) => {
@@ -829,32 +937,32 @@ pub fn parse_trigger(
                     .iter()
                     .map(|i| i.as_str().map(str::to_string))
                     .collect::<Option<_>>()
-                    .ok_or_else(|| "trigger: `on` lists event types".to_string())?,
-                _ => return Err("trigger: `on` lists event types".into()),
+                    .ok_or_else(|| "`on` lists event types".to_string())?,
+                _ => return Err("`on` lists event types".into()),
             };
             if events.is_empty() {
-                return Err("trigger: `on` names no event type".into());
+                return Err("`on` names no event type".into());
             }
             if events.iter().any(|t| t == "collector.synced") {
                 return Err(
-                    "trigger: a collector can't run on `collector.synced` (a run would trigger \
+                    "a collector can't run on `collector.synced` (a run would trigger \
                      itself); name the consumer to wait for in `after:` instead"
                         .into(),
                 );
             }
             if let Some(unknown) = events.iter().find(|t| !knows_event(t)) {
                 return Err(format!(
-                    "trigger: `{unknown}` isn't a registered event type (see `v_event_type`)"
+                    "`{unknown}` isn't a registered event type (see `v_event_type`)"
                 ));
             }
             let mut filter = BTreeMap::new();
             if let Some(w) = &t.filter {
                 let w = w
                     .as_mapping()
-                    .ok_or_else(|| "trigger: `where` maps payload fields to values".to_string())?;
+                    .ok_or_else(|| "`where` maps payload fields to values".to_string())?;
                 for (k, v) in w {
                     let (Some(k), Some(v)) = (k.as_str(), yaml_scalar(v)) else {
-                        return Err("trigger: `where` maps payload fields to values".into());
+                        return Err("`where` maps payload fields to values".into());
                     };
                     filter.insert(k.to_string(), v);
                 }
@@ -867,9 +975,7 @@ pub fn parse_trigger(
                             .and_then(oxplow_domain::time::parse_duration)
                             .and_then(|d| u32::try_from(d.as_secs()).ok())
                             .ok_or_else(|| {
-                                format!(
-                                    "trigger: `{key}` takes a duration like `30s`, `5m` or `2h`"
-                                )
+                                format!("`{key}` takes a duration like `30s`, `5m` or `2h`")
                             })
                     })
                     .transpose()
@@ -883,7 +989,7 @@ pub fn parse_trigger(
             if let Some(force) = &t.force {
                 if pacing.is_immediate() {
                     return Err(
-                        "trigger: `force` needs `settle`, `at_most` or `idle` (without them every \
+                        "`force` needs `settle`, `at_most` or `idle` (without them every \
                          event runs at once)"
                             .into(),
                     );
@@ -894,13 +1000,11 @@ pub fn parse_trigger(
                         .iter()
                         .map(|i| i.as_str().map(str::to_string))
                         .collect::<Option<_>>()
-                        .ok_or_else(|| "trigger: `force` lists event types".to_string())?,
-                    _ => return Err("trigger: `force` lists event types".into()),
+                        .ok_or_else(|| "`force` lists event types".to_string())?,
+                    _ => return Err("`force` lists event types".into()),
                 };
                 if let Some(stray) = pacing.force.iter().find(|t| !events.contains(t)) {
-                    return Err(format!(
-                        "trigger: `force` names `{stray}`, which isn't in `on`"
-                    ));
+                    return Err(format!("`force` names `{stray}`, which isn't in `on`"));
                 }
             }
             Ok(Trigger::On {
@@ -909,7 +1013,7 @@ pub fn parse_trigger(
                 pacing,
             })
         }
-        _ => Err(format!("trigger: {shapes}")),
+        _ => Err(shapes.to_string()),
     }
 }
 
@@ -951,13 +1055,24 @@ fn validate(
         ));
     }
     let ctx = |m: String| format!("collector `{id}`: {m}");
-    let trigger = parse_trigger(raw.trigger.as_ref(), knows_event).map_err(&ctx)?;
+    let trigger = parse_trigger(
+        TriggerKeys {
+            on: raw.on.as_ref(),
+            filter: raw.filter.as_ref(),
+            settle: raw.settle.as_ref(),
+            at_most: raw.at_most.as_ref(),
+            idle: raw.idle.as_ref(),
+            force: raw.force.as_ref(),
+        },
+        knows_event,
+    )
+    .map_err(&ctx)?;
     if raw.records.is_some() {
         return validate_report_collector(declarer, id, raw, trigger);
     }
     if matches!(trigger, Trigger::OnRun { .. }) {
         return Err(ctx(
-            "`on_run` is a report collector's trigger (`records:`)".into()
+            "`on: { run: … }` is a report collector's (`records:`)".into()
         ));
     }
     let runtime = match raw.runtime.as_deref() {
@@ -1056,7 +1171,7 @@ fn validate(
                 || !raw.facts.is_empty()
             {
                 return Err(ctx(
-                    "a `read` collector takes only `provider` and `trigger`: its records land in \
+                    "a `read` collector takes only `provider` and `on`: its records land in \
                      the provider's capability (`v_work_item`)"
                         .into(),
                 ));
@@ -1253,7 +1368,7 @@ fn validate(
 
 /// A report collector (`records:`, tsk863): the project's, reading one
 /// report file with a bundled parser (`entry: oxplow:<name>`) or its own
-/// script or program, on `{ on_run: test | analysis }` or by hand. It gets
+/// script or program, on `on: { run: test | analysis }` or by hand. It gets
 /// no `input`, `env`, `credentials` or `network`: its whole input is the
 /// report.
 fn validate_report_collector(
@@ -1302,7 +1417,7 @@ fn validate_report_collector(
     }
     if !matches!(trigger, Trigger::OnRun { .. } | Trigger::Manual) {
         return Err(ctx(
-            "a report collector runs `{ on_run: test | analysis }` or by hand (`manual`)".into(),
+            "a report collector runs `on: { run: test | analysis }` or by hand (`manual`)".into(),
         ));
     }
     // A test run's reports are tests and coverage, an analysis run's are
@@ -1319,7 +1434,7 @@ fn validate_report_collector(
                 Records::Analysis => ("analysis", "an analysis run"),
             };
             return Err(ctx(format!(
-                "records `{name}`, which {by} reads: use `trigger: {{ on_run: {} }}`",
+                "records `{name}`, which {by} reads: use `on: {{ run: {} }}`",
                 if records == Records::Analysis {
                     "analysis"
                 } else {
@@ -1466,7 +1581,7 @@ mod tests {
   doc: Pull requests from GitHub.
   runtime: exec
   entry: bin/sync.sh
-  trigger: { every: 10m }
+  on: { every: 10m }
   env: [GITHUB_TOKEN]
   credentials: [GH_PAT]
   network: [api.github.com, "*.githubusercontent.com"]
@@ -1521,18 +1636,20 @@ mod tests {
         assert_eq!(e.relations[0].to, "v_work_item");
     }
 
-    /// Every trigger shape parses; an `on:` type must be registered;
-    /// `after` and `where` go only with `on:`.
+    /// Every shape of `on` parses, with `where` and the pacing keys beside
+    /// it on the entry; an event type must be registered; `after`,
+    /// `where` and pacing go only with event types; the old `trigger:` is
+    /// an unknown key.
     #[test]
     fn triggers() {
-        let with = |t: &str| parse(&GOOD.replace("trigger: { every: 10m }", t));
-        assert_eq!(with("trigger: manual").0[0].trigger, Trigger::Manual);
+        let with = |t: &str| parse(&GOOD.replace("on: { every: 10m }", t));
+        assert_eq!(with("on: manual").0[0].trigger, Trigger::Manual);
         assert_eq!(
-            with("trigger: { every: 2h }").0[0].trigger,
+            with("on: { every: 2h }").0[0].trigger,
             Trigger::Every { minutes: 120 }
         );
         assert_eq!(
-            with("trigger: { on: [snapshot.taken], where: { trigger: git_refs } }").0[0].trigger,
+            with("on: [snapshot.taken]\n  where: { trigger: git_refs }").0[0].trigger,
             Trigger::On {
                 events: vec!["snapshot.taken".into()],
                 filter: [("trigger".to_string(), "git_refs".to_string())].into(),
@@ -1542,7 +1659,7 @@ mod tests {
         // Pacing — settle, at most, idle, and the events that run
         // at once past them.
         assert_eq!(
-            with("trigger: { on: [snapshot.taken, effort.finished], settle: 30s, at_most: 5m, idle: 2m, force: [effort.finished] }")
+            with("on: [snapshot.taken, effort.finished]\n  settle: 30s\n  at_most: 5m\n  idle: 2m\n  force: [effort.finished]")
                 .0[0]
                 .trigger,
             Trigger::On {
@@ -1557,46 +1674,48 @@ mod tests {
             }
         );
         assert_eq!(
-            with("trigger: { on: effort.finished }\n  after: [change.analyze]").0[0].after,
+            with("on: effort.finished\n  after: [change.analyze]").0[0].after,
             vec!["change.analyze"]
         );
         for (t, needle) in [
-            ("trigger: hourly", "trigger"),
-            ("trigger: { every: soon }", "duration"),
+            ("on: hourly", "isn't a registered event type"),
+            ("on: { every: soon }", "duration"),
             (
-                "trigger: { on: [snapshot.taken], settle: soon }",
+                "on: [snapshot.taken]\n  settle: soon",
                 "`settle` takes a duration",
             ),
-            ("trigger: { every: 5m, settle: 30s }", "go with `on`"),
             (
-                "trigger: { on: [snapshot.taken], force: [snapshot.taken] }",
+                "on: { every: 5m }\n  settle: 30s",
+                "go with event types in `on`",
+            ),
+            (
+                "on: [snapshot.taken]\n  force: [snapshot.taken]",
                 "`force` needs",
             ),
             (
-                "trigger: { on: [snapshot.taken], settle: 30s, force: [effort.finished] }",
+                "on: [snapshot.taken]\n  settle: 30s\n  force: [effort.finished]",
                 "`force` names `effort.finished`, which isn't in `on`",
             ),
+            ("on: [nope.happened]", "isn't a registered event type"),
             (
-                "trigger: { on: [nope.happened] }",
-                "isn't a registered event type",
+                "on: { every: 5m }\n  where: { a: b }",
+                "`where` goes with event types in `on`",
             ),
+            ("on: { every: 5m }\n  after: [x]", "`after` goes with"),
+            ("on: { at: noon }", "`on` is `manual`"),
+            ("on: manual\n  settle: 30s", "stands alone"),
+            ("on: [collector.synced]", "can't run on `collector.synced`"),
             (
-                "trigger: { every: 5m, where: { a: b } }",
-                "`where` goes with `on`",
-            ),
-            ("trigger: { every: 5m }\n  after: [x]", "`after` goes with"),
-            ("trigger: { at: noon }", "unknown field `at`"),
-            (
-                "trigger: { on: [collector.synced] }",
-                "can't run on `collector.synced`",
+                "trigger: { every: 5m }",
+                "unknown key `trigger` — write `on:`",
             ),
         ] {
             let (s, e) = with(t);
             assert!(s.is_empty(), "{t}");
             assert!(e.iter().any(|m| m.contains(needle)), "{t}: {e:?}");
         }
-        // No trigger: manual.
-        let (s, _) = parse(&GOOD.replace("  trigger: { every: 10m }\n", ""));
+        // No `on`: manual.
+        let (s, _) = parse(&GOOD.replace("  on: { every: 10m }\n", ""));
         assert_eq!(s[0].trigger, Trigger::Manual);
     }
 
@@ -1761,7 +1880,7 @@ mod tests {
         let own = Declarer::own("project");
         let knows = |e: &str| e == "snapshot.taken";
         let value: serde_yaml::Value = serde_yaml::from_str(
-            "- { id: acme.scan, runtime: starlark, entry: oxplow/collectors/scan.star, trigger: { on: [snapshot.taken] }, facts: [acme.todo, acme.complexity] }",
+            "- { id: acme.scan, runtime: starlark, entry: oxplow/collectors/scan.star, on: [snapshot.taken], facts: [acme.todo, acme.complexity] }",
         )
         .unwrap();
         let (specs, errors) = parse_collectors(&own, &value, &knows);
@@ -1771,7 +1890,7 @@ mod tests {
         assert_eq!(specs[0].facts, vec!["acme.complexity", "acme.todo"]);
         // An invalid one is refused, naming it.
         let bad: serde_yaml::Value = serde_yaml::from_str(
-            "- { id: acme.scan, runtime: starlark, entry: x.star, trigger: { on: [nope.happened] }, facts: [acme.todo] }",
+            "- { id: acme.scan, runtime: starlark, entry: x.star, on: [nope.happened], facts: [acme.todo] }",
         )
         .unwrap();
         let (specs, errors) = parse_collectors(&own, &bad, &knows);
@@ -1818,19 +1937,19 @@ mod tests {
     fn a_report_collectors_paths_stay_in_the_project() {
         for (yaml, needle) in [
             (
-                "- { id: t.a, records: tests, entry: oxplow:junit, report: { path: ../out.xml }, trigger: { on_run: test } }",
+                "- { id: t.a, records: tests, entry: oxplow:junit, report: { path: ../out.xml }, on: { run: test } }",
                 "report `../out.xml` must be a path inside the project",
             ),
             (
-                "- { id: t.a, records: tests, entry: oxplow:junit, report: { path: /tmp/out.xml }, trigger: { on_run: test } }",
+                "- { id: t.a, records: tests, entry: oxplow:junit, report: { path: /tmp/out.xml }, on: { run: test } }",
                 "report `/tmp/out.xml` must be a path inside the project",
             ),
             (
-                "- { id: t.a, records: tests, runtime: jaq, entry: ../p.jq, report: { path: out.xml, format: xml }, trigger: { on_run: test } }",
+                "- { id: t.a, records: tests, runtime: jaq, entry: ../p.jq, report: { path: out.xml, format: xml }, on: { run: test } }",
                 "entry `../p.jq` must be a path inside the project",
             ),
             (
-                "- { id: t.a, records: tests, runtime: jaq, entry: /p.jq, report: { path: out.xml, format: xml }, trigger: { on_run: test } }",
+                "- { id: t.a, records: tests, runtime: jaq, entry: /p.jq, report: { path: out.xml, format: xml }, on: { run: test } }",
                 "entry `/p.jq` must be a path inside the project",
             ),
         ] {
@@ -1851,13 +1970,13 @@ mod tests {
 - id: repo.scan_clone
   runtime: starlark
   entry: oxplow/gauges/repo_clone.star
-  trigger: { on: [snapshot.taken] }
+  on: [snapshot.taken]
   facts: [repo.rust_clone]
 - id: repo.type_coverage
   runtime: jaq
   entry: oxplow/collectors/type_coverage.jq
   report: { path: target/type-coverage.json, format: json }
-  trigger: { on: [snapshot.taken] }
+  on: [snapshot.taken]
   facts: [repo.type_coverage]
 "#,
         );
@@ -1893,7 +2012,7 @@ mod tests {
     #[test]
     fn read_collectors_name_a_provider_collector() {
         let (out, errors) = parse(
-            "- { id: issues, runtime: read, provider: { instance: tracker/issues, collector: issues }, trigger: { every: 10m } }",
+            "- { id: issues, runtime: read, provider: { instance: tracker/issues, collector: issues }, on: { every: 10m } }",
         );
         assert!(errors.is_empty(), "{errors:?}");
         assert_eq!(out[0].provider.as_ref().unwrap().collector, "issues");
@@ -1922,13 +2041,13 @@ mod tests {
   records: coverage
   entry: oxplow:lcov
   report: { path: target/coverage/lcov.info }
-  trigger: { on_run: test }
+  on: { run: test }
 - id: lint.custom
   records: analysis
   runtime: starlark
   entry: oxplow/parsers/lint.star
   report: { path: target/lint.json, format: json }
-  trigger: { on_run: analysis }
+  on: { run: analysis }
 - id: tests.by_hand
   records: tests
   runtime: exec
@@ -1987,8 +2106,8 @@ mod tests {
             "stdin",
         );
         refused(
-            &format!("{base}  records: tests\n  entry: oxplow:junit\n  trigger: {{ on: [snapshot.taken] }}\n"),
-            "on_run",
+            &format!("{base}  records: tests\n  entry: oxplow:junit\n  on: [snapshot.taken]\n"),
+            "or by hand",
         );
         refused(
             "- id: r\n  records: tests\n  entry: oxplow:junit\n",
@@ -2005,16 +2124,18 @@ mod tests {
         // tsk892: a test run's leg reads tests and coverage, an analysis
         // run's analysis — anything else would be parsed and dropped.
         refused(
-            &format!("{base}  records: analysis\n  entry: oxplow:eslint\n  trigger: {{ on_run: test }}\n"),
+            &format!("{base}  records: analysis\n  entry: oxplow:eslint\n  on: {{ run: test }}\n"),
             "records `analysis`, which an analysis run reads",
         );
         refused(
-            &format!("{base}  records: coverage\n  entry: oxplow:lcov\n  trigger: {{ on_run: analysis }}\n"),
+            &format!(
+                "{base}  records: coverage\n  entry: oxplow:lcov\n  on: {{ run: analysis }}\n"
+            ),
             "records `coverage`, which a test run reads",
         );
         refused(
-            "- id: r\n  runtime: jaq\n  entry: r.jq\n  facts: [a.b]\n  trigger: { on_run: test }\n",
-            "report collector's trigger",
+            "- id: r\n  runtime: jaq\n  entry: r.jq\n  facts: [a.b]\n  on: { run: test }\n",
+            "report collector's",
         );
         refused(
             "- id: r\n  runtime: jaq\n  entry: oxplow:lcov\n  facts: [a.b]\n",

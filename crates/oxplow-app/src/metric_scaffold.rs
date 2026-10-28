@@ -194,7 +194,7 @@ pub fn extension_files(
          \x20   doc: \"Functions over the complexity limit, per file\"\n\
          \x20   runtime: starlark\n\
          \x20   entry: collectors/complex_functions.star\n\
-         \x20   trigger: {{ on: [snapshot.taken] }}\n\
+         \x20   on: [snapshot.taken]\n\
          \x20   facts: [{measure}]\n\
          metrics:\n\
          \x20 # The headline: the per-file facts, added up.\n\

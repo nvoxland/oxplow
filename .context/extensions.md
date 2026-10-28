@@ -4067,7 +4067,7 @@ run is `collector_run.status = skipped` with the reason in `error` (V154;
 its last good counts stay, and it isn't a failure toward a disable).
 
 **Reacting to another extension's types (P9.D1).** A collector's
-`trigger: { on: [...] }` and an effect's `on:` may name core types, the
+`on: [...]` and an effect's `on:` may name core types, the
 extension's own declared ones, and **another extension's**
 (`acme_pr.merged` from an extension that isn't `acme-pr`). There is no
 `depends:` key: the qualified type name is the dependency, as a model's
@@ -4268,6 +4268,15 @@ effects:
     entry: effects/announce.star   # transform({event}) → {commands, events?} | {skip}
     after: [page_ref.work_item]    # optional: what it runs after on one event ("Ordering")
 ```
+
+**One trigger grammar.** An effect's `on`/`where` are a collector's —
+the same keys on the entry, one parser (`collectors::parse_trigger`) and
+one matcher (`collectors::fires`, `Trigger::fires`). An effect reacts to
+every matching event, so it takes event types only: no clock, no report
+run, no pacing (`settle`, `at_most`, `idle`, `force` are a collector's).
+An effort policy's `.star` and a provider's `react` verb are the same
+script shape handed an event by the host; they are not manifest
+triggers.
 
 **Loading** (P8.D9) reads `on`/`where` through the collectors'
 `parse_trigger` (one rule for both) against core types and the
