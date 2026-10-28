@@ -16,6 +16,9 @@ intent:
     - name: pr-link
       input: { wikilink: "pr:12" }
       expect: the pull request's URI, `oxplow:github/pr?id=12`
+    - name: a-pull-request-resolves-and-opens-on-its-page
+      input: { sql: "SELECT resolve FROM v_resource WHERE resource = 'github/pr'" }
+      expect: a synced pull request's URI resolves to its model row, opens on the pr page, and the lifetimes page filters by state
     - name: pr-lifetimes-draws-bars-filters-syncs-and-opens
       input: { page: pr-lifetimes }
       expect: a bar per readable pull request; the filters re-run the page, Sync runs the collector and a bar opens its pull request

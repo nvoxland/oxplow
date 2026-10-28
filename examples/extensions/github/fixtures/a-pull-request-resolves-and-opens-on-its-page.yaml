@@ -1,0 +1,23 @@
+# A synced pull request is a resource: its URI resolves to a model row and
+# opens on the `pr` page, and the lifetimes page filters by state.
+given:
+  - rows:
+      pr:
+        - { number: 12, title: Fix the hover state, body: The button flickered., state: open, author: octocat, head_branch: fix-hover, draft: false, opened_at: "2026-10-01T00:00:00Z", url: "https://github.com/o/r/pull/12" }
+        - { number: 11, title: Speed up search, state: closed, author: octocat, head_branch: fast-search, draft: false, opened_at: "2026-09-20T00:00:00Z", merged_at: "2026-09-24T00:00:00Z", url: "https://github.com/o/r/pull/11" }
+when: { sql: "SELECT resolve FROM v_resource WHERE resource = 'github/pr'" }
+expect: { rows: [{ resolve: v_github_pull_request }] }
+steps:
+  - when: { sql: "SELECT title FROM v_github_pull_request WHERE uri = 'oxplow:github/pr?id=12'" }
+    expect: { rows: [{ title: Fix the hover state }] }
+  - when: { page: pr, params: { uri: "oxplow:github/pr?id=12" } }
+    expect:
+      loaders:
+        pr: { rows: 1 }
+      text: { contains: [Fix the hover state] }
+  - when: { page: pr-lifetimes, params: { state: all } }
+    expect: { loaders: { pr_lifetimes: { rows: [{ number: 12 }, { number: 11 }] } } }
+  - when: { page: pr-lifetimes, params: { state: open } }
+    expect: { loaders: { pr_lifetimes: { rows: [{ number: 12 }] } } }
+  - when: { page: pr-lifetimes, params: { state: merged } }
+    expect: { loaders: { pr_lifetimes: { rows: [{ number: 11 }] } } }
