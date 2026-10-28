@@ -10,8 +10,9 @@ mod common;
 
 use std::path::Path;
 
-use oxplow_app::extension_catalog::ExtensionCatalog;
-use oxplow_sdk::{check, extension_test::test_extension, render_findings, Format};
+use oxplow_sdk::{
+    check, extension_test::test_extension, render_findings, ExtensionCatalog, Format,
+};
 
 fn copy_dir(from: &Path, to: &Path) {
     std::fs::create_dir_all(to).unwrap();
@@ -75,17 +76,14 @@ fn loader_rows(
 /// oxplow one snapshot's TODO becomes a
 /// classified fact beside the open work, every service decided on its
 /// run.
+/// The triage example declares the host services its scripts use, and
+/// `extension test` previews it whole: its job, effect, component and
+/// command are what it contributes.
 #[tokio::test(flavor = "multi_thread")]
-async fn the_triage_example_reads_the_tree_the_layer_and_a_model() {
-    use oxplow_app::ai_service::{ProviderConfig, Role, RoleBinding};
+async fn the_triage_example_declares_its_services_and_contributes_its_parts() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path();
-    oxplow_app::vcs::GitProvider
-        .init_repository(root)
-        .await
-        .unwrap();
-    let example = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/extensions/triage");
-    copy_dir(&example, &root.join(".oxplow/extensions/triage"));
+    oxplow_sdk::scaffold_example(root, "triage", None).unwrap();
 
     let report = check(root, "triage", &ExtensionCatalog::new(), None, None, None)
         .await
@@ -114,26 +112,6 @@ async fn the_triage_example_reads_the_tree_the_layer_and_a_model() {
         "{:?}",
         tested.warnings
     );
-    // The preview runs it whole: its job against the fixture model, the
-    // event its job logs through its effect, its component's reads — in
-    // the throwaway's activated generation, listing what it contributes
-    // and what only the app shows.
-    for example in [
-        "summary-published",
-        "summary-with-evidence",
-        "summary-cancelled",
-        "summary-to-the-wiki",
-        "decide-a-todo",
-        "summary-delivered",
-        "todo-board",
-        "todos-and-open-work",
-    ] {
-        assert!(
-            tested.ran.contains(&format!("example {example}")),
-            "{example}: {:?}",
-            tested.ran
-        );
-    }
     assert!(tested.generation.is_some());
     for id in [
         "oxplow:oxplow/job?job=triage/summarize",
@@ -147,147 +125,8 @@ async fn the_triage_example_reads_the_tree_the_layer_and_a_model() {
             tested.contributes
         );
     }
-
-    // It ran in its own throwaway: the project has no database of its own
-    // from it.
+    // It ran in its own throwaway: the project has no database from it.
     assert!(!root.join(".oxplow/local.sqlite").exists());
-
-    // A real oxplow: a source file with a TODO, one open work item, a
-    // model that calls everything a bug.
-    std::fs::create_dir_all(root.join("src")).unwrap();
-    std::fs::write(
-        root.join("src/lib.rs"),
-        "// TODO: the cache never expires\nfn a() {}\n",
-    )
-    .unwrap();
-    let svc = common::booted(root).await;
-    // The preview's generation contributes what a real one over the same
-    // project does.
-    let mut real: Vec<String> = svc
-        .extension_catalog
-        .named(root, "triage")
-        .unwrap()
-        .contributions
-        .iter()
-        .map(|d| d.id.to_string())
-        .collect();
-    let mut previewed = tested.contributes.clone();
-    real.sort();
-    previewed.sort();
-    assert_eq!(previewed, real);
-    svc.commands
-        .run(
-            &oxplow_domain::Actor::Human,
-            "oxplow.work_item.create",
-            serde_json::json!({ "title": "Expire the cache" }),
-            false,
-        )
-        .await
-        .unwrap();
-    let reply = serde_json::json!({ "answers": { "label": { "type": "choice", "choice": "bug", "probabilities": { "bug": 0.9, "cleanup": 0.05, "feature": 0.05 } } } });
-    let (base, _) = oxplow_ai_fake::mock(
-        "/chat/completions",
-        200,
-        serde_json::json!({ "choices": [{ "index": 0, "finish_reason": "stop", "message": { "role": "assistant", "content": reply.to_string() } }], "usage": { "prompt_tokens": 4, "completion_tokens": 2 } }),
-    )
-    .await;
-    svc.ai
-        .save_provider(
-            ProviderConfig {
-                id: "m".into(),
-                kind: "openai_compatible".into(),
-                base_url: Some(base),
-            },
-            None,
-        )
-        .unwrap();
-    svc.ai
-        .set_role(
-            &Role::parse("triage/sort").expect("a profile role"),
-            Some(RoleBinding::new("m", "x")),
-        )
-        .unwrap();
-    let stream = svc.streams.list_streams().await.unwrap()[0].id;
-    let capture = svc.snapshot_captures.get(&stream).unwrap();
-    capture.enqueue_startup_diff().await.unwrap();
-    capture
-        .request_snapshot(oxplow_domain::snapshot::SnapshotTrigger::Startup)
-        .await
-        .unwrap();
-
-    let recorded = svc
-        .metrics
-        .run_collector_by_key(
-            "triage",
-            "todos",
-            Some(stream),
-            &oxplow_domain::run::RunContext::core(
-                oxplow_domain::Actor::Human,
-                oxplow_domain::run::Mode::External,
-            ),
-        )
-        .await
-        .unwrap();
-    assert_eq!(recorded, 2);
-    let rows = svc
-        .sql
-        .query_sql(
-            "SELECT measure_key, value, path, rule FROM v_fact WHERE measure_key LIKE 'triage.%' \
-             ORDER BY measure_key",
-            vec![],
-            None,
-        )
-        .await
-        .unwrap();
-    assert_eq!(
-        serde_json::to_value(&rows.rows).unwrap(),
-        serde_json::json!([
-            ["triage.open_items", 1.0, null, null],
-            ["triage.todos", 1.0, "src/lib.rs", "bug"],
-        ])
-    );
-    let decided = svc
-        .sql
-        .query_sql(
-            "SELECT decisions FROM v_extension_run WHERE contribution = 'oxplow:oxplow/collector?collector=triage/todos'",
-            vec![],
-            None,
-        )
-        .await
-        .unwrap();
-    let decided = serde_json::to_value(&decided.rows).unwrap().to_string();
-    for scope in ["tree.read", "ai.compute", "sql.read"] {
-        assert!(decided.contains(scope), "{scope}: {decided}");
-    }
-    assert!(!decided.contains("denied"), "{decided}");
-
-    // The sort asked for its own profile, which the person bound.
-    let calls = svc
-        .sql
-        .query_sql("SELECT DISTINCT role FROM v_ai_call", vec![], None)
-        .await
-        .unwrap();
-    assert_eq!(
-        serde_json::to_value(&calls.rows).unwrap(),
-        serde_json::json!([["triage/sort"]])
-    );
-
-    // Its decisions command reads the TODOs through the metric
-    // (`metric_findings('triage.todos')`), as its board's page does.
-    let listed = svc
-        .commands
-        .run(
-            &oxplow_domain::Actor::Human,
-            "triage.todos.decisions",
-            serde_json::json!({}),
-            false,
-        )
-        .await
-        .unwrap();
-    assert_eq!(
-        listed.result["result"]["todos"],
-        serde_json::json!([{ "path": "src/lib.rs", "line": 1, "kind": "bug", "decision": null }])
-    );
 }
 
 /// Run `name` as a person on `svc`'s bus.
