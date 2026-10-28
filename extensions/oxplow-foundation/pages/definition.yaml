@@ -119,25 +119,25 @@ data:
               FROM json_each(j.value -> '$.settings') st) AS settings
       FROM page, json_each(page.nodes) j
       ORDER BY j.key
-  # The view as an outline, a node a line, nested as the view nests: what
-  # it is, what it shows, its title, columns and settings (embedded
-  # pages' nodes say which page they are from).
+  # The view as an outline, a node a line, nested as the view nests: a
+  # short name for what it is (its heading, when it has one, first), then
+  # its columns and settings (an embedded page's nodes say whose they are).
   view:
     sql: |
       SELECT group_concat(
-               substr('                                        ', 1, 2 * depth) || '- **' || id || '** — '
+               substr('                                        ', 1, 2 * depth) || '- '
+               || CASE WHEN title IS NOT NULL AND title <> '' THEN '**' || title || '**: ' ELSE '' END
                || CASE kind
-                    WHEN 'viz' THEN coalesce('the rows from `' || loader || '` (Data, above), shown as ', 'shown as ') || '`' || viz || '`'
-                    WHEN 'stack' THEN 'its sections, one after another'
-                    WHEN 'grid' THEN 'its tiles, side by side'
-                    WHEN 'switch' THEN 'one of its sections at a time, picked ' || replace(detail, 'on ', 'by ')
-                    WHEN 'embed' THEN 'the page ' || detail || ', inline'
-                    WHEN 'slot' THEN 'where other extensions add their pages (' || detail || ')'
-                    WHEN 'markdown' THEN 'text'
-                    WHEN 'component' THEN 'the custom component ' || detail
+                    WHEN 'viz' THEN upper(substr(viz, 1, 1)) || substr(viz, 2) || coalesce(' of `' || loader || '`', '')
+                    WHEN 'stack' THEN 'Stack of sections'
+                    WHEN 'grid' THEN 'Grid of tiles'
+                    WHEN 'switch' THEN 'Switch ' || detail
+                    WHEN 'embed' THEN 'Page ' || detail
+                    WHEN 'slot' THEN 'Slot ' || detail
+                    WHEN 'markdown' THEN 'Text'
+                    WHEN 'component' THEN 'Component ' || detail
                     ELSE kind END
-               || CASE WHEN title IS NOT NULL AND title <> '' THEN ', under the heading “' || title || '”' ELSE '' END
-               || CASE WHEN page <> (SELECT page FROM page) THEN ', from `' || page || '`' ELSE '' END
+               || CASE WHEN page <> (SELECT page FROM page) THEN ' (from `' || page || '`)' ELSE '' END
                || coalesce(char(10) || substr('                                        ', 1, 2 * depth + 2) || 'columns: ' || columns, '')
                || coalesce(char(10) || substr('                                        ', 1, 2 * depth + 2) || settings, ''),
                char(10)) AS text
