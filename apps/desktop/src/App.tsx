@@ -73,6 +73,7 @@ import { MissingPage } from "./pages/MissingPage.js";
 import { kindForTabId } from "./pageKinds.js";
 import { useExtensions } from "./extensionsStore.js";
 import { foundationDown, foundationDownText } from "./foundationDown.js";
+import { openHandlerFor, type OpenHandlers } from "./tabs/openHandlers.js";
 import { PanelRunsProvider } from "./components/Panels/PanelRunsContext.js";
 import { useAlerts } from "./components/Alerts/useAlerts.js";
 import { useAlertToasts } from "./components/Alerts/useAlertToasts.js";
@@ -1170,8 +1171,8 @@ export function App() {
     // Page-visit recording lives in the central activation effect
     // below — it fires whenever `effectiveCenterActive` resolves to a
     // new TabRef, regardless of which handler caused the activation.
-    switch (typeOf(ref.id)) {
-      case "oxplow/agent_session": {
+    const handlers: OpenHandlers = {
+      "oxplow/agent_session": (ref) => {
         // Its tab is there while it's open on this thread
         // (`reconcileSessionTabs`). A closed session, or another thread's,
         // has none: its transcript opens instead, with Reopen on it.
@@ -1195,12 +1196,11 @@ export function App() {
         } else {
           transcript();
         }
-        return;
-      }
-      case "oxplow/symbol":
+      },
+      "oxplow/symbol": (ref) => {
         void openSymbol(identityOf(ref.id) ?? ref.id);
-        return;
-      case "oxplow/file": {
+      },
+      "oxplow/file": (ref) => {
         const payload = fileOf(ref);
         if (!payload?.path) return;
         const version = payload.version ?? WORKING;
@@ -1212,17 +1212,11 @@ export function App() {
         }
         // A file at a revision reads itself.
         openTab(ref);
-        return;
-      }
-      case "page":
-        // A page opened again in another view (a diff at another line) is
-        // the tab already showing it, in that view.
-        openAsPageTab();
-        return;
-      default:
-        openAsPageTab();
-        return;
-    }
+      },
+    };
+    // A page opened again in another view (a diff at another line) is the
+    // tab already showing it, in that view.
+    (openHandlerFor(handlers, typeOf(ref.id)) ?? openAsPageTab)(ref);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [handleOpenFile, handleOpenWiki, openTab, selectedThreadId, selectedThreadSessions, setCenterActive, stream?.id]);
 

@@ -478,6 +478,31 @@ pub(crate) fn foundation_declarations() -> (
     (metrics, dimensions)
 }
 
+/// The code metrics oxplow-bundled declares (its `oxplow.*` metrics), parsed
+/// from the bundled manifest.
+pub(crate) fn code_metrics_declarations() -> Vec<oxplow_config::MetricEntry> {
+    let manifest: serde_yaml::Value = serde_yaml::from_str(include_str!(
+        "../../../extensions/oxplow-bundled/extension.yaml"
+    ))
+    .expect("the bundled manifest parses");
+    let entries: Vec<serde_yaml::Value> =
+        serde_yaml::from_value(manifest.get("metrics").cloned().expect("it declares them"))
+            .expect("metrics parse");
+    let own: Vec<serde_yaml::Value> = entries
+        .into_iter()
+        .filter(|e| {
+            e.get("key")
+                .and_then(|k| k.as_str())
+                .is_some_and(|k| k.starts_with("oxplow."))
+        })
+        .collect();
+    oxplow_config::validate_metrics(
+        Some(serde_yaml::from_value(serde_yaml::Value::Sequence(own)).expect("metrics parse")),
+        oxplow_config::CatalogLayer::Extension(oxplow_config::OXPLOW_NAMESPACE),
+    )
+    .expect("the code metrics validate")
+}
+
 /// The specs the foundation's metrics resolve to, as an activation seeds them.
 pub(crate) fn foundation_specs() -> Vec<oxplow_db::NewMetricSpec> {
     let (metrics, _) = foundation_declarations();

@@ -57,7 +57,7 @@ test("a person's Backfill reaches what was logged before the effect was deployed
   writeFileSync(
     join(dir, "extension.yaml"),
     "manifest: 2\nname: late\nintent:\n  purpose: An effect deployed after the event it backfills.\n" +
-      "permissions: { commands: [oxplow.work_item.comment] }\n" +
+      "permissions: [commands:oxplow.work_item.comment]\n" +
       "effects:\n  - { id: note, summary: Notes a created task., on: [work_item.created], entry: effects/note.star }\n",
   );
   writeFileSync(

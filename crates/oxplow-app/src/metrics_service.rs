@@ -3817,7 +3817,7 @@ mod tests {
     /// Seed the catalog with every foundation code metric `use:`d: a metric's
     /// spec is seeded only while it's on.
     async fn seed_with_every_builtin_on(svc: &Arc<crate::Services>) {
-        svc.config.write().unwrap().metrics = foundation_collectors()
+        svc.config.write().unwrap().metrics = code_metric_collectors()
             .iter()
             .map(|c| MetricEntry {
                 use_key: Some(c.key.clone()),
@@ -4123,7 +4123,7 @@ def transform(input):
             svc.commands.run(
                 &oxplow_domain::Actor::Human,
                 crate::collector_runner::SYNC,
-                serde_json::json!({ "collector": "oxplow-foundation/oxplow.rust.unsafe_blocks" }),
+                serde_json::json!({ "collector": "oxplow-bundled/oxplow.rust.unsafe_blocks" }),
                 false,
             )
         };
@@ -4300,7 +4300,7 @@ def transform(input):
         let err = svc
             .metrics
             .run_collector_by_key(
-                "oxplow-foundation",
+                "oxplow-bundled",
                 "oxplow.rust.unsafe_blocks",
                 None,
                 &RunContext::core(Actor::Human, Mode::External),
@@ -4801,14 +4801,14 @@ def transform(input):
         assert!(facts[0].value >= 3.0);
     }
 
-    /// oxplow-foundation's collectors, as its manifest declares them.
-    fn foundation_collectors() -> Vec<FactCollector> {
-        let foundation = crate::bundled_extensions::find("oxplow-foundation").unwrap();
+    /// oxplow-bundled' collectors, as its manifest declares them.
+    fn code_metric_collectors() -> Vec<FactCollector> {
+        let foundation = crate::bundled_extensions::find("oxplow-bundled").unwrap();
         let manifest: serde_yaml::Value =
             serde_yaml::from_str(foundation.file("extension.yaml").unwrap()).unwrap();
         let (specs, errors) = oxplow_config::collectors::parse_collectors(
             &oxplow_config::collectors::Declarer::shared(
-                "oxplow-foundation",
+                "oxplow-bundled",
                 oxplow_config::OXPLOW_NAMESPACE,
             ),
             &manifest["collectors"],
@@ -4817,19 +4817,19 @@ def transform(input):
         assert_eq!(errors, Vec::<String>::new());
         let path = crate::test_fixtures::shipped_extensions()
             .into_iter()
-            .find(|e| e.name == "oxplow-foundation")
+            .find(|e| e.name == "oxplow-bundled")
             .unwrap()
             .path;
         specs
             .iter()
-            .filter_map(|s| FactCollector::from_spec("oxplow-foundation", &path, s))
+            .filter_map(|s| FactCollector::from_spec("oxplow-bundled", &path, s))
             .collect()
     }
 
-    /// One of oxplow-foundation's code-metric collectors — `run_one_collector`
+    /// One of oxplow-bundled' code-metric collectors — `run_one_collector`
     /// reads its script through the bundled extension.
     fn builtin_collector_fixture(key: &str) -> FactCollector {
-        foundation_collectors()
+        code_metric_collectors()
             .into_iter()
             .find(|c| c.key == key)
             .expect("a foundation collector")
@@ -5525,7 +5525,7 @@ def transform(input):
             .await
             .unwrap()
             .expect("seeded");
-        assert_eq!(spec.scope, "oxplow:oxplow/extension?name=oxplow-foundation");
+        assert_eq!(spec.scope, "oxplow:oxplow/extension?name=oxplow-bundled");
         assert_eq!(spec.target, Some(5.0));
         assert_eq!(spec.warn_at, Some(8.0));
         assert_eq!(spec.fail_at, Some(13.0));
@@ -5719,7 +5719,7 @@ def transform(input):
             .await
             .unwrap()
             .expect("seeded");
-        assert_eq!(spec.scope, "oxplow:oxplow/extension?name=oxplow-foundation");
+        assert_eq!(spec.scope, "oxplow:oxplow/extension?name=oxplow-bundled");
         let cat = svc.metrics.catalog().await;
         let entry = cat
             .iter()
@@ -5733,7 +5733,7 @@ def transform(input):
         let count = svc
             .metrics
             .run_collector_by_key(
-                "oxplow-foundation",
+                "oxplow-bundled",
                 "oxplow.rust.unsafe_blocks",
                 None,
                 &RunContext::core(Actor::Human, Mode::External),
@@ -5793,10 +5793,16 @@ def transform(input):
     fn this_repos_config_uses_only_metrics_the_catalog_has() {
         let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let config = oxplow_config::load_project_config(&repo).expect("the repo's config loads");
-        let extensions = vec![(
-            "oxplow-foundation".to_string(),
-            crate::test_fixtures::foundation_declarations().0,
-        )];
+        let extensions = vec![
+            (
+                "oxplow-foundation".to_string(),
+                crate::test_fixtures::foundation_declarations().0,
+            ),
+            (
+                "oxplow-bundled".to_string(),
+                crate::test_fixtures::code_metrics_declarations(),
+            ),
+        ];
         let unknown = oxplow_config::unknown_uses(&[], &[], &extensions, &config.metrics);
         assert_eq!(unknown, Vec::<String>::new());
         let resolved = resolve_metrics(&[], &[], &extensions, &config.metrics);
@@ -5987,22 +5993,15 @@ def transform(input):
     }
 
     #[tokio::test]
-    async fn the_code_metrics_are_oxplow_foundations_and_opt_in_ones_wait_for_a_use() {
+    async fn the_code_metrics_are_oxplow_bundleds_and_opt_in_ones_wait_for_a_use() {
         let (svc, dir) = fixture().await;
-        std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
-        std::fs::write(
-            dir.path().join(".oxplow/personal.yaml"),
-            "disableExtensions: [oxplow-bundled]\n",
-        )
-        .unwrap();
-        svc.reload_config_from_disk().unwrap();
         crate::test_fixtures::activate(&svc).await;
         let running = svc.metrics.fact_collectors();
         let fn_count = running
             .iter()
             .find(|c| c.key == "oxplow.fn_count")
-            .expect("on by default, with oxplow-bundled off");
-        assert_eq!(fn_count.owner, "oxplow-foundation");
+            .expect("on by default");
+        assert_eq!(fn_count.owner, "oxplow-bundled");
         assert!(!running.iter().any(|c| c.key == "oxplow.rust.unsafe_blocks"));
         assert!(!running.iter().any(|c| c.key == "oxplow.duplicate_lines"));
 
@@ -6028,7 +6027,7 @@ def transform(input):
             .await
             .unwrap()
             .expect("seeded once on");
-        assert_eq!(spec.scope, "oxplow:oxplow/extension?name=oxplow-foundation");
+        assert_eq!(spec.scope, "oxplow:oxplow/extension?name=oxplow-bundled");
     }
 
     #[tokio::test]
@@ -6182,10 +6181,7 @@ def transform(input):
             .iter()
             .find(|e| e.key == "oxplow.rust.unsafe_blocks")
             .expect("built-in present");
-        assert_eq!(
-            entry.scope,
-            "oxplow:oxplow/extension?name=oxplow-foundation"
-        );
+        assert_eq!(entry.scope, "oxplow:oxplow/extension?name=oxplow-bundled");
         assert!(!entry.enabled, "not enabled before use:");
         assert!(entry.toggleable, "code collectors are toggleable");
         // Matches the seeded spec's category (builtin_ast_specs), so the Catalog
@@ -6210,7 +6206,7 @@ def transform(input):
             .await
             .unwrap()
             .expect("spec seeded on enable (T-E2)");
-        assert_eq!(spec.scope, "oxplow:oxplow/extension?name=oxplow-foundation");
+        assert_eq!(spec.scope, "oxplow:oxplow/extension?name=oxplow-bundled");
         let yaml = std::fs::read_to_string(oxplow_config::config_path(dir.path())).unwrap();
         assert!(
             yaml.contains("oxplow.rust.unsafe_blocks"),

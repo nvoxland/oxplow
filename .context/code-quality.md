@@ -187,7 +187,7 @@ in the background. `DuplicationRecorder::record`
 - **no facts**: a change scan anchors only its changed files, so a capture
   from it would restate the whole tree from a slice and zero out every
   untouched file's duplicates (tsk365). `oxplow.duplicate_lines` is
-  oxplow-foundation's whole-tree collector's (P7.B5, closes tsk388): the
+  oxplow-bundled's whole-tree collector's: the
   `duplicate_blocks(min_lines)` Starlark builtin over the whole tree after
   ref moves (`snapshot.taken`, `trigger: git_refs`) — paced, so a burst
   of them (a commit, a rebase, a restart's catch-up) is one scan of the
@@ -395,7 +395,7 @@ also render in the core changed-files tree (`ChangedFilesTree`).
 
 ## Adding a new code/quality signal
 
-Code/quality signals are now authored as **metrics** (oxplow-foundation's, or the project's own extension's, turned on by
+Code/quality signals are now authored as **metrics** (oxplow-bundled's, or the project's own extension's, turned on by
 `.oxplow/project.yaml` `metrics:` `use:` entries) over the `code_metrics()` / `ast_query()` host
 builtins — see [metrics.md](./metrics.md), duplicated lines included (the
 `duplicate_blocks` builtin). The change analyzer's scoped scan stays an

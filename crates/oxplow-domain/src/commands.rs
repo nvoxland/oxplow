@@ -287,7 +287,9 @@ pub struct CommandUi {
 pub const UI_INPUT_BINDINGS: &[&str] = &["stream", "thread", "uri", "uri.id"];
 
 /// The window's own forms: a `ui.form` that isn't a page's ref
-/// (`App.tsx` `openForm`).
+/// (`App.tsx` `openForm`). A closed list that only shrinks
+/// (`fixtures/window_forms.json` pins it): a form is a page's form, and
+/// `commit` already is one.
 pub const WINDOW_FORMS: &[&str] = &["new-thread"];
 
 /// The menu bar's menus (`menuBar.ts` `MenuId`).
@@ -1112,6 +1114,33 @@ fn accepted_values(root: &Value, node: &Value) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    /// The window's own forms only shrink: a new form is a page's form, not
+    /// code in the window. A name missing from the golden is a new window
+    /// form; a golden name missing from the list is one that left — take it
+    /// out of the golden too.
+    #[test]
+    fn the_window_forms_only_shrink() {
+        let golden: Vec<String> =
+            serde_json::from_str(include_str!("../fixtures/window_forms.json"))
+                .expect("the golden is a JSON list");
+        let added: Vec<&&str> = WINDOW_FORMS
+            .iter()
+            .filter(|f| !golden.iter().any(|g| g == **f))
+            .collect();
+        assert!(
+            added.is_empty(),
+            "new window forms {added:?}: make it a page's form"
+        );
+        let left: Vec<&String> = golden
+            .iter()
+            .filter(|g| !WINDOW_FORMS.contains(&g.as_str()))
+            .collect();
+        assert!(
+            left.is_empty(),
+            "left the list: {left:?} — remove it from the golden"
+        );
+    }
+
     use super::*;
     use serde_json::json;
 

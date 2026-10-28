@@ -1006,7 +1006,8 @@ the user guide is `docs/guide/pages.md`.
   `extensionsChanged`, and lists its errors with the load errors, once
   each. Bundled extensions are checked where they're built.
 - **Bundled extensions.** There are two. `oxplow-foundation` is required: oxplow's own
-  commands, AI providers and harness implementations, code metrics, and the
+  commands, AI providers and harness implementations, the default work list,
+  effort policy, snapshots and wiki, and the
   measures, dimensions and metrics oxplow records itself (tokens, efforts, tests,
   coverage, analysis, work items: its `measures:` / `dimensions:` / `metrics:`,
   scope `extension:oxplow-foundation`; the producers' Rust only records the facts).
@@ -1014,7 +1015,15 @@ the user guide is `docs/guide/pages.md`.
   review packet, the analytics pages and the agent's advisories in one
   extension, because the point is building oxplow on its own extension
   platform, not letting people pick between its features. It can still be
-  disabled like any other.
+  disabled like any other. `oxplow-bundled` also holds the code metrics measured from each snapshot's
+  tree (TODO markers, function count, complexity and length, doc coverage,
+  duplicated lines and the per-language idiom counts) with their collectors,
+  metrics and the measures only they write (`oxplow.todo`, `oxplow.ast_hit`,
+  `oxplow.duplicate_lines`, `oxplow.doc_coverage`); foundation has none of
+  them. Complexity, function length and parameter count stay foundation's
+  measures: core's change analysis records them too. Both share the `oxplow`
+  namespace, so a script or metric in one names the other's `oxplow.*`
+  measures without a warning.
   - Their sources live in the repo at `extensions/<name>/`, and they
     ship as described under "Shipped deployments" below.
   - `origin` is `bundled` and their path is `bundled:<name>`.

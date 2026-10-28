@@ -32,7 +32,7 @@ view:
 test("a page mounted at another page's slot shows inside it, given the host's values", async ({ page, daemon }) => {
   await installExtension(daemon, "e2e-slot-host", { files: { "pages/possum.yaml": host } });
   await installExtension(daemon, "e2e-slot-guest", {
-    manifest: "ui:\n  slots:\n    - { slot: e2e-slot-host/possum.extras, page: possum-extras, title: Extras }\n",
+    manifest: "ui:\n  mounts:\n    - { page: possum-extras, at: e2e-slot-host/possum.extras, title: Extras }\n",
     files: { "pages/possum-extras.yaml": mounted },
   });
   await page.goto("/");
