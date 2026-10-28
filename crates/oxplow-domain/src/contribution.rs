@@ -313,7 +313,6 @@ impl ContributionKind {
             .expect("every kind is in KINDS")
     }
 
-
     /// Its id segment (`metric`, `custom_component`).
     /// Whether its contributions are named globally — by a name unique
     /// across extensions that callers already use (a command's bus id, a
