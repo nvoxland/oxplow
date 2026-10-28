@@ -184,11 +184,11 @@ pub struct ManifestV2 {
     pub permissions: oxplow_domain::permissions::Permissions,
 
     // ---- kinds ----
-    /// SQL models: each with `models/<name>.sql`, published as
+    /// Datasets: each with its SQL in `models/<name>.sql`, published as
     /// `v_<extension>_<name>`.
     #[serde(default)]
-    #[schemars(with = "Option<Vec<oxplow_db::models::ModelDecl>>")]
-    pub models: Option<Value>,
+    #[schemars(with = "Option<Vec<oxplow_db::models::DatasetDecl>>")]
+    pub datasets: Option<Value>,
     /// Measures, in `.oxplow/project.yaml`'s vocabulary.
     #[serde(default)]
     #[schemars(with = "Option<Vec<oxplow_config::MeasureEntry>>")]

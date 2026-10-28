@@ -127,7 +127,7 @@ writes the references beside `SKILL.md` (`shared::write_skills`); one that
 doesn't gets the index and reads a body with `oxplow_get_skill { name,
 reference? }`. Each rule has one home skill (wikilinks:
 `oxplow-wiki-capture`; waiting on the person: `oxplow-runtime`;
-foreground tests: `oxplow-collection`; `v_model`/`oxplow_query_sql`:
+foreground tests: `oxplow-collection`; `v_dataset`/`oxplow_query_sql`:
 `oxplow-extension`); the others point to it by name. No skill text names
 a task id or `.context/` (tests).
 

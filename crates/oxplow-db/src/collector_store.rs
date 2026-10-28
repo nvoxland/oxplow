@@ -42,13 +42,13 @@ pub struct EntityTable {
     /// `v_<extension>_<entity>`.
     pub view: String,
     pub key: String,
-    /// What the entity is, for the catalog (`v_model.description`).
+    /// What the entity is, for the catalog (`v_dataset.description`).
     pub description: String,
     pub columns: Vec<EntityColumn>,
 }
 
 /// One column of an entity: stored as `stored`, documented by `doc` (its
-/// contract in `v_model_column`).
+/// contract in `v_field`).
 #[derive(Debug, Clone, PartialEq)]
 pub struct EntityColumn {
     pub name: String,
@@ -762,12 +762,12 @@ mod tests {
             .unwrap_err();
         assert!(err.to_string().contains("belongs to `core`"), "{err}");
         // Its contract is the declared columns, docs included: the catalog
-        // (`v_model_column`) documents it like any model.
+        // (`v_field`) documents it like any model.
         let columns: Vec<(String, String, String)> = db
             .read(|tx| {
                 let mut st = tx
                     .prepare(
-                        "SELECT c.name, c.sql_type, c.doc FROM v_model_column c
+                        "SELECT c.name, c.sql_type, c.doc FROM v_field c
                          WHERE c.view = 'v_my_gh_pr' ORDER BY c.position",
                     )
                     .map_err(map_sql_err)?;

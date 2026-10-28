@@ -964,7 +964,7 @@ mod tests {
         };
         w(
             "extension.yaml",
-            "manifest: 2\nname: acme\nintent:\n  purpose: Count.\n  origin: \"oxplow:oxplow/thread?id=thr1\"\n  examples: []\nmodels:\n  - name: x\n    version: 1\n    description: X.\n    columns:\n      - { name: n, type: \"\", doc: N. }\n",
+            "manifest: 2\nname: acme\nintent:\n  purpose: Count.\n  origin: \"oxplow:oxplow/thread?id=thr1\"\n  examples: []\ndatasets:\n  - name: x\n    version: 1\n    description: X.\n    fields:\n      - { name: n, type: \"\", doc: N. }\n",
         );
         w("models/x.sql", "SELECT 1 AS n\n");
         w(

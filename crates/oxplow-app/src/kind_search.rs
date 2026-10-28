@@ -475,17 +475,17 @@ collectors:
     entry: prs.star
     entities:
       - {{ name: pr, key: n, columns: {{ n: text, title: text, body: text }} }}
-models:
+datasets:
   - name: prs
     version: 1
     description: Pull requests.
-    columns:
+    fields:
       - {{ name: uri, type: TEXT, doc: The ref. }}
       - {{ name: title, type: TEXT, doc: Its title. }}
   - name: found
     version: 1
     description: Pull requests, as search finds them.
-    columns:
+    fields:
       - {{ name: uri, type: TEXT, doc: The ref. }}
       - {{ name: title, type: TEXT, doc: Its title. }}
       - {{ name: body, type: TEXT, doc: Its description. }}

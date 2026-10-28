@@ -7,7 +7,7 @@ and agents query.
 
 > **Status: partly built (epic tsk275).**
 > - **Current:** the `v_*` read contract for core data, plus `oxplow_query_sql` and
->   the catalog as models (`v_model*`), and the **fact substrate**
+>   the catalog as models (`v_dataset`, `v_field`, `v_model_lineage`, `v_model_test`), and the **fact substrate**
 >   (`measure`, `dimension`, `metric_spec`, `metric_capture`, `fact`, cube),
 >   documented in [metrics.md](./metrics.md).
 > - **Current (tsk289):** extension `exec` sources that bring external
@@ -32,8 +32,8 @@ and agents query.
 >   pinning its `name`, so a model too big to count within the 5 s timeout
 >   costs only its own cell (tsk1065).
 > - **Current (P4, epic tsk484):** every published view is a **model**
->   (core files and extensions' `models:`, compiled with lineage,
->   contracts, versions and tests; the registry `v_model*` is the
+>   (core files and extensions' `datasets:`, compiled with lineage,
+>   contracts, versions and tests; the registry `v_dataset`, `v_field`, `v_model_lineage`, `v_model_test` are the
 >   catalog); the read contract is **enforced** by the authorizer;
 >   metrics read in SQL through `metric_grid()` / `MEASURE()` and
 >   `metric_findings()`; results carry their `reads` and `freshness`, and
@@ -118,7 +118,7 @@ metrics.md.
 ## Shipped sources (core)
 
 What core publishes, by where it comes from. Each row names its models
-(`v_<name>`); `v_model` lists them all.
+(`v_<name>`); `v_dataset` lists them all.
 
 | Source | Models | Facts |
 |---|---|---|
@@ -135,7 +135,7 @@ What core publishes, by where it comes from. Each row names its models
 | usage | `page_visit` | — |
 | ui | `op_error` (operations that failed in front of the person, from `ui.op_failed` events) | — |
 | metrics | `measure`, `dimension`, `metric_spec`, `metric_catalog`, `capture`, `fact`, `effort_metric_delta`; series through `metric_grid()`, offenders through `metric_findings()` | — |
-| the log and the registry | `event`, `event_content`, `event_checkpoint`, `event_dead_letter`; `model`, `model_column`, `model_lineage`, `model_test` | — |
+| the log and the registry | `event`, `event_content`, `event_checkpoint`, `event_dead_letter`; `dataset`, `field`, `model_lineage`, `model_test` | — |
 
 Live-only for now — read over LSP or git when asked, not stored, so no
 model: blame lines, and LSP references. A collector that
@@ -144,6 +144,35 @@ struggle signals (the bundled review policy's `v_oxplow_bundled_struggle`, over 
 **exceptions and decisions**, not trends and totals.
 
 ## Models (P4.2)
+
+**Vocabulary.** The declaration nouns follow standard BI (and Apache
+Ossie) terms: a published view is declared as a **dataset** (manifest key
+`datasets:`, `DatasetDecl`, registry view `v_dataset`) and its columns
+as **fields** (`fields:`, `DatasetField`, `v_field`). The older names stay
+where they name machinery, not the declaration: the compiler module
+(`models.rs`), the registry tables (`model`, `model_input`,
+`model_contract`, `model_test`), `v_model_lineage` / `v_model_test`,
+the SQL folder (`models/<name>.sql`, core's `models.yaml`), and the
+contribution kind's URI (`oxplow:oxplow/model?model=<ext>/<name>`). An
+old `models:` or a dataset's `columns:` is an unknown key whose error says
+what to write (`manifest_keys::RENAMED`); nothing reads the old spelling.
+
+**Relationships.** A dataset may declare `relationships: [{ from:
+<field>, to: <dataset>.<field> }]`: its field `from` holds values of
+another dataset's field. `from` must be one of its fields and `to` must
+have both parts — errors at the declaration's `file:line`
+(`check_relationships`). The target is resolved once every dataset of
+the pass has published, the way a `ref()` names one (own, then core;
+`<ext>/<name>` for another extension's): a target naming no dataset, or
+no field of it, is the extension's error (the dataset still publishes,
+without that relationship; for core it fails the compile). The resolved
+ones are stored as `model.relationships_json` (V120) and published as
+`v_dataset.relationships`, a JSON array of `{from, to, to_view,
+to_field}`, NULL when none. They are not part of the contract and change
+nothing about how queries or entity dimensions join yet; the `catalog`
+tool shows them when one dataset is named. (The `relationships` *test*,
+`{ relationships: { column, to, field } }`, is separate: it checks the
+rows.)
 
 Every connection registers three scalar functions for URIs
 (`oxplow-db/src/sql_functions.rs`): `uri(resource, key1, value1, …)` builds
@@ -156,15 +185,15 @@ the URI lacks it or isn't one) and `uri_resource(uri)` its resource
 (`oxplow/work_item`). Other URIs are selected from their owning model's
 `uri` column (`.context/resources.md` "Using URIs").
 
-A model, and each of its columns, may carry an `ai_context:` block
+A dataset, and each of its fields, may carry an `ai_context:` block
 (`oxplow_domain::AiContext`: `instructions`, `synonyms`, `examples`, all
 optional, unknown keys refused): guidance for an agent reading the catalog,
-borrowed from Apache Ossie. It is not part of any contract. `ColumnDecl`'s
+borrowed from Apache Ossie. It is not part of any contract. `DatasetField`'s
 equality ignores it, the contract recorded in `model_contract` and the golden
 leave it out, so editing it never needs a version bump. It is stored as
 `model.ai_context_json` and, for the columns, one object keyed by column name
-in `model.column_ai_context_json`. `v_model.ai_context` and
-`v_model_column.ai_context` publish it (JSON text, NULL when absent), and the
+in `model.column_ai_context_json`. `v_dataset.ai_context` and
+`v_field.ai_context` publish it (JSON text, NULL when absent), and the
 `catalog` tool returns both. Metrics and dimensions carry the same block
 (`metric_spec.ai_context_json`, `dimension.ai_context_json`).
 
@@ -187,8 +216,8 @@ through `ref('<model>')` and `source('<table>')`, compiled to a view at
 every open (`crates/oxplow-db/src/models.rs`, called from
 `migrate_and_compile` after the migrations). Core models live in
 `crates/oxplow-db/models/`: `<name>.sql` plus an entry in `models.yaml`
-(`name`, `version`, `description`, `columns` — the contract, with each
-column's SQLite type and doc — and `tests`); the build script embeds every
+(`name`, `version`, `description`, `fields` — the contract, with each
+field's SQLite type and doc — optional `relationships`, and `tests`); the build script embeds every
 file there, and view `v_<name>` publishes it. The compiler, per owner, in
 one transaction:
 
@@ -236,9 +265,9 @@ without dropping its table. `drop_extension` drops the extension's views
 by the registry. V109 registered the entity views synced before it.
 
 **Extension models** (P4.9, `crates/oxplow-app/src/extension_models.rs`).
-An extension declares `models:` in `extension.yaml` — each entry the same
-`ModelDecl` as `models.yaml` (name, version, description, columns, key,
-tests) — with its SQL in `models/<name>.sql` (`models::join_sources`;
+An extension declares `datasets:` in `extension.yaml` — each entry the same
+`DatasetDecl` as `models.yaml` (name, version, description, fields,
+relationships, key, tests) — with its SQL in `models/<name>.sql` (`models::join_sources`;
 a declaration without its file, or a file without its declaration, is an
 extension error). Each publishes `v_<extension>_<name>` (dashes as
 underscores — the entity views' formula). Inside one:
@@ -324,15 +353,15 @@ data problem in someone's database mustn't make it unopenable
 declarations honest). **Built (P4.2, tsk487):** all 49 core views are
 models (`the_core_models_reproduce_the_views_the_migrations_made` proves
 each one's columns and types equal the migration view it replaced),
-`v_model*` are models over the registry, and `CATALOG` /
+`v_dataset`, `v_field`, `v_model_lineage`, `v_model_test` are models over the registry, and `CATALOG` /
 `SemanticLayer::describe_schema` are gone. Views are dropped before the
 migrations and compiled after them at every writable open; a read-only
 open (`oxplow extension check`) uses what the last open compiled.
 
 ### Materialized models (P7.B2)
 
-A model may declare **`materialize: on_change`** (`ModelDecl.materialize`;
-core's `models.yaml` and an extension's `models:` alike). It compiles and
+A model may declare **`materialize: on_change`** (`DatasetDecl.materialize`;
+core's `models.yaml` and an extension's `datasets:` alike). It compiles and
 is checked exactly like any other — its SELECT against lineage and
 contract, `model_input` recording what it reads — and then publishes as a
 view over its own table, **`m_<view>`** (`models::materialized_table`),
@@ -361,7 +390,7 @@ been quiet for the coalesce window, and is recorded in `asset_state`.
 **Lineage for subscriptions** routes through the table: a materialized
 model changes when `m_<view>` is refilled, not when its inputs move, so
 `ModelsChanged` names it and its readers once per recompute. Its
-watermark is therefore when it was computed; `v_model` (v3) adds
+watermark is therefore when it was computed; `v_dataset` adds
 `materialize`, `computed_at` and `events_to` (from `asset_state`).
 **Keys** (P8.B1). A model may declare `key: [col, …]` — the columns
 whose values name one row. Each must be a declared column, named once
@@ -373,7 +402,7 @@ change that needs a bump (`its key became [..]`). A key implies a test,
 `key(<cols>)`, run before the declared ones: its columns are never null
 and no two rows share them. A keyed materialized model's `m_<view>`
 takes the key as its `PRIMARY KEY` (a changed key recreates the table
-for the next recompute). `v_model_column` (v2) shows each column's
+for the next recompute). `v_field` shows each field's
 `key_part` (its 1-based place in the key).
 
 **On a clock** (P8.B2). `materialize: { every: 1h }` (the collectors'
@@ -393,7 +422,7 @@ What a recompute records and what the clock waits on are one clock,
 `Assets`' `Now` (`Timestamp::now`; tests pass one that follows tokio's
 paused clock with `with_now`, so the `every:` tests run hours of virtual
 time instead of sleeping, tsk794). `model.materialize` records `every 1h` (V142 rebuilt `model` for the
-wider CHECK); `v_model` is v4. oxplow-bundled's `co_change_pair` is
+wider CHECK); oxplow-bundled's `co_change_pair` is
 `every: 1h`.
 
 **Incremental** (P8.B4). `materialize: { incremental: <column> }` keeps
@@ -437,7 +466,7 @@ incremental check reports an append that fails on its fixture. A row that appear
 test` checks each incremental model against a full refill (P8.B5).
 `asset_state` (V143) records each recompute's `mode` (`full` /
 `incremental`), the `watermark` it reached and the `row_count`;
-`v_asset` (v3) and `v_model` (v5, `mode`) show them.
+`v_asset` (v3) and `v_dataset` (`mode`) show them.
 
 ## Metrics in SQL (P4.5)
 
@@ -535,7 +564,7 @@ rows are read when a query names the model.
   the core view of the same name for that query alone, and both are dropped
   with it.
 - **The core model is an empty typed stub** (`SELECT CAST(NULL AS TEXT) AS …
-  WHERE 0`): it carries the contract (columns, docs, version, `v_model`) and
+  WHERE 0`): it carries the contract (columns, docs, version, `v_dataset`) and
   gives a `check` something to compile against. A gateway with nothing bound
   to read the sources (a bare `SqlGateway::new`) **refuses** a run naming one
   rather than answer empty, and a test pins that no core model is built on a
@@ -730,7 +759,7 @@ never the physical tables, which stay internal and free to change.
 
 **Shipped today** — each a core model, `crates/oxplow-db/models/<name>.sql`
 (see "Models"); the version history in the parentheses is the migrations
-that made them before P4.2. `v_model`, `v_model_column`, `v_model_lineage`
+that made them before P4.2. `v_dataset`, `v_field`, `v_model_lineage`
 and `v_model_test` are the catalog of all of them:
 
 | View | What it is |
@@ -789,8 +818,8 @@ and `v_model_test` are the catalog of all of them:
 | `v_symbol` / `v_symbol_capture` | the definitions oxplow's own tree-sitter extraction finds in each stream's files, in every supported language, no language server needed (V62) — the current tree, restated per changed file at each snapshot by the `symbols.collect` pump consumer (`uri` `oxplow:oxplow/symbol?path=<path>&symbol=<id>`, no revision, unique per stream; `kind` from one vocabulary; `container` `::`-joined; `signature` the parameter types in overloading languages; the name's `line`/`col` and the whole symbol's `start_*`..`end_*`), and what each snapshot's collection covered (`files_collected`, `files_failed`: content unreadable at the snapshot). Details: language-support.md "Symbols" |
 
 **Column docs live with the model, not here.** `models.yaml` documents
-every column, and the registry is the catalog: `v_model` +
-`v_model_column`, read through `oxplow_query_sql` (extension entities too —
+every column, and the registry is the catalog: `v_dataset` +
+`v_field`, read through `oxplow_query_sql` (extension entities too —
 their contract is their declared columns; tsk517). The compile at
 open fails if a view's columns and its declared ones disagree, in name,
 type or order. So changing a view means:
@@ -876,13 +905,13 @@ An extension entity `<entity>` owned by extension `<ext>` is exposed as
 - Values are `SqlCell`: an untagged `null | boolean | number | string`,
   so the TS binding is a plain scalar union. Blobs come back as
   `"<blob N bytes>"`.
-- The catalog is SQL: `v_model` (name, owner, kind, description) and
-  `v_model_column` (each column's SQL type and doc). The MCP
+- The catalog is SQL: `v_dataset` (name, owner, kind, description) and
+  `v_field` (each column's SQL type and doc). The MCP
   `describe_schema` tool and its IPC twin are gone (tsk517).
 - Pages never call models or run collectors on render; they read what
   collectors already produced.
 - Everything an extension adds (entities, relations, dimensions, metrics)
-  appears in the same models (`v_model`, `v_dimension`, `v_metric_spec`) and
+  appears in the same models (`v_dataset`, `v_dimension`, `v_metric_spec`) and
   the same `oxplow_query_sql` as core data. Agents never need
   an extension-specific tool. Full agent surface:
   [extensions.md](./extensions.md) → "Agents: the MCP surface".
@@ -1434,7 +1463,7 @@ preparation before stepping the statement. It also traverses `model_input`
 `ref` lineage so materialization cannot hide dependencies. A failed policy
 restores the connection's authorizer and query-only state. Scope calls and
 collector `input` use the same policy through `RunContext`; core reads have
-no extension authority. Exact `sql.read:<v_model>` needs are additive; bare
+no extension authority. Exact `sql.read:<view>` needs are additive; bare
 `sql.read` keeps the existing whole-layer meaning. Computed metric table
 functions refuse bounded authority until their precomputation has a matching
 policy. No extension receives a policy callback or a database connection.

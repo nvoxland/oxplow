@@ -160,7 +160,11 @@ the same version is refused) and `model_test` (the last result of each
 declared test). `model.materialize` is `on_change`, `every <duration>`
 (V142) or `incremental <column>` (V143): SQLite can't widen a CHECK in
 place, so both rebuilt `model`, keeping `model_input` and `model_test`
-aside across the cascade. Readable as `v_model*`.
+aside across the cascade. `model.relationships_json` (V120) holds a
+dataset's declared relationships, resolved (`[{from, to, to_view,
+to_field}]`); V120 also dropped the recorded contracts of `v_model` and
+`v_model_column`, renamed `v_dataset` and `v_field`. Readable as
+`v_dataset`, `v_field`, `v_model_lineage`, `v_model_test`.
 
 **Changed tables per commit** (P4.6, `crates/oxplow-db/src/changes.rs`):
 every pooled connection's init installs SQLite's preupdate, commit and

@@ -36,7 +36,7 @@ pub type ConfigSignature = std::collections::BTreeMap<String, String>;
 pub fn reads_configuration(extension: &crate::extensions::Extension) -> bool {
     extension.configuration.is_some()
         && extension
-            .models
+            .datasets
             .iter()
             .any(|model| models::config_reads(&model.sql).is_ok_and(|reads| !reads.is_empty()))
 }
@@ -103,10 +103,10 @@ impl PreparedExtensionDatabase {
         let models = snapshot
             .extensions()
             .iter()
-            .filter(|extension| extension.enabled && !extension.models.is_empty())
+            .filter(|extension| extension.enabled && !extension.datasets.is_empty())
             .map(|extension| ExtensionModels {
                 extension: extension.name.clone(),
-                sources: extension.models.clone(),
+                sources: extension.datasets.clone(),
                 config: None,
             })
             .collect();

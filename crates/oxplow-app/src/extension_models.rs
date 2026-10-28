@@ -98,7 +98,7 @@ mod tests {
         std::fs::write(p, body).unwrap();
     }
 
-    const MANIFEST: &str = "manifest: 2\nname: late\nintent:\n  purpose: x\n  examples: [{ name: a }]\nmodels:\n  - name: blocked\n    version: 1\n    description: Blocked work items.\n    columns:\n      - { name: uri, type: TEXT, doc: Work item ref. }\n  - name: broken\n    version: 1\n    description: Broken.\n    columns:\n      - { name: nope, doc: x }\n";
+    const MANIFEST: &str = "manifest: 2\nname: late\nintent:\n  purpose: x\n  examples: [{ name: a }]\ndatasets:\n  - name: blocked\n    version: 1\n    description: Blocked work items.\n    fields:\n      - { name: uri, type: TEXT, doc: Work item ref. }\n  - name: broken\n    version: 1\n    description: Broken.\n    fields:\n      - { name: nope, doc: x }\n";
 
     /// P4.9 (tsk494): an extension's model publishes its view; one that
     /// doesn't compile is that extension's error in the list, not a boot
@@ -174,7 +174,7 @@ mod tests {
         write(
             &root,
             ".oxplow/extensions/late/extension.yaml",
-            "manifest: 2\nname: late\nintent:\n  purpose: x\nmodels:\n  - name: counted\n    version: 1\n    description: The work items.\n    columns:\n      - { name: uri, type: TEXT, doc: Work item ref. }\n",
+            "manifest: 2\nname: late\nintent:\n  purpose: x\ndatasets:\n  - name: counted\n    version: 1\n    description: The work items.\n    fields:\n      - { name: uri, type: TEXT, doc: Work item ref. }\n",
         );
         write(
             &root,
@@ -220,7 +220,7 @@ mod tests {
         let root = svc.layout.project_dir.clone();
         let manifest = |cols: &str| {
             format!(
-                "manifest: 2\nname: late\nintent:\n  purpose: x\n  examples: [{{ name: a }}]\nmodels:\n  - name: blocked\n    version: 1\n    description: Blocked work items.\n    columns:\n{cols}"
+                "manifest: 2\nname: late\nintent:\n  purpose: x\n  examples: [{{ name: a }}]\ndatasets:\n  - name: blocked\n    version: 1\n    description: Blocked work items.\n    fields:\n{cols}"
             )
         };
         let id = "      - { name: uri, type: TEXT, doc: Work item ref. }\n";

@@ -1,6 +1,6 @@
 //! Settings → Data: what the semantic layer holds, who provides it, and how
-//! much. The catalog itself is the model registry (`v_model`,
-//! `v_model_column`, P4.2/P4.9) — read through SQL like everything else;
+//! much. The catalog itself is the model registry (`v_dataset`,
+//! `v_field`, P4.2/P4.9) — read through SQL like everything else;
 //! this adds what SQL can't say: an entity an extension declares that
 //! hasn't synced yet. Row counts aren't here: one `count(*)` over a big
 //! model can outrun the query timeout, so the UI counts each row itself
@@ -39,7 +39,7 @@ pub async fn data_entities(
     };
     let models = layer
         .query_sql(
-            "SELECT view, owner, kind, description FROM v_model
+            "SELECT view, owner, kind, description FROM v_dataset
               ORDER BY owner <> 'core', owner, view",
             vec![],
             Some(oxplow_db::semantic_layer::MAX_ROW_LIMIT),

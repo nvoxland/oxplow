@@ -23,6 +23,16 @@ pub const RENAMED: &[(&str, &str)] = &[
          commands:p]`",
     ),
     (
+        "models",
+        "write `datasets:` — `models: [{ name, columns: [..] }]` is \
+         `datasets: [{ name, fields: [..] }]`, each one's SQL still in `models/<name>.sql`",
+    ),
+    (
+        "columns",
+        "write `fields:` — a dataset's `columns: [{ name, type, doc }]` is \
+         `fields: [{ name, type, doc }]`",
+    ),
+    (
     "trigger",
     "write `on:` on the entry itself — `trigger: { on: [x], where: {…}, settle: 30s }` is \
      `on: [x]` with `where:` and `settle:` beside it, `trigger: { every: 15m }` is \
@@ -74,6 +84,17 @@ mod tests {
         assert!(
             old_map.starts_with("unknown key `permissions` — `permissions:` is a list of scopes"),
             "{old_map}"
+        );
+        let dataset = hint_unknown(
+            "datasets: datasets[0]: unknown field `columns`, expected one of `name`, `fields` at line 7 column 5",
+        );
+        assert!(
+            dataset.starts_with("datasets: datasets[0]: unknown key `columns` — write `fields:`"),
+            "{dataset}"
+        );
+        assert!(
+            hint_unknown("unknown field `models`, expected one of `datasets`")
+                .starts_with("unknown key `models` — write `datasets:`"),
         );
         assert_eq!(
             hint_unknown("unknown field `bogus`, expected `id`"),

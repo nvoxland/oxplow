@@ -19,7 +19,7 @@ pub const SQL_QUERY: &str = "oxplow.sql.query";
 #[serde(deny_unknown_fields)]
 pub struct QuerySqlInput {
     /// One read-only `SELECT` or `WITH` statement over the published
-    /// models (`v_model` lists them, `v_model_column` documents their
+    /// models (`v_dataset` lists them, `v_field` documents their
     /// columns). Use `?1`, `?2`, … for parameters.
     pub sql: String,
     /// Positional parameter values for `?1`, `?2`, ….
@@ -99,7 +99,7 @@ mod tests {
             .run(
                 &anonymous(),
                 SQL_QUERY,
-                json!({ "sql": "SELECT view FROM v_model WHERE view = ?1", "params": ["v_work_item"], "limit": 5 }),
+                json!({ "sql": "SELECT view FROM v_dataset WHERE view = ?1", "params": ["v_work_item"], "limit": 5 }),
                 false,
             )
             .await

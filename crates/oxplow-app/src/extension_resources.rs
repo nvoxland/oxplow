@@ -138,7 +138,7 @@ pub fn resource_extension(extension: &str, namespace: &str) -> String {
 pub fn parse_resources(
     extension: &str,
     namespace: &str,
-    models: &[oxplow_db::models::ModelSource],
+    models: &[oxplow_db::models::DatasetSource],
     value: &serde_yaml::Value,
     file: &str,
     manifest: &str,
@@ -191,7 +191,7 @@ fn decl_of(
     segment: &str,
     extension: &str,
     core: bool,
-    models: &[oxplow_db::models::ModelSource],
+    models: &[oxplow_db::models::DatasetSource],
     f: ResourceFile,
 ) -> Result<ResourceDecl, String> {
     let declared = f.clone().into_decl(segment)?;
@@ -238,7 +238,7 @@ fn decl_of(
             })?;
         if let Some(col) = columns
             .iter()
-            .find(|col| !source.decl.columns.iter().any(|c| c.name == **col))
+            .find(|col| !source.decl.fields.iter().any(|c| c.name == **col))
         {
             return Err(named(format!(
                 "model `{model}` has no `{col}` column ({why})"
@@ -314,11 +314,11 @@ mod tests {
     const MANIFEST: &str = "manifest: 2
 name: acme
 intent: { purpose: PRs., origin: null, examples: [] }
-models:
+datasets:
   - name: prs
     version: 1
     description: Pull requests.
-    columns:
+    fields:
       - { name: uri, type: TEXT, doc: The ref. }
       - { name: title, type: TEXT, doc: Its title. }
 resources:

@@ -10,7 +10,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use oxplow_db::models::{contract_change, extension_view, ModelSource};
+use oxplow_db::models::{contract_change, extension_view, DatasetSource};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
@@ -1163,11 +1163,11 @@ fn pair_by<'a, T, K: Ord + Clone>(
 /// one's first contract difference (a SQL-only change keeps the contract).
 pub fn models_diff(
     extension: &str,
-    before: &[ModelSource],
-    after: &[ModelSource],
+    before: &[DatasetSource],
+    after: &[DatasetSource],
 ) -> Vec<ModelImpact> {
-    let cols = |m: Option<&ModelSource>| -> Vec<String> {
-        m.map(|m| m.decl.columns.iter().map(|c| c.name.clone()).collect())
+    let cols = |m: Option<&DatasetSource>| -> Vec<String> {
+        m.map(|m| m.decl.fields.iter().map(|c| c.name.clone()).collect())
             .unwrap_or_default()
     };
     pair_by(before, after, |m| m.decl.name.clone())
@@ -1176,7 +1176,7 @@ pub fn models_diff(
             let changed: Vec<String> = match (b, a) {
                 (Some(x), Some(y)) => [
                     ("query", x.sql != y.sql),
-                    ("columns", x.decl.columns != y.decl.columns),
+                    ("columns", x.decl.fields != y.decl.fields),
                     ("description", x.decl.description != y.decl.description),
                     ("tests", x.decl.tests != y.decl.tests),
                     ("version", x.decl.version != y.decl.version),
@@ -1195,8 +1195,8 @@ pub fn models_diff(
                 _ => Change::Changed,
             };
             let contract_change = match (b, a) {
-                (Some(x), Some(y)) if x.decl.columns != y.decl.columns => {
-                    Some(contract_change(&x.decl.columns, &y.decl.columns))
+                (Some(x), Some(y)) if x.decl.fields != y.decl.fields => {
+                    Some(contract_change(&x.decl.fields, &y.decl.fields))
                 }
                 _ => None,
             };
@@ -1737,18 +1737,18 @@ pub async fn impact_within(
             }
         })
         .collect();
-    let empty: Vec<ModelSource> = Vec::new();
+    let empty: Vec<DatasetSource> = Vec::new();
     let mut models = models_diff(
         name,
-        before.as_ref().map_or(&empty, |b| &b.extension.models),
-        &after.extension.models,
+        before.as_ref().map_or(&empty, |b| &b.extension.datasets),
+        &after.extension.datasets,
     );
     // Readers outside this extension: its own views, by exact name (a
     // prefix would also drop another extension's `v_<name>_<…>` views).
     let own: BTreeSet<String> = models.iter().map(|m| m.view.clone()).collect();
     let key_of = |v: &Version<'_>, view: &str| -> Vec<String> {
         v.extension
-            .models
+            .datasets
             .iter()
             .find(|m| extension_view(name, &m.decl.name) == view)
             .map(|m| m.decl.key.clone())
@@ -1865,24 +1865,25 @@ pub async fn impact_within(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use oxplow_db::models::{ColumnDecl, ModelDecl};
+    use oxplow_db::models::{DatasetDecl, DatasetField};
     use serde_json::json;
 
-    fn model(name: &str, columns: &[(&str, &str)], sql: &str) -> ModelSource {
-        ModelSource {
-            decl: ModelDecl {
+    fn model(name: &str, columns: &[(&str, &str)], sql: &str) -> DatasetSource {
+        DatasetSource {
+            decl: DatasetDecl {
                 name: name.into(),
                 version: 1,
                 description: "d".into(),
-                columns: columns
+                fields: columns
                     .iter()
-                    .map(|(n, t)| ColumnDecl {
+                    .map(|(n, t)| DatasetField {
                         name: (*n).into(),
                         sql_type: (*t).into(),
                         doc: "d".into(),
                         ai_context: None,
                     })
                     .collect(),
+                relationships: vec![],
                 key: vec![],
                 tests: Vec::new(),
                 deprecated: Vec::new(),

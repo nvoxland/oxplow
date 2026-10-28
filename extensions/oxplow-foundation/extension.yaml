@@ -40,12 +40,12 @@ intent:
     - name: catalog-lists-prompts-and-config-keys
       input: { page: catalog }
       expect: the questions grouped by who offers them with Ask on each, and the config keys
-    - name: data-catalog-lists-models-with-their-columns
-      input: { page: data-catalog, params: { model: "" } }
-      expect: every model with its owner, what it holds and its columns
-    - name: data-catalog-names-one-models-columns
-      input: { page: data-catalog, params: { model: effort } }
-      expect: one model's columns with their docs and key
+    - name: data-catalog-lists-datasets-with-their-fields
+      input: { page: data-catalog, params: { dataset: "" } }
+      expect: every dataset with its owner, what it holds and its fields
+    - name: data-catalog-names-one-datasets-fields
+      input: { page: data-catalog, params: { dataset: effort } }
+      expect: one dataset's fields with their docs and key
     - name: thread-settings-start-from-the-saved-prompt-and-list-open-sessions
       input: { page: thread-settings, params: { thread: thr1 } }
       expect: the thread's saved prompt and ref, its open agent sessions
@@ -1377,7 +1377,7 @@ commands:
     example: {"query": "oauth redirect", "resources": ["oxplow/wiki", "oxplow/work_item"], "limit": 10}
   # sql.read
   - name: sql.query
-    summary: "Run ONE read-only SQL statement over the published `v_*` models. It takes `SELECT`/`WITH` over the views pages and the UI read (`v_model` lists them; physical tables are refused). Joins across views are fine. Metrics read as columns of a grid: `SELECT bucket, zone, MEASURE('<metric key>') FROM metric_grid('day'|'week'|'month'[, '<dimension>'])` (keys in v_metric_spec, dimensions in v_dimension). Positional params `?1`, `?2`, … bind from `params`. Returns `{columns, rows, truncated, reads, generation, coverage}`; rows are positional arrays; `truncated` means more rows existed than `limit`. `coverage` names the collector behind each collected model it read and how its last run stands (`current`, `stale`, `failed`, `disabled`, `needs_approval`, `never`): a complete result over a failed collector is still missing data. Writes, PRAGMA, ATTACH and multiple statements are rejected; queries time out after 5s. `v_model_column` documents every column."
+    summary: "Run ONE read-only SQL statement over the published `v_*` datasets. It takes `SELECT`/`WITH` over the views pages and the UI read (`v_dataset` lists them; physical tables are refused). Joins across views are fine. Metrics read as columns of a grid: `SELECT bucket, zone, MEASURE('<metric key>') FROM metric_grid('day'|'week'|'month'[, '<dimension>'])` (keys in v_metric_spec, dimensions in v_dimension). Positional params `?1`, `?2`, … bind from `params`. Returns `{columns, rows, truncated, reads, generation, coverage}`; rows are positional arrays; `truncated` means more rows existed than `limit`. `coverage` names the collector behind each collected model it read and how its last run stands (`current`, `stale`, `failed`, `disabled`, `needs_approval`, `never`): a complete result over a failed collector is still missing data. Writes, PRAGMA, ATTACH and multiple statements are rejected; queries time out after 5s. `v_field` documents every field (column)."
     scope: sql.read
     op: query
     tool: query_sql

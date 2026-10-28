@@ -4,7 +4,7 @@
 //! open. The compiler resolves the references (an unknown one is an error
 //! at `file:line`), orders the models so each is created after what it
 //! reads (a cycle is an error), creates the views, and records them — the
-//! `model`, `model_input` and `model_contract` tables the `v_model*` views
+//! `model`, `model_input` and `model_contract` tables the `v_dataset*` views
 //! read. It holds each model to two promises:
 //!
 //! - **Lineage:** what SQLite reports the view reading (the recording
@@ -44,16 +44,22 @@ mod core_files {
 /// The owner of the core models.
 pub const CORE: &str = "core";
 
-/// One model as its owner declares it (an entry of `models.yaml`).
+/// One dataset as its owner declares it (an entry of `models.yaml`, or
+/// of an extension's `datasets:`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct ModelDecl {
+pub struct DatasetDecl {
     pub name: String,
     pub version: u32,
     pub description: String,
-    /// The contract: the view's columns, in order.
-    pub columns: Vec<ColumnDecl>,
-    /// The columns whose values name one row: declared columns,
+    /// The contract: the view's fields (its columns), in order.
+    pub fields: Vec<DatasetField>,
+    /// How its fields point into other datasets:
+    /// `[{ from: <field>, to: <dataset>.<field> }]`. Declared, checked and
+    /// published (`v_dataset.relationships`); not part of the contract.
+    #[serde(default)]
+    pub relationships: Vec<RelationshipDecl>,
+    /// The fields whose values name one row: declared fields,
     /// part of the contract. A key implies its test (never null, never
     /// repeated), and a materialized model's table takes it as its
     /// primary key.
@@ -184,14 +190,14 @@ pub struct Twin {
     pub until: String,
 }
 
-/// One promised column.
+/// One promised field: a column of the dataset's view.
 ///
 /// Equality is the contract's: `ai_context` is guidance for an agent, not
 /// a promise, so two columns that differ only in it are equal and editing it
 /// never needs a version bump.
 #[derive(Debug, Clone, Eq, Serialize, Deserialize, specta::Type, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct ColumnDecl {
+pub struct DatasetField {
     pub name: String,
     /// The declared type SQLite reports for the view's column
     /// (`PRAGMA table_info`); empty for a computed column.
@@ -204,7 +210,7 @@ pub struct ColumnDecl {
     pub ai_context: Option<AiContext>,
 }
 
-impl PartialEq for ColumnDecl {
+impl PartialEq for DatasetField {
     fn eq(&self, other: &Self) -> bool {
         self.name == other.name && self.sql_type == other.sql_type && self.doc == other.doc
     }
@@ -212,7 +218,7 @@ impl PartialEq for ColumnDecl {
 
 /// `columns` as the contract records them (the golden and
 /// `model_contract`): name, type and doc, without their `ai_context`.
-fn contract_columns(columns: &[ColumnDecl]) -> serde_json::Value {
+fn contract_columns(columns: &[DatasetField]) -> serde_json::Value {
     columns
         .iter()
         .map(|c| serde_json::json!({ "name": c.name, "type": c.sql_type, "doc": c.doc }))
@@ -222,7 +228,7 @@ fn contract_columns(columns: &[ColumnDecl]) -> serde_json::Value {
 /// The columns' `ai_context` blocks as one JSON object keyed by column
 /// name (the `model.column_ai_context_json` column); `None` when no column
 /// has one.
-fn column_ai_context_json(columns: &[ColumnDecl]) -> Option<String> {
+fn column_ai_context_json(columns: &[DatasetField]) -> Option<String> {
     let map: serde_json::Map<String, serde_json::Value> = columns
         .iter()
         .filter_map(|c| Some((c.name.clone(), c.ai_context.as_ref()?.to_value())))
@@ -256,6 +262,27 @@ pub struct AcceptedValues {
     pub values: Vec<String>,
 }
 
+/// One declared relationship: this dataset's field `from` holds values of
+/// `to`, another dataset's field (`<dataset>.<field>`, the dataset named
+/// as a `ref()` names it).
+#[derive(
+    Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
+)]
+#[serde(deny_unknown_fields)]
+pub struct RelationshipDecl {
+    pub from: String,
+    pub to: String,
+}
+
+impl RelationshipDecl {
+    /// `to` split into its dataset and field (at the last `.`), when it
+    /// has both.
+    pub fn target(&self) -> Option<(&str, &str)> {
+        let (dataset, field) = self.to.rsplit_once('.')?;
+        (!dataset.is_empty() && !field.is_empty()).then_some((dataset, field))
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Relationship {
@@ -267,8 +294,8 @@ pub struct Relationship {
 
 /// A model's declaration and its SQL file.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
-pub struct ModelSource {
-    pub decl: ModelDecl,
+pub struct DatasetSource {
+    pub decl: DatasetDecl,
     /// Where the SQL came from, for error locations (`models/work_item.sql`).
     pub file: String,
     pub sql: String,
@@ -284,7 +311,7 @@ fn invalid(msg: impl Into<String>) -> DomainError {
 
 /// The core models: `models.yaml` joined with each `<name>.sql`. Every
 /// declared model needs its file and every file its declaration.
-pub fn core_sources() -> Result<Vec<ModelSource>, DomainError> {
+pub fn core_sources() -> Result<Vec<DatasetSource>, DomainError> {
     let files: HashMap<&str, &str> = core_files::FILES.iter().copied().collect();
     let yaml = files
         .get("models.yaml")
@@ -310,7 +337,7 @@ pub fn core_sources() -> Result<Vec<ModelSource>, DomainError> {
 /// database that recorded the version refuses to open otherwise); a
 /// version the golden lacks is new and needs blessing. One line per
 /// model that drifts.
-pub fn contract_drift(golden: &serde_json::Value, decls: &[ModelDecl]) -> Vec<String> {
+pub fn contract_drift(golden: &serde_json::Value, decls: &[DatasetDecl]) -> Vec<String> {
     let mut out = Vec::new();
     for d in decls {
         let now = contract_json(d);
@@ -325,7 +352,7 @@ pub fn contract_drift(golden: &serde_json::Value, decls: &[ModelDecl]) -> Vec<St
                     "{} v{}'s contract changed ({}); bump its version",
                     d.name,
                     d.version,
-                    was.change_to(&d.columns, &d.key)
+                    was.change_to(&d.fields, &d.key)
                 ));
             }
             None => out.push(format!(
@@ -342,7 +369,7 @@ pub fn contract_drift(golden: &serde_json::Value, decls: &[ModelDecl]) -> Vec<St
 /// published and never rewritten, so a change to one still drifts (bump
 /// its version). Earlier versions are kept: the file is the publication
 /// history (what `OXPLOW_BLESS=1` writes).
-pub fn pin_contracts(golden: &serde_json::Value, decls: &[ModelDecl]) -> serde_json::Value {
+pub fn pin_contracts(golden: &serde_json::Value, decls: &[DatasetDecl]) -> serde_json::Value {
     let mut golden = golden.as_object().cloned().unwrap_or_default();
     for d in decls {
         let versions = golden
@@ -360,7 +387,7 @@ pub fn pin_contracts(golden: &serde_json::Value, decls: &[ModelDecl]) -> serde_j
 /// and `model_contract`'s shape).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Contract {
-    pub columns: Vec<ColumnDecl>,
+    pub columns: Vec<DatasetField>,
     #[serde(default)]
     pub key: Vec<String>,
 }
@@ -368,7 +395,7 @@ pub struct Contract {
 impl Contract {
     /// The first difference from this contract to `columns` / `key`, in
     /// words.
-    pub fn change_to(&self, columns: &[ColumnDecl], key: &[String]) -> String {
+    pub fn change_to(&self, columns: &[DatasetField], key: &[String]) -> String {
         if self.columns != columns {
             contract_change(&self.columns, columns)
         } else {
@@ -377,8 +404,8 @@ impl Contract {
     }
 }
 
-fn contract_json(d: &ModelDecl) -> serde_json::Value {
-    serde_json::json!({ "columns": contract_columns(&d.columns), "key": d.key })
+fn contract_json(d: &DatasetDecl) -> serde_json::Value {
+    serde_json::json!({ "columns": contract_columns(&d.fields), "key": d.key })
 }
 
 /// The 1-based line of the declaration `name: <model>` in `text`.
@@ -395,7 +422,7 @@ fn decl_line(text: &str, model: &str) -> Option<usize> {
 /// seq). Appending takes the rows past the table's highest watermark, so a
 /// value two rows shared would let the second slip under it unseen; a
 /// unique one can't (tsk777).
-fn check_materialize(decl: &ModelDecl, at: &str) -> Result<(), DomainError> {
+fn check_materialize(decl: &DatasetDecl, at: &str) -> Result<(), DomainError> {
     match &decl.materialize {
         Some(m @ Materialize::Every { every }) if m.every().is_none() => Err(invalid(format!(
             "{at}: `{}` materializes `every: {every}`, which isn't a duration; use minutes (`15m`) or hours (`2h`)",
@@ -408,7 +435,7 @@ fn check_materialize(decl: &ModelDecl, at: &str) -> Result<(), DomainError> {
                     decl.name
                 )));
             }
-            let integer = decl.columns.iter().any(|c| {
+            let integer = decl.fields.iter().any(|c| {
                 c.name == incremental.trim() && c.sql_type.eq_ignore_ascii_case("INTEGER")
             });
             if !integer {
@@ -439,7 +466,7 @@ fn check_materialize(decl: &ModelDecl, at: &str) -> Result<(), DomainError> {
 /// appended would change when a later row lands on another input, tsk778),
 /// randomness or reading of the clock (`file:line` of the first, pointing
 /// at `on_change`).
-fn check_incremental_sql(decl: &ModelDecl, sql: &str, file: &str) -> Result<(), DomainError> {
+fn check_incremental_sql(decl: &DatasetDecl, sql: &str, file: &str) -> Result<(), DomainError> {
     if decl
         .materialize
         .as_ref()
@@ -515,10 +542,10 @@ fn check_incremental_sql(decl: &ModelDecl, sql: &str, file: &str) -> Result<(), 
 }
 
 /// A key names declared columns, each once.
-fn check_key(decl: &ModelDecl, at: &str) -> Result<(), DomainError> {
+fn check_key(decl: &DatasetDecl, at: &str) -> Result<(), DomainError> {
     let mut seen = BTreeSet::new();
     for k in &decl.key {
-        if !decl.columns.iter().any(|c| &c.name == k) {
+        if !decl.fields.iter().any(|c| &c.name == k) {
             return Err(invalid(format!(
                 "{at}: `{}`'s key names `{k}`, which isn't one of its columns",
                 decl.name
@@ -534,6 +561,86 @@ fn check_key(decl: &ModelDecl, at: &str) -> Result<(), DomainError> {
     Ok(())
 }
 
+/// A relationship runs from one of the dataset's declared fields to
+/// `<dataset>.<field>`. Whether that dataset and field exist is settled
+/// when the datasets compile ([`relationships_json`]).
+fn check_relationships(decl: &DatasetDecl, at: &str) -> Result<(), DomainError> {
+    for r in &decl.relationships {
+        if !decl.fields.iter().any(|f| f.name == r.from) {
+            return Err(invalid(format!(
+                "{at}: `{}`'s relationship from `{}` names no field it declares",
+                decl.name, r.from
+            )));
+        }
+        if r.target().is_none() {
+            return Err(invalid(format!(
+                "{at}: `{}`'s relationship to `{}` isn't `<dataset>.<field>`",
+                decl.name, r.to
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// A dataset's relationships resolved, as `v_dataset.relationships`
+/// publishes them — `[{ from, to, to_view, to_field }]`, `None` when none
+/// resolves — and the problems with the rest. `view_of` resolves a
+/// dataset name the way a `ref()` does; a target naming no dataset, or no
+/// field of one, is a problem and isn't published.
+fn relationships_json(
+    conn: &Connection,
+    decl: &DatasetDecl,
+    view_of: &dyn Fn(&str) -> Option<String>,
+) -> (Option<String>, Vec<String>) {
+    let mut out = Vec::with_capacity(decl.relationships.len());
+    let mut problems = Vec::new();
+    for r in &decl.relationships {
+        let Some((dataset, field)) = r.target() else {
+            problems.push(format!(
+                "`{}`'s relationship to `{}` isn't `<dataset>.<field>`",
+                decl.name, r.to
+            ));
+            continue;
+        };
+        let Some(view) = view_of(dataset) else {
+            problems.push(format!(
+                "`{}`'s relationship to `{}`: `{dataset}` names no dataset",
+                decl.name, r.to
+            ));
+            continue;
+        };
+        let has = match view_columns(conn, &view) {
+            Ok(cols) => cols.iter().any(|(name, _)| name == field),
+            Err(e) => {
+                problems.push(format!("`{}`'s relationship to `{}`: {e}", decl.name, r.to));
+                continue;
+            }
+        };
+        if !has {
+            problems.push(format!(
+                "`{}`'s relationship to `{}`: `{view}` has no field `{field}`",
+                decl.name, r.to
+            ));
+            continue;
+        }
+        out.push(serde_json::json!({
+            "from": r.from, "to": r.to, "to_view": view, "to_field": field,
+        }));
+    }
+    let json = (!out.is_empty()).then(|| serde_json::Value::Array(out).to_string());
+    (json, problems)
+}
+
+/// Record a published dataset's resolved relationships.
+fn record_relationships(conn: &Connection, view: &str, json: &str) -> Result<(), DomainError> {
+    conn.execute(
+        "UPDATE model SET relationships_json = ?2 WHERE view = ?1",
+        params![view, json],
+    )
+    .map_err(map_sql_err)?;
+    Ok(())
+}
+
 /// Join a `models.yaml` with its SQL files (`file(name)` reads
 /// `<name>.sql`; `sql_files()` lists the stems present).
 pub fn sources_from(
@@ -541,8 +648,8 @@ pub fn sources_from(
     dir: &str,
     file: impl Fn(&str) -> Option<String>,
     sql_files: impl Fn() -> Vec<String>,
-) -> Result<Vec<ModelSource>, DomainError> {
-    let decls: Vec<ModelDecl> =
+) -> Result<Vec<DatasetSource>, DomainError> {
+    let decls: Vec<DatasetDecl> =
         serde_yaml::from_str(yaml).map_err(|e| invalid(format!("{dir}/models.yaml: {e}")))?;
     let declared_in = format!("{dir}/models.yaml");
     for d in &decls {
@@ -551,6 +658,7 @@ pub fn sources_from(
             None => declared_in.clone(),
         };
         check_key(d, &at)?;
+        check_relationships(d, &at)?;
         check_materialize(d, &at)?;
     }
     join_sources(decls, dir, &declared_in, file, sql_files)
@@ -560,16 +668,17 @@ pub fn sources_from(
 /// `dir`: every declared model needs its file and every file its
 /// declaration.
 pub fn join_sources(
-    decls: Vec<ModelDecl>,
+    decls: Vec<DatasetDecl>,
     dir: &str,
     declared_in: &str,
     file: impl Fn(&str) -> Option<String>,
     sql_files: impl Fn() -> Vec<String>,
-) -> Result<Vec<ModelSource>, DomainError> {
+) -> Result<Vec<DatasetSource>, DomainError> {
     let mut seen = BTreeSet::new();
     let mut out = Vec::with_capacity(decls.len());
     for decl in decls {
         check_key(&decl, declared_in)?;
+        check_relationships(&decl, declared_in)?;
         check_materialize(&decl, declared_in)?;
         if !seen.insert(decl.name.clone()) {
             return Err(invalid(format!(
@@ -598,8 +707,8 @@ pub fn join_sources(
                 ))
             })?;
             seen.insert(d.file.trim_end_matches(".sql").to_string());
-            out.push(ModelSource {
-                decl: ModelDecl {
+            out.push(DatasetSource {
+                decl: DatasetDecl {
                     name: format!("{}_v{}", decl.name, d.version),
                     version: d.version,
                     description: format!(
@@ -609,7 +718,8 @@ pub fn join_sources(
                         decl.name,
                         d.until
                     ),
-                    columns: Vec::new(),
+                    fields: Vec::new(),
+                    relationships: Vec::new(),
                     key: Vec::new(),
                     tests: Vec::new(),
                     materialize: None,
@@ -625,7 +735,7 @@ pub fn join_sources(
             });
         }
         check_incremental_sql(&decl, &sql, &format!("{dir}/{path}"))?;
-        out.push(ModelSource {
+        out.push(DatasetSource {
             decl,
             file: format!("{dir}/{path}"),
             sql,
@@ -651,7 +761,7 @@ pub fn core_view(name: &str) -> String {
 /// references replaced, and what it declared it reads.
 #[derive(Debug, Clone)]
 struct Resolved<'a> {
-    source: &'a ModelSource,
+    source: &'a DatasetSource,
     view: String,
     sql: String,
     /// Views of the models it `ref()`s.
@@ -662,14 +772,14 @@ struct Resolved<'a> {
     first_ref_at: Option<String>,
 }
 
-fn at(src: &ModelSource, offset: usize) -> String {
+fn at(src: &DatasetSource, offset: usize) -> String {
     let (line, col) = line_col(&src.sql, offset);
     format!("{}:{line}:{col}", src.file)
 }
 
 /// The one quoted-name argument of a `ref()` / `source()` call.
 fn only_name(
-    src: &ModelSource,
+    src: &DatasetSource,
     call: &crate::sql_tokens::Call,
     what: &str,
 ) -> Result<String, DomainError> {
@@ -806,7 +916,7 @@ pub fn substitute_config(
 
 fn resolve<'a>(
     conn: &Connection,
-    sources: &'a [ModelSource],
+    sources: &'a [DatasetSource],
     view_of: &dyn Fn(&str) -> String,
 ) -> Result<Vec<Resolved<'a>>, DomainError> {
     let names: BTreeSet<&str> = sources.iter().map(|s| s.decl.name.as_str()).collect();
@@ -829,7 +939,7 @@ fn resolve<'a>(
 /// `None` when it names nothing) and `source()`s (`source_ok` says why a
 /// table can't be read, if it can't).
 fn resolve_one<'a>(
-    src: &'a ModelSource,
+    src: &'a DatasetSource,
     view: String,
     ref_view: &dyn Fn(&str) -> Option<String>,
     source_ok: &dyn Fn(&str) -> Result<(), String>,
@@ -1000,7 +1110,7 @@ pub fn drop_all(conn: &Connection) -> Result<(), DomainError> {
 /// Whether a source compiles: a kept earlier version is kept only until
 /// its date, and only if its version published.
 enum Kept {
-    Yes(Box<ModelSource>),
+    Yes(Box<DatasetSource>),
     /// Why not.
     No(String),
 }
@@ -1009,7 +1119,7 @@ enum Kept {
 /// version published (`model_contract`).
 fn fill_twin(
     conn: &Connection,
-    src: &ModelSource,
+    src: &DatasetSource,
     view_of: &dyn Fn(&str) -> String,
     today: &str,
 ) -> Result<Kept, DomainError> {
@@ -1033,7 +1143,7 @@ fn fill_twin(
         }
     };
     let mut filled = src.clone();
-    filled.decl.columns = contract.columns;
+    filled.decl.fields = contract.columns;
     filled.decl.key = contract.key;
     Ok(Kept::Yes(Box::new(filled)))
 }
@@ -1058,7 +1168,7 @@ pub fn compile_core(conn: &mut Connection) -> Result<(), DomainError> {
 pub fn compile(
     conn: &mut Connection,
     owner: &str,
-    sources: &[ModelSource],
+    sources: &[DatasetSource],
     view_of: &dyn Fn(&str) -> String,
 ) -> Result<(), DomainError> {
     let tx = conn.transaction().map_err(map_sql_err)?;
@@ -1096,6 +1206,22 @@ pub fn compile(
     for m in &models {
         publish(&tx, m, owner, &now, Pass::Publish)?;
     }
+    // Every dataset is published now: a relationship may point at any.
+    let published: BTreeSet<String> = models.iter().map(|m| m.view.clone()).collect();
+    let target = |name: &str| Some(view_of(name)).filter(|v| published.contains(v));
+    for m in &models {
+        let (json, problems) = relationships_json(&tx, &m.source.decl, &target);
+        if !problems.is_empty() {
+            return Err(invalid(format!(
+                "{}: {}",
+                m.source.file,
+                problems.join("; ")
+            )));
+        }
+        if let Some(json) = json {
+            record_relationships(&tx, &m.view, &json)?;
+        }
+    }
     tx.commit().map_err(map_sql_err)
 }
 
@@ -1124,8 +1250,8 @@ fn publish(
         // The SELECT checked out: publish the view over its table instead.
         conn.execute_batch(&format!("DROP VIEW {}", quote(&m.view)))
             .map_err(map_sql_err)?;
-        materialize_table(conn, &m.view, &decl.columns, &decl.key)?;
-        let columns: Vec<String> = decl.columns.iter().map(|c| quote(&c.name)).collect();
+        materialize_table(conn, &m.view, &decl.fields, &decl.key)?;
+        let columns: Vec<String> = decl.fields.iter().map(|c| quote(&c.name)).collect();
         conn.execute_batch(&format!(
             "CREATE VIEW {} AS SELECT {} FROM {}",
             quote(&m.view),
@@ -1148,7 +1274,7 @@ fn publish(
             now,
             decl.materialize.as_ref().map(Materialize::recorded),
             AiContext::to_column(&decl.ai_context),
-            column_ai_context_json(&decl.columns)
+            column_ai_context_json(&decl.fields)
         ],
     )
     .map_err(map_sql_err)?;
@@ -1175,7 +1301,7 @@ fn publish(
 fn materialize_table(
     conn: &Connection,
     view: &str,
-    columns: &[ColumnDecl],
+    columns: &[DatasetField],
     key: &[String],
 ) -> Result<(), DomainError> {
     let table = materialized_table(view);
@@ -1291,7 +1417,7 @@ fn check_contract(
     let decl = &m.source.decl;
     let actual = view_columns(conn, &m.view)?;
     let declared: Vec<(String, String)> = decl
-        .columns
+        .fields
         .iter()
         .map(|c| (c.name.clone(), c.sql_type.clone()))
         .collect();
@@ -1306,7 +1432,7 @@ fn check_contract(
     match stored_contract(conn, &m.view, decl.version)? {
         None if !record => Ok(()),
         None => {
-            let columns = serde_json::to_string(&contract_columns(&decl.columns))
+            let columns = serde_json::to_string(&contract_columns(&decl.fields))
                 .map_err(|e| invalid(e.to_string()))?;
             let key = serde_json::to_string(&decl.key).map_err(|e| invalid(e.to_string()))?;
             conn.execute(
@@ -1317,13 +1443,13 @@ fn check_contract(
             .map_err(map_sql_err)?;
             Ok(())
         }
-        Some(before) if before.columns != decl.columns || before.key != decl.key => {
+        Some(before) if before.columns != decl.fields || before.key != decl.key => {
             Err(invalid(format!(
                 "{}: {} v{}'s contract changed ({}); bump its version",
                 m.source.file,
                 decl.name,
                 decl.version,
-                before.change_to(&decl.columns, &decl.key)
+                before.change_to(&decl.fields, &decl.key)
             )))
         }
         Some(_) => Ok(()),
@@ -1368,7 +1494,7 @@ fn show(cols: &[(String, String)]) -> String {
 }
 
 /// The first difference between two contracts, in words.
-pub fn contract_change(before: &[ColumnDecl], after: &[ColumnDecl]) -> String {
+pub fn contract_change(before: &[DatasetField], after: &[DatasetField]) -> String {
     for (i, a) in after.iter().enumerate() {
         match before.get(i) {
             None => return format!("column `{}` added", a.name),
@@ -1404,7 +1530,7 @@ pub type FixtureRows = Vec<(String, Vec<serde_json::Map<String, serde_json::Valu
 pub fn incremental_matches_full(
     tx: &Connection,
     view: &str,
-    decl: &ModelDecl,
+    decl: &DatasetDecl,
     before: &FixtureRows,
     after: &FixtureRows,
 ) -> Result<Option<String>, DomainError> {
@@ -1425,7 +1551,7 @@ pub fn incremental_matches_full(
     let sql = sql.as_str();
     write_fixture_rows(tx, before)?;
     let mut defs: Vec<String> = decl
-        .columns
+        .fields
         .iter()
         .map(|c| {
             format!("{} {}", quote(&c.name), c.sql_type)
@@ -1535,7 +1661,7 @@ pub struct TestResult {
 /// `model_test`.
 pub fn run_tests(
     conn: &Connection,
-    sources: &[ModelSource],
+    sources: &[DatasetSource],
     view_of: &dyn Fn(&str) -> String,
 ) -> Result<Vec<TestResult>, DomainError> {
     let now = ts_to_string(oxplow_domain::Timestamp::now());
@@ -1655,7 +1781,7 @@ fn test_sql(
 #[derive(Debug, Clone)]
 pub struct ExtensionModels {
     pub extension: String,
-    pub sources: Vec<ModelSource>,
+    pub sources: Vec<DatasetSource>,
     /// The extension's effective configuration (`defaults < project <
     /// personal`) that its models' `config('/pointer')` reads are compiled
     /// against; `None` when it declares none.
@@ -1963,7 +2089,7 @@ fn pass(
         .cloned()
         .collect();
     let mut done: BTreeSet<String> = BTreeSet::new();
-    let mut published: Vec<(String, &ModelSource)> = Vec::new();
+    let mut published: Vec<(String, &DatasetSource)> = Vec::new();
     let mut pending = resolved;
     while !pending.is_empty() {
         let mut progressed = false;
@@ -2025,11 +2151,30 @@ fn pass(
         }
         pending = waiting;
     }
+    // Relationships, once everything that published has: a target is
+    // named the way a ref() names it. A bad one is the extension's error;
+    // the dataset stays published.
+    for (ext, src) in &published {
+        let target = |name: &str| match name.split_once('/') {
+            Some((other, n)) => known.get(&(other.to_string(), n.to_string())).cloned(),
+            None => known
+                .get(&(ext.clone(), name.to_string()))
+                .or_else(|| known.get(&(CORE.to_string(), name.to_string())))
+                .cloned(),
+        };
+        let (json, problems) = relationships_json(tx, &src.decl, &target);
+        for p in problems {
+            push(&mut errors, ext, format!("{}: {p}", src.file));
+        }
+        if let (Some(json), Pass::Publish) = (json, mode) {
+            record_relationships(tx, &extension_view(ext, &src.decl.name), &json)?;
+        }
+    }
     // Declared tests, on what published: a failure is the extension's
     // health, and the view stays. (A check proves the SQL; running the
     // tests is `extension test`'s.)
     for e in extensions.iter().filter(|_| mode == Pass::Publish) {
-        let mine: Vec<ModelSource> = published
+        let mine: Vec<DatasetSource> = published
             .iter()
             .filter(|(ext, _)| ext == &e.extension)
             .map(|(_, src)| (*src).clone())
@@ -2118,17 +2263,17 @@ mod tests {
         conn
     }
 
-    fn source(name: &str, sql: &str, columns: &[&str]) -> ModelSource {
-        ModelSource {
-            decl: ModelDecl {
+    fn source(name: &str, sql: &str, columns: &[&str]) -> DatasetSource {
+        DatasetSource {
+            decl: DatasetDecl {
                 name: name.into(),
                 version: 1,
                 description: format!("{name}."),
-                columns: columns
+                fields: columns
                     .iter()
                     .map(|c| {
                         let (n, t) = c.split_once(' ').unwrap_or((c, ""));
-                        ColumnDecl {
+                        DatasetField {
                             name: n.into(),
                             sql_type: t.into(),
                             doc: format!("{n}."),
@@ -2136,6 +2281,7 @@ mod tests {
                         }
                     })
                     .collect(),
+                relationships: vec![],
                 key: vec![],
                 tests: vec![],
                 deprecated: vec![],
@@ -2205,7 +2351,7 @@ mod tests {
 
     /// Guidance for an agent is not a promise: editing a column's
     /// `ai_context` at a published version is no contract change, and the
-    /// edit reaches `v_model_column`.
+    /// edit reaches `v_field`.
     #[test]
     fn a_columns_ai_context_is_published_and_editing_it_needs_no_bump() {
         let mut conn = fresh();
@@ -2217,19 +2363,19 @@ mod tests {
         };
         let mut m = source("a", "SELECT id FROM source('streams')", &["id INTEGER"]);
         m.decl.ai_context = ctx("about the model");
-        m.decl.columns[0].ai_context = ctx("about the column");
+        m.decl.fields[0].ai_context = ctx("about the column");
         compile(&mut conn, "t", std::slice::from_ref(&m), &view).unwrap();
         let read = |conn: &Connection| -> (Option<String>, Option<String>) {
             let model = conn
                 .query_row(
-                    "SELECT ai_context FROM v_model WHERE view = 'v_t_a'",
+                    "SELECT ai_context FROM v_dataset WHERE view = 'v_t_a'",
                     [],
                     |r| r.get(0),
                 )
                 .unwrap();
             let column = conn
                 .query_row(
-                    "SELECT ai_context FROM v_model_column WHERE view = 'v_t_a'",
+                    "SELECT ai_context FROM v_field WHERE view = 'v_t_a'",
                     [],
                     |r| r.get(0),
                 )
@@ -2249,7 +2395,7 @@ mod tests {
             .unwrap();
         assert!(!recorded.contains("ai_context"), "{recorded}");
         // Reworded at the same version: accepted, and published anew.
-        m.decl.columns[0].ai_context = ctx("reworded");
+        m.decl.fields[0].ai_context = ctx("reworded");
         compile(&mut conn, "t", std::slice::from_ref(&m), &view).unwrap();
         assert!(read(&conn).1.unwrap().contains("reworded"));
         // A model without any reads NULL.
@@ -2258,7 +2404,7 @@ mod tests {
         compile(&mut conn, "t", &[m, bare], &view).unwrap();
         let none: Option<String> = conn
             .query_row(
-                "SELECT ai_context FROM v_model_column WHERE view = 'v_t_b'",
+                "SELECT ai_context FROM v_field WHERE view = 'v_t_b'",
                 [],
                 |r| r.get(0),
             )
@@ -2409,8 +2555,8 @@ mod tests {
     /// only a database that had recorded the version noticed).
     #[test]
     fn a_contract_changed_at_a_pinned_version_drifts() {
-        let decl: ModelDecl = serde_yaml::from_str(
-            "name: a\nversion: 1\ndescription: d\ncolumns:\n  - { name: id, type: INTEGER, doc: \"Row id.\" }\n",
+        let decl: DatasetDecl = serde_yaml::from_str(
+            "name: a\nversion: 1\ndescription: d\nfields:\n  - { name: id, type: INTEGER, doc: \"Row id.\" }\n",
         )
         .unwrap();
         let golden = pin_contracts(&serde_json::json!({}), std::slice::from_ref(&decl));
@@ -2419,7 +2565,7 @@ mod tests {
             Vec::<String>::new()
         );
         let mut reworded = decl.clone();
-        reworded.columns[0].doc = "The row's id.".into();
+        reworded.fields[0].doc = "The row's id.".into();
         assert_eq!(
             contract_drift(&golden, std::slice::from_ref(&reworded)),
             vec![
@@ -2444,7 +2590,7 @@ mod tests {
         // Blessing never rewrites a published version: the reworded v1
         // stays as it was pinned, and still drifts.
         let mut reworded_again = decl.clone();
-        reworded_again.columns[0].doc = "The row's id.".into();
+        reworded_again.fields[0].doc = "The row's id.".into();
         let reblessed = pin_contracts(&golden, std::slice::from_ref(&reworded_again));
         assert_eq!(reblessed["a"]["1"], golden["a"]["1"]);
         assert_eq!(
@@ -2461,8 +2607,8 @@ mod tests {
     /// version drifts, and a recorded version refuses a changed key.
     #[test]
     fn a_key_is_part_of_the_contract() {
-        let decl: ModelDecl = serde_yaml::from_str(
-            "name: a\nversion: 1\ndescription: d\ncolumns:\n  - { name: id, type: INTEGER, doc: \"Row id.\" }\n",
+        let decl: DatasetDecl = serde_yaml::from_str(
+            "name: a\nversion: 1\ndescription: d\nfields:\n  - { name: id, type: INTEGER, doc: \"Row id.\" }\n",
         )
         .unwrap();
         assert!(decl.key.is_empty());
@@ -2493,7 +2639,7 @@ mod tests {
     #[test]
     fn an_every_clock_is_checked_and_recorded() {
         let yaml = |every: &str| {
-            format!("- name: a\n  version: 1\n  description: d\n  materialize: {{ every: {every} }}\n  columns:\n    - {{ name: id, type: INTEGER, doc: \"Row id.\" }}\n")
+            format!("- name: a\n  version: 1\n  description: d\n  materialize: {{ every: {every} }}\n  fields:\n    - {{ name: id, type: INTEGER, doc: \"Row id.\" }}\n")
         };
         let ok = sources_from(
             &yaml("2h"),
@@ -2538,7 +2684,7 @@ mod tests {
     fn an_incremental_model_is_refused_what_appending_cant_keep_right() {
         let decl = |extra: &str| {
             format!(
-                "- name: a\n  version: 1\n  description: d\n  materialize: {{ incremental: id }}\n{extra}  columns:\n    - {{ name: id, type: INTEGER, doc: \"Row id.\" }}\n    - {{ name: v, type: TEXT, doc: \"A value.\" }}\n"
+                "- name: a\n  version: 1\n  description: d\n  materialize: {{ incremental: id }}\n{extra}  fields:\n    - {{ name: id, type: INTEGER, doc: \"Row id.\" }}\n    - {{ name: v, type: TEXT, doc: \"A value.\" }}\n"
             )
         };
         let load = |yaml: String, sql: &str| {
@@ -2628,10 +2774,44 @@ mod tests {
         }
     }
 
+    /// A relationship runs from one of the dataset's own fields to
+    /// `<dataset>.<field>`; anything else is an error at its line.
+    #[test]
+    fn a_relationship_from_an_undeclared_field_or_to_no_field_is_an_error_at_its_line() {
+        let decl = |rel: &str| {
+            format!(
+                "- name: a\n  version: 1\n  description: d\n  relationships: [{rel}]\n  fields:\n    - {{ name: id, type: INTEGER, doc: \"Row id.\" }}\n"
+            )
+        };
+        let load = |yaml: &str| {
+            sources_from(
+                yaml,
+                "models",
+                |_| Some("SELECT 1 AS id".into()),
+                || vec!["a".into()],
+            )
+        };
+        load(&decl("{ from: id, to: work_item.id }")).unwrap();
+        let err = load(&decl("{ from: nope, to: work_item.id }")).unwrap_err();
+        assert!(
+            err.to_string().contains(
+                "models/models.yaml:1: `a`'s relationship from `nope` names no field it declares"
+            ),
+            "{err}"
+        );
+        let err = load(&decl("{ from: id, to: work_item }")).unwrap_err();
+        assert!(
+            err.to_string().contains(
+                "models/models.yaml:1: `a`'s relationship to `work_item` isn't `<dataset>.<field>`"
+            ),
+            "{err}"
+        );
+    }
+
     /// A key names declared columns; another is an error at its line.
     #[test]
     fn a_key_on_an_undeclared_column_is_an_error_at_its_line() {
-        let yaml = "- name: a\n  version: 1\n  description: d\n  key: [nope]\n  columns:\n    - { name: id, type: INTEGER, doc: \"Row id.\" }\n";
+        let yaml = "- name: a\n  version: 1\n  description: d\n  key: [nope]\n  fields:\n    - { name: id, type: INTEGER, doc: \"Row id.\" }\n";
         let err = sources_from(
             yaml,
             "models",
@@ -2729,7 +2909,7 @@ mod tests {
     fn every_core_model_contract_is_pinned_at_its_version() {
         let path =
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/model_contracts.json");
-        let decls: Vec<ModelDecl> = core_sources()
+        let decls: Vec<DatasetDecl> = core_sources()
             .unwrap()
             .into_iter()
             .map(|s| s.decl)
@@ -2813,7 +2993,7 @@ mod tests {
         Ok(errors)
     }
 
-    fn ext(extension: &str, models: Vec<ModelSource>) -> ExtensionModels {
+    fn ext(extension: &str, models: Vec<DatasetSource>) -> ExtensionModels {
         ExtensionModels {
             extension: extension.into(),
             sources: models
@@ -2847,7 +3027,7 @@ mod tests {
         .unwrap()
     }
 
-    fn on_change(mut m: ModelSource) -> ModelSource {
+    fn on_change(mut m: DatasetSource) -> DatasetSource {
         m.decl.materialize = Some(Materialize::ON_CHANGE);
         m
     }
@@ -3171,6 +3351,93 @@ mod tests {
         );
     }
 
+    /// A dataset's relationships publish on `v_dataset.relationships`,
+    /// each target resolved the way a `ref()` is; a target that names no
+    /// dataset, or no field of it, is the extension's error, and the
+    /// dataset still publishes.
+    #[test]
+    fn relationships_publish_resolved_and_a_bad_target_is_the_extensions_error() {
+        let mut conn = fresh();
+        let rel = |from: &str, to: &str| RelationshipDecl {
+            from: from.into(),
+            to: to.into(),
+        };
+        let mut late = source(
+            "late",
+            "SELECT uri, title FROM ref('work_item')",
+            &["uri TEXT", "title TEXT"],
+        );
+        late.decl.relationships = vec![rel("uri", "work_item.uri")];
+        let mut digest = source(
+            "titles",
+            "SELECT uri FROM ref('late-work/late')",
+            &["uri TEXT"],
+        );
+        digest.decl.relationships = vec![
+            rel("uri", "late-work/late.uri"),
+            rel("uri", "work_item.nope"),
+            rel("uri", "missing.uri"),
+        ];
+        let errors = publish(
+            &mut conn,
+            &[ext("late-work", vec![late]), ext("digest", vec![digest])],
+        )
+        .unwrap();
+        assert!(errors["late-work"].is_empty(), "{errors:?}");
+        let digest_errors = errors["digest"].join("\n");
+        assert!(
+            digest_errors.contains(
+                "`titles`'s relationship to `work_item.nope`: `v_work_item` has no field `nope`"
+            ),
+            "{digest_errors}"
+        );
+        assert!(
+            digest_errors
+                .contains("`titles`'s relationship to `missing.uri`: `missing` names no dataset"),
+            "{digest_errors}"
+        );
+        let published = |view: &str| -> Option<serde_json::Value> {
+            conn.query_row(
+                "SELECT relationships FROM v_dataset WHERE view = ?1",
+                [view],
+                |r| r.get::<_, Option<String>>(0),
+            )
+            .unwrap()
+            .map(|t| serde_json::from_str(&t).unwrap())
+        };
+        assert_eq!(
+            published("v_late_work_late"),
+            Some(serde_json::json!([
+                { "from": "uri", "to": "work_item.uri", "to_view": "v_work_item", "to_field": "uri" }
+            ]))
+        );
+        assert_eq!(
+            published("v_digest_titles"),
+            Some(serde_json::json!([
+                { "from": "uri", "to": "late-work/late.uri", "to_view": "v_late_work_late", "to_field": "uri" }
+            ]))
+        );
+        assert_eq!(published("v_work_item"), None);
+    }
+
+    /// A check (on temp views, recording nothing) reports a bad target too.
+    #[test]
+    fn a_check_reports_a_relationship_to_no_field() {
+        let conn = fresh();
+        let mut m = source("late", "SELECT uri FROM ref('work_item')", &["uri TEXT"]);
+        m.decl.relationships = vec![RelationshipDecl {
+            from: "uri".into(),
+            to: "work_item.nope".into(),
+        }];
+        let checked = check_extensions(&conn, &[ext("late-work", vec![m])], &[]).unwrap();
+        assert!(
+            checked.errors["late-work"]
+                .join("\n")
+                .contains("`v_work_item` has no field `nope`"),
+            "{checked:?}"
+        );
+    }
+
     /// P4.9 (tsk494): an extension model's declared tests run after it
     /// publishes; a failure is in `model_test` and the extension's errors,
     /// and the view stays published.
@@ -3303,7 +3570,7 @@ mod tests {
             file: "fresh.sql".into(),
             until: "2999-01-01".into(),
         }];
-        let never = ModelSource {
+        let never = DatasetSource {
             twin: None,
             ..never
         };

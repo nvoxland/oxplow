@@ -53,12 +53,12 @@ collectors:
           stream_id: int
           last_touched_at: time
           days_idle: int
-models:
+datasets:
   # v_stale_work_stale_tasks: the collected stale tasks, longest idle first.
   - name: stale_tasks
     version: 1
     description: "Open tasks (ready, in progress or blocked) that nobody has edited, commented on or worked on for at least a week, as of the collector's last sync. Longest idle first."
-    columns:
+    fields:
       - { name: id, type: INTEGER, doc: The task id. }
       - { name: title, type: TEXT, doc: The task's title. }
       - { name: status, type: TEXT, doc: "The task's status: ready, in_progress or blocked." }

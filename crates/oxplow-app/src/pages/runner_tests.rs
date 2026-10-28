@@ -177,7 +177,7 @@ async fn a_change_dirties_what_reads_it_and_what_follows() {
     assert!(dirty_loaders(page, &r, &["v_commit".to_string()], &none).is_empty());
     let r = run(&svc, "acme/queried", &[]).await;
     assert_eq!(
-        dirty_loaders(&r.page, &r, &["v_model".to_string()], &none),
+        dirty_loaders(&r.page, &r, &["v_dataset".to_string()], &none),
         ["q"]
     );
 }

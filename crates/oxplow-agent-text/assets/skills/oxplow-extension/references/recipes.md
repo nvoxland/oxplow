@@ -4,7 +4,7 @@ Each recipe: write the file, check it, deploy, test.
 
 ## Data → page
 
-1. Find the columns: `v_model`, `v_model_column`, `oxplow_query_sql`.
+1. Find the columns: `v_dataset`, `v_field`, `oxplow_query_sql`.
 2. Write `.oxplow/extensions/<name>/pages/<slug>.yaml`:
 
    ```yaml page

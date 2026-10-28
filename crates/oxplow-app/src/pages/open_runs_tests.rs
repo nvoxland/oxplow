@@ -175,7 +175,7 @@ async fn a_model_change_re_runs_the_runs_that_read_it() {
         .open(&svc, request("acme/numbers", &[]), "w")
         .await
         .unwrap();
-    let changed = runs.models_changed(&svc, &["v_model".to_string()]).await;
+    let changed = runs.models_changed(&svc, &["v_dataset".to_string()]).await;
     let ids: Vec<&str> = changed.iter().map(|c| c.run_id.as_str()).collect();
     assert!(!ids.contains(&other.as_str()), "{ids:?}");
     // It re-ran; its rows are the same, so nothing is reported for it.
@@ -212,7 +212,7 @@ async fn a_model_change_re_runs_only_what_reads_it() {
         .open(&svc, request("acme/mixed", &[]), "w")
         .await
         .unwrap();
-    runs.models_changed(&svc, &["v_model".to_string()]).await;
+    runs.models_changed(&svc, &["v_dataset".to_string()]).await;
     let after = runs.get(&id).unwrap();
     let r = |run: &super::runner::PageRun, l: &str| run.loaders[l].result.rows.clone();
     assert_eq!(
@@ -272,7 +272,7 @@ async fn changes_during_the_first_read_are_observed_before_publishing_the_run() 
                             if everything {
                                 observed.notify_everything();
                             } else {
-                                observed.notify_models(&["v_model".into()]);
+                                observed.notify_models(&["v_dataset".into()]);
                             }
                         }
                         Box::pin(async move {
@@ -286,7 +286,7 @@ async fn changes_during_the_first_read_are_observed_before_publishing_the_run() 
                 .unwrap(),
             )
             .unwrap();
-        let model = if relevant { "v_model" } else { "v_page" };
+        let model = if relevant { "v_dataset" } else { "v_page" };
         let yaml = format!("title: Opening\ndata: {{ read: {{ command: {name}, reads: [{model}] }} }}\nview: {{ viz: number, from: read }}\n");
         let page =
             super::schema::parse_page("acme", "acme", "opening", "pages/opening.yaml", &yaml)
@@ -354,7 +354,7 @@ async fn a_slow_model_refresh_cannot_restore_older_params_after_a_newer_request(
         )
         .unwrap();
     let page = super::schema::parse_page("acme", "acme", "delayed", "pages/delayed.yaml",
-        "title: Delayed\nparams: [{ name: n, default: 0 }]\ndata:\n  read:\n    command: oxplow.test.delayed_read\n    args: { n: { param: n } }\n    reads: [v_model]\nview: { viz: number, from: read }\n").unwrap();
+        "title: Delayed\nparams: [{ name: n, default: 0 }]\ndata:\n  read:\n    command: oxplow.test.delayed_read\n    args: { n: { param: n } }\n    reads: [v_dataset]\nview: { viz: number, from: read }\n").unwrap();
     let mut req = request("acme/delayed", &[]);
     req.target = RunTarget::Spec(Arc::new(page));
     let (id, _) = runs.open(&svc, req, "window").await.unwrap();
@@ -362,7 +362,7 @@ async fn a_slow_model_refresh_cannot_restore_older_params_after_a_newer_request(
     let services = svc.clone();
     let pending = tokio::spawn(async move {
         refreshing
-            .models_changed(&services, &["v_model".into()])
+            .models_changed(&services, &["v_dataset".into()])
             .await
     });
     entered.notified().await;

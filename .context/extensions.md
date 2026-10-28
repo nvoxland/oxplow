@@ -949,12 +949,12 @@ the user guide is `docs/guide/pages.md`.
   with the Timeline by foundation's `package.json`). Core draws what the
   kit draws; the component holds only the editor and the pickers.
   - **The catalog** is the page's **rail**: a `rail:` node in the same
-    page file (a `list` over `v_model`, oxplow's own first, its `view`
+    page file (a `list` over `v_dataset`, oxplow's own first, its `view`
     column selecting the `model` param, the picked row emphasized). A
     pick pushes `#model=` (Back un-picks) and the component hears it.
   - **The component** (`main.ts`, its pure half `model.ts`, tested from
     the desktop as `viz/exploreDataModel.test.ts`): the picked model's
-    documented columns (`v_model_column`) and lineage (`v_model_lineage`:
+    documented columns (`v_field`) and lineage (`v_model_lineage`:
     the models it reads, links that pick them, the tables it reads, the
     models that read it); the SQL box (a pick writes `SELECT * … LIMIT
     50`; any read-only query, metrics included — `SELECT bucket,
@@ -1624,7 +1624,7 @@ ui:                  # what it adds to the core UI (a command's own `ui:` puts i
   decorators: …      # labels from its models on core URIs (stable since P10; see "Decorators")
   replacements: …    # a page in place of a named core component (see "Replacements")
 advisories:  [...]   # see "Advisories"
-models:     [...]   # SQL models: ModelDecl entries + models/<name>.sql → v_<ext>_<name>; `key: [cols]`; `materialize: on_change | { every: 1h } | { incremental: <col> }` stores one (semantic-layer.md "Extension models", "Materialized models")
+datasets:   [...]   # SQL datasets: DatasetDecl entries (`fields:`, optional `relationships: [{ from, to: <dataset>.<field> }]`) + models/<name>.sql → v_<ext>_<name>; `key: [fields]`; `materialize: on_change | { every: 1h } | { incremental: <field> }` stores one (semantic-layer.md "Models" vocabulary, "Extension models", "Materialized models"); the old `models:` / `columns:` are unknown keys with a hint
 panels: …           # left-nav panels, each a page compact (see "Panels")
 commands:  [...]   # Starlark scripts composing core commands, a scope's or its provider's operations (see "Commands")
 resources: …        # kinds of thing a URI can name (see "Resources")
@@ -1968,7 +1968,7 @@ is held by a page with a whole-page action running that command.
 - **Live** (`OXPLOW_LIVE_ANSWERABILITY=1`): `answerability::live_pages` asks
   this machine's `decide` model (`AiService::for_this_machine`: the global
   `ai.yaml`, keychain read only), given only the skill text and the catalog
-  (every `v_model` view, every command an agent may run and every tool it
+  (every `v_dataset` view, every command an agent may run and every tool it
   is offered), what it would reach for first; it must pick the page's first
   loader's model or command.
 - **An extension's own** `questions.yaml` (`answerability::check`) runs in `oxplow extension test`:
@@ -5111,8 +5111,8 @@ tool: open_work              # offered as <namespace>_open_work
 
 **Understanding the semantic layer**
 
-- `oxplow_query_sql`: read-only SQL over the published models. `v_model` /
-  `v_model_column` / `v_model_lineage` describe every view (core `v_*` and
+- `oxplow_query_sql`: read-only SQL over the published models. `v_dataset` /
+  `v_field` / `v_model_lineage` describe every view (core `v_*` and
   extension `v_<ext>_<entity>`) with its column docs and inputs;
   `v_dimension`, `v_metric_spec` and `v_measure` list the dimensions,
   metrics and measures, extension-declared ones included, each with its
@@ -5243,7 +5243,7 @@ tool: open_work              # offered as <namespace>_open_work
 **Teaching the agent**
 
 An `oxplow-extension` skill (shipped in `crates/oxplow-agent-text/assets`)
-teaches the format, the `v_*` contract and the loop "read `v_model` →
+teaches the format, the `v_*` contract and the loop "read `v_dataset` →
 oxplow_query_sql → write files → oxplow_validate_extension → oxplow_run_page".
 Its page references (`page-format.md`, `loaders.md`, `view-nodes.md`,
 `recipes.md`, …) describe the page file. Add to Context on a page puts

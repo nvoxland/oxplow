@@ -2,7 +2,7 @@
 
 An extension is a folder under `.oxplow/extensions/<name>/` with an
 `extension.yaml`. Everything it adds is declared there as data:
-pages, models, collectors, commands, effects, providers and the rest.
+pages, datasets, collectors, commands, effects, providers and the rest.
 Each of those is a *contribution*.
 
 The goal is personal tools that agents can help you build, with useful
@@ -233,7 +233,7 @@ lists each declared reference with Set… and Revoke.
 <!-- kinds:begin (generated from oxplow_domain::contribution::KINDS; bless with OXPLOW_BLESS=1) -->
 | Key | What it adds | More |
 |---|---|---|
-| `models` | SQL views over oxplow's models, published as `v_<ext>_<name>` |  |
+| `datasets` | SQL views over oxplow's datasets, published as `v_<ext>_<name>` |  |
 | `measures` | what a metric's facts measure | [Metrics](../guide/metrics.md) |
 | `metrics` | a number tracked over a measure | [Metrics](../guide/metrics.md) |
 | `dimensions` | a way to slice metrics | [Metrics](../guide/metrics.md) |

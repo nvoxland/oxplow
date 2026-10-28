@@ -592,24 +592,27 @@ mod tests {
     /// reading it — when its table is refilled, not when its inputs move.
     #[tokio::test]
     async fn a_materialized_model_recomputes_once_per_burst_and_announces_its_readers() {
-        use oxplow_db::models::{ColumnDecl, ExtensionModels, Materialize, ModelDecl, ModelSource};
+        use oxplow_db::models::{
+            DatasetDecl, DatasetField, DatasetSource, ExtensionModels, Materialize,
+        };
         use oxplow_tasks::TaskStore as _;
         let f = crate::test_fixtures::services_with_task_effort().await;
         let model =
-            |name: &str, sql: &str, columns: &[(&str, &str)], on_change: bool| ModelSource {
-                decl: ModelDecl {
+            |name: &str, sql: &str, columns: &[(&str, &str)], on_change: bool| DatasetSource {
+                decl: DatasetDecl {
                     name: name.into(),
                     version: 1,
                     description: format!("{name}."),
-                    columns: columns
+                    fields: columns
                         .iter()
-                        .map(|(n, t)| ColumnDecl {
+                        .map(|(n, t)| DatasetField {
                             name: (*n).into(),
                             sql_type: (*t).into(),
                             doc: "d".into(),
                             ai_context: None,
                         })
                         .collect(),
+                    relationships: vec![],
                     key: vec![],
                     tests: Vec::new(),
                     deprecated: Vec::new(),
@@ -725,23 +728,26 @@ mod tests {
     /// input moves.
     #[tokio::test]
     async fn a_contract_change_alone_refills_a_materialized_model() {
-        use oxplow_db::models::{ColumnDecl, ExtensionModels, Materialize, ModelDecl, ModelSource};
+        use oxplow_db::models::{
+            DatasetDecl, DatasetField, DatasetSource, ExtensionModels, Materialize,
+        };
         let f = crate::test_fixtures::services_with_task_effort().await;
-        let model =
-            |name: &str, version: u32, sql: &str, title_type: &str, on_change: bool| ModelSource {
-                decl: ModelDecl {
+        let model = |name: &str, version: u32, sql: &str, title_type: &str, on_change: bool| {
+            DatasetSource {
+                decl: DatasetDecl {
                     name: name.into(),
                     version,
                     description: format!("{name}."),
-                    columns: [("id", "TEXT"), ("title", title_type)]
+                    fields: [("id", "TEXT"), ("title", title_type)]
                         .iter()
-                        .map(|(n, t)| ColumnDecl {
+                        .map(|(n, t)| DatasetField {
                             name: (*n).into(),
                             sql_type: (*t).into(),
                             doc: "d".into(),
                             ai_context: None,
                         })
                         .collect(),
+                    relationships: vec![],
                     key: vec![],
                     tests: Vec::new(),
                     deprecated: Vec::new(),
@@ -751,7 +757,8 @@ mod tests {
                 file: format!("models/{name}.sql"),
                 sql: sql.into(),
                 twin: None,
-            };
+            }
+        };
         // `titles` reads `base`; v2 of `base` changes `title`'s type, so
         // `titles`' contract changes with its SELECT untouched.
         let compile = |version: u32, base_sql: &str, title_type: &str| {

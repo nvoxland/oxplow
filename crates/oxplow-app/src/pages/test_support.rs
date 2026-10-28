@@ -83,7 +83,7 @@ data:
   q:
     command: oxplow.sql.query
     args: { sql: "SELECT 7 AS seven" }
-    reads: [v_model]
+    reads: [v_dataset]
 view: { viz: table, from: q }
 "#,
     ),
@@ -238,7 +238,7 @@ view:
 title: Mixed
 data:
   steady: { sql: "SELECT abs(random()) AS r" }
-  models: { sql: "SELECT count(*) AS n FROM v_model" }
+  models: { sql: "SELECT count(*) AS n FROM v_dataset" }
   after: { sql: "SELECT n, abs(random()) AS r FROM models" }
 view:
   stack:

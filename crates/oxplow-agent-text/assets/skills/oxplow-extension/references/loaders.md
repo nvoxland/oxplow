@@ -30,7 +30,7 @@ data:
 ```
 
 - One read-only statement over the `v_*` models (`oxplow_query_sql`'s rules;
-  read column names from `v_model_column`, never guess).
+  read column names from `v_field`, never guess).
 - `:name` binds a page param or a `params:` entry. An earlier loader reads
   as a **temp table of its name**; naming a later one is an error.
 - It runs again when a model it read changes.

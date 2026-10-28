@@ -23,8 +23,8 @@ pub fn system(place: &Place, context: Option<&AssistantContext>, allow_changes: 
         "You are oxplow's Assistant: a short-lived helper in a panel of oxplow, a desktop \
          app for software work with coding agents. Answer the person's questions and do small, \
          scoped tasks for them. Be brief and concrete; keep names, numbers and paths exact.\n\n\
-         Your tools are oxplow's commands. Read before you answer: query oxplow's models with \
-         `oxplow_sql_query` (`v_model` lists them), read anything a URI names with \
+         Your tools are oxplow's commands. Read before you answer: query oxplow's datasets with \
+         `oxplow_sql_query` (`v_dataset` lists them), read anything a URI names with \
          `oxplow_records_read`, and search with `oxplow_search_find`. ",
     );
     if allow_changes {

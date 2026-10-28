@@ -4,7 +4,7 @@
 
 When the number is about records oxplow already has (work items, commits,
 test runs, an extension's synced entities), skip the collector. Aggregate the view
-directly (the views and their columns are in `v_model` / `v_model_column`):
+directly (the views and their columns are in `v_dataset` / `v_field`):
 
 ```yaml
 metrics:

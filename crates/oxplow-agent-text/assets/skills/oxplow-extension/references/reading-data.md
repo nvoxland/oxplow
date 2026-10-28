@@ -5,8 +5,8 @@ answer is still wrong, and the queries to start from.
 
 ## Know the schema before you query it
 
-- `SELECT view, name, description FROM v_model` lists every view;
-  `SELECT name, sql_type, doc FROM v_model_column WHERE view = 'v_test_run'`
+- `SELECT view, name, description FROM v_dataset` lists every view;
+  `SELECT name, sql_type, doc FROM v_field WHERE view = 'v_test_run'`
   documents its columns. Read both; a guessed column is an error at best
   and a different column than you meant at worst.
 - `v_metric_catalog` lists the metrics you can read with `MEASURE('<key>')`.

@@ -2070,10 +2070,10 @@ pub struct Extension {
     /// Dimensions it contributes (fact or entity), never promoted: an
     /// extension toggling would rebuild the metric cube each time.
     pub dimensions: Vec<oxplow_config::DimensionEntry>,
-    /// Its SQL models (`models:` plus `models/<name>.sql`), published as
+    /// Its datasets (`datasets:` plus `models/<name>.sql`), published as
     /// `v_<extension>_<name>` (`extension_models`). Empty when any
     /// declaration is broken (see `errors`).
-    pub models: Vec<oxplow_db::models::ModelSource>,
+    pub datasets: Vec<oxplow_db::models::DatasetSource>,
     /// Left-nav panels it contributes (valid ones; invalid ones are in
     /// `errors`).
     pub panels: Vec<ExtensionPanel>,
@@ -3092,7 +3092,7 @@ pub(crate) fn empty_extension(name: &str, path: &str, origin: &str) -> Extension
         advisories: Vec::new(),
         measures: Vec::new(),
         dimensions: Vec::new(),
-        models: Vec::new(),
+        datasets: Vec::new(),
         metrics: Vec::new(),
         panels: Vec::new(),
         commands: Vec::new(),
@@ -3582,7 +3582,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             }
             Err(e) => ext.errors.push(err_at("metrics", e)),
         }
-        match parse_block::<oxplow_db::models::ModelDecl>(m.models.clone()) {
+        match parse_block::<oxplow_db::models::DatasetDecl>(m.datasets.clone()) {
             Ok(decls) => {
                 let dir = format!("{rel}/models");
                 let joined = oxplow_db::models::join_sources(
@@ -3599,11 +3599,14 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                     },
                 );
                 match joined {
-                    Ok(models) => ext.models = models,
-                    Err(e) => ext.errors.push(err_at("models", e.to_string())),
+                    Ok(datasets) => ext.datasets = datasets,
+                    Err(e) => ext.errors.push(err_at("datasets", e.to_string())),
                 }
             }
-            Err(e) => ext.errors.push(err_at("models", format!("models: {e}"))),
+            Err(e) => ext.errors.push(err_at(
+                "datasets",
+                oxplow_domain::manifest_keys::hint_unknown(&format!("datasets: {e}")),
+            )),
         }
         // Cross-references inside the catalog: a metric's source measure
         // and a collector's fact measures are normally ones this extension
@@ -3767,7 +3770,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
     }
     if let Some(v) = decorator_files {
         let (decorators, errors) =
-            decorators::parse_decorators(name, &ext.models, &v, &file, &manifest);
+            decorators::parse_decorators(name, &ext.datasets, &v, &file, &manifest);
         ext.ui.decorators = decorators;
         ext.errors.extend(errors);
     }
@@ -3789,7 +3792,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
         let (resources, errors) = crate::extension_resources::parse_resources(
             name,
             &ext.namespace,
-            &ext.models,
+            &ext.datasets,
             &v,
             &file,
             &manifest,
@@ -3983,7 +3986,10 @@ fn check_permissions(ext: &mut Extension, files: &dyn ExtensionFiles, file: &str
 /// The SQL of `ext` that may read its own configuration — a model, a page's
 /// loader, an advisory — with where each is declared.
 fn config_sql(ext: &Extension) -> Vec<(String, &str)> {
-    let models = ext.models.iter().map(|m| (m.file.clone(), m.sql.as_str()));
+    let models = ext
+        .datasets
+        .iter()
+        .map(|m| (m.file.clone(), m.sql.as_str()));
     let pages = ext.page_files.iter().flat_map(|p| {
         p.loaders.iter().filter_map(|d| match &d.loader {
             crate::pages::schema::Loader::Sql { sql, .. } => {
@@ -4854,7 +4860,7 @@ pub(super) fn clear_contributions(ext: &mut Extension) {
     ext.measures.clear();
     ext.dimensions.clear();
     ext.metrics.clear();
-    ext.models.clear();
+    ext.datasets.clear();
     ext.panels.clear();
     ext.commands.clear();
     ext.jobs.clear();
@@ -5395,10 +5401,10 @@ async fn model_overlay(
     let models = candidate
         .extensions
         .iter()
-        .filter(|ext| ext.enabled && !ext.models.is_empty())
+        .filter(|ext| ext.enabled && !ext.datasets.is_empty())
         .map(|ext| oxplow_db::models::ExtensionModels {
             extension: ext.name.clone(),
-            sources: ext.models.clone(),
+            sources: ext.datasets.clone(),
             config: ext.default_configuration(),
         })
         .collect();
@@ -7204,11 +7210,11 @@ collectors:
     input: \"SELECT uri FROM v_work_item\"
     entities:
       - { name: thing, key: id, columns: { id: int, label: text } }
-models:
+datasets:
   - name: labelled
     version: 1
     description: Labelled things.
-    columns:
+    fields:
       - { name: id, type: INTEGER, doc: The thing. }
       - { name: label, type: TEXT, doc: Its label. }
 commands:
@@ -7498,7 +7504,7 @@ commands:
                 "shared-files-agent"
             ]
         );
-        let mut models: Vec<&str> = b.models.iter().map(|m| m.decl.name.as_str()).collect();
+        let mut models: Vec<&str> = b.datasets.iter().map(|m| m.decl.name.as_str()).collect();
         models.sort();
         assert_eq!(
             models,
@@ -9168,24 +9174,24 @@ commands:
         );
     }
 
-    /// `models:` entries with their `models/<name>.sql`
-    /// load as the extension's models; a declaration without its file, a
+    /// `datasets:` entries with their `models/<name>.sql`
+    /// load as the extension's datasets; a declaration without its file, a
     /// file without its declaration, and a malformed entry are errors.
     #[test]
-    fn extensions_declare_models_with_their_sql() {
+    fn extensions_declare_datasets_with_their_sql() {
         let dir = tempfile::tempdir().unwrap();
         let manifest = [
             "manifest: 2",
             "name: x",
             "intent:",
             "  purpose: test",
-            "models:",
+            "datasets:",
             "  - name: late",
             "    version: 1",
             "    description: Blocked work items.",
-            "    columns:",
+            "    fields:",
             "      - { name: uri, type: TEXT, doc: Work item ref. }",
-            "  - { name: gone, version: 1, description: No file., columns: [] }",
+            "  - { name: gone, version: 1, description: No file., fields: [] }",
             "",
         ]
         .join("\n");
@@ -9202,7 +9208,7 @@ commands:
         );
         let ext = project_extensions(dir.path()).remove(0);
         assert_eq!(
-            ext.models
+            ext.datasets
                 .iter()
                 .map(|m| m.decl.name.as_str())
                 .collect::<Vec<_>>(),
@@ -9219,16 +9225,16 @@ commands:
             dir.path(),
             ".oxplow/extensions/x/extension.yaml",
             &manifest.replace(
-                "  - { name: gone, version: 1, description: No file., columns: [] }\n",
+                "  - { name: gone, version: 1, description: No file., fields: [] }\n",
                 "",
             ),
         );
         std::fs::remove_file(dir.path().join(".oxplow/extensions/x/models/stray.sql")).unwrap();
         let ext = project_extensions(dir.path()).remove(0);
         assert!(ext.errors.is_empty(), "{:?}", ext.errors);
-        assert_eq!(ext.models.len(), 1);
-        assert_eq!(ext.models[0].file, ".oxplow/extensions/x/models/late.sql");
-        assert!(ext.models[0].sql.contains("ref('work_item')"));
+        assert_eq!(ext.datasets.len(), 1);
+        assert_eq!(ext.datasets[0].file, ".oxplow/extensions/x/models/late.sql");
+        assert!(ext.datasets[0].sql.contains("ref('work_item')"));
 
         write(
             dir.path(),
@@ -9242,11 +9248,39 @@ commands:
             ext.errors
         );
 
-        let (_d, ext) = load_x(&[], "models:\n  - { name: late, colour: red }\n");
+        let (_d, ext) = load_x(&[], "datasets:\n  - { name: late, colour: red }\n");
         assert!(
             ext.errors
                 .iter()
-                .any(|e| e.contains("models") && e.contains("colour")),
+                .any(|e| e.contains("datasets") && e.contains("colour")),
+            "{:?}",
+            ext.errors
+        );
+    }
+
+    /// The old spellings are unknown keys whose error says what to write:
+    /// `models:` is `datasets:`, a dataset's `columns:` is `fields:`.
+    #[test]
+    fn old_models_and_columns_keys_say_what_to_write() {
+        let (_d, ext) = load_x(
+            &[],
+            "models:\n  - { name: late, version: 1, description: d, fields: [] }\n",
+        );
+        assert!(
+            ext.errors
+                .iter()
+                .any(|e| e.contains("unknown key `models` — write `datasets:`")),
+            "{:?}",
+            ext.errors
+        );
+        let (_d, ext) = load_x(
+            &[],
+            "datasets:\n  - { name: late, version: 1, description: d, columns: [] }\n",
+        );
+        assert!(
+            ext.errors
+                .iter()
+                .any(|e| e.contains("unknown key `columns` — write `fields:`")),
             "{:?}",
             ext.errors
         );

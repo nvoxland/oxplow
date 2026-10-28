@@ -129,14 +129,14 @@
         }
       ]
     },
-    "models": {
-      "description": "SQL models: each with `models/<name>.sql`, published as\n`v_<extension>_<name>`.",
+    "datasets": {
+      "description": "Datasets: each with its SQL in `models/<name>.sql`, published as\n`v_<extension>_<name>`.",
       "type": [
         "array",
         "null"
       ],
       "items": {
-        "$ref": "#/definitions/ModelDecl"
+        "$ref": "#/definitions/DatasetDecl"
       },
       "default": null
     },
@@ -533,8 +533,8 @@
         ]
       }
     },
-    "ModelDecl": {
-      "description": "One model as its owner declares it (an entry of `models.yaml`).",
+    "DatasetDecl": {
+      "description": "One dataset as its owner declares it (an entry of `models.yaml`, or\nof an extension's `datasets:`).",
       "type": "object",
       "properties": {
         "name": {
@@ -548,15 +548,23 @@
         "description": {
           "type": "string"
         },
-        "columns": {
-          "description": "The contract: the view's columns, in order.",
+        "fields": {
+          "description": "The contract: the view's fields (its columns), in order.",
           "type": "array",
           "items": {
-            "$ref": "#/definitions/ColumnDecl"
+            "$ref": "#/definitions/DatasetField"
           }
         },
+        "relationships": {
+          "description": "How its fields point into other datasets:\n`[{ from: <field>, to: <dataset>.<field> }]`. Declared, checked and\npublished (`v_dataset.relationships`); not part of the contract.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/RelationshipDecl"
+          },
+          "default": []
+        },
         "key": {
-          "description": "The columns whose values name one row: declared columns,\npart of the contract. A key implies its test (never null, never\nrepeated), and a materialized model's table takes it as its\nprimary key.",
+          "description": "The fields whose values name one row: declared fields,\npart of the contract. A key implies its test (never null, never\nrepeated), and a materialized model's table takes it as its\nprimary key.",
           "type": "array",
           "items": {
             "type": "string"
@@ -608,11 +616,11 @@
         "name",
         "version",
         "description",
-        "columns"
+        "fields"
       ]
     },
-    "ColumnDecl": {
-      "description": "One promised column.\n\nEquality is the contract's: `ai_context` is guidance for an agent, not\na promise, so two columns that differ only in it are equal and editing it\nnever needs a version bump.",
+    "DatasetField": {
+      "description": "One promised field: a column of the dataset's view.\n\nEquality is the contract's: `ai_context` is guidance for an agent, not\na promise, so two columns that differ only in it are equal and editing it\nnever needs a version bump.",
       "type": "object",
       "properties": {
         "name": {
@@ -675,6 +683,23 @@
         }
       },
       "additionalProperties": false
+    },
+    "RelationshipDecl": {
+      "description": "One declared relationship: this dataset's field `from` holds values of\n`to`, another dataset's field (`<dataset>.<field>`, the dataset named\nas a `ref()` names it).",
+      "type": "object",
+      "properties": {
+        "from": {
+          "type": "string"
+        },
+        "to": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "from",
+        "to"
+      ]
     },
     "TestDecl": {
       "description": "One declared test, written as a one-key map: `{ not_null: id }`,\n`{ unique: id }`, `{ accepted_values: { column, values } }`,\n`{ relationships: { column, to, field } }` or `{ sql: \"SELECT …\" }` (a\nquery returning the failing rows).",

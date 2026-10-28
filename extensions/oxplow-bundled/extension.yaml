@@ -594,11 +594,11 @@ configuration:
     struggle: { repeatedEdits: 5, failedCommands: 3 }
     largeUncommitted: { files: 15 }
     sharedFiles: { windowMinutes: 60 }
-models:
+datasets:
   - name: change_interest
     version: 1
     description: "Each changed file's \"look here first\" review priority (size × complexity spikes × parameter growth × long new functions) and why, `; `-separated."
-    columns:
+    fields:
       - { name: change_id, type: INTEGER, doc: "The change (v_change.id)." }
       - { name: path, type: TEXT, doc: "Repo-relative path." }
       - { name: interest, type: "", doc: "Review priority (a real number); higher means look here first." }
@@ -608,14 +608,14 @@ models:
     # "The last 180 days" moves with the clock, not with a write.
     materialize: { every: 1h }
     description: "Files usually committed together: each pair (both ways round) that shared at least 3 commits of 50 files or fewer in the last 180 days."
-    columns:
+    fields:
       - { name: path, type: TEXT, doc: "A file." }
       - { name: other, type: TEXT, doc: "A file committed with it." }
       - { name: together, type: "", doc: "How many commits they shared." }
   - name: change_co_change
     version: 1
     description: "Files in a change that history says are surprising: untouched for 90 days or more, or changed without any of their usual partners (top three co-changers)."
-    columns:
+    fields:
       - { name: change_id, type: INTEGER, doc: "The change (v_change.id)." }
       - { name: path, type: TEXT, doc: "The surprising file." }
       - { name: reason, type: "", doc: "`dormant` or `usual-co-changers-absent`." }
@@ -624,14 +624,14 @@ models:
   - name: deviation
     version: 1
     description: "Files each effort changed outside the area its work item names: a file is in the area when the item's title or body names it, or one of its directories at least two levels deep (`src/ui`). An item that names no area has none."
-    columns:
+    fields:
       - { name: effort_id, type: INTEGER, doc: "The effort (v_effort.id)." }
       - { name: path, type: TEXT, doc: "Repo-relative file path." }
       - { name: change_kind, type: TEXT, doc: "`created`, `updated` or `deleted`." }
   - name: struggle
     version: 1
     description: "Where the agent had trouble in an effort, by this review policy's thresholds: a file edited 5+ times (`repeated_edits`) or 3+ failed shell commands (`failed_commands`). Likely places for mistakes."
-    columns:
+    fields:
       - { name: effort_id, type: INTEGER, doc: "Effort." }
       - { name: thread_id, type: INTEGER, doc: "Thread." }
       - { name: agent_session_id, type: INTEGER, doc: "The agent session it happened in; NULL when not recorded." }
@@ -642,7 +642,7 @@ models:
     version: 3
     key: [uri]
     description: "Whether each of the agent's claims is backed, by this review policy's rule: it cites evidence (`v_claim.evidence` — a run, a test, a file, or `reviewer` when a person verified it) or a person verified it (`v_claim.review`), or it is `tests_pass` and its effort's latest test run (`v_test_run`) passed with at least one test. A claim a person dismissed has no row: it counts neither as backed nor as unbacked."
-    columns:
+    fields:
       - { name: uri, type: TEXT, doc: "The claim (`v_claim.uri`)." }
       - { name: effort_id, type: INTEGER, doc: "Its effort (v_effort.id), if one was open." }
       - { name: verified, type: INT, doc: "1 when something backs it, else 0." }
@@ -652,7 +652,7 @@ models:
     key: [seq]
     materialize: { incremental: seq }
     description: "Every verdict a reviewer gave (`oxplow_bundled.accepted` / `.changes_requested`), oldest first — appended as each lands, so reading the latest never scans the log. Read from the events' envelopes alone, which retention keeps: a verdict outlives its payload."
-    columns:
+    fields:
       - { name: seq, type: INTEGER, doc: "The verdict's event (v_event.seq)." }
       - { name: uri, type: TEXT, doc: "The effort reviewed (`oxplow:oxplow/effort?id=eff<id>`)." }
       - { name: verdict, type: TEXT, doc: "`accepted` or `changes_requested`." }
@@ -661,7 +661,7 @@ models:
     version: 2
     key: [uri]
     description: "Each effort's latest verdict, as its decorators show it: a chip on the effort's page and a badge where a page row links to it."
-    columns:
+    fields:
       - { name: uri, type: TEXT, doc: "The effort (`oxplow:oxplow/effort?id=eff<id>`)." }
       - { name: label, type: TEXT, doc: "`Accepted`, `Accepted (forced)` or `Changes requested`." }
       - { name: color, type: TEXT, doc: "`green`, `orange` or `red`." }
@@ -669,13 +669,13 @@ models:
     version: 2
     key: [thread_id]
     description: "When the person last cleared each thread's Finished list in the Work panel (`oxplow.work.clear_finished`), read from the events' envelopes."
-    columns:
+    fields:
       - { name: thread_id, type: INT, doc: "The thread (v_thread.id)." }
       - { name: cleared_at, type: TEXT, doc: "When it was last cleared (RFC 3339)." }
   - name: thread_work
     version: 4
     description: "Each thread's Work panel, one row per line in display order, from the active work list (`v_work_item`): what's in progress (the item, under its epic with the epic's other children, and an open effort no item names), up to 10 ready items, and the last 5 finished items, wiki pages and unlinked efforts since the list was cleared."
-    columns:
+    fields:
       - { name: thread_id, type: INT, doc: "The thread (v_thread.id)." }
       - { name: grp, type: TEXT, doc: "`In progress`, `Ready` or `Finished`." }
       - { name: g, type: INT, doc: "The group's place (0, 1, 3)." }

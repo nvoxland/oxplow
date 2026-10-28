@@ -1,0 +1,13 @@
+# The data catalog lists every dataset with its owner, what it holds and its
+# fields (the page's text shows the first rows only; `v_effort` and
+# `v_dataset` are found by name, which is how the list is read).
+given:
+  - { command: oxplow.effort.open, input: { thread: thr1 } }
+when: { page: data-catalog, params: { dataset: "" } }
+expect:
+  text: { contains: ["| Dataset | Owner | Holds | Fields |", "| v_agent_conversation | core |"] }
+steps:
+  - params: { dataset: effort }
+    expect: { loaders: { catalog: { rows: [{ view: v_effort, owner: core }] } } }
+  - params: { dataset: dataset }
+    expect: { loaders: { catalog: { rows: [{ view: v_dataset, owner: core }] } } }

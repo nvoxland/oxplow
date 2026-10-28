@@ -1,6 +1,6 @@
 ---
 name: oxplow-extension
-description: Build oxplow pages and extensions on request: views over oxplow's data (tasks, efforts, threads, comments, wiki, snapshots, metrics) that the user sees in the app and can share with their team. Loads when the user asks to "make/build/show me a page/view/report/dashboard/list of X", "a place where I can see X", "track X across threads/efforts", "what's waiting on me", or asks to change an existing page. Teaches the semantic layer (`v_model`, `oxplow_query_sql`), the `.oxplow/extensions/<name>/` format, and the fixture, check, test, deploy loop.
+description: Build oxplow pages and extensions on request: views over oxplow's data (tasks, efforts, threads, comments, wiki, snapshots, metrics) that the user sees in the app and can share with their team. Loads when the user asks to "make/build/show me a page/view/report/dashboard/list of X", "a place where I can see X", "track X across threads/efforts", "what's waiting on me", or asks to change an existing page. Teaches the semantic layer (`v_dataset`, `oxplow_query_sql`), the `.oxplow/extensions/<name>/` format, and the fixture, check, test, deploy loop.
 ---
 
 # Building oxplow pages
@@ -20,7 +20,7 @@ that already answers it; `oxplow_show_page { page }` shows it. **To answer
 with a table or chart now**, `oxplow_show_page { spec }` (an inline page,
 read-only) beats pasting rows; build a file only for a lasting page.
 
-**The loop:** find the data (`v_model`, `v_model_column`, `oxplow_query_sql`:
+**The loop:** find the data (`v_dataset`, `v_field`, `oxplow_query_sql`:
 read columns, never guess) → **write a fixture for the behavior first**
 (`fixtures/<example>.yaml`: `given` the data, `when` it runs, `expect`
 what it shows or does — a component's with `ui:` steps) → write the page
@@ -45,7 +45,7 @@ shows a draft page over the project's real data: a look, not a test.
 - `references/development-cycle.md`: source, drafts, deploy, held deployments.
 - `references/ui-contributions.md`: slots, panels, renderers, decorators, replacements.
 - `references/scaffolding.md`: the kinds `extension new` makes.
-- `references/semantic-layer.md`: finding data, URIs in SQL, publishing models.
+- `references/semantic-layer.md`: finding data, URIs in SQL, publishing datasets.
 - `references/commands-and-forms.md`: commands, forms, custom components.
 - `references/collectors.md`, `references/metrics.md`, `references/jobs-and-ai.md`, `references/providers.md`: outside data, metrics, model jobs, providers.
 - `references/repair-and-sharing.md`: disabled contributions, share.

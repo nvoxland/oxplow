@@ -137,9 +137,9 @@ const fn spec(
 pub const KINDS: &[KindSpec] = &[
     spec(
         ContributionKind::Model,
-        "models",
-        "Model",
-        "SQL views over oxplow's models, published as `v_<ext>_<name>`",
+        "datasets",
+        "Dataset",
+        "SQL views over oxplow's datasets, published as `v_<ext>_<name>`",
         false,
         false,
     ),

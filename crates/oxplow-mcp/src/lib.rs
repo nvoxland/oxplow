@@ -351,7 +351,7 @@ impl ServerHandler for OxplowMcp {
         info.instructions = Some(
             "Oxplow knows this project's work and code: work items, efforts, \
              test runs and coverage, commits, metrics and the wiki, readable \
-             with `oxplow_query_sql` over the read-only `v_*` models (`v_model` lists \
+             with `oxplow_query_sql` over the read-only `v_*` datasets (`v_dataset` lists \
              them). Every write is a command (`run_command`).\n\n\
              Answering the person: when they ask to see, list, compare or \
              track something about the work or the code (\"show me\", \
@@ -1042,7 +1042,7 @@ mod tests {
                 &rmcp::model::Extensions::default(),
                 "oxplow_query_sql",
                 serde_json::json!({
-                    "sql": "SELECT name FROM v_model_column WHERE view = 'v_work_item'",
+                    "sql": "SELECT name FROM v_field WHERE view = 'v_work_item'",
                 }),
             )
             .await

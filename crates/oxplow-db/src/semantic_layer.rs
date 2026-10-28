@@ -1,6 +1,6 @@
 //! The semantic layer's read surface: `query_sql` over the published
-//! models (the `v_*` views `models.rs` compiles; `v_model` and
-//! `v_model_column` are their catalog). The models are the versioned
+//! models (the `v_*` views `models.rs` compiles; `v_dataset` and
+//! `v_field` are their catalog). The models are the versioned
 //! contract; physical tables stay internal. See
 //! `.context/semantic-layer.md`.
 
@@ -750,7 +750,7 @@ impl<'c> ReadSession<'c> {
             Denied::Table(table) => {
                 let hint = match self.readers.get(table) {
                     Some(views) if !views.is_empty() => format!("read {}", views.join(" or ")),
-                    _ => "read a published model (see `v_model`)".to_string(),
+                    _ => "read a published model (see `v_dataset`)".to_string(),
                 };
                 format!("query_sql: `{table}` is a physical table, not a published model; {hint}")
             }

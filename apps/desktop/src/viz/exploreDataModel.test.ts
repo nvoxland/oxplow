@@ -23,7 +23,7 @@ import {
 const result = (columns: string[], rows: (string | number | null)[][]): Rows => ({ columns, rows, truncated: false });
 
 test("a model's documented columns", () => {
-  expect(MODEL_COLUMNS_SQL).toContain("FROM v_model_column WHERE view = ?1");
+  expect(MODEL_COLUMNS_SQL).toContain("FROM v_field WHERE view = ?1");
   expect(modelColumns(result(["name", "sql_type", "doc"], [["id", "INTEGER", "Task id."], ["n", null, "Count."]]))).toEqual([
     { name: "id", sqlType: "INTEGER", doc: "Task id." },
     { name: "n", sqlType: "", doc: "Count." },

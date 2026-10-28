@@ -79,7 +79,7 @@ async fn a_qualified_read_reaches_only_its_model_and_what_derives_from_it() {
         &root,
         ".oxplow/extensions/acme/extension.yaml",
         &format!(
-            "manifest: 2\nname: acme\nintent:\n  purpose: p\npermissions: [sql.read]\nmodels:\n  - name: efforts\n    version: 1\n    description: Efforts.\n    columns:\n      - {{ name: id, type: INTEGER, doc: Id. }}\n  - name: mine\n    version: 1\n    description: Items.\n    columns:\n      - {{ name: uri, type: TEXT, doc: Ref. }}\ncommands:\n{block}"
+            "manifest: 2\nname: acme\nintent:\n  purpose: p\npermissions: [sql.read]\ndatasets:\n  - name: efforts\n    version: 1\n    description: Efforts.\n    fields:\n      - {{ name: id, type: INTEGER, doc: Id. }}\n  - name: mine\n    version: 1\n    description: Items.\n    fields:\n      - {{ name: uri, type: TEXT, doc: Ref. }}\ncommands:\n{block}"
         ),
     );
     write(

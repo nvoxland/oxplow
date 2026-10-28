@@ -135,7 +135,7 @@ fn put_in(dir: &Path, e: &Ext) {
     let version = e.model_version;
     let mut manifest = format!("manifest: 2\nname: {name}\n");
     manifest += &format!(
-        "intent:\n  purpose: p\nmodels:\n  - name: items\n    version: {version}\n    description: Items.\n    columns:\n      - {{ name: uri, type: TEXT, doc: Work item ref. }}\n  - name: plain\n    version: 1\n    description: Plain.\n    columns:\n      - {{ name: uri, type: TEXT, doc: Work item ref. }}\n"
+        "intent:\n  purpose: p\ndatasets:\n  - name: items\n    version: {version}\n    description: Items.\n    fields:\n      - {{ name: uri, type: TEXT, doc: Work item ref. }}\n  - name: plain\n    version: 1\n    description: Plain.\n    fields:\n      - {{ name: uri, type: TEXT, doc: Work item ref. }}\n"
     );
     let mut exports = String::new();
     if let Some((visibility, version)) = e.export {
@@ -221,7 +221,7 @@ fn put_in(dir: &Path, e: &Ext) {
         );
     }
     if !commands.is_empty() {
-        manifest = manifest.replace("models:\n", &format!("commands:\n{commands}models:\n"));
+        manifest = manifest.replace("datasets:\n", &format!("commands:\n{commands}datasets:\n"));
     }
     write(dir, "extension.yaml", &manifest);
     write(dir, "handlers/get.star", HANDLER);

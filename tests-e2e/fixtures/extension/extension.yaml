@@ -31,12 +31,12 @@ effects:
     on: [work_item.created]
     entry: effects/note.star
     needs: [sql.read]
-models:
+datasets:
   - name: item
     version: 2
     key: [uri]
     description: "Each oxplow task as an `e2e/item` URI: what the resource resolves."
-    columns:
+    fields:
       - { name: uri, type: TEXT, doc: "`oxplow:e2e/item?id=<n>`." }
       - { name: title, type: TEXT, doc: "The item's title." }
 resources:

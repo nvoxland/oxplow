@@ -5046,7 +5046,7 @@ async fn incremental_models(host: &Host, ext: &Extension, report: &mut TestRepor
     let rel = ext.path.trim_end_matches('/').to_string();
     let dir = host.root.join(&rel);
     let manifest = std::fs::read_to_string(dir.join("extension.yaml")).unwrap_or_default();
-    for model in &ext.models {
+    for model in &ext.datasets {
         let decl = &model.decl;
         if decl
             .materialize
@@ -5057,7 +5057,7 @@ async fn incremental_models(host: &Host, ext: &Extension, report: &mut TestRepor
             continue;
         }
         let line = oxplow_app::extensions::manifest_v2::entry_line(
-            &manifest, "models", "name", &decl.name,
+            &manifest, "datasets", "name", &decl.name,
         )
         .unwrap_or(1);
         let at = format!("{rel}/extension.yaml:{line}");
@@ -6068,11 +6068,11 @@ collectors:
     entry: collectors/shell.sh
     entities:
       - {{ name: line, key: n, columns: {{ n: int }} }}
-models:
+datasets:
   - name: labelled
     version: 1
     description: Labelled things.
-    columns:
+    fields:
       - {{ name: id, type: INTEGER, doc: The thing. }}
       - {{ name: label, type: TEXT, doc: Its label. }}
 commands:
@@ -6234,7 +6234,7 @@ commands:
             root,
             ".oxplow/extensions/maker/extension.yaml",
             &format!(
-                "manifest: 2\nname: maker\nintent:\n  purpose: Make items.\nmodels:\n  - name: items\n    version: {version}\n    description: Items.\n    columns:\n      - {{ name: uri, type: TEXT, doc: A work item. }}\nexports:\n  - {{ contribution: oxplow:oxplow/model?model=maker/items, version: {version}, visibility: stable }}\n"
+                "manifest: 2\nname: maker\nintent:\n  purpose: Make items.\ndatasets:\n  - name: items\n    version: {version}\n    description: Items.\n    fields:\n      - {{ name: uri, type: TEXT, doc: A work item. }}\nexports:\n  - {{ contribution: oxplow:oxplow/model?model=maker/items, version: {version}, visibility: stable }}\n"
             ),
         );
         write(
@@ -6368,13 +6368,13 @@ intent:
   purpose: Long visits.
   origin: oxplow:oxplow/thread?id=thr1
   examples: []
-models:
+datasets:
   - name: long_visits
     version: 1
     description: Visits and how long they lasted.
     key: [id]
     materialize: { incremental: id }
-    columns:
+    fields:
       - { name: id, type: INTEGER, doc: The visit. }
       - { name: duration_ms, type: INTEGER, doc: How long it lasted. }
 ",
@@ -7468,11 +7468,11 @@ event_types:
   types:
     - { type: acme.merged, v: 1, schema: merged.v1.json, summary: Merged. }
     - { type: acme.merged, v: 2, schema: merged.v2.json, summary: Merged., upcast: merged.star }
-models:
+datasets:
   - name: prs
     version: 1
     description: PRs.
-    columns:
+    fields:
       - { name: uri, type: \"\", doc: The ref. }
       - { name: title, type: \"\", doc: Its title. }
 resources:
@@ -8107,11 +8107,11 @@ intent:
   purpose: PRs.
   examples:
     - { name: read, input: { sql: x }, expect: rows }
-models:
+datasets:
   - name: prs
     version: 1
     description: PRs.
-    columns:
+    fields:
       - { name: title, type: \"\", doc: Its title. }
 ",
         );
@@ -8208,13 +8208,13 @@ intent:
   purpose: Titles.
   examples:
     - { name: stored, input: { sql: x }, expect: rows }
-models:
+datasets:
   - name: titles
     version: 1
     key: [id]
     materialize: on_change
     description: Titles.
-    columns:
+    fields:
       - { name: id, type: TEXT, doc: The item. }
       - { name: title, type: TEXT, doc: Its title. }
 ",

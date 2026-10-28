@@ -984,9 +984,9 @@ fn with_ai_context(files: &mut Vec<ScaffoldFile>, bad_key: bool) {
     );
     let unknown = if bad_key { "      hint: nope\n" } else { "" };
     manifest.content.push_str(&format!(
-        "models:\n  - name: dims\n    version: 1\n    description: The dimensions.\n    \
+        "datasets:\n  - name: dims\n    version: 1\n    description: The dimensions.\n    \
          ai_context:\n      instructions: Use to list slices.\n      synonyms: [slices]\n{unknown}    \
-         columns:\n      - name: dim_key\n        type: TEXT\n        doc: The key.\n        \
+         fields:\n      - name: dim_key\n        type: TEXT\n        doc: The key.\n        \
          ai_context:\n          instructions: Pass to metric_grid.\n          examples: [complex_fns.area]\n"
     ));
     files.push(ScaffoldFile {
@@ -1007,14 +1007,14 @@ async fn ai_context_is_published_on_a_model_a_column_a_metric_and_a_dimension() 
         async move { opt_text(&p.rows(&sql).await[0][0]) }
     };
     let model = one(format!(
-        "SELECT ai_context FROM v_model WHERE owner = '{NAME}' AND name = 'dims'"
+        "SELECT ai_context FROM v_dataset WHERE owner = '{NAME}' AND name = 'dims'"
     ))
     .await
     .expect("the model's block");
     assert!(model.contains("Use to list slices."), "{model}");
     assert!(model.contains("slices"), "{model}");
     let column = one(format!(
-        "SELECT c.ai_context FROM v_model_column c JOIN v_model m ON m.view = c.view \
+        "SELECT c.ai_context FROM v_field c JOIN v_dataset m ON m.view = c.view \
          WHERE m.owner = '{NAME}' AND c.name = 'dim_key'"
     ))
     .await

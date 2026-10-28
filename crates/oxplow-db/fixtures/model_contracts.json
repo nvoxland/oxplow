@@ -24029,5 +24029,124 @@
       ],
       "key": []
     }
+  },
+  "dataset": {
+    "1": {
+      "columns": [
+        {
+          "name": "view",
+          "type": "TEXT",
+          "doc": "The view to query (`v_work_item`)."
+        },
+        {
+          "name": "name",
+          "type": "TEXT",
+          "doc": "The dataset's name within its owner (`work_item`)."
+        },
+        {
+          "name": "owner",
+          "type": "TEXT",
+          "doc": "`core`, or the extension that declares it."
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "doc": "`sql` (compiled from a SQL file) or `entity` (an extension's synced entity)."
+        },
+        {
+          "name": "version",
+          "type": "INTEGER",
+          "doc": "Contract version: a change to the fields bumps it."
+        },
+        {
+          "name": "description",
+          "type": "TEXT",
+          "doc": "What the view holds."
+        },
+        {
+          "name": "sql",
+          "type": "TEXT",
+          "doc": "The SELECT the view was compiled from, references resolved."
+        },
+        {
+          "name": "compiled_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 time of the open that compiled it."
+        },
+        {
+          "name": "materialize",
+          "type": "TEXT",
+          "doc": "NULL when it's computed on read (a view); `on_change` when it's stored and recomputed when an input changes; `every <d>` (`every 1h`) when it's stored and recomputed on that clock; `incremental <column>` when it's stored and kept by appending rows past that watermark."
+        },
+        {
+          "name": "computed_at",
+          "type": "TEXT",
+          "doc": "For a materialized dataset: when it was last recomputed (RFC 3339); NULL otherwise."
+        },
+        {
+          "name": "events_to",
+          "type": "INTEGER",
+          "doc": "For a materialized dataset: the event log's highest seq when that recompute began — what its inputs had seen."
+        },
+        {
+          "name": "mode",
+          "type": "TEXT",
+          "doc": "For a materialized dataset: how its last recompute ran — `full` or `incremental`."
+        },
+        {
+          "name": "ai_context",
+          "type": "TEXT",
+          "doc": "Guidance for an agent reading the dataset, as JSON `{\"instructions\", \"synonyms\", \"examples\"}`; NULL when none. Not part of the contract."
+        },
+        {
+          "name": "relationships",
+          "type": "TEXT",
+          "doc": "How its fields point into other datasets, as a JSON array of `{\"from\", \"to\", \"to_view\", \"to_field\"}` (`from` its field, `to` as declared, `<dataset>.<field>`, resolved to that dataset's view and field); NULL when it declares none. Not part of the contract."
+        }
+      ],
+      "key": []
+    }
+  },
+  "field": {
+    "1": {
+      "columns": [
+        {
+          "name": "view",
+          "type": "TEXT",
+          "doc": "The dataset's view (`v_dataset.view`)."
+        },
+        {
+          "name": "position",
+          "type": "INT",
+          "doc": "0-based field position."
+        },
+        {
+          "name": "name",
+          "type": "",
+          "doc": "Field name."
+        },
+        {
+          "name": "sql_type",
+          "type": "",
+          "doc": "The field's SQLite declared type; empty for a computed one."
+        },
+        {
+          "name": "doc",
+          "type": "",
+          "doc": "What the field holds."
+        },
+        {
+          "name": "key_part",
+          "type": "",
+          "doc": "Its 1-based place in the dataset's key; null when it isn't part of the key."
+        },
+        {
+          "name": "ai_context",
+          "type": "",
+          "doc": "Guidance for an agent reading the field, as JSON `{\"instructions\", \"synonyms\", \"examples\"}`; NULL when none. Not part of the contract."
+        }
+      ],
+      "key": []
+    }
   }
 }

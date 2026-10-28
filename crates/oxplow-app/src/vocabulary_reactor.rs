@@ -576,11 +576,11 @@ mod tests {
     const ACME: &str = "manifest: 2
 name: acme
 intent: { purpose: PRs., origin: null, examples: [] }
-models:
+datasets:
   - name: prs
     version: 1
     description: Pull requests.
-    columns:
+    fields:
       - { name: uri, type: TEXT, doc: The ref. }
       - { name: title, type: TEXT, doc: Its title. }
 resources:

@@ -41,7 +41,7 @@ pub fn describe(ext: &Extension) -> Vec<Descriptor> {
             line: line.parse().ok(),
         }
     };
-    for m in ext.models.iter().filter(|m| m.twin.is_none()) {
+    for m in ext.datasets.iter().filter(|m| m.twin.is_none()) {
         let view = oxplow_db::models::extension_view(&ext.name, &m.decl.name);
         let mut d = new(ContributionKind::Model, &m.decl.name, RunsOn::Query);
         d.contract_version = Some(m.decl.version);
@@ -489,7 +489,7 @@ fn remove(ext: &mut Extension, c: &Collision) {
     let local = c.refused.local.as_str();
     match c.kind {
         ContributionKind::Model => ext
-            .models
+            .datasets
             .retain(|x| x.decl.name != local && x.twin.as_ref().is_none_or(|t| t.of != local)),
         ContributionKind::EventType => ext.event_types.types.retain(|x| x.event_type != local),
         ContributionKind::Resource => ext.resources.retain(|x| x.decl.name.name() != local),
@@ -540,7 +540,7 @@ mod tests {
         let ns = name.replace('-', "_");
         format!(
             "manifest: 2\nname: {name}\nintent: {{ purpose: p, origin: null, examples: [] }}\n\
-             models:\n  - name: prs\n    version: 3\n    description: Pull requests.\n    columns:\n      - {{ name: uri, type: TEXT, doc: The ref. }}\n      - {{ name: title, type: TEXT, doc: Its title. }}\n\
+             datasets:\n  - name: prs\n    version: 3\n    description: Pull requests.\n    fields:\n      - {{ name: uri, type: TEXT, doc: The ref. }}\n      - {{ name: title, type: TEXT, doc: Its title. }}\n\
              event_types:\n  types:\n    - {{ type: {ns}.merged, v: 1, schema: merged.json, summary: Merged. }}\n\
              panels:\n  - {{ id: inbox, title: Inbox, scope: project, body: open }}\n\
              resources:\n  - {{ name: pr, label: Pull request, params: {{ id: {{ required: true, pattern: '^[0-9]+$' }} }}, resolve: prs, icon: git-pull-request }}\n\
@@ -778,7 +778,7 @@ mod tests {
         let (first, second) = (&exts[0], &exts[1]);
         assert_eq!(first.errors, Vec::<String>::new());
         for (what, name) in [
-            ("model", "v_acme_pr_prs"),
+            ("dataset", "v_acme_pr_prs"),
             ("event type", "acme_pr.merged"),
             ("resource", "acme-pr/pr"),
         ] {
@@ -794,9 +794,9 @@ mod tests {
                 reports[0]
             );
         }
-        assert!(second.models.is_empty() && second.resources.is_empty());
+        assert!(second.datasets.is_empty() && second.resources.is_empty());
         assert!(second.event_types.types.is_empty());
-        assert_eq!(first.models.len(), 1);
+        assert_eq!(first.datasets.len(), 1);
         assert_eq!(first.resources.len(), 1);
         assert_eq!(first.event_types.types.len(), 1);
         for kind in [K::Model, K::EventType, K::Resource] {

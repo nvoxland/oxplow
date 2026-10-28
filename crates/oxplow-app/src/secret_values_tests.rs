@@ -66,7 +66,7 @@ async fn leak_sweep(svc: &crate::Services, results: &[String], secret: &str) {
     // Every published model, read whole.
     let models = svc
         .sql
-        .query_sql("SELECT name FROM v_model", vec![], None)
+        .query_sql("SELECT name FROM v_dataset", vec![], None)
         .await
         .unwrap();
     let names: Vec<String> = serde_json::to_value(&models.rows)

@@ -1354,28 +1354,6 @@ export type CollectorSync =
  */
 "upsert";
 
-/**
- *  One promised column.
- *
- *  Equality is the contract's: `ai_context` is guidance for an agent, not
- *  a promise, so two columns that differ only in it are equal and editing it
- *  never needs a version bump.
- */
-export type ColumnDecl = {
-	name: string,
-	/**
-	 *  The declared type SQLite reports for the view's column
-	 *  (`PRAGMA table_info`); empty for a computed column.
-	 */
-	type?: string,
-	doc: string,
-	/**
-	 *  Guidance for an agent reading the column. Not part of the contract:
-	 *  left out of `model_contract` and the golden, stored on the model.
-	 */
-	ai_context?: AiContext | null,
-};
-
 /**  How a column's value reads in the UI. An agent reads the raw value. */
 export type ColumnFormat =
 /**  A timestamp's date. */
@@ -1801,6 +1779,81 @@ export type CustomComponent_Serialize = {
 	 *  `sql.read` permission.
 	 */
 	sql?: SqlAccess | null,
+};
+
+/**
+ *  One dataset as its owner declares it (an entry of `models.yaml`, or
+ *  of an extension's `datasets:`).
+ */
+export type DatasetDecl = {
+	name: string,
+	version: number,
+	description: string,
+	/**  The contract: the view's fields (its columns), in order. */
+	fields: DatasetField[],
+	/**
+	 *  How its fields point into other datasets:
+	 *  `[{ from: <field>, to: <dataset>.<field> }]`. Declared, checked and
+	 *  published (`v_dataset.relationships`); not part of the contract.
+	 */
+	relationships?: RelationshipDecl[],
+	/**
+	 *  The fields whose values name one row: declared fields,
+	 *  part of the contract. A key implies its test (never null, never
+	 *  repeated), and a materialized model's table takes it as its
+	 *  primary key.
+	 */
+	key?: string[],
+	tests?: TestDecl[],
+	/**
+	 *  Earlier versions kept published beside this one after a breaking
+	 *  change, each as `<view>_v<version>` until its date.
+	 */
+	deprecated?: Deprecated[],
+	/**
+	 *  How it is computed: absent, on read (a view); `on_change`, stored
+	 *  and recomputed when one of its inputs changes; `{ every: 1h }`,
+	 *  stored and recomputed on that clock.
+	 */
+	materialize?: Materialize | null,
+	/**  Guidance for an agent reading the model. Not part of the contract. */
+	ai_context?: AiContext | null,
+};
+
+/**
+ *  One promised field: a column of the dataset's view.
+ *
+ *  Equality is the contract's: `ai_context` is guidance for an agent, not
+ *  a promise, so two columns that differ only in it are equal and editing it
+ *  never needs a version bump.
+ */
+export type DatasetField = {
+	name: string,
+	/**
+	 *  The declared type SQLite reports for the view's column
+	 *  (`PRAGMA table_info`); empty for a computed column.
+	 */
+	type?: string,
+	doc: string,
+	/**
+	 *  Guidance for an agent reading the column. Not part of the contract:
+	 *  left out of `model_contract` and the golden, stored on the model.
+	 */
+	ai_context?: AiContext | null,
+};
+
+/**  A model's declaration and its SQL file. */
+export type DatasetSource = {
+	decl: DatasetDecl,
+	/**  Where the SQL came from, for error locations (`models/work_item.sql`). */
+	file: string,
+	sql: string,
+	/**
+	 *  For a kept earlier version (named `<name>_v<version>`): what it's a
+	 *  version of. Its columns are filled from the contract that version
+	 *  published when it compiles.
+	 */
+	twin: Twin | null,
 };
 
 /**  Where in the manifest it was declared. */
@@ -2352,11 +2405,11 @@ export type Extension_Deserialize = {
 	 */
 	dimensions: DimensionEntry[],
 	/**
-	 *  Its SQL models (`models:` plus `models/<name>.sql`), published as
+	 *  Its datasets (`datasets:` plus `models/<name>.sql`), published as
 	 *  `v_<extension>_<name>` (`extension_models`). Empty when any
 	 *  declaration is broken (see `errors`).
 	 */
-	models: ModelSource[],
+	datasets: DatasetSource[],
 	/**
 	 *  Left-nav panels it contributes (valid ones; invalid ones are in
 	 *  `errors`).
@@ -2506,11 +2559,11 @@ export type Extension_Serialize = {
 	 */
 	dimensions: DimensionEntry[],
 	/**
-	 *  Its SQL models (`models:` plus `models/<name>.sql`), published as
+	 *  Its datasets (`datasets:` plus `models/<name>.sql`), published as
 	 *  `v_<extension>_<name>` (`extension_models`). Empty when any
 	 *  declaration is broken (see `errors`).
 	 */
-	models: ModelSource[],
+	datasets: DatasetSource[],
 	/**
 	 *  Left-nav panels it contributes (valid ones; invalid ones are in
 	 *  `errors`).
@@ -3585,36 +3638,6 @@ export type MetricEntry = {
 	ai_context?: AiContext | null,
 };
 
-/**  One model as its owner declares it (an entry of `models.yaml`). */
-export type ModelDecl = {
-	name: string,
-	version: number,
-	description: string,
-	/**  The contract: the view's columns, in order. */
-	columns: ColumnDecl[],
-	/**
-	 *  The columns whose values name one row: declared columns,
-	 *  part of the contract. A key implies its test (never null, never
-	 *  repeated), and a materialized model's table takes it as its
-	 *  primary key.
-	 */
-	key?: string[],
-	tests?: TestDecl[],
-	/**
-	 *  Earlier versions kept published beside this one after a breaking
-	 *  change, each as `<view>_v<version>` until its date.
-	 */
-	deprecated?: Deprecated[],
-	/**
-	 *  How it is computed: absent, on read (a view); `on_change`, stored
-	 *  and recomputed when one of its inputs changes; `{ every: 1h }`,
-	 *  stored and recomputed on that clock.
-	 */
-	materialize?: Materialize | null,
-	/**  Guidance for an agent reading the model. Not part of the contract. */
-	ai_context?: AiContext | null,
-};
-
 /**  Features callers may discover before requesting a model operation. */
 export type ModelFeature = "text" | "image" | "toolCalling" | "streaming";
 
@@ -3623,20 +3646,6 @@ export type ModelFreshness = {
 	model: string,
 	/**  RFC 3339. */
 	changedAt: string,
-};
-
-/**  A model's declaration and its SQL file. */
-export type ModelSource = {
-	decl: ModelDecl,
-	/**  Where the SQL came from, for error locations (`models/work_item.sql`). */
-	file: string,
-	sql: string,
-	/**
-	 *  For a kept earlier version (named `<name>_v<version>`): what it's a
-	 *  version of. Its columns are filled from the contract that version
-	 *  published when it compiles.
-	 */
-	twin: Twin | null,
 };
 
 /**  A node of a page's view. */
@@ -5011,6 +5020,16 @@ export type Relationship = {
 	/**  The model the column points into. */
 	to: string,
 	field: string,
+};
+
+/**
+ *  One declared relationship: this dataset's field `from` holds values of
+ *  `to`, another dataset's field (`<dataset>.<field>`, the dataset named
+ *  as a `ref()` names it).
+ */
+export type RelationshipDecl = {
+	from: string,
+	to: string,
 };
 
 /**

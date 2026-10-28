@@ -226,7 +226,7 @@ fn every_live_model_reads_the_columns_it_declares() {
             .find(|s| s.decl.name == *name)
             .unwrap_or_else(|| panic!("no core model `{name}`"))
             .decl;
-        let declared: Vec<&str> = decl.columns.iter().map(|c| c.name.as_str()).collect();
+        let declared: Vec<&str> = decl.fields.iter().map(|c| c.name.as_str()).collect();
         assert_eq!(declared, crate::live_models::columns(name), "{name}");
     }
 }

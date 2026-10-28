@@ -70,7 +70,7 @@ fn identifier(s: &str) -> bool {
 /// and an error (`file:line: …`) for each broken one.
 pub fn parse_decorators(
     extension: &str,
-    models: &[oxplow_db::models::ModelSource],
+    models: &[oxplow_db::models::DatasetSource],
     value: &serde_yaml::Value,
     file: &str,
     manifest: &str,
@@ -96,7 +96,7 @@ pub fn parse_decorators(
         };
         let line = item_line;
         let model = models.iter().find(|m| m.decl.name == d.model);
-        let has = |col: &str| model.is_some_and(|m| m.decl.columns.iter().any(|c| c.name == col));
+        let has = |col: &str| model.is_some_and(|m| m.decl.fields.iter().any(|c| c.name == col));
         let wanted: Vec<&str> = ["uri", d.label.as_str()]
             .into_iter()
             .chain(d.color.as_deref())
@@ -154,7 +154,7 @@ mod tests {
             d.path(),
             ".oxplow/extensions/flags/extension.yaml",
             &format!(
-                "manifest: 2\nname: flags\nengine: \">=0.1\"\nversion: 0.1.0\nintent:\n  purpose: p\n  examples: [{{ name: a }}]\nmodels:\n  - name: flags\n    version: 1\n    description: d\n    columns:\n      - {{ name: uri, type: TEXT, doc: r }}\n      - {{ name: label, type: TEXT, doc: l }}\n      - {{ name: color, type: TEXT, doc: c }}\nui:\n  decorators:\n{decorators}"
+                "manifest: 2\nname: flags\nengine: \">=0.1\"\nversion: 0.1.0\nintent:\n  purpose: p\n  examples: [{{ name: a }}]\ndatasets:\n  - name: flags\n    version: 1\n    description: d\n    fields:\n      - {{ name: uri, type: TEXT, doc: r }}\n      - {{ name: label, type: TEXT, doc: l }}\n      - {{ name: color, type: TEXT, doc: c }}\nui:\n  decorators:\n{decorators}"
             ),
         );
         write(

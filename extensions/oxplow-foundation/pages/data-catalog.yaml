@@ -1,36 +1,37 @@
 title: Data catalog
-description: 'What oxplow''s data holds: every model (`v_*` view) with its owner, what it holds and its columns (name and type); name one (`v_effort` or `effort`) for its columns'' docs, key and any `ai_context` guidance for reading it (a JSON `{instructions, synonyms, examples}`). Query them with `oxplow_query_sql`; metrics are read with `MEASURE(''<key>'')` over `metric_grid()` (their units and aggregation are in `v_metric_spec`).'
+description: 'What oxplow''s data holds: every dataset (`v_*` view) with its owner, what it holds and its fields (name and type); name one (`v_effort` or `effort`) for its fields'' docs, key, relationships to other datasets and any `ai_context` guidance for reading it (a JSON `{instructions, synonyms, examples}`). Query them with `oxplow_query_sql`; metrics are read with `MEASURE(''<key>'')` over `metric_grid()` (their units and aggregation are in `v_metric_spec`).'
 hidden: true
 tool: catalog
 params:
-- name: model
-  label: Model (`v_effort`); empty for all
+- name: dataset
+  label: Dataset (`v_effort`); empty for all
   default: ''
 data:
   catalog:
     sql: |
       SELECT m.view, m.owner,
-             m.description || CASE WHEN m.ai_context IS NOT NULL THEN ' [ai_context: ' || m.ai_context || ']' ELSE '' END AS description,
+             m.description || CASE WHEN m.ai_context IS NOT NULL THEN ' [ai_context: ' || m.ai_context || ']' ELSE '' END
+               || CASE WHEN :dataset <> '' AND m.relationships IS NOT NULL THEN ' [relationships: ' || m.relationships || ']' ELSE '' END AS description,
              (SELECT group_concat(
                        c.name || ' ' || coalesce(c.sql_type, '')
-                       || CASE WHEN :model <> '' AND c.doc IS NOT NULL THEN ' — ' || c.doc ELSE '' END
-                       || CASE WHEN :model <> '' AND c.key_part IS NOT NULL THEN ' (key)' ELSE '' END
-                       || CASE WHEN :model <> '' AND c.ai_context IS NOT NULL THEN ' [ai_context: ' || c.ai_context || ']' ELSE '' END,
-                       CASE WHEN :model <> '' THEN char(10) ELSE ', ' END)
-                FROM (SELECT * FROM v_model_column c WHERE c.view = m.view ORDER BY c.position) c) AS columns
-      FROM v_model m
-      WHERE :model = '' OR m.view = :model OR m.name = :model
+                       || CASE WHEN :dataset <> '' AND c.doc IS NOT NULL THEN ' — ' || c.doc ELSE '' END
+                       || CASE WHEN :dataset <> '' AND c.key_part IS NOT NULL THEN ' (key)' ELSE '' END
+                       || CASE WHEN :dataset <> '' AND c.ai_context IS NOT NULL THEN ' [ai_context: ' || c.ai_context || ']' ELSE '' END,
+                       CASE WHEN :dataset <> '' THEN char(10) ELSE ', ' END)
+                FROM (SELECT * FROM v_field c WHERE c.view = m.view ORDER BY c.position) c) AS fields
+      FROM v_dataset m
+      WHERE :dataset = '' OR m.view = :dataset OR m.name = :dataset
       ORDER BY m.owner <> 'core', m.owner, m.view
 view:
   from: catalog
   viz: table
   columns:
   - key: view
-    label: Model
+    label: Dataset
   - key: owner
     label: Owner
   - key: description
     label: Holds
-  - key: columns
-    label: Columns
-  empty: No model by that name; leave `model` empty to list them all.
+  - key: fields
+    label: Fields
+  empty: No dataset by that name; leave `dataset` empty to list them all.

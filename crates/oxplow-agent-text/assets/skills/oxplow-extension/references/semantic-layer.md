@@ -1,11 +1,11 @@
-# Finding the data, URIs, and publishing models
+# Finding the data, URIs, and publishing datasets
 
 ## Find the data
 
-- `v_model` lists every queryable view (`v_stream`, `v_thread`, `v_work_item`,
+- `v_dataset` lists every queryable view (`v_stream`, `v_thread`, `v_work_item`,
   `v_effort`, `v_comment`, `v_wiki_page`, `v_snapshot`, `v_measure`,
-  `v_capture`, `v_fact`, …) with its doc, and `v_model_column` documents
-  every column: `SELECT view, name, sql_type, doc FROM v_model_column WHERE
+  `v_capture`, `v_fact`, …) with its doc, and `v_field` documents
+  every field (column): `SELECT view, name, sql_type, doc FROM v_field WHERE
   view = 'v_work_item'`. **Read them first**; don't guess column names.
 - Comment threads on pages are `v_comment`, and each one's messages
   `v_comment_message` (`WHERE comment = <the thread's uri> ORDER BY
@@ -73,24 +73,26 @@ Carry URIs; never assemble or dissect them:
   extension removed; store the URI anyway, and expect a reader to show it
   as unresolved rather than fail.
 
-## Publishing models
+## Publishing datasets
 
-When other pages, extensions or agents should read a shaped dataset —
-not just one page — publish it as a **model**: a documented, versioned
-view. Declare it in `extension.yaml` and write its SQL in
+When other pages, extensions or agents should read a shaped set of rows —
+not just one page — publish it as a **dataset**: a documented, versioned
+view. Declare it under `datasets:` in `extension.yaml` and write its SQL in
 `models/<name>.sql`:
 
 ```yaml
-models:
+datasets:
   - name: blocked
     version: 1
     description: Blocked tasks, oldest first.
-    columns:                       # the contract: every column, in order
-      - { name: id, type: INTEGER, doc: Task id. }
+    fields:                        # the contract: every column, in order
+      - { name: uri, type: TEXT, doc: The work item. }
       - { name: title, type: TEXT, doc: Title. }
+    relationships:                 # optional: a field holding another dataset's values
+      - { from: uri, to: work_item.uri }
     tests:
-      - { not_null: id }
-      - { unique: id }
+      - { not_null: uri }
+      - { unique: uri }
 ```
 
 ```sql
@@ -100,23 +102,28 @@ SELECT uri, title FROM ref('work_item') WHERE state = 'blocked'
 
 - It publishes as `v_<extension>_<name>` (dashes as underscores):
   `v_late_work_blocked` for extension `late-work`.
-- Read through `ref()` only: `ref('work_item')` is a core model (`v_work_item`),
-  `ref('blocked')` your own model or synced entity. Another extension's
-  model is read through an import ("Importing another extension's model" below). `source('<table>')` is only
+- Read through `ref()` only: `ref('work_item')` is a core dataset (`v_work_item`),
+  `ref('blocked')` your own dataset or synced entity. Another extension's
+  dataset is read through an import ("Importing another extension's dataset" below). `source('<table>')` is only
   for your own source tables (`ext__<ext>__<entity>`).
-- `type` is what SQLite reports for the column (`PRAGMA table_info`);
-  leave it out for a computed column (`count(*)`, an expression).
-- **Changing the columns is a breaking change:** bump `version`. To keep
+- `type` is what SQLite reports for the field's column (`PRAGMA table_info`);
+  leave it out for a computed one (`count(*)`, an expression).
+- `relationships: [{ from: <field>, to: <dataset>.<field> }]` says a field
+  holds another dataset's values (`to` names the dataset as `ref()` does:
+  `work_item.uri`, `blocked.uri`, `other-ext/items.uri`). `from` must be one
+  of the fields; a `to` that names no dataset or field is an extension error.
+  Readers see them in `v_dataset.relationships`. Not part of the contract.
+- **Changing the fields is a breaking change:** bump `version`. To keep
   the old shape for readers, keep its SQL in another file and list it:
   `deprecated: [{ version: 1, file: blocked.v1.sql, until: 2027-01-01 }]`
   publishes `v_<ext>_blocked_v1` until then.
 - **`ai_context`** is optional guidance for an agent that reads the
-  catalog, on a model, on one of its columns, on a metric and on a
+  catalog, on a dataset, on one of its fields, on a metric and on a
   dimension: `ai_context: { instructions: "When to use it and how to read it.",
   synonyms: [tickets], examples: ["open items by assignee"] }`. Every key
-  is optional; an unknown key is refused. It is not part of a column's
+  is optional; an unknown key is refused. It is not part of a field's
   contract: changing it never needs a `version` bump. Agents read it in
-  `v_model.ai_context`, `v_model_column.ai_context`,
+  `v_dataset.ai_context`, `v_field.ai_context`,
   `v_metric_spec.ai_context` and `v_dimension.ai_context` (a JSON text,
   NULL when absent), and in the `catalog` tool.
 - Check runs the compile without publishing; oxplow publishes after
@@ -124,9 +131,9 @@ SELECT uri, title FROM ref('work_item') WHERE state = 'blocked'
   errors and `v_model_test`, and the view stays up.
 - **Let other extensions build on it** by exporting it:
   `exports: [{ contribution: "oxplow:oxplow/model?model=<ext>/<name>", version: 1,
-  visibility: stable }]` (the version is the model's). Unexported, it's yours alone.
+  visibility: stable }]` (the version is the dataset's). Unexported, it's yours alone.
 
-### Importing another extension's model
+### Importing another extension's dataset
 
 Declare what you read, at the version you read it, and read it through
 the binding:

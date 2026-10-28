@@ -49,12 +49,12 @@ collectors:
     entry: collectors/ddl.star
     on: [snapshot.taken]
     facts: [schema_review.ddl]
-models:
+datasets:
   - name: verdict
     version: 2
     key: [effort_id]
     description: "Each effort that changed a migration file, judged: `changes requested` when it drops a table, its latest test run isn't an observed green one, its diff coverage is under 90%, or a function it added is more complex than 15; else `accepted`."
-    columns:
+    fields:
       - { name: effort_id, type: INTEGER, doc: "The effort (v_effort.id)." }
       - { name: uri, type: TEXT, doc: "The effort's uri (`oxplow:oxplow/effort?id=eff<id>`)." }
       - { name: verdict, type: TEXT, doc: "`accepted` or `changes requested`." }

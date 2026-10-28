@@ -20,7 +20,7 @@
 //! connection, reads each live model its SQL names and hands the rows to
 //! the query as a temp table, with a temp view of the model's own name over
 //! it. The core model of that name is an empty typed stub, there for the
-//! contract (columns, docs, `v_model`) and to compile against; no model may
+//! contract (columns, docs, `v_dataset`) and to compile against; no model may
 //! read one (it would read the stub).
 
 use std::sync::{Arc, OnceLock};

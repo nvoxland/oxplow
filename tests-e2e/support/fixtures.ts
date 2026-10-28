@@ -42,7 +42,7 @@ async function workspace(): Promise<Workspace> {
     // extension's is published once they are.
     await until("the extensions' models to publish", 60_000, async () => {
       const out = await ipc<{ rows: unknown[][] }>(daemon, "query_sql", {
-        sql: "SELECT 1 FROM v_model WHERE view = 'v_e2e_item'",
+        sql: "SELECT 1 FROM v_dataset WHERE view = 'v_e2e_item'",
       });
       return out.rows.length > 0;
     });

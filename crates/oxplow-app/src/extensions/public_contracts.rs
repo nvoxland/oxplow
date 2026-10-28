@@ -225,7 +225,7 @@ fn resolve_global_imports(extensions: &mut [Extension]) {
 
 pub(super) fn prepare(ext: &mut Extension) {
     let queries: Vec<_> = ext
-        .models
+        .datasets
         .iter()
         .map(|model| {
             (
@@ -630,7 +630,7 @@ fn resolve(extensions: &mut [Extension], publish: bool) {
 fn remove_guarded(ext: &mut Extension, id: &ContributionId) {
     let local = id.local.as_str();
     match id.kind {
-        ContributionKind::Model => ext.models.retain(|model| {
+        ContributionKind::Model => ext.datasets.retain(|model| {
             model.decl.name != local && model.twin.as_ref().is_none_or(|twin| twin.of != local)
         }),
         ContributionKind::Page => ext.page_files.retain(|page| page.slug != local),
@@ -733,7 +733,7 @@ fn prune_mounts(extensions: &mut [Extension], blocked: &BTreeSet<String>) {
                 }
             });
             let models: BTreeSet<_> = ext
-                .models
+                .datasets
                 .iter()
                 .map(|model| oxplow_db::models::extension_view(&ext.name, &model.decl.name))
                 .collect();
@@ -779,7 +779,7 @@ fn prune_mounts(extensions: &mut [Extension], blocked: &BTreeSet<String>) {
 
 fn bind_sql(ext: &mut Extension) {
     let bindings = &ext.public_contracts.bindings;
-    for model in &mut ext.models {
+    for model in &mut ext.datasets {
         model.sql = rewrite_sql(&model.sql, bindings, true);
     }
     for page in &mut ext.page_files {

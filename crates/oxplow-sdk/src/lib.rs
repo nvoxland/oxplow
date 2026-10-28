@@ -370,12 +370,12 @@ pub fn scaffold_with(
              \x20   input: \"SELECT uri, title, state FROM v_work_item\"\n\
              \x20   entities:\n\
              \x20     - {{ name: item, key: uri, columns: {{ uri: text, title: text }} }}\n\
-             models:\n\
+             datasets:\n\
              \x20 # v_{ns}_open_items: SQL over the entity (`ref('item')`), checked at load.\n\
              \x20 - name: open_items\n\
              \x20   version: 1\n\
              \x20   description: \"TODO: what these rows are.\"\n\
-             \x20   columns:\n\
+             \x20   fields:\n\
              \x20     - {{ name: uri, type: TEXT, doc: \"The work item (oxplow:oxplow/work_item?id=<id>&provider=<provider>).\" }}\n\
              \x20     - {{ name: title, type: TEXT, doc: \"Its title.\" }}\n"
         )),
@@ -2126,7 +2126,7 @@ mod tests {
         write(
             dir.path(),
             ".oxplow/extensions/other/extension.yaml",
-            "manifest: 2\nname: other\nintent:\n  purpose: x\nmodels:\n  - { name: things, version: 1, description: Things., columns: [{ name: n, type: \"\", doc: N. }] }\n",
+            "manifest: 2\nname: other\nintent:\n  purpose: x\ndatasets:\n  - { name: things, version: 1, description: Things., fields: [{ name: n, type: \"\", doc: N. }] }\n",
         );
         write(
             dir.path(),

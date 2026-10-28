@@ -1,6 +1,6 @@
 // Explore Data's pure half: the queries it runs over oxplow's models and
 // what it makes of their rows. The model registry is the catalog —
-// `v_model_column` for a model's documented columns, `v_model_lineage` for
+// `v_field` for a dataset's documented fields, `v_model_lineage` for
 // what it reads and what reads it — and a metric reads as a line through
 // `metric_grid()`. `main.ts` runs them over the bridge (`querySql`).
 
@@ -44,8 +44,8 @@ export interface Lineage {
   readBy: string[];
 }
 
-export const MODEL_SQL = "SELECT view, owner, description FROM v_model WHERE view = ?1";
-export const MODEL_COLUMNS_SQL = "SELECT name, sql_type, doc FROM v_model_column WHERE view = ?1 ORDER BY position";
+export const MODEL_SQL = "SELECT view, owner, description FROM v_dataset WHERE view = ?1";
+export const MODEL_COLUMNS_SQL = "SELECT name, sql_type, doc FROM v_field WHERE view = ?1 ORDER BY position";
 export const LINEAGE_SQL = "SELECT view, input, kind FROM v_model_lineage WHERE view = ?1 OR input = ?1";
 export const METRICS_SQL = "SELECT key, title FROM v_metric_catalog ORDER BY title";
 /** The dimensions a metric can be sliced by (`v_dimension`). */

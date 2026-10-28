@@ -871,7 +871,7 @@ mod tests {
     async fn catalog(svc: &oxplow_app::Services) -> Vec<String> {
         let models = svc
             .sql
-            .query_sql("SELECT view FROM v_model ORDER BY view", vec![], None)
+            .query_sql("SELECT view FROM v_dataset ORDER BY view", vec![], None)
             .await
             .unwrap();
         let mut out: Vec<String> = models
