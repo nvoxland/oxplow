@@ -18,6 +18,9 @@ intent:
     - name: ddl-counted
       input: { collector: ddl }
       expect: one fact per kind of statement in each migration file, none for other files
+    - name: the-verdict-joins-the-migrations-facts-with-core-evidence
+      input: { sql: "SELECT verdict, reasons, statements FROM v_schema_review_verdict WHERE effort_id = 1" }
+      expect: a migration's DDL facts, the effort's reported test run and its new complex function make the verdict
 # What a migration file holds, per kind of statement.
 measures:
   - key: schema_review.ddl

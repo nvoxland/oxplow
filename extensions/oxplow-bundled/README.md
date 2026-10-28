@@ -109,8 +109,9 @@ no reviewer has acted on).
 - **The model** is the person's binding of `oxplow-bundled/reasoning` in
   Settings → AI, else their Main model. With neither, nothing is asked:
   the effect skips and says where to bind one.
-- **Approve** the job `reasoning` and the effects `infer-reasoning` and
-  `store-reasoning` (Settings → Data → Programs) before anything runs.
+- **Nothing else to approve:** the job `reasoning` and the effects
+  `infer-reasoning` and `store-reasoning` run as this extension, under the
+  permissions it was deployed with.
 - **Infer Again** on the list (`effort.infer_reasoning { again: true }`)
   asks once more, e.g. after binding another model; an unchanged prompt
   on the same model reads the answer it already has.

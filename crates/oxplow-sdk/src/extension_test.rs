@@ -1606,7 +1606,7 @@ fn given_project(host: &Host, project: &Value) -> Result<(), String> {
 ///   heads the git indexer read (each replaces what was stored).
 /// - `visit: { page, kind?, label?, thread?, duration_ms? }`: a page the person
 ///   opened, as the shell records it.
-/// - `facts: { measure, producer?, items?: [{ value?, path?, line?, rule?, severity?, detail?, subject? }] }`:
+/// - `facts: { measure, producer?, items?: [{ value?, path?, line?, rule?, severity?, detail?, subject?, dims? }] }`:
 ///   what a collector found, recorded as one capture of the measure.
 /// - `retention: { days }`: the log's retention sweep, run as it is `days`
 ///   from now: payloads past their keep are expired, envelopes stay.
@@ -1703,7 +1703,7 @@ async fn first_stream(host: &Host) -> Result<oxplow_domain::StreamId, String> {
 /// `change: { kind?, target, files?: [{ path, status?, additions?,
 /// deletions?, zone?, is_test? }], functions?: [{ path, symbol, name?, status?,
 /// container?, signature_changed?, body_changed?, start_line?, visibility?,
-/// is_test?, length?, params_before?, params_after?, complexity_delta? }] }`:
+/// is_test?, length?, params_before?, params_after?, complexity?, complexity_delta? }] }`:
 /// what the change analysis stored for a change (`SqliteChangeStore::
 /// store_results`). A `working` or `effort` change's head is the working
 /// tree; a `commit`'s is the commit `target`.
@@ -1757,6 +1757,7 @@ async fn observe_change(host: &Host, body: &Value) -> Result<(), String> {
             length: int(&f, "length"),
             params_before: int(&f, "params_before"),
             params_after: int(&f, "params_after"),
+            complexity: f.get("complexity").and_then(Value::as_f64),
             complexity_delta: f.get("complexity_delta").and_then(Value::as_f64),
             path,
             ..Default::default()
@@ -2278,7 +2279,7 @@ async fn observe_visit(host: &Host, body: &Value) -> Result<(), String> {
 }
 
 /// `facts: { measure, producer?, items?: [{ value?, path?, line?, rule?,
-/// severity?, detail?, subject? }] }`: findings of `measure` (declared by
+/// severity?, detail?, subject?, dims? }] }`: findings of `measure` (declared by
 /// core or an extension), recorded as one capture
 /// (`SqliteFactStore::record_facts`), the way a collector's run records them.
 async fn observe_facts(host: &Host, body: &Value) -> Result<(), String> {
@@ -2307,6 +2308,7 @@ async fn observe_facts(host: &Host, body: &Value) -> Result<(), String> {
                 severity: text("severity"),
                 rule: text("rule"),
                 detail: text("detail"),
+                dims_json: f.get("dims").map(Value::to_string),
                 ..oxplow_db::NewFact::new(
                     measure.id,
                     f.get("value").and_then(Value::as_f64).unwrap_or(1.0),
@@ -6620,9 +6622,9 @@ expect:
           - { path: src/hot.rs, status: modified, additions: 10, deletions: 2 }
           - { path: src/new.rs, status: added, additions: 3, is_test: true }
         functions:
-          - { path: src/hot.rs, symbol: grow, status: modified, body_changed: true, length: 20, complexity_delta: 3 }
+          - { path: src/hot.rs, symbol: grow, status: modified, body_changed: true, length: 20, complexity: 17, complexity_delta: 3 }
 when:
-  sql: SELECT f.path, f.additions, f.is_test, (SELECT count(*) FROM v_change_function g WHERE g.change_id = f.change_id) AS fns FROM v_change_file f JOIN v_change c ON c.id = f.change_id WHERE c.kind = 'commit' AND c.target = 'abc' ORDER BY f.path
+  sql: SELECT f.path, f.additions, f.is_test, (SELECT count(*) FROM v_change_function g WHERE g.change_id = f.change_id AND g.complexity = 17) AS fns FROM v_change_file f JOIN v_change c ON c.id = f.change_id WHERE c.kind = 'commit' AND c.target = 'abc' ORDER BY f.path
 expect:
   rows:
     - { path: src/hot.rs, additions: 10, is_test: 0, fns: 1 }
@@ -6740,13 +6742,13 @@ expect:
             dir.path(),
             ".oxplow/extensions/notes/fixtures/basic.yaml",
             "given:
-  - observe: { facts: { measure: oxplow.test_case, items: [{ path: src/a.rs, line: 3, rule: bug }, { path: src/b.rs, line: 9, rule: cleanup, value: 2 }] } }
+  - observe: { facts: { measure: oxplow.test_case, items: [{ path: src/a.rs, line: 3, rule: bug }, { path: src/b.rs, line: 9, rule: cleanup, value: 2, dims: { oxplow.status: failed } }] } }
 when:
-  sql: SELECT path, line, rule, value FROM v_fact WHERE measure_key = 'oxplow.test_case' ORDER BY path
+  sql: SELECT path, line, rule, value, dims_json LIKE '%failed%' AS failed FROM v_fact WHERE measure_key = 'oxplow.test_case' ORDER BY path
 expect:
   rows:
-    - { path: src/a.rs, line: 3, rule: bug, value: 1.0 }
-    - { path: src/b.rs, line: 9, rule: cleanup, value: 2.0 }
+    - { path: src/a.rs, line: 3, rule: bug, value: 1.0, failed: null }
+    - { path: src/b.rs, line: 9, rule: cleanup, value: 2.0, failed: 1 }
 ",
         );
         let report = test_extension(dir.path(), "notes", false).await.unwrap();

@@ -641,7 +641,7 @@ Status: done. Core keeps detection and the health report; the bundled
 effect `oxplow-bundled/repair-disabled` files (or comments on) the repair
 item through `oxplow.work_item.create` / `comment` on the active work list,
 deduplicating by the open item's `Repair <extension> <contribution>:` title
-prefix (no stable work-item key exists yet), once a person approves it. An
+prefix (no stable work-item key exists yet). An
 effect whose event carries no thread is an anchorless effect (no thread
 gate). `contribution_repair.rs`, the `contribution.repair` consumer and
 `contribution_health.repair_item`/`repair_seq` are gone (V58).

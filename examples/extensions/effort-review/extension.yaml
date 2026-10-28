@@ -16,6 +16,12 @@ intent:
     - name: review-asked
       input: { job: review }
       expect: the model reads the effort's evidence, then answers; the call, the evidence and the answer are the job's output
+    - name: a-finished-review-is-commented-on-the-work-item
+      input: { job: review }
+      expect: the finished review is commented on the effort's work item and its reviews row carries what the model wrote
+    - name: a-cancelled-review-keeps-what-it-had-in-the-comment
+      input: { job: review }
+      expect: a review cancelled while it writes is commented with what it had and says it was cancelled
     - name: review-cancelled
       input: { job: review }
       expect: cancelled while it writes, the job stops and keeps what it had

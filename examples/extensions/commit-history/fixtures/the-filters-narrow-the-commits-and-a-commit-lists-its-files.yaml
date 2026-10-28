@@ -1,0 +1,32 @@
+# The filters (search, merges only) narrow the commits table; the commit
+# the table selects (`commit`) fills the files section.
+given:
+  - observe: { commit: { sha: aaa1111, at: "2026-10-01T09:00:00Z", subject: Add the parser, author: Ann, email: ann@example.test, files: [{ path: src/parse.rs, status: A, additions: 40 }, { path: src/lib.rs, additions: 2, deletions: 1 }] } }
+  - observe: { commit: { sha: bbb2222, at: "2026-10-02T09:00:00Z", subject: Fix the lexer, author: Bob, email: bob@example.test, parents: [aaa1111] } }
+  - observe: { commit: { sha: ccc3333, at: "2026-10-03T09:00:00Z", subject: Merge the lexer fix, author: Ann, email: ann@example.test, parents: [aaa1111, bbb2222] } }
+when:
+  page: history
+  params: { range: all }
+expect:
+  loaders:
+    commits:
+      rows:
+        - { sha: ccc3333, subject: Merge the lexer fix }
+        - { sha: bbb2222, subject: Fix the lexer }
+        - { sha: aaa1111, subject: Add the parser }
+steps:
+  - params: { q: lexer }
+    expect:
+      loaders:
+        commits: { rows: [{ sha: ccc3333 }, { sha: bbb2222 }] }
+  - params: { merges: true }
+    expect:
+      loaders:
+        commits: { rows: [{ sha: ccc3333 }] }
+  - params: { commit: aaa1111 }
+    expect:
+      loaders:
+        files:
+          rows:
+            - { path: src/lib.rs, status: M, additions: 2, deletions: 1 }
+            - { path: src/parse.rs, status: A, additions: 40 }

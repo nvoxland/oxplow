@@ -51,4 +51,4 @@ saying the import withheld them and why.
 `oxplow extension test .oxplow/extensions/review-badges` runs the two page
 examples (both empty in a fresh project).
 `oxplow-sdk/tests/examples.rs` also runs it beside effort-review: present,
-disabled, on another version and missing, and with a real review.
+on another version and missing.

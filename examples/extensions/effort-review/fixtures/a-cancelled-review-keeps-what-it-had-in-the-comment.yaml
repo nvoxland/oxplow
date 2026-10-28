@@ -1,0 +1,26 @@
+# Cancelled while the model writes: the job ends cancelled, and the comment
+# on the work item keeps what it had and says so. (Oxplow's own work list,
+# effort policy and wiki are bundled's.)
+requires: [oxplow-bundled]
+when:
+  setup:
+    - { command: oxplow.work_item.create, input: { title: Parse blocks } }
+    - { command: oxplow.effort.open, input: { thread: thr1, work_item: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow" } }
+    - { command: oxplow.effort.close, input: { effort: "eff1" } }
+  job: review
+  intentKey: "review:eff1"
+  cancel: true
+  request:
+    schemaVersion: 1
+    role: summarize
+    messages:
+      - { role: user, parts: [{ type: text, text: "Review eff1 at length." }] }
+expect:
+  state: cancelled
+  effects: { contains: [{ id: effort-review/publish-review, state: ok }] }
+steps:
+  - when: { sql: "SELECT body FROM v_work_item_comment WHERE body LIKE '**Review of eff1**%The review was cancelled after%'" }
+    expect: { rows: 1 }
+model:
+  replies:
+    - { text: "The tests the agent ran cover the parser change, but the diff coverage leaves the error path untested.", chunkDelayMs: 100 }

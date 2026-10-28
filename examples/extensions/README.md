@@ -3,8 +3,9 @@
 Each folder is a working extension built only on oxplow's public
 extension services. Copy one to your project's `.oxplow/extensions/`,
 deploy it (`oxplow.extension.deploy { name }`) to use it, and run `oxplow extension test .oxplow/extensions/<name>` to run
-its examples on a throwaway oxplow. `crates/oxplow-sdk/tests/examples.rs`
-runs them all, some against a real in-memory oxplow too.
+its examples on a throwaway oxplow. `every_example_scaffolds_checks_and_tests_clean`
+(`crates/oxplow-sdk/tests/just_works.rs`) copies each one with `oxplow extension new --from <example>`
+and runs its fixtures; `tests/examples.rs` adds only what the SDK reports about two of them.
 
 | Example | What it shows |
 |---|---|
@@ -39,7 +40,7 @@ that run through public commands and the SDK only:
   resolves, reads real reviews, and degrades — pages and the task-page
   slot withheld, the rest loaded, the reason printed — when the producer
   is disabled, missing or exports another version.
-  Tests: the review-badges tests in `examples.rs`.
+  Tests: the review-badges test in `examples.rs` (available, disabled, missing and another version).
 
 A fourth proves a review isn't oxplow's to decide:
 

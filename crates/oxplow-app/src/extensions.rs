@@ -2038,8 +2038,8 @@ pub struct Extension {
     /// Resources it declares (valid ones — the vocabulary registers
     /// them, `vocabulary_reactor`).
     pub resources: Vec<crate::extension_resources::ExtensionResource>,
-    /// Effects it declares (valid ones — each runs only once a person
-    /// approves it, `effects`).
+    /// Effects it declares (valid ones; each reacts once the extension is
+    /// deployed, `effects`).
     pub effects: Vec<crate::effects::EffectDecl>,
     /// The capability implementations it declares (`implementations:`,
     /// each a built-in of core's).
@@ -2134,8 +2134,8 @@ impl Extension {
     }
 
     /// The project's own: not one that ships with oxplow. Only it may run
-    /// its own programs to record facts and parse reports, each once a
-    /// person approved it.
+    /// its own programs to record facts and parse reports, under the
+    /// permissions a person approved when it was deployed.
     pub fn is_own(&self) -> bool {
         self.origin == "project"
     }

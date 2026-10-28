@@ -107,7 +107,24 @@ async fn every_example_scaffolds_checks_and_tests_clean() {
             .filter(|w| !w.contains("aren't run"))
             .collect();
         assert!(unexpected.is_empty(), "{}: {unexpected:?}", example.name);
-        assert!(!report.ran.is_empty(), "{} ran its examples", example.name);
+        // Every example the manifest names ran.
+        let manifest = example
+            .files
+            .iter()
+            .find(|(rel, _)| *rel == "extension.yaml")
+            .map(|(_, bytes)| serde_yaml::from_slice::<serde_yaml::Value>(bytes).unwrap())
+            .unwrap();
+        let named = manifest["intent"]["examples"].as_sequence().unwrap();
+        assert!(!named.is_empty(), "{} names examples", example.name);
+        for item in named {
+            let ran = format!("example {}", item["name"].as_str().unwrap());
+            assert!(
+                report.ran.contains(&ran),
+                "{ran} of {} in {:?}",
+                example.name,
+                report.ran
+            );
+        }
     }
 }
 

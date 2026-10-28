@@ -1,0 +1,13 @@
+# The mount puts the example's page in the New Session page's `sections`
+# slot, after `start`, fed the thread the person is starting a session in.
+given:
+  - observe: { turn: { prompt: Review the page migration } }
+when:
+  page: oxplow-foundation/new-session
+  params: { stream_id: 1, thread_id: 1 }
+expect:
+  nodes:
+    - { id: start }
+    - { id: session-history.thread-history }
+  loaders:
+    session-history.thread-history/thread_history: { rows: [{ prompt: Review the page migration }] }

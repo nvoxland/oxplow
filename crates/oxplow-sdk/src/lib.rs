@@ -19,7 +19,7 @@ mod throwaway;
 
 use std::path::{Path, PathBuf};
 
-use oxplow_app::extension_catalog::ExtensionCatalog;
+pub use oxplow_app::extension_catalog::ExtensionCatalog;
 use oxplow_app::extensions::{self, Extension, EXTENSIONS_DIR};
 pub use oxplow_app::metric_scaffold::MetricStarter;
 use oxplow_app::sql_gateway::SqlGateway;

@@ -29,7 +29,7 @@ view:
     label: How Sure
   - key: why
     label: Why
-  empty: Nothing inferred. The agent recorded its decisions or made none worth noting; or no model serves `oxplow-bundled/reasoning` (Settings → AI); or its programs aren't approved (Settings → Data → Programs).
+  empty: Nothing inferred. The agent recorded its decisions or made none worth noting; or no model serves `oxplow-bundled/reasoning` (Settings → AI); or the extension is turned off.
   actions:
   - id: confirm
     label: Confirm

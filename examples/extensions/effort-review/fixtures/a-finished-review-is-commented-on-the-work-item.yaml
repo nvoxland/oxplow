@@ -1,0 +1,30 @@
+# A review that finishes is commented on the effort's work item, and the
+# effort's `reviews` row carries what the model wrote. (Oxplow's own work
+# list, effort policy and wiki are bundled's.)
+requires: [oxplow-bundled]
+when:
+  setup:
+    - { command: oxplow.work_item.create, input: { title: Parse blocks } }
+    - { command: oxplow.effort.open, input: { thread: thr1, work_item: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow" } }
+    - { command: oxplow.test.record_run, as: agent, input: { command: cargo test, passed: 12, failed: 0, total: 12 } }
+    - { command: oxplow.effort.close, input: { effort: "eff1" } }
+  job: review
+  intentKey: "review:eff1"
+  request:
+    schemaVersion: 1
+    role: summarize
+    messages:
+      - { role: user, parts: [{ type: text, text: "Review eff1." }] }
+expect:
+  state: succeeded
+  effects: { contains: [{ id: effort-review/publish-review, state: ok }] }
+  commands: { contains: [oxplow.work_item.comment] }
+steps:
+  - when: { sql: "SELECT body FROM v_work_item_comment WHERE body LIKE '**Review of eff1**%'" }
+    expect: { rows: [{ body: "**Review of eff1**\n\nThe tests pass." }] }
+  - when: { sql: "SELECT effort, state, review FROM v_effort_review_reviews" }
+    expect:
+      rows:
+        - { effort: "oxplow:oxplow/effort?id=eff1", state: succeeded, review: "The tests pass." }
+model:
+  replies: ["The tests pass."]

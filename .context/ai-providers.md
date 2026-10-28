@@ -677,7 +677,7 @@ its source; with no model bound, the recorded ones are all there is.
   "Unverified Claims" with their source (stated or read) and review state.
 - Disabling oxplow-bundled, removing its permissions or replacing them with
   another extension's (an effect that calls the same commands) needs no
-  core change. Pinned end to end in `oxplow-sdk/tests/examples.rs`.
+  core change. Pinned in `oxplow-bundled`'s `reasoning-*` and `infer-reasoning-*` fixtures.
 
 ## Settings → AI (current)
 
