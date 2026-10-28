@@ -29,7 +29,7 @@ test("a replaceable node shows the active replacement, and oxplow's own once it 
   await expect(page.getByTestId("replacement-work_item.list")).toHaveCount(0);
 
   await installExtension(daemon, "e2e-replacement", {
-    manifest: "ui:\n  replacements:\n    - { target: work_item.list, page: wombat-list, version: 1 }\n",
+    manifest: "ui:\n  mounts:\n    - { page: wombat-list, at: work_item.list, version: 1 }\n",
     files: { "pages/wombat-list.yaml": lanes },
   });
   const replaced = host.getByTestId("replacement-work_item.list");

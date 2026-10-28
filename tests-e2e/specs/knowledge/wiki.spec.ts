@@ -133,6 +133,7 @@ test("the editor formats a selection and takes a dropped page as a link", async 
   const body = page.locator('[data-node="body"]:visible');
   await expect(body).toContainText("Start here.");
   await body.locator(".ProseMirror p", { hasText: "Start here." }).click();
+  await expect(body.locator(".ProseMirror")).toBeFocused();
   await page.keyboard.press("End");
   // A keyboard selection ("Home" is the document's start on macOS).
   for (let i = 0; i < "Start here.".length; i++) await page.keyboard.press("Shift+ArrowLeft");

@@ -25,7 +25,7 @@ actions:
 
 test("a page's form action submits, and the page shows the result", async ({ page, daemon }) => {
   await installExtension(daemon, "e2e-form", {
-    manifest: "permissions:\n  commands: [oxplow.work_item.create]\n",
+    manifest: "permissions: [commands:oxplow.work_item.create]\n",
     files: { "pages/numbat.yaml": spec },
   });
   await page.goto("/");
