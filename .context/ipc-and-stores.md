@@ -252,6 +252,26 @@ touches roughly seven files. They sit in this order:
 The component then calls the api wrapper and (if the data is reactive)
 subscribes to the relevant `*.changed` event to refetch.
 
+## A read on both front doors
+
+A read both the person and the agent make is one operation. The
+surface-parity manifest (`crates/oxplow-surface-parity`) says how for
+every `Both` row:
+
+- **`via_bus`** — the IPC adapter runs the agent's bus command as the
+  person (`commands::bus::read_as_person`), so the bus validates and
+  answers for both. `tests/parity.rs` checks the adapter's source names
+  the command. `search` and `vcs_blame` are these.
+- **`both_shaped`** — the person's call has another shape (an open run a
+  window holds, the explorer's `raw` switch, the comment layer's own
+  drawing) and both call the one service; the row says what differs.
+
+An IPC read with no UI caller is deleted, not kept beside the agent's:
+`validate_extension`, `vcs_log`, `vcs_branches` and `ensure_change` are the
+agent's commands only. Two bodies for one read drift — the deleted
+`validate_extension` dry-ran a check's SQL on the project's database,
+which `oxplow_sdk::check` says a check never does.
+
 ## Worked example: `wiki_page`
 
 Reads of a persisted feature are models now (P6): the `wiki_page`
@@ -844,9 +864,9 @@ unchanged. File contents come from snapshot blobs, so the `search.index`
 pump consumer indexes them on `snapshot.taken` (durable, redelivered after
 a crash). Nothing reaches the index on the in-memory bus. Archiving a
 stream purges its file rows (`purge_stream_files`). See
-[resources.md](./resources.md) "Where URIs are stored" (the search index). Exposed identically on IPC
-(`search`) and MCP (`oxplow_search`) — see the parity manifest
-(`crates/oxplow-surface-parity`).
+[resources.md](./resources.md) "Where URIs are stored" (the search index). One operation on
+both doors: the IPC `search` runs the agent's `oxplow.search.find` as the
+person ("A read on both front doors").
 
 ## Related
 

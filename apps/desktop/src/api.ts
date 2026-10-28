@@ -32,9 +32,6 @@ import type {
   HarnessListing,
   PanelPlacement,
   UiPreference,
-  ChangeRow,
-  ChangeTarget,
-  CheckReport,
   CommentIntent,
   CommentMessage,
   CommentStatus,
@@ -45,7 +42,6 @@ import type {
   Viz,
   RecentProjectView,
   RoleBinding,
-  ScriptServices,
   ServiceListing,
   CommandOutcome,
   CommandSpec,
@@ -63,7 +59,7 @@ export interface ProviderConfig {
   kind: string;
   baseUrl: string | null;
 }
-export type { ServiceListing, ScriptServices };
+export type { ServiceListing };
 export type { Extension, VizConfig, VizRun, Viz, SearchHit, SqlCell, SqlQueryResult };
 
 /// Convert the tauri-specta {status, data|error} envelope into a
@@ -334,14 +330,8 @@ import {
   type StreamHead,
 } from "./streamHead.js";
 import { streamRowId } from "./modelIds.js";
-import type {
-  BlameLine,
-  RevisionInfo,
-} from "./tauri-bridge/generated/bindings.js";
-export type {
-  BlameLine,
-  RevisionInfo,
-};
+import type { BlameLine } from "./tauri-bridge/generated/bindings.js";
+export type { BlameLine };
 
 // ---- The stream's version control, neutral (`.context/vcs.md`) ----
 
@@ -493,9 +483,6 @@ export async function listServices(): Promise<ServiceListing[]> {
   return unwrap(await commands.listServices());
 }
 
-export async function validateExtension(name: string, streamId: string | null): Promise<CheckReport> {
-  return unwrap(await commands.validateExtension(name, streamId));
-}
 
 /// Tell the backend what this window shows (`tabs/tabReport.ts`), for an
 /// agent's `list_tabs` / `get_open_page`.
@@ -505,9 +492,6 @@ export async function reportTabs(report: TabReport): Promise<void> {
 
 /// Analyze a change (a commit, an effort, or a stream's working tree) if
 /// needed and return its `v_change` row. See `.context/semantic-layer.md`.
-export async function ensureChange(target: ChangeTarget): Promise<ChangeRow> {
-  return unwrap(await commands.ensureChange(target));
-}
 
 export { openInSystemBrowser } from "./tauri-bridge/systemBrowser.js";
 export {

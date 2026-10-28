@@ -18,16 +18,17 @@ pub async fn search(
     resources: Option<Vec<String>>,
     limit: Option<u32>,
 ) -> Result<Vec<SearchHit>, IpcError> {
-    let resources = resources.unwrap_or_default();
-    Ok(svc
-        .search_store
-        .search(
-            &query,
-            stream_id.as_deref(),
-            &resources,
-            limit.unwrap_or(50) as usize,
-        )
-        .await?)
+    crate::commands::bus::read_as_person(
+        svc,
+        "oxplow.search.find",
+        serde_json::json!({
+            "query": query,
+            "stream_id": stream_id,
+            "resources": resources,
+            "limit": limit,
+        }),
+    )
+    .await
 }
 
 #[cfg(test)]
@@ -39,5 +40,21 @@ mod tests {
             .await
             .unwrap();
         assert!(out.is_array());
+    }
+
+    /// The person's search is the agent's: a stream id that isn't one is
+    /// refused at its field, on either front door.
+    #[tokio::test]
+    async fn a_thread_id_as_the_stream_is_refused() {
+        let (svc, _dir) = crate::test_support::services().await;
+        let err = crate::dispatch(
+            "search",
+            serde_json::json!({ "query": "anything", "streamId": "thr1" }),
+            &svc,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.code, "INVALID", "{err:?}");
+        assert_eq!(err.field.as_deref(), Some("/stream_id"), "{err:?}");
     }
 }

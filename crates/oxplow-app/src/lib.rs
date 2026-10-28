@@ -58,8 +58,6 @@ pub mod contribution_health;
 pub mod credential_lint;
 pub mod daemon_supervisor;
 pub mod diagnostics;
-#[cfg(test)]
-mod directory_page_tests;
 pub mod duplication_scan;
 #[cfg(test)]
 mod earlier_sessions_tests;

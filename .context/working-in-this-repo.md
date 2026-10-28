@@ -279,9 +279,7 @@ An extension's behavior is a fixture in its extension, written first
 (`extensions.md` "`oxplow extension test`"): a page, a command, an
 event's effects, a job, a collector, an advisory, a query over its
 models, a custom component's own code (`ui:` steps, "Testing a
-component"). Never a new Rust test: Rust tests are for core (the page
-tests that were in `bundled_extensions.rs` and `settings_pages_tests.rs`
-are fixtures now; `directory_page_tests.rs` is what remains of them). A
+component"). Never a new Rust test: Rust tests are for core. A
 fixture runs on a throwaway oxplow — this build's schema, only the data
 it makes, only the extensions its own declares (a fixture's `requires:`
 adds more, e.g. `oxplow-bundled` for oxplow's work list) — never the

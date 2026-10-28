@@ -32,6 +32,19 @@ pub async fn run_command(
     Ok(outcome)
 }
 
+/// A read the person makes through the bus: command `id` run as the
+/// person, its result decoded. A typed IPC read the agent has too is
+/// this, so both front doors validate and answer alike.
+pub(crate) async fn read_as_person<T: serde::de::DeserializeOwned>(
+    svc: &Services,
+    id: &str,
+    input: serde_json::Value,
+) -> Result<T, IpcError> {
+    let outcome = svc.commands.run(&Actor::Human, id, input, false).await?;
+    serde_json::from_value(outcome.result)
+        .map_err(|e| IpcError::internal(format!("`{id}` answered an unexpected shape: {e}")))
+}
+
 /// The page a person's run of command `id` opens next: its
 /// `ui.open_after` bound from the run's `result` by the one tokenizer
 /// (`CommandUi::open_after_for`); `None` when it says none. A field the

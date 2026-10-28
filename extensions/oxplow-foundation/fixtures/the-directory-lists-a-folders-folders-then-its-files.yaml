@@ -1,0 +1,15 @@
+# The Directory page, the renderer of `oxplow/dir`: a folder's rows,
+# folders first, each naming the URI it opens.
+given:
+  - observe: { turn: { prompt: c, write: { path: src/sub/c.rs, body: "c\n" } } }
+  - observe: { turn: { prompt: b, write: { path: src/b.rs, body: "b\n" } } }
+  - observe: { turn: { prompt: a, write: { path: src/a.rs, body: "a\n" } } }
+  - observe: { turn: { prompt: top, write: { path: top.txt, body: "t\n" } } }
+when: { page: oxplow-foundation/directory, params: { stream_id: 1, path: src } }
+expect:
+  loaders:
+    directory:
+      rows:
+        - { name: sub, icon: folder, target: "oxplow:oxplow/dir?path=src/sub" }
+        - { name: a.rs, icon: file, target: "oxplow:oxplow/file?path=src/a.rs" }
+        - { name: b.rs, icon: file, target: "oxplow:oxplow/file?path=src/b.rs" }

@@ -577,7 +577,7 @@ the user guide is `docs/guide/pages.md`.
 - **Surfaces.**
   - IPC: `open_page` (starts a run a window keeps open), `run_page`,
     `get_page`, `page_text`, `page_form`, `submit_page_form`,
-    `run_page_action`, `validate_extension`. MCP: `oxplow_run_page`,
+    `run_page_action`. MCP: `oxplow_run_page`,
     `oxplow_find_page`, `oxplow_show_page`, `oxplow_run_page_action`,
     `oxplow_validate_extension`; an agent reads a
     page's definition with `oxplow_read`
@@ -613,8 +613,8 @@ the user guide is `docs/guide/pages.md`.
   - **Over IPC (the UI)** they show the live set: `list_extensions`,
     `get_page`, `load_component` and `invoke_component_command` take no
     stream; `open_page`, `run_page` and `run_page_action` take one only for
-    the page's data context. `validate_extension` is an authoring call and
-    checks the named stream's source.
+    the page's data context. Checking an extension is the agent's
+    `oxplow_validate_extension` (and the CLI's `check`), not an IPC read.
   - `oxplow_get_open_page` (an agent's) plus `report_open_page` (UI) are
     current; see "Agents: the MCP surface".
     Agents write page files with their normal Edit tool, under the filing
@@ -1692,7 +1692,7 @@ version the file declares.
 
 `crates/oxplow-sdk` (P1.14; target §10.5) is the one
 implementation behind three doors: the `oxplow extension new|check|test`
-CLI, the RPC/MCP `validate_extension`, and `write_page`. Every
+CLI, the agent's `oxplow_validate_extension`, and `write_page`. Every
 door gives an author the same report, so an agent editing from a terminal
 and one calling MCP read identical `file:line: what — fix` lines.
 
@@ -1894,7 +1894,7 @@ and one calling MCP read identical `file:line: what — fix` lines.
   reads `<root>/.oxplow/local.sqlite` **read-only** (`Database::open_read_only`:
   no migrations, no writes). Exit 0 clean, 1 with errors (or an SDK error such as an unknown
   extension), 2 usage.
-- **`validate_extension`** (RPC and MCP) returns the `CheckReport`, not
+- **`oxplow_validate_extension`** returns the `CheckReport`, not
   the bare `Extension`; the extension is inside it.
 
 The `oxplow-extension` skill requires `check` after every edit.

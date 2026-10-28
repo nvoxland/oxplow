@@ -1,6 +1,6 @@
 //! `oxplow extension new|check|test` (`.context/extensions.md` "The
 //! SDK"). A thin argv shell over `oxplow_sdk`: the same `check` the
-//! RPC/MCP `validate_extension` runs, printed as `file:line: what — fix`
+//! agent's `oxplow_validate_extension` runs, printed as `file:line: what — fix`
 //! lines so an agent editing an extension from a terminal gets the same
 //! answer it would get through MCP. Exit 0 when clean, 1 with findings,
 //! 2 on a usage error.
