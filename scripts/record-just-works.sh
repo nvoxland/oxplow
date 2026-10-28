@@ -38,7 +38,7 @@ git -C "$project" -c user.name=record -c user.email=record@localhost commit -q -
   claude -p "$(cat "$prompt")" \
     --safe-mode \
     --no-session-persistence \
-    --append-system-prompt-file "$repo/crates/oxplow-agent-text/assets/oxplow-extension.SKILL.md" \
+    --append-system-prompt-file "$repo/crates/oxplow-agent-text/assets/skills/oxplow-extension/SKILL.md" \
     --permission-mode acceptEdits \
     --allowedTools Read Write Edit Glob Grep "Bash(oxplow extension:*)" "Bash(ls:*)" "Bash(cat:*)" "Bash(mkdir:*)" \
     --output-format json
@@ -47,7 +47,7 @@ git -C "$project" -c user.name=record -c user.email=record@localhost commit -q -
 
 rm -rf "$fixture/produced"
 mkdir -p "$fixture/produced"
-cp -R "$project/oxplow/extensions/." "$fixture/produced/"
+cp -R "$project/.oxplow/extensions/." "$fixture/produced/"
 
 : > "$fixture/check.txt"
 : > "$fixture/test.txt"

@@ -282,6 +282,29 @@ async fn a_scaffolded_command_checks_tests_and_runs_through_the_bus() {
     );
 }
 
+/// `extension new job` checks clean, and its fixtures run the job on the
+/// fixture model: the reply is the job's text, and the finished job reaches
+/// `publish`, which comments it on the work item.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_scaffolded_job_checks_tests_and_answers_with_the_fixture_model() {
+    let dir = project().await;
+    scaffolded(dir.path(), "job", "note-writer").await;
+    let ran = tested(dir.path(), "note-writer").await;
+    for example in ["example basic", "example published"] {
+        assert!(ran.contains(&example.to_string()), "{example} in {ran:?}");
+    }
+    let svc = booted(dir.path()).await;
+    let ext = loaded(&svc, dir.path(), "note-writer");
+    for command in ["job.ask", "job.status", "job.cancel", "note.ask"] {
+        let name = format!("{}.{command}", ext.namespace);
+        assert!(
+            ext.commands.iter().any(|c| c.name == name),
+            "{name} in {:?}",
+            ext.commands.iter().map(|c| &c.name).collect::<Vec<_>>()
+        );
+    }
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_scaffolded_effect_checks_tests_and_once_started_reacts() {
     use oxplow_app::effect_triggers::EffectTriggers;

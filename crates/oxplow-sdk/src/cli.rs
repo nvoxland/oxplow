@@ -14,7 +14,7 @@ use oxplow_app::extensions::EXTENSIONS_DIR;
 
 const USAGE: &str = "\
 usage:
-  oxplow extension new <page|extension|provider|collector|metric|command|effect|component|policy|advisory|skill|panel> <name> [--origin <ref>] [--capability <cap>] [--language <lang>] [--glob <glob>] [--root <dir>]
+  oxplow extension new <page|extension|provider|collector|metric|command|effect|component|policy|advisory|skill|panel|job> <name> [--origin <ref>] [--capability <cap>] [--language <lang>] [--glob <glob>] [--root <dir>]
       scaffold .oxplow/extensions/<name>/ with a v2 manifest, an intent
       (--origin = the effort/thread ref that asked for it), one example
       and its fixture, and the kind's starter: a page with a row action; a
@@ -28,10 +28,10 @@ usage:
       and line; a command composing core
       commands; an effect reacting to an event; a custom component with
       its page and bundle; an effort policy script; an advisory; a skill;
-      a panel over a page. Each checks clean
+      a panel over a page; a job (a cancellable model call, with its
+      commands, page and an effect that publishes the reply). Each checks clean
       and passes `test` as written
       (a provider once a real program replaces its stub)
-  oxplow extension check <name|path> [--impact] [--against <rev>] [--services] [--json] [--root <dir>]
   oxplow extension new --from <example> [<name>] [--root <dir>]
   oxplow extension new --list-examples
       copy an example extension oxplow ships (a working one: its pages,
@@ -39,6 +39,7 @@ usage:
       it. It keeps its name (its commands and models are named by it), so a
       different <name> is refused: rename after copying. --list-examples
       names them
+  oxplow extension check <name|path> [--impact] [--against <rev>] [--services] [--json] [--root <dir>]
       load the extension and report every problem with file:line, dry-running
       its models, commands, pages and advisories on a throwaway oxplow —
       this build's schema, no data, what the extension declares turned on
@@ -103,11 +104,11 @@ struct Parsed {
     origin: Option<String>,
     /// `new provider --capability`: the capability it implements.
     capability: Option<String>,
-    /// `new metric --language` / `--glob`: what it scans.
     /// `new --from <example>`: the example to copy.
     from: Option<String>,
     /// `new --list-examples`.
     list_examples: bool,
+    /// `new metric --language` / `--glob`: what it scans.
     language: Option<String>,
     glob: Option<String>,
     root: Option<PathBuf>,
@@ -126,9 +127,9 @@ fn parse(args: &[String]) -> Result<Parsed, Failure> {
     let mut p = Parsed {
         positional: Vec::new(),
         origin: None,
-        capability: None,
         from: None,
         list_examples: false,
+        capability: None,
         language: None,
         glob: None,
         root: None,
@@ -142,7 +143,6 @@ fn parse(args: &[String]) -> Result<Parsed, Failure> {
     let mut it = args.iter();
     while let Some(a) = it.next() {
         match a.as_str() {
-            "--origin" => {
             "--from" => {
                 p.from = Some(
                     it.next()
@@ -151,6 +151,7 @@ fn parse(args: &[String]) -> Result<Parsed, Failure> {
                 );
             }
             "--list-examples" => p.list_examples = true,
+            "--origin" => {
                 p.origin = Some(
                     it.next()
                         .ok_or_else(|| Failure::Usage("--origin needs a ref".into()))?
@@ -218,7 +219,6 @@ fn run_inner(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> Resul
         return Err(Failure::Usage("missing subcommand".into()));
     };
     match sub.as_str() {
-        "new" => {
         "new" if p.list_examples => {
             for example in crate::examples::all() {
                 let _ = writeln!(
@@ -245,6 +245,7 @@ fn run_inner(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> Resul
             );
             Ok(0)
         }
+        "new" => {
             let kind = pos
                 .next()
                 .and_then(|k| Kind::parse(k))
@@ -548,7 +549,7 @@ mod tests {
         assert_eq!(cli(&["migrate", "old", "--root", root]).0, 2);
         let (code, _, err) = cli(&["new", "widget", "x", "--root", root]);
         assert_eq!(code, 2);
-        assert!(err.contains("`skill` or `panel`"), "{err}");
+        assert!(err.contains("`panel` or `job`"), "{err}");
         let (code, _, err) = cli(&["check", "nope", "--root", root]);
         assert_eq!(code, 1);
         assert!(err.contains("no extension `nope`"), "{err}");
@@ -557,7 +558,6 @@ mod tests {
         assert!(err.contains("not a canonical ref"), "{err}");
     }
 
-    /// `new provider --capability` scaffolds a provider of that
     /// `new --from <example>` copies an example oxplow ships and keeps its
     /// name; `--list-examples` names them; a bad example or another name is a
     /// usage error that says what to do.
@@ -591,6 +591,7 @@ mod tests {
         assert_eq!(code, 0, "{err}");
     }
 
+    /// `new provider --capability` scaffolds a provider of that
     /// capability; one without a contract is refused, and the flag is a
     /// provider's alone.
     #[test]
