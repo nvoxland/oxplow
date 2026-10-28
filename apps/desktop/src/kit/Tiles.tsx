@@ -24,11 +24,12 @@ export function TileSlot({ size = "small", className, children, ...rest }: HTMLA
   );
 }
 
-/** A tile: a titled card. `title` may be a link the page builds. */
-export function Tile({ title, children, ...rest }: Omit<HTMLAttributes<HTMLElement>, "title"> & { title?: ReactNode }) {
+/** A tile: a titled card. `title` may be a link the page builds; `hideTitle`
+ *  keeps it for screen readers and leaves it off the card. */
+export function Tile({ title, hideTitle = false, children, ...rest }: Omit<HTMLAttributes<HTMLElement>, "title"> & { title?: ReactNode; hideTitle?: boolean }) {
   return (
     <section className="ox-tile" {...rest}>
-      {title ? <div className="ox-tile-title">{title}</div> : null}
+      {title ? <div className={hideTitle ? "ox-tile-title ox-sr-only" : "ox-tile-title"}>{title}</div> : null}
       <div className="ox-tile-body">{children}</div>
     </section>
   );

@@ -38,11 +38,13 @@ loaders:
 view:
   stack:
   - id: agent-session-waiting
-    title: ''
+    title: Waiting on you
+    hide_title: true
     from: agent_session_waiting
     viz: approvals
   - id: agent-session-terminal
-    title: ''
+    title: Terminal
+    hide_title: true
     from: agent_session_terminal
     viz: terminal
     terminal:

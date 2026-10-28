@@ -208,6 +208,9 @@ pub struct Node {
     /// Unique in its page; `#node=<id>` points at it.
     pub id: String,
     pub title: Option<String>,
+    /// Its heading isn't drawn (it stays in the page for Contents, screen
+    /// readers and agents).
+    pub hide_title: bool,
     /// A contract another extension's active provider may take its place
     /// under (`work_item.board`).
     pub replaceable: Option<String>,
@@ -660,15 +663,15 @@ fn loader_name_problem(name: &str) -> Option<String> {
             "loader `{name}`: a loader's name is lowercase letters, digits and `_`, starting with a letter"
         ));
     }
-    if name.starts_with("v_") || name.starts_with("m_") || matches!(name, "temp" | "main") {
-        return Some(format!(
-            "loader `{name}`: that name is a dataset's (or the database's): name it something else"
     if oxplow_db::sql_tokens::is_reserved_word(name) {
         return Some(format!(
             "loader `{name}`: that name is a SQL keyword, which SQL can't name a table by: \
              name it something else"
         ));
     }
+    if name.starts_with("v_") || name.starts_with("m_") || matches!(name, "temp" | "main") {
+        return Some(format!(
+            "loader `{name}`: that name is a dataset's (or the database's): name it something else"
         ));
     }
     None
@@ -928,6 +931,11 @@ fn parse_node(value: &serde_yaml::Value, ctx: &mut NodeCtx<'_>) -> Result<Node, 
     };
     let id = take_str(&mut map, "id")?;
     let title = take_str(&mut map, "title")?;
+    let hide_title = match map.remove("hide_title") {
+        None => false,
+        Some(serde_yaml::Value::Bool(b)) => b,
+        Some(other) => return Err(format!("`hide_title` is true or false, not {other:?}")),
+    };
     let replaceable = take_str(&mut map, "replaceable")?;
     let size = map
         .remove("size")
@@ -1034,6 +1042,7 @@ fn parse_node(value: &serde_yaml::Value, ctx: &mut NodeCtx<'_>) -> Result<Node, 
     Ok(Node {
         id: id.unwrap_or(default_id),
         title,
+        hide_title,
         replaceable,
         size,
         kind,
@@ -1092,6 +1101,25 @@ fn leaf_viz(
     Ok(cfg)
 }
 
+/// A section — a child of a `stack`, `grid` or `switch` — says what it is
+/// with a `title`; whether that heading is drawn is `hide_title`. A slot
+/// or an embed takes its title from the page it shows, so it needs none.
+fn check_titles(node: &Node) -> Result<(), String> {
+    for child in node.children() {
+        let titled = child.title.as_deref().is_some_and(|t| !t.trim().is_empty());
+        if !titled && !matches!(child.kind, NodeKind::Slot { .. } | NodeKind::Embed { .. }) {
+            return Err(format!(
+                "node `{}` is a section and needs a `title`: give it one, and add \
+                 `hide_title: true` if its heading shouldn't show (Contents and agents \
+                 still read it)",
+                child.id
+            ));
+        }
+        check_titles(child)?;
+    }
+    Ok(())
+}
+
 /// What needs the whole page: node ids, bindings, selections, switches,
 /// the badge and the answers.
 fn check_page(page: &Page) -> Result<(), String> {
@@ -1113,6 +1141,10 @@ fn check_page(page: &Page) -> Result<(), String> {
             return Err(format!("`replaceable: {target}` is placed once on a page"));
         }
         targets.push(target);
+    }
+    check_titles(&page.view)?;
+    if let Some(rail) = &page.rail {
+        check_titles(rail)?;
     }
     let mut seen: Vec<&str> = Vec::new();
     for node in page.nodes() {

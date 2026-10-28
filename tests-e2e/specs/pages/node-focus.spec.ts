@@ -11,8 +11,8 @@ loaders:
     sql: SELECT 1 AS n
 view:
   stack:
-    - { id: top, viz: table, from: rows }
-    - { id: target, viz: number, from: one }
+    - { id: top, title: Top, viz: table, from: rows }
+    - { id: target, title: Target, viz: number, from: one }
 `;
 
 test("opening a page URI with #node= scrolls to the node and marks it", async ({ page, daemon }) => {

@@ -168,7 +168,8 @@ loaders:
 view:
   stack:
   - id: about
-    title: ''
+    title: About
+    hide_title: true
     viz: detail
     from: about
     columns:
@@ -224,7 +225,8 @@ view:
     - { key: form, label: Opens a form }
   # Only an inline view's: nothing at all for a page with a file.
   - id: yaml
-    title: ''
+    title: YAML
+    hide_title: true
     viz: markdown
     from: yaml
     empty: ''

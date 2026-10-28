@@ -2136,7 +2136,7 @@ mod tests {
         write(
             dir.path(),
             ".oxplow/extensions/other/pages/home.yaml",
-            "title: Home\nloaders:\n  n: { sql: \"SELECT 1 AS n\" }\nview:\n  stack:\n    - { id: n, viz: number, from: n }\n    - { slot: more }\n",
+            "title: Home\nloaders:\n  n: { sql: \"SELECT 1 AS n\" }\nview:\n  stack:\n    - { id: n, title: N, viz: number, from: n }\n    - { slot: more }\n",
         );
         let user = |requires: &str, mounts: bool| {
             let slots = if mounts {

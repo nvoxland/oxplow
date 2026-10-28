@@ -9,6 +9,9 @@ export interface SectionProps {
    *  beside it (`at: { after: <id> }`). */
   id?: string;
   title: ReactNode;
+  /** The heading isn't drawn: it stays in the page, visually hidden, for
+   *  Contents and screen readers. */
+  hideTitle?: boolean;
   description?: ReactNode;
   actions?: readonly PageAction[];
   /** The extension it comes from, when it isn't the page's own: said by
@@ -32,6 +35,7 @@ export interface SectionProps {
 export function Section({
   id,
   title,
+  hideTitle = false,
   description,
   actions,
   source,
@@ -47,11 +51,12 @@ export function Section({
     <section
       className="ox-section"
       data-section={id}
+      data-title-hidden={hideTitle ? "true" : undefined}
       data-testid={testId ?? (collapse ? `${collapse.prefix}-group-${id}` : undefined)}
-      style={fill ? fillStyle : undefined}
+      style={fill ? (hideTitle ? hiddenFillStyle : fillStyle) : undefined}
     >
-      <div className="ox-section-head">
-        <h2 className="ox-section-title">
+      <div className={hideTitle && !actions && !source ? "ox-section-head ox-sr-only" : "ox-section-head"}>
+        <h2 className={hideTitle ? "ox-section-title ox-sr-only" : "ox-section-title"}>
           {collapse ? (
             // The toggle sits INSIDE the heading: it stays a heading for the
             // outline, and a real button gets the keyboard for free.
@@ -96,3 +101,5 @@ export function Section({
 }
 
 const fillStyle: CSSProperties = { display: "flex", flexDirection: "column", flex: 1, minHeight: 0 };
+/** A filling section with no heading draws as the filling body alone. */
+const hiddenFillStyle: CSSProperties = { ...fillStyle, marginTop: 0 };

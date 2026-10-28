@@ -30,8 +30,8 @@ loaders:
   count: { sql: "SELECT count(*) AS total FROM big" }
 view:
   stack:
-    - { viz: table, from: big }
-    - { viz: number, from: count }
+    - { title: Big ones, viz: table, from: big }
+    - { title: Total, hide_title: true, viz: number, from: count }
 "#,
     ),
     (
@@ -55,8 +55,8 @@ loaders:
 view:
   stack:
     - { embed: { page: acme/picked } }
-    - { viz: number, from: borrowed }
-    - { viz: list, from: colors }
+    - { title: Borrowed, viz: number, from: borrowed }
+    - { title: Colors, viz: list, from: colors }
 "#,
     ),
     (
@@ -71,8 +71,8 @@ view:
   switch:
     param: area
     children:
-      - { id: one, viz: list, from: one }
-      - { id: two, viz: list, from: two }
+      - { id: one, title: One, viz: list, from: one }
+      - { id: two, title: Two, viz: list, from: two }
 "#,
     ),
     (
@@ -227,9 +227,9 @@ loaders:
   last: { sql: "SELECT 2 AS b" }
 view:
   stack:
-    - { viz: number, from: first }
+    - { title: First, viz: number, from: first }
     - { slot: sections }
-    - { viz: number, from: last }
+    - { title: Last, viz: number, from: last }
 "#,
     ),
     (
@@ -242,8 +242,8 @@ loaders:
   after: { sql: "SELECT n, abs(random()) AS r FROM datasets" }
 view:
   stack:
-    - { viz: number, from: steady }
-    - { viz: table, from: after }
+    - { title: Steady, viz: number, from: steady }
+    - { title: After, viz: table, from: after }
 "#,
     ),
     (

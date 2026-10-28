@@ -20,6 +20,16 @@ async fn each_node_reads_under_its_id_with_its_loaders_rows() {
     assert!(text.contains("\n2\n") || text.contains("\n2"), "{text}");
 }
 
+/// A section whose title isn't drawn (`hide_title`) still reads under its
+/// heading, so an agent can name it.
+#[tokio::test]
+async fn a_section_with_a_hidden_title_still_has_its_heading() {
+    let (_dir, svc) = fixture().await;
+    let r = run(&svc, "acme/numbers", &[("n", SqlCell::Int(2))]).await;
+    let text = page_text(&svc, &svc.layout.project_dir, &r).await.unwrap();
+    assert!(text.contains("## Total [node count]"), "{text}");
+}
+
 #[tokio::test]
 async fn an_embed_reads_nested_with_its_ids_under_the_embeds() {
     let (_dir, svc) = fixture().await;

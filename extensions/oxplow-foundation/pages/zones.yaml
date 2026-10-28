@@ -11,5 +11,5 @@ loaders:
     sql: "SELECT path FROM v_zone_unmatched ORDER BY path"
 view:
   stack:
-  - { id: zones, viz: table, from: zones }
-  - { id: unmatched, viz: table, from: unmatched }
+  - { id: zones, title: Zones, viz: table, from: zones }
+  - { id: unmatched, title: Unmatched files, viz: table, from: unmatched }

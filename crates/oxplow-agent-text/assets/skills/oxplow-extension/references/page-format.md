@@ -53,7 +53,7 @@ loaders:
 view: { viz: table, from: failing }
 ```
 
-`loaders.md` is `loaders:`; `view-nodes.md` is `view:`; `recipes.md` has worked
+`loaders.md` is `loaders:`; `view-nodes.md` is `view:` (every section of a `stack`, `grid` or `switch` needs a `title`, and `hide_title: true` keeps its heading off the page); `recipes.md` has worked
 examples.
 
 ## Metadata

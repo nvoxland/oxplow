@@ -20,6 +20,8 @@ view:
   # co-change files): pages mounted at `oxplow-foundation/diff.file-header`.
   - slot: file-header
   - id: diff
+    title: Diff
+    hide_title: true
     from: diff
     viz: diff
     diff:

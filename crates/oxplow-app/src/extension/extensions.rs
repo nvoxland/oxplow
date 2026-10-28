@@ -5658,7 +5658,7 @@ commands:
         write(
             dir.path(),
             ".oxplow/extensions/base/pages/page.yaml",
-            "title: Page\nparams: [{ name: stream_id }]\nloaders:\n  a: { sql: \"SELECT :stream_id AS n\" }\n  b: { sql: \"SELECT 2 AS n\" }\nview:\n  stack:\n    - { viz: number, from: a }\n    - { slot: sections }\n    - { viz: number, from: b }\n",
+            "title: Page\nparams: [{ name: stream_id }]\nloaders:\n  a: { sql: \"SELECT :stream_id AS n\" }\n  b: { sql: \"SELECT 2 AS n\" }\nview:\n  stack:\n    - { title: A, viz: number, from: a }\n    - { slot: sections }\n    - { title: B, viz: number, from: b }\n",
         );
         write(
             dir.path(),
@@ -6878,7 +6878,7 @@ commands:
     fn a_stack_of_more_than_eight_sections_warns() {
         let stack = |n: usize| {
             let nodes: Vec<String> = (0..n)
-                .map(|i| format!("    - {{ id: s{i}, markdown: hi }}\n"))
+                .map(|i| format!("    - {{ id: s{i}, title: S{i}, markdown: hi }}\n"))
                 .collect();
             format!("title: P\nview:\n  stack:\n{}", nodes.concat())
         };

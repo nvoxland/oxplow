@@ -1444,13 +1444,13 @@ mod definition_page_tests {
 
     // Comments, quoted strings and whitespace must survive Show Definition:
     // this is the exact inline YAML, not a serialization of the parsed page.
-    const INLINE_SPEC: &str = "# authored inline, with its own comment\ntitle: 'Inline release'\nloaders:\n  numbers: { sql: 'SELECT 7 AS n' }\nview:\n  id: layout\n  stack:\n    - { id: total, title: Total, viz: number, from: numbers }\n    - { id: note, markdown: 'A preserved note.' }\n";
+    const INLINE_SPEC: &str = "# authored inline, with its own comment\ntitle: 'Inline release'\nloaders:\n  numbers: { sql: 'SELECT 7 AS n' }\nview:\n  id: layout\n  stack:\n    - { id: total, title: Total, viz: number, from: numbers }\n    - { id: note, title: Note, markdown: 'A preserved note.' }\n";
 
     /// A node says what it is set to, as its YAML does: a viz its columns
     /// and its role block, a switch its param.
     #[tokio::test]
     async fn an_inline_definitions_nodes_say_what_they_are_set_to() {
-        const SPEC: &str = "title: Set\nparams: [{ name: area, role: filter, default: one }]\nloaders:\n  items: { sql: \"SELECT 'a' AS id, NULL AS parent\" }\nview:\n  switch:\n    param: area\n    children:\n      - { id: one, viz: tree, from: items, tree: { id: id, parent: parent, label: id }, columns: [{ key: id, label: Item }], empty: None yet. }\n      - { id: two, markdown: 'Hi.' }\n";
+        const SPEC: &str = "title: Set\nparams: [{ name: area, role: filter, default: one }]\nloaders:\n  items: { sql: \"SELECT 'a' AS id, NULL AS parent\" }\nview:\n  switch:\n    param: area\n    children:\n      - { id: one, title: One, viz: tree, from: items, tree: { id: id, parent: parent, label: id }, columns: [{ key: id, label: Item }], empty: None yet. }\n      - { id: two, title: Two, markdown: 'Hi.' }\n";
         let f = crate::test_fixtures::services_with_effort().await;
         let out = f
             .svc

@@ -199,18 +199,22 @@ test("an embedded page's own actions are buttons above it, pressed naming the em
   await waitFor(() => expect(calls).toEqual([["run-1", "notes", "tidy", null, null, null, false]]));
 });
 
-// A section with no title is still a section of the page: apart from the
-// title and the sections around it, with no heading.
-test("an untitled section is spaced as a section, with no heading", () => {
+// A section's title says what it is; `hide_title` only keeps it from being
+// drawn: the heading stays in the page, visually hidden.
+test("a hidden-title section keeps its heading in the page, visually hidden", () => {
   const page = fakePage(
     node.stack("stack", [
-      node.viz("facts", "items", { columns: [{ key: "id" }] }, { title: "" }),
+      node.viz("facts", "items", { columns: [{ key: "id" }] }, { title: "Facts", hideTitle: true }),
       node.viz("more", "items", { columns: [{ key: "id" }] }, { title: "More" }),
     ]),
   );
   const run = fakeRun(page, { loaders: { items: loader(["id"], [["a"]]) } });
   const { container } = render(<PageTree run={run} runId="run-1" />);
-  const facts = container.querySelector('[data-node="facts"]')!;
-  expect(facts.querySelector(".ox-section")).not.toBeNull();
-  expect(facts.querySelector(".ox-section-title")).toBeNull();
+  const facts = container.querySelector('[data-node="facts"] section.ox-section')!;
+  const heading = facts.querySelector("h2.ox-section-title")!;
+  expect(heading.textContent).toBe("Facts");
+  expect(heading.className).toContain("ox-sr-only");
+  expect(facts.querySelector(".ox-section-head")!.className).toContain("ox-sr-only");
+  const more = container.querySelector('[data-node="more"] h2.ox-section-title')!;
+  expect(more.className).not.toContain("ox-sr-only");
 });

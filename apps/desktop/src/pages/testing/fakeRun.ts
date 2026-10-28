@@ -75,10 +75,11 @@ export function fakeAction(over: Partial<PageAction> & { id: string }): PageActi
 
 interface Common {
   title?: string | null;
+  hideTitle?: boolean;
   size?: TileSize | null;
 }
 
-const common = (id: string, o: Common = {}) => ({ id, title: o.title ?? null, replaceable: null, size: o.size ?? null });
+const common = (id: string, o: Common = {}) => ({ id, title: o.title ?? null, hideTitle: o.hideTitle ?? false, replaceable: null, size: o.size ?? null });
 
 export const node = {
   viz: (id: string, from: string | null, page: Partial<VizConfig> = {}, o: Common = {}): Node =>

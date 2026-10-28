@@ -17,6 +17,6 @@ loaders:
     sql: "SELECT collector, name FROM v_collector_credential WHERE is_set = 0 ORDER BY collector, name"
 view:
   stack:
-  - { id: runs, viz: table, from: runs }
-  - { id: collectors, viz: table, from: collectors }
-  - { id: credentials, viz: table, from: credentials }
+  - { id: runs, title: Runs, viz: table, from: runs }
+  - { id: collectors, title: Collectors, viz: table, from: collectors }
+  - { id: credentials, title: Missing credentials, viz: table, from: credentials }

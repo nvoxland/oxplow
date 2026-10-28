@@ -5,18 +5,30 @@ drawn in the page's rail. Every node has an `id`: unique in the page, by
 default its loader, embedded page, slot or component name, else `stack`,
 `stack-2`, … Give a node an `id` to point at it: `#node=<id>` in a link
 scrolls to it, and `oxplow_run_page` text prints each node under `[node
-<id>]`. Any node may have `title`, `replaceable` (a contract another
-extension's page may take over) and `size`.
+<id>]`. Any node may have `title`, `hide_title`, `replaceable` (a contract
+another extension's page may take over) and `size`.
+
+**A section needs a `title`.** A section is a child of a `stack`, `grid` or
+`switch` (in `view:` or `rail:`). Its title says what it is: it is the
+heading, the entry in the rail's Contents, and the heading `oxplow_run_page`
+text prints. A section with no `title`, or `title: ''`, is refused when the
+page loads. If the heading should not show (the section is plainly what the
+page is, or the page's title already says it), add `hide_title: true`: the
+heading is not drawn, but Contents, screen readers and agents still read it.
+A page whose whole `view:` is one node needs no title, and a `slot` or
+`embed` takes its title from the page it shows (an embed's own `title`
+replaces it).
 
 ## Layout
 
 ```yaml
 view:
   stack:                       # children one after another (sections)
-    - { viz: number, from: total }
-    - grid:                    # children as tiles, each at its size
-        - { viz: bar,  from: by_day, size: wide, chart: { x: day, y: n } }
-        - { viz: list, from: recent, size: tall }
+    - { title: Total, hide_title: true, viz: number, from: total }
+    - title: Activity
+      grid:                    # children as tiles, each at its size
+        - { title: By day, viz: bar,  from: by_day, size: wide, chart: { x: day, y: n } }
+        - { title: Recent, viz: list, from: recent, size: tall }
 ```
 
 - `stack: [nodes]`; `grid: [nodes]` (a child's `size`: `small` default,

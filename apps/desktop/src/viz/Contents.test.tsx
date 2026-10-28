@@ -29,3 +29,12 @@ test("three sections are not; a page of them shows no Contents", () => {
   const view = render(<Contents root={body(3)} />);
   expect(view.queryByTestId("viz-rail-contents")).toBeNull();
 });
+
+test("a section whose heading is visually hidden is still listed, in order", async () => {
+  const root = body(3);
+  root.querySelector("section")!.insertAdjacentHTML("beforebegin", `<section><h2 class="ox-section-title ox-sr-only">Hidden</h2></section>`);
+  const view = render(<Contents root={root} />);
+  await waitFor(() => expect(view.getByTestId("viz-rail-contents")).toBeTruthy());
+  const items = Array.from(view.getByTestId("viz-rail-contents").querySelectorAll("button")).map((b) => b.textContent);
+  expect(items).toEqual(["Hidden", "Section 0", "Section 1", "Section 2"]);
+});

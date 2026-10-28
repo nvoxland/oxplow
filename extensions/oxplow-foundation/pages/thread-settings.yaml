@@ -43,6 +43,8 @@ view:
       width: 120
     empty: None open. New session… on the thread's menu starts one.
   - id: hint
+    title: About the prompt
+    hide_title: true
     markdown: Appended to the agent's system prompt for this thread (on top of any stream-level prompt). Applies to agent sessions started after Save — existing sessions keep the prompt they launched with.
   - id: prompt
     title: Custom Prompt

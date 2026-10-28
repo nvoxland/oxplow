@@ -16,5 +16,5 @@ loaders:
     sql: "SELECT target_uri, ref_type FROM v_page_ref WHERE source_uri = :source ORDER BY target_uri"
 view:
   stack:
-  - { id: pointing_at, viz: table, from: pointing_at }
-  - { id: points_to, viz: table, from: points_to }
+  - { id: pointing_at, title: Pointing at it, viz: table, from: pointing_at }
+  - { id: points_to, title: It points to, viz: table, from: points_to }

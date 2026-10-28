@@ -3676,6 +3676,11 @@ export type Node_Deserialize = {
 	id: string,
 	title: string | null,
 	/**
+	 *  Its heading isn't drawn (it stays in the page for Contents, screen
+	 *  readers and agents).
+	 */
+	hideTitle: boolean,
+	/**
 	 *  A contract another extension's active provider may take its place
 	 *  under (`work_item.board`).
 	 */
@@ -3689,6 +3694,11 @@ export type Node_Serialize = {
 	/**  Unique in its page; `#node=<id>` points at it. */
 	id: string,
 	title: string | null,
+	/**
+	 *  Its heading isn't drawn (it stays in the page for Contents, screen
+	 *  readers and agents).
+	 */
+	hideTitle: boolean,
 	/**
 	 *  A contract another extension's active provider may take its place
 	 *  under (`work_item.board`).

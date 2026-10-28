@@ -17,5 +17,5 @@ loaders:
     sql: "SELECT page, stale FROM v_knowledge_ref WHERE path = :path"
 view:
   stack:
-  - { id: stale, viz: table, from: stale }
-  - { id: about_file, viz: table, from: about_file }
+  - { id: stale, title: Stale pages, viz: table, from: stale }
+  - { id: about_file, title: About this file, viz: table, from: about_file }

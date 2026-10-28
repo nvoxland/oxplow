@@ -9,7 +9,7 @@ loaders:
     sql: SELECT 'Outer echidna' AS line
 view:
   stack:
-  - { id: intro, viz: table, from: intro, columns: [{ key: line, label: Line }] }
+  - { id: intro, title: Intro, viz: table, from: intro, columns: [{ key: line, label: Line }] }
   - { id: inner, embed: { page: e2e-embed/echidna-inner, params: { name: spiny } } }
 `;
 
@@ -22,8 +22,8 @@ loaders:
     sql: SELECT 'Inner ' || :name AS line
 view:
   stack:
-  - { id: facts, viz: table, from: facts, columns: [{ key: line, label: Line }] }
-  - { id: note, markdown: The embedded note. }
+  - { id: facts, title: Facts, viz: table, from: facts, columns: [{ key: line, label: Line }] }
+  - { id: note, title: Note, markdown: The embedded note. }
 `;
 
 test("an embedded page's nodes show in the host, with ids <embed>/<child>", async ({ page, daemon }) => {

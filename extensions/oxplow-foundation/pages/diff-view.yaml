@@ -218,7 +218,8 @@ view:
       text: body
     empty: ''
   - id: verdict
-    title: ''
+    title: Verdict
+    hide_title: true
     replaceable: effort.verdict
     from: verdict
     viz: table

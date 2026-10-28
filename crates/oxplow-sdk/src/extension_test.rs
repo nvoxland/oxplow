@@ -7637,7 +7637,7 @@ loaders:
   items: {{ sql: \"{query}\" }}
 view:
   stack:
-    - {{ id: list, viz: table, from: items }}
+    - {{ id: list, title: Items, viz: table, from: items }}
 answers:
   - {{ question: \"What is open?\", params: {answer_params} }}
 "
@@ -8042,8 +8042,8 @@ loaders:
   items: { sql: \"SELECT title FROM v_work_item\" }
 view:
   stack:
-    - { id: add, viz: form, form: { command: oxplow.work_item.create } }
-    - { id: items, viz: table, from: items }
+    - { id: add, title: Add, viz: form, form: { command: oxplow.work_item.create } }
+    - { id: items, title: Items, viz: table, from: items }
 ",
             &[(
                 "submitted",
@@ -8076,7 +8076,7 @@ steps:
         write(
             root,
             ".oxplow/extensions/host/pages/items.yaml",
-            "title: Items\nloaders:\n  n: { sql: \"SELECT 1 AS n\" }\nview:\n  stack:\n    - { id: count, viz: number, from: n }\n    - { slot: extra }\n",
+            "title: Items\nloaders:\n  n: { sql: \"SELECT 1 AS n\" }\nview:\n  stack:\n    - { id: count, title: Count, viz: number, from: n }\n    - { slot: extra }\n",
         );
         write(
             root,

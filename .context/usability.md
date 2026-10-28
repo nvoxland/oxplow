@@ -77,7 +77,8 @@ markdown itself, nor edits it in a `<textarea>`.
   name ("Settings: Agents"). A link that means one place opens its area
   with `section` — one of the area's section ids or an anchor inside one
   (`settings-data-delivery`) — and the page scrolls there. A page of
-  four sections or more lists them in its rail (Contents). A declared document does the same with `view:
+  four sections or more lists them in its rail (Contents), those whose
+  heading is hidden (`hide_title`) too. A declared document does the same with `view:
   <param>`: the one section in view is the page, the others are its rail,
   a change of section is pushed (Back returns), and the launcher lists
   each section by name. On any page `#section=<id>` lands on that
@@ -574,7 +575,9 @@ not a pick and isn't in the address.
   plainly. A section's actions are `PageAction[]` too, at its heading. A
   primary action is the accent button; one per place.
 - **A section is a heading over a rule**, no box (`kit/Section`). A card
-  is a dashboard tile's, not a page section's.
+  is a dashboard tile's, not a page section's. Every section has a title
+  (it is its Contents entry); a heading that would look wrong is hidden
+  with `hide_title: true`, never left off.
 
 ## Proposals are drawn once
 

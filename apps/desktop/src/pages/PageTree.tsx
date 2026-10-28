@@ -160,20 +160,21 @@ function NodeView(props: NodeViewProps) {
     ) : (
       own
     );
-  // A page a slot mounted is titled by its own page.
-  const title = def ? (def.title ?? null) : (at.embed?.page.title ?? null);
+  // A page a slot mounted, or an embed with no title, is titled by its own
+  // page: an embed's heading is not drawn.
+  const title = def?.title || (def?.kind === "embed" || !def ? (at.embed?.page.title ?? null) : null);
+  const hideTitle = def ? def.hideTitle || (def.kind === "embed" && !def.title) : false;
   const fills = fillsNode(run, at);
   return (
     <NodeFrame id={id} fill={fills}>
       {placement === "section" && title ? (
-        <Section id={id} title={title} fill={fills}>
+        <Section id={id} title={title} hideTitle={hideTitle} fill={fills}>
           {body}
         </Section>
       ) : placement === "tile" ? (
-        <Tile title={title ?? undefined}>{body}</Tile>
-      ) : placement === "section" && !fills ? (
-        // Untitled, still a section: apart from what is around it.
-        <div className="ox-section">{body}</div>
+        <Tile title={title ?? undefined} hideTitle={hideTitle}>
+          {body}
+        </Tile>
       ) : (
         body
       )}
@@ -345,7 +346,7 @@ function VizNode(props: NodeViewProps & { def: Node; id: string }) {
 function emptySections(run: PageRun, at: RunNode): { id: string; title: string }[] {
   const candidates = at.children.flatMap((c) => {
     const def = nodeById(run.page, c.id);
-    if (!def || def.kind !== "viz" || !def.title || def.replaceable || c.error) return [];
+    if (!def || def.kind !== "viz" || !def.title || def.hideTitle || def.replaceable || c.error) return [];
     const vizRun = nodeRunOf(run, def);
     const loader = def.from !== null ? run.loaders[def.from] : undefined;
     if (!vizRun || !loader) return [];

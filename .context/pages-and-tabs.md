@@ -584,9 +584,13 @@ its kind, which is also what visits and bookmarks record
 resolve it to the page file's icon and title.
 
 oxplow's pages (`extensions/oxplow-foundation/pages/*.yaml`; a view is a
-`stack` of nodes drawn as sections unless noted; a section titled `''`
-has no heading but keeps a section's spacing, and takes no space when it
-draws nothing; a filling one is drawn bare):
+`stack` of nodes drawn as sections unless noted; every section has a
+`title` (the page loader refuses one without, naming the node), and
+`hide_title: true` keeps its heading out of sight — a `Section` whose
+heading is visually hidden (`ox-sr-only`) for Contents, screen readers and
+the agent text — while a hidden-title section that draws nothing takes no
+space and a filling one (the terminal) takes the page's height with no
+margin; an embed or a slot takes its title from the page it shows):
 
 - **Renderers.** `wiki-page` (`for: oxplow/wiki`, default, tab label
   `{{param.slug}}`, `comments: true`): a `markdown` viz over

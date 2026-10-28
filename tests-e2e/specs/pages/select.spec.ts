@@ -15,6 +15,7 @@ loaders:
 view:
   stack:
   - id: animals
+    title: Animals
     viz: table
     from: animals
     columns:

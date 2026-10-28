@@ -35,6 +35,52 @@ fn a_pages_loaders_are_under_loaders_and_data_is_refused_naming_it() {
     assert!(why.contains("write `loaders:`"), "{why}");
 }
 
+/// A section — a child of a `stack`, `grid` or `switch`, in the view or the
+/// rail — needs a `title`; a missing one and `''` are refused naming the
+/// node and the fix. `hide_title` is how its heading is kept off the page.
+#[test]
+fn a_section_needs_a_title_and_hide_title_keeps_it_unseen() {
+    let head = "title: T\nloaders:\n  q: { rows: [{ a: 1 }] }\n";
+    let why = refused(&format!(
+        "{head}view:\n  stack:\n    - {{ id: facts, viz: table, from: q }}\n"
+    ));
+    assert!(why.contains("node `facts`"), "{why}");
+    assert!(why.contains("needs a `title`"), "{why}");
+    assert!(why.contains("hide_title: true"), "{why}");
+    let why = refused(&format!(
+        "{head}view:\n  stack:\n    - {{ id: facts, title: '', viz: table, from: q }}\n"
+    ));
+    assert!(why.contains("node `facts`"), "{why}");
+    let why = refused(&format!(
+        "{head}view: {{ viz: table, from: q }}\nrail:\n  stack:\n    - {{ id: side, markdown: hi }}\n"
+    ));
+    assert!(why.contains("node `side`"), "{why}");
+    let why = refused(&format!(
+        "{head}view:\n  stack:\n    - title: One\n      grid:\n        - {{ id: tile, viz: table, from: q }}\n"
+    ));
+    assert!(why.contains("node `tile`"), "{why}");
+    // A page whose view is one node, and an embed or a slot (titled by the
+    // page it shows), need none.
+    page(&format!("{head}view: {{ viz: table, from: q }}\n")).expect("one node");
+    page(&format!(
+        "{head}view:\n  stack:\n    - {{ slot: after }}\n    - {{ embed: {{ page: acme/other }} }}\n"
+    ))
+    .expect("slot and embed");
+    let ok = page(&format!(
+        "{head}view:\n  stack:\n    - {{ id: facts, title: Facts, hide_title: true, viz: table, from: q }}\n    - {{ id: more, title: More, viz: table, from: q }}\n"
+    ))
+    .expect("loads");
+    let by_id = |id: &str| {
+        ok.nodes()
+            .into_iter()
+            .find(|n| n.id == id)
+            .unwrap()
+            .hide_title
+    };
+    assert!(by_id("facts"));
+    assert!(!by_id("more"));
+}
+
 /// A loader's SQL is read with the one SQL tokenizer: an apostrophe in a
 /// comment doesn't hide the loaders and params after it, a word or
 /// `:param` in a comment or a string isn't read, and a quoted identifier
@@ -48,6 +94,22 @@ fn a_loaders_sql_is_read_with_the_one_sql_tokenizer() {
     let q = p.loader("q").unwrap();
     assert_eq!(q.reads_loaders, ["a"]);
     assert_eq!(q.reads_params, ["kept"]);
+}
+
+/// A loader isn't named for a SQL keyword SQLite won't take as a table
+/// name (`order`, not `row`): the SQL that reads it couldn't name it, and
+/// a later loader's `ORDER BY` would read as reading it.
+#[test]
+fn a_loader_named_for_a_sql_keyword_is_refused() {
+    let why = refused(
+        "title: T\nloaders:\n  order: { rows: [{ a: 1 }] }\nview: { viz: table, from: order }\n",
+    );
+    assert!(why.contains("loader `order`"), "{why}");
+    assert!(why.contains("SQL keyword"), "{why}");
+    page(
+        "title: T\nloaders:\n  orders: { rows: [{ a: 1 }] }\nview: { viz: table, from: orders }\n",
+    )
+    .expect("a name that only starts like one is fine");
 }
 
 /// A page that shows one query: one loader, one viz node bound to it.
@@ -96,22 +158,6 @@ view:
 }
 
 /// Later loaders read earlier ones as tables; a stack holds nodes, an
-/// A loader isn't named for a SQL keyword SQLite won't take as a table
-/// name (`order`, not `row`): the SQL that reads it couldn't name it, and
-/// a later loader's `ORDER BY` would read as reading it.
-#[test]
-fn a_loader_named_for_a_sql_keyword_is_refused() {
-    let why = refused(
-        "title: T\nloaders:\n  order: { rows: [{ a: 1 }] }\nview: { viz: table, from: order }\n",
-    );
-    assert!(why.contains("loader `order`"), "{why}");
-    assert!(why.contains("SQL keyword"), "{why}");
-    page(
-        "title: T\nloaders:\n  orders: { rows: [{ a: 1 }] }\nview: { viz: table, from: orders }\n",
-    )
-    .expect("a name that only starts like one is fine");
-}
-
 /// embed and a slot; ids are unique across the tree.
 #[test]
 fn a_composite_page_shares_its_loaders() {
@@ -133,7 +179,7 @@ view:
     - { id: files, title: Files, viz: tree, from: files, tree: { id: path, parent: path, label: path } }
     - { embed: { page: other/review, params: { change: { from: change.change_id } } } }
     - { slot: sections }
-    - { markdown: "Some *notes*." , id: notes }
+    - { title: Notes, markdown: "Some *notes*." , id: notes }
 "#,
     )
     .unwrap();
@@ -178,8 +224,8 @@ loaders:
     rows: [{ state: failed, tone: danger }, { state: passed, tone: success }]
 view:
   stack:
-    - { id: timeline, component: { id: pr-timeline, props: { compact: true } } }
-    - { viz: list, from: colors }
+    - { id: timeline, title: Timeline, component: { id: pr-timeline, props: { compact: true } } }
+    - { title: Colors, viz: list, from: colors }
 badge: { loader: checks }
 answers:
   - { question: "Which checks failed on this PR?", params: { number: 12 } }
@@ -224,8 +270,8 @@ view:
   switch:
     param: area
     children:
-      - { id: agents, viz: number, from: agents }
-      - { id: ai, viz: number, from: ai }
+      - { id: agents, title: Agents, viz: number, from: agents }
+      - { id: ai, title: AI, viz: number, from: ai }
 "#,
     )
     .unwrap();
@@ -307,7 +353,7 @@ fn an_arg_comes_from_a_param_an_earlier_column_or_a_literal() {
 #[test]
 fn node_ids_are_unique() {
     let e = refused(
-        "title: T\nloaders:\n  a: { sql: SELECT 1 }\nview:\n  stack:\n    - { viz: table, from: a }\n    - { viz: list, from: a }\n",
+        "title: T\nloaders:\n  a: { sql: SELECT 1 }\nview:\n  stack:\n    - { title: A, viz: table, from: a }\n    - { title: B, viz: list, from: a }\n",
     );
     assert!(e.contains("node id `a`") && e.contains("twice"), "{e}");
 }
@@ -315,7 +361,7 @@ fn node_ids_are_unique() {
 #[test]
 fn a_switch_param_is_a_declared_filter_and_its_children_have_ids() {
     let e = refused(
-        "title: T\nloaders:\n  a: { sql: SELECT 1 }\nview: { switch: { param: area, children: [{ id: a, viz: table, from: a }] } }\n",
+        "title: T\nloaders:\n  a: { sql: SELECT 1 }\nview: { switch: { param: area, children: [{ id: a, title: A, viz: table, from: a }] } }\n",
     );
     assert!(e.contains("param `area`"), "{e}");
 }
@@ -546,6 +592,7 @@ loaders:
 view:
   stack:
     - id: list
+      title: Commits
       viz: table
       from: commits
       columns: [{ key: sha, select: commit }]
@@ -566,7 +613,7 @@ view:
 fn a_replaceable_node_names_a_known_target_once() {
     let page_with = |a: &str, b: &str| {
         format!(
-            "title: T\nloaders:\n  q: {{ sql: \"SELECT 1 AS n\" }}\nview:\n  stack:\n    - {{ id: a, viz: table, from: q, replaceable: {a} }}\n    - {{ id: b, viz: table, from: q, replaceable: {b} }}\n"
+            "title: T\nloaders:\n  q: {{ sql: \"SELECT 1 AS n\" }}\nview:\n  stack:\n    - {{ id: a, title: A, viz: table, from: q, replaceable: {a} }}\n    - {{ id: b, title: B, viz: table, from: q, replaceable: {b} }}\n"
         )
     };
     assert!(refused(&page_with("nope.thing", "work_item.board"))

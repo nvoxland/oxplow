@@ -19,6 +19,8 @@ loaders:
 view:
   stack:
   - id: hint
+    title: About the prompt
+    hide_title: true
     markdown: Appended to the agent's system prompt for every thread inside this stream. Applies to agent sessions started after Save — existing sessions keep the prompt they launched with.
   - id: prompt
     title: Custom Prompt

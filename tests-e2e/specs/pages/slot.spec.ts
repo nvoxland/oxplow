@@ -10,7 +10,7 @@ loaders:
     sql: SELECT 'ringtail' AS kind
 view:
   stack:
-  - { id: first, markdown: The host's own section. }
+  - { id: first, title: Host, markdown: The host's own section. }
   - { slot: extras }
 `;
 

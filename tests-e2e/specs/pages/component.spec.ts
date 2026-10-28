@@ -9,8 +9,8 @@ loaders:
     sql: SELECT 'spotted' AS kind UNION ALL SELECT 'northern'
 view:
   stack:
-  - { id: before, markdown: Above the component. }
-  - { id: echo, component: { id: echo, props: { mood: calm } } }
+  - { id: before, title: Before, markdown: Above the component. }
+  - { id: echo, title: Echo, component: { id: echo, props: { mood: calm } } }
 `;
 
 // It draws the rows of each loader it is fed, and its own props.

@@ -16,5 +16,5 @@ loaders:
     sql: "SELECT repair_item FROM v_contribution_health WHERE extension = :extension AND contribution = :contribution"
 view:
   stack:
-  - { id: unhealthy, viz: table, from: unhealthy }
-  - { id: repair, viz: table, from: repair }
+  - { id: unhealthy, title: Failing or disabled, viz: table, from: unhealthy }
+  - { id: repair, title: Repair, viz: table, from: repair }

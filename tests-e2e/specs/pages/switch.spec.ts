@@ -15,8 +15,8 @@ view:
   switch:
     param: area
     children:
-    - { id: coast, markdown: Dingoes of the coast. }
-    - { id: desert, markdown: Dingoes of the desert. }
+    - { id: coast, title: Coast, markdown: Dingoes of the coast. }
+    - { id: desert, title: Desert, markdown: Dingoes of the desert. }
 `;
 
 test("only the switched child shows, and changing the param switches it", async ({ page, daemon }) => {

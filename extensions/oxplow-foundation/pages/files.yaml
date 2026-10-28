@@ -97,7 +97,8 @@ loaders:
 view:
   stack:
   - id: header
-    title: ''
+    title: Status
+    hide_title: true
     from: header
     viz: detail
     columns:
@@ -127,7 +128,8 @@ view:
       input:
         stream: str{{param.stream_id}}
   - id: tree
-    title: ''
+    title: Files
+    hide_title: true
     from: tree
     viz: tree
     tree:

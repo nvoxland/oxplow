@@ -107,7 +107,8 @@ loaders:
 view:
   stack:
   - id: header
-    title: ''
+    title: Metric
+    hide_title: true
     from: header
     viz: detail
     columns:
@@ -162,7 +163,8 @@ view:
         - '{{param.metric}}'
         enabled: false
   - id: chart
-    title: ''
+    title: Chart
+    hide_title: true
     from: chart
     viz: line
     chart:
@@ -172,7 +174,8 @@ view:
       targets: target
     empty: No recordings in this range.
   - id: unchecked
-    title: ''
+    title: Unchecked files
+    hide_title: true
     from: unchecked
     viz: list
     columns:
