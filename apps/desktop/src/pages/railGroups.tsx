@@ -1,7 +1,7 @@
-/// The rail groups every page shows the same way, a page file's and a
-/// page's alike: Selection (what a row click picked, never an input)
-/// and About this page (its extension, the source file to edit, whether
-/// that source changed since it was deployed).
+/// What every page shows the same way: the rail's Selection (what a row
+/// click picked, never an input), and About this page (what it is for,
+/// its extension, the source file to edit, whether that source changed
+/// since it was deployed), which its ☰ opens.
 import { useEffect, useState } from "react";
 
 import { querySql, type SqlCell } from "../api.js";
@@ -62,43 +62,52 @@ export function RailSelection({
   );
 }
 
-export function RailAbout({
+export function PageAbout({
+  description,
   origin,
   outOfDate,
   onOpenPage,
   testPrefix,
 }: {
+  /** What the page is for (its `description`). */
+  description: string;
   origin: PageProvenance;
   /** Its source changed after the deployment that runs. */
   outOfDate: boolean;
-  onOpenPage(ref: TabRef): void;
+  onOpenPage?(ref: TabRef): void;
   testPrefix: string;
 }) {
   return (
-    <RailGroup title="About this page" testId={`${testPrefix}-rail-about`}>
+    <div data-testid={`${testPrefix}-about`}>
+      {description ? <p className="ox-rail-line">{description}</p> : null}
       <Facts
         facts={[
           {
             key: "extension",
             label: "Extension",
-            value: (
+            value: onOpenPage ? (
               <button type="button" className="ox-link ox-params-more" data-testid={`${testPrefix}-about-extension`} onClick={() => onOpenPage(settingsRef("extensions"))}>
                 {origin.extension}
               </button>
+            ) : (
+              origin.extension
             ),
           },
           {
             key: "source",
             label: "Source",
-            value: origin.source ? (
-              <button type="button" className="ox-link ox-params-more ox-mono" data-testid={`${testPrefix}-about-source`} onClick={() => onOpenPage(fileRef(origin.source!))}>
-                {origin.source}
-              </button>
-            ) : origin.bundled ? (
-              "Ships with oxplow"
-            ) : (
-              "Not on this machine"
-            ),
+            value:
+              origin.source && onOpenPage ? (
+                <button type="button" className="ox-link ox-params-more ox-mono" data-testid={`${testPrefix}-about-source`} onClick={() => onOpenPage(fileRef(origin.source!))}>
+                  {origin.source}
+                </button>
+              ) : origin.source ? (
+                origin.source
+              ) : origin.bundled ? (
+                "Ships with oxplow"
+              ) : (
+                "Not on this machine"
+              ),
           },
         ]}
       />
@@ -107,7 +116,7 @@ export function RailAbout({
           The source changed since it was deployed; deploy it to see the change.
         </p>
       ) : null}
-    </RailGroup>
+    </div>
   );
 }
 

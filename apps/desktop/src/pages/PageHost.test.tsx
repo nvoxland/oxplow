@@ -59,6 +59,22 @@ test("a whole-page action presses on the run, asking first when its command does
   await waitFor(() => expect(queryByTestId("page-action-confirm")).toBeNull());
 });
 
+test("the description isn't in the body: About this page in the ☰ shows it with where the page comes from", async () => {
+  const run = tablePage();
+  run.page.description = "What the items are.";
+  run.page.origin = { extension: "acme", source: ".oxplow/extensions/acme/pages/items.yaml", running: "", deployment: null, bundled: false };
+  const opened: string[] = [];
+  const { runs } = fakePageRuns(run);
+  const view = render(<PageHost pageKey={key} runs={runs} onOpenPage={(ref) => opened.push(ref.id)} />);
+  fireEvent.click(await view.findByTestId("action-page-about"));
+  const about = await view.findByTestId("page-about");
+  expect(about.textContent).toContain("What the items are.");
+  expect(view.getByTestId("page-file").textContent).not.toContain("What the items are.");
+  expect(view.queryByTestId("page-rail-about")).toBeNull();
+  fireEvent.click(view.getByTestId("page-about-source"));
+  expect(paramOf(opened[0], "path")).toBe(".oxplow/extensions/acme/pages/items.yaml");
+});
+
 test("a whole-page action with `when` is offered only while the page's row has that column truthy", async () => {
   const run = tablePage({
     actions: [

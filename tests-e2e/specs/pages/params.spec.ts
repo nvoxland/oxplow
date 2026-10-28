@@ -59,11 +59,14 @@ test("the rail's filters narrow a page, a row click shows the next section its p
   // `commit` is what a row click picks: never an input.
   await expect(rail.getByTestId("page-param-commit")).toHaveCount(0);
   await expect(rail.getByTestId("page-rail-selection")).toContainText("Click a row to select it.");
-  await expect(rail.getByTestId("page-about-source")).toHaveText(".oxplow/extensions/commit-history/pages/history.yaml");
-  // Copy is the page's, in its nav bar's ☰: the open run as text.
+  // Copy is the page's, in its nav bar's ☰: the open run as text. About
+  // this page, there too, says where it comes from.
   await page.getByTestId("page-nav-menu").filter({ visible: true }).click();
   await expect(page.getByTestId("menu-item-action-page-copy")).toBeVisible();
+  await page.getByTestId("menu-item-action-page-about").click();
+  await expect(page.getByTestId("page-about-source")).toHaveText(".oxplow/extensions/commit-history/pages/history.yaml");
   await page.keyboard.press("Escape");
+  await expect(page.getByTestId("page-about-popover")).toHaveCount(0);
 
   await expect(commits).toContainText("Add the numbat");
   await expect(commits).toContainText("Add the wombat");

@@ -11,7 +11,7 @@ import type { TabRef } from "../tabs/tabState.js";
 import type { PageRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
 import { PageTree } from "./PageTree.js";
 import { pageOptionsSource, usePageReads } from "./pageReads.js";
-import { RailAbout, RailSelection, type PickedRow } from "./railGroups.js";
+import { RailSelection, type PickedRow } from "./railGroups.js";
 
 export interface PageRailProps {
   run: PageRun;
@@ -20,8 +20,6 @@ export interface PageRailProps {
   onApply(name: string, value: SqlCell, row?: PickedRow): void;
   /** The rows picked for its selection params, by param. */
   picked?: Record<string, PickedRow>;
-  /** Its source changed after the deployment that runs. */
-  outOfDate?: boolean;
   streamId?: string | null;
   onOpenPage?(ref: TabRef, opts?: { newTab?: boolean }): void;
 }
@@ -39,7 +37,7 @@ export function switchSections(run: PageRun): { param: string; sections: { id: s
   };
 }
 
-export function PageRail({ run, runId, onApply, picked = NO_PICKED, outOfDate = false, streamId = null, onOpenPage }: PageRailProps) {
+export function PageRail({ run, runId, onApply, picked = NO_PICKED, streamId = null, onOpenPage }: PageRailProps) {
   // A resource param is what the page is, a selection what a row picked:
   // neither is an input. A switch's param is its sections, drawn as links.
   // No role is a resource, as the server reads it.
@@ -85,7 +83,6 @@ export function PageRail({ run, runId, onApply, picked = NO_PICKED, outOfDate = 
       ) : null}
       {run.rail ? <PageTree run={run} runId={runId} root={run.rail} streamId={streamId} onOpenPage={onOpenPage} onSetParam={onApply} /> : null}
       <RailSelection params={selections} values={run.params} picked={picked} onApply={onApply} testPrefix="page" />
-      {onOpenPage ? <RailAbout origin={run.page.origin} outOfDate={outOfDate} onOpenPage={onOpenPage} testPrefix="page" /> : null}
     </>
   );
 }

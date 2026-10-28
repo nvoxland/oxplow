@@ -67,11 +67,10 @@ test("a page that doesn't take them has neither", async () => {
   expect(view.container.querySelector(`[data-ref="${URI}"]`)).toBeNull();
 });
 
-test("the body's markdown headings are the rail's Contents, above About this page", async () => {
+test("the body's markdown headings are the rail's Contents", async () => {
   const view = render(page(false));
   const contents = await waitFor(() => view.getByTestId("viz-rail-contents"));
   await waitFor(() => expect([...contents.querySelectorAll("button")].map((b) => b.textContent)).toEqual(["First", "Second"]));
-  expect(view.getByTestId("page-rail-about")).toBeTruthy();
 });
 
 test("`#comment=` reveals that comment on a page that takes comments, and only there", async () => {

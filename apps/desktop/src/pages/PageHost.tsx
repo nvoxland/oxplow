@@ -19,7 +19,8 @@ import { Contents } from "../viz/Contents.js";
 import { VizStreamContext } from "../viz/VizStream.js";
 import type { Stream } from "../api.js";
 import { identityOf } from "../uri/uri.js";
-import { useOutOfDate, type PickedRow } from "./railGroups.js";
+import { PageAbout, useOutOfDate, type PickedRow } from "./railGroups.js";
+import { Popover } from "../kit/Popover.js";
 import type { PageAction } from "../kit/actions.js";
 import { Loading } from "../kit/Loading.js";
 import { ActionForm, useVizActions } from "../viz/VizView.js";
@@ -89,6 +90,9 @@ export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, re
   const specYaml = state.specYaml ?? pageKey.specYaml ?? null;
   useEffect(() => { if (specYaml) onSpecYaml?.(specYaml); }, [specYaml, onSpecYaml]);
   const [saveAs, setSaveAs] = useState<"wiki" | "page" | null>(null);
+  // About this page opens over the page's top right, under its ☰.
+  const [about, setAbout] = useState(false);
+  const aboutAnchor = useRef<HTMLSpanElement>(null);
   const open = (uri: string) => {
     if (nav) nav.navigate({ id: uri });
     else onOpenPage?.({ id: uri });
@@ -133,6 +137,7 @@ export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, re
   const pageActions: PageAction[] = [
     // What it shows, as text, as an agent would read it.
     ...(page ? [{ id: "page-copy", label: copied ? "Copied" : "Copy", title: "Copy what the page shows, as text", standard: true, icon: "copy", run: copy }] : []),
+    ...(page ? [{ id: "page-about", label: "About this page", standard: true, run: () => setAbout(true) }] : []),
     ...(page ? [{ id: "page-definition", label: "Show definition", standard: true, run: () => open(definitionUri(page.id, run!.params, specYaml)) }] : []),
     ...(specYaml ? [
       { id: "view-save-wiki", label: "Save to wiki…", standard: true, run: () => setSaveAs("wiki") },
@@ -238,7 +243,7 @@ export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, re
           <>
             <Contents root={body} />
             {saveAs && specYaml ? <SaveViewForm key={saveAs} kind={saveAs} specYaml={specYaml} initialTitle={title} onClose={() => setSaveAs(null)} onSaved={open} /> : null}
-            <PageRail run={run} runId={runId} onApply={apply} picked={picked} outOfDate={outOfDate} streamId={streamId} onOpenPage={onOpenPage} />
+            <PageRail run={run} runId={runId} onApply={apply} picked={picked} streamId={streamId} onOpenPage={onOpenPage} />
           </>
         ) : undefined
       }
@@ -250,6 +255,12 @@ export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, re
       <PageViewContext.Provider value={{ streamId: pageKey.streamId, threadId: pageKey.threadId }}>
       <VizStreamContext.Provider value={stream}>
       <PageCommentsContext.Provider value={pageComments}>
+        <span ref={aboutAnchor} style={aboutAnchorStyle} />
+        {about && page ? (
+          <Popover anchor={aboutAnchor} label="About this page" onClose={() => setAbout(false)} testId="page-about-popover">
+            <PageAbout description={page.description} origin={page.origin} outOfDate={outOfDate} onOpenPage={onOpenPage ? (ref) => { setAbout(false); onOpenPage(ref); } : undefined} testPrefix="page" />
+          </Popover>
+        ) : null}
         <div
           ref={setBody}
           data-testid="page-file"
@@ -259,7 +270,6 @@ export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, re
           {...(pageComments ? contextNodeProps(pageComments.target) : {})}
         >
           {page && !fills && !(page.category === "Dashboards" && page.view.kind === "grid" && !page.origin.bundled) ? <h1 className="ox-title">{sectionTitle(run!) ?? title}</h1> : null}
-          {page?.description && !fills ? <p className="ox-intro">{page.description}</p> : null}
           {actions.pending ? (
             <CommandConfirm
               label={actions.pending.action.label}
@@ -316,6 +326,7 @@ function sectionTitle(run: PageRun): string | null {
 
 const NO_PARAMS: Record<string, SqlCell> = {};
 const NO_PICKED: Record<string, PickedRow> = {};
+const aboutAnchorStyle: CSSProperties = { position: "absolute", top: 0, right: 0, width: 0, height: 0 };
 const fillStyle: CSSProperties = { display: "flex", flexDirection: "column", flex: 1, minHeight: 0 };
 
 /** Whether one of the run's viz nodes fills (a file, a diff: its page

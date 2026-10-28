@@ -45,3 +45,24 @@ test("a click outside closes a Popover; a click inside does not", () => {
   fireEvent.mouseDown(view.getByTestId("elsewhere"));
   expect(view.queryByTestId("pop")).toBeNull();
 });
+
+// Opened from somewhere else (a menu item), it takes focus, so Escape
+// reaches it; one whose content took focus keeps it there.
+test("a Popover takes focus when it opens, unless something inside already has it", () => {
+  const view = render(<Host />);
+  expect(document.activeElement).toBe(view.getByTestId("pop"));
+  cleanup();
+  function Focused() {
+    const anchor = useRef<HTMLButtonElement>(null);
+    return (
+      <div>
+        <button ref={anchor} type="button">When</button>
+        <Popover anchor={anchor} label="Custom range" onClose={() => {}} testId="pop">
+          <input data-testid="inside" autoFocus />
+        </Popover>
+      </div>
+    );
+  }
+  const focused = render(<Focused />);
+  expect(document.activeElement).toBe(focused.getByTestId("inside"));
+});

@@ -18,8 +18,8 @@ const GAP = 8;
 /**
  * Room a control's row doesn't have: a dialog over the page, beside its
  * anchor and opening away from the rail (to the anchor's left when there
- * is space, else below it). Escape or a click outside closes it, and focus
- * goes back to the anchor. It stays in its owner's DOM, so focus moving
+ * is space, else below it). It takes focus when it opens; Escape or a
+ * click outside closes it, and focus goes back to the anchor. It stays in its owner's DOM, so focus moving
  * into it is still focus inside the owner.
  */
 export function Popover({ anchor, label, onClose, children, testId }: PopoverProps) {
@@ -41,6 +41,14 @@ export function Popover({ anchor, label, onClose, children, testId }: PopoverPro
     setAt({ left, top: Math.max(GAP, top), maxWidth: width });
   }, [anchor]);
 
+  // Focus inside, so Escape reaches it when it was opened from elsewhere
+  // (a menu item); content that took focus itself keeps it.
+  // Once placed: a hidden element takes no focus.
+  const placed = at.visibility !== "hidden";
+  useEffect(() => {
+    if (placed && !self.current?.contains(document.activeElement)) self.current?.focus();
+  }, [placed]);
+
   useEffect(() => {
     const outside = (e: MouseEvent) => {
       const target = e.target as Node | null;
@@ -55,6 +63,7 @@ export function Popover({ anchor, label, onClose, children, testId }: PopoverPro
       ref={self}
       role="dialog"
       aria-label={label}
+      tabIndex={-1}
       className="ox-popover"
       data-testid={testId}
       style={at}

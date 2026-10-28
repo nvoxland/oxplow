@@ -1160,10 +1160,11 @@ no caller may bypass the bus to write to the terminal.
 A page has **one place for its controls: its rail** (`PageRail`). It
 has no toolbar, and where a control goes is not the author's to say. The
 rail stacks its groups in a fixed order, so nothing moves as values
-change: **Filters** (its filter params), **Selection** (what a row click
-picked) and **About this page** (its extension and the source file to
-edit, and a line when the source changed since its deploy). Page-level
-actions — Copy, Add to Context, the page's whole-page actions, and
+change: **Filters** (its filter params) and **Selection** (what a row click
+picked). Page-level actions — About this page (a popover: what the page
+is for, its extension and the source file to edit, and a line when the
+source changed since its deploy; a page's description is said only
+there, never above its body), Copy, Add to Context, the page's whole-page actions, and
 Refresh only for a page that declares `refresh: true` (a page re-runs
 on its own when oxplow's data changes; Refresh is for one that reads
 outside oxplow) — are in the nav bar (its ☰, unless `prominent`), never

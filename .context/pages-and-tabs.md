@@ -460,9 +460,10 @@ run takes new params itself (`setParams`). `PageHost` takes a `PageKey`,
 holds its run (`usePageRunWith` over `usePageRunsStore()`: the
 `PageRunsContext`'s store, else the window's; `RunState` carries the
 `runId`, `rerun` is Refresh) and draws the `tabs/Page.tsx` chrome:
-Contents, Selection (the rows picked, `picked` history state) and
-About this page (`page.origin`, out of date) in the rail
-(`pages/railGroups.tsx`); `comments: true` → the
+Contents and Selection (the rows picked, `picked` history state) in the
+rail (`pages/railGroups.tsx`); About this page in the ☰ (a `Popover`
+over the body's top right: the page's `description`, `page.origin`, out
+of date — the description is never drawn in the body); `comments: true` → the
 `CommentNavigator`, `PageCommentsContext` and `#comment=` on the tab's
 identity; a renderer's backlinks and outbound links; the stream as
 `VizStreamContext` (`viz/VizStream.ts`); full width for a grid, a board or a dashboard; and
@@ -817,7 +818,7 @@ the body region differs.
   controls, a contents list): a `320px` sticky column beside a body of
   **either** width (the body is padded then), titled by `rightRailTitle`
   ("Details" by default). A page's rail is `PageRail` — Filters, its
-  `rail:` tree, Selection, About this page, built from `RailGroup` and `ParamList`
+  `rail:` tree, Selection, built from `RailGroup` and `ParamList`
   (usability.md "A page's controls are in its rail").
   It is orthogonal to the archetype — a dashboard may have one for its
   filters, Git History's holds its find, author and branch.
