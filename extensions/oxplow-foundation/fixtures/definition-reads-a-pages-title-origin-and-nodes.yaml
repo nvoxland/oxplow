@@ -40,7 +40,19 @@ expect:
         - { id: files, kind: viz, viz: tree, loader: files, columns: name (File) }
         - { id: sections, kind: slot, detail: "`oxplow-foundation/commit.sections`" }
     view:
-      rows: 1
+      rows:
+        - text: |-
+            - Stack of sections
+              - **Commit**: Detail of `detail`
+                - columns: subject (Subject), body (Message), author (Author), committed_at (Date), sha (Version), parents (Parents)
+                - when empty: “Commit not found.”
+              - **Files**: Tree of `files`
+                - columns: name (File)
+                - when empty: “The commit changed no files.”
+                - id: column `id`
+                - parent: column `parent`
+                - label: column `name`
+              - Slot `oxplow-foundation/commit.sections`
     actions:
       rows:
         - { label: Cherry-pick, command: oxplow.git.cherry_pick, on: detail }

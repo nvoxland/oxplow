@@ -649,7 +649,7 @@ fn loader_source(loader: &crate::pages::schema::Loader) -> (&'static str, Option
 
 /// The parts of a page run its definition lists, flat: its params with
 /// the values this run used, its loaders with what they read and the
-/// rows they gave, and its actions where they sit (`page`, or the viz
+/// rows and columns they gave, and its actions where they sit (`page`, or the viz
 /// node's id).
 fn definition_parts(run: &PageRun) -> (Vec<Value>, Vec<Value>, Vec<Value>) {
     let page = &run.page;
@@ -680,6 +680,7 @@ fn definition_parts(run: &PageRun) -> (Vec<Value>, Vec<Value>, Vec<Value>) {
                 "reads": d.reads,
                 "uses": d.reads_loaders,
                 "rows": ran.map(|r| r.result.rows.len()),
+                "columns": ran.map(|r| &r.result.columns),
                 "error": ran.and_then(|r| r.error.clone()),
             })
         })
@@ -1245,6 +1246,8 @@ mod tests {
         assert_eq!(loaders[0]["name"], json!("names"), "{def}");
         assert_eq!(loaders[0]["kind"], json!("sql"), "{def}");
         assert_eq!(loaders[0]["rows"], json!(2), "{def}");
+        // The columns its rows have, which a viz's settings name.
+        assert_eq!(loaders[0]["columns"], json!(["name"]), "{def}");
         let actions = def["actions"].as_array().unwrap();
         let on: Vec<_> = actions
             .iter()

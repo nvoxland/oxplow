@@ -83,7 +83,7 @@ loaders:
              (SELECT group_concat(value, ', ') FROM json_each(j.value -> '$.uses')) AS uses,
              (SELECT group_concat(value, ', ') FROM json_each(j.value -> '$.reads')) AS reads,
              j.value ->> '$.rows' AS rows, j.value ->> '$.error' AS error,
-             j.value ->> '$.source' AS source
+             j.value ->> '$.source' AS source, j.value -> '$.columns' AS result_columns
       FROM page, json_each(page.loaders) j
       ORDER BY j.key
   queries:
@@ -108,15 +108,20 @@ loaders:
              j.value ->> '$.title' AS title, j.value ->> '$.loader' AS loader,
              j.value ->> '$.page' AS page, j.value ->> '$.detail' AS detail,
              (SELECT group_concat(value, ', ') FROM json_each(j.value -> '$.columns')) AS columns,
-             -- A setting as words: `empty "None yet."`, a block's set
-             -- fields (`terminal: of uri, thread thread`), never JSON.
-             (SELECT group_concat(
-                       CASE WHEN st.key = 'empty' THEN 'when empty: “' || st.value || '”'
-                            WHEN st.type = 'object' THEN
-                              st.key || ': ' || (SELECT group_concat(f.key || ' `' || f.value || '`', ', ')
-                                                 FROM json_each(st.value) f WHERE f.type <> 'null')
-                            ELSE st.key || ' `' || st.value || '`' END, ' · ')
-              FROM json_each(j.value -> '$.settings') st) AS settings
+             -- Its settings as bullets, never JSON: a role block's set
+             -- fields each its own (`of: column uri` when it names a column
+             -- of the rows it shows, else the value), `when empty: "…"`.
+             (SELECT group_concat('- ' || line, char(10)) FROM (
+                SELECT CASE WHEN st.key = 'empty' THEN 'when empty: “' || st.value || '”'
+                            ELSE st.key || ': `' || st.value || '`' END AS line
+                FROM json_each(j.value -> '$.settings') st WHERE st.type <> 'object'
+                UNION ALL
+                SELECT f.key || ': '
+                       || CASE WHEN f.value IN (SELECT c.value FROM loaders l, json_each(l.result_columns) c
+                                                WHERE l.name = j.value ->> '$.loader')
+                               THEN 'column `' || f.value || '`' ELSE '`' || f.value || '`' END
+                FROM json_each(j.value -> '$.settings') st, json_each(st.value) f
+                WHERE st.type = 'object' AND f.type <> 'null')) AS settings
       FROM page, json_each(page.nodes) j
       ORDER BY j.key
   # The view as an outline, a node a line, nested as the view nests: a
@@ -138,8 +143,9 @@ loaders:
                     WHEN 'component' THEN 'Component ' || detail
                     ELSE kind END
                || CASE WHEN page <> (SELECT page FROM page) THEN ' (from `' || page || '`)' ELSE '' END
-               || coalesce(char(10) || substr('                                        ', 1, 2 * depth + 2) || 'columns: ' || columns, '')
-               || coalesce(char(10) || substr('                                        ', 1, 2 * depth + 2) || settings, ''),
+               || coalesce(char(10) || substr('                                        ', 1, 2 * depth + 2) || '- columns: ' || columns, '')
+               || coalesce(char(10) || substr('                                        ', 1, 2 * depth + 2)
+                           || replace(settings, char(10), char(10) || substr('                                        ', 1, 2 * depth + 2)), ''),
                char(10)) AS text
       FROM (SELECT * FROM nodes ORDER BY n)
   actions:
