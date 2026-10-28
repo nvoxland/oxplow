@@ -137,6 +137,8 @@
 .ox-title { margin: 0; font-size: var(--text-2xl); font-weight: var(--weight-bold); line-height: var(--leading-tight); color: var(--text-primary); }
 .ox-intro { margin: var(--space-2) 0 0; color: var(--text-secondary); }
 .ox-section { margin-top: var(--space-6); }
+/* An untitled section that draws nothing takes no space. */
+.ox-section:empty { display: none; }
 .ox-section-head {
   display: flex;
   align-items: baseline;

@@ -198,3 +198,19 @@ test("an embedded page's own actions are buttons above it, pressed naming the em
   fireEvent.click(getByTestId("viz-action-tidy"));
   await waitFor(() => expect(calls).toEqual([["run-1", "notes", "tidy", null, null, null, false]]));
 });
+
+// A section with no title is still a section of the page: apart from the
+// title and the sections around it, with no heading.
+test("an untitled section is spaced as a section, with no heading", () => {
+  const page = fakePage(
+    node.stack("stack", [
+      node.viz("facts", "items", { columns: [{ key: "id" }] }, { title: "" }),
+      node.viz("more", "items", { columns: [{ key: "id" }] }, { title: "More" }),
+    ]),
+  );
+  const run = fakeRun(page, { loaders: { items: loader(["id"], [["a"]]) } });
+  const { container } = render(<PageTree run={run} runId="run-1" />);
+  const facts = container.querySelector('[data-node="facts"]')!;
+  expect(facts.querySelector(".ox-section")).not.toBeNull();
+  expect(facts.querySelector(".ox-section-title")).toBeNull();
+});

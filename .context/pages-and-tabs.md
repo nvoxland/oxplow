@@ -579,7 +579,9 @@ its kind, which is also what visits and bookmarks record
 resolve it to the page file's icon and title.
 
 oxplow's pages (`extensions/oxplow-foundation/pages/*.yaml`; a view is a
-`stack` of nodes drawn as sections unless noted):
+`stack` of nodes drawn as sections unless noted; a section titled `''`
+has no heading but keeps a section's spacing, and takes no space when it
+draws nothing; a filling one is drawn bare):
 
 - **Renderers.** `wiki-page` (`for: oxplow/wiki`, default, tab label
   `{{param.slug}}`, `comments: true`): a `markdown` viz over

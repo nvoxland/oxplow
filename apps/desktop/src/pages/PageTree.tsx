@@ -171,6 +171,9 @@ function NodeView(props: NodeViewProps) {
         </Section>
       ) : placement === "tile" ? (
         <Tile title={title ?? undefined}>{body}</Tile>
+      ) : placement === "section" && !fills ? (
+        // Untitled, still a section: apart from what is around it.
+        <div className="ox-section">{body}</div>
       ) : (
         body
       )}
