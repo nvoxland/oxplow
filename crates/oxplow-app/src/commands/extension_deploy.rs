@@ -1,6 +1,6 @@
 //! `extensions.deploy` operations: `oxplow.extension.deploy`, `rollback`,
 //! `enable`, `disable`, `remove`, `share` and `unshare`
-//! (`crate::extension_deploy` does the work). External: each writes files
+//! (`crate::extension::extension_deploy` does the work). External: each writes files
 //! (the store, the settings, `.oxplow/.gitignore`) and activates, outside
 //! the bus's transaction. A deploy returns once its deployment runs.
 
@@ -14,7 +14,7 @@ use super::agent_reads::actor_stream;
 use super::ops::Op;
 use super::util::{failed, parse, schema, ServicesSlot};
 use super::{Handler, HandlerOutput, Invocation};
-use crate::extension_deploy::DeployError;
+use crate::extension::extension_deploy::DeployError;
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -133,13 +133,16 @@ fn deploy_op(services: ServicesSlot) -> Op {
                     .await?
                     .as_deref()
                     .and_then(oxplow_domain::StreamId::try_from_str);
-                crate::extension_deploy::refuse_draft_deploy(&svc, stream, &input.name)
+                crate::extension::extension_deploy::refuse_draft_deploy(&svc, stream, &input.name)
                     .await
                     .map_err(domain)?;
-                let deployed =
-                    crate::extension_deploy::deploy(&svc, &input.name, invocation.confirmed)
-                        .await
-                        .map_err(deploy_error("oxplow.extension.deploy", &raw))?;
+                let deployed = crate::extension::extension_deploy::deploy(
+                    &svc,
+                    &input.name,
+                    invocation.confirmed,
+                )
+                .await
+                .map_err(deploy_error("oxplow.extension.deploy", &raw))?;
                 Ok(output(deployed))
             })
         })),
@@ -162,10 +165,14 @@ fn write_page_op(services: ServicesSlot) -> Op {
                     .await?
                     .as_deref()
                     .and_then(oxplow_domain::StreamId::try_from_str);
-                crate::extension_deploy::refuse_draft_deploy(&svc, stream, &input.extension)
-                    .await
-                    .map_err(domain)?;
-                let written = crate::extension_deploy::write_page(
+                crate::extension::extension_deploy::refuse_draft_deploy(
+                    &svc,
+                    stream,
+                    &input.extension,
+                )
+                .await
+                .map_err(domain)?;
+                let written = crate::extension::extension_deploy::write_page(
                     &svc,
                     &input.extension,
                     &input.page,
@@ -198,10 +205,10 @@ fn new_dashboard_op(services: ServicesSlot) -> Op {
                     .await?
                     .as_deref()
                     .and_then(oxplow_domain::StreamId::try_from_str);
-                crate::extension_deploy::refuse_draft_deploy(&svc, stream, extension)
+                crate::extension::extension_deploy::refuse_draft_deploy(&svc, stream, extension)
                     .await
                     .map_err(domain)?;
-                let written = crate::extension_deploy::new_dashboard(
+                let written = crate::extension::extension_deploy::new_dashboard(
                     &svc,
                     extension,
                     &input.title,
@@ -227,7 +234,7 @@ fn rollback_op(services: ServicesSlot) -> Op {
                 let raw = input.clone();
                 let input: RollbackInput = parse(input)?;
                 let svc = services.get()?;
-                let done = crate::extension_deploy::rollback(
+                let done = crate::extension::extension_deploy::rollback(
                     &svc,
                     &input.name,
                     input.to.as_deref(),
@@ -253,7 +260,7 @@ fn enable_op(services: ServicesSlot, op: &'static str, enabled: bool) -> Op {
                 let raw = input.clone();
                 let input: NameInput = parse(input)?;
                 let svc = services.get()?;
-                crate::extension_deploy::set_enabled(
+                crate::extension::extension_deploy::set_enabled(
                     &svc,
                     &input.name,
                     enabled,
@@ -280,7 +287,7 @@ fn remove_op(services: ServicesSlot) -> Op {
             Box::pin(async move {
                 let input: NameInput = parse(input)?;
                 let svc = services.get()?;
-                crate::extension_deploy::remove(&svc, &input.name)
+                crate::extension::extension_deploy::remove(&svc, &input.name)
                     .await
                     .map_err(domain)?;
                 Ok(output(serde_json::json!({ "name": input.name })))
@@ -303,9 +310,9 @@ fn share_op(services: ServicesSlot, op: &'static str) -> Op {
                 let svc = services.get()?;
                 let shared = op == "share";
                 if shared {
-                    crate::extension_deploy::share(&svc, &input.name)
+                    crate::extension::extension_deploy::share(&svc, &input.name)
                 } else {
-                    crate::extension_deploy::unshare(&svc, &input.name)
+                    crate::extension::extension_deploy::unshare(&svc, &input.name)
                 }
                 .map_err(domain)?;
                 Ok(output(

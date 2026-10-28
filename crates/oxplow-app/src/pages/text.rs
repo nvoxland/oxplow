@@ -13,7 +13,7 @@ use oxplow_domain::DomainError;
 
 use super::runner::{PageRun, RunNode};
 use super::schema::{Node, NodeKind, Page};
-use crate::extensions::VizRun;
+use crate::pages::spec::VizRun;
 
 /// `run` as text.
 pub async fn page_text(

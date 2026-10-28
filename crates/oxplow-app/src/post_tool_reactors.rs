@@ -28,7 +28,7 @@ use oxplow_domain::{DomainError, StoredEvent};
 use crate::advisories::AdvisoryDeps;
 use crate::collection::{CollectionService, RunCause};
 use crate::event_pump::AsyncEventConsumer;
-use crate::extensions::AdvisoryOn;
+use crate::extension::extensions::AdvisoryOn;
 
 pub const COLLECTION: &str = "collection";
 pub const POST_TOOL_ADVISORIES: &str = "advisories.post_tool";

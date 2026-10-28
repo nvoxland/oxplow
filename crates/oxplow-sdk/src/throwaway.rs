@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use oxplow_ai::config::{BuiltinRole, ProviderConfig, RoleBinding};
-use oxplow_app::extensions::EXTENSIONS_DIR;
+use oxplow_app::extension::extensions::EXTENSIONS_DIR;
 use oxplow_app::providers::host::HostEnv;
 
 /// The fixture model's provider instance, which every role is bound to.
@@ -98,7 +98,7 @@ impl Host {
                 }
                 return;
             }
-            let ext = oxplow_app::extensions::load_extension_at(&source, name);
+            let ext = oxplow_app::extension::extensions::load_extension_at(&source, name);
             let needs = ext.requires.iter().cloned().chain(
                 ext.public_contracts
                     .imports
@@ -249,11 +249,13 @@ impl Host {
             let Some(source) = copied.get(name) else {
                 continue;
             };
-            let built = oxplow_app::extension_store::Inputs::of(&root.join(source))
+            let built = oxplow_app::extension::extension_store::Inputs::of(&root.join(source))
                 .run
                 .is_some();
             if builds || !built {
-                if let Err(e) = oxplow_app::extension_deploy::deploy(&svc, name, true).await {
+                if let Err(e) =
+                    oxplow_app::extension::extension_deploy::deploy(&svc, name, true).await
+                {
                     deploys.push(format!("{name}: {e}"));
                 }
             }
@@ -407,7 +409,7 @@ fn copy_all(from: &Path, to: &Path) -> std::io::Result<()> {
 }
 
 fn copy_dir(from: &Path, to: &Path) -> std::io::Result<()> {
-    let exclude = oxplow_app::extension_store::Inputs::of(from).exclude;
+    let exclude = oxplow_app::extension::extension_store::Inputs::of(from).exclude;
     copy_tree(from, to, &exclude, "")
 }
 

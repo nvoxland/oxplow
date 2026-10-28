@@ -11,7 +11,7 @@ mod common;
 
 use std::path::{Path, PathBuf};
 
-use oxplow_app::extension_catalog::ExtensionCatalog;
+use oxplow_app::extension::extension_catalog::ExtensionCatalog;
 use oxplow_sdk::extension_test::{test_extension, test_extension_in};
 use oxplow_sdk::{check, render_findings, scaffold, Format, Kind};
 
@@ -52,7 +52,7 @@ fn loaded(
     svc: &oxplow_app::Services,
     root: &Path,
     name: &str,
-) -> oxplow_app::extensions::Extension {
+) -> oxplow_app::extension::extensions::Extension {
     let ext = svc
         .extension_catalog
         .get(root)
@@ -257,7 +257,7 @@ async fn a_scaffolded_metric_checks_tests_and_declares_its_blocks() {
             _ => None,
         })
         .expect("a linked column");
-    assert_eq!(link.kind, oxplow_app::extensions::LinkKind::File);
+    assert_eq!(link.kind, oxplow_app::pages::spec::LinkKind::File);
     assert_eq!(link.line.as_deref(), Some("line"));
 }
 

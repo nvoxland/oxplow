@@ -41,8 +41,8 @@ use super::host::{self, Connection, HostError, Launch};
 use super::oauth;
 use super::spec::{self, ProviderSpec};
 use crate::commands::{CommandBus, HandlerOutput};
-use crate::extension_catalog::ExtensionCatalog;
-use crate::extensions::Extension;
+use crate::extension::extension_catalog::ExtensionCatalog;
+use crate::extension::extensions::Extension;
 
 #[path = "generation.rs"]
 mod generation;
@@ -78,7 +78,7 @@ pub struct HostDeps {
     pub catalog: Arc<ExtensionCatalog>,
     /// The project's activation boundary: once it has activated a
     /// generation, provider maps are published through it.
-    pub activation: Arc<crate::extension_activation::ExtensionActivation>,
+    pub activation: Arc<crate::extension::extension_activation::ExtensionActivation>,
     pub db: Database,
     /// What a provider's `host/call` `sql.read` reads through.
     pub sql: crate::sql_gateway::SqlGateway,
@@ -465,7 +465,7 @@ impl Instance {
                     ));
                 }
                 let value = secrets
-                    .get(&crate::extension_secrets::account(
+                    .get(&crate::extension::extension_secrets::account(
                         &self.deps.project,
                         &self.ext.name,
                         reference,
@@ -1075,7 +1075,7 @@ impl Instance {
         let activation = &registry.deps.activation;
         let run = activation.pin_run(run).await.map_err(CommandError::from)?;
         let pin = run
-            .host_generation::<crate::extension_activation::GenerationPin>()
+            .host_generation::<crate::extension::extension_activation::GenerationPin>()
             .expect("pinned provider context")
             .clone();
         activation
@@ -1420,7 +1420,8 @@ pub struct ProviderRegistry {
     health: parking_lot::Mutex<BTreeMap<String, InstanceHealth>>,
     /// One reconcile at a time.
     reconciling: Arc<tokio::sync::Mutex<()>>,
-    extension_secrets: std::sync::OnceLock<Arc<crate::extension_secrets::ExtensionSecrets>>,
+    extension_secrets:
+        std::sync::OnceLock<Arc<crate::extension::extension_secrets::ExtensionSecrets>>,
     /// Set once its first reconcile has run: what waits for the
     /// instances the config names to be up (tsk915).
     reconciled: tokio::sync::watch::Sender<bool>,
@@ -1568,7 +1569,7 @@ impl ProviderRegistry {
 
     pub(crate) fn adopt_extension_secrets(
         &self,
-        secrets: Arc<crate::extension_secrets::ExtensionSecrets>,
+        secrets: Arc<crate::extension::extension_secrets::ExtensionSecrets>,
     ) {
         self.extension_secrets
             .set(secrets)
@@ -1631,7 +1632,7 @@ impl ProviderRegistry {
             .split_once('/')
             .filter(|(e, i)| !e.is_empty() && !i.is_empty())
             .ok_or_else(|| "an instance is `<extension>/<instance id>`".to_string())?;
-        let ext = crate::extensions::owner(extensions, ext_name)
+        let ext = crate::extension::extensions::owner(extensions, ext_name)
             .filter(|e| e.enabled)
             .ok_or_else(|| format!("no enabled extension `{ext_name}`"))?;
         let wanted = provider.unwrap_or(id);
@@ -1831,7 +1832,7 @@ impl ProviderRegistry {
                 .iter()
                 .map(|c| {
                     let account = match &c.secret_ref {
-                        Some(reference) => crate::extension_secrets::account(
+                        Some(reference) => crate::extension::extension_secrets::account(
                             &self.deps.project,
                             &ext.name,
                             reference,
@@ -2010,7 +2011,7 @@ impl ProviderRegistry {
     /// ownership from a newer raw catalog load.
     pub(super) async fn instance_in_snapshot(
         &self,
-        snapshot: &crate::extension_catalog::CatalogSnapshot,
+        snapshot: &crate::extension::extension_catalog::CatalogSnapshot,
         ext: &Extension,
         spec: &ProviderSpec,
         id: &str,
@@ -2027,21 +2028,21 @@ impl ProviderRegistry {
             == snapshot.source_generation();
         // Checks of unpublished candidates may start a process, but cannot
         // acquire private state under an active installation's identity.
-        let state = crate::extensions::owner(snapshot.extensions(), &ext.name)
+        let state = crate::extension::extensions::owner(snapshot.extensions(), &ext.name)
             .filter(|current| {
                 unchanged && *current == ext && current.enabled && current.providers.contains(spec)
             })
             .map(|_| {
                 (
-                    crate::extension_state::StateSource::new(
-                        crate::extension_state::StateHost::new(
+                    crate::extension::extension_state::StateSource::new(
+                        crate::extension::extension_state::StateHost::new(
                             self.deps.catalog.clone(),
                             self.deps.project_dir.clone(),
                         ),
                         self.deps.db.clone(),
                     ),
-                    crate::extension_configuration::ConfigurationSource::new(
-                        crate::extension_configuration::ConfigurationHost::new(
+                    crate::extension::extension_configuration::ConfigurationSource::new(
+                        crate::extension::extension_configuration::ConfigurationHost::new(
                             self.deps.catalog.clone(),
                             self.deps.project_dir.clone(),
                         ),

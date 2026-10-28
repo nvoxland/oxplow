@@ -299,7 +299,7 @@ pub struct MetricsService {
     published_inputs: Arc<parking_lot::Mutex<Option<Arc<PublishedMetricInputs>>>>,
     /// The loaded-extensions cache shared with `Services`; a fresh one
     /// for a bare `MetricsService` in tests.
-    extensions_cache: Arc<crate::extension_catalog::ExtensionCatalog>,
+    extensions_cache: Arc<crate::extension::extension_catalog::ExtensionCatalog>,
     /// Per state entity metric: when it was last captured and the value
     /// (tsk322), for the throttle and the unchanged-value skip.
     entity_captures: Arc<std::sync::Mutex<HashMap<String, (std::time::Instant, f64)>>>,
@@ -453,9 +453,9 @@ impl MetricsService {
         config: Arc<RwLock<OxplowConfig>>,
         project_dir: PathBuf,
     ) -> Self {
-        let extensions_cache = Arc::new(crate::extension_catalog::ExtensionCatalog::for_project(
-            &project_dir,
-        ));
+        let extensions_cache = Arc::new(
+            crate::extension::extension_catalog::ExtensionCatalog::for_project(&project_dir),
+        );
         Self {
             snapshot_store,
             thread_store,
@@ -534,7 +534,7 @@ impl MetricsService {
     /// Share the loaded-extensions cache with the rest of `Services`.
     pub fn with_extension_catalog(
         mut self,
-        catalog: Arc<crate::extension_catalog::ExtensionCatalog>,
+        catalog: Arc<crate::extension::extension_catalog::ExtensionCatalog>,
     ) -> Self {
         self.extensions_cache = catalog;
         self
@@ -912,7 +912,7 @@ impl MetricsService {
                 )
             })?;
         }
-        let dir = format!("{}/{name}", crate::extensions::EXTENSIONS_DIR);
+        let dir = format!("{}/{name}", crate::extension::extensions::EXTENSIONS_DIR);
         if self.project_dir.join(&dir).exists() {
             return Err(format!(
                 "{dir} already exists; pick another name or edit it in place"
@@ -1934,8 +1934,11 @@ impl MetricsService {
         input: serde_json::Value,
         mode: Mode,
     ) -> Result<Vec<serde_json::Value>, String> {
-        let path =
-            crate::extensions::source_or_shipped(&self.project_dir, &self.project_dir, owner);
+        let path = crate::extension::extensions::source_or_shipped(
+            &self.project_dir,
+            &self.project_dir,
+            owner,
+        );
         let collector = FactCollector::from_spec(owner, &path, spec)
             .ok_or_else(|| format!("collector `{}` declares no `facts:`", spec.id))?;
         let runner = self.preview_runner(&collector, &self.project_dir)?;
@@ -1958,7 +1961,7 @@ impl MetricsService {
         event: Option<&serde_json::Value>,
     ) -> Result<Vec<serde_json::Value>, String> {
         use crate::services::TreeSource as _;
-        let path = crate::extensions::source_or_shipped(&self.project_dir, root, owner);
+        let path = crate::extension::extensions::source_or_shipped(&self.project_dir, root, owner);
         let collector = FactCollector::from_spec(owner, &path, spec)
             .ok_or_else(|| format!("collector `{}` declares no `facts:`", spec.id))?;
         if collector.input.is_some() {
@@ -2614,7 +2617,7 @@ impl MetricsService {
 /// extension's own layer alone, with the defaults applied. What a check
 /// resolves them to before the app has loaded the extension.
 pub fn declared_metric_specs(
-    extension: &crate::extensions::Extension,
+    extension: &crate::extension::extensions::Extension,
 ) -> Vec<oxplow_db::MetricSpec> {
     MetricLayers {
         global: Vec::new(),
@@ -2842,7 +2845,7 @@ impl FactRunner {
 /// (bundled or on disk). `None` when it can't be read.
 fn collector_script_text(collector: &FactCollector, root: &Path) -> Option<String> {
     let entry = collector.entry.as_deref()?;
-    crate::extensions::read_extension_file(root, &collector.path, entry)
+    crate::extension::extensions::read_extension_file(root, &collector.path, entry)
 }
 
 /// A fingerprint of the LOGIC that produces a collector's facts (tsk45): its script
@@ -3836,7 +3839,7 @@ mod tests {
             owner: oxplow_config::collectors::PROJECT_EXTENSION.into(),
             path: format!(
                 "{}/{}",
-                crate::extensions::EXTENSIONS_DIR,
+                crate::extension::extensions::EXTENSIONS_DIR,
                 oxplow_config::collectors::PROJECT_EXTENSION
             ),
             trigger: Trigger::On {

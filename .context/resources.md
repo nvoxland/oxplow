@@ -171,7 +171,7 @@ resources:
   (`v_<ext>_<dataset>`), or core's for the oxplow namespace
   (`resolve: agent_turn`). A `pattern` is anchored and kept in one form
   both regex engines read alike (`param_pattern.rs`).
-- **Loading.** `crates/oxplow-app/src/extension_resources.rs` parses the
+- **Loading.** `crates/oxplow-app/src/extension/extension_resources.rs` parses the
   block (`ResourceEntry` → `ResourceDecl`); each resource is a contribution
   of kind `resource` (`oxplow:oxplow/resource?resource=<ext>/<name>`), so a
   resource two extensions declare is the later one's load error. A

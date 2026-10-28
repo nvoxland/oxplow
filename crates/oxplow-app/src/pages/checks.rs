@@ -10,7 +10,7 @@ use oxplow_db::{SqlCell, SqlQueryResult, TempTable};
 
 use super::runner::{bind_args, LoaderRun};
 use super::schema::{Loader, NodeKind, Page};
-use crate::extensions::{bind_params, VizConfig, VizRun};
+use crate::pages::spec::{bind_params, VizConfig, VizRun};
 
 /// Each loader of a page that ran, by name: its result or why it failed.
 pub type LoaderChecks = BTreeMap<String, Result<SqlQueryResult, String>>;
@@ -21,11 +21,11 @@ pub type PageChecks = BTreeMap<String, LoaderChecks>;
 /// Dry-run `page`'s `sql` loaders through `layer`.
 pub async fn dry_run(layer: &crate::sql_gateway::SqlGateway, page: &Page) -> LoaderChecks {
     // Each param at its default (else NULL), as a run with none given.
-    let params: BTreeMap<String, SqlCell> = crate::extensions::resolve_param_values(
+    let params: BTreeMap<String, SqlCell> = crate::pages::spec::resolve_param_values(
         &page.id,
         &page.params,
         &BTreeMap::new(),
-        &crate::extensions::ViewContext::default(),
+        &crate::pages::spec::ViewContext::default(),
     )
     .unwrap_or_default();
     let mut earlier: BTreeMap<String, LoaderRun> = BTreeMap::new();
@@ -80,7 +80,7 @@ pub async fn dry_run(layer: &crate::sql_gateway::SqlGateway, page: &Page) -> Loa
 /// Every page of `ext`, dry-run.
 pub async fn dry_run_all(
     layer: &crate::sql_gateway::SqlGateway,
-    ext: &crate::extensions::Extension,
+    ext: &crate::extension::extensions::Extension,
 ) -> PageChecks {
     let mut out = PageChecks::new();
     for page in &ext.page_files {
@@ -138,7 +138,7 @@ const MAX_COLUMNS: usize = 8;
 /// empty on purpose). The viewer's `stream_id`, `thread_id` and `head_sha`
 /// are filled in for it.
 pub fn launcher_unfilled_params(page: &Page) -> Vec<String> {
-    use crate::extensions::ParamRole;
+    use crate::pages::spec::ParamRole;
     if page.hidden || page.category.is_none() {
         return Vec::new();
     }
@@ -158,7 +158,7 @@ pub fn launcher_unfilled_params(page: &Page) -> Vec<String> {
 /// options, sections or columns, a long description, a param nothing reads.
 /// Warnings, never errors.
 pub fn layout_warnings(page: &Page) -> Vec<String> {
-    use crate::extensions::{ParamRole, ParamType};
+    use crate::pages::spec::{ParamRole, ParamType};
     let mut out = Vec::new();
     let nodes = page.nodes();
     let switches: Vec<&str> = nodes
@@ -195,7 +195,7 @@ pub fn layout_warnings(page: &Page) -> Vec<String> {
         || nodes.iter().any(|n| match &n.kind {
             NodeKind::Embed { .. } | NodeKind::Slot { .. } | NodeKind::Component { .. } => true,
             // A custom viz is a component too: it is given the page's params.
-            NodeKind::Viz { config, .. } => config.viz == crate::extensions::Viz::Custom,
+            NodeKind::Viz { config, .. } => config.viz == crate::pages::spec::Viz::Custom,
             _ => false,
         });
     if !passes_on {
@@ -205,7 +205,7 @@ pub fn layout_warnings(page: &Page) -> Vec<String> {
             .flat_map(|l| l.reads_params.iter().cloned())
             .collect();
         read.extend(switches.iter().map(|s| s.to_string()));
-        let mut actions: Vec<&crate::extensions::PageAction> = page.actions.iter().collect();
+        let mut actions: Vec<&crate::pages::spec::PageAction> = page.actions.iter().collect();
         for n in &nodes {
             if let NodeKind::Viz { config: cfg, .. } = &n.kind {
                 actions.extend(cfg.actions.iter());
@@ -223,7 +223,7 @@ pub fn layout_warnings(page: &Page) -> Vec<String> {
         }
         for a in actions {
             read.extend(
-                crate::extensions::action_templates(&a.input)
+                crate::pages::spec::action_templates(&a.input)
                     .into_iter()
                     .filter(|(scope, _)| scope == "param")
                     .map(|(_, name)| name),
@@ -274,7 +274,7 @@ pub fn layout_warnings(page: &Page) -> Vec<String> {
             if let NodeKind::Viz { config: cfg, .. } = &n.kind {
                 if matches!(
                     cfg.viz,
-                    crate::extensions::Viz::Table | crate::extensions::Viz::List
+                    crate::pages::spec::Viz::Table | crate::pages::spec::Viz::List
                 ) && cfg.columns.len() > MAX_COLUMNS
                 {
                     out.push(format!(

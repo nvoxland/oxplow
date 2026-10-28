@@ -19,8 +19,8 @@ mod throwaway;
 
 use std::path::{Path, PathBuf};
 
-pub use oxplow_app::extension_catalog::ExtensionCatalog;
-use oxplow_app::extensions::{self, Extension, EXTENSIONS_DIR};
+pub use oxplow_app::extension::extension_catalog::ExtensionCatalog;
+use oxplow_app::extension::extensions::{self, Extension, EXTENSIONS_DIR};
 pub use oxplow_app::metric_scaffold::MetricStarter;
 use oxplow_app::sql_gateway::SqlGateway;
 use oxplow_domain::contribution::ContributionKind;
@@ -1239,7 +1239,7 @@ pub struct CheckReport {
     pub extension: Extension,
     /// With `--impact`: what going from `against` to the working
     /// tree changes; `null` without it.
-    pub impact: Option<oxplow_app::extension_impact::ImpactReport>,
+    pub impact: Option<oxplow_app::extension::extension_impact::ImpactReport>,
     /// The revision `impact` compares the working tree with.
     pub against: Option<String>,
     /// The services each of its Starlark scripts uses or declares
@@ -1352,8 +1352,8 @@ async fn impact_against(
     layer: &SqlGateway,
     against: &str,
     commands: extensions::CommandSchemas<'_>,
-) -> Result<oxplow_app::extension_impact::ImpactReport, SdkError> {
-    use oxplow_app::extensions::{extension_tree_at, impact_between, ReviewSide};
+) -> Result<oxplow_app::extension::extension_impact::ImpactReport, SdkError> {
+    use oxplow_app::extension::extensions::{extension_tree_at, impact_between, ReviewSide};
     // A revision's files through the VCS; nothing here reads a snapshot.
     let trees = oxplow_app::trees::Trees::new(
         std::sync::Arc::new(oxplow_app::vcs::GitProvider),
@@ -1625,7 +1625,7 @@ mod tests {
     /// and validates against it; a page file has no schema yet.
     #[test]
     fn scaffolds_name_and_satisfy_their_schemas() {
-        use oxplow_app::extensions::schema;
+        use oxplow_app::extension::extensions::schema;
         let manifest_schema =
             jsonschema::validator_for(&schema::manifest_schema()).expect("compiles");
         for kind in [

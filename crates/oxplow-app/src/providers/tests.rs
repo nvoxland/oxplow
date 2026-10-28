@@ -9,7 +9,7 @@ use oxplow_oauth_sim::OAuthSim;
 use serde_json::json;
 
 use super::*;
-use crate::extensions::Extension;
+use crate::extension::extensions::Extension;
 use crate::test_fixtures::{
     services_with_effort, services_with_task_effort, EffortFixture, TaskEffortFixture,
 };
@@ -94,7 +94,7 @@ fn running(svc: &crate::Services, id: &str) -> bool {
 }
 
 fn extension(project: &Path) -> Extension {
-    let ext = crate::extensions::load_extensions(project)
+    let ext = crate::extension::extensions::load_extensions(project)
         .into_iter()
         .find(|e| e.name == EXT)
         .expect("the tracker extension loads");
@@ -1126,7 +1126,7 @@ async fn a_provider_command_is_declared_over_an_operation_it_lists() {
             base.replacen("permissions:", &format!("{entry}permissions:"), 1),
         )
         .unwrap();
-        let loaded = crate::extensions::load_extensions(&root)
+        let loaded = crate::extension::extensions::load_extensions(&root)
             .into_iter()
             .find(|e| e.name == EXT)
             .unwrap();
@@ -1159,7 +1159,7 @@ async fn provider_args_stay_inside_the_extension_folder() {
         ),
     )
     .unwrap();
-    let loaded = crate::extensions::load_extensions(&project)
+    let loaded = crate::extension::extensions::load_extensions(&project)
         .into_iter()
         .find(|e| e.name == EXT)
         .unwrap();
@@ -1228,7 +1228,7 @@ async fn an_adapter_provider_names_its_server_mapping_and_tools_inside_the_folde
     ] {
         assert!(ADAPTER_MANIFEST.contains(from), "{from}");
         std::fs::write(dir.join("extension.yaml"), ADAPTER_MANIFEST.replace(from, to)).unwrap();
-        let loaded = crate::extensions::load_extensions(&project)
+        let loaded = crate::extension::extensions::load_extensions(&project)
             .into_iter()
             .find(|e| e.name == EXT)
             .unwrap();
@@ -1241,7 +1241,7 @@ async fn an_adapter_provider_names_its_server_mapping_and_tools_inside_the_folde
     }
     std::fs::write(dir.join("mcp/tools.json"), "{}").unwrap();
     std::fs::write(dir.join("extension.yaml"), ADAPTER_MANIFEST).unwrap();
-    let loaded = crate::extensions::load_extensions(&project)
+    let loaded = crate::extension::extensions::load_extensions(&project)
         .into_iter()
         .find(|e| e.name == EXT)
         .unwrap();
@@ -1281,7 +1281,7 @@ async fn a_provider_runs_from_its_deployment() {
         .canonicalize()
         .unwrap();
     let hash = fx.svc.extension_catalog.live()["tracker"].clone();
-    let deployment = crate::extension_store::deployment_dir(&project, EXT, &hash)
+    let deployment = crate::extension::extension_store::deployment_dir(&project, EXT, &hash)
         .canonicalize()
         .unwrap();
     assert_eq!(ran_in, deployment);
@@ -1317,7 +1317,7 @@ async fn a_provider_cannot_declare_another_core_event_type() {
         serde_json::to_string(&declared).unwrap(),
     )
     .unwrap();
-    let loaded = crate::extensions::load_extensions(&project)
+    let loaded = crate::extension::extensions::load_extensions(&project)
         .into_iter()
         .find(|e| e.name == EXT)
         .unwrap();
@@ -3541,7 +3541,7 @@ async fn a_generation_restarts_only_the_instances_it_changed() {
     // config; the instance's in-memory entry is put back before the
     // generation that carries it publishes.
     let kept = fx.svc.config.read().unwrap().extension_instances.clone();
-    let changes = crate::extension_deploy::stage_sources(&fx.svc).await;
+    let changes = crate::extension::extension_deploy::stage_sources(&fx.svc).await;
     fx.svc.config.write().unwrap().extension_instances = kept;
     fx.svc
         .extension_activation
@@ -3676,7 +3676,7 @@ async fn an_oauth_credential_is_declared_and_checked() {
     );
     let refused = |authorize: &str, more: &str, says: &str| {
         write_oauth_extension(&project, "", authorize, token, more);
-        let loaded = crate::extensions::load_extensions(&project)
+        let loaded = crate::extension::extensions::load_extensions(&project)
             .into_iter()
             .find(|e| e.name == EXT)
             .unwrap();
@@ -4765,7 +4765,7 @@ async fn an_adapter_server_by_url_is_declared_and_checked() {
     ] {
         assert!(manifest.contains(from), "{from}");
         std::fs::write(dir.join("extension.yaml"), manifest.replace(from, to)).unwrap();
-        let loaded = crate::extensions::load_extensions(&project)
+        let loaded = crate::extension::extensions::load_extensions(&project)
             .into_iter()
             .find(|e| e.name == EXT)
             .unwrap();
@@ -5994,7 +5994,7 @@ async fn a_provider_needs_only_scopes_host_call_serves() {
         .join(".oxplow/extensions/tracker/extension.yaml");
     let text = std::fs::read_to_string(&manifest).unwrap();
     std::fs::write(&manifest, format!("{text}    needs: [config.read]\n")).unwrap();
-    let loaded = crate::extensions::load_extensions(root.path())
+    let loaded = crate::extension::extensions::load_extensions(root.path())
         .into_iter()
         .find(|e| e.name == EXT)
         .unwrap();
@@ -6043,7 +6043,7 @@ async fn running_policy(hooks: &str) -> (EffortFixture, Extension) {
     let fx = services_with_effort().await;
     let project = fx.svc.layout.project_dir.clone();
     write_policy_extension(&project, hooks);
-    let ext = crate::extensions::load_extensions(&project)
+    let ext = crate::extension::extensions::load_extensions(&project)
         .into_iter()
         .find(|e| e.name == "steward")
         .expect("the policy extension loads");
@@ -6343,7 +6343,7 @@ async fn running_harness(hooks: &str) -> (EffortFixture, Extension) {
     let fx = services_with_effort().await;
     let project = fx.svc.layout.project_dir.clone();
     write_harness_extension(&project, hooks);
-    let ext = crate::extensions::load_extensions(&project)
+    let ext = crate::extension::extensions::load_extensions(&project)
         .into_iter()
         .find(|e| e.name == "conductor")
         .expect("the harness extension loads");
@@ -6558,7 +6558,7 @@ async fn running_snapshots(
     let fx = services_with_effort().await;
     let project = fx.svc.layout.project_dir.clone();
     write_snapshots_extension(&project, contents);
-    let ext = crate::extensions::load_extensions(&project)
+    let ext = crate::extension::extensions::load_extensions(&project)
         .into_iter()
         .find(|e| e.name == "shutter")
         .expect("the snapshots extension loads");
@@ -6774,7 +6774,7 @@ async fn a_knowledge_provider_keeps_pages_and_core_records_them() {
     )
     .unwrap();
     write_knowledge_extension(&project, &state);
-    let ext = crate::extensions::load_extensions(&project)
+    let ext = crate::extension::extensions::load_extensions(&project)
         .into_iter()
         .find(|e| e.name == "shelf")
         .expect("the knowledge extension loads");

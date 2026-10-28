@@ -33,7 +33,7 @@ use oxplow_domain::events::EventView;
 use std::path::Path;
 use std::sync::Arc;
 
-use oxplow_app::extensions::Extension;
+use oxplow_app::extension::extensions::Extension;
 use oxplow_app::providers::host::{self, Launch};
 use oxplow_app::providers::{self, ProviderSpec};
 use oxplow_domain::Actor;
@@ -264,8 +264,9 @@ async fn examples(shared: &Arc<Host>, ext: &Extension, report: &mut TestReport) 
     let rel = ext.path.trim_end_matches('/').to_string();
     // Read as the extension's files are everywhere: a bundled extension's
     // fixtures are embedded with it, not on disk.
-    let read =
-        |file: &str| oxplow_app::extensions::read_extension_file(&shared.root, &ext.path, file);
+    let read = |file: &str| {
+        oxplow_app::extension::extensions::read_extension_file(&shared.root, &ext.path, file)
+    };
     let examples = ext
         .intent
         .as_ref()
@@ -1118,7 +1119,7 @@ async fn job_example(
     id: &str,
     report: &mut TestReport,
 ) {
-    use oxplow_app::extension_commands::CommandHandler;
+    use oxplow_app::extension::extension_commands::CommandHandler;
     let shown = ex.shown;
     let by_op = |scope: &str, op: &str| {
         ext.commands
@@ -3126,7 +3127,7 @@ async fn page_form_start(
             .into_iter()
             .find(|n| {
                 matches!(&n.kind, NodeKind::Viz { config: cfg, .. }
-                    if cfg.viz == oxplow_app::extensions::Viz::Form)
+                    if cfg.viz == oxplow_app::pages::spec::Viz::Form)
             })
             .map(|n| n.id.clone())
             .ok_or_else(|| "the page has no form node".to_string())?,
@@ -3139,7 +3140,7 @@ async fn page_form_start(
             oxplow_app::pages::runner::RunRequest {
                 target: oxplow_app::pages::runner::RunTarget::Page(page.id.clone()),
                 params,
-                ctx: oxplow_app::extensions::ViewContext::default(),
+                ctx: oxplow_app::pages::spec::ViewContext::default(),
                 viewer: oxplow_domain::Actor::Human,
             },
             "extension-test",
@@ -3246,7 +3247,7 @@ fn component_at(
         let component = match &n.kind {
             oxplow_app::pages::schema::NodeKind::Component { component, .. } => component.clone(),
             oxplow_app::pages::schema::NodeKind::Viz { config, .. }
-                if config.viz == oxplow_app::extensions::Viz::Custom =>
+                if config.viz == oxplow_app::pages::spec::Viz::Custom =>
             {
                 config.custom.as_ref()?.component.clone()?
             }
@@ -3310,7 +3311,7 @@ async fn run_page(
     host: &Host,
     target: oxplow_app::pages::runner::RunTarget,
     params: &Value,
-    ctx: &oxplow_app::extensions::ViewContext,
+    ctx: &oxplow_app::pages::spec::ViewContext,
 ) -> Result<oxplow_app::pages::runner::PageRun, String> {
     use oxplow_app::pages::runner::{PageRunner, RunRequest};
     host.current().await;
@@ -3347,7 +3348,7 @@ async fn run_page(
 fn view_context(
     ex: &Example<'_>,
     report: &mut TestReport,
-) -> Option<oxplow_app::extensions::ViewContext> {
+) -> Option<oxplow_app::pages::spec::ViewContext> {
     /// A view's id: its number, or its ref read by `parse` (`thr1`).
     fn id(v: Option<&Value>, parse: fn(&str) -> Option<i64>) -> Result<Option<i64>, ()> {
         match v {
@@ -3373,7 +3374,7 @@ fn view_context(
             oxplow_domain::ThreadId::try_from_str(s).map(|i| i.value())
         }),
     ) {
-        (Ok(stream_id), Ok(thread_id)) => Some(oxplow_app::extensions::ViewContext {
+        (Ok(stream_id), Ok(thread_id)) => Some(oxplow_app::pages::spec::ViewContext {
             stream_id,
             thread_id,
             active: None,
@@ -3663,7 +3664,7 @@ struct PageAt<'a> {
     page: &'a str,
     /// What runs: the page (`<extension>/<slug>`), or an inline one.
     target: oxplow_app::pages::runner::RunTarget,
-    ctx: &'a oxplow_app::extensions::ViewContext,
+    ctx: &'a oxplow_app::pages::spec::ViewContext,
 }
 
 impl PageAt<'_> {
@@ -3976,7 +3977,7 @@ impl PageAt<'_> {
 /// `actions` as an example names them: an id where it names an id, else
 /// the action's fields (spelled as the page YAML spells them) that the
 /// example names.
-fn actions_like(want: &Value, actions: &[oxplow_app::extensions::PageAction]) -> Value {
+fn actions_like(want: &Value, actions: &[oxplow_app::pages::spec::PageAction]) -> Value {
     let named = want.as_array();
     Value::Array(
         actions
@@ -4014,7 +4015,7 @@ fn snake_case(name: &str) -> String {
 fn node_actions(
     run: &oxplow_app::pages::runner::PageRun,
     id: &str,
-) -> Vec<oxplow_app::extensions::PageAction> {
+) -> Vec<oxplow_app::pages::spec::PageAction> {
     let local = id.rsplit('/').next().unwrap_or(id);
     run.page
         .nodes()
@@ -4491,7 +4492,7 @@ async fn page_answers(host: &Host, ext: &Extension, report: &mut TestReport) {
             .push(format!("{rel}: the primary thread: {e}"));
         return;
     }
-    let ctx = oxplow_app::extensions::ViewContext::default();
+    let ctx = oxplow_app::pages::spec::ViewContext::default();
     for page in &ext.page_files {
         if page.answers.is_empty() {
             continue;
@@ -4553,10 +4554,10 @@ fn answers(
 async fn command_example(
     host: &Host,
     ex: &Example<'_>,
-    cmd: &oxplow_app::extension_commands::ExtensionCommand,
+    cmd: &oxplow_app::extension::extension_commands::ExtensionCommand,
     report: &mut TestReport,
 ) {
-    use oxplow_app::extension_commands::{call_names, dry_run, Composed};
+    use oxplow_app::extension::extension_commands::{call_names, dry_run, Composed};
     let shown = ex.shown;
     let Some(answers) = answers(ex, &format!("command `{}`", cmd.name), report) else {
         return;
@@ -4762,10 +4763,11 @@ async fn policy_example(
         Reaction::Run { events, .. } if !events.is_empty() => {
             Err("it appends events, and a policy emits nothing".to_string())
         }
-        Reaction::Run { calls, .. } => {
-            oxplow_app::extension_commands::check_calls(host.svc.commands.as_ref(), calls)
-                .map(|()| reaction)
-        }
+        Reaction::Run { calls, .. } => oxplow_app::extension::extension_commands::check_calls(
+            host.svc.commands.as_ref(),
+            calls,
+        )
+        .map(|()| reaction),
         Reaction::Skip(_) => Ok(reaction),
     });
     if let Some(p) = reaction_problem(&ex.expect, decided) {
@@ -5056,7 +5058,7 @@ async fn incremental_datasets(host: &Host, ext: &Extension, report: &mut TestRep
         {
             continue;
         }
-        let line = oxplow_app::extensions::manifest_v2::entry_line(
+        let line = oxplow_app::extension::extensions::manifest_v2::entry_line(
             &manifest, "datasets", "name", &decl.name,
         )
         .unwrap_or(1);
@@ -5705,7 +5707,7 @@ async fn publish_generation(svc: &Arc<oxplow_app::Services>) -> Result<(), Strin
 /// `work_items` implementation or provider. None is an error the suite
 /// reports.
 async fn with_work_list(host: &Host, ext: &Extension) -> Result<Host, String> {
-    let mut lists: Vec<String> = oxplow_app::extensions::load_extensions(&host.checkout)
+    let mut lists: Vec<String> = oxplow_app::extension::extensions::load_extensions(&host.checkout)
         .into_iter()
         .filter(|e| {
             e.implementations
@@ -5741,7 +5743,7 @@ async fn with_work_list(host: &Host, ext: &Extension) -> Result<Host, String> {
 async fn policy_suite(
     host: &Host,
     ext: &Extension,
-    decl: &oxplow_app::extensions::implementations::ImplementationDecl,
+    decl: &oxplow_app::extension::extensions::implementations::ImplementationDecl,
     report: &mut TestReport,
 ) {
     let manifest = format!("{}/extension.yaml", ext.path.trim_end_matches('/'));
@@ -6273,7 +6275,7 @@ commands:
         let checked = crate::check(
             dir.path(),
             "reader",
-            &oxplow_app::extension_catalog::ExtensionCatalog::new(),
+            &oxplow_app::extension::extension_catalog::ExtensionCatalog::new(),
             None,
             None,
             None,
@@ -6811,7 +6813,7 @@ expect:
             &host,
             oxplow_app::pages::runner::RunTarget::Page("oxplow-foundation/git-history".into()),
             &json!({ "stream_id": 1, "head_sha": "c1" }),
-            &oxplow_app::extensions::ViewContext::default(),
+            &oxplow_app::pages::spec::ViewContext::default(),
         )
         .await
         .unwrap();

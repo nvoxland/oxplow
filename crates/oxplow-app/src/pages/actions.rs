@@ -271,7 +271,7 @@ async fn page_rows(
         .run(super::runner::RunRequest {
             target: super::runner::RunTarget::Spec(std::sync::Arc::new(page)),
             params: given,
-            ctx: crate::extensions::ViewContext::default(),
+            ctx: crate::pages::spec::ViewContext::default(),
             viewer: viewer.clone(),
         })
         .await
@@ -293,7 +293,7 @@ async fn page_rows(
 async fn form_sources(
     svc: &crate::Services,
     choices: &BTreeMap<String, String>,
-    fields: &[crate::extensions::FormField],
+    fields: &[crate::pages::spec::FormField],
     params: &BTreeMap<String, SqlCell>,
     viewer: &Actor,
 ) -> Result<
@@ -345,7 +345,7 @@ pub async fn page_form(
     let viz_run = node_run(holder, def)
         .ok_or_else(|| invalid("/node", format!("`{node_path}` isn't a viz")))?;
     let form = match (&viz_run.config.viz, &viz_run.config.form) {
-        (crate::extensions::Viz::Form, Some(f)) => f.clone(),
+        (crate::pages::spec::Viz::Form, Some(f)) => f.clone(),
         _ => return Err(invalid("/node", format!("node `{node_path}` isn't a form"))),
     };
     let name = form.command.clone().unwrap_or_default();
@@ -434,7 +434,7 @@ pub async fn submit_page_form(
     let viz_run = node_run(holder, def)
         .ok_or_else(|| invalid("/node", format!("`{node_path}` isn't a viz")))?;
     let form = match (&viz_run.config.viz, &viz_run.config.form) {
-        (crate::extensions::Viz::Form, Some(f)) => f.clone(),
+        (crate::pages::spec::Viz::Form, Some(f)) => f.clone(),
         _ => return Err(invalid("/node", format!("node `{node_path}` isn't a form"))),
     };
     let defaults = match form.defaults.as_ref() {
@@ -470,7 +470,7 @@ pub async fn page_action_form(
         .get(run_id)
         .ok_or_else(|| invalid("/runId", format!("no open page run `{run_id}`")))?;
     let (actions, params, rows): (
-        Vec<crate::extensions::PageAction>,
+        Vec<crate::pages::spec::PageAction>,
         BTreeMap<String, SqlCell>,
         Option<oxplow_db::SqlQueryResult>,
     ) = match (
@@ -573,7 +573,7 @@ pub async fn page_action_form(
 /// choices read.
 async fn form_start(
     svc: &crate::Services,
-    action: crate::extensions::PageAction,
+    action: crate::pages::spec::PageAction,
     params: &BTreeMap<String, SqlCell>,
     row: Option<&BTreeMap<String, SqlCell>>,
 ) -> Result<crate::viz_actions::FormStart, CommandError> {

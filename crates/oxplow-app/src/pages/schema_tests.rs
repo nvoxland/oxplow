@@ -2,7 +2,7 @@
 //! load-time check refuses.
 
 use super::schema::*;
-use crate::extensions::Viz;
+use crate::pages::spec::Viz;
 
 fn page(text: &str) -> Result<Page, String> {
     parse_page(
@@ -361,7 +361,7 @@ fn an_extensions_page_files_load_and_a_broken_one_names_its_file() {
         "title: Broken\nview: { viz: table }\n",
     )
     .unwrap();
-    let loaded = crate::extensions::load_extension_at(&ext, "acme");
+    let loaded = crate::extension::extensions::load_extension_at(&ext, "acme");
     assert_eq!(
         loaded
             .page_files
@@ -426,7 +426,7 @@ fn a_panel_names_its_extensions_pages() {
         "title: Count\nparams: [{ name: stream_id }]\ndata:\n  c: { sql: SELECT 3 AS n }\nview: { viz: number, from: c }\nbadge: { loader: c }\n",
     )
     .unwrap();
-    let loaded = crate::extensions::load_extension_at(&ext, "acme");
+    let loaded = crate::extension::extensions::load_extension_at(&ext, "acme");
     let work = loaded
         .panels
         .iter()
@@ -462,10 +462,11 @@ fn two_core_named_extensions_cannot_declare_one_page() {
             "title: Comments\ndata:\n  rows:\n    sql: SELECT 1 AS n\nview:\n  viz: table\n  from: rows\n",
         );
     }
-    let mut exts: Vec<crate::extensions::Extension> = crate::extensions::load_extensions(d.path())
-        .into_iter()
-        .filter(|e| e.origin == "project")
-        .collect();
+    let mut exts: Vec<crate::extension::extensions::Extension> =
+        crate::extension::extensions::load_extensions(d.path())
+            .into_iter()
+            .filter(|e| e.origin == "project")
+            .collect();
     for e in &mut exts {
         e.namespace = oxplow_domain::OXPLOW_NAMESPACE.into();
     }
@@ -505,7 +506,7 @@ view:
     let role = |name: &str| p.params.iter().find(|q| q.name == name).unwrap().role;
     assert_eq!(
         role("commit"),
-        Some(crate::extensions::ParamRole::Selection)
+        Some(crate::pages::spec::ParamRole::Selection)
     );
     assert_eq!(role("path"), None);
 }

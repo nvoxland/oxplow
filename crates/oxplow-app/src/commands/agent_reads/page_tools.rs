@@ -220,7 +220,7 @@ fn find_pages(svc: &Services, p: &FindPageInput) -> Result<Value, CommandError> 
             let params: Vec<Value> = page
                 .params
                 .iter()
-                .filter(|x| !crate::extensions::ViewContext::supplies(&x.name))
+                .filter(|x| !crate::pages::spec::ViewContext::supplies(&x.name))
                 .map(|x| {
                     json!({
                         "name": x.name,
@@ -301,7 +301,7 @@ async fn context(
     invocation: &Invocation,
     stream_id: Option<String>,
     thread_id: Option<String>,
-) -> Result<crate::extensions::ViewContext, CommandError> {
+) -> Result<crate::pages::spec::ViewContext, CommandError> {
     if let Some(stream) = &stream_id {
         check_stream_id("/stream_id", stream)?;
     }
@@ -316,7 +316,7 @@ async fn context(
             })
         })
         .transpose()?;
-    Ok(crate::extensions::view_context(
+    Ok(crate::pages::spec::view_context(
         svc,
         stream.as_deref().and_then(StreamId::try_from_str),
         thread,
@@ -421,7 +421,9 @@ fn show_op(services: ServicesSlot) -> Op {
                         let core = svc
                             .extension_catalog
                             .named(&svc.layout.project_dir, ext)
-                            .is_ok_and(|e| e.namespace == crate::extensions::CORE_NAMESPACE);
+                            .is_ok_and(|e| {
+                                e.namespace == crate::extension::extensions::CORE_NAMESPACE
+                            });
                         let named = if core { slug.to_string() } else { page.clone() };
                         let values: Vec<(String, String)> = p
                             .params
@@ -1273,7 +1275,7 @@ mod definition_page_tests {
                 // No `of`: the command loader receives null for `page`
                 // and the exact inline spec for `spec`.
                 params: [("spec".to_string(), SqlCell::Text(INLINE_SPEC.into()))].into(),
-                ctx: crate::extensions::view_context(&f.svc, None, Some(f.thread)).await,
+                ctx: crate::pages::spec::view_context(&f.svc, None, Some(f.thread)).await,
                 viewer: Actor::Human,
             })
             .await
@@ -1372,7 +1374,7 @@ mod definition_page_tests {
                     ),
                 ]
                 .into(),
-                ctx: crate::extensions::ViewContext::default(),
+                ctx: crate::pages::spec::ViewContext::default(),
                 viewer: oxplow_domain::Actor::Human,
             })
             .await

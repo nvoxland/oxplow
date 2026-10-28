@@ -752,7 +752,7 @@ pub fn check_declarations(spec: &ProviderSpec, declared: &InitializeResult) -> R
     }
     for command in &declared.commands {
         // An operation name is one segment of a command id (`estimate`).
-        if !crate::extension_commands::valid_op(&command.name) {
+        if !crate::extension::extension_commands::valid_op(&command.name) {
             return Err(format!(
                 "provider `{id}` command `{}`: an operation is lowercase letters, digits and \
                  underscores, starting with a letter",

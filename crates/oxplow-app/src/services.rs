@@ -316,7 +316,7 @@ pub enum Declared {
 /// script isn't kept on its spec): the project's copy, or a candidate's
 /// under review.
 pub fn of_extension(
-    ext: &crate::extensions::Extension,
+    ext: &crate::extension::extensions::Extension,
     read: &dyn Fn(&str) -> Option<String>,
 ) -> Vec<ScriptServices> {
     use oxplow_config::collectors::CollectorRuntime;
@@ -377,7 +377,9 @@ pub fn of_extension(
         );
     }
     for c in &ext.commands {
-        if let crate::extension_commands::CommandHandler::Script { entry, script } = &c.handler {
+        if let crate::extension::extension_commands::CommandHandler::Script { entry, script } =
+            &c.handler
+        {
             push(
                 format!("command `{}`", c.name),
                 entry,

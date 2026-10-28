@@ -13,7 +13,7 @@ use oxplow_db::SqlCell;
 use oxplow_domain::{Actor, CommandError, CommandOutcome};
 use serde_json::Value;
 
-use crate::extensions;
+use crate::extension::extensions;
 
 /// Where a dragged row landed: the rows on either side of the drop
 /// (`before`: the one below it, `after`: the one above), the row it was
@@ -93,7 +93,7 @@ impl Prepared {
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn prepare_resolved(
     source_id: &str,
-    actions: &[extensions::PageAction],
+    actions: &[crate::pages::spec::PageAction],
     actor_id: &str,
     action_id: &str,
     params: &BTreeMap<String, SqlCell>,
@@ -196,7 +196,7 @@ pub struct FormStart {
     #[specta(type = oxplow_domain::Json)]
     pub values: Value,
     pub fixed: Vec<String>,
-    pub fields: Option<Vec<crate::extensions::FormField>>,
+    pub fields: Option<Vec<crate::pages::spec::FormField>>,
     /// Fields picked from a list, with their choices.
     pub choices: BTreeMap<String, Vec<Choice>>,
     /// Object fields' children, read from their `from` viz.
@@ -852,7 +852,7 @@ view:
         RunRequest {
             target: RunTarget::Page(page.into()),
             params,
-            ctx: extensions::ViewContext::default(),
+            ctx: crate::pages::spec::ViewContext::default(),
             viewer: Actor::Human,
         }
     }
@@ -957,7 +957,7 @@ view:
             .into_iter()
             .find(|n| {
                 matches!(&n.kind, crate::pages::schema::NodeKind::Viz { config, .. }
-                    if config.viz == extensions::Viz::Form)
+                    if config.viz == crate::pages::spec::Viz::Form)
             })
             .map(|n| n.id.clone())
             .unwrap_or_else(|| panic!("{} has no form", run.page.id))
@@ -1540,7 +1540,7 @@ view:
         assert_eq!(start.fixed, vec!["uri".to_string()]);
         assert_eq!(
             start.fields,
-            Some(vec![crate::extensions::FormField::Name("title".into())])
+            Some(vec![crate::pages::spec::FormField::Name("title".into())])
         );
         assert_eq!(start.values["uri"], json!(item));
         submit(
@@ -1809,7 +1809,7 @@ view:
             Some(&b"<!doctype html><p>2</p>"[..])
         );
 
-        crate::extension_store::remove(&root, "acme", &[first_hash]);
+        crate::extension::extension_store::remove(&root, "acme", &[first_hash]);
         assert_eq!(file(&first), None);
         assert!(file(&second).is_some());
     }

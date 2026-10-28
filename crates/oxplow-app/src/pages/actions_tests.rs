@@ -13,7 +13,7 @@ use super::actions::{
 use super::open_runs::PageRuns;
 use super::runner::{RunRequest, RunTarget};
 use super::test_support::fixture;
-use crate::extensions::ViewContext;
+use crate::pages::spec::ViewContext;
 
 async fn titles(svc: &crate::Services) -> Vec<String> {
     let r = svc

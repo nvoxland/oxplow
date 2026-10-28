@@ -12,7 +12,7 @@ use std::path::Path;
 use oxplow_db::SqlCell;
 use oxplow_domain::DomainError;
 
-use crate::extensions::{Viz, VizRun};
+use crate::pages::spec::{Viz, VizRun};
 
 /// Rows a table-like rendering shows before saying how many more there
 /// are.
@@ -934,7 +934,7 @@ fn treemap(run: &VizRun) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::extensions::{VizChart, VizConfig};
+    use crate::pages::spec::{VizChart, VizConfig};
     use oxplow_db::SqlQueryResult;
 
     /// A markdown viz reads as its `text` column, not its first.
@@ -946,7 +946,7 @@ mod tests {
             &["slug", "body"],
             vec![vec![t("a"), t("# Hello")]],
         );
-        r.config.markdown = Some(crate::extensions::VizMarkdown {
+        r.config.markdown = Some(crate::pages::spec::VizMarkdown {
             text: Some("body".into()),
         });
         let out = render(&r, &Resolved::default());
@@ -1099,7 +1099,7 @@ mod tests {
             vec![t("Ready"), t("c"), SqlCell::Int(0)],
         ];
         let r = with(run(Viz::List, None, &["bucket", "title", "d"], rows), |l| {
-            l.group = Some(crate::extensions::VizGroup {
+            l.group = Some(crate::pages::spec::VizGroup {
                 by: "bucket".into(),
                 link: None,
                 values: Vec::new(),
@@ -1118,7 +1118,7 @@ mod tests {
     fn a_board_reads_as_its_columns_in_order() {
         let rows = vec![vec![t("done"), t("a")], vec![t("later"), t("b")]];
         let r = with(run(Viz::Board, None, &["state", "title"], rows), |l| {
-            l.group = Some(crate::extensions::VizGroup {
+            l.group = Some(crate::pages::spec::VizGroup {
                 by: "state".into(),
                 link: None,
                 values: vec!["todo".into(), "done".into()],
@@ -1146,7 +1146,7 @@ mod tests {
                 ],
             ),
             |l| {
-                l.tree = Some(crate::extensions::VizTree {
+                l.tree = Some(crate::pages::spec::VizTree {
                     id: Some("id".into()),
                     parent: Some("parent".into()),
                     label: Some("name".into()),
@@ -1175,7 +1175,7 @@ mod tests {
                 ],
             ),
             |l| {
-                l.tree = Some(crate::extensions::VizTree {
+                l.tree = Some(crate::pages::spec::VizTree {
                     id: Some("id".into()),
                     parent: Some("parent".into()),
                     label: Some("name".into()),
@@ -1209,7 +1209,7 @@ mod tests {
                 ],
             ),
             |l| {
-                l.timeline = Some(crate::extensions::VizTimeline {
+                l.timeline = Some(crate::pages::spec::VizTimeline {
                     at: Some("at".into()),
                     label: Some("what".into()),
                     uri_column: Some("uri".into()),
@@ -1253,7 +1253,7 @@ mod tests {
                 ],
             ),
             |l| {
-                l.steps = Some(crate::extensions::VizSteps {
+                l.steps = Some(crate::pages::spec::VizSteps {
                     label: Some("step".into()),
                     status: Some("status".into()),
                 })
@@ -1280,7 +1280,7 @@ mod tests {
                 ],
             ),
             |l| {
-                l.hunks = Some(crate::extensions::VizHunks {
+                l.hunks = Some(crate::pages::spec::VizHunks {
                     path: Some("path".into()),
                     from: Some("a".into()),
                     to: Some("b".into()),
@@ -1313,7 +1313,7 @@ mod tests {
                 vec![vec![t("h.txt"), t(&format!("git:{sha}")), t("working")]],
             ),
             |l| {
-                l.hunks = Some(crate::extensions::VizHunks {
+                l.hunks = Some(crate::pages::spec::VizHunks {
                     path: Some("path".into()),
                     from: Some("a".into()),
                     to: Some("b".into()),
@@ -1340,7 +1340,7 @@ mod tests {
                 ],
             ),
             |l| {
-                l.code = Some(crate::extensions::VizCode {
+                l.code = Some(crate::pages::spec::VizCode {
                     path: Some("path".into()),
                     revision: Some("rev".into()),
                     lines: Some("lines".into()),
@@ -1376,7 +1376,7 @@ mod tests {
                 ],
             ),
             |l| {
-                l.diff = Some(crate::extensions::VizDiff {
+                l.diff = Some(crate::pages::spec::VizDiff {
                     path: Some("path".into()),
                     from: Some("a".into()),
                     to: Some("b".into()),
@@ -1415,7 +1415,7 @@ mod tests {
                 ],
             ),
             |l| {
-                l.code = Some(crate::extensions::VizCode {
+                l.code = Some(crate::pages::spec::VizCode {
                     path: Some("path".into()),
                     revision: Some("rev".into()),
                     lines: Some("lines".into()),
@@ -1434,7 +1434,7 @@ mod tests {
                 vec![vec![t("c.txt"), t(&format!("git:{sha}")), t("working")]],
             ),
             |l| {
-                l.diff = Some(crate::extensions::VizDiff {
+                l.diff = Some(crate::pages::spec::VizDiff {
                     path: Some("path".into()),
                     from: Some("a".into()),
                     to: Some("b".into()),
@@ -1457,7 +1457,7 @@ mod tests {
         let editor = with(
             run(Viz::Editor, None, &["path"], vec![vec![t("e.txt")]]),
             |l| {
-                l.editor = Some(crate::extensions::VizEditor {
+                l.editor = Some(crate::pages::spec::VizEditor {
                     path: Some("path".into()),
                     lines: None,
                 })
@@ -1484,7 +1484,7 @@ mod tests {
                 ],
             ),
             |l| {
-                l.terminal = Some(crate::extensions::VizTerminal {
+                l.terminal = Some(crate::pages::spec::VizTerminal {
                     of: Some("uri".into()),
                     title: Some("title".into()),
                     stopped: None,
@@ -1512,7 +1512,7 @@ mod tests {
                 vec![vec![t("https://example.com/a")]],
             ),
             |l| {
-                l.embed = Some(crate::extensions::VizEmbed {
+                l.embed = Some(crate::pages::spec::VizEmbed {
                     url: Some("url".into()),
                 })
             },

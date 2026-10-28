@@ -12,7 +12,7 @@ use oxplow_domain::events::schema::{EventType as _, ThreadCheckpoint};
 use oxplow_domain::{DomainError, StoredEvent};
 
 use crate::event_pump::AsyncEventConsumer;
-use crate::extensions::{AdvisoryAudience, AdvisoryOn, AdvisoryOncePer, Extension};
+use crate::extension::extensions::{AdvisoryAudience, AdvisoryOn, AdvisoryOncePer, Extension};
 
 /// The params every advisory query may use.
 pub const PARAMS: &[&str] = &["thread_id", "stream_id", "turn_id", "effort_id"];
@@ -274,7 +274,7 @@ pub struct AdvisoryDeps {
     pub effort_store: std::sync::Arc<oxplow_db::SqliteEffortStore>,
     pub thread_store: std::sync::Arc<oxplow_db::SqliteThreadStore>,
     pub worktrees: std::sync::Arc<crate::worktrees::WorktreeRouter>,
-    pub extension_catalog: std::sync::Arc<crate::extension_catalog::ExtensionCatalog>,
+    pub extension_catalog: std::sync::Arc<crate::extension::extension_catalog::ExtensionCatalog>,
     pub db: oxplow_db::Database,
     pub sql: crate::sql_gateway::SqlGateway,
     pub collection: crate::collection::CollectionService,
@@ -453,13 +453,14 @@ fn cell_text(c: &SqlCell) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::extensions::Advisory;
+    use crate::extension::extensions::Advisory;
 
     fn ext(advisories: Vec<Advisory>) -> Extension {
-        let mut e = crate::extensions::load_extensions(tempfile::tempdir().unwrap().path())
-            .into_iter()
-            .next()
-            .unwrap();
+        let mut e =
+            crate::extension::extensions::load_extensions(tempfile::tempdir().unwrap().path())
+                .into_iter()
+                .next()
+                .unwrap();
         e.name = "x".into();
         e.advisories = advisories;
         e
@@ -472,7 +473,7 @@ mod tests {
             query: query.into(),
             once_per,
             heading: None,
-            audience: crate::extensions::AdvisoryAudience::Agent,
+            audience: crate::extension::extensions::AdvisoryAudience::Agent,
             needs: Vec::new(),
         }
     }
@@ -1623,7 +1624,7 @@ mod tests {
     #[test]
     fn every_bundled_hint_has_a_fixture_that_fires_it() {
         let dir = tempfile::tempdir().unwrap();
-        let exts = crate::extensions::load_extensions(dir.path());
+        let exts = crate::extension::extensions::load_extensions(dir.path());
         let bundled = exts.iter().find(|e| e.name == "oxplow-bundled").unwrap();
         let mut shipped: Vec<&str> = bundled.advisories.iter().map(|a| a.id.as_str()).collect();
         shipped.sort_unstable();

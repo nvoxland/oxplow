@@ -33,7 +33,7 @@ pub struct Feeds {
 
 impl Feeds {
     /// Restate from the enabled extensions' collectors.
-    pub fn restate(&self, extensions: &[crate::extensions::Extension]) {
+    pub fn restate(&self, extensions: &[crate::extension::extensions::Extension]) {
         let mut by_dataset: BTreeMap<String, Vec<Feeder>> = BTreeMap::new();
         for ext in extensions.iter().filter(|e| e.enabled) {
             for c in &ext.collectors {

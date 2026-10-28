@@ -81,54 +81,7 @@ pub mod event_pump;
 #[cfg(test)]
 mod event_view_tests;
 pub mod events;
-pub mod extension_activation;
-#[cfg(test)]
-mod extension_activation_tests;
-pub mod extension_build;
-pub mod extension_catalog;
-pub mod extension_commands;
-pub mod extension_config_migration;
-#[cfg(test)]
-mod extension_config_tests;
-pub mod extension_configuration;
-pub mod extension_datasets;
-pub mod extension_deploy;
-pub mod extension_event_types;
-pub mod extension_generation;
-#[cfg(test)]
-mod extension_grants_tests;
-pub mod extension_impact;
-#[cfg(test)]
-mod extension_imports_tests;
-pub mod extension_job_ai;
-pub mod extension_job_authority;
-#[cfg(test)]
-mod extension_job_crash_tests;
-pub mod extension_job_dispatch;
-#[cfg(test)]
-mod extension_job_hardening_tests;
-pub mod extension_job_operations;
-pub(crate) mod extension_job_runner;
-pub mod extension_job_scheduler;
-#[cfg(test)]
-mod extension_job_stream_tests;
-pub mod extension_jobs;
-#[cfg(test)]
-mod extension_jobs_tests;
-#[cfg(test)]
-mod extension_private_state_tests;
-pub mod extension_resources;
-#[cfg(test)]
-mod extension_run_health_tests;
-#[cfg(test)]
-mod extension_run_pin_tests;
-pub mod extension_runtime_adapters;
-pub mod extension_secrets;
-#[cfg(test)]
-mod extension_sql_config_tests;
-pub mod extension_state;
-pub mod extension_store;
-pub mod extensions;
+pub mod extension;
 pub mod external_process;
 pub mod file_ref_version;
 #[cfg(test)]
@@ -578,13 +531,13 @@ pub struct Services {
     pub event_pump: Arc<event_pump::EventPump>,
     /// Loaded extensions per worktree root, reloaded when a file under
     /// `.oxplow/extensions/` or the project config changes.
-    pub extension_catalog: Arc<extension_catalog::ExtensionCatalog>,
-    pub jobs: Arc<extension_jobs::ExtensionJobs>,
-    pub extension_secrets: Arc<extension_secrets::ExtensionSecrets>,
+    pub extension_catalog: Arc<extension::extension_catalog::ExtensionCatalog>,
+    pub jobs: Arc<extension::extension_jobs::ExtensionJobs>,
+    pub extension_secrets: Arc<extension::extension_secrets::ExtensionSecrets>,
     /// Shared publication and reader boundary. Every service that reads a
     /// generation holds it; boot activates the first one (a repairable
     /// baseline), and until then they serve the current load.
-    pub extension_activation: Arc<extension_activation::ExtensionActivation>,
+    pub extension_activation: Arc<extension::extension_activation::ExtensionActivation>,
     /// Custom components' bundles as their frames loaded them, by version
     /// (tsk984): what the daemon serves a frame, and what its invoke names.
     pub component_bundles: Arc<component_bundles::ComponentBundles>,
@@ -612,7 +565,7 @@ pub struct Services {
     /// The enabled external provider instances (`.context/providers.md`).
     pub providers: Arc<providers::ProviderRegistry>,
     /// Enabled extensions' `commands:` on the bus (P6b).
-    pub extension_commands: Arc<extension_commands::ExtensionCommands>,
+    pub extension_commands: Arc<extension::extension_commands::ExtensionCommands>,
     /// Filled once services are in an `Arc`: what the operations that
     /// reach across services (effects, the agent's reads) run against.
     pub services_slot: commands::util::ServicesSlot,
@@ -830,7 +783,10 @@ impl Services {
     /// The extensions under `root` as listed: loaded, with what the
     /// primary worktree's dataset compile and vocabulary refused added to
     /// each one's errors.
-    pub async fn listed_extensions(&self, root: &std::path::Path) -> Vec<extensions::Extension> {
+    pub async fn listed_extensions(
+        &self,
+        root: &std::path::Path,
+    ) -> Vec<extension::extensions::Extension> {
         match self
             .sql
             .read_generation(async {
@@ -873,7 +829,7 @@ impl Services {
                 {
                     let mut pending = candidate.clone();
                     pending.enabled = false;
-                    extensions::clear_contributions(&mut pending);
+                    extension::extensions::clear_contributions(&mut pending);
                     pending.errors.push(
                         "candidate changes are not active until extension activation succeeds"
                             .into(),
@@ -902,7 +858,7 @@ impl Services {
                     .to_vec();
                 for extension in &mut unavailable {
                     extension.enabled = false;
-                    extensions::clear_contributions(extension);
+                    extension::extensions::clear_contributions(extension);
                     extension
                         .errors
                         .push("extension activation is unavailable".into());
@@ -1013,7 +969,8 @@ impl Services {
         let task_store = Arc::new(SqliteTaskStore::new(db.clone()));
         let handoff_store = Arc::new(oxplow_db::SqliteHandoffStore::new(db.clone()));
         let event_log_store = Arc::new(SqliteEventLogStore::new(db.clone(), vocabulary.clone()));
-        let extension_activation = Arc::new(extension_activation::ExtensionActivation::new());
+        let extension_activation =
+            Arc::new(extension::extension_activation::ExtensionActivation::new());
         let sql = sql_gateway::SqlGateway::new(db.clone())
             .with_vocabulary(vocabulary.clone())
             .with_activation(extension_activation.clone());
@@ -1261,16 +1218,16 @@ impl Services {
         // The metric runner (fact collectors → substrate). Holds leaf Arcs
         // only (never `Arc<Services>`); the `collector.triggers` consumer
         // hands it events, and its catalog loop is spawned in `boot.rs`.
-        let extension_catalog = Arc::new(extension_catalog::ExtensionCatalog::for_project(
-            &layout.project_dir,
-        ));
+        let extension_catalog = Arc::new(
+            extension::extension_catalog::ExtensionCatalog::for_project(&layout.project_dir),
+        );
         // The service is built before the catalog: its AI profiles are
         // whatever the active extensions declare, read live.
         ai.set_profiles({
             let catalog = extension_catalog.clone();
             let root = layout.project_dir.clone();
             Arc::new(move || {
-                extensions::ai_profiles::profiles_of(
+                extension::extensions::ai_profiles::profiles_of(
                     &catalog.unpinned(&root, "profiles are read from declarations"),
                 )
             })
@@ -1294,14 +1251,14 @@ impl Services {
             vcs: vcs.clone(),
             services: services_slot.clone(),
         });
-        let extension_secrets = Arc::new(extension_secrets::ExtensionSecrets::new(
+        let extension_secrets = Arc::new(extension::extension_secrets::ExtensionSecrets::new(
             extension_catalog.clone(),
             &layout.project_dir,
             machine.secrets.clone(),
             sql.clone(),
         ));
-        let jobs = Arc::new(extension_jobs::ExtensionJobs::new(
-            extension_jobs::JobsDependencies {
+        let jobs = Arc::new(extension::extension_jobs::ExtensionJobs::new(
+            extension::extension_jobs::JobsDependencies {
                 db: db.clone(),
                 catalog: extension_catalog.clone(),
                 root: layout.project_dir.clone(),
@@ -1694,7 +1651,7 @@ impl Services {
         commands
             .add_op(providers::sync::sync_op(&providers))
             .expect("provider.sync's op registers");
-        let extension_commands = Arc::new(extension_commands::ExtensionCommands::new(
+        let extension_commands = Arc::new(extension::extension_commands::ExtensionCommands::new(
             &commands,
             extension_catalog.clone(),
             layout.project_dir.clone(),
@@ -1793,13 +1750,13 @@ impl Services {
             .chain(commands::context_basket::ops())
             .chain(commands::extension_jobs::ops(jobs.clone()))
             .chain(commands::extension_state::ops(
-                extension_state::StateHost::new(
+                extension::extension_state::StateHost::new(
                     extension_catalog.clone(),
                     layout.project_dir.clone(),
                 ),
             ))
             .chain(commands::extension_configuration::ops(
-                extension_configuration::ConfigurationHost::new(
+                extension::extension_configuration::ConfigurationHost::new(
                     extension_catalog.clone(),
                     layout.project_dir.clone(),
                 ),

@@ -30,9 +30,9 @@ use oxplow_domain::events::schema::{extension_namespace, EventSchemaRegistry};
 use oxplow_domain::vocabulary::Vocabulary;
 use oxplow_domain::DomainError;
 
-use crate::extension_catalog::CatalogSnapshot;
-use crate::extension_event_types::EventTypes;
-use crate::extensions::Extension;
+use crate::extension::extension_catalog::CatalogSnapshot;
+use crate::extension::extension_event_types::EventTypes;
+use crate::extension::extensions::Extension;
 use oxplow_domain::uri::resources::{ResourceDecl, ResourceRegistry};
 
 /// What the generation needs of the host to build a vocabulary: the
@@ -53,9 +53,9 @@ struct Declares {
     /// Its `event_types:`.
     types: EventTypes,
     /// Its `resources:`.
-    resources: Vec<crate::extension_resources::ExtensionResource>,
+    resources: Vec<crate::extension::extension_resources::ExtensionResource>,
     /// Its reactions to other extensions' types.
-    subscriptions: Vec<crate::extensions::ForeignSubscription>,
+    subscriptions: Vec<crate::extension::extensions::ForeignSubscription>,
 }
 
 type Declared = Vec<Declares>;
@@ -404,7 +404,7 @@ mod tests {
         // Removed: no appends, the logged row still reads, the type stays
         // listed unregistered.
         std::fs::remove_dir_all(root.join(".oxplow/extensions/acme-pr")).unwrap();
-        crate::extension_deploy::remove(svc, "acme-pr")
+        crate::extension::extension_deploy::remove(svc, "acme-pr")
             .await
             .unwrap();
         assert!(log.append(merged(14)).await.is_err());
@@ -461,7 +461,7 @@ mod tests {
         crate::test_fixtures::activate_with_problems(svc).await;
         assert_eq!(window().await, (7, 3));
         std::fs::remove_dir_all(root.join(".oxplow/extensions/acme-pr")).unwrap();
-        crate::extension_deploy::remove(svc, "acme-pr")
+        crate::extension::extension_deploy::remove(svc, "acme-pr")
             .await
             .unwrap();
         assert_eq!(window().await, (7, 3));
@@ -621,7 +621,9 @@ resources:
             Some(oxplow_domain::uri::build::of("acme/pr", &[("id", "12")]))
         );
         std::fs::remove_dir_all(root.join(".oxplow/extensions/acme")).unwrap();
-        crate::extension_deploy::remove(svc, "acme").await.unwrap();
+        crate::extension::extension_deploy::remove(svc, "acme")
+            .await
+            .unwrap();
         assert_eq!(link(), None);
     }
 
@@ -720,7 +722,7 @@ resources:
             ".oxplow/extensions/acme-pr/extension.yaml",
             &collector("acme_pr.merged"),
         );
-        let loaded = crate::extensions::load_extensions(dir.path());
+        let loaded = crate::extension::extensions::load_extensions(dir.path());
         let ext = loaded.iter().find(|e| e.name == "acme-pr").unwrap();
         assert!(ext.errors.is_empty(), "{:?}", ext.errors);
         assert_eq!(ext.collectors.len(), 1);
@@ -730,7 +732,7 @@ resources:
             ".oxplow/extensions/acme-pr/extension.yaml",
             &collector("acme_pr.closed"),
         );
-        let loaded = crate::extensions::load_extensions(dir.path());
+        let loaded = crate::extension::extensions::load_extensions(dir.path());
         let ext = loaded.iter().find(|e| e.name == "acme-pr").unwrap();
         assert!(
             ext.errors
@@ -745,7 +747,7 @@ resources:
             ".oxplow/extensions/acme-pr/extension.yaml",
             &collector("other_ext.thing"),
         );
-        let loaded = crate::extensions::load_extensions(dir.path());
+        let loaded = crate::extension::extensions::load_extensions(dir.path());
         let ext = loaded.iter().find(|e| e.name == "acme-pr").unwrap();
         assert!(ext.errors.is_empty(), "{:?}", ext.errors);
         assert_eq!(ext.subscriptions.len(), 1);
@@ -839,7 +841,7 @@ resources:
 
         // Loading alone (what `oxplow extension check` sees): no error, and a
         // warning for each subscription.
-        let loaded = crate::extensions::load_extensions(&root)
+        let loaded = crate::extension::extensions::load_extensions(&root)
             .into_iter()
             .find(|e| e.name == "beta")
             .unwrap();
@@ -899,7 +901,7 @@ resources:
 
         // The owner goes: unresolved again.
         std::fs::remove_dir_all(root.join(".oxplow/extensions/acme-pr")).unwrap();
-        crate::extension_deploy::remove(svc, "acme-pr")
+        crate::extension::extension_deploy::remove(svc, "acme-pr")
             .await
             .unwrap();
         assert_eq!(unresolved(&listed(svc, "beta").await.errors), 2);
@@ -924,7 +926,7 @@ resources:
                 "def transform(x):\n    return {\"skip\": \"no\"}\n",
             );
             write(d.path(), ".oxplow/extensions/beta/pull.sh", "#!/bin/sh\n");
-            let loaded = crate::extensions::load_extensions(d.path())
+            let loaded = crate::extension::extensions::load_extensions(d.path())
                 .into_iter()
                 .find(|e| e.name == "beta")
                 .unwrap();

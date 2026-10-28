@@ -10,8 +10,8 @@ use oxplow_domain::contribution::{ContributionId, ContributionKind};
 use oxplow_domain::run::{ContributionRef, Mode, RunContext};
 use oxplow_domain::{Actor, StoredEvent};
 
-use crate::extension_catalog::ExtensionCatalog;
-use crate::extensions::Extension;
+use crate::extension::extension_catalog::ExtensionCatalog;
+use crate::extension::extensions::Extension;
 
 /// `ext`'s contribution `kind`/`local`, at its version and the catalog
 /// generation `root` is served at now.
@@ -62,7 +62,8 @@ pub fn live_owner(
     let root = root.to_path_buf();
     std::sync::Arc::new(move || {
         let snapshot = catalog.live_snapshot(&root);
-        let current = crate::extensions::owner(snapshot.extensions(), &owner.id.extension);
+        let current =
+            crate::extension::extensions::owner(snapshot.extensions(), &owner.id.extension);
         match current {
             Some(ext)
                 if ext.enabled

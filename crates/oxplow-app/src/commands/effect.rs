@@ -46,7 +46,7 @@ use super::{Handler, HandlerOutput, Invocation};
 use crate::contribution_health::ContributionHealth;
 use crate::effect_triggers::{self, run_reaction, Reacted};
 use crate::effects::EffectDecl;
-use crate::extensions::Extension;
+use crate::extension::extensions::Extension;
 use crate::Services;
 
 pub const RETRY: &str = "oxplow.effect.retry";

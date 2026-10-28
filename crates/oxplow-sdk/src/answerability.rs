@@ -240,7 +240,7 @@ pub async fn check(file: &str, questions: &[Question], c: &Checker<'_>) -> Check
     for (i, q) in questions.iter().enumerate() {
         let at = format!("{file}: question {} ({:?})", i + 1, q.question);
         if let Some(about) = &q.about {
-            if let Some(why) = oxplow_app::extension_resources::resource_problem(about) {
+            if let Some(why) = oxplow_app::extension::extension_resources::resource_problem(about) {
                 out.errors.push(format!(
                     "{at}: `about: {about}`: {why} — fix: `oxplow/file`, `oxplow/commit`, \
                      `oxplow/effort`, `oxplow/work_item`, …"
@@ -428,7 +428,7 @@ fn page_reaches(page: &oxplow_app::pages::schema::Page) -> Vec<String> {
 /// sources): the named skill names what the page's loaders reach, and with
 /// `svc` the page runs with the answer's params and no loader fails.
 pub async fn check_pages(
-    extensions: &[oxplow_app::extensions::Extension],
+    extensions: &[oxplow_app::extension::extensions::Extension],
     skill_text: &(dyn Fn(&str) -> Option<String> + Sync),
     svc: Option<&oxplow_app::Services>,
 ) -> Checked {
@@ -453,7 +453,9 @@ pub async fn check_pages(
                     ));
                 }
                 if let Some(about) = &answer.about {
-                    if let Some(why) = oxplow_app::extension_resources::resource_problem(about) {
+                    if let Some(why) =
+                        oxplow_app::extension::extension_resources::resource_problem(about)
+                    {
                         out.errors.push(format!(
                             "{at}: `about: {about}`: {why} — fix: a resource kind"
                         ));
@@ -509,7 +511,7 @@ pub async fn check_pages(
                     .run(RunRequest {
                         target: RunTarget::Spec(std::sync::Arc::new(page.clone())),
                         params,
-                        ctx: oxplow_app::extensions::ViewContext::default(),
+                        ctx: oxplow_app::pages::spec::ViewContext::default(),
                         viewer: oxplow_domain::Actor::Human,
                     })
                     .await;
@@ -539,7 +541,7 @@ pub async fn check_pages(
 /// The live half for pages: given the answer's skill, the model must reach
 /// for the page's first loader's model or command.
 pub async fn live_pages(
-    extensions: &[oxplow_app::extensions::Extension],
+    extensions: &[oxplow_app::extension::extensions::Extension],
     skill_text: &(dyn Fn(&str) -> Option<String> + Sync),
     catalog: &[String],
     ai: &AiService,
@@ -707,7 +709,7 @@ mod tests {
                 ),
             )
             .unwrap();
-            oxplow_app::extensions::load_extension_at(&dir, "acme")
+            oxplow_app::extension::extensions::load_extension_at(&dir, "acme")
         };
         let skill = |name: &str| {
             (name == "acme-skill").then(|| "Use v_work_item to list work.".to_string())

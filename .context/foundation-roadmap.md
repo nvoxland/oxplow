@@ -205,7 +205,7 @@ Acceptance: One authoritative descriptor/registry drives loader validation, disc
 
 Validation: Exercise a representative collector, effect, provider and component through discovery/validation; reject inconsistent descriptors; verify legacy manifest fixtures and generated references.
 
-Starting points: `crates/oxplow-app/src/extensions/manifest_v2.rs`, `crates/oxplow-app/src/extensions.rs`, `crates/oxplow-sdk/src/lib.rs`, `.context/extensions.md`.
+Starting points: `crates/oxplow-app/src/extension/extensions/manifest_v2.rs`, `crates/oxplow-app/src/extension/extensions.rs`, `crates/oxplow-sdk/src/lib.rs`, `.context/extensions.md`.
 
 Prerequisites: none; can start independently.
 
@@ -296,7 +296,7 @@ Acceptance: Authority defaults to denied for sensitive services, is derived per 
 
 Validation: Test grant matching, version changes, revocation, scope narrowing, redaction and unsupported enforcement states. Review a pure script, AI collector, external program and component action against the same model.
 
-Starting points: `crates/oxplow-app/src/grants.rs`, `crates/oxplow-app/src/extensions/manifest_v2.rs`, `crates/oxplow-app/src/ai_service.rs`, `.context/ai-providers.md`.
+Starting points: `crates/oxplow-app/src/grants.rs`, `crates/oxplow-app/src/extension/extensions/manifest_v2.rs`, `crates/oxplow-app/src/ai_service.rs`, `.context/ai-providers.md`.
 
 Prerequisites: Normalize contribution descriptors and public extension terminology.
 
@@ -331,7 +331,7 @@ Acceptance: A developer can identify extension/contribution version, cause, acti
 
 Validation: Run successful, rejected, cancelled and retrying contributions through the common views; assert ownership/cause linkage, no sensitive values, bounded retention and accurate freshness after failure.
 
-Starting points: `crates/oxplow-app/src/extension_catalog.rs`, `crates/oxplow-db/src/effect_run_store.rs`, `crates/oxplow-app/src/collector_runner.rs`, `crates/oxplow-db/datasets`.
+Starting points: `crates/oxplow-app/src/extension/extension_catalog.rs`, `crates/oxplow-db/src/effect_run_store.rs`, `crates/oxplow-app/src/collector_runner.rs`, `crates/oxplow-db/datasets`.
 
 Prerequisites: Introduce a shared extension RunContext; Compose declared host services through the shared context; Define scoped extension grants and usage audit contracts.
 
@@ -454,7 +454,7 @@ Acceptance: An extension can persist a workflow and user settings without a fake
 
 Validation: Cover concurrent updates, restart, migration failure/recovery, namespace isolation, disabled/uninstalled ownership and personal versus project precedence. Demonstrate a small triage workflow.
 
-Starting points: `crates/oxplow-app/src/effective_config.rs`, `crates/oxplow-app/src/commands/config_commands.rs`, `crates/oxplow-app/src/extensions.rs`, `crates/oxplow-db`.
+Starting points: `crates/oxplow-app/src/effective_config.rs`, `crates/oxplow-app/src/commands/config_commands.rs`, `crates/oxplow-app/src/extension/extensions.rs`, `crates/oxplow-db`.
 
 Prerequisites: Compose declared host services through the shared context.
 
@@ -499,7 +499,7 @@ Acceptance: A failed update leaves the last good activation usable and reports c
 
 Validation: Inject failure into each registration step and test hot update while queries/actions run. Assert rollback/last-good behavior and no mixed generation or leaked registration.
 
-Starting points: `crates/oxplow-app/src/extension_catalog.rs`, `crates/oxplow-app/src/extension_datasets.rs`, `crates/oxplow-app/src/config_reactors.rs`, `crates/oxplow-app/src/extensions/custom_components.rs`.
+Starting points: `crates/oxplow-app/src/extension/extension_catalog.rs`, `crates/oxplow-app/src/extension/extension_datasets.rs`, `crates/oxplow-app/src/config_reactors.rs`, `crates/oxplow-app/src/extension/extensions/custom_components.rs`.
 
 Prerequisites: Normalize contribution descriptors and public extension terminology; Introduce a shared extension RunContext.
 
@@ -513,7 +513,7 @@ Acceptance: No new calls use disposed handles; old contributions cannot keep run
 
 Validation: Repeat enable/update/disable cycles with long jobs, subscriptions and UI bridges. Check worker/resource counts, cleanup after errors and stale-handle rejection.
 
-Starting points: `crates/oxplow-app/src/extension_catalog.rs`, `crates/oxplow-app/src/config_reactors.rs`, `crates/oxplow-app/src/providers`, `crates/oxplow-app/src/effects.rs`.
+Starting points: `crates/oxplow-app/src/extension/extension_catalog.rs`, `crates/oxplow-app/src/config_reactors.rs`, `crates/oxplow-app/src/providers`, `crates/oxplow-app/src/effects.rs`.
 
 Prerequisites: Stage and activate one coherent extension generation; Provide durable cancellable extension jobs outside database transactions.
 
@@ -533,7 +533,7 @@ Acceptance: Two independent extensions can integrate without relying on internal
 
 Validation: Use producer/consumer fixtures with compatible, breaking, optional, missing and cyclic imports. Test disable/update compatibility and confirm the loader rejects dependency ambiguity.
 
-Starting points: `crates/oxplow-app/src/extensions/manifest_v2.rs`, `crates/oxplow-app/src/extension_datasets.rs`, `crates/oxplow-app/src/extension_event_types.rs`, `crates/oxplow-app/src/extension_commands.rs`.
+Starting points: `crates/oxplow-app/src/extension/extensions/manifest_v2.rs`, `crates/oxplow-app/src/extension/extension_datasets.rs`, `crates/oxplow-app/src/extension/extension_event_types.rs`, `crates/oxplow-app/src/extension/extension_commands.rs`.
 
 Prerequisites: Normalize contribution descriptors and public extension terminology.
 
@@ -547,7 +547,7 @@ Acceptance: Unknown ordering targets and cycles produce errors rather than being
 
 Validation: Test multiple effects in one extension and across extensions, missing/disabled targets, cycles, duplicate deliveries and restart replay; compare existing event graph fixtures.
 
-Starting points: `crates/oxplow-app/src/event_pump.rs`, `crates/oxplow-app/src/effect_triggers.rs`, `crates/oxplow-app/src/extensions/manifest_v2.rs`.
+Starting points: `crates/oxplow-app/src/event_pump.rs`, `crates/oxplow-app/src/effect_triggers.rs`, `crates/oxplow-app/src/extension/extensions/manifest_v2.rs`.
 
 Prerequisites: Use one versioned event envelope across runtime and authoring; Declare versioned public imports and cross-extension contracts.
 
@@ -652,7 +652,7 @@ Acceptance: Core detects/report errors even when no work list or repair policy i
 
 Validation: Exercise healthy/failing contributions, repeated events, no work list, a fake alternate provider, disabled policy and recovered contribution. Verify audit and links.
 
-Starting points: `crates/oxplow-app/src/contribution_repair.rs`, `crates/oxplow-app/src/extension_catalog.rs`, `extensions/oxplow-bundled/extension.yaml`, `crates/oxplow-app/src/commands`.
+Starting points: `crates/oxplow-app/src/contribution_repair.rs`, `crates/oxplow-app/src/extension/extension_catalog.rs`, `extensions/oxplow-bundled/extension.yaml`, `crates/oxplow-app/src/commands`.
 
 Prerequisites: Use one versioned event envelope across runtime and authoring; Compose declared host services through the shared context.
 
@@ -693,7 +693,7 @@ Acceptance: The same component can run bundled or from a project with equivalent
 
 Validation: Run the same component fixture in both origins, hot update and disable it, and test rejected bridge messages and undeclared commands.
 
-Starting points: `crates/oxplow-app/src/extensions/custom_components.rs`, `crates/oxplow-app/src/bundled_extensions.rs`, `apps/desktop/src/viz/CustomComponentViz.tsx`.
+Starting points: `crates/oxplow-app/src/extension/extensions/custom_components.rs`, `crates/oxplow-app/src/bundled_extensions.rs`, `apps/desktop/src/viz/CustomComponentViz.tsx`.
 
 Prerequisites: Stage and activate one coherent extension generation; Enforce scoped grants across hosts and external execution.
 
@@ -718,7 +718,7 @@ Acceptance: A custom task view works with the existing provider, and a non-task 
 
 Validation: Build a custom task detail/board using two providers and a separate triage form using namespaced state. Exercise editing, reorder, navigation, invalid input and permission denial.
 
-Starting points: `crates/oxplow-app/src/extensions/replacements.rs`, `crates/oxplow-app/src/pages/runner.rs` (`replacement`), `apps/desktop/src/viz/CustomComponentViz.tsx`, `crates/oxplow-app/src/extensions/schema.rs`.
+Starting points: `crates/oxplow-app/src/extension/extensions/replacements.rs`, `crates/oxplow-app/src/pages/runner.rs` (`replacement`), `apps/desktop/src/viz/CustomComponentViz.tsx`, `crates/oxplow-app/src/extension/extensions/schema.rs`.
 
 Prerequisites: Provide namespaced extension state and configuration services.
 
@@ -732,7 +732,7 @@ Acceptance: An agent can validate and preview a whole extension without publishi
 
 Validation: Preview an extension combining a model, event, effect, job and component; compare with a temporary production host, inject invalid changes, and assert isolation and cleanup.
 
-Starting points: `crates/oxplow-sdk/src/throwaway.rs`, `crates/oxplow-sdk/src/extension_test.rs`, `crates/oxplow-sdk/src/conformance.rs`, `crates/oxplow-app/src/extensions.rs`.
+Starting points: `crates/oxplow-sdk/src/throwaway.rs`, `crates/oxplow-sdk/src/extension_test.rs`, `crates/oxplow-sdk/src/conformance.rs`, `crates/oxplow-app/src/extension/extensions.rs`.
 
 Prerequisites: Stage and activate one coherent extension generation; Own and dispose extension resources on disable and update.
 

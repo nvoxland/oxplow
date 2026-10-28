@@ -16,7 +16,7 @@ use std::collections::BTreeMap;
 use oxplow_domain::{Actor, DomainError};
 use serde_json::{json, Map, Value};
 
-use crate::extensions::Extension;
+use crate::extension::extensions::Extension;
 use crate::Services;
 
 /// What a tool runs.
@@ -150,7 +150,7 @@ fn page_description(page: &crate::pages::schema::Page) -> String {
 /// (its label, its choices, its default) and `format`. None is required:
 /// a param left out takes its default or what the caller's context binds
 /// (`thread_id`, `stream_id`).
-fn params_schema(params: &[crate::extensions::PageParam]) -> Value {
+fn params_schema(params: &[crate::pages::spec::PageParam]) -> Value {
     let mut properties = Map::new();
     for param in params {
         let mut property = Map::new();

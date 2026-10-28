@@ -504,9 +504,11 @@ over a database file); adversarial and concurrency coverage is still to do.
 
 ## What works today
 
-Code: `crates/oxplow-app/src/extensions.rs` (the loader),
-`crates/oxplow-app/src/pages/` (the page schema, runner, open runs,
-actions, checks and text renderings), `crates/oxplow-rpc/src/commands/extensions.rs`
+Code: `crates/oxplow-app/src/extension/` (the extension machinery: the
+loader `extensions.rs`, activation, catalog, deploy, jobs, resources),
+`crates/oxplow-app/src/pages/` (the page schema and spec types — `Viz`,
+`VizConfig`, `ViewContext` in `spec.rs` —, runner, open runs, actions,
+checks and text renderings), `crates/oxplow-rpc/src/commands/extensions.rs`
 and `pages.rs` (IPC), and the page tools in `crates/oxplow-mcp/src/lib.rs`.
 The authoring format, as agents learn it, is in the `oxplow-extension`
 skill's `references/` (`page-format.md`, `loaders.md`, `view-nodes.md`);
@@ -531,7 +533,7 @@ the user guide is `docs/guide/pages.md`.
   advisories, `oxplow_show_page` and `oxplow_get_open_page`. A stream's
   `stream_id` only scopes the data a page reads (`:stream_id` /
   `:thread_id`). Reads go through `Services.extension_catalog`
-  (`crates/oxplow-app/src/extension_catalog.rs`). `find_page`, the page
+  (`crates/oxplow-app/src/extension/extension_catalog.rs`). `find_page`, the page
   tools and the advisory/metric/source readers take the catalog; the
   authoring checks (`oxplow_validate_extension`, preview) load the source
   instead. `ExtensionCatalog::snapshot` returns immutable declarations with
@@ -898,7 +900,7 @@ the user guide is `docs/guide/pages.md`.
     - The GitHub example's PR page has a Sync PRs action
       (`command: oxplow.collector.sync`).
   - **Viz** (`VizView.tsx`; the `Viz` enum and `VizConfig` in
-    `extensions.rs`): `table`, `list`, `number`, `markdown`, `bar`
+    `pages/spec.rs`): `table`, `list`, `number`, `markdown`, `bar`
     (`DailyBarChart`), `line` (`components/charts/TrendChart`, one chart per
     `chart.series`), `treemap` (two-level `components/charts/squarify`),
     `board`, and the structure components: `tree` (collapsible nesting by
@@ -1593,7 +1595,7 @@ agent: true }`.
 
 ## `extension.yaml`
 
-Manifest **version 2** (P1.11; `crates/oxplow-app/src/extensions/manifest_v2.rs`).
+Manifest **version 2** (P1.11; `crates/oxplow-app/src/extension/extensions/manifest_v2.rs`).
 Every contribution is declared as data, unknown keys are errors, and the
 loader resolves cross-references with `file:line` messages.
 

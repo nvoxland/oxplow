@@ -9,7 +9,7 @@ use oxplow_domain::Actor;
 
 use super::runner::*;
 use super::test_support::{fixture, run};
-use crate::extensions::ViewContext;
+use crate::pages::spec::ViewContext;
 
 fn ints(run: &PageRun, loader: &str) -> Vec<i64> {
     run.loaders[loader]

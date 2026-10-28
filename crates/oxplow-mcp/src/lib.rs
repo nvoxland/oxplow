@@ -666,7 +666,7 @@ mod tests {
             .collect();
         names.sort();
         for name in names {
-            oxplow_app::extension_deploy::deploy(svc, &name, true)
+            oxplow_app::extension::extension_deploy::deploy(svc, &name, true)
                 .await
                 .unwrap_or_else(|e| panic!("deploy `{name}`: {e}"));
         }
@@ -812,7 +812,7 @@ mod tests {
                         oxplow_db::SqlCell::Text("primary".into()),
                     )]
                     .into(),
-                    ctx: oxplow_app::extensions::ViewContext::default(),
+                    ctx: oxplow_app::pages::spec::ViewContext::default(),
                     viewer: oxplow_domain::Actor::Human,
                 },
                 "window",

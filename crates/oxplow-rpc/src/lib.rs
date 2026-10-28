@@ -235,7 +235,7 @@ macro_rules! oxplow_command_table {
                 set_panel_layout => $crate::commands::semantic::set_panel_layout { layout: Vec<::oxplow_db::PanelPlacement> } -> (),
                 get_ui_preferences => $crate::commands::semantic::get_ui_preferences {} -> Vec<::oxplow_db::UiPreference>,
                 set_ui_preference => $crate::commands::semantic::set_ui_preference { scope: String, key: String, value_json: Option<String> } -> (),
-                list_extensions => $crate::commands::extensions::list_extensions {} -> Vec<::oxplow_app::extensions::Extension>,
+                list_extensions => $crate::commands::extensions::list_extensions {} -> Vec<::oxplow_app::extension::extensions::Extension>,
                 load_component => $crate::commands::extensions::load_component { id: String } -> String,
                 invoke_component_command => $crate::commands::extensions::invoke_component_command { id: String, command: String, input: ::oxplow_domain::Json, confirmed: bool, version: String } -> ::oxplow_domain::CommandOutcome,
                 run_component_sql => $crate::commands::extensions::run_component_sql { id: String, sql: String, params: Option<Vec<::oxplow_db::SqlCell>>, stream_id: Option<String>, version: String } -> ::oxplow_db::SqlQueryResult,
@@ -386,7 +386,8 @@ pub(crate) mod test_support {
             .collect();
         names.sort();
         for name in names {
-            let _ = oxplow_app::extension_deploy::deploy(&ctx.services, &name, true).await;
+            let _ =
+                oxplow_app::extension::extension_deploy::deploy(&ctx.services, &name, true).await;
         }
         ctx.services
             .extension_activation

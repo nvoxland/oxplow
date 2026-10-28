@@ -414,7 +414,7 @@ pub struct EffortPolicyConsumer {
     pub db: oxplow_db::Database,
     /// What names the extension implementing a policy (its run's
     /// contribution and generation).
-    pub catalog: Arc<crate::extension_catalog::ExtensionCatalog>,
+    pub catalog: Arc<crate::extension::extension_catalog::ExtensionCatalog>,
     pub root: std::path::PathBuf,
 }
 
@@ -551,7 +551,7 @@ impl AsyncEventConsumer for EffortPolicyConsumer {
                 return Ok(false);
             }
             let bus = self.bus()?;
-            crate::extension_commands::check_calls(&*bus, &calls)
+            crate::extension::extension_commands::check_calls(&*bus, &calls)
                 .map_err(|e| storage(format!("effort policy `{id}`: {e}")))?;
             self.run(&run, calls).await.map(|()| true)
         }

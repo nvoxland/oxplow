@@ -59,9 +59,9 @@ use std::time::Duration;
 
 use crate::effects::{self, EffectDecl, Gate, Reaction};
 use crate::event_pump::AsyncEventConsumer;
-use crate::extension_commands::own_events;
-use crate::extensions::descriptors::{gates, placement};
-use crate::extensions::Extension;
+use crate::extension::extension_commands::own_events;
+use crate::extension::extensions::descriptors::{gates, placement};
+use crate::extension::extensions::Extension;
 use crate::Services;
 use oxplow_domain::contribution::ContributionKind;
 
@@ -683,7 +683,7 @@ pub(crate) async fn run_reaction(
 #[derive(serde::Serialize, serde::Deserialize)]
 struct Resend {
     calls: Vec<CommandCall>,
-    events: Vec<crate::extension_commands::ComposedEvent>,
+    events: Vec<crate::extension::extension_commands::ComposedEvent>,
 }
 
 /// Why a scheduled automatic retry wasn't sent: what it would send no
@@ -1853,7 +1853,7 @@ mod tests {
             tokio::spawn(async move { consumer.handle(&ev).await })
         };
         tokio::time::sleep(Duration::from_millis(300)).await;
-        crate::extension_deploy::set_enabled(svc, "acme", false, true)
+        crate::extension::extension_deploy::set_enabled(svc, "acme", false, true)
             .await
             .unwrap();
         running.await.unwrap().unwrap();
@@ -1897,7 +1897,7 @@ mod tests {
             tokio::spawn(async move { consumer.handle(&ev).await })
         };
         tokio::time::sleep(Duration::from_millis(300)).await;
-        crate::extension_deploy::set_enabled(svc, "acme", false, true)
+        crate::extension::extension_deploy::set_enabled(svc, "acme", false, true)
             .await
             .unwrap();
         let revoked = std::time::Instant::now();

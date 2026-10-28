@@ -32,7 +32,7 @@ use oxplow_domain::{DomainError, StoredEvent};
 
 use crate::collector_runner::{self, Collectors, EventRun};
 use crate::event_pump::AsyncEventConsumer;
-use crate::extensions::descriptors::{gates, placement};
+use crate::extension::extensions::descriptors::{gates, placement};
 use crate::Services;
 use oxplow_domain::contribution::ContributionKind;
 

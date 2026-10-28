@@ -195,7 +195,7 @@ async fn deploy_from_outside(project: &Path, name: Option<&String>) -> Result<St
     let mut out = Vec::new();
     let mut failed = Vec::new();
     for name in &names {
-        match oxplow_app::extension_deploy::deploy(&svc, name, true).await {
+        match oxplow_app::extension::extension_deploy::deploy(&svc, name, true).await {
             Ok(deployed) => {
                 out.push(format!(
                     "{name}: {} {}{}",
@@ -249,7 +249,7 @@ async fn extension(project: &Path, args: &[String]) -> Result<String, String> {
                 .read(|c| oxplow_db::extension_deployment_store::list_tx(c, None))
                 .await
                 .map_err(|e| e.to_string())?;
-            let next = oxplow_app::extension_deploy::next_boot(project, &rows).await?;
+            let next = oxplow_app::extension::extension_deploy::next_boot(project, &rows).await?;
             let mut out: Vec<String> = next
                 .runs
                 .iter()
@@ -281,7 +281,7 @@ async fn extension_test(project: &Path, args: &[String]) -> Result<String, Strin
     let junit = take_flag(&mut args, "--junit");
     let names = if args.is_empty() {
         let settings = oxplow_config::extension_settings(project);
-        oxplow_app::extensions::known_names(project, &settings)
+        oxplow_app::extension::extensions::known_names(project, &settings)
             .into_iter()
             .filter(|n| settings.source(project, n).join("extension.yaml").is_file())
             .collect()
@@ -413,7 +413,7 @@ impl Tasks {
             bus.add_op(op).map_err(|e| e.to_string())?;
         }
         // Declared as oxplow's own commands in its foundation extension.
-        oxplow_app::extension_commands::register_declared(&bus);
+        oxplow_app::extension::extension_commands::register_declared(&bus);
         let actor = match thread {
             Some(t) => Actor::Agent {
                 session_id: None,
@@ -936,7 +936,7 @@ mod tests {
         svc.streams.ensure_primary().await.unwrap();
         let hash = "00000000000000ba";
         write_files(
-            &oxplow_app::extension_store::deployment_dir(p, "oxplow-foundation", hash),
+            &oxplow_app::extension::extension_store::deployment_dir(p, "oxplow-foundation", hash),
             &|t| format!("{t}not_a_key: 1\n"),
         );
         let row = oxplow_db::extension_deployment_store::DeploymentRow {
@@ -995,7 +995,7 @@ mod tests {
         drop(held);
 
         let source = p.join(".oxplow/extensions/oxplow-foundation");
-        let hash = oxplow_app::extension_store::source_hash(&source).unwrap();
+        let hash = oxplow_app::extension::extension_store::source_hash(&source).unwrap();
         let deployed = dev(p, &["extension", "deploy", "oxplow-foundation"])
             .await
             .unwrap();

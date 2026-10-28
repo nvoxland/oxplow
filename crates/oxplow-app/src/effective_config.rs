@@ -12,7 +12,7 @@ use oxplow_config::OxplowConfig;
 use serde_json::Value;
 
 use crate::ai_service::AiSettings;
-use crate::extensions::Extension;
+use crate::extension::extensions::Extension;
 
 /// Where a setting's value comes from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, specta::Type)]
@@ -307,7 +307,7 @@ mod tests {
                 },
             ],
         };
-        let mut ext = crate::extensions::empty_extension("gh", "gh", "project");
+        let mut ext = crate::extension::extensions::empty_extension("gh", "gh", "project");
         ext.metrics =
             vec![serde_json::from_value(serde_json::json!({ "key": "gh.prs.open" })).unwrap()];
         let all = effective_config(&config, dir.path(), Some(&ai), None, &[ext]);

@@ -410,8 +410,8 @@ pub struct HostCalls {
     /// What its `sql.read` reads through, the metric functions included.
     sql: crate::sql_gateway::SqlGateway,
     state: Option<(
-        crate::extension_state::StateSource,
-        crate::extension_configuration::ConfigurationSource,
+        crate::extension::extension_state::StateSource,
+        crate::extension::extension_configuration::ConfigurationSource,
         oxplow_domain::run::ContributionRef,
     )>,
     runs: parking_lot::Mutex<std::collections::HashMap<String, oxplow_domain::run::RunContext>>,
@@ -436,8 +436,8 @@ impl HostCalls {
         grant: oxplow_domain::grant::Grant,
         sql: crate::sql_gateway::SqlGateway,
         state: Option<(
-            crate::extension_state::StateSource,
-            crate::extension_configuration::ConfigurationSource,
+            crate::extension::extension_state::StateSource,
+            crate::extension::extension_configuration::ConfigurationSource,
             oxplow_domain::run::ContributionRef,
         )>,
     ) -> Arc<Self> {
@@ -596,7 +596,7 @@ impl HostCalls {
 pub fn first_difference(declared: &InitializeResult, live: &InitializeResult) -> String {
     let a = serde_json::to_value(declared).unwrap_or_default();
     let b = serde_json::to_value(live).unwrap_or_default();
-    crate::extension_impact::json_difference(&a, &b)
+    crate::extension::extension_impact::json_difference(&a, &b)
         .map(|(path, a, b)| format!("at `{path}`: declared {a}, running {b}"))
         .unwrap_or_else(|| "they differ".into())
 }
@@ -620,7 +620,7 @@ pub struct Deployment {
 /// `ext`'s provider `spec` in its deployment, its declarations read.
 pub fn deployment(
     project_dir: &Path,
-    ext: &crate::extensions::Extension,
+    ext: &crate::extension::extensions::Extension,
     spec: &ProviderSpec,
 ) -> Result<Deployment, HostError> {
     let ext_dir = ext_dir(project_dir, ext);
@@ -654,6 +654,6 @@ pub fn adapter_bin() -> PathBuf {
 }
 
 /// The provider's extension folder under `root`.
-pub fn ext_dir(root: &Path, ext: &crate::extensions::Extension) -> PathBuf {
+pub fn ext_dir(root: &Path, ext: &crate::extension::extensions::Extension) -> PathBuf {
     root.join(&ext.path)
 }
