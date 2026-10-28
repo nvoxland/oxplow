@@ -13,6 +13,7 @@ pub mod answerability;
 pub mod cli;
 mod component_harness;
 pub mod conformance;
+pub mod examples;
 pub mod extension_test;
 mod throwaway;
 
@@ -155,6 +156,49 @@ pub fn scaffold(
 /// (`extension new metric <name> --language … --glob …`); every other kind
 /// ignores `metric`.
 pub fn scaffold_with(
+/// Copy the example extension `example` (one oxplow ships) into
+/// `.oxplow/extensions/<example>/`. It keeps its name: its commands, models
+/// and pages are namespaced by it, so a different `name` is refused —
+/// rename after copying. Refuses an existing folder.
+pub fn scaffold_example(
+    root: &Path,
+    example: &str,
+    name: Option<&str>,
+) -> Result<Scaffolded, SdkError> {
+    let found = examples::find(example).ok_or_else(|| {
+        SdkError::Invalid(format!(
+            "no example `{example}`: the examples are {}",
+            examples::names()
+        ))
+    })?;
+    if let Some(name) = name.filter(|n| *n != found.name) {
+        return Err(SdkError::Invalid(format!(
+            "`--from {example}` keeps the name `{example}` (its commands and models are named by it): copy it as `{example}`, then rename after copying (got `{name}`)"
+        )));
+    }
+    let rel_dir = format!("{EXTENSIONS_DIR}/{}", found.name);
+    let dir = root.join(&rel_dir);
+    if dir.exists() {
+        return Err(SdkError::Invalid(format!(
+            "{rel_dir} already exists; edit it in place"
+        )));
+    }
+    let mut files = Vec::new();
+    for (rel, bytes) in found.files {
+        let path = dir.join(rel);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(path, bytes)?;
+        files.push(format!("{rel_dir}/{rel}"));
+    }
+    Ok(Scaffolded {
+        name: found.name.to_string(),
+        dir: rel_dir,
+        files,
+    })
+}
+
     root: &Path,
     kind: Kind,
     name: &str,

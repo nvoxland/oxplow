@@ -64,6 +64,53 @@ fn loaded(
     ext
 }
 
+/// `extension new --from <example>` copies each example oxplow ships, and
+/// the copy checks and tests clean as it stands (an example that builds on
+/// another comes with it).
+#[tokio::test(flavor = "multi_thread")]
+async fn every_example_scaffolds_checks_and_tests_clean() {
+    let all = oxplow_sdk::examples::all();
+    assert!(all.len() >= 9, "the examples are compiled in");
+    for example in all {
+        let dir = project().await;
+        let needs: &[&str] = match example.name {
+            "review-badges" => &["effort-review"],
+            _ => &[],
+        };
+        for name in needs.iter().copied().chain([example.name]) {
+            oxplow_sdk::scaffold_example(dir.path(), name, None).unwrap();
+        }
+        let report = check(
+            dir.path(),
+            example.name,
+            &ExtensionCatalog::new(),
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        assert!(
+            report.ok,
+            "{}: {}",
+            example.name,
+            render_findings(&report, Format::Text)
+        );
+        let report = test_extension(dir.path(), example.name, false)
+            .await
+            .unwrap();
+        assert_eq!(report.errors, Vec::<String>::new(), "{}", example.name);
+        // A component's `ui` steps need an app and a display that is awake.
+        let unexpected: Vec<_> = report
+            .warnings
+            .iter()
+            .filter(|w| !w.contains("aren't run"))
+            .collect();
+        assert!(unexpected.is_empty(), "{}: {unexpected:?}", example.name);
+        assert!(!report.ran.is_empty(), "{} ran its examples", example.name);
+    }
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_scaffolded_page_checks_tests_and_its_row_action_binds() {
     let dir = project().await;

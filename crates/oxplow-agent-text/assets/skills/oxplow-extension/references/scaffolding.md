@@ -9,7 +9,9 @@ themselves or share the extension with their team (`oxplow.extension.share`).
 You build them with your normal file tools. `$OXPLOW_BIN extension new <kind>
 <name> --origin <your effort ref>` scaffolds the folder with a v2 manifest,
 an intent, one example and its fixture, and a working starter for the
-kind; then edit. Each passes `check` and `extension test` as written, so a
+kind; then edit. `$OXPLOW_BIN extension new --list-examples` names the
+working examples oxplow ships, and `new --from <example>` copies one (it
+keeps its name; rename after copying). Each passes `check` and `extension test` as written, so a
 failure after your edit is yours:
 - `page` — a page over open tasks with a row action (Start);
 - `collector` — a Starlark collector of an entity, a model over it

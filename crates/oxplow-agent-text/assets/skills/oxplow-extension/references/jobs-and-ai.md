@@ -44,8 +44,8 @@ effects:
 - Show it running with a page over `v_job_run_output` (`WHERE job_id = (SELECT id FROM v_job_run WHERE uri = :job_run)`):
   it updates as the model writes. oxplow's own Job Runs page lists every run
   with Cancel.
-- The `triage` example oxplow ships has one, with its fixtures (a tool
-  round, a cancel); the `effort-review` example
+- `$OXPLOW_BIN extension new --from triage` copies an example with one, with
+  its fixtures (a tool round, a cancel); `--from effort-review`
   starts one per finished effort, its tool reading the effort's evidence,
   and comments the answer on the work item.
 - Your command namespace is your name with `-` as `_`: extension
