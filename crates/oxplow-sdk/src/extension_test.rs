@@ -8380,6 +8380,11 @@ steps:
         );
         let report = test_extension(root, "cards", false).await.unwrap();
         assert_eq!(report.errors, Vec::<String>::new());
+        if report.warnings.iter().any(|w| w.contains("aren't run")) {
+            // The display is locked or asleep: the window draws nothing, so the
+            // steps were not run (`a_window_that_draws_nothing_…` covers that).
+            return;
+        }
 
         write(
             root,
