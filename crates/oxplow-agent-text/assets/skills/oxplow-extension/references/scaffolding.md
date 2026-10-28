@@ -9,7 +9,9 @@ themselves or share the extension with their team (`oxplow.extension.share`).
 You build them with your normal file tools. `$OXPLOW_BIN extension new <kind>
 <name> --origin <your effort ref>` scaffolds the folder with a v2 manifest,
 an intent, one example and its fixture, and a working starter for the
-kind; then edit. Each passes `check` and `extension test` as written, so a
+kind; then edit. `$OXPLOW_BIN extension new --list-examples` names the
+working examples oxplow ships, and `new --from <example>` copies one (it
+keeps its name; rename after copying). Each passes `check` and `extension test` as written, so a
 failure after your edit is yours:
 - `page` — a page over open tasks with a row action (Start);
 - `collector` — a Starlark collector of an entity, a model over it
@@ -40,11 +42,13 @@ failure after your edit is yours:
   `oxplow:oxplow/wiki?slug=…`), and a `knowledge_pages` collector of the same rows;
 - `effect` — a script reacting to a logged event by composing commands
   (private; runs under the extension's permissions);
-- `job` — model work that runs on its own, outside any transaction: its
-  reply streams into `v_job_run_output`, its model may call tools you
-  declare, a person can cancel it, and an effect on its
-  `contribution.job.completed` writes what it found (runs once a person
-  under its permissions; `references/jobs-and-ai.md`);
+- `job` — model work that runs on its own, outside any transaction: the
+  starter has the job and its model profile, `job.ask|status|cancel`
+  commands, a `note.ask` command that holds the prompt, a page over
+  `v_job_run_output` that follows the reply live, and a `publish` effect on
+  `contribution.job.completed` that comments the reply on a work item. Its
+  fixtures run the job on a fixture model (`model: { replies }`); a person
+  can cancel it (`references/jobs-and-ai.md`);
 - `component` — a custom component (private): a page with its component
   node and a web bundle on oxplow's client library;
 - `policy` — an effort policy written as a script (`implementations:`,

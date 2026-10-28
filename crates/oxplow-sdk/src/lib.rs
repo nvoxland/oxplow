@@ -13,6 +13,7 @@ pub mod answerability;
 pub mod cli;
 mod component_harness;
 pub mod conformance;
+pub mod examples;
 pub mod extension_test;
 mod throwaway;
 
@@ -80,10 +81,13 @@ pub enum Kind {
     Skill,
     /// A left-nav panel showing one page compact.
     Panel,
+    /// A cancellable model job: its prompt, `ask`/`status`/`cancel` commands,
+    /// a page following its output, and an effect that publishes the answer.
+    Job,
 }
 
 impl Kind {
-    pub const NAMES: &'static str = "`page`, `extension`, `provider`, `collector`, `metric`, `command`, `effect`, `component`, `policy`, `advisory`, `skill` or `panel`";
+    pub const NAMES: &'static str = "`page`, `extension`, `provider`, `collector`, `metric`, `command`, `effect`, `component`, `policy`, `advisory`, `skill`, `panel` or `job`";
 
     pub fn parse(s: &str) -> Option<Kind> {
         match s {
@@ -101,6 +105,7 @@ impl Kind {
             "skill" => Some(Kind::Skill),
             "page" => Some(Kind::Page),
             "panel" => Some(Kind::Panel),
+            "job" => Some(Kind::Job),
             _ => None,
         }
     }
@@ -149,6 +154,49 @@ pub fn scaffold(
     origin: Option<&str>,
 ) -> Result<Scaffolded, SdkError> {
     scaffold_with(root, kind, name, origin, &MetricStarter::default())
+}
+
+/// Copy the example extension `example` (one oxplow ships) into
+/// `.oxplow/extensions/<example>/`. It keeps its name: its commands, models
+/// and pages are namespaced by it, so a different `name` is refused —
+/// rename after copying. Refuses an existing folder.
+pub fn scaffold_example(
+    root: &Path,
+    example: &str,
+    name: Option<&str>,
+) -> Result<Scaffolded, SdkError> {
+    let found = examples::find(example).ok_or_else(|| {
+        SdkError::Invalid(format!(
+            "no example `{example}`: the examples are {}",
+            examples::names()
+        ))
+    })?;
+    if let Some(name) = name.filter(|n| *n != found.name) {
+        return Err(SdkError::Invalid(format!(
+            "`--from {example}` keeps the name `{example}` (its commands and models are named by it): copy it as `{example}`, then rename after copying (got `{name}`)"
+        )));
+    }
+    let rel_dir = format!("{EXTENSIONS_DIR}/{}", found.name);
+    let dir = root.join(&rel_dir);
+    if dir.exists() {
+        return Err(SdkError::Invalid(format!(
+            "{rel_dir} already exists; edit it in place"
+        )));
+    }
+    let mut files = Vec::new();
+    for (rel, bytes) in found.files {
+        let path = dir.join(rel);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(path, bytes)?;
+        files.push(format!("{rel_dir}/{rel}"));
+    }
+    Ok(Scaffolded {
+        name: found.name.to_string(),
+        dir: rel_dir,
+        files,
+    })
 }
 
 /// [`scaffold`], with the language and files a `Kind::Metric` scans
@@ -257,6 +305,12 @@ pub fn scaffold_with(
             ),
             "a comment on the finished work item",
             Some("{ commands: [oxplow.work_item.comment] }".to_string()),
+        ),
+        // Its fixtures carry a model, so they are written with the job below.
+        Kind::Job => (
+            "{ job: run }".to_string(),
+            "the job succeeds with the model's reply",
+            None,
         ),
     };
     let mut manifest = extensions::scaffold_manifest(&extensions::ManifestScaffold {
@@ -424,6 +478,65 @@ pub fn scaffold_with(
             panel = ContributionKind::Panel.spec().title.to_lowercase(),
             title = title_case(name)
         )),
+        Kind::Job => {
+            manifest.push_str(
+                "    - name: published\n      input: { job: run }\n      expect: the finished job's reply is commented on the work item\n",
+            );
+            manifest.push_str(&format!(
+                "# The model: a person binds `{name}/{ns}` in Settings → AI; until then it\n\
+                 # uses their Summarize model. The job's script runs core commands as\n\
+                 # the caller. Deploying approves the permissions below.\n\
+                 permissions:\n\
+                 \x20 ai: true\n\
+                 \x20 commands: [oxplow.work_item.comment]\n\
+                 ai_profiles:\n\
+                 \x20 - id: {ns}\n\
+                 \x20   description: \"TODO: what the model is asked to do.\"\n\
+                 \x20   fallback: summarize\n\
+                 jobs:\n\
+                 \x20 # One model conversation per intent key; `job.ask` starts it, `job.cancel`\n\
+                 \x20 # stops it (what it had written is kept).\n\
+                 \x20 - id: run\n\
+                 \x20   description: \"TODO: what the job does. Here: write a short note about a work item.\"\n\
+                 \x20   version: 1\n\
+                 \x20   operation: ai.complete_typed\n\
+                 \x20   needs: [ai.compute]\n\
+                 \x20   timeout: 120\n\
+                 commands:\n\
+                 \x20 # The job's lifecycle, through the host's jobs scope. `agent: true` would\n\
+                 \x20 # let an effect ask too.\n\
+                 \x20 - name: job.ask\n\
+                 \x20   summary: Start the job; returns it. The intent key makes it one job per key.\n\
+                 \x20   scope: jobs.write\n\
+                 \x20   op: enqueue\n\
+                 \x20 - name: job.status\n\
+                 \x20   summary: The job's state, what it has written so far and, once it ends, its answer.\n\
+                 \x20   scope: jobs.read\n\
+                 \x20   op: snapshot\n\
+                 \x20 - name: job.cancel\n\
+                 \x20   summary: Stop the job; it keeps what it had written.\n\
+                 \x20   scope: jobs.write\n\
+                 \x20   op: cancel\n\
+                 \x20 # Builds the job's request (the prompt lives here) and composes `job.ask`.\n\
+                 \x20 - name: note.ask\n\
+                 \x20   summary: \"TODO: what asking does. Here: ask a model for a note on a work item.\"\n\
+                 \x20   entry: commands/ask.star\n\
+                 \x20   access: record\n\
+                 \x20   input_schema:\n\
+                 \x20     type: object\n\
+                 \x20     required: [uri]\n\
+                 \x20     additionalProperties: false\n\
+                 \x20     properties:\n\
+                 \x20       uri: {{ type: string, description: \"The work item (oxplow:oxplow/work_item?id=<id>&provider=<provider>).\" }}\n\
+                 effects:\n\
+                 \x20 - id: publish\n\
+                 \x20   summary: When the job ends, comment its reply on the work item.\n\
+                 \x20   on: [contribution.job.completed]\n\
+                 \x20   where: {{ job: \"{name}/run\" }}\n\
+                 \x20   entry: effects/publish.star\n\
+                 \x20   needs: [jobs.read]\n"
+            ));
+        }
         Kind::Page | Kind::Extension | Kind::Metric => {}
     }
     write(&format!("{rel_dir}/extension.yaml"), manifest)?;
@@ -545,6 +658,132 @@ pub fn scaffold_with(
                      \x20   - {{ key: title, label: Item, link: {{ kind: page, from: uri }} }}\n\
                      \x20 empty: Nothing collected yet — sync the collector (Settings → Data).\n",
                     title = title_case(name)
+                ),
+            )?;
+        }
+        Kind::Job => {
+            let task = "Write a one-line note about this work item.";
+            write(
+                &format!("{rel_dir}/commands/ask.star"),
+                format!(
+                    "# Builds the job's request and composes the job's `ask`. The intent key\n\
+                     # names the work item, so asking again for it returns the same job.\n\
+                     \n\
+                     SYSTEM = \"{task} Answer in one sentence.\"\n\
+                     \n\
+                     def transform(x):\n\
+                     \x20   uri = x[\"input\"][\"uri\"]\n\
+                     \x20   return {{\"commands\": [{{\n\
+                     \x20       \"name\": \"{ns}.job.ask\",\n\
+                     \x20       \"input\": {{\n\
+                     \x20           \"job\": \"run\",\n\
+                     \x20           \"intentKey\": \"note:\" + uri,\n\
+                     \x20           \"request\": {{\n\
+                     \x20               \"schemaVersion\": 1,\n\
+                     \x20               \"role\": \"{ns}\",\n\
+                     \x20               \"messages\": [\n\
+                     \x20                   {{\"role\": \"system\", \"parts\": [{{\"type\": \"text\", \"text\": SYSTEM}}]}},\n\
+                     \x20                   {{\"role\": \"user\", \"parts\": [{{\"type\": \"text\", \"text\": \"Work item: \" + uri}}]}},\n\
+                     \x20               ],\n\
+                     \x20           }},\n\
+                     \x20       }},\n\
+                     \x20   }}]}}\n"
+                ),
+            )?;
+            write(
+                &format!("{rel_dir}/effects/publish.star"),
+                "# The finished job's reply, commented on the work item its intent key names.\n\
+                 # The event says only which run ended (`where:` keeps it to this job).\n\
+                 \n\
+                 PREFIX = \"note:\"\n\
+                 \n\
+                 def transform(x):\n\
+                 \x20   payload = x[\"event\"][\"payload\"]\n\
+                 \x20   if payload[\"outcome\"] != \"succeeded\":\n\
+                 \x20       return {\"skip\": \"the job didn't finish (\" + payload[\"outcome\"] + \")\"}\n\
+                 \x20   run = scope(\"jobs.read\", {\"job_run\": payload[\"job_run\"]})\n\
+                 \x20   key = run.get(\"intentKey\") or \"\"\n\
+                 \x20   if not key.startswith(PREFIX):\n\
+                 \x20       return {\"skip\": \"not a note: \" + key}\n\
+                 \x20   answer = run.get(\"result\") or {}\n\
+                 \x20   text = \"\".join([p.get(\"text\", \"\") for p in answer.get(\"parts\", []) if p.get(\"type\") == \"text\"]).strip()\n\
+                 \x20   if not text:\n\
+                 \x20       return {\"skip\": \"the model wrote nothing\"}\n\
+                 \x20   return {\"commands\": [{\n\
+                 \x20       \"name\": \"oxplow.work_item.comment\",\n\
+                 \x20       \"input\": {\"uri\": key[len(PREFIX):], \"body\": text},\n\
+                 \x20   }]}\n"
+                    .to_string(),
+            )?;
+            write(
+                &format!("{rel_dir}/pages/{name}.yaml"),
+                format!(
+                    "title: {title}\n\
+                     description: \"TODO: what this page answers.\"\n\
+                     category: Work\n\
+                     data:\n\
+                     \x20 # One row per run; `output` is what the model has written so far, so the\n\
+                     \x20 # page follows a running job live.\n\
+                     \x20 runs:\n\
+                     \x20   sql: |\n\
+                     \x20     SELECT r.id AS job_run, r.intent_key, r.state, r.updated_at,\n\
+                     \x20            (SELECT group_concat(o.text, '') FROM v_job_run_output o\n\
+                     \x20             WHERE o.job_id = r.id AND o.attempt = r.attempt AND o.kind = 'text') AS output\n\
+                     \x20     FROM v_job_run r\n\
+                     \x20     WHERE r.extension = '{name}'\n\
+                     \x20     ORDER BY r.created_at DESC\n\
+                     view:\n\
+                     \x20 viz: table\n\
+                     \x20 from: runs\n\
+                     \x20 columns:\n\
+                     \x20   - {{ key: intent_key, label: About }}\n\
+                     \x20   - {{ key: state }}\n\
+                     \x20   - {{ key: output, label: Reply }}\n\
+                     \x20 empty: Nothing asked yet — run {ns}.note.ask on a work item.\n",
+                    title = title_case(name)
+                ),
+            )?;
+            write(
+                &format!("{rel_dir}/fixtures/basic.yaml"),
+                    "# The job runs on a throwaway oxplow; its model call answers with the\n\
+                     # fixture model's reply (`model:`) — no provider, nothing spent.\n\
+                     when:\n\
+                     \x20 job: run\n\
+                     \x20 intentKey: note:first\n\
+                     \x20 request:\n\
+                     \x20   schemaVersion: 1\n\
+                     \x20   role: summarize\n\
+                     \x20   messages:\n\
+                     \x20     - { role: user, parts: [{ type: text, text: \"Write a note.\" }] }\n\
+                     expect:\n\
+                     \x20 state: succeeded\n\
+                     \x20 text: A fine start.\n\
+                     model:\n\
+                     \x20 replies: [\"A fine start.\"]\n"
+                    .to_string()
+            )?;
+            write(
+                &format!("{rel_dir}/fixtures/published.yaml"),
+                format!(
+                    "# The finished job reaches `publish`, which comments the reply on the work\n\
+                     # item its intent key names. (Oxplow's own work list is bundled's.)\n\
+                     requires: [oxplow-bundled]\n\
+                     given: [{{ command: oxplow.work_item.create, input: {{ title: First }} }}]\n\
+                     when:\n\
+                     \x20 job: run\n\
+                     \x20 intentKey: \"note:{work_item}\"\n\
+                     \x20 request:\n\
+                     \x20   schemaVersion: 1\n\
+                     \x20   role: summarize\n\
+                     \x20   messages:\n\
+                     \x20     - {{ role: user, parts: [{{ type: text, text: \"Write a note.\" }}] }}\n\
+                     expect:\n\
+                     \x20 state: succeeded\n\
+                     \x20 effects:\n\
+                     \x20   - {{ id: {name}/publish, state: ok }}\n\
+                     \x20 commands: {{ contains: [oxplow.work_item.comment] }}\n\
+                     model:\n\
+                     \x20 replies: [\"A fine start.\"]\n"
                 ),
             )?;
         }
@@ -1409,6 +1648,7 @@ mod tests {
             Kind::Skill,
             Kind::Page,
             Kind::Panel,
+            Kind::Job,
         ] {
             let dir = tempfile::tempdir().unwrap();
             let made = scaffold(dir.path(), kind, "demo", None).unwrap();

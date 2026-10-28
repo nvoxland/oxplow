@@ -64,6 +64,53 @@ fn loaded(
     ext
 }
 
+/// `extension new --from <example>` copies each example oxplow ships, and
+/// the copy checks and tests clean as it stands (an example that builds on
+/// another comes with it).
+#[tokio::test(flavor = "multi_thread")]
+async fn every_example_scaffolds_checks_and_tests_clean() {
+    let all = oxplow_sdk::examples::all();
+    assert!(all.len() >= 9, "the examples are compiled in");
+    for example in all {
+        let dir = project().await;
+        let needs: &[&str] = match example.name {
+            "review-badges" => &["effort-review"],
+            _ => &[],
+        };
+        for name in needs.iter().copied().chain([example.name]) {
+            oxplow_sdk::scaffold_example(dir.path(), name, None).unwrap();
+        }
+        let report = check(
+            dir.path(),
+            example.name,
+            &ExtensionCatalog::new(),
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        assert!(
+            report.ok,
+            "{}: {}",
+            example.name,
+            render_findings(&report, Format::Text)
+        );
+        let report = test_extension(dir.path(), example.name, false)
+            .await
+            .unwrap();
+        assert_eq!(report.errors, Vec::<String>::new(), "{}", example.name);
+        // A component's `ui` steps need an app and a display that is awake.
+        let unexpected: Vec<_> = report
+            .warnings
+            .iter()
+            .filter(|w| !w.contains("aren't run"))
+            .collect();
+        assert!(unexpected.is_empty(), "{}: {unexpected:?}", example.name);
+        assert!(!report.ran.is_empty(), "{} ran its examples", example.name);
+    }
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_scaffolded_page_checks_tests_and_its_row_action_binds() {
     let dir = project().await;
@@ -233,6 +280,29 @@ async fn a_scaffolded_command_checks_tests_and_runs_through_the_bus() {
         "{}",
         ran.result
     );
+}
+
+/// `extension new job` checks clean, and its fixtures run the job on the
+/// fixture model: the reply is the job's text, and the finished job reaches
+/// `publish`, which comments it on the work item.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_scaffolded_job_checks_tests_and_answers_with_the_fixture_model() {
+    let dir = project().await;
+    scaffolded(dir.path(), "job", "note-writer").await;
+    let ran = tested(dir.path(), "note-writer").await;
+    for example in ["example basic", "example published"] {
+        assert!(ran.contains(&example.to_string()), "{example} in {ran:?}");
+    }
+    let svc = booted(dir.path()).await;
+    let ext = loaded(&svc, dir.path(), "note-writer");
+    for command in ["job.ask", "job.status", "job.cancel", "note.ask"] {
+        let name = format!("{}.{command}", ext.namespace);
+        assert!(
+            ext.commands.iter().any(|c| c.name == name),
+            "{name} in {:?}",
+            ext.commands.iter().map(|c| &c.name).collect::<Vec<_>>()
+        );
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]

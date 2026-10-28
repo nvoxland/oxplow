@@ -1704,6 +1704,14 @@ CLI, the agent's `oxplow_validate_extension`, and `write_page`. Every
 door gives an author the same report, so an agent editing from a terminal
 and one calling MCP read identical `file:line: what — fix` lines.
 
+- **`scaffold_example(root, example, name)`** (`extension new --from <example>`,
+  `--list-examples`) copies one of `examples/extensions/*` into the project.
+  The SDK carries them (`crates/oxplow-sdk/src/examples.rs`: compiled in by
+  `build.rs` in a release build, read from the folder in a debug one, as
+  `oxplow-app` does for `extensions/`). The copy keeps the example's name
+  (its commands and models are named by it); another name is refused:
+  rename after copying. `every_example_scaffolds_checks_and_tests_clean`
+  keeps each one passing `check` and `test`.
 - **`scaffold(root, kind, name, origin)`** (`extension new <kind> <name>`)
   writes `.oxplow/extensions/<name>/extension.yaml` (v2, an `intent` whose `origin` is the URI passed with `--origin`,
   one example) and, but for a bare extension, that example's fixture

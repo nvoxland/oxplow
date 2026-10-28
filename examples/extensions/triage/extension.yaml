@@ -35,6 +35,9 @@ intent:
     - name: todos-and-open-work
       input: { collector: todos }
       expect: one open-items fact and one TODO fact for src/lib.rs line 1, classified
+    - name: todo-board-reads
+      input: { page: todo-board }
+      expect: the board's page shows no TODOs in a fresh project
     - name: the-board-decides-a-todo-from-its-card
       input: { page: todo-board }
       expect: a card per sorted TODO under its kind; a card's form records the decision

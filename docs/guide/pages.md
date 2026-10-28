@@ -425,7 +425,8 @@ extension must declare the permissions for them.
 
 The `task-views` example that oxplow ships is a working set of all three:
 swimlanes you drag cards between, a compact list with row actions, and a
-plain editor form. Copy it and change it.
+plain editor form. Copy it with `oxplow extension new --from task-views` and
+change it.
 
 ## Sharing
 
@@ -560,4 +561,4 @@ can read them in `v_event`. Limits:
   shape is a new `v` with an `upcast` script.
 
 A complete example, which pulls this repo's pull requests and a page that
-matches them to tasks, is the `github` example that oxplow ships.
+matches them to tasks, is the `github` example that oxplow ships (`oxplow extension new --from github`).
