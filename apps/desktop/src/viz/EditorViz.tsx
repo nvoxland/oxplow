@@ -11,16 +11,20 @@ import { EditorPane } from "../components/EditorPane.js";
 import { isDirty, useBuffer } from "../editor/buffers.js";
 import { buffers } from "../editor/openFiles.js";
 import { recordOpError } from "../opErrors.js";
+import { LOCAL_FS } from "../filesystem.js";
 import { WORKING } from "../revision.js";
 import { useOptionalPageNavigation, useTabEditing } from "../tabs/PageNavigationContext.js";
 import { diffRef, fileRefAt, gitCommitRef } from "../tabs/pageRefs.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { useVizStream } from "./VizStream.js";
 
-export function EditorViz({ row, onOpenPage }: { row: { path: string; line: number | null } | null; onOpenPage?(ref: TabRef): void }) {
+export function EditorViz({ row, onOpenPage }: { row: { path: string; filesystem?: string | null; line: number | null } | null; onOpenPage?(ref: TabRef): void }) {
   const stream = useVizStream();
   const nav = useOptionalPageNavigation();
-  const path = row?.path ?? null;
+  // The editor edits only the local working tree; a page that accepts a
+  // filesystem never routes here, so one that does is a mistake to show.
+  const foreign = row?.filesystem && row.filesystem !== LOCAL_FS ? row.filesystem : null;
+  const path = foreign ? null : (row?.path ?? null);
   useEffect(() => {
     if (stream && path) void buffers.open(stream, path);
   }, [stream, path]);
@@ -40,6 +44,13 @@ export function EditorViz({ row, onOpenPage }: { row: { path: string; line: numb
   };
 
   if (!stream) return <p className="ox-empty-line">No project is open.</p>;
+  if (foreign) {
+    return (
+      <p className="ox-error" data-testid="viz-editor-filesystem">
+        <code>{row?.path}</code> is on the <code>{foreign}</code> filesystem; the editor edits only the working tree. Open it in the File viewer.
+      </p>
+    );
+  }
   if (!path) return <p className="ox-empty-line">This page names no file.</p>;
   if (!buffer || buffer.state === "loading") return <p className="ox-empty-line" data-testid="viz-editor-loading">Opening {path}…</p>;
   if (buffer.state === "missing") {

@@ -57,18 +57,21 @@ pub async fn resolve(
         Viz::Approvals => out.approvals = pending_proposals(svc, run).await?,
         Viz::Code => {
             let c = run.config.code.clone().unwrap_or_default();
-            let (Some(p), Some(r)) = (
-                column(run, c.path.as_ref()),
-                column(run, c.revision.as_ref()),
-            ) else {
+            let Some(p) = column(run, c.path.as_ref()) else {
                 return Ok(out);
             };
+            let (r, f) = (
+                column(run, c.revision.as_ref()),
+                column(run, c.filesystem.as_ref()),
+            );
             let l = column(run, c.lines.as_ref());
             for row in run.result.rows.iter().take(MAX_HUNK_FILES) {
                 let at = |i: usize| row.get(i).map(cell).unwrap_or_default();
                 let lines = l.and_then(|i| parse_lines(&at(i)));
+                let rev = r.map(at).unwrap_or_default();
+                let filesystem = f.map(at).unwrap_or_default();
                 out.files
-                    .push(file_text(svc, root, &at(p), &at(r), lines).await);
+                    .push(file_text(svc, root, &filesystem, &at(p), &rev, lines).await);
             }
         }
         Viz::Editor => {
@@ -79,7 +82,7 @@ pub async fn resolve(
             };
             let path = row.get(p).map(cell).unwrap_or_default();
             out.files
-                .push(file_text(svc, root, &path, "working", None).await);
+                .push(file_text(svc, root, "", &path, "working", None).await);
         }
         Viz::Diff => {
             let d = run.config.diff.clone().unwrap_or_default();
@@ -170,22 +173,45 @@ pub fn parse_lines(text: &str) -> Option<(usize, usize)> {
     (a > 0 && b > 0).then(|| (a.min(b), a.max(b)))
 }
 
-/// `path` at revision `rev`, cut to `lines` when given and to
+/// `path` at revision `rev` of `filesystem` (empty: the local one, whose
+/// empty revision is the working tree), cut to `lines` when given and to
 /// [`MAX_HUNK_BYTES`], or why it can't be shown.
 async fn file_text(
     svc: &crate::Services,
     root: &Path,
+    filesystem: &str,
     path: &str,
     rev: &str,
     lines: Option<(usize, usize)>,
 ) -> String {
-    let parsed: oxplow_domain::vcs::Revision = match rev.parse() {
-        Ok(r) => r,
-        Err(e) => return format!("(can't read it: {e})"),
+    let bytes = if filesystem.is_empty() || filesystem == oxplow_domain::filesystem::LOCAL {
+        let parsed: oxplow_domain::vcs::Revision =
+            match if rev.is_empty() { "working" } else { rev }.parse() {
+                Ok(r) => r,
+                Err(e) => return format!("(can't read it: {e})"),
+            };
+        svc.trees
+            .read_at(root, &parsed, path)
+            .await
+            .map_err(|e| e.to_string())
+    } else {
+        let cx = oxplow_domain::filesystem::FsCx { stream: None };
+        match svc.filesystems.resolve(Some(filesystem)) {
+            Ok(fs) => fs
+                .read(&cx, (!rev.is_empty()).then_some(rev), path, None)
+                .await
+                .map_err(|e| e.to_string()),
+            Err(e) => Err(e.to_string()),
+        }
     };
-    let text = match svc.trees.read_at(root, &parsed, path).await {
+    let text = match bytes {
         Ok(Some(bytes)) => String::from_utf8_lossy(&bytes).into_owned(),
-        Ok(None) => return format!("(not there at {rev})"),
+        Ok(None) => {
+            return format!(
+                "(not there at {})",
+                if rev.is_empty() { filesystem } else { rev }
+            )
+        }
         Err(e) => return format!("(can't read it: {e})"),
     };
     let text = match lines {
@@ -1342,6 +1368,7 @@ mod tests {
             |l| {
                 l.code = Some(crate::pages::spec::VizCode {
                     path: Some("path".into()),
+                    filesystem: None,
                     revision: Some("rev".into()),
                     lines: Some("lines".into()),
                     sync: false,
@@ -1417,6 +1444,7 @@ mod tests {
             |l| {
                 l.code = Some(crate::pages::spec::VizCode {
                     path: Some("path".into()),
+                    filesystem: None,
                     revision: Some("rev".into()),
                     lines: Some("lines".into()),
                     sync: false,
@@ -1459,6 +1487,7 @@ mod tests {
             |l| {
                 l.editor = Some(crate::pages::spec::VizEditor {
                     path: Some("path".into()),
+                    filesystem: None,
                     lines: None,
                 })
             },

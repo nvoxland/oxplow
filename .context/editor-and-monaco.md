@@ -243,6 +243,12 @@ A page shows files through two kit vizes (`.context/extensions.md`
   working file.
 
 Open file navigates in the tab when there is one, else opens a page.
+A `code` row names its file, optionally its `filesystem` and `revision`
+(none of either: the local working tree). The viz `stat`s the file before
+reading it, so a binary or over-5-MiB file shows a placeholder line, not
+its bytes. The `editor` viz edits only the local working tree: it takes
+an optional `filesystem` column and shows a refusal, not an editor, for
+any but `oxplow:local` (the Editor page accepts none anyway).
 The file-viewer and duplicate-block pages draw these vizes;
 `DiffPane` stays (it is the `hunks` viz's and `diff`'s).
 

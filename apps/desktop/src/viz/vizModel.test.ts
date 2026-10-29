@@ -517,13 +517,14 @@ describe("structure components (P6.A2)", () => {
     ]);
   });
 
-  test("codeRows keep rows naming a file and a revision, with their marked lines", () => {
-    const l = viz({ viz: "code", code: { path: "p", revision: "r", lines: "l", sync: false } });
+  test("codeRows keep rows naming a file, with their filesystem, revision and marked lines", () => {
+    const l = viz({ viz: "code", code: { path: "p", filesystem: "f", revision: "r", lines: "l", sync: false } });
     expect(
-      codeRows(l, result(["p", "r", "l"], [["x.rs", "git:abc", "40-12"], ["y.rs", "working", null], ["z.rs", null, "1"]])),
+      codeRows(l, result(["p", "f", "r", "l"], [["x.rs", null, "git:abc", "40-12"], ["y.rs", "oxplow:temp", null, null], ["z.rs", "", "", "1"], [null, null, null, null]])),
     ).toEqual([
-      { path: "x.rs", revision: "git:abc", lines: { start: 12, end: 40 }, row: ["x.rs", "git:abc", "40-12"] },
-      { path: "y.rs", revision: "working", lines: null, row: ["y.rs", "working", null] },
+      { path: "x.rs", filesystem: null, revision: "git:abc", lines: { start: 12, end: 40 }, row: ["x.rs", null, "git:abc", "40-12"] },
+      { path: "y.rs", filesystem: "oxplow:temp", revision: null, lines: null, row: ["y.rs", "oxplow:temp", null, null] },
+      { path: "z.rs", filesystem: null, revision: null, lines: { start: 1, end: 1 }, row: ["z.rs", "", "", "1"] },
     ]);
   });
 
@@ -537,8 +538,8 @@ describe("structure components (P6.A2)", () => {
 
   test("editorRow is the first row's file and the line it lands on", () => {
     const l = viz({ viz: "editor", editor: { path: "p", lines: "l" } });
-    expect(editorRow(l, result(["p", "l"], [["src/a.rs", "12-14"]]))).toEqual({ path: "src/a.rs", line: 12 });
-    expect(editorRow(l, result(["p", "l"], [["src/a.rs", null]]))).toEqual({ path: "src/a.rs", line: null });
+    expect(editorRow(l, result(["p", "l"], [["src/a.rs", "12-14"]]))).toEqual({ path: "src/a.rs", filesystem: null, line: 12 });
+    expect(editorRow(l, result(["p", "l"], [["src/a.rs", null]]))).toEqual({ path: "src/a.rs", filesystem: null, line: null });
     expect(editorRow(l, result(["p", "l"], []))).toBeNull();
   });
 

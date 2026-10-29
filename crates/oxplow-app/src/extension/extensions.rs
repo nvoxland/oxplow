@@ -6045,6 +6045,7 @@ commands:
             c.code,
             Some(VizCode {
                 path: Some("p".into()),
+                filesystem: None,
                 revision: Some("r".into()),
                 lines: Some("l".into()),
                 sync: true,
@@ -6119,6 +6120,7 @@ commands:
             e.editor,
             Some(VizEditor {
                 path: Some("p".into()),
+                filesystem: None,
                 lines: Some("l".into()),
             })
         );

@@ -6,6 +6,7 @@
  * filesystem's own word (`revision.ts` is the local one's), so it is
  * never read without the filesystem it belongs to.
  */
+import type { FsStat } from "./tauri-bridge/generated/bindings.js";
 import { shortRevisionLabel, WORKING } from "./revision.js";
 
 /** The stream's worktree as files: what a file URI means without a `filesystem`. */
@@ -19,4 +20,19 @@ export function fsRevLabel(filesystem: string | null | undefined, rev: string | 
   if (!filesystem || filesystem === LOCAL_FS) return shortRevisionLabel(rev ?? WORKING);
   if (!rev) return filesystem;
   return /^[0-9a-f]{13,64}$/i.test(rev) ? rev.slice(0, 7) : rev;
+}
+
+/** The largest file a viewer loads into its editor: 5 MiB. A bigger one
+ *  shows [`unshownReason`] instead. */
+export const MAX_SHOWN_BYTES = 5 * 1024 * 1024;
+
+/** Why a viewer doesn't load the file `stat` describes, or null when it
+ *  does: a binary file or one over [`MAX_SHOWN_BYTES`] says what it is and
+ *  how many bytes it holds. Read before the file is, so neither is loaded. */
+export function unshownReason(stat: FsStat): string | null {
+  if (stat.kind === "dir") return "a folder, not a file";
+  const bytes = stat.size ?? 0;
+  if (stat.isText === false) return `binary file, ${bytes} bytes`;
+  if (bytes > MAX_SHOWN_BYTES) return `too large to show, ${bytes} bytes`;
+  return null;
 }

@@ -601,13 +601,21 @@ margin; an embed or a slot takes its title from the page it shows):
   `oxplow.knowledge.write_page` and Delete Page, a `detail` of last edit
   and freshness, and a `table` of the cited files with Mark verified (a
   page not yet written is a row with an empty body, made by its first
-  Save). `editor` (`for: oxplow/file`, `accepts: { rev: absent }`,
+  Save). `editor` (`for: oxplow/file`, `accepts: { rev: absent, filesystem: absent }`,
   default, label `{{param.path|basename}}`, `comments: true`): an `editor`
-  viz of the working file, `#lines=` landed on
+  viz of the working file, `#lines=` landed on — the editor edits only
+  the local working tree, so a URI naming a revision or a filesystem
+  never routes to it
   (`.context/editor-and-monaco.md` "The editor viz"). `file-viewer`
-  (`for: oxplow/file` with a `rev`, `comments: true`, label
-  `{{param.path|basename}} ({{param.rev}})`): a `code` viz of the file at
-  that revision, `#lines=` marked. `directory` (`for: oxplow/dir`, default,
+  (`for: oxplow/file`, no `accepts`, so it is offered for every file URI
+  and Open With lists it beside the Editor on a local file; params `uri`,
+  `path`, `filesystem`, `rev`, `lines`; `comments: true`): a `code` viz of
+  the file on that filesystem at that revision, `#lines=` marked, a
+  binary or over-5-MiB file shown as a placeholder. Its label is computed
+  in its loader's `suffix` column, `{{param.path|basename}}{{row.suffix}}`:
+  nothing for the working tree, ` (<rev>)` for a local revision, ` (<filesystem>
+  <rev>)` for another filesystem (a hash cut to 7). `fsRevLabel` in
+  `filesystem.ts` is the desktop's own twin for the `code` viz's header. `directory` (`for: oxplow/dir`, default,
   label `{{param.path|basename}}`; params `uri`, `path`, `filesystem`, `rev`, `stream_id`): a
   `list` viz of `v_file WHERE filesystem = :filesystem AND rev = :rev AND
   parent = :path` (a folder of any filesystem at any revision; the

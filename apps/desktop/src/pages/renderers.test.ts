@@ -6,8 +6,8 @@ import { RENDERER_VIEW_KEY, pageView, renderedResourceOf, rendererFor, renderers
 
 const page = (id: string, more: Partial<Page> = {}): Page =>
   fakePage(node.markdown("v", ""), { id, extension: "oxplow-foundation", slug: id, title: id, ...more });
-const editor = page("editor", { for: ["oxplow/file"], accepts: { rev: "absent" }, default: true });
-const viewer = page("file-viewer", { for: ["oxplow/file"], accepts: { rev: "present" } });
+const editor = page("editor", { for: ["oxplow/file"], accepts: { rev: "absent", filesystem: "absent" }, default: true });
+const viewer = page("file-viewer", { for: ["oxplow/file"] });
 const blame = page("blame", { extension: "acme", for: ["oxplow/file"] });
 const prs = page("pr", { extension: "acme", for: ["acme/pr"], accepts: { id: "^[0-9]+$" } });
 const web = page("external-url", { for: ["https", "http"], default: true });
@@ -24,8 +24,10 @@ describe("renderedResourceOf", () => {
 
 describe("renderers", () => {
   test("the pages for a URI's resource whose `accepts` hold for its params", () => {
-    expect(renderersFor("oxplow:oxplow/file?path=a.ts", pages).map((p) => p.id)).toEqual(["editor", "blame"]);
+    expect(renderersFor("oxplow:oxplow/file?path=a.ts", pages).map((p) => p.id)).toEqual(["editor", "file-viewer", "blame"]);
     expect(renderersFor("oxplow:oxplow/file?path=a.ts&rev=git:HEAD", pages).map((p) => p.id)).toEqual(["file-viewer", "blame"]);
+    // The editor edits only the local working tree: another filesystem's file is the viewer's.
+    expect(renderersFor("oxplow:oxplow/file?path=a.ts&filesystem=oxplow:temp", pages).map((p) => p.id)).toEqual(["file-viewer", "blame"]);
     expect(renderersFor("oxplow:acme/pr?id=12", pages).map((p) => p.id)).toEqual(["pr"]);
     expect(renderersFor("oxplow:acme/pr?id=x", pages)).toEqual([]);
     expect(renderersFor("https://example.com", pages).map((p) => p.id)).toEqual(["external-url"]);

@@ -31,6 +31,11 @@ pub struct DiffParams {
     /// against `from` itself — a branch's own changes against `git:main`.
     #[serde(default)]
     pub since_fork: bool,
+    /// The filesystem both sides are on. A diff compares the local
+    /// worktree's revisions, so any other is refused (read both files and
+    /// compare them); absent = `oxplow:local`.
+    #[serde(default)]
+    pub filesystem: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -170,6 +175,18 @@ pub fn ops(services: ServicesSlot) -> Vec<Op> {
                     check_optional_stream("oxplow_diff", "/stream_id", p.stream_id.as_deref())?;
                     let sid =
                         stream_or_actors(&svc, invocation.actor(), p.stream_id.take()).await?;
+                    if let Some(fs) = p
+                        .filesystem
+                        .as_deref()
+                        .filter(|f| *f != oxplow_domain::filesystem::LOCAL)
+                    {
+                        return Err(invalid(
+                            "/filesystem",
+                            format!(
+                                "a diff compares revisions of the local worktree; the `{fs}` filesystem has none to diff. Read both files and compare them."
+                            ),
+                        ));
+                    }
                     let to = parse_revision("/to", &p.to)?;
                     let mut from = p
                         .from
@@ -293,6 +310,33 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(err, CommandError::Invalid { .. }), "{err:?}");
+
+        // A diff is of the local worktree's revisions: another filesystem
+        // is refused, naming it, not diffed as if it were local.
+        let err = svc
+            .commands
+            .run(
+                &anonymous(),
+                "oxplow.vcs.diff",
+                json!({ "to": "working", "filesystem": "oxplow:extensions" }),
+                false,
+            )
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("oxplow:extensions") && err.contains("local worktree"),
+            "{err}"
+        );
+        svc.commands
+            .run(
+                &anonymous(),
+                "oxplow.vcs.diff",
+                json!({ "to": "working", "filesystem": "oxplow:local" }),
+                false,
+            )
+            .await
+            .unwrap();
     }
 
     fn commit_file(dir: &std::path::Path, path: &str, body: &str, message: &str) -> String {

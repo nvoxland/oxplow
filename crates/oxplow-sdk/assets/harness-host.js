@@ -75,6 +75,9 @@
     return NAMES.has(name);
   }
 
+  // src/filesystem.ts
+  var MAX_SHOWN_BYTES = 5 * 1024 * 1024;
+
   // src/uri/uri.ts
   var CONTRIBUTIONS = new Set([
     "dataset",

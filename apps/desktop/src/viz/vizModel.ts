@@ -675,22 +675,29 @@ export function parseLines(value: SqlCell | undefined): { start: number; end: nu
   return { start: Math.min(start, end), end: Math.max(start, end) };
 }
 
-/** `code` viz: each row's file, the revision it is read at and the lines
- *  it marks. Rows without a file or a revision are left out. */
-export function codeRows(viz: VizConfig, result: SqlQueryResult): { path: string; revision: string; lines: { start: number; end: number } | null; row: SqlCell[] }[] {
+/** A `code` viz row: a file on a filesystem at a revision (none of
+ *  either: the local working tree) and the lines it marks. */
+export type CodeRow = { path: string; filesystem: string | null; revision: string | null; lines: { start: number; end: number } | null; row: SqlCell[] };
+
+/** `code` viz: each row's file, the filesystem and revision it is read at
+ *  (a column each, optional) and the lines it marks. Rows without a file
+ *  are left out. */
+export function codeRows(viz: VizConfig, result: SqlQueryResult): CodeRow[] {
   const paths = columnValues(result, viz.code?.path);
+  if (!paths) return [];
+  const filesystems = columnValues(result, viz.code?.filesystem);
   const revisions = columnValues(result, viz.code?.revision);
-  if (!paths || !revisions) return [];
   const lines = columnValues(result, viz.code?.lines);
-  const out: { path: string; revision: string; lines: { start: number; end: number } | null; row: SqlCell[] }[] = [];
+  const out: CodeRow[] = [];
   paths.forEach((p, i) => {
-    const revision = revisions[i];
-    if (typeof p === "string" && p && typeof revision === "string" && revision) {
-      out.push({ path: p, revision, lines: parseLines(lines?.[i]), row: result.rows[i] ?? [] });
+    if (typeof p === "string" && p) {
+      out.push({ path: p, filesystem: nonEmpty(filesystems?.[i]), revision: nonEmpty(revisions?.[i]), lines: parseLines(lines?.[i]), row: result.rows[i] ?? [] });
     }
   });
   return out;
 }
+
+const nonEmpty = (v: SqlCell | undefined): string | null => (typeof v === "string" && v ? v : null);
 
 /** `diff` viz: the first row's file between its two revisions, landing on
  *  its `lines`' start; null when the first row doesn't name them. */
@@ -708,11 +715,11 @@ export function diffRow(viz: VizConfig, result: SqlQueryResult): DiffSpec | null
 
 /** `editor` viz: the working tree's file the first row names and the line
  *  it lands on (its `lines`' start); null when the row names no file. */
-export function editorRow(viz: VizConfig, result: SqlQueryResult): { path: string; line: number | null } | null {
+export function editorRow(viz: VizConfig, result: SqlQueryResult): { path: string; filesystem: string | null; line: number | null } | null {
   const at = (column: string | null | undefined) => columnValues(result, column)?.[0];
   const path = at(viz.editor?.path);
   if (typeof path !== "string" || !path) return null;
-  return { path, line: parseLines(at(viz.editor?.lines))?.start ?? null };
+  return { path, filesystem: nonEmpty(at(viz.editor?.filesystem)), line: parseLines(at(viz.editor?.lines))?.start ?? null };
 }
 
 /** `embed` viz: the web page the first row names; null when it names none. */

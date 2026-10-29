@@ -1,24 +1,34 @@
-title: File at a Revision
-description: A file read-only at a revision (a commit, a branch, a snapshot), filling the page; `#lines=12-40` marks and reveals lines. The renderer of oxplow's `file` resource when its URI names a `rev`.
-label: '{{param.path|basename}} ({{param.rev}})'
+title: File Viewer
+description: A file read-only, on any filesystem at any revision; a binary or very large one says what it is instead. `#lines=12-40` marks lines. Offered for every `file` URI.
+label: '{{param.path|basename}}{{row.suffix}}'
 for: oxplow/file
-accepts:
-  rev: present
 comments: true
 params:
 - name: uri
 - name: path
+- name: filesystem
 - name: rev
 - name: lines
   role: filter
 loaders:
   file_viewer:
     sql: |
-      SELECT :path AS path, :rev AS rev, :lines AS lines
+      SELECT :path AS path, :filesystem AS filesystem, :rev AS rev, :lines AS lines,
+             CASE
+               WHEN COALESCE(:filesystem, 'oxplow:local') = 'oxplow:local' THEN
+                 CASE WHEN COALESCE(:rev, 'working') = 'working' THEN '' ELSE ' (' || :rev || ')' END
+               ELSE ' (' || :filesystem ||
+                 CASE
+                   WHEN :rev IS NULL THEN ''
+                   WHEN length(:rev) > 12 AND :rev NOT GLOB '*[^0-9a-fA-F]*' THEN ' ' || substr(:rev, 1, 7)
+                   ELSE ' ' || :rev
+                 END || ')'
+             END AS suffix
 view:
   from: file_viewer
   viz: code
   code:
     path: path
+    filesystem: filesystem
     revision: rev
     lines: lines

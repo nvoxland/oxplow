@@ -132,6 +132,29 @@ cap is refused.
   rev)` for a tab or header (a local revision as `shortRevisionLabel`, another
   filesystem's hash shortened).
 
+## Viewing, saving and diffing
+
+- **Viewing.** The File viewer (`code` viz, `viz/CodeViz.tsx`) reads by
+  `{filesystem, rev}`; a `code` row's `filesystem` and `revision` are
+  optional columns (none: the local working tree). It `stat_file`s first
+  and shows `(binary file, N bytes)` or `(too large to show, N bytes)`
+  (`MAX_SHOWN_BYTES`, 5 MiB, `unshownReason` in `filesystem.ts`) instead of
+  loading the file. The Editor accepts only `rev: absent, filesystem: absent`;
+  `EditorViz` refuses a row naming another filesystem.
+- **Saving.** `oxplow.file.save { stream, path, content, filesystem? }`
+  resolves the filesystem through the registry and refuses one without
+  the `writable` feature, naming it ("the `oxplow:extensions` filesystem is
+  read-only"); an unknown id is refused naming the registered ones. The
+  other file commands (`create`, `rename`, `delete`) stay on the local
+  worktree. `file.saved`'s subject is the file URI on the saved
+  filesystem.
+- **Diffing.** A diff compares revisions of the local worktree
+  (`Trees::diff`, `DiffPane`; a diff tab's `left`/`right` are local
+  revisions). `oxplow_diff { filesystem? }` refuses any filesystem but
+  `oxplow:local`, so two files of different filesystems (or any non-local
+  pair) are never diffed as if local: read both and compare. A diff
+  between non-local revisions is not supported yet.
+
 ## In a URI
 
 `oxplow:oxplow/file?path=…[&rev=…][&filesystem=<id>]`, and the same for

@@ -68,7 +68,7 @@ afterEach(() => {
   panes.length = 0;
 });
 
-function view(row: { path: string; line: number | null }, registered: (TabEditing | null)[] = []) {
+function view(row: { path: string; filesystem?: string | null; line: number | null }, registered: (TabEditing | null)[] = []) {
   const setEditing = (e: TabEditing | null) => registered.push(e);
   const nav = { navigate: () => {}, goBack: () => {}, goForward: () => {}, canGoBack: false, canGoForward: false, setEditing } as PageNavigation;
   return render(
@@ -98,6 +98,15 @@ test("typing makes the tab dirty, and the tab's Save writes the draft", async ()
   });
   await waitFor(() => expect(saves).toEqual([{ path: "src/a.rs", content: "fn b() {}" }]));
   await waitFor(() => expect(registered.at(-1)?.dirty).toBe(false));
+});
+
+test("a file of another filesystem is refused, not opened: the editor edits only the working tree", async () => {
+  const v = view({ path: "acme/page.yaml", filesystem: "oxplow:extensions", line: null });
+  expect(v.getByTestId("viz-editor-filesystem").textContent).toContain("oxplow:extensions");
+  expect(panes).toEqual([]);
+  expect(models.has("acme/page.yaml")).toBe(false);
+  const local = view({ path: "src/a.rs", filesystem: "oxplow:local", line: null });
+  await waitFor(() => expect(local.getByTestId("editor-pane")).toBeTruthy());
 });
 
 test("a path that isn't a file says so", async () => {

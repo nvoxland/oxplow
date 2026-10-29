@@ -529,6 +529,11 @@ pub(crate) fn plain_json<S: serde::Serializer>(
 #[serde(deny_unknown_fields)]
 pub struct VizCode {
     pub path: Option<String>,
+    /// A column holding the filesystem's id; none or empty, the local one.
+    #[serde(default)]
+    pub filesystem: Option<String>,
+    /// A column holding the revision, the filesystem's own word; none or
+    /// empty, its current content (the working tree locally).
     pub revision: Option<String>,
     /// A column holding `12-40` (or `12`): the lines marked and revealed.
     #[serde(default)]
@@ -574,6 +579,10 @@ pub struct VizEmbed {
 #[serde(deny_unknown_fields)]
 pub struct VizEditor {
     pub path: Option<String>,
+    /// A column holding the filesystem's id; the editor edits only the
+    /// local working tree, so any other is shown as a refusal.
+    #[serde(default)]
+    pub filesystem: Option<String>,
     /// A column holding `12` (or `12-40`: its start): the line revealed.
     #[serde(default)]
     pub lines: Option<String>,
@@ -1769,7 +1778,7 @@ impl VizConfig {
         }
         if let Some(c) = &self.code {
             out.extend(
-                [&c.path, &c.revision, &c.lines]
+                [&c.path, &c.filesystem, &c.revision, &c.lines]
                     .into_iter()
                     .flatten()
                     .map(|k| ("code", k)),
@@ -1788,7 +1797,7 @@ impl VizConfig {
         }
         if let Some(e) = &self.editor {
             out.extend(
-                [&e.path, &e.lines]
+                [&e.path, &e.filesystem, &e.lines]
                     .into_iter()
                     .flatten()
                     .map(|k| ("editor", k)),

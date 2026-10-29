@@ -9,7 +9,8 @@ import type { TabRef } from "../tabs/tabState.js";
 // marked; `diff` one file between two revisions. Both read the files
 // themselves and open the working file on Open file.
 
-const reads: { path: string; revision: string }[] = [];
+const reads: { path: string; revision: string | undefined; filesystem?: string }[] = [];
+const models: string[] = [];
 const decorations: { startLineNumber: number; endLineNumber: number }[] = [];
 const diffModels: number[] = [];
 const actions: string[] = [];
@@ -54,7 +55,7 @@ mock.module("monaco-editor", () => ({
   editor: {
     create: () => fakeEditor(),
     createDiffEditor: () => fakeEditor(),
-    createModel: (text: string) => ({ lines: text.split("\n").length, getLineCount: () => text.split("\n").length, getLineMaxColumn: () => 1, getValue: () => text, dispose() {} }),
+    createModel: (text: string) => (models.push(text), { lines: text.split("\n").length, getLineCount: () => text.split("\n").length, getLineMaxColumn: () => 1, getValue: () => text, dispose() {} }),
     EditorOption: { lineHeight: 0 },
   },
   Range: class {
@@ -69,9 +70,15 @@ mock.module("monaco-editor", () => ({
 const realApi = await import("../api.js");
 mock.module("../api.js", () => ({
   ...realApi,
-  readAt: async (_stream: string, path: string, at: { rev?: string }) => {
-    reads.push({ path, revision: at.rev });
-    return path === "gone.rs" ? null : Array.from({ length: 50 }, (_, i) => `line ${i + 1}`).join("\n");
+  statFile: async (_stream: string, path: string) => {
+    if (path === "gone.rs") return null;
+    if (path === "logo.png") return { kind: "file", size: 2048, modifiedAt: null, isText: false, language: null };
+    if (path === "huge.log") return { kind: "file", size: 9_000_000, modifiedAt: null, isText: true, language: null };
+    return { kind: "file", size: 100, modifiedAt: null, isText: true, language: null };
+  },
+  readAt: async (_stream: string, path: string, at: { rev?: string; filesystem?: string }) => {
+    reads.push({ path, revision: at.rev, ...(at.filesystem ? { filesystem: at.filesystem } : {}) });
+    return Array.from({ length: 50 }, (_, i) => `line ${i + 1}`).join("\n");
   },
   listCommentsForTarget: async (target: string) => {
     commentTargets.push(target);
@@ -86,6 +93,7 @@ const { VizView } = await import("./VizView.js");
 afterEach(() => {
   cleanup();
   reads.length = 0;
+  models.length = 0;
   decorations.length = 0;
   diffModels.length = 0;
   actions.length = 0;
@@ -171,15 +179,13 @@ test("a code viz shows each row's file at its revision, its lines marked, and op
       />
     </PageNavigationContext.Provider>,
   );
-  await waitFor(() => expect(reads).toHaveLength(2));
+  // `gone.rs` is `stat`ed first and found missing, so it is never read.
+  await waitFor(() => expect(reads).toHaveLength(1));
   const files = view.getAllByTestId("viz-code-file");
   expect(files.map((f) => f.querySelector("[data-testid=viz-code-path]")!.textContent)).toEqual(["src/a.rs", "gone.rs"]);
   expect(files[0]!.textContent).toContain(":12-14");
   expect(files[0]!.textContent).toContain("@abc1234");
-  expect(reads).toEqual([
-    { path: "src/a.rs", revision: "git:abc1234" },
-    { path: "gone.rs", revision: "working" },
-  ]);
+  expect(reads).toEqual([{ path: "src/a.rs", revision: "git:abc1234" }]);
   await waitFor(() => expect(decorations).toEqual([expect.objectContaining({ startLineNumber: 12, endLineNumber: 14 })]));
   await waitFor(() => expect(view.getByTestId("viz-code-problem").textContent).toBe("Not there at working tree"));
   fireEvent.click(files[0]!.querySelector("[data-testid=viz-code-open]")!);
@@ -203,4 +209,35 @@ test("a diff viz shows its first row's file between its two revisions", async ()
     { path: "src/a.rs", revision: "git:abc1234" },
     { path: "src/a.rs", revision: "working" },
   ]);
+});
+
+test("a binary or too-large file is not read; the placeholder says what it is", async () => {
+  render(
+    <VizView
+      run={run({ viz: "code", code: { path: "p", revision: "r", lines: null, sync: false } }, ["p", "r"], [
+        ["logo.png", "working"],
+        ["huge.log", "working"],
+      ])}
+      streamId="str1"
+      onOpenPage={() => {}}
+    />,
+  );
+  await waitFor(() => expect(models).toHaveLength(2));
+  expect(models).toEqual(["(binary file, 2048 bytes)", "(too large to show, 9000000 bytes)"]);
+  expect(reads).toEqual([]);
+});
+
+test("a code viz row names its filesystem; with no revision it reads that filesystem's current content", async () => {
+  const view = render(
+    <VizView
+      run={run({ viz: "code", code: { path: "p", filesystem: "f", revision: "r", lines: null, sync: false } }, ["p", "f", "r"], [
+        ["acme/page.yaml", "oxplow:extensions", null],
+      ])}
+      streamId="str1"
+      onOpenPage={() => {}}
+    />,
+  );
+  await waitFor(() => expect(reads).toHaveLength(1));
+  expect(reads).toEqual([{ path: "acme/page.yaml", revision: undefined, filesystem: "oxplow:extensions" }]);
+  expect(view.getByTestId("viz-code-file").textContent).toContain("@oxplow:extensions");
 });

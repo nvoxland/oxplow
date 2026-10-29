@@ -1,22 +1,22 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 
-import { readAt } from "../api.js";
+import { readAt, statFile } from "../api.js";
 import { MonacoCommentLayer, type MonacoCommentHandle } from "../components/Comments/MonacoCommentLayer.js";
 import { fileUri } from "../uri/uri.js";
 import { usePageComments } from "./pageComments.js";
 import { languageForPath } from "../editor-language.js";
-import { revisionSlot, shortRevisionLabel, type Revision } from "../revision.js";
+import { fsRevLabel, unshownReason } from "../filesystem.js";
+import { revisionSlot, WORKING, type Revision } from "../revision.js";
 import { useMonacoViewState } from "../components/useMonacoViewState.js";
 import { useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
 import { fileRef } from "../tabs/pageRefs.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { ScrollSync } from "./codeScrollSync.js";
-import type { codeRows } from "./vizModel.js";
-
-type CodeRow = ReturnType<typeof codeRows>[number];
+import type { CodeRow } from "./vizModel.js";
 
 /**
- * `code`: each row's file, read-only, at its revision — side by side, at
+ * `code`: each row's file, read-only, on its filesystem at its revision
+ * (neither: the working tree) — side by side, at
  * the height its place gives (a page's whole body on a viz page). A row's
  * `lines` are marked and revealed; with `sync` the editors scroll
  * together from their marks (`codeScrollSync.ts`). On a page that takes
@@ -30,13 +30,15 @@ export function CodeViz({ rows, streamId, sync, onOpenPage }: { rows: CodeRow[];
   return (
     <div data-testid="viz-code" style={rowStyle}>
       {rows.map((r, i) => (
-        <CodeEditorView key={`${i}:${r.path}@${r.revision}`} syncKey={String(i)} row={r} streamId={streamId} sync={bus} onOpenPage={onOpenPage} divider={i > 0} />
+        <CodeEditorView key={`${i}:${r.filesystem ?? ""}:${r.path}@${r.revision ?? ""}`} syncKey={String(i)} row={r} streamId={streamId} sync={bus} onOpenPage={onOpenPage} divider={i > 0} />
       ))}
     </div>
   );
 }
 
-/** The one read-only Monaco mount: a file at a revision, its lines marked. */
+/** The one read-only Monaco mount: a file on a filesystem at a revision,
+ *  its lines marked. A binary or too-large file is `stat`ed first and
+ *  shows a placeholder line instead of being read. */
 function CodeEditorView({
   row,
   streamId,
@@ -52,7 +54,8 @@ function CodeEditorView({
   onOpenPage?(ref: TabRef): void;
   divider: boolean;
 }) {
-  const { path, revision, lines } = row;
+  const { path, filesystem, revision, lines } = row;
+  const where = fsRevLabel(filesystem, revision);
   const nav = useOptionalPageNavigation();
   const hostRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<any>(null);
@@ -61,9 +64,9 @@ function CodeEditorView({
   const [problem, setProblem] = useState<string | null>(null);
   // Scroll and cursor stay with the tab's entry, unless lines are marked:
   // the mark is where the page lands.
-  const attachViewState = useMonacoViewState(`code:${path}@${revision}`);
+  const attachViewState = useMonacoViewState(`code:${filesystem ?? ""}:${path}@${revision ?? ""}`);
   const pageComments = usePageComments();
-  const commentTarget = fileUri(path, revisionSlot(revision as Revision));
+  const commentTarget = fileUri(path, revisionSlot((revision ?? WORKING) as Revision), filesystem);
   const commentLayer = useRef<MonacoCommentHandle | null>(null);
   useEffect(() => {
     const editor = editorRef.current;
@@ -129,15 +132,18 @@ function CodeEditorView({
     let detach: (() => void) | null = null;
     void (async () => {
       try {
-        const content = await readAt(streamId ?? "", path, { rev: revision as Revision });
+        const at = { ...(filesystem ? { filesystem } : {}), ...(revision ? { rev: revision } : {}) };
+        const stat = await statFile(streamId ?? "", path, at);
+        const unshown = stat ? unshownReason(stat) : null;
+        const content = stat && !unshown ? await readAt(streamId ?? "", path, at) : null;
         const monaco = monacoRef.current;
         const editor = editorRef.current;
         if (cancelled || !monaco || !editor) return;
-        const model = monaco.editor.createModel(content ?? "", languageForPath(path) ?? "plaintext");
+        const model = monaco.editor.createModel(unshown ? `(${unshown})` : content ?? "", unshown ? "plaintext" : languageForPath(path) ?? "plaintext");
         const previous = editor.getModel?.();
         editor.setModel(model);
         previous?.dispose();
-        setProblem(content === null ? `Not there at ${shortRevisionLabel(revision)}` : null);
+        setProblem(content === null && !unshown ? `Not there at ${where}` : null);
         if (!lines) {
           detach = attachViewState(editor);
           return;
@@ -167,10 +173,10 @@ function CodeEditorView({
     };
     // `lines` stands in by its ends (a fresh object each run).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, streamId, path, revision, lines?.start, lines?.end, sync, syncKey]);
+  }, [ready, streamId, path, filesystem, revision, lines?.start, lines?.end, sync, syncKey]);
 
   const openFile = () => {
-    const ref = fileRef(path);
+    const ref = fileRef(path, filesystem && revision ? (revision as Revision) : WORKING, filesystem);
     if (nav) nav.navigate(ref);
     else onOpenPage?.(ref);
   };
@@ -182,8 +188,8 @@ function CodeEditorView({
           {path}
         </span>
         {lines ? <span>{lines.start === lines.end ? `:${lines.start}` : `:${lines.start}-${lines.end}`}</span> : null}
-        <span title={`Revision: ${revision}`} style={{ fontFamily: "var(--font-mono)" }}>
-          @{shortRevisionLabel(revision)}
+        <span title={`${filesystem ?? "oxplow:local"} @ ${revision ?? "current"}`} style={{ fontFamily: "var(--font-mono)" }}>
+          @{where}
         </span>
         {problem ? (
           <span data-testid="viz-code-problem" style={{ color: "var(--severity-critical)" }}>

@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use super::ops::Op;
-use super::util::{bare_id, parse, schema};
+use super::util::{bare_id, parse, schema, ServicesSlot};
 use super::{Handler, HandlerOutput, Invocation};
 use crate::workspace_files::{WorkspaceError, WorkspaceFiles};
 
@@ -35,6 +35,10 @@ pub struct SaveInput {
     pub path: String,
     /// What it holds now.
     pub content: String,
+    /// The filesystem it is on (`oxplow:local`); left out, the stream's
+    /// worktree. One without the `writable` feature is refused.
+    #[serde(default)]
+    pub filesystem: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -98,42 +102,84 @@ pub(super) fn failed(e: WorkspaceError) -> CommandError {
 }
 
 /// `event`, anchored on `stream` and about `subject`.
-pub(super) fn logged(mut event: Envelope, stream: StreamId, subject: &str) -> Envelope {
-    event.anchors.stream_id = Some(stream);
-    event.with_subject([oxplow_domain::uri::build::file_uri(subject)])
+pub(super) fn logged(event: Envelope, stream: StreamId, subject: &str) -> Envelope {
+    logged_on(event, stream, oxplow_domain::uri::build::file_uri(subject))
 }
 
-/// `save { stream, path, content }`.
-pub fn save_op(files: Arc<WorkspaceFiles>) -> Op {
+/// `event`, anchored on `stream` and about the file `uri`.
+fn logged_on(mut event: Envelope, stream: StreamId, uri: String) -> Envelope {
+    event.anchors.stream_id = Some(stream);
+    event.with_subject([uri])
+}
+
+/// `save { stream, path, content, filesystem? }`: through the filesystem
+/// registry, so a filesystem that doesn't write (the running extensions,
+/// scratch) refuses by its `features`.
+pub fn save_op(services: ServicesSlot) -> Op {
     Op::new(
         "files.write",
         "save",
         schema::<SaveInput>(),
         false,
         Handler::External(Arc::new(move |invocation: Invocation, input: Value| {
-            let files = files.clone();
+            let services = services.clone();
             Box::pin(async move {
                 let input: SaveInput = parse(input)?;
                 let stream = stream_of(&invocation, &input.stream)?;
                 let bytes = input.content.len() as u64;
-                let saved = files
-                    .write(Some(&stream.to_string()), input.path.clone(), input.content)
+                let svc = services.get()?;
+                let fs = svc
+                    .filesystems
+                    .resolve(input.filesystem.as_deref())
+                    .map_err(|e| CommandError::Invalid {
+                        field: Some("/filesystem".into()),
+                        message: e.to_string(),
+                    })?;
+                if !fs.has_feature(oxplow_domain::filesystem::WRITABLE) {
+                    return Err(CommandError::Invalid {
+                        field: Some("/filesystem".into()),
+                        message: format!(
+                            "the `{}` filesystem is read-only: it can't be saved to",
+                            fs.id()
+                        ),
+                    });
+                }
+                let cx = oxplow_domain::filesystem::FsCx {
+                    stream: Some(stream),
+                };
+                fs.write(&cx, &input.path, input.content.as_bytes())
                     .await
-                    .map_err(failed)?;
-                let event = logged(
+                    .map_err(|e| match e {
+                        oxplow_domain::filesystem::FsError::Invalid(message) => {
+                            CommandError::Invalid {
+                                field: Some("/path".into()),
+                                message,
+                            }
+                        }
+                        other => CommandError::Failed {
+                            message: other.to_string(),
+                        },
+                    })?;
+                let path = input.path;
+                let event = logged_on(
                     Envelope::typed::<FileSaved>(
                         invocation.actor().source(),
                         &FileSavedV1 {
                             stream: stream.to_string(),
-                            path: saved.path.clone(),
+                            path: path.clone(),
                             bytes,
                         },
                     ),
                     stream,
-                    &saved.path,
+                    oxplow_domain::uri::build::file_uri_at(
+                        &path,
+                        input.filesystem.as_deref(),
+                        None,
+                        None,
+                    ),
                 );
                 Ok(HandlerOutput {
-                    result: json!({ "path": saved.path, "bytes": bytes }),
+                    result: json!({ "path": path, "bytes": bytes }),
                     events: vec![event],
                     ..HandlerOutput::default()
                 })
@@ -348,6 +394,62 @@ mod tests {
         assert_eq!(
             saved.envelope.subject,
             vec!["oxplow:oxplow/file?path=notes.txt".to_string()]
+        );
+    }
+
+    /// Save goes through the filesystem registry: a filesystem that isn't
+    /// `writable` (the running extensions, scratch) is refused naming it,
+    /// one that isn't registered is refused, and the local one (named or
+    /// not) writes.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn save_refuses_a_filesystem_that_is_not_writable() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let stream = fx.svc.streams.list_streams().await.unwrap()[0]
+            .id
+            .to_string();
+        for id in ["oxplow:extensions", "oxplow:temp"] {
+            let err = fx
+                .svc
+                .commands
+                .run(
+                    &Actor::Human,
+                    "oxplow.file.save",
+                    json!({ "stream": stream, "path": "a.txt", "content": "x", "filesystem": id }),
+                    false,
+                )
+                .await
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains(id) && err.contains("read-only"), "{err}");
+        }
+        let err = fx
+            .svc
+            .commands
+            .run(
+                &Actor::Human,
+                "oxplow.file.save",
+                json!({ "stream": stream, "path": "a.txt", "content": "x", "filesystem": "acme:s3" }),
+                false,
+            )
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("acme:s3"), "{err}");
+        let out = fx
+            .svc
+            .commands
+            .run(
+                &Actor::Human,
+                "oxplow.file.save",
+                json!({ "stream": stream, "path": "named.txt", "content": "hi", "filesystem": "oxplow:local" }),
+                false,
+            )
+            .await
+            .unwrap();
+        assert_eq!(out.result, json!({ "path": "named.txt", "bytes": 2 }));
+        assert_eq!(
+            std::fs::read_to_string(fx._dir.path().join("named.txt")).unwrap(),
+            "hi"
         );
     }
 

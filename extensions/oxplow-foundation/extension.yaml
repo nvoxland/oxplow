@@ -199,6 +199,9 @@ intent:
     - name: the-directory-lists-a-folder-on-another-filesystem
       input: { page: directory, params: { stream_id: 1, path: '', filesystem: 'oxplow:extensions' } }
       expect: the extensions that run, each a folder on that filesystem
+    - name: the-file-viewer-names-its-filesystem-and-revision-in-its-label
+      input: { page: file-viewer, params: { path: 'oxplow-foundation/extension.yaml', filesystem: 'oxplow:extensions', rev: 4f9c2e1a7b3d5f60 } }
+      expect: the file's path, filesystem and revision, and a label suffix naming the filesystem and the revision's first 7 characters
     - name: the-capabilities-area-lists-the-implementations-and-choosing-one-is-a-config-write
       input: { page: settings, params: { area: integrations } }
       expect: each capability's implementations and a default row; choosing writes the layer's choice

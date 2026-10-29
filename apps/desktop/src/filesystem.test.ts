@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { fsRevLabel, LOCAL_FS } from "./filesystem.js";
+import { fsRevLabel, LOCAL_FS, MAX_SHOWN_BYTES, unshownReason } from "./filesystem.js";
 
 test("the local filesystem labels a revision as the revision helpers do", () => {
   expect(fsRevLabel(null, null)).toBe("working tree");
@@ -14,4 +14,12 @@ test("another filesystem labels its own revision, or itself", () => {
   expect(fsRevLabel("oxplow:extensions", "4f9c2e1a7b3d5f60")).toBe("4f9c2e1");
   expect(fsRevLabel("oxplow:extensions", "v2")).toBe("v2");
   expect(fsRevLabel("oxplow:temp", null)).toBe("oxplow:temp");
+});
+
+test("a binary or too-large file is not shown, and says what it is", () => {
+  const file = { kind: "file", size: 12, modifiedAt: null, isText: true, language: null } as const;
+  expect(unshownReason(file)).toBeNull();
+  expect(unshownReason({ ...file, size: 2048, isText: false })).toBe("binary file, 2048 bytes");
+  expect(unshownReason({ ...file, size: MAX_SHOWN_BYTES + 1 })).toBe(`too large to show, ${MAX_SHOWN_BYTES + 1} bytes`);
+  expect(unshownReason({ ...file, size: MAX_SHOWN_BYTES })).toBeNull();
 });

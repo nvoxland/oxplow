@@ -146,8 +146,8 @@ export function recordedPageKind(ref: TabRef): string {
  * historical view carries its revision (`file:<path>@git:HEAD`,
  * `@snap:<id>`) so it is a distinct tab from the working-tree view.
  */
-export function fileRef(path: string, version: Revision = WORKING): TabRef {
-  return { id: fileUri(path, revisionSlot(version)) };
+export function fileRef(path: string, version: Revision = WORKING, filesystem: string | null = null): TabRef {
+  return { id: fileUri(path, revisionSlot(version), filesystem) };
 }
 
 /** A file tab's path and version, read from its URI; null for another. */

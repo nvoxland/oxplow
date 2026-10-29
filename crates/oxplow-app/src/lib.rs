@@ -1796,7 +1796,7 @@ impl Services {
             .chain(commands::agent_reads::ops(services_slot.clone()))
             .chain(client_host::ops(&client_host))
             .chain([
-                commands::file::save_op(workspace_files.clone()),
+                commands::file::save_op(services_slot.clone()),
                 commands::file::create_op(workspace_files.clone()),
                 commands::file::create_directory_op(workspace_files.clone()),
                 commands::file::rename_op(workspace_files.clone()),

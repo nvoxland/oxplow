@@ -60,11 +60,13 @@ Rows come from the loader (a viz has no query). A viz that reads no rows
   setting the param to its `id`.
 - `board`: groups as columns of cards: `group: { by: <column>, values:
   [<columns in order>] }`. `timeline`, `steps`: ordered events or stages.
-- `code`: each row's file at a revision, read-only: `code: { path,
-  revision, lines?, sync? }`. `diff`: the first row's file between two
+- `code`: each row's file read-only, on a filesystem at a revision (a
+  column each; none: the working tree): `code: { path, filesystem?,
+  revision?, lines?, sync? }`. `diff`: the first row's file between two
   revisions: `diff: { path, from, to, lines?, base? }` (several files:
   `hunks`). `editor`: edits the first row's working-tree file: `editor: {
-  path, lines? }` (the person saves it).
+  path, filesystem?, lines? }` (the person saves it; only the local
+  working tree).
 - `embed`: the first row's web page (`http`/`https`) in a sandboxed window:
   `embed: { url: <column> }`. `terminal`: a terminal.
 - `form`: one command's input (`commands-and-forms.md`).

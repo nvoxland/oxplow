@@ -6019,6 +6019,12 @@ export type VizChart = {
  */
 export type VizCode = {
 	path: string | null,
+	/**  A column holding the filesystem's id; none or empty, the local one. */
+	filesystem?: string | null,
+	/**
+	 *  A column holding the revision, the filesystem's own word; none or
+	 *  empty, its current content (the working tree locally).
+	 */
 	revision: string | null,
 	/**  A column holding `12-40` (or `12`): the lines marked and revealed. */
 	lines?: string | null,
@@ -6176,6 +6182,11 @@ export type VizDiff = {
  */
 export type VizEditor = {
 	path: string | null,
+	/**
+	 *  A column holding the filesystem's id; the editor edits only the
+	 *  local working tree, so any other is shown as a refusal.
+	 */
+	filesystem?: string | null,
 	/**  A column holding `12` (or `12-40`: its start): the line revealed. */
 	lines?: string | null,
 };

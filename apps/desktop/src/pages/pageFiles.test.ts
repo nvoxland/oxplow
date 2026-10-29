@@ -45,15 +45,16 @@ describe("a route's page file", () => {
 });
 
 describe("renderers over page files", () => {
-  const editor = file("oxplow-foundation", "editor", { for: ["oxplow/file"], accepts: { rev: "absent" }, default: true });
-  const viewer = file("oxplow-foundation", "file-viewer", { for: ["oxplow/file"], accepts: { rev: "present" } });
+  const editor = file("oxplow-foundation", "editor", { for: ["oxplow/file"], accepts: { rev: "absent", filesystem: "absent" }, default: true });
+  const viewer = file("oxplow-foundation", "file-viewer", { for: ["oxplow/file"] });
   const blame = file("acme", "blame", { for: ["oxplow/file"] });
   const all = [ext("oxplow-foundation", "oxplow", [tasks, editor, viewer]), ext("acme", "acme", [blame])];
 
   test("only the pages that render something, by the same match rules", () => {
     const renderers = pageFileRenderers(all);
     expect(renderers.map((p) => p.id)).toEqual(["oxplow-foundation/editor", "oxplow-foundation/file-viewer", "acme/blame"]);
-    expect(renderersFor("oxplow:oxplow/file?path=a.ts", renderers).map((p) => p.id)).toEqual(["oxplow-foundation/editor", "acme/blame"]);
+    expect(renderersFor("oxplow:oxplow/file?path=a.ts", renderers).map((p) => p.id)).toEqual(["oxplow-foundation/editor", "oxplow-foundation/file-viewer", "acme/blame"]);
+    expect(renderersFor("oxplow:oxplow/file?path=a.ts&filesystem=oxplow:temp", renderers).map((p) => p.id)).toEqual(["oxplow-foundation/file-viewer", "acme/blame"]);
     expect(rendererFor("oxplow:oxplow/file?path=a.ts&rev=git:HEAD", renderers, {})?.id).toBe("oxplow-foundation/file-viewer");
     expect(rendererFor("oxplow:oxplow/file?path=a.ts", renderers, { "oxplow.renderer": "acme/blame" })?.id).toBe("acme/blame");
   });
