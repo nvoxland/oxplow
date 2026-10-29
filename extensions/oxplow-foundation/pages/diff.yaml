@@ -9,7 +9,7 @@ params:
 - name: label
 - name: base
 - name: lines
-  role: filter
+  role: view
 loaders:
   diff:
     sql: |
