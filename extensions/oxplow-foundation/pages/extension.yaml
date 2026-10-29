@@ -1,5 +1,5 @@
 title: Extension
-description: One extension — where it comes from, its version, its permissions and problems, what it contributes and its deployments. The renderer of oxplow's `extension` resource.
+description: One extension — where it comes from, its version, its permissions and problems, its pages and every other contribution (commands, metrics, resources, …) under its kind, and its deployments. The renderer of oxplow's `extension` resource.
 label: '{{param.name}}'
 icon: package
 for: oxplow/extension
@@ -44,9 +44,23 @@ loaders:
       FROM about a LEFT JOIN summary s ON s.extension = a.extension
   contributions:
     sql: |
-      SELECT count(*) || ' ' || kind || CASE WHEN count(*) = 1 THEN '' ELSE 's' END AS text
-      FROM v_contribution WHERE extension = (SELECT extension FROM about) AND kind <> 'page'
-      GROUP BY kind ORDER BY kind
+      -- Each contribution besides its pages: its name and description from its
+      -- kind's own dataset where it has one (else its local name), under the
+      -- kind's plural name; a link where a page draws its kind.
+      SELECT COALESCE(k.label, c.kind) || 's' AS grp, c.kind, c.local AS id,
+             COALESCE(m.title, ms.title, d.label, r.label, i.title, c.local) AS title,
+             COALESCE(ms.description, m.description) AS body,
+             CASE WHEN EXISTS (SELECT 1 FROM v_page p, json_each(p.renders) j WHERE j.value = 'oxplow/' || c.kind)
+                  THEN c.uri END AS link
+      FROM about a JOIN v_contribution c ON c.extension = a.extension AND c.kind <> 'page'
+           LEFT JOIN v_resource k ON k.resource = 'oxplow/' || c.kind
+           LEFT JOIN v_metric_spec ms ON c.kind = 'metric' AND ms.key = c.local
+           LEFT JOIN v_measure m ON c.kind = 'measure' AND m.key = c.local
+           LEFT JOIN v_dimension d ON c.kind = 'dimension' AND d.key = c.local
+           LEFT JOIN v_resource r ON c.kind = 'resource' AND r.resource = c.global_name
+           LEFT JOIN v_capability_provider i ON c.kind = 'implementation' AND i.extension = c.extension
+                AND i.capability || '.' || i.provider = c.local
+      ORDER BY grp, title
   pages:
     sql: |
       SELECT p.title, p.id, p.description,
@@ -84,13 +98,12 @@ view:
     from: pages
     sections: { title: title, id: id, link: definition, body: description }
     empty: It has no pages.
-  - id: kinds
+  - id: contributions
     title: Other contributions
-    viz: list
+    viz: sections
     from: contributions
+    sections: { title: title, id: id, link: link, body: body, group: grp }
     empty: Nothing besides its pages.
-    columns:
-    - { key: text, label: Contribution }
   - id: deployments
     title: Deployments
     viz: table

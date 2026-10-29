@@ -1,6 +1,6 @@
 # An extension that ships with oxplow, in words: the same facts as the
 # Extensions page (where it comes from, its version, its permissions, its
-# problems), its pages with a link to each Definition, and its deployments. The page's actions are the ones its row allows.
+# problems), its pages with a link to each Definition, its other contributions by kind, and its deployments. The page's actions are the ones its row allows.
 when:
   page: oxplow-foundation/extension
   params:
@@ -19,5 +19,6 @@ expect:
   nodes:
     - { id: about, kind: viz }
     - { id: pages, kind: viz }
+    - { id: contributions, kind: viz }
     - { id: deployments, kind: viz }
     - { id: runs, kind: slot }
