@@ -55,13 +55,13 @@ loaders:
       ORDER BY p.title
   deployments:
     sql: |
-      -- Worded as the Version fact is: the deployment and when, then
-      -- where it came from; the running one says so.
-      SELECT d.name, d.hash, d.deployed_at, NOT d.active AS inactive,
-             'Deployment ' || substr(d.hash, 1, 7) || ', deployed ' || strftime('%Y-%m-%d', d.deployed_at)
-             || CASE WHEN d."commit" IS NULL THEN '' ELSE ', from commit ' || substr(d."commit", 1, 7)
-                     || CASE WHEN d.dirty THEN ' with uncommitted changes' ELSE '' END END
-             || CASE WHEN d.active THEN ' (running now)' ELSE '' END AS text
+      -- Newest first: the top one is what runs (unless a roll back made an
+      -- older one run; that one alone offers no Roll Back to This).
+      SELECT d.name, d.hash, NOT d.active AS inactive,
+             strftime('%Y-%m-%d %H:%M', d.deployed_at) AS deployed,
+             substr(d.hash, 1, 7) AS version,
+             CASE WHEN d."commit" IS NULL THEN NULL
+                  ELSE substr(d."commit", 1, 7) || CASE WHEN d.dirty THEN ' + uncommitted changes' ELSE '' END END AS "commit"
       FROM about a JOIN v_extension_deployment d ON d.name = a.extension
       ORDER BY d.deployed_at DESC
 view:
@@ -93,11 +93,13 @@ view:
     - { key: text, label: Contribution }
   - id: deployments
     title: Deployments
-    viz: list
+    viz: table
     from: deployments
     empty: No deployments yet. A deploy copies the extension's source here.
     columns:
-    - { key: text, label: Deployment }
+    - { key: deployed, label: Deployed }
+    - { key: version, label: Version }
+    - { key: commit, label: From commit }
     actions:
     - id: rollback
       label: Roll Back to This
