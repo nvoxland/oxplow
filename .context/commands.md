@@ -182,7 +182,7 @@ Everything a person reaches a command by comes from the offers:
 - **a ref's menus** — a page's ☰, a row's right-click menu (a table or
   card row, the Board's card) and the Navigator's thread menu — offer the
   commands about its kind (`ui.about`) that apply to it. The **daemon**
-  says which: RPC `ref_commands { uri }` (`oxplow_app::ref_commands`)
+  says which: RPC `ref_commands { uri }` (`oxplow_app::commands::ref_commands`)
   returns the ids of the commands whose `about` is the ref's resource
   and whose `about_when` holds on its row, read by the same lookup a
   resource page's `content` loader uses (the resolving dataset's row by

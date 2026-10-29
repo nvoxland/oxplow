@@ -44,6 +44,7 @@ mod proposals;
 pub mod provider_instances;
 pub mod reasoning;
 mod record;
+pub mod ref_commands;
 pub mod review;
 pub mod snapshot;
 mod steps;

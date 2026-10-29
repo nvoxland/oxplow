@@ -135,7 +135,6 @@ pub mod providers;
 mod reading_data_tests;
 pub mod reasoning;
 pub mod recovery;
-pub mod ref_commands;
 pub mod ref_moves;
 pub mod ref_read;
 pub mod ref_resolver;

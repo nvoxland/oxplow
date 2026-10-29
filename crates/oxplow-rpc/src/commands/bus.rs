@@ -83,10 +83,10 @@ pub async fn list_person_commands(svc: &Services) -> Result<Vec<CommandSpec>, Ip
 
 /// The commands about the ref `uri` a person is offered: those whose kind
 /// (`ui.about`) it is, with each `ui.about_when` held on its row
-/// (`oxplow_app::ref_commands`). What every menu of a ref's commands asks,
+/// (`oxplow_app::commands::ref_commands`). What every menu of a ref's commands asks,
 /// the page's ☰ and a row's right-click alike.
 pub async fn ref_commands(svc: &Services, uri: String) -> Result<Vec<String>, IpcError> {
-    oxplow_app::ref_commands::ref_commands(svc, &uri)
+    oxplow_app::commands::ref_commands::ref_commands(svc, &uri)
         .await
         .map_err(IpcError::invalid)
 }
