@@ -37,7 +37,8 @@ loaders:
              NULL, 'Deploy it on its page to approve.', NULL, NULL, 0, 0, '',
              (SELECT json_group_array(json_object(
                        'text', CASE WHEN instr(j.value, ' — ') > 0 THEN substr(j.value, 1, instr(j.value, ' — ') - 1) ELSE j.value END,
-                       'hint', CASE WHEN instr(j.value, ' — ') > 0 THEN substr(j.value, instr(j.value, ' — ') + 3) END))
+                       'hint', CASE WHEN instr(j.value, ' — ') > 0 THEN substr(j.value, instr(j.value, ' — ') + 3) END)
+                     ORDER BY j.value)
               FROM json_each(e.pending) j)
       FROM v_extension e
       WHERE json_array_length(e.pending) > 0 AND (NULLIF(:extension, '') IS NULL OR e.name = :extension)

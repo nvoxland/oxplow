@@ -56,10 +56,11 @@ loaders:
                WHEN 'shipped' THEN 'The copy that ships with oxplow.'
                WHEN 'source' THEN 'Its source folder, as it is.'
                WHEN 'undeployed' THEN 'Nothing: it was never deployed.'
-               ELSE 'Nothing: neither its source nor a deployment is on this machine.' END AS runs_text,
-             -- Each scope as it is written, with what it lets the extension do
-             -- as its hover.
-             NULLIF((SELECT json_group_array(json_object('text', r.scope, 'hint', 'May ' || r.text || '.'))
+               ELSE 'Nothing: neither its source nor a deployment is on this machine.' END
+               || CASE WHEN x.enabled THEN '' ELSE ' (Disabled)' END AS runs_text,
+             -- Each scope as it is written, alphabetically, with what it lets
+             -- the extension do as its hover.
+             NULLIF((SELECT json_group_array(json_object('text', r.scope, 'hint', 'May ' || r.text || '.') ORDER BY r.scope)
                      FROM reach r WHERE r.extension = x.name), '[]') AS permission_items,
              CASE WHEN x.failing + x.disabled + x.load_problems + x.awaiting > 0 THEN
                'Problems: ' || (

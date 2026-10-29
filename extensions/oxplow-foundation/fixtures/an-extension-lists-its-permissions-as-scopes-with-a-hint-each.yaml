@@ -1,5 +1,5 @@
-# What an extension may reach is its scopes as written, each an item with
-# its explanation as the hover: [{ text, hint }]. An extension with
+# What an extension may reach is its scopes as written, alphabetically,
+# each an item with its explanation as the hover: [{ text, hint }]. An extension with
 # nothing wrong has no Problems line.
 when:
   page: oxplow-foundation/extension
@@ -14,4 +14,5 @@ expect:
           - { scope: sql.read, text: "read your project's data with SQL" }
     about_facts:
       rows:
-        - { problems_label: null }
+        - problems_label: null
+          permission_items: '[{"text":"agent.write","hint":"May give your agents instructions."},{"text":"ai.compute","hint":"May use your AI model key."},{"text":"files.read","hint":"May read your project''s files."},{"text":"sql.read","hint":"May read your project''s data with SQL."}]'
