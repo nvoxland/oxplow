@@ -9,6 +9,7 @@ import type {
   Reads,
   SymbolLocation,
   SnapshotTrigger,
+  FsStat,
 } from "./tauri-bridge/generated/bindings.js";
 import { listen, onRemoteReconnect, sendSocketFrame, triggerRemoteResync } from "./tauri-bridge/transport.js";
 
@@ -1322,15 +1323,25 @@ export async function resolveSymbol(streamId: string, ref: string): Promise<Symb
   return unwrap(await commands.resolveSymbol(streamId, ref));
 }
 
-/** `path` at `revision` (`working`, `snap:<id>`, `git:<rev>`); null
- *  when it isn't there. Every read names its revision — there is no
- *  implicit working-tree default. */
-export async function readAt(
-  streamId: string,
-  path: string,
-  revision: Revision,
-): Promise<string | null> {
-  return unwrap(await commands.readAt(streamId || null, path, revision));
+/** Where a file is read: its filesystem (none: `oxplow:local`, the
+ *  stream's worktree) and the revision on it, the filesystem's own word
+ *  (locally `working`, `snap:<id>`, `git:<rev>`; none: its default, the
+ *  working tree). */
+export interface FileAt {
+  filesystem?: string | null;
+  rev?: Revision | null;
+}
+
+/** `path` on a filesystem at a revision, as text; null when it isn't
+ *  there. */
+export async function readAt(streamId: string, path: string, at: FileAt = {}): Promise<string | null> {
+  return unwrap(await commands.readAt(streamId || null, path, at.filesystem ?? null, at.rev ?? null));
+}
+
+/** What `path` is on a filesystem at a revision (kind, size, whether it
+ *  is text, language); null when it isn't there. */
+export async function statFile(streamId: string, path: string, at: FileAt = {}): Promise<FsStat | null> {
+  return unwrap(await commands.statFile(streamId || null, path, at.filesystem ?? null, at.rev ?? null));
 }
 
 /** Save a file of the stream's worktree: `oxplow.file.save`. */

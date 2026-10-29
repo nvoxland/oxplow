@@ -110,7 +110,17 @@ oxplow:github/pr?id=12
   it picks which renderer draws the URI when several declare it).
 - **A revision is a param.** `rev=git:HEAD`, `rev=snap:3`: the
   `Revision` strings (`revision.ts`), never `@…`. Only files, directories
-  and symbols take one.
+  and symbols take one. What a `rev` means belongs to the file's
+  filesystem: the `Revision` vocabulary is the local filesystem's, and
+  another filesystem has its own (a deployment hash).
+- **A file names its filesystem.** `filesystem=<id>` (`oxplow:temp`,
+  `acme:s3`; [filesystems.md](./filesystems.md)) on a file or directory
+  URI says where its bytes come from. Absent is `oxplow:local`, the
+  stream's worktree, so every URI written before filesystems keeps its
+  identity; the builders (`file_uri_at`, `dir_uri_at`, `fileUri`,
+  `dirUri`) leave out an explicit `oxplow:local` so one file has one
+  identity. Readers resolve the id through `Services.filesystems`, and
+  an unknown id is refused naming the ones there are.
 - **Any other scheme is an external resource** (`https:`, `file://`):
   `AnyUri { Oxplow, External(url::Url) }` types the split; a link may be
   either.
@@ -132,7 +142,7 @@ oxplow:github/pr?id=12
 the resource's own name for a contribution (`page?page=tasks`, `command?command=oxplow.file.save`,
 `collector?collector=triage/todos`, `effect?effect=acme/notify`,
 `resource?resource=github/pr`). Resources with several identity params
-have none: `file?path=&rev=`, `dir?path=`, `symbol?path=&symbol=`,
+have none: `file?path=&rev=&filesystem=`, `dir?path=&filesystem=`, `symbol?path=&symbol=`,
 `work_item?provider=&id=`, `subagent?session=&agent=`,
 `extension_deployment?name=&hash=`, `block?path=&lines=`,
 `test?class=&name=`. A page's own params ride beside its key

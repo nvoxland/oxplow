@@ -124,8 +124,9 @@ pub async fn read(
     let param = |name: &str| parsed.param(name).unwrap_or_default().to_string();
     match resource.as_str() {
         r::FILE => {
-            let text = file_text(svc, &parsed, stream).await?;
-            let text = match parsed.view().get("lines") {
+            let span = parsed.view().get("lines");
+            let text = file_text(svc, &parsed, stream, span.is_some()).await?;
+            let text = match span {
                 Some(span) => lines(&text, span)?,
                 None => text,
             };
@@ -205,33 +206,49 @@ impl RefRead {
     }
 }
 
-/// A file's text at the URI's revision (the working tree when it names
-/// none), in the caller's stream's worktree.
+/// A file's text on the URI's filesystem (none named: the local one) at
+/// its revision (none: the filesystem's default), for the caller's stream.
+/// A binary file reads as a line saying so, not as lossy bytes. With
+/// `whole` false only the first `MAX_CONTENT + 1` bytes are read — enough
+/// for `set_content` to see the file is longer.
 async fn file_text(
     svc: &Services,
     parsed: &OxplowUri,
     stream: Option<StreamId>,
+    whole: bool,
 ) -> Result<String, ReadError> {
-    let revision: oxplow_domain::vcs::Revision = parsed
-        .param("rev")
-        .unwrap_or("working")
-        .parse()
-        .map_err(ReadError::Invalid)?;
-    let root = svc
-        .worktrees
-        .resolve(stream.map(|s| s.to_string()).as_deref())
+    let fs = svc
+        .filesystems
+        .resolve(parsed.param("filesystem"))
+        .map_err(fs_error)?;
+    let cx = oxplow_domain::filesystem::FsCx { stream };
+    let (rev, path) = (
+        parsed.param("rev"),
+        parsed.param("path").unwrap_or_default(),
+    );
+    let not_found = || ReadError::NotFound(parsed.to_string());
+    let stat = fs.stat(&cx, rev, path).await.map_err(fs_error)?;
+    let stat = stat.ok_or_else(not_found)?;
+    if stat.is_text == Some(false) {
+        return Ok(format!("binary file, {} bytes", stat.size.unwrap_or(0)));
+    }
+    let range = (!whole).then_some(oxplow_domain::filesystem::ByteRange {
+        offset: 0,
+        len: MAX_CONTENT as u64 + 1,
+    });
+    let bytes = fs
+        .read(&cx, rev, path, range)
         .await
-        .into_local_path();
-    let bytes = svc
-        .trees
-        .read_at(&root, &revision, parsed.param("path").unwrap_or_default())
-        .await
-        .map_err(|e| match e {
-            oxplow_domain::DomainError::Invalid(m) => ReadError::Invalid(m),
-            other => ReadError::Storage(other),
-        })?
-        .ok_or_else(|| ReadError::NotFound(parsed.to_string()))?;
+        .map_err(fs_error)?
+        .ok_or_else(not_found)?;
     Ok(String::from_utf8_lossy(&bytes).into_owned())
+}
+
+fn fs_error(e: oxplow_domain::filesystem::FsError) -> ReadError {
+    match oxplow_domain::DomainError::from(e) {
+        oxplow_domain::DomainError::Invalid(m) => ReadError::Invalid(m),
+        other => ReadError::Storage(other),
+    }
 }
 
 /// The lines a `lines=<from>-<to>` (or `lines=<n>`) view names, 1-based

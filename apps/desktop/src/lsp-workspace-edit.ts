@@ -44,7 +44,7 @@ export function workspaceEditIOForStream(monaco: any, stream: Stream): Workspace
     findModel: (uri) => monaco.editor.getModel(monaco.Uri.parse(uri)) ?? null,
     pathFromUri: (uri) => relativePathFromFileUri(stream, uri),
     readFile: async (path) => {
-      const content = await readAt(stream.id, path, WORKING);
+      const content = await readAt(stream.id, path, { rev: WORKING });
       if (content == null) throw new Error("file not found in worktree");
       return content;
     },

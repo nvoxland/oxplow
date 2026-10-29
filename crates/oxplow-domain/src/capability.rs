@@ -319,6 +319,38 @@ pub const AGENT_HARNESS: ProviderContract = ProviderContract {
     data: Some(HARNESS_DATA),
 };
 
+/// A filesystem's (`.context/filesystems.md`): core asks it what a path is
+/// (`stat`), for its bytes (`read`, whole or a range) and for its listing,
+/// and — with `writable` — to replace a file. Its id is the
+/// `filesystem` param of the file URIs it owns
+/// (`oxplow:oxplow/file?filesystem=<extension>:<name>&path=…`).
+pub const FILESYSTEM: ProviderContract = ProviderContract {
+    verbs: &[
+        Verb {
+            name: "stat",
+            needs: Need::Always,
+        },
+        Verb {
+            name: "read",
+            needs: Need::Always,
+        },
+        Verb {
+            name: "list",
+            needs: Need::Always,
+        },
+        Verb {
+            name: "write",
+            needs: Need::Feature("writable"),
+        },
+    ],
+    dispatch: None,
+    events: &[],
+    records: None,
+    resource: None,
+    items: false,
+    data: None,
+};
+
 /// What a harness declares of itself (`agent::harness::HarnessData`).
 pub const HARNESS_DATA: &str = r#"{
   "type": "object",
@@ -439,6 +471,16 @@ pub const CAPABILITIES: &[CapabilitySpec] = &[
         default: "anthropic",
         features: &["decide_native"],
         provider: None,
+    },
+    CapabilitySpec {
+        id: "filesystem",
+        title: "Filesystem",
+        choosable: false,
+        optional: false,
+        many: true,
+        default: "local",
+        features: &["writable"],
+        provider: Some(&FILESYSTEM),
     },
 ];
 
@@ -615,15 +657,19 @@ mod tests {
                 .filter(|c| c.many)
                 .map(|c| (c.id, c.default))
                 .collect::<Vec<_>>(),
-            [("agent_harness", "claude"), ("ai_provider", "anthropic")]
+            [
+                ("agent_harness", "claude"),
+                ("ai_provider", "anthropic"),
+                ("filesystem", "local")
+            ]
         );
         assert_eq!(spec("snapshots").map(|c| c.optional), Some(false));
         assert!(spec("nope").is_none());
     }
 
     /// What a process may implement is what core gives a contract: the
-    /// work list, the effort policy and an agent harness. The rest are
-    /// core's or built-ins'.
+    /// work list, the effort policy, snapshots, knowledge, an agent harness
+    /// and a filesystem. The rest are core's or built-ins'.
     #[test]
     fn a_process_implements_only_a_capability_with_a_contract() {
         assert_eq!(
@@ -637,7 +683,8 @@ mod tests {
                 "effort_policy",
                 "snapshots",
                 "knowledge",
-                "agent_harness"
+                "agent_harness",
+                "filesystem"
             ]
         );
         assert!(contract("vcs").is_none() && contract("nope").is_none());
@@ -677,6 +724,15 @@ mod tests {
         assert_eq!(
             snapshots.required(&serde_json::json!({"contents": true})),
             ["mark", "changed", "read_at"]
+        );
+        let files = contract("filesystem").unwrap();
+        assert_eq!(
+            files.required(&serde_json::json!({})),
+            ["stat", "read", "list"]
+        );
+        assert_eq!(
+            files.required(&serde_json::json!({"writable": true})),
+            ["stat", "read", "list", "write"]
         );
         for c in CAPABILITIES {
             for verb in c.provider.map(|p| p.verbs).unwrap_or_default() {

@@ -152,10 +152,10 @@ export function DiffPane({ streamId, spec, visible, onJumpToSource }: Props) {
       try {
         const leftPromise = spec.leftContent !== undefined
           ? Promise.resolve(spec.leftContent as string | null)
-          : readAt(streamId, spec.path, spec.leftVersion);
+          : readAt(streamId, spec.path, { rev: spec.leftVersion });
         const rightPromise = spec.rightContent !== undefined
           ? Promise.resolve(spec.rightContent as string | null)
-          : readAt(streamId, spec.path, spec.rightVersion);
+          : readAt(streamId, spec.path, { rev: spec.rightVersion });
         const [leftContent, rightContent] = await Promise.all([leftPromise, rightPromise]);
         if (cancelled) return;
         const monaco = monacoRef.current;

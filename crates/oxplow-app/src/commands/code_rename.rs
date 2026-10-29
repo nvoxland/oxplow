@@ -109,12 +109,13 @@ pub fn rename_symbol_op(services: ServicesSlot) -> Op {
             Box::pin(async move {
                 let input: RenameSymbolInput = parse(input)?;
                 let stream = stream_of(&invocation, &input.stream)?;
-                let (path, rev, _) = oxplow_domain::uri::build::file_of_uri(&input.uri)
+                let file = oxplow_domain::uri::build::file_of_uri(&input.uri)
                     .map_err(|e| invalid("/uri", e.to_string()))?;
-                if rev.is_some() {
+                let path = file.path;
+                if file.rev.is_some() || file.filesystem.is_some() {
                     return Err(invalid(
                         "/uri",
-                        "a rename changes the working tree: name the file without a revision",
+                        "a rename changes the working tree: name the file without a revision or a filesystem",
                     ));
                 }
                 if input.new_name.trim().is_empty() {

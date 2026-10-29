@@ -216,37 +216,83 @@ pub fn branch_uri(name: &str) -> String {
     keyed(r::BRANCH, name)
 }
 
-/// A file by its workspace-relative path, in the working tree.
+/// A file by its workspace-relative path, in the working tree of the
+/// local filesystem.
 pub fn file_uri(path: &str) -> String {
     of(r::FILE, &[("path", path)])
 }
 
-/// A file at a revision (`git:HEAD`, `snap:01J9…`), optionally lines of
-/// it (`10-20`, the view).
-pub fn file_uri_at(path: &str, rev: Option<&str>, lines: Option<&str>) -> String {
+/// `params` with the filesystem a URI names and the revision on it. The
+/// local filesystem is the default, so naming it is left out: one file,
+/// one identity.
+fn located<'a>(
+    path: &'a str,
+    filesystem: Option<&'a str>,
+    rev: Option<&'a str>,
+) -> Vec<(&'static str, &'a str)> {
     let mut params = vec![("path", path)];
+    params.extend(
+        filesystem
+            .filter(|f| *f != crate::filesystem::LOCAL)
+            .map(|f| ("filesystem", f)),
+    );
     params.extend(rev.map(|rev| ("rev", rev)));
-    let view: Vec<(&str, &str)> = lines.map(|l| ("lines", l)).into_iter().collect();
-    of_with_view(r::FILE, &params, &view)
+    params
 }
 
-/// A file URI's path and revision (`None`: the working tree), with its
-/// lines when its view names them.
-pub fn file_of_uri(text: &str) -> Result<(String, Option<String>, Option<String>), NotA> {
+/// A file on `filesystem` (`None`: the local one) at a revision, a
+/// revision being the filesystem's own word (`git:HEAD`, `snap:01J9…`
+/// locally, a deployment hash of `oxplow:extensions`), optionally lines of
+/// it (`10-20`, the view).
+pub fn file_uri_at(
+    path: &str,
+    filesystem: Option<&str>,
+    rev: Option<&str>,
+    lines: Option<&str>,
+) -> String {
+    let view: Vec<(&str, &str)> = lines.map(|l| ("lines", l)).into_iter().collect();
+    of_with_view(r::FILE, &located(path, filesystem, rev), &view)
+}
+
+/// What a file URI names.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileRef {
+    pub path: String,
+    /// The filesystem it is on; `None` is the local one, whether the URI
+    /// left it out or named it.
+    pub filesystem: Option<String>,
+    /// The filesystem's revision; `None`: its default (the working tree).
+    pub rev: Option<String>,
+    /// The lines its view names.
+    pub lines: Option<String>,
+}
+
+/// A file URI's parts.
+pub fn file_of_uri(text: &str) -> Result<FileRef, NotA> {
     let u = parse_resource(text, r::FILE)?;
     let path = u
         .param("path")
         .ok_or_else(|| not_a(text, r::FILE))?
         .to_string();
-    Ok((
+    Ok(FileRef {
         path,
-        u.param("rev").map(str::to_string),
-        u.view().get("lines").cloned(),
-    ))
+        filesystem: u
+            .param("filesystem")
+            .filter(|f| *f != crate::filesystem::LOCAL)
+            .map(str::to_string),
+        rev: u.param("rev").map(str::to_string),
+        lines: u.view().get("lines").cloned(),
+    })
 }
 
+/// A directory of the local filesystem's working tree.
 pub fn dir_uri(path: &str) -> String {
     of(r::DIR, &[("path", path)])
+}
+
+/// A directory on `filesystem` (`None`: the local one) at a revision.
+pub fn dir_uri_at(path: &str, filesystem: Option<&str>, rev: Option<&str>) -> String {
+    of(r::DIR, &located(path, filesystem, rev))
 }
 
 /// A symbol: `id` its symbol id within the file at `path`
@@ -505,16 +551,17 @@ mod tests {
     fn a_shaped_uri_names_its_parts() {
         assert_eq!(file_uri("src/a@b.rs"), "oxplow:oxplow/file?path=src/a@b.rs");
         assert_eq!(
-            file_uri_at("src/a.rs", Some("git:HEAD"), Some("10-20")),
+            file_uri_at("src/a.rs", None, Some("git:HEAD"), Some("10-20")),
             "oxplow:oxplow/file?path=src/a.rs&rev=git:HEAD#lines=10-20"
         );
         assert_eq!(
             file_of_uri("oxplow:oxplow/file?path=src/a.rs&rev=git:HEAD#lines=10-20").unwrap(),
-            (
-                "src/a.rs".to_string(),
-                Some("git:HEAD".to_string()),
-                Some("10-20".to_string())
-            )
+            FileRef {
+                path: "src/a.rs".to_string(),
+                filesystem: None,
+                rev: Some("git:HEAD".to_string()),
+                lines: Some("10-20".to_string()),
+            }
         );
         assert_eq!(
             symbol_uri_at("src/a.rs", "Parser::parse", Some("snap:812")),
@@ -530,6 +577,52 @@ mod tests {
         );
         assert_eq!(commit_uri("4c44d495"), "oxplow:oxplow/commit?sha=4c44d495");
         assert_eq!(wiki_uri("auth-flow"), "oxplow:oxplow/wiki?slug=auth-flow");
+    }
+
+    /// A working-tree file of the local filesystem is named as it always
+    /// was: the pinned strings are the identity every stored link carries.
+    #[test]
+    fn a_local_working_tree_file_uri_is_what_it_was() {
+        assert_eq!(file_uri("a.rs"), "oxplow:oxplow/file?path=a.rs");
+        assert_eq!(
+            file_uri("a b/c&d.rs"),
+            "oxplow:oxplow/file?path=a%20b/c%26d.rs"
+        );
+        assert_eq!(
+            file_uri_at("a.rs", Some("oxplow:local"), None, None),
+            file_uri("a.rs")
+        );
+        assert_eq!(
+            file_uri_at("a.rs", None, Some("git:HEAD"), Some("1-2")),
+            "oxplow:oxplow/file?path=a.rs&rev=git:HEAD#lines=1-2"
+        );
+        assert_eq!(dir_uri("src"), "oxplow:oxplow/dir?path=src");
+        assert_eq!(
+            dir_uri_at("src", Some("oxplow:local"), None),
+            dir_uri("src")
+        );
+    }
+
+    /// A file on another filesystem names it; naming the local one is
+    /// left out so one file has one identity.
+    #[test]
+    fn a_file_on_another_filesystem_names_it() {
+        assert_eq!(
+            file_uri_at("x.yaml", Some("oxplow:temp"), None, None),
+            "oxplow:oxplow/file?filesystem=oxplow:temp&path=x.yaml"
+        );
+        assert_eq!(
+            file_uri_at("ext/pages/a.yaml", Some("acme:s3"), Some("h1"), None),
+            "oxplow:oxplow/file?filesystem=acme:s3&path=ext/pages/a.yaml&rev=h1"
+        );
+        assert_eq!(
+            dir_uri_at("ext", Some("oxplow:extensions"), None),
+            "oxplow:oxplow/dir?filesystem=oxplow:extensions&path=ext"
+        );
+        let named = file_of_uri("oxplow:oxplow/file?path=a.rs&filesystem=oxplow:local").unwrap();
+        assert_eq!(named.filesystem, None, "naming the local one is no name");
+        let temp = file_of_uri(&file_uri_at("x.yaml", Some("oxplow:temp"), None, None)).unwrap();
+        assert_eq!(temp.filesystem.as_deref(), Some("oxplow:temp"));
     }
 
     /// A reader gets the decoded key, typed, or says which resource it

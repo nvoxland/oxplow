@@ -337,7 +337,8 @@ pub const MANIFEST: &[Capability] = &[
     agent("oxplow_diff"),
     agent("oxplow_vcs_log"),
     via_bus("vcs_blame", "vcs_blame", "oxplow_vcs_blame", "oxplow.vcs.blame"),
-    ui("read_at", "the editor's file at a revision; an agent reads a file ref at that revision with `read`"),
+    ui("read_at", "the editor's file on a filesystem at a revision; an agent reads a file ref with `read`"),
+    ui("stat_file", "the viewer's look at a file before it reads it; an agent reads a file ref with `read`"),
     ui(
         "resolve_symbol",
         "opening a symbol link; an agent reads v_symbol, and `read` for a pinned version",

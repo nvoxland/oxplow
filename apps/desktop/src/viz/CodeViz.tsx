@@ -129,7 +129,7 @@ function CodeEditorView({
     let detach: (() => void) | null = null;
     void (async () => {
       try {
-        const content = await readAt(streamId ?? "", path, revision as Revision);
+        const content = await readAt(streamId ?? "", path, { rev: revision as Revision });
         const monaco = monacoRef.current;
         const editor = editorRef.current;
         if (cancelled || !monaco || !editor) return;

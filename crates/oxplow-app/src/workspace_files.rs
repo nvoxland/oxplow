@@ -318,7 +318,13 @@ pub fn list_workspace_paths(
     let dir = resolve_workspace_path(root_dir, relative_path)?;
     let entries = match std::fs::read_dir(&dir) {
         Ok(entries) => entries,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound && !relative_path.is_empty() => {
+        // A folder that isn't there, or a file named as one, has no rows.
+        Err(e)
+            if matches!(
+                e.kind(),
+                std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
+            ) && !relative_path.is_empty() =>
+        {
             return Ok(Vec::new())
         }
         Err(e) => return Err(e.into()),

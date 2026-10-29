@@ -119,6 +119,42 @@
       "view": {},
       "canonical": "oxplow:oxplow/page?page=new-task&parent=oxplow:oxplow/work_item?id%3Dtsk1%26provider%3Doxplow",
       "identity": "oxplow:oxplow/page?page=new-task&parent=oxplow:oxplow/work_item?id%3Dtsk1%26provider%3Doxplow"
+    },
+    {
+      "$comment": "A file on a filesystem other than the local one names it (`filesystem`); keys sort whatever order they were written in, so the filesystem comes first.",
+      "text": "oxplow:oxplow/file?path=abc123.yaml&filesystem=oxplow:temp",
+      "resource": { "extension": "oxplow", "name": "file" },
+      "params": { "filesystem": "oxplow:temp", "path": "abc123.yaml" },
+      "view": {},
+      "canonical": "oxplow:oxplow/file?filesystem=oxplow:temp&path=abc123.yaml",
+      "identity": "oxplow:oxplow/file?filesystem=oxplow:temp&path=abc123.yaml"
+    },
+    {
+      "$comment": "A revision is the filesystem's own word: a deployment hash on the extensions filesystem.",
+      "text": "oxplow:oxplow/file?rev=4f9c2e1a&path=oxplow-foundation/pages/commit.yaml&filesystem=oxplow:extensions#lines=1-5",
+      "resource": { "extension": "oxplow", "name": "file" },
+      "params": { "filesystem": "oxplow:extensions", "path": "oxplow-foundation/pages/commit.yaml", "rev": "4f9c2e1a" },
+      "view": { "lines": "1-5" },
+      "canonical": "oxplow:oxplow/file?filesystem=oxplow:extensions&path=oxplow-foundation/pages/commit.yaml&rev=4f9c2e1a#lines=1-5",
+      "identity": "oxplow:oxplow/file?filesystem=oxplow:extensions&path=oxplow-foundation/pages/commit.yaml&rev=4f9c2e1a"
+    },
+    {
+      "$comment": "An extension's filesystem is `<extension>:<name>`.",
+      "text": "oxplow:oxplow/file?filesystem=acme:s3&path=bucket/key%20one.txt",
+      "resource": { "extension": "oxplow", "name": "file" },
+      "params": { "filesystem": "acme:s3", "path": "bucket/key one.txt" },
+      "view": {},
+      "canonical": "oxplow:oxplow/file?filesystem=acme:s3&path=bucket/key%20one.txt",
+      "identity": "oxplow:oxplow/file?filesystem=acme:s3&path=bucket/key%20one.txt"
+    },
+    {
+      "$comment": "A directory names its filesystem the same way.",
+      "text": "oxplow:oxplow/dir?path=oxplow-foundation/pages&filesystem=oxplow:extensions",
+      "resource": { "extension": "oxplow", "name": "dir" },
+      "params": { "filesystem": "oxplow:extensions", "path": "oxplow-foundation/pages" },
+      "view": {},
+      "canonical": "oxplow:oxplow/dir?filesystem=oxplow:extensions&path=oxplow-foundation/pages",
+      "identity": "oxplow:oxplow/dir?filesystem=oxplow:extensions&path=oxplow-foundation/pages"
     }
   ],
   "invalid": [
@@ -139,6 +175,7 @@
     { "text": "oxplow:oxplow/effort?i%64=eff1", "reason": "bad_param" },
     { "text": "oxplow:oxplow/effort?id=a&id=b", "reason": "duplicate_param" },
     { "text": "oxplow:oxplow/effort?id=eff1#q=a&q=b", "reason": "duplicate_param" },
+    { "text": "oxplow:oxplow/file?path=a&filesystem=oxplow:temp&filesystem=acme:s3", "reason": "duplicate_param" },
     { "text": "oxplow:oxplow/file?path=a%2", "reason": "bad_escape" },
     { "text": "oxplow:oxplow/file?path=a%zz", "reason": "bad_escape" },
     { "text": "oxplow:oxplow/file?path=a%FF", "reason": "not_utf8" },
@@ -157,6 +194,12 @@
       "params": { "id": "12" },
       "view": {},
       "canonical": "oxplow:acme/pr?id=12"
+    },
+    {
+      "resource": "oxplow/file",
+      "params": { "rev": "4f9c2e1a", "path": "oxplow-foundation/pages/a.yaml", "filesystem": "oxplow:extensions" },
+      "view": {},
+      "canonical": "oxplow:oxplow/file?filesystem=oxplow:extensions&path=oxplow-foundation/pages/a.yaml&rev=4f9c2e1a"
     }
   ]
 }

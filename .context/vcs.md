@@ -132,7 +132,13 @@ is the `rev` param, where the working tree is the omitted param
 `FileVersion`. A revision of another VCS than the workspace's is
 refused, naming the workspace's.
 
-**`Trees`** (`crates/oxplow-app/src/trees.rs`, `Services.trees`) reads
+**`Trees`** (`crates/oxplow-app/src/trees.rs`, `Services.trees`) is the
+engine behind the `oxplow:local` filesystem ([filesystems.md](./filesystems.md)):
+`LocalFs` delegates its reads and its past-revision listings to it, and
+`Revision` is that filesystem's private word for `rev`. A file's content is
+read through the `FileSystem` registry (`Services.filesystems`); `Trees`
+itself stays the engine for diffs, the code-quality corpus and change
+analysis, which name a root and a `Revision` directly. It reads
 any revision of a workspace: `files_at`, `read_at`, `corpus` (text files,
 for the code-quality scans), `changes(from?, to)` (paths and statuses
 only: ids compared, no changed file read) and `diff(from?, to)` (the same
@@ -151,8 +157,10 @@ used to skip the filter, tsk552); two snapshots settle un-hashed rows
 first (`resolve_for_compare`); a mixed pair normalizes the snapshot side
 into VCS ids.
 
-The neutral RPCs are `read_at { streamId, path, revision }`, `files_at`,
-`diff { streamId, from, to }` (UI only), and, for an agent, MCP `read` of `oxplow:oxplow/file?path=<path>&rev=<revision>`. The daemon finishes every request it gets (dropping a
+The neutral RPCs are `read_at { streamId, path, filesystem?, rev? }` and
+`stat_file` (the filesystem registry's `read` and `stat`; `rev` is the
+filesystem's own word, absent the working tree), `files_at`,
+`diff { streamId, from, to }` (UI only), and, for an agent, MCP `read` of `oxplow:oxplow/file?path=<path>&rev=<revision>` (add `filesystem=<id>` for a filesystem other than the local one). The daemon finishes every request it gets (dropping a
 result in the UI doesn't cancel the work), so a view that refreshes on
 workspace events should not start a diff per event (a page re-runs once per
 change). The MCP VCS

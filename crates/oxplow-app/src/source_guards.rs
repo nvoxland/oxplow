@@ -809,6 +809,7 @@ fn core_never_special_cases_its_own_implementations() {
 const WORKTREE_PATH_USERS: &[(&str, &str)] = &[
     // The providers proper.
     ("crates/oxplow-app/src/workspace_files.rs", "the workspace files provider"),
+    ("crates/oxplow-app/src/filesystems/local.rs", "the local filesystem: a stream's worktree as files"),
     ("crates/oxplow-app/src/vcs/reads.rs", "the VCS provider's reads"),
     ("crates/oxplow-app/src/commands/vcs.rs", "the VCS commands' runner"),
     ("crates/oxplow-app/src/branch_reconciler.rs", "reconciles each worktree's branch through the VCS provider"),

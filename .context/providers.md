@@ -432,15 +432,15 @@ a verb runs as (so an inverse naming a verb undoes through it), the event
 types it may emit, what its collectors stream, the URIs an instance owns,
 and whether it keeps items.
 
-| | `work_items` | `effort_policy` | `agent_harness` | `snapshots` | `knowledge` |
-|---|---|---|---|---|---|
-| verbs | `create`, `update`, `transition`; `link` ← links, `comment` ← comments, `delete` ← delete, `reorder` ← ordering, `move` ← lists | `react` | `launch`, `tool_use`, `render`; `turns` ← transcript, `token_readings` ← telemetry, `refresh_text` ← runtime_text, `prompt` and `subagent` ← subagents | `mark`, `changed`; `read_at` ← contents | `write_page`, `delete_page`, `link` |
-| verbs run as | `oxplow.work_item.<verb>` | the dispatcher's call (nothing undoes it) | core's call: a session's launch, the hook route, the OTLP route, a transcript read, a text refresh | core's call: every take core makes (an effort's brackets, a turn's end, a measured run, an archive) | `oxplow.knowledge.<verb>`, after core checks the page against its record |
-| declares as `data` | nothing | nothing | `env_markers`, `settings` | nothing | nothing |
-| may emit | `work_item.recorded@3` | nothing | nothing | nothing | `knowledge.page.recorded@2` |
-| collectors stream | `work_item` rows, logged as `work_item.recorded@3` `{ item: row }` | nothing | nothing | nothing | `knowledge_page` rows, logged as `knowledge.page.recorded@2` `{ page: row }` |
-| owns URIs | `oxplow/work_item` with `provider=<instance>` | none | none | none | `oxplow/wiki` (no `provider` param: the active store's) |
-| keeps items (`fields`, `idPattern`) | yes | no | no | no | no |
+| | `work_items` | `effort_policy` | `agent_harness` | `snapshots` | `knowledge` | `filesystem` |
+|---|---|---|---|---|---|---|
+| verbs | `create`, `update`, `transition`; `link` ← links, `comment` ← comments, `delete` ← delete, `reorder` ← ordering, `move` ← lists | `react` | `launch`, `tool_use`, `render`; `turns` ← transcript, `token_readings` ← telemetry, `refresh_text` ← runtime_text, `prompt` and `subagent` ← subagents | `mark`, `changed`; `read_at` ← contents | `write_page`, `delete_page`, `link` | `stat`, `read`, `list`; `write` ← writable |
+| verbs run as | `oxplow.work_item.<verb>` | the dispatcher's call (nothing undoes it) | core's call: a session's launch, the hook route, the OTLP route, a transcript read, a text refresh | core's call: every take core makes (an effort's brackets, a turn's end, a measured run, an archive) | `oxplow.knowledge.<verb>`, after core checks the page against its record | core's call: a reader's `stat`, `read` and `list` for a file URI naming the filesystem |
+| declares as `data` | nothing | nothing | `env_markers`, `settings` | nothing | nothing | nothing |
+| may emit | `work_item.recorded@3` | nothing | nothing | nothing | `knowledge.page.recorded@2` | nothing |
+| collectors stream | `work_item` rows, logged as `work_item.recorded@3` `{ item: row }` | nothing | nothing | nothing | `knowledge_page` rows, logged as `knowledge.page.recorded@2` `{ page: row }` | nothing |
+| owns URIs | `oxplow/work_item` with `provider=<instance>` | none | none | none | `oxplow/wiki` (no `provider` param: the active store's) | none (its id is the `filesystem` param of the file URIs it serves) |
+| keeps items (`fields`, `idPattern`) | yes | no | no | no | no | no |
 
 Each such capability has a **host** (`registry::CapabilityHost`): what
 turns a started instance into the capability's implementation and takes
@@ -453,7 +453,9 @@ harness's (`agent_harness::HarnessHost`) registers an `ExternalHarness` in
 catalog reload keeps it); the snapshots' (`snapshots::SnapshotsHost`)
 registers an `ExternalSnapshots` in `Services.snapshots`; the
 knowledge's (`knowledge::KnowledgeHost`) registers an `ExternalKnowledge`
-in `Services.knowledge`. A record row carries its own `uri`; the host
+in `Services.knowledge`. (The `filesystem` contract has no host yet: core's
+filesystems are built in, and a provider's arrive with its host —
+[filesystems.md](./filesystems.md).) A record row carries its own `uri`; the host
 logs it as the contract's event with the row under the contract's key,
 that URI the subject and the instance the source (`provider:<id>`: whose
 record it is). A URI of a resource with no `provider` param

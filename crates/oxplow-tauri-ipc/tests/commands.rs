@@ -180,7 +180,8 @@ async fn git_reads_over_primary_worktree() {
         s.clone(),
         None,
         "nope.txt".into(),
-        oxplow_domain::vcs::Revision::git("HEAD"),
+        None,
+        Some("git:HEAD".into()),
     )
     .await;
     let _ = commands::generated::vcs_blame(

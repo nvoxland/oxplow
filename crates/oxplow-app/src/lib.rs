@@ -85,6 +85,9 @@ pub mod extension;
 pub mod external_process;
 pub mod file_ref_version;
 #[cfg(test)]
+pub(crate) mod filesystem_conformance;
+pub(crate) mod filesystems;
+#[cfg(test)]
 mod foundation_collectors_tests;
 pub mod grants;
 pub mod harness_conformance;
@@ -705,6 +708,9 @@ pub struct Services {
     /// Every version of a workspace's tree — working, snapshot, VCS
     /// revision — read and diffed through one interface.
     pub trees: Arc<trees::Trees>,
+    /// The filesystems, by id (`.context/filesystems.md`): where a file's
+    /// bytes come from. Readers name one by its id; none is `oxplow:local`.
+    pub filesystems: Arc<oxplow_domain::filesystem::FileSystemRegistry>,
     /// Per-file subtree records the change-scoped duplicate scan reuses
     /// between scans (`oxplow_code_dup::DupCache`, bounded in bytes).
     pub dup_cache: Arc<oxplow_code_dup::DupCache>,
@@ -1155,6 +1161,13 @@ impl Services {
             blobs.clone(),
             config_arc.clone(),
         ));
+        let filesystems = Arc::new(oxplow_domain::filesystem::FileSystemRegistry::new());
+        filesystems.register(Arc::new(filesystems::local::LocalFs::new(
+            trees.clone(),
+            worktrees.clone(),
+            workspace_files.clone(),
+            config_arc.clone(),
+        )));
 
         // Snapshot capture singleton — owned here so anything in
         // Services can request snapshots. The fs-watcher, startup sweep, and
@@ -1284,7 +1297,7 @@ impl Services {
         // extensions declare, and running provider instances'.
         let capabilities = Arc::new(
             capabilities::CapabilityRegistry::new(
-                vec![capabilities::Implementation {
+                [capabilities::Implementation {
                     capability: "vcs".into(),
                     id: vcs.rev_kind().into(),
                     title: vcs.rev_kind().into(),
@@ -1296,7 +1309,10 @@ impl Services {
                     id_pattern: None,
                     icon: None,
                     config: serde_json::json!({}),
-                }],
+                }]
+                .into_iter()
+                .chain(filesystems::implementations())
+                .collect(),
                 vocabulary.clone(),
             )
             .with_project(
@@ -1950,6 +1966,7 @@ impl Services {
             branch_reconciler,
             ref_moves,
             trees,
+            filesystems,
             dup_cache: Arc::new(oxplow_code_dup::DupCache::default()),
             stopping: tokio_util::sync::CancellationToken::new(),
         })

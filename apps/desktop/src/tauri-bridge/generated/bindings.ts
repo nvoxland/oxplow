@@ -461,7 +461,28 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	readAt: (streamId: string | null, path: string, revision: string) => typedError<string | null, IpcError_Serialize>(__TAURI_INVOKE("read_at", { streamId, path, revision })),
+	readAt: (streamId: string | null, path: string, filesystem: string | null, rev: string | null) => typedError<string | null, IpcError_Serialize>(__TAURI_INVOKE("read_at", { streamId, path, filesystem, rev })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
+	statFile: (streamId: string | null, path: string, filesystem: string | null, rev: string | null) => typedError<{
+	kind: FsKind,
+	/**  A file's byte length; none on a folder. */
+	size: number | null,
+	/**
+	 *  Milliseconds since the epoch; none when the filesystem keeps no
+	 *  times (a past revision).
+	 */
+	modifiedAt: number | null,
+	/**  Whether a file's first 8 KB hold no NUL byte; none on a folder. */
+	isText: boolean | null,
+	/**
+	 *  The editor's language id by extension (`rust`, `yaml`); none when
+	 *  it isn't one it knows, and on a folder.
+	 */
+	language: string | null,
+} | null, IpcError_Serialize>(__TAURI_INVOKE("stat_file", { streamId, path, filesystem, rev })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -2911,6 +2932,27 @@ export type FormStart_Serialize = {
 	 *  again.
 	 */
 	reads: Reads,
+};
+
+export type FsKind = "file" | "dir";
+
+/**  What a filesystem knows of one path. */
+export type FsStat = {
+	kind: FsKind,
+	/**  A file's byte length; none on a folder. */
+	size: number | null,
+	/**
+	 *  Milliseconds since the epoch; none when the filesystem keeps no
+	 *  times (a past revision).
+	 */
+	modifiedAt: number | null,
+	/**  Whether a file's first 8 KB hold no NUL byte; none on a folder. */
+	isText: boolean | null,
+	/**
+	 *  The editor's language id by extension (`rust`, `yaml`); none when
+	 *  it isn't one it knows, and on a folder.
+	 */
+	language: string | null,
 };
 
 /**

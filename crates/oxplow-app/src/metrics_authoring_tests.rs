@@ -619,6 +619,7 @@ async fn the_page_rows_carry_file_refs_to_the_path_and_line() {
             let r#ref = oxplow_domain::uri::build::file_uri_at(
                 &text(&r[path_col]),
                 None,
+                None,
                 Some(&int(&r[line_col]).to_string()),
             );
             oxplow_domain::uri::OxplowUri::parse(&r#ref)
@@ -633,14 +634,21 @@ async fn the_page_rows_carry_file_refs_to_the_path_and_line() {
             oxplow_domain::uri::build::file_uri_at(
                 "engine/plan.rs",
                 None,
+                None,
                 Some(&at.plan.to_string())
             ),
             oxplow_domain::uri::build::file_uri_at(
                 "engine/run.rs",
                 None,
+                None,
                 Some(&at.run.to_string())
             ),
-            oxplow_domain::uri::build::file_uri_at("ui/view.rs", None, Some(&at.view.to_string())),
+            oxplow_domain::uri::build::file_uri_at(
+                "ui/view.rs",
+                None,
+                None,
+                Some(&at.view.to_string())
+            ),
         ]
     );
 }

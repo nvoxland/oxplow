@@ -100,7 +100,7 @@ async fn blocking<R: Send + 'static>(
 }
 
 /// `path` as a workspace-relative path that can't leave the workspace.
-fn relative(path: &str) -> Result<&str, DomainError> {
+pub(crate) fn relative(path: &str) -> Result<&str, DomainError> {
     let p = Path::new(path);
     if path.is_empty() || p.components().any(|c| !matches!(c, Component::Normal(_))) {
         return Err(invalid(format!(

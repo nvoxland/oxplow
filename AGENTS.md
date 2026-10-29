@@ -114,6 +114,7 @@ or exact mechanics.
 | Adding a new persisted operation (store + IPC + UI), event bus, cross-store updates | `.context/ipc-and-stores.md` |
 | Background colors, tier hierarchy, adding a new color variable | `.context/theming.md` |
 | `.git` watching, blame, branch changes, commit execution | `.context/git-integration.md` |
+| Filesystems — the `FileSystem` trait and registry, `oxplow:local` over `Trees`, the `filesystem` param of file URIs, reading/stat/listing a file by filesystem and `rev` | `.context/filesystems.md` |
 | The VCS capability — `Vcs` trait, `GitProvider`, `WorktreeRouter`, `WorkspaceFiles`, branch reconciler, conformance | `.context/vcs.md` |
 | Smart conflict auto-resolution (Tier-1 token diff3; Tier-2 AST scoped) | `.context/smart-merge.md` |
 | `EditorPane`, Monaco models/decorations/context menu, blame overlay, diff editor, LSP bridge | `.context/editor-and-monaco.md` |

@@ -11,6 +11,8 @@
 // by hand, not by `URL`/`URLSearchParams`, which read `+` as a space and
 // normalize paths.
 
+import { LOCAL_FS } from "../filesystem.js";
+
 export interface ResourceName {
   extension: string;
   name: string;
@@ -336,15 +338,29 @@ export const commandUri = (id: string): string => resourceUri("oxplow/command", 
 /** A panel the rail or a view remembers things about. */
 export const panelUri = (panel: string): string => resourceUri("oxplow/panel", { panel });
 
-/** A file, at a revision (`git:HEAD`, `snap:…`; none: the working tree). */
-export const fileUri = (path: string, rev: string | null = null): string => resourceUri("oxplow/file", { path, rev });
+/** The `filesystem` param a URI carries: none for the local filesystem,
+ *  the default, so one file has one identity. */
+const filesystemParam = (filesystem: string | null): string | null => (filesystem === LOCAL_FS ? null : filesystem);
+
+/** A file on `filesystem` (null: the local one) at a revision, the
+ *  filesystem's own word for one (`git:HEAD`, `snap:…`; none: its default,
+ *  the working tree). */
+export const fileUri = (path: string, rev: string | null = null, filesystem: string | null = null): string =>
+  resourceUri("oxplow/file", { path, rev, filesystem: filesystemParam(filesystem) });
 /** A directory, at a revision. */
-export const dirUri = (path: string, rev: string | null = null): string => resourceUri("oxplow/dir", { path, rev });
+export const dirUri = (path: string, rev: string | null = null, filesystem: string | null = null): string =>
+  resourceUri("oxplow/dir", { path, rev, filesystem: filesystemParam(filesystem) });
 
 /** A file's lines (`#lines=10-20`; one line is `10-10`): what Ask About
  *  This names for an editor or diff selection. */
-export function fileLinesUri(path: string, start: number, end: number, rev: string | null = null): string {
-  return resourceUri("oxplow/file", { path, rev }, { lines: `${start}-${end}` });
+export function fileLinesUri(
+  path: string,
+  start: number,
+  end: number,
+  rev: string | null = null,
+  filesystem: string | null = null,
+): string {
+  return resourceUri("oxplow/file", { path, rev, filesystem: filesystemParam(filesystem) }, { lines: `${start}-${end}` });
 }
 
 /** A shell route: `oxplow/page?page=<name>`, the params that say what it

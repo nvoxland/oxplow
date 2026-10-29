@@ -108,6 +108,12 @@ impl From<oxplow_domain::CommandError> for IpcError {
     }
 }
 
+impl From<oxplow_domain::filesystem::FsError> for IpcError {
+    fn from(value: oxplow_domain::filesystem::FsError) -> Self {
+        DomainError::from(value).into()
+    }
+}
+
 impl From<DomainError> for IpcError {
     fn from(value: DomainError) -> Self {
         match &value {

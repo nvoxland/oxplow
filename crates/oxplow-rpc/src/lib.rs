@@ -280,7 +280,8 @@ macro_rules! oxplow_command_table {
                 record_usage => $crate::commands::usage::record_usage { kind: String, payload_json: String } -> ::oxplow_db::UsageEvent,
                 // git
                 git_resolve_commit_ref_labels => $crate::commands::git::git_resolve_commit_ref_labels { shas: Vec<String> } -> ::std::collections::HashMap<String, Vec<::oxplow_app::vcs::CommitRefLabel>>,
-                read_at => $crate::commands::trees::read_at { stream_id: Option<String>, path: String, revision: ::oxplow_domain::vcs::Revision } -> Option<String>,
+                read_at => $crate::commands::trees::read_at { stream_id: Option<String>, path: String, filesystem: Option<String>, rev: Option<String> } -> Option<String>,
+                stat_file => $crate::commands::trees::stat_file { stream_id: Option<String>, path: String, filesystem: Option<String>, rev: Option<String> } -> Option<::oxplow_domain::filesystem::FsStat>,
                 // workspace
                 resolve_symbol => $crate::commands::trees::resolve_symbol { stream_id: String, symbol: String } -> Option<::oxplow_app::symbol_resolve::SymbolLocation>,
                 files_at => $crate::commands::trees::files_at { stream_id: Option<String>, revision: ::oxplow_domain::vcs::Revision } -> Vec<String>,

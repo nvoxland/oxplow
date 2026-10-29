@@ -2,7 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { fileLinesUri, formatUri, identityOf, isExternal, paramOf, parseUri, resourceUri, typeOf, uriProblem } from "./uri.js";
+import { LOCAL_FS } from "../filesystem.js";
+import { dirUri, fileLinesUri, fileUri, formatUri, identityOf, isExternal, paramOf, parseUri, resourceUri, typeOf, uriProblem } from "./uri.js";
 
 // oxplow's URI grammar against the golden fixture the Rust parser asserts
 // too (crates/oxplow-domain/tests/oxplow_uri.rs), so the two can't drift.
@@ -65,4 +66,16 @@ test("a file's lines are the view, never the identity", () => {
   expect(fileLinesUri("src/a.rs", 10, 20)).toBe("oxplow:oxplow/file?path=src/a.rs#lines=10-20");
   expect(fileLinesUri("src/a.rs", 3, 3, "git:abc123")).toBe("oxplow:oxplow/file?path=src/a.rs&rev=git:abc123#lines=3-3");
   expect(identityOf(fileLinesUri("src/a.rs", 10, 20))).toBe("oxplow:oxplow/file?path=src/a.rs");
+});
+
+test("a file on another filesystem names it; the local one is left out", () => {
+  expect(fileUri("a.rs")).toBe("oxplow:oxplow/file?path=a.rs");
+  expect(fileUri("a.rs", null, LOCAL_FS)).toBe(fileUri("a.rs"));
+  expect(fileUri("x.yaml", null, "oxplow:temp")).toBe("oxplow:oxplow/file?filesystem=oxplow:temp&path=x.yaml");
+  expect(fileUri("p/a.yaml", "4f9c2e1a", "oxplow:extensions")).toBe(
+    "oxplow:oxplow/file?filesystem=oxplow:extensions&path=p/a.yaml&rev=4f9c2e1a",
+  );
+  expect(dirUri("ext", null, "acme:s3")).toBe("oxplow:oxplow/dir?filesystem=acme:s3&path=ext");
+  expect(dirUri("ext", null, LOCAL_FS)).toBe(dirUri("ext"));
+  expect(fileLinesUri("a.rs", 1, 2, null, "oxplow:temp")).toBe("oxplow:oxplow/file?filesystem=oxplow:temp&path=a.rs#lines=1-2");
 });

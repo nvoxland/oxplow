@@ -151,7 +151,7 @@ function watch(
 }
 
 export const buffers = createBufferStore({
-  read: (stream, path) => readAt(stream, path, WORKING),
+  read: (stream, path) => readAt(stream, path, { rev: WORKING }),
   save: async (stream, path, content, call) => {
     // An audited write that logs `file.saved` (its content isn't kept in
     // the record); an agent's Save is written as the agent.

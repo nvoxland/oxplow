@@ -310,7 +310,7 @@ export function EditorPane({
     logUi("debug", "editor: readHEAD start", { path: filePath });
     (async () => {
       try {
-        const content = await readAt(sid, filePath, gitRevision("HEAD"));
+        const content = await readAt(sid, filePath, { rev: gitRevision("HEAD") });
         if (cancelled) return;
         logUi("debug", "editor: readHEAD end", {
           path: filePath,

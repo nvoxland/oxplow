@@ -69,8 +69,8 @@ mock.module("monaco-editor", () => ({
 const realApi = await import("../api.js");
 mock.module("../api.js", () => ({
   ...realApi,
-  readAt: async (_stream: string, path: string, revision: string) => {
-    reads.push({ path, revision });
+  readAt: async (_stream: string, path: string, at: { rev?: string }) => {
+    reads.push({ path, revision: at.rev });
     return path === "gone.rs" ? null : Array.from({ length: 50 }, (_, i) => `line ${i + 1}`).join("\n");
   },
   listCommentsForTarget: async (target: string) => {

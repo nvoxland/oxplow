@@ -244,7 +244,7 @@ pub fn write_page_tx(
     for kept in file_edges_tx(conn, &source)? {
         let cited = edges.iter().any(|e| e.target == kept.target);
         let under = file_of_uri(&kept.target)
-            .is_ok_and(|(path, _, _)| path_under_any_dir(&path, &page.dir_refs));
+            .is_ok_and(|file| path_under_any_dir(&file.path, &page.dir_refs));
         if !cited && under {
             edges.push(kept);
         }
