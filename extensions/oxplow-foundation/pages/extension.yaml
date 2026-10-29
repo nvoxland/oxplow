@@ -78,22 +78,19 @@ view:
     - { key: problems_label, label: Problems, link: { kind: page, from: problems_target } }
     - { key: manifest, label: Manifest, link: { kind: page, from: manifest_target } }
     empty: This extension isn't known to the project.
-  - id: contributes
-    title: Contributes
-    stack:
-    - id: pages
-      title: Pages
-      viz: sections
-      from: pages
-      sections: { title: title, id: id, link: definition, body: description }
-      empty: It has no pages.
-    - id: kinds
-      title: Everything else
-      viz: list
-      from: contributions
-      empty: Nothing else.
-      columns:
-      - { key: text, label: Contribution }
+  - id: pages
+    title: Pages
+    viz: sections
+    from: pages
+    sections: { title: title, id: id, link: definition, body: description }
+    empty: It has no pages.
+  - id: kinds
+    title: Other contributions
+    viz: list
+    from: contributions
+    empty: Nothing besides its pages.
+    columns:
+    - { key: text, label: Contribution }
   - id: deployments
     title: Deployments
     viz: list
