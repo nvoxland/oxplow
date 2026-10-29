@@ -2368,8 +2368,12 @@ A param (`PageParam`) takes `name`, `label`, `default`, `options`,
   is shown, so it is in the `#` and a change replaces the entry; a
   `switch`'s param is a filter by default. `selection` is derived, never
   written: a column `select`s the param, the rail shows the picked row
-  instead of an input, it is in the `#`, and a pick pushes an entry. A
-  `filter` or `selection` param found in a `?` is refused.
+  instead of an input, it is in the `#`, and a pick pushes an entry. `view`
+  rides the `#` like a filter but is state the page or the system sets:
+  the rail never draws it (not in Filters, not counted for Reset) and a
+  person never edits it; a `for:` page may take one (`ParamRole::rides_view`
+  is the one test for "rides the `#`"). A `filter`, `selection` or `view`
+  param found in a `?` is refused.
 - **`options_from: <page>`** (a slug of the extension, or
   `<extension>/<slug>`; `page_ref_problem` checks it exists and is not the
   page itself) makes a choice whose options a page lists: its rows are

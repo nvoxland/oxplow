@@ -3,7 +3,7 @@
 /// a URI's renderer (chosen from the daemon's list) names, the params a
 /// tab's URI gives its run, and where a change of them goes (the `?`, or
 /// the `#` replaced or pushed).
-import type { Extension, Node, Page, Renderer, SqlCell } from "../tauri-bridge/generated/bindings.js";
+import type { Extension, Node, Page, PageParam, Renderer, SqlCell } from "../tauri-bridge/generated/bindings.js";
 import type { PagePayload } from "../tabs/pageRefs.js";
 import { isDefaultValue } from "../viz/vizModel.js";
 import { pickRenderer } from "./renderers.js";
@@ -43,10 +43,16 @@ export function enabledPageFiles(extensions: readonly Extension[] | null): Page[
   return (extensions ?? []).filter((e) => e.enabled).flatMap((e) => e.pageFiles ?? []);
 }
 
+/** Whether a param of this role rides the URI's `#` view (a filter, a
+ *  pick, a view param); no role is a resource, which rides the `?`. */
+export function ridesView(role: PageParam["role"] | undefined): boolean {
+  return (role ?? "resource") !== "resource";
+}
+
 /** The params a tab's URI gives a page's run: the `?` params it declares
  *  (a renderer's URI also carries its resource's own, `id`, `provider`,
  *  which a page that doesn't declare them can't take), and those of its
- *  `#` the page declares as a filter or a pick (never the shell's
+ *  `#` the page declares as a filter, a pick or a view param (never the shell's
  *  `oxplow.*`, a `#node=` landing or a resource param spelled in the `#`). */
 export function pageRunParams(
   page: Page,
@@ -56,7 +62,7 @@ export function pageRunParams(
   const out: Record<string, SqlCell> = {};
   for (const p of page.params) if (p.name in resource) out[p.name] = resource[p.name] ?? null;
   for (const p of page.params) {
-    if ((p.role ?? "resource") === "resource" || !(p.name in view)) continue;
+    if (!ridesView(p.role) || !(p.name in view)) continue;
     out[p.name] = view[p.name] ?? null;
   }
   return out;
@@ -94,7 +100,7 @@ export function pageViewChange(
   for (const [name, value] of Object.entries({ ...current, ...patch })) {
     const p = param(name);
     if (p && isDefaultValue(p, value ?? null)) continue;
-    (role(name) === "resource" ? resource : view)[name] = value ?? null;
+    (ridesView(role(name)) ? view : resource)[name] = value ?? null;
   }
   const push = Object.entries(patch).some(
     ([name, value]) => role(name) === "resource" || (value !== null && role(name) === "selection") || switches.has(name),

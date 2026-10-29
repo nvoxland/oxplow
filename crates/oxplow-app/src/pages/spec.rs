@@ -892,6 +892,17 @@ pub enum ParamRole {
     Filter,
     /// The row a click picked; the rail shows that row, never an input.
     Selection,
+    /// State the page or the system sets (its URI's `#` view, like a
+    /// filter), never a person: the rail does not draw it.
+    View,
+}
+
+impl ParamRole {
+    /// Whether a param of this role rides in the URI's `#` view (every
+    /// role but `resource`).
+    pub fn rides_view(self) -> bool {
+        !matches!(self, ParamRole::Resource)
+    }
 }
 
 /// A `date_range`'s presets and how far back each reaches (`all`: no

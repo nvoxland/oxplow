@@ -79,6 +79,19 @@ describe("a page's params from its URI", () => {
   });
 });
 
+describe("a view param", () => {
+  const page = file("acme", "shown", { params: [param("uri", "resource"), param("mode", "view")] });
+
+  test("is read from the `#`, never the `?`", () => {
+    expect(pageRunParams(page, { uri: "u" }, { mode: "raw" })).toEqual({ uri: "u", mode: "raw" });
+    expect(pageRunParams(page, { uri: "u", mode: "nope" }, {})).toEqual({ uri: "u", mode: "nope" });
+  });
+
+  test("a change replaces the view, like a filter", () => {
+    expect(pageViewChange(page, { uri: "u" }, { mode: "raw" })).toEqual({ resource: { uri: "u" }, view: { mode: "raw" }, push: false });
+  });
+});
+
 describe("a change of a page's params", () => {
   const page = fakePage(
     node.switch("modes", "mode", [node.viz("list", "items"), node.viz("board", "items")]),

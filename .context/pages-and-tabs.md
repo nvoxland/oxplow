@@ -577,7 +577,8 @@ that page with a load error; bundled's panel bodies are
 `comments-panel` and `go-to-panel` for that reason). Open With lists the same daemon list. The tab body is `PageFileView`: its run's
 params are the entry's URI (`pageRunParams`: the `?` params — a
 renderer's `uri` and its resource's own — and the `#` params the page
-declares as a filter or a selection; a param with no role is a resource),
+declares as a filter, a selection or a view param; a param with no role is a
+resource; `ridesView(role)` / `ParamRole::rides_view` is the one test),
 so a view change is a new key and Back/Forward show each entry's run; the
 host keeps the last run of the same page on screen, `data-stale`, until
 the new key answers. A change the page makes goes back through the tab
@@ -1480,8 +1481,9 @@ that has a filter (Tasks' scope and chips, Metrics' range, Git History's
 `?` is only what it shows (a diff's path and sides, a dashboard's id, a
 metric's key), so two diffs in a tab are two pages. A param written in
 the wrong place is not read from there. A page param's `role`
-(`resource` by default, `filter`, or a column's `select`) says where its
-value rides (docs/guide/pages.md "Where a param lives in the address").
+(`resource` by default, `filter`, `view` — state the page or system sets,
+in the `#` like a filter but never drawn in the rail — or a column's
+`select`) says where its value rides (docs/guide/pages.md "Where a param lives in the address").
 Page memory is scoped by `keyIdentityOf` (the
 identity without its `?` params: `oxplow:oxplow/page?page=tasks`) for
 a page, or `resource:<ext>/<name>` for a resource page.

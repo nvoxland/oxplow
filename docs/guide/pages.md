@@ -103,7 +103,9 @@ A param's `role` says where its value rides in the page's address. The
 default, `resource`, names what the page shows (the `?` part; a change
 opens another resource). `role: filter` marks one that only narrows or
 re-views it (a search, a range): it rides in the `#` part and a change
-replaces the entry. A row you click that a column `select`s is the page's
+replaces the entry. `role: view` rides the `#` the same way, but it is state
+the page or the system sets: the rail never draws it and a person never
+edits it. A row you click that a column `select`s is the page's
 selection (also in the `#`).
 
 ### Columns and links

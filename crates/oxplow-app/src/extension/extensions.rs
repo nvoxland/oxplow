@@ -2575,7 +2575,7 @@ fn renderer_problem(
     let takes: Vec<&str> = p
         .params
         .iter()
-        .filter(|q| q.role.unwrap_or(ParamRole::Resource) == ParamRole::Resource)
+        .filter(|q| !q.role.is_some_and(ParamRole::rides_view))
         .map(|q| q.name.as_str())
         .filter(|n| !matches!(*n, "uri" | "stream_id" | "thread_id"))
         .collect();
@@ -8273,8 +8273,14 @@ commands:
                 "",
             )
         };
+        let viewed = viz_page(
+            "title: Viewed\nparams: [{ name: uri }, { name: id }, { name: mode, role: view }]\nfor: x/pr\n",
+            "SELECT :uri, :id, :mode",
+            "",
+        );
         let (_d, ext) = load_x(
             &[
+                ("viewed", &viewed),
                 ("pr", &pr("for: x/pr\ndefault: true\n")),
                 ("pr-raw", &pr("for: x/pr\naccepts: { id: '^\\d+$' }\n")),
                 ("both", &pr("for: [x/pr, oxplow/file]\n")),

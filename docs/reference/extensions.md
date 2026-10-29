@@ -589,7 +589,7 @@ view: { viz: table, from: pr }
 - A page that renders may declare a `uri` param. It runs with the
   URI of the thing. A param it declares with the same name as one of the
   URI's params (`id`, `path`) gets that value, so the query can use it
-  directly. Any other param must be a filter (`role: filter`).
+  directly. Any other param must be a filter or a view param (`role: filter`, `role: view`).
 - Nothing draws a URI? oxplow shows its label and params, or the raw URI
   in a muted style if the thing is gone. This is not an error.
 

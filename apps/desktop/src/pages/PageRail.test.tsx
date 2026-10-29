@@ -28,6 +28,20 @@ test("the rail lists the page's filters, never its resource or selection", () =>
   expect(queryByTestId("page-param-picked")).toBeNull();
 });
 
+test("a page whose only non-resource param is a view param has no Filters group", () => {
+  const viewPage = fakePage(node.viz("items", "items"), {
+    params: [
+      { name: "uri", role: "resource", type: "text" },
+      { name: "mode", role: "view", type: "text", default: "a" },
+    ],
+  });
+  const viewRun = fakeRun(viewPage, { params: { uri: "x", mode: "b" }, loaders: { items: loader([], []) } });
+  const { queryByTestId, queryByText } = render(<PageRail run={viewRun} runId="run-v" onApply={() => {}} />);
+  expect(queryByTestId("page-param-mode")).toBeNull();
+  expect(queryByTestId("action-page-rail-reset")).toBeNull();
+  expect(queryByText("Filters")).toBeNull();
+});
+
 test("changing a filter applies it", () => {
   const applied: [string, SqlCell][] = [];
   const { getByTestId } = render(<PageRail run={run} runId="run-1" onApply={(n, v) => applied.push([n, v])} />);

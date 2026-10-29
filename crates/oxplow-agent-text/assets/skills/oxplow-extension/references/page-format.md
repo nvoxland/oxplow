@@ -95,7 +95,9 @@ looking at.** Don't hardcode ids.
 - `role` says where it rides in the page's URI. `resource` (default) names
   what the page shows (`?sha=…`; a change opens another resource). `filter`
   narrows how it shows it (`#…`; a change replaces the view; a `switch`'s
-  param is a filter). Never write `role: selection`: a column's `select`
+  param is a filter). `view` is state the page or the system sets, not a
+  person: it rides the `#` like a filter but the rail never draws it (a
+  display-mode page, `for:`, may take one). Never write `role: selection`: a column's `select`
   makes it.
 - Every param is drawn in the page's rail. Put a param on a page only when
   a person would change it.

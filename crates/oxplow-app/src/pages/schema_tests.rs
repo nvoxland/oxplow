@@ -651,6 +651,25 @@ view:
     assert_eq!(role("path"), None);
 }
 
+/// `role: view` is state the page or the system sets: it rides the `#`
+/// like a filter.
+#[test]
+fn a_view_role_parses_and_rides_the_view() {
+    let p = page(
+        r#"
+title: Shown
+params:
+  - { name: mode, role: view, default: a }
+view: { markdown: Hi }
+"#,
+    )
+    .unwrap();
+    let role = p.params[0].role;
+    assert_eq!(role, Some(crate::pages::spec::ParamRole::View));
+    assert!(role.unwrap().rides_view());
+    assert!(!crate::pages::spec::ParamRole::Resource.rides_view());
+}
+
 /// A node another extension's page may stand in for names a known target,
 /// once per page.
 #[test]

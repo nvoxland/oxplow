@@ -4860,7 +4860,12 @@ export type ParamRole =
  */
 "filter" |
 /**  The row a click picked; the rail shows that row, never an input. */
-"selection";
+"selection" |
+/**
+ *  State the page or the system sets (its URI's `#` view, like a
+ *  filter), never a person: the rail does not draw it.
+ */
+"view";
 
 /**  What a viz param holds. */
 export type ParamType =

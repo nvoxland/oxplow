@@ -45,6 +45,7 @@ import { PageViewContext } from "./PageViewContext.js";
 import { usePageReads } from "./pageReads.js";
 import { firstLoader } from "./firstLoader.js";
 import { recordOpError } from "../opErrors.js";
+import { ridesView } from "./pageFiles.js";
 import { HostedViewContext, useHostedView } from "../viz/hostedView.js";
 
 export interface PageHostProps {
@@ -320,7 +321,7 @@ export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, re
 /** The params a page's view holds (its filters and picks): what a
  *  `custom` viz on it shares and sets. */
 export function pageViewKeys(params: readonly Pick<PageParam, "name" | "role">[]): string[] {
-  return params.filter((p) => (p.role ?? "resource") !== "resource").map((p) => p.name);
+  return params.filter((p) => ridesView(p.role)).map((p) => p.name);
 }
 
 /** The title of the section a switch page shows, which titles its body
