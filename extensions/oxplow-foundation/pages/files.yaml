@@ -98,7 +98,6 @@ view:
   stack:
   - id: header
     title: Status
-    hide_title: true
     from: header
     viz: detail
     columns:

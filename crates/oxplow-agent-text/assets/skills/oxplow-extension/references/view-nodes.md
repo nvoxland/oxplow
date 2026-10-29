@@ -12,9 +12,13 @@ another extension's page may take over) and `size`.
 `switch` (in `view:` or `rail:`). Its title says what it is: it is the
 heading, the entry in the rail's Contents, and the heading `oxplow_run_page`
 text prints. A section with no `title`, or `title: ''`, is refused when the
-page loads. If the heading should not show (the section is plainly what the
-page is, or the page's title already says it), add `hide_title: true`: the
-heading is not drawn, but Contents, screen readers and agents still read it.
+page loads. Hide a heading (`hide_title: true`) only for a section that
+fills the page (a diff, a terminal, the page's one tree) or is a one-line
+banner or intro above the rest; a section of facts, a list, a table or a
+chart among others always shows its title (the page's own title is in the
+nav bar, not above the body, so the first section's heading is what tells
+the reader where they are). A hidden heading is still in Contents, screen
+readers and agents' text.
 A page whose whole `view:` is one node needs no title, and a `slot` or
 `embed` takes its title from the page it shows (an embed's own `title`
 replaces it).
