@@ -20,7 +20,9 @@ use super::super::util::{failed, invalid, parse, schema, ServicesSlot};
 use super::super::{Handler, HandlerOutput, Invocation};
 use super::{check_stream_id, stream_or_actors};
 use crate::pages::runner::{PageRun, PageRunner, RunNode, RunRequest, RunTarget};
-use crate::pages::schema::{parse_inline_page, NodeKind};
+use crate::pages::schema::{
+    parse_inline_page, parse_temp_page, temp_file_name, NodeKind, TEMP_EXTENSION,
+};
 use crate::Services;
 
 /// Rows of one loader an agent reads in JSON.
@@ -450,10 +452,17 @@ pub struct ShowPageInput {
     #[serde(default)]
     pub params: Option<BTreeMap<String, Value>>,
     /// Or a page of your own as YAML (`title`, `loaders:` with sql / rows /
-    /// page loaders, `view:`; it only reads): kept as a view the person
-    /// can save to the wiki or as a page.
+    /// page loaders, `view:`; it only reads): kept as a page file on
+    /// `oxplow:temp` (`temp/<id>`) the person can save to the wiki or as a
+    /// page.
     #[serde(default)]
     pub spec: Option<String>,
+}
+
+/// The id of the view `yaml` is, on `oxplow:temp`: a hash of its text, so
+/// showing the same YAML again is the same page (and the same file).
+fn temp_view_id(yaml: &str) -> String {
+    format!("v{:016x}", xxhash_rust::xxh3::xxh3_64(yaml.as_bytes()))
 }
 
 /// A param value as a uri carries it.
@@ -504,12 +513,18 @@ fn show_op(services: ServicesSlot) -> Op {
                         )
                     }
                     (None, Some(yaml)) => {
-                        let page = parse_inline_page(yaml).map_err(|m| invalid("/spec", m))?;
-                        let thread = invocation.actor().thread_id().map(|t| t.to_string());
-                        let id = svc.page_runs.keep_view(&page.title, thread, yaml);
+                        // A view is a page file on `oxplow:temp`, named by
+                        // its content: the same YAML is the same page.
+                        let id = temp_view_id(yaml);
+                        parse_temp_page(&id, yaml).map_err(|m| invalid("/spec", m))?;
+                        svc.temp
+                            .put(&temp_file_name(&id), yaml.as_bytes())
+                            .await
+                            .map_err(|e| failed(DomainError::Storage(e.to_string())))?;
+                        let page = format!("{TEMP_EXTENSION}/{id}");
                         (
-                            oxplow_domain::uri::build::view_uri(&id),
-                            RunTarget::Spec(Arc::new(page)),
+                            oxplow_domain::uri::build::page_uri(&page, &[]),
+                            RunTarget::Page(page),
                         )
                     }
                     _ => {
@@ -1016,13 +1031,13 @@ async fn described_page(
         }
         // A view's file: a page that only reads.
         TEMP => {
-            if page_slug(path).is_none() {
+            let Some(slug) = page_slug(path) else {
                 return Ok(None);
-            }
+            };
             let Some(text) = text(TEMP).await else {
                 return Ok(None);
             };
-            parse_inline_page(&text)
+            parse_temp_page(slug, &text)
                 .ok()
                 .map(|page| Described::File(Box::new(page)))
         }
@@ -1708,31 +1723,54 @@ mod show_tests {
 
     use crate::pages::test_support::fixture;
 
-    /// An agent shows an inline page: it is kept as an ephemeral view
-    /// (`oxplow:oxplow/view?id=…`) a window opens like a page; a page by
-    /// id is shown at its own uri. With no window to open it in, it says
-    /// so and is still there to open.
+    const VIEW: &str =
+        "title: Mine\nloaders:\n  a: { sql: SELECT 5 AS five }\nview: { viz: number, from: a }\n";
+
+    /// An agent shows an inline page: it is written as a page file on
+    /// `oxplow:temp` and shown as the page `temp/<id>`; the same YAML shown
+    /// again is the same page; a page by id is shown at its own uri. With no
+    /// window to open it in, it says so and is still there to open.
     #[tokio::test]
-    async fn an_agent_shows_an_inline_page_as_a_view() {
+    async fn an_agent_shows_an_inline_page_as_a_temp_page() {
         let (_dir, svc) = fixture().await;
-        let out = svc
-            .commands
-            .run(
-                &Actor::Human,
-                "oxplow.page.show",
-                json!({ "spec": "title: Mine\nloaders:\n  a: { sql: SELECT 5 AS five }\nview: { viz: number, from: a }\n" }),
-                false,
-            )
-            .await
-            .unwrap()
-            .result;
+        let show = |spec: &'static str| {
+            let svc = svc.clone();
+            async move {
+                svc.commands
+                    .run(
+                        &Actor::Human,
+                        "oxplow.page.show",
+                        json!({ "spec": spec }),
+                        false,
+                    )
+                    .await
+                    .unwrap()
+                    .result
+            }
+        };
+        let out = show(VIEW).await;
         let uri = out["uri"].as_str().unwrap().to_string();
-        assert!(uri.starts_with("oxplow:oxplow/view?id="), "{out}");
+        assert!(uri.starts_with("oxplow:oxplow/page?page=temp/"), "{out}");
         assert_eq!(out["opened"], json!(false), "{out}");
         assert!(out["text"].as_str().unwrap().contains("# Mine"), "{out}");
-        let id = uri.rsplit('=').next().unwrap();
-        let view = svc.page_runs.view(id).expect("kept");
-        assert_eq!(view.title, "Mine");
+        let id = uri.rsplit('/').next().unwrap();
+        let on_disk = std::fs::read_to_string(
+            svc.layout
+                .project_dir
+                .join(format!(".oxplow/runtime/temp/{id}.yaml")),
+        )
+        .expect("the view is a file on oxplow:temp");
+        assert_eq!(on_disk, VIEW);
+        let page = svc
+            .extension_catalog
+            .find_page(&svc.layout.project_dir, &format!("temp/{id}"))
+            .unwrap();
+        assert_eq!(page.title, "Mine");
+        assert_eq!(show(VIEW).await["uri"], json!(uri), "same YAML, same page");
+        assert_ne!(
+            show("title: Other\nview: { markdown: hi }\n").await["uri"],
+            json!(uri)
+        );
         let page = svc
             .commands
             .run(
@@ -1881,7 +1919,8 @@ mod describe_tests {
         let fx = services_with_effort().await;
         fx.svc.temp.put("v1.yaml", PAGE.as_bytes()).await.unwrap();
         let def = describe(&fx, json!({ "uri": uri(TEMP, "v1.yaml", None) })).await;
-        assert_eq!(def["page"], json!("inline"), "{def}");
+        assert_eq!(def["page"], json!("temp/v1"), "{def}");
+        assert_eq!(def["file"], json!(".oxplow/runtime/temp/v1.yaml"), "{def}");
         let nodes = def["nodes"].as_array().unwrap();
         let total = nodes.iter().find(|n| n["id"] == "total").unwrap();
         assert_eq!(total["parent"], json!("layout"), "{total}");
@@ -1892,6 +1931,13 @@ mod describe_tests {
         fx.svc.temp.put("v2.yaml", acting.as_bytes()).await.unwrap();
         assert_eq!(
             describe(&fx, json!({ "uri": uri(TEMP, "v2.yaml", None) })).await,
+            Value::Null
+        );
+        // A display mode is no view.
+        let mode = "title: Mode\nfor: oxplow/file\nparams: [{ name: uri }]\nloaders:\n  q: { rows: [{ a: 1 }] }\nview: { viz: table, from: q }\n";
+        fx.svc.temp.put("v3.yaml", mode.as_bytes()).await.unwrap();
+        assert_eq!(
+            describe(&fx, json!({ "uri": uri(TEMP, "v3.yaml", None) })).await,
             Value::Null
         );
         // No such file.

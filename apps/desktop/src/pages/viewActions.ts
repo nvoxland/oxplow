@@ -18,6 +18,10 @@ export function viewWikiBody(title: string, specYaml: string): string {
   return `# ${title.replace(/[\r\n]+/g, " ")}\n\n${fence}oxplow-page\n${specYaml.trimEnd()}\n${fence}\n`;
 }
 
+/** The extension a shown view's page is under: `temp/<id>`, the page file
+ *  `<id>.yaml` on `oxplow:temp`. */
+export const TEMP_EXTENSION = "temp";
+
 /** The page "Show Definition" draws with: Definition, a display mode of a
  *  page's YAML file. */
 export const DEFINITION_PAGE = "oxplow-foundation/definition";

@@ -23,11 +23,11 @@ import { commands, type Extension, type Renderer } from "../tauri-bridge/generat
 import { identityOf, typeOf } from "../uri/uri.js";
 
 /** Whether a tab's URI is drawn by whichever page the daemon offers: all
- *  but a route (`oxplow/page`, which names its own page), an inline view
- *  and a symbol (which opens its file). */
+ *  but a route (`oxplow/page`, which names its own page) and a symbol
+ *  (which opens its file). */
 export function drawnByRenderer(uri: string): boolean {
   const resource = typeOf(uri);
-  return resource !== "oxplow/page" && resource !== "oxplow/view" && resource !== "oxplow/symbol";
+  return resource !== "oxplow/page" && resource !== "oxplow/symbol";
 }
 
 /** Asks the daemon (`renderers_for`). */

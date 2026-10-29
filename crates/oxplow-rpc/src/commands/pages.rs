@@ -25,9 +25,6 @@ use crate::error::IpcError;
 pub struct OpenedRun {
     pub run_id: String,
     pub run: PageRun,
-    /// Inline YAML retained by the tab, so it can reopen after a daemon
-    /// restart and save exactly what the agent showed.
-    pub spec_yaml: Option<String>,
 }
 
 /// What to run: a deployed page by id, or an inline page's YAML (a
@@ -57,37 +54,19 @@ pub async fn open_page(
     svc: &Services,
     page: Option<String>,
     spec_yaml: Option<String>,
-    view: Option<String>,
     params: Option<BTreeMap<String, SqlCell>>,
     stream_id: Option<String>,
     thread_id: Option<String>,
     client: String,
 ) -> Result<OpenedRun, IpcError> {
-    // A view an agent showed: its page, as it was kept.
-    let spec_yaml = match view {
-        Some(id) => Some(
-            svc.page_runs
-                .view(&id)
-                .map(|view| view.spec_yaml)
-                .or(spec_yaml)
-                .ok_or_else(|| {
-                    DomainError::Invalid(format!("no view `{id}` (it went with a restart)"))
-                })?,
-        ),
-        None => spec_yaml,
-    };
     let req = RunRequest {
-        target: target(page, spec_yaml.clone())?,
+        target: target(page, spec_yaml)?,
         params: params.unwrap_or_default(),
         ctx: context(svc, stream_id.as_deref(), thread_id.as_deref()).await,
         viewer: Actor::Human,
     };
     let (run_id, run) = svc.page_runs.open(svc, req, &client).await?;
-    Ok(OpenedRun {
-        run_id,
-        run,
-        spec_yaml,
-    })
+    Ok(OpenedRun { run_id, run })
 }
 
 pub async fn close_page(svc: &Services, run_id: String) -> Result<(), IpcError> {
@@ -303,7 +282,6 @@ mod tests {
             None,
             None,
             None,
-            None,
             "snapshot-window".into(),
         )
         .await
@@ -340,15 +318,17 @@ mod tests {
 
     const INLINE: &str = "# Exact source\ntitle: An inline view\nloaders:\n  value: { sql: 'SELECT 7 AS n' }\nview: { viz: table, from: value }\n";
 
+    /// A shown view is a page file on `oxplow:temp`: a window opens it as
+    /// `temp/<id>` (a restarted daemon finds the file again), and one that
+    /// is gone says so.
     #[tokio::test]
-    async fn an_ephemeral_view_returns_its_exact_yaml_and_reopens_from_tab_history() {
+    async fn a_temp_view_opens_as_a_page_and_a_missing_one_says_so() {
         let (ctx, _dir) = crate::test_support::services().await;
-        let id = ctx.page_runs.keep_view("An inline view", None, INLINE);
-        let first = open_page(
+        ctx.temp.put("v1.yaml", INLINE.as_bytes()).await.unwrap();
+        let opened = open_page(
             &ctx,
+            Some("temp/v1".into()),
             None,
-            None,
-            Some(id),
             None,
             None,
             None,
@@ -356,31 +336,17 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(first.spec_yaml.as_deref(), Some(INLINE));
-        close_page(&ctx, first.run_id).await.unwrap();
-        // A restarted daemon has no in-memory registry entry for this id.
-        let reopened = open_page(
-            &ctx,
-            None,
-            first.spec_yaml,
-            Some("forgotten-view".into()),
-            None,
-            None,
-            None,
-            "window".into(),
-        )
-        .await
-        .unwrap();
-        assert_eq!(reopened.spec_yaml.as_deref(), Some(INLINE));
+        assert_eq!(opened.run.page.id, "temp/v1");
         assert_eq!(
-            reopened.run.loaders["value"].result.rows,
+            opened.run.loaders["value"].result.rows,
             vec![vec![SqlCell::Int(7)]]
         );
+        close_page(&ctx, opened.run_id).await.unwrap();
+        ctx.temp.remove("v1.yaml").await.unwrap();
         let missing = open_page(
             &ctx,
+            Some("temp/v1".into()),
             None,
-            None,
-            Some("forgotten-view".into()),
             None,
             None,
             None,
@@ -389,7 +355,7 @@ mod tests {
         .await
         .unwrap_err();
         assert_eq!(missing.code, "INVALID");
-        assert!(missing.message.contains("restart"));
+        assert!(missing.message.contains("temp/v1"), "{}", missing.message);
     }
 
     #[tokio::test]

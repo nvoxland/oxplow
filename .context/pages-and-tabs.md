@@ -143,8 +143,8 @@ drawing it checked) lists the daemon's list (`PageNavigation.renderers`)
 when it has several. Picking one is a view change
 (Back returns to the first). `App.tsx` `renderTab` draws a route
 (`oxplow:oxplow/page?page=…`) through `routeTab` (its page file, else
-`MissingPage`), an ephemeral view (`oxplow:oxplow/view?id=…`) through
-`EphemeralView`, and anything else through the page file of the renderer
+`MissingPage`; a shown view, `page=temp/<id>`, through `TempPage`), and
+anything else through the page file of the renderer
 `chooseRenderer` picks from the daemon's list, else
 `builtInPages.resource` (the fallback, the one built-in). Every page draws
 in `PageFileView` / `PageHost`; the desktop reads every page from a
@@ -322,7 +322,7 @@ defines what the person sees:
   as JSON>` (`viewActions.ts::definitionUri`); the tab reads
   `Definition: <slug>.yaml`. Open With on any page file lists it beside the
   File viewer, which stays the default and shows the raw YAML (Definition
-  has no YAML section). A page with no running copy (an inline view, an
+  has no YAML section). A page with no running copy (an
   extension that runs from its source) offers no Show Definition
   (`PageHost`). Definition reads the file once (`oxplow.page.describe`
   over the file's `content.uri` and `content.text`) and shows: where the
@@ -371,16 +371,29 @@ report what would draw badly). Load checks refuse a page file whose
 renderer, component, replaceable or params declarations do not hold.
 A slot mount whose host page is missing is a warning.
 
-**Ephemeral views** (`oxplow/view?id=…`) route directly to `EphemeralView`
-and the same `PageHost`. `open_page` returns the exact `specYaml` with
-the run. The subscription store retains it for daemon reconnects, and the
-tab keeps it under `view.specYaml` in its entry's history state. On a
-restart the daemon uses the restored source if its in-memory view is
-gone; nothing creates a persistent answer record. View params still live
-in the URI's `#`, and inline source keeps its read-only restrictions.
+**Shown views** are temp pages. An agent's `spec` is written as the page
+file `<id>.yaml` on `oxplow:temp` (`filesystems.md`) and shown as the page
+`temp/<id>` (`oxplow:oxplow/page?page=temp/<id>`), the same kind of thing
+as a shipped page. `parse_temp_page(id, text)` is `parse_page("temp", …)`
+plus the inline rules (it only reads: no `command` loaders, actions, forms,
+terminals, editors, components or slots) and `for:` refused (a view is not a
+display mode). `ExtensionCatalog::find_page("temp/<id>")` reads and parses
+the file (cached by its modified time; a read counts as use for the GC), so
+a run, `get_page` and `open_page { page: "temp/<id>" }` need nothing
+special; the page's `PageProvenance.running_uri` is its temp file, so **Show
+definition** works as for any page. The `<id>` is a hash of the YAML
+(`v<16 hex>`): showing the same YAML again is the same page and refreshes
+its file. The desktop routes `temp/` through `TempPage` (`pages/TempPage.tsx`):
+it asks the daemon for the page (`get_page`) and draws it with
+`PageFileView`; the tab is labelled "View" until the page's title is
+registered. A daemon restart keeps the file, so the tab still opens. A file
+the GC removed (7 days idle, 200 files, 32 MB) or that was never written
+shows "This view is gone" in its place. View params live in the URI's `#`.
 
 Every page host with a running copy offers **Show definition** in its standard actions.
-An inline view also offers **Save to wiki…** and **Save as Page…**. The
+A shown view (a `temp/` page) also offers **Save to wiki…** and **Save as Page…**.
+Both read the YAML through the file read (`readAt(streamId, "<id>.yaml",
+{ filesystem: "oxplow:temp" })`), so the saved page is exactly the file. The
 forms live in the rail (Enter submits, Escape cancels). Saving to wiki
 runs `oxplow.knowledge.write_page` with an `oxplow-page` fence, so the
 saved page remains live. Saving as a page runs
@@ -450,9 +463,8 @@ params, focus, source, text }` — the person's own run, not a re-run.
 
 **Showing a page** (`oxplow.page.show { page, params } | { spec }`,
 the agent's `oxplow_show_page`): a page by id opens at its uri; an
-inline `spec` is kept in memory as a **view** (`PageRuns::keep_view`,
-`oxplow:oxplow/view?id=<id>`), opened with `open_page { view }` — gone
-with a daemon restart. It opens as a tab of the caller's thread when a
+inline `spec` is checked (`parse_temp_page`), written to `oxplow:temp` as
+`<id>.yaml` and shown as `oxplow:oxplow/page?page=temp/<id>`. It opens as a tab of the caller's thread when a
 window is open (`tabs.write/open`; `opened`, else `why`) and returns the
 page's text.
 
@@ -541,7 +553,7 @@ arrives after is discarded. A list is *not* refreshed when a file's
 content changes, so a page with `accepts.content` is judged on the
 content as of the first ask until the extensions reload. Routing stays
 synchronous: `App.tsx` lists the URIs of the thread's tab bodies
-(`drawnByRenderer`: not a route, an inline view or a symbol) and
+(`drawnByRenderer`: not a route or a symbol) and
 `useRenderers` fetches them in an effect; `renderTab` reads the settled
 list (`renderersOf(uri)`), and a tab whose first ask is still pending
 draws a brief "Loading…" (`TabLoading`) until it settles, which
@@ -625,7 +637,7 @@ component (`ComponentPage`, drawn by `PageHost` in place of the tree):
 it fills the page, its `setTitle` / `setActions` are the tab's title and
 nav-bar actions, the tab entry's whole `#` is its view, and what it hands
 over with `showView` (an inline page's YAML) opens as a run of its own and
-is drawn under it (`ShownView`, with Save as Page); its `rail:` is drawn
+is drawn under it; its `rail:` is drawn
 in the rail as any page's. Every node's root
 has `data-node` and registers in a `NodeRegistry`; `useNodeFocus` lands
 on `#node=<id>` (scroll, `data-focused` for 1.5 s; a shown view's run

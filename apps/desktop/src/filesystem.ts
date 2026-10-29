@@ -12,6 +12,9 @@ import { shortRevisionLabel, WORKING } from "./revision.js";
 /** The stream's worktree as files: what a file URI means without a `filesystem`. */
 export const LOCAL_FS = "oxplow:local";
 
+/** Scratch files oxplow keeps for a while: a shown view is a page file here. */
+export const TEMP_FS = "oxplow:temp";
+
 /** `filesystem` (none: the local one) and `rev` as the short label a
  *  file's tab or header shows: a local revision as `shortRevisionLabel`
  *  has it, another filesystem's revision shortened when it is a hash, and

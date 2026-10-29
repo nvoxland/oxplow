@@ -318,6 +318,30 @@ impl FileSystem for TempFs {
     }
 }
 
+/// The modified time of the file `name` under `project`'s temp folder, or
+/// none when it isn't there (never written, or gone with the sweep). A look
+/// counts as a read: it restarts an old file's idle clock. For code that
+/// can't wait on [`FileSystem`] (the page catalog), which reads the file
+/// with [`read_text_sync`] when this time is new.
+pub fn modified_sync(project: &std::path::Path, name: &str) -> Option<SystemTime> {
+    valid_name(name).ok()?;
+    let file = project.join(TEMP_DIR).join(name);
+    let modified = std::fs::metadata(&file)
+        .ok()
+        .filter(|m| m.is_file())?
+        .modified()
+        .ok()?;
+    touch_if_old(&file);
+    Some(modified)
+}
+
+/// The text of the file `name` under `project`'s temp folder, if it is
+/// there and is text.
+pub fn read_text_sync(project: &std::path::Path, name: &str) -> Option<String> {
+    valid_name(name).ok()?;
+    std::fs::read_to_string(project.join(TEMP_DIR).join(name)).ok()
+}
+
 /// Best effort: a read of a file more than a day old restarts its idle
 /// clock.
 fn touch_if_old(file: &std::path::Path) {

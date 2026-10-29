@@ -34,8 +34,11 @@ person.
 - `oxplow_show_page { page, params }` opens an existing page beside the
   conversation; `{ spec: "<yaml>" }` opens an inline one. It returns the
   page's text, so keep your prose short.
-- A `spec` is kept in memory as a view (`oxplow:oxplow/view?id=…`) until
-  oxplow restarts. The person can **save it to the wiki** (as an
+- A `spec` is written as a page file on `oxplow:temp` and shown as the
+  page `temp/<id>` (`oxplow:oxplow/page?page=temp/<id>`). The same YAML is
+  the same page. It survives a restart and is removed after seven days
+  without being opened (then the tab says "This view is gone"). Its menu
+  has Show Definition, as any page's. The person can **save it to the wiki** (as an
   `oxplow-page` block) or **as a page** in their extension (default
   `my-pages`), where it becomes a file.
 - To save it yourself as a page, write the YAML with

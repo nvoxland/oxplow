@@ -34,16 +34,24 @@ test("a page with no running copy offers no Show definition", async () => {
   expect(view.queryByTestId("action-page-definition")).toBeNull();
 });
 
-test("an inline view offers saves without requiring a single SQL viz", async () => {
-  const yaml = "title: Snapshot\nloaders: { items: { rows: [{ title: Alpha }] } }\nview: { viz: table, from: items }\n";
-  const kept: string[] = [];
-  const { runs } = fakePageRuns(gridPage());
-  const view = render(<PageHost pageKey={{ ...key, page: undefined, specYaml: yaml }} runs={runs} onSpecYaml={(source) => kept.push(source)} />);
+test("a shown view (a temp page) offers Save and Show definition of its temp file; a deployed page offers no Save", async () => {
+  const TEMP_FILE = "oxplow:oxplow/file?path=v1.yaml&filesystem=oxplow:temp";
+  const base = gridPage();
+  const temp = { ...base, page: { ...base.page, id: "temp/v1", extension: "temp", slug: "v1", origin: { ...base.page.origin, extension: "temp", runningUri: TEMP_FILE } } };
+  const opened: string[] = [];
+  const { runs } = fakePageRuns(temp);
+  const view = render(<PageHost pageKey={{ ...key, page: "temp/v1" }} runs={runs} onOpenPage={(ref) => opened.push(ref.id)} />);
   await view.findByTestId("action-view-save-page");
-  // It has no file to show the definition of.
-  expect(view.queryByTestId("action-page-definition")).toBeNull();
   expect(view.getByTestId("action-view-save-wiki").textContent).toContain("Save to wiki");
-  expect(kept).toContain(yaml);
+  fireEvent.click(view.getByTestId("action-page-definition"));
+  expect(paramOf(opened[0], "path")).toBe("v1.yaml");
+  expect(paramOf(opened[0], "filesystem")).toBe("oxplow:temp");
+  expect(viewOf(opened[0], "oxplow.renderer")).toBe("oxplow-foundation/definition");
+  cleanup();
+  const deployed = fakePageRuns(tablePage());
+  const other = render(<PageHost pageKey={key} runs={deployed.runs} />);
+  await other.findByText("Items: Alpha");
+  expect(other.queryByTestId("action-view-save-page")).toBeNull();
 });
 
 test("the title is the page's label over its params and its first loader's first row", async () => {

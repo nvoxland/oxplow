@@ -181,7 +181,7 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	openPage: (page: string | null, specYaml: string | null, view: string | null, params: { [key in string]: SqlCell } | null, streamId: string | null, threadId: string | null, client: string) => typedError<OpenedRun_Serialize, IpcError_Serialize>(__TAURI_INVOKE("open_page", { page, specYaml, view, params, streamId, threadId, client })),
+	openPage: (page: string | null, specYaml: string | null, params: { [key in string]: SqlCell } | null, streamId: string | null, threadId: string | null, client: string) => typedError<OpenedRun_Serialize, IpcError_Serialize>(__TAURI_INVOKE("open_page", { page, specYaml, params, streamId, threadId, client })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -3838,11 +3838,6 @@ export type OpenedRun = OpenedRun_Serialize | OpenedRun_Deserialize;
 export type OpenedRun_Deserialize = {
 	runId: string,
 	run: PageRun_Deserialize,
-	/**
-	 *  Inline YAML retained by the tab, so it can reopen after a daemon
-	 *  restart and save exactly what the agent showed.
-	 */
-	specYaml: string | null,
 };
 
 /**
@@ -3852,11 +3847,6 @@ export type OpenedRun_Deserialize = {
 export type OpenedRun_Serialize = {
 	runId: string,
 	run: PageRun_Serialize,
-	/**
-	 *  Inline YAML retained by the tab, so it can reopen after a daemon
-	 *  restart and save exactly what the agent showed.
-	 */
-	specYaml: string | null,
 };
 
 /**  Who contributed it. */

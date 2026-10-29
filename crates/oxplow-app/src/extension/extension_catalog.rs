@@ -259,6 +259,8 @@ pub struct ExtensionCatalog {
     active: Mutex<Option<Arc<CatalogSnapshot>>>,
     /// Full loads performed; tests read it to prove a hit parses nothing.
     loads: AtomicUsize,
+    /// The temp pages read, by id, with the modified time they were read at.
+    temp_pages: Mutex<HashMap<String, (std::time::SystemTime, crate::pages::schema::Page)>>,
     /// The primary worktree's extensions may have changed.
     changes: tokio::sync::broadcast::Sender<()>,
     runtime_changes: tokio::sync::broadcast::Sender<()>,
@@ -284,6 +286,7 @@ impl Default for ExtensionCatalog {
             pending: Arc::default(),
             active: Mutex::default(),
             loads: AtomicUsize::default(),
+            temp_pages: Mutex::default(),
             changes: tokio::sync::broadcast::channel(64).0,
             runtime_changes: tokio::sync::broadcast::channel(64).0,
             bundled_from_sources: false,
@@ -575,11 +578,39 @@ impl ExtensionCatalog {
         id: &str,
     ) -> Result<crate::pages::schema::Page, DomainError> {
         let (ext, slug) = id.split_once('/').ok_or(DomainError::NotFound)?;
+        if ext == crate::pages::schema::TEMP_EXTENSION {
+            return self.temp_page(root, slug);
+        }
         self.named(root, ext)?
             .page_files
             .into_iter()
             .find(|p| p.slug == slug)
             .ok_or(DomainError::NotFound)
+    }
+
+    /// The temp page `temp/<id>`: the file `<id>.yaml` on `oxplow:temp`,
+    /// parsed again only when its modified time changes. A file that is
+    /// gone (swept, or never written) is `NotFound`; one that no longer
+    /// parses is `Invalid`.
+    fn temp_page(&self, root: &Path, id: &str) -> Result<crate::pages::schema::Page, DomainError> {
+        use crate::filesystems::temp;
+        let name = crate::pages::schema::temp_file_name(id);
+        let Some(modified) = temp::modified_sync(root, &name) else {
+            self.temp_pages.lock().remove(id);
+            return Err(DomainError::NotFound);
+        };
+        if let Some((at, page)) = self.temp_pages.lock().get(id) {
+            if *at == modified {
+                return Ok(page.clone());
+            }
+        }
+        let text = temp::read_text_sync(root, &name).ok_or(DomainError::NotFound)?;
+        let page = crate::pages::schema::parse_temp_page(id, &text)
+            .map_err(|why| DomainError::Invalid(format!("view `{id}`: {why}")))?;
+        self.temp_pages
+            .lock()
+            .insert(id.to_string(), (modified, page.clone()));
+        Ok(page)
     }
 
     /// The page a page URI's `page` param names: `<extension>/<slug>`, or a
@@ -854,6 +885,62 @@ mod tests {
                 .any(|e| e == "it requires `needy`, which isn't active"),
             "{held:?}"
         );
+    }
+
+    /// `temp/<id>` is the file `<id>.yaml` on `oxplow:temp`, found again by a
+    /// fresh catalog (a restart), parsed again when it changes, and
+    /// `NotFound` once it is gone.
+    #[test]
+    fn a_temp_page_is_read_from_its_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join(".oxplow/runtime/temp/v1.yaml");
+        write(
+            dir.path(),
+            ".oxplow/runtime/temp/v1.yaml",
+            "title: One\nview: { markdown: hi }\n",
+        );
+        let page = ExtensionCatalog::new()
+            .find_page(dir.path(), "temp/v1")
+            .unwrap();
+        assert_eq!(page.title, "One");
+        assert_eq!(page.id, "temp/v1");
+        let catalog = ExtensionCatalog::new();
+        assert_eq!(
+            catalog.find_page(dir.path(), "temp/v1").unwrap().title,
+            "One"
+        );
+        // A new modified time is a new parse.
+        std::fs::write(&file, "title: Two\nview: { markdown: hi }\n").unwrap();
+        let later = std::time::SystemTime::now() + std::time::Duration::from_secs(5);
+        std::fs::File::options()
+            .write(true)
+            .open(&file)
+            .unwrap()
+            .set_modified(later)
+            .unwrap();
+        assert_eq!(
+            catalog.find_page(dir.path(), "temp/v1").unwrap().title,
+            "Two"
+        );
+        // A file that acts is no view; a missing one is not found.
+        write(
+            dir.path(),
+            ".oxplow/runtime/temp/v2.yaml",
+            "title: Bad\nview: { slot: s }\n",
+        );
+        assert!(matches!(
+            catalog.find_page(dir.path(), "temp/v2"),
+            Err(DomainError::Invalid(_))
+        ));
+        std::fs::remove_file(&file).unwrap();
+        assert!(matches!(
+            catalog.find_page(dir.path(), "temp/v1"),
+            Err(DomainError::NotFound)
+        ));
+        assert!(matches!(
+            catalog.find_page(dir.path(), "temp/../x"),
+            Err(DomainError::NotFound)
+        ));
     }
 
     #[test]

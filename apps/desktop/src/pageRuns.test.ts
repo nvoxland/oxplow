@@ -276,23 +276,6 @@ describe("pageRuns", () => {
     expect(runs.runIds()).toEqual([]);
     expect(f.calls.close).toContain("late");
   });
-  test("an ephemeral view retains exact source and reopens with it after a daemon restart", async () => {
-    const f = fake();
-    const opened: PageKey[] = [];
-    const yaml = "# Source comment\ntitle: Kept view\nview: { markdown: Hello }\n";
-    f.transport.open = async (key) => {
-      opened.push({ ...key });
-      return { runId: `view-${opened.length}`, run: fakeRun("Kept view"), specYaml: yaml };
-    };
-    const runs = createPageRuns(f.transport);
-    const handle = runs.open({ view: "v1", params: {}, streamId: null, threadId: "thr1" });
-    await wait(0);
-    expect(handle.get().specYaml).toBe(yaml);
-    f.reconnect();
-    await wait(0);
-    expect(opened[1].specYaml).toBe(yaml);
-    expect(opened[1].view).toBe("v1");
-  });
   test("two hosts of one page share one run, closed when the last lets go", async () => {
     const f = fake();
     const runs = createPageRuns(f.transport);

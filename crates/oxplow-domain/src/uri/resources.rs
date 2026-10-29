@@ -28,9 +28,6 @@ pub const WIKI: &str = "oxplow/wiki";
 pub const COMMENT: &str = "oxplow/comment";
 pub const EVENT: &str = "oxplow/event";
 pub const PAGE: &str = "oxplow/page";
-/// An ephemeral page an agent showed (`oxplow.page.show { spec }`): kept
-/// in memory by the daemon, opened like a page.
-pub const VIEW: &str = "oxplow/view";
 pub const METRIC: &str = "oxplow/metric";
 pub const DATASET: &str = "oxplow/dataset";
 pub const AI_MODEL: &str = "oxplow/ai_model";

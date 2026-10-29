@@ -1839,12 +1839,16 @@ mod tests {
             .unwrap(),
         ))
         .unwrap();
+        let uri = out["uri"].as_str().unwrap();
+        assert!(uri.starts_with("oxplow:oxplow/page?page=temp/"), "{out}");
+        let id = uri.rsplit('/').next().unwrap();
         assert!(
-            out["uri"]
-                .as_str()
-                .unwrap()
-                .starts_with("oxplow:oxplow/view?id="),
-            "{out}"
+            services
+                .layout
+                .project_dir
+                .join(format!(".oxplow/runtime/temp/{id}.yaml"))
+                .is_file(),
+            "the view is a file on oxplow:temp: {out}"
         );
         assert!(
             out["text"].as_str().unwrap().contains("| primary |"),

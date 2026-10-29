@@ -988,7 +988,7 @@ the user guide is `docs/guide/pages.md`.
     page (`showView`, protocol 12: its query as one `sql` loader, its viz
     over it — `specOf` in `src/explore-data/dataset.ts`), the page opens it
     (`open_page { specYaml }`) and draws it under the frame with
-    `PageTree` (`pages/PageComponent.tsx` `ShownView`), live, with **Save
+    `PageTree` (`pages/PageComponent.tsx`), live, with **Save
     as Page** (`pages/SaveViewForm.tsx`: `oxplow.extension.write_page {
     extension, page, spec, deploy: true }`, then opens the page; a saved
     page pins to a dashboard as an embed). A refused spec answers the
@@ -1001,7 +1001,7 @@ the user guide is `docs/guide/pages.md`.
     pasting rows: MCP **`oxplow_show_page { page | spec, params? }`** runs
     `oxplow.page.show`. A `spec` is an inline page of the agent's own
     (read-only, no actions or forms). It opens beside the conversation
-    as a view (`oxplow:oxplow/view?id=…`) and the call returns the page's
+    as a page file on `oxplow:temp` (`oxplow:oxplow/page?page=temp/<id>`) and the call returns the page's
     text. The person saves it with **Save to wiki** or **Save as Page**
     (`oxplow.extension.write_page`). Nothing else is stored: there are no
     thread answers and no Keep This. See pages-and-tabs.md "Showing a
@@ -2293,8 +2293,10 @@ Where it lives, and what is loaded:
   File viewer's. A page with no running copy offers no Show Definition
   (pages-and-tabs.md).
 - **An inline page** (`parse_inline_page`: a markdown ` ```oxplow-page `
-  block, an agent's `oxplow_show_page { spec }`) only reads: no `command`
-  loaders, no actions, forms, terminals, editors, components or slots.
+  block) only reads: no `command` loaders, no actions, forms, terminals,
+  editors, components or slots. An agent's `oxplow_show_page { spec }` is a
+  **temp page** (`parse_temp_page`): the same rules, `for:` refused, kept as
+  the page file `<id>.yaml` on `oxplow:temp` and run as `temp/<id>`.
 
 ### Metadata
 

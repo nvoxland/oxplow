@@ -896,7 +896,6 @@ mod tests {
             None,
             None,
             None,
-            None,
             "one".into(),
         )
         .await
@@ -905,7 +904,6 @@ mod tests {
             &svc,
             None,
             Some(yaml.into()),
-            None,
             None,
             None,
             None,

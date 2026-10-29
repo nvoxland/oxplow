@@ -1273,7 +1273,7 @@ commands:
     tool: find_page
     example: {"question": "which tests failed this week"}
   - name: page.show
-    summary: "Show the person a page beside the conversation. Give `page` (`<extension>/<slug>`, from `oxplow.page.find`) with `params`, or `spec`: a page of your own as YAML (`title`, `loaders:` with sql / rows / page loaders, `view:` with table, list, chart, tree, number or markdown nodes; it only reads) — kept as a view (`oxplow:oxplow/view?id=…`) the person can save to the wiki or as a page. It opens as a tab of your thread when their window is open (`opened`), and returns the page's text so you can keep your prose short."
+    summary: "Show the person a page beside the conversation. Give `page` (`<extension>/<slug>`, from `oxplow.page.find`) with `params`, or `spec`: a page of your own as YAML (`title`, `loaders:` with sql / rows / page loaders, `view:` with table, list, chart, tree, number or markdown nodes; it only reads) — kept as a page file on `oxplow:temp` (`oxplow:oxplow/page?page=temp/<id>`) the person can save to the wiki or as a page. It opens as a tab of your thread when their window is open (`opened`), and returns the page's text so you can keep your prose short."
     scope: pages.show
     op: show
     tool: show_page

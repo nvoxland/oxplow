@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { RememberedContext, createRememberedStore } from "../prefs/remembered.js";
-import { SaveViewCommandContext, SaveViewForm } from "./SaveViewForm.js";
+import { SaveTempViewForm, SaveViewCommandContext, SaveViewForm, SaveViewSourceContext } from "./SaveViewForm.js";
 
 afterEach(cleanup);
 const spec = "# Comment\ntitle: View\nloaders: { items: { rows: [{ title: Alpha }] } }\nview: { viz: table, from: items }\n";
@@ -46,4 +46,31 @@ test("a refused save keeps the form and source for retry; Escape cancels", async
   expect(f.closed()).toBe(0);
   fireEvent.keyDown(f.view.getByTestId("save-view-title"), { key: "Escape" });
   expect(f.closed()).toBe(1);
+});
+
+function tempForm(source: string | null) {
+  const reads: [string | null, string][] = [];
+  const calls: [string, unknown][] = [];
+  const prefs = createRememberedStore({ load: async () => [], save: async () => {} });
+  const view = render(<RememberedContext.Provider value={prefs}><SaveViewCommandContext.Provider value={async (name, input) => { calls.push([name, input]); }}>
+    <SaveViewSourceContext.Provider value={async (streamId, file) => { reads.push([streamId, file]); return source; }}>
+      <SaveTempViewForm kind="wiki" file="v1.yaml" streamId="str1" initialTitle="Busy Tasks" onClose={() => {}} onSaved={() => {}} />
+    </SaveViewSourceContext.Provider>
+  </SaveViewCommandContext.Provider></RememberedContext.Provider>);
+  return { view, reads, calls };
+}
+
+test("a temp view's YAML is read from its file on oxplow:temp, then saved as it is", async () => {
+  const f = tempForm(spec);
+  await f.view.findByTestId("save-view-title");
+  expect(f.reads).toEqual([["str1", "v1.yaml"]]);
+  fireEvent.submit(f.view.getByTestId("save-view-form"));
+  await waitFor(() => expect(f.calls[0]?.[0]).toBe("oxplow.knowledge.write_page"));
+  expect((f.calls[0]![1] as { body: string }).body).toContain("```oxplow-page\n# Comment");
+});
+
+test("a temp view that is gone can't be saved", async () => {
+  const f = tempForm(null);
+  expect((await f.view.findByRole("alert")).textContent).toContain("This view is gone");
+  expect(f.view.queryByTestId("save-view-submit")).toBeNull();
 });

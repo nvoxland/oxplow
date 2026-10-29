@@ -436,6 +436,48 @@ fn an_inline_page_only_reads() {
     }
 }
 
+/// A temp page (an agent's shown view, a file on `oxplow:temp`) has the
+/// inline rules, is `temp/<id>`, runs from its temp file, and is never a
+/// resource page.
+#[test]
+fn a_temp_page_is_temp_slash_id_with_the_inline_rules() {
+    let ok = parse_temp_page(
+        "ab12-cd",
+        "title: T\nloaders:\n  a: { sql: SELECT 1 AS n }\nview: { viz: table, from: a }\n",
+    )
+    .unwrap();
+    assert_eq!(ok.id, "temp/ab12-cd");
+    assert_eq!(ok.slug, "ab12-cd");
+    assert_eq!(ok.origin.extension, "temp");
+    assert_eq!(
+        ok.origin.running_uri.as_deref(),
+        Some("oxplow:oxplow/file?filesystem=oxplow:temp&path=ab12-cd.yaml")
+    );
+    assert!(
+        ok.origin.running.ends_with("ab12-cd.yaml"),
+        "{}",
+        ok.origin.running
+    );
+    for (text, why) in [
+        (
+            "title: T\nloaders:\n  a: { command: acme.ci.x, refresh: manual }\nview: { viz: table, from: a }\n",
+            "command",
+        ),
+        (
+            "title: T\nloaders:\n  a: { sql: SELECT 1 }\nview: { viz: table, from: a }\nactions: [{ id: x, label: X, command: acme.ci.x, input: {} }]\n",
+            "actions",
+        ),
+        ("title: T\nview: { slot: sections }\n", "slot"),
+        (
+            "title: T\nfor: oxplow/file\nparams: [{ name: uri }]\nloaders:\n  q: { rows: [{ a: 1 }] }\nview: { viz: table, from: q }\n",
+            "for:",
+        ),
+    ] {
+        let e = parse_temp_page("x", text).expect_err(why);
+        assert!(e.contains(why), "{why}: {e}");
+    }
+}
+
 /// An extension's `pages/*.yaml` load as its page files; a broken one is an
 /// error naming its file, and the rest still load.
 #[test]

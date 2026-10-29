@@ -39,8 +39,8 @@ import type { FrameAction } from "../viz/componentBridge.js";
 import { NodeRegistryContext, PageTree, createNodeRegistry, useNodeFocus } from "./PageTree.js";
 import { labelRow, tabLabel } from "./renderers.js";
 import { useNodeActions, useNodeForms } from "./useNodeActions.js";
-import { SaveViewForm } from "./SaveViewForm.js";
-import { definitionUri } from "./viewActions.js";
+import { SaveTempViewForm } from "./SaveViewForm.js";
+import { definitionUri, TEMP_EXTENSION } from "./viewActions.js";
 import { PageViewContext } from "./PageViewContext.js";
 import { usePageReads } from "./pageReads.js";
 import { firstLoader } from "./firstLoader.js";
@@ -64,8 +64,6 @@ export interface PageHostProps {
   /** The stream it runs for, whole: what a viz that needs more than its
    *  id reads (the editor: the worktree its files are under). */
   stream?: Stream | null;
-  /** Keep a shown view's exact source in its tab's history state. */
-  onSpecYaml?(yaml: string): void;
 }
 
 const NO_ROWS = { columns: [], rows: [] };
@@ -73,7 +71,7 @@ const NO_ROWS = { columns: [], rows: [] };
 /** How long a page may take before it says it is reading. */
 export const LOADING_AFTER_MS = 150;
 
-export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, renders = null, stream = null, onSpecYaml }: PageHostProps) {
+export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, renders = null, stream = null }: PageHostProps) {
   const store = usePageRunsStore();
   const state = usePageRunWith(runs ?? store, pageKey);
   const { error, setParams, rerun } = state;
@@ -88,8 +86,8 @@ export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, re
   const streamId = pageKey.streamId;
   const nav = useOptionalPageNavigation();
   const page = run?.page ?? null;
-  const specYaml = state.specYaml ?? pageKey.specYaml ?? null;
-  useEffect(() => { if (specYaml) onSpecYaml?.(specYaml); }, [specYaml, onSpecYaml]);
+  // A shown view is a page file on `oxplow:temp`: what Save reads.
+  const viewFile = page?.origin.extension === TEMP_EXTENSION ? `${page.slug}.yaml` : null;
   const [saveAs, setSaveAs] = useState<"wiki" | "page" | null>(null);
   // About this page opens over the page's top right, under its ☰.
   const [about, setAbout] = useState(false);
@@ -139,10 +137,10 @@ export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, re
     // What it shows, as text, as an agent would read it.
     ...(page ? [{ id: "page-copy", label: copied ? "Copied" : "Copy", title: "Copy what the page shows, as text", standard: true, icon: "copy", run: copy }] : []),
     ...(page ? [{ id: "page-about", label: "About this page", standard: true, run: () => setAbout(true) }] : []),
-    // A page's definition is a display mode of its running file; a page
-    // with no running copy (an inline view) has none to show.
+    // A page's definition is a display mode of its running file (a shown
+    // view's is its temp file); a page with no running copy has none to show.
     ...(page?.origin.runningUri ? [{ id: "page-definition", label: "Show definition", standard: true, run: () => open(definitionUri(page.origin.runningUri!, run!.params)) }] : []),
-    ...(specYaml ? [
+    ...(viewFile ? [
       { id: "view-save-wiki", label: "Save to wiki…", standard: true, run: () => setSaveAs("wiki") },
       { id: "view-save-page", label: "Save as Page…", standard: true, run: () => setSaveAs("page") },
     ] : []),
@@ -245,7 +243,7 @@ export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, re
         run ? (
           <>
             <Contents root={body} />
-            {saveAs && specYaml ? <SaveViewForm key={saveAs} kind={saveAs} specYaml={specYaml} initialTitle={title} onClose={() => setSaveAs(null)} onSaved={open} /> : null}
+            {saveAs && viewFile ? <SaveTempViewForm key={saveAs} kind={saveAs} file={viewFile} streamId={streamId} initialTitle={title} onClose={() => setSaveAs(null)} onSaved={open} /> : null}
             <PageRail run={run} runId={runId} onApply={apply} picked={picked} streamId={streamId} onOpenPage={onOpenPage} />
           </>
         ) : undefined

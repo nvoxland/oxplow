@@ -15,12 +15,11 @@ import { getUiClientId } from "./uiClientId.js";
 import { commands, type PageRun, type RunSnapshot, type SqlCell } from "./tauri-bridge/generated/bindings.js";
 import { onRemoteReconnect } from "./tauri-bridge/transport.js";
 
-/** What to run: a deployed page by id, or an inline page's YAML. */
+/** What to run: a page by id (a deployed one, or a temp view,
+ *  `temp/<id>`), or an inline page's YAML (a markdown block's). */
 export interface PageKey {
   page?: string;
   specYaml?: string;
-  /** An ephemeral view an agent showed (`oxplow:oxplow/view?id=…`). */
-  view?: string;
   params: Record<string, SqlCell>;
   streamId: string | null;
   threadId: string | null;
@@ -36,7 +35,7 @@ export interface RunChange {
 
 /** How the store reaches the daemon (injected, so tests need none). */
 export interface PageRunsTransport {
-  open(key: PageKey): Promise<{ runId: string; run: PageRun; specYaml?: string | null }>;
+  open(key: PageKey): Promise<{ runId: string; run: PageRun }>;
   close(runId: string): Promise<void>;
   fetch(runIds: string[]): Promise<Record<string, RunSnapshot>>;
   setParams(runId: string, params: Record<string, SqlCell>): Promise<PageRun>;
@@ -49,8 +48,6 @@ export interface PageRunsTransport {
 }
 
 export interface RunState {
-  /** Exact inline source, retained for tab restoration and saving. */
-  specYaml?: string | null;
   /** The open run's id (what its actions are pressed on); null until the
    *  daemon has opened it. */
   runId: string | null;
@@ -97,7 +94,7 @@ export function keyOf(key: PageKey): string {
   const params = Object.keys(key.params)
     .sort()
     .map((k) => [k, key.params[k]]);
-  return JSON.stringify([key.page ?? null, key.specYaml ?? null, key.view ?? null, params, key.streamId, key.threadId]);
+  return JSON.stringify([key.page ?? null, key.specYaml ?? null, params, key.streamId, key.threadId]);
 }
 
 export function createPageRuns(transport: PageRunsTransport) {
@@ -124,7 +121,7 @@ export function createPageRuns(transport: PageRunsTransport) {
     const opening = ++entry.opening;
     inFlightOpens += 1;
     entry.runId = transport.open({ ...entry.key, params: { ...entry.requestParams } }).then(
-      ({ runId, run, specYaml }) => {
+      ({ runId, run }) => {
         const earlySeq = earlyChanges.get(runId);
         earlyChanges.delete(runId);
         if (opening !== entry.opening) {
@@ -132,9 +129,7 @@ export function createPageRuns(transport: PageRunsTransport) {
           return null;
         }
         byRunId.set(runId, entry);
-        const yaml = specYaml ?? entry.key.specYaml ?? null;
-        if (yaml) entry.key = { ...entry.key, specYaml: yaml };
-        entry.state = { runId, run, specYaml: yaml, error: null, stale: false };
+        entry.state = { runId, run, error: null, stale: false };
         // The daemon may have announced a change before its open HTTP
         // reply reached this window. Keep notices only while opens are
         // pending, never as a timed history of unrelated events.
@@ -362,7 +357,6 @@ export function daemonTransport(): PageRunsTransport {
         await commands.openPage(
           key.page ?? null,
           key.specYaml ?? null,
-          key.view ?? null,
           key.params,
           key.streamId,
           key.threadId,

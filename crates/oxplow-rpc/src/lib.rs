@@ -242,7 +242,7 @@ macro_rules! oxplow_command_table {
                 component_form => $crate::commands::extensions::component_form { id: String, command: String, input: Option<::oxplow_domain::Json>, version: String } -> ::oxplow_app::viz_actions::FormStart,
                 list_services => $crate::commands::extensions::list_services {} -> Vec<$crate::commands::extensions::ServiceListing>,
                 // pages: a window's open runs
-                open_page => $crate::commands::pages::open_page { page: Option<String>, spec_yaml: Option<String>, view: Option<String>, params: Option<::std::collections::BTreeMap<String, ::oxplow_db::SqlCell>>, stream_id: Option<String>, thread_id: Option<String>, client: String } -> $crate::commands::pages::OpenedRun,
+                open_page => $crate::commands::pages::open_page { page: Option<String>, spec_yaml: Option<String>, params: Option<::std::collections::BTreeMap<String, ::oxplow_db::SqlCell>>, stream_id: Option<String>, thread_id: Option<String>, client: String } -> $crate::commands::pages::OpenedRun,
                 close_page => $crate::commands::pages::close_page { run_id: String } -> (),
                 set_page_params => $crate::commands::pages::set_page_params { run_id: String, params: ::std::collections::BTreeMap<String, ::oxplow_db::SqlCell> } -> ::oxplow_app::pages::runner::PageRun,
                 rerun_page => $crate::commands::pages::rerun_page { run_id: String } -> ::oxplow_app::pages::runner::PageRun,

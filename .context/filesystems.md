@@ -118,6 +118,14 @@ cap is refused.
   so a file someone keeps opening stays; a younger one is left alone, so
   `stat`'s `modified_at` (a cache key) moves at most once a day by reading.
 
+- **What lives here today:** shown views. `oxplow.page.show { spec }` writes
+  `v<hash>.yaml` (`Services.temp.put`) and shows the page `temp/<id>`;
+  `ExtensionCatalog::find_page` reads the file again (cached by its modified
+  time, and a look counts as a read for the GC). A view the GC removed is
+  `NotFound`; the window says "This view is gone". Show Definition,
+  Save as Page and Save to wiki read the file as any file
+  (`filesystem=oxplow:temp`).
+
 ## Using one
 
 - RPC `read_at { streamId, path, filesystem?, rev? }` and `stat_file`

@@ -45,7 +45,8 @@ import { chooseRenderer, chooseRoute } from "./pages/pageFiles.js";
 import { drawnByRenderer, renderersCache, useRenderers } from "./pages/useRenderers.js";
 import type { Extension } from "./tauri-bridge/generated/bindings.js";
 import { PageFileView } from "./pages/PageFileView.js";
-import { EphemeralView } from "./pages/EphemeralView.js";
+import { TempPage } from "./pages/TempPage.js";
+import { TEMP_EXTENSION } from "./pages/viewActions.js";
 import { PersonCommandConfirm } from "./components/PersonCommandConfirm.js";
 import { RemoteConnectionBanner } from "./components/RemoteConnectionBanner.js";
 import { subscribeUiError } from "./ui-error.js";
@@ -1622,6 +1623,15 @@ export function App() {
       const page = pagePayload(ref)!;
       // Until the extensions load, nothing says what draws it.
       if (extensions === null) return { id: ref.id, label: page.page, closable: true, render: () => null };
+      // A shown view is a page file on `oxplow:temp`: the daemon has it, not the extensions.
+      if (page.extension === TEMP_EXTENSION) {
+        return {
+          id: ref.id,
+          label: "View",
+          closable: true,
+          render: () => <TempPage id={page.page} resource={page.params} stream={stream} threadId={selectedThread?.id ?? null} onOpenPage={nav.navOpen} />,
+        };
+      }
       const file = chooseRoute(extensions, page);
       if (file) return pageFileTab(file, ref, nav, page.params, null);
       return { id: ref.id, label: page.page, closable: true, render: () => <MissingPage page={page} /> };
@@ -1631,12 +1641,6 @@ export function App() {
     // the declarations pick), else foundation's fallback, `resource`.
     const renderTab = (ref: TabRef, nav: SlotNav): CenterTab | null => {
       if (typeOf(ref.id) === "oxplow/page") return routeTab(ref, nav);
-      if (typeOf(ref.id) === "oxplow/view") return {
-        id: ref.id,
-        label: "View",
-        closable: true,
-        render: () => <EphemeralView view={paramOf(ref.id, "id") ?? ""} stream={stream} threadId={selectedThread?.id ?? null} onOpenPage={nav.navOpen} />,
-      };
       // A symbol opens its file at its line (openSymbol); it's never a tab.
       if (typeOf(ref.id) === "oxplow/symbol") return null;
       // Until the extensions load, nothing says what renders it.

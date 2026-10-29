@@ -777,6 +777,38 @@ pub fn parse_inline_page(text: &str) -> Result<Page, String> {
     Ok(page)
 }
 
+/// The extension a temp page (a page file on `oxplow:temp`) is under, so
+/// its id is `temp/<id>`.
+pub const TEMP_EXTENSION: &str = "temp";
+
+/// The file `temp/<id>` is, by its name on `oxplow:temp`.
+pub fn temp_file_name(id: &str) -> String {
+    format!("{id}.yaml")
+}
+
+/// Parse a temp page: the page file `<id>.yaml` on `oxplow:temp`, an
+/// agent's shown view. It has the inline rules (it only reads), is
+/// `temp/<id>`, runs from its temp file (`PageProvenance.running_uri`, so
+/// Show Definition works) and is never a resource page.
+pub fn parse_temp_page(id: &str, text: &str) -> Result<Page, String> {
+    let file = temp_file_name(id);
+    let rel = format!("{}/{file}", crate::filesystems::temp::TEMP_DIR);
+    let mut page = parse_page(TEMP_EXTENSION, INLINE_ID, id, &rel, text)?;
+    if let Some(why) = inline_problem(&page) {
+        return Err(why);
+    }
+    if page.is_resource_page() {
+        return Err("a temp page is a view, not a display mode: it can't have `for:`".into());
+    }
+    page.origin.running_uri = Some(oxplow_domain::uri::build::file_uri_at(
+        &file,
+        Some(oxplow_domain::filesystem::TEMP),
+        None,
+        None,
+    ));
+    Ok(page)
+}
+
 /// Why `page` can't be an inline page: something in it acts.
 fn inline_problem(page: &Page) -> Option<String> {
     if let Some(l) = page
