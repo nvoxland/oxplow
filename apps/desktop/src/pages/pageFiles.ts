@@ -1,12 +1,12 @@
 /// Page files as the window finds and opens them (`.context/pages-and-tabs.md`
-/// "Page files", "The desktop host"): a route's page by its id, a URI's
-/// renderer among the page files' `for`, the params a tab's URI gives its
-/// run, and where a change of them goes (the `?`, or the `#` replaced or
-/// pushed).
-import type { Extension, Node, Page, SqlCell } from "../tauri-bridge/generated/bindings.js";
+/// "Page files", "The desktop host"): a route's page by its id, the page file
+/// a URI's renderer (chosen from the daemon's list) names, the params a
+/// tab's URI gives its run, and where a change of them goes (the `?`, or
+/// the `#` replaced or pushed).
+import type { Extension, Node, Page, Renderer, SqlCell } from "../tauri-bridge/generated/bindings.js";
 import type { PagePayload } from "../tabs/pageRefs.js";
 import { isDefaultValue } from "../viz/vizModel.js";
-import { rendererFor, rendererName, renderersFor } from "./renderers.js";
+import { pickRenderer } from "./renderers.js";
 import { extPageUri, pageUri, type Params } from "../uri/uri.js";
 
 /** The namespace whose pages are core-named (`page=<slug>`):
@@ -41,11 +41,6 @@ export function pageFileUri(extensions: readonly Extension[], page: Page, params
 /** Every enabled extension's page files. */
 export function enabledPageFiles(extensions: readonly Extension[] | null): Page[] {
   return (extensions ?? []).filter((e) => e.enabled).flatMap((e) => e.pageFiles ?? []);
-}
-
-/** The page files that render a resource (`for:`), in the extensions' order. */
-export function pageFileRenderers(extensions: readonly Extension[] | null): Page[] {
-  return enabledPageFiles(extensions).filter((p) => p.for.length > 0);
 }
 
 /** The params a tab's URI gives a page's run: the `?` params it declares
@@ -113,17 +108,16 @@ export function chooseRoute(extensions: Extension[], route: PagePayload): Page |
   return pageFileOf(extensions, route) ?? null;
 }
 
-/** What draws a resource URI: the page files' renderer (`for`, `accepts`,
- *  the view's `#oxplow.renderer=`, `default`); null: none does, and
- *  foundation's `resource` fallback draws it. */
-export function chooseRenderer(extensions: Extension[], id: string, view: Record<string, unknown>): Page | null {
-  return rendererFor(id, pageFileRenderers(extensions), view);
+/** The enabled page file with id `<extension>/<slug>`, or null. */
+export function pageFileById(extensions: readonly Extension[], id: string): Page | null {
+  return enabledPageFiles(extensions).find((p) => p.id === id) ?? null;
 }
 
-/** Open With's choices for `id`: every page file that renders it, each
- *  name once. */
-export function openWithOptions(extensions: readonly Extension[] | null, id: string): { name: string; title: string }[] {
-  const out = new Map<string, string>();
-  for (const p of renderersFor(id, pageFileRenderers(extensions))) out.set(rendererName(p), p.title);
-  return [...out].map(([name, title]) => ({ name, title }));
+/** What draws a resource URI: the page file of the renderer the view
+ *  picks among the daemon's `renderers` (`pickRenderer`); null: none does
+ *  (or the page left the extensions since), and foundation's `resource`
+ *  fallback draws it. */
+export function chooseRenderer(extensions: readonly Extension[], renderers: readonly Renderer[], view: Record<string, unknown>): Page | null {
+  const picked = pickRenderer(renderers, view);
+  return picked ? pageFileById(extensions, picked.page) : null;
 }

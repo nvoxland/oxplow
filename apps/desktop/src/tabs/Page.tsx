@@ -1,8 +1,6 @@
 import type { CSSProperties, ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useExtensions } from "../extensionsStore.js";
-import { RENDERER_VIEW_KEY, rendererName } from "../pages/renderers.js";
-import { chooseRenderer, openWithOptions } from "../pages/pageFiles.js";
+import { RENDERER_VIEW_KEY, pickRenderer } from "../pages/renderers.js";
 import { PageNavBar } from "./PageNavBar.js";
 import { useOptionalPageNavigation } from "./PageNavigationContext.js";
 import type { BookmarkScope } from "./bookmarks.js";
@@ -189,23 +187,20 @@ export function Page({ title, titleIcon, kind, chips: ownChips, actions, pin, ch
     ? (backlinks as { count: number; body: ReactNode }).count
     : undefined;
   const effectiveTitle: ReactNode = title ?? ctxNav?.title ?? "";
-  // The pages that render this URI, to pick among.
-  const extensions = useExtensions();
-  const shownId = ctxNav?.ref?.id ?? null;
+  // The pages that render this URI, to pick among (the daemon's list).
+  const shownRenderers = ctxNav?.renderers;
   const shownView = ctxNav?.viewParams;
   const patchView = ctxNav?.patchViewParams;
   const openWith = useMemo(() => {
-    if (!shownId || !patchView) return undefined;
-    if (!extensions) return undefined;
-    const options = openWithOptions(extensions, shownId);
-    const current = chooseRenderer(extensions, shownId, shownView ?? {});
-    if (options.length < 2 || !current) return undefined;
+    if (!shownRenderers || !patchView) return undefined;
+    const current = pickRenderer(shownRenderers, shownView ?? {});
+    if (shownRenderers.length < 2 || !current) return undefined;
     return {
-      options,
-      current: rendererName(current),
+      options: shownRenderers.map((r) => ({ name: r.page, title: r.title })),
+      current: current.page,
       pick: (name: string) => patchView({ [RENDERER_VIEW_KEY]: name }),
     };
-  }, [extensions, shownId, shownView, patchView]);
+  }, [shownRenderers, shownView, patchView]);
   const pinned = ctxNav?.pinned ?? false;
   const baseNavBar: PageNavBarConfig | undefined = navBar ?? (ctxNav ? {
     canBack: ctxNav.canGoBack,

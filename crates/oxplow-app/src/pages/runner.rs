@@ -29,6 +29,10 @@ use crate::pages::spec::{
     bind_params, evaluate_alert, resolve_param_values, AlertState, ViewContext,
 };
 
+/// The most bytes of a loader's rows the daemon reads to decide whether a
+/// page accepts a URI (`accepts: { content: … }`).
+pub(super) const ACCEPT_RESULT_BYTES: usize = 1024 * 1024;
+
 /// How deep embeds and page loaders may nest before a run stops: a cycle
 /// the load checks missed, or a page that embeds too much.
 const MAX_DEPTH: usize = 8;
@@ -365,6 +369,57 @@ impl<'a> PageRunner<'a> {
                 badge,
             })
         })
+    }
+
+    /// Loader `target` of `page` and only what it reads (its chain), for
+    /// a URI-acceptance check (`pages/renderers.rs`): the rows of `target`.
+    /// `supplied` are the page's param values; `content` is the page's
+    /// `content` loader already resolved, shared by every page asked about
+    /// the same URI. Any loader's failure is the whole answer's, and each
+    /// result is cut to [`ACCEPT_RESULT_BYTES`].
+    pub(super) async fn run_loader_chain(
+        &self,
+        page: &Page,
+        target: &str,
+        supplied: BTreeMap<String, SqlCell>,
+        ctx: &ViewContext,
+        viewer: &Actor,
+        content: Option<SqlQueryResult>,
+    ) -> Result<SqlQueryResult, String> {
+        let params = self
+            .params_of(page, &supplied, ctx)
+            .await
+            .map_err(|e| e.to_string())?;
+        let chain = page.loader_chain(target);
+        let mut memo = Memo::new();
+        let mut loaders: BTreeMap<String, LoaderRun> = BTreeMap::new();
+        for decl in page.loaders.iter().filter(|d| chain.contains(&d.name)) {
+            let mut run = match (&decl.loader, &content) {
+                (Loader::Content { .. }, Some(result)) => LoaderRun {
+                    result: result.clone(),
+                    error: None,
+                    key: "content".to_string(),
+                },
+                (Loader::Content { .. }, None) => {
+                    return Err("the page's content wasn't resolved".into())
+                }
+                _ => {
+                    self.run_loader(page, decl, &params, &loaders, ctx, viewer, &mut memo, 0)
+                        .await
+                }
+            };
+            if let Some(error) = run.error {
+                return Err(error);
+            }
+            ResultBudget::new(ACCEPT_RESULT_BYTES)
+                .admit(&mut run.result)
+                .map_err(|e| e.to_string())?;
+            loaders.insert(decl.name.clone(), run);
+        }
+        loaders
+            .remove(target)
+            .map(|r| r.result)
+            .ok_or_else(|| format!("no loader `{target}`"))
     }
 
     /// `page`'s params for this run, with `head_sha` (when declared and

@@ -52,7 +52,13 @@ pub struct Page {
     /// The resources it renders (`oxplow/commit`); empty: a route.
     #[serde(rename = "for")]
     pub renders: Vec<String>,
+    /// Per URI param of the resource it renders: `present`, `absent` or an
+    /// id pattern its value must match.
     pub accepts: BTreeMap<String, String>,
+    /// `accepts: { content: <loader> }`: one of its own loaders, which
+    /// must yield a row for the page to be offered for a URI
+    /// (`pages/renderers.rs`).
+    pub accepts_content: Option<String>,
     pub default: bool,
     pub pinned: bool,
     pub comments: bool,
@@ -87,6 +93,29 @@ impl Page {
 
     pub fn loader(&self, name: &str) -> Option<&LoaderDecl> {
         self.loaders.iter().find(|l| l.name == name)
+    }
+
+    /// Loader `name` and every loader it reads, directly or not, in the
+    /// order they are declared (and run): all that answering `name` takes.
+    /// Empty when there is no such loader.
+    pub fn loader_chain(&self, name: &str) -> Vec<String> {
+        let mut wanted = vec![name.to_string()];
+        let mut at = 0;
+        while let Some(current) = wanted.get(at).cloned() {
+            at += 1;
+            if let Some(decl) = self.loader(&current) {
+                for read in &decl.reads_loaders {
+                    if !wanted.contains(read) {
+                        wanted.push(read.clone());
+                    }
+                }
+            }
+        }
+        self.loaders
+            .iter()
+            .filter(|l| wanted.contains(&l.name))
+            .map(|l| l.name.clone())
+            .collect()
     }
 
     /// Whether it is a resource page (`for:`): a display mode of the
@@ -341,6 +370,7 @@ struct PageFile {
     params: Vec<PageParam>,
     #[serde(default, rename = "for")]
     renders: Option<Renders>,
+    /// Param rules by name, and `content: <loader>` (not a param).
     #[serde(default)]
     accepts: BTreeMap<String, String>,
     #[serde(default)]
@@ -518,6 +548,8 @@ pub fn parse_page(
         deployment: None,
         bundled: false,
     };
+    let mut file = file;
+    let accepts_content = file.accepts.remove(ACCEPTS_CONTENT);
     let content = file.content.as_ref();
     let content_loader = Loader::Content {
         text: content.is_some_and(|c| c.text),
@@ -598,6 +630,11 @@ pub fn parse_page(
         .tool
         .map(|t| crate::extension::extension_commands::tool_name(namespace, &t))
         .transpose()?;
+    if let Some(loader) = &accepts_content {
+        if let Some(why) = accepts_content_problem(loader, &loaders, resource) {
+            return Err(why);
+        }
+    }
     let page = Page {
         id,
         extension: extension.to_string(),
@@ -611,6 +648,7 @@ pub fn parse_page(
         params,
         renders,
         accepts: file.accepts,
+        accepts_content,
         default: file.default,
         pinned: file.pinned,
         comments: file.comments,
@@ -676,6 +714,48 @@ fn page_kind_problem(file: &PageFile, resource: bool) -> Option<String> {
             return Some(format!(
                 "content: `max_bytes: {max}` must be between 1 and {MAX_CONTENT_BYTES} (4 MiB)"
             ));
+        }
+    }
+    None
+}
+
+/// The `accepts` key that names a loader, not a URI param.
+pub const ACCEPTS_CONTENT: &str = "content";
+
+/// Why `accepts: { content: <loader> }` can't be asked of a URI: the
+/// daemon runs only that loader's chain (sql, rows, a read command,
+/// `content`) to decide, so it can't need another page.
+fn accepts_content_problem(loader: &str, loaders: &[LoaderDecl], resource: bool) -> Option<String> {
+    if !resource {
+        return Some(
+            "`accepts: content` is for a resource page (a page with `for:`): it says what a URI's content must hold for the page to be offered"
+                .into(),
+        );
+    }
+    let Some(decl) = loaders.iter().find(|l| l.name == loader) else {
+        let names: Vec<&str> = loaders.iter().map(|l| l.name.as_str()).collect();
+        return Some(format!(
+            "`accepts: content: {loader}` isn't a loader of the page (loaders: {})",
+            names.join(", ")
+        ));
+    };
+    let mut wanted = vec![decl.name.clone()];
+    let mut at = 0;
+    while let Some(current) = wanted.get(at).cloned() {
+        at += 1;
+        let Some(l) = loaders.iter().find(|l| l.name == current) else {
+            continue;
+        };
+        if matches!(l.loader, Loader::Page { .. }) {
+            return Some(format!(
+                "`accepts: content: {loader}` reads the `page` loader `{}`: it is decided from `sql`, `rows`, read-only `command` and `content` loaders only",
+                l.name
+            ));
+        }
+        for read in &l.reads_loaders {
+            if !wanted.contains(read) {
+                wanted.push(read.clone());
+            }
         }
     }
     None

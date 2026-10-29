@@ -148,6 +148,17 @@ pub struct FindPageInput {
     pub limit: Option<usize>,
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RenderersInput {
+    /// The uri to draw (`oxplow:oxplow/file?path=src/a.rs`, an `https://`
+    /// url); a `#` view on it is ignored.
+    pub uri: String,
+    /// Stream whose files and data the check reads; omit for your own.
+    #[serde(default)]
+    pub stream_id: Option<String>,
+}
+
 /// The words of `text` worth matching on: lowercase, three letters or
 /// more, the commonest words left out.
 fn words(text: &str) -> Vec<String> {
@@ -166,8 +177,16 @@ fn overlap(question: &[String], text: &str) -> usize {
     question.iter().filter(|w| theirs.contains(w)).count()
 }
 
-/// The pages that answer `question` (and show `about`), best first.
-fn find_pages(svc: &Services, p: &FindPageInput) -> Result<Value, CommandError> {
+/// The pages that answer `question` (and show `about`), best first. A
+/// resource page shows `about` when `pages::renderers` offers it for that
+/// uri; a standalone page when an answer of its says it is about the
+/// uri's resource.
+async fn find_pages(
+    svc: &Services,
+    p: &FindPageInput,
+    ctx: &crate::pages::spec::ViewContext,
+    viewer: &oxplow_domain::Actor,
+) -> Result<Value, CommandError> {
     let about = p
         .about
         .as_deref()
@@ -177,6 +196,14 @@ fn find_pages(svc: &Services, p: &FindPageInput) -> Result<Value, CommandError> 
                 .map_err(|e| invalid("/about", format!("`{u}` isn't an oxplow uri: {e}")))
         })
         .transpose()?;
+    let offered: Vec<String> = match &p.about {
+        Some(uri) => crate::pages::renderers::renderers_for(svc, uri, ctx, viewer)
+            .await
+            .into_iter()
+            .map(|r| r.page)
+            .collect(),
+        None => Vec::new(),
+    };
     let question = p.question.as_deref().map(words).unwrap_or_default();
     let extensions = svc.extension_catalog.unpinned(
         &svc.layout.project_dir,
@@ -191,11 +218,13 @@ fn find_pages(svc: &Services, p: &FindPageInput) -> Result<Value, CommandError> 
                 continue;
             }
             if let Some(kind) = &about {
-                let shows = page.renders.iter().any(|r| r == kind)
-                    || page
-                        .answers
+                let shows = if page.is_resource_page() {
+                    offered.contains(&page.id)
+                } else {
+                    page.answers
                         .iter()
-                        .any(|a| a.about.as_deref() == Some(kind));
+                        .any(|a| a.about.as_deref() == Some(kind))
+                };
                 if !shows {
                     continue;
                 }
@@ -267,13 +296,37 @@ fn find_pages(svc: &Services, p: &FindPageInput) -> Result<Value, CommandError> 
     Ok(json!({ "pages": pages }))
 }
 
+fn renderers_op(services: ServicesSlot) -> Op {
+    Op::new(
+        "pages.read",
+        "renderers",
+        schema::<RenderersInput>(),
+        false,
+        Handler::External(Arc::new(move |invocation: Invocation, input| {
+            let services = services.clone();
+            Box::pin(async move {
+                let p: RenderersInput = parse(input)?;
+                let svc = services.get()?;
+                let ctx = context(&svc, &invocation, p.stream_id.clone(), None).await?;
+                let renderers =
+                    crate::pages::renderers::renderers_for(&svc, &p.uri, &ctx, invocation.actor())
+                        .await;
+                Ok(HandlerOutput {
+                    result: json!({ "uri": p.uri, "renderers": renderers }),
+                    ..HandlerOutput::default()
+                })
+            })
+        })),
+    )
+}
+
 fn find_op(services: ServicesSlot) -> Op {
     Op::new(
         "pages.read",
         "find",
         schema::<FindPageInput>(),
         false,
-        Handler::External(Arc::new(move |_invocation: Invocation, input| {
+        Handler::External(Arc::new(move |invocation: Invocation, input| {
             let services = services.clone();
             Box::pin(async move {
                 let p: FindPageInput = parse(input)?;
@@ -284,8 +337,9 @@ fn find_op(services: ServicesSlot) -> Op {
                     ));
                 }
                 let svc = services.get()?;
+                let ctx = context(&svc, &invocation, None, None).await?;
                 Ok(HandlerOutput {
-                    result: find_pages(&svc, &p)?,
+                    result: find_pages(&svc, &p, &ctx, invocation.actor()).await?,
                     ..HandlerOutput::default()
                 })
             })
@@ -502,6 +556,7 @@ pub fn ops(services: ServicesSlot) -> Vec<Op> {
         show_op(services.clone()),
         run_op(services.clone()),
         find_op(services.clone()),
+        renderers_op(services.clone()),
         definition_op(services.clone()),
         run_action_op(services),
     ]
@@ -1199,6 +1254,73 @@ mod tests {
         )
         .await;
         assert_eq!(ids(&about), ["rank/mode"], "{about}");
+    }
+
+    /// `about` asks the one place that decides which pages draw a uri
+    /// (`pages::renderers`): a page whose `accepts` don't hold for the
+    /// uri's params is not found.
+    #[tokio::test]
+    async fn find_about_keeps_only_the_resource_pages_that_accept_the_uri() {
+        let (_dir, svc) = ranked(&[
+            (
+                "numeric",
+                format!(
+                    "title: Numeric\nfor: oxplow/commit\nparams: [{{ name: uri }}]\naccepts: {{ sha: '^[0-9]+$' }}\n{BODY}"
+                ),
+            ),
+            (
+                "any",
+                format!("title: Any\nfor: oxplow/commit\nparams: [{{ name: uri }}]\n{BODY}"),
+            ),
+        ])
+        .await;
+        let numeric = run(
+            &svc,
+            "oxplow.page.find",
+            json!({ "about": "oxplow:oxplow/commit?sha=1234" }),
+        )
+        .await;
+        assert_eq!(ids(&numeric), ["rank/any", "rank/numeric"], "{numeric}");
+        let hex = run(
+            &svc,
+            "oxplow.page.find",
+            json!({ "about": "oxplow:oxplow/commit?sha=abc1234" }),
+        )
+        .await;
+        assert_eq!(ids(&hex), ["rank/any"], "{hex}");
+    }
+
+    /// The bus command a page reads offers the same list as the window's.
+    #[tokio::test]
+    async fn renderers_lists_the_pages_that_can_draw_a_uri() {
+        let (_dir, svc) = ranked(&[
+            (
+                "numeric",
+                format!(
+                    "title: Numeric\nfor: oxplow/commit\nparams: [{{ name: uri }}]\naccepts: {{ sha: '^[0-9]+$' }}\n{BODY}"
+                ),
+            ),
+            (
+                "any",
+                format!("title: Any\nfor: oxplow/commit\nparams: [{{ name: uri }}]\n{BODY}"),
+            ),
+        ])
+        .await;
+        let out = run(
+            &svc,
+            "oxplow.page.renderers",
+            json!({ "uri": "oxplow:oxplow/commit?sha=1234#oxplow.renderer=rank/any" }),
+        )
+        .await;
+        let pages: Vec<&str> = out["renderers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|r| r["page"].as_str())
+            .filter(|p| p.starts_with("rank/"))
+            .collect();
+        assert_eq!(pages, ["rank/any", "rank/numeric"], "{out}");
+        assert!(out["renderers"][0]["title"].is_string(), "{out}");
     }
 
     #[tokio::test]

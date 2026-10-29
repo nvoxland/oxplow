@@ -2336,6 +2336,7 @@ mod tests {
                 "oxplow.page.find",
                 "oxplow.page.list_tabs",
                 "oxplow.page.open",
+                "oxplow.page.renderers",
                 "oxplow.page.run",
                 // A page's action runs its command through the bus as the
                 // page acting for the presser: the command's own record.

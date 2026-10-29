@@ -1274,6 +1274,11 @@ commands:
     scope: pages.read
     op: definition
     example: {"page": "oxplow-foundation/commit", "params": {"sha": "abc1234"}}
+  - name: page.renderers
+    summary: "The pages that can draw a uri, in the order Open With lists them: each `page` (`<extension>/<slug>`), its `title` and whether it is the `default`. A page is offered when its `for` names the uri's resource, its `accepts` hold for the uri's params, and — if it says `accepts: { content: <loader> }` — that loader of its own has a row (the daemon runs only that loader, 2 s at most; a failure is not offered). `oxplow_navigate` a uri with `#oxplow.renderer=<page>` to open it in one of them."
+    scope: pages.read
+    op: renderers
+    example: {"uri": "oxplow:oxplow/file?path=src/main.rs"}
   - name: page.run_action
     summary: "Press a page's action as the page acting for you. A whole-page action (the page's `actions`), or a node's (`node`, as `[node <id>]` names it in the page's text) — for a row action, `row` is the row it runs on (column → value, as `oxplow.page.run` returned it; it must be one of the node's rows). The command it declares runs as the page for you, so the same rules apply as if you ran it yourself."
     scope: pages.write

@@ -1,15 +1,12 @@
 /**
- * Which page renders a URI (`.context/pages-and-tabs.md` "Renderers"): the
- * declared pages whose `for` names its resource (an oxplow URI's
- * `<extension>/<name>`, a web page's scheme) and whose `accepts` hold for
- * its params. The URI's view picks among them (`#oxplow.renderer=
- * <extension>/<page>`); else its resource's default; else the first there
- * is; else none — and the caller shows foundation's fallback (`resource`).
- * Nothing here knows a resource: the declarations say it all.
+ * The window's side of renderers (`.context/pages-and-tabs.md` "Which page
+ * draws a URI"): the view keys the shell reads, which of the daemon's
+ * offered pages a URI's view picks, and the text of a tab. Which pages can
+ * draw a URI is the daemon's (`renderers_for`); nothing here decides it.
  */
-import type { Page, PageRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
+import type { Page, PageRun, Renderer, SqlCell } from "../tauri-bridge/generated/bindings.js";
 import { firstLoader } from "./firstLoader.js";
-import { formatUri, parseUri, typeOf } from "../uri/uri.js";
+import { formatUri, parseUri } from "../uri/uri.js";
 
 /** The view key that names a URI's renderer (`<extension>/<page>`). */
 export const RENDERER_VIEW_KEY = "oxplow.renderer";
@@ -25,65 +22,19 @@ export function pageView<T>(view: Record<string, T>): Record<string, T> {
   return Object.fromEntries(Object.entries(view).filter(([k]) => !k.startsWith("oxplow.")));
 }
 
-/** The schemes a page may render besides oxplow's resources. */
-const SCHEMES = ["https", "http"];
-
-/** What renders `id` is chosen by: an oxplow URI's resource, an http(s)
- *  URL's scheme; null for anything else. */
-export function renderedResourceOf(id: string): string | null {
-  const resource = typeOf(id);
-  if (resource !== null) return resource;
-  const scheme = /^([a-z][a-z0-9+.-]*):\/\//i.exec(id)?.[1]?.toLowerCase();
-  return scheme && SCHEMES.includes(scheme) ? scheme : null;
-}
-
-/** What renders a resource: a page file (`Page`, its `id`
- *  `<extension>/<slug>`). */
-export interface RendererDecl {
-  id: string;
-  extension: string;
-  slug: string;
-  for: string[];
-  accepts: Partial<Record<string, string>>;
-  default: boolean;
-}
-
-/** A renderer's name in a view (`<extension>/<page>`). */
-export function rendererName(page: RendererDecl): string {
-  return `${page.extension}/${page.slug}`;
-}
-
-/** Whether `page`'s `accepts` hold for `params`: each named param present,
- *  absent, or matching its pattern. */
-function takes(page: RendererDecl, params: Record<string, string>): boolean {
-  return Object.entries(page.accepts).every(([key, rule]) => {
-    const value = params[key];
-    if (rule === "present") return value !== undefined;
-    if (rule === "absent") return value === undefined;
-    return value !== undefined && new RegExp(rule ?? "").test(value);
-  });
-}
-
-/** The pages that render `id`, in the order the extensions list them. */
-export function renderersFor<P extends RendererDecl>(id: string, pages: readonly P[]): P[] {
-  const resource = renderedResourceOf(id);
-  if (resource === null) return [];
-  const params = parseUri(id)?.params ?? {};
-  return pages.filter((p) => p.for.includes(resource) && takes(p, params));
-}
-
-/** The page that renders `id` in `view`, or null when no page does. */
-export function rendererFor<P extends RendererDecl>(
-  id: string,
-  pages: readonly P[],
-  view: Record<string, unknown>,
-): P | null {
-  const candidates = renderersFor(id, pages);
+/** The page to draw a URI with, among `renderers` (what the daemon says
+ *  can draw it, `useRenderers`): the one `view` names
+ *  (`#oxplow.renderer=<extension>/<page>`), else the default, else the
+ *  first; null when none can — the caller shows foundation's fallback
+ *  (`resource`). A name the view gives that the daemon doesn't offer is
+ *  ignored. Which pages those are is decided in the daemon alone
+ *  (`pages/renderers.rs`). */
+export function pickRenderer(renderers: readonly Renderer[], view: Record<string, unknown>): Renderer | null {
   const named = view[RENDERER_VIEW_KEY];
   return (
-    (typeof named === "string" ? candidates.find((p) => rendererName(p) === named) : undefined) ??
-    candidates.find((p) => p.default) ??
-    candidates[0] ??
+    (typeof named === "string" ? renderers.find((r) => r.page === named) : undefined) ??
+    renderers.find((r) => r.default) ??
+    renderers[0] ??
     null
   );
 }

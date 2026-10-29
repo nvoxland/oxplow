@@ -107,7 +107,7 @@ oxplow:github/pr?id=12
   `part=request|response` (a model call's), `part=result` (a subagent's
   last message). Keys core will read from now on are `oxplow.*`
   (`#oxplow.renderer=<extension>/<page>` is a view key the desktop reads:
-  it picks which renderer draws the URI when several declare it).
+  it picks which renderer draws the URI when the daemon offers several).
 - **A revision is a param.** `rev=git:HEAD`, `rev=snap:3`: the
   `Revision` strings (`revision.ts`), never `@…`. Only files, directories
   and symbols take one. What a `rev` means belongs to the file's
@@ -330,9 +330,11 @@ A tab's id is its URI (`TabRef.id`; a web page's is its URL), and a
 `TabRef` is `{ id, pinned? }`: there is no kind and no payload, so the
 desktop reads a tab from its URI (`typeOf`, `paramOf`). `apps/desktop/src/resources.ts` reads
 `v_resource` (icons, labels, an extension's wikilink prefixes). **A page
-is a renderer of a resource**: which one draws a URI comes from the
-`pages[].for` declarations, then the `#oxplow.renderer=` view key, then
-the page marked `default`, then the first (`pages/renderers.ts`,
+is a renderer of a resource**: the daemon says which pages can draw a
+URI (`pages/renderers.rs`: `for`, `accepts` over the URI's params, then
+`accepts.content` over what it names; `oxplow.page.renderers`), and the
+window picks the `#oxplow.renderer=` view key's, else the page marked
+`default`, else the first (`pickRenderer`,
 [pages-and-tabs.md](./pages-and-tabs.md) "Renderers"). A URI nothing
 renders (no page, or no row in its dataset) opens on foundation's
 fallback `resource` page: its label and params, or the raw URI muted as

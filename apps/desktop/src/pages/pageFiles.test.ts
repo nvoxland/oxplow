@@ -1,18 +1,16 @@
 import { describe, expect, test } from "bun:test";
 
-import type { Extension, PageParam, Page } from "../tauri-bridge/generated/bindings.js";
+import type { Extension, PageParam, Page, Renderer } from "../tauri-bridge/generated/bindings.js";
 import { fakeAction, fakePage, node } from "./testing/fakeRun.js";
 import {
   chooseRenderer,
   chooseRoute,
-  openWithOptions,
+  pageFileById,
   pageFileOf,
-  pageFileRenderers,
   pageFileUri,
   pageRunParams,
   pageViewChange,
 } from "./pageFiles.js";
-import { rendererFor, rendererName, renderersFor } from "./renderers.js";
 
 const file = (extension: string, slug: string, over: Partial<Page> = {}): Page =>
   fakePage(node.viz("items", "items"), { id: `${extension}/${slug}`, extension, slug, title: slug, ...over });
@@ -44,23 +42,16 @@ describe("a route's page file", () => {
   });
 });
 
-describe("renderers over page files", () => {
-  const editor = file("oxplow-foundation", "editor", { for: ["oxplow/file"], accepts: { rev: "absent", filesystem: "absent" }, default: true });
-  const viewer = file("oxplow-foundation", "file-viewer", { for: ["oxplow/file"] });
+describe("a renderer's page file", () => {
+  const editor = file("oxplow-foundation", "editor", { for: ["oxplow/file"] });
   const blame = file("acme", "blame", { for: ["oxplow/file"] });
-  const all = [ext("oxplow-foundation", "oxplow", [tasks, editor, viewer]), ext("acme", "acme", [blame])];
+  const all = [ext("oxplow-foundation", "oxplow", [tasks, editor]), ext("acme", "acme", [blame], false)];
 
-  test("only the pages that render something, by the same match rules", () => {
-    const renderers = pageFileRenderers(all);
-    expect(renderers.map((p) => p.id)).toEqual(["oxplow-foundation/editor", "oxplow-foundation/file-viewer", "acme/blame"]);
-    expect(renderersFor("oxplow:oxplow/file?path=a.ts", renderers).map((p) => p.id)).toEqual(["oxplow-foundation/editor", "oxplow-foundation/file-viewer", "acme/blame"]);
-    expect(renderersFor("oxplow:oxplow/file?path=a.ts&filesystem=oxplow:temp", renderers).map((p) => p.id)).toEqual(["oxplow-foundation/file-viewer", "acme/blame"]);
-    expect(rendererFor("oxplow:oxplow/file?path=a.ts&rev=git:HEAD", renderers, {})?.id).toBe("oxplow-foundation/file-viewer");
-    expect(rendererFor("oxplow:oxplow/file?path=a.ts", renderers, { "oxplow.renderer": "acme/blame" })?.id).toBe("acme/blame");
-  });
-
-  test("a page file's renderer name is its id, as a declared page's is `<extension>/<id>`", () => {
-    expect(rendererName(blame)).toBe("acme/blame");
+  test("is found by its id among the enabled extensions' pages", () => {
+    expect(pageFileById(all, "oxplow-foundation/editor")).toBe(editor);
+    // Disabled, or not there: nothing.
+    expect(pageFileById(all, "acme/blame")).toBeNull();
+    expect(pageFileById(all, "acme/gone")).toBeNull();
   });
 });
 
@@ -126,17 +117,16 @@ describe("what draws a tab", () => {
     expect(chooseRoute(exts2, { extension: null, page: "gone", params: {} })).toBeNull();
   });
 
-  test("a resource: its page file renderer — a component's too — else nothing (the fallback draws it)", () => {
-    expect(chooseRenderer(exts2, "oxplow:oxplow/commit?sha=abc", {})).toBe(commit);
-    expect(chooseRenderer(exts2, "oxplow:oxplow/file?path=a", {})).toBe(editorFile);
-    expect(chooseRenderer(exts2, "oxplow:oxplow/page?page=a/b", {})).toBeNull();
-    expect(chooseRenderer(exts2, "oxplow:oxplow/nothing?id=1", {})).toBeNull();
-  });
+  const offer = (...pages: Page[]): Renderer[] => pages.map((p) => ({ page: p.id, title: p.title, default: p.default }));
 
-  test("Open With lists every renderer once by name", () => {
-    const blame = file("acme", "blame", { title: "Blame", for: ["oxplow/commit"] });
-    const all = [...exts2, ext("acme", "acme", [blame])];
-    expect(openWithOptions(all, "oxplow:oxplow/commit?sha=abc").map((o) => o.name)).toEqual(["oxplow-foundation/commit", "acme/blame"]);
+  test("a resource: the page file of the renderer the daemon offered — a component's too — else nothing (the fallback draws it)", () => {
+    expect(chooseRenderer(exts2, offer(commit), {})).toBe(commit);
+    expect(chooseRenderer(exts2, offer(editorFile), {})).toBe(editorFile);
+    expect(chooseRenderer(exts2, [], {})).toBeNull();
+    // The view's pick, among what was offered.
+    expect(chooseRenderer(exts2, offer(editorFile, commit), { "oxplow.renderer": "oxplow-foundation/commit" })).toBe(commit);
+    // Offered, but no longer a page file (the extensions just reloaded): the fallback.
+    expect(chooseRenderer(exts2, [{ page: "acme/gone", title: "Gone", default: true }], {})).toBeNull();
   });
 
   // Mounts in a page's slots never move it off its file.

@@ -157,6 +157,18 @@ pub async fn get_page(svc: &Services, id: String) -> Result<Page, IpcError> {
         .find_page(svc.worktrees.project_dir(), &id)?)
 }
 
+/// The pages that can draw `uri`, in the order the extensions list them
+/// (`oxplow_app::pages::renderers`): the window's one way to choose what
+/// draws a tab and what Open With lists.
+pub async fn renderers_for(
+    svc: &Services,
+    uri: String,
+    stream_id: Option<String>,
+) -> Result<Vec<oxplow_app::pages::renderers::Renderer>, IpcError> {
+    let ctx = context(svc, stream_id.as_deref(), None).await;
+    Ok(oxplow_app::pages::renderers::renderers_for(svc, &uri, &ctx, &Actor::Human).await)
+}
+
 /// The YAML a visual page edit starts from. Writable pages read their
 /// primary source, including edits not yet deployed, so saving a tile
 /// does not silently replace those edits with the deployed copy.

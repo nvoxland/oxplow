@@ -109,6 +109,7 @@ export function fakePage(view: Node, over: Partial<Page> = {}): Page {
     params: [],
     for: [],
     accepts: {},
+    acceptsContent: null,
     default: false,
     pinned: false,
     comments: false,

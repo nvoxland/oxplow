@@ -1,47 +1,26 @@
 import { describe, expect, test } from "bun:test";
 
-import type { Page } from "../tauri-bridge/generated/bindings.js";
+import type { Page, Renderer } from "../tauri-bridge/generated/bindings.js";
 import { fakePage, node } from "./testing/fakeRun.js";
-import { RENDERER_VIEW_KEY, pageView, renderedResourceOf, rendererFor, renderersFor, shellView, tabLabel, withRenderedParams } from "./renderers.js";
+import { RENDERER_VIEW_KEY, pageView, pickRenderer, shellView, tabLabel, withRenderedParams } from "./renderers.js";
 
 const page = (id: string, more: Partial<Page> = {}): Page =>
   fakePage(node.markdown("v", ""), { id, extension: "oxplow-foundation", slug: id, title: id, ...more });
-const editor = page("editor", { for: ["oxplow/file"], accepts: { rev: "absent", filesystem: "absent" }, default: true });
-const viewer = page("file-viewer", { for: ["oxplow/file"] });
-const blame = page("blame", { extension: "acme", for: ["oxplow/file"] });
-const prs = page("pr", { extension: "acme", for: ["acme/pr"], accepts: { id: "^[0-9]+$" } });
-const web = page("external-url", { for: ["https", "http"], default: true });
-const pages = [editor, viewer, blame, prs, web, page("tasks")];
+const r = (name: string, over: Partial<Renderer> = {}): Renderer => ({ page: name, title: name, default: false, ...over });
 
-describe("renderedResourceOf", () => {
-  test("an oxplow URI's resource, an http(s) URL's scheme, else nothing", () => {
-    expect(renderedResourceOf("oxplow:oxplow/file?path=a.ts")).toBe("oxplow/file");
-    expect(renderedResourceOf("https://example.com/a")).toBe("https");
-    expect(renderedResourceOf("ftp://example.com/a")).toBeNull();
-    expect(renderedResourceOf("not a uri")).toBeNull();
-  });
-});
+describe("pickRenderer", () => {
+  const offered = [r("oxplow-foundation/editor", { default: true }), r("oxplow-foundation/file-viewer"), r("acme/blame")];
 
-describe("renderers", () => {
-  test("the pages for a URI's resource whose `accepts` hold for its params", () => {
-    expect(renderersFor("oxplow:oxplow/file?path=a.ts", pages).map((p) => p.id)).toEqual(["editor", "file-viewer", "blame"]);
-    expect(renderersFor("oxplow:oxplow/file?path=a.ts&rev=git:HEAD", pages).map((p) => p.id)).toEqual(["file-viewer", "blame"]);
-    // The editor edits only the local working tree: another filesystem's file is the viewer's.
-    expect(renderersFor("oxplow:oxplow/file?path=a.ts&filesystem=oxplow:temp", pages).map((p) => p.id)).toEqual(["file-viewer", "blame"]);
-    expect(renderersFor("oxplow:acme/pr?id=12", pages).map((p) => p.id)).toEqual(["pr"]);
-    expect(renderersFor("oxplow:acme/pr?id=x", pages)).toEqual([]);
-    expect(renderersFor("https://example.com", pages).map((p) => p.id)).toEqual(["external-url"]);
-  });
-
-  test("the view's renderer, else the default, else the one there is, else none", () => {
-    expect(rendererFor("oxplow:oxplow/file?path=a.ts", pages, {})?.id).toBe("editor");
-    expect(rendererFor("oxplow:oxplow/file?path=a.ts", pages, { [RENDERER_VIEW_KEY]: "acme/blame" })?.id).toBe("blame");
-    // A renderer the view names that doesn't take this URI is ignored.
-    expect(rendererFor("oxplow:oxplow/file?path=a.ts", pages, { [RENDERER_VIEW_KEY]: "acme/pr" })?.id).toBe("editor");
-    // No default among them: the first, as the extensions list them.
-    expect(rendererFor("oxplow:oxplow/file?path=a.ts&rev=git:HEAD", pages, {})?.id).toBe("file-viewer");
-    expect(rendererFor("oxplow:acme/pr?id=12", pages, {})?.id).toBe("pr");
-    expect(rendererFor("oxplow:oxplow/commit?sha=abc", pages, {})).toBeNull();
+  test("the view's renderer, else the default, else the first, else none", () => {
+    expect(pickRenderer(offered, {})?.page).toBe("oxplow-foundation/editor");
+    expect(pickRenderer(offered, { [RENDERER_VIEW_KEY]: "acme/blame" })?.page).toBe("acme/blame");
+    // A renderer the view names that the daemon doesn't offer for this URI is ignored.
+    expect(pickRenderer(offered, { [RENDERER_VIEW_KEY]: "acme/pr" })?.page).toBe("oxplow-foundation/editor");
+    expect(pickRenderer(offered, { [RENDERER_VIEW_KEY]: 7 })?.page).toBe("oxplow-foundation/editor");
+    // No default among them: the first, as the daemon lists them.
+    expect(pickRenderer(offered.slice(1), {})?.page).toBe("oxplow-foundation/file-viewer");
+    expect(pickRenderer([], {})).toBeNull();
+    expect(pickRenderer([], { [RENDERER_VIEW_KEY]: "acme/blame" })).toBeNull();
   });
 });
 

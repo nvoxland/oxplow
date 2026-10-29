@@ -96,27 +96,56 @@ browser regression checks usable terminal height before and after reload.
 
 A URI names a thing; a **page** is one **renderer** of it. A tab's id is
 the URI it shows, and nothing in the desktop keeps a list of page kinds.
-Which page draws a URI comes from the page files' declarations
-(`pages/renderers.ts`, `chooseRenderer` in `pages/pageFiles.ts`, "The
-desktop host"):
 
-1. The pages whose `for` names the URI's resource (an oxplow resource
-   `<extension>/<name>`, or the scheme `https` / `http` for a web page)
-   and whose `accepts` hold for its params.
-2. The view key `#oxplow.renderer=<extension>/<page>` picks among them.
-3. Else the page with `default: true`; else the first.
-4. Else foundation's `resource` page (`pages/ResourcePage.tsx`): the
+**Which page draws a URI** (the daemon decides which pages *can*; the
+window picks among them):
+
+*Which can.* One place, `pages/renderers.rs` `renderers_for(svc, uri, ctx,
+viewer) -> Vec<Renderer { page, title, default }>`. The desktop (RPC
+`renderers_for { uri, stream_id }`), an agent (the read command
+`oxplow.page.renderers { uri, stream_id? }`) and `oxplow_find_page { about }`
+all ask it. A page is offered for a URI when, in this order,
+
+1. its `for` names the URI's resource (an oxplow resource
+   `<extension>/<name>`, or the scheme `https` / `http` for a web page);
+2. its `accepts` hold for the URI's params: each named param `present`,
+   `absent` or matching its anchored pattern (`param_pattern`); and
+3. when it says `accepts: { content: <loader> }` (`Page.accepts_content`;
+   at load the name must be a loader of the page, and neither it nor
+   anything it reads may be a `page` loader), that loader yields at least
+   one row.
+
+The list is in the order the enabled extensions list their pages. Step 3
+runs only that loader's dependency chain (`Page::loader_chain`: `sql`,
+`rows`, a read-only `command`, and the system's `content`) as the viewer,
+for the stream the call names. Each check has 2 seconds and 1 MiB
+(`ACCEPT_TIMEOUT`, `ACCEPT_RESULT_BYTES`); an error, a timeout or a
+command that is not a read means the page is not offered, never an error
+to the caller. The URI's `content` is resolved once per call, and only
+when a page that passed steps 1-2 reads it to decide: with `text` if one
+of them asks for text (`content: { text: true }`), at the largest
+`max_bytes` among them. The checks of the pages run at once.
+
+*Which one.* `pickRenderer(list, view)` (`pages/renderers.ts`), from the
+daemon's list:
+
+1. The view key `#oxplow.renderer=<extension>/<page>` names one of them
+   (a name not in the list is ignored).
+2. Else the page with `default: true`; else the first.
+3. Else (an empty list) foundation's `resource` page (`pages/ResourcePage.tsx`): the
    resource's label and params, or the raw URI muted as a dead link when
    nothing declares the resource or its dataset has no row. Never an
    error, never a toast.
 
 **Open With** in the nav bar's ☰ (a submenu, `menu-item-page-open-with`,
 each renderer `menu-item-page-open-with-<extension>/<page>`, the one
-drawing it checked) lists the renderers when there are several. Picking one is a view change
+drawing it checked) lists the daemon's list (`PageNavigation.renderers`)
+when it has several. Picking one is a view change
 (Back returns to the first). `App.tsx` `renderTab` draws a route
 (`oxplow:oxplow/page?page=…`) through `routeTab` (its page file, else
 `MissingPage`), an ephemeral view (`oxplow:oxplow/view?id=…`) through
-`EphemeralView`, and anything else through its renderer's page file, else
+`EphemeralView`, and anything else through the page file of the renderer
+`chooseRenderer` picks from the daemon's list, else
 `builtInPages.resource` (the fallback, the one built-in). Every page draws
 in `PageFileView` / `PageHost`; the desktop reads every page from a
 page file. A pinned renderer's tab
@@ -487,19 +516,39 @@ that one), `submit_page_form` submits it as the page for the person, and
 start. A whole-page action may read `{{row.x}}` / `when:`: the first
 loader's one row.
 
+**The renderers cache** (`pages/useRenderers.ts`). The window asks
+`renderers_for` once per identity (the URI without its `#` view) and
+stream and keeps the promise (`createRenderersCache`, the window's
+`renderersCache`); a failed ask is an empty list (the fallback page draws
+the URI) and is recorded as an operation error. The cache is keyed with
+the extensions: whenever `useExtensions` loads a new array (a deploy, a
+reconnect) every list is dropped and asked again, and an answer that
+arrives after is discarded. A list is *not* refreshed when a file's
+content changes, so a page with `accepts.content` is judged on the
+content as of the first ask until the extensions reload. Routing stays
+synchronous: `App.tsx` lists the URIs of the thread's tab bodies
+(`drawnByRenderer`: not a route, an inline view or a symbol) and
+`useRenderers` fetches them in an effect; `renderTab` reads the settled
+list (`renderersOf(uri)`), and a tab whose first ask is still pending
+draws a brief "Loading…" (`TabLoading`) until it settles, which
+re-renders the tabs (the lookup is a new function). `openRef`'s `open`
+starts the ask before the tab exists, so a link usually opens on an
+answer. The tab's nav context carries the list as `renderers` for Open
+With.
+
 **The desktop host** (`apps/desktop/src/pages/PageHost.tsx`). `App.tsx`
 draws a tab from its page file first (`pages/pageFiles.ts`):
 `chooseRoute` finds a route's page by id (`pageFileOf`: oxplow's — the
 `oxplow` namespace, `CORE_NAMESPACE` — by its slug, any other's by
-`<extension>/<slug>`), `chooseRenderer` a resource URI's among the page
-files' `for` / `accepts` / `#oxplow.renderer=` / `default`. Nothing else
+`<extension>/<slug>`), `chooseRenderer` a resource URI's: the page file
+named by `pickRenderer` over the daemon's `renderers_for` list
+("Renderers"; `pages/useRenderers.ts`). Nothing else
 draws a tab (a page's slot shows only the pages mounted there). oxplow-foundation and
 oxplow-bundled both have `namespace: oxplow` and share the core page
 names, so a slug one of them declares the other may not
 (`pages::schema::refuse_shared_core_pages`: the later in load order loses
 that page with a load error; bundled's panel bodies are
-`comments-panel` and `go-to-panel` for that reason). Open With lists every
-page file that renders the URI by name (`openWithOptions`). The tab body is `PageFileView`: its run's
+`comments-panel` and `go-to-panel` for that reason). Open With lists the same daemon list. The tab body is `PageFileView`: its run's
 params are the entry's URI (`pageRunParams`: the `?` params — a
 renderer's `uri` and its resource's own — and the `#` params the page
 declares as a filter or a selection; a param with no role is a resource),

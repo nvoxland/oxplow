@@ -221,6 +221,11 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
+	renderersFor: (uri: string, streamId: string | null) => typedError<Renderer[], IpcError_Serialize>(__TAURI_INVOKE("renderers_for", { uri, streamId })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	pageSpec: (page: string) => typedError<PageSpec, IpcError_Serialize>(__TAURI_INVOKE("page_spec", { page })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -4732,7 +4737,17 @@ export type Page_Deserialize = {
 	params: PageParam[],
 	/**  The resources it renders (`oxplow/commit`); empty: a route. */
 	for: string[],
+	/**
+	 *  Per URI param of the resource it renders: `present`, `absent` or an
+	 *  id pattern its value must match.
+	 */
 	accepts: { [key in string]: string },
+	/**
+	 *  `accepts: { content: <loader> }`: one of its own loaders, which
+	 *  must yield a row for the page to be offered for a URI
+	 *  (`pages/renderers.rs`).
+	 */
+	acceptsContent: string | null,
 	default: boolean,
 	pinned: boolean,
 	comments: boolean,
@@ -4781,7 +4796,17 @@ export type Page_Serialize = {
 	params: PageParam[],
 	/**  The resources it renders (`oxplow/commit`); empty: a route. */
 	for: string[],
+	/**
+	 *  Per URI param of the resource it renders: `present`, `absent` or an
+	 *  id pattern its value must match.
+	 */
 	accepts: { [key in string]: string },
+	/**
+	 *  `accepts: { content: <loader> }`: one of its own loaders, which
+	 *  must yield a row for the page to be offered for a URI
+	 *  (`pages/renderers.rs`).
+	 */
+	acceptsContent: string | null,
 	default: boolean,
 	pinned: boolean,
 	comments: boolean,
@@ -5062,6 +5087,15 @@ export type Relationship = {
 export type RelationshipDecl = {
 	from: string,
 	to: string,
+};
+
+/**  A page that can draw a URI. */
+export type Renderer = {
+	/**  `<extension>/<slug>`; what a view's `oxplow.renderer` names. */
+	page: string,
+	title: string,
+	/**  The page's own `default` flag. */
+	default: boolean,
 };
 
 /**

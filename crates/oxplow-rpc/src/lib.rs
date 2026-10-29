@@ -250,6 +250,7 @@ macro_rules! oxplow_command_table {
                 run_page => $crate::commands::pages::run_page { page: Option<String>, spec_yaml: Option<String>, params: Option<::std::collections::BTreeMap<String, ::oxplow_db::SqlCell>>, stream_id: Option<String> } -> ::oxplow_app::pages::runner::PageRun,
                 page_text => $crate::commands::pages::page_text { run_id: String } -> String,
                 get_page => $crate::commands::pages::get_page { id: String } -> ::oxplow_app::pages::schema::Page,
+                renderers_for => $crate::commands::pages::renderers_for { uri: String, stream_id: Option<String> } -> Vec<::oxplow_app::pages::renderers::Renderer>,
                 page_spec => $crate::commands::pages::page_spec { page: String } -> $crate::commands::pages::PageSpec,
                 page_form => $crate::commands::pages::page_form { run_id: String, node: String } -> ::oxplow_app::viz_actions::FormStart,
                 submit_page_form => $crate::commands::pages::submit_page_form { run_id: String, node: String, input: ::oxplow_domain::Json, confirmed: bool } -> ::oxplow_domain::CommandOutcome,

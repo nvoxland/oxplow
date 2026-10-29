@@ -723,6 +723,15 @@ the user guide is `docs/guide/pages.md`.
       params); a value is `present`, `absent` or an anchored id pattern
       (the `param_pattern` subset). A renderer shows a URI only when every
       rule holds.
+    - `accepts: { content: <loader> }` (the key `content`, not a param)
+      names one of the page's own loaders (or the system's `content`); the
+      page is offered for a URI only if that loader yields a row. It is a
+      load error if the name isn't a loader of the page, if it (or what
+      it reads) is a `page` loader, or on a page with no `for`. The daemon
+      runs only that loader's dependency chain (`sql`, `rows`, a read-only
+      `command`, `content`) with 2 s and 1 MiB; a failure is not offered.
+      Which pages draw a URI is `pages/renderers.rs`, asked by
+      `oxplow.page.renderers { uri }` (pages-and-tabs.md "Renderers").
     - `default: true` is only for a resource the extension declares (or,
       for oxplow's namespace, a scheme), and one page per resource. An
       extension that renders another's resource adds a renderer to pick
@@ -4217,8 +4226,8 @@ and `useResources` subscribes to:
   keeps the two lists equal; or the extension's own svg, drawn as an image)
   and label;
 - opening a URI of the resource (`openRef`, resources.md "The desktop")
-  opens it as itself, drawn by the renderer the `pages[].for`
-  declarations pick (`pages/renderers.ts`); a page renderer is run with
+  opens it as itself, drawn by the renderer the daemon offers
+  (`pages/renderers.rs`) and the window picks (`pickRenderer`); a page renderer is run with
   `{ uri }`, a URI nothing renders shows on the fallback `resource` page;
 - `preprocessWikilinks` turns `[[pr:12]]` into a link when the value
   matches the param's pattern (`extensionWikilinkRef`, as the backend's
@@ -5157,7 +5166,11 @@ tool: open_work              # offered as <namespace>_open_work
   extensions and what they contribute.
 - `oxplow_find_page { question?, about? }` (`oxplow.page.find`): the pages
   that answer a question, each with its params. Look here before writing SQL
-  for something a person will look at.
+  for something a person will look at. With `about`, a resource page is
+  found when `pages/renderers.rs` offers it for that uri.
+- `oxplow.page.renderers { uri, stream_id? }` (through `run_command`): the
+  pages that can draw a uri, in Open With's order (`page`, `title`,
+  `default`), as the window's `renderers_for` lists them.
 - `oxplow_run_page { page | spec, params?, format?, loader?, draft? }`
   (`oxplow.page.run`): **what the UI shows** for those params, as the
   page's text by default, or with `format: "json"` each loader's columns

@@ -126,6 +126,17 @@ params fit; `default: true` (only for a resource your extension declares)
 makes it the page a plain open uses; `pinned: true` pins its tabs. Params
 named like the URI's (`uri`, `sha`, `path`) are filled from it.
 
+`accepts: { content: <loader> }` also looks at what the URI names: the
+loader (one of your page's own, or `content` itself) must yield at least
+one row, or the page is not offered for that URI. Example: `accepts: { path:
+'^[\w./-]+\.yaml$', content: is_page }` with `is_page: { sql: "SELECT 1 AS n
+FROM content WHERE text LIKE '%loaders:%'" }` (and `content: { text: true }`).
+The daemon decides this alone, and runs only that loader and what it reads:
+`sql`, `rows`, a read-only `command`, `content`. Not a `page` loader (the load
+refuses it). It has 2 seconds and 1 MiB; a loader that fails or is slow means
+the page is not offered, so keep it cheap. `oxplow.page.renderers { uri }`
+says which pages a URI is offered to.
+
 ## `answers:` — how agents and tests find a page
 
 ```yaml

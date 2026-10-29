@@ -792,3 +792,71 @@ fn a_tab_says_its_label_filled_from_params_and_its_row() {
     )]);
     assert_eq!(tab_label(&p, &params, None), "example.com/a/b");
 }
+
+/// `accepts: { content: <loader> }` names one of the page's own loaders;
+/// the page is offered only when that loader has a row. It is a key of
+/// `accepts` that is not a URI param, so it is kept apart.
+#[test]
+fn accepts_content_names_a_loader_of_the_page() {
+    let p = page(
+        "title: T\nfor: oxplow/file\nparams: [{ name: uri }]\naccepts: { path: '^[a-z]+\\.yaml$', content: yes }\n\
+         loaders:\n  yes: { sql: \"SELECT 1 AS n FROM content\" }\nview: { viz: table, from: yes }\n",
+    )
+    .unwrap();
+    assert_eq!(p.accepts_content.as_deref(), Some("yes"));
+    // The other `accepts` keys stay URI params.
+    assert_eq!(p.accepts.keys().collect::<Vec<_>>(), ["path"]);
+    // The system's own loader is one of the page's.
+    let p = page(&format!(
+        "title: T\nfor: oxplow/file\nparams: [{{ name: uri }}]\naccepts: {{ content: content }}\n{BODY}"
+    ))
+    .unwrap();
+    assert_eq!(p.accepts_content.as_deref(), Some("content"));
+}
+
+#[test]
+fn accepts_content_refuses_what_cannot_be_asked_cheaply() {
+    let with = |accepts: &str, loaders: &str| {
+        format!(
+            "title: T\nfor: oxplow/file\nparams: [{{ name: uri }}]\naccepts: {{ {accepts} }}\nloaders:\n{loaders}view: {{ viz: table, from: content }}\n"
+        )
+    };
+    let why = refused(&with("content: nope", "  a: { rows: [{ n: 1 }] }\n"));
+    assert!(
+        why.contains("`accepts: content: nope`") && why.contains("isn't a loader"),
+        "{why}"
+    );
+    let why = refused(&with(
+        "content: borrowed",
+        "  borrowed: { page: acme/other, loader: q }\n",
+    ));
+    assert!(why.contains("`page` loader"), "{why}");
+    // The chain it reads is checked too.
+    let why = refused(&with(
+        "content: after",
+        "  borrowed: { page: acme/other, loader: q }\n  after: { sql: \"SELECT * FROM borrowed\" }\n",
+    ));
+    assert!(
+        why.contains("`page` loader") && why.contains("borrowed"),
+        "{why}"
+    );
+    // A standalone page has no resource to look at.
+    let why = refused(
+        "title: T\naccepts: { content: q }\nloaders:\n  q: { rows: [{ n: 1 }] }\nview: { viz: table, from: q }\n",
+    );
+    assert!(
+        why.contains("accepts: content") && why.contains("for:"),
+        "{why}"
+    );
+}
+
+/// A loader's dependency chain: itself and everything it reads, declared order.
+#[test]
+fn a_loaders_chain_is_what_it_reads_and_nothing_else() {
+    let p = page(
+        "title: T\nfor: oxplow/file\nparams: [{ name: uri }]\nloaders:\n  a: { sql: \"SELECT 1 AS n FROM content\" }\n  b: { sql: \"SELECT n FROM a\" }\n  c: { rows: [{ x: 1 }] }\n  d: { sql: \"SELECT n FROM b\" }\nview: { viz: table, from: d }\n",
+    )
+    .unwrap();
+    assert_eq!(p.loader_chain("d"), ["content", "a", "b", "d"]);
+    assert_eq!(p.loader_chain("c"), ["c"]);
+}

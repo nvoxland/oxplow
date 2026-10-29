@@ -2582,7 +2582,7 @@ fn renderer_problem(
         .map(|(_, n)| n.clone())
         .collect();
     if renders.is_empty() {
-        if p.default || p.pinned || !p.accepts.is_empty() {
+        if p.default || p.pinned || !p.accepts.is_empty() || p.accepts_content.is_some() {
             return Err(
                 "`default`, `pinned` and `accepts` are for a renderer: give it `for`".into(),
             );

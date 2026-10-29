@@ -21,7 +21,6 @@
 
 import type { TabRef } from "./tabState.js";
 import { classifyExternalUrl } from "../external-url-allowlist.js";
-import { renderedResourceOf } from "../pages/renderers.js";
 import {
   WORKING,
   type Revision,
@@ -127,7 +126,7 @@ export function isPage(ref: TabRef | null | undefined, page: string, extension: 
 export function recordedPageKind(ref: TabRef): string {
   const p = pagePayload(ref);
   if (p) return p.extension ? `${p.extension}/${p.page}` : p.page;
-  return renderedResourceOf(ref.id) ?? "link";
+  return typeOf(ref.id) ?? /^(https?):\/\//i.exec(ref.id)?.[1]?.toLowerCase() ?? "link";
 }
 
 

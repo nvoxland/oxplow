@@ -42,6 +42,8 @@ import { UndoToastStack } from "./components/UndoToast.js";
 import { identityOf, keyOf, pageUri, paramOf, parseUri, typeOf } from "./uri/uri.js";
 import { shellView, tabLabel } from "./pages/renderers.js";
 import { chooseRenderer, chooseRoute } from "./pages/pageFiles.js";
+import { drawnByRenderer, renderersCache, useRenderers } from "./pages/useRenderers.js";
+import type { Extension } from "./tauri-bridge/generated/bindings.js";
 import { PageFileView } from "./pages/PageFileView.js";
 import { EphemeralView } from "./pages/EphemeralView.js";
 import { PersonCommandConfirm } from "./components/PersonCommandConfirm.js";
@@ -188,6 +190,11 @@ function homeTabOf(tabs: TabRef[]): string {
     tabs[0]?.id ??
     HOME_TAB
   );
+}
+
+/** What a tab shows while the daemon says which page draws it. */
+function TabLoading() {
+  return <div style={{ padding: "8px 12px", color: "var(--text-muted)", fontSize: "var(--text-xs)" }}>Loading…</div>;
 }
 
 /** The params a tab's label and renderer are given: an oxplow URI's, and for
@@ -1229,9 +1236,17 @@ export function App() {
    * page contexts built in a memo always call the latest.
    */
   const openRefRef = useRef<(ref: string, how: import("./tabs/openRef.js").OpenHow, open: import("./tabs/openRef.js").RefHost["open"], closePage?: () => void) => void>(() => {});
+  const extensionsRef = useRef<Extension[] | null>(null);
   openRefRef.current = (ref, how, open, closePage) => {
     void openRefAt(ref, how, {
-      open,
+      // The daemon is asked which page draws the tab before the tab is
+      // there, so it usually has an answer when it first draws.
+      open: (tab, h) => {
+        if (extensionsRef.current && drawnByRenderer(tab.id)) {
+          void renderersCache.prefetch(extensionsRef.current, tab.id, stream?.id ?? null);
+        }
+        open(tab, h);
+      },
       closePage,
       showThread: async (thread) => {
         const streamId = streamOfThread(threadStatesRef.current, thread);
@@ -1574,7 +1589,18 @@ export function App() {
   );
 
   const extensions = useExtensions();
+  extensionsRef.current = extensions;
   const foundationErrors = foundationDown(extensions);
+  // Which pages can draw each tab of the thread: the daemon's list
+  // (`pages/useRenderers.ts`), fetched as tabs appear and remembered.
+  const rendererUris = useMemo(
+    () =>
+      (selectedThreadId ? (sessions[selectedThreadId]?.tabs ?? []) : []).flatMap((t) =>
+        bodies(t).map((b) => b.entry.ref.id).filter(drawnByRenderer),
+      ),
+    [sessions, selectedThreadId],
+  );
+  const renderersOf = useRenderers(extensions, rendererUris, stream?.id ?? null);
   const centerTabs: CenterTab[] = useMemo(() => {
     const tabs: CenterTab[] = [];
     // Every tab is a session tab (`tabs/session.ts`): files, diffs, agent
@@ -1615,7 +1641,10 @@ export function App() {
       if (typeOf(ref.id) === "oxplow/symbol") return null;
       // Until the extensions load, nothing says what renders it.
       if (extensions === null) return { id: ref.id, label: "", closable: true, render: () => null };
-      const file = chooseRenderer(extensions, ref.id, viewParamsOf(ref));
+      // The first ask for this URI hasn't answered: a moment of nothing.
+      const renderers = renderersOf(ref.id);
+      if (renderers === undefined) return { id: ref.id, label: "", closable: true, render: () => <TabLoading /> };
+      const file = chooseRenderer(extensions, renderers, viewParamsOf(ref));
       // A renderer's page file runs with the URI it shows and the
       // resource's own params; nothing renders it: foundation's fallback.
       if (file) return pageFileTab(file, ref, nav, { ...renderedParams(ref.id), uri: identityOf(ref.id) ?? ref.id }, ref.id);
@@ -1734,6 +1763,7 @@ export function App() {
           },
         },
         ref,
+        renderers: drawnByRenderer(ref.id) ? renderersOf(ref.id) : undefined,
         viewParams: viewParamsOf(ref),
         // Only the page the tab shows changes the tab; a hidden back page
         // drawing an older entry can't.
@@ -1837,6 +1867,7 @@ export function App() {
     shownFilePath,
     centerActive,
     extensions,
+    renderersOf,
   ]);
 
   return (

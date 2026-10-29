@@ -109,6 +109,9 @@ export interface PageNavigation {
   setTabActions?(actions: readonly PageAction[] | null): void;
   /** The page this body draws: its entry's ref (`tabs/session.ts`). */
   ref?: TabRef;
+  /** The pages that can draw this body's ref, as the daemon says
+   *  (`pages/useRenderers.ts`): what Open With lists. Absent for a route. */
+  renderers?: readonly import("../tauri-bridge/generated/bindings.js").Renderer[];
   /** **View params** — this tab's address: what the page shows (its
    *  filters, its search, the row picked). Shareable: a bookmark, a
    *  reopened tab and an agent see them. */
