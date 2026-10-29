@@ -45,11 +45,12 @@ loaders:
   contributions:
     sql: |
       -- Each contribution besides its pages: its name and description from its
-      -- kind's own dataset where it has one (else its local name), under the
+      -- kind's own dataset (v_command, v_skill, v_slot, v_custom_component,
+      -- v_metric_spec, …) where it has one (else its local name), under the
       -- kind's plural name; a link where a page draws its kind.
       SELECT COALESCE(k.label, c.kind) || 's' AS grp, c.kind, c.local AS id,
-             COALESCE(m.title, ms.title, d.label, r.label, i.title, c.local) AS title,
-             COALESCE(ms.description, m.description) AS body,
+             COALESCE(m.title, ms.title, d.label, r.label, i.title, cm.ui_label, cc.title, c.local) AS title,
+             COALESCE(ms.description, m.description, cm.summary, sk.description, sl.description, cc.description) AS body,
              CASE WHEN EXISTS (SELECT 1 FROM v_page p, json_each(p.renders) j WHERE j.value = 'oxplow/' || c.kind)
                   THEN c.uri END AS link
       FROM about a JOIN v_contribution c ON c.extension = a.extension AND c.kind <> 'page'
@@ -60,6 +61,10 @@ loaders:
            LEFT JOIN v_resource r ON c.kind = 'resource' AND r.resource = c.global_name
            LEFT JOIN v_capability_provider i ON c.kind = 'implementation' AND i.extension = c.extension
                 AND i.capability || '.' || i.provider = c.local
+           LEFT JOIN v_command cm ON c.kind = 'command' AND cm.uri = c.uri
+           LEFT JOIN v_skill sk ON c.kind = 'skill' AND sk.uri = c.uri
+           LEFT JOIN v_slot sl ON c.kind = 'slot' AND sl.uri = c.uri
+           LEFT JOIN v_custom_component cc ON c.kind = 'custom_component' AND cc.uri = c.uri
       ORDER BY grp, title
   pages:
     sql: |

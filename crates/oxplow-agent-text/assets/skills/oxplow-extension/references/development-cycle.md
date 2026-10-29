@@ -87,6 +87,9 @@ searches by question; in SQL `v_page` (`uri`, `extension`, `title`,
 they answer and `v_page_param` their params; `v_extension` lists the
 extensions that loaded (`enabled`, `errors`, `warnings`, `deployment`) and
 `v_contribution` what each contributes (count it by `extension` and `kind`).
+What a contribution is, in words, is in its kind's own dataset, joined on `uri`:
+`v_command`, `v_skill`, `v_slot`, `v_custom_component`, `v_metric_spec`,
+`v_measure`, `v_dimension`, `v_resource` and `v_capability_provider`.
 `oxplow_read { uri: "oxplow:oxplow/page?page=<ext>/<slug>" }` gives one
 page's definition and deployment; **Definition** in a page's ☰ menu, About this page, is
 the same for the person (the running page file, drawn as Definition, a

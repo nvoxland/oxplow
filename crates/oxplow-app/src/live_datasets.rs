@@ -60,6 +60,10 @@ pub const NAMES: &[&str] = &[
     "data_entity",
     "effect_backfill",
     "replacement",
+    "command",
+    "skill",
+    "slot",
+    "custom_component",
     "provider_instance",
     "provider_credential",
     "provider_collector",
@@ -181,6 +185,39 @@ pub fn columns(name: &str) -> &'static [&'static str] {
             "bound_to_provider",
             "capability",
             "chosen",
+        ],
+        "command" => &[
+            "uri",
+            "id",
+            "extension",
+            "summary",
+            "scope",
+            "access",
+            "confirm",
+            "confirms",
+            "undoable",
+            "ui_label",
+            "ui_group",
+        ],
+        "skill" => &["uri", "extension", "name", "kind", "description", "needs"],
+        "slot" => &[
+            "uri",
+            "extension",
+            "id",
+            "host",
+            "slot",
+            "page",
+            "description",
+        ],
+        "custom_component" => &[
+            "uri",
+            "extension",
+            "id",
+            "title",
+            "description",
+            "bundle",
+            "commands",
+            "sql",
         ],
         "provider_instance" => &[
             "instance",
@@ -312,7 +349,8 @@ pub fn follows(name: &str, change: &Change<'_>) -> bool {
             ),
             // The catalog and the config decide what exists; a dataset's
             // rows are counted when asked for.
-            "data_entity" | "effect_backfill" | "replacement" => {
+            "data_entity" | "effect_backfill" | "replacement" | "command" | "skill" | "slot"
+            | "custom_component" => {
                 matches!(event, E::ConfigChanged | E::ExtensionsChanged)
             }
             // The instances are config and the extensions' providers; a
@@ -547,6 +585,8 @@ impl LiveDatasets {
             "data_entity" => sources.data_entities(filters).await,
             "effect_backfill" => sources.effect_backfill(filters).await,
             "replacement" => Ok(sources.replacements()),
+            "command" => sources.commands(),
+            "skill" | "slot" | "custom_component" => Ok(sources.contributed(name)),
             "provider_instance" | "provider_credential" | "provider_collector" => {
                 sources.provider_instances(name, filters).await
             }
@@ -1315,6 +1355,129 @@ impl LiveSources {
             ]);
         }
         Ok(rows)
+    }
+
+    /// `v_command`: every registered command, as `list_commands` shows it
+    /// (the registry's specs), with the extension that declares it.
+    fn commands(&self) -> Result<Vec<Vec<SqlCell>>, DomainError> {
+        use oxplow_domain::contribution::{ContributionId, ContributionKind};
+        let svc = self
+            .services
+            .get()
+            .map_err(|e| DomainError::Invalid(e.to_string()))?;
+        let catalog = self.catalog.unpinned(
+            self.worktrees.project_dir(),
+            "commands are listed from declarations",
+        );
+        let mut rows: Vec<Vec<SqlCell>> = svc
+            .commands
+            .all()
+            .into_iter()
+            .map(|spec| {
+                let owner = catalog
+                    .iter()
+                    .filter(|e| e.enabled)
+                    .find(|e| e.commands.iter().any(|c| c.name == spec.id))
+                    .map(|e| e.name.clone());
+                let uri = ContributionId::new(
+                    owner.as_deref().unwrap_or("oxplow"),
+                    ContributionKind::Command,
+                    &spec.id,
+                )
+                .to_string();
+                vec![
+                    text(uri),
+                    text(spec.id.clone()),
+                    opt(owner),
+                    text(spec.summary.clone()),
+                    opt(spec.op.as_ref().map(|o| o.scope.clone())),
+                    text(wire_name(&spec.access)),
+                    text(wire_name(&spec.confirm)),
+                    flag(spec.confirm.required()),
+                    flag(spec.undoable),
+                    opt(spec.ui.as_ref().map(|u| u.label.clone())),
+                    opt(spec.ui.as_ref().and_then(|u| u.group.clone())),
+                ]
+            })
+            .collect();
+        rows.sort_by(|a, b| format!("{:?}", a[1]).cmp(&format!("{:?}", b[1])));
+        Ok(rows)
+    }
+
+    /// `v_skill`, `v_slot` and `v_custom_component`: what each enabled
+    /// extension gives the agent, mounts at another page's slot, or draws
+    /// with its own code, each under the URI `v_contribution` holds.
+    fn contributed(&self, dataset: &str) -> Vec<Vec<SqlCell>> {
+        use oxplow_domain::contribution::{ContributionId, ContributionKind};
+        let uri =
+            |ext: &str, kind, local: &str| text(ContributionId::new(ext, kind, local).to_string());
+        let mut rows = Vec::new();
+        for ext in self
+            .catalog
+            .unpinned(
+                self.worktrees.project_dir(),
+                "contributions are listed from declarations",
+            )
+            .iter()
+            .filter(|e| e.enabled)
+        {
+            match dataset {
+                "skill" => {
+                    for k in &ext.skills {
+                        rows.push(vec![
+                            uri(&ext.name, ContributionKind::Skill, &k.name),
+                            text(ext.name.clone()),
+                            text(k.name.clone()),
+                            text(wire_name(&k.kind)),
+                            text(k.description.clone()),
+                            text(serde_json::to_string(&k.needs).unwrap_or_default()),
+                        ]);
+                    }
+                }
+                "slot" => {
+                    for (n, s) in ext.ui.page_slots.iter().enumerate() {
+                        let id = s.local_id(n);
+                        rows.push(vec![
+                            uri(&ext.name, ContributionKind::Slot, &id),
+                            text(ext.name.clone()),
+                            text(id),
+                            text(s.host.clone()),
+                            text(s.slot.clone()),
+                            text(s.page.clone()),
+                            text(format!(
+                                "Shows `{}` at the `{}` slot of `{}`.",
+                                s.page, s.slot, s.host
+                            )),
+                        ]);
+                    }
+                }
+                _ => {
+                    for c in &ext.custom_components {
+                        let title = c.title.clone().unwrap_or_else(|| c.id.clone());
+                        rows.push(vec![
+                            uri(&ext.name, ContributionKind::CustomComponent, &c.id),
+                            text(ext.name.clone()),
+                            text(c.id.clone()),
+                            text(title.clone()),
+                            text(format!(
+                                "{title}: a component drawn by code in `{}`{}.",
+                                c.bundle,
+                                if c.sql.is_some() {
+                                    ", which reads data with SQL"
+                                } else {
+                                    ""
+                                }
+                            )),
+                            text(c.bundle.clone()),
+                            text(serde_json::to_string(&c.commands).unwrap_or_default()),
+                            opt(c.sql.as_ref().map(wire_name)),
+                        ]);
+                    }
+                }
+            }
+        }
+        rows.sort_by(|a, b| format!("{:?}", a[0]).cmp(&format!("{:?}", b[0])));
+        rows
     }
 
     /// `v_replacement`: each core sub-component an enabled extension

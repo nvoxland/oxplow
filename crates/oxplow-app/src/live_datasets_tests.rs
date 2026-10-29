@@ -1024,3 +1024,58 @@ async fn a_collector_is_a_v_collector_row_with_its_standing() {
         vec![vec![json!("ok"), json!("ok"), json!(1), Value::Null]]
     );
 }
+
+/// `v_command` is the registry `list_commands` reads: each command's
+/// summary, whether a person confirms it, and the URI `v_contribution`
+/// holds for the ones an extension declares.
+#[tokio::test]
+async fn commands_are_listed_with_their_summary_and_confirmation() {
+    let fx = services_with_effort().await;
+    let got = rows(
+        &fx,
+        "SELECT id, uri, summary <> '', confirms FROM v_command WHERE id = 'oxplow.extension.remove'",
+    )
+    .await;
+    assert_eq!(
+        got,
+        [vec![
+            json!("oxplow.extension.remove"),
+            json!("oxplow:oxplow/command?command=oxplow.extension.remove"),
+            json!(1),
+            json!(1),
+        ]]
+    );
+    let joined = rows(
+        &fx,
+        "SELECT count(*) FROM v_command c JOIN v_contribution k ON k.uri = c.uri WHERE c.extension IS NOT NULL",
+    )
+    .await;
+    assert!(joined[0][0].as_i64().unwrap() > 0, "{joined:?}");
+}
+
+/// Skills, slot mounts and custom components are read from the catalog
+/// under their `v_contribution` URIs, each with a sentence saying what it is.
+#[tokio::test]
+async fn skills_slots_and_components_are_described() {
+    let fx = services_with_effort().await;
+    let skills = rows(
+        &fx,
+        "SELECT count(*), sum(description = '') FROM v_skill s JOIN v_contribution k ON k.uri = s.uri",
+    )
+    .await;
+    assert!(skills[0][0].as_i64().unwrap() > 0, "{skills:?}");
+    assert_eq!(skills[0][1].as_i64(), Some(0), "{skills:?}");
+    let components = rows(
+        &fx,
+        "SELECT count(*), sum(description = '') FROM v_custom_component c JOIN v_contribution k ON k.uri = c.uri",
+    )
+    .await;
+    assert!(components[0][0].as_i64().unwrap() > 0, "{components:?}");
+    assert_eq!(components[0][1].as_i64(), Some(0), "{components:?}");
+    let slots = rows(
+        &fx,
+        "SELECT count(*) FROM v_slot s LEFT JOIN v_contribution k ON k.uri = s.uri WHERE k.uri IS NULL",
+    )
+    .await;
+    assert_eq!(slots, [vec![json!(0)]]);
+}

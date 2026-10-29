@@ -1,0 +1,5 @@
+SELECT CAST(NULL AS TEXT) AS uri, CAST(NULL AS TEXT) AS id, CAST(NULL AS TEXT) AS extension,
+       CAST(NULL AS TEXT) AS summary, CAST(NULL AS TEXT) AS scope, CAST(NULL AS TEXT) AS access,
+       CAST(NULL AS TEXT) AS confirm, CAST(NULL AS INTEGER) AS confirms, CAST(NULL AS INTEGER) AS undoable,
+       CAST(NULL AS TEXT) AS ui_label, CAST(NULL AS TEXT) AS ui_group
+WHERE 0

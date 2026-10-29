@@ -297,7 +297,7 @@ calls whose caller is the asking thread). `pages.write/run_action`
 page's actor. A read runs unrecorded, for any thread, and the operation
 reads the stream it names, else the actor's own
 (`agent_reads::stream_or_actors`). The `v_scope` live dataset lists every
-scope (id, access, host, summary). The MCP tools that carried these
+scope (id, access, host, summary); `v_command` lists every registered command (the registry `list_commands` reads) with its summary, scope, confirmation and undoability, under the URI `v_contribution` holds for an extension's own. The MCP tools that carried these
 reads are thin calls to the commands (`OxplowMcp::read_command`).
 
 A command's access is the strongest among the scopes it needs
