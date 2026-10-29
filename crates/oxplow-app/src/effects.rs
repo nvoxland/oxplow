@@ -1,5 +1,5 @@
 //! An extension's effects (`effects:` in its manifest, P8.D9–D11; **stable
-//! since P11**, tsk956; `.context/extensions.md` → "Effects"): a Starlark
+//! since P11**, tsk956; `.context/extensions-events.md` → "Effects"): a Starlark
 //! script that reacts to a logged event by composing commands, run as
 //! `Actor::Effect` with an agent's rights.
 //!
@@ -46,7 +46,7 @@ pub struct EffectDecl {
     /// Its source.
     pub script: String,
     /// What it runs after on one event, as written (resolved to refs on
-    /// its descriptor; `extensions.md` "Ordering").
+    /// its descriptor; `extensions-events.md` "Ordering").
     pub after: Vec<String>,
     /// `file:line` of the declaration.
     pub declared_at: String,

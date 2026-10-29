@@ -1,7 +1,7 @@
 //! What a custom component's frame is served, whoever serves it: the
 //! daemon (`/components/v/{version}/…`, `/component-lib/…`) and a test's
 //! harness serve the same bytes under the same headers, so a component
-//! tested is the component that runs (`.context/extensions.md`, "Custom
+//! tested is the component that runs (`.context/extensions-components.md`, "Custom
 //! components").
 //!
 //! **What it serves is a deployment.** The host loads the component's

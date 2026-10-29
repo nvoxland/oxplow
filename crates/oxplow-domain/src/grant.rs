@@ -1,5 +1,5 @@
 //! What a contribution asks to do, what its extension may do, and what
-//! each call was decided (`.context/extensions.md` "Grants").
+//! each call was decided (`.context/extensions-permissions.md` "Grants").
 //!
 //! A [`GrantRequest`] is derived from what a contribution declares — the
 //! scopes it calls (a model among them, `ai.compute`), the program it

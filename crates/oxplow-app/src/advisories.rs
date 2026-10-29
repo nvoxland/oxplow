@@ -4,7 +4,7 @@
 //! and effort bound, applies its `once_per` rule, and records every hit
 //! as a nudge (`v_agent_nudge`): the thread's undelivered nudges go out on
 //! its next prompt or tool call, stamped when they do. See
-//! `.context/extensions.md` → "Advisories".
+//! `.context/extensions-commands.md` → "Advisories".
 
 use async_trait::async_trait;
 use oxplow_db::{OnceScope, SqlCell, SqliteAgentNudgeStore};

@@ -1,7 +1,7 @@
 /// Hints raised to the person (`v_agent_nudge` rows with audience
 /// `person`): an extension's advisory meant for them, or oxplow muting a
 /// hint that kept firing at the agent. Alerts lists them until the person
-/// dismisses one (`oxplow.hint.dismiss`). See `.context/extensions.md`
+/// dismisses one (`oxplow.hint.dismiss`). See `.context/extensions-commands.md`
 /// "Advisories".
 
 import { useCallback, useEffect, useState } from "react";

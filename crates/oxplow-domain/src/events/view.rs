@@ -1,4 +1,4 @@
-//! The event envelope an extension sees (`.context/extensions.md` "The
+//! The event envelope an extension sees (`.context/extensions-events.md` "The
 //! event envelope"): one projection of a logged event, the same whichever
 //! path hands it over — a collector's `input.event`, an effect's
 //! `x["event"]`, an effort policy's event, a provider's `react { event }`,

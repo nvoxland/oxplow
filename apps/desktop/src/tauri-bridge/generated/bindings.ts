@@ -2082,7 +2082,7 @@ export type EffectDecl = {
 	script: string,
 	/**
 	 *  What it runs after on one event, as written (resolved to refs on
-	 *  its descriptor; `extensions.md` "Ordering").
+	 *  its descriptor; `extensions-events.md` "Ordering").
 	 */
 	after: string[],
 	/**  `file:line` of the declaration. */

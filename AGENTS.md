@@ -129,7 +129,20 @@ or exact mechanics.
 | External providers — the JSON-RPC/NDJSON protocol crate and meta-model, the fake provider, the host (consent, spawn, handshake, `ExternalWorkItems`), instances and health, Settings → Integrations, the conformance kit and `oxplow extension test` | `.context/providers.md` |
 | Work items — `v_work_item`, the `WorkItemsProvider` capability and registry, the oxplow provider, the conformance suite | `.context/work-items.md` |
 | The semantic layer — sources (entities + facts), dimensions, metrics, the `v_*` read contract, `query_sql`, user/extension sources (target design, epic tsk275) | `.context/semantic-layer.md` |
-| Extensions — the terms (extension, contribution, capability, provider, scope, access, effect), `extension.yaml`, pages (user/agent-built UI), slots, actions/alerts, the bundled `oxplow-bundled` extension, what moves out of core (target design) | `.context/extensions.md` |
+| Extensions — the terms (extension, contribution, capability, provider, scope, access, effect) and the index of the extensions docs | `.context/extensions.md` |
+| Extensions — `extension.yaml` (manifest v2), contribution descriptors, `configuration:`, private state, the design rules | `.context/extensions-manifest.md` |
+| Extensions — how pages run today: page files, ids, live set, params, checks, IPC/MCP surfaces, panels, desktop UI | `.context/extensions-page-host.md` |
+| Extensions — the page YAML (metadata, params, loaders, view nodes, actions, checks), change links, page layout | `.context/extensions-pages.md` |
+| Extensions — slots, replacements (`ui.mounts`), commands in core menus, decorators | `.context/extensions-slots.md` |
+| Extensions — custom components (frame, protocol, testing one) and Explore Data | `.context/extensions-components.md` |
+| Extensions — sources and deployments, builds, `extensionSources`, sharing, disabling, reviewing by impact | `.context/extensions-deploy.md` |
+| Extensions — health, disable and repair; candidate publication, vocabulary generations, runtime adapters, ingress | `.context/extensions-activation.md` |
+| Extensions — permissions and approval, the run context, services, grants, secret references | `.context/extensions-permissions.md` |
+| Extensions — the event envelope, event types, resources, ordering, effects | `.context/extensions-events.md` |
+| Extensions — collectors (sources), contributing metrics, jobs, AI profiles | `.context/extensions-jobs.md` |
+| Extensions — extension commands, capability implementations, skills, advisories, the agent MCP surface | `.context/extensions-commands.md` |
+| Extensions — the SDK (`oxplow extension new|check|test`), fixtures, answerability | `.context/extensions-sdk.md` |
+| Extensions — `oxplow-foundation`, `oxplow-bundled`, the review packet, `examples/extensions/` | `.context/extensions-bundled.md` |
 | AI providers & roles — API model access, role→model mapping, keychain, recorded computations (`AiCompute`, `ai_result`), the `ai_*` collector builtins, inferred decisions | `.context/ai-providers.md` |
 | Fact substrate (measure/dimension/metric_spec/capture/fact, cube, fact collectors, MCP/IPC reads, Metrics page) | `.context/metrics.md` |
 | Profiling (the `cube_equivalence` harness, samply traps), what's already optimized, what measurement ruled out | `.context/performance.md` |

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Record a fresh agent building an extension of one kind with nothing but
-# the oxplow-extension skill (P7.C6, `.context/extensions.md` "The SDK").
+# the oxplow-extension skill (P7.C6, `.context/extensions-sdk.md` "The SDK").
 #
 #   scripts/record-just-works.sh <kind>
 #

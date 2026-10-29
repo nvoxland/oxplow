@@ -1,5 +1,5 @@
 //! What every extension contribution carries, whatever its kind
-//! (`.context/extensions.md` "Contributions"): one [`Descriptor`], with a
+//! (`.context/extensions-manifest.md` "Contributions"): one [`Descriptor`], with a
 //! stable [`ContributionId`], its owner, how it's invoked
 //! and what it needs. The [`Registry`] of a catalog's descriptors is what
 //! loading checks against (names, collisions, needs) and what discovery

@@ -1,5 +1,5 @@
 /// The host side of a component under test (`oxplow extension test`'s
-/// component harness, `.context/extensions.md` "Testing a component"): the
+/// component harness, `.context/extensions-components.md` "Testing a component"): the
 /// page the harness serves loads this, which mounts the bundle in a
 /// sandboxed frame and speaks the real bridge to it (`createBridgeHost`,
 /// `initMessage`, `pageData` — the app's own, so the two can't drift).

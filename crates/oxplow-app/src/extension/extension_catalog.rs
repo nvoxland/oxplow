@@ -1,4 +1,4 @@
-//! The loaded extensions (`.context/extensions.md` "Deployments";
+//! The loaded extensions (`.context/extensions-deploy.md` "Deployments";
 //! `.context/performance.md` "Extension catalog cache").
 //!
 //! **Deployed** (the daemon's, [`ExtensionCatalog::for_project`]): what the

@@ -1,5 +1,5 @@
 //! The services a script uses, through every kind of host
-//! (`.context/extensions.md` "Services"): a collector reads the tree it
+//! (`.context/extensions-permissions.md` "Services"): a collector reads the tree it
 //! declares, a fact collector reads the semantic layer, a command's script
 //! can't ask a model — and what was decided lands on its run.
 

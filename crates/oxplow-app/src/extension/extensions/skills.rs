@@ -1,6 +1,6 @@
 //! `skills:` in `extension.yaml` (stable): text an extension gives the
 //! coding agent — a skill (`SKILL.md`) or a slash command — offered while
-//! what it needs is active (`.context/extensions.md` "Skills").
+//! what it needs is active (`.context/extensions-commands.md` "Skills").
 //!
 //! ```yaml
 //! skills:

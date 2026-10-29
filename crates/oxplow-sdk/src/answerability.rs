@@ -1,4 +1,4 @@
-//! The agent-answerability check (`.context/extensions.md`
+//! The agent-answerability check (`.context/extensions-sdk.md`
 //! "Answerability"): can an agent that reads the right skill answer the
 //! questions oxplow, or an extension, exists for?
 //!

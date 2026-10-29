@@ -1,4 +1,4 @@
-//! The `effect.triggers` pump consumer (P8.D10, `.context/extensions.md` →
+//! The `effect.triggers` pump consumer (P8.D10, `.context/extensions-events.md` →
 //! "Effects"): runs each extension effect whose `on:` names a logged event.
 //!
 //! One async consumer for every effect, like `collector.triggers`. For

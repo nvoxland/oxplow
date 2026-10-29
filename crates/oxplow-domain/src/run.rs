@@ -1,5 +1,5 @@
 //! One run of extension code, and what every host hands it
-//! (`.context/extensions.md` "The run context"): who it runs as, which
+//! (`.context/extensions-permissions.md` "The run context"): who it runs as, which
 //! contribution at which version and catalog generation, what caused it
 //! and where it sits (anchors, subject), whether it may call out, its
 //! budget and the flag that cancels it. A host builds one at the start of

@@ -1,4 +1,4 @@
-//! The host services a script may use (`.context/extensions.md`
+//! The host services a script may use (`.context/extensions-permissions.md`
 //! "Services"): each one a scope a script declares in its `needs`, the
 //! builtins it provides, and which runs may use it. Whether a script may
 //! use one is its extension's `permissions:` (`ai.compute` is `ai`). One table: the router that builds a run's hosts, `oxplow

@@ -2,7 +2,7 @@
  * Pure view-model helpers for viz pages: which columns to show, how a
  * cell links into the page graph, how values print, and the launcher
  * entries for loaded viz nodes. React-free so it's unit-tested directly.
- * See `.context/extensions.md`.
+ * See `.context/extensions-pages.md`.
  */
 import { humanize } from "../kit/humanize.js";
 import type { FormSource } from "./formSource.js";

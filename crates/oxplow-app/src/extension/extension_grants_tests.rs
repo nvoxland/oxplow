@@ -1,5 +1,5 @@
 //! Scoped grants are enforced, through real extensions on disk and the
-//! services that run them (`.context/extensions.md` "Services" and
+//! services that run them (`.context/extensions-permissions.md` "Services" and
 //! "Grants"): qualified reads, undeclared services, approved code,
 //! revocation and the decisions a run records.
 

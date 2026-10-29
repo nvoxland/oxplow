@@ -1,5 +1,5 @@
 //! The core sub-components an extension may replace (`ui.replacements`;
-//! `.context/extensions.md` "Replacements"): each a named target of one
+//! `.context/extensions-slots.md` "Replacements"): each a named target of one
 //! capability with a **versioned props contract** — the params its
 //! replacement page gets, and must declare, instead of any host state.
 //! (The viewer's stream isn't a prop: any page declaring `stream_id` gets

@@ -1,4 +1,4 @@
-//! The agent's MCP tools that extensions declare (`.context/extensions.md`
+//! The agent's MCP tools that extensions declare (`.context/extensions-commands.md`
 //! "Tools"). A tool is a command or a page that asks to be one (`tool:
 //! <name>`, offered as `<namespace>_<name>`): oxplow's own are
 //! `extensions/oxplow-foundation`'s declarations over core's operations,

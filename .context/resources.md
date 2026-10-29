@@ -186,7 +186,7 @@ resources:
   of kind `resource` (`oxplow:oxplow/resource?resource=<ext>/<name>`), so a
   resource two extensions declare is the later one's load error. A
   resource has no `page:`: it opens as itself, and the pages that render
-  it say so with `pages[].for` ([extensions.md](./extensions.md)
+  it say so with `pages[].for` ([extensions-pages.md](./extensions-pages.md)
   "Pages"). `v_resource` is at v4 (V103 dropped the `page` column).
 - **The registry.** `oxplow_domain::uri::resources::ResourceRegistry`
   (`register` refuses a second resource of a name or a second wikilink

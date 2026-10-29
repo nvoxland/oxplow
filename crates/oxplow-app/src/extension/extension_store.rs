@@ -1,4 +1,4 @@
-//! The deployment store (`.context/extensions.md` "Deployments"): each
+//! The deployment store (`.context/extensions-deploy.md` "Deployments"): each
 //! deployment of an extension is an immutable copy of its source at
 //! `<project>/.oxplow/runtime/extensions/<name>/<hash>/`, where `<hash>` is
 //! the hash of the source it was copied from. Everything oxplow runs or
@@ -21,7 +21,7 @@ pub fn deployment_dir(project: &Path, name: &str, hash: &str) -> PathBuf {
     project.join(STORE_DIR).join(name).join(hash)
 }
 
-/// What of a source is its input (`.context/extensions.md` "Builds"):
+/// What of a source is its input (`.context/extensions-deploy.md` "Builds"):
 /// with a `build:`, the output it writes and the folders it excludes
 /// aren't, and its command is. Read from `extension.yaml` leniently: a
 /// manifest that doesn't parse has no build, and its load says why.

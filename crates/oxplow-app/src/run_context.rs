@@ -1,5 +1,5 @@
 //! The app's constructors of a run's context (`oxplow_domain::run`,
-//! `.context/extensions.md` "The run context"): each host that runs
+//! `.context/extensions-permissions.md` "The run context"): each host that runs
 //! extension code builds its run here, so every run names its
 //! contribution, the extension's version and the catalog generation the
 //! same way, and is caused by and anchored to what triggered it.

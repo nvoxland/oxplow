@@ -1,6 +1,6 @@
 //! `GET /components/v/{version}/{*path}` and `/component-lib/{file}`: a
 //! custom component's bundle and the client library, for the sandboxed
-//! frame a page renders (`.context/extensions.md`, "Custom components").
+//! frame a page renders (`.context/extensions-components.md`, "Custom components").
 //! The daemon serves them because the shell holds no project state and
 //! browser mode has no custom scheme. What is served, and under which
 //! headers, is `oxplow_app::component_http`'s — the same a test's harness

@@ -1,4 +1,4 @@
-//! The component harness (`.context/extensions.md` "Testing a
+//! The component harness (`.context/extensions-components.md` "Testing a
 //! component"): a fixture's `ui:` steps run a custom component's own code
 //! against the test's oxplow, in the app's own webview, with no app around
 //! it.

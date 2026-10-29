@@ -7,7 +7,7 @@ read [ipc-and-stores.md](./ipc-and-stores.md).
 
 ## Extension jobs
 
-What a job is and how it runs: [extensions.md](./extensions.md) "Jobs".
+What a job is and how it runs: [extensions-jobs.md](./extensions-jobs.md) "Jobs".
 The lifecycle is pure in `oxplow-domain/src/extension_job.rs`; the store is
 `oxplow-db/src/extension_job_store.rs`. Tables (V52, V56):
 
@@ -1477,7 +1477,7 @@ no host); its output is validated against the newest schema. What the
 running vocabulary registered is restated, per `type@v`, into
 `event_type_contract` (V144; `v_event_type`), which keeps a declared
 type's first schema as its contract and a removed extension's types as
-`registered = 0` (P8.D3, extensions.md "Event types"). `append_tx`
+`registered = 0` (P8.D3, extensions-events.md "Event types"). `append_tx`
 refuses an unregistered `type@v` or a payload that fails its schema
 (`DomainError::Invalid`, naming the JSON path) before writing. Core
 producers build envelopes with `Envelope::typed::<T>(source, &payload)`
@@ -2188,12 +2188,12 @@ event_id, attempt)`: an attempt is made once, and the reaction's state is
 its latest attempt's (`latest_tx`; `v_effect_run.latest`). The command
 bus writes an attempt's row in its run's transaction, or claims it
 `started` first when a step runs outside it (`claim_tx` / `finish_tx`).
-See [extensions.md](./extensions.md) "Effects".
+See [extensions-events.md](./extensions-events.md) "Effects".
 
 ### `extension_run` — `crates/oxplow-db/src/extension_run_store.rs`
 
 V48. One row per finished run of extension code (`oxplow_domain::run`,
-[extensions.md](./extensions.md) "The run context"): `run_id` (a
+[extensions-permissions.md](./extensions-permissions.md) "The run context"): `run_id` (a
 UUIDv7), `parent_run_id`, `extension`, `contribution`
 (its URI, `oxplow:oxplow/command?command=oxplow.review.accept`, `oxplow:oxplow/job?job=effort-review/review`), `kind`, `version`, `generation`, `actor_kind` /
 `actor`, the anchors (`stream_id`, `thread_id`, `effort_id`, `turn_id`,
@@ -2448,7 +2448,7 @@ enforces identity, treating global rows' `NULL` stream as `''`).
   entries added, changed or gone; tsk896); core's read `v_search_work_item`
   (the active work list's items, through the interface) / `_comment` /
   `_wiki` and the feeds for the other resources named above
-  (`models/search_<kind>.sql`; `.context/extensions.md` "Resources" says
+  (`models/search_<kind>.sql`; `.context/extensions-events.md` "Resources" says
   how a resource gets one, and the models' docs say
   what each indexes and whether archived work is included). Files are upserted by the `search.index` pump consumer from
   `snapshot.taken` (`indexer.rs`).

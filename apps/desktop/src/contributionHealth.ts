@@ -1,6 +1,6 @@
 /**
  * Turning a failure-disabled contribution back on (P7.C1–C3,
- * `.context/extensions.md` -> "Health, disable and repair"): three
+ * `.context/extensions-activation.md` -> "Health, disable and repair"): three
  * failures in a row disable a provider instance, collector or effect until
  * a person runs `oxplow.contribution.enable`. Extension problems lists
  * them; Settings -> Data turns a collector

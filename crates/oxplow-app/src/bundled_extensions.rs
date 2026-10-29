@@ -5,7 +5,7 @@
 //! format, same loader) and their names are reserved. Their shipped copies
 //! run unless a dev build is asked to run them from their sources
 //! (`enableBundledExtensions: false`, [`shipped`]). See
-//! `.context/extensions.md`.
+//! `.context/extensions-bundled.md`.
 
 /// A bundled extension's files, as `(path inside its folder, bytes)`.
 pub type Files = &'static [(&'static str, &'static [u8])];

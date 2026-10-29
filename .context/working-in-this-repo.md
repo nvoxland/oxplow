@@ -277,7 +277,7 @@ effort's "Coverage & tests" panel.
 | Ready to push | `test:collect` with `lint:collect`, once |
 
 An extension's behavior is a fixture in its extension, written first
-(`extensions.md` "`oxplow extension test`"): a page, a command, an
+(`extensions-sdk.md` "`oxplow extension test`"): a page, a command, an
 event's effects, a job, a collector, an advisory, a query over its
 datasets, a custom component's own code (`ui:` steps, "Testing a
 component"). Never a new Rust test: Rust tests are for core. A
@@ -603,7 +603,7 @@ aws-lc-rs).
 `scripts/record-just-works.sh <kind>` records a fresh `claude -p` agent
 building an extension from `crates/oxplow-sdk/fixtures/just-works/<kind>/
 prompt.md` with nothing but the oxplow-extension skill (P7.C6, see
-[extensions.md](./extensions.md) "The SDK"). It costs a real run, so run
+[extensions-sdk.md](./extensions-sdk.md) "The SDK"). It costs a real run, so run
 it when the skill or the SDK changes enough that the recording no longer
 says something true — not per commit. Commit what it writes (`run.json`,
 `produced/`, `check.txt`, `test.txt`) with a hand-written `notes.md`;

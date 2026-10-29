@@ -1,5 +1,5 @@
 //! Configuration schema migrations, run at activation inside the
-//! generation's transaction (`.context/extensions.md` "Private
+//! generation's transaction (`.context/extensions-manifest.md` "Private
 //! configuration services"). A layer stored at an older schema version is
 //! carried to the declared one by the extension's pure Starlark steps and
 //! written back with a compare-and-swap; reads of a layer that has not been

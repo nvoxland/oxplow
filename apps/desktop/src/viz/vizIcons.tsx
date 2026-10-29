@@ -3,7 +3,7 @@
  * `icon` names one of `VIZ_ICON_NAMES`, and its `tone` one of
  * `VIZ_TONES`. Values come from the query, so the loader can't check them:
  * an unknown name draws no icon, an unknown tone leaves the cell plain.
- * See `.context/extensions.md` → Viz nodes.
+ * See `.context/extensions-pages.md` → Viz nodes.
  */
 import { Layers, MessageSquare, type LucideIcon } from "lucide-react";
 import type { CSSProperties, ReactElement } from "react";

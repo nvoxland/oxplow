@@ -1,4 +1,4 @@
-//! Deploying extensions (`.context/extensions.md` "Deployments"): what
+//! Deploying extensions (`.context/extensions-deploy.md` "Deployments"): what
 //! `oxplow.extension.deploy`, `rollback`, `enable`, `disable`, `remove`,
 //! `share` and `unshare` do, and the startup pass that deploys an enabled
 //! extension with no deployment here.
@@ -501,7 +501,7 @@ fn active_build(svc: &Services, name: &str) -> Option<String> {
 }
 
 /// What a deploy that runs a new or changed build command asks a person:
-/// the command runs with their authority (`.context/extensions.md`
+/// the command runs with their authority (`.context/extensions-deploy.md`
 /// "Builds"). `shown` is the source folder as the person knows it.
 pub(crate) fn build_line(run: &str, shown: &str) -> String {
     format!("build — runs `{run}` in {shown} with your authority, on every deploy")
@@ -557,7 +557,7 @@ fn active_entry(svc: &Services, name: &str) -> Option<crate::extension::extensio
     })
 }
 
-/// Each extension `name` requires is on (`.context/extensions.md`
+/// Each extension `name` requires is on (`.context/extensions-deploy.md`
 /// "Requires").
 fn requirements_met(
     settings: &ExtensionSettings,

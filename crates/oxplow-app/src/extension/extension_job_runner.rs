@@ -4,7 +4,7 @@
 //! reads SQL — each tool the model calls run and answered, then another
 //! round, up to its `max_tool_rounds`. All of it outside any transaction;
 //! cancelling the job drops the model's connection and the attempt closes
-//! `cancelled` with what it had. See `.context/extensions.md` "Jobs".
+//! `cancelled` with what it had. See `.context/extensions-jobs.md` "Jobs".
 
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;

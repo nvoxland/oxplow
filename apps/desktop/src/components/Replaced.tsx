@@ -6,7 +6,7 @@ import { HostedViewContext, useHostedView } from "../viz/hostedView.js";
 
 /**
  * A node another extension's page stands in for (`RunNode.replacedBy`).
- * The page run decides whose (`.context/extensions.md` → "Replacements":
+ * The page run decides whose (`.context/extensions-slots.md` → "Replacements":
  * the person's choice, the only candidate, a bound target's provider) and
  * runs it; this draws that run (`children`, drawn as an embed) under a
  * badge naming the extension, its custom components sharing the host's

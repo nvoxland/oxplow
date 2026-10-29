@@ -1,6 +1,6 @@
 //! What an extension may reach beyond the baseline, declared in its
 //! manifest's `permissions:` and approved when it is deployed
-//! (`.context/extensions.md` "Permissions").
+//! (`.context/extensions-permissions.md` "Permissions").
 //!
 //! `permissions:` is a list in the grammar of a script's `needs:` — a
 //! scope id, or `<scope>:<qualifier>` — of the scopes a person decides

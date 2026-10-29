@@ -2028,7 +2028,7 @@ metrics:                              # the read SPEC (the chartable metric)
   `use:` may only re-target thresholds; the structural fields are inherent.
 - The **fact collector**'s script gets `input = {report?, rows?, event?}` (the
   parsed `report:`, the `input:` query's rows, the trigger event as the
-  event envelope — extensions.md "The event envelope") and the
+  event envelope — extensions-events.md "The event envelope") and the
   snapshot tree it runs over through `files(glob)` / `source_files()` /
   `ast_query(text, language, sexpr)` / `duplicate_blocks(min_lines)` (see
   [collection.md](./collection.md)) — `tree.read`, which a fact collector
@@ -2036,7 +2036,7 @@ metrics:                              # the read SPEC (the chartable metric)
   or ask a model (`ai_*`) when it declares `needs: [sql.read]` /
   `[ai.compute]` — the latter only when its extension declares
   `ai.compute`; `MetricsService::given` builds them
-  (extensions.md "Services"). It returns `{ "facts": [
+  (extensions-permissions.md "Services"). It returns `{ "facts": [
   {measure, value, subject?, path?, line?, rule?, num?, den?, dims?} ] }` —
   one atomic fact per subject (never a baked total). `facts_of` refuses any
   other output (the old `samples` / `findings` shape is gone); a fact on a
@@ -2156,7 +2156,7 @@ the effort panel) and the Metrics page's `tone` (three tiers) draw that same lin
 
 Feedback is **advisory — oxplow never blocks**. It lives in the bundled
 `oxplow-bundled` extension as **advisories** (see
-[extensions.md](./extensions.md) → "Advisories"), SQL over the stored
+[extensions-commands.md](./extensions-commands.md) → "Advisories"), SQL over the stored
 per-effort views, not in core:
 
 - **`metric-deltas`** (prompt, every turn): "# Metric deltas (this effort)",
@@ -2171,7 +2171,7 @@ per-effort views, not in core:
   its own block.
 
 All three reach the agent as nudges (`v_agent_nudge`), taken by the next
-prompt or tool call (`.context/extensions.md` "Advisories").
+prompt or tool call (`.context/extensions-commands.md` "Advisories").
 Disabling `oxplow-bundled` turns them off.
 
 ## Performance: the `producers_for_measure` memo (tsk130)

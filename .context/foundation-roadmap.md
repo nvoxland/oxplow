@@ -590,7 +590,7 @@ for at most `max_tool_rounds`; `timeout` fails it; its end is
 streaming mappings (Anthropic, OpenAI) and the hardening tests (lease
 expiry, revocation and generation change mid-run, restart, capacity).
 An `idempotent` job cut off by a restart or a lost lease runs again, up
-to three attempts, its end announced once. See [extensions.md](./extensions.md)
+to three attempts, its end announced once. See [extensions-jobs.md](./extensions-jobs.md)
 "Jobs" and [ai-providers.md](./ai-providers.md) "Streaming and cancelling".
 
 Scope: Build AI streaming on durable job identity with cancellation, incremental output and completion/error events. Route model-requested tool operations through explicitly granted host commands/services with bounded recursion and usage. Keep interactive sessions and their input authority separate from model inference.
@@ -710,7 +710,7 @@ Integrations). Page actions open their command's form (`form: true`,
 under it in every form, and component bundles may hold forms (bridge
 protocol 4). The triage example keeps workflow decisions in private
 state through its own commands. Still to do: the task-views example and
-its browser spec. See [extensions.md](./extensions.md) "Replacements".
+its browser spec. See [extensions-slots.md](./extensions-slots.md) "Replacements".
 
 Scope: Expand the existing task-screen follow-up into general presentation primitives: detail/list/board mounting, forms, editing, reorder and navigation over references and host actions. Decouple choosing a presentation from installing a work-list provider. Integrate durable state/config instead of making authors impersonate a provider.
 

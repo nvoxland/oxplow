@@ -1,5 +1,5 @@
 //! What runs after what when one event reaches several contributions
-//! (`.context/extensions.md` "Ordering"): the `after:` of an effect or a
+//! (`.context/extensions-events.md` "Ordering"): the `after:` of an effect or a
 //! collector, resolved to refs and compiled into one order per event.
 //!
 //! Three things look alike and aren't:

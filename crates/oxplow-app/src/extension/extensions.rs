@@ -3,7 +3,7 @@
 //! An extension is a folder `.oxplow/extensions/<name>/` in a stream's
 //! worktree with an `extension.yaml` and `pages/<slug>.yaml` files. A
 //! viz node is a query over the semantic layer (`v_*` views) plus how to
-//! show it. See `.context/extensions.md`.
+//! show it. See `.context/extensions-manifest.md`.
 //!
 //! Loading never fails as a whole: a broken extension or page is
 //! reported in that extension's `errors` and everything else still

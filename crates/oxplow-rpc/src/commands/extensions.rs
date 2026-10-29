@@ -2,7 +2,7 @@
 //! their components. What the app shows is the main worktree's, whichever
 //! stream is open. Checking an extension is the agent's
 //! `oxplow.extension.validate` (the CLI's `check`), not an IPC read. See
-//! `.context/extensions.md` "Reading".
+//! `.context/extensions-page-host.md` "Reading".
 
 use oxplow_app::extension::extensions::Extension;
 use oxplow_app::Services;

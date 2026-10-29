@@ -463,7 +463,7 @@ pub fn run_starlark_hosted(
     run_starlark_inner(script, "transform", input, hosts)
 }
 
-/// The services a run was given (`.context/extensions.md` "Services"),
+/// The services a run was given (`.context/extensions-permissions.md` "Services"),
 /// the one thing in its `Evaluator::extra`: each builtin takes its own,
 /// and one whose service wasn't given says which need would give it.
 #[derive(Default, starlark::any::ProvidesStaticType)]

@@ -1,4 +1,4 @@
-//! `ui.mounts` (P9.A1, stable; `.context/extensions.md` →
+//! `ui.mounts` (P9.A1, stable; `.context/extensions-slots.md` →
 //! "Replacements"): a page that takes the place of a named core
 //! sub-component ([`oxplow_domain::replaceable`]).
 //!

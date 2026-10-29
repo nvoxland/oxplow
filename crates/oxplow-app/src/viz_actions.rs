@@ -1,4 +1,4 @@
-//! Running a viz's actions (P6.B1, `.context/extensions.md`): each is a
+//! Running a viz's actions (P6.B1, `.context/extensions-pages.md`): each is a
 //! command the viz offers, run through the bus as `Actor::Page` acting for
 //! whoever pressed it — a person from the UI, the calling agent from MCP.
 //! The bus applies that actor's whole policy (the agent policy,

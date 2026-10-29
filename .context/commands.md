@@ -114,7 +114,7 @@ ids. A command declares (`oxplow_domain::commands::CommandSpec`):
 
 `Actor::Job` is host-derived from a validated job/attempt/fence identity
 (source `job:<id>:<attempt>:<fence>`): what a job's model tool calls run
-as ([extensions.md](./extensions.md) "Jobs"). It carries the thread and
+as ([extensions-jobs.md](./extensions-jobs.md) "Jobs"). It carries the thread and
 stream the job was asked in, for the gates, and is confined to that
 stream. It cannot confirm or create a proposal: a command that asks is
 refused. A job runs only a command that says `job: true`, which an
@@ -221,7 +221,7 @@ command; the window only evaluates. Both read the same cases
 
 A page's `open: <column>` action is not a command: it runs nothing on the
 bus (no audit, no `command.executed`), so it appears in no command list and
-needs no spec ([extensions.md](./extensions.md) "Actions").
+needs no spec ([extensions-pages.md](./extensions-pages.md) "Actions").
 
 Save, Find, Quick Open and New Page with Your Agent are the window's own
 commands (below, "Where a command runs"); New Thread and Commit are
@@ -267,7 +267,7 @@ selector and its read access leaves no payload in command audit or SQL datasets.
 `StateHost` also supplies a trusted write helper for an already-audited TxCtx,
 with live checks and CAS savepoint rollback. There is no public state write
 operation yet: private input/result/proposal handling must precede that surface.
-See [extensions.md](./extensions.md) "Private state host boundary".
+See [extensions-manifest.md](./extensions-manifest.md) "Private state host boundary".
 
 | Access | Does | Audited | An agent's run |
 |---|---|---|---|
@@ -310,7 +310,7 @@ commits with the run; the file is written after it commits), while
 `providers.sync` and `test_runs.write` are `record` and `External`
 (each commits in its own service's transaction).
 Two more scopes are services a script uses through builtins rather than
-`scope(…)` — `tree.read` and `ai.compute` ([extensions.md](./extensions.md)
+`scope(…)` — `tree.read` and `ai.compute` ([extensions-permissions.md](./extensions-permissions.md)
 "Services"). A command's script may read SQL or its owning extension's private state: it
 composes, so no model calls, and it decides what runs rather than doing it, so no
 tree (`scope_calls::check_command_need`, at load; an effect or a collector reads it). The callable services are
@@ -438,7 +438,7 @@ is allowed only on a command with its extension's own handler (`entry:`),
 never on one over a scope's operation.
 
 **The per-run trace.** Every run carries a `RunContext`
-([extensions.md](./extensions.md) "The run context") whose trace counts
+([extensions-permissions.md](./extensions-permissions.md) "The run context") whose trace counts
 its scope calls. A `Tx` run's attempt keeps its own (`TxCtx::trace`,
 fresh per attempt, shared by the runs nested in it). The routing pass
 composes a composite once, through the gateway, as a pure child of the run,
@@ -631,7 +631,7 @@ through `CommandBus::run_effect` (P8.D10) with `RunOrigin::Effect`, the
 fourth origin beside a call, an undo and an approval: like those, its
 record (`effect_run` + `effect.result@5`) lands in the run's transaction,
 or is claimed before a step outside it (`claim`), and its
-`command.executed` is caused by the triggering event (extensions.md
+`command.executed` is caused by the triggering event (extensions-events.md
 "Effects").
 
 **An `External` run whose recording fails** (its effects already
@@ -802,7 +802,7 @@ proposal is decided once (`Invalid` after):
 
 A custom component's frame invokes a command through UI RPC
 `invoke_component_command` — as the page acting for the person, only a
-command its component declares ([extensions.md](./extensions.md),
+command its component declares ([extensions-components.md](./extensions-components.md),
 "Custom components").
 
 UI RPC **`decide_proposal { proposal, approve }`** (`ui` in surface
@@ -949,7 +949,7 @@ its area falls under (`threads.write`, `vcs.write`, …; `SCOPES`); "Handler" de
 
 | Command | Handler | Notes |
 |---|---|---|
-| `<extension namespace>.<name>` (an enabled extension's `commands:`) | `Dispatch`: the extension's Starlark script composes core commands — once, when the bus routes the run — run as any composite's (`extension_commands.rs`, P6b.B2; "Composition") | declared confirm / access, undoable, `Experimental`; registered while the extension is enabled (primary worktree). See [extensions.md](./extensions.md) → "Commands" |
+| `<extension namespace>.<name>` (an enabled extension's `commands:`) | `Dispatch`: the extension's Starlark script composes core commands — once, when the bus routes the run — run as any composite's (`extension_commands.rs`, P6b.B2; "Composition") | declared confirm / access, undoable, `Experimental`; registered while the extension is enabled (primary worktree). See [extensions-commands.md](./extensions-commands.md) → "Commands" |
 | `oxplow.review.accept`, `oxplow.review.request_changes` (oxplow-bundled, P7.C5) | extension composites of `oxplow.work_item.comment` + `oxplow.work_item.transition` (to `done` / `todo`) on an effort's work item — as steps, every list's verbs running outside the transaction (not undoable); an effort without a work item is refused by name; accept refuses unreviewed claims or inferred decisions unless `force` | `confirm: always` (a person's run asks; an agent's runs without asking). See [extensions.md](./extensions.md) → "oxplow-bundled" |
 | `oxplow.command.sequence { calls: [{ name, input }] }` | `Dispatch` — a composite (`commands/compose.rs`, P6b.A1) | `Write`, `Confirm::Never` — the children decide. Each child's own policy and confirmation; one audit row for the parent with the children in `result`. Every call in oxplow's records → one transaction (`steps::run_composed`), undoable as the reversed children that changed something; a call outside it (a `work_item.*` verb, any list's) → steps, in order, not undoable. The one composition mechanism (an extension's command runs on it). See "Composition" |
 | `oxplow.work_item.transition { uri, to, native_state? }` | `External` (`commands/work_item.rs`): the item's list's `transition` verb (oxplow's tasks: `oxplow_tasks::verbs::transition_tx`, in a transaction of their own) | `Record`; undoable (the inverse restores the prior canonical and native state; an external inverse is renamed to `oxplow.work_item.transition` so undo dispatches again). `to` is a canonical state, `native_state` the provider's own and must map to it (oxplow: its status; `archived` with `done` or `canceled`). For every provider core logs `work_item.state_changed` when the state moved, with the audit, caused by `command.executed` (the interface's events: [work-items.md](./work-items.md)), which the effort policy reacts to ([work-tracking.md](./work-tracking.md)). |
@@ -963,7 +963,7 @@ its area falls under (`threads.write`, `vcs.write`, …; `SCOPES`); "Handler" de
 | `oxplow.effort.report { thread?, summary?, impacts?, claims? }` | `External` (`commands/effort_report.rs`): it checks the summary's links against the worktree | `Record`, not undoable; optional. An agent reports only on its own thread; a person names one. It settles the effort lifecycle first, then records the summary, impacts and claims (at most 8 `{ statement, kind, evidence? }`, provenance `recorded`, replacing the effort's unreviewed recorded ones; a person's verdict stays) in one transaction on the thread's open effort, else its latest (refused at `/thread` when it has none) — never opening, closing or creating one — and returns `{ effort, link_warnings }`. Files and runs are observed, never reported, and without a summary `v_effort.summary` is the effort's last turn's final message ([work-tracking.md](./work-tracking.md)) |
 | `oxplow.test.record_run { thread?, command, duration_ms?, passed?, failed?, total? }` | `External` over the `CollectionService` (`commands/test_runs.rs`): the capture commits in the collector's own transaction | `Record`, not undoable. An agent's goes on its own thread whatever it names; a person names one. The `asserted` run whose counts oxplow couldn't parse; it is the thread's open effort's. A report oxplow parses itself is a report collector's, run by hand with `oxplow.collector.sync`. See [collection.md](./collection.md) |
 | `oxplow.extension.write_page { extension, page, spec, deploy? }` | `External` (`commands/extension_deploy.rs`, scope `pages.author`): writes `pages/<page>.yaml` (the YAML text in `spec`) into the extension's source in the primary checkout, scaffolding the manifest when the extension is new; `spec` must parse (`pages::schema::parse_page`) and the extension must load with it, else nothing stays written; a bundled extension and a caller in another stream (in-project source) are refused; `deploy: true` then deploys | `Write`, not undoable. Returns `{ page, path, deployed }`. What the app's Save as Page and dashboard edits call |
-| `oxplow.extension.deploy { name }` (from the primary checkout; refused from another stream when the source is inside the project), `rollback { name, to? }`, `enable { name }`, `disable { name }`, `remove { name }`, `share { name }`, `unshare { name }` | `External` (`commands/extension_deploy.rs`): copies a source into `.oxplow/runtime/extensions/<name>/<hash>/`, publishes the live set, and edits `.oxplow/personal.yaml`, `.oxplow/project.yaml` and `.oxplow/.gitignore` | `Write`, not undoable. `deploy` returns once the deployment runs; it fails, keeping the old one, when the extension does not prepare. `enable` / `disable` write the person's lists and are what the Extensions page calls; `remove` forgets deployments, state and settings and never deletes the source; `share` / `unshare` un-ignore a source and move its name to or from the team's `extensions:` list. See [extensions.md](./extensions.md) → "Sources and deployments" |
+| `oxplow.extension.deploy { name }` (from the primary checkout; refused from another stream when the source is inside the project), `rollback { name, to? }`, `enable { name }`, `disable { name }`, `remove { name }`, `share { name }`, `unshare { name }` | `External` (`commands/extension_deploy.rs`): copies a source into `.oxplow/runtime/extensions/<name>/<hash>/`, publishes the live set, and edits `.oxplow/personal.yaml`, `.oxplow/project.yaml` and `.oxplow/.gitignore` | `Write`, not undoable. `deploy` returns once the deployment runs; it fails, keeping the old one, when the extension does not prepare. `enable` / `disable` write the person's lists and are what the Extensions page calls; `remove` forgets deployments, state and settings and never deletes the source; `share` / `unshare` un-ignore a source and move its name to or from the team's `extensions:` list. See [extensions-deploy.md](./extensions-deploy.md) → "Sources and deployments" |
 | `oxplow.snapshot.restore_file { file_snapshot }` | `External` over `snapshot_files::SnapshotFiles` (`commands/snapshot.rs`, P8.A9) | `Write`, `Confirm::Destructive` (it overwrites the file at its path), not undoable: a person's run asks first. Writes into the row's stream's worktree — refused when that stream is archived or gone, never written into another checkout — and announces the stream's `WorkspaceChanged` |
 | `oxplow.lsp.install_server { package }`, `oxplow.lsp.remove_server { package }` | `External` over the `LspInstallerService` (`commands/lsp.rs`, P8.A9): the network and `.oxplow/lsp/` | `Write`, `Confirm::Always`, not undoable: a person's run asks first. Each pushes `LspServersChanged` (the server list isn't a model). See [lsp.md](./lsp.md) |
 | `oxplow.agent_session.open { thread, kind?, harness?, title?, resume? }`, `oxplow.agent_session.rename { session, title }`, `oxplow.agent_session.close { session }` | `Tx` over `agent_session_store` and `agent_stores::close_session_tx` (`commands/agent_session.rs`) | `Record` (`agent_sessions.write`). **The command is the slot's lifecycle; the RPC is the process's.** `open` only inserts the row — it never starts a process and never prompts (the UI starts the process when the tab mounts; nothing types into it, which the no-automation guards keep true for a session an agent opened); `harness` is checked against the registered harnesses and the project's enabled ones, the default is `HarnessRegistry::default`, `kind` defaults to `terminal`, and `action` is refused (not built). `resume` (a saved conversation's native id) binds the new slot to it as `chosen` in the same transaction — refused for a conversation open in another slot, and denied to an agent, which may open a session but not choose its conversation. Undone by closing it. `rename` undoes to the old title. `close` asks no one and is undone by **`oxplow.agent_session.reopen { session }`**: the slot closes, its open turns end interrupted and it logs `stopped` in one transaction, and its process stops after commit (`agent_sessions::SessionProcesses::kill`); `reopen` opens a slot a person closed again (refused for one its thread's or stream's close took, or on a closed thread), and its process resumes the saved conversation when its tab mounts. An agent acts only on sessions in its own stream. `terminate_terminal_session` / `chat_close_session` stop a process and leave the slot open. Sessions are named by URI (`oxplow:oxplow/agent_session?id=ses3`). **`start_fresh`** is a session's one control besides closing it (a session has no stop that keeps its slot: closing ends it, Earlier sessions reopens it): it forgets the saved conversation, the only way a session gets a new one — `Confirm::Destructive`, not undoable |
@@ -1000,7 +1000,7 @@ its area falls under (`threads.write`, `vcs.write`, …; `SCOPES`); "Handler" de
 | `oxplow.file.mark_generated { entry, generated? }` | `Tx` (`commands/config_commands.rs`, scope `config.write`) over `config_commands::change` | The Files page's Mark / Unmark as Generated: adds `entry` (trimmed of `/`) to the `generated` key's sorted `exclude` list, or with `generated: false` takes it off; nothing marked removes the key. One config write: `config.changed@2`, undoable. The `set_generated` IPC is gone |
 | `oxplow.delivery.retry { id }` / `oxplow.delivery.discard { id }` | `External` over the event pump (`commands/delivery.rs`, scope `deliveries.write`): the pump owns the dead letter (`v_event_dead_letter`) and a retry runs a consumer's handler again | `discard` is `Confirm::Destructive`. `retry` returns the letter (`retried`, or still `pending` with the new error); a letter that isn't pending, has no consumer or doesn't exist is `Invalid`. The `list_/retry_/discard_dead_letter` IPCs are gone |
 | `oxplow.lsp.restart_server { stream, language }` | `External` over `LspSessionManager::restart` (`commands/lsp.rs`, scope `lsp.control`): the server is a process on this machine | tears the stream's session down and starts it again, replaying the open documents; pushes `LspServersChanged`. The `restart_lsp_server` IPC is gone |
-| `oxplow.effect.retry { effect, event }` | `External` over `effect_triggers::run_reaction` (`commands/effect.rs`, P9.D4; the `effects.run` operation, its services filled at boot when the `effect.triggers` consumer registers) | the Alerts page's failed reactions; `Confirm::Always` (a person's run asks), not undoable. Has an extension's effect react again to an event its reaction to **failed** (its latest attempt, `v_effect_run.latest`), as the next attempt, run as the effect is now — enabled and deployed as it is, composing afresh. Asked every time: a failed attempt interrupted with a step outside oxplow under way may have landed it, and a retry sends it again. `Invalid` for a reaction that didn't fail or was never made, a disabled effect, an unknown effect or event. Result `{ effect, event, attempt, outcome, reason? }` — the retry's own outcome, which may be `failed` again. See [extensions.md](./extensions.md) "Effects" |
+| `oxplow.effect.retry { effect, event }` | `External` over `effect_triggers::run_reaction` (`commands/effect.rs`, P9.D4; the `effects.run` operation, its services filled at boot when the `effect.triggers` consumer registers) | the Alerts page's failed reactions; `Confirm::Always` (a person's run asks), not undoable. Has an extension's effect react again to an event its reaction to **failed** (its latest attempt, `v_effect_run.latest`), as the next attempt, run as the effect is now — enabled and deployed as it is, composing afresh. Asked every time: a failed attempt interrupted with a step outside oxplow under way may have landed it, and a retry sends it again. `Invalid` for a reaction that didn't fail or was never made, a disabled effect, an unknown effect or event. Result `{ effect, event, attempt, outcome, reason? }` — the retry's own outcome, which may be `failed` again. See [extensions-events.md](./extensions-events.md) "Effects" |
 | `oxplow.effect.backfill { effect, from_seq? \| since?, to_seq? }` | `External` over `commands/effect.rs::backfill` (P9.D5) | `Confirm::Always`, not undoable. Has an effect react to the matching events in the range it never reacted to (those logged before it was enabled), oldest first, once each, as it is now — at most 200 a run. Each is an attempt with `origin: backfill`, under the same dedupe, loop guard and health as a live reaction; three failures in a row disable the effect and stop the run, and so does the effect being disabled (checked before each reaction). `Invalid` for an unknown or disabled effect, or both `from_seq` and `since`. Result `{ effect, planned, ran, skipped, proposed, failed, remaining, stopped? }` |
 | `oxplow.effect.backfill_plan { effect, from_seq? \| since?, to_seq? }` | `Tx`, `Read` (P9.D5) | What `oxplow.effect.backfill` would react to: `{ effect, planned, from_seq, to_seq }`. The count a person is shown before running one (a confirmation carries a command's summary and input, not a computed count) |
 | `oxplow.contribution.enable { extension, kind, contribution }` | `External` over `contribution_health.rs` and the provider registry (P7.C1; replaced `provider.enable`) | Not undoable. Enables a disabled contribution on this machine again — clearing an automatic disable (`contribution_health` back to `ok`, its count starting over). `kind` (`provider` \| `collector` \| `effect`) is part of its name — a provider and a collector may share an id (tsk721); there must be a failed one of that kind, or a provider instance the registry knows. A provider instance resets its backoff and reconciles, so it starts when `extensionInstances` enables it; a collector runs at its next trigger. Logs `contribution.enabled@1 { extension, contribution, kind }`; the result is its `contribution_health` row. See [providers.md](./providers.md) |
@@ -1086,7 +1086,7 @@ discovery cheap, the example makes the first call right, and a refusal
 quotes the example. `run_command` answers with the outcome:
 `result`, `audit_id`, `event_id`, `inverse?` — or, for an effect's run that asks,
 `{ kind: "proposed", proposal, message }`). Every other tool is a
-command or page an extension declares with `tool:` ([extensions.md](./extensions.md)
+command or page an extension declares with `tool:` ([extensions-commands.md](./extensions-commands.md)
 "Agents: the MCP surface"): a named entry to a command, run through the
 bus like `run_command`, hinted read-only by its access. Records are
 written only through commands; there are no write tools of their own.
@@ -1185,4 +1185,4 @@ and provenance commit in the audited transaction; request content is
 performed later outside SQL under the job's extension's current permissions and exact registry
 owner. `jobs.read` is also a read-only scope service for composers and workers;
 it returns owned status/results and never the original request. See
-[extensions.md](./extensions.md) for declaration/input shapes and lifecycle.
+[extensions-jobs.md](./extensions-jobs.md) for declaration/input shapes and lifecycle.

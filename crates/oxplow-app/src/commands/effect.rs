@@ -1,5 +1,5 @@
 //! The commands a person runs an extension's effects with (P9.D4–D5,
-//! `.context/extensions.md` → "Effects"). The live consumer
+//! `.context/extensions-events.md` → "Effects"). The live consumer
 //! (`effect.triggers`) reacts to each event once, and only to events
 //! logged after the effect started; everything else is a person's:
 //!

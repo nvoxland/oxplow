@@ -1,6 +1,6 @@
 /**
  * The view a custom component shares with the page that hosts it
- * (`.context/extensions.md` → "Custom components", "Replacements"): its
+ * (`.context/extensions-components.md` → "Custom components", "Replacements"): its
  * view params and history state, what the bridge tells it (`init.view`)
  * and lets it set. Three hosts give one:
  * - a page that *is* the component: all its params, the whole entry;

@@ -1,5 +1,5 @@
 //! The event envelope is the same on every path that hands an event to an
-//! extension (`.context/extensions.md` "The event envelope"): one event,
+//! extension (`.context/extensions-events.md` "The event envelope"): one event,
 //! logged at v1 of a type whose owner has since published v2, with anchors,
 //! a subject and a cause, read by a derived collector, an exec collector
 //! (on its stdin) and an effect — each sees exactly `EventView::of` it, at

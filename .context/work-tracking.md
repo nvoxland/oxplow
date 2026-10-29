@@ -97,7 +97,7 @@ per turn.
 **The effort policy is an interface** (`oxplow_domain::effort_policy`):
 `EffortPolicy { id, react(EventView) → Vec<CommandCall> }`. A policy
 only composes; core runs. It gets the event envelope
-([extensions.md](./extensions.md) "The event envelope"), whose `anchors`
+([extensions-events.md](./extensions-events.md) "The event envelope"), whose `anchors`
 say the mover's thread, a checkpoint's turn, a landing's effort; it is
 offered each of `EVENTS`: `work_item.state_changed` (core's, logged for
 every provider), `effort.linked`, `effort.opened`, `thread.checkpoint`,
@@ -126,7 +126,7 @@ event a policy's own run caused (a source starting
 
 **A script may be the policy** (`implementations:` with `capability:
 effort_policy` and a `.star` entry, its `needs:` the scopes it reads —
-[extensions.md](./extensions.md) "Implementations"). It's an effect's
+[extensions-commands.md](./extensions-commands.md) "Implementations"). It's an effect's
 shape: `transform({event})` gets the event envelope and answers `{
 commands: [{ name, input }] }` or `{ skip }` (events are refused).
 `effort_policy::prepare_built_ins` registers it as an
@@ -280,7 +280,7 @@ or operational limits, not a view of what good work is:
   token-waste attribution.
 
 **Knobs.** An extension's SQL reads its own configuration
-(`config('/pointer')`, `.context/extensions.md` "Configuration in SQL"),
+(`config('/pointer')`, `.context/extensions-manifest.md` "Configuration in SQL"),
 so oxplow-bundled's constants are settings, not forks: `changeInterest.*`
 (weights and the long-function cut-off), `coChange.*` (pair threshold,
 window, per-commit file cap, dormant days), `struggle.*`,

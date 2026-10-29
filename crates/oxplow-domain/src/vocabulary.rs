@@ -1,5 +1,5 @@
 //! The vocabulary (P8.D1, `.context/data-model.md` "event_log",
-//! `.context/extensions.md`):
+//! `.context/extensions-events.md`):
 //! what the event log accepts — every event type at every version, with
 //! its schema and upcasts — and what a URI may name — every resource with
 //! its params. Core's event types plus what the running extensions declare

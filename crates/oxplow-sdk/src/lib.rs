@@ -1,4 +1,4 @@
-//! The extension SDK (`.context/extensions.md` "The SDK"): scaffold, check and test an
+//! The extension SDK (`.context/extensions-sdk.md` "The SDK"): scaffold, check and test an
 //! extension, and the provider conformance kit
 //! ([`conformance`], [`extension_test`]).
 //!

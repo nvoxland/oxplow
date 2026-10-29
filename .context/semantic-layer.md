@@ -279,7 +279,7 @@ underscores — the entity views' formula). Inside one:
 A check (`datasets::check_extensions`, P7.C6) runs the same pass with temp
 views, standing an empty view in for each declared entity that hasn't
 synced, and hands back what it created for the check's other queries to
-read (`SqlQuery::temp_views`) — see extensions.md "The SDK".
+read (`SqlQuery::temp_views`) — see extensions-sdk.md "The SDK".
 
 `datasets::compile_extensions` compiles every enabled extension's datasets in
 one pass after the core ones — in `Database::transaction`, which takes the
@@ -794,7 +794,7 @@ and `v_dataset_test` are the catalog of all of them:
 | `v_page_visit` | pages the human opened, and for how long (V74) |
 | `v_event` | the event log: every activity and state change, oldest first by `seq`, with anchors, subject URIs and payload (V94; see [DATA_DATASET_X.md](./DATA_DATASET_X.md) "event_log"); `payload_expired_at` since V102) |
 | `v_extension_run` | one row per finished run of extension code (V48; [DATA_DATASET_X.md](./DATA_DATASET_X.md) "extension_run"): `run_id`, `parent_run_id`, `extension`, `contribution`, `kind`, `version`, `generation`, `actor_kind`, `actor`, the anchors, `cause_event_id`, `mode`, `started_at`, `finished_at`, `outcome`, `error`, `wall_ms`, `cpu_ms`, `peak_bytes`, `ai_calls`, `scopes`, `decisions`, `latest` (1 on a contribution's most recent run). `v_effect_run`, `v_collector_run` and `v_ai_call` name theirs in `run_id`. Kept 90 days |
-| `v_job_run` | each job run — one execution of a job an extension declares (V56; [extensions.md](./extensions.md) "Jobs"): `id`, `job` (`job:<ext>/<id>`), `uri` (`job_run:<id>`), `extension`, `version`, `contract_version`, `operation`, `state`, `attempt`, `cancellation_requested`, `invoker`, `run_id`, `created_at`, `updated_at`, and its current attempt's `ai_calls`, `tool_calls`, `input_tokens`, `output_tokens`. Never its request or result |
+| `v_job_run` | each job run — one execution of a job an extension declares (V56; [extensions-jobs.md](./extensions-jobs.md) "Jobs"): `id`, `job` (`job:<ext>/<id>`), `uri` (`job_run:<id>`), `extension`, `version`, `contract_version`, `operation`, `state`, `attempt`, `cancellation_requested`, `invoker`, `run_id`, `created_at`, `updated_at`, and its current attempt's `ai_calls`, `tool_calls`, `input_tokens`, `output_tokens`. Never its request or result |
 | `v_job_run_output` | what a job produced as it ran, in order (`job_id`, `attempt`, `seq`): `kind` (`text`, `tool_call`, `tool_result`, `usage`), `at`, `text` (a text row's), `data` (the row as JSON). Written as it streams, so a page over it follows a job live |
 | `v_job_run_observation` | what a job's worker said after its attempt was fenced (a lease recovered, a permission removed, a declaration changed): one row per late result (`id`, `job_id`, `attempt`, `fence`, `at`, `outcome`, `evidence`). Evidence only; it never changes the job |
 | `v_op_error` | operations that failed in front of the person in the app, one row per `ui.op_failed@1` event (`oxplow.ui.report_error`, tsk1072): `event_id`, `at`, `stream_id`, `thread`, `label`, `command`, `message`, `exit_code`, `signal`, `duration_ms`, `output_size`, and the person's marks `seen` / `dismissed` (v2: `ui.op_error.seen` / `ui.op_error.dismissed` events, from `oxplow.op_error.*`; the Alerts page lists those not dismissed). The stderr / stdout are the event's `output` body (`oxplow_read` `event:<id>#output`). Kept 30 days, the output 14; an expired event keeps its row with its details NULL and `payload_expired_at` set |
@@ -920,7 +920,7 @@ An extension entity `<entity>` owned by extension `<ext>` is exposed as
   appears in the same datasets (`v_dataset`, `v_dimension`, `v_metric_spec`) and
   the same `oxplow_query_sql` as core data. Agents never need
   an extension-specific tool. Full agent surface:
-  [extensions.md](./extensions.md) → "Agents: the MCP surface".
+  [extensions-commands.md](./extensions-commands.md) → "Agents: the MCP surface".
 
 ### Completeness and coverage
 
@@ -1004,7 +1004,7 @@ collectors:
 The entry prints `{"entities": {"<name>": [ {col: value, …}, … ]}}`,
 and may add `"events": [{ "type", "payload", "subject"? }]` — its
 extension's own declared event types, logged with the run (P9.D2;
-[extensions.md](./extensions.md) "Event types").
+[extensions-events.md](./extensions-events.md) "Event types").
 
 **Entity vs fact collectors.**
 
@@ -1094,7 +1094,7 @@ last_event_id`. The UI refreshes when `v_collector_run` changes
 (`collectorRan`); the in-memory `SourceSynced` is gone.
 
 **Health (P7.C2).** Collectors share the contribution failure policy
-([extensions.md](./extensions.md) "Health, disable and repair"): three
+([extensions-activation.md](./extensions-activation.md) "Health, disable and repair"): three
 failed runs in a row disable one (`contribution_health`, key owner / id, kind
 `collector`); then nothing runs it until a person's `oxplow.contribution.enable`, and
 a page over its view warns that its rows aren't refreshing.
@@ -1113,7 +1113,7 @@ type without a `trigger` field:
   (`:stream_id`, `:snapshot_id`, `:effort_id`, `:thread_id`, `:turn_id`,
   integers, and the event itself — `:event_id` its id, `:event_seq` its
   seq; NULL when absent), and the script gets the event envelope as
-  `input.event` ([extensions.md](./extensions.md) "The event envelope").
+  `input.event` ([extensions-events.md](./extensions-events.md) "The event envelope").
 - **Once per event.** The run's `collector_run.last_event_id` is the
   event's seq, and its `collector.synced@2` is caused by the event with a
   per-event dedupe key. They commit with what the run wrote — an entity
@@ -1125,7 +1125,7 @@ type without a `trigger` field:
   the rest. An exec collector whose extension doesn't declare `process.run`
   doesn't load, so it never runs.
 - **Order.** A collector's `after:` names effects, collectors or core
-  consumers (extensions.md "Ordering"); collectors of one event run level
+  consumers (extensions-events.md "Ordering"); collectors of one event run level
   by level. An event waits on the core consumers named by the collectors
   **it triggers** (`after_for(event_type)`); a target nothing declares is a
   load error: an `effort.finished` event waits
@@ -1150,7 +1150,7 @@ entities from data already in the semantic layer:
   shape.
 - **Sandbox.** It runs in a script worker with no files, network, env or
   secrets. Its ways out are oxplow's own services, each one it declares
-  (extensions.md "Services"): the captured tree (`tree.read`), the
+  (extensions-permissions.md "Services"): the captured tree (`tree.read`), the
   semantic layer (`sql.read`), its own private state (`state.read`, served by
   StateSource outside SQL), and the `ai_*` builtins (`ai_classify` /
   `ai_score` / `ai_summarize` / `ai_extract`, implied when its script
@@ -1166,7 +1166,7 @@ entities from data already in the semantic layer:
   decision is denied (`RunCollectorError::Denied`, recorded as the run's
   `error`) when the extension lacks it. Only a permitted script is
   handed a dataset at all (the services router builds no dataset for any
-  other run, extensions.md "Services").
+  other run, extensions-permissions.md "Services").
   Any other derived collector needs **no permission**: the scheduler runs
   it on its `every:` trigger.
 - **Refused at parse:** `env` / `credentials` on a derived collector,

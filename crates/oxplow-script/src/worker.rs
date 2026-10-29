@@ -48,7 +48,7 @@ pub enum Engine {
     },
 }
 
-/// The services a run was given (`.context/extensions.md` "Services"):
+/// The services a run was given (`.context/extensions-permissions.md` "Services"):
 /// the tree (shipped as `tree` before the run), a model and the scopes,
 /// any of them. A builtin whose service wasn't given says which need it
 /// wants.

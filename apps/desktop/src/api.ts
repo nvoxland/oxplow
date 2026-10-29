@@ -406,7 +406,7 @@ export async function querySql(
 
 /// The extensions the app shows (and their pages) — the main worktree's,
 /// for every stream — with per-extension load errors. See
-/// `.context/extensions.md`.
+/// `.context/extensions-page-host.md`.
 export async function listExtensions(): Promise<Extension[]> {
   return unwrap(await commands.listExtensions());
 }

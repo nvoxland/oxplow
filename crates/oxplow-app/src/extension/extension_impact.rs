@@ -6,7 +6,7 @@
 //! collectors' and effects' dry runs on the same inputs — each version on
 //! its own datasets' overlay. It never runs a program, a provider or an exec
 //! collector (consent forbids running an unapproved version), and stores
-//! nothing. See `.context/extensions.md` → "Reviewing by impact".
+//! nothing. See `.context/extensions-deploy.md` → "Reviewing by impact".
 
 use std::collections::{BTreeMap, BTreeSet};
 

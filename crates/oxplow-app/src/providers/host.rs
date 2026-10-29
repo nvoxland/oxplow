@@ -3,7 +3,7 @@
 //! A provider runs from its extension's deployment, which never changes,
 //! under the `process` permission (and the `network` and `secrets` its
 //! extension declares) a person approved when they deployed it
-//! (`.context/extensions.md` "Permissions"). The spawn mirrors an `exec`
+//! (`.context/extensions-permissions.md` "Permissions"). The spawn mirrors an `exec`
 //! source: a scrubbed environment (PATH, HOME, the declared `env` names,
 //! the credentials from the keychain, `OXPLOW_*` context), the egress
 //! proxy and `sandbox-exec` where the OS enforces `network`, and the

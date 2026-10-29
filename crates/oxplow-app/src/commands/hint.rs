@@ -1,5 +1,5 @@
 //! Hint commands: a person dismisses a hint raised to them in Alerts
-//! (`.context/extensions.md` "Advisories"). `Tx` over the nudge store's
+//! (`.context/extensions-commands.md` "Advisories"). `Tx` over the nudge store's
 //! `dismiss_tx`; read back through `v_agent_nudge`, where a dismissed
 //! hint has its `delivered_at`. An agent can't dismiss what was raised to
 //! the person.

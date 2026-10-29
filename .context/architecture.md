@@ -98,7 +98,7 @@ machine until that person deploys it there.
 
 - **What the declaration covers.** `Permissions`, in the manifest:
   `sql`, `commands`, `files`, `ai`, `network`, `process`, `secrets`,
-  `agent` ([extensions.md](./extensions.md) "Permissions"). A contribution
+  `agent` ([extensions-permissions.md](./extensions-permissions.md) "Permissions"). A contribution
   that needs more than it declares is a load error naming what to add.
   A narrower request asks nothing new.
 - **What runs is what was deployed.** A deployment is immutable
@@ -117,7 +117,7 @@ machine until that person deploys it there.
 - **What it grants, and what isn't held.** The permissions grant the
   contribution's request (`oxplow_domain::grant`, derived by `grants.rs`
   from what it declares) — never more. Every run decides what it does
-  against it and records the decisions ([extensions.md](./extensions.md)
+  against it and records the decisions ([extensions-permissions.md](./extensions-permissions.md)
   "Grants"). Where oxplow can't hold a grant here — a program's files,
   network egress off macOS — the decision is `unenforced`, and the deploy
   prompt and a review say so.
@@ -409,7 +409,7 @@ copy of it: a stream edits its copy like any other code, and the change
 takes effect once merged into the main worktree. The extensions the app
 runs are the live deployments, not the files in any checkout: an edit to an
 extension's source (`.oxplow/extensions/`) changes nothing until someone
-deploys it (see [extensions.md](./extensions.md) → "Sources and
+deploys it (see [extensions-deploy.md](./extensions-deploy.md) → "Sources and
 deployments"). Agents' authoring tools read the source in their own
 checkout before it is deployed. If per-stream config is ever needed, it gets a separate file.
 

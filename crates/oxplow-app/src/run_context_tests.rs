@@ -1,5 +1,5 @@
 //! Every run of extension code is recorded once, as itself
-//! (`.context/extensions.md` "The run context", `v_extension_run`): one
+//! (`.context/extensions-permissions.md` "The run context", `v_extension_run`): one
 //! event reaches an `on:` collector and an effect; a person runs the
 //! collector and the extension's command. Each run names its contribution,
 //! the actor the host chose, what caused it and where, and the records

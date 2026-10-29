@@ -1,5 +1,5 @@
 /// The host side of a custom component's bridge (P6b.D4,
-/// `.context/extensions.md` → "Custom components"). The frame is
+/// `.context/extensions-components.md` → "Custom components"). The frame is
 /// sandboxed (`allow-scripts allow-forms`: an opaque origin, no network,
 /// no token; a form submits nowhere, its script handles it); after it loads, the host hands it one end of a MessageChannel
 /// with `init`, and every request comes back over that port — never over

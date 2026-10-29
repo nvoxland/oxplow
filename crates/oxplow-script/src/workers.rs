@@ -55,7 +55,7 @@ impl Default for Limits {
 /// Answers a command script's `scope(id, args)` call.
 pub type Serve<'a> = dyn FnMut(&str, Value) -> Result<Value, String> + 'a;
 
-/// The services a run is given (`.context/extensions.md` "Services"):
+/// The services a run is given (`.context/extensions-permissions.md` "Services"):
 /// any of them, each answered by what the caller passes.
 #[derive(Default)]
 pub struct Hosts<'a> {

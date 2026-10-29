@@ -7,7 +7,7 @@ authors.workspace = true
 license.workspace = true
 publish = false
 
-# The extension SDK (`.context/extensions.md` "The SDK"): scaffold, check,
+# The extension SDK (`.context/extensions-sdk.md` "The SDK"): scaffold, check,
 # migrate and test an extension, and the provider conformance kit. A library so the `oxplow extension …` CLI (the Tauri
 # binary) and the agent's `oxplow_validate_extension` share one
 # implementation and one set of messages.

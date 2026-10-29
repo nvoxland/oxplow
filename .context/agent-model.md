@@ -234,7 +234,7 @@ plugin namespacing, hence `oxplow-` instead of Claude's `/oxplow:`.
 Core (`crates/oxplow-mcp/src/lib.rs`) builds two tools, `list_commands`
 and `run_command`. Every other tool is a foundation command or page that
 declares `tool:` and is offered as `oxplow_<name>`; any extension declares
-its own the same way, under its namespace ([extensions.md](./extensions.md)
+its own the same way, under its namespace ([extensions-commands.md](./extensions-commands.md)
 "Agents: the MCP surface"). With the harness's namespace on top the agent
 calls `mcp__oxplow__run_command`, `mcp__oxplow__oxplow_query_sql`. No other
 spelling is accepted.
@@ -481,7 +481,7 @@ The UI reads each
 harness's features from `list_agent_harnesses` (`HarnessListing.features`),
 and its logo (`HarnessListing.icon`: the SVG its `implementations:` entry
 names in `icon:`, as a data URI, null when it declares none — no harness id
-is named in the UI; "Implementations" in [extensions.md](./extensions.md)):
+is named in the UI; "Implementations" in [extensions-commands.md](./extensions-commands.md)):
 
 | Harness (key) | Features |
 |---|---|

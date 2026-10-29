@@ -11,7 +11,7 @@ broader "Monaco at the core, custom shell around it" rationale, see
 The working tree's file opens on oxplow-foundation's `editor` page, a
 page (`pages/editor.yaml`: params `uri`, `path`, `lines` a filter)
 over the kit's **`editor` viz** (`viz/EditorViz.tsx`, `editor: { path,
-lines }`; extensions.md "Pages"). The viz opens the file's buffer,
+lines }`; extensions-pages.md "Pages"). The viz opens the file's buffer,
 draws `EditorPane` over it, lands on `#lines=`'s start, and tells its
 tab what it edits (`useTabEditing`: the ● on the tab, File → Save and
 Find, the tab cap never closing it). Saving runs `oxplow.file.save`. A
@@ -223,7 +223,7 @@ which is the useful action.
 
 ## Read-only code and diff vizes
 
-A page shows files through two kit vizes (`.context/extensions.md`
+A page shows files through two kit vizes (`.context/extensions-page-host.md`
 "Viz"):
 
 - **`code`** (`viz/CodeViz.tsx`): one read-only Monaco per row, side by

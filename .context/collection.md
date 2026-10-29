@@ -621,7 +621,7 @@ easier fit.)
 
 More globals back **fact collectors** (the metric substrate's author-able
 producers — see [metrics.md](./metrics.md)); what a script may call is
-the services it declares (extensions.md "Services": a fact collector
+the services it declares (extensions-permissions.md "Services": a fact collector
 implies `tree.read`; an entity collector reads the tree when it declares
 it):
 - `ast_query(text, language, sexpr)` → a flat `[{capture, text, start_row,

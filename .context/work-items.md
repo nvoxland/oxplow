@@ -169,7 +169,7 @@ or an item's description editor (`work_item.detail`) — with a
 page or component over `v_work_item` that changes items only through the
 interface commands, so it works with whichever list is active; the person
 picks whose shows (`replacements`, Settings → Integrations).
-[extensions.md](./extensions.md) "Replacements" has the contracts. The `oxplow-foundation/work-item.sections` slot gets
+[extensions-slots.md](./extensions-slots.md) "Replacements" has the contracts. The `oxplow-foundation/work-item.sections` slot gets
 `{ uri }`. Link…'s link type is free text (default `relates_to`): the
 provider names its own types, and `about` fits any URI. Its target is
 **any URI** (a work item's, `oxplow:oxplow/effort?id=eff12`, `oxplow:oxplow/collector?collector=x/y`); a link row
@@ -265,7 +265,7 @@ declares the feature must declare the verb. A Rust client, **`work_items::WorkIt
 suite uses it. Extension commands compose the same verbs:
 oxplow-bundled's Accept Review / Request Changes (P7.C5) comment on and
 transition an effort's work item whatever its provider
-([extensions.md](./extensions.md) "The review packet").
+([extensions-bundled.md](./extensions-bundled.md) "The review packet").
 
 **The contract is the `v_work_item` columns**, one shape for every
 provider (a provider's verb receives the same input, less `create`'s

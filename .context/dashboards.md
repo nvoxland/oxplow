@@ -1,6 +1,6 @@
 # Dashboards
 
-A dashboard is a page. Read [extensions.md](./extensions.md) "Pages" for
+A dashboard is a page. Read [extensions-pages.md](./extensions-pages.md) "Pages" for
 the page format; this doc covers only what is specific to dashboards.
 
 ## Page-file dashboards

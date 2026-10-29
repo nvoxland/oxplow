@@ -22,7 +22,7 @@ cannot consume a reference. The host brackets resolution with live owner and
 deployment checks. Save/revoke invalidates a synchronous admission revision, stops
 old consumers and requests coherent reconciliation even if the RPC is cancelled.
 Normal instance credential setters refuse these declarations; human host-secret
-ingress returns only reference/presence. See [extensions.md](./extensions.md)
+ingress returns only reference/presence. See [extensions-permissions.md](./extensions-permissions.md)
 "Host-owned secret references" for persistence and lifecycle details. Runtime
 validation and the human settings form remain unfinished.
 
@@ -178,7 +178,7 @@ notifications against the goldens.
 `react` (`confirm: never`, `access: record`), no event types or
 collectors, the same `team` config — and keeps no items (`discover` is
 empty, any other verb `InvalidInput`). `react { event }` (the event
-envelope, extensions.md "The event envelope") answers as an
+envelope, extensions-events.md "The event envelope") answers as an
 effect's script does: an item moved to `in_progress` with a thread in
 its anchors opens an effort on that thread linked to the item
 (`oxplow.effort.open`); one moved to `done` or `canceled` reads its open
@@ -619,7 +619,7 @@ provider's program must be findable where a person's would be; `ran`
 shows `agent_harness suite`. The MCP adapter
 (`oxplow-provider-mcp`) still maps work-item URIs only.
 
-**A provider runs under its extension's permissions** (`.context/extensions.md`
+**A provider runs under its extension's permissions** (`.context/extensions-permissions.md`
 "Permissions"): its manifest declares `process` (an `entry` or an MCP
 `command`), the `network` hosts it reaches and the `secrets` its credentials
 name — the loader refuses it otherwise, naming what to declare — and a person
@@ -1039,7 +1039,7 @@ doubles from `MachineEnv.provider_backoff` (1 s in the app, 0 in
 kills the process. **Its commands are its extension's**: the manifest
 declares each once over an operation its declarations list
 (`commands:` → `{ name: item.estimate, provider: fake, op: estimate,
-ui, … }`, [extensions.md](./extensions.md) "Commands"), so it has one id
+ui, … }`, [extensions-commands.md](./extensions-commands.md) "Commands"), so it has one id
 for every instance (`tracker.item.estimate`), registered by the
 extension's generation whether or not an instance runs. Its spec takes the
 operation's input schema (plus an optional `instance`), effect and
@@ -1136,7 +1136,7 @@ extension declares; the reason says what to add), `refused { reason }`
 start or call counts (a refused input or a cancel doesn't); a success
 resets the count and updates `last_ok_at` and the moving-average
 `mean_invoke_ms`. The count and the disable are the policy every extension
-contribution shares (P7.C1, `contribution_health.rs`; [extensions.md](./extensions.md)):
+contribution shares (P7.C1, `contribution_health.rs`; [extensions-activation.md](./extensions-activation.md)):
 the `contribution_health` row keyed `<extension>` / `<instance id>`, kind
 `provider` (`v_contribution_health`). **Three failures in a row disable the
 instance** — a write counts once however often it is sent again under
@@ -1321,7 +1321,7 @@ tell it is the same write. The contract (P10, built):
 - **An effect's failed attempt is sent again by itself** only when every
   step it composed was a write to such a provider, at most twice, and it
   sends exactly what the failed attempt composed, so its keys are the
-  same ([extensions.md](./extensions.md) "Attempts"); anything else waits for
+  same ([extensions-events.md](./extensions-events.md) "Attempts"); anything else waits for
   a person's `oxplow.effect.retry`, asked first. A failed command a person ran
   is reported, not retried.
 - **The kit checks the promise** (the work-items suite,
@@ -1339,7 +1339,7 @@ session: [agent-model.md](./agent-model.md) "Observe conformance".)
 
 What `oxplow extension test <name> [--bless] [--json]` runs for each
 provider an extension declares, after its check and its page and
-collector examples ([extensions.md](./extensions.md) "The SDK"). The person running it runs their own program, so no deploy
+collector examples ([extensions-sdk.md](./extensions-sdk.md) "The SDK"). The person running it runs their own program, so no deploy
 approval is asked; credentials come from the environment (the declared
 names — for a signed-in credential, an access token the author got
 themselves: the kit never signs in — and never a client secret).
@@ -1453,7 +1453,7 @@ namespace, and a candidate check cannot borrow the installed owner. No request
 selects an extension or DB path. Each call owns a short read transaction;
 provider execution and waiting hold none. Late catalog changes conservatively
 refuse the old instance's state access until lifetime reconciliation. See
-[extensions.md](./extensions.md) "Private state host boundary".
+[extensions-manifest.md](./extensions-manifest.md) "Private state host boundary".
 
 ## Provider resolution snapshots
 

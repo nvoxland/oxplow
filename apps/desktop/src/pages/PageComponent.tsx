@@ -1,5 +1,5 @@
 /// A page file's custom components (`.context/pages-and-tabs.md` "The
-/// desktop host", `.context/extensions.md` "Custom components"): a
+/// desktop host", `.context/extensions-components.md` "Custom components"): a
 /// `component` node (`{ component: { id, props } }`) is the page's
 /// extension's component in a sandboxed frame, fed the page's loaders
 /// (`pageData`: every loader's rows by name, the params, its props) and

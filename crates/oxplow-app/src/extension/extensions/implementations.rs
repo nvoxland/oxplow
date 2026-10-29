@@ -1,6 +1,6 @@
 //! `implementations:` in `extension.yaml` (stable): the capability
 //! implementations an extension declares
-//! (`.context/extensions.md` "Implementations").
+//! (`.context/extensions-commands.md` "Implementations").
 //!
 //! ```yaml
 //! implementations:

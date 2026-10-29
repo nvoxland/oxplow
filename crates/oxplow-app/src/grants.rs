@@ -1,5 +1,5 @@
 //! What each kind of contribution asks to do, derived from what it
-//! declares (`oxplow_domain::grant`, `.context/extensions.md` "Grants"),
+//! declares (`oxplow_domain::grant`, `.context/extensions-permissions.md` "Grants"),
 //! what its extension may do (its `permissions:`, approved when it was
 //! deployed), and what this machine can hold that to. A run decides each
 //! thing it does against them.

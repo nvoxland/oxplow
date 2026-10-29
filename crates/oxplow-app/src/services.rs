@@ -1,4 +1,4 @@
-//! The services a script's run is given (`.context/extensions.md`
+//! The services a script's run is given (`.context/extensions-permissions.md`
 //! "Services"): each service its script uses decided on its run — its mode,
 //! what it declares, its authority — and the hosts built for those it may
 //! use. Every host that runs an extension's script prepares it here:

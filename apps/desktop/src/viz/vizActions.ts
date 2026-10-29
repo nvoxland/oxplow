@@ -2,7 +2,7 @@
 /// acting for the person who pressed it — so it asks for confirmation when
 /// the command does, and grants no power the person lacks. Copy is the
 /// page's (`page_text`), Add to Context its menu's. See
-/// `.context/extensions.md`.
+/// `.context/extensions-pages.md`.
 import { fieldsOf, secretFields, shownFields, type Field } from "../components/SchemaForm/schemaFormModel.js";
 import { IpcCallError, needsConfirmation } from "../ipc-error.js";
 import type { CommandOutcome, Drop, FormStart, PageAction, VizRun, SqlCell } from "../tauri-bridge/generated/bindings.js";

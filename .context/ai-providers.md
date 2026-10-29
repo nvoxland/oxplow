@@ -123,7 +123,7 @@ saying so (`oxplow_ai::config::DROPPED_ROLES`; project.yaml's
 ### Extension AI profiles
 
 An extension declares its own model needs as **AI profiles**
-(`ai_profiles:` in `extension.yaml`, [extensions.md](./extensions.md)):
+(`ai_profiles:` in `extension.yaml`, [extensions-jobs.md](./extensions-jobs.md)):
 an id, a description, a required `fallback` built-in role and optional
 `features` (`text | tool_calling | streaming | image`). So
 `oxplow_ai::config::Role` is open: `Builtin(BuiltinRole)` or
@@ -272,7 +272,7 @@ an id, a description, a required `fallback` built-in role and optional
   the partial reply. `AiCompute::stream_typed` is the recorded
   computation: a recorded answer is handed over at once, whole, with no
   call; a cancelled or failed stream is never the recorded answer. A
-  job's rounds use it ([extensions.md](./extensions.md) "Jobs");
+  job's rounds use it ([extensions-jobs.md](./extensions-jobs.md) "Jobs");
   collectors don't stream.
 - **Rust kinds over Rig.** Every model provider is a Rust kind in
   `crates/oxplow-ai-rig`, and an `ai_provider` declaration names one with
@@ -546,7 +546,7 @@ and `ai_extract(text, schema, instructions = "")`, each with a keyword
 extension's AI profiles by id, qualified with the run's extension) — Starlark builtins
 (`crates/oxplow-script/src/ai.rs`) answered by the run's
 `AiHost`, one of the services the run was given (`runtime::Hosts`,
-[extensions.md](./extensions.md) "Services"). The host holds
+[extensions-permissions.md](./extensions-permissions.md) "Services"). The host holds
 a synchronous `dyn AiOracle`; the app's is `ai_compute::CollectorOracle`,
 which blocks the script's worker thread on the runtime and asks
 `AiCompute` as caller `collector:<owner>/<id>` — so every answer is a
@@ -562,7 +562,7 @@ per-row loop of calls can't run for hours and hold up every scheduled
 source behind it. Past either the worker is killed: no paid calls after
 a timeout. A run cut off keeps
 what it recorded, so its next run gets further (tsk559). Who gets a model is the
-services router's ([extensions.md](./extensions.md) "Services"): an
+services router's ([extensions-permissions.md](./extensions-permissions.md) "Services"): an
 entity collector whose script names an `ai_*` builtin implies
 `ai.compute`; a **fact collector** gets one when it declares
 `needs: [ai.compute]` and its extension declares `ai.compute` (otherwise

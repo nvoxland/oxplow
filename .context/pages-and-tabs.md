@@ -664,7 +664,7 @@ nested tree with ids `<embed>/<id>`, slot → its children, markdown → the
 `Markdown` component, component → its extension's component in a frame
 at its content's height (`pages/PageComponent.tsx` `ComponentNode`), a
 node or loader error → an inline `ox-error`. A component is fed its
-page's data over the bridge (protocol 12, `.context/extensions.md`
+page's data over the bridge (protocol 12, `.context/extensions-components.md`
 "Custom components": `pageData` — every loader's rows by name, the
 params, its props — and an `update` naming the loaders that changed); a
 `custom` viz is fed the same (`VizPages.componentData`), its own rows also
@@ -974,7 +974,7 @@ Lengths come from the spacing and radius tokens (theming.md).
 An extension lists `ui.mounts: [{ page, at, position }]` in its manifest. It
 mounts one of its own pages there, placed (`position`) at the start, the end, or beside
 a node by its stable id. A mount whose host slot is missing is a load
-warning. extensions.md "Slots".
+warning. extensions-slots.md "Slots".
 
 ## Body layouts
 
@@ -1584,7 +1584,7 @@ pick) is the list's own (`useListNav`); only a pick is a selection, and
 `useListNav`'s `selected` puts the cursor on a kept pick.
 
 **A component inside a page shares the page's view only where its host
-says which keys** (`viz/hostedView.ts`; `.context/extensions.md` "Whose
+says which keys** (`viz/hostedView.ts`; `.context/extensions-components.md` "Whose
 view a component has"): a replacement the keys its target's contract
 lists (the history graph: Git History's `q`, `author`, `branch`, the
 same ones core's commit list reads), a page's own component all of
@@ -1684,7 +1684,7 @@ page file, with no desktop code:
    `accepts`, `default: true` (the extension's own resource, one page
    per resource) and `pinned`. Such a page declares a `uri` param
    and is run with the URI; its other params that the URI carries get
-   their values from it. [extensions.md](./extensions.md) "Pages" has
+   their values from it. [extensions-pages.md](./extensions-pages.md) "Pages" has
    the rules.
 3. Plumb any list rows that target the thing through
    `useRouteDispatch` / `RouteLink` so plain-click navigates in-tab.

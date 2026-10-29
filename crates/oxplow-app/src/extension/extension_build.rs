@@ -1,4 +1,4 @@
-//! Running an extension's `build:` (`.context/extensions.md` "Builds"):
+//! Running an extension's `build:` (`.context/extensions-deploy.md` "Builds"):
 //! its command in the source folder, as the person, before a deploy
 //! copies. Not confined — a build is the person's own tool, which is what
 //! the approval at deploy says.

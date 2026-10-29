@@ -2,7 +2,7 @@
 //!
 //! An `exec` collector is a program an extension ships. It runs from its
 //! extension's deployment, under the `process` permission the person
-//! approved when they deployed it (`.context/extensions.md`
+//! approved when they deployed it (`.context/extensions-permissions.md`
 //! "Permissions"), and reaches only the hosts and secrets its
 //! permissions name. The entry runs with a scrubbed
 //! environment (PATH, HOME, the declared `env` names, its declared

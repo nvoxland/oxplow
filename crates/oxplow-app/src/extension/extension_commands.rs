@@ -1,4 +1,4 @@
-//! The `commands:` kind of `extension.yaml` (P6b, `.context/extensions.md`
+//! The `commands:` kind of `extension.yaml` (P6b, `.context/extensions-commands.md`
 //! → "Commands"): a command whose handler is a Starlark script that
 //! composes core commands.
 //!

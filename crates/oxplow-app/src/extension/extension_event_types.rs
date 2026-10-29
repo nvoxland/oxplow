@@ -1,7 +1,7 @@
 //! An extension's declared event types (`event_types:` in its manifest,
 //! P8.D2): what the vocabulary registers for each one
 //! (`EventSchemaRegistry::register_declared`), including the upcast its
-//! Starlark compiles to (`.context/extensions.md`).
+//! Starlark compiles to (`.context/extensions-events.md`).
 
 use std::sync::Arc;
 

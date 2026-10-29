@@ -18,7 +18,7 @@ person or a coding agent gets one answer wherever they meet it.
 
 User docs: [Extensions](../../docs/reference/extensions.md) and
 [Provider protocol](../../docs/reference/provider-protocol.md). Design
-notes for contributors: `.context/extensions.md` "The SDK" and
+notes for contributors: `.context/extensions-sdk.md` "The SDK" and
 `.context/providers.md` "The conformance kit".
 
 Tests: `bun run test:fast -p oxplow-sdk`. `tests/just_works.rs` checks
