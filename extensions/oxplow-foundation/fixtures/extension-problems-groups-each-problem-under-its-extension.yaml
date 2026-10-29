@@ -1,0 +1,11 @@
+# `viz: sections` with a group: the extension is the group (an arrow opens
+# its page) and each problem a subsection under it. A quiet project has none.
+when:
+  page: oxplow-foundation/extension-problems
+  params: { extension: oxplow-foundation }
+expect:
+  loaders:
+    problems:
+      rows: 0
+  nodes:
+    - { id: problems, kind: viz, viz: sections }

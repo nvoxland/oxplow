@@ -211,6 +211,9 @@ intent:
     - name: the-extensions-page-lists-every-extension-and-what-needs-repair
       input: { page: extensions, params: {} }
       expect: a section per extension headed by its name, each fact a sentence, the ones needing attention first, no repair buttons
+    - name: extension-problems-groups-each-problem-under-its-extension
+      input: { page: extension-problems, params: { extension: oxplow-foundation } }
+      expect: the extension is a group heading with an arrow to its page and each problem a subsection under it
     - name: extension-problems-collects-what-is-failing-or-turned-off
       input: { page: extension-problems, params: {} }
       expect: everything wrong with an extension under its name (stopped or failing contributions, permissions waiting for approval, load errors), with Start Again, Repair with the Agent and Start All Stopped

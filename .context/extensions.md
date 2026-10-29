@@ -1616,8 +1616,10 @@ those needing attention first, each fact a sentence from the hidden
 wrong with an extension: a contribution stopped after failing (never called
 "disabled": that word is for an extension turned off) or failing, permissions
 waiting for approval (`v_extension.pending`; the person approves with Deploy on
-its page), and load errors. A `sections` subsection each (titled
-`<extension>: <contribution>`, linking to the extension), with Start Again,
+its page), and load errors. The extension is the `sections` group (its arrow opens
+the Extension page) and each problem a subsection under it (titled `<kind>
+<contribution>`, `Did not load cleanly`, or `Needs your approval to run` with the
+waiting permissions as `format: items`), with Start Again,
 Repair with the Agent and Start All Stopped. A link from a one-line summary narrows it with the view param
 `#extension=<name>`; Alerts' failing-extension rows link the same way.
 

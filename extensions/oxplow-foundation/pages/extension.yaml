@@ -74,7 +74,7 @@ view:
     - { key: description, label: What it is }
     - { key: origin_text, label: From }
     - { key: runs_text, label: Runs }
-    - { key: permission_items, label: Permissions }
+    - { key: permission_items, label: Permissions, format: items }
     - { key: problems_label, label: Problems, link: { kind: page, from: problems_target } }
     - { key: manifest, label: Manifest, link: { kind: page, from: manifest_target } }
     empty: This extension isn't known to the project.

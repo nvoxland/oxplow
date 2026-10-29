@@ -14,5 +14,5 @@ view:
   columns:
   - { key: origin_text, label: From }
   - { key: runs_text, label: Runs }
-  - { key: permission_items, label: Permissions }
+  - { key: permission_items, label: Permissions, format: items }
   empty: No extensions. One you or your agent writes in .oxplow/extensions/ shows here.
