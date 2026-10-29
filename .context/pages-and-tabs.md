@@ -253,6 +253,9 @@ defines what the person sees:
   title, columns and settings; embeds and slot mounts included) and its
   actions where they sit. Only an inline view, which has no file, shows
   its YAML.
+  `v_page.running_uri` is the file URI of the copy that runs
+  (`…&rev=<hash>&filesystem=oxplow:extensions`, NULL with no deployment):
+  the link to open for "the page as it runs", pinned to that deployment.
 - **`view:`** (and an optional `rail:`) — a tree of nodes: `stack`,
   `grid` (children with `size`), `switch` (`{ param, children }`: the
   child whose id is the param's value), `viz` (+ `from: <loader>`, the

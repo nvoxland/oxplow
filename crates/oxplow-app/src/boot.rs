@@ -184,6 +184,12 @@ pub async fn run_boot_orchestration(
     state.event_pump.clone().spawn();
     // `every:` collectors: the scheduler runs `oxplow.collector.sync` as the system.
     crate::collector_runner::spawn_scheduler(state);
+    // Scratch files past their time or over the caps (`oxplow:temp`).
+    state.spawn_every(
+        std::time::Duration::from_secs(5 * 60),
+        std::time::Duration::from_secs(5 * 60),
+        |state| async move { state.temp.sweep().await },
+    );
     // Paced `on:` collectors: run each deferred one once its pacing allows.
     crate::pacing::spawn(state);
     // The agent runtimes' skills: what's offered now.

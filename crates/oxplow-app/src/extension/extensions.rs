@@ -748,10 +748,7 @@ pub fn load_deployed(
 /// Fill in where each of `ext`'s pages comes from: the deployment it
 /// runs, and its source file when the source is here.
 fn locate(ext: &mut Extension, project: &Path, settings: &oxplow_config::ExtensionSettings) {
-    let deployment = match &ext.deployment {
-        Deployment::Shipped { hash } | Deployment::Deployed { hash } => Some(hash.clone()),
-        _ => None,
-    };
+    let deployment = ext.deployment.hash().map(str::to_string);
     let dir = settings.source(project, &ext.name);
     // A shipped copy has no source here: a folder with its name is ignored.
     let shipped = matches!(ext.deployment, Deployment::Shipped { .. });

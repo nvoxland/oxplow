@@ -711,6 +711,9 @@ pub struct Services {
     /// The filesystems, by id (`.context/filesystems.md`): where a file's
     /// bytes come from. Readers name one by its id; none is `oxplow:local`.
     pub filesystems: Arc<oxplow_domain::filesystem::FileSystemRegistry>,
+    /// `oxplow:temp`, the one filesystem oxplow's own code writes: `put`
+    /// and `remove` (the registry's entry is the same value).
+    pub temp: Arc<filesystems::temp::TempFs>,
     /// Per-file subtree records the change-scoped duplicate scan reuses
     /// between scans (`oxplow_code_dup::DupCache`, bounded in bytes).
     pub dup_cache: Arc<oxplow_code_dup::DupCache>,
@@ -1234,6 +1237,12 @@ impl Services {
         let extension_catalog = Arc::new(
             extension::extension_catalog::ExtensionCatalog::for_project(&layout.project_dir),
         );
+        let temp = Arc::new(filesystems::temp::TempFs::new(&layout.project_dir));
+        filesystems.register(temp.clone());
+        filesystems.register(Arc::new(filesystems::extensions::ExtensionsFs::new(
+            layout.project_dir.clone(),
+            extension_catalog.clone(),
+        )));
         // The service is built before the catalog: its AI profiles are
         // whatever the active extensions declare, read live.
         ai.set_profiles({
@@ -1967,6 +1976,7 @@ impl Services {
             ref_moves,
             trees,
             filesystems,
+            temp,
             dup_cache: Arc::new(oxplow_code_dup::DupCache::default()),
             stopping: tokio_util::sync::CancellationToken::new(),
         })

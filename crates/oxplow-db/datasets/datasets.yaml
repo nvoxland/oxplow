@@ -1361,7 +1361,7 @@
   tests:
     - { not_null: uri }
 - name: page
-  version: 1
+  version: 2
   key: [uri]
   description: "Every page file of every enabled extension: a page's metadata, what it renders and how an agent finds it. Restated with each extension generation. Its params are `v_page_param`, the questions it answers `v_page_answer`."
   fields:
@@ -1383,6 +1383,7 @@
     - { name: "needs", type: "TEXT", doc: "The capabilities (or features) it needs, as a JSON array." }
     - { name: "source", type: "TEXT", doc: "Its source file, the one to edit, relative to the project; NULL when no source is here (it ships with oxplow)." }
     - { name: "deployment", type: "TEXT", doc: "Where its extension's files come from: `deployed`, `shipped`, `source`, `undeployed` or `not_here` (`v_extension.deployment`)." }
+    - { name: "running_uri", type: "TEXT", doc: "The file URI of the copy that runs, pinned to its deployment (`oxplow:oxplow/file?path=<extension>/pages/<file>&rev=<hash>&filesystem=oxplow:extensions`): comments and links on it stay on that copy, and it changes when a redeploy changes the running one. NULL when the extension runs no deployment (read from its source, or not deployed). (v2)" }
   tests:
     - { not_null: uri }
     - { unique: uri }

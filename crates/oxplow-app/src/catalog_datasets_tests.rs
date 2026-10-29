@@ -161,6 +161,54 @@ async fn pages_are_datasets_that_follow_the_catalog() {
     }
 }
 
+/// A page of a deployed extension carries the file URI of the copy that
+/// runs, pinned to its deployment hash; one of an extension that runs from
+/// its source has none.
+#[tokio::test]
+async fn a_page_names_the_copy_that_runs() {
+    let fx = services_with_effort().await;
+    let root = fx.svc.layout.project_dir.clone();
+    write(&root, "extension.yaml", MANIFEST);
+    write(&root, "pages/pr.yaml", PAGE);
+    crate::test_fixtures::activate(&fx.svc).await;
+
+    let hash = rows(&fx, "SELECT hash FROM v_extension WHERE name = 'acme'").await[0][0]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let expected = oxplow_domain::uri::build::file_uri_at(
+        "acme/pages/pr.yaml",
+        Some(oxplow_domain::filesystem::EXTENSIONS),
+        Some(&hash),
+        None,
+    );
+    assert_eq!(
+        rows(
+            &fx,
+            "SELECT running_uri FROM v_page WHERE uri = 'oxplow:oxplow/page?page=acme/pr'"
+        )
+        .await,
+        vec![vec![json!(expected.clone())]]
+    );
+    assert!(expected.contains("filesystem=oxplow:extensions") && expected.contains(&hash));
+    // The URI reads the running YAML back.
+    let text = crate::ref_read::read(&fx.svc, &expected, &Default::default(), None)
+        .await
+        .unwrap();
+    assert_eq!(text.content.as_deref(), Some(PAGE));
+    // With no revision it is the running copy.
+    let running = oxplow_domain::uri::build::file_uri_at(
+        "acme/pages/pr.yaml",
+        Some(oxplow_domain::filesystem::EXTENSIONS),
+        None,
+        None,
+    );
+    let text = crate::ref_read::read(&fx.svc, &running, &Default::default(), None)
+        .await
+        .unwrap();
+    assert_eq!(text.content.as_deref(), Some(PAGE));
+}
+
 /// What a loaded extension warns about is on its row; one that fails to
 /// load blocks the generation, so it is not a row (`oxplow_validate_extension`
 /// says why).

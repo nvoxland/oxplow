@@ -167,4 +167,65 @@ mod tests {
             "{files}"
         );
     }
+
+    /// The neutral reads reach the scratch files and the extensions' copies.
+    #[tokio::test]
+    async fn reads_reach_the_temp_and_extensions_filesystems() {
+        let (svc, dir) = crate::test_support::services().await;
+        svc.temp.put("v.yaml", b"title: V\n").await.unwrap();
+        let file = dir
+            .path()
+            .join(".oxplow/runtime/extensions/acme/h1/pages/p.yaml");
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(file, "title: P\n").unwrap();
+        let call = |name: &'static str,
+                    path: &'static str,
+                    filesystem: &'static str,
+                    rev: serde_json::Value| {
+            let svc = svc.clone();
+            async move {
+                crate::dispatch(
+                    name,
+                    json!({ "streamId": null, "path": path, "filesystem": filesystem, "rev": rev }),
+                    &svc,
+                )
+                .await
+            }
+        };
+        assert_eq!(
+            call("read_at", "v.yaml", "oxplow:temp", json!(null))
+                .await
+                .unwrap(),
+            json!("title: V\n")
+        );
+        assert_eq!(
+            call(
+                "read_at",
+                "acme/pages/p.yaml",
+                "oxplow:extensions",
+                json!("h1")
+            )
+            .await
+            .unwrap(),
+            json!("title: P\n")
+        );
+        let stat = call(
+            "stat_file",
+            "acme/pages/p.yaml",
+            "oxplow:extensions",
+            json!("h1"),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            (stat["kind"].clone(), stat["language"].clone()),
+            (json!("file"), json!("yaml"))
+        );
+        assert!(
+            call("read_at", "v.yaml", "oxplow:temp", json!("x"))
+                .await
+                .is_err(),
+            "no revisions"
+        );
+    }
 }

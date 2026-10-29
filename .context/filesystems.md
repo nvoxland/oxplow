@@ -3,10 +3,9 @@
 A **filesystem** is a capability with many implementations active at
 once: each answers `stat`, `read`, `list` and, when it is `writable`,
 `write`, and a reader names the one it means by its id. Core ships
-`oxplow:local` (the stream's worktree). `oxplow:extensions` (the running
+`oxplow:local` (the stream's worktree), `oxplow:extensions` (the running
 copies of extensions, `rev` = deployment hash) and `oxplow:temp` (scratch
-files) are the next built-ins, and a provider can add its own later
-(`<extension>:<name>`, `acme:s3`).
+files); a provider can add its own later (`<extension>:<name>`, `acme:s3`).
 
 ## The trait (`oxplow_domain::filesystem`)
 
@@ -73,6 +72,52 @@ file's content, kind and listing go through the filesystem.
   `WorkspaceChanged`) and needs a stream: it never falls back to the
   primary checkout.
 
+### `oxplow:extensions` (`filesystems/extensions.rs`)
+
+`ExtensionsFs` serves the copies of extensions oxplow runs. A path is
+`<extension name>/<path inside it>`; `rev` is a deployment hash and none
+means the extension's **running** deployment. Read-only.
+
+- Files are the deployment folder, `extension_store::deployment_dir(project,
+  name, hash)`. The running hash is the catalog's: `running_hash` (=
+  `Deployment::hash`, the same value `locate` writes to
+  `PageProvenance.deployment`), for a deployed or shipped copy.
+- An extension that runs no deployment — read from its source folder (an
+  authoring check, the CLI, a dev build's own extensions under
+  `enableBundledExtensions: false`), undeployed, or not here — has **no
+  running files**: with no `rev` its paths are `None`/empty and it isn't
+  in the root listing, exactly as `v_page.running_uri` is NULL for it. Name
+  one of its stored deployments by hash to read that. The source folder is
+  not this filesystem's business; it is `oxplow:local`.
+- A `rev` is one folder name (letters and digits); anything else is
+  `Invalid`. An unknown hash or extension is `None`.
+- Listing: `""` lists the extensions (those that run a deployment; with a
+  `rev`, those whose store folder holds it), `<name>` the deployment's
+  root, and so on one level; `None` walks everything. Symlinks are not
+  listed.
+- Escapes: the path is checked lexically (no `..`, not absolute), then the
+  target is canonicalized and must lie inside the canonical deployment
+  folder, so a symlink out is `Invalid`, never the file it points at.
+
+### `oxplow:temp` (`filesystems/temp.rs`)
+
+`TempFs` is scratch space oxplow's own code writes: a flat folder,
+`<project>/.oxplow/runtime/temp/<name>`, so a restart keeps what a window
+shows. A name is `^[A-Za-z0-9_-]+\.[A-Za-z0-9]+$` (no folders; anything
+else is `Invalid`), and there are **no revisions** (a `rev` is `Invalid`).
+It is not `writable`, so `oxplow.file.save` never touches it; the code
+that owns a file writes with `Services.temp.put(name, bytes)` / `remove`
+(the same `Arc<TempFs>` the registry holds). A file larger than the byte
+cap is refused.
+
+- GC (`TempFs::gc`): a file idle longer than 7 days (its modified time)
+  goes, then the oldest (by modified time, then name) until at most 200
+  files and 32 MB stay. It runs after every `put` and on a five-minute
+  tick (`Services::spawn_every` in `boot.rs`).
+- A read refreshes a file's modified time when it is more than a day old,
+  so a file someone keeps opening stays; a younger one is left alone, so
+  `stat`'s `modified_at` (a cache key) moves at most once a day by reading.
+
 ## Using one
 
 - RPC `read_at { streamId, path, filesystem?, rev? }` and `stat_file`
@@ -100,9 +145,9 @@ before filesystems keeps its identity; the builders leave an explicit
 `filesystem` is in `oxplow_domain::capability::CAPABILITIES`: `many`
 (every implementation is active, none chosen), feature `writable`, and a
 `ProviderContract` (`FILESYSTEM`: verbs `stat`, `read`, `list`; `write`
-← `writable`). `oxplow:local` is a core row (`source: core`, shown in
-`v_capability_provider` as provider `local`, `writable`) — it doesn't
-depend on any extension being enabled. A provider process cannot yet
+← `writable`). `oxplow:local`, `oxplow:extensions` and `oxplow:temp` are core rows (`source: core`, shown in
+`v_capability_provider` as providers `local` (`writable`), `extensions`
+and `temp`) — they don't depend on any extension being enabled. A provider process cannot yet
 implement it: the host (`FileSystemsHost`, registering an
 `ExternalFileSystem`) comes with external filesystems
 ([providers.md](./providers.md)).
@@ -114,7 +159,9 @@ async functions over `&dyn FileSystem` and a `rev`: stat matches read,
 absent is `None`, reads round-trip and ranges slice, listings are one
 level or the whole tree, a path never leaves the filesystem, only a
 `writable` filesystem writes. It runs against `oxplow:local` at the
-working tree, `git:HEAD` and a `snap:<id>`. A new filesystem adds a test
-that runs the same functions. The editor language table is
+working tree, `git:HEAD` and a `snap:<id>`, and against `oxplow:extensions`
+(a deployment holding the fixture, with no `rev` and by hash). `oxplow:temp`
+is flat, so it runs only the path check and asserts its own rules. A new
+filesystem adds a test that runs the same functions. The editor language table is
 `oxplow_domain::language_id` (the Monaco id space); a test holds it equal
 to the desktop's `editor-language.ts`.

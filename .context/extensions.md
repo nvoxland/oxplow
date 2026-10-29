@@ -2264,7 +2264,13 @@ Where it lives, and what is loaded:
   next deploy replaces the copy. `oxplow_get_open_page` adds `outOfDate`
   (`PageProvenance::out_of_date`, read from the files now: the source
   changed after the deployment was made). `v_page` has `source`, not the
-  running path. A deployed extension's errors and warnings name its source
+  running path, and `running_uri` (V123): the file URI of the running copy,
+  `oxplow:oxplow/file?path=<extension>/pages/<file>&rev=<hash>&filesystem=oxplow:extensions`
+  (built with `file_uri_at` from `origin.deployment`, so it pins the copy a
+  redeploy replaces); NULL when the extension runs no deployment (read from
+  its source, undeployed, not here). The same files are served by the
+  `oxplow:extensions` filesystem (filesystems.md); `locate` and that
+  filesystem both take the running hash from `Deployment::hash`. A deployed extension's errors and warnings name its source
   files, so they say what to edit.
 - **Show Definition** is foundation's hidden `definition` page: the page
   part by part from `oxplow.page.definition` (where it comes from, params,

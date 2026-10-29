@@ -23,6 +23,12 @@ use crate::DomainError;
 /// names no filesystem.
 pub const LOCAL: &str = "oxplow:local";
 
+/// The running copies of extensions (`<name>/<path>`, `rev` = deployment hash).
+pub const EXTENSIONS: &str = "oxplow:extensions";
+
+/// Scratch files oxplow keeps for a while (`<name>.<ext>`, no revisions).
+pub const TEMP: &str = "oxplow:temp";
+
 /// The feature of a filesystem that accepts [`FileSystem::write`].
 pub const WRITABLE: &str = "writable";
 

@@ -458,6 +458,50 @@ mod tests {
         (dir, services)
     }
 
+    /// A file on `oxplow:temp` reads by its name; on `oxplow:extensions` by
+    /// `<extension>/<path>` at a deployment hash (the running copy is read
+    /// in `a_page_names_the_copy_that_runs`).
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_file_reads_on_the_temp_and_extensions_filesystems() {
+        use oxplow_domain::filesystem::{EXTENSIONS, TEMP};
+        use oxplow_domain::uri::build::file_uri_at;
+        let (dir, svc) = project().await;
+        svc.temp.put("view-1.yaml", b"title: One\n").await.unwrap();
+        let temp = file_uri_at("view-1.yaml", Some(TEMP), None, None);
+        let read_text = |uri: String| {
+            let svc = svc.clone();
+            async move { read(&svc, &uri, &Reader::default(), None).await }
+        };
+        assert_eq!(
+            read_text(temp).await.unwrap().content.as_deref(),
+            Some("title: One\n")
+        );
+        assert!(matches!(
+            read_text(file_uri_at("nope.yaml", Some(TEMP), None, None)).await,
+            Err(ReadError::NotFound(_))
+        ));
+
+        for (hash, text) in [("h1", "old\n"), ("h2", "newer\n")] {
+            let file = crate::extension::extension_store::deployment_dir(dir.path(), "acme", hash)
+                .join("pages/p.yaml");
+            std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+            std::fs::write(file, text).unwrap();
+        }
+        let ext = |rev| file_uri_at("acme/pages/p.yaml", Some(EXTENSIONS), rev, None);
+        assert_eq!(
+            read_text(ext(Some("h1"))).await.unwrap().content.as_deref(),
+            Some("old\n")
+        );
+        assert_eq!(
+            read_text(ext(Some("h2"))).await.unwrap().content.as_deref(),
+            Some("newer\n")
+        );
+        assert!(matches!(
+            read_text(ext(Some("nosuch"))).await,
+            Err(ReadError::NotFound(_))
+        ));
+    }
+
     /// A file is read in the working tree, at a revision, and by lines.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_file_reads_at_its_revision_and_lines() {

@@ -33,6 +33,9 @@ pub struct PageRow {
     /// Its source file, the one to edit; none when no source is here.
     pub source: Option<String>,
     pub deployment: String,
+    /// The file URI of the copy that runs, pinned to its deployment; none
+    /// with no deployment.
+    pub running_uri: Option<String>,
 }
 
 /// One question a page answers, as `v_page_answer` lists it.
@@ -173,8 +176,8 @@ fn insert_pages(conn: &rusqlite::Connection, listing: &CatalogListing) -> Result
             "INSERT OR REPLACE INTO page
                (uri, extension, id, title, description, label, icon, category, keywords,
                 params_json, renders_json, is_default, pinned, hidden, tool, needs_json,
-                source, deployment)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
+                source, deployment, running_uri)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
         )
         .map_err(map_sql_err)?;
     for p in &listing.pages {
@@ -197,6 +200,7 @@ fn insert_pages(conn: &rusqlite::Connection, listing: &CatalogListing) -> Result
             p.needs_json,
             p.source,
             p.deployment,
+            p.running_uri,
         ])
         .map_err(map_sql_err)?;
     }

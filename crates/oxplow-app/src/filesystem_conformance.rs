@@ -16,7 +16,8 @@
 //!    the rows of the whole walk that have it as parent; a folder that
 //!    isn't there lists nothing.
 //! 4. **Paths** — a path that leaves the filesystem (`..`, absolute) is
-//!    refused as invalid by every call.
+//!    refused as invalid by every call (a write too, unless the filesystem
+//!    is read-only, which refuses every write as such).
 //! 5. **Write** — only a `writable` filesystem accepts one; any other
 //!    refuses with `ReadOnly`.
 
@@ -218,10 +219,17 @@ pub async fn a_path_never_leaves_the_filesystem(fs: &dyn FileSystem, cx: &FsCx, 
                 .is_some_and(invalid),
             "list {path}"
         );
-        assert!(
-            fs.write(cx, path, b"x").await.err().is_some_and(invalid),
-            "write {path}"
-        );
+        // A read-only filesystem refuses every write the same way.
+        let write = fs.write(cx, path, b"x").await.err();
+        if fs.has_feature("writable") {
+            assert!(write.is_some_and(invalid), "write {path}");
+        } else {
+            assert_eq!(
+                write,
+                Some(FsError::ReadOnly(fs.id().to_string())),
+                "write {path}"
+            );
+        }
     }
 }
 

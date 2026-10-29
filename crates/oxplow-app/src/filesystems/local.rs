@@ -120,7 +120,7 @@ fn dir_stat(modified_at: Option<i64>) -> FsStat {
 }
 
 /// `path` on disk under `root`: its stat, or `None` when it isn't there.
-fn stat_on_disk(root: &Path, path: &str) -> std::io::Result<Option<FsStat>> {
+pub(super) fn stat_on_disk(root: &Path, path: &str) -> std::io::Result<Option<FsStat>> {
     let abs = root.join(path);
     let meta = match std::fs::metadata(&abs) {
         Ok(meta) => meta,
@@ -143,7 +143,7 @@ fn stat_on_disk(root: &Path, path: &str) -> std::io::Result<Option<FsStat>> {
 }
 
 /// `range` of the file at `root`/`path`, without reading the rest.
-fn read_range_on_disk(
+pub(super) fn read_range_on_disk(
     root: &Path,
     path: &str,
     range: ByteRange,
