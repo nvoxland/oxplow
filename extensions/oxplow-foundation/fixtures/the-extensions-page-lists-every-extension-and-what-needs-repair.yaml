@@ -1,18 +1,16 @@
-# The overview reads the whole set: one row per extension, each linking to
-# its own page; the contributions that fail or are disabled sit under Needs
-# repair; the runs across extensions are a slot oxplow-bundled fills.
+# The overview is a document: a section per extension, headed by its name
+# (a link to its page), each fact a sentence. It has no repair buttons: a
+# problem is a one-line summary linking to the problems page.
 when:
   page: oxplow-foundation/extensions
 expect:
   label: Extensions
   loaders:
-    extensions_list:
+    facts:
       rows:
         contains:
-          - { name: oxplow-foundation, uri: "oxplow:oxplow/extension?name=oxplow-foundation", origin: bundled, state: Healthy, can_disable: 0 }
-    repairs:
-      rows: 0
+          - { extension: oxplow-foundation, extension_uri: "oxplow:oxplow/extension?name=oxplow-foundation", text: Ships with oxplow. }
+          - { extension: oxplow-foundation, text: "Turned on." }
   nodes:
-    - { id: list, kind: viz }
-    - { id: repairs, kind: viz }
-    - { id: runs, kind: slot }
+    - { id: facts, kind: viz }
+  actions: []

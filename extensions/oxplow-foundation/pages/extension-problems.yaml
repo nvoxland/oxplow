@@ -1,0 +1,61 @@
+title: Extension problems
+description: "Every extension contribution that is failing or turned off, and every extension that did not load cleanly, under the extension it belongs to: what failed and when."
+icon: triangle-alert
+category: System
+keywords: failing disabled repair collector effect provider
+params:
+- name: extension
+  role: view
+  label: Extension
+answers:
+- {"question":"Which extension providers or collectors are failing or disabled, and why?","params":{},"skill":"oxplow-extension"}
+- {"question":"What is wrong with this extension?","about":"oxplow/extension","params":{"extension":"oxplow-foundation"},"skill":"oxplow-extension"}
+loaders:
+  problems:
+    sql: |
+      SELECT h.extension, e.uri AS extension_uri, h.kind, h.contribution,
+             h.kind || ' ' || h.contribution || ': '
+             || CASE h.state
+                  WHEN 'disabled' THEN 'turned off, ' || coalesce(h.reason, 'no reason recorded')
+                  ELSE 'failing, ' || h.consecutive_failures || ' in a row' END
+             || CASE WHEN h.last_error IS NULL THEN '' ELSE ' (' || h.last_error || ')' END AS text,
+             h.updated_at,
+             (h.state = 'disabled') AS can_enable,
+             (h.state = 'disabled' AND h.repair_item IS NOT NULL) AS can_repair,
+             'Repair the extension described in [oxplow uri ' || coalesce(h.repair_item, '') || '] — read it first.' AS ask
+      FROM v_contribution_health h JOIN v_extension e ON e.name = h.extension
+      WHERE h.state <> 'ok' AND (NULLIF(:extension, '') IS NULL OR h.extension = :extension)
+      UNION ALL
+      SELECT e.name, e.uri, 'extension', e.name, 'It did not load cleanly: ' || j.value, NULL, 0, 0, ''
+      FROM v_extension e, json_each(e.errors) j
+      WHERE NULLIF(:extension, '') IS NULL OR e.name = :extension
+      ORDER BY 1, 3, 4
+view:
+  from: problems
+  viz: list
+  group: { by: extension, link: { kind: page, from: extension_uri } }
+  columns:
+  - { key: text, label: Problem }
+  - { key: updated_at, label: Last changed, format: relative }
+  empty: Nothing is failing or turned off.
+  actions:
+  - id: enable
+    label: Enable Again
+    command: oxplow.contribution.enable
+    row: true
+    when: can_enable
+    input:
+      extension: '{{row.extension}}'
+      kind: '{{row.kind}}'
+      contribution: '{{row.contribution}}'
+  - id: repair
+    label: Repair with the Agent
+    command: oxplow.agent.draft
+    row: true
+    when: can_repair
+    input:
+      text: '{{row.ask}}'
+  - id: enable-all
+    label: Enable All Disabled
+    command: oxplow.contribution.enable_all
+    input: {}

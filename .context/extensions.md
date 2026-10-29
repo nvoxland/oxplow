@@ -1081,7 +1081,7 @@ the user guide is `docs/guide/pages.md`.
   `enabled: false` and no pages, slots or sources, so every consumer
   ignores it; `find_page` and `run_page` say it's disabled. Which are
   on is the team's `extensions:` plus the person's `enableExtensions` /
-  `disableExtensions` ("Sources and deployments"). the Extensions page
+  `disableExtensions` ("Sources and deployments"). The Extensions page
   toggles it through `oxplow.extension.enable` / `disable`.
 - **A page of sections leads with what matters.** In a `stack`, a
   titled `viz` section with no rows (no error, not `replaceable`) folds
@@ -1588,31 +1588,32 @@ A fresh machine has nothing running, so a teammate's extension waits for
 its first deploy here (Startup), which asks for what it declares.
 
 **The Extension page** (foundation's `extension`, `for: oxplow/extension`,
-the default): one extension. About reads the `content` row (`v_extension`)
-and `v_extension_source` (origin, what runs, whether the source moved on
-since the deploy, a link to the running `extension.yaml`); then its pages
-(each linking to the Definition of the running file, `v_page.running_uri`),
-`extension-contributions` by kind, its permissions, its deployments (newest
-first, Roll Back to This), and the slot `oxplow-foundation/extension.runs`,
-which oxplow-bundled fills with `extension-runs` (foundation never depends on
-bundled). The Extensions list's names and Definition's Extension fact link to it.
+the default): one extension as a document. Its About is a list of sentences
+from `extension-facts` (where it comes from, what runs and whether the
+source moved on, on or off, what it may reach in words, what it waits on, a
+one-line Problems summary linking to Extension problems) and a link to its
+running `extension.yaml`; then its pages (each linking to the Definition of
+the running file, `v_page.running_uri`), the other contributions by count,
+what it may reach, its deployments (newest first, Roll Back to This) and the
+slot `oxplow-foundation/extension.runs`, which oxplow-bundled fills with
+`extension-runs` (foundation never depends on bundled). Deploy, Roll Back,
+Enable, Disable, Share with the Team, Stop Sharing and Remove are the page's
+actions (the ☰ menu), each offered by a `can_*` column of its first loader;
+one that adds permissions asks inline like any deploy.
 
-**The Extensions page** (foundation's `extensions`, the launcher's System
-page; Settings has no Extensions area): the whole set at once. Its table is
-every extension from `v_extension` joined to `v_extension_source` — the live
-dataset of each source as it is now, so an edit shows at once ("out of date"
-when its hash isn't the running deployment's) — those needing attention
-first (disabled, waiting on approval, problems, failing or disabled
-contributions, a source that moved on), each name linking to its Extension
-page, with what it may reach and the row actions Deploy (offered only when
-undeployed or out of date), Roll Back, Enable, Disable, Share with the Team,
-Stop Sharing and Remove, each offered by a `when:` column the query computes.
-"Needs repair" is `v_contribution_health` where not ok, with Enable Again,
-Repair with the Agent and Enable All Disabled; the slot
-`oxplow-foundation/extensions.runs` is filled by oxplow-bundled's `runs`.
-Every deployment of every extension is not on this page: each Extension page
-lists its own, newest first, with Roll Back to This. A row action that adds
-permissions asks inline like any deploy.
+**The Extensions page** (`extensions`, the launcher's System page; Settings
+has no Extensions area) is a document too: one headed section per extension
+(a `list` grouped by extension, the heading linking to its Extension page),
+those needing attention first, each fact a sentence from the hidden
+`extension-facts` page — the one place that turns `v_extension`,
+`v_extension_source` and `v_contribution_health` into words (permission ids
+become "may read your project's files"). It has no table and no buttons.
+
+**Extension problems** (`extension-problems`, System) collects every failing or
+disabled contribution and every extension that did not load cleanly, grouped
+by extension, with Enable Again, Repair with the Agent and Enable All
+Disabled. A link from a one-line summary narrows it with the view param
+`#extension=<name>`; Alerts' failing-extension rows link the same way.
 
 `v_extension.permissions` is the declaration as JSON (`{}`: baseline);
 `v_extension.pending` is what an undeployed extension waits on a person
@@ -3736,7 +3737,7 @@ its scope trace.
   **Reading it:** the bundled `runs` page (`oxplow-bundled/runs`, titled
   "Extension runs", in the launcher under Activity) lists, per extension
   and for the last 7 days, its runs, failures, denials, mean `cpu_ms` and
-  model calls, the ones needing attention first. the Extensions page
+  model calls, the ones needing attention first. The Extensions page
   shows each extension's worst current run (`v_extension_run`, `latest =
   1`). Opening an extension's row (the hidden `oxplow-bundled/extension-runs`
   page, param `extension`) lists its runs one by one for the same week:

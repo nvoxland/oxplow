@@ -21,8 +21,8 @@ loaders:
       SELECT name,
              '`' || name || '` isn''t running as it should: ' || coalesce(json_extract(errors, '$[0]'), 'unknown error')
                || CASE WHEN json_array_length(errors) > 1 THEN ' (+' || (json_array_length(errors) - 1) || ' more)' ELSE '' END AS what,
-             'Open Extensions' AS open,
-             uri('oxplow/page', 'page', 'extensions') AS settings
+             'Open the problems' AS open,
+             uri('oxplow/page', 'page', 'extension-problems') || '#extension=' || name AS settings
       FROM v_extension WHERE json_array_length(errors) > 0 ORDER BY name
 view:
   stack:

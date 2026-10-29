@@ -214,7 +214,7 @@ markdown itself, nor edits it in a `<textarea>`.
   the person lands where it's shown. A report, or a read of the list,
   that fails is logged with `logUi`, never recorded as another op error
   (it would loop).
-- **the Extensions page shows the grant, not only the verdict.** Each
+- **The Extensions page shows the grant, not only the verdict.** Each
   row lists the extension's permissions, and what a deploy, roll back or
   enable would add is shown in the confirmation before it runs
   (`CommandConfirm` lists one line per added permission; `process` says
@@ -222,7 +222,7 @@ markdown itself, nor edits it in a `<textarea>`.
   destructive, so they are on right-click** like the other row actions,
   and a row action that adds a permission asks inline, where the person
   clicked.
-- **the Extensions page shows each extension's last run.** One line under
+- **The Extensions page shows each extension's last run.** One line under
   the row from `v_extension_run` (`latest = 1` per contribution): the **worst
   current warning** (denied, then stale, then failed; the newest of equals) so a
   failing contribution isn't hidden behind another's later ok run, else the
@@ -232,7 +232,7 @@ markdown itself, nor edits it in a `<textarea>`.
   from `decisions` ("host evil.example: it isn't in the grant"). An extension
   that has never run shows no line. `lastRuns` in `extensionRowModel.ts`; the
   line re-reads when a run commits (`useRerunOnChange` on the read's datasets).
-- **the Extensions page says what each script is given.** Under the
+- **The Extensions page says what each script is given.** Under the
   row, one muted line per Starlark script that has services: its name, then
   the service titles ("Collector triage — Read the captured tree · Ask a
   model (needs `ai.compute`)"). A service the script uses without naming it in
@@ -1216,7 +1216,7 @@ no caller may bypass the bus to write to the terminal.
   beside Add comment). It puts the page or text in the selected thread's
   basket (`oxplow.context.add`, toast with Undo); the next prompt to any
   agent in the thread carries it. The Context dock panel and page list it.
-- **Repair with the Agent** (P7.C3, the Extensions page, on a disabled
+- **Repair with the Agent** (on Extension problems, on a disabled
   contribution with an open repair item) is the same gesture: it fills
   the input with `Repair the extension described in [oxplow uri <item>]
   — read it first.` (`contributionHealth.ts` → `repairWithAgent`). The brief

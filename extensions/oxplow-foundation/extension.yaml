@@ -210,10 +210,13 @@ intent:
       expect: the working-tree file's URI in current_uri, which the Open current version page action opens; none for the working tree or another filesystem
     - name: the-extensions-page-lists-every-extension-and-what-needs-repair
       input: { page: extensions, params: {} }
-      expect: one row per extension with its state, linking to its page; the failing or disabled contributions under Needs repair; a slot for the runs across extensions
+      expect: a section per extension headed by its name, each fact a sentence, the ones needing attention first, no repair buttons
+    - name: extension-problems-collects-what-is-failing-or-turned-off
+      input: { page: extension-problems, params: {} }
+      expect: the failing or disabled contributions and the extensions that did not load, under their extension, with Enable Again, Repair with the Agent and Enable All Disabled
     - name: the-extension-page-reads-a-shipped-extension
       input: { page: extension, params: { uri: 'oxplow:oxplow/extension?name=oxplow-foundation', name: oxplow-foundation } }
-      expect: its origin, what runs, its pages with a link to each Definition, its permissions, and a slot for its runs
+      expect: where it comes from, what runs, its pages with a link to each Definition, what it may reach in words, its deployments, and a slot for its runs
     - name: the-extension-page-is-offered-for-an-extension-uri
       input: { command: oxplow.page.renderers, input: { uri: 'oxplow:oxplow/extension?name=oxplow-foundation' } }
       expect: the Extension page, the default, draws an extension's URI

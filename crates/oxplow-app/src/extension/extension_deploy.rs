@@ -2503,46 +2503,60 @@ mod tests {
         assert_eq!(row().await[0][1], int(1));
     }
 
-    /// The Extensions page lists each extension and offers Deploy only
-    /// where it would change something: a source that moved on.
+    /// The Extension page opened on `acme`: its params, the way a link to
+    /// the extension's URI opens it.
+    fn acme_page() -> crate::pages::runner::RunRequest {
+        use crate::pages::runner::{RunRequest, RunTarget};
+        RunRequest {
+            target: RunTarget::Page("oxplow-foundation/extension".into()),
+            params: [
+                (
+                    "uri".to_string(),
+                    oxplow_db::SqlCell::Text("oxplow:oxplow/extension?name=acme".into()),
+                ),
+                ("name".to_string(), oxplow_db::SqlCell::Text("acme".into())),
+            ]
+            .into_iter()
+            .collect(),
+            ctx: crate::pages::spec::ViewContext::default(),
+            viewer: oxplow_domain::Actor::Human,
+        }
+    }
+
+    /// An extension's page allows Deploy only where it would change
+    /// something: a source that moved on.
     #[tokio::test]
-    async fn the_extensions_page_offers_deploy_only_when_the_source_moved_on() {
+    async fn the_extension_page_offers_deploy_only_when_the_source_moved_on() {
+        use crate::pages::open_runs::PageRuns;
         let fx = crate::test_fixtures::services_with_effort().await;
         let svc = &fx.svc;
         source(svc, "One");
         deploy(svc, "acme", true).await.unwrap();
         let acme = || async {
-            let run =
-                crate::test_fixtures::run_as_page(svc, "oxplow-foundation/extensions", &[])
-                    .await;
-            let col = |name: &str| run.columns.iter().position(|c| c == name).unwrap();
-            let row = run
-                .rows
-                .iter()
-                .find(|r| r[col("name")] == oxplow_db::SqlCell::Text("acme".into()))
-                .unwrap()
-                .clone();
+            let (_, run) = PageRuns::default()
+                .open(svc, acme_page(), "w")
+                .await
+                .unwrap();
+            let about = &run.loaders["about"].result;
+            let col = |name: &str| about.columns.iter().position(|c| c == name).unwrap();
             (
-                row[col("source_state")].clone(),
-                row[col("can_deploy")].clone(),
-                row[col("can_disable")].clone(),
+                about.rows[0][col("can_deploy")].clone(),
+                about.rows[0][col("can_disable")].clone(),
             )
         };
-        let text = |t: &str| oxplow_db::SqlCell::Text(t.into());
         let int = |n| oxplow_db::SqlCell::Int(n);
-        assert_eq!(acme().await, (text(""), int(0), int(1)));
+        assert_eq!(acme().await, (int(0), int(1)));
         source(svc, "Two");
-        assert_eq!(acme().await, (text("out of date"), int(1), int(1)));
+        assert_eq!(acme().await, (int(1), int(1)));
     }
 
-    /// The Extensions page's row actions run their commands from inside a
-    /// page action's read: disabling, enabling and removing there activate
-    /// all the same.
+    /// An extension page's actions run their commands from inside a page
+    /// action's read: disabling, enabling and removing there activate all
+    /// the same.
     #[tokio::test]
-    async fn the_extensions_page_row_actions_disable_enable_and_remove() {
+    async fn the_extension_page_actions_disable_enable_and_remove() {
         use crate::pages::actions::{run_page_action, PageActionCall};
         use crate::pages::open_runs::PageRuns;
-        use crate::pages::runner::{RunRequest, RunTarget};
         let fx = crate::test_fixtures::services_with_effort().await;
         let svc = &fx.svc;
         source(svc, "One");
@@ -2551,40 +2565,15 @@ mod tests {
         for action in ["disable", "enable", "remove"] {
             // Each press is on a fresh run: the row it acts on is the one
             // the run holds.
-            let (id, run) = runs
-                .open(
-                    svc,
-                    RunRequest {
-                        target: RunTarget::Page("oxplow-foundation/extensions".into()),
-                        params: Default::default(),
-                        ctx: crate::pages::spec::ViewContext::default(),
-                        viewer: oxplow_domain::Actor::Human,
-                    },
-                    "w",
-                )
-                .await
-                .unwrap();
-            let listed = &run.loaders["extensions_list"].result;
-            let name = listed.columns.iter().position(|c| c == "name").unwrap();
-            let acme = listed
-                .rows
-                .iter()
-                .find(|r| r[name] == oxplow_db::SqlCell::Text("acme".into()))
-                .expect("acme is listed");
-            let row = listed
-                .columns
-                .iter()
-                .cloned()
-                .zip(acme.iter().cloned())
-                .collect();
+            let (id, _) = runs.open(svc, acme_page(), "w").await.unwrap();
             run_page_action(
                 svc,
                 &runs,
                 PageActionCall {
                     run_id: id,
-                    node: Some("list".into()),
+                    node: None,
                     action: action.into(),
-                    row: Some(row),
+                    row: None,
                     input: None,
                     drop: None,
                     on_behalf_of: oxplow_domain::Actor::Human,

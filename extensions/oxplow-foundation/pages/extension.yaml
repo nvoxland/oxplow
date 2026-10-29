@@ -1,5 +1,5 @@
 title: Extension
-description: One extension — where it comes from, the deployment that runs, what it contributes, what it may reach, its deployments and its recent runs. The renderer of oxplow's `extension` resource.
+description: One extension — where it comes from, what runs, what it contributes, what it may reach, its pages and its deployments. The renderer of oxplow's `extension` resource.
 label: '{{param.name}}'
 icon: package
 for: oxplow/extension
@@ -12,104 +12,100 @@ answers:
 - {"question":"What does this extension contribute, and which deployment runs?","about":"oxplow/extension","params":{"uri":"oxplow:oxplow/extension?name=oxplow-foundation","name":"oxplow-foundation"},"skill":"oxplow-extension"}
 - {"question":"What may this extension reach?","about":"oxplow/extension","params":{"uri":"oxplow:oxplow/extension?name=oxplow-foundation","name":"oxplow-foundation"},"skill":"oxplow-extension"}
 loaders:
-  # Where it comes from and what runs, from the listing row the system
-  # handed over (`content`) and the source as it is now.
+  # The row the page's actions read, and the link to its running manifest.
   about:
     sql: |
       SELECT c.name AS extension, c.description,
-             CASE c.origin WHEN 'bundled' THEN 'ships with oxplow' ELSE 'yours' END AS origin,
-             CASE c.deployment
-               WHEN 'deployed' THEN 'deployment ' || substr(c.hash, 1, 12)
-               WHEN 'shipped' THEN 'the copy that ships with oxplow'
-               WHEN 'source' THEN 'its source, read in place'
-               WHEN 'undeployed' THEN 'nothing: it was never deployed'
-               ELSE 'nothing: no source or deployment is on this machine' END AS runs,
-             CASE WHEN s.hash IS NULL THEN 'no source on this machine'
-                  WHEN c.hash IS NULL THEN 'not deployed yet'
-                  WHEN s.hash <> c.hash THEN 'changed since the deployment'
-                  ELSE 'the same as the deployment' END AS source_state,
-             CASE WHEN c.enabled THEN 'on' ELSE 'off' END AS state,
-             COALESCE((SELECT group_concat(w.value, '; ') FROM json_each(c.pending) w), '') AS waiting_on,
-             json_array_length(c.errors) AS problems,
              CASE WHEN c.deployment IN ('deployed', 'shipped', 'source') THEN
                     uri('oxplow/file', 'filesystem', 'oxplow:extensions', 'path', c.name || '/extension.yaml')
                     || '#oxplow.renderer=oxplow-foundation/file-viewer' END AS manifest_target,
-             c.name || '/extension.yaml' AS manifest
+             (s.hash IS NOT NULL AND (c.deployment = 'undeployed'
+                OR (c.hash IS NOT NULL AND s.hash != c.hash))) AS can_deploy,
+             (c.deployment = 'deployed') AS can_rollback,
+             (NOT c.enabled) AS can_enable,
+             (c.enabled AND c.name != 'oxplow-foundation') AS can_disable,
+             (c.origin = 'project') AS can_remove,
+             (c.origin = 'project' AND NOT c.shared AND s.path LIKE '.oxplow/extensions/%') AS can_share,
+             (c.origin = 'project' AND c.shared) AS can_unshare
       FROM content c LEFT JOIN v_extension_source s ON s.name = c.name
+  facts:
+    page: oxplow-foundation/extension-facts
+    loader: facts
+    params: { extension: { from: about.extension } }
+  reach:
+    page: oxplow-foundation/extension-facts
+    loader: reach
+    params: { extension: { from: about.extension } }
+  about_facts:
+    sql: |
+      SELECT 0 AS n, description AS text, NULL AS target FROM about WHERE description <> ''
+      UNION ALL SELECT n, text, target FROM facts
+      UNION ALL SELECT 90, 'Read its running extension.yaml.', manifest_target FROM about WHERE manifest_target IS NOT NULL
+      ORDER BY n
+  contributions:
+    sql: |
+      SELECT count(*) || ' ' || kind || CASE WHEN count(*) = 1 THEN '' ELSE 's' END AS text
+      FROM v_contribution WHERE extension = (SELECT extension FROM about) AND kind <> 'page'
+      GROUP BY kind ORDER BY kind
   pages:
     sql: |
-      SELECT p.title, p.id, p.description,
+      SELECT p.title, p.description,
              CASE WHEN p.running_uri IS NOT NULL THEN p.running_uri || '#oxplow.renderer=oxplow-foundation/definition' END AS definition
-      FROM content c JOIN v_page p ON p.extension = c.name
+      FROM about a JOIN v_page p ON p.extension = a.extension
       ORDER BY p.title
-  deployments:
-    sql: |
-      SELECT d.name, substr(d.hash, 1, 7) AS deployment, d.hash, d.deployed_at,
-             CASE WHEN d.active THEN 'runs' ELSE '' END AS running,
-             NOT d.active AS inactive,
-             COALESCE((SELECT group_concat(p.key, ', ') FROM json_each(d.permissions) p), '') AS approved,
-             COALESCE(substr(d."commit", 1, 7) || CASE WHEN d.dirty THEN ' (uncommitted)' ELSE '' END, '') AS version,
-             d.source
-      FROM content c JOIN v_extension_deployment d ON d.name = c.name
-      ORDER BY d.deployed_at DESC
   permissions:
     sql: |
-      SELECT j.key AS permission, j.value AS reach
-      FROM content c, json_each(c.permissions) j
-      ORDER BY j.key
+      SELECT upper(substr(text, 1, 1)) || substr(text, 2) || '.' AS text FROM reach
+  deployments:
+    sql: |
+      SELECT d.name, d.hash, d.deployed_at, NOT d.active AS inactive,
+             'Deployment ' || substr(d.hash, 1, 7) || CASE WHEN d.active THEN ', running now' ELSE '' END
+             || CASE WHEN d."commit" IS NULL THEN '' ELSE ', from commit ' || substr(d."commit", 1, 7)
+                     || CASE WHEN d.dirty THEN ' with uncommitted changes' ELSE '' END END AS text
+      FROM about a JOIN v_extension_deployment d ON d.name = a.extension
+      ORDER BY d.deployed_at DESC
 view:
   stack:
   - id: about
     title: About
-    viz: detail
-    from: about
+    viz: list
+    from: about_facts
     columns:
-    - { key: description, label: What it is }
-    - { key: origin, label: Origin }
-    - { key: state, label: State }
-    - { key: runs, label: Runs }
-    - { key: source_state, label: Its source }
-    - { key: waiting_on, label: Waiting on a person }
-    - { key: problems, label: Problems }
-    - { key: manifest, label: Manifest, link: { kind: page, from: manifest_target } }
+    - { key: text, label: Fact, link: { kind: page, from: target } }
     empty: This extension isn't known to the project.
   - id: contributes
     title: Contributes
     stack:
     - id: pages
       title: Pages
-      viz: table
+      viz: list
       from: pages
       empty: It has no pages.
       columns:
-      - { key: title, label: Page }
+      - { key: title, label: Page, link: { kind: page, from: definition } }
       - { key: description, label: What it is }
-      - { key: id, label: Definition, link: { kind: page, from: definition } }
     - id: kinds
-      title: By kind
-      embed:
-        page: oxplow-foundation/extension-contributions
-        params: { extension: { from: about.extension } }
+      title: Everything else
+      viz: list
+      from: contributions
+      empty: Nothing else.
+      columns:
+      - { key: text, label: Contribution }
   - id: permissions
-    title: Permissions
-    viz: table
+    title: What it may reach
+    viz: list
     from: permissions
-    empty: It asks for nothing beyond the baseline.
+    empty: Nothing beyond the baseline.
     columns:
-    - { key: permission, label: Permission }
-    - { key: reach, label: Reach }
+    - { key: text, label: Permission }
   - id: deployments
     title: Deployments
-    viz: table
+    viz: list
     from: deployments
     empty: No deployments yet. A deploy copies the extension's source here.
     columns:
-    - { key: deployment, label: Deployment, width: 90 }
-    - { key: deployed_at, label: Deployed, format: relative, width: 120 }
-    - { key: running, label: Runs, width: 60 }
-    - { key: version, label: Commit, width: 150 }
-    - { key: approved, label: Approved to reach }
-    - { key: source, label: From }
+    - { key: text, label: Deployment }
+    - { key: deployed_at, label: Deployed, format: relative }
     actions:
     - id: rollback
       label: Roll Back to This
@@ -120,3 +116,46 @@ view:
       row: true
       when: inactive
   - slot: runs
+actions:
+- id: deploy
+  label: Deploy
+  command: oxplow.extension.deploy
+  input:
+    name: '{{row.extension}}'
+  when: can_deploy
+- id: rollback
+  label: Roll Back
+  command: oxplow.extension.rollback
+  input:
+    name: '{{row.extension}}'
+  when: can_rollback
+- id: enable
+  label: Enable
+  command: oxplow.extension.enable
+  input:
+    name: '{{row.extension}}'
+  when: can_enable
+- id: disable
+  label: Disable
+  command: oxplow.extension.disable
+  input:
+    name: '{{row.extension}}'
+  when: can_disable
+- id: share
+  label: Share with the Team
+  command: oxplow.extension.share
+  input:
+    name: '{{row.extension}}'
+  when: can_share
+- id: unshare
+  label: Stop Sharing
+  command: oxplow.extension.unshare
+  input:
+    name: '{{row.extension}}'
+  when: can_unshare
+- id: remove
+  label: Remove…
+  command: oxplow.extension.remove
+  input:
+    name: '{{row.extension}}'
+  when: can_remove

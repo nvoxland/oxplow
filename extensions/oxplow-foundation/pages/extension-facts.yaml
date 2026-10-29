@@ -1,0 +1,93 @@
+title: Extension facts
+description: "What can be said about extensions in words: where each comes from, what runs, its state, what it may reach, what it waits on and any problems. One extension, or every one with the ones needing attention first."
+hidden: true
+params:
+- name: extension
+  type: search
+  label: Extension
+answers:
+- {"question":"What may each extension reach, in words?","params":{},"skill":"oxplow-extension"}
+loaders:
+  # What each permission means, one row per scope an extension holds.
+  reach:
+    sql: |
+      SELECT e.name AS extension, j.key AS ord,
+             CASE
+               WHEN j.value = 'sql.read' THEN 'read your project''s data with SQL'
+               WHEN j.value = 'sql.write' THEN 'change your project''s data with SQL'
+               WHEN j.value = 'files.read' THEN 'read your project''s files'
+               WHEN j.value = 'files.write' THEN 'change your project''s files'
+               WHEN j.value = 'ai.compute' THEN 'use your AI model key'
+               WHEN j.value = 'process.run' THEN 'run programs on your machine'
+               WHEN j.value = 'agent.write' THEN 'give your agents instructions'
+               WHEN j.value LIKE 'network:%' THEN 'reach ' || substr(j.value, 9) || ' over the network'
+               WHEN j.value LIKE 'secrets:%' THEN 'read the secret ' || substr(j.value, 9)
+               WHEN j.value LIKE 'commands:%' THEN 'run the commands matching ' || substr(j.value, 10)
+               ELSE 'use the ' || j.value || ' permission'
+             END AS text
+      FROM v_extension e, json_each(e.permissions) j
+      WHERE :extension IS NULL OR e.name = :extension
+      ORDER BY e.name, j.key
+  facts:
+    sql: |
+      WITH x AS (
+        SELECT e.name, e.uri, e.origin, e.enabled, e.deployment, e.hash, e.shared, e.errors, e.pending,
+               s.hash AS source_hash,
+               COALESCE(h.failing, 0) AS failing, COALESCE(h.disabled, 0) AS disabled,
+               json_array_length(e.errors) AS load_problems,
+               (NOT e.enabled OR json_array_length(e.pending) > 0 OR json_array_length(e.errors) > 0
+                OR COALESCE(h.failing, 0) + COALESCE(h.disabled, 0) > 0
+                OR (s.hash IS NOT NULL AND e.hash IS NOT NULL AND s.hash <> e.hash)) AS attention
+        FROM v_extension e LEFT JOIN v_extension_source s ON s.name = e.name
+             LEFT JOIN (SELECT extension, sum(state = 'failing') AS failing, sum(state = 'disabled') AS disabled
+                        FROM v_contribution_health GROUP BY extension) h ON h.extension = e.name
+        WHERE :extension IS NULL OR e.name = :extension
+      ),
+      f(extension, extension_uri, attention, origin, n, text, target) AS (
+        SELECT name, uri, attention, origin, 1,
+               CASE WHEN origin = 'bundled' THEN 'Ships with oxplow.'
+                    WHEN shared THEN 'Yours, shared with the team.' ELSE 'Yours, not shared with the team.' END,
+               NULL FROM x
+        UNION ALL
+        SELECT name, uri, attention, origin, 2,
+               CASE deployment
+                 WHEN 'deployed' THEN 'Runs deployment ' || substr(hash, 1, 7)
+                      || CASE WHEN source_hash IS NULL THEN '.'
+                              WHEN source_hash <> hash THEN '; its source has changed since.'
+                              ELSE '; its source is unchanged.' END
+                 WHEN 'shipped' THEN 'Runs the copy that ships with oxplow.'
+                 WHEN 'source' THEN 'Runs its source folder as it is.'
+                 WHEN 'undeployed' THEN 'Runs nothing: it was never deployed.'
+                 ELSE 'Runs nothing: neither its source nor a deployment is on this machine.' END,
+               NULL FROM x
+        UNION ALL
+        SELECT name, uri, attention, origin, 3,
+               CASE WHEN NOT enabled THEN 'Turned off.'
+                    WHEN json_array_length(pending) > 0 THEN 'Waiting on a person to approve it.'
+                    ELSE 'Turned on.' END, NULL FROM x
+        UNION ALL
+        SELECT x.name, x.uri, x.attention, x.origin, 4,
+               COALESCE((SELECT 'May ' || group_concat(r.text, '; ') || '.' FROM reach r WHERE r.extension = x.name),
+                        'Reaches nothing beyond the baseline.'), NULL FROM x
+        UNION ALL
+        SELECT name, uri, attention, origin, 5,
+               'Waiting on: ' || (SELECT group_concat(w.value, '; ') FROM json_each(pending) w) || '.', NULL
+        FROM x WHERE json_array_length(pending) > 0
+        UNION ALL
+        SELECT name, uri, attention, origin, 6,
+               'Problems: ' || trim(
+                 CASE WHEN failing > 0 THEN failing || CASE WHEN failing = 1 THEN ' contribution failing' ELSE ' contributions failing' END || CASE WHEN disabled + load_problems > 0 THEN ', ' ELSE '' END ELSE '' END
+                 || CASE WHEN disabled > 0 THEN disabled || ' disabled' || CASE WHEN load_problems > 0 THEN ', ' ELSE '' END ELSE '' END
+                 || CASE WHEN load_problems > 0 THEN load_problems || CASE WHEN load_problems = 1 THEN ' problem loading it' ELSE ' problems loading it' END ELSE '' END) || '.',
+               uri('oxplow/page', 'page', 'extension-problems') || '#extension=' || name
+        FROM x WHERE failing + disabled + load_problems > 0
+      )
+      SELECT extension, extension_uri, n, text, target
+      FROM f ORDER BY attention DESC, origin, extension, n
+view:
+  from: facts
+  viz: list
+  group: { by: extension, link: { kind: page, from: extension_uri } }
+  columns:
+  - { key: text, label: Fact, link: { kind: page, from: target } }
+  empty: No extensions.

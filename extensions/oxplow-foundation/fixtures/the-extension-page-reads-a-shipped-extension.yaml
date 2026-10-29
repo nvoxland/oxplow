@@ -1,6 +1,6 @@
-# An extension that ships with oxplow: the page reads its row (`content`),
-# its pages with the link to each running file's Definition, and what it may
-# reach. Its deployments narrow to it.
+# An extension that ships with oxplow, in words: where it comes from, what
+# runs, what it may reach, its pages with a link to each Definition, and its
+# deployments. The page's actions are the ones its row allows.
 when:
   page: oxplow-foundation/extension
   params:
@@ -9,16 +9,19 @@ when:
 expect:
   label: oxplow-foundation
   loaders:
-    about:
+    about_facts:
       rows:
-        - extension: oxplow-foundation
-          origin: ships with oxplow
-          state: "on"
-          manifest: oxplow-foundation/extension.yaml
+        contains:
+          - { text: Ships with oxplow. }
+          - { text: "Read its running extension.yaml." }
+    permissions:
+      rows:
+        contains:
+          - { text: "Read your project's data with SQL." }
     pages:
       rows:
         contains:
-          - { title: Commit, id: oxplow-foundation/commit, definition: $any }
+          - { title: Commit, definition: $any }
   nodes:
     - { id: about, kind: viz }
     - { id: pages, kind: viz }

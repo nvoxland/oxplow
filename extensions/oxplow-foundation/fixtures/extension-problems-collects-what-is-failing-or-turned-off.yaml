@@ -1,0 +1,10 @@
+# The problems page lists failing or disabled contributions under their
+# extension, with the repair actions; over a quiet project it has none.
+when:
+  page: oxplow-foundation/extension-problems
+expect:
+  loaders:
+    problems:
+      rows: 0
+  nodes:
+    - { id: problems, kind: viz, actions: [{ id: enable }, { id: repair }, { id: enable-all }] }
