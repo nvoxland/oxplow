@@ -99,10 +99,11 @@ test("a whole-page action presses on the run, asking first when its command does
   await waitFor(() => expect(queryByTestId("page-action-confirm")).toBeNull());
 });
 
-test("the description isn't in the body: About this page in the ☰ shows it with where the page comes from", async () => {
+test("the description isn't in the body: About this page in the ☰ shows it with the facts Definition opens with", async () => {
   const run = tablePage();
   run.page.description = "What the items are.";
-  run.page.origin = { extension: "acme", source: ".oxplow/extensions/acme/pages/items.yaml", running: "", deployment: null, bundled: false };
+  const runningUri = "oxplow:oxplow/file?filesystem=oxplow:extensions&path=acme/pages/items.yaml&rev=abc123def456789";
+  run.page.origin = { extension: "acme", source: ".oxplow/extensions/acme/pages/items.yaml", running: "", deployment: "abc123def456789", bundled: false, runningUri };
   const opened: string[] = [];
   const { runs } = fakePageRuns(run);
   const view = render(<PageHost pageKey={key} runs={runs} onOpenPage={(ref) => opened.push(ref.id)} />);
@@ -111,8 +112,12 @@ test("the description isn't in the body: About this page in the ☰ shows it wit
   expect(about.textContent).toContain("What the items are.");
   expect(view.getByTestId("page-file").textContent).not.toContain("What the items are.");
   expect(view.queryByTestId("page-rail-about")).toBeNull();
+  // The same facts as Definition's About: its source is the running copy, raw.
+  for (const fact of ["Title", "Id", "Extension", "Source", "Origin", "Runs"]) expect(about.textContent).toContain(fact);
+  expect(about.textContent).toContain("deployment abc123def456");
+  expect(view.getByTestId("page-about-source").textContent).toBe("acme/pages/items.yaml");
   fireEvent.click(view.getByTestId("page-about-source"));
-  expect(paramOf(opened[0], "path")).toBe(".oxplow/extensions/acme/pages/items.yaml");
+  expect(opened[0]).toBe(`${runningUri}#oxplow.renderer=oxplow-foundation/file-viewer`);
 });
 
 test("a whole-page action with `when` is offered only while the page's row has that column truthy", async () => {

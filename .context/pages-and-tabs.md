@@ -592,8 +592,10 @@ holds its run (`usePageRunWith` over `usePageRunsStore()`: the
 `runId`, `rerun` is Refresh) and draws the `tabs/Page.tsx` chrome:
 Contents and Selection (the rows picked, `picked` history state) in the
 rail (`pages/railGroups.tsx`); About this page in the ☰ (a `Popover`
-over the body's top right: the page's `description`, `page.origin`, out
-of date — the description is never drawn in the body); `comments: true` → the
+over the body's top right: the page's `description`, then `PageAbout`'s
+facts — Definition's About rows from `page.origin` (Source opens
+`runningUri` in the File viewer) and the tab's URI — and out
+of date; the description is never drawn in the body); `comments: true` → the
 `CommentNavigator`, `PageCommentsContext` and `#comment=` on the tab's
 identity; a renderer's backlinks and outbound links; the stream as
 `VizStreamContext` (`viz/VizStream.ts`); full width for a grid, a board or a dashboard; and

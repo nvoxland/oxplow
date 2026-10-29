@@ -5,10 +5,13 @@
 import { useEffect, useState } from "react";
 
 import { querySql, type SqlCell } from "../api.js";
-import { Facts } from "../kit/Facts.js";
+import { Facts, type Fact } from "../kit/Facts.js";
+import { paramOf, withUriView } from "../uri/uri.js";
+import { RENDERER_VIEW_KEY } from "./renderers.js";
+import { FILE_VIEWER_PAGE } from "./viewActions.js";
 import { humanize } from "../kit/humanize.js";
 import { RailGroup } from "../kit/RailGroup.js";
-import { fileRef, settingsRef } from "../tabs/pageRefs.js";
+import { settingsRef } from "../tabs/pageRefs.js";
 import type { TabRef } from "../tabs/tabState.js";
 import type { PageParam, PageProvenance } from "../tauri-bridge/generated/bindings.js";
 
@@ -63,12 +66,20 @@ export function RailSelection({
 }
 
 export function PageAbout({
+  title,
+  id,
+  uri,
   description,
   origin,
   outOfDate,
   onOpenPage,
   testPrefix,
 }: {
+  title: string;
+  /** The page's id (`<extension>/<slug>`). */
+  id: string;
+  /** The URI the tab shows, when it is in one. */
+  uri?: string | null;
   /** What the page is for (its `description`). */
   description: string;
   origin: PageProvenance;
@@ -77,40 +88,35 @@ export function PageAbout({
   onOpenPage?(ref: TabRef): void;
   testPrefix: string;
 }) {
+  // The same facts Definition's About opens with: its source is the copy
+  // that runs, raw, in the File viewer — never the file to edit.
+  const running = origin.runningUri;
+  const sourcePath = running ? paramOf(running, "path") : null;
+  const link = (testId: string, text: string, ref: TabRef) =>
+    onOpenPage ? (
+      <button type="button" className="ox-link ox-fact-link" data-testid={testId} onClick={() => onOpenPage(ref)}>
+        {text}
+      </button>
+    ) : (
+      <span data-testid={testId}>{text}</span>
+    );
+  const facts: Fact[] = [
+    { key: "title", label: "Title", value: title },
+    { key: "id", label: "Id", value: id },
+    { key: "extension", label: "Extension", value: link(`${testPrefix}-about-extension`, origin.extension, settingsRef("extensions")) },
+  ];
+  if (running && sourcePath) {
+    facts.push({ key: "source", label: "Source", value: link(`${testPrefix}-about-source`, sourcePath, { id: withUriView(running, { [RENDERER_VIEW_KEY]: FILE_VIEWER_PAGE }) }) });
+  }
+  facts.push(
+    { key: "origin", label: "Origin", value: origin.bundled ? "ships with oxplow" : "yours" },
+    { key: "runs", label: "Runs", value: origin.deployment ? `deployment ${origin.deployment.slice(0, 12)}` : "loaded from its source" },
+  );
+  if (uri) facts.push({ key: "uri", label: "URI", value: <span className="ox-mono" data-testid={`${testPrefix}-about-uri`}>{uri}</span> });
   return (
     <div data-testid={`${testPrefix}-about`}>
       {description ? <p className="ox-rail-line">{description}</p> : null}
-      <Facts
-        facts={[
-          {
-            key: "extension",
-            label: "Extension",
-            value: onOpenPage ? (
-              <button type="button" className="ox-link ox-params-more" data-testid={`${testPrefix}-about-extension`} onClick={() => onOpenPage(settingsRef("extensions"))}>
-                {origin.extension}
-              </button>
-            ) : (
-              origin.extension
-            ),
-          },
-          {
-            key: "source",
-            label: "Source",
-            value:
-              origin.source && onOpenPage ? (
-                <button type="button" className="ox-link ox-params-more ox-mono" data-testid={`${testPrefix}-about-source`} onClick={() => onOpenPage(fileRef(origin.source!))}>
-                  {origin.source}
-                </button>
-              ) : origin.source ? (
-                origin.source
-              ) : origin.bundled ? (
-                "Ships with oxplow"
-              ) : (
-                "Not on this machine"
-              ),
-          },
-        ]}
-      />
+      <Facts facts={facts} />
       {outOfDate ? (
         <p className="ox-rail-line" data-testid={`${testPrefix}-about-out-of-date`}>
           The source changed since it was deployed; deploy it to see the change.

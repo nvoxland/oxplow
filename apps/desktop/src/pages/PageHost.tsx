@@ -268,7 +268,7 @@ export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, re
         <span ref={aboutAnchor} style={aboutAnchorStyle} />
         {about && page ? (
           <Popover anchor={aboutAnchor} label="About this page" onClose={() => setAbout(false)} testId="page-about-popover">
-            <PageAbout description={page.description} origin={page.origin} outOfDate={outOfDate} onOpenPage={onOpenPage ? (ref) => { setAbout(false); onOpenPage(ref); } : undefined} testPrefix="page" />
+            <PageAbout title={page.title} id={page.id} uri={nav?.ref?.id ?? null} description={page.description} origin={page.origin} outOfDate={outOfDate} onOpenPage={onOpenPage ? (ref) => { setAbout(false); onOpenPage(ref); } : undefined} testPrefix="page" />
           </Popover>
         ) : null}
         <div

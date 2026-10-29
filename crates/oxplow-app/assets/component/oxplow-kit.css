@@ -248,6 +248,8 @@
 .ox-fact:last-child dt, .ox-fact:last-child dd { border-bottom: 0; }
 .ox-fact dt { color: var(--text-secondary); }
 .ox-fact dd { margin: 0; min-width: 0; overflow-wrap: anywhere; color: var(--text-primary); font-weight: var(--weight-medium); }
+/* A link among the facts reads as its value, only in the link colour. */
+.ox-fact-link { background: none; border: none; padding: 0; font: inherit; text-align: left; overflow-wrap: anywhere; }
 
 /* Dashboards: a responsive grid of tiles; a tile spans by its size and
    is a titled card. 400px: a chart's labelled axis must fit. */

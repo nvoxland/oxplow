@@ -1,5 +1,5 @@
 title: Definition
-description: What a page file is made of, part by part. A display mode of a page's YAML file, in Open With beside the File viewer (the raw YAML); every page's ☰ opens its running copy this way as Show Definition.
+description: What a page file is made of, part by part — a display mode of a page's YAML file, beside the File viewer's raw YAML.
 label: 'Definition: {{param.path|basename}}'
 icon: file-text
 for: oxplow/file
