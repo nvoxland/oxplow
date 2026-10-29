@@ -4,13 +4,17 @@ icon: package
 category: System
 keywords: deploy rollback permissions enable disable share health
 loaders:
-  facts:
+  summary:
     page: oxplow-foundation/extension-facts
-    loader: facts
+    loader: summary
 view:
-  from: facts
-  viz: list
-  group: { by: extension, link: { kind: page, from: extension_uri } }
+  from: summary
+  viz: sections
+  sections: { title: extension, id: id, link: uri, body: problems_text }
   columns:
-  - { key: text, label: Fact, link: { kind: page, from: target } }
+  - { key: origin_text, label: From }
+  - { key: runs_text, label: Runs }
+  - { key: state_text, label: State }
+  - { key: reach_text, label: May reach }
+  - { key: waiting_text, label: Waiting on }
   empty: No extensions. One you or your agent writes in .oxplow/extensions/ shows here.

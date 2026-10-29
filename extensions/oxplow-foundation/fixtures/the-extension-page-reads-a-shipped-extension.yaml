@@ -11,9 +11,7 @@ expect:
   loaders:
     about_facts:
       rows:
-        contains:
-          - { text: Ships with oxplow. }
-          - { text: "Read its running extension.yaml." }
+        - { origin_text: Ships with oxplow., manifest: Read its running extension.yaml }
     permissions:
       rows:
         contains:

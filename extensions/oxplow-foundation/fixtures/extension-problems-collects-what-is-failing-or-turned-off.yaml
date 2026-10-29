@@ -7,4 +7,4 @@ expect:
     problems:
       rows: 0
   nodes:
-    - { id: problems, kind: viz, actions: [{ id: enable }, { id: repair }, { id: enable-all }] }
+    - { id: problems, kind: viz, viz: sections, actions: [{ id: enable }, { id: repair }, { id: enable-all }] }

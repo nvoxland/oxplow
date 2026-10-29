@@ -28,9 +28,9 @@ loaders:
              (c.origin = 'project' AND NOT c.shared AND s.path LIKE '.oxplow/extensions/%') AS can_share,
              (c.origin = 'project' AND c.shared) AS can_unshare
       FROM content c LEFT JOIN v_extension_source s ON s.name = c.name
-  facts:
+  summary:
     page: oxplow-foundation/extension-facts
-    loader: facts
+    loader: summary
     params: { extension: { from: about.extension } }
   reach:
     page: oxplow-foundation/extension-facts
@@ -38,10 +38,10 @@ loaders:
     params: { extension: { from: about.extension } }
   about_facts:
     sql: |
-      SELECT 0 AS n, description AS text, NULL AS target FROM about WHERE description <> ''
-      UNION ALL SELECT n, text, target FROM facts
-      UNION ALL SELECT 90, 'Read its running extension.yaml.', manifest_target FROM about WHERE manifest_target IS NOT NULL
-      ORDER BY n
+      SELECT a.description, s.origin_text, s.runs_text, s.state_text, s.reach_text, s.waiting_text, s.problems_label, s.problems_target,
+             CASE WHEN a.manifest_target IS NOT NULL THEN 'Read its running extension.yaml' END AS manifest,
+             a.manifest_target
+      FROM about a LEFT JOIN summary s ON s.extension = a.extension
   contributions:
     sql: |
       SELECT count(*) || ' ' || kind || CASE WHEN count(*) = 1 THEN '' ELSE 's' END AS text
@@ -49,7 +49,7 @@ loaders:
       GROUP BY kind ORDER BY kind
   pages:
     sql: |
-      SELECT p.title, p.description,
+      SELECT p.title, p.id, p.description,
              CASE WHEN p.running_uri IS NOT NULL THEN p.running_uri || '#oxplow.renderer=oxplow-foundation/definition' END AS definition
       FROM about a JOIN v_page p ON p.extension = a.extension
       ORDER BY p.title
@@ -68,22 +68,27 @@ view:
   stack:
   - id: about
     title: About
-    viz: list
+    viz: detail
     from: about_facts
     columns:
-    - { key: text, label: Fact, link: { kind: page, from: target } }
+    - { key: description, label: What it is }
+    - { key: origin_text, label: From }
+    - { key: runs_text, label: Runs }
+    - { key: state_text, label: State }
+    - { key: reach_text, label: May reach }
+    - { key: waiting_text, label: Waiting on }
+    - { key: problems_label, label: Problems, link: { kind: page, from: problems_target } }
+    - { key: manifest, label: Manifest, link: { kind: page, from: manifest_target } }
     empty: This extension isn't known to the project.
   - id: contributes
     title: Contributes
     stack:
     - id: pages
       title: Pages
-      viz: list
+      viz: sections
       from: pages
+      sections: { title: title, id: id, link: definition, body: description }
       empty: It has no pages.
-      columns:
-      - { key: title, label: Page, link: { kind: page, from: definition } }
-      - { key: description, label: What it is }
     - id: kinds
       title: Everything else
       viz: list

@@ -1,0 +1,17 @@
+# `viz: sections`: the Extension page gives each of its pages a subsection,
+# the page's title linking to its running file's Definition and its
+# description as the body.
+when:
+  page: oxplow-foundation/extension
+  params:
+    uri: "oxplow:oxplow/extension?name=oxplow-foundation"
+    name: oxplow-foundation
+expect:
+  nodes:
+    - { id: pages, kind: viz, viz: sections }
+  loaders:
+    pages:
+      rows:
+        contains:
+          - { title: Commit, id: oxplow-foundation/commit, definition: $any }
+  text: { contains: ["Commit"] }

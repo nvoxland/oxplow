@@ -1604,15 +1604,16 @@ one that adds permissions asks inline like any deploy.
 
 **The Extensions page** (`extensions`, the launcher's System page; Settings
 has no Extensions area) is a document too: one headed section per extension
-(a `list` grouped by extension, the heading linking to its Extension page),
+(`viz: sections`, a row per extension from `extension-facts`' `summary`: the heading links to its Extension page, the facts are columns, a Problems line is the body),
 those needing attention first, each fact a sentence from the hidden
 `extension-facts` page — the one place that turns `v_extension`,
 `v_extension_source` and `v_contribution_health` into words (permission ids
 become "may read your project's files"). It has no table and no buttons.
 
 **Extension problems** (`extension-problems`, System) collects every failing or
-disabled contribution and every extension that did not load cleanly, grouped
-by extension, with Enable Again, Repair with the Agent and Enable All
+disabled contribution and every extension that did not load cleanly, a
+`sections` subsection each (titled `<extension>: <contribution>`, linking to the
+extension), with Enable Again, Repair with the Agent and Enable All
 Disabled. A link from a one-line summary narrows it with the view param
 `#extension=<name>`; Alerts' failing-extension rows link the same way.
 

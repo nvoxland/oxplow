@@ -22,9 +22,12 @@ intent:
     - name: pr-lifetimes-draws-bars-filters-syncs-and-opens
       input: { page: pr-lifetimes }
       expect: a bar per readable pull request; the filters re-run the page, Sync runs the collector and a bar opens its pull request
-    - name: settings-extensions-area-lists-health-and-credentials
-      input: { page: oxplow-foundation/settings, params: { area: extensions } }
-      expect: a collector disabled after failures says why; a declared credential is listed once, never its value
+    - name: extension-problems-lists-a-disabled-collector-and-offers-enable-again
+      input: { page: oxplow-foundation/extension-problems, params: { extension: github } }
+      expect: a collector disabled after failures says why, under its extension
+    - name: settings-data-area-lists-a-credential-and-whether-it-is-kept
+      input: { page: oxplow-foundation/settings, params: { area: data } }
+      expect: a declared credential is listed once, never its value
 permissions: [process.run, network:api.github.com, secrets:GITHUB_TOKEN, commands:oxplow.collector.sync]
 collectors:
   - id: prs

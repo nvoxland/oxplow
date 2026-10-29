@@ -214,6 +214,9 @@ intent:
     - name: extension-problems-collects-what-is-failing-or-turned-off
       input: { page: extension-problems, params: {} }
       expect: the failing or disabled contributions and the extensions that did not load, under their extension, with Enable Again, Repair with the Agent and Enable All Disabled
+    - name: extension-pages-are-a-section-each-with-a-linked-heading
+      input: { page: extension, params: { uri: 'oxplow:oxplow/extension?name=oxplow-foundation', name: oxplow-foundation } }
+      expect: each page of the extension is a subsection, its title linking to the Definition of its running file and its description as the body
     - name: the-extension-page-reads-a-shipped-extension
       input: { page: extension, params: { uri: 'oxplow:oxplow/extension?name=oxplow-foundation', name: oxplow-foundation } }
       expect: where it comes from, what runs, its pages with a link to each Definition, what it may reach in words, its deployments, and a slot for its runs

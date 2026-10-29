@@ -37,6 +37,10 @@ in `v_contribution_health` (`extension`, `contribution`, `kind`, `state` = `ok` 
   deployment keeps running. Boot deploys nothing, so a restart never
   publishes a source (`references/development-cycle.md`).
   `oxplow.extension.rollback { name, to? }` makes an earlier deployment live.
+  `oxplow.extension.disable { name }` turns an extension off for the person
+  and `oxplow.extension.enable { name }` turns it on again; `oxplow.extension.remove
+  { name }` forgets its deployments, state and settings and never deletes the
+  source. The person does these on the extension's own page.
 - **Needs a tool to build** (TypeScript, a bundler): declare
   `build: { run: <command>, output: dist, exclude: [node_modules] }`.
   The deploy runs `run` in the source folder, then deploys the inputs plus

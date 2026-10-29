@@ -13,30 +13,31 @@ answers:
 loaders:
   problems:
     sql: |
-      SELECT h.extension, e.uri AS extension_uri, h.kind, h.contribution,
-             h.kind || ' ' || h.contribution || ': '
-             || CASE h.state
-                  WHEN 'disabled' THEN 'turned off, ' || coalesce(h.reason, 'no reason recorded')
-                  ELSE 'failing, ' || h.consecutive_failures || ' in a row' END
-             || CASE WHEN h.last_error IS NULL THEN '' ELSE ' (' || h.last_error || ')' END AS text,
-             h.updated_at,
+      SELECT h.extension || ': ' || h.contribution AS title, h.extension || '/' || h.kind || '/' || h.contribution AS id,
+             e.uri AS extension_uri, h.extension, h.kind, h.contribution,
+             CASE h.state
+               WHEN 'disabled' THEN 'Turned off, ' || coalesce(h.reason, 'no reason recorded') || '.'
+               ELSE 'Failing, ' || h.consecutive_failures || ' in a row.' END AS what,
+             h.last_error AS error, h.last_ok_at, h.updated_at,
              (h.state = 'disabled') AS can_enable,
              (h.state = 'disabled' AND h.repair_item IS NOT NULL) AS can_repair,
              'Repair the extension described in [oxplow uri ' || coalesce(h.repair_item, '') || '] — read it first.' AS ask
       FROM v_contribution_health h JOIN v_extension e ON e.name = h.extension
       WHERE h.state <> 'ok' AND (NULLIF(:extension, '') IS NULL OR h.extension = :extension)
       UNION ALL
-      SELECT e.name, e.uri, 'extension', e.name, 'It did not load cleanly: ' || j.value, NULL, 0, 0, ''
+      SELECT e.name, e.name || '/load/' || j.key, e.uri, e.name, 'extension', e.name,
+             'It did not load cleanly.', j.value, NULL, NULL, 0, 0, ''
       FROM v_extension e, json_each(e.errors) j
       WHERE NULLIF(:extension, '') IS NULL OR e.name = :extension
-      ORDER BY 1, 3, 4
+      ORDER BY 4, 5, 6
 view:
   from: problems
-  viz: list
-  group: { by: extension, link: { kind: page, from: extension_uri } }
+  viz: sections
+  sections: { title: title, id: id, link: extension_uri, body: error }
   columns:
-  - { key: text, label: Problem }
-  - { key: updated_at, label: Last changed, format: relative }
+  - { key: kind, label: Kind }
+  - { key: what, label: State }
+  - { key: last_ok_at, label: Last worked, format: relative }
   empty: Nothing is failing or turned off.
   actions:
   - id: enable
