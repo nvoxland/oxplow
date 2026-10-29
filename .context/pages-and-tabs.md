@@ -23,7 +23,9 @@ pages are THE shell.
 - **A thread's agents are its agent sessions, one tab each.** Every open
   `agent_session` row has a pinned tab (`agent_session:ses3`) leading the
   thread's tabs, in the order the sessions opened its terminal. The tabs follow the rows — `useThreadSessions` reads
-  `v_agent_session`, and `reconcileSessionTabs` (`tabs/sessionTabs.ts`)
+  `v_agent_session` (and is `null`, never another thread's rows, from a thread switch
+  until its own read lands — otherwise the switch would close the thread's session
+  tab and the active tab would fall to the MRU), and `reconcileSessionTabs` (`tabs/sessionTabs.ts`)
   keeps each open session's tab first and drops a closed one's — a
   session opened later still goes ahead of every other tab. **A new
   thread** (one with no tab list yet; they persist, so it's one never

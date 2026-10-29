@@ -63,13 +63,16 @@ export async function readThreadSessions(threadId: string): Promise<{ sessions: 
 /** A thread's open sessions, re-read when the dataset changes; `null` until
  *  the first read lands. */
 export function useThreadSessions(threadId: string | null): AgentSessionRow[] | null {
-  const [sessions, setSessions] = useState<AgentSessionRow[] | null>(null);
+  // Kept with the thread they were read for: for the render after a switch
+  // (before the effect clears them) they are another thread's, and a thread's
+  // tabs follow this list, so they must read as not yet read.
+  const [read, setRead] = useState<{ threadId: string; sessions: AgentSessionRow[] } | null>(null);
   const [reads, setReads] = useState<Reads>(NO_READS);
   const load = useCallback(() => {
     if (!threadId) return;
     void readThreadSessions(threadId)
       .then((r) => {
-        setSessions(r.sessions);
+        setRead({ threadId, sessions: r.sessions });
         setReads(r.reads);
       })
       .catch((e: unknown) => {
@@ -77,9 +80,9 @@ export function useThreadSessions(threadId: string | null): AgentSessionRow[] | 
       });
   }, [threadId]);
   useEffect(() => {
-    setSessions(null);
+    setRead(null);
     load();
   }, [load]);
   useRerunOnChange(reads, load);
-  return sessions;
+  return read && read.threadId === threadId ? read.sessions : null;
 }
