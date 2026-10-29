@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import { fileRef, lineView, pageTabRef, wikiPageRef, withViewParams } from "./pageRefs.js";
-import { pageUri, wikiUri } from "../uri/uri.js";
+import { fileUri, pageUri, withUriView, wikiUri } from "../uri/uri.js";
 import {
   activate,
   back,
@@ -12,6 +12,7 @@ import {
   evictions,
   forward,
   identityOf,
+  modeOf,
   navigate,
   open,
   parseSession,
@@ -22,6 +23,7 @@ import {
   serializeSession,
   patchHistoryState,
   setHistoryState,
+  slotShowing,
   stepOrigin,
   type Entry,
   type Origin,
@@ -123,6 +125,89 @@ describe("history", () => {
     let s = open(open(emptySession(), e(a)), e(b));
     s = navigate(s, slotOf(s, "oxplow:oxplow/wiki?slug=a"), e(b));
     expect(ids(s)).toEqual(["oxplow:oxplow/wiki?slug=b"]);
+  });
+});
+
+// A page shows once per display mode: its identity plus the renderer its
+// view names (`#oxplow.renderer`), absent being its own mode (the default).
+describe("display modes: one tab per identity and mode", () => {
+  const file = fileUri("a.ts");
+  const asDefinition = withUriView(file, { "oxplow.renderer": "oxplow-foundation/definition" });
+  const asBlame = withUriView(file, { "oxplow.renderer": "acme/blame" });
+  const f = { id: file } as Entry["ref"];
+  const def = { id: asDefinition } as Entry["ref"];
+  const blame = { id: asBlame } as Entry["ref"];
+
+  test("modeOf is the renderer the view names, or nothing", () => {
+    expect(modeOf(file)).toBe("");
+    expect(modeOf(asDefinition)).toBe("oxplow-foundation/definition");
+    expect(modeOf(withUriView(file, { lines: "3-4" }))).toBe("");
+    expect(modeOf("not a uri")).toBe("");
+  });
+
+  test("opening a file in another mode opens a second tab and leaves the first alone", () => {
+    let s = open(emptySession(), e(f));
+    s = open(s, e(def));
+    expect(ids(s)).toEqual([file, asDefinition]);
+    expect(s.active).toBe(slotOf(s, asDefinition));
+    // The same mode again focuses its tab.
+    s = open(s, e(f));
+    expect(ids(s)).toHaveLength(2);
+    expect(s.active).toBe(slotOf(s, file));
+  });
+
+  test("a tab showing the file in another view of the same mode is still the one refreshed", () => {
+    let s = open(emptySession(), e(def));
+    s = open(s, e({ id: withUriView(file, { "oxplow.renderer": "oxplow-foundation/definition", params: "{}" }) }));
+    expect(s.tabs).toHaveLength(1);
+  });
+
+  test("slotShowing tells modes apart", () => {
+    const s = open(open(emptySession(), e(f)), e(def));
+    expect(slotShowing(s, file)).toBe(slotOf(s, file));
+    expect(slotShowing(s, asDefinition)).toBe(slotOf(s, asDefinition));
+    expect(slotShowing(s, asBlame)).toBeNull();
+  });
+
+  test("navigating a tab to the file in another mode leaves the other tab open", () => {
+    let s = open(open(emptySession(), e(f)), e(a));
+    s = navigate(s, slotOf(s, "oxplow:oxplow/wiki?slug=a"), e(def));
+    expect(ids(s)).toEqual([file, asDefinition]);
+  });
+
+  test("navigating a tab to the file in a mode another tab shows closes that tab", () => {
+    let s = open(open(emptySession(), e(def)), e(a));
+    s = navigate(s, slotOf(s, "oxplow:oxplow/wiki?slug=a"), e(def));
+    expect(ids(s)).toEqual([asDefinition]);
+  });
+
+  test("Open With: the tab switches mode in place and a tab already in that mode closes", () => {
+    let s = open(open(open(emptySession(), e(f)), e(def)), e(a));
+    const slot = slotOf(s, file);
+    s = navigate(s, slot, e(def), { replace: true });
+    expect(ids(s)).toEqual([asDefinition, "oxplow:oxplow/wiki?slug=a"]);
+    expect(s.tabs[0]!.slot).toBe(slot);
+    // Another mode with no tab of its own: in place, nothing else closes.
+    s = navigate(s, slot, e(blame), { replace: true });
+    expect(ids(s)).toEqual([asBlame, "oxplow:oxplow/wiki?slug=a"]);
+  });
+
+  test("saved state carries across a filter within a mode, not across a change of mode", () => {
+    let s = open(emptySession(), e(f, { historyState: { scroll: 7 }, from: { items: [], index: 0, title: "t" } }));
+    const slot = s.active!;
+    s = navigate(s, slot, e({ id: withUriView(file, { lines: "3-4" }) }), { replace: true });
+    expect(current(s.tabs[0]!).historyState).toEqual({ scroll: 7 });
+    expect(current(s.tabs[0]!).from?.title).toBe("t");
+    s = navigate(s, slot, e(def), { replace: true });
+    expect(current(s.tabs[0]!).historyState).toBeUndefined();
+    expect(current(s.tabs[0]!).from).toBeUndefined();
+  });
+
+  test("a body is one per identity and mode", () => {
+    let s = open(emptySession(), e(f));
+    const slot = s.active!;
+    s = navigate(s, slot, e(def));
+    expect(bodies(s.tabs[0]!).map((b) => b.key)).toEqual([`${slot}/${file}`, `${slot}/${file}\noxplow-foundation/definition`]);
   });
 });
 

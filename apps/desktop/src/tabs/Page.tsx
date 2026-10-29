@@ -182,7 +182,8 @@ export function Page({ title, titleIcon, kind, chips: ownChips, actions, pin, ch
     return {
       options: shownRenderers.map((r) => ({ name: r.page, title: r.title })),
       current: current.page,
-      pick: (name: string) => patchView({ [RENDERER_VIEW_KEY]: name }),
+      // The default is the absent key, so tabs match on it (`modeOf`).
+      pick: (name: string) => patchView({ [RENDERER_VIEW_KEY]: shownRenderers.find((r) => r.page === name)?.default ? undefined : name }),
     };
   }, [shownRenderers, shownView, patchView]);
   const pinned = ctxNav?.pinned ?? false;

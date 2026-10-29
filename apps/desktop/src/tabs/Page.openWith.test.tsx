@@ -68,3 +68,13 @@ test("a URI with one renderer, none, or a list not yet asked offers nothing", as
     cleanup();
   }
 });
+
+// The default's mode is "no renderer in the view" (tabs match on it), so
+// picking the default drops the key rather than writing it.
+test("picking the default renderer drops oxplow.renderer from the view", async () => {
+  const patches: unknown[] = [];
+  const view = shown(FILE, two, patches, { "oxplow.renderer": "acme/blame" });
+  await openWith(view);
+  fireEvent.click(view.getByTestId("menu-item-page-open-with-oxplow-foundation/editor"));
+  await waitFor(() => expect(patches).toEqual([{ "oxplow.renderer": undefined }]));
+});

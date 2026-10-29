@@ -141,7 +141,13 @@ daemon's list:
 each renderer `menu-item-page-open-with-<extension>/<page>`, the one
 drawing it checked) lists the daemon's list (`PageNavigation.renderers`)
 when it has several. Picking one is a view change
-(Back returns to the first). `App.tsx` `renderTab` draws a route
+(Back returns to the first) **in this tab**: a tab that already shows the
+URI in the picked mode closes, so a page shows once per mode. Picking the
+default renderer drops the key rather than writing it, because an explicit
+default and an absent key are different modes to the tab store (it stays
+synchronous and never asks the daemon which renderer is the default); a
+URI that names the default explicitly is its own mode. State (`historyState`,
+`from`) carries across a filter in a mode, not across a change of mode. `App.tsx` `renderTab` draws a route
 (`oxplow:oxplow/page?page=…`) through `routeTab` (its page file, else
 `MissingPage`; a shown view, `page=temp/<id>`, through `TempPage`), and
 anything else through the page file of the renderer
@@ -177,7 +183,12 @@ page's id is its URL. A tab's view (`#lines=…`, a filter, a pick) rides in
 the id after `#` but is not its identity: the `?` names what the page
 shows, the `#` how it shows it, and the identity is the id without its
 `#` (`identityOf`). A `[[…]]` link, a `page_ref` row, a backlink and a tab
-all agree on one string. Two shapes:
+all agree on one string. **Tabs match on more than identity: a tab shows
+an identity in a display mode** (`modeOf`: the `#oxplow.renderer` value,
+`""` when the view names none — the default). The File viewer of a file and
+its Definition are two tabs; a page (with its mode) shows once. Things
+about the resource itself (bookmarks, comments, backlinks, the origin's
+position) stay on identity alone. Two shapes:
 
 - **A thing** (a file, directory, wiki page, work item, commit, metric,
   web page, …): the id is the thing's URI, and a renderer draws it
@@ -1268,18 +1279,19 @@ the bodies, Back/Forward, Up/Down, the star, Ask, what agents read.
 | `history.state` | `Entry.historyState` (persisted when it is JSON) |
 | the page you came from a list of | `Entry.from: Origin { title, items: [{ ref, label }], index }` |
 | pushState / replaceState | one `navigate(s, slot, entry, { replace })` |
-| back-forward cache | `bodies(tab)`: hidden bodies stay mounted, keyed by identity |
-| a SPA re-rendering on popstate | **every page is live**: one body per page identity, keyed `slot/identity`, so entries that differ only in the `#` re-render it — no remount, no Loading |
+| back-forward cache | `bodies(tab)`: hidden bodies stay mounted, keyed by identity and mode |
+| a SPA re-rendering on popstate | **every page is live**: one body per page identity and mode, keyed `slot/identity` (`slot/identity\nmode` in a mode), so entries that differ only in the `#` re-render it — no remount, no Loading |
 
 **Operations** (pure, tested in `session.test.ts`): `open` (finds the tab
-showing that **identity**, else a new tab; active. The same page at another
-view — a diff at another line, Board with another filter — moves the tab
-showing it to that view), `navigate` (the one move: pushes and clears
+showing that **identity in that mode** (`showingOf`), else a new tab; active.
+The same page at another view — a diff at another line, Board with another
+filter — moves the tab showing it to that view; opening Definition of a file
+opens or focuses a Definition tab and leaves its File viewer tab alone), `navigate` (the one move: pushes and clears
 forward; `{ replace: true }` takes the current entry's place. The same
-identity in another view keeps the page: its state, origin and mounted
-body. A same-page `replace` rewrites the entry in place and keeps forward
+identity and mode in another view keeps the page: its state, origin and
+mounted body; a change of mode is a new page in this tab (no state carries). A same-page `replace` rewrites the entry in place and keeps forward
 history, so a typed filter leaves Back and Forward alone. A page shown in
-another tab closes there), `setHistoryState`, `patchHistoryState`,
+another tab in the same mode closes there; in another mode it stays), `setHistoryState`, `patchHistoryState`,
 `back`, `forward`, `stepOrigin` (Up/Down in place, history untouched),
 `close` (the most recent other tab becomes active, as a browser does),
 `dropCurrent` (the page's record was deleted: back, dropping the entry,
@@ -1468,7 +1480,7 @@ should only survive as the rail-side fallback.
 
 ## Live by default: a page is a function of its entry
 
-A tab keeps **one mounted body per page identity** (`bodies(tab)`), so a
+A tab keeps **one mounted body per page identity and mode** (`bodies(tab)`), so a
 change of the `#` — a filter, a pick, Back or Forward between them —
 re-renders the page and never mounts it again: its state, its scroll and
 its loaded data stay. A page therefore reads its view from its props or

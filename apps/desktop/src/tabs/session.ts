@@ -10,14 +10,15 @@
  * - An **entry** is a page: its `ref`, whose id is a URI — what it shows
  *   (`?`, its identity) and how (`#`, its view) — its `historyState`
  *   (scroll, a draft, …), and `from`, the collection it was opened from.
- * - **One `navigate`**, as a browser has it: the same identity in another
+ * - **One `navigate`**, as a browser has it: the same identity and mode in another
  *   view keeps the page and changes its view (a filter replaces the entry,
  *   a pick pushes one); another identity is another page.
  */
 
 import type { SqlCell } from "../tauri-bridge/generated/bindings.js";
 import type { TabRef } from "./tabState.js";
-import { identityOf as uriIdentityOf } from "../uri/uri.js";
+import { RENDERER_VIEW_KEY } from "../pages/renderers.js";
+import { identityOf as uriIdentityOf, viewOf } from "../uri/uri.js";
 
 /** One item of the collection a page was opened from. */
 export interface OriginItem {
@@ -75,11 +76,11 @@ export interface Session {
 /** The most tabs a thread keeps open; pinned tabs don't count. */
 export const MAX_PAGE_TABS = 15;
 
-/** The slot of the tab showing the page `id` names now (in any view);
- *  null when none does. */
+/** The slot of the tab showing the page `id` names now (its identity in its
+ *  display mode, in any other view); null when none does. */
 export function slotShowing(s: Session, id: string): string | null {
-  const page = identityOf(id);
-  return s.tabs.find((t) => identityOf(current(t).ref.id) === page)?.slot ?? null;
+  const shown = showingOf(id);
+  return s.tabs.find((t) => showingOf(current(t).ref.id) === shown)?.slot ?? null;
 }
 
 /** The active tab's current page; null when none is active. */
@@ -102,6 +103,24 @@ export function identityOf(id: string): string {
   return uriIdentityOf(id) ?? id;
 }
 
+/** How a URI is drawn: the renderer its view names (`#oxplow.renderer`),
+ *  or "" when it names none (the default, which only the daemon's renderer
+ *  list can resolve — kept out of here so the session stays synchronous). An
+ *  explicit default and an absent one are different modes, so writers that
+ *  know the default leave the key out (Open With does). */
+export function modeOf(id: string): string {
+  return viewOf(id, RENDERER_VIEW_KEY) ?? "";
+}
+
+/** What a tab shows, for matching tabs: the identity in its display mode.
+ *  A page (with its mode) shows once; the same resource in another mode is
+ *  another tab. Anything about the resource itself (bookmarks, comments,
+ *  backlinks) keeps `identityOf`. */
+export function showingOf(id: string): string {
+  const mode = modeOf(id);
+  return mode ? `${identityOf(id)}\n${mode}` : identityOf(id);
+}
+
 function touched(mru: string[], slot: string): string[] {
   return [slot, ...mru.filter((s) => s !== slot)];
 }
@@ -116,12 +135,13 @@ function withTab(s: Session, slot: string, f: (t: Tab) => Tab): Session {
   return { ...s, tabs };
 }
 
-/** Show `entry`: the tab already showing its page — in any view — now in
- *  `entry`'s (its ref refreshed, its state kept), else a new tab. The tab
- *  becomes active. */
+/** Show `entry`: the tab already showing its page in its mode — in any
+ *  view — now in `entry`'s (its ref refreshed, its state kept), else a new
+ *  tab; the same page in another mode is another tab. The tab becomes
+ *  active. */
 export function open(s: Session, entry: Entry, opts: { pinned?: boolean } = {}): Session {
-  const page = identityOf(entry.ref.id);
-  const there = s.tabs.find((t) => identityOf(current(t).ref.id) === page);
+  const shown = showingOf(entry.ref.id);
+  const there = s.tabs.find((t) => showingOf(current(t).ref.id) === shown);
   if (there) {
     const refreshed = withTab(s, there.slot, (t) => {
       const entries = [...t.entries];
@@ -137,18 +157,20 @@ export function open(s: Session, entry: Entry, opts: { pinned?: boolean } = {}):
 
 /** Go to `entry` in `slot`, as a browser does: pushed after the current
  *  entry (what was forward is dropped), or in its place with `replace`.
- *  The same page in another view (`entry`'s identity is the current
- *  entry's) is that page further on: it keeps the page's state (open
+ *  The same page in another view (`entry`'s identity and mode are the
+ *  current entry's) is that page further on: it keeps the page's state (open
  *  sections, a draft) and its origin, and its body stays mounted; replaced,
  *  it is the entry rewritten (`history.replaceState`: what was forward
- *  stays). Another tab showing the page closes, so a page shows once. */
+ *  stays). A change of mode (Open With) is a new page in this tab: no state
+ *  carries. Another tab showing the page in the mode it arrives in closes,
+ *  so a page shows once per mode; one in a different mode stays. */
 export function navigate(s: Session, slot: string, entry: Entry, opts: { replace?: boolean } = {}): Session {
   const tab = s.tabs.find((t) => t.slot === slot);
   if (!tab) return s;
   const now = current(tab);
   if (now.ref.id === entry.ref.id) return s;
-  const page = identityOf(entry.ref.id);
-  const samePage = identityOf(now.ref.id) === page;
+  const shown = showingOf(entry.ref.id);
+  const samePage = showingOf(now.ref.id) === shown;
   const step: Entry = samePage
     ? {
         ...(now.from ? { from: now.from } : {}),
@@ -165,7 +187,7 @@ export function navigate(s: Session, slot: string, entry: Entry, opts: { replace
   }
   const kept = opts.replace ? tab.entries.slice(0, tab.at) : tab.entries.slice(0, tab.at + 1);
   const moved: Tab = { ...tab, entries: [...kept, step], at: kept.length };
-  const others = s.tabs.filter((t) => t.slot !== slot && identityOf(current(t).ref.id) === page).map((t) => t.slot);
+  const others = s.tabs.filter((t) => t.slot !== slot && showingOf(current(t).ref.id) === shown).map((t) => t.slot);
   const out = withTab(s, slot, () => moved);
   return others.reduce(close, out);
 }
@@ -293,7 +315,7 @@ export function evictions(s: Session, max: number, keep: (t: Tab) => boolean = (
 
 /** One mounted page of a tab. */
 export interface Body {
-  /** Stable while it stays the same page: `<slot>/<id or identity>`. */
+  /** Stable while it stays the same page: `<slot>/<identity>[\n<mode>]`. */
   key: string;
   /** The entry it draws. */
   entry: Entry;
@@ -302,8 +324,8 @@ export interface Body {
 }
 
 /**
- * The pages a tab keeps mounted: one per page identity among its entries
- * (its id without its `#` view), drawing the current entry when it is
+ * The pages a tab keeps mounted: one per page identity and mode among its
+ * entries (its id without its `#` view, but with its renderer), drawing the current entry when it is
  * that page's, else the nearest.
  * Every page is a function of its entry, so a change of view params (a
  * filter, a pick, Back between them) re-renders the page and never
@@ -311,7 +333,7 @@ export interface Body {
  * were.
  */
 export function bodies(tab: Tab): Body[] {
-  const keyOf = (entry: Entry) => `${tab.slot}/${identityOf(entry.ref.id)}`;
+  const keyOf = (entry: Entry) => `${tab.slot}/${showingOf(entry.ref.id)}`;
   const nearest = new Map<string, number>();
   tab.entries.forEach((entry, i) => {
     const key = keyOf(entry);

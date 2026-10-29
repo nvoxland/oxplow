@@ -79,3 +79,33 @@ test("Definition drawn again after another tab was shown still names its file an
   await expect(page.getByTestId("page-nav-title").filter({ visible: true })).toHaveText("Definition: numbat.yaml");
   await expect(file.getByTestId("node-about")).toContainText("e2e-defn/numbat");
 });
+
+test("Definition of a page whose file is open in the File viewer is another tab: both stay", async ({ page, daemon }) => {
+  await installExtension(daemon, "e2e-defn", { files: { "pages/numbat.yaml": numbat } });
+  await page.goto("/");
+  const openDefinition = async () => {
+    await openFromLauncher(page, "Defined Numbat");
+    await page.getByTestId("page-nav-menu").filter({ visible: true }).click();
+    await page.getByTestId("menu-item-action-page-about").click();
+    await page.getByTestId("page-about-definition").click();
+  };
+  // Definition, then this tab to the File viewer by Open With: it switches in place.
+  await openDefinition();
+  await expect(page.getByTestId("page-nav-title").filter({ visible: true })).toHaveText("Definition: numbat.yaml");
+  await page.getByTestId("page-nav-menu").filter({ visible: true }).click();
+  await page.getByTestId("menu-item-page-open-with").click();
+  await page.getByTestId("menu-item-page-open-with-oxplow-foundation/file-viewer").click();
+  await expect(page.getByTestId("viz-code").filter({ visible: true })).toContainText("title: Defined Numbat");
+  // The page file's tabs, by id: the running copy, one per display mode.
+  const fileTabs = page.locator('[data-testid^="center-tab-oxplow:"][data-testid*="numbat.yaml"]');
+  await expect(fileTabs).toHaveCount(1);
+  await expect(fileTabs.first()).toHaveAttribute("data-testid", /file-viewer/);
+
+  // The same page's Definition again: a Definition tab of its own, the File viewer tab stays.
+  await openDefinition();
+  await expect(page.getByTestId("page-nav-title").filter({ visible: true })).toHaveText("Definition: numbat.yaml");
+  await expect(fileTabs).toHaveCount(2);
+  await expect(page.locator('[data-testid^="center-tab-oxplow:"][data-testid*="definition"]')).toHaveCount(1);
+  await page.locator('[data-testid^="center-tab-oxplow:"][data-testid*="file-viewer"]').click();
+  await expect(page.getByTestId("viz-code").filter({ visible: true })).toContainText("title: Defined Numbat");
+});
