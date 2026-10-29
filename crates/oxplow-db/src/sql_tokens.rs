@@ -874,7 +874,7 @@ mod tests {
     }
 
     fn filters(sql: &str) -> Vec<(String, Operand)> {
-        equality_filters(sql, "v_workspace_file", &["parent", "path"]).unwrap()
+        equality_filters(sql, "v_file", &["parent", "path"]).unwrap()
     }
 
     fn text(col: &str, v: &str) -> (String, Operand) {
@@ -884,36 +884,36 @@ mod tests {
     #[test]
     fn a_top_level_equality_on_the_one_source_is_a_filter() {
         assert_eq!(
-            filters("SELECT * FROM v_workspace_file WHERE parent = 'src'"),
+            filters("SELECT * FROM v_file WHERE parent = 'src'"),
             vec![text("parent", "src")]
         );
         // Either side, qualified by the view or its alias, a parameter, any
         // case, beside conditions on other columns and before what follows.
         assert_eq!(
             filters(
-                "select name from V_WORKSPACE_FILE f where f.stream_id = :stream_id \
+                "select name from V_FILE f where f.stream_id = :stream_id \
                  and :p = f.Parent and kind <> 'dir' order by name limit 5"
             ),
             vec![("parent".to_string(), Operand::Param(":p".to_string()))]
         );
         assert_eq!(
-            filters("SELECT 1 FROM v_workspace_file WHERE v_workspace_file.path = ?2"),
+            filters("SELECT 1 FROM v_file WHERE v_file.path = ?2"),
             vec![("path".to_string(), Operand::Param("?2".to_string()))]
         );
         assert_eq!(
-            filters("SELECT 1 FROM v_workspace_file AS w WHERE w.path = 'x'"),
+            filters("SELECT 1 FROM v_file AS w WHERE w.path = 'x'"),
             vec![text("path", "x")]
         );
         // A subquery in a condition is that condition's own business.
         assert_eq!(
             filters(
-                "SELECT 1 FROM v_workspace_file WHERE parent = 'a' \
+                "SELECT 1 FROM v_file WHERE parent = 'a' \
                  AND path IN (SELECT path FROM v_change_file WHERE status = 'x' OR 1)"
             ),
             vec![text("parent", "a")]
         );
         assert_eq!(
-            filters("SELECT 1 FROM v_workspace_file WHERE parent = 'it''s'"),
+            filters("SELECT 1 FROM v_file WHERE parent = 'it''s'"),
             vec![text("parent", "it's")]
         );
     }
@@ -925,27 +925,29 @@ mod tests {
     fn the_one_read_of_a_view_inside_a_subquery_or_cte_is_narrowed_by_its_select() {
         assert_eq!(
             filters(
-                "WITH w AS (SELECT * FROM v_workspace_file f WHERE f.parent = 'a' AND f.kind <> 'x') \
+                "WITH w AS (SELECT * FROM v_file f WHERE f.parent = 'a' AND f.kind <> 'x') \
                  SELECT count(*) FROM w"
             ),
             vec![text("parent", "a")]
         );
         assert_eq!(
             filters(
-                "SELECT * FROM v_stream WHERE id IN (SELECT stream_id FROM v_workspace_file WHERE parent = 'a')"
+                "SELECT * FROM v_stream WHERE id IN (SELECT stream_id FROM v_file WHERE parent = 'a')"
             ),
             vec![text("parent", "a")]
         );
         // Two reads, or a read the nested SELECT does not narrow, stay whole.
         assert_eq!(
             filters(
-                "WITH w AS (SELECT * FROM v_workspace_file WHERE parent = 'a') \
-                 SELECT (SELECT count(*) FROM v_workspace_file) FROM w"
+                "WITH w AS (SELECT * FROM v_file WHERE parent = 'a') \
+                 SELECT (SELECT count(*) FROM v_file) FROM w"
             ),
             vec![]
         );
         assert_eq!(
-            filters("SELECT * FROM v_stream WHERE id IN (SELECT 1 FROM v_workspace_file WHERE parent = 'a' OR 1)"),
+            filters(
+                "SELECT * FROM v_stream WHERE id IN (SELECT 1 FROM v_file WHERE parent = 'a' OR 1)"
+            ),
             vec![]
         );
     }
@@ -957,27 +959,24 @@ mod tests {
     #[test]
     fn anything_but_a_plain_conjunction_on_the_one_source_reads_everything() {
         for sql in [
-            "SELECT * FROM v_workspace_file",
-            "SELECT * FROM v_workspace_file WHERE parent = 'a' OR parent = 'b'",
-            "SELECT * FROM v_workspace_file WHERE name BETWEEN 'a' AND parent = 'b'",
-            "SELECT * FROM v_workspace_file WHERE CASE WHEN 1 THEN 1 END AND parent = 'b'",
-            "SELECT * FROM v_workspace_file f JOIN v_change_file c ON c.path = f.path WHERE f.parent = 'a'",
-            "SELECT * FROM v_workspace_file, v_stream WHERE parent = 'a'",
-            "SELECT * FROM v_workspace_file WHERE parent = 'a' UNION SELECT * FROM v_workspace_file",
-            "SELECT (SELECT count(*) FROM v_workspace_file) FROM v_workspace_file WHERE parent = 'a'",
-            "WITH x AS (SELECT 1) SELECT * FROM v_workspace_file WHERE parent = 'a'",
-            "SELECT * FROM v_workspace_file WHERE NOT parent = 'a'",
-            "SELECT * FROM v_workspace_file WHERE parent = 'a' COLLATE NOCASE",
-            "SELECT * FROM v_workspace_file WHERE parent = lower('A')",
-            "SELECT * FROM v_workspace_file WHERE other.parent = 'a'",
+            "SELECT * FROM v_file",
+            "SELECT * FROM v_file WHERE parent = 'a' OR parent = 'b'",
+            "SELECT * FROM v_file WHERE name BETWEEN 'a' AND parent = 'b'",
+            "SELECT * FROM v_file WHERE CASE WHEN 1 THEN 1 END AND parent = 'b'",
+            "SELECT * FROM v_file f JOIN v_change_file c ON c.path = f.path WHERE f.parent = 'a'",
+            "SELECT * FROM v_file, v_stream WHERE parent = 'a'",
+            "SELECT * FROM v_file WHERE parent = 'a' UNION SELECT * FROM v_file",
+            "SELECT (SELECT count(*) FROM v_file) FROM v_file WHERE parent = 'a'",
+            "WITH x AS (SELECT 1) SELECT * FROM v_file WHERE parent = 'a'",
+            "SELECT * FROM v_file WHERE NOT parent = 'a'",
+            "SELECT * FROM v_file WHERE parent = 'a' COLLATE NOCASE",
+            "SELECT * FROM v_file WHERE parent = lower('A')",
+            "SELECT * FROM v_file WHERE other.parent = 'a'",
         ] {
             assert_eq!(filters(sql), vec![], "{sql}");
         }
         // A column it wasn't asked about isn't one.
-        assert_eq!(
-            filters("SELECT * FROM v_workspace_file WHERE kind = 'dir'"),
-            vec![]
-        );
+        assert_eq!(filters("SELECT * FROM v_file WHERE kind = 'dir'"), vec![]);
     }
 
     /// A filter's value is its literal, or the text bound to its parameter;
@@ -1027,7 +1026,7 @@ mod tests {
     fn a_concatenation_of_literals_and_parameters_is_one_value() {
         use crate::{SqlCell, SqlParams};
         assert_eq!(
-            filters("SELECT 1 FROM v_workspace_file WHERE path = :start || '..' || :end"),
+            filters("SELECT 1 FROM v_file WHERE path = :start || '..' || :end"),
             vec![(
                 "path".to_string(),
                 Operand::Concat(vec![
@@ -1038,11 +1037,11 @@ mod tests {
             )]
         );
         for sql in [
-            "SELECT 1 FROM v_workspace_file WHERE path = :start || parent",
-            "SELECT 1 FROM v_workspace_file WHERE path = :start || lower('x')",
-            "SELECT 1 FROM v_workspace_file WHERE path = :start ||",
-            "SELECT 1 FROM v_workspace_file WHERE path = :start || || :end",
-            "SELECT 1 FROM v_workspace_file WHERE path = :start | :end",
+            "SELECT 1 FROM v_file WHERE path = :start || parent",
+            "SELECT 1 FROM v_file WHERE path = :start || lower('x')",
+            "SELECT 1 FROM v_file WHERE path = :start ||",
+            "SELECT 1 FROM v_file WHERE path = :start || || :end",
+            "SELECT 1 FROM v_file WHERE path = :start | :end",
         ] {
             assert_eq!(filters(sql), vec![], "{sql}");
         }

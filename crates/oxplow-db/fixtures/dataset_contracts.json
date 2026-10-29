@@ -22323,78 +22323,6 @@
       ]
     }
   },
-  "workspace_file": {
-    "1": {
-      "columns": [
-        {
-          "name": "stream_id",
-          "type": "INT",
-          "doc": "The stream whose worktree it lists (v_stream.id)."
-        },
-        {
-          "name": "path",
-          "type": "TEXT",
-          "doc": "Its path in the worktree, `/`-separated."
-        },
-        {
-          "name": "parent",
-          "type": "TEXT",
-          "doc": "The folder it is in; `''` at the top level."
-        },
-        {
-          "name": "name",
-          "type": "TEXT",
-          "doc": "Its last path segment."
-        },
-        {
-          "name": "kind",
-          "type": "TEXT",
-          "doc": "`file` or `dir`."
-        },
-        {
-          "name": "status",
-          "type": "TEXT",
-          "doc": "A file's change against HEAD (`added`, `modified`, `deleted`, `renamed`, `untracked`, `conflicted`); NULL when unchanged, and on a folder."
-        }
-      ],
-      "key": []
-    },
-    "2": {
-      "columns": [
-        {
-          "name": "stream_id",
-          "type": "INT",
-          "doc": "The stream whose worktree it lists (v_stream.id)."
-        },
-        {
-          "name": "path",
-          "type": "TEXT",
-          "doc": "Its path in the worktree, `/`-separated."
-        },
-        {
-          "name": "parent",
-          "type": "TEXT",
-          "doc": "The folder it is in; `''` at the top level."
-        },
-        {
-          "name": "name",
-          "type": "TEXT",
-          "doc": "Its last path segment."
-        },
-        {
-          "name": "kind",
-          "type": "TEXT",
-          "doc": "`file` or `dir`."
-        },
-        {
-          "name": "status",
-          "type": "TEXT",
-          "doc": "A file's change against HEAD (`added`, `modified`, `deleted`, `renamed`, `untracked`, `conflicted`); NULL when unchanged, and on a folder."
-        }
-      ],
-      "key": []
-    }
-  },
   "extension_deployment": {
     "1": {
       "columns": [
@@ -24760,6 +24688,68 @@
           "name": "ran_at",
           "type": "TEXT",
           "doc": "RFC 3339 time it ran."
+        }
+      ],
+      "key": []
+    }
+  },
+  "file": {
+    "1": {
+      "columns": [
+        {
+          "name": "filesystem",
+          "type": "TEXT",
+          "doc": "The filesystem it is on (`oxplow:local`, `oxplow:extensions`, `oxplow:temp`)."
+        },
+        {
+          "name": "stream_id",
+          "type": "INT",
+          "doc": "The stream the listing ran for (v_stream.id); the local filesystem lists that stream's worktree."
+        },
+        {
+          "name": "rev",
+          "type": "TEXT",
+          "doc": "The revision the query asked for (`git:HEAD`, `snap:<id>`, a deployment hash); `''` for the filesystem's default (the files now), which `rev = ''` also asks for."
+        },
+        {
+          "name": "path",
+          "type": "TEXT",
+          "doc": "Its path in the filesystem, `/`-separated."
+        },
+        {
+          "name": "parent",
+          "type": "TEXT",
+          "doc": "The folder it is in; `''` at the top level."
+        },
+        {
+          "name": "name",
+          "type": "TEXT",
+          "doc": "Its last path segment."
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "doc": "`file` or `dir`."
+        },
+        {
+          "name": "size",
+          "type": "INT",
+          "doc": "A file's size in bytes; NULL on a folder, in a whole-tree listing, and past the first 1000 files of a folder."
+        },
+        {
+          "name": "modified_at",
+          "type": "INT",
+          "doc": "A file's modified time (ms since the epoch); NULL where `size` is, and where the filesystem keeps no times (a past revision)."
+        },
+        {
+          "name": "uri",
+          "type": "TEXT",
+          "doc": "Its resource URI (`oxplow:oxplow/file?path=…` or `…/dir?path=…`, with the `filesystem` and `rev` it is on when they aren't the local default)."
+        },
+        {
+          "name": "status",
+          "type": "TEXT",
+          "doc": "A file's change against HEAD (`added`, `modified`, `deleted`, `renamed`, `untracked`, `conflicted`); NULL when unchanged, on a folder, and on a filesystem with no VCS."
         }
       ],
       "key": []

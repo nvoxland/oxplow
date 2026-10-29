@@ -163,7 +163,7 @@ export function QuickOpenOverlay({ open, initialQuery, stream, threadId, selecte
     if (open && stream) inputRef.current?.focus();
   }, [open, stream?.id]);
 
-  // The stream's files (`v_workspace_file`, a walk of the tree): read once
+  // The stream's files (`v_file`, a walk of the tree): read once
   // when it opens, and again when what the read read changes.
   const [fileReads, setFileReads] = useState<Reads>(NO_READS);
   const loadFiles = useCallback(() => {

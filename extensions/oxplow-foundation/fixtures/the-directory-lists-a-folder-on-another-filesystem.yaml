@@ -1,0 +1,12 @@
+# The Directory page lists a folder of any filesystem, not only the
+# worktree: the root of `oxplow:extensions` is the extensions that run, each
+# row naming the folder's URI on that filesystem.
+when:
+  page: oxplow-foundation/directory
+  params: { stream_id: 1, path: "", filesystem: "oxplow:extensions" }
+expect:
+  loaders:
+    directory:
+      rows:
+        contains:
+          - { name: oxplow-foundation, icon: folder, target: "oxplow:oxplow/dir?filesystem=oxplow:extensions&path=oxplow-foundation" }

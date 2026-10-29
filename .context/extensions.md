@@ -2475,7 +2475,7 @@ whose loader does not return one (`viz_column_problems`). An agent reads
 (`viz_text`).
 
 - **A lazy tree: `tree.lazy: <param>`, `tree.branch: <column>`.** A tree
-  whose loader returns one level (a folder of `v_workspace_file`, `WHERE
+  whose loader returns one level (a folder of `v_file`, `WHERE
   parent = :folder`): `lazy` names the page's own param the level is read
   with (it needs a `default`, the top level, and cannot be one the context
   supplies), `branch` the column that is truthy on rows that open. A

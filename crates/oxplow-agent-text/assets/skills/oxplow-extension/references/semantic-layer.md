@@ -21,9 +21,12 @@
   both are read live. Read the rules with `oxplow.config.get { key: "zones" }`,
   change them with `oxplow.config.set` (the whole ordered table).
 - Also read live, for the stream a page runs for (its `stream_id`; the
-  primary checkout's without one): `v_workspace_file` (the worktree's files
-  and folders, with each file's change; a folder's listing is `WHERE parent
-  = 'src'`) and `v_agent_conversation` (every harness's saved conversations
+  primary checkout's without one): `v_file` (the files and folders
+  of a filesystem: the worktree's by default, with each file's change;
+  `WHERE filesystem = 'oxplow:extensions'` and `AND rev = '<revision>'` name
+  another filesystem and a revision, no `filesystem` is `oxplow:local`; a
+  folder's listing is `WHERE parent = 'src'` and fills `size` and
+  `modified_at`; each row's `uri` opens it) and `v_agent_conversation` (every harness's saved conversations
   begun there; join `v_agent_session` on `resume_session_id = native_id`).
   And for the project: `v_agent_harness` (the registered agents, those
   `agents:` names first, `enabled` and `position`), `v_config_value` (every setting's value now and

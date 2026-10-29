@@ -29,6 +29,7 @@ use oxplow_db::{SqlCell, SqlParams, TempTable, TempView};
 use oxplow_domain::agent::harness::{
     AgentHarness, ConversationQuery, HarnessError, NativeConversation,
 };
+use oxplow_domain::filesystem::FsKind;
 use oxplow_domain::{DomainError, Stream, StreamId, StreamKind};
 
 use crate::ai_service::AiService;
@@ -50,7 +51,7 @@ pub const NAMES: &[&str] = &[
     "config_value",
     "agent_conversation",
     "vcs_workspace",
-    "workspace_file",
+    "file",
     "agent_harness",
     "branch_divergence",
     "commit_between",
@@ -117,7 +118,19 @@ pub fn columns(name: &str) -> &'static [&'static str] {
         ],
         "vcs_workspace" => &["path", "branch", "head", "is_main", "stream_id"],
         "agent_harness" => &["id", "title", "enabled", "position", "settings"],
-        "workspace_file" => &["stream_id", "path", "parent", "name", "kind", "status"],
+        "file" => &[
+            "filesystem",
+            "stream_id",
+            "rev",
+            "path",
+            "parent",
+            "name",
+            "kind",
+            "size",
+            "modified_at",
+            "uri",
+            "status",
+        ],
         "branch_divergence" => &[
             "base",
             "head",
@@ -214,8 +227,9 @@ pub fn columns(name: &str) -> &'static [&'static str] {
 /// `<column> = <value>` of every row it reads is handed only those rows.
 pub fn pushdown(name: &str) -> &'static [&'static str] {
     match name {
-        // One folder is one `read_dir`; the whole tree is a walk.
-        "workspace_file" => &["parent"],
+        // The filesystem and revision pick what is listed; one folder is
+        // one `read_dir`, the whole tree a walk.
+        "file" => &["filesystem", "rev", "parent"],
         // One pair is one graph walk; a side left open ranges over the
         // branches (`LiveSources::branch_pairs`).
         "branch_divergence" | "commit_between" | "extension_change" => &["base", "head"],
@@ -289,9 +303,12 @@ pub fn follows(name: &str, change: &Change<'_>) -> bool {
                 event,
                 E::VcsRefsChanged { .. } | E::WorkspaceChanged { .. } | E::ExtensionsChanged
             ),
-            "workspace_file" => matches!(
+            "file" => matches!(
                 event,
-                E::WorkspaceChanged { .. } | E::VcsRefsChanged { .. } | E::ConfigChanged
+                E::WorkspaceChanged { .. }
+                    | E::VcsRefsChanged { .. }
+                    | E::ConfigChanged
+                    | E::ExtensionsChanged
             ),
             // The catalog and the config decide what exists; a dataset's
             // rows are counted when asked for.
@@ -376,6 +393,12 @@ pub async fn harness_conversations(
 /// How many unmatched paths `v_zone_unmatched` lists: enough to see the
 /// shape of what's missing, few enough to read.
 const UNMATCHED_SAMPLE: usize = 20;
+
+/// The most files of one folder `v_file` reads a size and time for; the
+/// rest of a bigger folder have NULL, and `STAT_PARALLEL` of them are
+/// stat-ed at once.
+const STAT_LIMIT: usize = 1000;
+const STAT_PARALLEL: usize = 16;
 
 /// The most commits `v_commit_between` lists per pair: it answers what is
 /// unpushed or unmerged, not a history (`v_commit` is that).
@@ -515,12 +538,7 @@ impl LiveDatasets {
             "config_value" => sources.config_values().await,
             "agent_conversation" => sources.agent_conversations(stream).await,
             "vcs_workspace" => sources.vcs_workspaces().await,
-            "workspace_file" => {
-                let parent = filters.iter().find(|(c, _)| c == "parent");
-                sources
-                    .workspace_files(stream, parent.map(|(_, v)| v.clone()))
-                    .await
-            }
+            "file" => sources.files(stream, filters).await,
             "agent_harness" => Ok(sources.agent_harnesses()),
             "branch_divergence" => sources.branch_divergence(stream, filters).await,
             "commit_between" => sources.commits_between(stream, filters).await,
@@ -1494,40 +1512,94 @@ impl LiveSources {
         ]])
     }
 
-    /// The files and folders the stream's worktree's filter keeps: in
-    /// `parent` alone when the query names one, else the whole tree.
-    async fn workspace_files(
+    /// The files and folders of one filesystem at one revision (the
+    /// `filesystem` and `rev` conditions; none or empty: `oxplow:local`, the
+    /// filesystem's default revision): in `parent` alone when the query
+    /// names one, else the whole tree. A one-level listing fills each
+    /// file's size and time with a `stat`; the whole tree leaves them NULL,
+    /// so Quick Open and the link index stay one walk.
+    async fn files(
         &self,
         stream: Option<StreamId>,
-        parent: Option<String>,
+        filters: &[(String, String)],
     ) -> Result<Vec<Vec<SqlCell>>, DomainError> {
+        let want = |column: &str| {
+            filters
+                .iter()
+                .find(|(c, _)| c == column)
+                .map(|(_, v)| v.as_str())
+        };
+        // An empty filesystem or revision is none named; an empty parent is
+        // the root.
+        let named = |column: &str| want(column).filter(|v| !v.is_empty());
+        let (filesystem, rev, parent) = (named("filesystem"), named("rev"), want("parent"));
         let stream = self.stream(stream).await?;
-        let generated = self
-            .config
-            .read()
-            .unwrap_or_else(|e| e.into_inner())
-            .generated
-            .clone();
-        let paths = self
-            .workspace_files
-            .list_paths(Some(&stream.id.to_string()), &generated, parent)
-            .await
+        let svc = self
+            .services
+            .get()
             .map_err(|e| DomainError::Invalid(e.to_string()))?;
+        let fs = svc.filesystems.resolve(filesystem)?;
+        let cx = oxplow_domain::filesystem::FsCx {
+            stream: Some(stream.id),
+        };
+        let entries = fs.list(&cx, rev, parent).await?;
+        // Only files are stat-ed (a folder's size is none, and a past
+        // revision would list the whole tree again for each), at most
+        // `STAT_LIMIT` of them, a few at a time.
+        let stats: Vec<Option<oxplow_domain::filesystem::FsStat>> = if parent.is_some() {
+            use futures::StreamExt as _;
+            let asked: Vec<(usize, FsKind, String)> = entries
+                .iter()
+                .enumerate()
+                .map(|(i, e)| (i, e.kind, e.path.clone()))
+                .collect();
+            futures::stream::iter(asked)
+                .map(|(i, kind, path)| {
+                    let fs = fs.clone();
+                    let rev = rev.map(str::to_string);
+                    async move {
+                        if i >= STAT_LIMIT || kind != FsKind::File {
+                            return None;
+                        }
+                        fs.stat(&cx, rev.as_deref(), &path).await.ok().flatten()
+                    }
+                })
+                .buffered(STAT_PARALLEL)
+                .collect()
+                .await
+        } else {
+            vec![None; entries.len()]
+        };
         let id = SqlCell::Int(stream.id.value());
-        Ok(paths
+        let int = |v: Option<i64>| v.map_or(SqlCell::Null(()), SqlCell::Int);
+        Ok(entries
             .into_iter()
-            .map(|p| {
-                let (parent, name) = match p.path.rsplit_once('/') {
-                    Some((parent, name)) => (parent.to_string(), name.to_string()),
-                    None => (String::new(), p.path.clone()),
+            .zip(stats)
+            .map(|(entry, stat)| {
+                let (folder, name) = match entry.path.rsplit_once('/') {
+                    Some((folder, name)) => (folder.to_string(), name.to_string()),
+                    None => (String::new(), entry.path.clone()),
+                };
+                let uri = match entry.kind {
+                    FsKind::Dir => {
+                        oxplow_domain::uri::build::dir_uri_at(&entry.path, filesystem, rev)
+                    }
+                    FsKind::File => {
+                        oxplow_domain::uri::build::file_uri_at(&entry.path, filesystem, rev, None)
+                    }
                 };
                 vec![
+                    text(fs.id()),
                     id.clone(),
-                    text(p.path),
-                    text(parent),
+                    text(rev.unwrap_or_default()),
+                    text(entry.path),
+                    text(folder),
                     text(name),
-                    text(if p.is_dir { "dir" } else { "file" }),
-                    opt(p.status.map(|s| s.as_str())),
+                    text(entry.kind.as_str()),
+                    int(stat.as_ref().and_then(|s| s.size).map(|n| n as i64)),
+                    int(stat.as_ref().and_then(|s| s.modified_at)),
+                    text(uri),
+                    opt(entry.status.map(|s| s.as_str())),
                 ]
             })
             .collect())

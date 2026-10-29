@@ -109,7 +109,8 @@ that runs each call under `spawn_blocking`. `Services.vcs` holds it as
   sent to the primary — and a path naming the workspace itself (`""`,
   `.`, `/`) is refused (`WholeWorkspace`), so an empty path can't delete
   the worktree. Reads still default to the primary. The desktop reads a
-  worktree's files from the live dataset `v_workspace_file` (one folder:
+  worktree's files from the live dataset `v_file` (the local filesystem when
+  no `filesystem` is named; one folder:
   `WHERE parent = ?`; the whole tree for Quick Open, the link index and the
   Project panel's search), through `workspaceFiles.ts`; the
   `list_workspace_entries` / `list_workspace_files` IPCs are gone. A

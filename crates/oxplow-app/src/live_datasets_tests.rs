@@ -425,7 +425,7 @@ async fn config_values_are_read_live_with_where_each_comes_from() {
 /// that worktree, one run for none lists the primary checkout's; folders
 /// are rows too, so a directory listing is `WHERE parent = ?`.
 #[tokio::test]
-async fn workspace_files_are_the_streams_worktrees() {
+async fn files_are_the_streams_worktrees() {
     let fx = services_with_effort().await;
     let (stream, wt) = worktree_stream(&fx, "side").await;
     std::fs::create_dir_all(fx._dir.path().join("src")).unwrap();
@@ -433,7 +433,7 @@ async fn workspace_files_are_the_streams_worktrees() {
     std::fs::create_dir_all(wt.join("lib")).unwrap();
     std::fs::write(wt.join("lib/b.rs"), "b").unwrap();
 
-    let listing = "SELECT path, parent, name, kind FROM v_workspace_file WHERE path IN ('src', 'src/a.rs', 'lib', 'lib/b.rs') ORDER BY path";
+    let listing = "SELECT path, parent, name, kind FROM v_file WHERE path IN ('src', 'src/a.rs', 'lib', 'lib/b.rs') ORDER BY path";
     assert_eq!(
         rows(&fx, listing).await,
         vec![
@@ -462,7 +462,7 @@ async fn workspace_files_are_the_streams_worktrees() {
     assert_eq!(
         rows_in(
             &fx,
-            "SELECT stream_id, status FROM v_workspace_file WHERE path = 'lib/b.rs'",
+            "SELECT stream_id, status FROM v_file WHERE path = 'lib/b.rs'",
             stream
         )
         .await,
@@ -487,15 +487,14 @@ async fn a_folder_listing_reads_that_folder_alone() {
     std::fs::write(root.join("src/skipped/y.rs"), "y").unwrap();
     std::fs::write(root.join(".gitignore"), "skipped/\n").unwrap();
 
-    let walked =
-        "SELECT path, name, kind FROM v_workspace_file WHERE parent || '' = 'src' ORDER BY path";
+    let walked = "SELECT path, name, kind FROM v_file WHERE parent || '' = 'src' ORDER BY path";
     let expected = vec![
         vec![json!("src/a.rs"), json!("a.rs"), json!("file")],
         vec![json!("src/deep"), json!("deep"), json!("dir")],
         vec![json!("src/empty"), json!("empty"), json!("dir")],
     ];
     assert_eq!(rows(&fx, walked).await, expected);
-    let folder = "SELECT path, name, kind FROM v_workspace_file WHERE parent = ?1 ORDER BY path";
+    let folder = "SELECT path, name, kind FROM v_file WHERE parent = ?1 ORDER BY path";
     let read = |sql: &'static str, p: &'static str| {
         let svc = fx.svc.clone();
         async move {
@@ -522,6 +521,180 @@ async fn a_folder_listing_reads_that_folder_alone() {
     std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
     assert!(walk.is_err(), "the whole walk enters every folder");
     assert_eq!(folder_read.unwrap(), json!(expected));
+}
+
+/// `v_file` reads through the filesystem registry: with no `filesystem`
+/// condition it lists `oxplow:local` alone; a one-level listing fills each
+/// file's size and time, a whole-tree one leaves them NULL; every row's
+/// `uri` is the file's identity (the filesystem named only when it isn't
+/// local).
+#[tokio::test]
+async fn v_file_lists_local_by_default_and_fills_size_for_one_level() {
+    let fx = services_with_effort().await;
+    std::fs::create_dir_all(fx._dir.path().join("src")).unwrap();
+    std::fs::write(fx._dir.path().join("src/a.rs"), "hello").unwrap();
+
+    let walk = rows(
+        &fx,
+        "SELECT filesystem, rev, size, modified_at, uri FROM v_file WHERE path = 'src/a.rs'",
+    )
+    .await;
+    assert_eq!(
+        walk,
+        vec![vec![
+            json!("oxplow:local"),
+            json!(""),
+            Value::Null,
+            Value::Null,
+            json!("oxplow:oxplow/file?path=src/a.rs")
+        ]]
+    );
+    let level = rows(
+        &fx,
+        "SELECT size, modified_at IS NOT NULL, uri FROM v_file WHERE parent = 'src'",
+    )
+    .await;
+    assert_eq!(
+        level,
+        vec![vec![
+            json!(5),
+            json!(1),
+            json!("oxplow:oxplow/file?path=src/a.rs")
+        ]]
+    );
+    let dir = rows(
+        &fx,
+        "SELECT uri FROM v_file WHERE parent = '' AND path = 'src'",
+    )
+    .await;
+    assert_eq!(dir, vec![vec![json!("oxplow:oxplow/dir?path=src")]]);
+    // No filesystem named reads the local one only.
+    let others = rows(
+        &fx,
+        "SELECT count(*) FROM v_file WHERE filesystem <> 'oxplow:local'",
+    )
+    .await;
+    assert_eq!(others, vec![vec![json!(0)]]);
+}
+
+/// `rev` is pushed down to the filesystem: a git revision of the local one
+/// lists the files committed there, not the files on disk now.
+#[tokio::test]
+async fn v_file_lists_a_local_git_revision() {
+    let fx = services_with_effort().await;
+    let root = fx._dir.path();
+    std::fs::write(root.join("old.txt"), "old").unwrap();
+    let sha = crate::test_fixtures::commit_all(root, "add old");
+    std::fs::remove_file(root.join("old.txt")).unwrap();
+    std::fs::write(root.join("new.txt"), "new").unwrap();
+
+    let at = rows(
+        &fx,
+        &format!(
+            "SELECT path, rev, uri, status FROM v_file \
+             WHERE filesystem = 'oxplow:local' AND rev = 'git:{sha}' AND parent = '' \
+             AND kind = 'file' ORDER BY path"
+        ),
+    )
+    .await;
+    assert_eq!(
+        at,
+        vec![vec![
+            json!("old.txt"),
+            json!(format!("git:{sha}")),
+            json!(format!("oxplow:oxplow/file?path=old.txt&rev=git:{sha}")),
+            Value::Null,
+        ]]
+    );
+    let now = rows(
+        &fx,
+        "SELECT path FROM v_file WHERE parent = '' AND kind = 'file' AND path IN ('old.txt', 'new.txt')",
+    )
+    .await;
+    assert_eq!(now, vec![vec![json!("new.txt")]]);
+}
+
+/// `oxplow:extensions` lists extension names at its root and an extension's
+/// files below, at the deployment the `rev` names.
+#[tokio::test]
+async fn v_file_lists_the_extensions_filesystem() {
+    let fx = services_with_effort().await;
+    let hash = "0123456789abcdef";
+    let dir = crate::extension::extension_store::deployment_dir(fx._dir.path(), "acme", hash);
+    std::fs::create_dir_all(dir.join("pages")).unwrap();
+    std::fs::write(dir.join("extension.yaml"), "name: acme\n").unwrap();
+    std::fs::write(dir.join("pages/p.yaml"), "x").unwrap();
+
+    let top = rows(
+        &fx,
+        &format!(
+            "SELECT path, kind, uri FROM v_file WHERE filesystem = 'oxplow:extensions' \
+             AND rev = '{hash}' AND parent = 'acme' ORDER BY path"
+        ),
+    )
+    .await;
+    assert_eq!(
+        top,
+        vec![
+            vec![
+                json!("acme/extension.yaml"),
+                json!("file"),
+                json!(format!(
+                    "oxplow:oxplow/file?filesystem=oxplow:extensions&path=acme/extension.yaml&rev={hash}"
+                ))
+            ],
+            vec![
+                json!("acme/pages"),
+                json!("dir"),
+                json!(format!(
+                    "oxplow:oxplow/dir?filesystem=oxplow:extensions&path=acme/pages&rev={hash}"
+                ))
+            ],
+        ]
+    );
+    let roots = rows(
+        &fx,
+        "SELECT count(*) FROM v_file WHERE filesystem = 'oxplow:extensions' AND parent = '' AND kind = 'dir'",
+    )
+    .await;
+    assert!(roots[0][0].as_i64().unwrap() >= 1, "{roots:?}");
+}
+
+/// `oxplow:temp` is flat: its files are at the root, with sizes.
+#[tokio::test]
+async fn v_file_lists_the_temp_filesystem() {
+    let fx = services_with_effort().await;
+    fx.svc.temp.put("scratch.yaml", b"abc").await.unwrap();
+    let temp = rows(
+        &fx,
+        "SELECT path, size, uri FROM v_file WHERE filesystem = 'oxplow:temp' AND parent = ''",
+    )
+    .await;
+    assert_eq!(
+        temp,
+        vec![vec![
+            json!("scratch.yaml"),
+            json!(3),
+            json!("oxplow:oxplow/file?filesystem=oxplow:temp&path=scratch.yaml")
+        ]]
+    );
+}
+
+/// A filesystem nobody registered is refused, naming the ones that are.
+#[tokio::test]
+async fn v_file_refuses_an_unknown_filesystem() {
+    let fx = services_with_effort().await;
+    let err = fx
+        .svc
+        .sql
+        .query_sql(
+            "SELECT path FROM v_file WHERE filesystem = 'acme:nowhere'",
+            vec![],
+            None,
+        )
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("oxplow:local"), "{err}");
 }
 
 /// The repository's working copies, and the stream using each: one no
@@ -734,8 +907,7 @@ fn a_change_names_the_live_datasets_that_follow_it() {
         path: "src/a.rs".into(),
     });
     assert!(
-        files.contains(&"v_workspace_file".to_string())
-            && files.contains(&"v_zone_unmatched".to_string()),
+        files.contains(&"v_file".to_string()) && files.contains(&"v_zone_unmatched".to_string()),
         "{files:?}"
     );
     assert!(after(OxplowEvent::BackgroundTasksChanged).is_empty());

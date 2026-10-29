@@ -608,9 +608,11 @@ margin; an embed or a slot takes its title from the page it shows):
   (`for: oxplow/file` with a `rev`, `comments: true`, label
   `{{param.path|basename}} ({{param.rev}})`): a `code` viz of the file at
   that revision, `#lines=` marked. `directory` (`for: oxplow/dir`, default,
-  label `{{param.path|basename}}`; params `uri`, `path`, `stream_id`): a
-  `list` viz of `v_workspace_file WHERE parent = :path`, folders first,
-  each row linking to its folder or file. `commit` (`for: oxplow/commit`,
+  label `{{param.path|basename}}`; params `uri`, `path`, `filesystem`, `rev`, `stream_id`): a
+  `list` viz of `v_file WHERE filesystem = :filesystem AND rev = :rev AND
+  parent = :path` (a folder of any filesystem at any revision; the
+  defaults are `oxplow:local` and `''`, the files now), folders first,
+  each row linking to its `uri`. `commit` (`for: oxplow/commit`,
   default, label `{{param.sha|short}}`): a row from `v_change WHERE kind =
   'commit' AND target = :sha` feeds a `detail` over `v_commit` (Cherry-pick
   and Revert through `oxplow.git.cherry_pick` / `revert`) and a `tree` over

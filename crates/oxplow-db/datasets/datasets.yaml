@@ -1602,16 +1602,21 @@
   tests:
     - { not_null: path }
     - { unique: path }
-- name: workspace_file
-  version: 2
-  description: "The files and folders of a stream's worktree that its filter keeps (the project's `generated:` lists and the worktree's `.gitignore`s), an empty folder too, with each file's change status. Read live when a query names it, for the stream the query runs for (the primary checkout's when none). A folder's listing is `WHERE parent = 'src'` (the top level: `parent = ''`; a literal or a parameter): such a query reads that one folder, any other walks the worktree."
+- name: file
+  version: 1
+  description: "The files and folders of one filesystem at one revision (`oxplow:local`: the stream's worktree, with the project's `generated:` lists and the worktree's `.gitignore`s applied, an empty folder too, and each file's change status; `oxplow:extensions`: the running extension copies; `oxplow:temp`: scratch files). Read live when a query names it. A query that names no `filesystem` lists `oxplow:local` only; name another with `WHERE filesystem = 'oxplow:extensions'`, a revision with `AND rev = 'git:HEAD'` (a filesystem's own vocabulary; none or `''`: its default). Local files are the stream's the query runs for (the primary checkout's when none). A folder's listing is `WHERE parent = 'src'` (the top level: `parent = ''`; a literal or a parameter): such a query reads that one folder and fills each file's `size` and `modified_at`, any other walks the whole tree and leaves them NULL."
   fields:
-    - { name: "stream_id", type: "INT", doc: "The stream whose worktree it lists (v_stream.id)." }
-    - { name: "path", type: "TEXT", doc: "Its path in the worktree, `/`-separated." }
+    - { name: "filesystem", type: "TEXT", doc: "The filesystem it is on (`oxplow:local`, `oxplow:extensions`, `oxplow:temp`)." }
+    - { name: "stream_id", type: "INT", doc: "The stream the listing ran for (v_stream.id); the local filesystem lists that stream's worktree." }
+    - { name: "rev", type: "TEXT", doc: "The revision the query asked for (`git:HEAD`, `snap:<id>`, a deployment hash); `''` for the filesystem's default (the files now), which `rev = ''` also asks for." }
+    - { name: "path", type: "TEXT", doc: "Its path in the filesystem, `/`-separated." }
     - { name: "parent", type: "TEXT", doc: "The folder it is in; `''` at the top level." }
     - { name: "name", type: "TEXT", doc: "Its last path segment." }
     - { name: "kind", type: "TEXT", doc: "`file` or `dir`." }
-    - { name: "status", type: "TEXT", doc: "A file's change against HEAD (`added`, `modified`, `deleted`, `renamed`, `untracked`, `conflicted`); NULL when unchanged, and on a folder." }
+    - { name: "size", type: "INT", doc: "A file's size in bytes; NULL on a folder, in a whole-tree listing, and past the first 1000 files of a folder." }
+    - { name: "modified_at", type: "INT", doc: "A file's modified time (ms since the epoch); NULL where `size` is, and where the filesystem keeps no times (a past revision)." }
+    - { name: "uri", type: "TEXT", doc: "Its resource URI (`oxplow:oxplow/file?path=…` or `…/dir?path=…`, with the `filesystem` and `rev` it is on when they aren't the local default)." }
+    - { name: "status", type: "TEXT", doc: "A file's change against HEAD (`added`, `modified`, `deleted`, `renamed`, `untracked`, `conflicted`); NULL when unchanged, on a folder, and on a filesystem with no VCS." }
 - name: zone_unmatched
   version: 1
   description: "Up to 20 paths in the primary worktree that no zone rule matched (they read zone `other`), read live when a query names it: the sign that the table needs a rule, or that the repo grew a new area."

@@ -53,7 +53,7 @@ loaders:
         UNION
         SELECT substr(path, 1, length(rtrim(path, replace(path, '/', ''))) - 1) FROM d WHERE instr(path, '/') > 0
       ), listing(path, parent, name, kind, status) AS (
-        SELECT w.path, w.parent, w.name, w.kind, w.status FROM v_workspace_file w
+        SELECT w.path, w.parent, w.name, w.kind, w.status FROM v_file w
         WHERE w.stream_id = :stream_id AND w.parent = :folder
       ), rows(path, parent, name, kind, status) AS (
         SELECT path, CASE WHEN instr(path, '/') > 0 THEN substr(path, 1, length(rtrim(path, replace(path, '/', ''))) - 1) END,

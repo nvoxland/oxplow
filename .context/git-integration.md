@@ -103,7 +103,7 @@ registration: we never seed cache for dirs we never care about.
 Subscribes via the **debounced** view (`subscribe_debounced(250ms)`)
 and bridges each batch onto `OxplowEvent::WorkspaceChanged`. Consumed by:
 
-- The Files page's loaders (`v_workspace_file` follows `WorkspaceChanged`).
+- The Files page's loaders (`v_file` follows `WorkspaceChanged`).
 - `EditorPane` for external-file-changed prompts.
 
 Source files mutate constantly; this watcher's job is to keep the
@@ -232,7 +232,7 @@ ref updates from outside the worktree are heard too.
 Fires `vcsRefsChanged` after each debounce. Consumed silently (no
 loading spinner) by:
 
-- The Files page's loaders (`v_workspace_file`, `v_branch`, `v_change` follow it).
+- The Files page's loaders (`v_file`, `v_branch`, `v_change` follow it).
 - `SnapshotCapture::spawn_git_refs_listener` — requests a snapshot for
   the stream, so every commit lands a snapshot row stamped with the new
   HEAD (`snapshot.revision`/`branch`) even when the worktree

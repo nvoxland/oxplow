@@ -832,7 +832,7 @@ declaring *what it is* and mounting the generic layer.
   aren't openable here. Implemented as `searchSite(q, null)` +
   a client-side file-hit stream filter in `buildQuickOpenResults`
   (`quickOpenResults.ts`); filename matches already come from the
-  current stream's `v_workspace_file` (read once, re-read when what it read changes). An **exact-identity match** — a
+  current stream's `v_file` (read once, re-read when what it read changes). An **exact-identity match** — a
   task id like `tsk30`, or a page/file/wiki name equal to the query —
   floats to the very top, above the fuzzy pages/commands sections
   (`isExactMatch`). Task ids are searchable because `index_task`

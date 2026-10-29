@@ -38,7 +38,7 @@ export type VizIconSpec =
 
 /** The work-status glyphs, matching the rail's Work rows (and the status
  *  states `v_work_item` uses, so a query can pass its state), and a file's
- *  change status (`v_workspace_file.status`). */
+ *  change status (`v_file.status`). */
 const STATUS: Record<string, { glyph: string; tone: VizTone | null; label: string }> = {
   ready: { glyph: "☐", tone: null, label: "Ready" },
   todo: { glyph: "☐", tone: null, label: "Ready" },

@@ -538,8 +538,7 @@ hand), which language servers run and whose binary is on disk
 (`v_collector_state`, `v_collector_credential`; per machine, outside the
 repo), what the zone table does to the worktree (`v_zone`,
 `v_zone_unmatched`: `project.yaml` edited by hand, and the files on disk),
-every setting's effective value (`v_config_value`), a worktree's files
-(`v_workspace_file`), the harnesses' saved conversations
+every setting's effective value (`v_config_value`), the files of a filesystem (`v_file`: the stream's worktree by default), the harnesses' saved conversations
 (`v_agent_conversation`: files the harness writes outside oxplow), the
 registered agent harnesses (`v_agent_harness`: which `agents:` enables, and the settings each declares), the
 repository's working copies (`v_vcs_workspace`) and how far two revisions
@@ -571,7 +570,7 @@ rows are read when a query names the dataset.
   live one (it would read the stub).
 - **Stream-scoped:** a query runs for a stream (`SqlQuery::stream`, which a
   page sets from its `stream_id` param). A dataset of a worktree —
-  `v_workspace_file`, `v_agent_conversation` — reads that stream's, and the
+  `v_file` on the local filesystem, `v_agent_conversation` — reads that stream's, and the
   primary checkout's when the query names none; its rows carry the
   `stream_id` they list. `LiveDatasets::materialize` takes the stream.
 - **Narrowed by the query:** a dataset can name the columns it reads
@@ -583,10 +582,17 @@ rows are read when a query names the dataset.
   none; a dataset read once inside a parenthesised `SELECT`, a CTE body or
   a subquery, is narrowed by that `SELECT`'s own conditions),
   the read gets the value and returns only those rows; anything else reads
-  them all, which is always correct. `v_workspace_file` narrows by
-  `parent`: `WHERE parent = :path` is one `read_dir`, not a walk. Both go
-  through `workspace_files::list_workspace_paths`, so a folder's rows are
-  the walk's rows for it (an ignored folder, or one under one, has none).
+  them all, which is always correct. `v_file` narrows by
+  `filesystem`, `rev` and `parent`: `filesystem` and `rev` pick what is
+  listed (a filesystem's own revision vocabulary; an empty `rev` is its
+  default), `WHERE parent = :path` is one `read_dir`, not a walk. It lists
+  through the filesystem registry's `list`
+  (`.context/filesystems.md`), so a folder's rows are the walk's rows for it
+  (an ignored folder, or one under one, has none). No `filesystem`
+  condition lists `oxplow:local` only. A one-level listing fills each
+  file's `size` and `modified_at` with a `stat` (at most 1000 files, 16 at
+  a time); the whole tree leaves them NULL, so Quick Open and the link
+  index stay one walk. `uri` is built with the URI builders.
 - **Made on demand (stored datasets).** The stored-dataset twin of
   "narrowed by the query" (`on_demand.rs`): a dataset names the columns
   that, all pinned by a query's certain `<column> = <value>` conditions
@@ -610,7 +616,7 @@ rows are read when a query names the dataset.
   with nothing bound (a check) makes nothing.
 - **Cheap, and current:** a read walks in-memory registries, a config file,
   the keychain, the stream store, a worktree's files (`v_zone`, and
-  `v_workspace_file` unless the query names a folder, walk them on every
+  `v_file` unless the query names a folder, walk them on every
   query) or each harness's conversation index;
   it holds no lock while the query runs. Nothing is cached, so a result is
   as current as the query. A live read has no watermark, so a result's

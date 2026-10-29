@@ -465,7 +465,7 @@ most one tick right after a window is covered can still report.
 
 ## A worktree's files as a live dataset (measured 2026-10-18)
 
-`v_workspace_file` reads a stream's worktree on every query: the VCS
+`v_file` (on the local filesystem) reads a stream's worktree on every query: the VCS
 status, the filtered walk, and the rows into a temp table. On this repo
 (2,321 files kept by the filter): status ~28 ms, walk ~40 ms, temp table
 ~2 ms — about 70 ms a query, and the walk grows with the tree. Listing one
@@ -475,6 +475,9 @@ folder (what the old `list_workspace_entries` IPC did) costs the status and one
 "Live datasets"): the status and one `read_dir`, as the IPC. The Project
 panel, Quick Open's file index and the Directory page can then read the
 dataset; the whole-tree walk is left to the queries that need the tree.
+`v_file` fills `size` and `modified_at` only for a one-folder listing (one
+`stat` per file, 16 at a time, at most 1000 files); the whole-tree walk
+leaves them NULL so Quick Open and the link index pay nothing for them.
 
 ## Daemon transport: what a loopback HTTP hop costs (tsk255)
 

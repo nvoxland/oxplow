@@ -165,3 +165,18 @@ is flat, so it runs only the path check and asserts its own rules. A new
 filesystem adds a test that runs the same functions. The editor language table is
 `oxplow_domain::language_id` (the Monaco id space); a test holds it equal
 to the desktop's `editor-language.ts`.
+
+## Listing as a dataset: `v_file`
+
+`v_file` (a live dataset, `live_datasets.rs`) lists any filesystem through
+the registry's `list`: columns `filesystem, stream_id, rev, path, parent,
+name, kind, size, modified_at, uri, status`. It pushes down `filesystem`,
+`rev` and `parent`. A query that names no `filesystem` lists `oxplow:local`
+only; `rev` is the filesystem's own word (an empty one is its default), and
+the row's `rev` is what the query asked. `parent = ''` is the root; a
+one-level listing fills `size` and `modified_at` with `stat` for the files
+(not the folders), the whole tree leaves them NULL. `uri` comes from
+`file_uri_at` / `dir_uri_at`, so it names the filesystem and revision
+whenever they aren't the local default. An unregistered `filesystem`
+refuses, naming the ones that are. Pages that draw a folder (Directory) take
+`filesystem` and `rev` params and link by the row's `uri`.
