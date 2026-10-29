@@ -7,7 +7,7 @@ answers:
 loaders:
   extensions_list:
     sql: |
-      SELECT e.name, e.origin, e.enabled, e.deployment,
+      SELECT e.name, e.uri, e.origin, e.enabled, e.deployment,
              substr(e.hash, 1, 7) AS running,
              CASE WHEN s.hash IS NOT NULL AND e.hash IS NOT NULL AND s.hash != e.hash
                   THEN 'out of date' ELSE '' END AS source_state,
@@ -30,6 +30,9 @@ view:
   columns:
   - key: name
     label: Extension
+    link:
+      kind: page
+      from: uri
   - key: origin
     label: From
     width: 90

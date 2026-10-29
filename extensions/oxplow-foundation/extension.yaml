@@ -208,6 +208,12 @@ intent:
     - name: the-file-viewer-opens-the-current-version-of-a-local-file-at-a-past-revision
       input: { page: file-viewer, params: { path: 'src/main.rs', rev: 'git:HEAD' } }
       expect: the working-tree file's URI in current_uri, which the Open current version page action opens; none for the working tree or another filesystem
+    - name: the-extension-page-reads-a-shipped-extension
+      input: { page: extension, params: { uri: 'oxplow:oxplow/extension?name=oxplow-foundation', name: oxplow-foundation } }
+      expect: its origin, what runs, its pages with a link to each Definition, its permissions, and a slot for its runs
+    - name: the-extension-page-is-offered-for-an-extension-uri
+      input: { command: oxplow.page.renderers, input: { uri: 'oxplow:oxplow/extension?name=oxplow-foundation' } }
+      expect: the Extension page, the default, draws an extension's URI
     - name: definition-names-an-open-action-by-its-column
       input: { page: definition, params: { uri: 'oxplow:oxplow/file?path=oxplow-foundation/pages/file-viewer.yaml&filesystem=oxplow:extensions', path: oxplow-foundation/pages/file-viewer.yaml } }
       expect: the Actions table says an action that opens a page "opens <column>" where a command goes

@@ -1,0 +1,96 @@
+title: Extension
+description: One extension — where it comes from, the deployment that runs, what it contributes, what it may reach, its deployments and its recent runs. The renderer of oxplow's `extension` resource.
+label: '{{param.name}}'
+icon: package
+for: oxplow/extension
+default: true
+params:
+- name: uri
+  label: Extension
+- name: name
+answers:
+- {"question":"What does this extension contribute, and which deployment runs?","about":"oxplow/extension","params":{"uri":"oxplow:oxplow/extension?name=oxplow-foundation","name":"oxplow-foundation"},"skill":"oxplow-extension"}
+- {"question":"What may this extension reach?","about":"oxplow/extension","params":{"uri":"oxplow:oxplow/extension?name=oxplow-foundation","name":"oxplow-foundation"},"skill":"oxplow-extension"}
+loaders:
+  # Where it comes from and what runs, from the listing row the system
+  # handed over (`content`) and the source as it is now.
+  about:
+    sql: |
+      SELECT c.name AS extension, c.description,
+             CASE c.origin WHEN 'bundled' THEN 'ships with oxplow' ELSE 'yours' END AS origin,
+             CASE c.deployment
+               WHEN 'deployed' THEN 'deployment ' || substr(c.hash, 1, 12)
+               WHEN 'shipped' THEN 'the copy that ships with oxplow'
+               WHEN 'source' THEN 'its source, read in place'
+               WHEN 'undeployed' THEN 'nothing: it was never deployed'
+               ELSE 'nothing: no source or deployment is on this machine' END AS runs,
+             CASE WHEN s.hash IS NULL THEN 'no source on this machine'
+                  WHEN c.hash IS NULL THEN 'not deployed yet'
+                  WHEN s.hash <> c.hash THEN 'changed since the deployment'
+                  ELSE 'the same as the deployment' END AS source_state,
+             CASE WHEN c.enabled THEN 'on' ELSE 'off' END AS state,
+             COALESCE((SELECT group_concat(w.value, '; ') FROM json_each(c.pending) w), '') AS waiting_on,
+             json_array_length(c.errors) AS problems,
+             CASE WHEN c.deployment IN ('deployed', 'shipped', 'source') THEN
+                    uri('oxplow/file', 'filesystem', 'oxplow:extensions', 'path', c.name || '/extension.yaml')
+                    || '#oxplow.renderer=oxplow-foundation/file-viewer' END AS manifest_target,
+             c.name || '/extension.yaml' AS manifest
+      FROM content c LEFT JOIN v_extension_source s ON s.name = c.name
+  pages:
+    sql: |
+      SELECT p.title, p.id, p.description,
+             CASE WHEN p.running_uri IS NOT NULL THEN p.running_uri || '#oxplow.renderer=oxplow-foundation/definition' END AS definition
+      FROM content c JOIN v_page p ON p.extension = c.name
+      ORDER BY p.title
+  permissions:
+    sql: |
+      SELECT j.key AS permission, j.value AS reach
+      FROM content c, json_each(c.permissions) j
+      ORDER BY j.key
+view:
+  stack:
+  - id: about
+    title: About
+    viz: detail
+    from: about
+    columns:
+    - { key: description, label: What it is }
+    - { key: origin, label: Origin }
+    - { key: state, label: State }
+    - { key: runs, label: Runs }
+    - { key: source_state, label: Its source }
+    - { key: waiting_on, label: Waiting on a person }
+    - { key: problems, label: Problems }
+    - { key: manifest, label: Manifest, link: { kind: page, from: manifest_target } }
+    empty: This extension isn't known to the project.
+  - id: contributes
+    title: Contributes
+    stack:
+    - id: pages
+      title: Pages
+      viz: table
+      from: pages
+      empty: It has no pages.
+      columns:
+      - { key: title, label: Page }
+      - { key: description, label: What it is }
+      - { key: id, label: Definition, link: { kind: page, from: definition } }
+    - id: kinds
+      title: By kind
+      embed:
+        page: oxplow-foundation/extension-contributions
+        params: { extension: { from: about.extension } }
+  - id: permissions
+    title: Permissions
+    viz: table
+    from: permissions
+    empty: It asks for nothing beyond the baseline.
+    columns:
+    - { key: permission, label: Permission }
+    - { key: reach, label: Reach }
+  - id: deployments
+    title: Deployments
+    embed:
+      page: oxplow-foundation/extensions-deployments
+      params: { extension: { from: about.extension } }
+  - slot: runs

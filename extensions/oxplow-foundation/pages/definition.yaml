@@ -31,7 +31,7 @@ loaders:
   # viewer.
   about:
     sql: |
-      SELECT title, page AS id, extension,
+      SELECT title, page AS id, extension, uri('oxplow/extension', 'name', extension) AS extension_target,
              c.path AS source,
              c.uri || '#oxplow.renderer=oxplow-foundation/file-viewer' AS source_target,
              CASE WHEN bundled THEN 'ships with oxplow' ELSE 'yours' END AS origin,
@@ -175,7 +175,7 @@ view:
     columns:
     - { key: title, label: Title }
     - { key: id, label: Id }
-    - { key: extension, label: Extension }
+    - { key: extension, label: Extension, link: { kind: page, from: extension_target } }
     - { key: source, label: Source, link: { kind: page, from: source_target } }
     - { key: origin, label: Origin }
     - { key: runs, label: Runs }
