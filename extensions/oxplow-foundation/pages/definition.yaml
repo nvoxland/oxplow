@@ -27,25 +27,17 @@ loaders:
     command: oxplow.page.describe
     args: { uri: { from: content.uri }, text: { from: content.text }, params: { param: params }, stream_id: { from: stream.stream } }
     reads: [page, extension_deployment]
-  # The other pages that draw this file, but not this one.
-  modes:
-    command: oxplow.page.renderers
-    args: { uri: { from: content.uri } }
-    items: renderers
-    reads: [page]
-  mode_links:
-    sql: |
-      SELECT title, (SELECT uri FROM content) || '#oxplow.renderer=' || page AS target
-      FROM modes WHERE page <> 'oxplow-foundation/definition'
-  # Where it comes from.
+  # Its URL, and where it comes from: its source is this same file, raw,
+  # in the File viewer.
   about:
     sql: |
-      SELECT title, page AS id, extension,
-             CASE WHEN source <> '' THEN source END AS source,
+      SELECT c.uri AS url, title, page AS id, extension,
+             c.path AS source,
+             c.uri || '#oxplow.renderer=oxplow-foundation/file-viewer' AS source_target,
              CASE WHEN bundled THEN 'ships with oxplow' ELSE 'yours' END AS origin,
              CASE WHEN deployment IS NULL THEN 'loaded from its source'
                   ELSE 'deployment ' || substr(deployment, 1, 12) END AS runs
-      FROM definition
+      FROM definition, content c
   description:
     sql: SELECT description AS text FROM definition WHERE description <> ''
   # How it is used, a line each: what it draws, how it is opened, its
@@ -181,21 +173,13 @@ view:
     viz: detail
     from: about
     columns:
+    - { key: url, label: URL }
     - { key: title, label: Title }
     - { key: id, label: Id }
     - { key: extension, label: Extension }
-    - { key: source, label: Source, link: { kind: file } }
+    - { key: source, label: Source, link: { kind: page, from: source_target } }
     - { key: origin, label: Origin }
     - { key: runs, label: Runs }
-  - id: modes
-    title: Other ways to open
-    viz: list
-    from: mode_links
-    empty: ''
-    columns:
-    - key: title
-      label: Mode
-      link: { kind: page, from: target }
   - id: description
     title: Description
     viz: markdown
