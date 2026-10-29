@@ -7,7 +7,7 @@ import { TabModal } from "./TabModal.js";
 
 afterEach(cleanup);
 
-test("it has a title, a subtitle and a ×; × and Escape close it; a click outside does not", () => {
+test("it has a title, a subtitle and a ×; ×, Escape and a click outside close it", () => {
   let closed = 0;
   const view = render(
     <TabModal title="Rename" subtitle="Fix the build" onClose={() => closed++} testId="m">
@@ -17,13 +17,30 @@ test("it has a title, a subtitle and a ×; × and Escape close it; a click outsi
   expect(view.getByTestId("m").getAttribute("role")).toBe("dialog");
   expect(view.getByTestId("m-title").textContent).toBe("Rename");
   expect(view.getByTestId("m-subtitle").textContent).toBe("Fix the build");
-  fireEvent.mouseDown(view.getByTestId("m-backdrop"));
-  fireEvent.click(view.getByTestId("m-backdrop"));
+  // A click inside the card isn't outside it.
+  fireEvent.mouseDown(view.getByTestId("m"));
   expect(closed).toBe(0);
-  fireEvent.click(view.getByTestId("m-close"));
+  fireEvent.mouseDown(view.getByTestId("m-backdrop"));
   expect(closed).toBe(1);
-  fireEvent.keyDown(view.getByTestId("field"), { key: "Escape" });
+  fireEvent.click(view.getByTestId("m-close"));
   expect(closed).toBe(2);
+  fireEvent.keyDown(view.getByTestId("field"), { key: "Escape" });
+  expect(closed).toBe(3);
+});
+
+test("once something in it was typed or changed, a click outside keeps it open; × and Escape still close it", () => {
+  let closed = 0;
+  const view = render(
+    <TabModal title="Rename" onClose={() => closed++} testId="m">
+      <input data-testid="field" />
+    </TabModal>,
+  );
+  fireEvent.input(view.getByTestId("field"), { target: { value: "x" } });
+  fireEvent.mouseDown(view.getByTestId("m-backdrop"));
+  expect(closed).toBe(0);
+  expect(view.getByTestId("m").getAttribute("data-kept")).toBe("true");
+  fireEvent.keyDown(view.getByTestId("field"), { key: "Escape" });
+  expect(closed).toBe(1);
 });
 
 test("focus goes into it, and back to what had it when it closes", () => {
