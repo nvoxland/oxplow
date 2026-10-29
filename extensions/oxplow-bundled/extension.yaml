@@ -278,6 +278,7 @@ intent:
       expect: both sides of a duplicate block are facts on their own block
 ui:
   mounts:
+    - { page: extension-runs, at: oxplow-foundation/extension.runs }
     - { page: change-review, at: oxplow-foundation/diff-view.sections }
     - { page: change-review, at: oxplow-foundation/commit.sections }
     - { page: change-review, at: oxplow-foundation/uncommitted-changes.sections }

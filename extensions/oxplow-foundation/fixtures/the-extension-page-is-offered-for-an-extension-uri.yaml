@@ -1,0 +1,10 @@
+# The Extension page is the one that opens an extension's URI; the generic
+# resource page no longer does.
+when:
+  command: oxplow.page.renderers
+  input: { uri: "oxplow:oxplow/extension?name=oxplow-foundation" }
+expect:
+  ok: true
+  result:
+    renderers:
+      - { page: oxplow-foundation/extension, default: true }

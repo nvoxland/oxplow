@@ -1,6 +1,10 @@
 title: Deployments
-description: "Each deployment in the store (v_extension_deployment), newest first: the copy of a source a deploy made, what it was approved to reach, and which one runs."
+description: "Each deployment in the store (v_extension_deployment), of one extension or of all, newest first: the copy of a source a deploy made, what it was approved to reach, and which one runs."
 hidden: true
+params:
+- name: extension
+  type: search
+  label: Extension
 loaders:
   extensions_deployments:
     sql: |
@@ -11,6 +15,7 @@ loaders:
              COALESCE(substr(d."commit", 1, 7) || CASE WHEN d.dirty THEN ' (uncommitted)' ELSE '' END, '') AS version,
              d.source
       FROM v_extension_deployment d
+      WHERE :extension IS NULL OR d.name = :extension
       ORDER BY d.deployed_at DESC
 view:
   from: extensions_deployments

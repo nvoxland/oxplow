@@ -1587,6 +1587,16 @@ permissions it was approved with (`v_extension_deployment.permissions`).
 A fresh machine has nothing running, so a teammate's extension waits for
 its first deploy here (Startup), which asks for what it declares.
 
+**The Extension page** (foundation's `extension`, `for: oxplow/extension`,
+the default): one extension. About reads the `content` row (`v_extension`)
+and `v_extension_source` (origin, what runs, whether the source moved on
+since the deploy, a link to the running `extension.yaml`); then its pages
+(each linking to the Definition of the running file, `v_page.running_uri`),
+`extension-contributions` by kind, its permissions, `extensions-deployments`
+narrowed by its `extension` param, and the slot `oxplow-foundation/extension.runs`,
+which oxplow-bundled fills with `extension-runs` (foundation never depends on
+bundled). The Extensions list's names and Definition's Extension fact link to it.
+
 **The Extensions page** (foundation's `extensions` page, which embeds
 `extensions-list` and `extensions-deployments`; Settings → Extensions
 embeds the same two pages): `extensions-list` is every

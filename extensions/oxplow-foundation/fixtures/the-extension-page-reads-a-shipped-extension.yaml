@@ -1,0 +1,27 @@
+# An extension that ships with oxplow: the page reads its row (`content`),
+# its pages with the link to each running file's Definition, and what it may
+# reach. Its deployments narrow to it.
+when:
+  page: oxplow-foundation/extension
+  params:
+    uri: "oxplow:oxplow/extension?name=oxplow-foundation"
+    name: oxplow-foundation
+expect:
+  label: oxplow-foundation
+  loaders:
+    about:
+      rows:
+        - extension: oxplow-foundation
+          origin: ships with oxplow
+          state: "on"
+          manifest: oxplow-foundation/extension.yaml
+    pages:
+      rows:
+        contains:
+          - { title: Commit, id: oxplow-foundation/commit, definition: $any }
+  nodes:
+    - { id: about, kind: viz }
+    - { id: pages, kind: viz }
+    - { id: permissions, kind: viz }
+    - { id: deployments, kind: embed }
+    - { id: runs, kind: slot }
