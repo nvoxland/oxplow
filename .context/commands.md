@@ -134,6 +134,7 @@ A command says how a person meets it with an optional `ui`
 | `group` | what search lists it under (`Git`, `Tasks`) |
 | `keywords` | more words search matches it by |
 | `about` | the resource it acts on (a resource name, `oxplow/work_item`, `acme/pr`): offered on a URI of it, its page and rows; absent, it needs no URI and **search** offers it |
+| `about_when` | with `about`: a column of the dataset its resource resolves through (`ResourceDecl::resolve`, `v_agent_session`) that must be truthy on the ref's own row — not null, 0, `""` or false, a page action's `when:` rule exactly (`viz_actions::when_holds`) — for the command to be offered on that ref. A ref in another state is not offered it: hidden, not greyed (greyed is for `when`, the window's state). For a command whose op refuses some states (`agent_session.reopen` refuses an open session: `about_when: reopenable`); absent, every ref of the kind is offered it. Checked when the extensions load (below) |
 | `input` | the input it runs with; a string exactly `{{stream}}` / `{{thread}}` (bound to the stream's / thread's bare id, `str1`), `{{uri}}` (the page's URI) or `{{uri.id}}` (its key; only with an `about`) binds from where it runs, and one with nothing to bind there makes it unavailable there. A binding is the whole string, never spliced into text (`UI_INPUT_BINDINGS`) |
 | `form` | what gathers its input (so no `input`): a page's URI (`oxplow:oxplow/page?page=new-task`) or one of the window's own forms (`WINDOW_FORMS`: `new-thread`, the Navigator's inline form; `commit`, the Files page's commit dialog) — choosing it opens that instead of running it; offered about a URI (`about`), a page form opens with `uri=<uri>` (`tabs/pageRefs.withPageParams`) so a `pages:` page form can prefill `defaults: { uri: "{{param.uri}}" }`; a window form takes none |
 | `open_after` | a URI to open once it ran, taking only `{{result.<field>}}` from its result (`oxplow:oxplow/page?page=custom-dashboard&id={{result.id}}`, `oxplow:oxplow/agent_session?id={{result.id}}`); a whole `{{result.<field>}}` is allowed when the result field is itself the URI (`{{result.page}}`); bound by the server (RPC `command_open_after`, `CommandUi::open_after_for`) — a field the result lacks opens nothing and says so |
@@ -148,8 +149,14 @@ A command says how a person meets it with an optional `ui`
 manifest's mistake is its `file:line` error): the label, `about`'s
 syntax, each `input` binding (whole, known, `uri` only with `about`),
 `form` (a URI or a window form, and no `input` beside it), `open_after`
-(a URI, only `{{result.<field>}}`) and `menu.bar` — `Invalid` at
-`/ui/<field>`, never a menu entry that silently doesn't work. Every
+(a URI, only `{{result.<field>}}`), `menu.bar` and `about_when` (only
+with an `about`, one plain column name) — `Invalid` at
+`/ui/<field>`, never a menu entry that silently doesn't work. That
+`about_when` is a column of `about`'s resolving dataset needs the loaded
+extensions, so it is checked once they are all loaded
+(`extension_commands::check_about_when`, an error on the command's extension at
+`/ui/about_when` naming the dataset's columns; a resource with no
+resolving dataset, a file, has no row to test). Every
 template — a page action's `{{param.x}}` / `{{row.x}}`, `ui.input`,
 `open_after` — is read by one tokenizer, `oxplow_domain::template`
 (`placeholders`, `whole_placeholder`, `splice`); the window binds
@@ -171,7 +178,20 @@ Everything a person reaches a command by comes from the offers:
   (Undo … Select All, done by the OS's responder chain: WKWebView only
   delivers ⌘C/⌘V with them in the menu; File ▸ Open Recent's submenu is
   built from the recents list and runs `projects.write` `open`);
-- **shortcuts** are the offers' `ui.shortcut`s.
+- **shortcuts** are the offers' `ui.shortcut`s;
+- **a ref's menus** — a page's ☰, a row's right-click menu (a table or
+  card row, the Board's card) and the Navigator's thread menu — offer the
+  commands about its kind (`ui.about`) that apply to it. The **daemon**
+  says which: RPC `ref_commands { uri }` (`oxplow_app::ref_commands`)
+  returns the ids of the commands whose `about` is the ref's resource
+  and whose `about_when` holds on its row, read by the same lookup a
+  resource page's `content` loader uses (the resolving dataset's row by
+  `uri`; a ref with no row offers none of the conditional commands). The
+  desktop asks once, as the menu opens (`useRefOffers`, so a state that
+  changed a moment ago is current; the menu opens with the answer), and
+  runs no SQL of its own: `refOffers` only binds and runs the listed ids.
+  The agent has no per-ref listing (`list_commands` is the index of all
+  it may run; the op refuses a state itself), so nothing there changes.
 
 **When a command is offered** (`ui.when`; `oxplow_domain::when`, the
 window's `when.ts`). VS Code's when-clause syntax: `!`, `&&` (binding

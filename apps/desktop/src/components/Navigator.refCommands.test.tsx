@@ -11,6 +11,7 @@ import { personSpec, recordRefOffers } from "./refCommandsTestSupport.js";
 const realApi = await import("../api.js");
 mock.module("../api.js", () => ({
   ...realApi,
+  refCommands: async (ref: string) => (ref.startsWith("oxplow:oxplow/thread") ? ["oxplow.handoff.send"] : []),
   listPersonCommands: async () => [
     personSpec("oxplow.handoff.send", {
       label: "Hand Off Work…",

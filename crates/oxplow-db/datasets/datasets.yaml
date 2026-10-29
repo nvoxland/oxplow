@@ -1227,7 +1227,7 @@
     - { not_null: id }
     - { unique: id }
 - name: agent_session
-  version: 10
+  version: 11
   description: "Agent sessions: the agent slots a person opened on a thread — a terminal agent, or a one-shot action. The row is the slot, not the process: a harness process ending leaves it open; closing the session, its thread or its stream's archive closes it."
   fields:
     - { name: "id", type: "INTEGER", doc: "Session id (its URI is `oxplow:oxplow/agent_session?id=ses<id>`)." }
@@ -1248,6 +1248,7 @@
     - { name: "fork_next", type: "INTEGER", doc: "1 when its next launch forks the conversation it is bound to instead of resuming it. (v6)" }
     - { name: "display_name", type: "TEXT", doc: "What a person calls it: its `title`, else its `native_title`, else the harness and the day it was opened. The one place a session is named. (v5; v6: the native title)" }
     - { name: "bound_origin", type: "TEXT", doc: "How it came to its current conversation (v_agent_session_binding.origin); NULL when it is bound to none. (v6)" }
+    - { name: "reopenable", type: "INT", doc: "1 when `oxplow.agent_session.reopen` accepts it: a person closed it (`closed_reason` is `closed`) and its thread is still open; else 0. (v11)" }
   tests:
     - { not_null: id }
     - { unique: id }

@@ -1013,10 +1013,13 @@ out and the ☰ itself hidden when it would be empty:
    Copy);
 2. **the page's and its extensions' own, sorted by label** (case and
    accents aside): each other action (`menu-item-action-<id>`; a busy one
-   says `label…` and is greyed), and each submenu by its name
-   (`menu-item-page-submenu-<name>`), which holds the actions whose
-   `submenu` and the commands about the page's resource whose `ui.group`
-   is that name (`menu-item-ref-command-<id>`), merged and sorted;
+   says `label…` and is greyed), each command about the page's resource
+   that applies to it now (`menu-item-ref-command-<id>`, at the top
+   level: its `ui.group` is the palette's heading and a row menu's
+   submenu, not one here; one whose `ui.about_when` the page's row fails
+   is not listed — the menu asks the daemon, `ref_commands`, as it opens),
+   and each submenu by its name (`menu-item-page-submenu-<name>`) that
+   an action's explicit `submenu` makes, holding those actions sorted;
 3. **Open With** (when two or more pages render the URI);
 4. **Backlinks (N)…**, **Outbound (N)…** and **Pin to Dashboard…**, which
    open their panel under the ☰ (`page-nav-backlinks-popover`,

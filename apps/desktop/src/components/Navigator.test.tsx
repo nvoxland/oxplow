@@ -306,17 +306,19 @@ test("the panel stays open while a form is active even if the pointer leaves", a
 // --- "Mark with…": the person's colour for a thread's tab ----------------
 
 /** Open a thread row's right-click menu inside the expanded overlay. */
-function openThreadMenu(
+async function openThreadMenu(
   getByTestId: (id: string) => HTMLElement,
   threadId: string,
 ) {
   openOverlay(getByTestId);
   fireEvent.contextMenu(getByTestId(`navigator-thread-row-${threadId}`));
+  // A thread's menu opens once the daemon has said which commands about it apply.
+  await waitFor(() => getByTestId("menu-item-thread.mark"));
 }
 
-test("a thread's menu offers 'Mark with…': what it does, five colours and None", () => {
+test("a thread's menu offers 'Mark with…': what it does, five colours and None", async () => {
   const { getByTestId } = renderNavigator({ onMarkThread: () => {} });
-  openThreadMenu(getByTestId, "thr1");
+  await openThreadMenu(getByTestId, "thr1");
 
   const mark = getByTestId("menu-item-thread.mark");
   expect(mark.textContent).toContain("Mark with…");
@@ -337,13 +339,13 @@ test("choosing a colour marks the thread; None clears it", async () => {
   const marked: [string, string | null][] = [];
   const { getByTestId, queryByTestId } = renderNavigator({ onMarkThread: (id, m) => marked.push([id, m]) });
 
-  openThreadMenu(getByTestId, "thr2");
+  await openThreadMenu(getByTestId, "thr2");
   fireEvent.click(getByTestId("menu-item-thread.mark"));
   fireEvent.click(getByTestId("menu-item-thread.mark.violet"));
   // Choosing closes the menu.
   await waitFor(() => expect(queryByTestId("menu-item-thread.mark") === null).toBe(true));
   fireEvent.contextMenu(getByTestId("navigator-thread-row-thr1"));
-  fireEvent.click(getByTestId("menu-item-thread.mark"));
+  fireEvent.click(await waitFor(() => getByTestId("menu-item-thread.mark")));
   fireEvent.click(getByTestId("menu-item-thread.mark.none"));
 
   expect(marked).toEqual([["thr2", "violet"], ["thr1", null]]);
@@ -351,10 +353,11 @@ test("choosing a colour marks the thread; None clears it", async () => {
 
 // --- Right-click on the strip's icons ---------------------------------------
 
-test("right-clicking a thread icon in the strip opens its row menu, headed by its title", () => {
+test("right-clicking a thread icon in the strip opens its row menu, headed by its title", async () => {
   const { getByTestId, queryByTestId } = renderNavigator({ onMarkThread: () => {} });
 
   fireEvent.contextMenu(getByTestId("navigator-strip-thread-thr2"));
+  await waitFor(() => getByTestId("context-menu-header"));
 
   // The icon shows only initials, so the menu names the thread.
   expect(getByTestId("context-menu-header").textContent).toBe("Research");
@@ -380,29 +383,30 @@ test("right-clicking a stream icon in the strip opens the stream's menu, headed 
   expect(getByTestId("menu-item-stream.settings")).toBeTruthy();
 });
 
-test("Rename from a strip icon's menu opens the panel with the rename field", () => {
+test("Rename from a strip icon's menu opens the panel with the rename field", async () => {
   const { getByTestId, queryByTestId } = renderNavigator({ onRenameThread: () => {} });
 
   fireEvent.contextMenu(getByTestId("navigator-strip-thread-thr2"));
-  fireEvent.click(getByTestId("menu-item-thread.rename"));
+  fireEvent.click(await waitFor(() => getByTestId("menu-item-thread.rename")));
 
   expect(queryByTestId("navigator-overlay") !== null).toBe(true);
   expect(getByTestId("navigator-thread-row-thr2").querySelector("input")).not.toBeNull();
 });
 
-test("the expanded rows' menus are headed by the name too", () => {
+test("the expanded rows' menus are headed by the name too", async () => {
   const { getByTestId } = renderNavigator();
   openOverlay(getByTestId);
   fireEvent.contextMenu(getByTestId("navigator-thread-row-thr2"));
-  expect(getByTestId("menu-item-thread.rename")).toBeTruthy();
+  expect(await waitFor(() => getByTestId("menu-item-thread.rename"))).toBeTruthy();
   expect(getByTestId("context-menu-header").textContent).toBe("Research");
 });
 
-test("a menu request from elsewhere (the title bar) opens that row's menu, headed by its name", () => {
+test("a menu request from elsewhere (the title bar) opens that row's menu, headed by its name", async () => {
   const marked: string[] = [];
   const { getByTestId, queryByTestId } = renderNavigator({ onMarkThread: (id) => marked.push(id) });
 
   act(() => requestNavigatorMenu({ kind: "thread", id: "thr2", x: 200, y: 15 }));
+  await waitFor(() => getByTestId("context-menu-header"));
   expect(getByTestId("context-menu-header").textContent).toBe("Research");
   fireEvent.click(getByTestId("menu-item-thread.mark"));
   fireEvent.click(getByTestId("menu-item-thread.mark.green"));

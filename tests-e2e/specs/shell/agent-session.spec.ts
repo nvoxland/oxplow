@@ -97,6 +97,12 @@ test("a session's tab shows its alias, and its fallback once the alias is cleare
   // Rename… is in its ☰, and is a form: the title, and the box to rename
   // it in its harness.
   await body.getByTestId("page-nav-menu").click();
+  // Reopen Session is about a session (`ui.about`) but only a closed one
+  // (`about_when`): this one is open, so it isn't offered, and the ☰ has no
+  // "Tasks" submenu for the commands about the session.
+  await expect(page.getByTestId("menu-item-action-page-action-rename")).toBeVisible();
+  await expect(page.getByTestId("menu-item-ref-command-oxplow.agent_session.reopen")).toHaveCount(0);
+  await expect(page.getByTestId("menu-item-page-submenu-Tasks")).toHaveCount(0);
   await body.getByTestId("menu-item-action-page-action-rename").click();
   const title = page.getByTestId("viz-action-form-fields-title");
   await title.fill("Renamed here");

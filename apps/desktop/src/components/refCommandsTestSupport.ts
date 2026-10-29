@@ -21,6 +21,7 @@ export function personSpec(id: string, ui: Partial<CommandUi>): CommandSpec {
       group: null,
       keywords: [],
       about: null,
+      about_when: null,
       input: null,
       form: null,
       open_after: null,

@@ -1,12 +1,16 @@
 /// A ref's commands (`.context/commands.md` "Offering a command to a
-/// person"): the commands about its kind (`ui.about`) — what its page's
-/// nav-bar menu and a row's right-click menu offer — grouped by their
-/// `ui.group`, each run the way the window runs any offer. The window
-/// says how (`setRefOfferHost`, from `App`); until it has, there are none.
+/// person"): the commands about its kind (`ui.about`) whose `ui.about_when`
+/// holds on its row — what its page's nav-bar menu and a row's right-click
+/// menu offer, the daemon's answer (`ref_commands`) asked when a menu
+/// opens — each run the way the window runs any offer. A row menu groups
+/// them by their `ui.group`. The window says how (`setRefOfferHost`, from
+/// `App`); until it has, there are none.
 import { useCallback } from "react";
 
+import { refCommands } from "../api.js";
 import { refOffers, type OfferContext, type OfferDeps } from "../commandOffers.js";
 import type { MenuItem } from "../menu.js";
+import { recordOpError } from "../opErrors.js";
 import { usePersonCommands } from "../personCommandsStore.js";
 import type { CommandEntry } from "./quickOpenResults.js";
 
@@ -17,10 +21,23 @@ export function setRefOfferHost(next: { ctx: OfferContext; deps: OfferDeps } | n
   host = next;
 }
 
-/** `ref`'s commands, by the person's command listing. */
-export function useRefOffers(): (ref: string) => CommandEntry[] {
+/** `ref`'s commands as of now: the daemon says which apply to it, the
+ *  person's command listing says how each is run. Asked as a menu opens,
+ *  so a ref's state (a session closed a moment ago) is current. */
+export function useRefOffers(): (ref: string) => Promise<CommandEntry[]> {
   const specs = usePersonCommands();
-  return useCallback((ref: string) => (host ? refOffers(specs, ref, host.ctx, host.deps) : []), [specs]);
+  return useCallback(
+    async (ref: string) => {
+      if (!host) return [];
+      // A menu without them still opens, and the failure is reported.
+      const applies = await refCommands(ref).catch((e: unknown) => {
+        recordOpError({ label: "Load commands for a ref", message: e instanceof Error ? e.message : String(e) });
+        return [];
+      });
+      return refOffers(specs, ref, applies, host.ctx, host.deps);
+    },
+    [specs],
+  );
 }
 
 /** `entries` by group, in the order groups first appear. */

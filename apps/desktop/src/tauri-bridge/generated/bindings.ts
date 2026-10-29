@@ -566,6 +566,11 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
+	refCommands: (uri: string) => typedError<string[], IpcError_Serialize>(__TAURI_INVOKE("ref_commands", { uri })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	registerClientHost: (client: string, scopes: string[]) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("register_client_host", { client, scopes })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -1558,6 +1563,16 @@ export type CommandUi = {
 	 *  ref's page and rows. `None`: it needs no ref, and search offers it.
 	 */
 	about?: string | null,
+	/**
+	 *  A column of `about`'s dataset row (the dataset its resource
+	 *  resolves through) that must be truthy — not null, 0, `""` or false —
+	 *  for the command to be offered on a ref of that kind: the same rule
+	 *  as a page action's `when`. A ref whose state fails it isn't offered
+	 *  the command at all (the daemon answers, `ref_commands`). Needs
+	 *  `about`; the column is checked against the dataset when the
+	 *  extensions load. Absent, every ref of the kind is offered it.
+	 */
+	about_when?: string | null,
 	/**
 	 *  The input it runs with. A string that is exactly `{{stream}}`,
 	 *  `{{thread}}`, `{{uri}}` or `{{uri.id}}` is bound from where it runs;

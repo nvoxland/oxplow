@@ -81,6 +81,16 @@ pub async fn list_person_commands(svc: &Services) -> Result<Vec<CommandSpec>, Ip
     Ok(specs)
 }
 
+/// The commands about the ref `uri` a person is offered: those whose kind
+/// (`ui.about`) it is, with each `ui.about_when` held on its row
+/// (`oxplow_app::ref_commands`). What every menu of a ref's commands asks,
+/// the page's ☰ and a row's right-click alike.
+pub async fn ref_commands(svc: &Services, uri: String) -> Result<Vec<String>, IpcError> {
+    oxplow_app::ref_commands::ref_commands(svc, &uri)
+        .await
+        .map_err(IpcError::invalid)
+}
+
 /// Window `client` (an id it mints when it starts) is open and hosts
 /// `scopes` (`tabs.write`, …): a command the daemon runs over one
 /// of them comes to it as a `clientCall` event addressed to it
@@ -232,6 +242,74 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(none, serde_json::Value::Null);
+    }
+
+    /// A command about a kind is offered on a ref of it only while its
+    /// `about_when` column holds on the ref's row: Reopen Session on a
+    /// session a person closed, not on an open one; a command without a
+    /// condition (Hand Off Work on a thread) on every ref of its kind.
+    #[tokio::test]
+    async fn an_about_command_is_offered_while_its_condition_holds() {
+        let (svc, _dir) = services().await;
+        let stream = svc.streams.ensure_primary().await.unwrap();
+        let thread = svc
+            .threads
+            .selected_or_first(&stream.id)
+            .await
+            .unwrap()
+            .expect("the primary stream has a thread");
+        let run = |id: &str, input: serde_json::Value| {
+            let svc = svc.clone();
+            let id = id.to_string();
+            async move {
+                crate::dispatch(
+                    "run_command",
+                    json!({ "id": id, "input": input, "confirmed": false }),
+                    &svc,
+                )
+                .await
+                .unwrap()
+            }
+        };
+        let offered = |uri: String| {
+            let svc = svc.clone();
+            async move {
+                let ids = crate::dispatch("ref_commands", json!({ "uri": uri }), &svc)
+                    .await
+                    .unwrap();
+                ids.as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|v| v.as_str().unwrap().to_string())
+                    .collect::<Vec<String>>()
+            }
+        };
+        let opened = run(
+            "oxplow.agent_session.open",
+            json!({ "thread": thread.to_string() }),
+        )
+        .await;
+        let session = opened["result"]["id"].as_str().unwrap().to_string();
+        let uri = oxplow_domain::uri::build::agent_session_uri(session.parse().unwrap());
+        let reopen = "oxplow.agent_session.reopen".to_string();
+
+        assert!(!offered(uri.clone()).await.contains(&reopen), "open");
+        run("oxplow.agent_session.close", json!({ "session": session })).await;
+        assert!(
+            offered(uri.clone()).await.contains(&reopen),
+            "closed by a person"
+        );
+        run("oxplow.agent_session.reopen", json!({ "session": session })).await;
+        assert!(!offered(uri).await.contains(&reopen), "open again");
+
+        let thread_uri = oxplow_domain::uri::build::thread_uri(thread);
+        assert!(offered(thread_uri)
+            .await
+            .contains(&"oxplow.handoff.send".to_string()));
+        assert_eq!(
+            offered("https://example.com".into()).await,
+            Vec::<String>::new()
+        );
     }
 
     #[tokio::test]

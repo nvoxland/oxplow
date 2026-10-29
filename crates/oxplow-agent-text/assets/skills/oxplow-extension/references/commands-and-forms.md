@@ -4,8 +4,15 @@
   right-click) says so in its own `ui`: `ui: { label, group?, about:
   oxplow/work_item, input?: { uri: "{{uri}}" } }` (`about` is a resource
   name, `<extension>/<name>`; `"{{uri.id}}"` binds the URI's key param, such as
-  the id, alone). To offer another command there with
-  a fixed input, declare your own over the same operation.
+  the id, alone). In a page's ☰ it sits at the top level among the page's
+  own actions, sorted by label (`group` is the palette's heading and the
+  row menu's grouping, not a ☰ submenu). Add `about_when: <column>` to
+  offer it only on a ref whose row has that column truthy (not null, 0,
+  `""`, false) — a column of the dataset the resource resolves through,
+  `closed` or `has_work_item`: a ref in another state is not offered the
+  command, so use it where the operation refuses some states. To offer
+  another command there with a fixed input, declare your own over the
+  same operation.
 - **A provider's own operations** are your commands too: `commands: [{
   name: item.estimate, summary, provider: <your provider id>, op:
   estimate, ui? }]` — the operation's input (plus an optional

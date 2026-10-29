@@ -103,6 +103,19 @@ impl Prepared {
     }
 }
 
+/// Whether a `when` column holds on a row: its cell is not null, 0, `""` or
+/// false. The one rule of a row action's `when` and a command's
+/// `ui.about_when` (`ref_commands`).
+pub(crate) fn when_holds(cell: &SqlCell) -> bool {
+    match cell {
+        SqlCell::Null(()) => false,
+        SqlCell::Int(n) => *n != 0,
+        SqlCell::Real(n) => *n != 0.0,
+        SqlCell::Bool(b) => *b,
+        SqlCell::Text(t) => !t.is_empty(),
+    }
+}
+
 /// The command `action_id` declared in `actions`, its input bound from
 /// resolved `params`, `row` and `drop`, acting as `actor_id` for
 /// `on_behalf_of`. `source_id` identifies the declaration in diagnostics;
@@ -167,14 +180,7 @@ pub(crate) fn prepare_resolved(
         _ => {}
     }
     if let (Some(when), Some(row)) = (&action.when, &row) {
-        let truthy = match row.get(when) {
-            None | Some(SqlCell::Null(())) => false,
-            Some(SqlCell::Int(n)) => *n != 0,
-            Some(SqlCell::Real(n)) => *n != 0.0,
-            Some(SqlCell::Bool(b)) => *b,
-            Some(SqlCell::Text(t)) => !t.is_empty(),
-        };
-        if !truthy {
+        if !row.get(when).is_some_and(when_holds) {
             return Err(invalid(
                 "/row",
                 format!("`{action_id}` isn't offered on this row (`when: {when}`)"),

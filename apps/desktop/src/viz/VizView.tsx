@@ -68,7 +68,8 @@ import {
 } from "./vizModel.js";
 import { askAssistant } from "../components/Assistant/assistantSession.js";
 import { addToContext } from "../contextBasket.js";
-import { useContextMenu } from "../components/useRowContextMenu.js";
+import { useContextMenu, type MenuItems } from "../components/useRowContextMenu.js";
+import type { MenuItem } from "../menu.js";
 import { refCommandMenuItems, useRefOffers } from "../components/refCommands.js";
 import { safeColor } from "../components/decorators.js";
 import { useDecorations } from "../components/useDecorations.js";
@@ -578,7 +579,15 @@ function RowsBody({
   };
   const first = result.rows[0]?.[0] ?? null;
   const rowActions = viz.actions.filter((a) => a.row && !a.edit);
-  const rowItems = (row: SqlCell[]) => [
+  const rowItems = (row: SqlCell[]): MenuItems => {
+    const base = rowBase(row);
+    // The commands about what the row links to (their `ui.about`), as the
+    // daemon says they apply to it now: the menu opens once it has.
+    const ref = rowRef(viz, result.columns, row);
+    if (!ref) return base;
+    return refOffersFor(ref).then((entries) => [...base, ...refCommandMenuItems(entries)]);
+  };
+  const rowBase = (row: SqlCell[]): MenuItem[] => [
     {
       id: "ask-about-row",
       label: "Ask the Assistant",
@@ -599,11 +608,6 @@ function RowsBody({
       enabled: actions !== undefined,
       run: () => actions?.run(a, rowRecord(result.columns, row)),
     })),
-    // The commands about what the row links to (their `ui.about`).
-    ...(() => {
-      const ref = rowRef(viz, result.columns, row);
-      return ref ? refCommandMenuItems(refOffersFor(ref)) : [];
-    })(),
   ];
   // Every row of every row component: focusable, with its menu from a
   // right-click or the keyboard (Menu key / Shift+F10).

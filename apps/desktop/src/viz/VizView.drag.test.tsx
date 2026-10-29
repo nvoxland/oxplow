@@ -205,7 +205,7 @@ test("a board is a column per group, its values first and empty ones too; a drop
 
 // A card's title is a link, and a link's own right-click opens its page in a
 // new tab; on a board the right-click on a card is the card's menu.
-test("a right-click on a board card's title link opens the card's menu, not its page", () => {
+test("a right-click on a board card's title link opens the card's menu, not its page", async () => {
   const opened: string[] = [];
   const run = runOf({
     viz: "board",
@@ -225,6 +225,6 @@ test("a right-click on a board card's title link opens the card's menu, not its 
   );
   const title = view.getByTestId("viz-row-0").querySelector("button, a") as HTMLElement;
   fireEvent.contextMenu(title);
-  expect(view.getByTestId("menu-item-viz-action-finish")).toBeTruthy();
+  expect(await waitFor(() => view.getByTestId("menu-item-viz-action-finish"))).toBeTruthy();
   expect(opened).toEqual([]);
 });

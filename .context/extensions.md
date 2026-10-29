@@ -640,8 +640,9 @@ the user guide is `docs/guide/pages.md`.
     manifest marks `prominent: true`, which stays a button there (several
     may; a row, group, drag or edit action can't be — `parse_actions`). In
     the ☰ the page's actions sort by label; `submenu: <name>` puts a page
-    action in that submenu, shared with the commands whose `ui.group` is the
-    name (a prominent one can't be in one). Any action may name an `icon`
+    action in that submenu (a prominent one can't be in one); the commands
+    about the page's resource are not in a submenu, they sit among the
+    actions at the top level, by label. Any action may name an `icon`
     from `extension_resources::ICONS` (the desktop's `src/icons.ts`): alone
     on its button in the bar, beside its label in a menu.
     **A page is a function of its tab entry** (`tabs/session.ts`): its
@@ -1136,7 +1137,8 @@ the user guide is `docs/guide/pages.md`.
     `oxplow.effort.verify_claim`, `claim` a param)
 
   **Its verdicts (P7.C5, the first bundled `commands:`)**, on an
-  effort's page under **Commands** (their `ui.about: effort`):
+  effort's page under **Commands** (their `ui.about: effort`, offered while the effort has a work item,
+  `about_when: work_item`):
   `oxplow.review.accept { effort, force? }` comments the review on the
   effort's work item then transitions it to `done`, refusing (`{ refuse }`)
   while a claim is unverified (a dismissed one doesn't count) or an
@@ -3129,14 +3131,22 @@ A command an extension declares meets a person through its own `ui`
 ([commands.md](./commands.md) "Offering a command to a person"). One
 **about a resource** (`ui: { label, group, about: oxplow/work_item, input: {
 uri: "{{uri}}" } }`) is offered on a URI of that resource. It shows in
-its page's nav-bar **Commands** menu (`RefCommandsMenu`, beside Ask) and
-in the right-click menu of a row for the row's URI (a page's table or
-list rows, by the first URI the row links to — `rowRef` — and Board
-cards), grouped by `ui.group`. The input's strings may be exactly
+its page's nav-bar ☰ (at the top level, sorted by label with the page's
+own actions) and in the right-click menu of a row for the row's URI (a
+page's table or list rows, by the first URI the row links to — `rowRef`
+— and Board cards), grouped by `ui.group`. It is offered only on a ref
+whose state it accepts: `ui.about_when: <column>` names a column of the
+dataset its resource resolves through (`v_agent_session.reopenable`)
+that must be truthy on the ref's row, the rule of a page action's
+`when:`; the daemon checks it (`ref_commands`) as a menu opens, and a
+command that fails is left out of the menu (`oxplow extension check`
+refuses an unknown column). Give it to a command whose operation
+refuses some states (Reopen Session: a closed session only). The input's strings may be exactly
 `{{uri}}` / `{{uri.id}}` (or `{{stream}}` / `{{thread}}`, which expand to
 bare ids; `{{uri.id}}` is the URI's key). Without an `input`, a command
 gets `{ uri: "{{uri}}" }`. The desktop builds the offers from the
-person's command listing (`refOffers`, `components/refCommands.ts`) and
+person's command listing and the ids the daemon says apply
+(`refOffers`, `components/refCommands.ts`) and
 runs each as search does (App publishes its offer host,
 `setRefOfferHost`). To put another command on a URI's menu — oxplow's
 transition to done, say — an extension declares its own command over the
@@ -4619,6 +4629,7 @@ commands:
       label: Finish Review
       group: Review
       about: oxplow/work_item          # resource-bound; absent: search offers it
+      # about_when: closed             # only where this column of the resource's dataset row is truthy
       input: { uri: "{{uri}}" }
     examples:
       - { name: happy, input: { uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow" }, expect_commands: [oxplow.work_item.transition] }

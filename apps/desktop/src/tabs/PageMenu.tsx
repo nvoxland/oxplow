@@ -12,6 +12,7 @@ import { ContextMenu } from "../components/ContextMenu.js";
 import { PagePinMenu, type PagePin } from "../pages/PagePinMenu.js";
 import type { AskTarget } from "../components/Prompts/askTarget.js";
 import { useRefOffers } from "../components/refCommands.js";
+import type { CommandEntry } from "../components/quickOpenResults.js";
 import { usePopoverDismiss } from "../components/usePopoverDismiss.js";
 import type { PageAction } from "../kit/actions.js";
 import type { MenuPosition } from "../menu.js";
@@ -36,6 +37,9 @@ const MENU_WIDTH = 240;
 export function PageMenu({ actions, ask, label, openWith, backlinks, outbound, pin, buttonStyle }: PageMenuProps) {
   const offersFor = useRefOffers();
   const [at, setAt] = useState<MenuPosition | null>(null);
+  // The commands about the page's ref that apply now: asked when the menu
+  // opens (the page's state may have changed since it last did).
+  const [offers, setOffers] = useState<CommandEntry[]>([]);
   const [panel, setPanel] = useState<PagePanel | null>(null);
   const button = useRef<HTMLButtonElement | null>(null);
   const boxRef = usePopoverDismiss<HTMLDivElement>(panel !== null, () => setPanel(null));
@@ -47,7 +51,7 @@ export function PageMenu({ actions, ask, label, openWith, backlinks, outbound, p
     context: ask
       ? { add: () => void addToContext({ uri: ask.ref, label }), disabledReason: addDisabledReason(thread) }
       : undefined,
-    commands: ask ? offersFor(ask.ref) : undefined,
+    commands: ask ? offers : undefined,
     openWith,
     backlinks: backlinks?.count,
     outbound: outbound?.count,
@@ -56,14 +60,17 @@ export function PageMenu({ actions, ask, label, openWith, backlinks, outbound, p
   });
   if (items.length === 0) return null;
 
-  const toggle = () => {
+  const toggle = async () => {
     if (at) {
       setAt(null);
       return;
     }
     setPanel(null);
     const r = button.current?.getBoundingClientRect();
-    if (r) setAt({ x: Math.max(8, r.right - MENU_WIDTH), y: r.bottom + 4 });
+    if (!r) return;
+    const position = { x: Math.max(8, r.right - MENU_WIDTH), y: r.bottom + 4 };
+    if (ask) setOffers(await offersFor(ask.ref));
+    setAt(position);
   };
 
   return (
@@ -81,7 +88,7 @@ export function PageMenu({ actions, ask, label, openWith, backlinks, outbound, p
         onMouseDown={(e) => {
           if (at) e.stopPropagation();
         }}
-        onClick={toggle}
+        onClick={() => void toggle()}
         style={buttonStyle}
       >
         <Menu size={18} aria-hidden />

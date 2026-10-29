@@ -664,6 +664,13 @@ export async function listPersonCommands(): Promise<CommandSpec[]> {
   return unwrap(await commands.listPersonCommands());
 }
 
+/** The ids of the commands about `uri` offered on it now: those about its
+ *  kind (`ui.about`) whose `ui.about_when` holds on its row
+ *  (`ref_commands`). */
+export async function refCommands(uri: string): Promise<string[]> {
+  return unwrap(await commands.refCommands(uri));
+}
+
 /** Run command `id` as a background task (its `ui.background`: a slow
  *  call out). Resolves once it started; `awaitGitOp` on the kickoff for
  *  its outcome. */

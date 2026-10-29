@@ -120,8 +120,13 @@ test("a ref's menus offer the commands about its kind, the ref bound into their 
     spec("tracker.item.flag", { label: "Flag", about: "oxplow/work_item" }),
     spec("oxplow.vcs.pull", { label: "Pull" }),
   ];
-  const offers = refOffers(specs, "oxplow:oxplow/work_item?id=W-1&provider=fake", ctx, d);
+  const ref = "oxplow:oxplow/work_item?id=W-1&provider=fake";
+  const offers = refOffers(specs, ref, ["tracker.item.estimate", "tracker.item.flag"], ctx, d);
   expect(offers.map((o) => o.id)).toEqual(["tracker.item.estimate", "tracker.item.flag"]);
+  // Only what the daemon says applies to this ref: one whose `about_when`
+  // fails on its row isn't in its answer, so it isn't offered.
+  expect(refOffers(specs, ref, ["tracker.item.flag"], ctx, d).map((o) => o.id)).toEqual(["tracker.item.flag"]);
+  expect(refOffers(specs, ref, [], ctx, d)).toEqual([]);
   for (const o of offers) o.run();
   await new Promise((r) => setTimeout(r, 0));
   expect(calls).toEqual([
@@ -137,7 +142,7 @@ test("a form about a ref opens with that ref as its param; a form about nothing 
     spec("triage.note.tag", { label: "Tag…", about: "triage/item", form: "oxplow:oxplow/page?mode=quick&page=triage/tag-form" }),
     spec("oxplow.thread.create", { label: "New Thread…", about: "triage/item", form: "new-thread" }),
   ];
-  for (const o of refOffers(specs, "oxplow:triage/item?id=7", { streamId: null, threadId: null }, d)) o.run();
+  for (const o of refOffers(specs, "oxplow:triage/item?id=7", specs.map((s) => s.id), { streamId: null, threadId: null }, d)) o.run();
   expect(calls).toEqual([
     "open oxplow:oxplow/page?page=triage/note-form&uri=oxplow:triage/item?id%3D7",
     "open oxplow:oxplow/page?mode=quick&page=triage/tag-form&uri=oxplow:triage/item?id%3D7",

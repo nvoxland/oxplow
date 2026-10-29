@@ -289,6 +289,71 @@ pub fn refuse_duplicate_tools(extensions: &mut [Extension]) {
     }
 }
 
+/// A command's `ui.about_when` names a column of the dataset its `about`
+/// resource resolves through (`ResourceDecl::resolve`): one an enabled
+/// extension declares, or oxplow's own. Another resource, one no dataset
+/// holds (a file) or a column that dataset lacks is an error on the
+/// command's extension, naming the columns there are — the daemon would
+/// otherwise never offer the command, and nothing would say why.
+pub fn check_about_when(extensions: &mut [Extension]) {
+    let mut views: BTreeMap<String, String> = oxplow_domain::uri::resources::foundation()
+        .resources()
+        .filter_map(|r| Some((r.name.to_string(), r.resolve.clone()?)))
+        .collect();
+    let mut columns: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    let mut publish = |view: String, d: &oxplow_db::datasets::DatasetSource| {
+        columns.insert(view, d.decl.fields.iter().map(|f| f.name.clone()).collect());
+    };
+    for d in oxplow_db::datasets::core_sources().unwrap_or_default() {
+        publish(oxplow_db::datasets::core_view(&d.decl.name), &d);
+    }
+    for e in extensions.iter().filter(|e| e.enabled) {
+        for d in &e.datasets {
+            publish(
+                oxplow_db::datasets::extension_view(&e.name, &d.decl.name),
+                d,
+            );
+        }
+        for r in &e.resources {
+            if let Some(view) = &r.decl.resolve {
+                views.insert(r.decl.name.to_string(), view.clone());
+            }
+        }
+    }
+    for ext in extensions.iter_mut().filter(|e| e.enabled) {
+        let mut problems = Vec::new();
+        for c in &ext.commands {
+            let Some((about, column)) =
+                c.ui.as_ref()
+                    .and_then(|ui| ui.about.as_ref().zip(ui.about_when.as_ref()))
+            else {
+                continue;
+            };
+            let at = |m: String| {
+                format!(
+                    "{}/extension.yaml: command `{}`: `/ui/about_when`: {m}",
+                    ext.path, c.name
+                )
+            };
+            let Some(view) = views.get(about.as_str()) else {
+                problems.push(at(format!(
+                    "`{about}` is no resource whose URIs a dataset resolves (`resolve:`), so there is no row to test `{column}` on"
+                )));
+                continue;
+            };
+            match columns.get(view) {
+                Some(have) if have.contains(column) => {}
+                Some(have) => problems.push(at(format!(
+                    "`{column}` isn't a column of `{view}` (`{about}`'s row): {}",
+                    have.join(", ")
+                ))),
+                None => problems.push(at(format!("`{view}` isn't a dataset that loaded"))),
+            }
+        }
+        ext.errors.extend(problems);
+    }
+}
+
 fn valid_segment(segment: &str) -> bool {
     let mut chars = segment.chars();
     matches!(chars.next(), Some(c) if c.is_ascii_lowercase())
@@ -1873,6 +1938,45 @@ mod tests {
         assert_eq!(ui.about.as_deref(), Some("oxplow/work_item"));
         assert_eq!(ui.input, Some(serde_json::json!({ "uri": "{{uri}}" })));
         assert!(!c.stable, "a private extension's command is experimental");
+    }
+
+    /// `ui.about_when` is a column of the dataset the `about` resource
+    /// resolves through: one it has loads; another column, or a resource
+    /// no dataset holds, is an error naming what there is.
+    #[test]
+    fn an_about_when_names_a_column_of_the_resources_dataset() {
+        let tail = |about: &str, when: &str| {
+            format!(
+                "    ui:\n      label: Reopen\n      about: {about}\n      about_when: {when}\n      input: {{ uri: \"{{{{uri}}}}\" }}\n"
+            )
+        };
+        let load = |name: &str, about: &str, when: &str| {
+            let d = tempfile::tempdir().unwrap();
+            write_ext(
+                d.path(),
+                name,
+                &format!("{GOOD}{}", tail(about, when)),
+                &[("handlers/finish_review.star", HANDLER)],
+            );
+            project(d.path(), name).errors
+        };
+        assert_eq!(
+            load("good-when", "oxplow/agent_session", "reopenable"),
+            Vec::<String>::new()
+        );
+        let unknown = load("bad-column", "oxplow/agent_session", "nope").join("\n");
+        assert!(
+            unknown.contains("`/ui/about_when`")
+                && unknown.contains("`nope` isn't a column of `v_agent_session`")
+                && unknown.contains("closed_reason"),
+            "{unknown}"
+        );
+        let none = load("no-dataset", "oxplow/file", "path").join("\n");
+        assert!(
+            none.contains("`/ui/about_when`")
+                && none.contains("no resource whose URIs a dataset resolves"),
+            "{none}"
+        );
     }
 
     /// Each broken entry is an error at its line, and is dropped.

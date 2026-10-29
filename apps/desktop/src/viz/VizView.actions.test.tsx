@@ -13,11 +13,17 @@ const realQuerySql = realApi.querySql;
 // to the real module so other test files keep working.
 const calls: boolean[] = [];
 const commandRuns: Array<[string, unknown]> = [];
+// What the daemon answers (`ref_commands`) for a work item: the kind's
+// commands, less those whose `about_when` fails on its row (`notNow`).
+const notNow = new Set<string>();
 mock.module("../api.js", () => ({
   ...realApi,
+  refCommands: async (ref: string) =>
+    ref.startsWith("oxplow:oxplow/work_item") ? ["tracker.item.flag", "tracker.item.reopen"].filter((id) => !notNow.has(id)) : [],
   getCommand: async () => Promise.reject(new Error("no bridge in tests")),
   listPersonCommands: async () => [
     personSpec("tracker.item.flag", { label: "Flag It", group: "Tracker", about: "oxplow/work_item", input: { uri: "{{uri}}" } }),
+    personSpec("tracker.item.reopen", { label: "Reopen It", group: "Tracker", about: "oxplow/work_item", about_when: "closed", input: { uri: "{{uri}}" } }),
   ],
   listExtensions: async () => [
     {
@@ -150,6 +156,31 @@ test("a row's linked ref gets its kind's commands", async () => {
   fireEvent.click(await waitFor(() => view.getByTestId("menu-item-ref-commands-Tracker")));
   fireEvent.click(view.getByTestId("menu-item-ref-command-tracker.item.flag"));
   await waitFor(() => expect(commandRuns).toEqual([["tracker.item.flag", { uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow" }]]));
+});
+
+// A command whose `about_when` fails on the row's ref (the daemon leaves it
+// out of its answer) is not in the row's menu at all.
+test("a row's menu leaves out a command whose about_when fails on its ref", async () => {
+  recordRefOffers(commandRuns);
+  const linked: VizRun = {
+    config: { ...viz, columns: [{ key: "uri", label: null, link: { kind: "page", from: null, line: null, base: null, head: null } }] },
+    params: {},
+    result: run.result,
+  };
+  const view = render(<VizView run={linked} onOpenPage={() => {}} />);
+  await new Promise((r) => setTimeout(r, 20));
+  fireEvent.contextMenu(view.getByTestId("viz-row-0"));
+  fireEvent.click(await waitFor(() => view.getByTestId("menu-item-ref-commands-Tracker")));
+  expect(view.queryByTestId("menu-item-ref-command-tracker.item.reopen")).not.toBeNull();
+  cleanup();
+  notNow.add("tracker.item.reopen");
+  const again = render(<VizView run={linked} onOpenPage={() => {}} />);
+  await new Promise((r) => setTimeout(r, 20));
+  fireEvent.contextMenu(again.getByTestId("viz-row-0"));
+  fireEvent.click(await waitFor(() => again.getByTestId("menu-item-ref-commands-Tracker")));
+  expect(again.queryByTestId("menu-item-ref-command-tracker.item.flag")).not.toBeNull();
+  expect(again.queryByTestId("menu-item-ref-command-tracker.item.reopen")).toBeNull();
+  notNow.clear();
 });
 
 // P6b.C5: a decorator's label follows a cell that links to its ref.

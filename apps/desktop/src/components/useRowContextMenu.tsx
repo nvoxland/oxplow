@@ -2,6 +2,7 @@ import type { KeyboardEvent, MouseEvent, ReactNode } from "react";
 import { useCallback, useState } from "react";
 
 import type { MenuItem } from "../menu.js";
+import { recordOpError } from "../opErrors.js";
 import { ContextMenu } from "./ContextMenu.js";
 
 /**
@@ -27,39 +28,59 @@ import { ContextMenu } from "./ContextMenu.js";
  * Shift+F10 for the focused row, anchored at its bounding rect, so
  * keyboard-first users never need the mouse.
  */
+/** A menu's items, or the promise of them: a row whose menu needs the
+ *  daemon's answer (a ref's commands, `refCommands.ts`) opens once it
+ *  has it, where the person pointed. */
+export type MenuItems = MenuItem[] | Promise<MenuItem[]>;
+
 export function useContextMenu(): {
-  open(event: MouseEvent, items: MenuItem[], header?: string): void;
+  open(event: MouseEvent, items: MenuItems, header?: string): void;
   /** Open at a point — for a menu asked for from elsewhere, whose own
    *  right-click already cancelled the native menu. */
-  openAt(pos: { x: number; y: number }, items: MenuItem[], header?: string): void;
-  openForKey(event: KeyboardEvent, items: MenuItem[], header?: string): void;
+  openAt(pos: { x: number; y: number }, items: MenuItems, header?: string): void;
+  openForKey(event: KeyboardEvent, items: MenuItems, header?: string): void;
   menu: ReactNode;
 } {
   const [state, setState] = useState<{ pos: { x: number; y: number }; items: MenuItem[]; header?: string } | null>(null);
 
-  const open = useCallback((event: MouseEvent, items: MenuItem[], header?: string) => {
-    // Always cancel the native menu on a surface that owns its own actions,
-    // even when there are none to show, so the OS menu never leaks here.
-    event.preventDefault();
-    event.stopPropagation();
-    if (items.length === 0) return;
-    setState({ pos: { x: event.clientX, y: event.clientY }, items, header });
+  const show = useCallback((pos: { x: number; y: number }, items: MenuItems, header?: string) => {
+    if (Array.isArray(items)) {
+      if (items.length > 0) setState({ pos, items, header });
+      return;
+    }
+    items.then(
+      (list) => {
+        if (list.length > 0) setState({ pos, items: list, header });
+      },
+      (e: unknown) => recordOpError({ label: "Open menu", message: e instanceof Error ? e.message : String(e) }),
+    );
   }, []);
 
-  const openAt = useCallback((pos: { x: number; y: number }, items: MenuItem[], header?: string) => {
-    if (items.length === 0) return;
-    setState({ pos, items, header });
-  }, []);
+  const open = useCallback(
+    (event: MouseEvent, items: MenuItems, header?: string) => {
+      // Always cancel the native menu on a surface that owns its own actions,
+      // even when there are none to show, so the OS menu never leaks here.
+      event.preventDefault();
+      event.stopPropagation();
+      show({ x: event.clientX, y: event.clientY }, items, header);
+    },
+    [show],
+  );
 
-  const openForKey = useCallback((event: KeyboardEvent, items: MenuItem[], header?: string) => {
-    const isMenuKey = event.key === "ContextMenu" || (event.key === "F10" && event.shiftKey);
-    if (!isMenuKey || items.length === 0) return;
-    event.preventDefault();
-    event.stopPropagation();
-    // Anchor under the focused row, left-aligned to it.
-    const rect = event.currentTarget.getBoundingClientRect();
-    setState({ pos: { x: rect.left, y: rect.bottom + 2 }, items, header });
-  }, []);
+  const openAt = show;
+
+  const openForKey = useCallback(
+    (event: KeyboardEvent, items: MenuItems, header?: string) => {
+      const isMenuKey = event.key === "ContextMenu" || (event.key === "F10" && event.shiftKey);
+      if (!isMenuKey || (Array.isArray(items) && items.length === 0)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      // Anchor under the focused row, left-aligned to it.
+      const rect = event.currentTarget.getBoundingClientRect();
+      show({ x: rect.left, y: rect.bottom + 2 }, items, header);
+    },
+    [show],
+  );
 
   const menu = state ? (
     <ContextMenu items={state.items} header={state.header} position={state.pos} onClose={() => setState(null)} />
@@ -76,15 +97,26 @@ export function useContextMenu(): {
  *   const { onContextMenu, onKeyDown, menu } = useRowContextMenu(items);
  *   return <div onContextMenu={onContextMenu} onKeyDown={onKeyDown}>… {menu}</div>;
  *
- * `header` titles the menu when the row doesn't show what it acts on.
+ * `header` titles the menu when the row doesn't show what it acts on. A
+ * function builds the items when the menu is asked for, so what they say
+ * is current (and they may be a promise).
  */
-export function useRowContextMenu(items: MenuItem[], header?: string): {
+export function useRowContextMenu(items: MenuItem[] | (() => MenuItems), header?: string): {
   onContextMenu(event: MouseEvent): void;
   onKeyDown(event: KeyboardEvent): void;
   menu: ReactNode;
 } {
   const { open, openForKey, menu } = useContextMenu();
-  const onContextMenu = useCallback((event: MouseEvent) => open(event, items, header), [open, items, header]);
-  const onKeyDown = useCallback((event: KeyboardEvent) => openForKey(event, items, header), [openForKey, items, header]);
+  const onContextMenu = useCallback(
+    (event: MouseEvent) => open(event, typeof items === "function" ? items() : items, header),
+    [open, items, header],
+  );
+  const onKeyDown = useCallback(
+    (event: KeyboardEvent) => {
+      const isMenuKey = event.key === "ContextMenu" || (event.key === "F10" && event.shiftKey);
+      if (isMenuKey) openForKey(event, typeof items === "function" ? items() : items, header);
+    },
+    [openForKey, items, header],
+  );
   return { onContextMenu, onKeyDown, menu };
 }

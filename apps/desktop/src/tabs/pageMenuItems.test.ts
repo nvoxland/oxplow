@@ -21,9 +21,9 @@ test("standard actions come first in their own order, then the custom ones sorte
     ask: { askAssistant: noop },
     context: { add: noop },
     commands: [
-      { id: "tracker.sync", label: "Sync", group: "Tracker", run: noop },
-      { id: "tracker.archive", label: "Archive", group: "Tracker", run: noop },
-      { id: "dl.pdf", label: "As PDF", group: "Download", run: noop },
+      { id: "tracker.sync", label: "Sync", run: noop },
+      { id: "tracker.archive", label: "Archive", run: noop },
+      { id: "dl.pdf", label: "As PDF", run: noop },
     ],
     openWith: { options: [{ name: "a/text", title: "Text" }, { name: "a/rich", title: "Formatted" }], current: "a/rich", pick: noop },
     backlinks: 2,
@@ -38,9 +38,11 @@ test("standard actions come first in their own order, then the custom ones sorte
     "action-refresh",
     "action-copy",
     "—",
+    "ref-command-tracker.archive",
+    "ref-command-dl.pdf",
     "page-submenu-Download",
     "action-export",
-    "page-submenu-Tracker",
+    "ref-command-tracker.sync",
     "action-zip",
     "—",
     "page-open-with",
@@ -53,12 +55,10 @@ test("standard actions come first in their own order, then the custom ones sorte
   expect(export_.label).toBe("Export…");
   expect(export_.enabled).toBe(false);
   expect(items.find((i) => i.id === "action-refresh")!.icon).toBe("refresh-cw");
-  // A page action and a command naming the same submenu share it, sorted.
-  expect(items.find((i) => i.id === "page-submenu-Download")!.submenu!.map((i) => i.label)).toEqual(["As CSV", "As JSON", "As PDF"]);
-  expect(items.find((i) => i.id === "page-submenu-Tracker")!.submenu!.map((i) => i.id)).toEqual([
-    "ref-command-tracker.archive",
-    "ref-command-tracker.sync",
-  ]);
+  // The commands about the page's resource sit at the top level, sorted
+  // by label with the page's own actions: only a page action's explicit
+  // `submenu` makes one.
+  expect(items.find((i) => i.id === "page-submenu-Download")!.submenu!.map((i) => i.label)).toEqual(["As CSV", "As JSON"]);
   expect(items.find((i) => i.id === "page-backlinks")!.label).toBe("Backlinks (2)…");
   expect(items.find((i) => i.id === "page-outbound")!.enabled).toBe(false);
   const openWith = items.find((i) => i.id === "page-open-with")!;
@@ -74,7 +74,7 @@ test("the items run what they stand for", () => {
   const ran: string[] = [];
   const items = pageMenuItems({
     ask: { askAssistant: () => ran.push("ask") },
-    commands: [{ id: "x.y", label: "Y", group: "X", run: () => ran.push("command") }],
+    commands: [{ id: "x.y", label: "Y", run: () => ran.push("command") }],
     openWith: { options: [{ name: "a/b", title: "B" }, { name: "a/c", title: "C" }], current: "a/b", pick: (n) => ran.push(`pick:${n}`) },
     backlinks: 1,
     pin: {},

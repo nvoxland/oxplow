@@ -10,7 +10,7 @@ import {
 import { archiveStream, type Stream, type Thread, type ThreadMark, type ThreadState } from "../api.js";
 import { subscribeNewThreadRequests } from "../new-thread-bus.js";
 import { AgentStatusDot, type AgentStatusDotState } from "./AgentStatusDot.js";
-import { useContextMenu, useRowContextMenu } from "./useRowContextMenu.js";
+import { useContextMenu, useRowContextMenu, type MenuItems } from "./useRowContextMenu.js";
 import type { MenuItem } from "../menu.js";
 import { threadUri } from "../uri/uri.js";
 import { refCommandMenuItems, useRefOffers } from "./refCommands.js";
@@ -253,7 +253,7 @@ export function Navigator({
     }
     return items;
   };
-  const threadMenu = (thread: Thread): MenuItem[] => {
+  const threadMenu = async (thread: Thread): Promise<MenuItem[]> => {
     const markItem = (mark: ThreadMark | null): MenuItem => ({
       id: `thread.mark.${mark ?? "none"}`,
       label: mark ? MARK_LABELS[mark] : "None",
@@ -294,7 +294,7 @@ export function Navigator({
       },
       // Then the commands about the thread (usability.md "Menus a page or
       // row gets from extensions").
-      ...refCommandMenuItems(refOffersFor(threadUri(thread.id))),
+      ...refCommandMenuItems(await refOffersFor(threadUri(thread.id))),
     );
     return items;
   };
@@ -310,7 +310,7 @@ export function Navigator({
   // A stream's or thread's menu asked for from outside (the title bar's
   // names): the same menu, headed the same way, at the asker's point.
   const requested = useContextMenu();
-  const menuFor = (r: NavigatorMenuRequest): { items: MenuItem[]; header: string } | null => {
+  const menuFor = (r: NavigatorMenuRequest): { items: MenuItems; header: string } | null => {
     if (r.kind === "stream") {
       const s = streams.find((x) => x.id === r.id);
       return s ? { items: streamMenu(s), header: s.title } : null;
@@ -391,7 +391,7 @@ export function Navigator({
                 selected={false}
                 status={undefined}
                 onClick={() => handleStripStream(g.stream.id)}
-                menu={streamMenu(g.stream)}
+                menu={() => streamMenu(g.stream)}
                 testId={`navigator-strip-stream-${g.stream.id}`}
               />
               {g.threads.map((thread, i) => {
@@ -410,7 +410,7 @@ export function Navigator({
                     status={agentStatuses[thread.id]}
                     question={agentQuestions?.[thread.id]}
                     onClick={() => handleStripThread(g.stream.id, thread.id, isSelected)}
-                    menu={threadMenu(thread)}
+                    menu={() => threadMenu(thread)}
                     testId={`navigator-strip-thread-${thread.id}`}
                   />
                 );
@@ -474,7 +474,7 @@ export function Navigator({
                       }
                     }}
                     onCancelRename={() => setRenaming(null)}
-                    menu={streamMenu(g.stream)}
+                    menu={() => streamMenu(g.stream)}
                     testId={`navigator-stream-row-${g.stream.id}`}
                   />
                   {g.threads.map((thread, i) => {
@@ -502,7 +502,7 @@ export function Navigator({
                           }
                         }}
                         onCancelRename={() => setRenaming(null)}
-                        menu={threadMenu(thread)}
+                        menu={() => threadMenu(thread)}
                         testId={`navigator-thread-row-${thread.id}`}
                       />
                     );
@@ -645,7 +645,7 @@ function StripRow({
   onClick?(): void;
   /** Its right-click menu — the panel row's, headed by the full title
    *  since the glyph shows only initials. */
-  menu?: MenuItem[];
+  menu?: () => MenuItems;
   testId?: string;
 }) {
   const interactive = !!onClick;
@@ -743,7 +743,7 @@ function OverlayRow({
   renaming?: boolean;
   onCommitRename?(next: string): void | Promise<void>;
   onCancelRename?(): void;
-  menu?: MenuItem[];
+  menu?: () => MenuItems;
   testId?: string;
 }) {
   const interactive = !!onClick && !renaming;

@@ -5,7 +5,7 @@
 /// or run it and open what it made. Pure, given its deps.
 import type { CommandEntry } from "./components/quickOpenResults.js";
 import type { CommandOutcome, CommandSpec } from "./tauri-bridge/generated/bindings.js";
-import { keyOf, typeOf } from "./uri/uri.js";
+import { keyOf } from "./uri/uri.js";
 import { withPageParams } from "./tabs/pageRefs.js";
 import { offeredWhen, type WhenContext } from "./when.js";
 
@@ -111,17 +111,22 @@ export function commandOffers(specs: CommandSpec[], ctx: OfferContext, deps: Off
   return out;
 }
 
-/** The commands of `specs` about `ref`'s kind (`ui.about`) — what a
- *  ref's page menu and its rows' right-click menus offer — with `ref`
- *  bound into their input (`{ uri: "{{uri}}" }` when they say none). */
-export function refOffers(specs: CommandSpec[], ref: string, ctx: OfferContext, deps: OfferDeps): CommandEntry[] {
-  // URI-SWITCH: `ui.about` names the resource (`oxplow/agent_session`).
-  const kind = typeOf(ref);
-  if (!kind) return [];
+/** The commands of `specs` the daemon says apply to `ref` (`applies`, its
+ *  `ref_commands`: the commands about its kind whose `ui.about_when` holds
+ *  on its row) — what a ref's page menu and its rows' right-click menus
+ *  offer — with `ref` bound into their input (`{ uri: "{{uri}}" }` when
+ *  they say none). */
+export function refOffers(
+  specs: CommandSpec[],
+  ref: string,
+  applies: readonly string[],
+  ctx: OfferContext,
+  deps: OfferDeps,
+): CommandEntry[] {
   const out: CommandEntry[] = [];
   for (const spec of specs) {
     const ui = spec.ui;
-    if (!ui || ui.about !== kind) continue;
+    if (!ui || !applies.includes(spec.id)) continue;
     const bound = ui.form ? { input: null } : bindInput(ui.input ?? { uri: "{{uri}}" }, { ...ctx, ref });
     if (bound) out.push(offer(spec, bound.input, ctx, deps, ref));
   }

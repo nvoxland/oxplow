@@ -291,19 +291,24 @@ markdown itself, nor edits it in a `<textarea>`.
 
 - **Order is fixed.** A page's nav bar's ☰: oxplow's own first (Ask the Assistant, then
   Add to Context and the standard actions, in their order — the same spot on every page),
-  then the page's and its extensions' own sorted by label, a submenu by
-  its name (an action's `submenu` and a command's `ui.group` of the same
-  name share one), then Open With and the panels
-  (`.context/pages-and-tabs.md` "The nav bar is core's"). A row's right-click menu: Ask the Assistant, the page's row
+  then the page's and its extensions' own sorted by label — an action, a
+  **command about the page's resource at the top level beside them** (its
+  `ui.group` makes no submenu in the ☰), or a submenu by its name that an
+  action's `submenu` makes — then Open With and the panels
+  (`.context/pages-and-tabs.md` "The nav bar is core's"). Only the
+  commands that apply to the ref are in a menu: one with an `about_when`
+  its row fails (Reopen Session on an open session) is left out, not
+  greyed. A row's right-click menu: Ask the Assistant, the page's row
   actions, then a separator and one submenu per `ui.group` with the
   commands about the row's ref (`refCommandMenuItems`). A Board card:
   Move To, then the same tail. The Navigator's thread menu ends with the
   same tail, the commands about that thread. A submenu opens on hover
   and on click; a click never closes the one its hover opened. Each runs as any offer does (asking first
   when the command asks). Testids: a row menu's group
-  `menu-item-ref-commands-<group>`, the ☰'s submenu
-  `menu-item-page-submenu-<name>`, a command in either
-  `menu-item-ref-command-<command id>`.
+  `menu-item-ref-commands-<group>`, the ☰'s submenu of an action's
+  `submenu` `menu-item-page-submenu-<name>`, a command in the ☰ (top
+  level) or a row menu `menu-item-ref-command-<command id>`. A menu opens
+  once the daemon has said which commands apply (`ref_commands`).
 
 ## A custom component is marked
 

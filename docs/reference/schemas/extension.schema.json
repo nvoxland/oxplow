@@ -1886,6 +1886,14 @@
           ],
           "default": null
         },
+        "about_when": {
+          "description": "A column of `about`'s dataset row (the dataset its resource\nresolves through) that must be truthy — not null, 0, `\"\"` or false —\nfor the command to be offered on a ref of that kind: the same rule\nas a page action's `when`. A ref whose state fails it isn't offered\nthe command at all (the daemon answers, `ref_commands`). Needs\n`about`; the column is checked against the dataset when the\nextensions load. Absent, every ref of the kind is offered it.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
         "input": {
           "description": "The input it runs with. A string that is exactly `{{stream}}`,\n`{{thread}}`, `{{uri}}` or `{{uri.id}}` is bound from where it runs;\na binding there's nothing for makes it unavailable there.",
           "default": null

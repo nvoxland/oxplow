@@ -846,6 +846,7 @@ pub(super) fn resolve_catalog(
     crate::extension::extension_commands::refuse_shared_namespaces(&mut out);
     crate::pages::schema::refuse_shared_core_pages(&mut out);
     crate::extension::extension_commands::refuse_duplicate_tools(&mut out);
+    crate::extension::extension_commands::check_about_when(&mut out);
     for ext in &mut out {
         ext.contributions.retain(|descriptor| {
             descriptor.id.kind != oxplow_domain::contribution::ContributionKind::Command

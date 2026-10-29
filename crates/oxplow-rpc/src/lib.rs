@@ -210,6 +210,7 @@ macro_rules! oxplow_command_table {
                 // the command bus, as the person
                 get_command => $crate::commands::bus::get_command { name: String } -> ::oxplow_domain::CommandSpec,
                 list_person_commands => $crate::commands::bus::list_person_commands {} -> Vec<::oxplow_domain::CommandSpec>,
+                ref_commands => $crate::commands::bus::ref_commands { uri: String } -> Vec<String>,
                 register_client_host => $crate::commands::bus::register_client_host { client: String, scopes: Vec<String> } -> (),
                 unregister_client_host => $crate::commands::bus::unregister_client_host { client: String } -> (),
                 answer_client_call => $crate::commands::bus::answer_client_call { client: String, id: String, result: Option<::oxplow_domain::Json>, error: Option<String> } -> (),

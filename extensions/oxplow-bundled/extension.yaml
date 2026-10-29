@@ -808,7 +808,7 @@ commands:
     entry: handlers/accept.star
     needs: [sql.read]
     confirm: always
-    ui: { label: Accept Review, group: Review, about: oxplow/effort, input: { effort: "{{uri.id}}" } }
+    ui: { label: Accept Review, group: Review, about: oxplow/effort, about_when: work_item, input: { effort: "{{uri.id}}" } }
     examples:
       - name: reviewed
         input: { effort: "eff1" }
@@ -842,7 +842,7 @@ commands:
     entry: handlers/request_changes.star
     needs: [sql.read]
     confirm: always
-    ui: { label: Request Changes, group: Review, about: oxplow/effort, input: { effort: "{{uri.id}}" } }
+    ui: { label: Request Changes, group: Review, about: oxplow/effort, about_when: work_item, input: { effort: "{{uri.id}}" } }
     examples:
       - name: a file outside the area
         input: { effort: "eff1" }

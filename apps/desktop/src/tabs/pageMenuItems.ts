@@ -1,9 +1,10 @@
 /// The page nav bar's ☰ menu, as data: everything a page can be acted on
 /// with that isn't how it is navigated, in a fixed order — oxplow's own
 /// first (Ask the Assistant, then Add to Context, then the standard actions, in their order), then the page's
-/// and its extensions' own sorted by label (an action, or a submenu its
-/// `submenu` / a command's `ui.group` names, merged by name), then Open
-/// With, then the panels (Backlinks, Outbound, Pin to Dashboard) it opens
+/// and its extensions' own sorted by label (an action, a command about the
+/// page's resource — all at the top level, the command's `ui.group` is its
+/// palette heading and its row menu's grouping, not a submenu here — or a
+/// submenu an action's `submenu` names), then Open With, then the panels (Backlinks, Outbound, Pin to Dashboard) it opens
 /// under the button. The primary and prominent actions are buttons in the
 /// bar instead. A section with nothing in it is left out, and so is the
 /// menu.
@@ -30,8 +31,9 @@ export interface PageMenuSource {
   actions?: readonly PageAction[];
   /** Ask the Assistant about the page (its suggested prompts are the panel's). */
   ask?: { askAssistant(): void };
-  /** The commands about the page's resource. */
-  commands?: Array<Pick<CommandEntry, "id" | "label" | "group" | "run" | "enabled">>;
+  /** The commands about the page's resource (those the daemon says apply
+   *  to it now). */
+  commands?: Array<Pick<CommandEntry, "id" | "label" | "run" | "enabled">>;
   openWith?: OpenWithProps;
   /** Add to Context: the page goes in the thread's basket. With a reason,
    *  not now. */
@@ -91,8 +93,9 @@ export function pageMenuItems(source: PageMenuSource): MenuItem[] {
   standard.push(...inMenu.filter((a) => a.standard).map(item));
   sections.push(standard);
 
-  // The page's and its extensions' own, sorted by label: an action alone,
-  // or a submenu (by its name) of the actions and commands that share it.
+  // The page's and its extensions' own, sorted by label: an action or a
+  // command about the page's resource alone, or a submenu (by its name) of
+  // the actions that share an explicit `submenu`.
   const loose: MenuItem[] = [];
   const submenus = new Map<string, MenuItem[]>();
   const into = (name: string, entry: MenuItem) => {
@@ -105,7 +108,7 @@ export function pageMenuItems(source: PageMenuSource): MenuItem[] {
     else loose.push(item(a));
   }
   for (const e of source.commands ?? []) {
-    into(e.group, { id: `ref-command-${e.id}`, label: e.label, enabled: e.enabled ?? true, run: e.run });
+    loose.push({ id: `ref-command-${e.id}`, label: e.label, enabled: e.enabled ?? true, run: e.run });
   }
   sections.push(
     [

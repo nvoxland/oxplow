@@ -193,6 +193,10 @@ pub const MANIFEST: &[Capability] = &[
         "the commands a person is offered (their `ui`); an agent lists all it may run with `list_commands`",
     ),
     ui(
+        "ref_commands",
+        "which commands about a ref apply to it (its kind, and each `ui.about_when` on its row), for the window's menus; an agent lists all it may run with `list_commands`",
+    ),
+    ui(
         "register_client_host",
         "the window says it's open and which scopes it hosts; an agent reaches them by running their commands",
     ),

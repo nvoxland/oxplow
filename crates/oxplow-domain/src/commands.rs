@@ -243,6 +243,15 @@ pub struct CommandUi {
     /// ref's page and rows. `None`: it needs no ref, and search offers it.
     #[serde(default)]
     pub about: Option<String>,
+    /// A column of `about`'s dataset row (the dataset its resource
+    /// resolves through) that must be truthy — not null, 0, `""` or false —
+    /// for the command to be offered on a ref of that kind: the same rule
+    /// as a page action's `when`. A ref whose state fails it isn't offered
+    /// the command at all (the daemon answers, `ref_commands`). Needs
+    /// `about`; the column is checked against the dataset when the
+    /// extensions load. Absent, every ref of the kind is offered it.
+    #[serde(default)]
+    pub about_when: Option<String>,
     /// The input it runs with. A string that is exactly `{{stream}}`,
     /// `{{thread}}`, `{{uri}}` or `{{uri.id}}` is bound from where it runs;
     /// a binding there's nothing for makes it unavailable there.
@@ -309,6 +318,29 @@ impl CommandUi {
                 return bad(
                     "about",
                     format!("`{kind}` isn't a resource (`<extension>/<name>`)"),
+                );
+            }
+        }
+        if let Some(column) = &self.about_when {
+            if self.about.is_none() {
+                return bad(
+                    "about_when",
+                    "`about_when` is a column of what the command is about: give it an `about`"
+                        .into(),
+                );
+            }
+            let mut chars = column.chars();
+            let name = chars
+                .next()
+                .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+                && chars.all(|c| c.is_ascii_alphanumeric() || c == '_');
+            if !name {
+                return bad(
+                    "about_when",
+                    format!(
+                        "`{column}` isn't a column name: name one column of the dataset that is \
+                         truthy where the command is offered (no `!`, no expression)"
+                    ),
                 );
             }
         }
@@ -1166,6 +1198,7 @@ mod tests {
             // A result field that is itself the ref to open.
             json!({ "label": "New", "open_after": "{{result.page}}" }),
             json!({ "label": "Save", "menu": { "bar": "file", "order": 1 } }),
+            json!({ "label": "Reopen", "about": "oxplow/agent_session", "about_when": "reopenable" }),
         ] {
             assert_eq!(ui(good.clone()).problem(), None, "{good}");
         }
@@ -1200,6 +1233,16 @@ mod tests {
                 json!({ "label": "X", "about": "Work Item" }),
                 "/ui/about",
                 "isn't a resource",
+            ),
+            (
+                json!({ "label": "X", "about_when": "reopenable" }),
+                "/ui/about_when",
+                "`about`",
+            ),
+            (
+                json!({ "label": "X", "about": "oxplow/agent_session", "about_when": "!closed" }),
+                "/ui/about_when",
+                "a column",
             ),
             (
                 json!({ "label": "X", "open_after": "oxplow:oxplow/page?id={{row.id}}&page=x" }),

@@ -381,6 +381,12 @@ commands:
     ui: { label: Finish Review, group: Review, about: oxplow/work_item, input: { uri: "{{uri}}" } }
 ```
 
+A command with `about` is offered on every ref of that resource. Add
+`about_when: <column>` to offer it only where that column of the ref's
+dataset row is truthy (not null, 0, empty or false), for a command whose
+operation refuses some states. In a page's ☰ it sits at the top level among
+the page's own actions, sorted by label.
+
 - A script reaches oxplow only through the scopes in `needs`. Today a
   script can call `sql.read`; naming another scope is a load error.
 - `scope("sql.read", { sql, params })` returns a list of row objects.

@@ -9,5 +9,10 @@ SELECT s.id, s.thread_id, s.kind, s.harness, s.title, s.resume_session_id, s.hos
                      s.harness || ' ' || substr(s.opened_at, 1, 10)) AS TEXT)
          AS display_name,
        (SELECT b.origin FROM source('agent_session_binding') b
-         WHERE b.agent_session_id = s.id AND b.unbound_at IS NULL) AS bound_origin
+         WHERE b.agent_session_id = s.id AND b.unbound_at IS NULL) AS bound_origin,
+       -- What `agent_session.reopen` accepts: a slot a person closed, on a
+       -- thread that is still open.
+       CAST(CASE WHEN s.closed_reason = 'closed' AND EXISTS (
+         SELECT 1 FROM source('threads') t WHERE t.id = s.thread_id AND t.closed_at IS NULL
+       ) THEN 1 ELSE 0 END AS INT) AS reopenable
 FROM source('agent_session') s
