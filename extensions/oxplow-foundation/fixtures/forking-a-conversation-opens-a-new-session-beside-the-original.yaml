@@ -1,0 +1,19 @@
+# The agent session page's Fork into New Session… opens a second session on
+# the same thread, bound to the conversation it forks with its next launch a
+# fork. The original session keeps its conversation, and the result names the
+# new session so the tab opens it.
+given:
+  - { command: oxplow.agent_session.open, input: { thread: thr1, harness: claude, resume: c5 } }
+when: { page: agent-session, params: { uri: "oxplow:oxplow/agent_session?id=ses1" } }
+expect:
+  loaders:
+    row: { rows: [{ session: ses1, conversation: "c5:0", can_fork: 1 }] }
+  actions: [rename, switch, fork]
+steps:
+  - press: { action: fork, input: { conversation: c5 } }
+    expect: { ok: true, result: { uri: "oxplow:oxplow/agent_session?id=ses2" } }
+  - when: { sql: "SELECT id, thread_id, harness, resume_session_id, fork_next FROM v_agent_session WHERE closed_at IS NULL ORDER BY id" }
+    expect:
+      rows:
+        - { id: 1, resume_session_id: c5, fork_next: 0 }
+        - { id: 2, harness: claude, resume_session_id: c5, fork_next: 1 }

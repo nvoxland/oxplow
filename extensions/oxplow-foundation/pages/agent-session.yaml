@@ -73,7 +73,7 @@ actions:
     conversation: oxplow-foundation/agent-session-conversations
   when: can_choose
 - id: fork
-  label: Fork Conversation…
+  label: Fork into New Session…
   form: true
   command: oxplow.agent_session.fork_conversation
   input:

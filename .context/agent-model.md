@@ -662,7 +662,7 @@ stream on another host (no `HOME` passed), reads as unknown.
 What can be resumed is listed two ways, both reads of
 `AgentHarness::conversations` (`live_datasets::harness_conversations`):
 for an open session, the `agent-session-conversations` choices page over
-`v_agent_conversation` (the page's Switch / Fork Conversation… forms:
+`v_agent_conversation` (the page's Switch Conversation… / Fork into New Session… forms:
 "Choosing another conversation" in terminal.md); for a thread with no session in hand, the
 `new-session-earlier` loader over `v_agent_conversation` (the New Session
 page, "Earlier sessions"), which adds the stream's closed sessions and says per row whether taking it
@@ -1583,7 +1583,7 @@ equivalence between tools.
 | Scenario | Pinned by |
 |---|---|
 | Native title changes | `a_slot_records_its_conversations_and_their_titles` (Claude's `session_title`); Codex's `thread/name/updated` in `a_prompt_in_the_tui_is_a_recorded_turn`, the name on resume in `a_new_thread_is_saved_so_the_tui_can_resume_it`; rename: `a_native_rename_is_a_thread_name_set` |
-| Binding changes (started, switched, forked, chosen) | `a_slots_bindings_are_its_conversations_in_order`, `a_person_resumes_a_chosen_conversation`, `a_fork_marks_the_next_launch`, `a_child_sessions_tool_hook_leaves_the_resume_pointer` |
+| Binding changes (started, switched, forked, chosen) | `a_slots_bindings_are_its_conversations_in_order`, `a_person_resumes_a_chosen_conversation`, `a_fork_opens_a_new_session_and_leaves_the_source_alone`, `a_fork_launch_binds_the_new_session_not_the_source`, `a_child_sessions_tool_hook_leaves_the_resume_pointer` |
 | Child-agent attribution | `its_subagents_are_read_from_their_hooks` (recorded `claude/subagent.jsonl`), `its_bridge_sends_the_call_id_the_exit_code_and_a_childs_parent` (opencode), `a_call_inside_a_subagent_call_is_the_subagents`, `a_background_subagent_hands_back_without_a_prompt` |
 | Unsupported capability | the conformance test above; `a_harness_without_a_list_says_so`; `a_native_rename_needs_the_feature_a_name_and_a_running_observer` |
 | Live client reconnect | `an_agent_session_is_reattached_not_spawned_again`; the pane's reopen (`terminalSession.test.ts`); Codex: `a_restarted_daemon_is_observed_again_on_the_next_open` |

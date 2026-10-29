@@ -58,6 +58,9 @@ intent:
     - name: thread-settings-start-from-the-saved-prompt-and-list-open-sessions
       input: { page: thread-settings, params: { thread: thr1 } }
       expect: the thread's saved prompt and ref, its open agent sessions
+    - name: forking-a-conversation-opens-a-new-session-beside-the-original
+      input: { page: agent-session, params: { uri: "oxplow:oxplow/agent_session?id=ses1" } }
+      expect: a new session on the same conversation marked to fork, the original untouched
     - name: stream-settings-start-from-the-saved-prompt
       input: { page: stream-settings, params: { stream: str1 } }
       expect: the stream's ref and an empty saved prompt
@@ -674,9 +677,11 @@ commands:
     op: rename
     example: {"session": "ses3", "title": "Review pass"}
   - name: agent_session.fork_conversation
-    summary: "Fork a saved conversation into an agent session (`ses3`): its next launch continues a copy of the conversation it is on, or of `conversation`, and keeps the original saved. Its running process stops."
+    summary: "Fork a saved conversation into a NEW agent session beside `ses3`, on its thread and harness: the new session's first launch continues a copy of the conversation `ses3` is on, or of `conversation`, and the original stays saved. `ses3` is untouched and keeps running. Returns the new session and its `uri`. Refused for a harness that can't fork. A person's only."
     scope: agent_sessions.write
     op: fork_conversation
+    # Never offered by itself (it needs the session): the agent session page's form action runs it and opens the new session's tab.
+    ui: { label: "Fork into New Session…", group: Tasks, open_after: "{{result.uri}}", when: "false" }
     example: {"session": "ses3"}
   - name: agent_session.resume_conversation
     summary: "Move an agent session (`ses3`) to one of its harness's saved conversations (`conversation`, its id): its running process stops and the next launch resumes the chosen one. Refused when another open session is on it. The one it was on stays saved."

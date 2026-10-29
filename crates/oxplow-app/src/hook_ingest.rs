@@ -1668,6 +1668,82 @@ mod tests {
         assert!(!slot(&svc).await.fork_next);
     }
 
+    /// A fork opens a new session on the conversation it forks with
+    /// `fork_next` set while the source stays on it. The copy's first
+    /// prompt (from the new session, which names itself) binds the NEW
+    /// session to the copy, `forked`; the source keeps its conversation.
+    #[tokio::test]
+    async fn a_fork_launch_binds_the_new_session_not_the_source() {
+        use oxplow_domain::agent_session::NewAgentSession;
+        let (svc, tid) = fixture().await;
+        let prompt = |ses, id: &str| {
+            hook_in(
+                HookKind::UserPromptSubmit,
+                tid,
+                ses,
+                Some(id),
+                json!({"prompt": "go"}),
+            )
+        };
+        let source = first_session();
+        svc.ingest(prompt(source, "c1")).await.unwrap();
+        let new = svc
+            .db
+            .transaction(move |tx| {
+                let now = Timestamp::now();
+                let s = oxplow_db::agent_session_store::insert_tx(
+                    tx,
+                    &NewAgentSession::terminal(tid, "claude"),
+                    now,
+                )?;
+                oxplow_db::agent_session_store::bind_tx(
+                    tx,
+                    s.id,
+                    "c1",
+                    BindingOrigin::Chosen,
+                    now,
+                )?;
+                oxplow_db::agent_session_store::set_fork_next_tx(tx, s.id, true, now)?;
+                Ok(s.id)
+            })
+            .await
+            .unwrap();
+        svc.ingest(prompt(new, "c2")).await.unwrap();
+        let get = |id| {
+            let db = svc.db.clone();
+            async move {
+                db.read(move |c| Ok(oxplow_db::agent_session_store::get_tx(c, id)?.unwrap()))
+                    .await
+                    .unwrap()
+            }
+        };
+        let (n, o) = (get(new).await, get(source).await);
+        assert_eq!(
+            (n.resume_session_id.as_str(), n.fork_next),
+            ("c2", false),
+            "the new session is on the copy"
+        );
+        assert_eq!(
+            (o.resume_session_id.as_str(), o.fork_next),
+            ("c1", false),
+            "the source is untouched"
+        );
+        let origin: String = svc
+            .db
+            .read(move |c| {
+                c.query_row(
+                    "SELECT origin FROM agent_session_binding
+                      WHERE agent_session_id = ?1 AND native_id = 'c2'",
+                    [new.value()],
+                    |r| r.get(0),
+                )
+                .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        assert_eq!(origin, "forked");
+    }
+
     /// The harness session a session resumes is the one its own prompts
     /// name: a tool hook from a child session (opencode's subagent) logs
     /// no session start and leaves the resume pointer alone.

@@ -481,7 +481,8 @@ One agent slot a person opened on a thread (V32; `ses<n>`, ref
   Claude's `/rename` or generated title, through a prompt hook's
   `session_title` — cleared when the slot moves to another, never
   copied across) and `fork_next` (V78: the next launch forks the bound
-  conversation instead of resuming it). `v_agent_session.display_name`
+  conversation instead of resuming it; `fork_conversation` sets it on a
+  NEW session it opens, never on the source). `v_agent_session.display_name`
   is `title`, else `native_title`, else harness and opened date: the one
   place a session is named. Rename sets `title` (the alias; clearing it
   falls back to `native_title`); naming the conversation in the harness is

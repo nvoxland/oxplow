@@ -88,8 +88,8 @@ Two pages draw it:
   row — the session's URI, `conversation` and `thread` — so the
   viz gives its `TerminalView` the `agent` parts (Start Fresh, the
   Escape interrupt in the row's thread); its `agent-session-waiting`
-  section above is the thread's `approvals`. Its actions (Rename…, Switch /
-  Fork Conversation…) are the nav bar's and the tab's
+  section above is the thread's `approvals`. Its actions (Rename…, Switch
+  Conversation…, Fork into New Session…) are the nav bar's and the tab's
   right-click menu.
 
 The backend (`commands/terminal.rs`, `open_terminal_session { uri, cols,
@@ -137,8 +137,8 @@ stops its process, and **Earlier sessions** brings it back
 (`agent_session.reopen`, resuming its saved conversation). A crash or
 backend restart leaves the slot open, so the tab resumes when it is shown.
 A process that ended on its own shows the ended banner (Start Again /
-Retry). The process kill that `resume_conversation` and
-`fork_conversation` do is a move to another conversation, not a stop.
+Retry). The process kill that `resume_conversation` does is a move to another
+conversation, not a stop. `fork_conversation` stops nothing.
 
 **Resume outcomes.** A launch that resumes a saved conversation never
 falls back to a fresh one (`Resume::Saved` is `exec <agent> <resume args>`,
@@ -168,18 +168,28 @@ worktree (`AgentHarness::conversations`: Claude's transcripts under its
 config dir, named by their last `custom-title` / `ai-title` record with the
 first thing the person typed; opencode's `session list --format json`;
 Codex's daemon's `thread/list`), read as `v_agent_conversation`. The
-agent session page's **Switch Conversation…** / **Fork Conversation…**
+agent session page's **Switch Conversation…** / **Fork into New Session…**
 (offered `when` the harness declares `conversation_list` /
 `conversation_fork`) are forms whose conversation is a select from the
 `agent-session-conversations` page — title, else first prompt, else id,
 saying "this session's" and "open in another session" (from
 `v_agent_session_binding`) — and run
 `oxplow.agent_session.resume_conversation` (refused for one open in
-another session, naming it; Undo goes back) or `fork_conversation` (the
-next launch forks it: `--resume <id> --fork-session`, Codex's `thread/fork`,
-`opencode -s <id> --fork`). Both stop the running process; the session's
-`conversation` (its resume id and `fork_next`, one value) changes, and its
-terminal opens again once that process has exited.
+another session, naming it; Undo goes back) or `fork_conversation` (opens a NEW session
+on the same thread and harness, beside this one, and the tab opens: the
+`open_after` of the command's `ui`). Switching stops the running process,
+changes the session's `conversation` (its resume id and `fork_next`, one
+value) and the terminal opens again once that process has exited. A fork
+stops nothing: the source keeps running and keeps its conversation. The
+new session is bound to the conversation it forks (the chosen one, else
+the source's) with `fork_next` set, so its first launch forks it
+(`--resume <id> --fork-session`, Codex's `thread/fork`, `opencode -s <id>
+--fork`) and the hook ingest binds it to the copy's id (`forked`; hooks
+name their session, so the source is never rebound). Until that launch the
+new session shares the forked conversation's id with its source, so
+`resume_conversation` onto that conversation is refused as for any open
+conversation; the fork itself never needs the original free. A harness
+without `conversation_fork` is refused. Undo closes the new session.
 
 **Earlier sessions: the same lists, with no session to ask.** The New
 Session page lists the thread's earlier sessions under its Start row, so a
