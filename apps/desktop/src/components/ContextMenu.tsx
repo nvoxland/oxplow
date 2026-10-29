@@ -27,6 +27,10 @@ interface MenuListProps {
   header?: string;
   onAction?(): void;
   minWidth?: number;
+  /** Draw the menu's own frame (border, chrome background); false when it
+   *  sits inside a frame already (a `ContextMenu`, which frames its header
+   *  and items together). */
+  framed?: boolean;
 }
 
 export function ContextMenu({ items, header, position, onClose, minWidth = 220, zIndex = 1000 }: ContextMenuProps) {
@@ -91,7 +95,7 @@ export function ContextMenu({ items, header, position, onClose, minWidth = 220, 
           {header}
         </div>
       ) : null}
-      <MenuList items={items} onAction={onClose} minWidth={minWidth} />
+      <MenuList items={items} onAction={onClose} minWidth={minWidth} framed={false} />
     </div>
   );
 }
@@ -108,12 +112,12 @@ const headerStyle: CSSProperties = {
   maxWidth: 320,
 };
 
-export function MenuList({ items, header, onAction, minWidth = 220 }: MenuListProps) {
+export function MenuList({ items, header, onAction, minWidth = 220, framed = true }: MenuListProps) {
   const [openSubmenuId, setOpenSubmenuId] = useState<string | null>(null);
   const submenuRefs = useRef(new Map<string, HTMLButtonElement | null>());
 
   return (
-    <div style={{ ...menuStyle, position: "relative", minWidth }}>
+    <div style={framed ? { ...menuStyle, position: "relative", minWidth } : listStyle}>
       {header ? (
         <div data-testid="context-submenu-header" style={submenuHeaderStyle}>
           {header}
@@ -266,6 +270,9 @@ const swatchStyle: CSSProperties = {
   borderRadius: 2,
   flexShrink: 0,
 };
+
+/** A list inside a frame: the items' layout without a second border. */
+const listStyle: CSSProperties = { display: "flex", flexDirection: "column", gap: 2, position: "relative" };
 
 const menuStyle: CSSProperties = {
   display: "flex",

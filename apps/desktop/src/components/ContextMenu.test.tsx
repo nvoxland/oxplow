@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { cleanup, fireEvent, render } from "@testing-library/react";
 
-import { MenuList } from "./ContextMenu.js";
+import { ContextMenu, MenuList } from "./ContextMenu.js";
 
 afterEach(cleanup);
 
@@ -45,4 +45,10 @@ test("a click after the hover that opened a submenu keeps it open", () => {
   expect(queryByTestId("menu-item-threads.hand-off")).not.toBeNull();
   fireEvent.click(item);
   expect(queryByTestId("menu-item-threads.hand-off")).not.toBeNull();
+});
+
+test("a context menu has one frame: its list draws no second border inside it", () => {
+  render(<ContextMenu items={[{ id: "a", label: "A", run: () => {} }]} position={{ x: 10, y: 10 }} onClose={() => {}} />);
+  const framed = [...document.body.querySelectorAll<HTMLElement>("div")].filter((d) => (d.getAttribute("style") ?? "").includes("--border-strong"));
+  expect(framed).toHaveLength(1);
 });
