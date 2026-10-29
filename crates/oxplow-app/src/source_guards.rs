@@ -781,6 +781,9 @@ const SPECIAL_CASES: &[(&str, &str, &str)] = &[
     // Reserving the name, so no provider takes oxplow's refs: no decision
     // about how to call one.
     ("crates/oxplow-domain/src/capability.rs", "== OXPLOW", "the reserved provider id"),
+    // The same reservation for filesystems: no extension's filesystem id
+    // falls in `oxplow:`, the namespace of oxplow's own.
+    ("crates/oxplow-app/src/providers/filesystems.rs", "== \"oxplow\"", "the reserved filesystem namespace"),
     // The URI grammar: a contribution's resource is oxplow's own
     // (`oxplow/dataset`), whichever extension implements it — a fact of the
     // naming, not a decision about how to treat an implementation.

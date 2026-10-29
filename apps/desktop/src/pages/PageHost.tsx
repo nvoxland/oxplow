@@ -41,11 +41,13 @@ import { labelRow, tabLabel } from "./renderers.js";
 import { useNodeActions, useNodeForms } from "./useNodeActions.js";
 import { SaveTempViewForm } from "./SaveViewForm.js";
 import { definitionUri, TEMP_EXTENSION } from "./viewActions.js";
+import { DashboardTitle } from "./DashboardTitle.js";
+import { useDashboardWritable } from "./dashboardAuthoring.js";
 import { PageViewContext } from "./PageViewContext.js";
 import { usePageReads } from "./pageReads.js";
+import { ridesView } from "./pageFiles.js";
 import { firstLoader } from "./firstLoader.js";
 import { recordOpError } from "../opErrors.js";
-import { ridesView } from "./pageFiles.js";
 import { HostedViewContext, useHostedView } from "../viz/hostedView.js";
 
 export interface PageHostProps {
