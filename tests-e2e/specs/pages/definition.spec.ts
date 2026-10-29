@@ -44,3 +44,34 @@ test("Show Definition opens the running copy drawn as Definition, and Open With 
   await page.getByTestId("menu-item-page-open-with-oxplow-foundation/file-viewer").click();
   await expect(page.getByTestId("viz-code").filter({ visible: true })).toContainText("title: Defined Numbat");
 });
+
+const other = `title: Other Numbat
+category: Data
+loaders:
+  rows:
+    sql: SELECT 'Other' AS line
+view:
+  viz: table
+  from: rows
+`;
+
+test("Definition drawn again after another tab was shown still names its file and reads it", async ({ page, daemon }) => {
+  await installExtension(daemon, "e2e-defn", { files: { "pages/numbat.yaml": numbat, "pages/other.yaml": other } });
+  await page.goto("/");
+  await openFromLauncher(page, "Defined Numbat");
+  await page.getByTestId("page-nav-menu").filter({ visible: true }).click();
+  await page.getByTestId("menu-item-action-page-definition").click();
+  const file = page.getByTestId("page-file").filter({ visible: true });
+  await expect(file.locator("h1")).toHaveText("Definition: numbat.yaml");
+
+  // Another tab is shown while the extension is deployed again (its running
+  // copy is another deployment); coming back, the tab still names its file
+  // and its sections read it.
+  const tab = page.locator('[data-testid^="center-tab-"]').filter({ hasText: "Definition: numbat.yaml" }).first();
+  await openFromLauncher(page, "Other Numbat");
+  await expect(page.getByTestId("page-file").filter({ visible: true }).locator("h1")).toHaveText("Other Numbat");
+  await installExtension(daemon, "e2e-defn", { files: { "pages/numbat.yaml": numbat.replace("What the numbats are.", "What they were."), "pages/other.yaml": other } });
+  await tab.click();
+  await expect(file.locator("h1")).toHaveText("Definition: numbat.yaml");
+  await expect(file.getByTestId("node-about")).toContainText("e2e-defn/numbat");
+});
