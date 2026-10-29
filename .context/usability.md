@@ -18,6 +18,31 @@ Things I keep forgetting. Read this before adding any UI.
 > lives in `.context/pages-and-tabs.md`. Plan:
 > `/Users/nvoxland/.claude/plans/the-ui-is-very-delightful-badger.md`.
 
+## Pages are informational: a wiki, a web of information
+
+oxplow's pages read like a wiki, not like an admin console or a
+spreadsheet. A page is a document about something: headed sections of
+facts and prose in the reading column, and every thing it names (an
+extension, a page, a commit, a file, a work item, a thread) is a link to
+that thing's own page, so a person moves through the project by following
+links. Concretely:
+
+- **A thing gets a section, not a row.** A page about several things
+  (every extension, every failing contribution) gives each its own headed
+  section with its facts in words; a wide table of ids and codes is the
+  exception, kept for data that is really tabular (a page's params, a
+  diff's files).
+- **Say it in words.** "may run its own SQL over your data", not
+  `sql` or `1`; "ships with oxplow", not `bundled`.
+- **Link everything that has a page,** and give a thing that is named
+  often a page of its own (a resource page) rather than repeating its
+  details where it is named.
+- **Problems and work to do get their own page** that collects them,
+  linked from where they show as a one-line summary; an informational
+  page carries no repair buttons.
+- **No layout rules that widen data.** The reading column is the
+  default; a page doesn't turn into a wide grid because it holds a table.
+
 ## Markdown is one component
 
 Wherever markdown is read or written — a wiki page, a work item's body,
