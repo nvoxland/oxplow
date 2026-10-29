@@ -1214,7 +1214,8 @@ change: **Filters** (its filter params) and **Selection** (what a row click
 picked). **The rail is drawn only when something is in it.** A page has a
 "Details" card when it has a switch, a `filter` param, a `selection`
 param, a `rail:` node, the save-a-view form open, or a Contents of its
-own; with none, no card is drawn and the body takes the full width
+own; with none, no card is drawn (a document page keeps its reading
+column; only a filling page and the wide kinds take the full width)
 (`railHas` in `pages/railHas.ts`, decided from the run before drawing,
 never by measuring). A page whose view fills (a terminal, a file, an
 editor, a diff) gets no automatic Contents; a real filter, selection or

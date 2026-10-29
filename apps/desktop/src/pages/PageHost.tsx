@@ -237,7 +237,7 @@ export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, re
   // A rail with nothing in it is not drawn (`railHas`), and its body then
   // takes the full width.
   const hasRail = run ? railHas(run, { fills, saveOpen: !!(saveAs && viewFile) }) : false;
-  const full = fills || (run ? wide(run) || !hasRail : false);
+  const full = fills || (run ? wide(run) : false);
 
   return (
     <Page

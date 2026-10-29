@@ -79,13 +79,13 @@ test("PageHost: a page with one section and nothing else draws no Details", asyn
   const view = host(run(sections(1)));
   await view.findByTestId("page-file");
   expect(view.queryByTestId("page-rail")).toBeNull();
-  expect(view.queryByTestId("page-rail-center")).toBeNull();
 });
 
-test("PageHost: with no rail the body is not in the reading column", async () => {
+test("PageHost: a document page with no rail keeps the reading column", async () => {
   const none = host(run(sections(1)));
   await none.findByTestId("page-file");
-  expect(none.queryByTestId("page-rail-center")).toBeNull();
+  expect(none.queryByTestId("page-rail")).toBeNull();
+  expect(none.container.querySelector(".oxplow-reading-column")).not.toBeNull();
   cleanup();
   const some = host(run(sections(1), [filter]));
   await some.findByTestId("page-rail-filters");
