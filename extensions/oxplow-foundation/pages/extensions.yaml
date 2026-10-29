@@ -1,5 +1,5 @@
 title: Extensions
-description: "Every extension this project knows, one section each, those needing attention first: where it comes from, what runs, its state, what it may reach and what it waits on."
+description: "Every extension this project knows, one section each, those needing attention first: where it comes from, what runs, what it may reach and its problems."
 icon: package
 category: System
 keywords: deploy rollback permissions enable disable share health
@@ -10,9 +10,10 @@ loaders:
 view:
   from: summary
   viz: sections
-  sections: { title: heading, id: id, link: uri, body: problems_text }
+  sections: { title: heading, id: id, link: uri }
   columns:
-  - { key: origin_text, label: From }
+  - { key: origin_text, label: From, link: { kind: page, from: origin_target } }
   - { key: runs_text, label: Runs }
   - { key: permission_items, label: Permissions, format: items }
+  - { key: problems_label, label: Problems, link: { kind: page, from: problems_target } }
   empty: No extensions. One you or your agent writes in .oxplow/extensions/ shows here.

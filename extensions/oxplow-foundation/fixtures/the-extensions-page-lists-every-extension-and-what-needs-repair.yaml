@@ -9,8 +9,8 @@ expect:
     summary:
       rows:
         contains:
-          - { extension: oxplow-foundation, uri: "oxplow:oxplow/extension?name=oxplow-foundation", heading: oxplow-foundation, origin_text: Ships with oxplow., permission_items: $any }
+          - { extension: oxplow-foundation, uri: "oxplow:oxplow/extension?name=oxplow-foundation", heading: oxplow-foundation, origin_text: Shipped with oxplow, origin_target: null, permission_items: $any }
   nodes:
     - { id: summary, kind: viz, viz: sections }
   actions: []
-  text: { contains: ["oxplow-foundation", "Ships with oxplow."] }
+  text: { contains: ["oxplow-foundation", "Shipped with oxplow"] }

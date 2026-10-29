@@ -11,7 +11,7 @@ expect:
   loaders:
     about_facts:
       rows:
-        - { origin_text: Ships with oxplow., manifest: Read its running extension.yaml }
+        - { origin_text: Shipped with oxplow, origin_target: null, manifest: Read its running extension.yaml }
     permissions:
       rows:
         contains:
