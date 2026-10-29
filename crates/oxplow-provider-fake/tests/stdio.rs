@@ -880,6 +880,140 @@ async fn a_snapshots_provider_without_contents_has_no_read_at() {
     );
 }
 
+/// Its filesystem mode (`OXPLOW_FAKE_CAPABILITY=filesystem`): an
+/// in-memory tree seeded from `OXPLOW_FAKE_FILES`, written only with the
+/// feature `writable`.
+fn spawn_filesystem(features: &str) -> (Child, Peer) {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_oxplow-provider-fake"))
+        .env("OXPLOW_FAKE_CAPABILITY", "filesystem")
+        .env("OXPLOW_FAKE_FEATURES", features)
+        // a/b.txt = "hello", c.bin = 0x00 0x01
+        .env(
+            "OXPLOW_FAKE_FILES",
+            r#"{"a/b.txt":"aGVsbG8=","c.bin":"AAE="}"#,
+        )
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .expect("spawn the fake");
+    let stdout = child.stdout.take().expect("piped stdout");
+    let stdin = child.stdin.take().expect("piped stdin");
+    let (peer, _incoming) = Peer::spawn(stdout, stdin);
+    (child, peer)
+}
+
+#[tokio::test]
+async fn as_a_filesystem_provider_it_declares_write_only_when_writable() {
+    for (features, writable, verbs) in [
+        ("writable", true, vec!["stat", "read", "list", "write"]),
+        ("", false, vec!["stat", "read", "list"]),
+    ] {
+        let (_child, peer) = spawn_filesystem(features);
+        let declared = initialize(&peer).await;
+        assert_eq!(
+            declared,
+            oxplow_provider_fake::filesystem_declarations(writable)
+        );
+        assert_eq!(declared.capabilities[0].capability, "filesystem");
+        assert_eq!(
+            declared.capabilities[0].features,
+            json!({ "writable": writable })
+        );
+        assert_eq!(
+            declared
+                .commands
+                .iter()
+                .map(|c| c.name.as_str())
+                .collect::<Vec<_>>(),
+            verbs
+        );
+    }
+}
+
+#[tokio::test]
+async fn as_a_filesystem_provider_it_serves_and_changes_its_tree() {
+    let (_child, peer) = spawn_filesystem("writable");
+    initialize(&peer).await;
+    let handle = check(&peer).await;
+    let call = |verb: &'static str, input: Value| {
+        let (peer, handle) = (&peer, &handle);
+        async move { invoke(peer, handle, verb, input).await.map(|r| r.result) }
+    };
+    assert_eq!(
+        call("stat", json!({ "path": "a/b.txt" })).await.unwrap(),
+        json!({ "entry": { "kind": "file", "size": 5, "modified_at": 1_700_000_000_000_i64,
+                           "is_text": true } })
+    );
+    assert_eq!(
+        call("stat", json!({ "path": "a" })).await.unwrap(),
+        json!({ "entry": { "kind": "dir" } })
+    );
+    assert_eq!(
+        call("stat", json!({ "path": "nope" })).await.unwrap(),
+        json!({ "entry": null })
+    );
+    assert_eq!(
+        call("stat", json!({ "path": "c.bin" })).await.unwrap()["entry"]["is_text"],
+        json!(false)
+    );
+    assert_eq!(
+        call("read", json!({ "path": "a/b.txt", "offset": 1, "len": 3 }))
+            .await
+            .unwrap(),
+        json!({ "bytes": "ZWxs" })
+    );
+    assert_eq!(
+        call("read", json!({ "path": "nope" })).await.unwrap(),
+        json!({ "bytes": null })
+    );
+    assert_eq!(
+        call("list", json!({ "parent": "" })).await.unwrap(),
+        json!({ "entries": [{ "path": "a", "kind": "dir" }, { "path": "c.bin", "kind": "file" }] })
+    );
+    assert_eq!(
+        call("list", json!({})).await.unwrap()["entries"]
+            .as_array()
+            .unwrap()
+            .len(),
+        3
+    );
+    call("write", json!({ "path": "a/new.txt", "content": "eA==" }))
+        .await
+        .unwrap();
+    assert_eq!(
+        call("read", json!({ "path": "a/new.txt" })).await.unwrap(),
+        json!({ "bytes": "eA==" })
+    );
+    for refused in [
+        call("stat", json!({ "path": "../x" })).await,
+        call("read", json!({ "path": "a/b.txt", "rev": "v9" })).await,
+    ] {
+        assert!(
+            matches!(refused, Err(ProtocolError::InvalidInput { .. })),
+            "{refused:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_read_only_filesystem_provider_has_no_write() {
+    let (_child, peer) = spawn_filesystem("");
+    initialize(&peer).await;
+    let handle = check(&peer).await;
+    let refused = invoke(
+        &peer,
+        &handle,
+        "write",
+        json!({ "path": "x", "content": "eA==" }),
+    )
+    .await;
+    assert!(
+        matches!(refused, Err(ProtocolError::InvalidInput { .. })),
+        "{refused:?}"
+    );
+}
+
 /// Its knowledge mode (`OXPLOW_FAKE_CAPABILITY=knowledge`): pages that
 /// answer their `knowledge.page.recorded` event, and a collector of them.
 fn spawn_knowledge(state: Option<&std::path::Path>) -> (Child, Peer, Receiver<Incoming>) {

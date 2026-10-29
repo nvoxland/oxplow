@@ -10,11 +10,13 @@
 //!   an instance;
 //! - [`effort_policy`] — `ExternalEffortPolicy`, the effort policy over an
 //!   instance;
+//! - [`filesystems`] — `ExternalFileSystem`, a filesystem over an instance;
 //! - [`sync`] — reading an instance's collectors (`oxplow.provider.sync`, the
 //!   schedule), checkpointed.
 
 pub mod agent_harness;
 pub mod effort_policy;
+pub mod filesystems;
 pub mod host;
 pub mod knowledge;
 pub mod oauth;

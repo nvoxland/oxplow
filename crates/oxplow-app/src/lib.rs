@@ -1641,6 +1641,9 @@ impl Services {
                 )),
                 Arc::new(providers::agent_harness::HarnessHost(harnesses.clone())),
                 Arc::new(providers::knowledge::KnowledgeHost(knowledge.clone())),
+                Arc::new(providers::filesystems::FileSystemsHost::new(
+                    filesystems.clone(),
+                )),
                 Arc::new(providers::snapshots::SnapshotsHost {
                     registry: snapshots.clone(),
                     ledger: providers::snapshots::Ledger {

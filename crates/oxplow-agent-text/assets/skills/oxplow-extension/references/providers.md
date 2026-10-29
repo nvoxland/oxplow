@@ -12,7 +12,9 @@ An extension with an **external provider** (`providers:` — a program that
    `expect`, `$any` matching anything) is invoked, every message must
    match the protocol, the session must match the golden
    `fixtures/transcripts/<id>.jsonl` (`--bless` writes it when a change is
-   intended — commit it), and its capability's conformance suite must pass.
+   intended — commit it), and its capability's conformance suite must pass
+   (a `filesystem` provider has none yet: `extension test` reports that, so
+   check its `stat`, `read`, `list` and `write` through the examples).
    A `resources:` entry may add `searchable: <model>` (a model of yours
    with `uri`, `title`, `body`): its rows are then found by the launcher's
    search and open on the resource's renderer.

@@ -6902,3 +6902,174 @@ async fn a_providers_host_read_reaches_the_metric_functions() {
         .unwrap();
     assert_eq!(read, json!([{ "n": 0 }]));
 }
+
+/// A project extension `shelf` (or `name`) whose provider `store` is the
+/// fake as a filesystem provider, holding `files` (path → content) and
+/// taking writes when `writable`.
+fn write_filesystem_extension(
+    project: &Path,
+    name: &str,
+    files: &[(String, Vec<u8>)],
+    writable: bool,
+) {
+    use base64::Engine as _;
+    let dir = project.join(".oxplow/extensions").join(name);
+    std::fs::create_dir_all(dir.join("bin")).unwrap();
+    std::fs::write(
+        dir.join("extension.yaml"),
+        format!("manifest: 2\nname: {name}\nintent:\n  purpose: the fake filesystem provider\n  examples: [{{ name: a }}]\npermissions: [process.run]\nproviders:\n  - id: store\n    capability: filesystem\n    entry: bin/provider\n    declarations: provider.json\n"),
+    )
+    .unwrap();
+    let seeded: serde_json::Map<String, serde_json::Value> = files
+        .iter()
+        .map(|(p, c)| {
+            (
+                p.clone(),
+                json!(base64::engine::general_purpose::STANDARD.encode(c)),
+            )
+        })
+        .collect();
+    let script = dir.join("bin/provider");
+    std::fs::write(
+        &script,
+        format!(
+            "#!/bin/sh\nOXPLOW_FAKE_CAPABILITY=filesystem OXPLOW_FAKE_FEATURES='{}' OXPLOW_FAKE_FILES='{}' exec '{}' \"$@\"\n",
+            if writable { "writable" } else { "" },
+            serde_json::Value::Object(seeded),
+            fake_bin().display()
+        ),
+    )
+    .unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    std::fs::write(
+        dir.join("provider.json"),
+        serde_json::to_string_pretty(&oxplow_provider_fake::filesystem_declarations(writable))
+            .unwrap(),
+    )
+    .unwrap();
+}
+
+/// The fixture with the filesystem extension `name` approved and its
+/// instance `store` running.
+async fn running_filesystem(name: &str, writable: bool) -> EffortFixture {
+    let fx = services_with_effort().await;
+    let project = fx.svc.layout.project_dir.clone();
+    write_filesystem_extension(
+        &project,
+        name,
+        &crate::filesystem_conformance::fixture(),
+        writable,
+    );
+    let ext = crate::extension::extensions::load_extensions(&project)
+        .into_iter()
+        .find(|e| e.name == name)
+        .expect("the filesystem extension loads");
+    assert_eq!(ext.errors, Vec::<String>::new());
+    deploy(&fx, &ext).await;
+    enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
+    fx
+}
+
+/// A filesystem provider's tree passes the filesystem conformance checks
+/// as `oxplow:local` does, through the host.
+#[tokio::test]
+async fn a_filesystem_provider_passes_the_filesystem_conformance_checks() {
+    use crate::filesystem_conformance as c;
+    let fx = running_filesystem("shelf", true).await;
+    let fs = fx.svc.filesystems.resolve(Some("shelf:store")).unwrap();
+    let cx = oxplow_domain::filesystem::FsCx::default();
+    assert_eq!(fs.id(), "shelf:store");
+    assert!(fs.has_feature("writable"));
+    for rev in [None, Some("v1")] {
+        c::stat_describes_what_read_returns(&*fs, &cx, rev).await;
+        c::read_round_trips_and_ranges_slice(&*fs, &cx, rev).await;
+        c::lists_one_level_or_the_whole_tree(&*fs, &cx, rev).await;
+        c::a_path_never_leaves_the_filesystem(&*fs, &cx, rev).await;
+    }
+    c::writes_only_when_writable(&*fs, &cx, None).await;
+    // A revision it doesn't have is refused as invalid.
+    let e = fs
+        .read(&cx, Some("v9"), &format!("{}/a.txt", c::ROOT), None)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(e, oxplow_domain::filesystem::FsError::Invalid(_)),
+        "{e:?}"
+    );
+    // The same tree through the layers a reader uses.
+    assert!(fx
+        .svc
+        .filesystems
+        .ids()
+        .contains(&"shelf:store".to_string()));
+}
+
+/// A provider that doesn't say `writable` is read-only, and its verbs
+/// carry no `write`.
+#[tokio::test]
+async fn a_read_only_filesystem_provider_refuses_writes() {
+    use crate::filesystem_conformance as c;
+    let fx = running_filesystem("shelf", false).await;
+    let fs = fx.svc.filesystems.resolve(Some("shelf:store")).unwrap();
+    let cx = oxplow_domain::filesystem::FsCx::default();
+    assert!(!fs.has_feature("writable"));
+    c::stat_describes_what_read_returns(&*fs, &cx, None).await;
+    c::read_round_trips_and_ranges_slice(&*fs, &cx, None).await;
+    c::lists_one_level_or_the_whole_tree(&*fs, &cx, None).await;
+    c::a_path_never_leaves_the_filesystem(&*fs, &cx, None).await;
+    c::writes_only_when_writable(&*fs, &cx, None).await;
+}
+
+/// A process that is gone makes the filesystem unavailable, not wrong:
+/// the reader is told so, and the next call may succeed.
+#[tokio::test]
+async fn a_filesystem_provider_whose_process_dies_is_unavailable() {
+    let fx = running_filesystem("shelf", false).await;
+    let fs = fx.svc.filesystems.resolve(Some("shelf:store")).unwrap();
+    let cx = oxplow_domain::filesystem::FsCx::default();
+    let path = format!("{}/a.txt", crate::filesystem_conformance::ROOT);
+    assert!(fs.read(&cx, None, &path, None).await.unwrap().is_some());
+    let instance = fx.svc.providers.get("shelf/store").await.expect("running");
+    instance.hook("crash").await;
+    let e = fs.read(&cx, None, &path, None).await.unwrap_err();
+    assert!(
+        matches!(&e, oxplow_domain::filesystem::FsError::Unavailable { filesystem, .. } if filesystem == "shelf:store"),
+        "{e:?}"
+    );
+}
+
+/// Turning the instance off takes its filesystem out of the registry: a
+/// reader is refused with the registry's "no filesystem" message.
+#[tokio::test]
+async fn unregistering_a_filesystem_provider_removes_its_filesystem() {
+    let fx = running_filesystem("shelf", false).await;
+    assert!(fx.svc.filesystems.has("shelf:store"));
+    turn_off(&fx.svc, "shelf/store").await;
+    assert!(!fx.svc.filesystems.has("shelf:store"));
+    let e = fx
+        .svc
+        .filesystems
+        .resolve(Some("shelf:store"))
+        .err()
+        .unwrap();
+    assert!(e.to_string().contains("no filesystem `shelf:store`"), "{e}");
+    // Core's own stay.
+    assert!(fx.svc.filesystems.has("oxplow:local"));
+}
+
+/// An extension can't take oxplow's namespace: `oxplow:` ids are core's.
+#[tokio::test]
+async fn a_filesystem_provider_cannot_take_the_oxplow_namespace() {
+    let fx = running_filesystem("oxplow", false).await;
+    assert!(!fx.svc.filesystems.has("oxplow:store"));
+    assert_eq!(
+        fx.svc
+            .filesystems
+            .ids()
+            .into_iter()
+            .filter(|id| id.starts_with("oxplow:"))
+            .collect::<Vec<_>>(),
+        ["oxplow:extensions", "oxplow:local", "oxplow:temp"]
+    );
+}

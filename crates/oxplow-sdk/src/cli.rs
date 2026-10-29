@@ -19,7 +19,7 @@ usage:
       (--origin = the effort/thread ref that asked for it), one example
       and its fixture, and the kind's starter: a page with a row action; a
       provider of --capability (work_items, the default, effort_policy,
-      agent_harness, snapshots or knowledge)
+      agent_harness, snapshots, knowledge or filesystem)
       with its contract's declarations, a stub program and test config; a Starlark
       collector with a dataset and a page over it; a code metric (--language,
       default rust, over --glob, default the language's files): a per-path

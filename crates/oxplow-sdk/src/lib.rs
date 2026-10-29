@@ -993,6 +993,13 @@ fn provider_starter(capability: &str) -> ProviderStarter {
             needs: None,
             data: serde_json::Value::Null,
         },
+        "filesystem" => ProviderStarter {
+            input: "{ command: list, input: { parent: '' } }".to_string(),
+            expect: "the root's entries",
+            fixture: "{ entries: $any }".to_string(),
+            needs: None,
+            data: serde_json::Value::Null,
+        },
         "knowledge" => ProviderStarter {
             input: "{ command: write_page, input: { slug: example, body: '# Example', verified_files: [], removed_files: [] } }"
                 .to_string(),
@@ -1096,6 +1103,35 @@ fn verb_input(capability: &str, verb: &str) -> (String, serde_json::Value) {
             json!({ "type": "object", "required": ["handle", "path"],
                     "additionalProperties": false,
                     "properties": { "handle": str_prop, "path": str_prop } }),
+        ),
+        ("filesystem", "stat") => (
+            "What a path is: { entry } — null when nothing is there, else { kind: file|dir, size?, \
+             modified_at?, is_text? }."
+                .into(),
+            json!({ "type": "object", "required": ["path"], "additionalProperties": false,
+                    "properties": { "path": str_prop, "rev": str_prop } }),
+        ),
+        ("filesystem", "read") => (
+            "A file's bytes, whole or the range `offset`/`len` names: { bytes } (base64), null when \
+             there is no such file."
+                .into(),
+            json!({ "type": "object", "required": ["path"], "additionalProperties": false,
+                    "properties": { "path": str_prop, "rev": str_prop,
+                                    "offset": { "type": "integer", "minimum": 0 },
+                                    "len": { "type": "integer", "minimum": 0 } } }),
+        ),
+        ("filesystem", "list") => (
+            "The files and folders directly in `parent` (\"\" is the root; none: the whole tree): \
+             { entries: [{ path, kind: file|dir }] }."
+                .into(),
+            json!({ "type": "object", "additionalProperties": false,
+                    "properties": { "rev": str_prop, "parent": str_prop } }),
+        ),
+        ("filesystem", "write") => (
+            "Replace a file's content (feature `writable`): {}, `content` base64.".into(),
+            json!({ "type": "object", "required": ["path", "content"],
+                    "additionalProperties": false,
+                    "properties": { "path": str_prop, "content": str_prop } }),
         ),
         ("knowledge", "write_page") => (
             "Write a page, creating it or replacing its body: { page } (the slug), and answer its \
@@ -1635,6 +1671,7 @@ mod tests {
             Kind::provider("agent_harness").unwrap(),
             Kind::provider("snapshots").unwrap(),
             Kind::provider("knowledge").unwrap(),
+            Kind::provider("filesystem").unwrap(),
             Kind::Collector,
             Kind::Metric,
             Kind::Command,

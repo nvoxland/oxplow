@@ -25,7 +25,7 @@ failure after your edit is yours:
 - `provider` — an external provider's declarations and a stub program
   (red until you write the program); `--capability <cap>` picks what it
   implements: `work_items` (the default), `effort_policy`,
-  `snapshots`, `knowledge` or `agent_harness` (a harness launching agent sessions: its command runs in
+  `snapshots`, `knowledge`, `filesystem` or `agent_harness` (a harness launching agent sessions: its command runs in
   the person's terminal, so the deploy that admits it (`process`) says that; if it can
   tell its subagents apart it declares the `subagents` feature and answers
   the `prompt` and `subagent` verbs).
@@ -34,6 +34,13 @@ failure after your edit is yours:
   from, to }` → `{ changes: [{ path, kind: added|modified|deleted, identity
   (xxh3-128 hex), size }] }` (`from: null` is the empty tree) and, with the
   `contents` feature, `read_at { handle, path }` → `{ bytes }` (base64).
+  A `filesystem` provider serves files under the id `<extension>:<instance id>`
+  (a file URI's `filesystem` param) and answers `stat { path, rev? }` → `{ entry }`
+  (null, or `{ kind: file|dir, size?, modified_at?, is_text? }`), `read { path, rev?,
+  offset?, len? }` → `{ bytes }` (base64, null when absent), `list { rev?, parent? }` →
+  `{ entries: [{ path, kind }] }` (no `parent`: the whole tree, `""`: the root) and, with
+  the `writable` feature, `write { path, content }` (base64) → `{}`; `oxplow:` ids are
+  core's.
   A `knowledge` provider answers `write_page { slug, title?,
   body, verified_files, removed_files }` → `{ page }`, `delete_page { slug }` and
   `link { page, target }`, each also answering the page's

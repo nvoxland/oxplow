@@ -5,7 +5,8 @@ once: each answers `stat`, `read`, `list` and, when it is `writable`,
 `write`, and a reader names the one it means by its id. Core ships
 `oxplow:local` (the stream's worktree), `oxplow:extensions` (the running
 copies of extensions, `rev` = deployment hash) and `oxplow:temp` (scratch
-files); a provider can add its own later (`<extension>:<name>`, `acme:s3`).
+files); an extension adds its own through the provider protocol
+(`<extension>:<instance id>`, `acme:s3`; [providers.md](./providers.md) "A filesystem provider").
 
 ## The trait (`oxplow_domain::filesystem`)
 
@@ -178,10 +179,14 @@ before filesystems keeps its identity; the builders leave an explicit
 `ProviderContract` (`FILESYSTEM`: verbs `stat`, `read`, `list`; `write`
 ← `writable`). `oxplow:local`, `oxplow:extensions` and `oxplow:temp` are core rows (`source: core`, shown in
 `v_capability_provider` as providers `local` (`writable`), `extensions`
-and `temp`) — they don't depend on any extension being enabled. A provider process cannot yet
-implement it: the host (`FileSystemsHost`, registering an
-`ExternalFileSystem`) comes with external filesystems
-([providers.md](./providers.md)).
+and `temp`) — they don't depend on any extension being enabled. A provider process implements
+it through `providers::filesystems::FileSystemsHost`, which registers an
+`ExternalFileSystem` under `<extension>:<instance id>` while the instance
+runs and unregisters it when the instance stops; the `oxplow:` namespace
+is core's. Its verbs are `stat`, `read` (base64; `offset`/`len` for a range),
+`list` and, with `writable`, `write`. A process that is gone is
+`FsError::Unavailable`; once unregistered, readers refuse its id with the
+registry's "no filesystem" message ([providers.md](./providers.md)).
 
 ## Tests
 
@@ -193,7 +198,9 @@ level or the whole tree, a path never leaves the filesystem, only a
 working tree, `git:HEAD` and a `snap:<id>`, and against `oxplow:extensions`
 (a deployment holding the fixture, with no `rev` and by hash). `oxplow:temp`
 is flat, so it runs only the path check and asserts its own rules. A new
-filesystem adds a test that runs the same functions. The editor language table is
+filesystem adds a test that runs the same functions; an external one runs them
+through the host against the fake provider (`providers/tests.rs`,
+`a_filesystem_provider_passes_the_filesystem_conformance_checks`). The editor language table is
 `oxplow_domain::language_id` (the Monaco id space); a test holds it equal
 to the desktop's `editor-language.ts`.
 

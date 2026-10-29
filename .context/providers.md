@@ -207,6 +207,18 @@ in memory only; the `mark`s it answered are counted in its state
 (`marks`, also what the next handle is numbered from), so a test can see a
 provider that wasn't chosen was asked nothing.
 
+**As a filesystem provider** (`OXPLOW_FAKE_CAPABILITY=filesystem`, with
+`OXPLOW_FAKE_FEATURES=writable` for the feature of that name, the only
+one) it declares `filesystem_declarations(writable)` — the `filesystem`
+capability with `features: { writable }`, the verbs `stat`, `read`,
+`list` and, with `writable`, `write` (each `confirm: never`, `access:
+record`, inputs `additionalProperties: false`), no event types or
+collectors, the same `team` config. It serves an in-memory tree, seeded at
+start from `OXPLOW_FAKE_FILES` (a JSON object, path → base64 content) and
+changed by `write`. It has one revision, `v1`: no `rev` or `v1` reads it,
+any other is `InvalidInput`. Every file's `modified_at` is a fixed
+`1700000000000`; folders are implied by file paths.
+
 **As a knowledge provider** (`OXPLOW_FAKE_CAPABILITY=knowledge`) it
 declares `knowledge_declarations()` — the `knowledge` capability (no
 features), the verbs `write_page { slug, title?, body, verified_files,
@@ -453,9 +465,9 @@ harness's (`agent_harness::HarnessHost`) registers an `ExternalHarness` in
 catalog reload keeps it); the snapshots' (`snapshots::SnapshotsHost`)
 registers an `ExternalSnapshots` in `Services.snapshots`; the
 knowledge's (`knowledge::KnowledgeHost`) registers an `ExternalKnowledge`
-in `Services.knowledge`. (The `filesystem` contract has no host yet: core's
-filesystems are built in, and a provider's arrive with its host —
-[filesystems.md](./filesystems.md).) A record row carries its own `uri`; the host
+in `Services.knowledge`; the filesystem's
+(`filesystems::FileSystemsHost`) registers an `ExternalFileSystem` in
+`Services.filesystems` ([filesystems.md](./filesystems.md)). A record row carries its own `uri`; the host
 logs it as the contract's event with the row under the contract's key,
 that URI the subject and the instance the source (`provider:<id>`: whose
 record it is). A URI of a resource with no `provider` param
@@ -466,7 +478,7 @@ Each host's `prepare` validates declarations and constructs its adapter
 without changing a live registry or starting a process. It returns a
 `PreparedProviderCapability` with fixed features and an infallible,
 synchronous registry action that the generation applies at publication. All
-five capability hosts use this split; nothing publishes an adapter outside a
+six capability hosts use this split; nothing publishes an adapter outside a
 generation.
 
 A candidate that is rejected before publication is marked stopped and shut down
@@ -520,6 +532,48 @@ idles (`.context/data-model.md` "An idle pipeline"), and the take on a
 turn's Stop path is its `mark` under `snapshotTurnBudgetMs` (an overrun
 is recorded, never cut short; the call itself is bounded by the
 instance's call timeout).
+
+**A filesystem provider** serves files (an S3 bucket, a remote
+checkout, a document store) that readers name by the `filesystem` param of
+a file URI (`oxplow:oxplow/file?filesystem=<id>&path=…`). Its id is
+`<extension>:<instance id>` (`acme:s3`), registered in
+`Services.filesystems` beside core's three, and the namespace `oxplow:` is
+core's: an extension named `oxplow` is refused at `prepare`. The
+capability is `many`, so every running instance is active at once, with no
+choice to make. A filesystem is read-only unless the capability's
+`features` say `writable`. Each operation is one invoke, with the
+`rev` the reader gave (opaque to core; absent is the provider's default
+revision):
+
+- `stat { path, rev? }` → `{ entry }`, `entry` null when nothing is
+  there, else `{ kind: file | dir, size?, modified_at?, is_text? }` (ms
+  since the epoch). The editor's `language` is not the provider's to
+  say: core derives it from the path.
+- `read { path, rev?, offset?, len? }` → `{ bytes }`, base64, null when
+  there is no such file. A range sends `offset` and `len`; the host
+  truncates what comes back to `len`.
+- `list { rev?, parent? }` → `{ entries: [{ path, kind }] }`; `parent`
+  absent is the whole tree, `""` the root. The host sorts by path.
+- `write { path, content }` → `{}`, `content` base64; declared only with
+  `writable` (without it `write` is refused as `ReadOnly`, uncalled).
+
+Paths are relative to the filesystem's root, `/`-separated. A path that
+leaves it (`..`, `.`, an empty segment, absolute, `\`) is refused by the
+host as `FsError::Invalid` before the call, so a provider never sees one.
+Failure: a provider's `InvalidInput` (a revision it does not have) is
+`FsError::Invalid`; every other failure — its process gone or
+dropping the connection, a call timeout, a verb it did not declare, an
+answer of the wrong shape, an event — is `FsError::Unavailable`, which a
+reader shows and may try again (the registry restarts the process with
+backoff, as for any instance). A filesystem provider emits no events.
+Turning the instance off, or an update that drops the capability,
+unregisters its filesystem: readers and `v_file` then refuse the id with
+the registry's "no filesystem `acme:s3`" message. The fake serves it as
+described in "The fake provider"; the conformance checks of
+`filesystem_conformance` run through the host against it
+(`providers/tests.rs`). `oxplow extension test` has no filesystem suite
+yet: the checks need the fixture tree in the provider, and the kit has no
+way to put it in a read-only one.
 
 **A harness provider** answers what a built-in harness answers in code
 (`.context/agent-model.md` "What a harness implements"). Its title is its

@@ -41,6 +41,11 @@
 //! `knowledge.page.recorded` event; collector `knowledge_pages` streams
 //! the pages changed after the cursor.
 //!
+//! With `OXPLOW_FAKE_CAPABILITY=filesystem` it is a **filesystem provider**
+//! (`filesystem`): it declares [`filesystem_declarations`] (`write` only
+//! with `OXPLOW_FAKE_FEATURES=writable`) and serves an in-memory tree,
+//! seeded from `OXPLOW_FAKE_FILES` (a JSON object of path → base64).
+//!
 //! Two notifications act at once: `fake/changed { collectors? }` makes
 //! it send the host `host/changed` (what a webhook would), and
 //! `fake/exit` makes it exit on its own (status 3).
@@ -116,11 +121,13 @@ use serde_json::{json, Value};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::{oneshot, Mutex};
 
+mod filesystem;
 mod harness;
 mod knowledge;
 mod policy;
 mod snapshots;
 
+pub use filesystem::declarations as filesystem_declarations;
 pub use harness::declarations as harness_declarations;
 pub use knowledge::declarations as knowledge_declarations;
 pub use policy::declarations as policy_declarations;
@@ -144,6 +151,11 @@ pub enum Capability {
     },
     /// A knowledge provider ([`knowledge_declarations`]).
     Knowledge,
+    /// A filesystem provider ([`filesystem_declarations`]); `writable` is
+    /// its feature of that name.
+    FileSystem {
+        writable: bool,
+    },
 }
 
 impl Capability {
@@ -156,14 +168,16 @@ impl Capability {
             "agent_harness" => Ok(Capability::AgentHarness),
             "snapshots" => Ok(Capability::Snapshots { contents: false }),
             "knowledge" => Ok(Capability::Knowledge),
+            "filesystem" => Ok(Capability::FileSystem { writable: false }),
             other => Err(format!(
-                "the fake implements work_items, effort_policy, agent_harness, snapshots or knowledge, not `{other}`"
+                "the fake implements work_items, effort_policy, agent_harness, snapshots, knowledge or filesystem, not `{other}`"
             )),
         }
     }
 
     /// The capability with the features `list` names (`OXPLOW_FAKE_FEATURES`,
-    /// comma-separated); only a snapshots provider has any (`contents`).
+    /// comma-separated); a snapshots provider has `contents`, a filesystem
+    /// provider `writable`.
     pub fn with_features(self, list: Option<&str>) -> Result<Self, String> {
         let mut features = list
             .unwrap_or_default()
@@ -189,7 +203,21 @@ impl Capability {
                 }
                 Ok(Capability::Snapshots { contents })
             }
-            _ => Err("only a snapshots provider takes features".into()),
+            Capability::FileSystem { .. } => {
+                let mut writable = false;
+                for f in features {
+                    match f {
+                        "writable" => writable = true,
+                        other => {
+                            return Err(format!(
+                                "a filesystem provider's feature is `writable`, not `{other}`"
+                            ))
+                        }
+                    }
+                }
+                Ok(Capability::FileSystem { writable })
+            }
+            _ => Err("only a snapshots or filesystem provider takes features".into()),
         }
     }
 }
@@ -484,6 +512,8 @@ struct World {
     /// so a test can see what the host sent.
     last_context: Option<Value>,
     snapshot_marks: snapshots::Marks,
+    /// A filesystem provider's files.
+    files: filesystem::Files,
     /// A knowledge provider's pages, by slug.
     pages: knowledge::Pages,
     hooks: Hooks,
@@ -598,6 +628,11 @@ where
         state,
         ..World::default()
     };
+    if matches!(capability, Capability::FileSystem { .. }) {
+        if let Ok(json) = std::env::var("OXPLOW_FAKE_FILES") {
+            world.files = filesystem::Files::seeded(&json).expect("OXPLOW_FAKE_FILES is valid");
+        }
+    }
     world.restore();
     let world: Shared = Arc::new(Mutex::new(world));
     while let Some(message) = incoming.recv().await {
@@ -760,6 +795,8 @@ async fn handle(
                 knowledge_declarations()
             } else if let Capability::Snapshots { contents } = capability {
                 snapshots_declarations(contents)
+            } else if let Capability::FileSystem { writable } = capability {
+                filesystem_declarations(writable)
             } else if hooks.bad_declarations {
                 bad_declarations()
             } else if hooks.plain_writes {
@@ -891,6 +928,17 @@ async fn handle(
                     let (result, events) =
                         knowledge::answer(&mut w.pages, &mut w.rev, &p.command, &p.input)?;
                     json!({ "result": result, "events": events })
+                }
+                _ if matches!(capability, Capability::FileSystem { .. }) => {
+                    let Capability::FileSystem { writable } = capability else {
+                        unreachable!()
+                    };
+                    let result = world
+                        .lock()
+                        .await
+                        .files
+                        .answer(&p.command, &p.input, writable)?;
+                    json!({ "result": result, "events": [] })
                 }
                 _ if matches!(capability, Capability::Snapshots { .. }) => {
                     let Capability::Snapshots { contents } = capability else {
