@@ -1,5 +1,5 @@
 title: Local History
-description: The stream's snapshots of the working tree, newest first — as a list, or under the git commit each equals. Show every snapshot lifts the cap.
+description: "The stream's snapshots of the working tree, newest first — as a list, or under the git commit each equals."
 icon: history
 category: Activity
 params:

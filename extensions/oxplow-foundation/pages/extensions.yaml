@@ -1,5 +1,5 @@
 title: Extensions
-description: 'Every extension this project knows: what runs, whether its source moved on since, what it may reach, and its deployments — with Deploy, Roll back, Enable, Disable, Remove and Share on each row.'
+description: "Every extension this project knows: what runs, whether its source moved on since, what it may reach, and its deployments."
 icon: package
 category: System
 keywords: deploy rollback permissions enable disable share

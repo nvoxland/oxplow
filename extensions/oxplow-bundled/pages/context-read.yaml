@@ -1,5 +1,5 @@
 title: Context Read
-description: The project docs the agent read during this effort. Compare with what it changed.
+description: "The project docs the agent read during this effort."
 hidden: true
 params:
 - name: effort_id

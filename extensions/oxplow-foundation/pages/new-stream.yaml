@@ -1,5 +1,5 @@
 title: New Stream
-description: A stream is its own worktree and its own threads. Put it on a branch that exists, on a new branch forked from another, or adopt a worktree that is already on disk.
+description: "The form for a new stream, which is its own worktree and its own threads: on an existing branch, on a new branch forked from another, or on an adopted worktree."
 icon: plus
 needs:
 - vcs

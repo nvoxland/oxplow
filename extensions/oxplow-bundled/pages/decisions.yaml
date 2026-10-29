@@ -1,5 +1,5 @@
 title: Decisions Made
-description: Forks the agent resolved on its own during this effort. Check the ones you'd have decided differently.
+description: "Forks the agent resolved on its own during this effort."
 hidden: true
 params:
 - name: effort_id

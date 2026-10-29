@@ -1,5 +1,5 @@
 title: Editor
-description: 'A file of the working tree, edited: unsaved edits shared with every tab showing it, Save writing it. The renderer of a `file` with no `rev` and no `filesystem`.'
+description: "A file of the working tree, edited: unsaved edits shared with every tab showing it. The renderer of a `file` with no `rev` and no `filesystem`."
 label: '{{param.path|basename}}'
 for: oxplow/file
 accepts:

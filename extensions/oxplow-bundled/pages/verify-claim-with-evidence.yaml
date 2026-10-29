@@ -1,5 +1,5 @@
 title: Verify a Claim With Evidence
-description: Mark a claim the agent made verified, citing what backs it — a test run (`oxplow:oxplow/run?id=12`), a file, a commit. Leave the evidence empty if you checked it yourself.
+description: "The form that marks a claim the agent made verified, with what backs it — a test run, a file, a commit — or none when you checked it yourself."
 hidden: true
 params:
 - name: claim

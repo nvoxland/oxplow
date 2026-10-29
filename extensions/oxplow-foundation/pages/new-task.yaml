@@ -1,5 +1,5 @@
 title: New Item
-description: File an item on the active work list - its title, its description, the state it starts in, and the list's own fields.
+description: "The form for a new item on the active work list - its title, description, starting state and the list's own fields."
 icon: plus
 needs:
 - work_items

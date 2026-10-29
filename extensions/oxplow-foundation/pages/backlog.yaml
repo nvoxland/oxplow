@@ -1,5 +1,5 @@
 title: Backlog
-description: The work items on no thread, to pick from or file into. Drag to reorder, mark rows for a bulk change, and right-click for the rest; the search matches a title or any of the work list's own fields.
+description: "The work items on no thread, to pick from or file into."
 icon: inbox
 category: Work
 needs:

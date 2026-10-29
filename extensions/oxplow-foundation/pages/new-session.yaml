@@ -1,5 +1,5 @@
 title: New Session
-description: Start a session on this thread with one of the project's agents, or bring an earlier one back.
+description: "The form for a new session on this thread: one of the project's agents, or an earlier session brought back."
 icon: plus
 params:
 - name: stream_id

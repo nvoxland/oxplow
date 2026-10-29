@@ -1,5 +1,5 @@
 title: Tasks
-description: 'The work items on a thread, on every thread of a stream or on all of them, by state: drag to reorder, onto another row to nest it, mark rows for a bulk change, and right-click for the rest.'
+description: "The work items on a thread, on every thread of a stream or on all of them, by state."
 icon: check-square
 category: Work
 keywords: dashboard work list

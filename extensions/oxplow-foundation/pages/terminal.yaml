@@ -1,5 +1,5 @@
 title: Terminal
-description: The stream's terminals — shells in its worktree — each kept running while you're elsewhere. The strip picks one; its menu renames or closes it.
+description: "The stream's terminals — shells in its worktree — each kept running while you're elsewhere."
 icon: terminal
 category: System
 params:

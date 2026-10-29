@@ -1,5 +1,5 @@
 title: Effort
-description: 'The effort this is of: its title, the task it is linked to and whether it is open. Rename… and Link to task… are buttons; Unlink and Close effort are on the right-click menu.'
+description: "The effort this is of: its title, the task it is linked to and whether it is open."
 hidden: true
 params:
 - name: effort_id

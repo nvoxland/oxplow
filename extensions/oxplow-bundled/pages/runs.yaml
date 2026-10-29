@@ -1,5 +1,5 @@
 title: Extension runs
-description: 'What each extension did in the last 7 days: runs, failures, denials, mean CPU and model calls. The ones needing attention come first; open one for its runs.'
+description: "What each extension did in the last 7 days: runs, failures, denials, mean CPU and model calls. The ones needing attention come first."
 category: Activity
 loaders:
   runs:

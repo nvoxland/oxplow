@@ -1,5 +1,5 @@
 title: Review Prompt
-description: A prompt for reviewing this effort with a second agent. Copy it and paste it into another harness running in this repo.
+description: "A prompt for reviewing this effort with a second agent, for another harness running in this repo."
 hidden: true
 params:
 - name: effort_id

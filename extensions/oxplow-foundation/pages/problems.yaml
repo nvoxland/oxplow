@@ -1,5 +1,5 @@
 title: Problems
-description: What the stream's language servers report now, by file (files with errors first), most severe first within a file. Name a severity to keep only that one.
+description: "What the stream's language servers report now, by file (files with errors first), most severe first within a file."
 icon: triangle-alert
 category: Code
 params:

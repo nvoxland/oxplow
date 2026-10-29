@@ -1,5 +1,5 @@
 title: Uncommitted
-description: 'The stream''s working tree against HEAD: commit it, see the changed files, and the analysis other extensions add.'
+description: "The stream's working tree against HEAD: the changed files, and the analysis other extensions add."
 icon: git-branch
 category: Git
 params:

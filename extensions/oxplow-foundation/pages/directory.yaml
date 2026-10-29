@@ -1,5 +1,5 @@
 title: Directory
-description: A folder's contents, on the stream's worktree or the filesystem and revision its URI names, folders first; each row opens its folder or file. The renderer of oxplow's `dir` resource (`[[dir:src]]`).
+description: "A folder's contents, on the stream's worktree or the filesystem and revision its URI names, folders first. The renderer of oxplow's `dir` resource (`[[dir:src]]`)."
 label: '{{param.path|basename}}'
 for: oxplow/dir
 default: true

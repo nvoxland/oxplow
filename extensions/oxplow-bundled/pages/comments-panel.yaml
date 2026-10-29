@@ -1,5 +1,5 @@
 title: Comments
-description: The stream's open comments, for you and for the agent to act on. Each opens the Comments inbox.
+description: "The stream's open comments, for you and for the agent to act on."
 hidden: true
 params:
 - name: stream_id

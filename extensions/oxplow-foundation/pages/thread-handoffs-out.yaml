@@ -1,5 +1,5 @@
 title: Handoffs From This Thread
-description: Work this thread handed to others, and how each ended. Withdraw one that is still open. Settled ones stay for a week.
+description: "Work this thread handed to others, and how each ended. Settled ones stay for a week."
 hidden: true
 params:
 - name: thread_id

@@ -1,5 +1,5 @@
 title: Job Runs
-description: Each job run — running and queued first, then the last day's — with what it has used so far. Open one to follow its output; Cancel stops it.
+description: "Each job run — running and queued first, then the last day's — with what it has used so far."
 category: Activity
 loaders:
   job_runs:

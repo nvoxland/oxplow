@@ -1,5 +1,5 @@
 title: Failed reactions
-description: Effects that failed on an event. Retry has the effect react again as it is now; if the failed attempt was interrupted, a step outside oxplow may already have run, and a retry sends it again, so it asks first.
+description: "Effects that failed on an event."
 hidden: true
 loaders:
   alerts_reactions:

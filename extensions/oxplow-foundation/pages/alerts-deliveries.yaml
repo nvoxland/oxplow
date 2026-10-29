@@ -1,5 +1,5 @@
 title: Undelivered events
-description: Events a consumer couldn't take. Retry runs the event through its consumer again; Discard gives up on it for that consumer.
+description: "Events a consumer couldn't take, with the consumer of each."
 hidden: true
 answers:
 - {"question":"Which events couldn't be delivered to their consumer?","params":{},"skill":"oxplow-extension"}

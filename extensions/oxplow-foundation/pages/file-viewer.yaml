@@ -1,5 +1,5 @@
 title: File Viewer
-description: A file read-only, on any filesystem at any revision; a binary or very large one says what it is instead. `#lines=12-40` marks lines. Offered for every `file` URI.
+description: "A file read-only, on any filesystem at any revision; a binary or very large one says what it is instead. Offered for every `file` URI."
 label: '{{param.path|basename}}{{row.suffix}}'
 for: oxplow/file
 comments: true

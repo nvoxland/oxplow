@@ -1,5 +1,5 @@
 title: Recent Decisions
-description: Forks your agents resolved in this stream, newest first, recorded or noticed by oxplow. Check the ones you'd have decided differently.
+description: "Forks your agents resolved in this stream, newest first, recorded or noticed by oxplow."
 category: Work
 params:
 - name: stream_id

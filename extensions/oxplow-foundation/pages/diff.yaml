@@ -1,5 +1,5 @@
 title: Diff
-description: 'One file between two revisions, filling the page: the diff with Prev/Next, Ask About This and what other extensions add under the header. `#lines=12` reveals a line.'
+description: "One file between two revisions, filling the page: the diff, and what other extensions add under the header."
 label: '{{param.path}} ({{param.label}})'
 icon: git-compare
 params:

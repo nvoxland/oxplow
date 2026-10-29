@@ -1,5 +1,5 @@
 title: Closed Threads
-description: The stream's closed threads, newest first, with the work each finished. Reopen puts one back on the rail.
+description: "The stream's closed threads, newest first, with the work each finished."
 icon: archive
 category: System
 params:

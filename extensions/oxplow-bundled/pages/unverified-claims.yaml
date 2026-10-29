@@ -1,5 +1,5 @@
 title: Unverified Claims
-description: Things the agent said about its work that nothing backs up — the ones it stated in its report and the ones a model read in its answers. Mark one verified once you've checked it, dismiss one the agent didn't make or didn't mean (it stops counting), or reopen a dismissed one.
+description: "Things the agent said about its work that nothing backs up — the ones it stated in its report and the ones a model read in its answers."
 hidden: true
 params:
 - name: effort_id

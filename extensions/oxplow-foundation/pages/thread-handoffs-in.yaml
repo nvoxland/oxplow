@@ -1,5 +1,5 @@
 title: Handoffs to This Thread
-description: Work other threads handed to this one. Take it on (its work item moves here) or decline it; its sender reads your note. Settled ones stay for a week.
+description: "Work other threads handed to this one, and how each ended. Settled ones stay for a week."
 hidden: true
 params:
 - name: thread_id

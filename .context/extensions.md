@@ -2263,6 +2263,11 @@ a typo is an error at the line):
   `category`, `keywords`, `params`, `for` / `accepts` / `default` /
   `pinned` (a renderer), `comments`, `refresh`, `hidden`, `needs`,
   `actions`, `alert`, `tool`, `answers`, `badge`.
+  A page's `description` says what the page is (what it shows, for
+  what, over which scope and order), not what you can do on it. A page
+  whose purpose is an action (a form to file an item, hand off work or
+  verify a claim) may name that action; never list UI mechanics ("drag
+  to reorder", "right-click for the rest") or the actions on offer.
 - **`loaders:`**: named loaders ("Loaders" below).
 - **`view:`**, and an optional `rail:`: a tree of nodes ("View nodes").
 

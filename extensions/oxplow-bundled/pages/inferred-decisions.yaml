@@ -1,5 +1,5 @@
 title: Decisions Oxplow Noticed
-description: Forks the agent seems to have resolved without recording them, proposed by a model from the effort's conversation and tool calls — the one bound to `oxplow-bundled/reasoning`, else your Main model. Guesses, not the agent's word; check the ones that matter.
+description: "Forks the agent seems to have resolved without recording them, proposed by a model from the effort's conversation and tool calls. Guesses, not the agent's word."
 hidden: true
 params:
 - name: effort_id

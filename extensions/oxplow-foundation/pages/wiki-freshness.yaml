@@ -1,5 +1,5 @@
 title: Wiki Freshness
-description: The files a wiki page cites, each with the snapshot it was pinned to and whether the file has changed since. Mark verified re-pins a file you re-read against the page.
+description: "The files a wiki page cites, each with the snapshot it was pinned to and whether the file has changed since."
 icon: book-open
 category: Knowledge
 params:

@@ -1,5 +1,5 @@
 title: Board
-description: The work items of this thread, the backlog, or everything, as cards in a column per state. Drag a card to a column to move it through the work list; right-click for Move To.
+description: "The work items of this thread, the backlog, or everything, as cards in a column per state."
 icon: columns-3
 category: Work
 keywords: kanban columns state work items
