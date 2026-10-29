@@ -1,5 +1,5 @@
 title: Extension
-description: One extension — where it comes from, what runs, what it contributes, what it may reach, its pages and its deployments. The renderer of oxplow's `extension` resource.
+description: One extension — where it comes from, its version, its permissions and problems, what it contributes and its deployments. The renderer of oxplow's `extension` resource.
 label: '{{param.name}}'
 icon: package
 for: oxplow/extension
@@ -38,7 +38,7 @@ loaders:
     params: { extension: { from: about.extension } }
   about_facts:
     sql: |
-      SELECT a.description, s.origin_text, s.origin_target, s.runs_text, s.permission_items, s.problems_label, s.problems_target,
+      SELECT a.description, s.origin_text, s.origin_target, s.version_text, s.permission_items, s.problems_label, s.problems_target,
              CASE WHEN a.manifest_target IS NOT NULL THEN 'Read its running extension.yaml' END AS manifest,
              a.manifest_target
       FROM about a LEFT JOIN summary s ON s.extension = a.extension
@@ -53,15 +53,15 @@ loaders:
              CASE WHEN p.running_uri IS NOT NULL THEN p.running_uri || '#oxplow.renderer=oxplow-foundation/definition' END AS definition
       FROM about a JOIN v_page p ON p.extension = a.extension
       ORDER BY p.title
-  permissions:
-    sql: |
-      SELECT upper(substr(text, 1, 1)) || substr(text, 2) || '.' AS text FROM reach
   deployments:
     sql: |
+      -- Worded as the Version fact is: the deployment and when, then
+      -- where it came from; the running one says so.
       SELECT d.name, d.hash, d.deployed_at, NOT d.active AS inactive,
-             'Deployment ' || substr(d.hash, 1, 7) || CASE WHEN d.active THEN ', running now' ELSE '' END
+             'Deployment ' || substr(d.hash, 1, 7) || ', deployed ' || strftime('%Y-%m-%d', d.deployed_at)
              || CASE WHEN d."commit" IS NULL THEN '' ELSE ', from commit ' || substr(d."commit", 1, 7)
-                     || CASE WHEN d.dirty THEN ' with uncommitted changes' ELSE '' END END AS text
+                     || CASE WHEN d.dirty THEN ' with uncommitted changes' ELSE '' END END
+             || CASE WHEN d.active THEN ' (running now)' ELSE '' END AS text
       FROM about a JOIN v_extension_deployment d ON d.name = a.extension
       ORDER BY d.deployed_at DESC
 view:
@@ -73,7 +73,7 @@ view:
     columns:
     - { key: description, label: What it is }
     - { key: origin_text, label: From, link: { kind: page, from: origin_target } }
-    - { key: runs_text, label: Runs }
+    - { key: version_text, label: Version }
     - { key: permission_items, label: Permissions, format: items }
     - { key: problems_label, label: Problems, link: { kind: page, from: problems_target } }
     - { key: manifest, label: Manifest, link: { kind: page, from: manifest_target } }
@@ -94,13 +94,6 @@ view:
       empty: Nothing else.
       columns:
       - { key: text, label: Contribution }
-  - id: permissions
-    title: What it may reach
-    viz: list
-    from: permissions
-    empty: Nothing beyond the baseline.
-    columns:
-    - { key: text, label: Permission }
   - id: deployments
     title: Deployments
     viz: list
@@ -108,7 +101,6 @@ view:
     empty: No deployments yet. A deploy copies the extension's source here.
     columns:
     - { key: text, label: Deployment }
-    - { key: deployed_at, label: Deployed, format: relative }
     actions:
     - id: rollback
       label: Roll Back to This

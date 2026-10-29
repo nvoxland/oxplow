@@ -13,7 +13,7 @@ view:
   sections: { title: heading, id: id, link: uri }
   columns:
   - { key: origin_text, label: From, link: { kind: page, from: origin_target } }
-  - { key: runs_text, label: Runs }
+  - { key: version_text, label: Version }
   - { key: permission_items, label: Permissions, format: items }
   - { key: problems_label, label: Problems, link: { kind: page, from: problems_target } }
   empty: No extensions. One you or your agent writes in .oxplow/extensions/ shows here.

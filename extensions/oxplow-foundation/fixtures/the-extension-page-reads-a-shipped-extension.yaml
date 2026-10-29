@@ -1,6 +1,6 @@
-# An extension that ships with oxplow, in words: where it comes from, what
-# runs, what it may reach, its pages with a link to each Definition, and its
-# deployments. The page's actions are the ones its row allows.
+# An extension that ships with oxplow, in words: the same facts as the
+# Extensions page (where it comes from, its version, its permissions, its
+# problems), its pages with a link to each Definition, and its deployments. The page's actions are the ones its row allows.
 when:
   page: oxplow-foundation/extension
   params:
@@ -11,11 +11,7 @@ expect:
   loaders:
     about_facts:
       rows:
-        - { origin_text: Shipped with oxplow, origin_target: null, manifest: Read its running extension.yaml }
-    permissions:
-      rows:
-        contains:
-          - { text: "Read your project's data with SQL." }
+        - { origin_text: Shipped with oxplow, origin_target: null, version_text: $any, permission_items: $any, manifest: Read its running extension.yaml }
     pages:
       rows:
         contains:
@@ -23,6 +19,5 @@ expect:
   nodes:
     - { id: about, kind: viz }
     - { id: pages, kind: viz }
-    - { id: permissions, kind: viz }
     - { id: deployments, kind: viz }
     - { id: runs, kind: slot }

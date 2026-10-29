@@ -32,12 +32,14 @@ loaders:
   summary:
     sql: |
       WITH x AS (
-        SELECT e.name, e.uri, e.origin, e.enabled, e.deployment, e.hash, e.shared, e.pending,
+        SELECT e.name, e.uri, e.origin, e.enabled, e.deployment, e.hash, e.shared, e.pending, e.version,
+               d.deployed_at,
                s.hash AS source_hash, s.path AS source_path,
                COALESCE(h.failing, 0) AS failing, COALESCE(h.disabled, 0) AS disabled,
                json_array_length(e.errors) AS load_problems,
                json_array_length(e.pending) AS awaiting
         FROM v_extension e LEFT JOIN v_extension_source s ON s.name = e.name
+             LEFT JOIN v_extension_deployment d ON d.name = e.name AND d.hash = e.hash
              LEFT JOIN (SELECT extension, sum(state = 'failing') AS failing, sum(state = 'disabled') AS disabled
                         FROM v_contribution_health GROUP BY extension) h ON h.extension = e.name
         WHERE :extension IS NULL OR e.name = :extension
@@ -49,19 +51,22 @@ loaders:
              -- Where it comes from: oxplow's own, or its folder in the project
              -- (a link to that folder).
              CASE WHEN x.origin = 'bundled' THEN 'Shipped with oxplow'
-                  ELSE COALESCE(x.source_path, 'Not on this machine') END AS origin_text,
+                  ELSE COALESCE(x.source_path
+                         || CASE WHEN x.deployment = 'deployed' AND x.source_hash <> x.hash
+                                 THEN ' (changed since it was deployed)' ELSE '' END,
+                       'Not on this machine') END AS origin_text,
              CASE WHEN x.origin <> 'bundled' AND x.source_path IS NOT NULL
                   THEN uri('oxplow/dir', 'path', x.source_path) END AS origin_target,
+             -- Which version runs: its declared version, the deployment and when
+             -- it was deployed.
              CASE x.deployment
-               WHEN 'deployed' THEN 'Deployment ' || substr(x.hash, 1, 7)
-                    || CASE WHEN x.source_hash IS NULL THEN '.'
-                            WHEN x.source_hash <> x.hash THEN '; its source has changed since.'
-                            ELSE '; its source is unchanged.' END
-               WHEN 'shipped' THEN 'The copy that ships with oxplow.'
-               WHEN 'source' THEN 'Its source folder, as it is.'
-               WHEN 'undeployed' THEN 'Nothing: it was never deployed.'
-               ELSE 'Nothing: neither its source nor a deployment is on this machine.' END
-               || CASE WHEN x.enabled THEN '' ELSE ' (Disabled)' END AS runs_text,
+               WHEN 'deployed' THEN COALESCE(x.version || ', ', '') || 'deployment ' || substr(x.hash, 1, 7)
+                    || COALESCE(', deployed ' || strftime('%Y-%m-%d', x.deployed_at), '')
+               WHEN 'shipped' THEN COALESCE(x.version || ', ', '') || 'the copy shipped with oxplow'
+               WHEN 'source' THEN 'Its source folder, as it is'
+               WHEN 'undeployed' THEN 'Never deployed'
+               ELSE 'Not on this machine' END
+               || CASE WHEN x.enabled THEN '' ELSE ' (Disabled)' END AS version_text,
              -- Each scope as it is written, alphabetically, with what it lets
              -- the extension do as its hover.
              NULLIF((SELECT json_group_array(json_object('text', r.scope, 'hint', 'May ' || r.text || '.') ORDER BY r.scope)
@@ -85,7 +90,7 @@ view:
   sections: { title: heading, id: id, link: uri }
   columns:
   - { key: origin_text, label: From, link: { kind: page, from: origin_target } }
-  - { key: runs_text, label: Runs }
+  - { key: version_text, label: Version }
   - { key: permission_items, label: Permissions, format: items }
   - { key: problems_label, label: Problems, link: { kind: page, from: problems_target } }
   empty: No extensions.
