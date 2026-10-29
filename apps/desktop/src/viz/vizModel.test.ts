@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Extension, VizConfig, VizRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
-import { rowMention, markParts, treeNodes, lazyTreeNodes, lazyTreeProblem, drawnTreeRows, wantedBranches, timelineEntries, stepItems, hunkRows, codeRows, diffRow, editorRow, embedRow, parseLines, mergeDirectory, barRows, lineSeries, sparklineValues, numericRowId, treemapItems, cellLinkRef, changedParams, foldEmpty, foldedAway, displayColumns, formatCell, parseParamInput, limitRows, slugify, rowAssistantContext, effortRowId, isTimestamp, rowGroups, rowEmphasized, rowDepth, rowContextRef } from "./vizModel.js";
+import { rowMention, markParts, treeNodes, lazyTreeNodes, lazyTreeProblem, drawnTreeRows, wantedBranches, timelineEntries, stepItems, sectionRows, hunkRows, codeRows, diffRow, editorRow, embedRow, parseLines, mergeDirectory, barRows, lineSeries, sparklineValues, numericRowId, treemapItems, cellLinkRef, changedParams, foldEmpty, foldedAway, displayColumns, formatCell, parseParamInput, limitRows, slugify, rowAssistantContext, effortRowId, isTimestamp, rowGroups, rowEmphasized, rowDepth, rowContextRef } from "./vizModel.js";
 import { formatMetricValue, formatShortDateTime } from "../components/format.js";
 import { diffSpecOf, duplicateBlockOf, isPage, lineOf, pagePayload } from "../tabs/pageRefs.js";
 import type { TabRef } from "../tabs/tabState.js";
@@ -515,6 +515,36 @@ describe("structure components (P6.A2)", () => {
       { label: "test", status: "failed", row: ["test", "failed"] },
       { label: "ship", status: "pending", row: ["ship", "later"] },
     ]);
+  });
+
+  test("sectionRows are a row each in order: title, link, body, and a stable key (id column, else title; repeats numbered)", () => {
+    const l = viz({ viz: "sections", sections: { title: "t", id: null, link: "u", body: "b" } });
+    const out = sectionRows(
+      l,
+      result(["id", "t", "u", "b"], [
+        ["a", "Alpha", "oxplow:oxplow/page?page=x", "hi"],
+        ["b", "Beta", "not a uri", "  "],
+        ["", "", null, null],
+      ]),
+    );
+    expect(out.map((s) => [s.key, s.title, s.link, s.body])).toEqual([
+      ["a", "Alpha", "oxplow:oxplow/page?page=x", "hi"],
+      ["b", "Beta", null, null],
+      ["", "", null, null],
+    ]);
+  });
+
+  test("sectionRows: the named id column wins; without one and no `id`, the title keys the row", () => {
+    const named = viz({ viz: "sections", sections: { title: "t", id: "slug", link: null, body: null } });
+    expect(sectionRows(named, result(["id", "slug", "t"], [["1", "s1", "T"]])).map((s) => s.key)).toEqual(["s1"]);
+    const none = viz({ viz: "sections", sections: { title: "t", id: null, link: null, body: null } });
+    expect(sectionRows(none, result(["t"], [["Same"], ["Same"], ["Other"]])).map((s) => s.key)).toEqual(["Same", "Same-2", "Other"]);
+    expect(sectionRows(viz({ viz: "sections", sections: { title: "gone", id: null, link: null, body: null } }), result(["t"], [["x"]]))).toEqual([]);
+  });
+
+  test("sections' role columns are never facts", () => {
+    const l = viz({ viz: "sections", sections: { title: "t", id: "id", link: "u", body: "b" } });
+    expect(displayColumns(l, ["id", "t", "u", "b", "kind"]).map((c) => c.key)).toEqual(["kind"]);
   });
 
   test("codeRows keep rows naming a file, with their filesystem, revision and marked lines", () => {

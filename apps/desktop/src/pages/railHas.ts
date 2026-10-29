@@ -1,7 +1,7 @@
 /// Whether a page's rail has anything to draw, decided from its run before
 /// anything is drawn (`.context/usability.md` "A page's controls are in its
 /// rail"): the "Details" card exists only when something is in it.
-import { CONTENTS_FROM } from "../viz/Contents.js";
+import { CONTENTS_FROM, CONTENTS_SUBSECTIONS_MAX } from "../viz/Contents.js";
 import { nodeById } from "../viz/nodeRun.js";
 import type { Node, PageRun, RunNode } from "../tauri-bridge/generated/bindings.js";
 import { emptySections } from "./PageTree.js";
@@ -9,12 +9,18 @@ import { emptySections } from "./PageTree.js";
 /** The titled sections a page draws that Contents would list: a stack's
  *  or slot's children with a title (a hidden heading counts: it stays in
  *  the page for Contents), less the ones folded away for having nothing.
- *  Mirrors `PageTree`'s drawing of `placement="section"`. */
+ *  Mirrors `PageTree`'s drawing of `placement="section"`, and counts a
+ *  `sections` viz's subsections (up to `CONTENTS_SUBSECTIONS_MAX`). */
 function sectionCount(run: PageRun): number {
   const walk = (run: PageRun, at: RunNode): number => {
     const def = nodeById(run.page, at.id);
     if (!def) return 0;
     let n = 0;
+    // A `sections` viz's subsections, Contents lists only up to its cap.
+    if (def.kind === "viz" && def.config.viz === "sections") {
+      const rows = (def.from !== null && run.loaders[def.from]?.result?.rows.length) || 0;
+      if (rows <= CONTENTS_SUBSECTIONS_MAX) n += rows;
+    }
     if (def.kind === "stack" || def.kind === "slot") {
       const folded = def.kind === "stack" ? emptySections(run, at) : [];
       n += at.children.filter((c) => !folded.some((f) => f.id === c.id) && titleOf(run, c)).length;

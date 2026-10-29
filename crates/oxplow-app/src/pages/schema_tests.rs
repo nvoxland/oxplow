@@ -399,9 +399,9 @@ fn unknown_keys_are_refused() {
     let e = refused("title: T\nquery: SELECT 1\nview: { markdown: hi, id: m }\n");
     assert!(e.contains("query"), "{e}");
     let e = refused(
-        "title: T\nloaders:\n  a: { sql: SELECT 1 }\nview: { viz: table, from: a, sections: [] }\n",
+        "title: T\nloaders:\n  a: { sql: SELECT 1 }\nview: { viz: table, from: a, bogus: [] }\n",
     );
-    assert!(e.contains("sections"), "{e}");
+    assert!(e.contains("bogus"), "{e}");
 }
 
 /// An inline page (a markdown block's, an agent's one-off) only reads.
@@ -920,4 +920,54 @@ fn a_loaders_chain_is_what_it_reads_and_nothing_else() {
     .unwrap();
     assert_eq!(p.loader_chain("d"), ["content", "a", "b", "d"]);
     assert_eq!(p.loader_chain("c"), ["c"]);
+}
+
+/// A `sections` viz parses its role block beside `columns` and `empty`; it
+/// is a row viz, so a whole-node action can't name it.
+#[test]
+fn a_sections_viz_parses_its_role_block() {
+    let p = page(
+        "title: T\nloaders:\n  q: { rows: [{ id: a, name: A }] }\nview:\n  viz: sections\n  from: q\n  sections: { title: name, id: id, link: uri, body: note }\n  columns: [{ key: kind }]\n  empty: Nothing here\n",
+    )
+    .expect("loads");
+    let crate::pages::schema::NodeKind::Viz { config, .. } = &p.view.kind else {
+        panic!("a viz")
+    };
+    assert_eq!(config.viz, Viz::Sections);
+    let s = config.sections.clone().unwrap();
+    assert_eq!(s.title.as_deref(), Some("name"));
+    assert_eq!(s.id.as_deref(), Some("id"));
+    assert_eq!(s.link.as_deref(), Some("uri"));
+    assert_eq!(s.body.as_deref(), Some("note"));
+    assert_eq!(config.empty.as_deref(), Some("Nothing here"));
+    assert_eq!(
+        config
+            .role_columns()
+            .iter()
+            .map(|(b, k)| format!("{b}:{k}"))
+            .collect::<Vec<_>>(),
+        [
+            "sections:name",
+            "sections:id",
+            "sections:uri",
+            "sections:note"
+        ]
+    );
+}
+
+/// A `sections` viz with no `title` column is refused at load, naming the
+/// block to write.
+#[test]
+fn a_sections_viz_without_a_title_column_is_refused() {
+    let why = refused(
+        "title: T\nloaders:\n  q: { rows: [{ a: 1 }] }\nview: { viz: sections, from: q }\n",
+    );
+    assert!(
+        why.contains("viz `sections` needs `sections: { title: <column> }`"),
+        "{why}"
+    );
+    let why = refused(
+        "title: T\nloaders:\n  q: { rows: [{ a: 1 }] }\nview: { viz: sections, from: q, sections: { body: a } }\n",
+    );
+    assert!(why.contains("title: <column>"), "{why}");
 }

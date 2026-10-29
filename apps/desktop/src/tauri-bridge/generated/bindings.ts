@@ -6053,6 +6053,14 @@ export type Viz =
 /**  The first row as label/value pairs (the displayed columns). */
 "detail" |
 /**
+ *  One subsection per row, in row order: a heading (`sections.title`,
+ *  linked through `sections.link`), the row's `columns` as a short
+ *  facts list and its `sections.body` as markdown. The subsections
+ *  are real sections of the page: in Contents (up to a cap), each
+ *  with the viz's row actions.
+ */
+"sections" |
+/**
  *  The rows as cards in columns, one column per `group` value (its
  *  `values` first, in order, empty ones too); a card is drawn as a
  *  list row. A drag action moves a card between columns.
@@ -6183,6 +6191,7 @@ export type VizConfig_Deserialize = {
 	tree: VizTree | null,
 	timeline: VizTimeline | null,
 	steps: VizSteps | null,
+	sections: VizSections | null,
 	hunks: VizHunks | null,
 	code: VizCode | null,
 	diff: VizDiff | null,
@@ -6234,6 +6243,7 @@ export type VizConfig_Serialize = {
 	tree: VizTree | null,
 	timeline: VizTimeline | null,
 	steps: VizSteps | null,
+	sections: VizSections | null,
 	hunks: VizHunks | null,
 	code: VizCode | null,
 	diff: VizDiff | null,
@@ -6383,6 +6393,24 @@ export type VizRun_Serialize = {
 	/**  The parameter values actually used (supplied or default). */
 	params: { [key in string]: SqlCell },
 	result: SqlQueryResult,
+};
+
+/**
+ *  `sections` viz: the columns of each row's subsection. The row's other
+ *  displayed `columns` are its facts.
+ */
+export type VizSections = {
+	/**  The column holding the heading's text. */
+	title: string | null,
+	/**
+	 *  A column holding a stable key for the row (names its subsection's
+	 *  `data-node`): `id` when the result has one, else the title.
+	 */
+	id?: string | null,
+	/**  A column holding a URI the heading links to. */
+	link?: string | null,
+	/**  A column of markdown drawn under the heading and the facts. */
+	body?: string | null,
 };
 
 /**  `steps` viz: each step's text and status. */

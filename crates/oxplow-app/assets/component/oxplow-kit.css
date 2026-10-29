@@ -141,7 +141,7 @@
 /* A section that drew nothing under its heading (not one folded shut)
    takes no space; the rail's Contents skips it too. */
 .ox-section:empty,
-.ox-section:not([data-collapsed]):not(:has(> :not(.ox-section-head))) { display: none; }
+.ox-section:not([data-collapsed]):not([data-keep]):not(:has(> :not(.ox-section-head))) { display: none; }
 .ox-section-head {
   display: flex;
   align-items: baseline;
@@ -151,6 +151,10 @@
   border-bottom: 1px solid var(--border-subtle);
 }
 .ox-section-title { flex: 1; margin: 0; font-size: var(--text-lg); font-weight: var(--weight-medium); line-height: var(--leading-tight); }
+/* A section inside a section (a `sections` viz's subsection) is a smaller
+   heading, closer to the one above. */
+.ox-section:not([data-level="2"]) { margin-top: var(--space-4); }
+.ox-section:not([data-level="2"]) > .ox-section-head > .ox-section-title { font-size: var(--text-md); }
 .ox-section-toggle { display: flex; align-items: baseline; gap: var(--space-2); width: 100%; padding: 0; border: none; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .ox-section-chevron { width: 1em; flex-shrink: 0; color: var(--text-muted); }
 .ox-section-desc { margin: 0 0 var(--space-3); color: var(--text-secondary); font-size: var(--text-sm); }

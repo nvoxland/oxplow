@@ -57,7 +57,7 @@ loaders:
       SELECT uri, title, updated_at FROM v_work_item
       WHERE state = 'blocked' AND thread_id = :thread_id
 view:
-  viz: table            # table | list | tree | number | markdown | bar | line | treemap | board | custom | ...
+  viz: table            # table | list | sections | tree | number | markdown | bar | line | treemap | board | custom | ...
   from: blocked
   columns:
     - { key: title, label: Item, link: { kind: page, from: uri } }
@@ -117,6 +117,25 @@ makes a cell clickable: `page` (any oxplow URI, such as a work item's),
 `file` (with `line:`), `wiki`, `commit`, `metric`. `select: <param>` makes
 a click set that param, so a detail section that reads it re-runs: master and
 detail with no code.
+
+### One section per thing
+
+When a page is about several things, give each its own heading instead of
+a table row. `viz: sections` draws one subsection per row of its loader:
+
+```yaml
+view:
+  viz: sections
+  from: things
+  sections: { title: name, id: id, link: uri, body: summary }
+  columns: [{ key: kind, label: Kind }]
+```
+
+Each row gets a heading (a link when `link` names a column holding a page's
+URI), its `columns` as a short list of facts, and `body` (a column of
+markdown). Give the rows a stable `id` column. The subsections are real
+sections: the page's Contents lists them under their heading, as long as
+there are 12 or fewer. A row's `actions` are in its right-click menu.
 
 ### Grouping and styling rows
 

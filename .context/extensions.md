@@ -920,6 +920,7 @@ the user guide is `docs/guide/pages.md`.
     `tree.parent`; orphans are roots, a cycle is cut; `lazy` and `branch`
     read one level per param value), `timeline` (oldest first, linked
     through `timeline.uri`), `detail` (the first row as label/value pairs),
+    `sections` (a subsection per row — see **`sections`** below),
     `steps` (a checklist by `steps.status`: done, active, failed, else
     pending) and `hunks` (each row's file diffed between `hunks.from` and
     `hunks.to` in the diff viewer, `DiffPane`, one expanded at a time).
@@ -936,7 +937,7 @@ the user guide is `docs/guide/pages.md`.
     rendering names its command (an agent runs the command itself). The
     loader drops a page whose viz node lacks the column roles its viz
     needs, naming the block (`chart`, `tree`, `timeline`, `steps`,
-    `hunks`), and `oxplow_validate_extension` checks every named column
+    `sections`, `hunks`), and `oxplow_validate_extension` checks every named column
     exists in the loader's result (`VizConfig::role_columns`). Pure data
     shaping lives in `vizModel.ts` (`barRows`, `lineSeries`, `treemapItems`,
     `treeNodes`, `timelineEntries`, `stepItems`, `hunkRows`).
@@ -2495,7 +2496,8 @@ unique in the page. `#node=<id>` in a link lands on it. `title`,
 `markdown: { text: <column> }`, else its first column, drawn by the one
 Markdown component, `.context/markdown.md`; with an `edit` action it is
 that component's editor, saving through the action), `bar`, `line`,
-`treemap`, `tree`, `timeline`, `detail`, `steps`, `hunks`, `board` (the
+`treemap`, `tree`, `timeline`, `detail`, `sections` (a subsection per
+row: **`sections`**, below), `steps`, `hunks`, `board` (the
 groups as columns of cards, each a list row; needs `group`, whose
 `values: [..]` fix the columns' order and keep empty ones as drop
 targets), `terminal` (a terminal per row, `terminal: { of, title?,
@@ -2513,11 +2515,36 @@ and `custom` (below). `terminal`, `editor`, `embed`, `form`, `approvals`
 and `custom` are refused in an inline page. A viz that fills its page
 (`code`, `diff`, `editor`, `terminal`, `embed`) draws no in-body title.
 
+**`sections`** (`viz: sections`; `VizSections`, `SectionsViz.tsx`,
+`sectionRows` in `vizModel.ts`) — a thing gets a section, not a row
+(`.context/usability.md` "Pages are informational"). One subsection per
+row, in row order: `sections: { title, id?, link?, body? }` (`title`
+required; `link` a column holding a URI the heading links to; `body` a
+column of markdown, drawn by the one Markdown component) and the viz's
+`columns` as a short `Facts` list (the role columns are never facts; with
+no `columns`, every other column is). `empty` and `when:` per row work as
+for any viz. A subsection is a real section of the page, drawn by the viz
+rather than made a `RunNode` per row: `kit/Section.tsx` chrome whose
+heading level is one below the enclosing section (`SectionLevelContext`:
+`h2` at the top, `h3` inside a section), kept when it has only a heading
+(`keepEmpty`), and a `data-node` of `<viz node>/<row key>`. The key is the
+`sections.id` column, else a column named `id`, else the title (a repeat
+gets `-2`, `-3`) — so give a `sections` loader a stable `id`. Row `actions`
+are in each subsection's right-click menu (and a `primary` one on click),
+as for a `list` row. Contents lists subsections under their parent up to
+`CONTENTS_SUBSECTIONS_MAX` (12; `viz/Contents.tsx`, the one constant, also
+what `railHas` counts with): the viz's root carries `data-sections=<rows>`
+and a longer one is skipped, its parent alone listed. It adds no width:
+subsections stay in the reading column. Agent text: a `###` heading (the
+link in parentheses), the facts as `**label**: value` lines, then the body.
+The Definition page's View outline reads it as "Sections of `loader`".
+
 Each component names the columns it draws from in its own block: `chart`
 (`x`, `y`, `series`, `label`, `size`, `group`, and a `line`'s `targets`: a
 target line from that column's last non-null value), `tree` (`id`,
 `parent`, `label`; lazy: `lazy`, `branch`), `timeline` (`at`, `label`,
-`uri`), `steps` (`label`, `status`), `hunks` (`path`, `from`, `to` — two
+`uri`), `steps` (`label`, `status`), `sections` (`title`; optional `id`,
+`link`, `body`), `hunks` (`path`, `from`, `to` — two
 revisions, `working` / `snap:<id>` / `git:<rev>`), `code` (`path`,
 `revision`; optional `lines`, a column holding `12-40` or `12`, marked and
 revealed, and `sync: true`), `diff` (`path`, `from`, `to`, optional
@@ -3309,7 +3336,7 @@ what the component shows and what an agent reads). An agent reads a
 ``(custom component `<id>`: it shows the page's loaders)``.
 `check_extension` checks that the declared commands are registered, and
 warns when a custom viz also fills a kit role block (`chart`, `tree`,
-`timeline`, `steps`, `hunks`, `code`, `diff`, `editor`, `embed`,
+`timeline`, `steps`, `sections`, `hunks`, `code`, `diff`, `editor`, `embed`,
 `terminal`) — the kit may already render it. That is the honest extent of
 a "this reimplements the kit" lint.
 
@@ -5270,7 +5297,8 @@ tool: open_work              # offered as <namespace>_open_work
   pivots to one column per series with each series' total; a treemap
   lists labels by size, largest first; a tree is an indented list; a
   timeline is `at — label (URI)` lines oldest first; a detail is
-  `**label**: value` lines; steps are a numbered `[x]`/`[>]`/`[!]`/`[ ]`
+  `**label**: value` lines; sections are a `### title (URI)` heading per
+  row, its `**label**: value` facts, then its body; steps are a numbered `[x]`/`[>]`/`[!]`/`[ ]`
   checklist; hunks are each file's unified diff between its two revisions
   (up to 20 files, 8 KB each). What a node needs beyond its rows — the
   hunks' diffs, a `code` node's files, an `approvals` node's proposals —

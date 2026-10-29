@@ -1,8 +1,18 @@
-import type { CSSProperties, ReactNode } from "react";
+import { createContext, useContext, type CSSProperties, type ReactNode } from "react";
 
 import { useSectionCollapse } from "../components/CollapsibleSections.js";
 import { ActionButtons } from "./ActionButtons.js";
 import type { PageAction } from "./actions.js";
+
+/** The heading level of the section a part of the page is in: a section
+ *  draws its heading one level below (`h2` at the top of a page, `h3` in
+ *  a section, to `h6`), so a nested section nests in the outline. */
+const SectionLevelContext = createContext(1);
+
+/** The heading level a section drawn here gets. */
+export function useSectionLevel(): 2 | 3 | 4 | 5 | 6 {
+  return Math.min(useContext(SectionLevelContext) + 1, 6) as 2 | 3 | 4 | 5 | 6;
+}
 
 export interface SectionProps {
   /** The section's stable id: what an extension's mount names to go
@@ -27,6 +37,9 @@ export interface SectionProps {
   /** It takes the height left in its page (a document's last section when
    *  the document fills): a flex column its body stretches in. */
   fill?: boolean;
+  /** It stays when nothing is under its heading (a subsection of a
+   *  `sections` viz: a thing with only a name still has its section). */
+  keepEmpty?: boolean;
   children?: ReactNode;
 }
 
@@ -43,62 +56,69 @@ export function Section({
   collapsible = false,
   defaultCollapsed = false,
   fill = false,
+  keepEmpty = false,
   children,
 }: SectionProps) {
+  const level = useSectionLevel();
+  const Heading = `h${level}` as "h2";
   const collapse = useSectionCollapse(id, collapsible, defaultCollapsed);
   const open = collapse ? collapse.expanded : true;
   return (
-    <section
-      className="ox-section"
-      data-section={id}
-      data-title-hidden={hideTitle ? "true" : undefined}
-      // Folded shut: its heading alone is all it shows, not an empty section.
-      data-collapsed={open ? undefined : "true"}
-      data-testid={testId ?? (collapse ? `${collapse.prefix}-group-${id}` : undefined)}
-      style={fill ? (hideTitle ? hiddenFillStyle : fillStyle) : undefined}
-    >
-      <div className={hideTitle && !actions && !source ? "ox-section-head ox-sr-only" : "ox-section-head"}>
-        <h2 className={hideTitle ? "ox-section-title ox-sr-only" : "ox-section-title"}>
-          {collapse ? (
-            // The toggle sits INSIDE the heading: it stays a heading for the
-            // outline, and a real button gets the keyboard for free.
-            <button
-              type="button"
-              className="ox-section-toggle"
-              data-testid={`${collapse.prefix}-section-toggle-${id}`}
-              aria-expanded={collapse.expanded}
-              onClick={collapse.toggle}
-            >
-              <span aria-hidden className="ox-section-chevron">
-                {collapse.expanded ? "▾" : "▸"}
-              </span>
-              <span>{title}</span>
-            </button>
+    <SectionLevelContext.Provider value={level}>
+      <section
+        className="ox-section"
+        data-section={id}
+        data-level={level}
+        data-keep={keepEmpty ? "true" : undefined}
+        data-title-hidden={hideTitle ? "true" : undefined}
+        // Folded shut: its heading alone is all it shows, not an empty section.
+        data-collapsed={open ? undefined : "true"}
+        data-testid={testId ?? (collapse ? `${collapse.prefix}-group-${id}` : undefined)}
+        style={fill ? (hideTitle ? hiddenFillStyle : fillStyle) : undefined}
+      >
+        <div className={hideTitle && !actions && !source ? "ox-section-head ox-sr-only" : "ox-section-head"}>
+          <Heading className={hideTitle ? "ox-section-title ox-sr-only" : "ox-section-title"}>
+            {collapse ? (
+              // The toggle sits INSIDE the heading: it stays a heading for the
+              // outline, and a real button gets the keyboard for free.
+              <button
+                type="button"
+                className="ox-section-toggle"
+                data-testid={`${collapse.prefix}-section-toggle-${id}`}
+                aria-expanded={collapse.expanded}
+                onClick={collapse.toggle}
+              >
+                <span aria-hidden className="ox-section-chevron">
+                  {collapse.expanded ? "▾" : "▸"}
+                </span>
+                <span>{title}</span>
+              </button>
+            ) : (
+              title
+            )}
+          </Heading>
+          {source ? (
+            <span className="ox-badge" data-source={source} title={`Added by the ${source} extension`}>
+              {source}
+            </span>
+          ) : null}
+          {actions ? <ActionButtons actions={actions} /> : null}
+        </div>
+        {open ? (
+          collapse ? (
+            <div data-testid={`${collapse.prefix}-section-body-${id}`} style={fill ? fillStyle : undefined}>
+              {description ? <p className="ox-section-desc">{description}</p> : null}
+              {children}
+            </div>
           ) : (
-            title
-          )}
-        </h2>
-        {source ? (
-          <span className="ox-badge" data-source={source} title={`Added by the ${source} extension`}>
-            {source}
-          </span>
+            <>
+              {description ? <p className="ox-section-desc">{description}</p> : null}
+              {children}
+            </>
+          )
         ) : null}
-        {actions ? <ActionButtons actions={actions} /> : null}
-      </div>
-      {open ? (
-        collapse ? (
-          <div data-testid={`${collapse.prefix}-section-body-${id}`} style={fill ? fillStyle : undefined}>
-            {description ? <p className="ox-section-desc">{description}</p> : null}
-            {children}
-          </div>
-        ) : (
-          <>
-            {description ? <p className="ox-section-desc">{description}</p> : null}
-            {children}
-          </>
-        )
-      ) : null}
-    </section>
+      </section>
+    </SectionLevelContext.Provider>
   );
 }
 

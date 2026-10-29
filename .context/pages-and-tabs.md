@@ -611,7 +611,9 @@ from the run: with nothing in it (no switch, `filter` or `selection` param,
 `Page` draws no Details card and the body takes the full width. Contents is
 automatic only for a page that does not fill: four or more titled
 sections (as `viz/Contents.tsx` lists them) or markdown that may have
-headings; About this page in the ☰ (the tab's
+headings. A `sections` viz's subsections are sections too, listed one
+level in under their parent up to `CONTENTS_SUBSECTIONS_MAX` rows (12;
+more and only the parent is listed; `railHas` counts the same); About this page in the ☰ (the tab's
 modal, `components/TabModal.tsx`, titled About this page: the page's `description`, then `PageAbout`'s
 facts — Id, Definition (a link: `runningUri` drawn as Definition with the
 run's params), origin, what runs (no Title or Extension row: the nav bar

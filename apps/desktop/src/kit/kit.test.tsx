@@ -29,6 +29,35 @@ test("a Section is an h2 with its description, actions and body, and carries its
   expect(getByText("body")).toBeTruthy();
 });
 
+// A section in a section nests in the outline: one heading level deeper.
+test("a Section inside a Section draws its heading one level below, down to h6, and keepEmpty is marked", () => {
+  const { container } = render(
+    <Section title="One">
+      <Section title="Two" keepEmpty>
+        <Section title="Three">
+          <Section title="Four">
+            <Section title="Five">
+              <Section title="Six">
+                <Section title="Seven">x</Section>
+              </Section>
+            </Section>
+          </Section>
+        </Section>
+      </Section>
+    </Section>,
+  );
+  expect(Array.from(container.querySelectorAll(".ox-section-title")).map((h) => `${h.tagName}:${h.textContent}`)).toEqual([
+    "H2:One",
+    "H3:Two",
+    "H4:Three",
+    "H5:Four",
+    "H6:Five",
+    "H6:Six",
+    "H6:Seven",
+  ]);
+  expect(container.querySelectorAll("[data-keep]").length).toBe(1);
+});
+
 // Actions are data; core draws them. A primary one is the accent button.
 test("ActionButtons draws each action, the primary one marked, busy and disabled honoured", () => {
   const ran: string[] = [];

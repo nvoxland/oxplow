@@ -69,7 +69,9 @@ export function markParts(text: string, needle: string): { text: string; mark: b
 /** The columns that style rows rather than show as cells: `group.by`,
  *  `emphasis` and `depth`. */
 function stylingColumns(viz: VizConfig): string[] {
-  return [viz.group?.by, viz.emphasis, viz.depth].filter((c): c is string => !!c);
+  // A `sections` viz's role columns are its heading and body, never facts.
+  const s = viz.viz === "sections" ? viz.sections : null;
+  return [viz.group?.by, viz.emphasis, viz.depth, s?.title, s?.id, s?.link, s?.body].filter((c): c is string => !!c);
 }
 
 /** Columns to render, in order. Declared `columns` win (skipping keys the
@@ -628,6 +630,46 @@ export function timelineEntries(
       row: result.rows[i]!,
     }))
     .sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
+}
+
+/** One subsection of a `sections` viz: a row. */
+export interface SectionRow {
+  /** Stable per row: its `id` column (`sections.id`, else a column named
+   *  `id`), else its title; a repeat gets `-2`, `-3`, … so keys are unique. */
+  key: string;
+  title: string;
+  /** The page its heading links to (`sections.link`: a URI), if any. */
+  link: LinkTarget | null;
+  /** Its markdown, if any. */
+  body: string | null;
+  row: SqlCell[];
+}
+
+/** `sections` viz: a subsection per row, in row order. A row with no
+ *  title shows its key. */
+export function sectionRows(viz: VizConfig, result: SqlQueryResult): SectionRow[] {
+  const titles = columnValues(result, viz.sections?.title);
+  if (!titles) return [];
+  const keys = columnValues(result, viz.sections?.id ?? (result.columns.includes("id") ? "id" : null));
+  const links = columnValues(result, viz.sections?.link);
+  const bodies = columnValues(result, viz.sections?.body);
+  const seen = new Map<string, number>();
+  return titles.map((t, i) => {
+    const title = formatCell(t);
+    const raw = keys?.[i];
+    const base = raw !== null && raw !== undefined && raw !== "" ? String(raw) : title;
+    const n = (seen.get(base) ?? 0) + 1;
+    seen.set(base, n);
+    const link = links?.[i];
+    const body = bodies?.[i];
+    return {
+      key: n === 1 ? base : `${base}-${n}`,
+      title: title === "" ? base : title,
+      link: typeof link === "string" && link !== "" && parseUri(link) ? link : null,
+      body: body === null || body === undefined || String(body).trim() === "" ? null : String(body),
+      row: result.rows[i] ?? [],
+    };
+  });
 }
 
 export type StepStatus = "done" | "active" | "failed" | "pending";

@@ -2,6 +2,9 @@
  * A page's Contents, in its rail: the markdown headings (`h2`, `h3`) in
  * the page's body and, once there are four or more, its sections'
  * headings, in order, the one on screen marked; a click scrolls to it.
+ * A section nested in another (a `sections` viz's subsections) is listed
+ * under its parent, unless its viz has more than
+ * `CONTENTS_SUBSECTIONS_MAX` rows: then none of them is.
  * Nothing is declared: a page whose body has markdown with headings (a
  * viewer or an editor, `.oxplow-md`) or a document of several sections
  * gets it, one without shows nothing. It follows the body as it changes
@@ -17,10 +20,23 @@ interface Heading {
   level: 2 | 3;
 }
 
-const HEADINGS = ".oxplow-md h2, .oxplow-md h3, h2.ox-section-title";
+const HEADINGS = ".oxplow-md h2, .oxplow-md h3, .ox-section-title";
 const SECTION_HEADING = "ox-section-title";
 /** Sections a page has before Contents lists them. */
 export const CONTENTS_FROM = 4;
+/** The most subsections of one `sections` viz Contents lists, under their
+ *  parent. A viz with more rows (every page of an extension, a hundred
+ *  of them) is a long document to scroll or search, not an outline: it
+ *  shows only its parent. The one constant — `railHas` counts with it. */
+export const CONTENTS_SUBSECTIONS_MAX = 12;
+/** What a `sections` viz's root carries: its row count. */
+export const SUBSECTIONS_ATTR = "data-sections";
+
+/** Whether `el` is in a `sections` viz too long to list. */
+function inLongSections(el: HTMLElement): boolean {
+  const group = el.closest<HTMLElement>(`[${SUBSECTIONS_ATTR}]`);
+  return !!group && Number(group.getAttribute(SUBSECTIONS_ATTR)) > CONTENTS_SUBSECTIONS_MAX;
+}
 
 /** The element that scrolls `el`: itself or its nearest ancestor that does. */
 function scrollParent(el: HTMLElement): HTMLElement | null {
@@ -32,18 +48,20 @@ function scrollParent(el: HTMLElement): HTMLElement | null {
 }
 
 /** A section that drew nothing under its heading (not one folded shut):
- *  hidden (the kit's `.ox-section` rule), so not a place to go to. */
+ *  hidden (the kit's `.ox-section` rule), so not a place to go to. A
+ *  section that `keepEmpty` is drawn, so it stays. */
 function emptySection(el: HTMLElement): boolean {
   const section = el.closest<HTMLElement>(".ox-section");
   return (
     !!section &&
+    !section.hasAttribute("data-keep") &&
     !section.hasAttribute("data-collapsed") &&
     Array.from(section.children).every((c) => c.classList.contains("ox-section-head"))
   );
 }
 
 function headingsIn(root: HTMLElement): Heading[] {
-  const all = Array.from(root.querySelectorAll<HTMLElement>(HEADINGS)).filter((el) => !emptySection(el));
+  const all = Array.from(root.querySelectorAll<HTMLElement>(HEADINGS)).filter((el) => !emptySection(el) && !inLongSections(el));
   const sections = all.filter((el) => el.classList.contains(SECTION_HEADING)).length;
   return all
     .filter((el) => sections >= CONTENTS_FROM || !el.classList.contains(SECTION_HEADING))

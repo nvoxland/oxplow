@@ -29,7 +29,9 @@ links. Concretely:
 
 - **A thing gets a section, not a row.** A page about several things
   (every extension, every failing contribution) gives each its own headed
-  section with its facts in words; a wide table of ids and codes is the
+  section with its facts in words — `viz: sections` over the loader draws
+  one subsection per row (a linked heading, facts, a markdown body, row
+  actions), in Contents up to 12 of them; a wide table of ids and codes is the
   exception, kept for data that is really tabular (a page's params, a
   diff's files).
 - **Say it in words.** "may run its own SQL over your data", not

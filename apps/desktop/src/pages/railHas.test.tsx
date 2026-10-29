@@ -3,6 +3,7 @@ import { cleanup, render } from "@testing-library/react";
 
 import { PageHost } from "./PageHost.js";
 import { contentsHas, railHas } from "./railHas.js";
+import { CONTENTS_SUBSECTIONS_MAX } from "../viz/Contents.js";
 import { decl, fakePage, fakePageRuns, fakeRun, loader, node } from "./testing/fakeRun.js";
 import type { PageKey } from "../pageRuns.js";
 import type { Node, PageParam } from "../tauri-bridge/generated/bindings.js";
@@ -18,6 +19,17 @@ const selection = { name: "picked", role: "selection", type: "text" } as PagePar
 const run = (view: Node, params: PageParam[] = [], rail: Node | null = null) =>
   fakeRun(fakePage(view, { params, rail, loaders: [decl("items")] }), { loaders: { items, other: items } });
 const sections = (n: number) => node.stack("s", Array.from({ length: n }, (_, i) => node.viz(`v${i}`, "items", cols, { title: `Section ${i}` })));
+const withSections = (rows: number, pad = 0) =>
+  fakeRun(
+    fakePage(
+      node.stack("s", [
+        node.viz("pages", "many", { viz: "sections", columns: [{ key: "id" }], sections: { title: "id" } } as never, { title: "Pages" }),
+        ...Array.from({ length: pad }, (_, i) => node.viz(`v${i}`, "items", cols, { title: `Other ${i}` })),
+      ]),
+      { loaders: [decl("items"), decl("many")] },
+    ),
+    { loaders: { items, many: loader(["id"], Array.from({ length: rows }, (_, i) => [`r${i}`])) } },
+  );
 const filling = () => node.viz("file", "items", { ...cols, fills: true });
 const no = { fills: false, saveOpen: false };
 
@@ -90,4 +102,18 @@ test("PageHost: a document page with no rail keeps the reading column", async ()
   const some = host(run(sections(1), [filter]));
   await some.findByTestId("page-rail-filters");
   expect(some.getByTestId("page-rail-center").className).toContain("reading");
+});
+
+// A `sections` viz's subsections are sections Contents lists, up to the cap.
+test("contentsHas: a sections viz's rows count as sections up to the cap, and past it only the parent does", () => {
+  const max = CONTENTS_SUBSECTIONS_MAX;
+  // The parent's own heading is one section; each row is another.
+  expect(contentsHas(withSections(2, 0), false)).toBe(false);
+  expect(contentsHas(withSections(3, 0), false)).toBe(true);
+  expect(contentsHas(withSections(max, 0), false)).toBe(true);
+  // Past the cap: the parent alone is a section, below the minimum...
+  expect(contentsHas(withSections(max + 1, 0), false)).toBe(false);
+  // ...and with others beside it, they are the ones counted.
+  expect(contentsHas(withSections(max + 100, 2), false)).toBe(false);
+  expect(contentsHas(withSections(max + 100, 3), false)).toBe(true);
 });

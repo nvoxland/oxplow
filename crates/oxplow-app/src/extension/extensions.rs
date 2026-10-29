@@ -2909,6 +2909,10 @@ pub(crate) fn shape_problem(cfg: &VizConfig, components: &[String]) -> Option<St
             let s = cfg.steps.clone().unwrap_or_default();
             need("steps", &[("label", &s.label)])
         }
+        Viz::Sections => {
+            let s = cfg.sections.clone().unwrap_or_default();
+            need("sections", &[("title", &s.title)])
+        }
         Viz::Code => {
             let c = cfg.code.clone().unwrap_or_default();
             need("code", &[("path", &c.path), ("revision", &c.revision)])
@@ -3409,6 +3413,7 @@ fn check_components(
                 ("tree", l.tree.is_some()),
                 ("timeline", l.timeline.is_some()),
                 ("steps", l.steps.is_some()),
+                ("sections", l.sections.is_some()),
                 ("hunks", l.hunks.is_some()),
                 ("code", l.code.is_some()),
                 ("diff", l.diff.is_some()),
@@ -7187,6 +7192,57 @@ commands:
             errs.contains("a.yaml: node `q`: steps column `gone`"),
             "{errs}"
         );
+    }
+
+    /// A `sections` viz parses its role block; it needs a `title`, and
+    /// every column it names (title, id, link, body) must be in the
+    /// loader's result.
+    #[tokio::test]
+    async fn sections_need_a_title_and_name_columns_the_loader_has() {
+        let (d, ext) = load_x(
+            &[
+                (
+                    "ok",
+                    &viz_page(
+                        "",
+                        "SELECT 'a' AS id, 'A' AS name, 'oxplow:x/y' AS uri, 'hi' AS note",
+                        "viz: sections\nsections: { title: name, id: id, link: uri, body: note }\n",
+                    ),
+                ),
+                ("notitle", &viz_page("", "SELECT 1", "viz: sections\n")),
+                (
+                    "gone",
+                    &viz_page(
+                        "",
+                        "SELECT 'A' AS name",
+                        "viz: sections\nsections: { title: name, link: nolink, body: nobody, id: noid }\n",
+                    ),
+                ),
+            ],
+            "",
+        );
+        let ok = node(&ext, "ok")
+            .expect("loads")
+            .sections
+            .as_ref()
+            .unwrap()
+            .clone();
+        assert_eq!(ok.title.as_deref(), Some("name"));
+        assert_eq!(ok.link.as_deref(), Some("uri"));
+        assert_eq!(ok.body.as_deref(), Some("note"));
+        assert!(node(&ext, "notitle").is_none());
+        let errs = ext.errors.join("\n");
+        assert!(
+            errs.contains("notitle.yaml") && errs.contains("`sections: { title: <column> }`"),
+            "{errs}"
+        );
+        let v = validate_extension(&layer().await, &cat(), d.path(), "x", None)
+            .await
+            .unwrap();
+        let errs = v.errors.join("\n");
+        for k in ["nolink", "nobody", "noid"] {
+            assert!(errs.contains(&format!("sections column `{k}`")), "{errs}");
+        }
     }
 
     #[tokio::test]

@@ -62,6 +62,21 @@ Rows come from the loader (a viz has no query). A viz that reads no rows
   (a param with a `default`, the top level) and `branch: <column>`, one
   level per param value (`WHERE parent = :folder`); a folder opens by
   setting the param to its `id`.
+- `sections`: one subsection per row, in row order: `sections: { title:
+  <column>, id?, link?, body? }`. Use it when a page is about several
+  things (every extension, every failing check, every page of one): each
+  thing gets a headed section, not a table row (a wide table is for data
+  that is really tabular). Under its heading (a link when `link` names a
+  column holding a URI) a subsection draws the viz's `columns` as a short
+  facts list, then `body` (a column of markdown). Its `id` column (default:
+  a column named `id`, else the title) keys the subsection (`data-node`
+  `<node id>/<id>`), so give it a stable one. The viz's row `actions` are
+  in each subsection's right-click menu (`when:` per row, as for a row). The
+  subsections are real sections: their heading is one level below the
+  section the viz is in, and the page's Contents lists them under it up to
+  12 rows; a longer viz (100+ pages) lists only its parent. It stays in
+  the reading column. An agent reads each as a `###` heading with its facts
+  and body.
 - `board`: groups as columns of cards: `group: { by: <column>, values:
   [<columns in order>] }`. `timeline`, `steps`: ordered events or stages.
 - `code`: each row's file read-only, on a filesystem at a revision (a
@@ -79,6 +94,34 @@ Rows come from the loader (a viz has no query). A viz that reads no rows
 
 An inline page (`markdown-blocks.md`) may not use `form`, `approvals`,
 `terminal`, `editor`, `custom`, actions, components or slots.
+
+### Example: `sections`
+
+```yaml page
+title: Things
+loaders:
+  things:
+    sql: |
+      SELECT name AS id, name, uri, kind, summary, failing FROM v_thing ORDER BY name
+view:
+  stack:
+    - title: Things
+      viz: sections
+      from: things
+      sections: { title: name, id: id, link: uri, body: summary }
+      columns:
+        - { key: kind, label: Kind }
+      empty: Nothing here yet.
+      actions:
+        - { id: fix, label: Repair, command: x.thing.repair, row: true,
+            when: failing, input: { name: "{{row.id}}" } }
+```
+
+Each `things` row is a subsection of "Things": the name as a heading
+linking to its page, "Kind" as a fact, `summary` as markdown, and Repair in
+its right-click menu where `failing` is set. A "Problems" line is one more
+`body` line (a link in markdown); nesting is by what the SQL puts in
+`body`.
 
 ## Columns
 

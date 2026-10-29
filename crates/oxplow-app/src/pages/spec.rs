@@ -43,6 +43,12 @@ pub enum Viz {
     Timeline,
     /// The first row as label/value pairs (the displayed columns).
     Detail,
+    /// One subsection per row, in row order: a heading (`sections.title`,
+    /// linked through `sections.link`), the row's `columns` as a short
+    /// facts list and its `sections.body` as markdown. The subsections
+    /// are real sections of the page: in Contents (up to a cap), each
+    /// with the viz's row actions.
+    Sections,
     /// The rows as cards in columns, one column per `group` value (its
     /// `values` first, in order, empty ones too); a card is drawn as a
     /// list row. A drag action moves a card between columns.
@@ -302,6 +308,27 @@ pub struct VizTimeline {
 pub struct VizSteps {
     pub label: Option<String>,
     pub status: Option<String>,
+}
+
+/// `sections` viz: the columns of each row's subsection. The row's other
+/// displayed `columns` are its facts.
+#[derive(
+    Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
+)]
+#[serde(deny_unknown_fields)]
+pub struct VizSections {
+    /// The column holding the heading's text.
+    pub title: Option<String>,
+    /// A column holding a stable key for the row (names its subsection's
+    /// `data-node`): `id` when the result has one, else the title.
+    #[serde(default)]
+    pub id: Option<String>,
+    /// A column holding a URI the heading links to.
+    #[serde(default)]
+    pub link: Option<String>,
+    /// A column of markdown drawn under the heading and the facts.
+    #[serde(default)]
+    pub body: Option<String>,
 }
 
 /// What becomes of the page a viz is on after one of its actions (or its
@@ -1818,6 +1845,7 @@ pub struct VizConfig {
     pub tree: Option<VizTree>,
     pub timeline: Option<VizTimeline>,
     pub steps: Option<VizSteps>,
+    pub sections: Option<VizSections>,
     pub hunks: Option<VizHunks>,
     pub code: Option<VizCode>,
     pub diff: Option<VizDiff>,
@@ -1913,6 +1941,14 @@ impl VizConfig {
                     .into_iter()
                     .flatten()
                     .map(|k| ("steps", k)),
+            );
+        }
+        if let Some(s) = &self.sections {
+            out.extend(
+                [&s.title, &s.id, &s.link, &s.body]
+                    .into_iter()
+                    .flatten()
+                    .map(|k| ("sections", k)),
             );
         }
         if let Some(h) = &self.hunks {

@@ -317,6 +317,7 @@ pub fn render(run: &VizRun, resolved: &Resolved) -> String {
         Viz::Tree => tree(run),
         Viz::Timeline => timeline(run),
         Viz::Detail => detail(run),
+        Viz::Sections => sections(run),
         // A board reads as its columns, each a section of its cards.
         Viz::Board => table(run),
         Viz::Steps => steps(run),
@@ -621,6 +622,51 @@ fn detail(run: &VizRun) -> String {
         .map(|(i, l)| format!("**{l}**: {}", row.get(i).map(cell).unwrap_or_default()))
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+/// Sections: per row, a `###` heading (its link after it), the row's
+/// displayed `columns` as label/value lines, then its markdown body — as
+/// the person reads the subsections. The role columns are not facts.
+fn sections(run: &VizRun) -> String {
+    let s = run.config.sections.clone().unwrap_or_default();
+    let Some(title) = column(run, s.title.as_ref()) else {
+        return table(run);
+    };
+    let link = column(run, s.link.as_ref());
+    let body = column(run, s.body.as_ref());
+    let role: Vec<usize> = [Some(title), link, body, column(run, s.id.as_ref())]
+        .into_iter()
+        .flatten()
+        .collect();
+    let facts: Vec<(usize, String)> = shown(run)
+        .into_iter()
+        .filter(|(i, _)| !role.contains(i))
+        .collect();
+    let blocks: Vec<String> = run
+        .result
+        .rows
+        .iter()
+        .map(|r| {
+            let at = |i: usize| r.get(i).map(cell).filter(|v| !v.is_empty());
+            let mut out = format!("### {}", at(title).unwrap_or_default());
+            if let Some(uri) = link.and_then(at) {
+                out.push_str(&format!(" ({uri})"));
+            }
+            for (i, label) in &facts {
+                out.push_str(&format!("\n**{label}**: {}", at(*i).unwrap_or_default()));
+            }
+            if let Some(text) = body.and_then(at) {
+                out.push_str(&format!("\n\n{text}"));
+            }
+            out
+        })
+        .collect();
+    let more = blocks.len().saturating_sub(MAX_ROWS);
+    let mut out: Vec<String> = blocks.into_iter().take(MAX_ROWS).collect();
+    if more > 0 {
+        out.push(format!("({more} more rows)"));
+    }
+    out.join("\n\n")
 }
 
 /// Steps: a numbered checklist — `[x]` done, `[>]` active, `[!]` failed,
@@ -994,6 +1040,7 @@ mod tests {
                 tree: None,
                 timeline: None,
                 steps: None,
+                sections: None,
                 hunks: None,
                 code: None,
                 diff: None,
@@ -1260,6 +1307,61 @@ mod tests {
         assert_eq!(
             render(&r, &Resolved::default()),
             "**title**: Fix it\n**state**: done"
+        );
+    }
+
+    /// Sections read as the person sees them: a heading per row (its link
+    /// after it), its facts as label/value lines, then its markdown body;
+    /// the role columns are not facts.
+    #[test]
+    fn sections_are_a_heading_per_row_with_facts_and_body() {
+        let r = with(
+            run(
+                Viz::Sections,
+                None,
+                &["id", "name", "uri", "kind", "note"],
+                vec![
+                    vec![
+                        t("a"),
+                        t("Alpha"),
+                        t("oxplow:x/a"),
+                        t("ships"),
+                        t("Says **hi**."),
+                    ],
+                    vec![
+                        t("b"),
+                        t("Beta"),
+                        SqlCell::Null(()),
+                        t("local"),
+                        SqlCell::Null(()),
+                    ],
+                ],
+            ),
+            |l| {
+                l.sections = Some(crate::pages::spec::VizSections {
+                    title: Some("name".into()),
+                    id: Some("id".into()),
+                    link: Some("uri".into()),
+                    body: Some("note".into()),
+                });
+                l.columns = vec![crate::pages::spec::PageColumn {
+                    key: "kind".into(),
+                    label: Some("Kind".into()),
+                    link: None,
+                    unit: None,
+                    icon: None,
+                    tone: None,
+                    width: None,
+                    format: None,
+                    highlight: None,
+                    select: None,
+                    expand: None,
+                }];
+            },
+        );
+        assert_eq!(
+            render(&r, &Resolved::default()),
+            "### Alpha (oxplow:x/a)\n**Kind**: ships\n\nSays **hi**.\n\n### Beta\n**Kind**: local"
         );
     }
 

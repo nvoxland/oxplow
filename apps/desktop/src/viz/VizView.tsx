@@ -38,6 +38,7 @@ import {
   displayColumns,
   formatCell,
   hunkRows,
+  sectionRows,
   isTimestamp,
   markParts,
   limitRows,
@@ -83,6 +84,7 @@ import { CodeViz } from "./CodeViz.js";
 import { DiffViz } from "./DiffViz.js";
 import { DataTable, type DataColumn, type RowProps } from "../kit/DataTable.js";
 import { Facts } from "../kit/Facts.js";
+import { SectionsViz } from "./SectionsViz.js";
 import { Stat } from "../kit/Stat.js";
 import { recordOpError } from "../opErrors.js";
 import { showToast } from "../components/toastStore.js";
@@ -1075,6 +1077,24 @@ function Viz({
       return <TimelineViz entries={timelineEntries(viz, result)} onOpenPage={onOpenPage} rowMenu={rowMenu} />;
     case "detail":
       return <DetailViz row={result.rows[0]!} cols={cols} cell={cell} rowMenu={rowMenu} />;
+    case "sections":
+      return (
+        <SectionsViz
+          node={viz.slug}
+          sections={sectionRows(viz, result)}
+          facts={(row) => cols.map((c) => ({ key: c.key, label: c.label, value: cell(row, c) }))}
+          rowMenu={rowMenu}
+          heading={(s) =>
+            s.link ? (
+              <RouteLink to={s.link} onNavigate={tabNavigate(s.link, onOpenPage)} style={linkStyle}>
+                {s.title}
+              </RouteLink>
+            ) : (
+              s.title
+            )
+          }
+        />
+      );
     case "steps":
       return <StepsViz steps={stepItems(viz, result)} rowMenu={rowMenu} />;
     case "approvals":

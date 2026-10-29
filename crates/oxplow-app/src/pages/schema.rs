@@ -25,7 +25,7 @@ use crate::pages::spec::{
     holds_one_row, parse_actions, typed, AlertFile, FormSpec, LauncherCategory, PageAction,
     PageAlert, PageColumn, PageParam, PageProvenance, ParamRole, ViewContext, Viz, VizChart,
     VizCode, VizConfig, VizCustom, VizDiff, VizEditor, VizEmbed, VizGroup, VizHunks, VizMarkdown,
-    VizSteps, VizTerminal, VizTimeline, VizTree,
+    VizSections, VizSteps, VizTerminal, VizTimeline, VizTree,
 };
 
 /// A loaded page.
@@ -464,6 +464,8 @@ struct VizFile {
     timeline: Option<VizTimeline>,
     #[serde(default)]
     steps: Option<VizSteps>,
+    #[serde(default)]
+    sections: Option<VizSections>,
     #[serde(default)]
     hunks: Option<VizHunks>,
     #[serde(default)]
@@ -1364,6 +1366,7 @@ fn leaf_viz(
         tree: f.tree,
         timeline: f.timeline,
         steps: f.steps,
+        sections: f.sections,
         hunks: f.hunks,
         code: f.code,
         diff: f.diff,
