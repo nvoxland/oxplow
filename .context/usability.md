@@ -30,10 +30,19 @@ links. Concretely:
 - **A thing gets a section, not a row.** A page about several things
   (every extension, every failing contribution) gives each its own headed
   section with its facts in words — `viz: sections` over the loader draws
-  one subsection per row (a linked heading, facts, a markdown body, row
-  actions), in Contents up to 12 of them; a wide table of ids and codes is the
+  one subsection per row (a heading, facts, a markdown body, row
+  actions), in Contents up to 10 of them, then "… N more"; a wide table of ids and codes is the
   exception, kept for data that is really tabular (a page's params, a
   diff's files).
+- **A heading is never a link; a heading whose thing has a page gets the
+  arrow.** An arrow icon (`OpenPageLink`, `kit/OpenPageLink.tsx`) right
+  after the heading text — the same icon everywhere, used for nothing else,
+  link-coloured, a button named and titled "Open <heading>" — opens that
+  thing's own page. Never turn the heading text into the link.
+- **A list of small things is items, inline.** A fact or cell that holds
+  several short things (an extension's permissions) is a column with
+  `format: items`: drawn inline separated by " · ", each item's `hint` its
+  hover text, its `uri` a link. Not a comma-joined string, not a table.
 - **Say it in words.** "may run its own SQL over your data", not
   `sql` or `1`; "ships with oxplow", not `bundled`.
 - **Link everything that has a page,** and give a thing that is named
@@ -91,11 +100,15 @@ markdown itself, nor edits it in a `<textarea>`.
   (`components/TabModal.tsx`): About this page, every page/viz action
   form (`FormModal`), a custom component's forms (`frameForms.tsx`) and
   the confirmation a command asks for in a tab (`CommandConfirm`). It
-  sits inside the tab's body, covering only that tab (the tab strip, rail
-  and other tabs stay usable), is as tall as its content, and has a
-  title, an optional subtitle (what it is about, in words, never an id)
-  and a ×. Escape, × and Cancel close it; a click outside doesn't (a
-  half-filled form isn't lost); focus goes into it and back on close.
+  docks at the right of the page's area under its nav bar, covering only
+  that page's body (the nav bar, tab strip, rail and other tabs stay
+  usable), is as tall as its content, wears the nav bar's background so
+  it reads as chrome, and has a title, an optional subtitle (what it is
+  about, in words, never an id) and a ×. Escape, × and Cancel close it,
+  and so does a click outside it — until something in it was typed or
+  changed: then a click outside keeps it open, flashes its edge in the
+  accent and says why ("You changed something here…"), so a stray click
+  never loses a half-filled form. Focus goes into it and back on close.
   It is the tab body's own state, and tab bodies stay mounted while
   another tab shows, so it is still open, typed values kept, when the
   person returns. Window-level dialogs that are not about one tab's
@@ -143,8 +156,11 @@ markdown itself, nor edits it in a `<textarea>`.
   name ("Settings: Agents"). A link that means one place opens its area
   with `section` — one of the area's section ids or an anchor inside one
   (`settings-data-delivery`) — and the page scrolls there. A page of
-  four sections or more lists them in its rail (Contents), those whose
-  heading is hidden (`hide_title`) too. A declared document does the same with `view:
+  two sections or more (a `sections` viz's rows count) lists them in its
+  rail (Contents; a single section gets none), those whose heading is
+  hidden (`hide_title`) too; a `sections` viz's rows are listed under
+  their parent, the first 10, then one "… N more" that scrolls to the parent
+  (`CONTENTS_SUBSECTIONS_MAX`). A declared document does the same with `view:
   <param>`: the one section in view is the page, the others are its rail,
   a change of section is pushed (Back returns), and the launcher lists
   each section by name. On any page `#section=<id>` lands on that

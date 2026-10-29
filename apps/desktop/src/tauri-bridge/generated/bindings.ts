@@ -1407,7 +1407,14 @@ export type ColumnFormat =
  */
 "sparkline" |
 /**  A short value as a pill, in the column's `tone`. */
-"badge";
+"badge" |
+/**
+ *  A list of items (a JSON array): each element is a string or
+ *  `{ "text": …, "hint"?: …, "uri"?: … }`, drawn inline separated by
+ *  ` · `; `hint` is the item's hover text, `uri` makes it a link. An
+ *  agent reads them joined by ` · `, a hint in parentheses.
+ */
+"items";
 
 /**  Makes a column's cells link to a page. */
 export type ColumnLink = {
@@ -6341,7 +6348,7 @@ export type VizEmbed = {
 export type VizGroup = {
 	/**  The column whose value groups the rows (not shown as a cell). */
 	by: string,
-	/**  The heading's link; `from` defaults to `by`. */
+	/**  The heading's arrow (its page); `from` defaults to `by`. */
 	link?: ColumnLink | null,
 	/**
 	 *  The groups in this order, shown even when no row has the value
@@ -6407,10 +6414,22 @@ export type VizSections = {
 	 *  `data-node`): `id` when the result has one, else the title.
 	 */
 	id?: string | null,
-	/**  A column holding a URI the heading links to. */
+	/**  A column holding a URI the heading's arrow opens. */
 	link?: string | null,
 	/**  A column of markdown drawn under the heading and the facts. */
 	body?: string | null,
+	/**
+	 *  A column whose value groups the rows: rows with the same value (in
+	 *  the order each first appears) go under one heading, a section one
+	 *  level above the rows' subsections. A row with no value is drawn
+	 *  outside any group, at the groups' level.
+	 */
+	group?: string | null,
+	/**
+	 *  A column holding a URI the group heading's arrow opens (read from
+	 *  the group's first row).
+	 */
+	group_link?: string | null,
 };
 
 /**  `steps` viz: each step's text and status. */

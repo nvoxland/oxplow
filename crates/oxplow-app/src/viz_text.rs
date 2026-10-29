@@ -12,7 +12,7 @@ use std::path::Path;
 use oxplow_db::SqlCell;
 use oxplow_domain::DomainError;
 
-use crate::pages::spec::{Viz, VizRun};
+use crate::pages::spec::{ColumnFormat, Viz, VizRun};
 
 /// Rows a table-like rendering shows before saying how many more there
 /// are.
@@ -367,6 +367,48 @@ fn cell(c: &SqlCell) -> String {
     }
 }
 
+/// An `items` cell: a JSON array of strings and `{ text, hint? }` objects
+/// as `text (hint) · text`. A value that isn't such a list reads as it is.
+fn items(c: &SqlCell) -> String {
+    let raw = cell(c);
+    let Ok(serde_json::Value::Array(list)) = serde_json::from_str::<serde_json::Value>(&raw) else {
+        return raw;
+    };
+    list.iter()
+        .filter_map(|item| match item {
+            serde_json::Value::String(text) => Some(text.clone()),
+            serde_json::Value::Object(o) => {
+                let text = o.get("text")?.as_str()?;
+                Some(match o.get("hint").and_then(|h| h.as_str()) {
+                    Some(hint) if !hint.is_empty() => format!("{text} ({hint})"),
+                    _ => text.to_string(),
+                })
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join(" · ")
+}
+
+/// Row `r`'s value in result column `i`, as the person reads it: an
+/// `items` column as its items.
+fn value(run: &VizRun, r: &[SqlCell], i: usize) -> String {
+    let Some(c) = r.get(i) else {
+        return String::new();
+    };
+    let is_items = run.result.columns.get(i).is_some_and(|key| {
+        run.config
+            .columns
+            .iter()
+            .any(|c| &c.key == key && c.format == Some(ColumnFormat::Items))
+    });
+    if is_items {
+        items(c)
+    } else {
+        cell(c)
+    }
+}
+
 fn number(c: &SqlCell) -> Option<f64> {
     match c {
         SqlCell::Int(i) => Some(*i as f64),
@@ -415,10 +457,7 @@ fn table(run: &VizRun) -> String {
     let shown = shown(run);
     let header: Vec<String> = shown.iter().map(|(_, l)| l.clone()).collect();
     let line = |r: &Vec<SqlCell>| -> Vec<String> {
-        shown
-            .iter()
-            .map(|(i, _)| r.get(*i).map(cell).unwrap_or_default())
-            .collect()
+        shown.iter().map(|(i, _)| value(run, r, *i)).collect()
     };
     let by = run
         .config
@@ -619,14 +658,17 @@ fn detail(run: &VizRun) -> String {
     };
     shown(run)
         .into_iter()
-        .map(|(i, l)| format!("**{l}**: {}", row.get(i).map(cell).unwrap_or_default()))
+        .map(|(i, l)| format!("**{l}**: {}", value(run, row, i)))
         .collect::<Vec<_>>()
         .join("\n")
 }
 
 /// Sections: per row, a `###` heading (its link after it), the row's
 /// displayed `columns` as label/value lines, then its markdown body — as
-/// the person reads the subsections. The role columns are not facts.
+/// the person reads the subsections. The role columns are not facts. With
+/// a `group`, a `###` heading per group (its link after it, groups in the
+/// order each first appears) and the rows' headings one level deeper; a
+/// row with no group stays at the groups' level.
 fn sections(run: &VizRun) -> String {
     let s = run.config.sections.clone().unwrap_or_default();
     let Some(title) = column(run, s.title.as_ref()) else {
@@ -634,31 +676,75 @@ fn sections(run: &VizRun) -> String {
     };
     let link = column(run, s.link.as_ref());
     let body = column(run, s.body.as_ref());
-    let role: Vec<usize> = [Some(title), link, body, column(run, s.id.as_ref())]
-        .into_iter()
-        .flatten()
-        .collect();
+    let group = column(run, s.group.as_ref());
+    let group_link = column(run, s.group_link.as_ref());
+    let role: Vec<usize> = [
+        Some(title),
+        link,
+        body,
+        column(run, s.id.as_ref()),
+        group,
+        group_link,
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
     let facts: Vec<(usize, String)> = shown(run)
         .into_iter()
         .filter(|(i, _)| !role.contains(i))
         .collect();
-    let blocks: Vec<String> = run
-        .result
-        .rows
+    let block = |r: &Vec<SqlCell>, hashes: &str| {
+        let at = |i: usize| Some(value(run, r, i)).filter(|v| !v.is_empty());
+        let mut out = format!("{hashes} {}", at(title).unwrap_or_default());
+        if let Some(uri) = link.and_then(at) {
+            out.push_str(&format!(" ({uri})"));
+        }
+        for (i, label) in &facts {
+            out.push_str(&format!("\n**{label}**: {}", at(*i).unwrap_or_default()));
+        }
+        if let Some(text) = body.and_then(at) {
+            out.push_str(&format!("\n\n{text}"));
+        }
+        out
+    };
+    let named = |r: &Vec<SqlCell>| group.map(|g| value(run, r, g)).filter(|v| !v.is_empty());
+    // Each group once, in the order it first appears, with its rows; a row
+    // with no group is a block of its own where it falls.
+    enum Part<'a> {
+        Group(String, &'a Vec<SqlCell>, Vec<&'a Vec<SqlCell>>),
+        Loose(&'a Vec<SqlCell>),
+    }
+    let mut parts: Vec<Part> = Vec::new();
+    for r in &run.result.rows {
+        match named(r) {
+            Some(name) => match parts.iter_mut().find_map(|p| match p {
+                Part::Group(n, _, rows) if *n == name => Some(rows),
+                _ => None,
+            }) {
+                Some(rows) => rows.push(r),
+                None => parts.push(Part::Group(name, r, vec![r])),
+            },
+            None => parts.push(Part::Loose(r)),
+        }
+    }
+    let blocks: Vec<String> = parts
         .iter()
-        .map(|r| {
-            let at = |i: usize| r.get(i).map(cell).filter(|v| !v.is_empty());
-            let mut out = format!("### {}", at(title).unwrap_or_default());
-            if let Some(uri) = link.and_then(at) {
-                out.push_str(&format!(" ({uri})"));
+        .map(|p| match p {
+            Part::Loose(r) => block(r, "###"),
+            Part::Group(name, first, rows) => {
+                let mut out = format!("### {name}");
+                if let Some(uri) = group_link
+                    .map(|g| value(run, first, g))
+                    .filter(|v| !v.is_empty())
+                {
+                    out.push_str(&format!(" ({uri})"));
+                }
+                for r in rows {
+                    out.push_str("\n\n");
+                    out.push_str(&block(r, "####"));
+                }
+                out
             }
-            for (i, label) in &facts {
-                out.push_str(&format!("\n**{label}**: {}", at(*i).unwrap_or_default()));
-            }
-            if let Some(text) = body.and_then(at) {
-                out.push_str(&format!("\n\n{text}"));
-            }
-            out
         })
         .collect();
     let more = blocks.len().saturating_sub(MAX_ROWS);
@@ -1343,6 +1429,7 @@ mod tests {
                     id: Some("id".into()),
                     link: Some("uri".into()),
                     body: Some("note".into()),
+                    ..Default::default()
                 });
                 l.columns = vec![crate::pages::spec::PageColumn {
                     key: "kind".into(),
@@ -1362,6 +1449,89 @@ mod tests {
         assert_eq!(
             render(&r, &Resolved::default()),
             "### Alpha (oxplow:x/a)\n**Kind**: ships\n\nSays **hi**.\n\n### Beta\n**Kind**: local"
+        );
+    }
+
+    /// A grouped `sections` viz reads a heading per group (its link after
+    /// it), the rows' headings one level deeper, groups in the order each
+    /// first appears; a row with no group is a heading at the groups' level.
+    #[test]
+    fn grouped_sections_nest_their_rows_under_the_group_heading() {
+        let r = with(
+            run(
+                Viz::Sections,
+                None,
+                &["name", "ext", "ext_uri", "kind"],
+                vec![
+                    vec![t("P1"), t("Alpha"), t("oxplow:x/alpha"), t("a")],
+                    vec![t("Q1"), t("Beta"), SqlCell::Null(()), t("b")],
+                    vec![t("P2"), t("Alpha"), t("oxplow:x/alpha"), t("c")],
+                    vec![t("Loose"), SqlCell::Null(()), SqlCell::Null(()), t("d")],
+                ],
+            ),
+            |l| {
+                l.sections = Some(crate::pages::spec::VizSections {
+                    title: Some("name".into()),
+                    group: Some("ext".into()),
+                    group_link: Some("ext_uri".into()),
+                    ..Default::default()
+                });
+                l.columns = vec![crate::pages::spec::PageColumn {
+                    key: "kind".into(),
+                    label: Some("Kind".into()),
+                    link: None,
+                    unit: None,
+                    icon: None,
+                    tone: None,
+                    width: None,
+                    format: None,
+                    highlight: None,
+                    select: None,
+                    expand: None,
+                }];
+            },
+        );
+        assert_eq!(
+            render(&r, &Resolved::default()),
+            "### Alpha (oxplow:x/alpha)\n\n#### P1\n**Kind**: a\n\n#### P2\n**Kind**: c\n\n### Beta\n\n#### Q1\n**Kind**: b\n\n### Loose\n**Kind**: d"
+        );
+    }
+
+    /// An `items` column reads as its items joined by " · ", a hint in
+    /// parentheses; a value that is not a list of items reads as it is.
+    #[test]
+    fn an_items_column_reads_as_its_items_with_hints() {
+        let items = r#"["plain",{"text":"sql.read","hint":"may run its own SQL"},{"text":"to","uri":"oxplow:x/y"}]"#;
+        let r = with(
+            run(
+                Viz::Detail,
+                None,
+                &["perms", "other"],
+                vec![vec![t(items), t("[1]")]],
+            ),
+            |l| {
+                let col = |key: &str, format| crate::pages::spec::PageColumn {
+                    key: key.into(),
+                    label: None,
+                    link: None,
+                    unit: None,
+                    icon: None,
+                    tone: None,
+                    width: None,
+                    format,
+                    highlight: None,
+                    select: None,
+                    expand: None,
+                };
+                l.columns = vec![
+                    col("perms", Some(crate::pages::spec::ColumnFormat::Items)),
+                    col("other", None),
+                ];
+            },
+        );
+        assert_eq!(
+            render(&r, &Resolved::default()),
+            "**perms**: plain · sql.read (may run its own SQL) · to\n**other**: [1]"
         );
     }
 

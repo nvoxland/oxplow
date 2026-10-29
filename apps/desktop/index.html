@@ -103,6 +103,9 @@
            headers and stream headers read as intentional chrome in dark
            mode. Composited over --surface-card. */
         --panel-header-bg: rgba(108, 156, 246, 0.12);
+        /* What comes out of the chrome (a tab's dialog, every menu): the
+           panel-header tint over the card, opaque. */
+        --surface-chrome: linear-gradient(var(--panel-header-bg), var(--panel-header-bg)), var(--surface-card);
         --surface-stream-tile: #c9d0dc;
         --text-on-stream-tile: #12161c;
         --surface-thread-tab: rgba(255, 255, 255, 0.04);
@@ -252,6 +255,12 @@
       @keyframes oxplow-pulse {
         0%, 100% { opacity: 1; }
         50% { opacity: 0.35; }
+      }
+      /* A tab dialog kept open by a click outside it (something in it was
+         changed): its edge flashes the accent twice. */
+      @keyframes oxplow-kept {
+        0%, 50%, 100% { box-shadow: -8px 8px 24px rgba(0, 0, 0, 0.28), 0 0 0 0 var(--accent); }
+        25%, 75% { box-shadow: -8px 8px 24px rgba(0, 0, 0, 0.28), 0 0 0 3px var(--accent); }
       }
       /* Indeterminate progress: a slim accent bar slides across the track. */
       @keyframes oxplow-progress-indeterminate {

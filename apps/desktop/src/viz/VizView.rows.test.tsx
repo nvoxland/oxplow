@@ -77,13 +77,16 @@ const grouped: Partial<VizConfig> = {
   actions: [{ id: "add", label: "+", command: "oxplow.work_item.create", input: {}, row: false, group: "Ready" }],
 };
 
-test("a grouped list puts its rows under a heading per value, in order, and the heading links", () => {
+test("a grouped list puts its rows under a heading per value, in order, and the heading has an arrow to its page", () => {
   const view = render(<VizView run={runOf(grouped)} compact onOpenPage={() => {}} />);
   const headings = view.getAllByTestId("viz-group-heading");
   expect(headings.map((h) => h.getAttribute("data-group"))).toEqual(["In progress", "Ready"]);
-  expect(headings[0]!.querySelector("[data-testid=viz-group-link]")?.textContent).toBe("In progress");
-  // "Ready" has no ref: plain text, not a link.
-  expect(headings[1]!.querySelector("[data-testid=viz-group-link]")).toBeNull();
+  // The heading text is plain; a group with a ref has the arrow after it.
+  expect(headings[0]!.querySelector("[data-testid=open-page-link]")?.getAttribute("title")).toBe("Open In progress");
+  expect(headings[0]!.querySelector("button[data-testid=open-page-link]")?.textContent).toBe("");
+  expect(headings[0]!.textContent).toContain("In progress");
+  // "Ready" has no ref: no arrow.
+  expect(headings[1]!.querySelector("[data-testid=open-page-link]")).toBeNull();
   // The group column isn't a cell.
   expect(view.getByTestId("viz-row-0").textContent).not.toContain("In progress");
   expect(view.getByTestId("viz-row-2").textContent).toContain("Next");
@@ -258,7 +261,7 @@ test("a link to a ref of any kind opens through the page's openRef", () => {
     </PageNavigationContext.Provider>,
   );
   fireEvent.click(view.getByTestId("viz-row-2").querySelector("button")!);
-  fireEvent.click(view.getAllByTestId("viz-group-link")[0]!, { metaKey: true });
+  fireEvent.click(view.getAllByTestId("open-page-link")[0]!, { metaKey: true });
   expect(opened).toEqual([
     ["oxplow:oxplow/work_item?id=tsk3&provider=oxplow", false],
     ["oxplow:oxplow/page?page=tasks", true],

@@ -71,7 +71,7 @@ export function markParts(text: string, needle: string): { text: string; mark: b
 function stylingColumns(viz: VizConfig): string[] {
   // A `sections` viz's role columns are its heading and body, never facts.
   const s = viz.viz === "sections" ? viz.sections : null;
-  return [viz.group?.by, viz.emphasis, viz.depth, s?.title, s?.id, s?.link, s?.body].filter((c): c is string => !!c);
+  return [viz.group?.by, viz.emphasis, viz.depth, s?.title, s?.id, s?.link, s?.body, s?.group, s?.group_link].filter((c): c is string => !!c);
 }
 
 /** Columns to render, in order. Declared `columns` win (skipping keys the
@@ -340,12 +340,48 @@ export function sparklineValues(v: SqlCell | undefined): number[] | null {
   }
 }
 
+/** One item of an `items` cell. */
+export interface Item {
+  text: string;
+  /** Its hover text. */
+  hint?: string;
+  /** The page it links to. */
+  uri?: string;
+}
+
+/** An `items` cell's items: a JSON array whose elements are a string or
+ *  `{ text, hint?, uri? }` (anything else in it is dropped); null when the
+ *  cell isn't such an array. */
+export function itemList(v: SqlCell | undefined): Item[] | null {
+  if (typeof v !== "string") return null;
+  try {
+    const parsed: unknown = JSON.parse(v);
+    if (!Array.isArray(parsed)) return null;
+    return parsed.flatMap((x): Item[] => {
+      if (typeof x === "string") return x === "" ? [] : [{ text: x }];
+      if (typeof x !== "object" || x === null) return [];
+      const o = x as Record<string, unknown>;
+      if (typeof o.text !== "string" || o.text === "") return [];
+      const item: Item = { text: o.text };
+      if (typeof o.hint === "string" && o.hint !== "") item.hint = o.hint;
+      if (typeof o.uri === "string" && o.uri !== "") item.uri = o.uri;
+      return [item];
+    });
+  } catch {
+    return null;
+  }
+}
+
 /** `v` read by `format`; null when it isn't the kind of value the format
  *  reads (the cell then shows as it would without one). */
 function byFormat(v: string | number, format: ColumnFormat): string | null {
   if (format === "sparkline") {
     const values = sparklineValues(v);
     return values === null ? null : values.length === 0 ? "" : String(values[values.length - 1]);
+  }
+  if (format === "items") {
+    const list = itemList(v);
+    return list === null ? null : list.map((i) => i.text).join(" · ");
   }
   if (typeof v === "string") {
     if (Number.isNaN(Date.parse(v))) return null;
@@ -642,7 +678,39 @@ export interface SectionRow {
   link: LinkTarget | null;
   /** Its markdown, if any. */
   body: string | null;
+  /** The group it is under (`sections.group`), if it has one. */
+  group: string | null;
+  /** The page its group's heading opens (`sections.group_link`), if any. */
+  groupLink: LinkTarget | null;
   row: SqlCell[];
+}
+
+/** What a `sections` viz draws, in order: a group (its rows under one
+ *  heading, at the place its first row is) or a row with no group. */
+export type SectionPart =
+  | { kind: "group"; name: string; link: LinkTarget | null; rows: SectionRow[] }
+  | { kind: "row"; section: SectionRow };
+
+/** `sections` rows as the parts the viz draws: rows with the same group
+ *  value together, groups in the order each first appears; the group's
+ *  link is its first row's. */
+export function sectionParts(sections: readonly SectionRow[]): SectionPart[] {
+  const parts: SectionPart[] = [];
+  const at = new Map<string, Extract<SectionPart, { kind: "group" }>>();
+  for (const s of sections) {
+    if (s.group === null) {
+      parts.push({ kind: "row", section: s });
+      continue;
+    }
+    const known = at.get(s.group);
+    if (known) known.rows.push(s);
+    else {
+      const part: Extract<SectionPart, { kind: "group" }> = { kind: "group", name: s.group, link: s.groupLink, rows: [s] };
+      at.set(s.group, part);
+      parts.push(part);
+    }
+  }
+  return parts;
 }
 
 /** `sections` viz: a subsection per row, in row order. A row with no
@@ -653,6 +721,8 @@ export function sectionRows(viz: VizConfig, result: SqlQueryResult): SectionRow[
   const keys = columnValues(result, viz.sections?.id ?? (result.columns.includes("id") ? "id" : null));
   const links = columnValues(result, viz.sections?.link);
   const bodies = columnValues(result, viz.sections?.body);
+  const groups = columnValues(result, viz.sections?.group);
+  const groupLinks = columnValues(result, viz.sections?.group_link);
   const seen = new Map<string, number>();
   return titles.map((t, i) => {
     const title = formatCell(t);
@@ -662,11 +732,15 @@ export function sectionRows(viz: VizConfig, result: SqlQueryResult): SectionRow[
     seen.set(base, n);
     const link = links?.[i];
     const body = bodies?.[i];
+    const group = groups?.[i];
+    const groupLink = groupLinks?.[i];
     return {
       key: n === 1 ? base : `${base}-${n}`,
       title: title === "" ? base : title,
       link: typeof link === "string" && link !== "" && parseUri(link) ? link : null,
       body: body === null || body === undefined || String(body).trim() === "" ? null : String(body),
+      group: group === null || group === undefined || String(group) === "" ? null : String(group),
+      groupLink: typeof groupLink === "string" && groupLink !== "" && parseUri(groupLink) ? groupLink : null,
       row: result.rows[i] ?? [],
     };
   });

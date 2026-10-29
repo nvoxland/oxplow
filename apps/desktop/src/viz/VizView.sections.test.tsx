@@ -57,15 +57,20 @@ const rows: SqlCell[][] = [
 const runOf = (over: Partial<VizConfig> = {}, data: SqlCell[][] = rows): VizRun =>
   ({ config: { ...base, ...over }, params: {}, result: { columns, rows: data, truncated: false } }) as unknown as VizRun;
 
-test("one subsection per row, in row order, each a section whose heading is a link when the row names a page", () => {
+test("one subsection per row, in row order, each a section; an arrow after the heading opens its page when the row names one, the heading text is never the link", () => {
   const view = render(<VizView run={runOf()} onOpenPage={() => {}} />);
   const sections = view.container.querySelectorAll("section.ox-section");
   expect(sections.length).toBe(2);
   const titles = Array.from(view.container.querySelectorAll(".ox-section-title")).map((h) => h.textContent);
   expect(titles).toEqual(["Alpha", "Beta"]);
-  // Alpha's heading links; Beta has no link column value: plain text.
-  expect(view.getByTestId("viz-section-a").querySelector(".ox-section-title a, .ox-section-title button")?.textContent).toBe("Alpha");
-  expect(view.getByTestId("viz-section-b").querySelector(".ox-section-title a, .ox-section-title button")).toBeNull();
+  // Alpha names a page: an arrow after its plain heading text. Beta has no link: none.
+  const arrow = view.getByTestId("viz-section-a").querySelector<HTMLElement>(".ox-section-title [data-testid=open-page-link]")!;
+  expect(arrow.getAttribute("title")).toBe("Open Alpha");
+  expect(arrow.getAttribute("aria-label")).toBe("Open Alpha");
+  expect(arrow.textContent).toBe("");
+  expect(view.getByRole("button", { name: "Open Alpha" })).toBe(arrow);
+  expect(view.getByTestId("viz-section-b").querySelector("[data-testid=open-page-link]")).toBeNull();
+  expect(view.queryByRole("button", { name: "Open Beta" })).toBeNull();
 });
 
 test("a subsection draws the displayed columns as facts, never the heading, link, id or body columns, and its body as markdown", () => {
@@ -157,7 +162,7 @@ test("a row action is in the subsection's right-click menu, offered by `when`, a
   expect((actionRuns[0]!.row as Record<string, unknown>).id).toBe("b");
 });
 
-test("following a heading's link opens its page", () => {
+test("the arrow after a heading opens its page; the heading text does nothing", () => {
   const opened: string[] = [];
   const nav = { navigate: () => {}, openRef: (ref: string) => void opened.push(ref) } as unknown as PageNavigation;
   const view = render(
@@ -166,6 +171,8 @@ test("following a heading's link opens its page", () => {
     </PageNavigationContext.Provider>,
   );
   fireEvent.click(view.getByText("Alpha"));
+  expect(opened).toEqual([]);
+  fireEvent.click(view.getByRole("button", { name: "Open Alpha" }));
   expect(opened).toEqual(["oxplow:oxplow/page?page=alpha"]);
 });
 
@@ -182,4 +189,39 @@ test("a long list of subsections is drawn in the reading column: no grid, no wid
   const view = render(<VizView run={runOf({}, many)} onOpenPage={() => {}} />);
   expect(view.container.querySelectorAll("section.ox-section").length).toBe(30);
   expect(view.container.querySelector("table, [class*=grid]")).toBeNull();
+});
+
+// With `sections.group`, rows with the same group value go under one group
+// section, a level above their subsections; the group has the arrow too.
+const groupedColumns = ["id", "name", "ext", "ext_uri", "kind"];
+const groupedRows: SqlCell[][] = [
+  ["p1", "P1", "Alpha", "oxplow:oxplow/page?page=alpha", "x"],
+  ["q1", "Q1", "Beta", null, "y"],
+  ["p2", "P2", "Alpha", "oxplow:oxplow/page?page=alpha", "z"],
+];
+const groupedRun = (): VizRun =>
+  ({
+    config: { ...base, columns: [{ key: "kind", label: "Kind", link: null, unit: null, icon: null, tone: null }], sections: { title: "name", id: "id", link: null, body: null, group: "ext", group_link: "ext_uri" } },
+    params: {},
+    result: { columns: groupedColumns, rows: groupedRows, truncated: false },
+  }) as unknown as VizRun;
+
+test("grouped rows: a group section in order of first appearance, its rows one level deeper, an arrow on the group only", () => {
+  const view = render(<VizView run={groupedRun()} onOpenPage={() => {}} />);
+  expect(Array.from(view.container.querySelectorAll(".ox-section-title")).map((h) => `${h.tagName}:${h.textContent}`)).toEqual([
+    "H2:Alpha",
+    "H3:P1",
+    "H3:P2",
+    "H2:Beta",
+    "H3:Q1",
+  ]);
+  // The group's rows are inside its section.
+  expect(view.getByTestId("viz-group-Alpha").querySelectorAll("[data-node]").length).toBe(2);
+  expect(view.getByRole("button", { name: "Open Alpha" })).toBeTruthy();
+  expect(view.queryByRole("button", { name: "Open Beta" })).toBeNull();
+  // Each container carries its count, for Contents' cap.
+  expect(view.getByTestId("viz-sections").getAttribute("data-sections")).toBe("2");
+  expect(view.getByTestId("viz-group-Alpha").querySelector("[data-sections]")!.getAttribute("data-sections")).toBe("2");
+  // Group columns are not facts.
+  expect(view.getByTestId("viz-section-facts-p1").textContent).toBe("Kindx");
 });

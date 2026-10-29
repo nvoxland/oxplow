@@ -128,6 +128,8 @@ export interface RouteLinkProps {
   style?: CSSProperties;
   testId?: string;
   title?: string;
+  /** The accessible name, when the children (an icon) carry no text. */
+  ariaLabel?: string;
   draggable?: boolean;
   onDragStart?: (e: React.DragEvent) => void;
 }
@@ -152,6 +154,7 @@ export function RouteLink({
   style,
   testId,
   title,
+  ariaLabel,
   draggable,
   onDragStart,
 }: RouteLinkProps) {
@@ -161,6 +164,7 @@ export function RouteLink({
       type="button"
       data-testid={testId}
       title={title}
+      aria-label={ariaLabel}
       draggable={draggable}
       onDragStart={onDragStart}
       onClick={handlers.onClick}

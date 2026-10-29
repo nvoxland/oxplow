@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useRef, type CSSProperties, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
 /** Where a tab's dialogs dock: the page's area under its nav bar (`Page`
@@ -19,8 +19,10 @@ export const TabModalHostContext = createContext<HTMLElement | null>(null);
  * with a form's typed values, when the person comes back to the tab: its
  * state is the tab body's own React state, nothing more.
  *
- * Escape (anywhere in it), × and the content's own Cancel close it; a
- * click outside does not, so a half-filled form isn't lost. Focus moves
+ * Escape (anywhere in it), × and the content's own Cancel close it, and so
+ * does a click outside it — until something in it was typed or changed:
+ * then a click outside keeps it open, flashes its edge and says why, so a
+ * half-filled form isn't lost to a stray click. Focus moves
  * into it (the first field, else the dialog) and returns to what had it
  * when it closes.
  */
@@ -43,6 +45,10 @@ export function TabModal({
 }) {
   const card = useRef<HTMLDivElement>(null);
   const host = useContext(TabModalHostContext);
+  // Something in it was typed or changed: a click outside no longer closes it.
+  const [changed, setChanged] = useState(false);
+  // A click outside it was refused (bumped to replay the flash).
+  const [kept, setKept] = useState(0);
   useEffect(() => {
     const before = document.activeElement as HTMLElement | null;
     const node = card.current;
@@ -56,14 +62,25 @@ export function TabModal({
     };
   }, []);
   const dialog = (
-    <div data-testid={`${testId}-backdrop`} style={backdropStyle}>
+    <div
+      data-testid={`${testId}-backdrop`}
+      style={backdropStyle}
+      onMouseDown={(e) => {
+        if (e.target !== e.currentTarget) return;
+        if (changed) setKept((n) => n + 1);
+        else onClose();
+      }}
+    >
       <div
         ref={card}
         role="dialog"
         aria-label={typeof title === "string" ? title : undefined}
         data-testid={testId}
         tabIndex={-1}
-        style={{ ...cardStyle, width }}
+        data-kept={kept > 0 ? "true" : undefined}
+        style={{ ...cardStyle, width, ...(kept > 0 ? { animation: "oxplow-kept 0.6s ease-in-out" } : null) }}
+        onInputCapture={() => setChanged(true)}
+        onChangeCapture={() => setChanged(true)}
         onKeyDown={(e) => {
           if (e.key === "Escape") {
             e.stopPropagation();
@@ -87,6 +104,11 @@ export function TabModal({
             ×
           </button>
         </header>
+        {kept > 0 ? (
+          <div key={kept} data-testid={`${testId}-kept`} role="status" style={keptStyle}>
+            You changed something here, so it stays open. Close it with × or Cancel.
+          </div>
+        ) : null}
         <div style={bodyStyle}>{children}</div>
       </div>
     </div>
@@ -98,7 +120,7 @@ const backdropStyle: CSSProperties = {
   position: "absolute",
   inset: 0,
   zIndex: 20,
-  background: "rgba(0, 0, 0, 0.2)",
+  background: "rgba(0, 0, 0, 0.35)",
   display: "flex",
   justifyContent: "flex-end",
   alignItems: "flex-start",
@@ -108,7 +130,8 @@ const backdropStyle: CSSProperties = {
 
 const cardStyle: CSSProperties = {
   // The dock panel's chrome (`Dock/DockPanel.tsx`): same surface, border and ×.
-  background: "var(--bg-1)",
+  // The nav bar's background, so it reads as part of the chrome, apart from the page.
+  background: "var(--surface-chrome)",
   color: "var(--text-primary, var(--fg))",
   // Docked under the nav bar at the right, as tall as its content.
   borderLeft: "1px solid var(--border-strong)",
@@ -119,6 +142,14 @@ const cardStyle: CSSProperties = {
   flexDirection: "column",
   maxHeight: "100%",
   outline: "none",
+};
+
+const keptStyle: CSSProperties = {
+  padding: "6px 16px",
+  fontSize: "var(--text-xs)",
+  color: "var(--text-primary, var(--fg))",
+  background: "color-mix(in srgb, var(--accent) 22%, transparent)",
+  borderBottom: "1px solid var(--accent)",
 };
 
 const headerStyle: CSSProperties = {

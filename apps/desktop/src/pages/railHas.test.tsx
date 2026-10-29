@@ -3,7 +3,6 @@ import { cleanup, render } from "@testing-library/react";
 
 import { PageHost } from "./PageHost.js";
 import { contentsHas, railHas } from "./railHas.js";
-import { CONTENTS_SUBSECTIONS_MAX } from "../viz/Contents.js";
 import { decl, fakePage, fakePageRuns, fakeRun, loader, node } from "./testing/fakeRun.js";
 import type { PageKey } from "../pageRuns.js";
 import type { Node, PageParam } from "../tauri-bridge/generated/bindings.js";
@@ -35,7 +34,6 @@ const no = { fills: false, saveOpen: false };
 
 test("railHas: nothing in the rail for a page with no filter, selection, rail node, switch or sections", () => {
   expect(railHas(run(node.viz("items", "items", cols)), no)).toBe(false);
-  expect(railHas(run(sections(3)), no)).toBe(false);
   expect(railHas(run(sections(1)), no)).toBe(false);
 });
 
@@ -53,9 +51,9 @@ test("railHas: a view param is never drawn, so it is not something; a resource p
   expect(railHas(run(plain, [{ name: "lines", role: "view", type: "text" } as PageParam, { name: "uri", role: "resource", type: "text" } as PageParam]), no)).toBe(false);
 });
 
-test("contentsHas: four sections list, three do not, a page that fills never does", () => {
-  expect(contentsHas(run(sections(4)), false)).toBe(true);
-  expect(contentsHas(run(sections(3)), false)).toBe(false);
+test("contentsHas: two sections list, one does not, a page that fills never does", () => {
+  expect(contentsHas(run(sections(2)), false)).toBe(true);
+  expect(contentsHas(run(sections(1)), false)).toBe(false);
   expect(contentsHas(run(sections(4)), true)).toBe(false);
   expect(railHas(run(filling()), { fills: true, saveOpen: false })).toBe(false);
 });
@@ -104,16 +102,31 @@ test("PageHost: a document page with no rail keeps the reading column", async ()
   expect(some.getByTestId("page-rail-center").className).toContain("reading");
 });
 
-// A `sections` viz's subsections are sections Contents lists, up to the cap.
-test("contentsHas: a sections viz's rows count as sections up to the cap, and past it only the parent does", () => {
-  const max = CONTENTS_SUBSECTIONS_MAX;
+// A `sections` viz's subsections are sections, every one of them: Contents
+// lists up to ten, but the page has them all.
+test("contentsHas: a sections viz's rows count as sections", () => {
   // The parent's own heading is one section; each row is another.
-  expect(contentsHas(withSections(2, 0), false)).toBe(false);
-  expect(contentsHas(withSections(3, 0), false)).toBe(true);
-  expect(contentsHas(withSections(max, 0), false)).toBe(true);
-  // Past the cap: the parent alone is a section, below the minimum...
-  expect(contentsHas(withSections(max + 1, 0), false)).toBe(false);
-  // ...and with others beside it, they are the ones counted.
-  expect(contentsHas(withSections(max + 100, 2), false)).toBe(false);
-  expect(contentsHas(withSections(max + 100, 3), false)).toBe(true);
+  expect(contentsHas(withSections(0, 0), false)).toBe(false);
+  expect(contentsHas(withSections(1, 0), false)).toBe(true);
+  expect(contentsHas(withSections(14, 0), false)).toBe(true);
+  expect(contentsHas(withSections(100, 1), false)).toBe(true);
+});
+
+test("contentsHas: a single titled section alone gets none", () => {
+  expect(contentsHas(run(sections(1)), false)).toBe(false);
+});
+
+// A grouped `sections` viz: each distinct group is a section too.
+test("contentsHas: a grouped sections viz counts its groups as well as its rows", () => {
+  const grouped = (data: string[][]) =>
+    fakeRun(
+      fakePage(node.stack("s", [node.viz("pages", "many", { viz: "sections", columns: [{ key: "id" }], sections: { title: "id", group: "g" } } as never)]), {
+        loaders: [decl("items"), decl("many")],
+      }),
+      { loaders: { items, many: loader(["id", "g"], data) } },
+    );
+  // One row, one group: two sections.
+  expect(contentsHas(grouped([["a", "x"]]), false)).toBe(true);
+  // One row with no group: one section.
+  expect(contentsHas(grouped([["a", ""]]), false)).toBe(false);
 });

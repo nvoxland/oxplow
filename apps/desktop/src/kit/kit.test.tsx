@@ -5,6 +5,7 @@ import { useState } from "react";
 import { ActionButtons } from "./ActionButtons.js";
 import { DataTable, type DataColumn } from "./DataTable.js";
 import { Loading } from "./Loading.js";
+import { PageNavigationContext, type PageNavigation } from "../tabs/PageNavigationContext.js";
 import { Section } from "./Section.js";
 import { Stat } from "./Stat.js";
 import { Tile, TileGrid, TileSlot } from "./Tiles.js";
@@ -291,4 +292,34 @@ test("useListNav's cursor follows the picked row", () => {
   expect(cursor()).toBe(1);
   rerender(<Picked selected={null} />);
   expect(cursor()).toBe(1);
+});
+
+// A heading is never a link: a thing with a page of its own gets an arrow
+// after the plain heading text.
+test("a Section with `opens` draws an arrow after its plain heading text, named and titled 'Open <name>', and it opens the page", () => {
+  const opened: string[] = [];
+  const { container, getByRole, queryByRole } = render(
+    <PageNavigationContext.Provider value={{ navigate: () => {}, openRef: (ref: string) => void opened.push(ref) } as unknown as PageNavigation}>
+      <Section title="Alpha" opens={{ to: "oxplow:oxplow/page?page=alpha", name: "Alpha" }}>
+        body
+      </Section>
+    </PageNavigationContext.Provider>,
+  );
+  const heading = getByRole("heading", { level: 2 });
+  expect(heading.firstChild?.textContent).toBe("Alpha");
+  expect(heading.textContent).toBe("Alpha");
+  const arrow = getByRole("button", { name: "Open Alpha" });
+  expect(arrow.getAttribute("title")).toBe("Open Alpha");
+  expect(arrow.className).toContain("ox-open-page");
+  expect(heading.contains(arrow)).toBe(true);
+  expect(arrow.querySelector("svg")).not.toBeNull();
+  // The text is not a link; the arrow is, and a button takes the keyboard.
+  fireEvent.click(container.querySelector(".ox-section-title")!);
+  expect(opened).toEqual([]);
+  fireEvent.click(arrow);
+  expect(opened).toEqual(["oxplow:oxplow/page?page=alpha"]);
+  cleanup();
+  const plain = render(<Section title="Beta">x</Section>);
+  expect(plain.queryByRole("button", { name: /Open/ })).toBeNull();
+  expect(queryByRole("button", { name: "Open Alpha" })).toBeNull();
 });

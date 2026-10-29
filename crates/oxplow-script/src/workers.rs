@@ -436,7 +436,7 @@ impl ScriptWorkers {
             .spawn()
             .map_err(|e| {
                 CollectError::WorkerDied(format!(
-                    "couldn't start the script worker {}: {e}",
+                    "couldn't start the script worker {}: {e} (it is built with the sidecars: `bun run build:dev`)",
                     self.exe.display()
                 ))
             })?;

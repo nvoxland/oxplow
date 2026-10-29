@@ -1,10 +1,11 @@
 /**
  * A page's Contents, in its rail: the markdown headings (`h2`, `h3`) in
- * the page's body and, once there are four or more, its sections'
- * headings, in order, the one on screen marked; a click scrolls to it.
- * A section nested in another (a `sections` viz's subsections) is listed
- * under its parent, unless its viz has more than
- * `CONTENTS_SUBSECTIONS_MAX` rows: then none of them is.
+ * the page's body and, once the page has two or more sections (a
+ * `sections` viz's subsections count), its sections' headings, in order,
+ * the one on screen marked; a click scrolls to it. A section nested in
+ * another (a `sections` viz's subsections, and its groups) is listed under
+ * its parent, the first `CONTENTS_SUBSECTIONS_MAX` of them per parent, then
+ * one "… N more" that scrolls to the parent.
  * Nothing is declared: a page whose body has markdown with headings (a
  * viewer or an editor, `.oxplow-md`) or a document of several sections
  * gets it, one without shows nothing. It follows the body as it changes
@@ -15,28 +16,26 @@ import { useEffect, useState } from "react";
 import { RailGroup } from "../kit/RailGroup.js";
 
 interface Heading {
+  /** What a click scrolls to. */
   el: HTMLElement;
+  /** Where it sits in the page, when that isn't `el` (a "… N more" is
+   *  where the first left-out subsection is, but goes to the parent). */
+  at?: HTMLElement;
   text: string;
-  level: 2 | 3;
+  level: 2 | 3 | 4;
 }
 
 const HEADINGS = ".oxplow-md h2, .oxplow-md h3, .ox-section-title";
 const SECTION_HEADING = "ox-section-title";
-/** Sections a page has before Contents lists them. */
-export const CONTENTS_FROM = 4;
+/** Sections a page has before Contents lists them: a page with a single
+ *  one has none. `railHas` counts with it. */
+export const CONTENTS_FROM = 2;
 /** The most subsections of one `sections` viz Contents lists, under their
- *  parent. A viz with more rows (every page of an extension, a hundred
- *  of them) is a long document to scroll or search, not an outline: it
- *  shows only its parent. The one constant — `railHas` counts with it. */
-export const CONTENTS_SUBSECTIONS_MAX = 12;
+ *  parent; a viz with more (every page of an extension, a hundred of
+ *  them) ends in one "… N more" that goes to the parent. */
+export const CONTENTS_SUBSECTIONS_MAX = 10;
 /** What a `sections` viz's root carries: its row count. */
 export const SUBSECTIONS_ATTR = "data-sections";
-
-/** Whether `el` is in a `sections` viz too long to list. */
-function inLongSections(el: HTMLElement): boolean {
-  const group = el.closest<HTMLElement>(`[${SUBSECTIONS_ATTR}]`);
-  return !!group && Number(group.getAttribute(SUBSECTIONS_ATTR)) > CONTENTS_SUBSECTIONS_MAX;
-}
 
 /** The element that scrolls `el`: itself or its nearest ancestor that does. */
 function scrollParent(el: HTMLElement): HTMLElement | null {
@@ -61,12 +60,52 @@ function emptySection(el: HTMLElement): boolean {
 }
 
 function headingsIn(root: HTMLElement): Heading[] {
-  const all = Array.from(root.querySelectorAll<HTMLElement>(HEADINGS)).filter((el) => !emptySection(el) && !inLongSections(el));
+  const all = Array.from(root.querySelectorAll<HTMLElement>(HEADINGS)).filter((el) => !emptySection(el));
   const sections = all.filter((el) => el.classList.contains(SECTION_HEADING)).length;
-  return all
-    .filter((el) => sections >= CONTENTS_FROM || !el.classList.contains(SECTION_HEADING))
-    .map((el): Heading => ({ el, text: el.textContent?.trim() ?? "", level: el.tagName === "H2" ? 2 : 3 }))
-    .filter((h) => h.text.length > 0);
+  const out: Heading[] = [];
+  // How many each `sections` viz's container has listed so far, and the
+  // sections left out (what is under one is left out with it).
+  const listed = new Map<HTMLElement, number>();
+  const leftOut = new Set<Element>();
+  for (const el of all) {
+    const isSection = el.classList.contains(SECTION_HEADING);
+    if (isSection && sections < CONTENTS_FROM) continue;
+    const own = el.closest("section");
+    if (isSection && own) {
+      let under = false;
+      for (let up = own.parentElement?.closest("section"); up; up = up.parentElement?.closest("section")) {
+        if (leftOut.has(up)) under = true;
+      }
+      if (under) {
+        leftOut.add(own);
+        continue;
+      }
+    }
+    const group = isSection ? el.closest<HTMLElement>(`[${SUBSECTIONS_ATTR}]`) : null;
+    if (group) {
+      const n = (listed.get(group) ?? 0) + 1;
+      listed.set(group, n);
+      if (n > CONTENTS_SUBSECTIONS_MAX) {
+        if (own) leftOut.add(own);
+        // One entry for the rest, at the first one left out.
+        if (n === CONTENTS_SUBSECTIONS_MAX + 1) {
+          const more = Number(group.getAttribute(SUBSECTIONS_ATTR)) - CONTENTS_SUBSECTIONS_MAX;
+          const parent = group.closest("section")?.querySelector<HTMLElement>(`.${SECTION_HEADING}`) ?? group;
+          out.push({ el: parent, at: el, text: `… ${more} more`, level: levelOf(el) });
+        }
+        continue;
+      }
+    }
+    const text = el.textContent?.trim() ?? "";
+    if (text.length > 0) out.push({ el, text, level: levelOf(el) });
+  }
+  return out;
+}
+
+/** A heading's indent: its `h` level, from `h2` (the page's top) to `h4`. */
+function levelOf(el: HTMLElement): 2 | 3 | 4 {
+  const n = Number(el.tagName.slice(1));
+  return n <= 2 ? 2 : n === 3 ? 3 : 4;
 }
 
 /** `root` is the page's body. */
@@ -105,7 +144,7 @@ export function Contents({ root }: { root: HTMLElement | null }) {
       const top = scroller ? scroller.getBoundingClientRect().top : 0;
       let current = 0;
       headings.forEach((h, i) => {
-        if (h.el.getBoundingClientRect().top - top - 8 <= 0) current = i;
+        if ((h.at ?? h.el).getBoundingClientRect().top - top - 8 <= 0) current = i;
       });
       setActive(current);
     };

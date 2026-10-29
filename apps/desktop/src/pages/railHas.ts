@@ -1,7 +1,7 @@
 /// Whether a page's rail has anything to draw, decided from its run before
 /// anything is drawn (`.context/usability.md` "A page's controls are in its
 /// rail"): the "Details" card exists only when something is in it.
-import { CONTENTS_FROM, CONTENTS_SUBSECTIONS_MAX } from "../viz/Contents.js";
+import { CONTENTS_FROM } from "../viz/Contents.js";
 import { nodeById } from "../viz/nodeRun.js";
 import type { Node, PageRun, RunNode } from "../tauri-bridge/generated/bindings.js";
 import { emptySections } from "./PageTree.js";
@@ -10,16 +10,20 @@ import { emptySections } from "./PageTree.js";
  *  or slot's children with a title (a hidden heading counts: it stays in
  *  the page for Contents), less the ones folded away for having nothing.
  *  Mirrors `PageTree`'s drawing of `placement="section"`, and counts a
- *  `sections` viz's subsections (up to `CONTENTS_SUBSECTIONS_MAX`). */
+ *  `sections` viz's subsections, every row. */
 function sectionCount(run: PageRun): number {
   const walk = (run: PageRun, at: RunNode): number => {
     const def = nodeById(run.page, at.id);
     if (!def) return 0;
     let n = 0;
-    // A `sections` viz's subsections, Contents lists only up to its cap.
+    // A `sections` viz's subsections: a section each, and each group.
     if (def.kind === "viz" && def.config.viz === "sections") {
-      const rows = (def.from !== null && run.loaders[def.from]?.result?.rows.length) || 0;
-      if (rows <= CONTENTS_SUBSECTIONS_MAX) n += rows;
+      const result = def.from !== null ? run.loaders[def.from]?.result : undefined;
+      n += result?.rows.length ?? 0;
+      const group = def.config.sections?.group ? result?.columns.indexOf(def.config.sections.group) : undefined;
+      if (result && group !== undefined && group >= 0) {
+        n += new Set(result.rows.map((r) => r[group]).filter((v) => v !== null && v !== "")).size;
+      }
     }
     if (def.kind === "stack" || def.kind === "slot") {
       const folded = def.kind === "stack" ? emptySections(run, at) : [];

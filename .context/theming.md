@@ -53,6 +53,10 @@ read as intentional headers in dark mode: rail section headers
 translucent, so when a surface needs the same look over a non-card base
 (tab bar, page nav) layer it over `--surface-card`:
 `background: linear-gradient(var(--panel-header-bg), var(--panel-header-bg)), var(--surface-card)`.
+That layered value is `--surface-chrome`, and it is what everything that
+comes out of the chrome wears: a tab's dialog (`TabModal`) and every menu
+(`MenuList`: the ☰, right-click menus, the menubar), with a
+`--border-strong` edge.
 
 ### Borders
 
