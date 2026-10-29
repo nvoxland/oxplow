@@ -20,6 +20,7 @@ expect:
         - title: Commit
           id: oxplow-foundation/commit
           extension: oxplow-foundation
+          origin: ships with oxplow
           source: oxplow-foundation/pages/commit.yaml
           source_target: "oxplow:oxplow/file?filesystem=oxplow:extensions&path=oxplow-foundation/pages/commit.yaml#oxplow.renderer=oxplow-foundation/file-viewer"
     description:

@@ -637,7 +637,7 @@ fn listed_only(name: &str, path: &str, deployment: Deployment) -> Extension {
     }
 }
 
-fn origin_of(name: &str) -> &'static str {
+pub(crate) fn origin_of(name: &str) -> &'static str {
     if crate::bundled_extensions::find(name).is_some() {
         "bundled"
     } else {

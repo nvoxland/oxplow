@@ -1026,6 +1026,8 @@ async fn described_page(
                 return Ok(None);
             };
             page.origin.deployment = rev.map(str::to_string);
+            // An older deployment of a shipped extension is still shipped.
+            page.origin.bundled = crate::extension::extensions::origin_of(ext) == "bundled";
             crate::extension::extensions::qualify_page_refs(&mut page);
             Some(Described::File(Box::new(page)))
         }
@@ -1041,7 +1043,8 @@ async fn described_page(
                 .ok()
                 .map(|page| Described::File(Box::new(page)))
         }
-        // A page file in a worktree, as the caller has it.
+        // A page file in a worktree, as the caller has it. — a draft, never the shipped copy
+        // (`bundled` stays false even for a shipped extension's page).
         LOCAL => {
             let Some((ext, slug)) = worktree_page(path) else {
                 return Ok(None);
@@ -1912,6 +1915,46 @@ mod describe_tests {
         )
         .await;
         assert_eq!(none, Value::Null);
+    }
+
+    /// Whether a page ships with oxplow follows its extension, whichever
+    /// copy of it is read: the running one, an older deployment's, or a
+    /// project's own. A temp view or a worktree draft is not the shipped
+    /// copy.
+    #[tokio::test]
+    async fn a_page_of_a_shipped_extension_says_it_ships_with_oxplow() {
+        let (fx, _hash) = deployed().await;
+        let project = &fx.svc.layout.project_dir;
+        let flag = |def: &Value| def["bundled"].as_bool();
+        let running = describe(
+            &fx,
+            json!({ "uri": uri(EXTENSIONS, "oxplow-foundation/pages/commit.yaml", None) }),
+        )
+        .await;
+        assert_eq!(flag(&running), Some(true), "{running}");
+        // An older deployment's copy of a shipped page is still one.
+        let old =
+            crate::extension::extension_store::deployment_dir(project, "oxplow-foundation", "old1");
+        std::fs::create_dir_all(old.join("pages")).unwrap();
+        std::fs::write(old.join("pages/commit.yaml"), OLD).unwrap();
+        let older = describe(
+            &fx,
+            json!({ "uri": uri(EXTENSIONS, "oxplow-foundation/pages/commit.yaml", Some("old1")) }),
+        )
+        .await;
+        assert_eq!(older["deployment"], json!("old1"), "{older}");
+        assert_eq!(flag(&older), Some(true), "{older}");
+        // A project's own extension is not.
+        let own = describe(
+            &fx,
+            json!({ "uri": uri(EXTENSIONS, "acme/pages/pr.yaml", None) }),
+        )
+        .await;
+        assert_eq!(flag(&own), Some(false), "{own}");
+        // A temp view is not.
+        fx.svc.temp.put("v2.yaml", PAGE.as_bytes()).await.unwrap();
+        let temp = describe(&fx, json!({ "uri": uri(TEMP, "v2.yaml", None) })).await;
+        assert_eq!(flag(&temp), Some(false), "{temp}");
     }
 
     #[tokio::test]
