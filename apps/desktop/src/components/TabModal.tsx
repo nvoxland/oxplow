@@ -131,7 +131,7 @@ const backdropStyle: CSSProperties = {
 const cardStyle: CSSProperties = {
   // The dock panel's chrome (`Dock/DockPanel.tsx`): same surface, border and ×.
   // The nav bar's background, so it reads as part of the chrome, apart from the page.
-  background: "linear-gradient(var(--panel-header-bg), var(--panel-header-bg)), var(--surface-card)",
+  background: "var(--surface-chrome)",
   color: "var(--text-primary, var(--fg))",
   // Docked under the nav bar at the right, as tall as its content.
   borderLeft: "1px solid var(--border-strong)",

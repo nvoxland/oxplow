@@ -103,6 +103,9 @@
            headers and stream headers read as intentional chrome in dark
            mode. Composited over --surface-card. */
         --panel-header-bg: rgba(108, 156, 246, 0.12);
+        /* What comes out of the chrome (a tab's dialog, every menu): the
+           panel-header tint over the card, opaque. */
+        --surface-chrome: linear-gradient(var(--panel-header-bg), var(--panel-header-bg)), var(--surface-card);
         --surface-stream-tile: #c9d0dc;
         --text-on-stream-tile: #12161c;
         --surface-thread-tab: rgba(255, 255, 255, 0.04);

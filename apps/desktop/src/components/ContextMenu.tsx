@@ -278,9 +278,10 @@ const menuStyle: CSSProperties = {
   overflowY: "auto",
   gap: 2,
   padding: 6,
-  border: "1px solid var(--border)",
+  // Chrome, as a tab's dialog is: the nav bar's tint, a strong edge.
+  border: "1px solid var(--border-strong)",
   borderRadius: 6,
-  background: "var(--bg)",
+  background: "var(--surface-chrome)",
   boxShadow: "0 8px 24px rgba(0, 0, 0, 0.35)",
 };
 
