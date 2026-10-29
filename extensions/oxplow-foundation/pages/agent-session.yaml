@@ -11,7 +11,6 @@ loaders:
     sql: |
       SELECT s.uri, 'ses' || s.id AS session, s.display_name, s.title, th.uri AS thread,
              coalesce(s.resume_session_id, '') || ':' || coalesce(s.fork_next, 0) AS conversation,
-             coalesce(json_extract(p.features, '$.conversation_list'), 0) = 1 AS can_choose,
              coalesce(json_extract(p.features, '$.conversation_fork'), 0) = 1 AS can_fork
       FROM v_agent_session s
       JOIN v_thread th ON th.id = s.thread_id
@@ -61,17 +60,6 @@ actions:
     title: '{{row.title}}'
   fixed:
   - session
-- id: switch
-  label: Switch Conversation…
-  form: true
-  command: oxplow.agent_session.resume_conversation
-  input:
-    session: '{{row.session}}'
-  fixed:
-  - session
-  choices:
-    conversation: oxplow-foundation/agent-session-conversations
-  when: can_choose
 - id: fork
   label: Fork into New Session…
   form: true

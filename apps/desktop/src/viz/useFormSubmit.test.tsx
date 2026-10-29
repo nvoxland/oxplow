@@ -27,9 +27,9 @@ afterEach(() => {
 const outcome = (inverse: boolean): CommandOutcome => ({ result: null, audit_id: 7, event_id: null, inverse: inverse ? {} : null }) as unknown as CommandOutcome;
 
 test("an undoable run offers Undo, which undoes it", async () => {
-  const { result } = renderHook(() => useFormSubmit("Switch Conversation", async () => outcome(true), () => {}));
+  const { result } = renderHook(() => useFormSubmit("Rename", async () => outcome(true), () => {}));
   await act(() => result.current.submit({}, false));
-  expect(toasts[0]?.message).toBe("Switch Conversation: done.");
+  expect(toasts[0]?.message).toBe("Rename: done.");
   await act(async () => toasts[0]!.onUndo!());
   expect(undone).toEqual([7]);
 });

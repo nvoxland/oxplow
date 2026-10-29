@@ -8,7 +8,7 @@ when: { page: agent-session, params: { uri: "oxplow:oxplow/agent_session?id=ses1
 expect:
   loaders:
     row: { rows: [{ session: ses1, conversation: "c5:0", can_fork: 1 }] }
-  actions: [rename, switch, fork]
+  actions: [rename, fork]
 steps:
   - press: { action: fork, input: { conversation: c5 } }
     expect: { ok: true, result: { uri: "oxplow:oxplow/agent_session?id=ses2" } }

@@ -662,8 +662,8 @@ stream on another host (no `HOME` passed), reads as unknown.
 What can be resumed is listed two ways, both reads of
 `AgentHarness::conversations` (`live_datasets::harness_conversations`):
 for an open session, the `agent-session-conversations` choices page over
-`v_agent_conversation` (the page's Switch Conversation… / Fork into New Session… forms:
-"Choosing another conversation" in terminal.md); for a thread with no session in hand, the
+`v_agent_conversation` (the page's Fork into New Session… form:
+"Forking a conversation" in terminal.md); for a thread with no session in hand, the
 `new-session-earlier` loader over `v_agent_conversation` (the New Session
 page, "Earlier sessions"), which adds the stream's closed sessions and says per row whether taking it
 reopens, resumes (`agent_session.open { resume }`), switches to a tab or

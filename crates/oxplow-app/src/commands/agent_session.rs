@@ -39,7 +39,6 @@ pub const RENAME: &str = "oxplow.agent_session.rename";
 pub const CLOSE: &str = "oxplow.agent_session.close";
 pub const REOPEN: &str = "oxplow.agent_session.reopen";
 pub const START_FRESH: &str = "oxplow.agent_session.start_fresh";
-pub const RESUME_CONVERSATION: &str = "oxplow.agent_session.resume_conversation";
 pub const FORK_CONVERSATION: &str = "oxplow.agent_session.fork_conversation";
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
@@ -86,15 +85,6 @@ pub struct RenameInput {
     /// conversation is observed. Not undone with the rename.
     #[serde(default)]
     pub native: bool,
-}
-
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct ConversationInput {
-    /// The session (`ses3`).
-    pub session: String,
-    /// One of its harness's saved conversations (its id).
-    pub conversation: String,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
@@ -497,54 +487,6 @@ fn free_conversation(
     Ok(())
 }
 
-/// `agent_session.resume_conversation { session, conversation }`: the
-/// session takes one of its harness's saved conversations (the person
-/// chose it). The process it runs stops; the UI spawns the next, which
-/// resumes the chosen one. The conversation it was on stays saved, and
-/// undoing goes back to it. A person's only.
-pub fn resume_conversation_op(processes: crate::agent_sessions::SessionProcesses) -> Op {
-    Op::new(
-        "agent_sessions.write",
-        "resume_conversation",
-        schema::<ConversationInput>(),
-        true,
-        Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
-            let input: ConversationInput = parse(input)?;
-            let session = load(ctx, &input.session)?;
-            in_own_stream(ctx, session.thread_id)?;
-            if !session.is_open() {
-                return Err(invalid("/session", "the session is closed"));
-            }
-            free_conversation(ctx, &session, &input.conversation)?;
-            let now = Timestamp::now();
-            bind_tx(
-                ctx.conn,
-                session.id,
-                &input.conversation,
-                BindingOrigin::Chosen,
-                now,
-            )?;
-            let after = get_tx(ctx.conn, session.id)?
-                .ok_or_else(|| invalid("/session", "the session vanished"))?;
-            let previous = session.resume_session_id.clone();
-            let processes = processes.clone();
-            let id = session.id;
-            Ok(HandlerOutput {
-                inverse: (!previous.is_empty() && previous != input.conversation)
-                    .then(|| {
-                        call(
-                            RESUME_CONVERSATION,
-                            json!({ "session": input.session, "conversation": previous }),
-                        )
-                    })
-                    .flatten(),
-                after_commit: Some(Box::new(move || processes.kill(id))),
-                ..result(&after)
-            })
-        })),
-    )
-}
-
 /// `agent_session.fork_conversation { session, conversation? }`: a NEW
 /// session beside `session`, on its thread and harness, bound to the saved
 /// conversation to fork — the one `session` is on, or the one named — with
@@ -638,7 +580,6 @@ pub fn ops(
         close_op(processes.clone()),
         reopen_op(),
         start_fresh_op(),
-        resume_conversation_op(processes.clone()),
         fork_conversation_op(capabilities),
     ]
 }
@@ -784,77 +725,21 @@ mod tests {
         assert_eq!(s.resume_session_id, "");
     }
 
-    /// A person moves a session to a saved conversation of their choosing:
-    /// it is bound `chosen`, and undoing goes back to the
-    /// one it was on. One open in another session is refused, naming it.
-    /// An agent may do neither this nor a fork.
+    /// An agent may fork a session too.
     #[tokio::test]
-    async fn a_person_resumes_a_chosen_conversation() {
+    async fn an_agent_may_fork_a_session() {
         let fx = services_with_effort().await;
         let me = fx.session.to_string();
-        let other = open(
+        bind(&fx, fx.session, "c5").await;
+        run(
             &fx,
-            &Actor::Human,
-            serde_json::json!({ "thread": fx.thread.to_string(), "harness": "claude" }),
-        )
-        .await;
-        let (session, other_id) = (fx.session, other.id);
-        fx.svc
-            .db
-            .transaction(move |tx| {
-                bind_tx(tx, session, "c1", BindingOrigin::Started, Timestamp::now())?;
-                bind_tx(
-                    tx,
-                    other_id,
-                    "taken",
-                    BindingOrigin::Started,
-                    Timestamp::now(),
-                )
-            })
-            .await
-            .unwrap();
-        let chosen = run(
-            &fx,
-            &Actor::Human,
-            RESUME_CONVERSATION,
-            serde_json::json!({ "session": me, "conversation": "c9" }),
-            false,
+            &agent(&fx),
+            FORK_CONVERSATION,
+            serde_json::json!({ "session": me }),
+            true,
         )
         .await
-        .unwrap();
-        let s = get(&fx, fx.session).await;
-        assert_eq!(s.resume_session_id, "c9");
-        fx.svc
-            .commands
-            .undo(&Actor::Human, chosen.audit_id.unwrap(), true)
-            .await
-            .unwrap();
-        assert_eq!(get(&fx, fx.session).await.resume_session_id, "c1");
-
-        let err = run(
-            &fx,
-            &Actor::Human,
-            RESUME_CONVERSATION,
-            serde_json::json!({ "session": me, "conversation": "taken" }),
-            false,
-        )
-        .await
-        .unwrap_err();
-        assert!(
-            matches!(&err, CommandError::Invalid { field: Some(f), message } if f == "/conversation" && message.contains(&oxplow_domain::uri::build::agent_session_uri(other.id))),
-            "{err:?}"
-        );
-        for (name, input) in [
-            (
-                RESUME_CONVERSATION,
-                serde_json::json!({ "session": me, "conversation": "c2" }),
-            ),
-            (FORK_CONVERSATION, serde_json::json!({ "session": me })),
-        ] {
-            run(&fx, &agent(&fx), name, input, true)
-                .await
-                .unwrap_or_else(|e| panic!("{name}: {e:?}"));
-        }
+        .unwrap_or_else(|e| panic!("{e:?}"));
     }
 
     /// A person opens a session on a saved conversation: it is bound

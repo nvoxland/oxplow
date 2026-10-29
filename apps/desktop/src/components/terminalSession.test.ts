@@ -77,14 +77,7 @@ test("the ended banner says what happened and offers the right actions", () => {
   const missing = { ...exitBanner({ exitCode: 1, outcome: missingOutcome }), outcome: missingOutcome };
   expect(missing.text).toContain("transcript wasn't found");
   expect(missing.actions).toEqual(["retry", "start-fresh"]);
-  // Where its harness can list its saved conversations, the person can
-  // choose another one to resume.
-  expect(exitBanner({ exitCode: 1, outcome: missing.outcome }, { canChoose: true }).actions).toEqual([
-    "retry",
-    "choose-another",
-    "start-fresh",
-  ]);
-  expect(exitBanner({ exitCode: 0, outcome: { kind: "ended" } }, { canChoose: true }).actions).toEqual(["start-again"]);
+  expect(exitBanner({ exitCode: 0, outcome: { kind: "ended" } }).actions).toEqual(["start-again"]);
 });
 
 // A launch that failed before any process existed (a program not installed,

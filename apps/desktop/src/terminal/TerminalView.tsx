@@ -14,8 +14,6 @@ export interface AgentTerminal {
   conversation: string | null;
   /** Begin a new conversation, the saved one dropped (confirmed here). */
   onStartFresh(): Promise<void>;
-  /** Another saved conversation (where the harness lists them). */
-  onChooseAnother?(): void;
   /** The person pressed Escape: the host records the interrupt. */
   onInterrupt(): void;
 }
@@ -39,7 +37,7 @@ export function TerminalView({ uri, agent, worktreePath, onOpenFile, isLinkableP
   });
   const detach = useRef<(() => void) | null>(null);
   const [confirmFresh, setConfirmFresh] = useState(false);
-  const banner = session.ended ? exitBanner(session.ended, { canChoose: !!agent?.onChooseAnother }) : null;
+  const banner = session.ended ? exitBanner(session.ended) : null;
   return (
     <div ref={boxRef} data-testid="terminal-view" data-uri={uri} style={boxStyle}>
       <TerminalSurface
@@ -61,11 +59,7 @@ export function TerminalView({ uri, agent, worktreePath, onOpenFile, isLinkableP
         <div data-testid="terminal-ended" style={bannerStyle}>
           <span>{banner.text}</span>
           {banner.actions.map((action) =>
-            action === "choose-another" ? (
-              <button key={action} type="button" data-testid="terminal-choose-another" onClick={() => agent?.onChooseAnother?.()}>
-                Choose another…
-              </button>
-            ) : action === "start-fresh" ? (
+            action === "start-fresh" ? (
               agent ? (
                 <button
                   key={action}

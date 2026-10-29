@@ -85,16 +85,12 @@ export function failedLaunch(error: unknown): { exitCode: null; outcome: ExitOut
 }
 
 /** What the ended banner says and offers. A resume that failed before a
- *  turn ran keeps the saved conversation: Retry resumes it again, Choose
- *  another (where its harness lists its saved conversations) resumes a
- *  different one, Start fresh deliberately begins a new one. Any other end offers Start Again,
+ *  turn ran keeps the saved conversation: Retry resumes it again, Start
+ *  fresh deliberately begins a new one. Any other end offers Start Again,
  *  which resumes the saved conversation as well. */
-export function exitBanner(
-  ended: { exitCode: number | null; outcome: ExitOutcome },
-  can: { canChoose?: boolean } = {},
-): {
+export function exitBanner(ended: { exitCode: number | null; outcome: ExitOutcome }): {
   text: string;
-  actions: Array<"start-again" | "retry" | "choose-another" | "start-fresh">;
+  actions: Array<"start-again" | "retry" | "start-fresh">;
 } {
   const o = ended.outcome;
   if (o.kind === "launch_failed") {
@@ -107,7 +103,7 @@ export function exitBanner(
         : "it exited before the conversation started";
     return {
       text: `Couldn't resume the saved conversation (exit ${o.exitCode}): ${why}. It is kept — retry, or start a fresh one.`,
-      actions: can.canChoose ? ["retry", "choose-another", "start-fresh"] : ["retry", "start-fresh"],
+      actions: ["retry", "start-fresh"],
     };
   }
   return {

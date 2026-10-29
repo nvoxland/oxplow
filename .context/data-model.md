@@ -510,7 +510,7 @@ One agent slot a person opened on a thread (V32; `ses<n>`, ref
   `fork_next`. The hook ingest binds the id a prompt or `SessionStart`
   names when it differs: `started` (the slot had none), `forked` (a fork
   launch's new id) or `switched` (a native `/resume`, `/branch`).
-  `oxplow.agent_session.resume_conversation` binds `chosen`. A `/clear` of
+  `chosen` is bound by `agent_session.open { resume }` and by `fork_conversation` (the conversation the person picked); there is no move of an existing session onto another conversation. Rows an earlier `resume_conversation` wrote keep `chosen`. A `/clear` of
   exactly the bound session and `start_fresh` unbind (`unbind_tx`,
   conditional on the expected id, so a newer one stays); a launch never
   does. `bound_elsewhere_tx` keeps one conversation in one open slot per
