@@ -1,5 +1,5 @@
 title: Extension
-description: One extension — where it comes from, its version, its permissions and problems, its pages and every other contribution (commands, metrics, resources, …) under its kind, and its deployments. The renderer of oxplow's `extension` resource.
+description: One extension — where it comes from, its version, permissions and problems, everything it contributes by kind, and its deployments.
 label: '{{param.name}}'
 icon: package
 for: oxplow/extension
