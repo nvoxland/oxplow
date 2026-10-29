@@ -310,21 +310,23 @@ defines what the person sees:
   each `{ param }`, `{ from: <loader>.<column> }` or a literal; it must
   say `reads` (datasets) or `refresh` (`manual`, `{ every }`); `items:
   <field>` takes a list inside its result as the rows, as the `definition`
-  page reads `oxplow.page.definition`'s `nodes`), `page`
+  page reads `oxplow.page.describe`'s `nodes`), `page`
   (another page's `loader`, with `params`) or `rows` (inline). A loader's
   name is a plain identifier, never a dataset's (`v_*`, `m_*`).
 - **Show Definition** is foundation's hidden `definition` page (params
-  `of`, the page id, or `spec`, an inline view's exact YAML, and `params`,
-  its params as JSON text), from one `oxplow.page.definition` call:
+  `of`, the page id, and `params`, its params as JSON text), from one
+  `oxplow.page.describe` call over the page's running file (its
+  `running_uri`, else the running copy by name for an extension that runs
+  from its source). An inline view has no file, so it offers no Show
+  Definition until inline views are temp pages:
   where the page comes from (its file a link to the file view), its
   description, how it is used (a line each: what it draws, how it is
   opened, its tab, updates, comments, how agents read and find it), its
   params with this run's values, its loaders (what each runs and reads,
   its rows), its view as an outline (a node a line: its viz and loader,
   title, columns and settings; embeds and slot mounts included) and its
-  actions where they sit. Only an inline view, which has no file, shows
-  its YAML.
-  `v_page.running_uri` is the file URI of the copy that runs
+  actions where they sit. The YAML is the File viewer's.
+  `v_page.running_uri` (and `PageProvenance.running_uri`, in the bindings) is the file URI of the copy that runs
   (`…&rev=<hash>&filesystem=oxplow:extensions`, NULL with no deployment):
   the link to open for "the page as it runs", pinned to that deployment.
 - **`view:`** (and an optional `rail:`) — a tree of nodes: `stack`,

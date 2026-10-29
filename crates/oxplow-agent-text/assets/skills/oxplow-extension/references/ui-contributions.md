@@ -20,7 +20,7 @@
     `stream_id`;
   - `oxplow-foundation/new-session.sections` (sections `start`, `earlier`) →
     `thread_id`.
-  `oxplow_find_page`/`oxplow.page.definition` on a page shows its slot
+  `oxplow_find_page`/`oxplow.page.describe` on a page's file shows its slot
   nodes; read a page's loaders to learn the params it binds.
 
 - **`ui.decorators`** add a label to the URIs of one resource: `{ dataset,

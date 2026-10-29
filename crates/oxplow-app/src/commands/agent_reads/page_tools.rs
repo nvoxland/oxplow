@@ -1,7 +1,7 @@
 //! Pages for an agent: `pages.read/run` reads what a page shows (its text,
 //! each node under `[node <id>]`, or its loaders' rows), `pages.read/find`
-//! finds the pages that answer a question, `pages.read/definition` says
-//! what a page is made of and where each node comes from, and
+//! finds the pages that answer a question, `pages.read/describe` says
+//! what a page file is made of and where each node comes from, and
 //! `pages.write/run_action` presses a page's action as the page acting for
 //! the caller. Foundation declares the commands (`oxplow.page.run`, …) and
 //! offers the common ones as tools.
@@ -63,13 +63,17 @@ pub struct RunPageInput {
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct PageDefinitionInput {
-    /// The page: `<extension>/<slug>`.
+pub struct DescribePageInput {
+    /// The page file, as a file uri (`oxplow:oxplow/file?path=…`): on
+    /// `oxplow:extensions` a page that runs (`<extension>/pages/<slug>.yaml`,
+    /// at its `rev`), on `oxplow:temp` a view's file, on the worktree a
+    /// page file under `extensions/<name>/pages/` or
+    /// `.oxplow/extensions/<name>/pages/`.
+    pub uri: String,
+    /// For a worktree file: its text as you have it (an edit not saved
+    /// yet); read when omitted. Other filesystems are always read.
     #[serde(default)]
-    pub page: Option<String>,
-    /// Or the exact YAML of an ephemeral view or markdown block.
-    #[serde(default)]
-    pub spec: Option<String>,
+    pub text: Option<String>,
     /// Param values by name, as for `oxplow.page.run`: which embeds and
     /// switch children it resolves to depend on them. A JSON object, or
     /// that object as a string (as a page's param carries it).
@@ -557,7 +561,7 @@ pub fn ops(services: ServicesSlot) -> Vec<Op> {
         run_op(services.clone()),
         find_op(services.clone()),
         renderers_op(services.clone()),
-        definition_op(services.clone()),
+        describe_op(services.clone()),
         run_action_op(services),
     ]
 }
@@ -898,22 +902,190 @@ fn definition_rows(
     }
 }
 
-fn definition_op(services: ServicesSlot) -> Op {
+/// The page a file is, to describe.
+enum Described {
+    /// A page the catalog runs, by id.
+    Running(String),
+    /// A page parsed from the file: a draft, an older deployment's copy
+    /// or a view.
+    File(Box<crate::pages::schema::Page>),
+}
+
+/// The largest page file read to describe (a page is a few KiB).
+const DESCRIBE_MAX_BYTES: usize = 1 << 20;
+
+/// `<slug>` of a page file name (`<slug>.yaml` or `.yml`).
+fn page_slug(file: &str) -> Option<&str> {
+    file.strip_suffix(".yaml")
+        .or_else(|| file.strip_suffix(".yml"))
+        .filter(|slug| !slug.is_empty())
+}
+
+/// `(extension, slug)` of a page file path on the worktree:
+/// `[.oxplow/]extensions/<extension>/pages/<slug>.yaml`.
+fn worktree_page(path: &str) -> Option<(&str, &str)> {
+    let parts: Vec<&str> = path.split('/').collect();
+    match parts.as_slice() {
+        [.., "extensions", ext, "pages", file] => Some((ext, page_slug(file)?)),
+        _ => None,
+    }
+}
+
+/// The text of the file `uri` names: `given` when the caller has it,
+/// else read from its filesystem. `None` when the file isn't there,
+/// isn't text or is too big to be a page.
+async fn file_text(
+    svc: &Services,
+    given: Option<&str>,
+    filesystem: Option<&str>,
+    rev: Option<&str>,
+    path: &str,
+    stream: Option<StreamId>,
+) -> Option<String> {
+    if let Some(text) = given {
+        return (text.len() <= DESCRIBE_MAX_BYTES).then(|| text.to_string());
+    }
+    let fs = svc.filesystems.resolve(filesystem).ok()?;
+    let bytes = fs
+        .read(&oxplow_domain::filesystem::FsCx { stream }, rev, path, None)
+        .await
+        .ok()??;
+    if bytes.len() > DESCRIBE_MAX_BYTES {
+        return None;
+    }
+    String::from_utf8(bytes).ok()
+}
+
+/// The page the file `uri` is, or `None` when it is no page: not a file
+/// uri, a file that isn't there, YAML that is no page or doesn't parse.
+async fn described_page(
+    svc: &Services,
+    p: &DescribePageInput,
+    stream: Option<StreamId>,
+) -> Result<Option<Described>, CommandError> {
+    use oxplow_domain::filesystem::{EXTENSIONS, LOCAL, TEMP};
+    let uri = oxplow_domain::uri::OxplowUri::parse(p.uri.trim())
+        .map_err(|e| invalid("/uri", format!("`{}` isn't an oxplow uri: {e}", p.uri)))?;
+    if uri.resource().to_string() != oxplow_domain::uri::resources::FILE {
+        return Ok(None);
+    }
+    let path = uri.param("path").unwrap_or_default();
+    let rev = uri.param("rev");
+    let filesystem = uri.param("filesystem").unwrap_or(LOCAL);
+    let project = &svc.layout.project_dir;
+    // The caller's text is of a worktree file; the other filesystems are read.
+    let text = |filesystem| {
+        let given = p.text.as_deref().filter(|_| filesystem == LOCAL);
+        file_text(svc, given, Some(filesystem), rev, path, stream)
+    };
+    Ok(match filesystem {
+        // The running copy, or the copy of an older (or other) deployment.
+        EXTENSIONS => {
+            let parts: Vec<&str> = path.split('/').collect();
+            let [ext, "pages", file] = parts.as_slice() else {
+                return Ok(None);
+            };
+            let Some(slug) = page_slug(file) else {
+                return Ok(None);
+            };
+            let id = format!("{ext}/{slug}");
+            let running = svc.extension_catalog.find_page(project, &id).ok();
+            if let Some(page) = &running {
+                if rev.is_none() || page.origin.deployment.as_deref() == rev {
+                    return Ok(Some(Described::Running(page.id.clone())));
+                }
+            }
+            let Some(text) = text(EXTENSIONS).await else {
+                return Ok(None);
+            };
+            let namespace = namespace_of(svc, ext);
+            let hash = rev.unwrap_or_default();
+            let rel = crate::extension::extensions::shown(
+                project,
+                &crate::extension::extension_store::deployment_dir(project, ext, hash)
+                    .join("pages")
+                    .join(file),
+            );
+            let Ok(mut page) = crate::pages::schema::parse_page(ext, &namespace, slug, &rel, &text)
+            else {
+                return Ok(None);
+            };
+            page.origin.deployment = rev.map(str::to_string);
+            crate::extension::extensions::qualify_page_refs(&mut page);
+            Some(Described::File(Box::new(page)))
+        }
+        // A view's file: a page that only reads.
+        TEMP => {
+            if page_slug(path).is_none() {
+                return Ok(None);
+            }
+            let Some(text) = text(TEMP).await else {
+                return Ok(None);
+            };
+            parse_inline_page(&text)
+                .ok()
+                .map(|page| Described::File(Box::new(page)))
+        }
+        // A page file in a worktree, as the caller has it.
+        LOCAL => {
+            let Some((ext, slug)) = worktree_page(path) else {
+                return Ok(None);
+            };
+            let Some(text) = text(LOCAL).await else {
+                return Ok(None);
+            };
+            let namespace = namespace_of(svc, ext);
+            let Ok(mut page) = crate::pages::schema::parse_page(ext, &namespace, slug, path, &text)
+            else {
+                return Ok(None);
+            };
+            crate::extension::extensions::qualify_page_refs(&mut page);
+            Some(Described::File(Box::new(page)))
+        }
+        _ => None,
+    })
+}
+
+/// The namespace extension `name`'s commands are under: the catalog's
+/// when it is here, else what a manifest without `namespace:` gets.
+fn namespace_of(svc: &Services, name: &str) -> String {
+    svc.extension_catalog
+        .named(&svc.layout.project_dir, name)
+        .map(|e| e.namespace)
+        .unwrap_or_else(|_| name.replace('-', "_"))
+}
+
+fn describe_op(services: ServicesSlot) -> Op {
     Op::new(
         "pages.read",
-        "definition",
-        schema::<PageDefinitionInput>(),
+        "describe",
+        schema::<DescribePageInput>(),
         false,
         Handler::External(Arc::new(move |invocation: Invocation, input| {
             let services = services.clone();
             Box::pin(async move {
-                let p: PageDefinitionInput = parse(input)?;
+                let p: DescribePageInput = parse(input)?;
                 let svc = services.get()?;
                 let ctx = context(&svc, &invocation, p.stream_id.clone(), None).await?;
-                let label = p.page.as_deref().unwrap_or("inline view").to_string();
+                // A file that is no page describes nothing: no rows.
+                let Some(described) =
+                    described_page(&svc, &p, ctx.stream_id.map(StreamId::new)).await?
+                else {
+                    return Ok(HandlerOutput {
+                        result: Value::Null,
+                        ..HandlerOutput::default()
+                    });
+                };
+                let (target, label) = match described {
+                    Described::Running(id) => (RunTarget::Page(id.clone()), id),
+                    Described::File(page) => {
+                        let id = page.id.clone();
+                        (RunTarget::Spec(Arc::new(*page)), id)
+                    }
+                };
                 let run = PageRunner::of(&svc)
                     .run(RunRequest {
-                        target: target(p.page, p.spec.clone())?,
+                        target,
                         params: cells(p.params),
                         ctx,
                         viewer: invocation.actor().clone(),
@@ -924,10 +1096,6 @@ fn definition_op(services: ServicesSlot) -> Op {
                 definition_rows(&run, &run.tree, "", None, 0, &mut rows);
                 let (params, loaders, actions) = definition_parts(&run);
                 let page = &run.page;
-                // The file it runs from, as written.
-                let yaml = p.spec.or_else(|| {
-                    std::fs::read_to_string(svc.layout.project_dir.join(&page.origin.running)).ok()
-                });
                 Ok(HandlerOutput {
                     result: json!({
                         "page": page.id,
@@ -953,7 +1121,6 @@ fn definition_op(services: ServicesSlot) -> Op {
                         "loaders": loaders,
                         "actions": actions,
                         "answers": page.answers,
-                        "yaml": yaml,
                         "nodes": rows,
                     }),
                     ..HandlerOutput::default()
@@ -1034,6 +1201,17 @@ mod tests {
             .await
             .unwrap_or_else(|e| panic!("{command}: {e:?}"))
             .result
+    }
+
+    /// The running copy of page `ext/slug`, as a file uri without a revision.
+    fn running(page: &str) -> String {
+        let (ext, slug) = page.split_once('/').unwrap();
+        oxplow_domain::uri::build::file_uri_at(
+            &format!("{ext}/pages/{slug}.yaml"),
+            Some(oxplow_domain::filesystem::EXTENSIONS),
+            None,
+            None,
+        )
     }
 
     #[tokio::test]
@@ -1347,8 +1525,8 @@ mod tests {
         let (_dir, svc) = fixture().await;
         let def = run(
             &svc,
-            "oxplow.page.definition",
-            json!({ "page": "acme/host" }),
+            "oxplow.page.describe",
+            json!({ "uri": running("acme/host") }),
         )
         .await;
         let nodes = def["nodes"].as_array().unwrap();
@@ -1368,16 +1546,11 @@ mod tests {
         // Each node names the node it sits in; the root none.
         assert_eq!(nodes[0]["parent"], json!(null));
         assert!(nodes[1..].iter().all(|n| n["parent"].is_string()), "{def}");
-        // The file as written.
-        assert!(
-            def["yaml"].as_str().unwrap_or_default().contains("title:"),
-            "{def}"
-        );
         // Params as a page's param carries them: JSON text.
         let def = run(
             &svc,
-            "oxplow.page.definition",
-            json!({ "page": "acme/numbers", "params": "{\"n\": 3}" }),
+            "oxplow.page.describe",
+            json!({ "uri": running("acme/numbers"), "params": "{\"n\": 3}" }),
         )
         .await;
         assert_eq!(def["page"], json!("acme/numbers"));
@@ -1391,8 +1564,8 @@ mod tests {
         let (_dir, svc) = fixture().await;
         let def = run(
             &svc,
-            "oxplow.page.definition",
-            json!({ "page": "acme/acts" }),
+            "oxplow.page.describe",
+            json!({ "uri": running("acme/acts") }),
         )
         .await;
         let params = def["params"].as_array().unwrap();
@@ -1424,8 +1597,8 @@ mod tests {
         // A loader that reads another names it.
         let def = run(
             &svc,
-            "oxplow.page.definition",
-            json!({ "page": "acme/bound" }),
+            "oxplow.page.describe",
+            json!({ "uri": running("acme/bound") }),
         )
         .await;
         let echo = def["loaders"]
@@ -1594,34 +1767,149 @@ mod show_tests {
 }
 
 #[cfg(test)]
-mod definition_page_tests {
-    use oxplow_domain::{Actor, CommandError};
-    use serde_json::json;
+mod describe_tests {
+    use oxplow_domain::filesystem::{EXTENSIONS, LOCAL, TEMP};
+    use oxplow_domain::uri::build::file_uri_at;
+    use oxplow_domain::Actor;
+    use serde_json::{json, Value};
 
-    // Comments, quoted strings and whitespace must survive Show Definition:
-    // this is the exact inline YAML, not a serialization of the parsed page.
-    const INLINE_SPEC: &str = "# authored inline, with its own comment\ntitle: 'Inline release'\nloaders:\n  numbers: { sql: 'SELECT 7 AS n' }\nview:\n  id: layout\n  stack:\n    - { id: total, title: Total, viz: number, from: numbers }\n    - { id: note, title: Note, markdown: 'A preserved note.' }\n";
+    use crate::test_fixtures::{services_with_effort, EffortFixture};
 
-    /// A node says what it is set to, as its YAML does: a viz its columns
-    /// and its role block, a switch its param.
-    #[tokio::test]
-    async fn an_inline_definitions_nodes_say_what_they_are_set_to() {
-        const SPEC: &str = "title: Set\nparams: [{ name: area, role: filter, default: one }]\nloaders:\n  items: { sql: \"SELECT 'a' AS id, NULL AS parent\" }\nview:\n  switch:\n    param: area\n    children:\n      - { id: one, title: One, viz: tree, from: items, tree: { id: id, parent: parent, label: id }, columns: [{ key: id, label: Item }], empty: None yet. }\n      - { id: two, title: Two, markdown: 'Hi.' }\n";
-        let f = crate::test_fixtures::services_with_effort().await;
-        let out = f
+    const MANIFEST: &str = "manifest: 2\nname: acme\nintent:\n  purpose: test\n";
+    const PAGE: &str = "# authored with its own comment\ntitle: 'Release'\nloaders:\n  numbers: { sql: 'SELECT 7 AS n' }\nview:\n  id: layout\n  stack:\n    - { id: total, title: Total, viz: number, from: numbers }\n    - { id: note, title: Note, markdown: 'A preserved note.' }\n";
+    const OLD: &str = "title: 'Old release'\nloaders:\n  numbers: { sql: 'SELECT 1 AS n' }\nview: { id: only, viz: number, from: numbers }\n";
+
+    /// A project whose extension `acme` is deployed with page `pr`.
+    async fn deployed() -> (EffortFixture, String) {
+        let fx = services_with_effort().await;
+        let dir = fx.svc.layout.project_dir.join(".oxplow/extensions/acme");
+        std::fs::create_dir_all(dir.join("pages")).unwrap();
+        std::fs::write(dir.join("extension.yaml"), MANIFEST).unwrap();
+        std::fs::write(dir.join("pages/pr.yaml"), PAGE).unwrap();
+        crate::test_fixtures::activate(&fx.svc).await;
+        let hash = fx
             .svc
-            .commands
-            .run(
-                &Actor::Human,
-                "oxplow.page.definition",
-                json!({ "spec": SPEC }),
-                false,
-            )
-            .await
+            .extension_catalog
+            .find_page(&fx.svc.layout.project_dir, "acme/pr")
+            .unwrap()
+            .origin
+            .deployment
             .unwrap();
-        let nodes = out.result["nodes"].as_array().unwrap();
-        let switch = &nodes[0];
-        assert_eq!(switch["detail"], json!("on `area`"), "{switch}");
+        (fx, hash)
+    }
+
+    async fn describe(fx: &EffortFixture, input: Value) -> Value {
+        fx.svc
+            .commands
+            .run(&Actor::Human, "oxplow.page.describe", input.clone(), false)
+            .await
+            .unwrap_or_else(|e| panic!("{input}: {e:?}"))
+            .result
+    }
+
+    fn uri(filesystem: &str, path: &str, rev: Option<&str>) -> String {
+        file_uri_at(path, Some(filesystem), rev, None)
+    }
+
+    /// A page file on `oxplow:extensions` is the page that runs: with no
+    /// revision, or with the running deployment's.
+    #[tokio::test]
+    async fn the_running_copy_on_the_extensions_filesystem_is_the_catalogs_page() {
+        let (fx, hash) = deployed().await;
+        for rev in [None, Some(hash.as_str())] {
+            let def = describe(
+                &fx,
+                json!({ "uri": uri(EXTENSIONS, "acme/pages/pr.yaml", rev) }),
+            )
+            .await;
+            assert_eq!(def["page"], json!("acme/pr"), "{def}");
+            assert_eq!(def["title"], json!("Release"), "{def}");
+            assert_eq!(def["deployment"], json!(hash), "{def}");
+            let ids: Vec<_> = def["nodes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|n| n["id"].clone())
+                .collect();
+            assert_eq!(
+                ids,
+                [json!("layout"), json!("total"), json!("note")],
+                "{def}"
+            );
+        }
+    }
+
+    /// A revision that isn't the running deployment's is that deployment's
+    /// file, parsed on its own.
+    #[tokio::test]
+    async fn another_revision_is_that_deployments_copy() {
+        let (fx, hash) = deployed().await;
+        let old = crate::extension::extension_store::deployment_dir(
+            &fx.svc.layout.project_dir,
+            "acme",
+            "old1",
+        );
+        std::fs::create_dir_all(old.join("pages")).unwrap();
+        std::fs::write(old.join("pages/pr.yaml"), OLD).unwrap();
+        let def = describe(
+            &fx,
+            json!({ "uri": uri(EXTENSIONS, "acme/pages/pr.yaml", Some("old1")) }),
+        )
+        .await;
+        assert_eq!(def["title"], json!("Old release"), "{def}");
+        assert_eq!(def["deployment"], json!("old1"), "{def}");
+        assert!(def["running"].as_str().unwrap().contains("old1"), "{def}");
+        assert_eq!(def["nodes"][0]["id"], json!("only"), "{def}");
+        // The running one is untouched.
+        let now = describe(
+            &fx,
+            json!({ "uri": uri(EXTENSIONS, "acme/pages/pr.yaml", Some(&hash)) }),
+        )
+        .await;
+        assert_eq!(now["title"], json!("Release"), "{now}");
+        // A revision nothing was deployed at: no rows.
+        let none = describe(
+            &fx,
+            json!({ "uri": uri(EXTENSIONS, "acme/pages/pr.yaml", Some("nope9")) }),
+        )
+        .await;
+        assert_eq!(none, Value::Null);
+    }
+
+    #[tokio::test]
+    async fn a_temp_file_is_a_view_that_only_reads() {
+        let fx = services_with_effort().await;
+        fx.svc.temp.put("v1.yaml", PAGE.as_bytes()).await.unwrap();
+        let def = describe(&fx, json!({ "uri": uri(TEMP, "v1.yaml", None) })).await;
+        assert_eq!(def["page"], json!("inline"), "{def}");
+        let nodes = def["nodes"].as_array().unwrap();
+        let total = nodes.iter().find(|n| n["id"] == "total").unwrap();
+        assert_eq!(total["parent"], json!("layout"), "{total}");
+        assert_eq!(total["loader_kind"], json!("sql"), "{total}");
+        assert_eq!(total["source"], json!("SELECT 7 AS n"), "{total}");
+        // A view that acts is no view.
+        let acting = "title: Acting\nactions:\n  - { id: create, label: Create, command: oxplow.work_item.create, input: { title: Hidden } }\nview: { markdown: Preview }\n";
+        fx.svc.temp.put("v2.yaml", acting.as_bytes()).await.unwrap();
+        assert_eq!(
+            describe(&fx, json!({ "uri": uri(TEMP, "v2.yaml", None) })).await,
+            Value::Null
+        );
+        // No such file.
+        assert_eq!(
+            describe(&fx, json!({ "uri": uri(TEMP, "gone.yaml", None) })).await,
+            Value::Null
+        );
+    }
+
+    /// A node says what it is set to, as its YAML does.
+    #[tokio::test]
+    async fn a_nodes_settings_are_what_its_yaml_set() {
+        const SPEC: &str = "title: Set\nparams: [{ name: area, role: filter, default: one }]\nloaders:\n  items: { sql: \"SELECT 'a' AS id, NULL AS parent\" }\nview:\n  switch:\n    param: area\n    children:\n      - { id: one, title: One, viz: tree, from: items, tree: { id: id, parent: parent, label: id }, columns: [{ key: id, label: Item }], empty: None yet. }\n      - { id: two, title: Two, markdown: 'Hi.' }\n";
+        let fx = services_with_effort().await;
+        fx.svc.temp.put("set.yaml", SPEC.as_bytes()).await.unwrap();
+        let out = describe(&fx, json!({ "uri": uri(TEMP, "set.yaml", None) })).await;
+        let nodes = out["nodes"].as_array().unwrap();
+        assert_eq!(nodes[0]["detail"], json!("on `area`"), "{out}");
         let one = nodes.iter().find(|n| n["id"] == "one").unwrap();
         assert_eq!(one["columns"], json!(["id (Item)"]), "{one}");
         assert_eq!(one["settings"]["tree"]["label"], json!("id"), "{one}");
@@ -1629,76 +1917,126 @@ mod definition_page_tests {
         assert!(one["settings"].get("columns").is_none(), "{one}");
     }
 
+    /// A page file in a worktree is described from the text the caller
+    /// passes, its extension and slug from its path.
     #[tokio::test]
-    async fn an_inline_definition_preserves_its_exact_yaml_and_names_its_nodes() {
-        let f = crate::test_fixtures::services_with_effort().await;
-        let out = f
+    async fn a_worktree_file_is_described_from_the_text_given() {
+        let (fx, _) = deployed().await;
+        for path in [
+            "extensions/acme/pages/draft.yaml",
+            ".oxplow/extensions/acme/pages/draft.yaml",
+        ] {
+            let def = describe(&fx, json!({ "uri": uri(LOCAL, path, None), "text": OLD })).await;
+            assert_eq!(def["page"], json!("acme/draft"), "{def}");
+            assert_eq!(def["title"], json!("Old release"), "{def}");
+            assert_eq!(def["extension"], json!("acme"), "{def}");
+            assert_eq!(def["file"], json!(path), "{def}");
+        }
+        // Without text it is read from the worktree.
+        std::fs::write(
+            fx.svc
+                .layout
+                .project_dir
+                .join(".oxplow/extensions/acme/pages/pr.yaml"),
+            OLD,
+        )
+        .unwrap();
+        let read = describe(
+            &fx,
+            json!({ "uri": uri(LOCAL, ".oxplow/extensions/acme/pages/pr.yaml", None) }),
+        )
+        .await;
+        assert_eq!(read["title"], json!("Old release"), "{read}");
+        // A file that isn't under an extension's pages is no page.
+        assert_eq!(
+            describe(
+                &fx,
+                json!({ "uri": uri(LOCAL, "docs/notes.yaml", None), "text": OLD })
+            )
+            .await,
+            Value::Null
+        );
+    }
+
+    /// Definition's `accepts.content` relies on this: a file that is no
+    /// page, or no YAML, is zero rows, never an error.
+    #[tokio::test]
+    async fn a_file_that_is_no_page_describes_nothing() {
+        let fx = services_with_effort().await;
+        let local = |text: &str| json!({ "uri": uri(LOCAL, "extensions/acme/pages/x.yaml", None), "text": text });
+        for text in [
+            "name: ci\non: [push]\njobs: {}\n",
+            "title: [unclosed\n  - : :\n",
+            "",
+            "just words",
+        ] {
+            assert_eq!(describe(&fx, local(text)).await, Value::Null, "{text:?}");
+        }
+        // Not a file uri, not a page path, an unknown filesystem.
+        for u in [
+            "oxplow:oxplow/commit?sha=abc1234".to_string(),
+            uri(EXTENSIONS, "acme/readme.yaml", None),
+            uri(EXTENSIONS, "acme/pages/missing.yaml", None),
+            uri("acme:s3", "acme/pages/x.yaml", None),
+        ] {
+            assert_eq!(
+                describe(&fx, json!({ "uri": u, "text": OLD })).await,
+                Value::Null,
+                "{u}"
+            );
+        }
+        // A uri that isn't one is refused.
+        let refused = fx
             .svc
             .commands
             .run(
                 &Actor::Human,
-                "oxplow.page.definition",
-                json!({ "spec": INLINE_SPEC }),
+                "oxplow.page.describe",
+                json!({ "uri": "not a uri" }),
                 false,
             )
             .await
-            .unwrap();
-        let result = &out.result;
-        assert_eq!(result["page"], json!("inline"));
-        assert_eq!(result["title"], json!("Inline release"));
-        assert_eq!(result["yaml"], json!(INLINE_SPEC));
-        let nodes = result["nodes"].as_array().unwrap();
-        assert_eq!(nodes.len(), 3, "{result}");
-        assert_eq!(nodes[0]["id"], json!("layout"));
-        assert_eq!(nodes[0]["parent"], json!(null));
-        let total = nodes.iter().find(|n| n["id"] == "total").unwrap();
-        assert_eq!(total["parent"], json!("layout"));
-        assert_eq!(total["page"], json!("inline"));
-        assert_eq!(total["loader"], json!("numbers"));
-        assert_eq!(total["loader_kind"], json!("sql"));
-        assert_eq!(total["viz"], json!("number"));
-        assert_eq!(total["source"], json!("SELECT 7 AS n"));
+            .unwrap_err();
+        assert!(
+            matches!(refused, oxplow_domain::CommandError::Invalid { .. }),
+            "{refused:?}"
+        );
     }
 
+    /// The tool no longer takes the old inputs: `spec` and the old name are gone.
     #[tokio::test]
-    async fn inline_definitions_require_one_target_and_refuse_acting_specs() {
-        let f = crate::test_fixtures::services_with_effort().await;
-        for input in [
-            json!({}),
-            json!({ "page": "oxplow-foundation/commit", "spec": INLINE_SPEC }),
-        ] {
-            let error = f
-                .svc
-                .commands
-                .run(&Actor::Human, "oxplow.page.definition", input, false)
-                .await
-                .unwrap_err();
-            assert!(matches!(&error, CommandError::Invalid { .. }), "{error:?}");
-            assert!(error.to_string().contains("one of them"), "{error}");
-        }
-        for (spec, why) in [
-            (
-                "title: Acting\nactions:\n  - { id: create, label: Create, command: oxplow.work_item.create, input: { title: Hidden action } }\nview: { markdown: Preview }\n",
-                "actions",
-            ),
-            (
-                "title: Command loader\nloaders:\n  tasks:\n    command: oxplow.work_item.create\n    args: { title: Hidden loader }\n    reads: [work_item]\nview: { viz: table, from: tasks }\n",
-                "not a command",
-            ),
-        ] {
-            let error = f
-                .svc
-                .commands
-                .run(
-                    &Actor::Human,
-                    "oxplow.page.definition",
-                    json!({ "spec": spec }),
-                    false,
-                )
-                .await
-                .unwrap_err();
-            assert!(matches!(&error, CommandError::Invalid { .. }), "{error:?}");
-            assert!(error.to_string().contains(why), "{error}");
-        }
+    async fn the_old_definition_command_and_its_spec_input_are_gone() {
+        let fx = services_with_effort().await;
+        assert!(fx.svc.commands.spec("oxplow.page.definition").is_none());
+        let err = fx
+            .svc
+            .commands
+            .run(
+                &Actor::Human,
+                "oxplow.page.describe",
+                json!({ "uri": uri(TEMP, "a.yaml", None), "spec": PAGE }),
+                false,
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, oxplow_domain::CommandError::Invalid { .. }),
+            "{err:?}"
+        );
+    }
+
+    /// A page's provenance names the copy that runs, the same URI `v_page` gives.
+    #[tokio::test]
+    async fn provenance_carries_the_running_uri() {
+        let (fx, hash) = deployed().await;
+        let page = fx
+            .svc
+            .extension_catalog
+            .find_page(&fx.svc.layout.project_dir, "acme/pr")
+            .unwrap();
+        assert_eq!(
+            page.origin.running_uri,
+            Some(uri(EXTENSIONS, "acme/pages/pr.yaml", Some(&hash)))
+        );
     }
 }

@@ -8,8 +8,6 @@ params:
   label: Page (`<extension>/<page>`)
 - name: params
   label: Its params (JSON)
-- name: spec
-  label: Inline page YAML
 - name: stream_id
 answers:
 - {"question":"What is this page made of, and where does each part come from?","params":{"of":"oxplow-foundation/commit"}}
@@ -18,17 +16,25 @@ loaders:
   scope:
     sql: |
       SELECT uri_param(uri, 'id') AS stream,
-             coalesce((SELECT title FROM v_page WHERE id = :of), 'inline view') AS title
+             (SELECT title FROM v_page WHERE id = :of) AS title
       FROM v_stream WHERE id = :stream_id
+  # The page file it runs from: its pinned copy, else (it runs from its
+  # source) the running one by name.
+  file:
+    sql: |
+      SELECT coalesce(running_uri,
+                      uri('oxplow/file', 'path', extension || '/pages/' || substr(id, instr(id, '/') + 1) || '.yaml',
+                          'filesystem', 'oxplow:extensions')) AS uri
+      FROM v_page WHERE id = :of
   page:
-    command: oxplow.page.definition
-    args: { page: { param: of }, spec: { param: spec }, params: { param: params }, stream_id: { from: scope.stream } }
+    command: oxplow.page.describe
+    args: { uri: { from: file.uri }, params: { param: params }, stream_id: { from: scope.stream } }
     reads: [page, extension_deployment]
-  # Where it comes from: an inline view has no file.
+  # Where it comes from.
   about:
     sql: |
       SELECT title, page AS id, extension,
-             CASE WHEN :spec IS NULL AND file <> '' THEN file END AS file,
+             CASE WHEN file <> '' THEN file END AS file,
              CASE WHEN bundled THEN 'ships with oxplow' ELSE 'yours' END AS origin,
              CASE WHEN deployment IS NULL THEN 'loaded from its source'
                   ELSE 'deployment ' || substr(deployment, 1, 12) END AS runs
@@ -160,11 +166,6 @@ loaders:
              CASE WHEN j.value ->> '$.form' THEN 'yes' ELSE 'no' END AS form
       FROM page, json_each(page.actions) j
       ORDER BY j.key
-  # An inline view has no file to open: its YAML, as written.
-  yaml:
-    sql: |
-      SELECT '### YAML' || char(10) || char(10) || '```yaml' || char(10) || yaml || char(10) || '```' AS text
-      FROM page WHERE :spec IS NOT NULL
 view:
   stack:
   - id: about
@@ -223,11 +224,3 @@ view:
     - { key: offered, label: Offered on }
     - { key: when, label: Only when }
     - { key: form, label: Opens a form }
-  # Only an inline view's: nothing at all for a page with a file.
-  - id: yaml
-    title: YAML
-    hide_title: true
-    viz: markdown
-    from: yaml
-    empty: ''
-    markdown: { text: text }

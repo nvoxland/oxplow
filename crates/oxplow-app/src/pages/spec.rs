@@ -1650,6 +1650,9 @@ pub struct PageProvenance {
     pub deployment: Option<String>,
     /// It ships with oxplow.
     pub bundled: bool,
+    /// The file URI of the copy that runs, pinned to its deployment (on
+    /// `oxplow:extensions`); none when it runs no deployment.
+    pub running_uri: Option<String>,
 }
 
 /// How a page's viz node draws its loader's rows: the viz, its role

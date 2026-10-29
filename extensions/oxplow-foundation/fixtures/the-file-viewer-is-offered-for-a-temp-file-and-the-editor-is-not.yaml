@@ -1,0 +1,13 @@
+# Which pages draw a file is the daemon's call. The File viewer takes any
+# file on any filesystem; the Editor writes the worktree, so a scratch file
+# is not offered to it.
+temp:
+  note.md: "# Hello\n"
+when:
+  command: oxplow.page.renderers
+  input: { uri: "oxplow:oxplow/file?path=note.md&filesystem=oxplow:temp" }
+expect:
+  ok: true
+  result:
+    renderers:
+      - { page: oxplow-foundation/file-viewer }

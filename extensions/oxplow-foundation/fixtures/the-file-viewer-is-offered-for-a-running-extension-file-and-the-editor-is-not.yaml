@@ -1,0 +1,10 @@
+# A file of a running extension is read-only: the File viewer draws it, the
+# Editor is not offered.
+when:
+  command: oxplow.page.renderers
+  input: { uri: "oxplow:oxplow/file?path=oxplow-foundation/extension.yaml&filesystem=oxplow:extensions" }
+expect:
+  ok: true
+  result:
+    renderers:
+      - { page: oxplow-foundation/file-viewer }

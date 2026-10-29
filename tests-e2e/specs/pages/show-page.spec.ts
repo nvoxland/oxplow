@@ -56,11 +56,9 @@ test("Save to wiki keeps a live oxplow-page block that renders again after reloa
   await expect(inline.locator('[data-node="count"]')).toContainText("1");
 });
 
-test("Show definition on an inline view shows its exact YAML and node origin", async ({ page, daemon }) => {
+test("an inline view has no Show definition: it has no file to describe", async ({ page, daemon }) => {
   await show(page, daemon, source("Defined Potoroo Count", "Defined Potoroo "));
-  await action(page, "page-definition");
-  const body = page.getByTestId("page-file").filter({ visible: true });
-  await expect(body.locator('[data-node="yaml"]')).toContainText("# Keep the source comment");
-  await expect(body.locator('[data-node="yaml"]')).toContainText("Defined Potoroo Count");
-  await expect(body.locator('[data-node="nodes"]')).toContainText("count");
+  await page.getByTestId("page-nav-menu").filter({ visible: true }).click();
+  await expect(page.getByTestId("menu-item-action-view-save-page")).toBeVisible();
+  await expect(page.getByTestId("menu-item-action-page-definition")).toHaveCount(0);
 });

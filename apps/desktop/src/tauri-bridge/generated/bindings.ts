@@ -4627,6 +4627,11 @@ export type PageProvenance = {
 	deployment: string | null,
 	/**  It ships with oxplow. */
 	bundled: boolean,
+	/**
+	 *  The file URI of the copy that runs, pinned to its deployment (on
+	 *  `oxplow:extensions`); none when it runs no deployment.
+	 */
+	runningUri: string | null,
 };
 
 /**  A run of a page. */

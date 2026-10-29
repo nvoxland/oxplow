@@ -16,9 +16,8 @@ test("a wiki view's enclosing fence cannot be closed by markdown inside its YAML
   expect(pageSlug("2026 release")).toBe("page-2026-release");
 });
 
-test("Show definition carries exact params and inline source, or the deployed page", () => {
-  const uri = definitionUri("inline", { q: "two words" }, "title: Inline");
-  expect(paramOf(uri, "spec")).toBe("title: Inline");
+test("Show definition carries the deployed page and its exact params", () => {
+  const uri = definitionUri("acme/list", { q: "two words" });
+  expect(paramOf(uri, "of")).toBe("acme/list");
   expect(paramOf(uri, "params")).toBe('{"q":"two words"}');
-  expect(paramOf(definitionUri("acme/list", {}), "of")).toBe("acme/list");
 });

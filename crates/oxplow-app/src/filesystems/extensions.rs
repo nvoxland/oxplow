@@ -35,6 +35,18 @@ pub fn running_hash<'a>(extensions: &'a [Extension], name: &str) -> Option<&'a s
     owner(extensions, name).and_then(|ext| ext.deployment.hash())
 }
 
+/// The file URI of page file `file` (`<slug>.yaml`) of extension `name`
+/// as deployment `hash` has it: how `PageProvenance.running_uri` and
+/// `v_page.running_uri` name the copy that runs.
+pub fn page_running_uri(name: &str, file: &str, hash: &str) -> String {
+    oxplow_domain::uri::build::file_uri_at(
+        &format!("{name}/pages/{file}"),
+        Some(EXTENSIONS),
+        Some(hash),
+        None,
+    )
+}
+
 pub struct ExtensionsFs {
     project: PathBuf,
     catalog: Arc<ExtensionCatalog>,

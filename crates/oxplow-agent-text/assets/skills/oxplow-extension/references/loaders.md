@@ -49,8 +49,8 @@ loaders:
 ```yaml
 loaders:
   defs:
-    command: oxplow.page.definition
-    args: { page: { param: of } }
+    command: oxplow.page.describe
+    args: { uri: "oxplow:oxplow/file?filesystem=oxplow:extensions&path=acme/pages/list.yaml" }
     reads: [v_page]
     items: nodes
 ```

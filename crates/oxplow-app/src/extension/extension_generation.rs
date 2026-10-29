@@ -285,18 +285,7 @@ fn page_rows(
             needs_json: json_text(&page.needs),
             source: page.origin.source.clone(),
             deployment: deployment_name(&extension.deployment).to_string(),
-            running_uri: page.origin.deployment.as_deref().map(|hash| {
-                oxplow_domain::uri::build::file_uri_at(
-                    &format!(
-                        "{}/pages/{}",
-                        extension.name,
-                        page.origin.running.rsplit('/').next().unwrap_or_default()
-                    ),
-                    Some(oxplow_domain::filesystem::EXTENSIONS),
-                    Some(hash),
-                    None,
-                )
-            }),
+            running_uri: page.origin.running_uri.clone(),
         });
         answers.extend(page.answers.iter().enumerate().map(|(i, a)| PageAnswerRow {
             page_uri: uri.clone(),

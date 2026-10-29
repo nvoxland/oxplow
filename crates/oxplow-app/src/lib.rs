@@ -2332,7 +2332,7 @@ mod tests {
                 "oxplow.metric.rebuild",
                 // The agent's reads of live state are read-scope operations
                 // (`commands/agent_reads`): they change no record.
-                "oxplow.page.definition",
+                "oxplow.page.describe",
                 "oxplow.page.find",
                 "oxplow.page.list_tabs",
                 "oxplow.page.open",

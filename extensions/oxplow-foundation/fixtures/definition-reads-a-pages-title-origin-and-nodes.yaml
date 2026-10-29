@@ -2,7 +2,7 @@
 # where it comes from (its file a link), what it is for, how it is used
 # (one line each), its params with this
 # run's values, its loaders, its nodes and its actions where they sit.
-# A page with a file shows no YAML: its source opens in the file view.
+# Its source opens in the file view.
 when: { page: oxplow-foundation/definition, params: { of: oxplow-foundation/commit, params: '{"sha":"abc1234"}', stream_id: 1 } }
 expect:
   loaders:
@@ -58,5 +58,3 @@ expect:
       rows:
         - { label: Cherry-pick, command: oxplow.git.cherry_pick, on: detail }
         - { label: Revert, command: oxplow.git.revert, on: detail }
-    yaml:
-      rows: 0

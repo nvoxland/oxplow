@@ -2276,7 +2276,8 @@ Where it lives, and what is loaded:
   next deploy replaces the copy. `oxplow_get_open_page` adds `outOfDate`
   (`PageProvenance::out_of_date`, read from the files now: the source
   changed after the deployment was made). `v_page` has `source`, not the
-  running path, and `running_uri` (V123): the file URI of the running copy,
+  running path, and `running_uri` (V123; `PageProvenance.running_uri`, filled in `locate` by
+  `filesystems::extensions::page_running_uri`, the one builder): the file URI of the running copy,
   `oxplow:oxplow/file?path=<extension>/pages/<file>&rev=<hash>&filesystem=oxplow:extensions`
   (built with `file_uri_at` from `origin.deployment`, so it pins the copy a
   redeploy replaces); NULL when the extension runs no deployment (read from
@@ -2285,9 +2286,10 @@ Where it lives, and what is loaded:
   filesystem both take the running hash from `Deployment::hash`. A deployed extension's errors and warnings name its source
   files, so they say what to edit.
 - **Show Definition** is foundation's hidden `definition` page: the page
-  part by part from `oxplow.page.definition` (where it comes from, params,
-  loaders, nodes, actions, answers), its file a link to the file view;
-  only an inline view shows its YAML (pages-and-tabs.md).
+  part by part from `oxplow.page.describe` over the page's running file
+  (`v_page.running_uri`; where it comes from, params, loaders, nodes,
+  actions, answers), its file a link to the file view. An inline view has
+  no file to describe, so it offers no Show Definition (pages-and-tabs.md).
 - **An inline page** (`parse_inline_page`: a markdown ` ```oxplow-page `
   block, an agent's `oxplow_show_page { spec }`) only reads: no `command`
   loaders, no actions, forms, terminals, editors, components or slots.
@@ -5177,9 +5179,12 @@ tool: open_work              # offered as <namespace>_open_work
   and rows (up to 200) and the tree. `spec` is an inline page of the
   agent's own (YAML); it only reads. `draft: true` reads the stream's
   draft of the page's extension.
-- `oxplow.page.definition` (through `run_command`): what a page is made of,
-  its source file, params, loaders and node tree, and which page and file
-  each node comes from.
+- `oxplow.page.describe { uri }` (through `run_command`): what a page file
+  is made of, its source file, params, loaders and node tree, and which
+  page and file each node comes from. `uri` is the file on
+  `oxplow:extensions` (the running page; an older `rev`, that deployment's
+  copy), `oxplow:temp` or the worktree (`text` is the draft); a file that is
+  no page gives no rows.
 - `oxplow_show_page` (`oxplow.page.show`): shows the person a page beside
   the conversation, a saved one with params or the agent's own `spec`.
 - **Text rendering** (design rule 17, `crates/oxplow-app/src/viz_text.rs`

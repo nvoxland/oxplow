@@ -17,8 +17,8 @@ export function viewWikiBody(title: string, specYaml: string): string {
   return `# ${title.replace(/[\r\n]+/g, " ")}\n\n${fence}oxplow-page\n${specYaml.trimEnd()}\n${fence}\n`;
 }
 
-export function definitionUri(page: string, params: Record<string, SqlCell>, specYaml?: string | null): string {
-  return pageUri("definition", { ...(specYaml ? { spec: specYaml } : { of: page }), params: JSON.stringify(params) });
+export function definitionUri(page: string, params: Record<string, SqlCell>): string {
+  return pageUri("definition", { of: page, params: JSON.stringify(params) });
 }
 
 export function pageSlug(title: string): string {

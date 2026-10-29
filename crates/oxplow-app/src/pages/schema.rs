@@ -547,6 +547,7 @@ pub fn parse_page(
         running: rel.to_string(),
         deployment: None,
         bundled: false,
+        running_uri: None,
     };
     let mut file = file;
     let accepts_content = file.accepts.remove(ACCEPTS_CONTENT);

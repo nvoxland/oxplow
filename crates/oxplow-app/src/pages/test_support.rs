@@ -93,13 +93,13 @@ view: { viz: table, from: q }
 title: Listed
 loaders:
   nodes:
-    command: oxplow.page.definition
-    args: { page: acme/numbers }
+    command: oxplow.page.describe
+    args: { uri: "oxplow:oxplow/file?filesystem=oxplow:extensions&path=acme/pages/numbers.yaml" }
     items: nodes
     reads: [v_page]
   missing:
-    command: oxplow.page.definition
-    args: { page: acme/numbers }
+    command: oxplow.page.describe
+    args: { uri: "oxplow:oxplow/file?filesystem=oxplow:extensions&path=acme/pages/numbers.yaml" }
     items: nope
     reads: [v_page]
 view: { viz: table, from: nodes }

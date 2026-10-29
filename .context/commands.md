@@ -260,7 +260,7 @@ See [extensions.md](./extensions.md) "Private state host boundary".
 URI's content), `sql.read/query` (`oxplow.sql.query`), `search.read/search`
 (`oxplow.search.find`), `pages.read/open` (`oxplow.page.open`),
 `agent_text.read/skill` (`oxplow.skill.read`), `pages.read/run`
-(`oxplow.page.run`: the page's text, or its loaders' rows and tree with `format: json`),
+(`oxplow.page.run`: the page's text, or its loaders' rows and tree with `format: json`), `pages.read/describe` (`oxplow.page.describe { uri, text?, params?, stream_id? }`: what a page file is made of — `uri` is a file uri, resolved per filesystem: `oxplow:extensions` the catalog's page that file is (a `rev` other than the running deployment's: that deployment's file parsed on its own), `oxplow:temp` a view's file (`parse_inline_page`), `oxplow:local` a draft `parse_page` of `text` (else the worktree file), the extension and slug from `[.oxplow/]extensions/<ext>/pages/<slug>.yaml`; a file that is no page, or no YAML, is a null result = zero rows as a loader, never an error; it replaced `oxplow.page.definition`, with no alias, and has no `spec` input or `yaml` output),
 `vcs.read/{diff,blame,log,status,branches}` (`oxplow.vcs.log` pages history
 from any revision, past what `v_commit` indexes), `lsp.read/*` (`oxplow.code.*`),
 `changes.read/ensure` (`oxplow.change.ensure`: it writes only the derived

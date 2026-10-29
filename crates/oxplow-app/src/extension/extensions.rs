@@ -766,9 +766,13 @@ fn locate(ext: &mut Extension, project: &Path, settings: &oxplow_config::Extensi
     for page in &mut ext.page_files {
         let file = page.origin.running.rsplit('/').next().unwrap_or_default();
         let at = source.as_ref().map(|dir| format!("{dir}/pages/{file}"));
+        let running_uri = deployment
+            .as_deref()
+            .map(|hash| crate::filesystems::extensions::page_running_uri(&ext.name, file, hash));
         let mut place = |o: &mut PageProvenance| {
             o.source = at.clone();
             o.deployment = deployment.clone();
+            o.running_uri = running_uri.clone();
         };
         place(&mut page.origin);
         page.view.for_each_origin(&mut place);
@@ -2393,7 +2397,7 @@ fn config_key_type<'a>(schema: &'a serde_json::Value, pointer: &str) -> Option<&
 /// Name each page `page` refers to by slug — a param's `options_from`, a
 /// column's `expand`, a form field's `from` — whole, as one of its own
 /// extension's: `<extension>/<slug>`, what every reader looks it up by.
-fn qualify_page_refs(page: &mut crate::pages::schema::Page) {
+pub(crate) fn qualify_page_refs(page: &mut crate::pages::schema::Page) {
     use crate::pages::schema::{Node, NodeKind};
     fn whole(extension: &str, id: &mut String) {
         if !id.contains('/') {

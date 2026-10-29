@@ -29,6 +29,8 @@ test("an inline view offers saves without requiring a single SQL viz", async () 
   const { runs } = fakePageRuns(gridPage());
   const view = render(<PageHost pageKey={{ ...key, page: undefined, specYaml: yaml }} runs={runs} onSpecYaml={(source) => kept.push(source)} />);
   await view.findByTestId("action-view-save-page");
+  // It has no file to show the definition of.
+  expect(view.queryByTestId("action-page-definition")).toBeNull();
   expect(view.getByTestId("action-view-save-wiki").textContent).toContain("Save to wiki");
   expect(kept).toContain(yaml);
 });

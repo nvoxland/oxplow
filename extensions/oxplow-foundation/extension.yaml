@@ -33,10 +33,7 @@ intent:
       expect: the page in v_bookmark at the thread's scope, undone by oxplow.bookmark.remove
     - name: definition-reads-a-pages-title-origin-and-nodes
       input: { page: definition, params: { of: oxplow-foundation/commit } }
-      expect: the page's title first (the tab's label reads it), where it comes from, its params, loaders, nodes and actions, and no YAML
-    - name: definition-shows-an-inline-views-yaml
-      input: { page: definition, params: { spec: "title: Inline" } }
-      expect: an inline view's YAML as written, and its nodes
+      expect: the page's title first (the tab's label reads it), where it comes from, its params, loaders, nodes and actions
     - name: closed-threads-lists-closed-threads-with-their-work
       input: { page: closed-threads, params: { stream_id: 1 } }
       expect: the stream's closed threads only, each with a Reopen action
@@ -205,6 +202,12 @@ intent:
     - name: a-resource-page-is-handed-the-file-its-uri-names
       input: { page: file-viewer, params: { uri: 'oxplow:oxplow/file?path=note.md&filesystem=oxplow:temp', path: note.md, filesystem: 'oxplow:temp' } }
       expect: the page's first loader, content, holds the file's path, filesystem, size and language, and the tab label names the filesystem
+    - name: the-file-viewer-is-offered-for-a-temp-file-and-the-editor-is-not
+      input: { command: oxplow.page.renderers, input: { uri: 'oxplow:oxplow/file?path=note.md&filesystem=oxplow:temp' } }
+      expect: the File viewer, and no Editor
+    - name: the-file-viewer-is-offered-for-a-running-extension-file-and-the-editor-is-not
+      input: { command: oxplow.page.renderers, input: { uri: 'oxplow:oxplow/file?path=oxplow-foundation/extension.yaml&filesystem=oxplow:extensions' } }
+      expect: the File viewer, and no Editor
     - name: the-capabilities-area-lists-the-implementations-and-choosing-one-is-a-config-write
       input: { page: settings, params: { area: integrations } }
       expect: each capability's implementations and a default row; choosing writes the layer's choice
@@ -1269,11 +1272,11 @@ commands:
     op: show
     tool: show_page
     example: {"spec": "title: Failing tests\nloaders:\n  t: { sql: \"SELECT name, status FROM v_test_case WHERE status = 'failed'\" }\nview: { viz: table, from: t }\n"}
-  - name: page.definition
-    summary: "What a page is made of. Its extension, source file and deployment, its params, its loaders (each one's sql, command, page or rows) and its node tree, each node with the page and file it comes from and the loader it shows — embedded pages and mounted slots included: what the person sees under Show Definition."
+  - name: page.describe
+    summary: "What a page file is made of. `uri` is the file (`oxplow:oxplow/file?path=…`): on `oxplow:extensions` a page that runs (`<extension>/pages/<slug>.yaml`; with a `rev` that isn't the running deployment, that deployment's copy), on `oxplow:temp` a view's file, on the worktree a page file under `extensions/<name>/pages/` or `.oxplow/extensions/<name>/pages/` (`text` is the file as you have it, else it is read). Gives its extension, source file and deployment, its params, its loaders (each one's sql, command, page or rows) and its node tree, each node with the page and file it comes from and the loader it shows — embedded pages and mounted slots included: what the person sees under Show Definition. A file that is no page (other YAML, YAML that doesn't parse) gives no rows."
     scope: pages.read
-    op: definition
-    example: {"page": "oxplow-foundation/commit", "params": {"sha": "abc1234"}}
+    op: describe
+    example: {"uri": "oxplow:oxplow/file?path=oxplow-foundation/pages/commit.yaml&filesystem=oxplow:extensions", "params": {"sha": "abc1234"}}
   - name: page.renderers
     summary: "The pages that can draw a uri, in the order Open With lists them: each `page` (`<extension>/<slug>`), its `title` and whether it is the `default`. A page is offered when its `for` names the uri's resource, its `accepts` hold for the uri's params, and — if it says `accepts: { content: <loader> }` — that loader of its own has a row (the daemon runs only that loader, 2 s at most; a failure is not offered). `oxplow_navigate` a uri with `#oxplow.renderer=<page>` to open it in one of them."
     scope: pages.read

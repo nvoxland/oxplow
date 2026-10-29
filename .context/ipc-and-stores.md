@@ -915,11 +915,14 @@ it in history; if a view's in-memory registry entry is gone after restart,
 opening that view with the retained YAML uses the ordinary inline parser.
 Without either a live view or retained YAML it returns an explicit error.
 
-`oxplow.page.definition` is a read command over the page runner. Its input
-requires exactly one of `page` (a deployed page ID) and `spec` (inline page
-YAML), plus optional `params` and `stream_id`. Inline definitions pass through
-the same `parse_inline_page` restrictions as one-off views: actions and command
-loaders are refused before a run opens. Reading a definition grants no acting
+`oxplow.page.describe` is a read command over the page runner. Its input is
+`uri` (the page's file: a file URI on `oxplow:extensions`, `oxplow:temp` or
+the worktree), plus optional `text` (the worktree file as the caller has it),
+`params` and `stream_id`. A running copy is the catalog's page; an older
+deployment's file, a temp view and a worktree draft are parsed on their own
+(a temp view through `parse_inline_page`: actions and command loaders make it
+no view). A file that is no page, or invalid YAML, is a null result (zero
+rows as a loader): never an error. Reading a description grants no acting
 authority.
 
 The result is the page as the runner parsed it, flat: its metadata (`file`,
@@ -931,9 +934,6 @@ error), `nodes` (parent, depth, page, source file, viz, loader kind and
 source, `detail` — a switch's param, an embed's page, a slot's name —
 `columns` as `key (Label)`, and `settings`: the rest of a viz's YAML,
 its role block, `empty` and row styling),
-`actions` (the page's and each viz node's, `on` saying where), `answers`,
-and `yaml`. For inline specs, `yaml` is the exact submitted text, including
-comments and formatting; for deployed pages it is the running file's text.
+`actions` (the page's and each viz node's, `on` saying where) and `answers`.
 Foundation's `definition` page calls it once (its `page` loader) and
-expands those lists in SQL with `json_each`; its `spec` param carries an
-ephemeral view's YAML when no deployed page is named.
+expands those lists in SQL with `json_each`.
