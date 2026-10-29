@@ -1211,7 +1211,14 @@ A page has **one place for its controls: its rail** (`PageRail`). It
 has no toolbar, and where a control goes is not the author's to say. The
 rail stacks its groups in a fixed order, so nothing moves as values
 change: **Filters** (its filter params) and **Selection** (what a row click
-picked). A `role: view` param (state the page or the system sets, in the
+picked). **The rail is drawn only when something is in it.** A page has a
+"Details" card when it has a switch, a `filter` param, a `selection`
+param, a `rail:` node, the save-a-view form open, or a Contents of its
+own; with none, no card is drawn and the body takes the full width
+(`railHas` in `pages/railHas.ts`, decided from the run before drawing,
+never by measuring). A page whose view fills (a terminal, a file, an
+editor, a diff) gets no automatic Contents; a real filter, selection or
+`rail:` node still gives it a rail. A `role: view` param (state the page or the system sets, in the
 `#` like a filter) is in neither: the rail never draws it, and a person
 never edits it. Page-level actions — About this page (the tab modal: what the page
 is for, in normal text colour, then the same facts Definition's About opens with, less the title and extension — id,

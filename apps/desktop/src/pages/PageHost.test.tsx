@@ -273,12 +273,16 @@ test("Loading shows only after 150 ms without a run; an open that fails says why
   await waitFor(() => expect(failed.container.querySelector(".ox-error")?.textContent).toContain("no page acme/page"));
 });
 
-test("a grid page takes the full width; a table reads as a document", async () => {
+test("a grid page and a page with no rail take the full width; a table with a rail reads as a document", async () => {
   const grid = render(<PageHost pageKey={key} runs={fakePageRuns(gridPage()).runs} />);
   await waitFor(() => expect(grid.container.querySelector('[data-node="tiles"]')).not.toBeNull());
   expect(grid.container.querySelector(".oxplow-reading-column")).toBeNull();
   cleanup();
-  const table = render(<PageHost pageKey={key} runs={fakePageRuns(tablePage()).runs} />);
+  const bare = render(<PageHost pageKey={key} runs={fakePageRuns(tablePage()).runs} />);
+  await bare.findByText("Items: Alpha");
+  expect(bare.container.querySelector(".oxplow-reading-column")).toBeNull();
+  cleanup();
+  const table = render(<PageHost pageKey={key} runs={fakePageRuns(tablePage({ params: [{ name: "q", role: "filter", type: "text", default: null } as never] })).runs} />);
   await table.findByText("Items: Alpha");
   expect(table.container.querySelector(".oxplow-reading-column")).not.toBeNull();
 });

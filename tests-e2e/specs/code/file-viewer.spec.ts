@@ -31,6 +31,9 @@ test("a file on the running extensions opens read-only in the File viewer", asyn
   await expect(page.getByTestId(`center-tab-dirty-${uri}`)).toHaveCount(0);
   await expect(page.getByTestId("viz-code-path").filter({ visible: true })).toHaveText("oxplow-foundation/extension.yaml");
   await expect(page.getByTestId("viz-code-file").filter({ visible: true })).toContainText("@oxplow:extensions");
+  // A page that fills, with no filter, selection or rail node, has no
+  // Details card.
+  await expect(page.getByTestId("page-rail").filter({ visible: true })).toHaveCount(0);
 });
 
 test("a scratch file on oxplow:temp opens read-only in the File viewer", async ({ page, daemon }) => {

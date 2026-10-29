@@ -605,7 +605,13 @@ holds its run (`usePageRunWith` over `usePageRunsStore()`: the
 `PageRunsContext`'s store, else the window's; `RunState` carries the
 `runId`, `rerun` is Refresh) and draws the `tabs/Page.tsx` chrome:
 Contents and Selection (the rows picked, `picked` history state) in the
-rail (`pages/railGroups.tsx`); About this page in the ☰ (the tab's
+rail (`pages/railGroups.tsx`), which `railHas` (`pages/railHas.ts`) decides
+from the run: with nothing in it (no switch, `filter` or `selection` param,
+`rail:` node or open save form, and no Contents) `rightRail` is undefined,
+`Page` draws no Details card and the body takes the full width. Contents is
+automatic only for a page that does not fill: four or more titled
+sections (as `viz/Contents.tsx` lists them) or markdown that may have
+headings; About this page in the ☰ (the tab's
 modal, `components/TabModal.tsx`, titled About this page: the page's `description`, then `PageAbout`'s
 facts — Id, Definition (a link: `runningUri` drawn as Definition with the
 run's params), origin, what runs (no Title or Extension row: the nav bar

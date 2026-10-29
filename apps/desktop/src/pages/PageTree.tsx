@@ -348,7 +348,7 @@ function VizNode(props: NodeViewProps & { def: Node; id: string }) {
 
 /** The children of stack `at` that fold away: titled, not replaceable
  *  viz nodes whose loader ran and has nothing for them (`foldEmpty`). */
-function emptySections(run: PageRun, at: RunNode): { id: string; title: string }[] {
+export function emptySections(run: PageRun, at: RunNode): { id: string; title: string }[] {
   const candidates = at.children.flatMap((c) => {
     const def = nodeById(run.page, c.id);
     if (!def || def.kind !== "viz" || !def.title || def.hideTitle || def.replaceable || c.error) return [];

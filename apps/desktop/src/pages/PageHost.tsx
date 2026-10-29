@@ -33,6 +33,7 @@ import { useOptionalPageNavigation, usePageTitle, useTabActions } from "../tabs/
 import type { TabRef } from "../tabs/tabState.js";
 import type { Node, PageParam, PageRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
 import { PageRail, switchSections } from "./PageRail.js";
+import { contentsHas, railHas, viewFills } from "./railHas.js";
 import { ComponentPage, type ComponentPageHost } from "./PageComponent.js";
 import type { BridgeHost } from "../viz/ComponentFrame.js";
 import type { FrameAction } from "../viz/componentBridge.js";
@@ -228,12 +229,15 @@ export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, re
   const reading = useDelayed(!run && !error, LOADING_AFTER_MS);
   const dashboard = page?.category === "Dashboards" && page.view.kind === "grid" && !page.origin.bundled ? page.id : null;
   const editableDashboard = useDashboardWritable(dashboard);
-  const fills = run ? whole || anyFills(run) : false;
+  const fills = run ? whole || viewFills(run) : false;
   // The nav bar carries the title, always: a switch page's is the section in
   // view, a writable dashboard's renames it in place.
   const shownTitle = run ? sectionTitle(run) ?? title : title;
   const navTitle = editableDashboard && page ? <DashboardTitle page={page.id} title={shownTitle} /> : shownTitle;
-  const full = fills || (run ? wide(run) : false);
+  // A rail with nothing in it is not drawn (`railHas`), and its body then
+  // takes the full width.
+  const hasRail = run ? railHas(run, { fills, saveOpen: !!(saveAs && viewFile) }) : false;
+  const full = fills || (run ? wide(run) || !hasRail : false);
 
   return (
     <Page
@@ -245,9 +249,9 @@ export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, re
       actions={pageActions}
       pin={pageKey.page && page && onOpenPage ? { tile: { kind: "page", page: page.id, params: run!.params, title: page.title }, onOpenPage } : undefined}
       rightRail={
-        run ? (
+        run && hasRail ? (
           <>
-            <Contents root={body} />
+            {contentsHas(run, fills) ? <Contents root={body} /> : null}
             {saveAs && viewFile ? <SaveTempViewForm key={saveAs} kind={saveAs} file={viewFile} streamId={streamId} initialTitle={title} onClose={() => setSaveAs(null)} onSaved={open} /> : null}
             <PageRail run={run} runId={runId} onApply={apply} picked={picked} streamId={streamId} onOpenPage={onOpenPage} />
           </>
@@ -331,14 +335,6 @@ function sectionTitle(run: PageRun): string | null {
 const NO_PARAMS: Record<string, SqlCell> = {};
 const NO_PICKED: Record<string, PickedRow> = {};
 const fillStyle: CSSProperties = { display: "flex", flexDirection: "column", flex: 1, minHeight: 0 };
-
-/** Whether one of the run's viz nodes fills (a file, a diff: its page
- *  says): the page gives its body every pixel. */
-function anyFills(run: PageRun): boolean {
-  const walk = (n: Node): boolean =>
-    n.kind === "viz" ? n.config.fills : n.kind === "stack" || n.kind === "grid" || n.kind === "switch" ? n.children.some(walk) : false;
-  return walk(run.page.view);
-}
 
 /** Whether the page wants the full width: a grid, or a board or a
  *  dashboard anywhere in it (a page's rule); everything else reads as
