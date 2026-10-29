@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { definitionUri, pageSlug, titledPage, viewWikiBody } from "./viewActions.js";
-import { paramOf } from "../uri/uri.js";
+import { identityOf, viewOf } from "../uri/uri.js";
 
 test("a saved page keeps comments and ordered loaders when its title changes", () => {
   const yaml = titledPage("# Keep this\ntitle: Before\nloaders:\n  source: { rows: [] }\n  dependent: { sql: SELECT * FROM source }\nview: { viz: table, from: dependent }\n", "After");
@@ -16,8 +16,10 @@ test("a wiki view's enclosing fence cannot be closed by markdown inside its YAML
   expect(pageSlug("2026 release")).toBe("page-2026-release");
 });
 
-test("Show definition carries the deployed page and its exact params", () => {
-  const uri = definitionUri("acme/list", { q: "two words" });
-  expect(paramOf(uri, "of")).toBe("acme/list");
-  expect(paramOf(uri, "params")).toBe('{"q":"two words"}');
+test("Show definition is the running copy's file drawn as Definition with the run's exact params", () => {
+  const running = "oxplow:oxplow/file?path=acme%2Fpages%2Flist.yaml&rev=abc123&filesystem=oxplow:extensions";
+  const uri = definitionUri(running, { q: "two words" });
+  expect(identityOf(uri)).toBe(identityOf(running));
+  expect(viewOf(uri, "oxplow.renderer")).toBe("oxplow-foundation/definition");
+  expect(viewOf(uri, "params")).toBe('{"q":"two words"}');
 });

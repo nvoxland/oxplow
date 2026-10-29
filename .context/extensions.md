@@ -2285,11 +2285,13 @@ Where it lives, and what is loaded:
   `oxplow:extensions` filesystem (filesystems.md); `locate` and that
   filesystem both take the running hash from `Deployment::hash`. A deployed extension's errors and warnings name its source
   files, so they say what to edit.
-- **Show Definition** is foundation's hidden `definition` page: the page
-  part by part from `oxplow.page.describe` over the page's running file
-  (`v_page.running_uri`; where it comes from, params, loaders, nodes,
-  actions, answers), its file a link to the file view. An inline view has
-  no file to describe, so it offers no Show Definition (pages-and-tabs.md).
+- **Show Definition** opens the page's running file (`v_page.running_uri`)
+  drawn as foundation's `definition` page, a display mode of a page's YAML
+  file (`for: oxplow/file`, `accepts.content` over `oxplow.page.describe`):
+  the page part by part (where it comes from, params, loaders, nodes,
+  actions, answers) and the file's other modes as links; the raw YAML is the
+  File viewer's. A page with no running copy offers no Show Definition
+  (pages-and-tabs.md).
 - **An inline page** (`parse_inline_page`: a markdown ` ```oxplow-page `
   block, an agent's `oxplow_show_page { spec }`) only reads: no `command`
   loaders, no actions, forms, terminals, editors, components or slots.
@@ -2742,7 +2744,7 @@ loaders' first rows and params are what a mount can take):
 `change_id` points at the page's change in `v_change`, with its analysis
 in `v_change_file`, `v_change_function`, `v_change_import`,
 `v_change_co_change` and `v_change_duplicate`. To learn a page's slots
-and params, read it with `oxplow_find_page` or the `definition` page: its
+and params, read it with `oxplow_find_page` or `oxplow.page.describe`: its
 slot nodes and loaders are listed.
 
 The launcher is not a slot: a page lists itself with `category`.

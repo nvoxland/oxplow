@@ -1,5 +1,6 @@
 import { parseDocument } from "yaml";
-import { pageUri } from "../uri/uri.js";
+import { withUriView } from "../uri/uri.js";
+import { RENDERER_VIEW_KEY } from "./renderers.js";
 import type { SqlCell } from "../tauri-bridge/generated/bindings.js";
 
 /** Keep the YAML as a document: a title edit preserves comments and key order. */
@@ -17,8 +18,16 @@ export function viewWikiBody(title: string, specYaml: string): string {
   return `# ${title.replace(/[\r\n]+/g, " ")}\n\n${fence}oxplow-page\n${specYaml.trimEnd()}\n${fence}\n`;
 }
 
-export function definitionUri(page: string, params: Record<string, SqlCell>): string {
-  return pageUri("definition", { of: page, params: JSON.stringify(params) });
+/** The page "Show Definition" draws with: Definition, a display mode of a
+ *  page's YAML file. */
+export const DEFINITION_PAGE = "oxplow-foundation/definition";
+
+/** What "Show Definition" opens: the page's running copy
+ *  (`PageProvenance.running_uri`, its file on `oxplow:extensions` pinned to
+ *  the deployment) drawn as Definition, with the run's exact params as the
+ *  mode's `params` filter. */
+export function definitionUri(runningUri: string, params: Record<string, SqlCell>): string {
+  return withUriView(runningUri, { [RENDERER_VIEW_KEY]: DEFINITION_PAGE, params: JSON.stringify(params) });
 }
 
 export function pageSlug(title: string): string {

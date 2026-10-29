@@ -1,0 +1,22 @@
+# A running page's YAML is a page: Open With offers the File viewer (the raw
+# YAML), first and so the one that opens, and Definition (what it is made
+# of), which narrows by content and so follows. The Editor is not offered,
+# the file being a running copy.
+when:
+  command: oxplow.page.renderers
+  input: { uri: "oxplow:oxplow/file?path=oxplow-foundation/pages/commit.yaml&filesystem=oxplow:extensions" }
+expect:
+  ok: true
+  result:
+    renderers:
+      - { page: oxplow-foundation/file-viewer, default: false }
+      - { page: oxplow-foundation/definition, default: false }
+steps:
+  - when:
+      command: oxplow.page.renderers
+      input: { uri: "oxplow:oxplow/file?path=oxplow-foundation/extension.yaml&filesystem=oxplow:extensions" }
+    expect:
+      ok: true
+      result:
+        renderers:
+          - { page: oxplow-foundation/file-viewer }

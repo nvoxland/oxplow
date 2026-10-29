@@ -1,0 +1,23 @@
+# Definition describes a page. A YAML file that is no page (or does not
+# parse) gets no Definition: Open With offers the File viewer alone. The
+# daemon decides this from the file's content, not its name.
+temp:
+  notes.yaml: "just: a list\nof: notes\n"
+  broken.yaml: "title: [unclosed\n"
+when:
+  command: oxplow.page.renderers
+  input: { uri: "oxplow:oxplow/file?path=notes.yaml&filesystem=oxplow:temp" }
+expect:
+  ok: true
+  result:
+    renderers:
+      - { page: oxplow-foundation/file-viewer }
+steps:
+  - when:
+      command: oxplow.page.renderers
+      input: { uri: "oxplow:oxplow/file?path=broken.yaml&filesystem=oxplow:temp" }
+    expect:
+      ok: true
+      result:
+        renderers:
+          - { page: oxplow-foundation/file-viewer }

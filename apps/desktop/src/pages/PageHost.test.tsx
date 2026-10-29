@@ -7,20 +7,31 @@ import { fakeAction, fakePageRuns, gridPage, loader, tablePage } from "./testing
 import { createPageRuns, type PageKey } from "../pageRuns.js";
 import { IpcCallError } from "../ipc-error.js";
 import type { CommandSpec, FormStart, PageRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
-import { paramOf } from "../uri/uri.js";
+import { paramOf, viewOf } from "../uri/uri.js";
 
 afterEach(cleanup);
 
 const key: PageKey = { page: "acme/page", params: {}, streamId: null, threadId: null };
 const wait = (ms: number) => act(() => new Promise<void>((r) => setTimeout(r, ms)));
 
-test("every page offers Show definition with the page and the run's actual params", async () => {
+const RUNNING = "oxplow:oxplow/file?path=acme/pages/page.yaml&rev=abc123&filesystem=oxplow:extensions";
+
+test("a page with a running copy offers Show definition: that file drawn as Definition, with the run's actual params", async () => {
   const opened: string[] = [];
-  const { runs } = fakePageRuns({ ...tablePage(), params: { q: "recent" } });
+  const base = tablePage();
+  const { runs } = fakePageRuns({ ...base, params: { q: "recent" }, page: { ...base.page, origin: { ...base.page.origin, runningUri: RUNNING } } });
   const view = render(<PageHost pageKey={key} runs={runs} onOpenPage={(ref) => opened.push(ref.id)} />);
   fireEvent.click(await view.findByTestId("action-page-definition"));
-  expect(paramOf(opened[0], "of")).toBe("acme/page");
-  expect(paramOf(opened[0], "params")).toBe('{"q":"recent"}');
+  expect(paramOf(opened[0], "path")).toBe("acme/pages/page.yaml");
+  expect(viewOf(opened[0], "oxplow.renderer")).toBe("oxplow-foundation/definition");
+  expect(viewOf(opened[0], "params")).toBe('{"q":"recent"}');
+});
+
+test("a page with no running copy offers no Show definition", async () => {
+  const { runs } = fakePageRuns(tablePage());
+  const view = render(<PageHost pageKey={key} runs={runs} />);
+  await view.findByText("Items: Alpha");
+  expect(view.queryByTestId("action-page-definition")).toBeNull();
 });
 
 test("an inline view offers saves without requiring a single SQL viz", async () => {

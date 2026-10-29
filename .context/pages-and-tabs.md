@@ -313,19 +313,31 @@ defines what the person sees:
   page reads `oxplow.page.describe`'s `nodes`), `page`
   (another page's `loader`, with `params`) or `rows` (inline). A loader's
   name is a plain identifier, never a dataset's (`v_*`, `m_*`).
-- **Show Definition** is foundation's hidden `definition` page (params
-  `of`, the page id, and `params`, its params as JSON text), from one
-  `oxplow.page.describe` call over the page's running file (its
-  `running_uri`, else the running copy by name for an extension that runs
-  from its source). An inline view has no file, so it offers no Show
-  Definition until inline views are temp pages:
-  where the page comes from (its file a link to the file view), its
-  description, how it is used (a line each: what it draws, how it is
-  opened, its tab, updates, comments, how agents read and find it), its
+- **Show Definition** opens the page's running copy (`running_uri`) drawn
+  as foundation's `definition` page, which is a display mode of a page's
+  YAML file: `for: oxplow/file`, `accepts: { path: '^[\w./-]+\.yaml$',
+  content: definition }` (offered only when `oxplow.page.describe` finds a
+  page in the file), `content: { text: true }`. The view is
+  `#oxplow.renderer=oxplow-foundation/definition&params=<the run's params
+  as JSON>` (`viewActions.ts::definitionUri`); the tab reads
+  `Definition: <slug>.yaml`. Open With on any page file lists it beside the
+  File viewer, which stays the default and shows the raw YAML (Definition
+  has no YAML section). A page with no running copy (an inline view, an
+  extension that runs from its source) offers no Show Definition
+  (`PageHost`). Definition reads the file once (`oxplow.page.describe`
+  over the file's `content.uri` and `content.text`) and shows: where the
+  page comes from (its Source, the worktree file, a link to the Editor;
+  the other modes of the file, `oxplow.page.renderers`, as links with the
+  `#oxplow.renderer=` key), its
+  description, how it is used (a line each: what it draws, that it is a
+  display mode of a resource, its tab, updates, comments, how agents read
+  and find it), its
   params with this run's values, its loaders (what each runs and reads,
   its rows), its view as an outline (a node a line: its viz and loader,
   title, columns and settings; embeds and slot mounts included) and its
-  actions where they sit. The YAML is the File viewer's.
+  actions where they sit. The offered list puts a page that narrows by
+  `accepts.content` after the pages that take any such file, so the first
+  (when none is flagged `default`) is the general one.
   `v_page.running_uri` (and `PageProvenance.running_uri`, in the bindings) is the file URI of the copy that runs
   (`…&rev=<hash>&filesystem=oxplow:extensions`, NULL with no deployment):
   the link to open for "the page as it runs", pinned to that deployment.
@@ -367,7 +379,7 @@ restart the daemon uses the restored source if its in-memory view is
 gone; nothing creates a persistent answer record. View params still live
 in the URI's `#`, and inline source keeps its read-only restrictions.
 
-Every page host offers **Show definition** in its standard actions.
+Every page host with a running copy offers **Show definition** in its standard actions.
 An inline view also offers **Save to wiki…** and **Save as Page…**. The
 forms live in the rail (Enter submits, Escape cancels). Saving to wiki
 runs `oxplow.knowledge.write_page` with an `oxplow-page` fence, so the

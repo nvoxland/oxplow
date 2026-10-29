@@ -32,8 +32,14 @@ intent:
       input: { command: oxplow.bookmark.set, input: { uri: "oxplow:oxplow/page?page=git-dashboard", page_kind: git-dashboard, scope: thread, thread: "thr1" } }
       expect: the page in v_bookmark at the thread's scope, undone by oxplow.bookmark.remove
     - name: definition-reads-a-pages-title-origin-and-nodes
-      input: { page: definition, params: { of: oxplow-foundation/commit } }
-      expect: the page's title first (the tab's label reads it), where it comes from, its params, loaders, nodes and actions
+      input: { page: definition, params: { uri: 'oxplow:oxplow/file?path=oxplow-foundation/pages/commit.yaml&filesystem=oxplow:extensions', path: oxplow-foundation/pages/commit.yaml } }
+      expect: the tab named for the file, then the page's source, the other pages that draw the file, its params, loaders, nodes and actions; no YAML (the File viewer shows that)
+    - name: definition-is-offered-for-a-page-yaml-beside-the-file-viewer
+      input: { command: oxplow.page.renderers, input: { uri: 'oxplow:oxplow/file?path=oxplow-foundation/pages/commit.yaml&filesystem=oxplow:extensions' } }
+      expect: the File viewer and Definition for a running page's file, only the File viewer for a YAML file that is no page
+    - name: definition-is-not-offered-for-a-yaml-that-is-not-a-page
+      input: { command: oxplow.page.renderers, input: { uri: 'oxplow:oxplow/file?path=notes.yaml&filesystem=oxplow:temp' } }
+      expect: the File viewer alone, for YAML that holds no page or does not parse
     - name: closed-threads-lists-closed-threads-with-their-work
       input: { page: closed-threads, params: { stream_id: 1 } }
       expect: the stream's closed threads only, each with a Reopen action

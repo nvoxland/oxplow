@@ -935,5 +935,5 @@ source, `detail` — a switch's param, an embed's page, a slot's name —
 `columns` as `key (Label)`, and `settings`: the rest of a viz's YAML,
 its role block, `empty` and row styling),
 `actions` (the page's and each viz node's, `on` saying where) and `answers`.
-Foundation's `definition` page calls it once (its `page` loader) and
+Foundation's `definition` page calls it once (its `definition` loader) and
 expands those lists in SQL with `json_each`.

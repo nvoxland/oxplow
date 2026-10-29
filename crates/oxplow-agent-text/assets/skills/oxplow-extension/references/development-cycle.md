@@ -89,7 +89,8 @@ extensions that loaded (`enabled`, `errors`, `warnings`, `deployment`) and
 `v_contribution` what each contributes (count it by `extension` and `kind`).
 `oxplow_read { uri: "oxplow:oxplow/page?page=<ext>/<slug>" }` gives one
 page's definition and deployment; **Show Definition** in a page's ☰ menu is
-the same for the person. An extension that fails to load isn't in
+the same for the person (the running page file, drawn as Definition, a
+display mode of the file beside the File viewer's raw YAML). An extension that fails to load isn't in
 `v_extension`: `oxplow_validate_extension` says why.
 
 ## When the person says "this page"

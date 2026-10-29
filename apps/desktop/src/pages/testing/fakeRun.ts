@@ -44,7 +44,7 @@ export function fakeViz(over: Partial<VizConfig> = {}): VizConfig {
     depth: null,
     fills: false,
     actions: [],
-    origin: { extension: "acme", source: null, running: "", deployment: null, bundled: false },
+    origin: { extension: "acme", source: null, running: "", deployment: null, bundled: false, runningUri: null },
     ...over,
   } as VizConfig;
 }
@@ -124,7 +124,7 @@ export function fakePage(view: Node, over: Partial<Page> = {}): Page {
     loaders: [],
     view,
     rail: null,
-    origin: { extension: "acme", source: null, running: "", deployment: null, bundled: false },
+    origin: { extension: "acme", source: null, running: "", deployment: null, bundled: false, runningUri: null },
     ...over,
   } as Page;
 }

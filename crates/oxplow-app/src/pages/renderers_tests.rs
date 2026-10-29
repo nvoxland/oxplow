@@ -184,6 +184,16 @@ const CONTENT_PAGES: &[(&str, &str)] = &[
         "plain",
         "for: oxplow/file\naccepts: { path: '^plain\\.[a-z]+$' }\n",
     ),
+    // Listed first by name, but it narrows by content: after the page that
+    // takes any such file.
+    (
+        "a-checked",
+        "for: oxplow/file\naccepts: { path: '^ordered\\.[a-z]+$', content: some }\nloaders:\n  some: { rows: [{ n: 1 }] }\n",
+    ),
+    (
+        "b-general",
+        "for: oxplow/file\naccepts: { path: '^ordered\\.[a-z]+$' }\n",
+    ),
     // A check that would count to ten million.
     (
         "slow",
@@ -217,6 +227,7 @@ async fn project() -> (tempfile::TempDir, std::sync::Arc<crate::Services>) {
         ("chain.rs", "fn main() {}\n"),
         ("rows.txt", "t\n"),
         ("plain.txt", "t\n"),
+        ("ordered.txt", "t\n"),
         ("slow.txt", "t\n"),
     ] {
         write(dir.path(), path, text);
@@ -315,6 +326,15 @@ async fn only_the_chain_of_the_accepts_loader_runs() {
 async fn a_page_with_no_content_check_is_offered_for_its_params_alone() {
     let (_dir, svc) = project().await;
     assert_eq!(acme_for(&svc, "plain.txt").await, ["acme/plain"]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_page_that_narrows_by_content_comes_after_one_that_takes_any_such_file() {
+    let (_dir, svc) = project().await;
+    assert_eq!(
+        acme_for(&svc, "ordered.txt").await,
+        ["acme/b-general", "acme/a-checked"]
+    );
 }
 
 /// The surface the desktop and agents share: the whole catalog, foundation's

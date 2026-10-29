@@ -139,8 +139,9 @@ export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, re
     // What it shows, as text, as an agent would read it.
     ...(page ? [{ id: "page-copy", label: copied ? "Copied" : "Copy", title: "Copy what the page shows, as text", standard: true, icon: "copy", run: copy }] : []),
     ...(page ? [{ id: "page-about", label: "About this page", standard: true, run: () => setAbout(true) }] : []),
-    // An inline view has no file the daemon could describe.
-    ...(page && !specYaml ? [{ id: "page-definition", label: "Show definition", standard: true, run: () => open(definitionUri(page.id, run!.params)) }] : []),
+    // A page's definition is a display mode of its running file; a page
+    // with no running copy (an inline view) has none to show.
+    ...(page?.origin.runningUri ? [{ id: "page-definition", label: "Show definition", standard: true, run: () => open(definitionUri(page.origin.runningUri!, run!.params)) }] : []),
     ...(specYaml ? [
       { id: "view-save-wiki", label: "Save to wiki…", standard: true, run: () => setSaveAs("wiki") },
       { id: "view-save-page", label: "Save as Page…", standard: true, run: () => setSaveAs("page") },

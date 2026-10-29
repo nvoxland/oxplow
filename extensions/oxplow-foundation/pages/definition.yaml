@@ -1,63 +1,70 @@
 title: Definition
-description: What a page is made of, part by part — where it comes from (its file opens in the file view), what it is for and how it is used, its params with the values this run used, the loaders that read its data, the nodes that show them (embedded pages and mounted slots included) and its actions. Every page's ☰ menu opens it as Show Definition.
-label: 'Definition: {{row.title}}'
+description: What a page file is made of, part by part. A display mode of a page's YAML file, in Open With beside the File viewer (the raw YAML); every page's ☰ opens its running copy this way as Show Definition.
+label: 'Definition: {{param.path|basename}}'
 icon: file-text
-hidden: true
+for: oxplow/file
+accepts:
+  path: '^[\w./-]+\.yaml$'
+  content: definition
+content: { text: true, max_bytes: 262144 }
 params:
-- name: of
-  label: Page (`<extension>/<page>`)
+- name: uri
+- name: path
 - name: params
+  role: filter
   label: Its params (JSON)
 - name: stream_id
 answers:
-- {"question":"What is this page made of, and where does each part come from?","params":{"of":"oxplow-foundation/commit"}}
+- {"question":"What is this page made of, and where does each part come from?","params":{"uri":"oxplow:oxplow/file?path=oxplow-foundation/pages/commit.yaml&filesystem=oxplow:extensions","path":"oxplow-foundation/pages/commit.yaml"}}
 loaders:
-  # First: the tab's label reads its row.
-  scope:
+  # The stream, as the command that describes the page names it.
+  stream:
     sql: |
-      SELECT uri_param(uri, 'id') AS stream,
-             (SELECT title FROM v_page WHERE id = :of) AS title
-      FROM v_stream WHERE id = :stream_id
-  # The page file it runs from: its pinned copy, else (it runs from its
-  # source) the running one by name.
-  file:
-    sql: |
-      SELECT coalesce(running_uri,
-                      uri('oxplow/file', 'path', extension || '/pages/' || substr(id, instr(id, '/') + 1) || '.yaml',
-                          'filesystem', 'oxplow:extensions')) AS uri
-      FROM v_page WHERE id = :of
-  page:
+      SELECT uri_param(uri, 'id') AS stream FROM v_stream WHERE id = :stream_id
+  # The page the file is, from the text the system read (no rows when the
+  # file is no page: then this mode isn't offered).
+  definition:
     command: oxplow.page.describe
-    args: { uri: { from: file.uri }, params: { param: params }, stream_id: { from: scope.stream } }
+    args: { uri: { from: content.uri }, text: { from: content.text }, params: { param: params }, stream_id: { from: stream.stream } }
     reads: [page, extension_deployment]
+  # The other pages that draw this file, but not this one.
+  modes:
+    command: oxplow.page.renderers
+    args: { uri: { from: content.uri } }
+    items: renderers
+    reads: [page]
+  mode_links:
+    sql: |
+      SELECT title, (SELECT uri FROM content) || '#oxplow.renderer=' || page AS target
+      FROM modes WHERE page <> 'oxplow-foundation/definition'
   # Where it comes from.
   about:
     sql: |
       SELECT title, page AS id, extension,
-             CASE WHEN file <> '' THEN file END AS file,
+             CASE WHEN source <> '' THEN source END AS source,
              CASE WHEN bundled THEN 'ships with oxplow' ELSE 'yours' END AS origin,
              CASE WHEN deployment IS NULL THEN 'loaded from its source'
                   ELSE 'deployment ' || substr(deployment, 1, 12) END AS runs
-      FROM page
+      FROM definition
   description:
-    sql: SELECT description AS text FROM page WHERE description <> ''
+    sql: SELECT description AS text FROM definition WHERE description <> ''
   # How it is used, a line each: what it draws, how it is opened, its
   # tab, when it updates, comments, how an agent reads it, and the
   # questions an agent finds it by.
   usage:
     sql: |
       WITH p AS (
-        SELECT *, json_array_length(page."for") AS draws,
-               (SELECT group_concat('`' || value || '`', ', ') FROM json_each(page."for")) AS kinds
-        FROM page
+        SELECT *, json_array_length(definition."for") AS draws,
+               (SELECT group_concat('`' || value || '`', ', ') FROM json_each(definition."for")) AS kinds
+        FROM definition
       ),
       lines(n, line) AS (
         SELECT 1, CASE WHEN draws = 0 THEN NULL
                        WHEN "default" THEN 'It draws ' || kinds || ' and is the page that opens one.'
                        ELSE 'It draws ' || kinds || ', but another page is the one that opens.' END FROM p
         UNION ALL
-        SELECT 2, CASE WHEN category IS NOT NULL AND NOT hidden THEN 'It is in the launcher, under ' || category || '.'
-                       WHEN draws > 0 AND "default" THEN 'It isn''t in the launcher: opening a ' || kinds || ' opens it.'
+        SELECT 2, CASE WHEN draws > 0 THEN 'It is a display mode of ' || kinds || ' (Open With).'
+                       WHEN category IS NOT NULL AND NOT hidden THEN 'It is in the launcher, under ' || category || '.'
                        ELSE 'It isn''t in the launcher: links from other pages open it.' END FROM p
         UNION ALL
         SELECT 3, CASE WHEN label IS NULL THEN 'Its tab is named by its title' ELSE 'Its tab is named `' || label || '`' END
@@ -71,7 +78,7 @@ loaders:
         SELECT 6, CASE WHEN tool IS NOT NULL THEN 'Agents get it as the tool `' || tool || '`, and read it with `oxplow_run_page`.'
                        ELSE 'An agent reads it with `oxplow_run_page`; it isn''t offered as a tool of its own.' END FROM p
         UNION ALL
-        SELECT 7 + j.key, 'Agents find it for "' || (j.value ->> '$.question') || '"' FROM page, json_each(page.answers) j
+        SELECT 7 + j.key, 'Agents find it for "' || (j.value ->> '$.question') || '"' FROM definition, json_each(definition.answers) j
       )
       SELECT line FROM lines WHERE line IS NOT NULL ORDER BY n
   usage_text:
@@ -81,7 +88,7 @@ loaders:
       SELECT j.value ->> '$.name' AS name, j.value ->> '$.label' AS label,
              coalesce(j.value ->> '$.role', 'resource') AS role, j.value ->> '$.type' AS type,
              j.value ->> '$.default' AS "default", j.value ->> '$.value' AS value
-      FROM page, json_each(page.params) j
+      FROM definition, json_each(definition.params) j
       ORDER BY j.key
   loaders:
     sql: |
@@ -90,7 +97,7 @@ loaders:
              (SELECT group_concat(value, ', ') FROM json_each(j.value -> '$.reads')) AS reads,
              j.value ->> '$.rows' AS rows, j.value ->> '$.error' AS error,
              j.value ->> '$.source' AS source, j.value -> '$.columns' AS result_columns
-      FROM page, json_each(page.loaders) j
+      FROM definition, json_each(definition.loaders) j
       ORDER BY j.key
   queries:
     sql: |
@@ -128,7 +135,7 @@ loaders:
                                THEN 'column `' || f.value || '`' ELSE '`' || f.value || '`' END
                 FROM json_each(j.value -> '$.settings') st, json_each(st.value) f
                 WHERE st.type = 'object' AND f.type <> 'null')) AS settings
-      FROM page, json_each(page.nodes) j
+      FROM definition, json_each(definition.nodes) j
       ORDER BY j.key
   # The view as an outline, a node a line, nested as the view nests: a
   # short name for what it is (its heading, when it has one, first), then
@@ -148,7 +155,7 @@ loaders:
                     WHEN 'markdown' THEN 'Text'
                     WHEN 'component' THEN 'Component ' || detail
                     ELSE kind END
-               || CASE WHEN page <> (SELECT page FROM page) THEN ' (from `' || page || '`)' ELSE '' END
+               || CASE WHEN page <> (SELECT page FROM definition) THEN ' (from `' || page || '`)' ELSE '' END
                || coalesce(char(10) || substr('                                        ', 1, 2 * depth + 2) || '- columns: ' || columns, '')
                || coalesce(char(10) || substr('                                        ', 1, 2 * depth + 2)
                            || replace(settings, char(10), char(10) || substr('                                        ', 1, 2 * depth + 2)), ''),
@@ -164,7 +171,7 @@ loaders:
                   ELSE 'the `' || (j.value ->> '$.on') || '` section' END AS offered,
              j.value ->> '$.when' AS "when",
              CASE WHEN j.value ->> '$.form' THEN 'yes' ELSE 'no' END AS form
-      FROM page, json_each(page.actions) j
+      FROM definition, json_each(definition.actions) j
       ORDER BY j.key
 view:
   stack:
@@ -177,9 +184,18 @@ view:
     - { key: title, label: Title }
     - { key: id, label: Id }
     - { key: extension, label: Extension }
-    - { key: file, label: File, link: { kind: file } }
+    - { key: source, label: Source, link: { kind: file } }
     - { key: origin, label: Origin }
     - { key: runs, label: Runs }
+  - id: modes
+    title: Other ways to open
+    viz: list
+    from: mode_links
+    empty: ''
+    columns:
+    - key: title
+      label: Mode
+      link: { kind: page, from: target }
   - id: description
     title: Description
     viz: markdown
