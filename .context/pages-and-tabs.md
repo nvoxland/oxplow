@@ -325,8 +325,8 @@ defines what the person sees:
   has no YAML section). A page with no running copy (an
   extension that runs from its source) offers no Show Definition
   (`PageHost`). Definition reads the file once (`oxplow.page.describe`
-  over the file's `content.uri` and `content.text`) and shows: the file's
-  URL (the top row) and where the page comes from (its Source is that
+  over the file's `content.uri` and `content.text`) and shows: where the
+  page comes from (its Source is that
   same running copy, a link that opens it raw in the File viewer with the
   `#oxplow.renderer=` key; never the editable worktree file), its
   description, how it is used (a line each: what it draws, that it is a

@@ -2289,7 +2289,7 @@ Where it lives, and what is loaded:
   drawn as foundation's `definition` page, a display mode of a page's YAML
   file (`for: oxplow/file`, `accepts.content` over `oxplow.page.describe`):
   the page part by part (where it comes from, params, loaders, nodes,
-  actions, answers), with the file's URL first and its Source a link to the
+  actions, answers), with its Source a link to the
   same running copy in the File viewer (the raw YAML). A page with no running copy offers no Show Definition
   (pages-and-tabs.md).
 - **An inline page** (`parse_inline_page`: a markdown ` ```oxplow-page `

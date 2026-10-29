@@ -33,8 +33,8 @@ test("Show Definition opens the running copy drawn as Definition, and Open With 
   await expect(file.getByTestId("node-description")).toContainText("What the numbats are.");
   // The raw YAML is the File viewer's mode, not a section here.
   await expect(file.getByTestId("node-yaml")).toHaveCount(0);
-  // Its URL comes first; its Source opens the same running copy, raw.
-  await expect(file.getByTestId("node-about")).toContainText("filesystem=oxplow:extensions");
+  // Its Source opens the same running copy, raw.
+  await expect(file.getByTestId("node-about")).toContainText("e2e-defn/pages/numbat.yaml");
   await expect(file.getByTestId("node-modes")).toHaveCount(0);
 
   await page.getByTestId("page-nav-menu").filter({ visible: true }).click();

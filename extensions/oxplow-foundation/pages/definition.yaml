@@ -27,11 +27,11 @@ loaders:
     command: oxplow.page.describe
     args: { uri: { from: content.uri }, text: { from: content.text }, params: { param: params }, stream_id: { from: stream.stream } }
     reads: [page, extension_deployment]
-  # Its URL, and where it comes from: its source is this same file, raw,
-  # in the File viewer.
+  # Where it comes from: its source is this same file, raw, in the File
+  # viewer.
   about:
     sql: |
-      SELECT c.uri AS url, title, page AS id, extension,
+      SELECT title, page AS id, extension,
              c.path AS source,
              c.uri || '#oxplow.renderer=oxplow-foundation/file-viewer' AS source_target,
              CASE WHEN bundled THEN 'ships with oxplow' ELSE 'yours' END AS origin,
@@ -173,7 +173,6 @@ view:
     viz: detail
     from: about
     columns:
-    - { key: url, label: URL }
     - { key: title, label: Title }
     - { key: id, label: Id }
     - { key: extension, label: Extension }
