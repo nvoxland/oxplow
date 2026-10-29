@@ -39,6 +39,8 @@ test("once something in it was typed or changed, a click outside keeps it open; 
   fireEvent.mouseDown(view.getByTestId("m-backdrop"));
   expect(closed).toBe(0);
   expect(view.getByTestId("m").getAttribute("data-kept")).toBe("true");
+  // It says why at the bottom, under the content.
+  expect(view.getByTestId("m").lastElementChild).toBe(view.getByTestId("m-kept"));
   fireEvent.keyDown(view.getByTestId("field"), { key: "Escape" });
   expect(closed).toBe(1);
 });

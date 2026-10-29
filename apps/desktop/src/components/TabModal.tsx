@@ -104,12 +104,12 @@ export function TabModal({
             ×
           </button>
         </header>
+        <div style={bodyStyle}>{children}</div>
         {kept > 0 ? (
           <div key={kept} data-testid={`${testId}-kept`} role="status" style={keptStyle}>
             You changed something here, so it stays open. Close it with × or Cancel.
           </div>
         ) : null}
-        <div style={bodyStyle}>{children}</div>
       </div>
     </div>
   );
@@ -149,7 +149,9 @@ const keptStyle: CSSProperties = {
   fontSize: "var(--text-xs)",
   color: "var(--text-primary, var(--fg))",
   background: "color-mix(in srgb, var(--accent) 22%, transparent)",
-  borderBottom: "1px solid var(--accent)",
+  // At the bottom, under the buttons a click outside missed.
+  borderTop: "1px solid var(--accent)",
+  flexShrink: 0,
 };
 
 const headerStyle: CSSProperties = {
