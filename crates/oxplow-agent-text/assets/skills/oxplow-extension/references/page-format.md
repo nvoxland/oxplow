@@ -171,3 +171,12 @@ only what that person could. `{{param.x}}` reads a param; `{{row.x}}` and
 true`) belongs on the viz node that shows the row (`view-nodes.md`). An agent
 presses one with `oxplow_run_page_action`; a command it may not run, or that
 needs a person's confirmation, is refused.
+
+An action can instead **open a URI**: `{ id, label, open: <column>, when? }`
+(`command` or `open`, never both). It runs no command: `<column>` of the
+first loader's one row (of the row, for a row action) holds the URI, and
+pressing it opens that page, as a link does. Use `when: <column>` so it is
+offered only when the column has a value (a CASE that is NULL otherwise). It
+takes no `input`, `form`, `drag`, `bulk` or `edit`. An agent pressing it is
+told `{ opened: <uri> }` and nothing runs. e.g. `{ id: open-current, label:
+Open current version, open: current_uri, when: current_uri }`.

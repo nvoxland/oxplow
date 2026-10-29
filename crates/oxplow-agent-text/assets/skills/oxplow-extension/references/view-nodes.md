@@ -126,6 +126,8 @@ action) or the page (`page-format.md`).
 - A page's actions without `row` or `group` go in its ☰ menu. Copy and Add
   to Context are on every page: don't declare them.
 - An action runs as the page acting for whoever pressed it.
+- `open: <column>` instead of `command` opens the URI that column of the row
+  holds, and runs nothing (`page-format.md` "Whole-page actions").
 
 ## `embed`
 

@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -60,4 +61,33 @@ test("Open With on a local file offers the File viewer beside the Editor", async
   await page.getByTestId("menu-item-page-open-with-oxplow-foundation/file-viewer").click();
   await expect(page.getByTestId("viz-code").filter({ visible: true })).toContainText("koala");
   await expect(page.getByTestId("viz-editor")).toHaveCount(0);
+});
+
+// The File viewer's body is the file, so its viz draws no Open file. A
+// local file at a past revision has a working-tree version: the page's ☰
+// offers Open current version, which opens it in the Editor. An extension's
+// file has neither.
+test("a local file at a past revision has no inline Open file, and its ☰ opens the current version in the Editor", async ({ page, daemon }) => {
+  writeFileSync(join(daemon.project, "wombat.txt"), "wombat\n");
+  const git = (...args: string[]) =>
+    execFileSync("git", ["-c", "user.name=e2e", "-c", "user.email=e2e@example.com", ...args], { cwd: daemon.project });
+  git("add", "wombat.txt");
+  git("commit", "-q", "-m", "Add wombat");
+  await ready(page);
+  await navigate(daemon, "oxplow:oxplow/file?path=wombat.txt&rev=git:HEAD");
+  await expect(page.getByTestId("viz-code").filter({ visible: true })).toContainText("wombat");
+  await expect(page.getByTestId("viz-code-open")).toHaveCount(0);
+  await page.getByTestId("page-nav-menu").filter({ visible: true }).click();
+  await page.getByTestId("menu-item-action-page-action-open-current").click();
+  await expect(page.getByTestId("viz-editor").filter({ visible: true })).toContainText("wombat");
+});
+
+test("a file on the running extensions has neither Open file nor Open current version", async ({ page, daemon }) => {
+  await ready(page);
+  await navigate(daemon, "oxplow:oxplow/file?path=oxplow-foundation/extension.yaml&filesystem=oxplow:extensions");
+  await expect(page.getByTestId("viz-code").filter({ visible: true })).toContainText("oxplow-foundation");
+  await expect(page.getByTestId("viz-code-open")).toHaveCount(0);
+  await page.getByTestId("page-nav-menu").filter({ visible: true }).click();
+  await expect(page.getByTestId("menu-item-action-page-about")).toBeVisible();
+  await expect(page.getByTestId("menu-item-action-page-action-open-current")).toHaveCount(0);
 });

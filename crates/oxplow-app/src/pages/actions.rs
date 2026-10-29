@@ -577,12 +577,14 @@ async fn form_start(
 ) -> Result<crate::viz_actions::FormStart, CommandError> {
     let values = crate::viz_actions::bind_input(&action.input, params, row, None)?;
     let (choices, _, _) = form_sources(svc, &action.choices, &[], params, &Actor::Human).await?;
+    let name = action
+        .command
+        .clone()
+        .ok_or_else(|| invalid("/action", format!("`{}` runs no command", action.id)))?;
     let command = svc
         .commands
-        .spec(&action.command)
-        .ok_or_else(|| CommandError::Unknown {
-            name: action.command.clone(),
-        })?;
+        .spec(&name)
+        .ok_or_else(|| CommandError::Unknown { name })?;
     Ok(crate::viz_actions::FormStart {
         command,
         values,

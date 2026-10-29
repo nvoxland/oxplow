@@ -1134,8 +1134,15 @@ pub struct PageAction {
     /// Unique within the viz; `oxplow_run_page_action` names it.
     pub id: String,
     pub label: String,
-    /// The command it runs (`oxplow.work_item.transition`).
-    pub command: String,
+    /// The command it runs (`oxplow.work_item.transition`). None for an
+    /// `open` action, which runs none.
+    #[serde(default)]
+    pub command: Option<String>,
+    /// An `open` action: the column of the row it is offered on that holds
+    /// the URI it opens. It runs no command (no bus run, no audit): the
+    /// app navigates, and an agent pressing it is told the URI.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub open: Option<String>,
     /// The command's input. A string that is exactly `{{param.<name>}}`
     /// or `{{row.<column>}}` becomes that value (a number stays a number);
     /// one that contains them has them spliced in as text.
@@ -1233,8 +1240,14 @@ pub(crate) struct ActionFile {
     /// Unique within the viz.
     id: String,
     label: String,
-    /// The command it runs (`oxplow.work_item.transition`).
-    command: String,
+    /// The command it runs (`oxplow.work_item.transition`). One of
+    /// `command` or `open`.
+    #[serde(default)]
+    command: Option<String>,
+    /// Instead of a command: the column of the row (the page's, the viz's
+    /// or the row's own) that holds the URI to open. No command runs.
+    #[serde(default)]
+    open: Option<String>,
     /// The command's input; `{{param.<name>}}` / `{{row.<column>}}` bound.
     #[serde(default)]
     input: Option<serde_json::Value>,
@@ -1346,8 +1359,47 @@ pub(crate) fn parse_actions(
         if out.iter().any(|a| a.id == f.id) {
             return Err(format!("actions: `{}` is declared twice", f.id));
         }
-        oxplow_domain::CommandSpec::validate_id(&f.command)
-            .map_err(|e| format!("actions: `{}`: {e}", f.id))?;
+        match (&f.command, &f.open) {
+            (None, None) => {
+                return Err(format!(
+                    "actions: `{}` needs a `command` or an `open` (the column that holds the URI to open)",
+                    f.id
+                ))
+            }
+            (Some(_), Some(_)) => {
+                return Err(format!(
+                    "actions: `{}`: give a `command` or `open`, not both",
+                    f.id
+                ))
+            }
+            (Some(command), None) => oxplow_domain::CommandSpec::validate_id(command)
+                .map_err(|e| format!("actions: `{}`: {e}", f.id))?,
+            (None, Some(column)) => {
+                if column.trim().is_empty() {
+                    return Err(format!("actions: `{}`: `open` needs a column", f.id));
+                }
+                if !(f.row || holds_one_row) {
+                    return Err(format!(
+                        "actions: `{}`: `open` names a column of a row: use it on a row action (`row: true`) or on a viz that holds one row (detail, form, markdown, a page's row)",
+                        f.id
+                    ));
+                }
+                if f.input.is_some()
+                    || f.form
+                    || f.edit
+                    || f.drag
+                    || f.bulk
+                    || !f.fixed.is_empty()
+                    || !f.choices.is_empty()
+                    || f.group.is_some()
+                {
+                    return Err(format!(
+                        "actions: `{}`: an `open` action runs no command, so it takes no `input`, `form`, `edit`, `drag`, `bulk`, `fixed`, `choices` or `group`",
+                        f.id
+                    ));
+                }
+            }
+        }
         if let Some(g) = &f.group {
             if !grouped {
                 return Err(format!(
@@ -1389,6 +1441,7 @@ pub(crate) fn parse_actions(
         let one_row = !row
             && holds_one_row
             && (f.when.is_some()
+                || f.open.is_some()
                 || action_templates(&input)
                     .iter()
                     .any(|(scope, _)| scope == "row"));
@@ -1571,6 +1624,7 @@ pub(crate) fn parse_actions(
             id: f.id,
             label: f.label,
             command: f.command,
+            open: f.open,
             input,
             row,
             group: f.group,

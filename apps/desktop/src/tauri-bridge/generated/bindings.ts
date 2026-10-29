@@ -4235,8 +4235,17 @@ export type PageAction_Deserialize = {
 	/**  Unique within the viz; `oxplow_run_page_action` names it. */
 	id: string,
 	label: string,
-	/**  The command it runs (`oxplow.work_item.transition`). */
-	command: string,
+	/**
+	 *  The command it runs (`oxplow.work_item.transition`). None for an
+	 *  `open` action, which runs none.
+	 */
+	command?: string | null,
+	/**
+	 *  An `open` action: the column of the row it is offered on that holds
+	 *  the URI it opens. It runs no command (no bus run, no audit): the
+	 *  app navigates, and an agent pressing it is told the URI.
+	 */
+	open?: string | null,
 	/**
 	 *  The command's input. A string that is exactly `{{param.<name>}}`
 	 *  or `{{row.<column>}}` becomes that value (a number stays a number);
@@ -4353,8 +4362,17 @@ export type PageAction_Serialize = {
 	/**  Unique within the viz; `oxplow_run_page_action` names it. */
 	id: string,
 	label: string,
-	/**  The command it runs (`oxplow.work_item.transition`). */
-	command: string,
+	/**
+	 *  The command it runs (`oxplow.work_item.transition`). None for an
+	 *  `open` action, which runs none.
+	 */
+	command: string | null,
+	/**
+	 *  An `open` action: the column of the row it is offered on that holds
+	 *  the URI it opens. It runs no command (no bus run, no audit): the
+	 *  app navigates, and an agent pressing it is told the URI.
+	 */
+	open?: string | null,
 	/**
 	 *  The command's input. A string that is exactly `{{param.<name>}}`
 	 *  or `{{row.<column>}}` becomes that value (a number stays a number);

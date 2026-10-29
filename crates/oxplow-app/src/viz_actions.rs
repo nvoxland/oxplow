@@ -70,18 +70,36 @@ const DROP_SCOPES: &[&str] = &["before", "after", "onto", "group", "order"];
 /// that activates (an extension's deploy, enable, disable or remove) waits
 /// for every reader of the generation it replaces, and would wait on its
 /// own.
-pub(crate) struct Prepared {
-    actor: Actor,
-    command: String,
-    input: Value,
-    confirmed: bool,
+pub(crate) enum Prepared {
+    /// A command, run through the bus.
+    Command {
+        actor: Actor,
+        command: String,
+        input: Value,
+        confirmed: bool,
+    },
+    /// An `open` action: the URI it opens. Nothing runs (no bus run, no
+    /// audit); the outcome says what to open (`{ "opened": <uri> }`) and the
+    /// presser navigates.
+    Open(String),
 }
 
 impl Prepared {
     pub(crate) async fn run(self, svc: &crate::Services) -> Result<CommandOutcome, CommandError> {
-        svc.commands
-            .run(&self.actor, &self.command, self.input, self.confirmed)
-            .await
+        match self {
+            Prepared::Command {
+                actor,
+                command,
+                input,
+                confirmed,
+            } => svc.commands.run(&actor, &command, input, confirmed).await,
+            Prepared::Open(uri) => Ok(CommandOutcome {
+                result: serde_json::json!({ "opened": uri }),
+                audit_id: None,
+                event_id: None,
+                inverse: None,
+            }),
+        }
     }
 }
 
@@ -163,6 +181,24 @@ pub(crate) fn prepare_resolved(
             ));
         }
     }
+    if let Some(column) = &action.open {
+        if given.is_some() {
+            return Err(invalid(
+                "/input",
+                format!("`{action_id}` opens a URI; it takes no input"),
+            ));
+        }
+        let uri = match row.and_then(|r| r.get(column)) {
+            Some(SqlCell::Text(t)) if !t.is_empty() => t.clone(),
+            _ => {
+                return Err(invalid(
+                    "/row",
+                    format!("`{action_id}` has no URI to open: the row's `{column}` isn't text"),
+                ))
+            }
+        };
+        return Ok(Prepared::Open(uri));
+    }
     let bound = bind_input(&action.input, params, row, drop.as_ref())?;
     let input = match given {
         None => bound,
@@ -176,12 +212,14 @@ pub(crate) fn prepare_resolved(
         }
         Some(given) => filled(bound, given, &action.fixed)?,
     };
-    Ok(Prepared {
+    Ok(Prepared::Command {
         actor: Actor::Page {
             page_id: actor_id.to_string(),
             on_behalf_of: Box::new(on_behalf_of),
         },
-        command: action.command,
+        command: action
+            .command
+            .ok_or_else(|| invalid("/action", format!("`{action_id}` has no command to run")))?,
         input,
         confirmed,
     })
@@ -588,7 +626,7 @@ fn prepare_component_command(
             ),
         });
     }
-    Ok(Prepared {
+    Ok(Prepared::Command {
         actor: Actor::Component {
             component: call.component,
             on_behalf_of: Box::new(call.on_behalf_of),

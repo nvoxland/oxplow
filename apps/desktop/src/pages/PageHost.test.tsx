@@ -2,6 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 
 import { PageHost } from "./PageHost.js";
+import { PageNavigationContext } from "../tabs/PageNavigationContext.js";
 import { PageActionContext, PageFormsContext, type PageForms, type RunPageAction } from "./useNodeActions.js";
 import { fakeAction, fakePageRuns, gridPage, loader, tablePage } from "./testing/fakeRun.js";
 import { createPageRuns, type PageKey } from "../pageRuns.js";
@@ -142,6 +143,38 @@ test("a whole-page action with `when` is offered only while the page's row has t
   const view = render(<PageHost pageKey={key} runs={runs} />);
   await view.findByTestId("action-page-action-stop");
   expect(view.queryByTestId("action-page-action-start")).toBeNull();
+});
+
+test("an `open` page action is offered by `when` and opens the URI the press answers, as a link does", async () => {
+  const calls: unknown[][] = [];
+  const press: RunPageAction = async (...args) => {
+    calls.push(args);
+    return { result: { opened: "oxplow:oxplow/file?path=a.rs" }, audit_id: null, event_id: null, inverse: null } as never;
+  };
+  const open = fakeAction({ id: "current", label: "Open current version", command: null, open: "current_uri", when: "current_uri", oneRow: true });
+  const withRow = (uri: string | null) => {
+    const run = tablePage({ actions: [open] });
+    run.loaders.items = loader(["id", "title", "current_uri"], [["a", "Alpha", uri]]);
+    return fakePageRuns(run).runs;
+  };
+  const absent = render(<PageHost pageKey={key} runs={withRow(null)} />);
+  await absent.findByTestId("page-file");
+  expect(absent.queryByTestId("action-page-action-current")).toBeNull();
+  cleanup();
+  // In a tab the page's actions go to its nav bar's ☰ (`setTabActions`).
+  const opened: string[] = [];
+  let tabActions: readonly { id: string; run(): void }[] = [];
+  render(
+    <PageNavigationContext.Provider value={{ navigate() {}, goBack() {}, goForward() {}, canGoBack: false, canGoForward: false, openRef: (ref) => opened.push(ref), setTabActions: (a) => (tabActions = a ?? []) }}>
+      <PageActionContext.Provider value={press}>
+        <PageHost pageKey={key} runs={withRow("oxplow:oxplow/file?path=a.rs")} />
+      </PageActionContext.Provider>
+    </PageNavigationContext.Provider>,
+  );
+  await waitFor(() => expect(tabActions.map((a) => a.id)).toContain("page-action-current"));
+  act(() => tabActions.find((a) => a.id === "page-action-current")!.run());
+  await waitFor(() => expect(opened).toEqual(["oxplow:oxplow/file?path=a.rs"]));
+  expect(calls).toEqual([["run-1", null, "current", null, null, null, false]]);
 });
 
 test("a whole-page form action opens its form from page_action_form and submits it as a press", async () => {

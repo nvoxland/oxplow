@@ -78,6 +78,12 @@ export interface ActionTarget {
   params: Record<string, SqlCell>;
 }
 
+/** What an action does, in a word for a title: the command it runs, or
+ *  the column whose URI it opens. */
+export function actionDoes(action: Pick<PageAction, "command" | "open">): string {
+  return action.open ? `opens ${action.open}` : (action.command ?? "");
+}
+
 export async function performVizAction(
   action: PageAction,
   run: ActionTarget,
@@ -89,6 +95,13 @@ export async function performVizAction(
 ): Promise<VizActionOutcome> {
   try {
     const outcome = await deps.press(run.config.id, action.id, run.params, row, streamId, confirmed, drop);
+    // An `open` action ran nothing: it says the URI to open, as a link does.
+    if (action.open) {
+      const uri = (outcome.result as { opened?: unknown } | null)?.opened;
+      if (typeof uri !== "string") throw new Error(`${action.label}: the row has no URI to open`);
+      deps.openPage(uri, false);
+      return "done";
+    }
     // A run that came back undoable offers its Undo.
     const auditId = outcome.inverse && outcome.audit_id != null ? outcome.audit_id : null;
     deps.toast(`${action.label}: done.`, auditId === null ? undefined : () => void deps.undo(auditId).catch((e: unknown) => deps.recordError(`Undo ${action.label}`, e instanceof Error ? e.message : String(e))));
@@ -118,7 +131,7 @@ export async function openAfterAction(
     return;
   }
   try {
-    const page = await deps.openAfter(action.command, outcome.result);
+    const page = await deps.openAfter(action.command ?? "", outcome.result);
     if (page) deps.openPage(page, action.then === "replace");
   } catch (e) {
     deps.recordError(action.label, e instanceof Error ? e.message : String(e));

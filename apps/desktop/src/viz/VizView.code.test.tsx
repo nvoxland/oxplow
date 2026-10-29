@@ -192,6 +192,19 @@ test("a code viz shows each row's file at its revision, its lines marked, and op
   expect(navigated.map((r) => r.id)).toEqual(["oxplow:oxplow/file?path=src/a.rs"]);
 });
 
+// A code viz that is the page itself (the File viewer) draws no Open file;
+// a snippet in another page does.
+test("a code viz that is the page's own view has no Open file", async () => {
+  const vizRun = run({ viz: "code", code: { path: "p", revision: "r", lines: null, sync: false } }, ["p", "r"], [["src/a.rs", "git:abc1234"]]);
+  const snippet = render(<VizView run={vizRun} streamId="str1" onOpenPage={() => {}} />);
+  await waitFor(() => expect(reads).toHaveLength(1));
+  expect(snippet.queryByTestId("viz-code-open")).not.toBeNull();
+  snippet.unmount();
+  const page = render(<VizView run={vizRun} streamId="str1" onOpenPage={() => {}} isPage />);
+  await waitFor(() => expect(reads).toHaveLength(2));
+  expect(page.queryByTestId("viz-code-open")).toBeNull();
+});
+
 test("a diff viz shows its first row's file between its two revisions", async () => {
   const view = render(
     <VizView

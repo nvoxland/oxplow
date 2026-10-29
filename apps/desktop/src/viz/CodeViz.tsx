@@ -25,12 +25,12 @@ import type { CodeRow } from "./vizModel.js";
  * See
  * `.context/editor-and-monaco.md` "Read-only code and diff vizes".
  */
-export function CodeViz({ rows, streamId, sync, onOpenPage }: { rows: CodeRow[]; streamId: string | null; sync: boolean; onOpenPage?(ref: TabRef): void }) {
+export function CodeViz({ rows, streamId, sync, onOpenPage, isPage = false }: { rows: CodeRow[]; streamId: string | null; sync: boolean; onOpenPage?(ref: TabRef): void; isPage?: boolean }) {
   const bus = useMemo(() => (sync ? new ScrollSync() : null), [sync]);
   return (
     <div data-testid="viz-code" style={rowStyle}>
       {rows.map((r, i) => (
-        <CodeEditorView key={`${i}:${r.filesystem ?? ""}:${r.path}@${r.revision ?? ""}`} syncKey={String(i)} row={r} streamId={streamId} sync={bus} onOpenPage={onOpenPage} divider={i > 0} />
+        <CodeEditorView key={`${i}:${r.filesystem ?? ""}:${r.path}@${r.revision ?? ""}`} syncKey={String(i)} row={r} streamId={streamId} sync={bus} onOpenPage={onOpenPage} divider={i > 0} isPage={isPage} />
       ))}
     </div>
   );
@@ -46,6 +46,7 @@ function CodeEditorView({
   syncKey,
   onOpenPage,
   divider,
+  isPage,
 }: {
   row: CodeRow;
   streamId: string | null;
@@ -53,6 +54,8 @@ function CodeEditorView({
   syncKey: string;
   onOpenPage?(ref: TabRef): void;
   divider: boolean;
+  /** The viz is the page itself: its file is the page's, nothing to open. */
+  isPage: boolean;
 }) {
   const { path, filesystem, revision, lines } = row;
   const where = fsRevLabel(filesystem, revision);
@@ -197,9 +200,11 @@ function CodeEditorView({
           </span>
         ) : null}
         <span style={{ flex: 1 }} />
-        <button type="button" className="ox-button" data-testid="viz-code-open" onClick={openFile}>
-          Open file
-        </button>
+        {isPage ? null : (
+          <button type="button" className="ox-button" data-testid="viz-code-open" onClick={openFile}>
+            Open file
+          </button>
+        )}
       </div>
       <div ref={hostRef} style={{ flex: 1, minHeight: 0 }} />
       {pageComments && ready ? (

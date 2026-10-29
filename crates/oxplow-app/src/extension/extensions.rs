@@ -3575,6 +3575,13 @@ async fn prepare(
                     .push(format!("{}: loader `{name}`: {e}", page.origin.running));
             }
         }
+        // A whole-page action reads the first loader's row.
+        if let Some(Ok(first)) = page.first_loader().and_then(|l| loaders.get(&l.name)) {
+            for problem in action_column_problems(&page.actions, &first.columns) {
+                ext.errors
+                    .push(format!("{}: page {problem}", page.origin.running));
+            }
+        }
         for (node, viz, result) in crate::pages::checks::viz_nodes(&page, loaders) {
             let Ok(result) = result else { continue };
             for problem in viz_column_problems(viz, &result.columns) {
@@ -3631,23 +3638,25 @@ async fn check_collector_inputs(
     }
 }
 
-/// What a viz names that its loader's columns lack: a role block's
-/// column, an action's `when` or row placeholder, a column's key, unit,
-/// icon, tone or link column.
-fn viz_column_problems(cfg: &VizConfig, cols: &[String]) -> Vec<String> {
+/// What actions name that the result they read lacks: a `when`, an `open`
+/// column, a row placeholder.
+fn action_column_problems(
+    actions: &[crate::pages::spec::PageAction],
+    cols: &[String],
+) -> Vec<String> {
     let mut problems: Vec<String> = Vec::new();
-    for (block, k) in cfg.role_columns() {
-        if !cols.contains(k) {
-            problems.push(format!(
-                "{block} column `{k}` isn't in the query result (columns: {})",
-                cols.join(", ")
-            ));
-        }
-    }
-    for a in &cfg.actions {
+    for a in actions {
         if let Some(when) = a.when.as_ref().filter(|w| !cols.contains(w)) {
             problems.push(format!(
                 "action `{}` is offered `when: {when}`, which isn't in the \
+                     query result (columns: {})",
+                a.id,
+                cols.join(", ")
+            ));
+        }
+        if let Some(open) = a.open.as_ref().filter(|o| !cols.contains(o)) {
+            problems.push(format!(
+                "action `{}` opens `{open}`, which isn't in the \
                      query result (columns: {})",
                 a.id,
                 cols.join(", ")
@@ -3670,6 +3679,23 @@ fn viz_column_problems(cfg: &VizConfig, cols: &[String]) -> Vec<String> {
             }
         }
     }
+    problems
+}
+
+/// What a viz names that its loader's columns lack: a role block's
+/// column, an action's `when` or row placeholder, a column's key, unit,
+/// icon, tone or link column.
+fn viz_column_problems(cfg: &VizConfig, cols: &[String]) -> Vec<String> {
+    let mut problems: Vec<String> = Vec::new();
+    for (block, k) in cfg.role_columns() {
+        if !cols.contains(k) {
+            problems.push(format!(
+                "{block} column `{k}` isn't in the query result (columns: {})",
+                cols.join(", ")
+            ));
+        }
+    }
+    problems.extend(action_column_problems(&cfg.actions, cols));
     for c in &cfg.columns {
         let mut keys = vec![&c.key];
         keys.extend(c.unit.iter());
@@ -4134,6 +4160,74 @@ mod tests {
             ),
         ] {
             let err = parse(&[action]).unwrap_err();
+            assert!(err.contains(said), "{action}: {err}");
+        }
+    }
+
+    /// An `open` action opens the URI a column of its row holds: it runs no
+    /// command, so it has exactly one of `command` or `open`, and none of
+    /// what a command's input or form needs.
+    #[test]
+    fn open_actions_name_a_column_and_run_no_command() {
+        let parse = |actions: &[&str], one_row: bool| {
+            parse_actions(
+                actions
+                    .iter()
+                    .map(|a| serde_yaml::from_str(a).unwrap())
+                    .collect(),
+                &[],
+                false,
+                one_row,
+            )
+        };
+        let ok = parse(
+            &["{ id: o, label: Open, open: current_uri, when: current_uri }"],
+            true,
+        )
+        .unwrap();
+        assert_eq!(ok[0].command, None);
+        assert_eq!(ok[0].open.as_deref(), Some("current_uri"));
+        assert!(ok[0].one_row, "an open action reads the viz's row");
+        let row = parse(&["{ id: o, label: Open, open: uri, row: true }"], false).unwrap();
+        assert!(row[0].row && !row[0].one_row);
+        for (action, one_row, said) in [
+            (
+                "{ id: o, label: O }",
+                true,
+                "needs a `command` or an `open`",
+            ),
+            (
+                "{ id: o, label: O, command: x.y.z, open: uri }",
+                true,
+                "`command` or `open`, not both",
+            ),
+            (
+                "{ id: o, label: O, open: uri }",
+                false,
+                "`open` names a column of a row",
+            ),
+            (
+                "{ id: o, label: O, open: uri, row: true, form: true }",
+                false,
+                "an `open` action runs no command",
+            ),
+            (
+                "{ id: o, label: O, open: uri, row: true, input: { a: b } }",
+                false,
+                "an `open` action runs no command",
+            ),
+            (
+                "{ id: o, label: O, open: uri, row: true, bulk: true }",
+                false,
+                "an `open` action runs no command",
+            ),
+            (
+                "{ id: o, label: O, open: uri, row: true, drag: true }",
+                false,
+                "an `open` action runs no command",
+            ),
+        ] {
+            let err = parse(&[action], one_row).unwrap_err();
             assert!(err.contains(said), "{action}: {err}");
         }
     }
@@ -7868,7 +7962,7 @@ commands:
         assert_eq!(
             a.actions
                 .iter()
-                .map(|x| (x.id.as_str(), x.command.as_str(), x.row))
+                .map(|x| (x.id.as_str(), x.command.as_deref().unwrap(), x.row))
                 .collect::<Vec<_>>(),
             vec![
                 ("finish", "oxplow.work_item.transition", false),

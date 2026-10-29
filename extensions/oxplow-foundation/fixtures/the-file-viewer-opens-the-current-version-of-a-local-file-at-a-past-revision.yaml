@@ -1,0 +1,24 @@
+# A local file at a past revision has a working-tree version: the File
+# viewer's "Open current version" page action opens it (`open:
+# current_uri`, offered `when` the column is set; the Editor draws it).
+# The working tree itself and a file on another filesystem (an
+# extension's deployment, a temp file) have none.
+when:
+  page: oxplow-foundation/file-viewer
+  params: { path: "src/main.rs", rev: "git:HEAD" }
+expect:
+  loaders:
+    file_viewer:
+      rows: [{ current_uri: "oxplow:oxplow/file?path=src/main.rs" }]
+  actions:
+    - { id: open-current, label: Open current version, open: current_uri, when: current_uri }
+steps:
+  # Pressing it runs no command: it says what to open.
+  - press: { action: open-current }
+    expect: { ok: true, result: { opened: "oxplow:oxplow/file?path=src/main.rs" } }
+  - params: { rev: "working" }
+    expect: { loaders: { file_viewer: { rows: [{ current_uri: null }] } } }
+  - params: { path: "oxplow-foundation/extension.yaml", filesystem: "oxplow:extensions", rev: "4f9c2e1a7b3d5f60" }
+    expect: { loaders: { file_viewer: { rows: [{ current_uri: null }] } } }
+  - params: { path: "abc.yaml", filesystem: "oxplow:temp", rev: "r1" }
+    expect: { loaders: { file_viewer: { rows: [{ current_uri: null }] } } }

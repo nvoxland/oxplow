@@ -242,7 +242,12 @@ A page shows files through two kit vizes (`.context/extensions.md`
   row, its `lines` revealed on the modified side; Open file shows the
   working file.
 
-Open file navigates in the tab when there is one, else opens a page.
+Open file navigates in the tab when there is one, else opens a page. A
+`code` viz that is the page's own view (the File viewer: the root of the
+page's tree at full size, not an embed's, a rail's, an expanded row's or a
+section of another page) draws no Open file: the file is the page's.
+`PageTree` gives the viz `isPage`; a snippet in a review, a finding or a
+wiki block keeps the button.
 A `code` row names its file, optionally its `filesystem` and `revision`
 (none of either: the local working tree). The viz `stat`s the file before
 reading it, so a binary or over-5-MiB file shows a placeholder line, not

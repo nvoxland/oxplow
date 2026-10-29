@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 
 import { IpcCallError } from "../ipc-error.js";
 import type { FormStart, PageAction, VizRun } from "../tauri-bridge/generated/bindings.js";
-import { actionOffered, offeredWholePage, openAfterAction, performVizAction, promptField, rowRecord, type VizActionDeps } from "./vizActions.js";
+import { actionDoes, actionOffered, offeredWholePage, openAfterAction, performVizAction, promptField, rowRecord, type VizActionDeps } from "./vizActions.js";
 
 const run = { config: { id: "acme/prs" }, params: { repo: "x" } } as unknown as VizRun;
 const action: PageAction = { id: "finish", label: "Finish", command: "oxplow.work_item.transition", input: {}, row: false };
@@ -185,4 +185,30 @@ test("a whole-page action is offered as a button; one over the viz's one row onl
   expect(offeredWholePage(oneRow, result([["a", 1], ["b", 1]]))).toBe(false);
   // Without a `when` it is offered on any single row.
   expect(offeredWholePage({ ...oneRow, when: null }, result([["a", 0]]))).toBe(true);
+});
+
+test("an `open` action opens the URI the press answered, with no toast, undo or open_after", async () => {
+  const log: string[] = [];
+  const d: VizActionDeps = {
+    press: async () => ({ result: { opened: "oxplow:oxplow/file?path=a.rs" }, audit_id: null, event_id: null, inverse: null }),
+    toast: (m) => log.push(`toast ${m}`),
+    undo: async () => {},
+    recordError: (label, m) => log.push(`error ${label}: ${m}`),
+    openAfter: async () => {
+      log.push("open_after");
+      return null;
+    },
+    openPage: (page, replace) => log.push(`${replace ? "replace with" : "open"} ${page}`),
+  };
+  const open: PageAction = { ...action, command: null, open: "current_uri" };
+  expect(await performVizAction(open, run, null, null, false, d)).toBe("done");
+  expect(log).toEqual(["open oxplow:oxplow/file?path=a.rs"]);
+  // An answer without a URI is the action's failure.
+  const none: VizActionDeps = { ...d, press: async () => ({ result: {}, audit_id: null, event_id: null, inverse: null }) };
+  expect(await performVizAction(open, run, null, null, false, none)).toBe("failed");
+});
+
+test("actionDoes says the command an action runs, or the column it opens", () => {
+  expect(actionDoes(action)).toBe("oxplow.work_item.transition");
+  expect(actionDoes({ ...action, command: null, open: "current_uri" })).toBe("opens current_uri");
 });

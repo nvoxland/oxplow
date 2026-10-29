@@ -132,7 +132,9 @@ column's value, and `tone: <column>` colours the cell (`accent`, `success`,
 command, input }`. `"{{param.x}}"` binds a param and, on a row action
 (`row: true`), `"{{row.col}}"` binds that row's column. An action runs as
 the page acting for whoever pressed it, so it can't do anything you
-couldn't.
+couldn't. An action can instead open a page: `open: <column>` names the
+column of its row that holds the URI, and pressing it opens that page, as a
+link does. No command runs.
 
 ### Alerts
 

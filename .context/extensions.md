@@ -2605,7 +2605,7 @@ usability.md "Keyboard").
 
 ### Actions
 
-`actions:` on a page or a viz node: `{ id, label, command, input, row?,
+`actions:` on a page or a viz node: `{ id, label, command | open, input, row?,
 group?, form?, fixed?, choices?, then?, when?, primary?, prominent?,
 submenu?, icon?, drag?, bulk?, key?, edit?, confirm? }` (`PageAction`).
 `input` binds `{{param.x}}` and, on a row action, `{{row.x}}`
@@ -2615,6 +2615,21 @@ reads the page's first loader's one row. A drag action also binds
 `{{before.x}}`, `{{after.x}}`, `{{onto.x}}`, `{{group.value}}`, and
 `{{order.x}}` (a list of column `x` in the new order).
 
+- **`open: <column>` is an action that is not a command**: exactly one of
+  `command` or `open` (`parse_actions` refuses both and neither). The column
+  of the row the action is offered on (a whole-page action's first-loader
+  row, a holds-one-row viz's, a row action's) holds the URI to open. Nothing
+  runs: no bus run, no audit, no `command.executed`. The press still goes
+  to the server (`viz_actions::prepare_resolved` → `Prepared::Open`), which
+  checks the row and `when` as for a command, and answers `{ "opened": <uri> }`;
+  the desktop then opens it (`performVizAction`, as `open_after` does) and
+  an agent's `oxplow_run_page_action` reads it. An `open` action takes no
+  `input`, `form`, `fixed`, `choices`, `drag`, `bulk`, `edit` or `group`.
+  The extension check names a column the loader lacks (`when` and `open`
+  alike, for page and viz actions). `PageAction.command` is nullable in the
+  bindings; `actionDoes` (vizActions.ts) is what an action's title says
+  (`opens <column>`). The File viewer's "Open current version" is one:
+  `open: current_uri` over its loader's column.
 - An action runs as the page for whoever pressed it
   (`Actor::Page { page_id, on_behalf_of }`; `pages/actions.rs`,
   `viz_actions::prepare_resolved`), so it grants no power. A press names

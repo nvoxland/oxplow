@@ -1,0 +1,13 @@
+# An action that opens a URI runs no command: Definition's Actions table
+# says which column it opens in the Command column.
+when:
+  page: oxplow-foundation/definition
+  params:
+    uri: "oxplow:oxplow/file?path=oxplow-foundation/pages/file-viewer.yaml&filesystem=oxplow:extensions"
+    path: oxplow-foundation/pages/file-viewer.yaml
+    stream_id: 1
+expect:
+  loaders:
+    actions:
+      rows:
+        - { label: Open current version, command: opens current_uri, on: page, when: current_uri }

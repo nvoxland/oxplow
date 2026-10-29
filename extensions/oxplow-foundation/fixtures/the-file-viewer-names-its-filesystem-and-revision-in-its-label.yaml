@@ -8,7 +8,7 @@ when:
 expect:
   loaders:
     file_viewer:
-      rows: [{ path: "notes.md", suffix: "" }]
+      rows: [{ path: "notes.md", suffix: "", current_uri: null }]
 steps:
   - when: { page: oxplow-foundation/file-viewer, params: { path: "notes.md", rev: "git:HEAD" } }
     expect:

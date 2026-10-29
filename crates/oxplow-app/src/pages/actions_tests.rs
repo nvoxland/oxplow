@@ -126,6 +126,30 @@ async fn a_page_action_reads_the_first_loaders_row() {
     assert_eq!(titles(&svc).await, ["stop sess-1"]);
 }
 
+/// An `open` page action runs nothing: pressed, it tells what URI to open
+/// (the row's column), with no audit row; a row with no URI is refused.
+#[tokio::test]
+async fn an_open_action_returns_the_uri_and_runs_no_command() {
+    let (_dir, svc) = fixture().await;
+    let runs = PageRuns::default();
+    let id = open(&svc, &runs, "acme/opens").await;
+    let out = run_page_action(&svc, &runs, call(&id, None, "show", None))
+        .await
+        .unwrap();
+    assert_eq!(
+        out.result,
+        serde_json::json!({ "opened": "oxplow:oxplow/file?path=a.rs" })
+    );
+    assert!(out.audit_id.is_none() && out.event_id.is_none() && out.inverse.is_none());
+    let err = run_page_action(&svc, &runs, call(&id, None, "nothing", None))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(&err, CommandError::Invalid { message, .. } if message.contains("no URI to open")),
+        "{err:?}"
+    );
+}
+
 async fn open(svc: &std::sync::Arc<crate::Services>, runs: &PageRuns, page: &str) -> String {
     runs.open(
         svc,

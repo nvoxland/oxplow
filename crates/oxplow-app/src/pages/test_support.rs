@@ -231,6 +231,18 @@ view: { viz: table, from: other }
 "#,
     ),
     (
+        "opens",
+        r#"
+title: Opens
+loaders:
+  row: { sql: "SELECT 'oxplow:oxplow/file?path=a.rs' AS uri, '' AS none" }
+actions:
+  - { id: show, label: Show, open: uri, when: uri }
+  - { id: nothing, label: Nothing, open: none }
+view: { viz: detail, from: row }
+"#,
+    ),
+    (
         "new-item",
         r#"
 title: New Item

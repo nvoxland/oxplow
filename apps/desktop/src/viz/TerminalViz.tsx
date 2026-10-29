@@ -93,7 +93,7 @@ export function TerminalViz({ run, onSetParam }: { run: VizRun; onSetParam?(name
       {actions.pending ? (
         <CommandConfirm
           label={actions.pending.action.label}
-          command={actions.pending.action.command}
+          command={actions.pending.action.command ?? ""}
           details={actions.pending.details}
           onConfirm={actions.confirm}
           onCancel={actions.cancel}

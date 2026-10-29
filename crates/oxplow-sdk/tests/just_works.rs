@@ -148,11 +148,8 @@ async fn a_scaffolded_page_checks_tests_and_its_row_action_binds() {
             _ => None,
         })
         .expect("a row action");
-    assert!(
-        svc.commands.spec(&action.command).is_some(),
-        "{}",
-        action.command
-    );
+    let command = action.command.as_deref().expect("a command action");
+    assert!(svc.commands.spec(command).is_some(), "{command}");
 }
 
 #[tokio::test(flavor = "multi_thread")]

@@ -420,7 +420,7 @@ fn page_reaches(page: &oxplow_app::pages::schema::Page) -> Vec<String> {
         })
         // The commands its whole-page actions run: how a page answers
         // "do this".
-        .chain(page.actions.iter().map(|a| a.command.clone()))
+        .chain(page.actions.iter().filter_map(|a| a.command.clone()))
         .collect()
 }
 
@@ -484,10 +484,14 @@ pub async fn check_pages(
                 // A page answers "do this" with an action: its command
                 // exists and the input it gives fits the command.
                 for action in &page.actions {
-                    match svc.commands.spec(&action.command) {
+                    // An `open` action runs no command.
+                    let Some(command) = &action.command else {
+                        continue;
+                    };
+                    match svc.commands.spec(command) {
                         None => out.errors.push(format!(
                             "{at}: action `{}` runs no command `{}` — fix: name a registered one",
-                            action.id, action.command
+                            action.id, command
                         )),
                         Some(spec) => {
                             let valid = InputValidator::compile(&spec.input_schema)
@@ -496,7 +500,7 @@ pub async fn check_pages(
                             if let Err(e) = valid {
                                 out.errors.push(format!(
                                     "{at}: action `{}`'s input doesn't fit `{}`: {e} — fix: the input",
-                                    action.id, action.command
+                                    action.id, command
                                 ));
                             }
                         }

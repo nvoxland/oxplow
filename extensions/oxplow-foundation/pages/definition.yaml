@@ -155,7 +155,8 @@ loaders:
       FROM (SELECT * FROM nodes ORDER BY n)
   actions:
     sql: |
-      SELECT j.value ->> '$.label' AS label, j.value ->> '$.command' AS command,
+      SELECT j.value ->> '$.label' AS label,
+             coalesce(j.value ->> '$.command', 'opens ' || (j.value ->> '$.open')) AS command,
              j.value ->> '$.on' AS "on",
              CASE WHEN j.value ->> '$.on' = 'page' THEN
                     CASE WHEN j.value ->> '$.prominent' THEN 'a button in the nav bar' ELSE 'the ☰ menu' END

@@ -75,7 +75,7 @@ function MarkdownEditor({ run, streamId, action, saved }: { run: VizRun; streamI
       {form.pending ? (
         <CommandConfirm
           label={action.label}
-          command={action.command}
+          command={action.command ?? ""}
           onConfirm={() => void form.submit(form.pending!, true)}
           onCancel={form.cancel}
           testIdPrefix="viz-markdown-confirm"

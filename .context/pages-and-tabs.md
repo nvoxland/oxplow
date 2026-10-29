@@ -1039,6 +1039,12 @@ A page says **what** goes in the bar, as data:
   is `prominent`, in a `submenu` or drawn with an `icon` when its page file
   says so, a custom component's when its `setActions` does; only oxplow
   marks an action `standard`;
+  a page action may `open: <column>` instead of running a command: pressing
+  it opens the URI that column of the page's row holds (the File viewer's
+  Open current version, offered `when: current_uri`, a local file at a past
+  revision); `PageTree` also tells a viz it is the page (`isPage`: the root
+  of the run's own tree, full size) so a viz that links to its own resource
+  (the code viz's Open file) hides that link there;
 - `pin: { tile, onOpenPage }`: what the page would add to a dashboard —
   the ☰'s Pin to Dashboard… (`menu-item-page-pin`). A page file pins as an
   `embed` node of itself (`PagePin`, `pages/PagePinMenu.tsx`): the menu lists

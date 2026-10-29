@@ -23,7 +23,15 @@ loaders:
                    WHEN length(:rev) > 12 AND :rev NOT GLOB '*[^0-9a-fA-F]*' THEN ' ' || substr(:rev, 1, 7)
                    ELSE ' ' || :rev
                  END || ')'
-             END AS suffix
+             END AS suffix,
+             -- The working-tree file of a past revision of a local file.
+             CASE
+               WHEN COALESCE(:filesystem, 'oxplow:local') = 'oxplow:local'
+                    AND :rev IS NOT NULL AND :rev NOT IN ('', 'working')
+               THEN uri('oxplow/file', 'path', :path)
+             END AS current_uri
+actions:
+- { id: open-current, label: Open current version, open: current_uri, when: current_uri }
 view:
   from: file_viewer
   viz: code

@@ -1178,7 +1178,11 @@ there, never above its body), Copy, Add to Context, the page's whole-page action
 Refresh only for a page that declares `refresh: true` (a page re-runs
 on its own when oxplow's data changes; Refresh is for one that reads
 outside oxplow) — are in the nav bar (its ☰, unless `prominent`), never
-in the rail or above the body (`PageHost` hands them to `Page`).
+in the rail or above the body (`PageHost` hands them to `Page`). A page
+action that goes to another page (`open: <column>`, no command) is one of
+them: the File viewer's Open current version, for a local file at a past
+revision. A viz that is the whole page shows no inline link to its own
+resource (the code viz's Open file); one in a snippet does.
 
 A param is a **row**, drawn by the kit's `ParamRow`
 (`src/kit/ParamControls.tsx`): its label beside its value. At rest the

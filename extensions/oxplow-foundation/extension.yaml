@@ -202,6 +202,12 @@ intent:
     - name: the-directory-lists-a-folder-on-another-filesystem
       input: { page: directory, params: { stream_id: 1, path: '', filesystem: 'oxplow:extensions' } }
       expect: the extensions that run, each a folder on that filesystem
+    - name: the-file-viewer-opens-the-current-version-of-a-local-file-at-a-past-revision
+      input: { page: file-viewer, params: { path: 'src/main.rs', rev: 'git:HEAD' } }
+      expect: the working-tree file's URI in current_uri, which the Open current version page action opens; none for the working tree or another filesystem
+    - name: definition-names-an-open-action-by-its-column
+      input: { page: definition, params: { uri: 'oxplow:oxplow/file?path=oxplow-foundation/pages/file-viewer.yaml&filesystem=oxplow:extensions', path: oxplow-foundation/pages/file-viewer.yaml } }
+      expect: the Actions table says an action that opens a page "opens <column>" where a command goes
     - name: the-file-viewer-names-its-filesystem-and-revision-in-its-label
       input: { page: file-viewer, params: { path: 'oxplow-foundation/extension.yaml', filesystem: 'oxplow:extensions', rev: 4f9c2e1a7b3d5f60 } }
       expect: the file's path, filesystem and revision, and a label suffix naming the filesystem and the revision's first 7 characters

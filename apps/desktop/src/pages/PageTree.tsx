@@ -18,7 +18,7 @@ import type { PickedRow } from "./railGroups.js";
 import { FormSourceContext } from "../viz/formSource.js";
 import { VizActionRunnerContext } from "../viz/vizActionRunner.js";
 import { ActionForm, VizView, useVizActions } from "../viz/VizView.js";
-import { offeredWholePage } from "../viz/vizActions.js";
+import { actionDoes, offeredWholePage } from "../viz/vizActions.js";
 import { CommandConfirm } from "../components/CommandConfirm.js";
 import { nodeById, nodeRunOf } from "../viz/nodeRun.js";
 import { foldEmpty } from "../viz/vizModel.js";
@@ -279,7 +279,7 @@ function EmbeddedActions({ embed, node, runId, streamId }: { embed: PageRun; nod
       {actions.pending ? (
         <CommandConfirm
           label={actions.pending.action.label}
-          command={actions.pending.action.command}
+          command={actions.pending.action.command ?? ""}
           details={actions.pending.details}
           onConfirm={actions.confirm}
           onCancel={actions.cancel}
@@ -296,7 +296,7 @@ function EmbeddedActions({ embed, node, runId, streamId }: { embed: PageRun; nod
       {offered.length > 0 ? (
         <div data-testid="viz-part-actions" className="ox-toolbar">
           {offered.map((a) => (
-            <button key={a.id} type="button" data-testid={`viz-action-${a.id}`} disabled={actions.busy !== null} title={a.command} onClick={() => actions.run(a, null)}>
+            <button key={a.id} type="button" data-testid={`viz-action-${a.id}`} disabled={actions.busy !== null} title={actionDoes(a)} onClick={() => actions.run(a, null)}>
               {actions.busy === a.id ? `${a.label}…` : a.label}
             </button>
           ))}
@@ -315,6 +315,9 @@ function Unknown(props: NodeViewProps) {
 
 function VizNode(props: NodeViewProps & { def: Node; id: string }) {
   const { run, def, id, runId, streamId = null, onOpenPage, onSetParam, compact = false } = props;
+  // The viz is the page's whole view: the root of its own tree, drawn at full
+  // size (not a rail, an embed's page or an expanded row's).
+  const isPage = props.at === run.tree && props.prefix === undefined && !compact && props.placement === "bare";
   const runner = useNodeActions(runId, id);
   const forms = useNodeForms(runId, id);
   const pages = useNodePages(run, def);
@@ -333,6 +336,7 @@ function VizNode(props: NodeViewProps & { def: Node; id: string }) {
         onOpenPage={onOpenPage}
         onSetParam={onSetParam}
         partButtons={props.partButtons ?? !compact}
+        isPage={isPage}
         componentView={componentView}
         {...(compact ? { compact: true, maxRows: COMPACT_ROWS } : {})}
       />

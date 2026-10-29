@@ -199,6 +199,10 @@ command; the window only evaluates. Both read the same cases
 (`crates/oxplow-domain/fixtures/when_cases.json`). A new key goes in
 `CONTEXT_KEYS` and the window's `whenContext` (`App.tsx`) together.
 
+A page's `open: <column>` action is not a command: it runs nothing on the
+bus (no audit, no `command.executed`), so it appears in no command list and
+needs no spec ([extensions.md](./extensions.md) "Actions").
+
 Save, Find, Quick Open and New Page with Your Agent are the window's own
 commands (below, "Where a command runs"); New Thread and Commit are
 `oxplow.thread.create` / `oxplow.vcs.commit` with a window `form`. There

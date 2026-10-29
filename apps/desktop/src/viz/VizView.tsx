@@ -85,7 +85,7 @@ import { Facts } from "../kit/Facts.js";
 import { Stat } from "../kit/Stat.js";
 import { recordOpError } from "../opErrors.js";
 import { showToast } from "../components/toastStore.js";
-import { actionOffered, offeredWholePage, openAfterAction, performVizAction, promptField, rowRecord, type ActionTarget } from "./vizActions.js";
+import { actionDoes, actionOffered, offeredWholePage, openAfterAction, performVizAction, promptField, rowRecord, type ActionTarget } from "./vizActions.js";
 import { useHistoryState } from "../tabs/useHistoryState.js";
 import {
   chainedDrops,
@@ -181,7 +181,7 @@ function VizViewBody(props: VizViewProps & { lazyOpen: CollapsedSet | null; bran
   const confirm = actions.pending ? (
     <CommandConfirm
       label={actions.pending.action.label}
-      command={actions.pending.action.command}
+      command={actions.pending.action.command ?? ""}
       details={actions.pending.details}
       onConfirm={actions.confirm}
       onCancel={actions.cancel}
@@ -255,7 +255,7 @@ function MarksBar({ run, actions, marks }: { run: VizRun; actions: VizActionsSta
         {marked.length} selected
       </span>
       {bulkOffers(run, marked).map(({ action, rows }) => (
-        <button key={action.id} type="button" data-testid={`viz-bulk-${action.id}`} disabled={actions.busy !== null} title={action.command} onClick={() => actions.runMany(action, rows)}>
+        <button key={action.id} type="button" data-testid={`viz-bulk-${action.id}`} disabled={actions.busy !== null} title={actionDoes(action)} onClick={() => actions.runMany(action, rows)}>
           {actions.busy === action.id ? `${action.label}…` : action.label}
         </button>
       ))}
@@ -292,6 +292,10 @@ interface VizViewProps {
   /** Its whole-viz actions (an Add…) as buttons above its body: a
    *  page's node does; a compact one has no room. */
   partButtons?: boolean;
+  /** The viz is the page's own view (the whole of its body, not a snippet in
+   *  another page, an embed or a row): what it shows is the page's resource,
+   *  so it offers no link to open that resource. */
+  isPage?: boolean;
 }
 
 /** Where a command's `ui.open_after` page opens from a viz: in the page
@@ -392,7 +396,7 @@ function PartButtons({ run, actions }: { run: VizRun; actions: VizActionsState }
   return (
     <div data-testid="viz-part-actions" style={{ display: "flex", gap: 6, marginBottom: 6 }}>
       {buttons.map((a) => (
-        <button key={a.id} type="button" data-testid={`viz-action-${a.id}`} disabled={actions.busy !== null} title={a.command} onClick={() => actions.run(a, null)}>
+        <button key={a.id} type="button" data-testid={`viz-action-${a.id}`} disabled={actions.busy !== null} title={actionDoes(a)} onClick={() => actions.run(a, null)}>
           {actions.busy === a.id ? `${a.label}…` : a.label}
         </button>
       ))}
@@ -420,6 +424,7 @@ function RowsBody({
   onSetParam,
   marks,
   tree = null,
+  isPage = false,
 }: VizViewProps & { actions?: VizActionsState; marks?: Marks; tree?: LazyTree | null }) {
   const viz = run.config;
   const limited = limitRows(run.result, maxRows);
@@ -856,7 +861,7 @@ function RowsBody({
   return (
     <>
       {compact ? null : <ResultCompleteness result={result} />}
-      <Viz {...{ run, result, viz, cols, cell, first, compact, streamId, onOpenPage, rowMenu, rowsView, onCustomFailure, onCustomReady, componentView, fitCustom, onSetParam }} tree={treeNodesDrawn ? { nodes: treeNodesDrawn, open: tree?.open ?? null } : null} />
+      <Viz {...{ run, result, viz, cols, cell, first, compact, streamId, onOpenPage, rowMenu, rowsView, onCustomFailure, onCustomReady, componentView, fitCustom, onSetParam, isPage }} tree={treeNodesDrawn ? { nodes: treeNodesDrawn, open: tree?.open ?? null } : null} />
       {ctxMenu.menu}
     </>
   );
@@ -1010,6 +1015,7 @@ function Viz({
   fitCustom,
   tree,
   onSetParam,
+  isPage,
 }: {
   run: VizRun;
   result: VizRun["result"];
@@ -1030,6 +1036,7 @@ function Viz({
   onCustomReady?(): void;
   componentView: HostedView | null;
   fitCustom: boolean;
+  isPage: boolean;
 }) {
   // A page file's `custom` viz is fed its page's loaders.
   const fed = useVizPages()?.componentData ?? null;
@@ -1073,7 +1080,7 @@ function Viz({
     case "hunks":
       return <HunksViz rows={hunkRows(viz, result)} streamId={streamId} rowMenu={rowMenu} />;
     case "code":
-      return <CodeViz rows={codeRows(viz, result)} streamId={streamId} sync={viz.code?.sync ?? false} onOpenPage={onOpenPage} />;
+      return <CodeViz rows={codeRows(viz, result)} streamId={streamId} sync={viz.code?.sync ?? false} onOpenPage={onOpenPage} isPage={isPage} />;
     case "diff":
       return <DiffViz spec={diffRow(viz, result)} streamId={streamId} onOpenPage={onOpenPage} />;
     case "editor":

@@ -25,7 +25,7 @@ import type { PageAction } from "../kit/actions.js";
 import { Loading } from "../kit/Loading.js";
 import { ActionForm, useVizActions } from "../viz/VizView.js";
 import { FormSourceContext } from "../viz/formSource.js";
-import { offeredWholePage } from "../viz/vizActions.js";
+import { actionDoes, offeredWholePage } from "../viz/vizActions.js";
 import { VizActionRunnerContext } from "../viz/vizActionRunner.js";
 import { usePageRunsStore, usePageRunWith, type PageKey, type PageRuns } from "../pageRuns.js";
 import { Page } from "../tabs/Page.js";
@@ -150,7 +150,7 @@ export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, re
     ...offered.map((a) => ({
       id: `page-action-${a.id}`,
       label: a.label,
-      title: a.command,
+      title: actionDoes(a),
       busy: actions.busy === a.id,
       disabled: actions.busy !== null && actions.busy !== a.id,
       prominent: a.prominent,
@@ -279,7 +279,7 @@ export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, re
           {actions.pending ? (
             <CommandConfirm
               label={actions.pending.action.label}
-              command={actions.pending.action.command}
+              command={actions.pending.action.command ?? ""}
               details={actions.pending.details}
               onConfirm={actions.confirm}
               onCancel={actions.cancel}
