@@ -63,18 +63,26 @@ Rows come from the loader (a viz has no query). A viz that reads no rows
   level per param value (`WHERE parent = :folder`); a folder opens by
   setting the param to its `id`.
 - `sections`: one subsection per row, in row order: `sections: { title:
-  <column>, id?, link?, body? }`. Use it when a page is about several
+  <column>, id?, link?, body?, group?, group_link? }`. Use it when a page is about several
   things (every extension, every failing check, every page of one): each
   thing gets a headed section, not a table row (a wide table is for data
-  that is really tabular). Under its heading (a link when `link` names a
-  column holding a URI) a subsection draws the viz's `columns` as a short
+  that is really tabular). A heading is never a link: when `link` names a
+  column holding a URI, an arrow after the heading text ("Open <heading>")
+  opens that page. Under its heading a subsection draws the viz's `columns` as a short
   facts list, then `body` (a column of markdown). Its `id` column (default:
   a column named `id`, else the title) keys the subsection (`data-node`
   `<node id>/<id>`), so give it a stable one. The viz's row `actions` are
-  in each subsection's right-click menu (`when:` per row, as for a row). The
+  in each subsection's right-click menu (`when:` per row, as for a row).
+  `group: <column>` (and `group_link: <column of URIs>`) puts rows with
+  the same value (groups in the order each first appears) under one group
+  heading, a section one level above the rows' subsections, with the same
+  arrow when `group_link` is set; a row with no group value stays at the
+  groups' level. The
   subsections are real sections: their heading is one level below the
-  section the viz is in, and the page's Contents lists them under it up to
-  12 rows; a longer viz (100+ pages) lists only its parent. It stays in
+  section the viz is in. A page with two or more sections has a Contents
+  (a `sections` viz's rows and groups count), which lists up to 10 of them
+  under their parent (per group too) and then one "... N more" that goes to
+  the parent (or the group). It stays in
   the reading column. An agent reads each as a `###` heading with its facts
   and body.
 - `board`: groups as columns of cards: `group: { by: <column>, values:
@@ -117,8 +125,12 @@ view:
             when: failing, input: { name: "{{row.id}}" } }
 ```
 
+To put the rows under a heading each, add `group: owner` and
+`group_link: owner_uri` (columns of the loader) to `sections:`: a "Problems"
+page with the extension as the group and each problem a subsection.
+
 Each `things` row is a subsection of "Things": the name as a heading
-linking to its page, "Kind" as a fact, `summary` as markdown, and Repair in
+with an arrow to its page, "Kind" as a fact, `summary` as markdown, and Repair in
 its right-click menu where `failing` is set. A "Problems" line is one more
 `body` line (a link in markdown); nesting is by what the SQL puts in
 `body`.
@@ -132,8 +144,15 @@ exists for actions and links).
 - `width` is pixels; the rest share the space. `format`: `date`,
   `datetime`, `relative` (how long ago), `bytes`, `duration`
   (milliseconds), `integer`, `percent` (a 0-1 fraction), `sparkline` (a
-  JSON array of numbers), `badge` (a pill in the column's `tone`). It
-  changes only what the person sees; agents read the raw values.
+  JSON array of numbers), `badge` (a pill in the column's `tone`), `items`
+  (below). It changes only what the person sees; agents read the raw values
+  (but for `items`).
+- `format: items`: the value is a JSON array of items, each a string or
+  `{ "text": ..., "hint"?: ..., "uri"?: ... }`, drawn inline separated by
+  " · " in a `detail` or `sections` fact, a `table` or `list` cell. `hint`
+  is the item's hover text, `uri` makes it a link. Build the array in SQL
+  (`json_group_array(json_object('text', name, 'hint', why))`). An agent
+  reads `text (hint) · text`.
 - `link: { kind, from? }` makes cells clickable: `page` (any URI: a work
   item's `v_work_item.uri`, `oxplow:oxplow/commit?sha=…`), `file` (a path;
   `line: <column>`), `wiki` (a slug), `effort-diff`, `commit`, `metric`.

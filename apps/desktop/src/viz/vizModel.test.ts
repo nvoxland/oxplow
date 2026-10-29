@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Extension, VizConfig, VizRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
-import { rowMention, markParts, treeNodes, lazyTreeNodes, lazyTreeProblem, drawnTreeRows, wantedBranches, timelineEntries, stepItems, sectionRows, hunkRows, codeRows, diffRow, editorRow, embedRow, parseLines, mergeDirectory, barRows, lineSeries, sparklineValues, numericRowId, treemapItems, cellLinkRef, changedParams, foldEmpty, foldedAway, displayColumns, formatCell, parseParamInput, limitRows, slugify, rowAssistantContext, effortRowId, isTimestamp, rowGroups, rowEmphasized, rowDepth, rowContextRef } from "./vizModel.js";
+import { rowMention, markParts, treeNodes, lazyTreeNodes, lazyTreeProblem, drawnTreeRows, wantedBranches, timelineEntries, stepItems, sectionRows, sectionParts, itemList, hunkRows, codeRows, diffRow, editorRow, embedRow, parseLines, mergeDirectory, barRows, lineSeries, sparklineValues, numericRowId, treemapItems, cellLinkRef, changedParams, foldEmpty, foldedAway, displayColumns, formatCell, parseParamInput, limitRows, slugify, rowAssistantContext, effortRowId, isTimestamp, rowGroups, rowEmphasized, rowDepth, rowContextRef } from "./vizModel.js";
 import { formatMetricValue, formatShortDateTime } from "../components/format.js";
 import { diffSpecOf, duplicateBlockOf, isPage, lineOf, pagePayload } from "../tabs/pageRefs.js";
 import type { TabRef } from "../tabs/tabState.js";
@@ -542,9 +542,30 @@ describe("structure components (P6.A2)", () => {
     expect(sectionRows(viz({ viz: "sections", sections: { title: "gone", id: null, link: null, body: null } }), result(["t"], [["x"]]))).toEqual([]);
   });
 
+  test("sectionParts: rows with the same group go under one group, groups in order of first appearance, a row with no group stays where it is; the link is the first row's", () => {
+    const l = viz({ viz: "sections", sections: { title: "t", id: null, link: null, body: null, group: "g", group_link: "gu" } });
+    const rows = sectionRows(
+      l,
+      result(["t", "g", "gu"], [
+        ["P1", "Alpha", "oxplow:oxplow/page?page=a"],
+        ["Q1", "Beta", null],
+        ["P2", "Alpha", null],
+        ["Loose", null, null],
+      ]),
+    );
+    const parts = sectionParts(rows);
+    expect(parts.map((p) => (p.kind === "group" ? `${p.name}:${p.rows.map((r) => r.title).join(",")}:${p.link}` : `row:${p.section.title}`))).toEqual([
+      "Alpha:P1,P2:oxplow:oxplow/page?page=a",
+      "Beta:Q1:null",
+      "row:Loose",
+    ]);
+  });
+
   test("sections' role columns are never facts", () => {
     const l = viz({ viz: "sections", sections: { title: "t", id: "id", link: "u", body: "b" } });
     expect(displayColumns(l, ["id", "t", "u", "b", "kind"]).map((c) => c.key)).toEqual(["kind"]);
+    const g = viz({ viz: "sections", sections: { title: "t", id: "id", link: "u", body: "b", group: "g", group_link: "gu" } });
+    expect(displayColumns(g, ["id", "t", "u", "b", "g", "gu", "kind"]).map((c) => c.key)).toEqual(["kind"]);
   });
 
   test("codeRows keep rows naming a file, with their filesystem, revision and marked lines", () => {
@@ -696,5 +717,20 @@ describe("foldEmpty", () => {
     const { shown, empty } = foldEmpty([withActions([{ row: false, group: null }]), withActions([{ row: true, group: null }])]);
     expect(shown).toHaveLength(1);
     expect(empty).toHaveLength(1);
+  });
+});
+
+describe("itemList", () => {
+  test("a JSON array of strings and { text, hint?, uri? } objects is items; anything else drops, and a non-array is null", () => {
+    expect(itemList('["a",{"text":"b","hint":"why"},{"text":"c","uri":"oxplow:oxplow/page?page=x"},{"nope":1},3,{"text":"","hint":"h"}]')).toEqual([
+      { text: "a" },
+      { text: "b", hint: "why" },
+      { text: "c", uri: "oxplow:oxplow/page?page=x" },
+    ]);
+    expect(itemList("[]")).toEqual([]);
+    expect(itemList("not json")).toBeNull();
+    expect(itemList('{"text":"a"}')).toBeNull();
+    expect(itemList(null)).toBeNull();
+    expect(itemList(3)).toBeNull();
   });
 });

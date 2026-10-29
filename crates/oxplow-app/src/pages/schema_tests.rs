@@ -971,3 +971,42 @@ fn a_sections_viz_without_a_title_column_is_refused() {
     );
     assert!(why.contains("title: <column>"), "{why}");
 }
+
+/// A column's `format: items` says its value is a list of items; it loads on
+/// a table, a list, a detail and a sections viz, and a made-up format is
+/// refused.
+#[test]
+fn a_column_can_hold_a_list_of_items() {
+    for viz in [
+        "table",
+        "list",
+        "detail",
+        "sections, sections: { title: a }",
+    ] {
+        let text = format!(
+            "title: T\nloaders:\n  q: {{ rows: [{{ a: 1, p: '[]' }}] }}\nview: {{ viz: {viz}, from: q, columns: [{{ key: p, format: items }}] }}\n"
+        );
+        let ok = page(&text);
+        assert!(ok.is_ok(), "{viz}: {ok:?}");
+    }
+    let why = refused(
+        "title: T\nloaders:\n  q: { rows: [{ a: 1 }] }\nview: { viz: table, from: q, columns: [{ key: a, format: itemz }] }\n",
+    );
+    assert!(why.contains("itemz"), "{why}");
+}
+
+/// `sections` takes a `group` column and a `group_link` column (checked
+/// against the loader's columns with the other role columns, at load).
+#[test]
+fn a_sections_viz_can_group_its_rows() {
+    let p = page(
+        "title: T\nloaders:\n  q: { rows: [{ name: A, ext: x, ext_uri: u }] }\nview: { viz: sections, from: q, sections: { title: name, group: ext, group_link: ext_uri } }\n",
+    )
+    .expect("loads");
+    let crate::pages::schema::NodeKind::Viz { config, .. } = &p.view.kind else {
+        panic!("a viz")
+    };
+    let s = config.sections.clone().unwrap();
+    assert_eq!(s.group.as_deref(), Some("ext"));
+    assert_eq!(s.group_link.as_deref(), Some("ext_uri"));
+}

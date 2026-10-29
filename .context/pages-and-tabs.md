@@ -609,11 +609,22 @@ rail (`pages/railGroups.tsx`), which `railHas` (`pages/railHas.ts`) decides
 from the run: with nothing in it (no switch, `filter` or `selection` param,
 `rail:` node or open save form, and no Contents) `rightRail` is undefined,
 `Page` draws no Details card and the body takes the full width. Contents is
-automatic only for a page that does not fill: four or more titled
-sections (as `viz/Contents.tsx` lists them) or markdown that may have
-headings. A `sections` viz's subsections are sections too, listed one
-level in under their parent up to `CONTENTS_SUBSECTIONS_MAX` rows (12;
-more and only the parent is listed; `railHas` counts the same); About this page in the ☰ (the tab's
+automatic only for a page that does not fill: two or more titled
+sections (`CONTENTS_FROM`; a page with one gets none) or markdown that may
+have headings. A `sections` viz's subsections are sections too (all of them
+count), listed one level in under their parent, the first
+`CONTENTS_SUBSECTIONS_MAX` (10) and then one "… N more" entry that scrolls to
+the parent (the cap is per container: per group too, and `sections.group` /
+`group_link` make group sections, three levels in Contents, `h2`/`h3`/`h4`;
+a row without a group stays at the groups' level); `railHas` counts the same
+sections, groups included. A section heading is never a
+link: a thing with a page of its own (a `sections` row's `link`, a group's
+`link`) gets the `OpenPageLink` arrow (`kit/OpenPageLink.tsx`, lucide
+`SquareArrowRightEnter`, used for nothing else, "Open <heading>") right
+after the heading text. A column's `format: items` draws a JSON array of
+items (`ItemsCell`: a string or `{text, hint?, uri?}`) inline separated by
+" · ", the hint a tooltip, the uri a link, in a detail, sections, table or
+list; About this page in the ☰ (the tab's
 modal, `components/TabModal.tsx`, titled About this page: the page's `description`, then `PageAbout`'s
 facts — Id, Definition (a link: `runningUri` drawn as Definition with the
 run's params), origin, what runs (no Title or Extension row: the nav bar

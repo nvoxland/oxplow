@@ -1,7 +1,9 @@
 import { createContext, useContext, type CSSProperties, type ReactNode } from "react";
 
 import { useSectionCollapse } from "../components/CollapsibleSections.js";
+import type { TabRef } from "../tabs/tabState.js";
 import { ActionButtons } from "./ActionButtons.js";
+import { OpenPageLink } from "./OpenPageLink.js";
 import type { PageAction } from "./actions.js";
 
 /** The heading level of the section a part of the page is in: a section
@@ -19,6 +21,10 @@ export interface SectionProps {
    *  beside it (`at: { after: <id> }`). */
   id?: string;
   title: ReactNode;
+  /** The page the thing this section is about has: an arrow after the
+   *  heading's text opens it (`OpenPageLink`). The heading is never the
+   *  link. `name` is the heading's text, for the arrow's "Open <name>". */
+  opens?: { to: TabRef | string; name: string; onNavigate?: (ref: TabRef, opts?: { newTab?: boolean }) => void };
   /** The heading isn't drawn: it stays in the page, visually hidden, for
    *  Contents and screen readers. */
   hideTitle?: boolean;
@@ -48,6 +54,7 @@ export interface SectionProps {
 export function Section({
   id,
   title,
+  opens,
   hideTitle = false,
   description,
   actions,
@@ -96,6 +103,7 @@ export function Section({
             ) : (
               title
             )}
+            {opens ? <OpenPageLink to={opens.to} name={opens.name} onNavigate={opens.onNavigate} /> : null}
           </Heading>
           {source ? (
             <span className="ox-badge" data-source={source} title={`Added by the ${source} extension`}>

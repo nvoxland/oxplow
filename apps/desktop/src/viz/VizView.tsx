@@ -39,6 +39,7 @@ import {
   formatCell,
   hunkRows,
   sectionRows,
+  itemList,
   isTimestamp,
   markParts,
   limitRows,
@@ -84,6 +85,8 @@ import { CodeViz } from "./CodeViz.js";
 import { DiffViz } from "./DiffViz.js";
 import { DataTable, type DataColumn, type RowProps } from "../kit/DataTable.js";
 import { Facts } from "../kit/Facts.js";
+import { ItemsCell } from "./ItemsCell.js";
+import { OpenPageLink } from "../kit/OpenPageLink.js";
 import { SectionsViz } from "./SectionsViz.js";
 import { Stat } from "../kit/Stat.js";
 import { recordOpError } from "../opErrors.js";
@@ -512,7 +515,10 @@ function RowsBody({
     // A highlighted column marks its param's current value in the text.
     const needle = c.highlight === null ? "" : String(run.params[c.highlight] ?? "");
     const series = c.format === "sparkline" ? sparklineValues(raw) : null;
-    const text = series ? (
+    const itemsList = c.format === "items" ? itemList(raw) : null;
+    const text = itemsList ? (
+      <ItemsCell items={itemsList} linkStyle={linkStyle} />
+    ) : series ? (
       <span data-testid="viz-sparkline" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
         <Sparkline values={series} width={72} height={18} />
         <span>{formatted}</span>
@@ -927,7 +933,8 @@ interface RowsView {
 }
 
 /** A group's heading, styled as the rail's sub-headings: its value
- *  (linked when the group's `link` resolves) and its group actions. */
+ *  (an arrow after it opens its page when the group's `link` resolves,
+ *  never the text itself) and its group actions. */
 function GroupHeading({
   group,
   open,
@@ -957,18 +964,8 @@ function GroupHeading({
       >
         {open ? "▾" : "▸"}
       </button>
-      {ref ? (
-        <RouteLink
-          to={ref}
-          testId="viz-group-link"
-          onNavigate={tabNavigate(ref, onOpenPage)}
-          style={{ ...linkStyle, color: "inherit", letterSpacing: "inherit", textTransform: "inherit" }}
-        >
-          {group.label}
-        </RouteLink>
-      ) : (
-        <span>{group.label}</span>
-      )}
+      <span>{group.label}</span>
+      {ref ? <OpenPageLink to={ref} name={group.label} onNavigate={tabNavigate(ref, onOpenPage)} /> : null}
       <span data-testid="viz-group-count" style={{ fontWeight: "normal", color: "var(--text-muted)" }}>
         {group.rows.length}
       </span>
@@ -1084,15 +1081,7 @@ function Viz({
           sections={sectionRows(viz, result)}
           facts={(row) => cols.map((c) => ({ key: c.key, label: c.label, value: cell(row, c) }))}
           rowMenu={rowMenu}
-          heading={(s) =>
-            s.link ? (
-              <RouteLink to={s.link} onNavigate={tabNavigate(s.link, onOpenPage)} style={linkStyle}>
-                {s.title}
-              </RouteLink>
-            ) : (
-              s.title
-            )
-          }
+          navigate={(link) => tabNavigate(link, onOpenPage)}
         />
       );
     case "steps":

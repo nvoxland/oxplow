@@ -323,12 +323,22 @@ pub struct VizSections {
     /// `data-node`): `id` when the result has one, else the title.
     #[serde(default)]
     pub id: Option<String>,
-    /// A column holding a URI the heading links to.
+    /// A column holding a URI the heading's arrow opens.
     #[serde(default)]
     pub link: Option<String>,
     /// A column of markdown drawn under the heading and the facts.
     #[serde(default)]
     pub body: Option<String>,
+    /// A column whose value groups the rows: rows with the same value (in
+    /// the order each first appears) go under one heading, a section one
+    /// level above the rows' subsections. A row with no value is drawn
+    /// outside any group, at the groups' level.
+    #[serde(default)]
+    pub group: Option<String>,
+    /// A column holding a URI the group heading's arrow opens (read from
+    /// the group's first row).
+    #[serde(default)]
+    pub group_link: Option<String>,
 }
 
 /// What becomes of the page a viz is on after one of its actions (or its
@@ -821,6 +831,11 @@ pub enum ColumnFormat {
     Sparkline,
     /// A short value as a pill, in the column's `tone`.
     Badge,
+    /// A list of items (a JSON array): each element is a string or
+    /// `{ "text": …, "hint"?: …, "uri"?: … }`, drawn inline separated by
+    /// ` · `; `hint` is the item's hover text, `uri` makes it a link. An
+    /// agent reads them joined by ` · `, a hint in parentheses.
+    Items,
 }
 
 /// `group` on a `list` or `table`: the rows under a heading per distinct
@@ -831,7 +846,7 @@ pub enum ColumnFormat {
 pub struct VizGroup {
     /// The column whose value groups the rows (not shown as a cell).
     pub by: String,
-    /// The heading's link; `from` defaults to `by`.
+    /// The heading's arrow (its page); `from` defaults to `by`.
     #[serde(default)]
     pub link: Option<ColumnLink>,
     /// The groups in this order, shown even when no row has the value
@@ -1945,7 +1960,7 @@ impl VizConfig {
         }
         if let Some(s) = &self.sections {
             out.extend(
-                [&s.title, &s.id, &s.link, &s.body]
+                [&s.title, &s.id, &s.link, &s.body, &s.group, &s.group_link]
                     .into_iter()
                     .flatten()
                     .map(|k| ("sections", k)),

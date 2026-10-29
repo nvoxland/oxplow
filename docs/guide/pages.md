@@ -112,7 +112,10 @@ selection (also in the `#`).
 
 A table or list takes `columns:` for headers, order and links. `format`
 (`date`, `datetime`, `relative`, `bytes`, `duration`, `integer`, `percent`,
-`sparkline`, `badge`) changes only what you see. `link: { kind, from }`
+`sparkline`, `badge`, `items`) changes only what you see. An `items` column
+holds a JSON array whose elements are a string or `{ "text": ..., "hint"?:
+..., "uri"?: ... }`: drawn inline separated by " · ", the hint on hover, the
+uri a link. `link: { kind, from }`
 makes a cell clickable: `page` (any oxplow URI, such as a work item's),
 `file` (with `line:`), `wiki`, `commit`, `metric`. `select: <param>` makes
 a click set that param, so a detail section that reads it re-runs: master and
@@ -131,11 +134,13 @@ view:
   columns: [{ key: kind, label: Kind }]
 ```
 
-Each row gets a heading (a link when `link` names a column holding a page's
-URI), its `columns` as a short list of facts, and `body` (a column of
+Each row gets a heading (when `link` names a column holding a page's URI, an
+arrow after the heading opens that page; the heading text is never a link), its `columns` as a short list of facts, and `body` (a column of
 markdown). Give the rows a stable `id` column. The subsections are real
-sections: the page's Contents lists them under their heading, as long as
-there are 12 or fewer. A row's `actions` are in its right-click menu.
+sections: a page with two or more sections has a Contents that lists them
+under their heading, the first 10, then one "... N more". A row's `actions` are in its right-click menu. `group: <column>` (with
+`group_link: <column>`) puts rows with the same value under one heading, a
+section above their subsections; Contents nests both levels.
 
 ### Grouping and styling rows
 

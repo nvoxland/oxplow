@@ -1604,7 +1604,7 @@ one that adds permissions asks inline like any deploy.
 
 **The Extensions page** (`extensions`, the launcher's System page; Settings
 has no Extensions area) is a document too: one headed section per extension
-(`viz: sections`, a row per extension from `extension-facts`' `summary`: the heading links to its Extension page, the facts are columns, a Problems line is the body),
+(`viz: sections`, a row per extension from `extension-facts`' `summary`: an arrow after the heading opens its Extension page, the facts are columns, a Problems line is the body),
 those needing attention first, each fact a sentence from the hidden
 `extension-facts` page — the one place that turns `v_extension`,
 `v_extension_source` and `v_contribution_health` into words (permission ids
@@ -2520,7 +2520,7 @@ and `custom` are refused in an inline page. A viz that fills its page
 `sectionRows` in `vizModel.ts`) — a thing gets a section, not a row
 (`.context/usability.md` "Pages are informational"). One subsection per
 row, in row order: `sections: { title, id?, link?, body? }` (`title`
-required; `link` a column holding a URI the heading links to; `body` a
+required; `link` a column holding a URI the heading's arrow opens; `body` a
 column of markdown, drawn by the one Markdown component) and the viz's
 `columns` as a short `Facts` list (the role columns are never facts; with
 no `columns`, every other column is). `empty` and `when:` per row work as
@@ -2533,9 +2533,13 @@ heading level is one below the enclosing section (`SectionLevelContext`:
 gets `-2`, `-3`) — so give a `sections` loader a stable `id`. Row `actions`
 are in each subsection's right-click menu (and a `primary` one on click),
 as for a `list` row. Contents lists subsections under their parent up to
-`CONTENTS_SUBSECTIONS_MAX` (12; `viz/Contents.tsx`, the one constant, also
-what `railHas` counts with): the viz's root carries `data-sections=<rows>`
-and a longer one is skipped, its parent alone listed. It adds no width:
+`CONTENTS_SUBSECTIONS_MAX` (10; `viz/Contents.tsx`, the one constant): the
+viz's root carries `data-sections=<rows>`; past ten, one "… N more" entry
+scrolls to the parent (`railHas` counts every row, with `CONTENTS_FROM`).
+The heading is never a link: a row's `link` is the `OpenPageLink` arrow
+after it. `sections.group` / `group_link` group rows under a group section
+one level above (each group container carries its own `data-sections`; Contents
+caps per container, and skips what is under a group it left out). It adds no width:
 subsections stay in the reading column. Agent text: a `###` heading (the
 link in parentheses), the facts as `**label**: value` lines, then the body.
 The Definition page's View outline reads it as "Sections of `loader`".
@@ -2631,8 +2635,10 @@ whose loader does not return one (`viz_column_problems`). An agent reads
 - `width` is pixels (a table lays out fixed; cells are cut to one line).
   `format` (`ColumnFormat`): `date`, `datetime`, `relative`, `bytes`,
   `duration` (ms), `integer`, `percent` (a 0–1 fraction), `sparkline` (a
-  JSON array of numbers), `badge` (a pill in the column's `tone`). It
-  changes only what a person sees; an agent reads the raw value.
+  JSON array of numbers), `badge` (a pill in the column's `tone`), `items` (a JSON array of
+  strings or `{text, hint?, uri?}`, drawn inline separated by " · ", the
+  hint on hover, the uri a link; an agent reads `text (hint) · text`). It
+  changes only what a person sees; an agent reads the raw value (but for `items`).
 - A timestamp cell shows in local time, its full time on hover.
 
 **Row styling** (`row_style_problem`), each naming a result column:

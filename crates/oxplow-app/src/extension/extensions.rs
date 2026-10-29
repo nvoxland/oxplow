@@ -6666,7 +6666,7 @@ commands:
     }
 
     /// `targets` draws target lines on a `line` chart; on another viz it is
-    /// refused. The formats `sparkline` and `badge` load.
+    /// refused. The formats `sparkline`, `badge` and `items` load.
     #[test]
     fn chart_targets_and_the_new_formats_load() {
         let (_d, ext) = load_x(
@@ -6676,7 +6676,7 @@ commands:
                     &viz_page(
                         "",
                         "SELECT 1 AS at, 2 AS v, 3 AS goal, '[1,2]' AS s, 'ok' AS level",
-                        "viz: line\nchart: { x: at, y: v, targets: goal }\ncolumns: [{ key: s, format: sparkline }, { key: level, format: badge }]\n",
+                        "viz: line\nchart: { x: at, y: v, targets: goal }\ncolumns: [{ key: s, format: sparkline }, { key: level, format: badge }, { key: s, format: items }]\n",
                     ),
                 ),
                 (
@@ -6698,6 +6698,7 @@ commands:
         );
         assert_eq!(trend.columns[0].format, Some(ColumnFormat::Sparkline));
         assert_eq!(trend.columns[1].format, Some(ColumnFormat::Badge));
+        assert_eq!(trend.columns[2].format, Some(ColumnFormat::Items));
         assert!(page_of(&ext, "bars").is_none());
         let errs = ext.errors.join("\n");
         assert!(

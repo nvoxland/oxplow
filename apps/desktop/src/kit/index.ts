@@ -11,6 +11,7 @@ export { ActionButtons } from "./ActionButtons.js";
 export { DataTable, type DataColumn, type DataGroup, type DataTableProps, type RowProps } from "./DataTable.js";
 export { Facts, type Fact } from "./Facts.js";
 export { humanize } from "./humanize.js";
+export { OpenPageLink, type OpenPageLinkProps } from "./OpenPageLink.js";
 export { ParamList, ParamRow, type ParamListProps, type ParamRowProps } from "./ParamControls.js";
 export { Popover, type PopoverProps } from "./Popover.js";
 export { RailGroup, type RailGroupProps } from "./RailGroup.js";
