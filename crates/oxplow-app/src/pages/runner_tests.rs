@@ -435,3 +435,24 @@ async fn a_replaceable_node_runs_the_replacement_that_stands_in_for_it() {
     assert_eq!(own.tree.replaced_by, None);
     assert!(own.tree.embed.is_none(), "{:?}", own.tree);
 }
+
+/// A loader with no columns (nothing came back, or it failed) is not a
+/// table SQLite can hold: what reads it yields no rows, or says what it
+/// read failed, never a syntax error.
+#[tokio::test]
+async fn a_loader_that_reads_one_with_no_columns_does_not_fail_in_sql() {
+    let (_dir, svc) = fixture().await;
+    let r = run(&svc, "acme/emptied", &[]).await;
+    assert_eq!(r.loaders["none"].error, None);
+    assert_eq!(r.loaders["after_none"].error, None);
+    assert!(r.loaders["after_none"].result.rows.is_empty());
+    let err = r.loaders["after_broken"]
+        .error
+        .as_deref()
+        .unwrap_or_default();
+    assert!(
+        err.contains("`broken`") && err.contains("returned no `nope`"),
+        "{err}"
+    );
+    assert!(!err.contains("syntax"), "{err}");
+}

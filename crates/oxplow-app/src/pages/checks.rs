@@ -6,7 +6,7 @@
 
 use std::collections::BTreeMap;
 
-use oxplow_db::{SqlCell, SqlQueryResult, TempTable};
+use oxplow_db::{SqlCell, SqlQueryResult};
 
 use super::runner::{bind_args, LoaderRun};
 use super::schema::{Loader, NodeKind, Page};
@@ -38,18 +38,10 @@ pub async fn dry_run(layer: &crate::sql_gateway::SqlGateway, page: &Page) -> Loa
         if decl.reads_loaders.iter().any(|n| !earlier.contains_key(n)) {
             continue;
         }
-        let temp = decl
-            .reads_loaders
-            .iter()
-            .filter_map(|n| {
-                let r = &earlier.get(n)?.result;
-                Some(TempTable {
-                    name: n.clone(),
-                    columns: r.columns.clone(),
-                    rows: r.rows.clone(),
-                })
-            })
-            .collect::<Vec<_>>();
+        // One that reads a loader with no columns has nothing to select.
+        let Ok(temp) = super::runner::temp_tables(&decl.reads_loaders, &earlier) else {
+            continue;
+        };
         let mut named = bind_params(&page.params, &params, time::OffsetDateTime::now_utc());
         for (k, v) in bind_args(given, &params, &earlier) {
             named.retain(|(n, _)| n != &k);

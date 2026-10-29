@@ -484,37 +484,33 @@ impl<'a> PageRunner<'a> {
             return hit.clone();
         }
         let outcome = match &decl.loader {
-            Loader::Sql { sql, params: given } => {
-                let temp = decl
-                    .reads_loaders
-                    .iter()
-                    .filter_map(|n| {
-                        let r = &earlier.get(n)?.result;
-                        Some(TempTable {
-                            name: n.clone(),
-                            columns: r.columns.clone(),
-                            rows: r.rows.clone(),
-                        })
-                    })
-                    .collect::<Vec<_>>();
-                let mut named = bind_params(&page.params, params, time::OffsetDateTime::now_utc());
-                for (k, v) in bind_args(given, params, earlier) {
-                    named.retain(|(n, _)| n != &k);
-                    named.push((k, SqlCell::from(v)));
-                }
-                // `config('/key')` reads its own extension's settings.
-                match self.with_config(page, sql).await {
-                    Err(e) => Err(e.to_string()),
-                    Ok(sql) => {
-                        let mut query = oxplow_db::SqlQuery::new(&sql)
-                            .named(named)
-                            .limit(None)
-                            .stream(stream);
-                        query.temp = temp;
-                        self.sql.run(query).await.map_err(|e| e.to_string())
+            Loader::Sql { sql, params: given } => match temp_tables(&decl.reads_loaders, earlier) {
+                Err(Unreadable::Failed(why)) => Err(why),
+                // SQLite holds no table without columns, and a loader that
+                // yielded none has no shape to select from: what reads it
+                // has no rows.
+                Err(Unreadable::NoColumns) => Ok(table(Vec::new(), Vec::new())),
+                Ok(temp) => {
+                    let mut named =
+                        bind_params(&page.params, params, time::OffsetDateTime::now_utc());
+                    for (k, v) in bind_args(given, params, earlier) {
+                        named.retain(|(n, _)| n != &k);
+                        named.push((k, SqlCell::from(v)));
+                    }
+                    // `config('/key')` reads its own extension's settings.
+                    match self.with_config(page, sql).await {
+                        Err(e) => Err(e.to_string()),
+                        Ok(sql) => {
+                            let mut query = oxplow_db::SqlQuery::new(&sql)
+                                .named(named)
+                                .limit(None)
+                                .stream(stream);
+                            query.temp = temp;
+                            self.sql.run(query).await.map_err(|e| e.to_string())
+                        }
                     }
                 }
-            }
+            },
             Loader::Command {
                 command,
                 args,
@@ -984,6 +980,40 @@ fn stream_of(params: &BTreeMap<String, SqlCell>, ctx: &ViewContext) -> Option<i6
         Some(SqlCell::Int(id)) => Some(*id),
         _ => ctx.stream_id,
     }
+}
+
+/// Why the loaders a query reads can't be its temp tables.
+pub(super) enum Unreadable {
+    /// One failed: its error is the reader's (not a syntax error over the
+    /// table it never made).
+    Failed(String),
+    /// One has no columns (it yielded nothing, with no shape).
+    NoColumns,
+}
+
+/// The loaders `names` as the temp tables a query reads them from.
+pub(super) fn temp_tables(
+    names: &[String],
+    earlier: &BTreeMap<String, LoaderRun>,
+) -> Result<Vec<TempTable>, Unreadable> {
+    let mut out = Vec::new();
+    for n in names {
+        let Some(run) = earlier.get(n) else { continue };
+        if let Some(error) = &run.error {
+            return Err(Unreadable::Failed(format!(
+                "reads `{n}`, which failed: {error}"
+            )));
+        }
+        if run.result.columns.is_empty() {
+            return Err(Unreadable::NoColumns);
+        }
+        out.push(TempTable {
+            name: n.clone(),
+            columns: run.result.columns.clone(),
+            rows: run.result.rows.clone(),
+        });
+    }
+    Ok(out)
 }
 
 fn table(columns: Vec<String>, rows: Vec<Vec<SqlCell>>) -> SqlQueryResult {

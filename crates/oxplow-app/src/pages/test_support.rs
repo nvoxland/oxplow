@@ -106,6 +106,22 @@ view: { viz: table, from: nodes }
 "#,
     ),
     (
+        "emptied",
+        r#"
+title: Emptied
+loaders:
+  none: { rows: [] }
+  after_none: { sql: "SELECT state FROM none" }
+  broken:
+    command: oxplow.page.describe
+    args: { uri: "oxplow:oxplow/file?filesystem=oxplow:extensions&path=acme/pages/numbers.yaml" }
+    items: nope
+    reads: [v_page]
+  after_broken: { sql: "SELECT id FROM broken" }
+view: { viz: table, from: after_none }
+"#,
+    ),
+    (
         "bound",
         r#"
 title: Bound
