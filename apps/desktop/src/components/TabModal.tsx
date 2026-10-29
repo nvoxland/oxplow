@@ -1,12 +1,18 @@
-import { useEffect, useRef, type CSSProperties, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useRef, type CSSProperties, type ReactNode } from "react";
+import { createPortal } from "react-dom";
+
+/** Where a tab's dialogs dock: the page's area under its nav bar (`Page`
+ *  provides it), so a dialog sits at its top right and never scrolls with
+ *  the body. With none (a dialog outside a page), it draws in place. */
+export const TabModalHostContext = createContext<HTMLElement | null>(null);
 
 /**
  * The one dialog for anything that comes from within a tab: a page's
- * About, a page or viz action's form. It lives inside the tab's body area
- * (the tab body is its positioned ancestor, so it dims and covers only
- * that tab's content, never the tab strip, the rail HUD or the other
- * tabs), is as tall as its content, and is headed by a title (and, under
- * it, what it is about) and a × close.
+ * About, a page or viz action's form. It docks at the right of the page's
+ * area under its nav bar (`TabModalHostContext`), as tall as its content:
+ * it dims only that page's body, never its nav bar, the tab strip, the
+ * rail HUD or the other tabs, and is headed by a title (and, under it,
+ * what it is about) and a × close.
  *
  * Because every tab body stays mounted while another tab is shown
  * (`CenterTabs`: `display: none`), a modal open in a tab is still open,
@@ -24,7 +30,7 @@ export function TabModal({
   onClose,
   children,
   testId = "tab-modal",
-  width = "min(480px, 100%)",
+  width = "min(38vw, 560px)",
 }: {
   title: ReactNode;
   /** What it is about, under the title, in words (never an id). */
@@ -36,6 +42,7 @@ export function TabModal({
   width?: string;
 }) {
   const card = useRef<HTMLDivElement>(null);
+  const host = useContext(TabModalHostContext);
   useEffect(() => {
     const before = document.activeElement as HTMLElement | null;
     const node = card.current;
@@ -48,7 +55,7 @@ export function TabModal({
       if (before && before.isConnected) before.focus();
     };
   }, []);
-  return (
+  const dialog = (
     <div data-testid={`${testId}-backdrop`} style={backdropStyle}>
       <div
         ref={card}
@@ -84,27 +91,30 @@ export function TabModal({
       </div>
     </div>
   );
+  return host ? createPortal(dialog, host) : dialog;
 }
 
 const backdropStyle: CSSProperties = {
   position: "absolute",
   inset: 0,
   zIndex: 20,
-  background: "rgba(0, 0, 0, 0.35)",
+  background: "rgba(0, 0, 0, 0.2)",
   display: "flex",
-  justifyContent: "center",
+  justifyContent: "flex-end",
   alignItems: "flex-start",
-  padding: "48px 16px 16px",
   overflow: "hidden",
+  pointerEvents: "auto",
 };
 
 const cardStyle: CSSProperties = {
   // The dock panel's chrome (`Dock/DockPanel.tsx`): same surface, border and ×.
   background: "var(--bg-1)",
   color: "var(--text-primary, var(--fg))",
-  border: "1px solid var(--border-strong)",
-  borderRadius: 6,
-  boxShadow: "0 8px 24px rgba(0, 0, 0, 0.28)",
+  // Docked under the nav bar at the right, as tall as its content.
+  borderLeft: "1px solid var(--border-strong)",
+  borderBottom: "1px solid var(--border-strong)",
+  borderBottomLeftRadius: 6,
+  boxShadow: "-8px 8px 24px rgba(0, 0, 0, 0.28)",
   display: "flex",
   flexDirection: "column",
   maxHeight: "100%",

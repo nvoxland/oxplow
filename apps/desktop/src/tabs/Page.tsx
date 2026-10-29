@@ -2,6 +2,7 @@ import type { CSSProperties, ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { RENDERER_VIEW_KEY, pickRenderer } from "../pages/renderers.js";
 import { PageNavBar } from "./PageNavBar.js";
+import { TabModalHostContext } from "../components/TabModal.js";
 import { useOptionalPageNavigation } from "./PageNavigationContext.js";
 import type { BookmarkScope } from "./bookmarks.js";
 import type { AskTarget } from "../components/Prompts/askTarget.js";
@@ -230,6 +231,7 @@ export function Page({ title, titleIcon, kind, chips: ownChips, actions, pin, ch
         comments: baseNavBar.comments ?? commentsNav,
       }
     : undefined;
+  const [modalHost, setModalHost] = useState<HTMLDivElement | null>(null);
   const navBarOwnsBacklinks = effectiveNavBar?.backlinks !== undefined;
 
   return (
@@ -316,13 +318,19 @@ export function Page({ title, titleIcon, kind, chips: ownChips, actions, pin, ch
           </div>
         </div>
       ) : null}
-      {width === "reading" || rightRail != null ? (
-        <RailBody width={width} fill={fill} rightRail={rightRail} rightRailTitle={rightRailTitle}>{children}</RailBody>
-      ) : (
-        <div style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: "auto", display: "flex", flexDirection: "column" }}>
-          {children}
-        </div>
-      )}
+      {/* The area under the nav bar: the body, and where a tab's dialog docks. */}
+      <div style={{ flex: 1, minHeight: 0, minWidth: 0, display: "flex", flexDirection: "column", position: "relative" }}>
+        <TabModalHostContext.Provider value={modalHost}>
+          {width === "reading" || rightRail != null ? (
+            <RailBody width={width} fill={fill} rightRail={rightRail} rightRailTitle={rightRailTitle}>{children}</RailBody>
+          ) : (
+            <div style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: "auto", display: "flex", flexDirection: "column" }}>
+              {children}
+            </div>
+          )}
+        </TabModalHostContext.Provider>
+        <div ref={setModalHost} data-testid="tab-modal-host" style={{ position: "absolute", inset: 0, zIndex: 20, pointerEvents: "none" }} />
+      </div>
       {backlinksBody !== undefined && !navBarOwnsBacklinks ? (
         <div
           data-testid="page-backlinks"
