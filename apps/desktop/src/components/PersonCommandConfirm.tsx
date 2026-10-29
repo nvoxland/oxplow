@@ -5,14 +5,14 @@ import type { CSSProperties } from "react";
 import { useSyncExternalStore } from "react";
 
 import { personCommands } from "../personCommands.js";
-import { CommandConfirm } from "./CommandConfirm.js";
+import { ConfirmBox } from "./CommandConfirm.js";
 
 export function PersonCommandConfirm() {
   const pending = useSyncExternalStore(personCommands.subscribe, personCommands.pending);
   if (!pending) return null;
   return (
     <div style={hostStyle}>
-      <CommandConfirm
+      <ConfirmBox
         label={pending.label}
         command={pending.command}
         onConfirm={() => void personCommands.confirm()}

@@ -8,15 +8,19 @@ import { useEffect, useState } from "react";
 
 import { getCommand } from "../api.js";
 import type { CommandSpec } from "../tauri-bridge/generated/bindings.js";
+import { TabModal } from "./TabModal.js";
 
-export function CommandConfirm({
-  label,
-  command,
-  onConfirm,
-  onCancel,
-  details = [],
-  testIdPrefix = "command-confirm",
-}: {
+/** A confirmation that comes from within a tab: the tab's modal
+ *  (`TabModal`), over that tab's body only. */
+export function CommandConfirm(props: ConfirmProps) {
+  return (
+    <TabModal title={`Confirm ${props.label}`} onClose={props.onCancel} testId={`${props.testIdPrefix ?? "command-confirm"}-modal`} width="min(420px, 100%)">
+      <ConfirmBox {...props} bare />
+    </TabModal>
+  );
+}
+
+interface ConfirmProps {
   /** What the person pressed (`Finish`). */
   label: string;
   /** The command it runs (`oxplow.work_item.transition`). */
@@ -27,7 +31,20 @@ export function CommandConfirm({
    *  deploy adds), from the bus's `NEEDS_CONFIRMATION`. */
   details?: string[];
   testIdPrefix?: string;
-}) {
+}
+
+/** The confirmation itself, with no modal around it: where the command
+ *  was run from outside any tab (`PersonCommandConfirm`, floating over
+ *  the window). */
+export function ConfirmBox({
+  label,
+  command,
+  onConfirm,
+  onCancel,
+  details = [],
+  testIdPrefix = "command-confirm",
+  bare = false,
+}: ConfirmProps & { bare?: boolean }) {
   const [spec, setSpec] = useState<CommandSpec | null>(null);
   useEffect(() => {
     let live = true;
@@ -48,7 +65,7 @@ export function CommandConfirm({
       data-testid={testIdPrefix}
       role="alertdialog"
       aria-label={`Confirm ${label}`}
-      style={destructive ? { ...boxStyle, borderColor: "var(--severity-critical)" } : boxStyle}
+      style={bare ? { ...boxStyle, border: "none", padding: 0, marginBottom: 0 } : destructive ? { ...boxStyle, borderColor: "var(--severity-critical)" } : boxStyle}
       onKeyDown={(e) => {
         if (e.key === "Escape") {
           // The confirmation's own cancel: a container's Escape mustn't also fire.

@@ -589,7 +589,7 @@ async fn form_start(
         command,
         values,
         fixed: action.fixed,
-        fields: None,
+        fields: (!action.fields.is_empty()).then_some(action.fields),
         choices,
         subfields: BTreeMap::new(),
         reads: oxplow_db::Reads::default(),

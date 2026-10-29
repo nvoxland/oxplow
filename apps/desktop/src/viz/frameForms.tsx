@@ -8,12 +8,12 @@ import type { ReactNode } from "react";
 
 import { componentForm, invokeComponentCommand } from "../api.js";
 import { SchemaForm } from "../components/SchemaForm/SchemaForm.js";
-import { Slideover } from "../components/Slideover.js";
+import { TabModal } from "../components/TabModal.js";
 import { recordOpError } from "../opErrors.js";
 import type { FormStart } from "../tauri-bridge/generated/bindings.js";
 import type { FormDeps } from "./ComponentFrame.js";
 import type { OwnForm } from "./componentBridge.js";
-import { FormSlideover } from "./VizView.js";
+import { FormModal } from "./VizView.js";
 import { useFormSubmit } from "./useFormSubmit.js";
 
 interface AskedForm {
@@ -50,8 +50,7 @@ export function useFrameForms(componentKey: string | null, title: string): { for
   const element = (
     <>
       {ownAsked ? (
-        <Slideover
-          open
+        <TabModal
           onClose={() => {
             ownAsked.resolve(null);
             setOwnAsked(null);
@@ -69,7 +68,7 @@ export function useFrameForms(componentKey: string | null, title: string): { for
             }}
             testIdPrefix="custom-page-own-form-fields"
           />
-        </Slideover>
+        </TabModal>
       ) : null}
       {asked && componentKey ? <CommandForm componentKey={componentKey} title={title} asked={asked} onDone={() => setAsked(null)} /> : null}
     </>
@@ -126,7 +125,7 @@ function CommandForm({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [asked]);
   return (
-    <FormSlideover
+    <FormModal
       title={title}
       start={start}
       form={form}

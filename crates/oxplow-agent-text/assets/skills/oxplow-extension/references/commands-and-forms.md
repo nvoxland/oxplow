@@ -71,8 +71,9 @@
 - **A form node** (`viz: form`, no `from`) is one command's input:
   `form: { command, defaults?, fixed?, fields? }`. `defaults` takes
   `{{param.x}}`; a `query` prefills from its first row; `fixed` fields
-  show their default and can't be changed (an item's `uri`); `fields`
-  says which to show.
+  are the host's: never drawn, sent with their default (an item's `uri`);
+  `fields` says which to show, and how each reads: `{ name, label, help }`
+  (below).
 - **Editing what is saved:** `mode: edit` (and list its `fields`). Save
   is enabled only when changed, Discard puts the saved values back, and
   what the person typed survives Back and a restart. Without it the form
@@ -95,10 +96,27 @@
   a create form giving way to what it made), `stay` (nothing opens) or `close` (the page closes: it showed what the command removed).
 - **A form action** on any page: `form: true` on an action opens the
   command's form starting from its `input`, instead of running at once
-  (a side panel; one text field alone is a prompt strip above the rows);
-  `fixed` keeps fields to the bound values:
+  (a dialog over the page's tab; one text field alone is a prompt strip
+  above the rows). The form is headed and its button labelled with the
+  action's `label` less a trailing `…`. `fixed` keeps fields to the bound
+  values and **never draws them** (an id means nothing to the person); say
+  what the form is about in words instead: a row action's `about: <column>`
+  is its subtitle (a page action's form is about the page, its title).
+  `input` values that aren't `fixed` are where the fields start (bind the
+  text a person sees, e.g. a `display_name` column, not an empty one).
   `{ id: edit, label: Edit…, command: oxplow.work_item.update, row: true,
-  form: true, fixed: [uri], input: { uri: "{{row.uri}}", title: "{{row.title}}" } }`.
+  form: true, about: title, fixed: [uri], input: { uri: "{{row.uri}}", title: "{{row.title}}" } }`.
+- **How a form's fields read** (an action's `fields`, or a form node's):
+  `fields: [{ name: title, label: Name, help: What the tab shows. }, native]`
+  lists the only fields shown, in order (the rest keep `input`'s value),
+  each with the `label` over it (else the schema `title`, else the name
+  humanized: `native_rename` → "Native rename") and a `help` line under
+  it. A command's schema `description` is written for agents and is never
+  shown to a person: say what a person should read in `help`. An unknown
+  field is refused where the page loads. A boolean is a checkbox with its
+  label to the right and its help under that. A field in `choices` is a
+  select showing each row's `label` and sending its `value`, starting on
+  the `input` value.
 - **Drag, bulk and key actions** (row actions): `drag: true` runs on a
   drop, binding `{{before.x}}` / `{{after.x}}` (the rows below / above
   where it landed; a missing one is left out), `{{onto.x}}`,

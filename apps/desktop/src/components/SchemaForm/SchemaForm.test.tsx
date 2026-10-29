@@ -109,14 +109,14 @@ test("`fields` renders only those, in that order; the others are still submitted
   expect(submitted).toEqual([{ title: "T", note: "shown", ref: "r:1" }]);
 });
 
-test("a `fixed` field shows its value as text, is not an input, and is submitted unchanged", () => {
+test("a `fixed` field is not drawn, and is submitted unchanged", () => {
   const submitted: unknown[] = [];
   const { getByTestId, queryByTestId, container } = render(
     <SchemaForm schema={wide} initial={{ title: "T", ref: "r:1" }} fixed={["ref"]} onSubmit={(v) => submitted.push(v)} testIdPrefix="f" />,
   );
-  expect(getByTestId("f-ref-fixed").textContent).toContain("r:1");
+  expect(queryByTestId("f-ref-fixed")).toBe(null);
   expect(queryByTestId("f-ref")).toBe(null);
-  // The first editable field takes the focus, not the fixed one above it.
+  expect(container.textContent).not.toContain("r:1");
   expect(document.activeElement).toBe(getByTestId("f-title"));
   expect(container.querySelectorAll("input").length).toBe(2);
   fireEvent.keyDown(getByTestId("f-title"), { key: "Escape" });
@@ -391,4 +391,119 @@ test("a field the schema marks writeOnly is a secret: masked, never in the draft
   expect(key.type).toBe("password");
   fireEvent.change(key, { target: { value: "sk-secret" } });
   expect(JSON.stringify(drafts)).not.toContain("sk-secret");
+});
+
+// A command's schema is written for agents: a form for a person labels its
+// fields by the host's `fields` (label, help), else the humanized name, and
+// never shows the schema's description unless the host says it is for people.
+const agentSchema = {
+  type: "object",
+  required: ["session", "title"],
+  properties: {
+    session: { type: "string", description: "The session (`ses3`)." },
+    title: { type: "string" },
+    native_rename: { type: "boolean", description: "Only where the harness declares `native_rename`." },
+  },
+};
+
+test("fixed fields are not drawn, not even as text, but are still submitted", () => {
+  const submitted: unknown[] = [];
+  const { getByTestId, queryByTestId, container } = render(
+    <SchemaForm schema={agentSchema} initial={{ session: "ses1", title: "T" }} fixed={["session"]} schemaHelp={false} onSubmit={(v) => submitted.push(v)} testIdPrefix="f" />,
+  );
+  expect(queryByTestId("f-session")).toBeNull();
+  expect(queryByTestId("f-session-fixed")).toBeNull();
+  expect(container.textContent).not.toContain("ses1");
+  fireEvent.submit(getByTestId("f"));
+  expect(submitted).toEqual([{ session: "ses1", title: "T" }]);
+});
+
+test("a field's label and help come from the host's fields; the fallback is the humanized name, with no schema description", () => {
+  const { getByText, queryByText, container } = render(
+    <SchemaForm
+      schema={agentSchema}
+      fixed={["session"]}
+      schemaHelp={false}
+      fields={[{ name: "title", label: "Name", help: "What the tab shows." }, "native_rename"]}
+      onSubmit={() => {}}
+      testIdPrefix="f"
+    />,
+  );
+  expect(getByText("Name")).toBeTruthy();
+  expect(getByText("What the tab shows.")).toBeTruthy();
+  expect(getByText("Native rename")).toBeTruthy();
+  expect(container.textContent).not.toContain("harness declares");
+  expect(queryByText("Title")).toBeNull();
+});
+
+test("a schema description shows only when the host says the schema is for people", () => {
+  const { container } = render(<SchemaForm schema={agentSchema} onSubmit={() => {}} testIdPrefix="f" />);
+  expect(container.textContent).toContain("harness declares");
+});
+
+test("a boolean is a checkbox with its label to the right and its help beneath", () => {
+  const { getByTestId, getByText } = render(
+    <SchemaForm
+      schema={agentSchema}
+      fixed={["session"]}
+      initial={{ title: "T" }}
+      schemaHelp={false}
+      fields={["title", { name: "native_rename", label: "Also rename it in Codex", help: "Shown in Codex's list." }]}
+      onSubmit={() => {}}
+      testIdPrefix="f"
+    />,
+  );
+  const box = getByTestId("f-native_rename") as HTMLInputElement;
+  expect(box.type).toBe("checkbox");
+  const label = getByText("Also rename it in Codex");
+  expect(label.tagName).toBe("LABEL");
+  expect(label.getAttribute("for")).toBe(box.id);
+  expect(box.compareDocumentPosition(label) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(getByText("Shown in Codex's list.")).toBeTruthy();
+});
+
+test("a field picked from a list shows the labels, submits the value, and starts on the initial one", () => {
+  const submitted: unknown[] = [];
+  const { getByTestId } = render(
+    <SchemaForm
+      schema={{ type: "object", properties: { conversation: { type: "string" } } }}
+      initial={{ conversation: "c2" }}
+      choices={{ conversation: [{ value: "c1", label: "Fix the build" }, { value: "c2", label: "Add forms — this session's" }] }}
+      onSubmit={(v) => submitted.push(v)}
+      testIdPrefix="f"
+    />,
+  );
+  const select = getByTestId("f-conversation") as HTMLSelectElement;
+  expect(select.value).toBe("c2");
+  expect(Array.from(select.options).map((o) => o.textContent)).toContain("Fix the build");
+  fireEvent.change(select, { target: { value: "c1" } });
+  fireEvent.submit(getByTestId("f"));
+  expect(submitted).toEqual([{ conversation: "c1" }]);
+});
+
+test("Cancel, and Escape, cancel the form; Enter still submits", () => {
+  let cancelled = 0;
+  const submitted: unknown[] = [];
+  const { getByTestId } = render(
+    <SchemaForm schema={schema} initial={{ title: "T" }} onSubmit={(v) => submitted.push(v)} onCancel={() => cancelled++} submitLabel="Rename" testIdPrefix="f" />,
+  );
+  fireEvent.click(getByTestId("f-cancel"));
+  expect(cancelled).toBe(1);
+  fireEvent.keyDown(getByTestId("f-title"), { key: "Escape" });
+  expect(cancelled).toBe(2);
+  fireEvent.submit(getByTestId("f"));
+  expect(submitted).toEqual([{ title: "T" }]);
+});
+
+test("the submit is a primary button, disabled only for a missing required field, and says why on hover", () => {
+  const { getByTestId } = render(
+    <SchemaForm schema={agentSchema} fixed={["session"]} initial={{ session: "s" }} schemaHelp={false} fields={[{ name: "title", label: "Name" }]} onSubmit={() => {}} submitLabel="Rename" testIdPrefix="f" />,
+  );
+  const submit = getByTestId("f-submit") as HTMLButtonElement;
+  expect(submit.disabled).toBe(true);
+  expect(submit.title).toBe("Fill in Name first");
+  expect(submit.className).toContain("ox-primary");
+  fireEvent.change(getByTestId("f-title"), { target: { value: "x" } });
+  expect(submit.disabled).toBe(false);
+  expect(submit.title).toBe("");
 });

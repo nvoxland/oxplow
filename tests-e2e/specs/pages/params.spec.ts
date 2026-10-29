@@ -67,7 +67,7 @@ test("the rail's filters narrow a page, a row click shows the next section its p
   await expect(page.getByTestId("page-about-definition")).toHaveText("commit-history/pages/history.yaml");
   await expect(page.getByTestId("page-about-uri")).toContainText("oxplow:oxplow/page?page=commit-history/history");
   await page.keyboard.press("Escape");
-  await expect(page.getByTestId("page-about-popover")).toHaveCount(0);
+  await expect(page.getByTestId("page-about-modal")).toHaveCount(0);
 
   await expect(commits).toContainText("Add the numbat");
   await expect(commits).toContainText("Add the wombat");

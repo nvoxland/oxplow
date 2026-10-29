@@ -55,6 +55,7 @@ view:
       outcome: declined
     row: true
     form: true
+    about: body
     fixed:
     - handoff
     - outcome

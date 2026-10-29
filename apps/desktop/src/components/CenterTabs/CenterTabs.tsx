@@ -437,6 +437,8 @@ export function CenterTabs({ tabs, activeId, onActivate, onClose, header, onReor
                 minHeight: 0,
                 minWidth: 0,
                 flexDirection: "column",
+                // A tab's own dialogs (`TabModal`) cover this body only.
+                position: "relative",
               }}
               data-testid={`center-tab-body-${tab.id}`}
               aria-hidden={!isActive}

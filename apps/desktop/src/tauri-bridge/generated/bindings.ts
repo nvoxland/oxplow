@@ -2773,6 +2773,16 @@ export type FormFieldSpec = FormFieldSpec_Serialize | FormFieldSpec_Deserialize;
 export type FormFieldSpec_Deserialize = {
 	name: string,
 	/**
+	 *  What the person reads over the field; absent, the schema's `title`,
+	 *  else the name humanized (`native_rename` → "Native rename").
+	 */
+	label?: string | null,
+	/**
+	 *  A line under the field, written for the person. Absent, none: the
+	 *  command's schema `description` is for agents and is never shown.
+	 */
+	help?: string | null,
+	/**
 	 *  Shown only while each named field's value is one of these; hidden,
 	 *  it is neither required nor submitted.
 	 */
@@ -2794,6 +2804,16 @@ export type FormFieldSpec_Deserialize = {
 
 export type FormFieldSpec_Serialize = {
 	name: string,
+	/**
+	 *  What the person reads over the field; absent, the schema's `title`,
+	 *  else the name humanized (`native_rename` → "Native rename").
+	 */
+	label?: string | null,
+	/**
+	 *  A line under the field, written for the person. Absent, none: the
+	 *  command's schema `description` is for agents and is never shown.
+	 */
+	help?: string | null,
 	/**
 	 *  Shown only while each named field's value is one of these; hidden,
 	 *  it is neither required nor submitted.
@@ -4289,6 +4309,20 @@ export type PageAction_Deserialize = {
 	 */
 	fixed: string[],
 	/**
+	 *  A form action's fields as the person sees them, in this order: the
+	 *  only ones shown (the others keep `input`'s value), each with its
+	 *  own `label` and `help`. Absent, every field of the command but the
+	 *  `fixed` ones, labelled from the schema.
+	 */
+	fields?: FormField_Deserialize[],
+	/**
+	 *  A row action's form: the column of the row that says, in words, what
+	 *  the form is about (a setting's name): the form's subtitle, since its
+	 *  `fixed` fields (ids) are never shown. A page action's form is
+	 *  about the page, named by its title.
+	 */
+	about?: string | null,
+	/**
 	 *  A form action's fields picked from a list: each names a viz
 	 *  (`<extension>/<slug>`) run with the viz's params, whose rows are
 	 *  the choices (`value`, `label`, optional `group`).
@@ -4415,6 +4449,20 @@ export type PageAction_Serialize = {
 	 *  values are `input`'s, imposed again when it runs (an item's `ref`).
 	 */
 	fixed: string[],
+	/**
+	 *  A form action's fields as the person sees them, in this order: the
+	 *  only ones shown (the others keep `input`'s value), each with its
+	 *  own `label` and `help`. Absent, every field of the command but the
+	 *  `fixed` ones, labelled from the schema.
+	 */
+	fields?: FormField_Serialize[],
+	/**
+	 *  A row action's form: the column of the row that says, in words, what
+	 *  the form is about (a setting's name): the form's subtitle, since its
+	 *  `fixed` fields (ids) are never shown. A page action's form is
+	 *  about the page, named by its title.
+	 */
+	about?: string | null,
 	/**
 	 *  A form action's fields picked from a list: each names a viz
 	 *  (`<extension>/<slug>`) run with the viz's params, whose rows are

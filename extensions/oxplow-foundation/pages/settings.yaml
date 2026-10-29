@@ -396,6 +396,7 @@ view:
           command: oxplow.agent.set_setting
           form: true
           row: true
+          about: setting
           fixed:
           - agent
           - key
@@ -566,6 +567,7 @@ view:
           command: oxplow.collector.set_credential
           row: true
           form: true
+          about: name
           fixed:
           - collector
           - name
@@ -602,6 +604,7 @@ view:
           command: oxplow.extension.set_secret
           row: true
           form: true
+          about: name
           fixed:
           - extension
           - reference
@@ -828,6 +831,7 @@ view:
           command: oxplow.ai.test_provider
           form: true
           row: true
+          about: id
           fixed:
           - id
           input:
@@ -873,6 +877,7 @@ view:
           command: oxplow.ai.set_role
           form: true
           row: true
+          about: role
           when: can_assign
           fixed:
           - role

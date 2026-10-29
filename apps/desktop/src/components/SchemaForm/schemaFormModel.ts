@@ -269,7 +269,9 @@ export type Scalar = string | number | boolean;
 
 /** One of the fields a form shows: its name, or its name and how it
  *  shows (a page form's `fields` entry). */
-export type FieldSpec = string | { name: string; visible_if?: Record<string, Scalar | Scalar[]>; secret?: boolean };
+export type FieldSpec =
+  | string
+  | { name: string; label?: string | null; help?: string | null; visible_if?: Record<string, Scalar | Scalar[]>; secret?: boolean };
 
 export interface ShownField {
   name: string;
@@ -277,18 +279,24 @@ export interface ShownField {
   visibleIf: Record<string, string[]>;
   /** Masked, never in a draft; blank leaves it out. */
   secret: boolean;
+  /** What the person reads over the field, when the form says. */
+  label: string | null;
+  /** A line under the field, written for the person, when the form says. */
+  help: string | null;
 }
 
 export function shownFields(specs: FieldSpec[]): ShownField[] {
   return specs.map((s) =>
     typeof s === "string"
-      ? { name: s, visibleIf: {}, secret: false }
+      ? { name: s, visibleIf: {}, secret: false, label: null, help: null }
       : {
           name: s.name,
           visibleIf: Object.fromEntries(
             Object.entries(s.visible_if ?? {}).map(([k, v]) => [k, (Array.isArray(v) ? v : [v]).map(String)]),
           ),
           secret: s.secret === true,
+          label: s.label ?? null,
+          help: s.help ?? null,
         },
   );
 }

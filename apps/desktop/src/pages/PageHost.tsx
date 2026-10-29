@@ -20,7 +20,7 @@ import { VizStreamContext } from "../viz/VizStream.js";
 import type { Stream } from "../api.js";
 import { identityOf } from "../uri/uri.js";
 import { PageAbout, useOutOfDate, type PickedRow } from "./railGroups.js";
-import { Popover } from "../kit/Popover.js";
+import { TabModal } from "../components/TabModal.js";
 import type { PageAction } from "../kit/actions.js";
 import { Loading } from "../kit/Loading.js";
 import { ActionForm, useVizActions } from "../viz/VizView.js";
@@ -94,7 +94,6 @@ export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, re
   const [saveAs, setSaveAs] = useState<"wiki" | "page" | null>(null);
   // About this page opens over the page's top right, under its ☰.
   const [about, setAbout] = useState(false);
-  const aboutAnchor = useRef<HTMLSpanElement>(null);
   const open = (uri: string) => {
     if (nav) nav.navigate({ id: uri });
     else onOpenPage?.({ id: uri });
@@ -262,11 +261,10 @@ export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, re
       <PageViewContext.Provider value={{ streamId: pageKey.streamId, threadId: pageKey.threadId }}>
       <VizStreamContext.Provider value={stream}>
       <PageCommentsContext.Provider value={pageComments}>
-        <span ref={aboutAnchor} style={aboutAnchorStyle} />
         {about && page ? (
-          <Popover anchor={aboutAnchor} label="About this page" onClose={() => setAbout(false)} testId="page-about-popover">
+          <TabModal title="About this page" onClose={() => setAbout(false)} testId="page-about-modal">
             <PageAbout id={page.id} uri={nav?.ref?.id ?? null} description={page.description} origin={page.origin} params={run?.params ?? {}} outOfDate={outOfDate} onOpenPage={onOpenPage ? (ref) => { setAbout(false); onOpenPage(ref); } : undefined} testPrefix="page" />
-          </Popover>
+          </TabModal>
         ) : null}
         <div
           ref={setBody}
@@ -289,7 +287,7 @@ export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, re
           {actions.form ? (
             <VizActionRunnerContext.Provider value={pageRunner}>
               <FormSourceContext.Provider value={pageForms}>
-                <ActionForm run={target} streamId={streamId} pressed={actions.form} onClose={actions.closeForm} />
+                <ActionForm run={target} streamId={streamId} pressed={actions.form} subject={title || null} onClose={actions.closeForm} />
               </FormSourceContext.Provider>
             </VizActionRunnerContext.Provider>
           ) : null}
@@ -332,7 +330,6 @@ function sectionTitle(run: PageRun): string | null {
 
 const NO_PARAMS: Record<string, SqlCell> = {};
 const NO_PICKED: Record<string, PickedRow> = {};
-const aboutAnchorStyle: CSSProperties = { position: "absolute", top: 0, right: 0, width: 0, height: 0 };
 const fillStyle: CSSProperties = { display: "flex", flexDirection: "column", flex: 1, minHeight: 0 };
 
 /** Whether one of the run's viz nodes fills (a file, a diff: its page

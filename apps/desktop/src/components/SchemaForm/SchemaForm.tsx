@@ -3,9 +3,10 @@
 /// from `schemaForm.ts`.
 ///
 /// Usability contract (.context/usability.md): Enter submits (when the form
-/// has a submit), Escape resets to the initial value, the submit is
-/// disabled while a field has a problem, and each problem shows under its
-/// field. An edit form (`mode: "edit"`) saves only when changed and has a
+/// has a submit), Escape cancels (a form with `onCancel`) or resets to the
+/// initial value, the submit is the primary button and is disabled while a
+/// field has a problem (its hover says which), and each problem shows
+/// under its field. An edit form (`mode: "edit"`) saves only when changed and has a
 /// Discard. A field may show only for some values of another
 /// (`visible_if`) and may be secret: masked, never in a draft, blank left
 /// out.
@@ -44,6 +45,13 @@ export interface SchemaFormProps {
   onChange?(value: Record<string, unknown> | null): void;
   /** With it, the form has a submit button and Enter submits. */
   onSubmit?(value: Record<string, unknown>): void;
+  /** With it, the form has a Cancel beside the submit, and Escape cancels
+   *  (a create form; an edit form's Escape still puts the saved values back). */
+  onCancel?(): void;
+  /** Show each field's schema `description` under it (default). A command's
+   *  schema is written for agents: a form that runs one passes false and
+   *  says what a person reads in `fields` (`help`). */
+  schemaHelp?: boolean;
   submitLabel?: string;
   busy?: boolean;
   testIdPrefix?: string;
@@ -61,8 +69,8 @@ export interface SchemaFormProps {
   draft?: Drafts | null;
   /** Each edit's draft: null once it is back to `initial`. */
   onDraft?(draft: Drafts | null): void;
-  /** These fields show their value as text: not inputs, submitted with
-   *  their `initial` value. */
+  /** These fields are the host's, not the person's: not drawn at all,
+   *  submitted with their `initial` value. */
   fixed?: string[];
   /** A message per top-level field from the host (a rejected submit),
    *  shown under the field until the person edits it. One for a field
@@ -82,6 +90,8 @@ export function SchemaForm({
   initial,
   onChange,
   onSubmit,
+  onCancel,
+  schemaHelp = true,
   submitLabel,
   busy = false,
   testIdPrefix = "schema-form",
@@ -177,9 +187,18 @@ export function SchemaForm({
     f.kind === "object" ? f.children.length > 0 : !(choices?.[f.path]?.length === 0 && !f.required);
   const rendered = listed.filter((f) => !hidden.has(f.path) && askable(f));
   const live = Object.entries(serverErrors ?? {}).filter(([name]) => !edited.has(name));
-  const shownPaths = new Set(rendered.map((f) => f.path));
+  const drawn = rendered.filter((f) => !fixedSet.has(f.path));
+  const shownPaths = new Set(drawn.map((f) => f.path));
   const stray = live.filter(([name]) => !shownPaths.has(name));
-  const firstEditable = rendered.findIndex((f) => !fixedSet.has(f.path));
+  const spec = (path: string) => specs?.find((x) => x.name === path);
+  const labelOf = (f: Field) => spec(f.path)?.label ?? f.label;
+  // Why the submit is off, for its hover: the required fields still empty.
+  const missing = drawn.filter((f) => f.required && !secrets.has(f.path) && errors[f.path] !== undefined && (drafts[f.path] ?? "") === "");
+  const whyNot = valid
+    ? ""
+    : missing.length > 0
+      ? `Fill in ${missing.map(labelOf).join(", ")} first`
+      : `Fix ${Object.keys(errors).filter((k) => !fixedSet.has(k)).map((k) => labelOf(fields.find((f) => f.path === k) ?? ({ label: k } as Field))).join(", ")} first`;
   const submit = () => {
     if (onSubmit && valid && !busy && (mode === "create" || dirty)) onSubmit(value);
   };
@@ -198,22 +217,24 @@ export function SchemaForm({
         if (e.key === "Escape") {
           // The form's own cancel: a container's Escape mustn't also fire.
           e.stopPropagation();
-          discard();
+          if (onCancel && mode === "create") onCancel();
+          else discard();
         }
       }}
     >
-      {rendered.map((f, i) => {
+      {drawn.map((f, i) => {
         const server = live.find(([name]) => name === f.path)?.[1];
         return (
           <div key={f.path} style={{ display: "flex", flexDirection: "column", gap: 2 }}>
             <FieldInput
               field={f}
+              label={labelOf(f)}
+              help={spec(f.path)?.help ?? (schemaHelp ? f.description : null)}
               drafts={drafts}
               errors={errors}
               onEdit={edit}
-              autoFocus={i === firstEditable && onSubmit !== undefined && mode === "create"}
+              autoFocus={i === 0 && onSubmit !== undefined && mode === "create"}
               testIdPrefix={testIdPrefix}
-              fixed={fixedSet.has(f.path)}
               choices={choices?.[f.path]}
               secret={secrets.has(f.path)}
               onSubmitShortcut={submit}
@@ -234,20 +255,32 @@ export function SchemaForm({
         </div>
       ) : null}
       {onSubmit ? (
-        <div style={{ display: "flex", gap: 8 }}>
-          <button type="submit" data-testid={`${testIdPrefix}-submit`} disabled={!valid || busy || (mode === "edit" && !dirty)}>
-            {busy ? `${label}…` : label}
-          </button>
-          {again ? (
-            <button type="button" data-testid={`${testIdPrefix}-again`} disabled={!valid || busy} onClick={submitAgain}>
-              {again.label}
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", paddingTop: 4 }}>
+          {onCancel ? (
+            <button type="button" className="ox-button" data-testid={`${testIdPrefix}-cancel`} style={buttonStyle} onClick={onCancel}>
+              Cancel
             </button>
           ) : null}
           {mode === "edit" ? (
-            <button type="button" data-testid={`${testIdPrefix}-discard`} disabled={!dirty || busy} onClick={discard}>
+            <button type="button" className="ox-button" data-testid={`${testIdPrefix}-discard`} style={buttonStyle} disabled={!dirty || busy} onClick={discard}>
               Discard
             </button>
           ) : null}
+          {again ? (
+            <button type="button" className="ox-button" data-testid={`${testIdPrefix}-again`} style={buttonStyle} disabled={!valid || busy} title={whyNot} onClick={submitAgain}>
+              {again.label}
+            </button>
+          ) : null}
+          <button
+            type="submit"
+            className="ox-button ox-primary"
+            data-testid={`${testIdPrefix}-submit`}
+            style={buttonStyle}
+            disabled={!valid || busy || (mode === "edit" && !dirty)}
+            title={whyNot}
+          >
+            {busy ? `${label}…` : label}
+          </button>
         </div>
       ) : null}
     </form>
@@ -256,23 +289,27 @@ export function SchemaForm({
 
 function FieldInput({
   field: f,
+  label: text,
+  help,
   drafts,
   errors,
   onEdit,
   autoFocus,
   testIdPrefix,
-  fixed,
   choices,
   secret = false,
   onSubmitShortcut,
 }: {
   field: Field;
+  /** What the person reads over the field. */
+  label: string;
+  /** A line under it, for the person. */
+  help: string | null;
   drafts: Drafts;
   errors: Record<string, string>;
   onEdit(path: string, raw: string): void;
   autoFocus: boolean;
   testIdPrefix: string;
-  fixed: boolean;
   choices?: FieldChoice[];
   /** Masked: a key, a token. */
   secret?: boolean;
@@ -282,37 +319,28 @@ function FieldInput({
   if (f.kind === "object") {
     return (
       <fieldset style={fieldsetStyle}>
-        <legend style={labelStyle}>{f.label}</legend>
+        <legend style={labelStyle}>{text}</legend>
         {f.children.map((c) => (
           <FieldInput
             key={c.path}
             field={c}
+            label={c.label}
+            help={c.description}
             drafts={drafts}
             errors={errors}
             onEdit={onEdit}
             autoFocus={false}
             testIdPrefix={testIdPrefix}
-            fixed={fixed}
           />
         ))}
       </fieldset>
     );
   }
   const raw = drafts[f.path] ?? "";
-  if (fixed) {
-    return (
-      <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-        <span style={labelStyle}>{f.label}</span>
-        <span data-testid={`${id}-fixed`} style={{ fontFamily: f.kind === "text" || f.kind === "markdown" ? undefined : "var(--font-mono)", whiteSpace: "pre-wrap" }}>
-          {raw}
-        </span>
-      </div>
-    );
-  }
   const error = errors[f.path];
   const label = (
     <label htmlFor={id} style={labelStyle}>
-      {f.label}
+      {text}
       {f.required ? <span aria-hidden> *</span> : null}
     </label>
   );
@@ -321,8 +349,9 @@ function FieldInput({
     input = <ChoiceSelect id={id} value={raw} required={f.required} autoFocus={autoFocus} choices={choices} onChange={(v) => onEdit(f.path, v)} />;
   } else switch (f.kind) {
     case "boolean":
+      // The label to the right of the box, its help beneath the label.
       return (
-        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", columnGap: 8, rowGap: 2, alignItems: "baseline" }}>
           <input
             id={id}
             data-testid={id}
@@ -330,14 +359,15 @@ function FieldInput({
             checked={raw === "true"}
             autoFocus={autoFocus}
             onChange={(e) => onEdit(f.path, e.target.checked ? "true" : "false")}
+            style={{ margin: 0 }}
           />
           {label}
-          {f.description ? <span style={hintStyle}>{f.description}</span> : null}
+          {help ? <span style={{ ...hintStyle, gridColumn: 2 }}>{help}</span> : null}
         </div>
       );
     case "enum":
       input = (
-        <select id={id} data-testid={id} value={raw} autoFocus={autoFocus} onChange={(e) => onEdit(f.path, e.target.value)}>
+        <select id={id} data-testid={id} className="ox-select" value={raw} autoFocus={autoFocus} onChange={(e) => onEdit(f.path, e.target.value)}>
           <option value="">{f.required ? "Choose…" : "—"}</option>
           {f.options.map((o) => (
             <option key={o} value={o}>
@@ -368,6 +398,7 @@ function FieldInput({
         <textarea
           id={id}
           data-testid={id}
+          className="ox-textarea"
           value={raw}
           autoFocus={autoFocus}
           rows={Math.min(8, Math.max(2, raw.split("\n").length))}
@@ -382,6 +413,7 @@ function FieldInput({
         <input
           id={id}
           data-testid={id}
+          className="ox-input"
           type={secret ? "password" : f.kind === "integer" || f.kind === "number" ? "number" : "text"}
           autoComplete={secret ? "off" : undefined}
           step={f.kind === "integer" ? 1 : undefined}
@@ -396,7 +428,7 @@ function FieldInput({
     <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
       {label}
       {input}
-      {f.description ? <span style={hintStyle}>{f.description}</span> : null}
+      {help ? <span style={hintStyle}>{help}</span> : null}
       {error && raw !== "" ? (
         <span data-testid={`${id}-error`} style={errorStyle}>
           {error}
@@ -409,6 +441,7 @@ function FieldInput({
 const labelStyle: CSSProperties = { fontSize: "var(--text-sm)", fontWeight: 600 };
 const hintStyle: CSSProperties = { fontSize: "var(--text-xs)", color: "var(--text-secondary)" };
 const errorStyle: CSSProperties = { fontSize: "var(--text-xs)", color: "var(--severity-critical)" };
+const buttonStyle: CSSProperties = { padding: "5px 16px" };
 const inputStyle: CSSProperties = { width: "100%", boxSizing: "border-box" };
 const fieldsetStyle: CSSProperties = {
   border: "1px solid var(--border-subtle)",
@@ -449,7 +482,7 @@ function ChoiceSelect({
     </option>
   );
   return (
-    <select id={id} data-testid={id} value={value} autoFocus={autoFocus} onChange={(e) => onChange(e.target.value)}>
+    <select id={id} data-testid={id} className="ox-select" value={value} autoFocus={autoFocus} onChange={(e) => onChange(e.target.value)}>
       <option value="">{required ? "Choose…" : "—"}</option>
       {groups.map((g, i) =>
         g.name === null ? (

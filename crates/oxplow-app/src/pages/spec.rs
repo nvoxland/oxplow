@@ -418,6 +418,14 @@ pub enum FormField {
 #[serde(deny_unknown_fields)]
 pub struct FormFieldSpec {
     pub name: String,
+    /// What the person reads over the field; absent, the schema's `title`,
+    /// else the name humanized (`native_rename` → "Native rename").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    /// A line under the field, written for the person. Absent, none: the
+    /// command's schema `description` is for agents and is never shown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub help: Option<String>,
     /// Shown only while each named field's value is one of these; hidden,
     /// it is neither required nor submitted.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -1161,6 +1169,18 @@ pub struct PageAction {
     /// Fields of a form action the person sees but can't change: their
     /// values are `input`'s, imposed again when it runs (an item's `ref`).
     pub fixed: Vec<String>,
+    /// A form action's fields as the person sees them, in this order: the
+    /// only ones shown (the others keep `input`'s value), each with its
+    /// own `label` and `help`. Absent, every field of the command but the
+    /// `fixed` ones, labelled from the schema.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fields: Vec<FormField>,
+    /// A row action's form: the column of the row that says, in words, what
+    /// the form is about (a setting's name): the form's subtitle, since its
+    /// `fixed` fields (ids) are never shown. A page action's form is
+    /// about the page, named by its title.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub about: Option<String>,
     /// A form action's fields picked from a list: each names a viz
     /// (`<extension>/<slug>`) run with the viz's params, whose rows are
     /// the choices (`value`, `label`, optional `group`).
@@ -1264,6 +1284,13 @@ pub(crate) struct ActionFile {
     /// editable).
     #[serde(default)]
     fixed: Vec<String>,
+    /// A form action's fields as the person sees them: the only ones
+    /// shown, in this order, each a name or `{ name, label, help }`.
+    #[serde(default)]
+    fields: Vec<FormField>,
+    /// A row action's form: the row's column that says what it is about.
+    #[serde(default)]
+    about: Option<String>,
     /// A form action's fields picked from a list: field → the viz whose
     /// rows are its choices.
     #[serde(default)]
@@ -1426,6 +1453,23 @@ pub(crate) fn parse_actions(
                 "actions: `{}`: `fixed` is for a form action (`form: true`)",
                 f.id
             ));
+        }
+        if f.about.is_some() && !(f.form && f.row) {
+            return Err(format!(
+                "actions: `{}`: `about` is for a row action's form (`form: true`, `row: true`)",
+                f.id
+            ));
+        }
+        if !f.fields.is_empty() {
+            if !f.form {
+                return Err(format!(
+                    "actions: `{}`: `fields` is for a form action (`form: true`)",
+                    f.id
+                ));
+            }
+            if let Some(why) = action_fields_problem(&f.fields, &f.fixed) {
+                return Err(format!("actions: `{}`: {why}", f.id));
+            }
         }
         if f.when.is_some() && !(f.row || f.drag || holds_one_row) {
             return Err(format!(
@@ -1630,6 +1674,8 @@ pub(crate) fn parse_actions(
             group: f.group,
             form,
             fixed: f.fixed,
+            fields: f.fields,
+            about: f.about,
             choices: f.choices,
             then: f.then,
             when: f.when,
@@ -1646,6 +1692,39 @@ pub(crate) fn parse_actions(
         });
     }
     Ok(out)
+}
+
+/// What's wrong with a form action's `fields`: a field twice, a fixed one
+/// (never drawn), a secret or object one (the action's form has neither),
+/// or a condition on a field it doesn't show.
+fn action_fields_problem(fields: &[FormField], fixed: &[String]) -> Option<String> {
+    let names: Vec<&str> = fields.iter().map(|f| f.name()).collect();
+    for (i, field) in fields.iter().enumerate() {
+        let name = field.name();
+        if names[..i].contains(&name) {
+            return Some(format!("`fields` names `{name}` twice"));
+        }
+        if fixed.iter().any(|k| k == name) {
+            return Some(format!(
+                "`fields` names `{name}`, which is `fixed` (a fixed field is never shown)"
+            ));
+        }
+        if field.secret() || field.from().is_some() {
+            return Some(format!(
+                "`fields`: `{name}` can't be `secret` or have a `from` in an action's form"
+            ));
+        }
+        if let Some(on) = field
+            .visible_if()
+            .keys()
+            .find(|on| !names.contains(&on.as_str()) || on.as_str() == name)
+        {
+            return Some(format!(
+                "`fields`: `{name}`'s `visible_if` names `{on}`, which isn't another of its `fields`"
+            ));
+        }
+    }
+    None
 }
 
 /// Whether a viz of this kind holds one row, so a whole-node action can

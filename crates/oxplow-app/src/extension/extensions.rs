@@ -3322,6 +3322,46 @@ impl<F: Fn(&str) -> Option<serde_json::Value> + Sync> RunningCommands for F {
 /// The registry a check is given.
 pub type CommandSchemas<'a> = &'a dyn RunningCommands;
 
+/// A form action's `fields` are fields of its command's input: one the
+/// schema doesn't have is refused where the page loads, not met as a form
+/// that quietly shows nothing for it. Where the registry can't be asked
+/// (the CLI), or the command isn't in it, nothing is checked.
+fn check_action_fields(ext: &mut Extension, commands: Option<CommandSchemas<'_>>) {
+    let Some(schema_of) = commands else { return };
+    let mut problems = Vec::new();
+    for page in &ext.page_files {
+        let node_actions = page.nodes().into_iter().filter_map(|n| match &n.kind {
+            crate::pages::schema::NodeKind::Viz { config, .. } => Some(&config.actions),
+            _ => None,
+        });
+        for actions in std::iter::once(&page.actions).chain(node_actions) {
+            for a in actions.iter().filter(|a| !a.fields.is_empty()) {
+                let Some(schema) = a.command.as_deref().and_then(|c| schema_of.input_schema(c))
+                else {
+                    continue;
+                };
+                let Some(props) = schema.get("properties").and_then(|p| p.as_object()) else {
+                    continue;
+                };
+                for field in &a.fields {
+                    if !props.contains_key(field.name()) {
+                        problems.push(format!(
+                            "{}: page `{}`: action `{}`: `fields` names `{}`, which isn't an input of `{}` (inputs: {})",
+                            page.origin.running,
+                            page.slug,
+                            a.id,
+                            field.name(),
+                            a.command.as_deref().unwrap_or_default(),
+                            props.keys().cloned().collect::<Vec<_>>().join(", ")
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    ext.errors.extend(problems);
+}
+
 /// A custom component's declared commands must exist; a `custom` viz
 /// that also fills a kit role block gets a nudge — the kit may already
 /// render it (the honest extent of a "this reimplements the kit" lint).
@@ -3509,6 +3549,7 @@ async fn prepare(
     let candidate = catalog.candidate(root, ext.clone());
     *ext = candidate.candidate().clone();
     check_components(ext, read, commands);
+    check_action_fields(ext, commands);
     let (overlay, errors) = dataset_overlay(layer, &candidate).await;
     ext.errors.extend(errors);
     let layer = &layer.with_overlay(overlay.clone());
@@ -3650,6 +3691,14 @@ fn action_column_problems(
         if let Some(when) = a.when.as_ref().filter(|w| !cols.contains(w)) {
             problems.push(format!(
                 "action `{}` is offered `when: {when}`, which isn't in the \
+                     query result (columns: {})",
+                a.id,
+                cols.join(", ")
+            ));
+        }
+        if let Some(about) = a.about.as_ref().filter(|c| !cols.contains(c)) {
+            problems.push(format!(
+                "action `{}` is `about: {about}`, which isn't in the \
                      query result (columns: {})",
                 a.id,
                 cols.join(", ")
@@ -8024,6 +8073,88 @@ commands:
             ext.errors
                 .iter()
                 .any(|e| e.contains("b.yaml") && e.contains("away")),
+            "{:?}",
+            ext.errors
+        );
+    }
+
+    /// A form action's `fields` carry the person's label and help for each
+    /// field it shows; each refusal names the action's problem.
+    #[test]
+    fn a_form_action_says_how_its_fields_read() {
+        let act = |spec: &str| {
+            viz_page(
+                "",
+                "SELECT 1",
+                &format!("actions: [{{ id: x, label: X, command: a.b.c, {spec} }}]\n"),
+            )
+        };
+        let (_d, ext) = load_x(
+            &[
+                (
+                    "a",
+                    &act("form: true, input: { s: a }, fixed: [s], fields: [{ name: title, label: Name, help: Shown to people }, native]"),
+                ),
+                ("nonform", &act("fields: [title]")),
+                ("twice", &act("form: true, fields: [title, title]")),
+                ("fixed", &act("form: true, input: { s: a }, fixed: [s], fields: [s]")),
+                ("secret", &act("form: true, fields: [{ name: k, secret: true }]")),
+                ("cond", &act("form: true, fields: [{ name: a, visible_if: { zz: 1 } }]")),
+                ("about", &act("form: true, row: true, about: n")),
+                ("aboutpage", &act("form: true, about: n")),
+            ],
+            "",
+        );
+        let about = node(&ext, "about").expect("about loads");
+        assert_eq!(about.actions[0].about.as_deref(), Some("n"));
+        let a = node(&ext, "a").expect("a loads");
+        let fields = &a.actions[0].fields;
+        assert_eq!(fields.len(), 2);
+        assert!(matches!(
+            &fields[0],
+            FormField::Spec(FormFieldSpec { name, label: Some(l), help: Some(h), .. })
+                if name == "title" && l == "Name" && h == "Shown to people"
+        ));
+        for (slug, why) in [
+            ("nonform", "`fields` is for a form action"),
+            ("twice", "names `title` twice"),
+            ("fixed", "which is `fixed`"),
+            ("secret", "can't be `secret`"),
+            ("cond", "`visible_if` names `zz`"),
+            ("aboutpage", "`about` is for a row action's form"),
+        ] {
+            assert!(page_of(&ext, slug).is_none(), "{slug}");
+            assert!(
+                ext.errors
+                    .iter()
+                    .any(|e| e.contains(&format!("{slug}.yaml")) && e.contains(why)),
+                "{slug}: {:?}",
+                ext.errors
+            );
+        }
+    }
+
+    /// A form action's `fields` must be inputs of its command: the check
+    /// names the one that isn't, and the ones that are pass.
+    #[test]
+    fn a_form_actions_fields_must_be_inputs_of_its_command() {
+        let page = |fields: &str| {
+            viz_page("", "SELECT 1", &format!("actions: [{{ id: x, label: X, command: a.b.c, form: true, fields: {fields} }}]\n"))
+        };
+        let (_d, mut ext) = load_x(
+            &[("ok", &page("[title]")), ("bad", &page("[title, nope]"))],
+            "",
+        );
+        let schema = |name: &str| {
+            (name == "a.b.c")
+                .then(|| serde_json::json!({ "properties": { "title": {}, "native": {} } }))
+        };
+        check_action_fields(&mut ext, Some(&schema));
+        assert_eq!(ext.errors.len(), 1, "{:?}", ext.errors);
+        assert!(
+            ext.errors[0].contains("bad.yaml")
+                && ext.errors[0].contains("`nope`")
+                && ext.errors[0].contains("inputs: title, native"),
             "{:?}",
             ext.errors
         );

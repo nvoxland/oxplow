@@ -52,8 +52,12 @@ actions:
   form: true
   fixed:
   - effort
+  fields:
+  - name: title
+    label: Name
   input:
     effort: '{{row.effort}}'
+    title: '{{row.title}}'
 - id: link
   label: Link to task…
   command: oxplow.effort.link

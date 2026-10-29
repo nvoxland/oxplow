@@ -2608,8 +2608,8 @@ usability.md "Keyboard").
 ### Actions
 
 `actions:` on a page or a viz node: `{ id, label, command | open, input, row?,
-group?, form?, fixed?, choices?, then?, when?, primary?, prominent?,
-submenu?, icon?, drag?, bulk?, key?, edit?, confirm? }` (`PageAction`).
+group?, form?, fixed?, fields?, about?, choices?, then?, when?, primary?,
+prominent?, submenu?, icon?, drag?, bulk?, key?, edit?, confirm? }` (`PageAction`).
 `input` binds `{{param.x}}` and, on a row action, `{{row.x}}`
 (`{{row.x|json}}`: the JSON a text cell holds, typed; the one filter,
 checked at load). A page action with `when` or `{{row.*}}` and no `row`
@@ -2639,12 +2639,31 @@ reads the page's first loader's one row. A drag action also binds
   row, and the server checks it is one of the node's rows. An agent
   presses one with `oxplow_run_page_action`; a command it may not run, or
   that needs a person's confirmation, is refused.
-- `form: true` opens the command's form instead of running (a slideover,
-  or, when the form less its `fixed` fields is one text field, a prompt
-  strip above the rows). What the person fills in runs, its `fixed` fields
-  put back to the bound values. A refusal naming a field (`INVALID` with
-  `field`) shows under that field. A run that came back undoable toasts
-  with Undo.
+- `form: true` opens the command's form instead of running (the tab's
+  modal, `TabModal`, or, when the form less its `fixed` fields is one text
+  field, a prompt strip above the rows). What the person fills in runs,
+  its `fixed` fields put back to the bound values. A refusal naming a
+  field (`INVALID` with `field`) shows under that field. A run that came
+  back undoable toasts with Undo. The form is for a person:
+  - the heading and the submit are the action's `label` less a trailing
+    `…`; Cancel and Escape close it; the submit is the primary button,
+    off only while a required field is empty (its hover says which);
+  - `fixed` fields are never drawn (no raw ids). What the form is about
+    is its subtitle: a row action's `about: <column>` (the row's words),
+    else, for a page action with `fixed` fields, the page's title;
+    `about` is for a row action's form and the column must be in the
+    result (checked at load);
+  - `fields: [name | { name, label?, help? }]` (the same `FormField` as a
+    `form` node's `fields`, minus `secret` and `from`) lists the only
+    fields shown, in order; the others keep `input`'s value. Lookup order
+    for a field's text: `label` here, else the schema `title`, else the
+    humanized name; `help` here, else nothing — the command's schema
+    `description` is for agents and is never shown. Every name must be an
+    input of the command (`check_action_fields`, at load, when the
+    registry can be asked);
+  - non-`fixed` `input` values are the fields' starting values; a
+    `choices` field shows each row's `label`, sends its `value`, and
+    starts on the one `input` names.
 - `primary: true` (a row action) is what a click on the row, or Enter,
   runs: the first one the row is offered (`when`). `prominent: true`
   keeps a page action a button in the nav bar; the rest go in the ☰ menu

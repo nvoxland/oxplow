@@ -26,6 +26,8 @@ let formStarts = 0;
 let fixedStart: Record<string, unknown> | null = null;
 // The page the command names after a run (`ui.open_after`), if any.
 let openAfterPage: string | null = null;
+// What else an action's form starts with (`fields`, `choices`, other values).
+let actionExtras: Record<string, unknown> = {};
 
 const UPDATE: CommandSpec = {
   id: "oxplow.work_item.update",
@@ -69,6 +71,7 @@ const formSource: FormSource = {
     values: { uri: row?.uri, title: row?.title },
     fixed: ["uri"],
     fields: null,
+    ...actionExtras,
   }) as never,
   start: async () => {
     formStarts += 1;
@@ -109,6 +112,7 @@ beforeEach(() => {
   fixedStart = null;
   openAfterPage = null;
   actionCommand = UPDATE;
+  actionExtras = {};
 });
 afterEach(cleanup);
 
@@ -163,8 +167,9 @@ test("a form action opens its form in a slideover and runs what the person fille
   const slideover = await waitFor(() => view.getByTestId("viz-action-form"));
   expect(slideover.getAttribute("role")).toBe("dialog");
   expect(runs).toEqual([]);
-  // The fixed uri is shown, not an input; the title starts from the row.
-  expect(view.getByTestId("viz-action-form-fields-uri-fixed").textContent).toContain("oxplow:oxplow/work_item?id=tsk1&provider=oxplow");
+  // The fixed uri is the host's: not drawn, not even as text; the title starts from the row.
+  expect(view.queryByTestId("viz-action-form-fields-uri-fixed")).toBeNull();
+  expect(slideover.textContent).not.toContain("oxplow:oxplow/work_item?id=tsk1");
   const title = view.getByTestId("viz-action-form-fields-title") as HTMLInputElement;
   expect(title.value).toBe("Old");
   fireEvent.change(title, { target: { value: "New" } });
@@ -205,9 +210,11 @@ test("a form action whose form is one text field opens a prompt strip, not a sli
   expect(strip.getAttribute("data-shape")).toBe("prompt");
   expect(view.queryByRole("dialog")).toBeNull();
   expect(runs).toEqual([]);
-  // The field's description is the strip's message; the field starts
+  // The strip's message is the field's label (its help, when the page gives
+  // one), never the schema's agent-facing description; the field starts
   // from the row, focused and selected.
-  expect(strip.textContent).toContain("What to call it");
+  expect(strip.textContent).toContain("Title");
+  expect(strip.textContent).not.toContain("What to call it");
   const title = view.getByTestId("viz-action-form-fields-title") as HTMLInputElement;
   expect(title.value).toBe("Old");
   expect(document.activeElement).toBe(title);
@@ -438,4 +445,122 @@ test("an edit form keeps its draft in the tab and saves only when changed", asyn
   fireEvent.submit(again.getByTestId("viz-form-fields"));
   await waitFor(() => expect(submits).toEqual([{ uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", title: "New" }]));
   await waitFor(() => expect(state["form:x/l"]).toBe(null));
+});
+
+// A form for a person: the heading and the button say the action without
+// the menu's ellipsis, the host's fixed values are not drawn, the fields
+// read as the page says (else the humanized name, never the agent-facing
+// schema description), the choices show their labels, and the submit is a
+// primary button beside a Cancel.
+const AGENT: CommandSpec = {
+  id: "oxplow.work_item.update",
+  input_schema: {
+    type: "object",
+    required: ["uri", "title"],
+    properties: {
+      uri: { type: "string", description: "The item's ref." },
+      title: { type: "string", description: "Agent-facing words about the title." },
+      native_rename: { type: "boolean", description: "Only where the harness declares it." },
+      conversation: { type: "string", description: "The saved conversation to fork (its id)." },
+    },
+  },
+} as unknown as CommandSpec;
+
+test("the form's heading and submit say the action without its ellipsis, in a primary button beside Cancel", async () => {
+  actionCommand = AGENT;
+  const view = render(<VizView run={run} onOpenPage={() => {}} />);
+  await pressRetitle(view);
+  expect(view.getByTestId("viz-action-form-title").textContent).toBe("Retitle");
+  const submit = view.getByTestId("viz-action-form-fields-submit");
+  expect(submit.textContent).toBe("Retitle");
+  expect(submit.className).toContain("ox-primary");
+  expect(view.getByTestId("viz-action-form-fields-cancel")).toBeTruthy();
+});
+
+test("fields read as the page says, else the humanized name with no schema description", async () => {
+  actionCommand = AGENT;
+  actionExtras = { fields: [{ name: "title", label: "Name", help: "What the tab shows." }, "native_rename"] };
+  const view = render(<VizView run={run} onOpenPage={() => {}} />);
+  const form = await pressRetitle(view);
+  expect(view.getByText("Name")).toBeTruthy();
+  expect(view.getByText("What the tab shows.")).toBeTruthy();
+  expect(view.getByText("Native rename")).toBeTruthy();
+  expect(form.textContent).not.toContain("Agent-facing");
+  expect(form.textContent).not.toContain("harness declares");
+});
+
+test("a choice shows its labels, submits its value, and starts on the action's own value", async () => {
+  actionCommand = AGENT;
+  actionExtras = {
+    values: { uri: "u", title: "Old", conversation: "c2" },
+    fields: ["title", "conversation"],
+    choices: { conversation: [{ value: "c1", label: "Fix the build", group: null }, { value: "c2", label: "Add forms — this session's", group: null }] },
+  };
+  const view = render(<VizView run={run} onOpenPage={() => {}} />);
+  await pressRetitle(view);
+  const select = view.getByTestId("viz-action-form-fields-conversation") as HTMLSelectElement;
+  expect(select.value).toBe("c2");
+  expect(Array.from(select.options).map((o) => o.textContent)).toContain("Fix the build");
+  fireEvent.change(select, { target: { value: "c1" } });
+  fireEvent.submit(view.getByTestId("viz-action-form-fields"));
+  await waitFor(() => expect(runs).toHaveLength(1));
+  expect(runs[0].input).toMatchObject({ conversation: "c1", title: "Old" });
+});
+
+test("Cancel and Escape close the form and run nothing", async () => {
+  actionCommand = AGENT;
+  actionExtras = { fields: ["title", "native_rename"] };
+  const view = render(<VizView run={run} onOpenPage={() => {}} />);
+  await pressRetitle(view);
+  fireEvent.click(view.getByTestId("viz-action-form-fields-cancel"));
+  await waitFor(() => expect(view.queryByTestId("viz-action-form")).toBeNull());
+  await pressRetitle(view);
+  fireEvent.keyDown(view.getByTestId("viz-action-form-fields-title"), { key: "Escape" });
+  await waitFor(() => expect(view.queryByTestId("viz-action-form")).toBeNull());
+  expect(runs).toEqual([]);
+});
+
+test("the submit is off while a required field is empty, and its hover says which", async () => {
+  actionCommand = AGENT;
+  actionExtras = { values: { uri: "u" }, fields: [{ name: "title", label: "Name" }, "native_rename"] };
+  const view = render(<VizView run={run} onOpenPage={() => {}} />);
+  await pressRetitle(view);
+  const submit = view.getByTestId("viz-action-form-fields-submit") as HTMLButtonElement;
+  expect(submit.disabled).toBe(true);
+  expect(submit.title).toBe("Fill in Name first");
+});
+
+test("a page action's form names what it is about under its heading, from the page's own label", async () => {
+  actionCommand = AGENT;
+  actionExtras = { fields: ["title", "native_rename"] };
+  const { ActionForm } = await import("./VizView.js");
+  const action = viz.actions[0]!;
+  const view = render(
+    <ActionForm run={run as never} streamId={null} pressed={{ action, row: null }} subject="Fix the build" onClose={() => {}} />,
+  );
+  const subtitle = await waitFor(() => view.getByTestId("viz-action-form-subtitle"));
+  expect(subtitle.textContent).toBe("Fix the build");
+});
+
+test("a row action's form names its row under the heading by the action's `about` column", async () => {
+  actionCommand = AGENT;
+  actionExtras = { fields: ["title", "native_rename"] };
+  const { ActionForm } = await import("./VizView.js");
+  const action = { ...viz.actions[0]!, about: "title" };
+  const view = render(
+    <ActionForm run={run as never} streamId={null} pressed={{ action, row: { uri: "u", title: "Fix the build" } }} subject="The page" onClose={() => {}} />,
+  );
+  const subtitle = await waitFor(() => view.getByTestId("viz-action-form-subtitle"));
+  expect(subtitle.textContent).toBe("Fix the build");
+});
+
+test("a row action without `about` has no subtitle, whatever page it is on", async () => {
+  actionCommand = AGENT;
+  actionExtras = { fields: ["title", "native_rename"] };
+  const { ActionForm } = await import("./VizView.js");
+  const view = render(
+    <ActionForm run={run as never} streamId={null} pressed={{ action: viz.actions[0]!, row: { uri: "u", title: "T" } }} subject="The page" onClose={() => {}} />,
+  );
+  await waitFor(() => view.getByTestId("viz-action-form"));
+  expect(view.queryByTestId("viz-action-form-subtitle")).toBeNull();
 });

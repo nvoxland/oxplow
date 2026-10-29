@@ -84,7 +84,8 @@ pages are THE shell.
 | `apps/desktop/src/tabs/BacklinksList.tsx` | Default renderer for the Page chrome's `backlinks` slot — buttons that route via `onOpenPage`; a row with no page renders muted as its raw ref (dead link). `entryMenu` supplies a row's right-click actions (a work item's link rows: Unlink). |
 | `apps/desktop/src/components/Analytics/DailyBarChart.tsx` | Generic daily bar chart (`{ label, value }[]`); renders `bar` vizzes. |
 | `apps/desktop/src/components/CollapsibleSections.tsx` | Collapsible page sections. Two parts plus a hook: `CollapsibleSections` (state provider), `SectionCollapseControls` (the "Expand all" / "Collapse all" pair), and `useSectionCollapse`, which the kit `Section` (`collapsible`, `defaultCollapsed`; the toggle is a button inside the `<h2>`) reads. Sections register themselves on mount so the controls know what "all" means — only what's **currently rendered** counts, so a filtered-out section is never silently expanded — and the controls self-hide when nothing is registered. **The page places the controls**: Recorded Metrics renders them in the **details rail** beside its filters, which works because the provider wraps the whole `<Page>` and `rightRail` is *rendered* inside Page's subtree (context follows the render tree, not the creation site). For that to be safe the provider renders `children` **bare** — a wrapper element there would break the page chrome's `height: 100%` column. Collapsed ids are the tab entry's state (`useHistoryState`); default is expanded, and stored ids are deliberately **not** reconciled against the rendered set (a section hidden by a page's search must return still collapsed). Pure state/persistence in the sibling `sectionCollapse.ts`. **Not a `Page` prop** — see `.context/usability.md` → "Collapsible page sections". Adopters: none now. |
-| `apps/desktop/src/components/Slideover.tsx` | Right-edge panel primitive (~38vw, backdrop-click + Escape close, focus-into-panel on open) for form-shaped flows that don't justify a full page. Use instead of a centered modal. |
+| `apps/desktop/src/components/TabModal.tsx` | The one dialog for anything that comes from within a tab (About this page, page/viz action forms, a custom component's forms, a command's confirmation). Drawn inside the tab's body (`CenterTabs` makes each body `position: relative`): dims only that tab, sized to its content, title + subtitle + ×, Escape/× close, focus in and back. A tab body stays mounted while another tab shows, so an open modal and a form's typed values survive switching tabs: its state is the body's own React state, no history state. |
+| `apps/desktop/src/components/Slideover.tsx` | Right-edge window-level panel (~38vw, backdrop-click + Escape close) for detail openings that aren't from one tab's content (`Navigator`, `BranchPicker`, commit/snapshot detail). |
 
 ## Renderers
 
@@ -602,8 +603,8 @@ holds its run (`usePageRunWith` over `usePageRunsStore()`: the
 `PageRunsContext`'s store, else the window's; `RunState` carries the
 `runId`, `rerun` is Refresh) and draws the `tabs/Page.tsx` chrome:
 Contents and Selection (the rows picked, `picked` history state) in the
-rail (`pages/railGroups.tsx`); About this page in the ☰ (a `Popover`
-over the body's top right: the page's `description`, then `PageAbout`'s
+rail (`pages/railGroups.tsx`); About this page in the ☰ (the tab's
+modal, `components/TabModal.tsx`, titled About this page: the page's `description`, then `PageAbout`'s
 facts — Id, Definition (a link: `runningUri` drawn as Definition with the
 run's params), origin, what runs (no Title or Extension row: the nav bar
 and Definition have them) and the tab's URI — and out

@@ -60,6 +60,45 @@ markdown itself, nor edits it in a `<textarea>`.
   one text field is one too, at the top of the page (the action prompt strip): a Rename… on a Files
   page is the Project panel's strip, never a one-field slideover. Same Enter-submits / Escape-cancels contract;
   the strip is dismissed by the panel's local `pendingPrompt` state.
+- **A dialog from a tab is the tab modal, and there is one kind**
+  (`components/TabModal.tsx`): About this page, every page/viz action
+  form (`FormModal`), a custom component's forms (`frameForms.tsx`) and
+  the confirmation a command asks for in a tab (`CommandConfirm`). It
+  sits inside the tab's body, covering only that tab (the tab strip, rail
+  and other tabs stay usable), is as tall as its content, and has a
+  title, an optional subtitle (what it is about, in words, never an id)
+  and a ×. Escape, × and Cancel close it; a click outside doesn't (a
+  half-filled form isn't lost); focus goes into it and back on close.
+  It is the tab body's own state, and tab bodies stay mounted while
+  another tab shows, so it is still open, typed values kept, when the
+  person returns. Window-level dialogs that are not about one tab's
+  content stay `Slideover` (`Navigator`, `BranchPicker`) and
+  `PersonCommandConfirm` (a command run from the menu, outside any tab,
+  `ConfirmBox`). `viz/EditorViz.tsx`'s "File changed on disk" is a
+  blocking choice (no ×/Escape), so it keeps its own overlay. Extensions
+  and custom components never draw a dialog: forms are declared in YAML
+  and drawn by core.
+  The documented kinds of dialog are three: the **tab modal** (anything
+  from a tab), the **dock panel** (the bottom bar's popups,
+  `components/Dock/`: `DockBar`, one `DockPanel` host, panels registered
+  through `dockPanels.tsx`, extension panels with `dock: true`) and the
+  **window-level** ones (branch picker, Quick Open, Navigator forms, the
+  media lightbox; `Slideover` for the detail openings). The tab modal
+  copies the dock panel's chrome (surface, border, header rule, ×) so the
+  two look alike; they are separate components because one anchors to the
+  bottom bar and resizes, the other covers a tab.
+- **An action form is for a person** (rules for every `form: true`
+  action, in `SchemaForm`/`FormModal`): heading and submit are the
+  action's label without its `…`; the submit is the primary button,
+  right-aligned beside Cancel, disabled only while a required field is
+  empty (hover says which), Enter submits, Escape cancels; `fixed` fields
+  are never drawn (the subtitle says what the form is about); labels come
+  from the action's `fields` (`label`), else the schema title, else the
+  humanized name; help only from `fields` (`help`) — the schema
+  `description` is agent-facing and hidden (`schemaHelp={false}`);
+  booleans are a checkbox with the label to its right and help under it;
+  a choice shows labels and sends values, starting on the bound value;
+  the first editable field has focus.
 - **Form-shaped flows that warrant a focused workspace use a page tab
   or a slideover, not a centered modal.** The "+ New" flows ship as
   Page tabs (the New Stream and New Item page forms, the `Stream/Thread`
@@ -200,9 +239,9 @@ markdown itself, nor edits it in a `<textarea>`.
 - **Disabled submit button when invalid** rather than erroring on
   submit. Show required-field hints inline.
   `SchemaForm` also takes `fields` (show only these top-level fields,
-  in order; the rest keep their `initial` value and are still
-  submitted), `fixed` (shown as read-only text, `<prefix>-<field>-fixed`,
-  submitted unchanged, never focused) and `serverErrors` (a host's
+  in order, each optionally with a `label` and `help`; the rest keep their `initial` value and are still
+  submitted), `fixed` (not drawn at all, submitted unchanged),
+  `onCancel` (a Cancel button; Escape cancels in a create form) and `serverErrors` (a host's
   message per top-level field, under the field like a client error and
   cleared when that field is edited; one for a field not shown appears
   once above the submit button as `<prefix>-form-error`). Server errors
@@ -211,7 +250,7 @@ markdown itself, nor edits it in a `<textarea>`.
   A command's refusal that names a field (`INVALID` with `field`, on
   `IpcCallError.field`; `fieldErrors`) is shown that way by every form
   that runs a command — a form page, a page's form action (`form: true`,
-  in a `Slideover` — or a prompt strip when its form is one text field —
+  in the tab modal — or a prompt strip when its form is one text field —
   never a modal; success closes it) and, through the
   bridge's `field`, a custom component's own form — never only in the
   error rail.
@@ -322,7 +361,7 @@ markdown itself, nor edits it in a `<textarea>`.
   the page body. Its title and actions are data the frame sends
   (`setTitle`, `setActions`) and core draws in the bar — never buttons of
   oxplow's look inside the frame for page-level actions. A form it asks
-  for (`openForm`) is oxplow's slideover, with Enter submitting and
+  for (`openForm`) is oxplow's tab modal, with Enter submitting and
   Escape closing as every form.
 
 ## A replaced component is marked, and falls back to oxplow's
@@ -1174,7 +1213,7 @@ rail stacks its groups in a fixed order, so nothing moves as values
 change: **Filters** (its filter params) and **Selection** (what a row click
 picked). A `role: view` param (state the page or the system sets, in the
 `#` like a filter) is in neither: the rail never draws it, and a person
-never edits it. Page-level actions — About this page (a popover: what the page
+never edits it. Page-level actions — About this page (the tab modal: what the page
 is for, in normal text colour, then the same facts Definition's About opens with, less the title and extension — id,
 Definition (a link to the running copy drawn as Definition, never the
 file to edit; the only way to Definition from a page), origin, what runs — and the tab's URI, and a line when the

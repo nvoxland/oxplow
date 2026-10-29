@@ -76,7 +76,7 @@ test("a session that can't launch shows why and offers a retry", async ({ fresh 
 /// Clearing the alias gives the fallback back.
 test("a session's tab shows its alias, and its fallback once the alias is cleared", async ({ fresh }) => {
   const { page, daemon } = fresh;
-  await run(daemon, "oxplow.agent.set_agents", { agents: ["scripted", "claude"] });
+  await run(daemon, "oxplow.agent.set_agents", { agents: ["scripted", "claude", "codex"] });
   await page.goto("/");
   await expect(newSessionPage(page)).toBeVisible();
   await newSessionPage(page).locator('[data-node="start"]').getByTestId("viz-form-fields-harness").selectOption("claude");
@@ -104,8 +104,29 @@ test("a session's tab shows its alias, and its fallback once the alias is cleare
   await expect(page.getByTestId("menu-item-ref-command-oxplow.agent_session.reopen")).toHaveCount(0);
   await expect(page.getByTestId("menu-item-page-submenu-Tasks")).toHaveCount(0);
   await body.getByTestId("menu-item-action-page-action-rename").click();
+  // The form is the tab's modal: headed without the menu's ellipsis, about
+  // the session by its name (never its id), its Name starting on the
+  // current one, with a primary submit and a Cancel.
+  const form = body.getByTestId("viz-action-form");
+  await expect(form.getByTestId("viz-action-form-title")).toHaveText("Rename");
+  await expect(form.getByTestId("viz-action-form-subtitle")).toHaveText("My review");
+  await expect(form).not.toContainText(/ses\d/);
   const title = page.getByTestId("viz-action-form-fields-title");
+  await expect(title).toHaveValue("My review");
+  await expect(form.getByTestId("viz-action-form-fields-submit")).toHaveText("Rename");
+  await expect(form.getByTestId("viz-action-form-fields-cancel")).toBeVisible();
   await title.fill("Renamed here");
+  // Another tab is fully usable with this one's modal open, and the modal
+  // (with what was typed) is still there when the person comes back.
+  await searchLauncher(page, "new codex session");
+  await page.getByTestId("launcher-command-oxplow.agent_session.open_codex").click();
+  const sessions = page.locator('[data-testid^="center-tab-oxplow:oxplow/agent_session?"]');
+  await expect(sessions).toHaveCount(2);
+  await sessions.nth(1).click();
+  await expect(body).toBeHidden();
+  await tab.click();
+  await expect(page.getByTestId("viz-action-form")).toBeVisible();
+  await expect(page.getByTestId("viz-action-form-fields-title")).toHaveValue("Renamed here");
   await page.getByTestId("viz-action-form-fields-submit").click();
   await expect(tab).toContainText("Renamed here");
   await rename("");

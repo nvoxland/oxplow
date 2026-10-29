@@ -6,7 +6,7 @@ import { commandOpenAfter, undoCommand, type VizRun, type SqlCell } from "../api
 import { FormSourceContext, useFormSource, type FormSource } from "./formSource.js";
 import { useVizPages } from "./vizPages.js";
 import { VizActionRunnerContext, useVizActionRunner, type VizActionRunner } from "./vizActionRunner.js";
-import { Slideover } from "../components/Slideover.js";
+import { TabModal } from "../components/TabModal.js";
 import { InlinePromptStrip } from "../components/InlinePromptStrip.js";
 import type { FormStart } from "../tauri-bridge/generated/bindings.js";
 import type { Drop, PageAction as DeclaredPageAction } from "../tauri-bridge/generated/bindings.js";
@@ -21,7 +21,7 @@ import { CommandConfirm } from "../components/CommandConfirm.js";
 import { ResultCompleteness } from "./ResultCompleteness.js";
 import { useFormSubmit } from "./useFormSubmit.js";
 import { SchemaForm } from "../components/SchemaForm/SchemaForm.js";
-import { withSubfields, type Drafts, type Field } from "../components/SchemaForm/schemaFormModel.js";
+import { shownFields, withSubfields, type Drafts, type Field } from "../components/SchemaForm/schemaFormModel.js";
 import { NO_READS, useRerunOnChange } from "./rerun.js";
 import { RouteLink, routeDispatch } from "../tabs/RouteLink.js";
 import { linkOrigins } from "./linkOrigin.js";
@@ -1201,6 +1201,7 @@ function FormViz({ run, streamId }: { run: VizRun; streamId: string | null }) {
         fixed={start.fixed}
         choices={start.choices}
         serverErrors={form.serverErrors}
+        schemaHelp={false}
         mode={mode}
         submitLabel={mode === "edit" ? undefined : run.config.title}
         draft={draft}
@@ -1233,11 +1234,16 @@ export function ActionForm({
   run,
   streamId,
   pressed,
+  subject,
   onClose,
 }: {
   run: ActionTarget;
   streamId: string | null;
   pressed: { action: DeclaredPageAction; row: Record<string, SqlCell> | null };
+  /** The page's own title, which is what a page action is about: the
+   *  subtitle of a form that has `fixed` fields (the host's ids, never
+   *  drawn). A row action has none — its row isn't the page. */
+  subject?: string | null;
   onClose(): void;
 }) {
   const { action, row } = pressed;
@@ -1273,12 +1279,29 @@ export function ActionForm({
   }, [run.config.id, action.id, rowKey, streamId, source]);
   // Which shape opens is the form's to say: nothing until it is read.
   if (!start) return null;
-  const submitLabel = action.label.replace(/…$/, "");
+  // A menu label's ellipsis says "this asks first"; the form that asks is
+  // headed, and its button labelled, without it.
+  const name = actionName(action.label);
+  // What the form is about, in words: the row's `about` column, else — for
+  // a page's own action with fixed fields — the page's title. Never an id.
+  const aboutCell = action.about && row ? row[action.about] : null;
+  const about =
+    aboutCell !== null && aboutCell !== undefined && String(aboutCell) !== ""
+      ? String(aboutCell)
+      : row === null && start.fixed.length > 0
+        ? (subject ?? null)
+        : null;
   const field = promptField(start);
   if (field) {
-    return <ActionPrompt label={action.label} start={start} field={field} form={form} submitLabel={submitLabel} onClose={onClose} testId="viz-action-form" />;
+    return <ActionPrompt label={name} about={about} start={start} field={field} form={form} submitLabel={name} onClose={onClose} testId="viz-action-form" />;
   }
-  return <FormSlideover title={action.label} start={start} form={form} submitLabel={submitLabel} onClose={onClose} testId="viz-action-form" />;
+  return <FormModal title={name} subtitle={about} start={start} form={form} submitLabel={name} onClose={onClose} testId="viz-action-form" />;
+}
+
+/** An action's label as a form's heading and button: the menu label without
+ *  its trailing ellipsis (`Rename…`, `Rename...`). */
+export function actionName(label: string): string {
+  return label.replace(/\s*(…|\.{3})$/, "");
 }
 
 /** A form that is one text field, as a prompt strip at the top of the
@@ -1291,6 +1314,7 @@ export function ActionForm({
  *  field and the submit at the same ids whichever shape opens. */
 function ActionPrompt({
   label,
+  about,
   start,
   field,
   form,
@@ -1299,6 +1323,8 @@ function ActionPrompt({
   testId,
 }: {
   label: string;
+  /** What it is about, in words: ahead of the field's own message. */
+  about: string | null;
   start: FormStart;
   field: Field & { secret: boolean };
   form: ReturnType<typeof useFormSubmit>;
@@ -1309,6 +1335,7 @@ function ActionPrompt({
   const values = (start.values ?? {}) as Record<string, unknown>;
   // A secret is never required: blank keeps the saved one, so it is left out.
   const optional = !field.required || field.secret;
+  const fieldSpec = start.fields ? shownFields(start.fields).find((f) => f.name === field.key) : undefined;
   const errors = form.serverErrors;
   const error = errors ? (errors[field.key] ?? Object.values(errors)[0] ?? null) : null;
   return (
@@ -1323,8 +1350,8 @@ function ActionPrompt({
         />
       ) : null}
       <InlinePromptStrip
-        message={field.description ?? field.label}
-        fields={[{ key: field.key, initialValue: String(values[field.key] ?? ""), placeholder: field.label, optional, secret: field.secret }]}
+        message={[about, fieldSpec?.help ?? fieldSpec?.label ?? field.label].filter(Boolean).join(" — ")}
+        fields={[{ key: field.key, initialValue: String(values[field.key] ?? ""), placeholder: fieldSpec?.label ?? field.label, optional, secret: field.secret }]}
         confirmLabel={submitLabel}
         busy={form.busy}
         error={error}
@@ -1340,8 +1367,9 @@ function ActionPrompt({
  *  values (its fixed fields shown, not editable), a command that asks
  *  confirmed in the host. `form` is the `useFormSubmit` that runs it;
  *  `testId` prefixes the slideover, its confirm and its fields. */
-export function FormSlideover({
+export function FormModal({
   title,
+  subtitle,
   start,
   form,
   submitLabel,
@@ -1349,6 +1377,8 @@ export function FormSlideover({
   testId,
 }: {
   title: string;
+  /** What the form is about, under its title. */
+  subtitle?: string | null;
   start: FormStart | null;
   form: ReturnType<typeof useFormSubmit>;
   submitLabel: string;
@@ -1356,7 +1386,7 @@ export function FormSlideover({
   testId: string;
 }) {
   return (
-    <Slideover open onClose={onClose} title={title} testId={testId}>
+    <TabModal onClose={onClose} title={title} subtitle={subtitle} testId={testId}>
       {form.pending && start ? (
         <CommandConfirm
           label={title}
@@ -1374,13 +1404,15 @@ export function FormSlideover({
           choices={start.choices}
           fields={start.fields ?? undefined}
           serverErrors={form.serverErrors}
+          schemaHelp={false}
           submitLabel={submitLabel}
           busy={form.busy}
           onSubmit={(input) => void form.submit(input, false)}
+          onCancel={onClose}
           testIdPrefix={`${testId}-fields`}
         />
       ) : null}
-    </Slideover>
+    </TabModal>
   );
 }
 
