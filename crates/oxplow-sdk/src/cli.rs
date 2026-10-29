@@ -1,5 +1,5 @@
-//! `oxplow extension new|check|test` (`.context/extensions.md` "The
-//! SDK"). A thin argv shell over `oxplow_sdk`: the same `check` the
+//! `oxplow extension new|check|test` (`.context/extensions-sdk.md`
+//! "The SDK"). A thin argv shell over `oxplow_sdk`: the same `check` the
 //! agent's `oxplow_validate_extension` runs, printed as `file:line: what — fix`
 //! lines so an agent editing an extension from a terminal gets the same
 //! answer it would get through MCP. Exit 0 when clean, 1 with findings,
@@ -49,14 +49,16 @@ usage:
       datasets and their rows, collectors' outputs, providers' grants —
       writing nothing. --services lists, per script, the host services it
       uses (sql.read, tree.read, ai.compute) and whether it declared them
-  oxplow extension test <name|path> [--bless] [--json] [--junit <file>] [--root <dir>]
+  oxplow extension test <name|path> [--only <example,…>] [--bless] [--json] [--junit <file>] [--root <dir>]
       on a throwaway oxplow over a copy of the project's extensions: check,
       then each intent example's fixture (a page's rows, a collector's
       entities, a command's composition), questions.yaml, and each declared
       provider: its handshake against its declarations, its test config,
       its examples, every message against the protocol's schemas, its
       golden transcript (--bless writes it) and its capability's
-      conformance suite. --junit also writes the report to <file> as JUnit,
+      conformance suite. --only runs the check and just the named examples
+      (their fixtures' file names, without .yaml): the quick run while
+      working on them. --junit also writes the report to <file> as JUnit,
       for a report collector
 
 <name|path> is an extension name (its source in the project's
@@ -121,6 +123,8 @@ struct Parsed {
     against: Option<String>,
     /// `test --junit <file>`: also write the report there as JUnit.
     junit: Option<PathBuf>,
+    /// `test --only <a,b>`: just these examples, after the check.
+    only: Option<Vec<String>>,
 }
 
 fn parse(args: &[String]) -> Result<Parsed, Failure> {
@@ -139,6 +143,7 @@ fn parse(args: &[String]) -> Result<Parsed, Failure> {
         services: false,
         against: None,
         junit: None,
+        only: None,
     };
     let mut it = args.iter();
     while let Some(a) = it.next() {
@@ -196,6 +201,12 @@ fn parse(args: &[String]) -> Result<Parsed, Failure> {
                 )
             }
             "--bless" => p.bless = true,
+            "--only" => {
+                let names = it.next().ok_or_else(|| {
+                    Failure::Usage("--only needs example names, comma-separated".into())
+                })?;
+                p.only = Some(names.split(',').map(|n| n.trim().to_string()).collect());
+            }
             "--junit" => {
                 p.junit =
                     Some(PathBuf::from(it.next().ok_or_else(|| {
@@ -319,7 +330,15 @@ fn run_inner(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> Resul
             let (root, name) = locate(p.root.as_deref(), target);
             // A throwaway oxplow over a copy of the project's extensions:
             // the project's database is never opened.
-            let report = block_on(crate::extension_test::test_extension(&root, &name, p.bless))?;
+            let report = match &p.only {
+                Some(_) if p.bless => {
+                    return Err(Failure::Usage(
+                        "--only runs examples alone; --bless writes a provider's transcript, which it doesn't run".into(),
+                    ))
+                }
+                Some(only) => block_on(crate::extension_test::test_extension_only(&root, &name, only))?,
+                None => block_on(crate::extension_test::test_extension(&root, &name, p.bless))?,
+            };
             let format = if p.json { Format::Json } else { Format::Text };
             let _ = write!(out, "{}", crate::extension_test::render(&report, format));
             if p.json {
@@ -410,6 +429,24 @@ mod tests {
             String::from_utf8(out).unwrap(),
             String::from_utf8(err).unwrap(),
         )
+    }
+
+    /// `test --only <a,b>` runs the check and the named examples alone; a
+    /// name no example has fails, naming those there are.
+    #[test]
+    fn test_runs_only_the_named_examples() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_str().unwrap();
+        crate::scaffold(dir.path(), crate::Kind::Effect, "notes", None).unwrap();
+        let (code, out, err) = cli(&["test", "notes", "--only", "basic", "--root", root]);
+        assert_eq!(code, 0, "{out}{err}");
+        assert!(out.ends_with("; ran check, 1 example\n"), "{out}");
+        let (code, out, _) = cli(&["test", "notes", "--only", "nope", "--root", root]);
+        assert_eq!(code, 1, "{out}");
+        assert!(
+            out.contains("no example `nope` — fix: one of basic"),
+            "{out}"
+        );
     }
 
     /// `test --junit <file>` also writes the report as JUnit, which a

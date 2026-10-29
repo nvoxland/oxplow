@@ -50,8 +50,13 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
    real provider. It works before the extension's first deploy. Run it in
    the foreground after `oxplow_validate_extension` and before handing
    over; `--junit <file>` also writes a report for the Tests panel, `--json`
-   the full report. It exits 1 when anything failed.
-   Its report says what it ran, the generation, what the extension
+   the full report. It exits 1 when anything failed. While you work on a
+   few fixtures, `--only <example>[,<example>…]` (their file names without
+   `.yaml`) runs the check and just those: run the whole extension once
+   more before you hand over.
+   Its text report lists the errors and warnings, then one line: how many
+   of each, and what ran (`check, 79 examples, answers`; the JUnit form
+   names each example). Its JSON report says the generation, what the extension
    `contributes`, and what it can't run here (`unsupported`: panels, decorators,
    replacements, skills — the app shows them).
    **A test runs your extension with what it declares**, plus oxplow's

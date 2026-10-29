@@ -266,7 +266,11 @@ is held by a page with a whole-page action running that command.
   extension's own `commands:` — or one of its providers' `<id>.<name>`
   (schema from its declarations).
 
-**`oxplow extension test <name>`** (`extension_test.rs`) runs on
+**`oxplow extension test <name> [--only <example>,…]`** (`extension_test.rs`;
+`--only` runs the check and just the named examples, nothing else — the
+quick run while iterating; the text report sums up what ran with the
+examples as one count, the JUnit form names each; an example's `expect`
+compares numbers by value, so `2.0` holds for `2`) runs on
 **a throwaway oxplow** (`Host`, "The SDK" above: activated as boot
 activates, its entities created empty, the fixture model answering every
 model call). It never reads what runs here — no deployment, no

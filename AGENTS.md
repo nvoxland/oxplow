@@ -39,7 +39,7 @@ or exact mechanics.
   commands, all in the foreground (a backgrounded run's reports are
   never ingested), never bare `cargo test` / `bun test` (they emit no
   reports):
-  - `bun run test:ext [<name>]` — an edit under `extensions/` or
+  - `bun run test:ext [<name>] [--only <fixture>,…]` — an edit under `extensions/` or
     `.oxplow/extensions/` is checked with this: check, fixtures and page
     answers on a throwaway oxplow, in seconds, with no compile (a debug
     build reads oxplow's own extensions from their folders). After a

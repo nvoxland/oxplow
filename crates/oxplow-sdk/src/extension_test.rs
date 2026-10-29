@@ -1,5 +1,5 @@
-//! `oxplow extension test` (P5.D5, P7.C6; `.context/extensions.md` "The
-//! SDK"; `.context/providers.md` "The conformance kit"). Everything runs
+//! `oxplow extension test` (P5.D5, P7.C6; `.context/extensions-sdk.md`
+//! "The SDK"; `.context/providers.md` "The conformance kit"). Everything runs
 //! on a throwaway oxplow — an in-memory one over a copy of the project's
 //! `.oxplow/extensions/` ([`Host`]) — so it never touches the project's
 //! data: `check` (against its real command registry, so `commands:`
@@ -158,6 +158,27 @@ pub async fn test_extension_in(
     bless: bool,
     env: host::HostEnv,
 ) -> Result<TestReport, SdkError> {
+    run(root, name, bless, env, None).await
+}
+
+/// The check, then only the intent examples named in `only` (their
+/// fixtures' file stems): the quick run while working on a few of them.
+/// Nothing else runs — no providers, suites or page answers.
+pub async fn test_extension_only(
+    root: &Path,
+    name: &str,
+    only: &[String],
+) -> Result<TestReport, SdkError> {
+    run(root, name, false, host::process_env(), Some(only)).await
+}
+
+async fn run(
+    root: &Path,
+    name: &str,
+    bless: bool,
+    env: host::HostEnv,
+    only: Option<&[String]>,
+) -> Result<TestReport, SdkError> {
     let started = std::time::Instant::now();
     let host = Arc::new(
         Host::start(root, name, &[], env.clone(), true)
@@ -213,8 +234,23 @@ pub async fn test_extension_in(
     report.contributes = ext.contributions.iter().map(|d| d.id.to_string()).collect();
     report.unsupported = unsupported(&ext);
     report.finish_case("check".into(), 0, started);
-    if report.errors.is_empty() {
-        examples(&host, &ext, &mut report).await;
+    if let Some(only) = only {
+        let there: Vec<String> = ext
+            .intent
+            .as_ref()
+            .map(|i| i.examples.iter().map(|e| e.name.clone()).collect())
+            .unwrap_or_default();
+        for unknown in only.iter().filter(|n| !there.contains(n)) {
+            report.errors.push(format!(
+                "{name}: no example `{unknown}` — fix: one of {}",
+                there.join(", ")
+            ));
+        }
+        if report.errors.is_empty() {
+            examples(&host, &ext, Some(only), &mut report).await;
+        }
+    } else if report.errors.is_empty() {
+        examples(&host, &ext, None, &mut report).await;
         for spec in &ext.providers {
             let (before, started) = (report.errors.len(), std::time::Instant::now());
             report.ran.push(format!("provider {}", spec.id));
@@ -259,8 +295,13 @@ fn example_fixture(
 
 /// The intent examples a throwaway oxplow runs: a page's, a derived
 /// collector's. A provider's (`when: { command, input }`) run in its
-/// session.
-async fn examples(shared: &Arc<Host>, ext: &Extension, report: &mut TestReport) {
+/// session. `only`: just the examples it names.
+async fn examples(
+    shared: &Arc<Host>,
+    ext: &Extension,
+    only: Option<&[String]>,
+    report: &mut TestReport,
+) {
     let rel = ext.path.trim_end_matches('/').to_string();
     // Read as the extension's files are everywhere: a bundled extension's
     // fixtures are embedded with it, not on disk.
@@ -271,7 +312,9 @@ async fn examples(shared: &Arc<Host>, ext: &Extension, report: &mut TestReport) 
         .intent
         .as_ref()
         .map(|i| i.examples.clone())
-        .unwrap_or_default();
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|e| only.is_none_or(|only| only.contains(&e.name)));
     // Examples that make data, each on an oxplow of its own, run side by
     // side, a few at a time; their findings join the report in the
     // examples' order.
@@ -972,6 +1015,8 @@ fn compare(want: &Value, got: &Value) -> Option<(String, Value, Value)> {
                     .find_map(|(i, (w, g))| walk(&format!("{path}/{i}"), w, g)),
                 _ => differs(),
             },
+            // A number is its value: a fixture's 2.0 is a script's 2.
+            Value::Number(w) if got.as_f64().is_some_and(|g| w.as_f64() == Some(g)) => None,
             _ if want == got => None,
             _ => differs(),
         }
@@ -6034,11 +6079,30 @@ pub fn render(report: &TestReport, format: crate::Format) -> String {
                 if report.errors.len() == 1 { "" } else { "s" },
                 report.warnings.len(),
                 if report.warnings.len() == 1 { "" } else { "s" },
-                report.ran.join(", ")
+                ran_summary(&report.ran)
             ));
             out
         }
     }
+}
+
+/// What ran, in order, with the examples as one count where the first
+/// stood (the JUnit form names each).
+fn ran_summary(ran: &[String]) -> String {
+    let examples = ran.iter().filter(|r| r.starts_with("example ")).count();
+    let (mut parts, mut counted) = (Vec::new(), false);
+    for r in ran {
+        if !r.starts_with("example ") {
+            parts.push(r.clone());
+        } else if !counted {
+            counted = true;
+            parts.push(format!(
+                "{examples} example{}",
+                if examples == 1 { "" } else { "s" }
+            ));
+        }
+    }
+    parts.join(", ")
 }
 
 /// `report` as one JUnit `<testsuite>` (no XML prolog, so a caller can
@@ -7360,6 +7424,67 @@ effects:
         assert_eq!(
             compare(&json!({ "rows": [{ "a": 1 }, { "a": 9 }] }), &got),
             Some(("/rows/1/a".into(), json!(9), json!(3)))
+        );
+        assert!(
+            holds(json!({ "rows": [{ "a": 1.0 }, { "b": 4.0 }] })),
+            "a number is its value: 1 is 1.0"
+        );
+        assert!(!holds(json!({ "rows": [{ "a": 1.5 }, { "b": 4 }] })));
+    }
+
+    /// The text report names each failure and sums up what ran: the
+    /// examples as a count, not one by one (the JUnit form names them).
+    #[test]
+    fn the_text_report_counts_the_examples_it_ran() {
+        let mut report = TestReport::part("acme");
+        report.ran = ["check", "example first", "example second", "answers"]
+            .map(String::from)
+            .to_vec();
+        report.errors.push("fixtures/second.yaml:1: wrong".into());
+        let text = render(&report, Format::Text);
+        assert!(
+            text.contains("error: fixtures/second.yaml:1: wrong\n"),
+            "{text}"
+        );
+        assert!(
+            text.ends_with("acme: 1 error, 0 warnings; ran check, 2 examples, answers\n"),
+            "{text}"
+        );
+        report.ran = ["check", "example first"].map(String::from).to_vec();
+        assert!(
+            render(&report, Format::Text).ends_with("; ran check, 1 example\n"),
+            "{}",
+            render(&report, Format::Text)
+        );
+    }
+
+    /// Run with `only`, the check runs and then just the named examples;
+    /// a name no example has is an error naming the ones there are.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn only_the_named_examples_run() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        paged(
+            root,
+            "title: Items\nloaders:\n  items: { sql: \"SELECT 1 AS n\" }\nview: { from: items, viz: table }\n",
+            &[
+                ("first", "when: { page: items }\nexpect: { loaders: { items: { rows: 1 } } }\n"),
+                ("second", "when: { page: items }\nexpect: { loaders: { items: { rows: 5 } } }\n"),
+            ],
+        );
+        let report = test_extension_only(root, "paged", &["first".into()])
+            .await
+            .unwrap();
+        assert_eq!(report.errors, Vec::<String>::new());
+        assert_eq!(report.ran, ["check", "example first"].map(String::from));
+
+        let report = test_extension_only(root, "paged", &["third".into()])
+            .await
+            .unwrap();
+        let errors = report.errors.join("\n");
+        assert!(
+            errors.contains("no example `third`") && errors.contains("first, second"),
+            "{errors}"
         );
     }
 

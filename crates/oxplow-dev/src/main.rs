@@ -49,12 +49,14 @@ oxplow-dev extension deploy [<name>]         deploy <name>'s source as the app d
                                              whose source changed (foundation first): the
                                              first run of a checkout, or after a core change;
                                              only while oxplow is quit
-oxplow-dev extension test [<name> …] [--junit F]
+oxplow-dev extension test [<name> …] [--only <example,…>] [--junit F]
                                              run each extension's tests (check, fixtures,
                                              page answers) on a throwaway oxplow — no
                                              compile for an extension-only change, safe
                                              while oxplow runs; no name: every extension
-                                             with a source here; --junit writes JUnit to F
+                                             with a source here; --only: the check and
+                                             just those examples (fixture file names);
+                                             --junit writes JUnit to F
 
 oxplow-dev --help                            this
 
@@ -271,14 +273,17 @@ async fn extension(project: &Path, args: &[String]) -> Result<String, String> {
     }
 }
 
-/// `extension test [<name> …] [--junit <file>]`: each named extension's
-/// tests (`oxplow extension test`'s), else every extension with a source
-/// here; the findings as text, and with `--junit` one JUnit file over all of
-/// them. Any failing extension fails the command.
+/// `extension test [<name> …] [--only <example,…>] [--junit <file>]`: each
+/// named extension's tests (`oxplow extension test`'s), else every extension
+/// with a source here; with `--only`, the check and just those examples. The
+/// findings as text, and with `--junit` one JUnit file over all of them. Any
+/// failing extension fails the command.
 async fn extension_test(project: &Path, args: &[String]) -> Result<String, String> {
-    use oxplow_sdk::extension_test::{render, test_extension};
+    use oxplow_sdk::extension_test::{render, test_extension, test_extension_only};
     let mut args = args.to_vec();
     let junit = take_flag(&mut args, "--junit");
+    let only: Option<Vec<String>> = take_flag(&mut args, "--only")
+        .map(|names| names.split(',').map(|n| n.trim().to_string()).collect());
     let names = if args.is_empty() {
         let settings = oxplow_config::extension_settings(project);
         oxplow_app::extension::extensions::known_names(project, &settings)
@@ -290,7 +295,11 @@ async fn extension_test(project: &Path, args: &[String]) -> Result<String, Strin
     };
     let (mut text, mut suites, mut failed) = (String::new(), String::new(), false);
     for name in &names {
-        match test_extension(project, name, false).await {
+        let tested = match &only {
+            Some(only) => test_extension_only(project, name, only).await,
+            None => test_extension(project, name, false).await,
+        };
+        match tested {
             Ok(report) => {
                 failed |= !report.ok;
                 text.push_str(&render(&report, oxplow_sdk::Format::Text));
@@ -1158,5 +1167,15 @@ mod tests {
         );
         let err = dev(p, &["extension", "test", "acme"]).await.unwrap_err();
         assert!(err.contains("loader `items` returned"), "{err}");
+
+        // `--only` runs the check and the named examples alone.
+        let err = dev(p, &["extension", "test", "acme", "--only", "one"])
+            .await
+            .unwrap_err();
+        assert!(err.ends_with("; ran check, 1 example"), "{err}");
+        let err = dev(p, &["extension", "test", "acme", "--only", "two"])
+            .await
+            .unwrap_err();
+        assert!(err.contains("no example `two`"), "{err}");
     }
 }

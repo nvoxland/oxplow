@@ -270,7 +270,7 @@ effort's "Coverage & tests" panel.
 
 | You changed | Run |
 |---|---|
-| Only files under `extensions/` or `.oxplow/extensions/` | `bun run test:ext [<name>]` — seconds, no compile |
+| Only files under `extensions/` or `.oxplow/extensions/` | `bun run test:ext [<name>]` — seconds, no compile; `bun run test:ext <name> --only <fixture>[,…]` runs the check and just those fixtures while you iterate |
 | A Rust crate | `bun run test:fast -p <crate> [filter]` |
 | `apps/desktop/src` | `bun run test:fast:ts` (and `bun run e2e` for a user path) |
 | Core and an extension together | both: `test:ext` rebuilds through `cargo run` first (and builds `oxplow-script-worker` first: a fixture's scripts run in it, from `target/debug/`) |
