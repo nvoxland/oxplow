@@ -16,25 +16,34 @@ const wait = (ms: number) => act(() => new Promise<void>((r) => setTimeout(r, ms
 
 const RUNNING = "oxplow:oxplow/file?path=acme/pages/page.yaml&rev=abc123&filesystem=oxplow:extensions";
 
-test("a page with a running copy offers Show definition: that file drawn as Definition, with the run's actual params", async () => {
+test("About this page: Definition opens the running copy drawn as Definition, with the run's actual params; no Title row, the description in its own text", async () => {
   const opened: string[] = [];
   const base = tablePage();
-  const { runs } = fakePageRuns({ ...base, params: { q: "recent" }, page: { ...base.page, origin: { ...base.page.origin, runningUri: RUNNING } } });
+  const { runs } = fakePageRuns({ ...base, params: { q: "recent" }, page: { ...base.page, description: "Lists the items.", origin: { ...base.page.origin, runningUri: RUNNING } } });
   const view = render(<PageHost pageKey={key} runs={runs} onOpenPage={(ref) => opened.push(ref.id)} />);
-  fireEvent.click(await view.findByTestId("action-page-definition"));
+  expect(view.queryByTestId("action-page-definition")).toBeNull();
+  fireEvent.click(await view.findByTestId("action-page-about"));
+  const about = await view.findByTestId("page-about");
+  expect(about.textContent).toContain("Lists the items.");
+  expect(about.querySelector(".ox-about-description")?.textContent).toBe("Lists the items.");
+  expect(about.textContent).not.toContain("Title");
+  fireEvent.click(view.getByTestId("page-about-definition"));
   expect(paramOf(opened[0], "path")).toBe("acme/pages/page.yaml");
   expect(viewOf(opened[0], "oxplow.renderer")).toBe("oxplow-foundation/definition");
   expect(viewOf(opened[0], "params")).toBe('{"q":"recent"}');
 });
 
-test("a page with no running copy offers no Show definition", async () => {
+test("a page with no running copy has no Definition in About", async () => {
   const { runs } = fakePageRuns(tablePage());
   const view = render(<PageHost pageKey={key} runs={runs} />);
   await view.findByText("Items: Alpha");
+  fireEvent.click(await view.findByTestId("action-page-about"));
+  await view.findByTestId("page-about");
+  expect(view.queryByTestId("page-about-definition")).toBeNull();
   expect(view.queryByTestId("action-page-definition")).toBeNull();
 });
 
-test("a shown view (a temp page) offers Save and Show definition of its temp file; a deployed page offers no Save", async () => {
+test("a shown view (a temp page) offers Save and, in About, Definition as Definition of its temp file; a deployed page offers no Save", async () => {
   const TEMP_FILE = "oxplow:oxplow/file?path=v1.yaml&filesystem=oxplow:temp";
   const base = gridPage();
   const temp = { ...base, page: { ...base.page, id: "temp/v1", extension: "temp", slug: "v1", origin: { ...base.page.origin, extension: "temp", runningUri: TEMP_FILE } } };
@@ -43,7 +52,8 @@ test("a shown view (a temp page) offers Save and Show definition of its temp fil
   const view = render(<PageHost pageKey={{ ...key, page: "temp/v1" }} runs={runs} onOpenPage={(ref) => opened.push(ref.id)} />);
   await view.findByTestId("action-view-save-page");
   expect(view.getByTestId("action-view-save-wiki").textContent).toContain("Save to wiki");
-  fireEvent.click(view.getByTestId("action-page-definition"));
+  fireEvent.click(view.getByTestId("action-page-about"));
+  fireEvent.click(await view.findByTestId("page-about-definition"));
   expect(paramOf(opened[0], "path")).toBe("v1.yaml");
   expect(paramOf(opened[0], "filesystem")).toBe("oxplow:temp");
   expect(viewOf(opened[0], "oxplow.renderer")).toBe("oxplow-foundation/definition");
@@ -112,12 +122,12 @@ test("the description isn't in the body: About this page in the ☰ shows it wit
   expect(about.textContent).toContain("What the items are.");
   expect(view.getByTestId("page-file").textContent).not.toContain("What the items are.");
   expect(view.queryByTestId("page-rail-about")).toBeNull();
-  // The same facts as Definition's About: its source is the running copy, raw.
-  for (const fact of ["Title", "Id", "Extension", "Source", "Origin", "Runs"]) expect(about.textContent).toContain(fact);
+  // The same facts as Definition's About, less the Title the nav bar shows: its source is the running copy, as Definition.
+  for (const fact of ["Id", "Definition", "Origin", "Runs"]) expect(about.textContent).toContain(fact);
   expect(about.textContent).toContain("deployment abc123def456");
-  expect(view.getByTestId("page-about-source").textContent).toBe("acme/pages/items.yaml");
-  fireEvent.click(view.getByTestId("page-about-source"));
-  expect(opened[0]).toBe(`${runningUri}#oxplow.renderer=oxplow-foundation/file-viewer`);
+  expect(view.getByTestId("page-about-definition").textContent).toBe("acme/pages/items.yaml");
+  fireEvent.click(view.getByTestId("page-about-definition"));
+  expect(opened[0]).toBe(`${runningUri}#oxplow.renderer=oxplow-foundation/definition&params=%7B%7D`);
 });
 
 test("a whole-page action with `when` is offered only while the page's row has that column truthy", async () => {

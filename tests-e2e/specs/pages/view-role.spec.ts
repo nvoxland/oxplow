@@ -21,7 +21,8 @@ test("Definition's rail has no Filters group: its params param is a view param",
   await page.goto("/");
   await openFromLauncher(page, "Viewed Numbat");
   await page.getByTestId("page-nav-menu").filter({ visible: true }).click();
-  await page.getByTestId("menu-item-action-page-definition").click();
+  await page.getByTestId("menu-item-action-page-about").click();
+  await page.getByTestId("page-about-definition").click();
 
   const file = page.getByTestId("page-file").filter({ visible: true });
   await expect(file.getByTestId("node-about")).toContainText("Viewed Numbat");

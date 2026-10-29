@@ -22,13 +22,11 @@ export function viewWikiBody(title: string, specYaml: string): string {
  *  `<id>.yaml` on `oxplow:temp`. */
 export const TEMP_EXTENSION = "temp";
 
-/** The page "Show Definition" draws with: Definition, a display mode of a
+/** The page "Definition" in About this page draws with: Definition, a display mode of a
  *  page's YAML file. */
 export const DEFINITION_PAGE = "oxplow-foundation/definition";
-/** The page that shows a file raw, read-only, at any revision. */
-export const FILE_VIEWER_PAGE = "oxplow-foundation/file-viewer";
 
-/** What "Show Definition" opens: the page's running copy
+/** What Definition in About this page opens: the page's running copy
  *  (`PageProvenance.running_uri`, its file on `oxplow:extensions` pinned to
  *  the deployment) drawn as Definition, with the run's exact params as the
  *  mode's `params` filter. */

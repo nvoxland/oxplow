@@ -313,7 +313,7 @@ defines what the person sees:
   page reads `oxplow.page.describe`'s `nodes`), `page`
   (another page's `loader`, with `params`) or `rows` (inline). A loader's
   name is a plain identifier, never a dataset's (`v_*`, `m_*`).
-- **Show Definition** opens the page's running copy (`running_uri`) drawn
+- **Definition in About this page** opens the page's running copy (`running_uri`) drawn
   as foundation's `definition` page, which is a display mode of a page's
   YAML file: `for: oxplow/file`, `accepts: { path: '^[\w./-]+\.yaml$',
   content: definition }` (offered only when `oxplow.page.describe` finds a
@@ -323,8 +323,8 @@ defines what the person sees:
   `Definition: <slug>.yaml`. Open With on any page file lists it beside the
   File viewer, which stays the default and shows the raw YAML (Definition
   has no YAML section). A page with no running copy (an
-  extension that runs from its source) offers no Show Definition
-  (`PageHost`). Definition reads the file once (`oxplow.page.describe`
+  extension that runs from its source) has no Definition row
+  (`PageHost`); there is no menu action for it. Definition reads the file once (`oxplow.page.describe`
   over the file's `content.uri` and `content.text`) and shows: where the
   page comes from (its Source is that
   same running copy, a link that opens it raw in the File viewer with the
@@ -390,7 +390,7 @@ registered. A daemon restart keeps the file, so the tab still opens. A file
 the GC removed (7 days idle, 200 files, 32 MB) or that was never written
 shows "This view is gone" in its place. View params live in the URI's `#`.
 
-Every page host with a running copy offers **Show definition** in its standard actions.
+Every page host with a running copy has **Definition** in About this page, which opens Definition (there is no Show definition action).
 A shown view (a `temp/` page) also offers **Save to wiki…** and **Save as Page…**.
 Both read the YAML through the file read (`readAt(streamId, "<id>.yaml",
 { filesystem: "oxplow:temp" })`), so the saved page is exactly the file. The
@@ -593,8 +593,9 @@ holds its run (`usePageRunWith` over `usePageRunsStore()`: the
 Contents and Selection (the rows picked, `picked` history state) in the
 rail (`pages/railGroups.tsx`); About this page in the ☰ (a `Popover`
 over the body's top right: the page's `description`, then `PageAbout`'s
-facts — Definition's About rows from `page.origin` (Source opens
-`runningUri` in the File viewer) and the tab's URI — and out
+facts — Id, Definition (a link: `runningUri` drawn as Definition with the
+run's params), origin, what runs (no Title or Extension row: the nav bar
+and Definition have them) and the tab's URI — and out
 of date; the description is never drawn in the body); `comments: true` → the
 `CommentNavigator`, `PageCommentsContext` and `#comment=` on the tab's
 identity; a renderer's backlinks and outbound links; the stream as

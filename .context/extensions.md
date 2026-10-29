@@ -2290,12 +2290,12 @@ Where it lives, and what is loaded:
   `oxplow:extensions` filesystem (filesystems.md); `locate` and that
   filesystem both take the running hash from `Deployment::hash`. A deployed extension's errors and warnings name its source
   files, so they say what to edit.
-- **Show Definition** opens the page's running file (`v_page.running_uri`)
+- **Definition in About this page** opens the page's running file (`v_page.running_uri`)
   drawn as foundation's `definition` page, a display mode of a page's YAML
   file (`for: oxplow/file`, `accepts.content` over `oxplow.page.describe`):
   the page part by part (where it comes from, params, loaders, nodes,
   actions, answers), with its Source a link to the
-  same running copy in the File viewer (the raw YAML). A page with no running copy offers no Show Definition
+  same running copy in the File viewer (the raw YAML). A page with no running copy has no Definition row
   (pages-and-tabs.md).
 - **An inline page** (`parse_inline_page`: a markdown ` ```oxplow-page `
   block) only reads: no `command` loaders, no actions, forms, terminals,

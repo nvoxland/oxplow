@@ -64,7 +64,7 @@ test("the rail's filters narrow a page, a row click shows the next section its p
   await page.getByTestId("page-nav-menu").filter({ visible: true }).click();
   await expect(page.getByTestId("menu-item-action-page-copy")).toBeVisible();
   await page.getByTestId("menu-item-action-page-about").click();
-  await expect(page.getByTestId("page-about-source")).toHaveText("commit-history/pages/history.yaml");
+  await expect(page.getByTestId("page-about-definition")).toHaveText("commit-history/pages/history.yaml");
   await expect(page.getByTestId("page-about-uri")).toContainText("oxplow:oxplow/page?page=commit-history/history");
   await page.keyboard.press("Escape");
   await expect(page.getByTestId("page-about-popover")).toHaveCount(0);

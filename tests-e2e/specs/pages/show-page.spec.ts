@@ -69,9 +69,10 @@ test("Save as Page writes the view's file as a deployed page and opens it", asyn
   await expect(page.getByTestId("page-file").filter({ visible: true }).locator('[data-node="count"]')).toContainText("0");
 });
 
-test("Show Definition on a view opens Definition of its temp file", async ({ page, daemon }) => {
+test("Definition in About on a view opens Definition of its temp file", async ({ page, daemon }) => {
   await show(page, daemon, source("Defined Potoroo Count", "Defined Potoroo "));
-  await action(page, "page-definition");
+  await action(page, "page-about");
+  await page.getByTestId("page-about-definition").click();
   const file = page.getByTestId("page-file").filter({ visible: true });
   await expect(page.getByTestId("page-nav-title").filter({ visible: true })).toHaveText(/^Definition: v[0-9a-f]{16}\.yaml$/);
   await expect(file.getByTestId("node-about")).toContainText("Defined Potoroo Count");

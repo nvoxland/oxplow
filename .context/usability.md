@@ -1170,9 +1170,9 @@ change: **Filters** (its filter params) and **Selection** (what a row click
 picked). A `role: view` param (state the page or the system sets, in the
 `#` like a filter) is in neither: the rail never draws it, and a person
 never edits it. Page-level actions — About this page (a popover: what the page
-is for, then the same facts Definition's About opens with — title, id,
-extension, Source (the running copy, raw in the File viewer, never the
-file to edit), origin, what runs — and the tab's URI, and a line when the
+is for, in normal text colour, then the same facts Definition's About opens with, less the title and extension — id,
+Definition (a link to the running copy drawn as Definition, never the
+file to edit; the only way to Definition from a page), origin, what runs — and the tab's URI, and a line when the
 source changed since its deploy; a page's description is said only
 there, never above its body), Copy, Add to Context, the page's whole-page actions, and
 Refresh only for a page that declares `refresh: true` (a page re-runs

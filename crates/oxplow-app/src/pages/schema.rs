@@ -789,7 +789,7 @@ pub fn temp_file_name(id: &str) -> String {
 /// Parse a temp page: the page file `<id>.yaml` on `oxplow:temp`, an
 /// agent's shown view. It has the inline rules (it only reads), is
 /// `temp/<id>`, runs from its temp file (`PageProvenance.running_uri`, so
-/// Show Definition works) and is never a resource page.
+/// Definition in About works) and is never a resource page.
 pub fn parse_temp_page(id: &str, text: &str) -> Result<Page, String> {
     let file = temp_file_name(id);
     let rel = format!("{}/{file}", crate::filesystems::temp::TEMP_DIR);

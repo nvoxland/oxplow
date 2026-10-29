@@ -2,7 +2,7 @@ import { installExtension } from "../../support/pages.js";
 import { expect, test } from "../../support/fixtures.js";
 import { openFromLauncher } from "../../support/ui.js";
 
-// Definition is a display mode of a page's YAML file: Show Definition opens
+// Definition is a display mode of a page's YAML file: Definition in About this page opens
 // the page's running copy drawn as Definition, and the File viewer (the raw
 // YAML) is one Open With away.
 
@@ -18,12 +18,13 @@ view:
   columns: [{ key: line, label: Line }]
 `;
 
-test("Show Definition opens the running copy drawn as Definition, and Open With lists the File viewer too", async ({ page, daemon }) => {
+test("Definition in About this page opens the running copy drawn as Definition, and Open With lists the File viewer too", async ({ page, daemon }) => {
   await installExtension(daemon, "e2e-defn", { files: { "pages/numbat.yaml": numbat } });
   await page.goto("/");
   await openFromLauncher(page, "Defined Numbat");
   await page.getByTestId("page-nav-menu").filter({ visible: true }).click();
-  await page.getByTestId("menu-item-action-page-definition").click();
+  await page.getByTestId("menu-item-action-page-about").click();
+  await page.getByTestId("page-about-definition").click();
 
   const file = page.getByTestId("page-file").filter({ visible: true });
   // The tab names the file, not the page.
@@ -62,7 +63,8 @@ test("Definition drawn again after another tab was shown still names its file an
   await page.goto("/");
   await openFromLauncher(page, "Defined Numbat");
   await page.getByTestId("page-nav-menu").filter({ visible: true }).click();
-  await page.getByTestId("menu-item-action-page-definition").click();
+  await page.getByTestId("menu-item-action-page-about").click();
+  await page.getByTestId("page-about-definition").click();
   const file = page.getByTestId("page-file").filter({ visible: true });
   await expect(page.getByTestId("page-nav-title").filter({ visible: true })).toHaveText("Definition: numbat.yaml");
 

@@ -40,7 +40,7 @@ import { NodeRegistryContext, PageTree, createNodeRegistry, useNodeFocus } from 
 import { labelRow, tabLabel } from "./renderers.js";
 import { useNodeActions, useNodeForms } from "./useNodeActions.js";
 import { SaveTempViewForm } from "./SaveViewForm.js";
-import { definitionUri, TEMP_EXTENSION } from "./viewActions.js";
+import { TEMP_EXTENSION } from "./viewActions.js";
 import { DashboardTitle } from "./DashboardTitle.js";
 import { useDashboardWritable } from "./dashboardAuthoring.js";
 import { PageViewContext } from "./PageViewContext.js";
@@ -140,9 +140,6 @@ export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, re
     // What it shows, as text, as an agent would read it.
     ...(page ? [{ id: "page-copy", label: copied ? "Copied" : "Copy", title: "Copy what the page shows, as text", standard: true, icon: "copy", run: copy }] : []),
     ...(page ? [{ id: "page-about", label: "About this page", standard: true, run: () => setAbout(true) }] : []),
-    // A page's definition is a display mode of its running file (a shown
-    // view's is its temp file); a page with no running copy has none to show.
-    ...(page?.origin.runningUri ? [{ id: "page-definition", label: "Show definition", standard: true, run: () => open(definitionUri(page.origin.runningUri!, run!.params)) }] : []),
     ...(viewFile ? [
       { id: "view-save-wiki", label: "Save to wiki…", standard: true, run: () => setSaveAs("wiki") },
       { id: "view-save-page", label: "Save as Page…", standard: true, run: () => setSaveAs("page") },
@@ -268,7 +265,7 @@ export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, re
         <span ref={aboutAnchor} style={aboutAnchorStyle} />
         {about && page ? (
           <Popover anchor={aboutAnchor} label="About this page" onClose={() => setAbout(false)} testId="page-about-popover">
-            <PageAbout title={page.title} id={page.id} uri={nav?.ref?.id ?? null} description={page.description} origin={page.origin} outOfDate={outOfDate} onOpenPage={onOpenPage ? (ref) => { setAbout(false); onOpenPage(ref); } : undefined} testPrefix="page" />
+            <PageAbout id={page.id} uri={nav?.ref?.id ?? null} description={page.description} origin={page.origin} params={run?.params ?? {}} outOfDate={outOfDate} onOpenPage={onOpenPage ? (ref) => { setAbout(false); onOpenPage(ref); } : undefined} testPrefix="page" />
           </Popover>
         ) : null}
         <div

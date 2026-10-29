@@ -180,6 +180,8 @@
 }
 .ox-rail-group-head .ox-link { text-transform: none; letter-spacing: 0; background: none; border: none; padding: 0; font: inherit; }
 .ox-rail-line { margin: 0; color: var(--text-muted); font-size: var(--text-sm); }
+/* About this page's description: normal text, a little space before the facts. */
+.ox-about-description { margin: 0 0 var(--space-2); color: var(--text-primary); font-size: var(--text-sm); }
 .ox-params { display: flex; flex-direction: column; }
 .ox-param {
   display: grid;

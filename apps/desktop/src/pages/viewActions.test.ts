@@ -16,7 +16,7 @@ test("a wiki view's enclosing fence cannot be closed by markdown inside its YAML
   expect(pageSlug("2026 release")).toBe("page-2026-release");
 });
 
-test("Show definition is the running copy's file drawn as Definition with the run's exact params", () => {
+test("Definition in About is the running copy's file drawn as Definition with the run's exact params", () => {
   const running = "oxplow:oxplow/file?path=acme%2Fpages%2Flist.yaml&rev=abc123&filesystem=oxplow:extensions";
   const uri = definitionUri(running, { q: "two words" });
   expect(identityOf(uri)).toBe(identityOf(running));

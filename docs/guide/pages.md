@@ -201,8 +201,8 @@ Every page has the same layout:
 
 - **The title row** holds what acts on the whole page: Copy, the page's own
   actions and, if the page says `refresh: true`, Refresh. The **☰** menu has
-  the rest, including **Show Definition**: the page's YAML and where each
-  part of it comes from.
+  the rest, including **About this page**, whose **Definition** opens the page's definition:
+  the page's YAML and where each part of it comes from.
 - **The body** is the content: the title, the description, then the nodes.
 - **The side panel** has three groups. **Filters** lists each param beside
   its value; click a value to change it. **Selection** shows the row you
