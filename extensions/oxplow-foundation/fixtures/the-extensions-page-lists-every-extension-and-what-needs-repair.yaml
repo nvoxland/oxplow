@@ -9,7 +9,7 @@ expect:
     summary:
       rows:
         contains:
-          - { extension: oxplow-foundation, uri: "oxplow:oxplow/extension?name=oxplow-foundation", origin_text: Ships with oxplow., state_text: Turned on. }
+          - { extension: oxplow-foundation, uri: "oxplow:oxplow/extension?name=oxplow-foundation", heading: oxplow-foundation, origin_text: Ships with oxplow., permission_items: $any, approval_items: null }
   nodes:
     - { id: summary, kind: viz, viz: sections }
   actions: []

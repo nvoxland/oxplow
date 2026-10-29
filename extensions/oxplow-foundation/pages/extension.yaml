@@ -38,7 +38,7 @@ loaders:
     params: { extension: { from: about.extension } }
   about_facts:
     sql: |
-      SELECT a.description, s.origin_text, s.runs_text, s.state_text, s.reach_text, s.waiting_text, s.problems_label, s.problems_target,
+      SELECT a.description, s.origin_text, s.runs_text, s.permission_items, s.approval_items, s.problems_label, s.problems_target,
              CASE WHEN a.manifest_target IS NOT NULL THEN 'Read its running extension.yaml' END AS manifest,
              a.manifest_target
       FROM about a LEFT JOIN summary s ON s.extension = a.extension
@@ -74,9 +74,8 @@ view:
     - { key: description, label: What it is }
     - { key: origin_text, label: From }
     - { key: runs_text, label: Runs }
-    - { key: state_text, label: State }
-    - { key: reach_text, label: May reach }
-    - { key: waiting_text, label: Waiting on }
+    - { key: permission_items, label: Permissions }
+    - { key: approval_items, label: Needs your approval to run }
     - { key: problems_label, label: Problems, link: { kind: page, from: problems_target } }
     - { key: manifest, label: Manifest, link: { kind: page, from: manifest_target } }
     empty: This extension isn't known to the project.

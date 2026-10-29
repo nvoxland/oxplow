@@ -11,7 +11,7 @@ loaders:
   # What each permission means, one row per scope an extension holds.
   reach:
     sql: |
-      SELECT e.name AS extension, j.key AS ord,
+      SELECT e.name AS extension, j.key AS ord, j.value AS scope,
              CASE
                WHEN j.value = 'sql.read' THEN 'read your project''s data with SQL'
                WHEN j.value = 'sql.write' THEN 'change your project''s data with SQL'
@@ -43,7 +43,8 @@ loaders:
       )
       SELECT *, CASE WHEN problems_label IS NOT NULL THEN '[' || problems_label || '](' || problems_target || ')' END AS problems_text
       FROM (
-      SELECT x.name AS extension, x.name AS id, x.uri, x.origin,
+      SELECT x.name AS extension, x.name || CASE WHEN x.enabled THEN '' ELSE ' (disabled)' END AS heading,
+             x.name AS id, x.uri, x.origin,
              CASE WHEN x.origin = 'bundled' THEN 'Ships with oxplow.'
                   WHEN x.shared THEN 'Yours, shared with the team.' ELSE 'Yours, not shared with the team.' END AS origin_text,
              CASE x.deployment
@@ -55,12 +56,16 @@ loaders:
                WHEN 'source' THEN 'Its source folder, as it is.'
                WHEN 'undeployed' THEN 'Nothing: it was never deployed.'
                ELSE 'Nothing: neither its source nor a deployment is on this machine.' END AS runs_text,
-             CASE WHEN NOT x.enabled THEN 'Turned off.'
-                  WHEN json_array_length(x.pending) > 0 THEN 'Waiting on a person to approve it.'
-                  ELSE 'Turned on.' END AS state_text,
-             COALESCE((SELECT group_concat(r.text, '; ') || '.' FROM reach r WHERE r.extension = x.name),
-                      'Nothing beyond the baseline.') AS reach_text,
-             (SELECT group_concat(w.value, '; ') FROM json_each(x.pending) w) AS waiting_text,
+             -- Each scope as it is written, with what it lets the extension do
+             -- as its hover.
+             NULLIF((SELECT json_group_array(json_object('text', r.scope, 'hint', 'May ' || r.text || '.'))
+                     FROM reach r WHERE r.extension = x.name), '[]') AS permission_items,
+             -- What its source asks for that nobody approved yet: a pending
+             -- line is `<what> — <what it allows>`.
+             NULLIF((SELECT json_group_array(json_object(
+                       'text', CASE WHEN instr(w.value, ' — ') > 0 THEN substr(w.value, 1, instr(w.value, ' — ') - 1) ELSE w.value END,
+                       'hint', CASE WHEN instr(w.value, ' — ') > 0 THEN substr(w.value, instr(w.value, ' — ') + 3) END))
+              FROM json_each(x.pending) w), '[]') AS approval_items,
              CASE WHEN x.failing + x.disabled + x.load_problems > 0 THEN
                trim(
                  CASE WHEN x.failing > 0 THEN x.failing || CASE WHEN x.failing = 1 THEN ' contribution failing' ELSE ' contributions failing' END || CASE WHEN x.disabled + x.load_problems > 0 THEN ', ' ELSE '' END ELSE '' END
@@ -75,11 +80,10 @@ loaders:
 view:
   from: summary
   viz: sections
-  sections: { title: extension, id: id, link: uri, body: problems_text }
+  sections: { title: heading, id: id, link: uri, body: problems_text }
   columns:
   - { key: origin_text, label: From }
   - { key: runs_text, label: Runs }
-  - { key: state_text, label: State }
-  - { key: reach_text, label: May reach }
-  - { key: waiting_text, label: Waiting on }
+  - { key: permission_items, label: Permissions }
+  - { key: approval_items, label: Needs your approval to run }
   empty: No extensions.

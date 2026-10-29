@@ -217,6 +217,9 @@ intent:
     - name: extension-pages-are-a-section-each-with-a-linked-heading
       input: { page: extension, params: { uri: 'oxplow:oxplow/extension?name=oxplow-foundation', name: oxplow-foundation } }
       expect: each page of the extension is a subsection, its title linking to the Definition of its running file and its description as the body
+    - name: an-extension-lists-its-permissions-as-scopes-with-a-hint-each
+      input: { page: extension, params: { uri: 'oxplow:oxplow/extension?name=oxplow-foundation', name: oxplow-foundation } }
+      expect: each scope as written with its explanation as a hover; nothing waits on approval for a running extension
     - name: the-extension-page-reads-a-shipped-extension
       input: { page: extension, params: { uri: 'oxplow:oxplow/extension?name=oxplow-foundation', name: oxplow-foundation } }
       expect: where it comes from, what runs, its pages with a link to each Definition, what it may reach in words, its deployments, and a slot for its runs

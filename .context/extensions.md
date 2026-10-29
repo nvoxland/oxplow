@@ -1591,8 +1591,10 @@ its first deploy here (Startup), which asks for what it declares.
 **The Extension page** (foundation's `extension`, `for: oxplow/extension`,
 the default): one extension as a document. Its About is a list of sentences
 from `extension-facts` (where it comes from, what runs and whether the
-source moved on, on or off, what it may reach in words, what it waits on, a
-one-line Problems summary linking to Extension problems) and a link to its
+source moved on, its permissions as the scope keys written (`sql.read`, each an
+item `{text, hint}` whose hint says what it allows), what its source asks for
+that nobody approved ("Needs your approval to run", the same items; the
+Extension page's Deploy approves them), a one-line Problems summary linking to Extension problems) and a link to its
 running `extension.yaml`; then its pages (each linking to the Definition of
 the running file, `v_page.running_uri`), the other contributions by count,
 what it may reach, its deployments (newest first, Roll Back to This) and the
@@ -1604,11 +1606,10 @@ one that adds permissions asks inline like any deploy.
 
 **The Extensions page** (`extensions`, the launcher's System page; Settings
 has no Extensions area) is a document too: one headed section per extension
-(`viz: sections`, a row per extension from `extension-facts`' `summary`: the heading links to its Extension page, the facts are columns, a Problems line is the body),
+(`viz: sections`, a row per extension from `extension-facts`' `summary`: the heading links to its Extension page, the facts are columns, a Problems line is the body; an extension turned off has " (disabled)" after its name),
 those needing attention first, each fact a sentence from the hidden
 `extension-facts` page — the one place that turns `v_extension`,
-`v_extension_source` and `v_contribution_health` into words (permission ids
-become "may read your project's files"). It has no table and no buttons.
+`v_extension_source` and `v_contribution_health` into words (a scope keeps its key; its explanation is the hover). It has no table and no buttons.
 
 **Extension problems** (`extension-problems`, System) collects every failing or
 disabled contribution and every extension that did not load cleanly, a
