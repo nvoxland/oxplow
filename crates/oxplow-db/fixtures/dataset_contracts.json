@@ -24854,5 +24854,201 @@
       ],
       "key": []
     }
+  },
+  "command": {
+    "1": {
+      "columns": [
+        {
+          "name": "uri",
+          "type": "TEXT",
+          "doc": "`oxplow:oxplow/command?command=<id>`."
+        },
+        {
+          "name": "id",
+          "type": "TEXT",
+          "doc": "The command id on the bus: `oxplow.work_item.create`."
+        },
+        {
+          "name": "extension",
+          "type": "TEXT",
+          "doc": "The enabled extension whose manifest declares it; NULL for a command core registers itself."
+        },
+        {
+          "name": "summary",
+          "type": "TEXT",
+          "doc": "What it does, one sentence or more: what `list_commands` and the launcher show."
+        },
+        {
+          "name": "scope",
+          "type": "TEXT",
+          "doc": "The scope whose operation backs it (`v_scope.id`); NULL for one a script or a provider runs."
+        },
+        {
+          "name": "access",
+          "type": "TEXT",
+          "doc": "What it may touch: `view`, `read`, `record`, `write` or `external`."
+        },
+        {
+          "name": "confirm",
+          "type": "TEXT",
+          "doc": "When a person confirms it: `never`, `always` or `destructive`."
+        },
+        {
+          "name": "confirms",
+          "type": "INT",
+          "doc": "1 when a person confirms it before it runs."
+        },
+        {
+          "name": "undoable",
+          "type": "INT",
+          "doc": "1 when `commands.undo` can reverse a run."
+        },
+        {
+          "name": "ui_label",
+          "type": "TEXT",
+          "doc": "What a person reads in search and menus; NULL when it is not offered to a person by itself."
+        },
+        {
+          "name": "ui_group",
+          "type": "TEXT",
+          "doc": "What search lists it under (`Git`, `Tasks`); NULL for none."
+        }
+      ],
+      "key": [
+        "uri"
+      ]
+    }
+  },
+  "skill": {
+    "1": {
+      "columns": [
+        {
+          "name": "uri",
+          "type": "TEXT",
+          "doc": "Its `v_contribution.uri`."
+        },
+        {
+          "name": "extension",
+          "type": "TEXT",
+          "doc": "The extension that declares it."
+        },
+        {
+          "name": "name",
+          "type": "TEXT",
+          "doc": "Its name, which the agent's runtime files it under."
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "doc": "`skill` (loaded when relevant) or `command` (a slash command a person runs)."
+        },
+        {
+          "name": "description",
+          "type": "TEXT",
+          "doc": "The frontmatter's `description:`."
+        },
+        {
+          "name": "needs",
+          "type": "TEXT",
+          "doc": "What must be active for it to be offered, as a JSON array."
+        }
+      ],
+      "key": [
+        "uri"
+      ]
+    }
+  },
+  "slot": {
+    "1": {
+      "columns": [
+        {
+          "name": "uri",
+          "type": "TEXT",
+          "doc": "Its `v_contribution.uri`."
+        },
+        {
+          "name": "extension",
+          "type": "TEXT",
+          "doc": "The extension that mounts the page."
+        },
+        {
+          "name": "id",
+          "type": "TEXT",
+          "doc": "Its id among the extension's mounts."
+        },
+        {
+          "name": "host",
+          "type": "TEXT",
+          "doc": "The page whose slot it is (`oxplow-foundation/commit`)."
+        },
+        {
+          "name": "slot",
+          "type": "TEXT",
+          "doc": "The slot's name in that page."
+        },
+        {
+          "name": "page",
+          "type": "TEXT",
+          "doc": "The page it shows there (`<extension>/<slug>`)."
+        },
+        {
+          "name": "description",
+          "type": "TEXT",
+          "doc": "What the mount does, in a sentence."
+        }
+      ],
+      "key": [
+        "uri"
+      ]
+    }
+  },
+  "custom_component": {
+    "1": {
+      "columns": [
+        {
+          "name": "uri",
+          "type": "TEXT",
+          "doc": "Its `v_contribution.uri`."
+        },
+        {
+          "name": "extension",
+          "type": "TEXT",
+          "doc": "The extension that declares it."
+        },
+        {
+          "name": "id",
+          "type": "TEXT",
+          "doc": "Its id, which a page's `component` node names."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "What a person calls it; its id when it has no title."
+        },
+        {
+          "name": "description",
+          "type": "TEXT",
+          "doc": "What it is, in a sentence."
+        },
+        {
+          "name": "bundle",
+          "type": "TEXT",
+          "doc": "The folder in the extension that holds its code."
+        },
+        {
+          "name": "commands",
+          "type": "TEXT",
+          "doc": "The commands it may invoke, as a JSON array."
+        },
+        {
+          "name": "sql",
+          "type": "TEXT",
+          "doc": "`read` when it runs its own read-only SQL over the datasets; NULL otherwise."
+        }
+      ],
+      "key": [
+        "uri"
+      ]
+    }
   }
 }

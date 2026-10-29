@@ -52,6 +52,9 @@ pub struct SkillDecl {
     pub file: String,
     /// What it needs active (`work_items`, `work_items.comments`).
     pub needs: Vec<String>,
+    /// The `description:` of its frontmatter: when the agent loads a skill,
+    /// what a command does.
+    pub description: String,
 }
 
 /// A `skills:` entry as the manifest holds it.
@@ -116,6 +119,7 @@ pub(crate) fn parse_skills(
         match problem {
             Some(p) => errors.push(at(file, line, p)),
             None => out.push(SkillDecl {
+                description: description_of(&files.read(&f.file).unwrap_or_default()),
                 name: f.name,
                 kind: f.kind,
                 file: f.file,
@@ -124,6 +128,15 @@ pub(crate) fn parse_skills(
         }
     }
     (out, errors)
+}
+
+/// The frontmatter's `description:` (a skill without one is refused).
+fn description_of(body: &str) -> String {
+    body.strip_prefix("---\n")
+        .and_then(|rest| rest.split_once("\n---"))
+        .and_then(|(front, _)| front.lines().find_map(|l| l.strip_prefix("description:")))
+        .map(|v| v.trim().trim_matches('"').to_string())
+        .unwrap_or_default()
 }
 
 fn well_formed(name: &str) -> bool {
@@ -206,12 +219,14 @@ mod tests {
                     kind: SkillKind::Skill,
                     file: "s/SKILL.md".into(),
                     needs: vec!["work_items".into()],
+                    description: "Work items.".into(),
                 },
                 SkillDecl {
                     name: "work-next".into(),
                     kind: SkillKind::Command,
                     file: "c.md".into(),
                     needs: vec![],
+                    description: "Next.".into(),
                 },
             ]
         );

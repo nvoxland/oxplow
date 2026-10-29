@@ -1076,6 +1076,16 @@ impl CommandBus {
             .collect()
     }
 
+    /// Every registered command's spec, whoever may run it (`v_command`).
+    pub fn all(&self) -> Vec<CommandSpec> {
+        self.commands
+            .read()
+            .commands
+            .values()
+            .map(|c| c.spec.clone())
+            .collect()
+    }
+
     pub fn spec(&self, name: &str) -> Option<CommandSpec> {
         self.commands.read().get(name).map(|c| c.spec.clone())
     }

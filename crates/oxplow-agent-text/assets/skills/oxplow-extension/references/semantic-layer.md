@@ -76,6 +76,11 @@ Carry URIs; never assemble or dissect them:
   extension removed; store the URI anyway, and expect a reader to show it
   as unresolved rather than fail.
 
+`v_command` is every registered command with its summary, scope and whether a
+person confirms it; `v_skill`, `v_slot` and `v_custom_component` describe what
+an extension gives the agent, mounts and draws. Each carries the `uri` that
+`v_contribution` holds, so they join.
+
 ## Publishing datasets
 
 When other pages, extensions or agents should read a shaped set of rows —

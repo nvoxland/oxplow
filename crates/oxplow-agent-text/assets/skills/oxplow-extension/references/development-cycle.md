@@ -14,8 +14,7 @@ edits change nothing on the person's screen until you deploy.
 2. Edit the source. Write as many files as the step needs.
 3. Check it after every edit: `oxplow_validate_extension` (the same report
    as `$OXPLOW_BIN extension check`), then run its fixtures with
-   `$OXPLOW_BIN extension test <name> --only <fixture>` in your terminal
-   until they pass, then the whole extension once.
+   `$OXPLOW_BIN extension test <name>` in your terminal until they pass.
    Both run on a throwaway oxplow — this build's schema, only the data a
    fixture makes, only the extensions yours declares (a fixture adds more with `requires:`) — so they need no
    deploy and nothing in the project's database affects them.
@@ -88,10 +87,9 @@ searches by question; in SQL `v_page` (`uri`, `extension`, `title`,
 they answer and `v_page_param` their params; `v_extension` lists the
 extensions that loaded (`enabled`, `errors`, `warnings`, `deployment`) and
 `v_contribution` what each contributes (count it by `extension` and `kind`).
-A contribution's own name and description are in its kind's dataset: a
-metric's in `v_metric_spec` (`key`), a measure's in `v_measure`, a
-dimension's in `v_dimension`, a resource kind's in `v_resource` (`resource`,
-`label`; it also names each kind's plural label).
+What a contribution is, in words, is in its kind's own dataset, joined on `uri`:
+`v_command`, `v_skill`, `v_slot`, `v_custom_component`, `v_metric_spec`,
+`v_measure`, `v_dimension`, `v_resource` and `v_capability_provider`.
 `oxplow_read { uri: "oxplow:oxplow/page?page=<ext>/<slug>" }` gives one
 page's definition and deployment; **Definition** in a page's ☰ menu, About this page, is
 the same for the person (the running page file, drawn as Definition, a

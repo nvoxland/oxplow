@@ -109,6 +109,12 @@ waiting permissions as `format: items`), with Start Again,
 Repair with the Agent and Start All Stopped. A link from a one-line summary narrows it with the view param
 `#extension=<name>`; Alerts' failing-extension rows link the same way.
 
+What a contribution is, in words, is read from its kind's own dataset, which
+joins `v_contribution` on `uri`: `v_command` (summary, scope, confirmation),
+`v_skill` (the frontmatter description), `v_slot` (a page mount: host, slot,
+page) and `v_custom_component`, all live; the Extension page's contributions
+use them as section bodies.
+
 `v_extension.permissions` is the declaration as JSON (`{}`: baseline);
 `v_extension.pending` is what an undeployed extension waits on a person
 for (the same lines; `[]` when nothing).
