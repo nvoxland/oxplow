@@ -736,6 +736,9 @@ the user guide is `docs/guide/pages.md`.
       (usability.md "Comments are a page's"). Comments name one URI, so
       `true` is the whole declaration.
     - `default`, `pinned` and `accepts` without `for` are a load error.
+    - A page with `for` takes no `category`, `hidden`, `keywords` or `badge`,
+      declares `params: [{ name: uri }]`, and is handed the `content` loader
+      (above, Metadata and Loaders).
     - A renderer is run with the params of the URI it draws: a param it
       declares that the URI carries takes the URI's value (supplied → URI
       → context → default), so a `path` param of an `oxplow/dir` renderer
@@ -2283,10 +2286,15 @@ Where it lives, and what is loaded:
 ### Metadata
 
 - `label` is the tab's name: `{{param.x}}` and `{{row.col}}` (the first
-  loader's first row), filters `|short`, `|basename`, `|url`. Any other
+  authored loader's first row, else `content`'s), filters `|short`, `|basename`, `|url`. Any other
   `{{…}}` is refused (`label_refs`).
 - `category` is the launcher section (`LauncherCategory`); none means the
   page opens only from elsewhere. `hidden` keeps it out of the launcher.
+  A page with `for:` is a resource page, a display mode of its resource:
+  it takes none of `category`, `hidden`, `keywords`, `badge` (load
+  errors) and must declare a `uri` param. It is handed a `content`
+  loader first, configured by `content: { text, max_bytes }`
+  ([pages-and-tabs.md](./pages-and-tabs.md) "Resource pages and standalone pages").
 - `needs: [capability]`: a page whose needs are not met runs nothing.
   Its `PageRun.inactive` (`PageInactive { needs, message }`) says what it
   needs, and the page shows that instead of an error.
@@ -2393,6 +2401,10 @@ digits and `_`, never a dataset's (`v_*`, `m_*`).
 - `page`: another page's loader (`{ page, loader, params }`). Pages nest 8
   deep (`MAX_DEPTH`).
 - `rows`: inline rows, the first row's keys the columns.
+- `content` (never declared): a resource page's first loader, the record its
+  `uri` names; read as `FROM content` / `{ from: content.<col> }`. The name
+  is reserved: no loader or param is called `content`, and a standalone page
+  can't read it.
 
 **Running one** (`pages/runner.rs`, `PageRunner::run`): params resolve as
 above. Loaders run in order. A loader that fails carries its `error` and

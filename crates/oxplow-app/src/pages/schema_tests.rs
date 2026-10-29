@@ -185,10 +185,12 @@ view:
     .unwrap();
     assert_eq!(p.renders, vec!["oxplow/commit".to_string()]);
     assert!(p.default);
-    let Loader::Sql { .. } = &p.loaders[1].loader else {
+    // The system's `content` comes first; the author's follow.
+    assert_eq!(p.loaders[0].name, "content");
+    let Loader::Sql { .. } = &p.loaders[2].loader else {
         panic!()
     };
-    assert_eq!(p.loaders[1].reads_loaders, vec!["change".to_string()]);
+    assert_eq!(p.loaders[2].reads_loaders, vec!["change".to_string()]);
     let NodeKind::Stack { children } = &p.view.kind else {
         panic!()
     };
@@ -632,4 +634,161 @@ fn params_are_checked_on_any_page_and_inline_pages_hold_no_web_page() {
     )
     .expect_err("refused");
     assert!(why.contains("a web page"), "{why}");
+}
+
+const BODY: &str = "view: { viz: table, from: q }\nloaders:\n  q: { rows: [{ a: 1 }] }\n";
+
+/// A page with `for:` is a resource page: the system declares its
+/// `content` loader first, configured by `content:`, reading its `uri`.
+#[test]
+fn a_resource_page_is_handed_a_content_loader_first() {
+    let p = page(&format!(
+        "title: T\nfor: oxplow/file\nparams: [{{ name: uri }}]\n{BODY}"
+    ))
+    .unwrap();
+    assert!(p.is_resource_page());
+    let names: Vec<&str> = p.loaders.iter().map(|l| l.name.as_str()).collect();
+    assert_eq!(names, ["content", "q"]);
+    assert_eq!(
+        p.loaders[0].loader,
+        Loader::Content {
+            text: false,
+            max_bytes: DEFAULT_CONTENT_BYTES
+        }
+    );
+    assert_eq!(p.loaders[0].reads_params, ["uri"]);
+    // "The page's row" is its first authored loader's.
+    assert_eq!(p.first_loader().unwrap().name, "q");
+
+    let p = page(
+        "title: T\nfor: oxplow/file\nparams: [{ name: uri }]\ncontent: { text: true, max_bytes: 4096 }\nview: { viz: table, from: content }\n",
+    )
+    .unwrap();
+    assert_eq!(
+        p.loaders[0].loader,
+        Loader::Content {
+            text: true,
+            max_bytes: 4096
+        }
+    );
+    assert_eq!(p.first_loader().unwrap().name, "content");
+}
+
+/// A later loader reads `content` as a table or through `from:`.
+#[test]
+fn a_resource_pages_loaders_read_content() {
+    let p = page(
+        "title: T\nfor: oxplow/file\nparams: [{ name: uri }]\nloaders:\n  \
+         a: { sql: 'SELECT path FROM content' }\n  \
+         b: { sql: 'SELECT :p AS p', params: { p: { from: content.path } } }\n\
+         view: { viz: table, from: a }\n",
+    )
+    .unwrap();
+    assert_eq!(p.loaders[1].reads_loaders, ["content"]);
+    assert_eq!(p.loaders[2].reads_loaders, ["content"]);
+}
+
+#[test]
+fn a_resource_page_is_never_listed_so_it_takes_no_listing_keys() {
+    for (key, line) in [
+        ("category", "category: Work"),
+        ("hidden", "hidden: true"),
+        ("keywords", "keywords: a b"),
+        ("badge", "badge: { loader: q }"),
+    ] {
+        let why = refused(&format!(
+            "title: T\nfor: oxplow/file\nparams: [{{ name: uri }}]\n{line}\n{BODY}"
+        ));
+        assert!(why.contains(&format!("takes no `{key}`")), "{why}");
+        assert!(why.contains("never listed on its own"), "{why}");
+    }
+    // The same keys are a standalone page's.
+    page(&format!("title: T\ncategory: Work\nkeywords: a\n{BODY}")).unwrap();
+}
+
+#[test]
+fn a_resource_page_declares_the_uri_it_is_given() {
+    let why = refused(&format!("title: T\nfor: oxplow/file\n{BODY}"));
+    assert!(why.contains("declare `params: [{ name: uri }]`"), "{why}");
+    let why = refused(&format!(
+        "title: T\nfor: oxplow/file\nparams: [{{ name: path }}]\n{BODY}"
+    ));
+    assert!(why.contains("declare `params: [{ name: uri }]`"), "{why}");
+}
+
+#[test]
+fn content_is_the_systems_name() {
+    let why = refused(
+        "title: T\nfor: oxplow/file\nparams: [{ name: uri }]\nview: { viz: table, from: content }\nloaders:\n  content: { rows: [{ a: 1 }] }\n",
+    );
+    assert!(
+        why.contains("loader `content`") && why.contains("name it something else"),
+        "{why}"
+    );
+    let why = refused(&format!("title: T\nparams: [{{ name: content }}]\n{BODY}"));
+    assert!(why.contains("param `content`"), "{why}");
+    let why = refused(&format!(
+        "title: T\nfor: oxplow/file\nparams: [{{ name: uri }}, {{ name: content }}]\n{BODY}"
+    ));
+    assert!(why.contains("param `content`"), "{why}");
+}
+
+#[test]
+fn a_standalone_page_has_no_content() {
+    let why = refused("title: T\ncontent: { text: true }\nview: { viz: table, from: q }\nloaders:\n  q: { rows: [{ a: 1 }] }\n");
+    assert!(why.contains("this page has no `for:`"), "{why}");
+    let why = refused("title: T\nloaders:\n  q: { sql: 'SELECT * FROM content' }\nview: { viz: table, from: q }\n");
+    assert!(why.contains("a page with no `for:` has none"), "{why}");
+    let why = refused(
+        "title: T\nloaders:\n  q: { sql: 'SELECT 1 AS a' }\n  r: { sql: 'SELECT :a AS a', params: { a: { from: content.path } } }\nview: { viz: table, from: q }\n",
+    );
+    assert!(why.contains("a page with no `for:` has none"), "{why}");
+    // A column that happens to be called `content` is not the loader.
+    page("title: T\nloaders:\n  q: { sql: 'SELECT content FROM v_thing' }\nview: { viz: table, from: q }\n").unwrap();
+}
+
+#[test]
+fn content_asks_for_a_sane_size() {
+    for bad in ["0", "4194305"] {
+        let why = refused(&format!(
+            "title: T\nfor: oxplow/file\nparams: [{{ name: uri }}]\ncontent: {{ max_bytes: {bad} }}\n{BODY}"
+        ));
+        assert!(why.contains("must be between 1 and"), "{why}");
+    }
+    page(&format!(
+        "title: T\nfor: oxplow/file\nparams: [{{ name: uri }}]\ncontent: {{ text: true, max_bytes: 4194304 }}\n{BODY}"
+    ))
+    .unwrap();
+}
+
+#[test]
+fn a_tab_says_its_label_filled_from_params_and_its_row() {
+    use super::label::tab_label;
+    use oxplow_db::SqlCell;
+    use std::collections::BTreeMap;
+    let p = page(&format!(
+        "title: Thing\nlabel: '{{{{param.path|basename}}}} {{{{row.n}}}}'\nparams: [{{ name: path }}]\n{BODY}"
+    ))
+    .unwrap();
+    let params = BTreeMap::from([("path".to_string(), SqlCell::Text("src/a/b.rs".into()))]);
+    let row = BTreeMap::from([("n".to_string(), SqlCell::Int(3))]);
+    assert_eq!(tab_label(&p, &params, Some(&row)), "b.rs 3");
+    // It names the row before there is one: the title.
+    assert_eq!(tab_label(&p, &params, None), "Thing");
+    let p = page(&format!(
+        "title: Thing\nlabel: '{{{{param.sha|short}}}}'\nparams: [{{ name: sha }}]\n{BODY}"
+    ))
+    .unwrap();
+    let params = BTreeMap::from([("sha".to_string(), SqlCell::Text("abcdef0123".into()))]);
+    assert_eq!(tab_label(&p, &params, None), "abcdef0");
+    assert_eq!(tab_label(&p, &BTreeMap::new(), None), "Thing");
+    let p = page(&format!(
+        "title: Web\nlabel: '{{{{param.u|url}}}}'\nparams: [{{ name: u }}]\n{BODY}"
+    ))
+    .unwrap();
+    let params = BTreeMap::from([(
+        "u".to_string(),
+        SqlCell::Text("https://example.com/a/b".into()),
+    )]);
+    assert_eq!(tab_label(&p, &params, None), "example.com/a/b");
 }

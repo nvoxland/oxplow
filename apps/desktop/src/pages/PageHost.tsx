@@ -43,6 +43,7 @@ import { SaveViewForm } from "./SaveViewForm.js";
 import { definitionUri } from "./viewActions.js";
 import { PageViewContext } from "./PageViewContext.js";
 import { usePageReads } from "./pageReads.js";
+import { firstLoader } from "./firstLoader.js";
 import { recordOpError } from "../opErrors.js";
 import { HostedViewContext, useHostedView } from "../viz/hostedView.js";
 
@@ -118,8 +119,8 @@ export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, re
   const actions = useVizActions(target, streamId, pageRunner);
   // One that reads the page's row (`when`, `{{row.*}}`) reads the first
   // loader's one row, as the daemon does when it runs.
-  const firstLoader = page?.loaders[0]?.name;
-  const pageRows = (firstLoader ? run?.loaders[firstLoader]?.result : undefined) ?? NO_ROWS;
+  const rowLoader = page ? firstLoader(page)?.name : undefined;
+  const pageRows = (rowLoader ? run?.loaders[rowLoader]?.result : undefined) ?? NO_ROWS;
   const offered = (page?.actions ?? []).filter((a) => offeredWholePage(a, pageRows));
   const reads = usePageReads();
   const [copied, setCopied] = useState(false);

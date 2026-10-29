@@ -87,8 +87,7 @@ fn page_row(
     }
     let first = run
         .page
-        .loaders
-        .first()
+        .first_loader()
         .and_then(|l| run.loaders.get(&l.name))
         .map(|l| &l.result);
     match first.map(|r| (r, r.rows.as_slice())) {
@@ -262,8 +261,7 @@ async fn page_rows(
     let name = match loader {
         Some(l) => l.to_string(),
         None => page
-            .loaders
-            .first()
+            .first_loader()
             .map(|l| l.name.clone())
             .ok_or_else(|| invalid("/source", format!("page `{page_id}` has no loader")))?,
     };

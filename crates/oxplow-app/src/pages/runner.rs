@@ -114,6 +114,8 @@ pub struct RunNode {
 
 /// Runs pages over one oxplow's data.
 pub struct PageRunner<'a> {
+    /// The services a `content` loader reads files and resources through.
+    pub svc: &'a crate::Services,
     pub sql: crate::sql_gateway::SqlGateway,
     pub catalog: &'a crate::extension::extension_catalog::ExtensionCatalog,
     pub commands: &'a crate::commands::CommandBus,
@@ -153,6 +155,7 @@ impl<'a> PageRunner<'a> {
     /// The runner over `svc`'s data, finding pages in its project.
     pub fn of(svc: &'a crate::Services) -> Self {
         PageRunner {
+            svc,
             sql: svc.sql.clone(),
             catalog: &svc.extension_catalog,
             commands: svc.commands.as_ref(),
@@ -348,7 +351,7 @@ impl<'a> PageRunner<'a> {
                     .badge
                     .as_ref()
                     .map(|b| b.loader.as_str())
-                    .or_else(|| page.loaders.first().map(|l| l.name.as_str()))?;
+                    .or_else(|| page.first_loader().map(|l| l.name.as_str()))?;
                 Some(evaluate_alert(a, &loaders.get(watched)?.result))
             });
             Ok(PageRun {
@@ -407,6 +410,20 @@ impl<'a> PageRunner<'a> {
                 decl.reads_params.contains(k) || matches!(decl.loader, Loader::Page { .. })
             })
             .collect();
+        // A resource's content is keyed by the resource (its identity), not
+        // by the view it is shown with.
+        let identity = match (&decl.loader, params.get("uri")) {
+            (Loader::Content { .. }, Some(SqlCell::Text(uri))) => Some(SqlCell::Text(
+                oxplow_domain::uri::OxplowUri::parse(uri.trim())
+                    .map(|u| u.identity())
+                    .unwrap_or_else(|_| uri.clone()),
+            )),
+            _ => None,
+        };
+        let mut bound = bound;
+        if let (Some((name, _)), Some(identity)) = (params.get_key_value("uri"), &identity) {
+            bound.insert(name, identity);
+        }
         let key = key_of(&decl.loader, &bound, stream, &inputs);
         if let Some(hit) = memo.get(&key) {
             return hit.clone();
@@ -511,6 +528,22 @@ impl<'a> PageRunner<'a> {
                 }
             }
             Loader::Rows { columns, rows } => Ok(table(columns.clone(), rows.clone())),
+            Loader::Content { text, max_bytes } => match params.get("uri") {
+                Some(SqlCell::Text(uri)) => {
+                    super::content::resolve_content(
+                        self.svc,
+                        uri,
+                        stream,
+                        super::content::ContentOpts {
+                            text: *text,
+                            max_bytes: *max_bytes,
+                        },
+                    )
+                    .await
+                }
+                // Nothing to look at: the page was opened with no URI.
+                _ => Ok(table(vec!["uri".into()], Vec::new())),
+            },
         };
         // Bound each memo entry too, before it is cloned into the cache.
         // The shared run budget separately charges every retained copy.

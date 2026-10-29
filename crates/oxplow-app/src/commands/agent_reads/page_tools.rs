@@ -185,6 +185,11 @@ fn find_pages(svc: &Services, p: &FindPageInput) -> Result<Value, CommandError> 
     let mut scored: Vec<(usize, Value)> = Vec::new();
     for ext in extensions.iter().filter(|e| e.enabled) {
         for page in &ext.page_files {
+            // A resource page is a display mode of its resource: found
+            // through `about`, never listed on its own.
+            if about.is_none() && page.is_resource_page() {
+                continue;
+            }
             if let Some(kind) = &about {
                 let shows = page.renders.iter().any(|r| r == kind)
                     || page
@@ -636,7 +641,8 @@ struct DefinitionRow {
 }
 
 /// What a loader is and what it runs: its SQL, its command, the page
-/// loader it takes (`<page>#<loader>`), or nothing for inline rows.
+/// loader it takes (`<page>#<loader>`), or nothing for inline rows and a
+/// resource page's `content`.
 fn loader_source(loader: &crate::pages::schema::Loader) -> (&'static str, Option<String>) {
     use crate::pages::schema::Loader;
     match loader {
@@ -644,6 +650,7 @@ fn loader_source(loader: &crate::pages::schema::Loader) -> (&'static str, Option
         Loader::Command { command, .. } => ("command", Some(command.clone())),
         Loader::Page { page, loader, .. } => ("page", Some(format!("{page}#{loader}"))),
         Loader::Rows { .. } => ("rows", None),
+        Loader::Content { .. } => ("content", None),
     }
 }
 
@@ -1127,7 +1134,9 @@ mod tests {
             ),
             (
                 "no-uri-param",
-                format!("title: Plain\nfor: oxplow/commit\n{BODY}"),
+                format!(
+                    "title: Plain\nanswers:\n  - {{ question: \"Which is plain?\", about: oxplow/commit }}\n{BODY}"
+                ),
             ),
             (
                 "elsewhere",
@@ -1165,6 +1174,31 @@ mod tests {
         .await;
         assert_eq!(ids(&both), ["rank/answers-about"], "{both}");
         assert_eq!(both["pages"].as_array().unwrap().len(), 1, "{both}");
+    }
+
+    /// A resource page is a display mode of its resource: `find` lists it
+    /// only for the resource asked about, never for a question alone.
+    #[tokio::test]
+    async fn find_without_about_never_lists_a_resource_page() {
+        let (_dir, svc) = ranked(&[
+            (
+                "mode",
+                format!(
+                    "title: Gadget mode\nfor: oxplow/commit\nparams: [{{ name: uri }}]\n{BODY}"
+                ),
+            ),
+            ("standalone", format!("title: Gadget list\n{BODY}")),
+        ])
+        .await;
+        let found = run(&svc, "oxplow.page.find", json!({ "question": "gadget" })).await;
+        assert_eq!(ids(&found), ["rank/standalone"], "{found}");
+        let about = run(
+            &svc,
+            "oxplow.page.find",
+            json!({ "about": "oxplow:oxplow/commit?sha=abc1234" }),
+        )
+        .await;
+        assert_eq!(ids(&about), ["rank/mode"], "{about}");
     }
 
     #[tokio::test]

@@ -3354,7 +3354,18 @@ items: string | null } |
 /**  Another page's loader, run with `params`. */
 { kind: "page"; page: string; loader: string; params: { [key in string]: ArgSource } } |
 /**  Rows written inline. */
-{ kind: "rows"; columns: string[]; rows: SqlCell[][] };
+{ kind: "rows"; columns: string[]; rows: SqlCell[][] } |
+/**
+ *  What the system knows of the resource a `for:` page shows: the
+ *  record its `uri` param names (`pages/content.rs`). Never declared by
+ *  an author: it is the first loader of every resource page, named
+ *  [`CONTENT`], configured by the page's `content:` key.
+ */
+{ kind: "content";
+/**  Read a file's text too (columns `text`, `truncated`). */
+text: boolean;
+/**  The most bytes of a file's text read. */
+max_bytes: number };
 
 /**  One of a page's named sources of rows. */
 export type LoaderDecl = {

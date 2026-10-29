@@ -25,6 +25,7 @@ const file = (extension: string, slug: string, over: Record<string, unknown> = {
   category: null,
   keywords: null,
   hidden: false,
+  for: [],
   params: [],
   badge: null,
   view: { id: "v", kind: "markdown", text: "" },
@@ -46,6 +47,11 @@ test("the launcher lists every page file with a category that isn't hidden, by i
   expect(rows.map((r) => r[0])).not.toContain("diff");
   expect(rows.map((r) => r[0])).not.toContain("secret");
   expect(out.find((p) => p.label === "Tasks")?.keywords).toContain("dashboard");
+});
+
+test("the launcher never lists a resource page (a page with `for:`), though it has a category", () => {
+  const out = launcherPages([ext({ name: "x", pageFiles: [file("x", "pr", { title: "PR", category: "Work", for: ["x/pr"] })] } as never)]);
+  expect(out.map((p) => p.label)).not.toContain("PR");
 });
 
 test("a page file's badge count is its badge, and zero shows none", () => {

@@ -148,6 +148,19 @@ view: { viz: number, from: a }
 "#,
     ),
     (
+        "file-look",
+        r#"
+title: File Look
+for: oxplow/file
+params: [{ name: uri }]
+content: { text: true, max_bytes: 8 }
+loaders:
+  shown: { sql: "SELECT path, text, truncated FROM content" }
+  bare: { sql: "SELECT count(*) AS n FROM content" }
+view: { viz: table, from: shown }
+"#,
+    ),
+    (
         "needy",
         r#"
 title: Needy

@@ -8,6 +8,7 @@
  * Nothing here knows a resource: the declarations say it all.
  */
 import type { Page, PageRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
+import { firstLoader } from "./firstLoader.js";
 import { formatUri, parseUri, typeOf } from "../uri/uri.js";
 
 /** The view key that names a URI's renderer (`<extension>/<page>`). */
@@ -152,7 +153,7 @@ export function tabLabel(
 /** The row a page file's `{{row.*}}` reads: its first declared loader's
  *  first row, by column; null before that loader has a row. */
 export function labelRow(run: PageRun): Record<string, SqlCell> | null {
-  const first = run.page.loaders[0]?.name;
+  const first = firstLoader(run.page)?.name;
   const result = first ? run.loaders[first]?.result : undefined;
   const row = result?.rows[0];
   if (!result || !row) return null;

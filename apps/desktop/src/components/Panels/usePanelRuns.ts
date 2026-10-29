@@ -11,6 +11,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { streamRowId, threadRowId } from "../../modelIds.js";
 import { windowPageRuns, type PageRuns } from "../../pageRuns.js";
+import { firstLoader } from "../../pages/firstLoader.js";
 import { pageFileUri } from "../../pages/pageFiles.js";
 import type { Extension, ExtensionPanel, ChoiceOption, PageRun, PanelScope, SqlCell } from "../../tauri-bridge/generated/bindings.js";
 
@@ -42,7 +43,7 @@ export function pageCount(count: PageRun | null): number | null {
     const n = typeof count.badge === "number" ? count.badge : Number(count.badge);
     return Number.isFinite(n) ? n : null;
   }
-  const first = count.page.loaders[0]?.name;
+  const first = firstLoader(count.page)?.name;
   const result = first ? count.loaders[first]?.result : undefined;
   return result ? result.rows.length : null;
 }

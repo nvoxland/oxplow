@@ -147,6 +147,35 @@ async fn a_page_whose_needs_are_unmet_says_so_and_runs_nothing() {
     assert_eq!(ints(&r, "q"), [1]);
 }
 
+/// A resource page reads the record its URI names as `FROM content`, run
+/// before its own loaders; a URI that names nothing gives no rows.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_resource_page_reads_its_content() {
+    let (dir, svc) = fixture().await;
+    std::fs::write(dir.path().join("notes.txt"), "0123456789").unwrap();
+    let uri = |path: &str| SqlCell::Text(format!("oxplow:oxplow/file?path={path}"));
+    let r = run(&svc, "acme/file-look", &[("uri", uri("notes.txt"))]).await;
+    for name in ["content", "shown", "bare"] {
+        assert_eq!(r.loaders[name].error, None, "{name}");
+    }
+    assert_eq!(
+        r.loaders["shown"].result.rows,
+        [[
+            SqlCell::Text("notes.txt".into()),
+            SqlCell::Text("01234567".into()),
+            SqlCell::Int(1)
+        ]]
+    );
+    let r = run(&svc, "acme/file-look", &[("uri", uri("gone.txt"))]).await;
+    assert_eq!(r.loaders["shown"].error, None);
+    assert!(r.loaders["shown"].result.rows.is_empty());
+    assert_eq!(ints(&r, "bare"), [0]);
+    // Opened with no URI there is nothing to read.
+    let r = run(&svc, "acme/file-look", &[]).await;
+    assert_eq!(r.loaders["content"].error, None);
+    assert!(r.loaders["content"].result.rows.is_empty());
+}
+
 #[tokio::test]
 async fn an_unknown_param_is_refused() {
     let (_dir, svc) = fixture().await;

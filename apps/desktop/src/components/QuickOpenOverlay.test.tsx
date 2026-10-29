@@ -25,6 +25,7 @@ mock.module("../api.js", () => ({
           category: "Work",
           keywords: null,
           hidden: false,
+          for: [],
           params: [],
           badge: null,
           view: { id: "v", kind: "markdown", text: "" },

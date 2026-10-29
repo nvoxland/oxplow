@@ -511,8 +511,8 @@ resources:
         write(
             root,
             ".oxplow/extensions/acme/pages/pr.yaml",
-            "title: Pull request\ncategory: Work\nfor: acme/pr\ndefault: true\n\
-             params: [{ name: id }]\n\
+            "title: Pull request\nfor: acme/pr\ndefault: true\n\
+             params: [{ name: uri }, { name: id }]\n\
              loaders:\n  open: { sql: \"SELECT 1 AS n\" }\nview: { viz: table, from: open }\n",
         );
     }

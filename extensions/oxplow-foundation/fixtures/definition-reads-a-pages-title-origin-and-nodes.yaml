@@ -30,6 +30,7 @@ expect:
         - { name: stream_id }
     loaders:
       rows:
+        - { name: content, kind: content }
         - { name: row, kind: sql }
         - { name: detail, kind: sql }
         - { name: files, kind: sql, uses: row }

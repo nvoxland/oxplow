@@ -283,8 +283,7 @@ async fn owned_row(
     let vocabulary = svc.vocabulary.current();
     let view = vocabulary
         .resources
-        .get(uri.resource())
-        .and_then(|decl| decl.resolve.clone())
+        .resolving_dataset(uri.resource())
         .ok_or_else(|| {
             ReadError::Invalid(format!(
                 "no dataset holds `{}` URIs; `oxplow_query_sql` over `v_resource` lists the resources and what resolves each",

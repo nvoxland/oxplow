@@ -227,6 +227,12 @@ of work items, commits and efforts, a file's text at its `rev` (its
 `#lines=` view), an event's or model call's body (`#part=`), a page's
 definition.
 
+A resource page (`for:`) is handed the same record as its first loader,
+`content` (`pages/content.rs::resolve_content`): a file's `stat` row (text on
+request), the `resolve` dataset's row, or `{ uri }` for any other resource.
+`ResourceRegistry::resolving_dataset` is the one lookup of a resource's
+`resolve` dataset that `ref_read` and `content` share.
+
 `link_check` checks a wikilink's URI against its resource's `resolve`
 dataset; `symbol_resolve` finds a symbol now (`v_symbol`) or at its `rev`.
 

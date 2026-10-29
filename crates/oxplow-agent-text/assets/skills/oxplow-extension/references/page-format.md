@@ -59,11 +59,13 @@ examples.
 ## Metadata
 
 - `title` (required), `description`, `label` (the tab's name:
-  `{{param.x}}`, `{{row.col}}` of the first loader's first row; filters
+  `{{param.x}}`, `{{row.col}}` of the first loader's first row (a `for:`
+  page's first loader is the one you declare first, not `content`); filters
   `|short`, `|basename`, `|url`), `icon`, `category` (the launcher
   section: `Work`, `Code`, `Git`, `Activity`, `Knowledge`, `Data`,
   `Dashboards`, `System`; none means opened only from elsewhere),
-  `keywords`.
+  `keywords`. (A page with `for:` takes none of `category`, `hidden`,
+  `keywords` or `badge`: see "Renderers".)
 - `hidden: true`: not in the launcher (a drill-down, an embedded page).
   `refresh: true`: a Refresh button, for pages reading outside oxplow.
   `comments: true`: the person may comment on its text. `needs:
@@ -101,8 +103,24 @@ looking at.** Don't hardcode ids.
 ## Renderers
 
 `for: oxplow/commit` (or a list; your own `<extension>/<name>`, another
-extension's, or `https`/`http`) makes the page the one that draws that kind
-of URI; it has no launcher entry unless it has a `category`. `accepts: {
+extension's, or `https`/`http`) makes the page a **resource page**: a
+display mode of that kind of URI (a commit, a file), opened from the
+resource and never listed on its own. So it takes no `category`, `hidden`,
+`keywords` or `badge`, and it must declare `params: [{ name: uri }]` (the
+URI it shows). A page with no `for:` is **standalone**: its own loaders,
+listed by the launcher and search.
+
+The system hands a resource page the record its URI names, as a loader
+called `content` that you never declare. Read it as `FROM content` or `{
+from: content.<col> }`; do not query for what the page renders. For a file
+(`oxplow/file`) it is one row, `uri, path, filesystem, rev, kind, size,
+modified_at, is_text, language`; for a resource a dataset resolves (a
+commit, a work item) it is that dataset's row; for any other it is `{ uri }`.
+`content: { text: true, max_bytes: 262144 }` in the page also reads a file's
+text (`text`, `truncated`; `text` is NULL for a binary file; `max_bytes` at
+most 4 MiB, default 64 KiB). No such file or row: `content` has no rows.
+`content` is reserved: no loader or param of yours is named that, and a
+standalone page can't read it. `accepts: {
 <param>: present | absent | <anchored pattern> }` limits it to URIs whose
 params fit; `default: true` (only for a resource your extension declares)
 makes it the page a plain open uses; `pinned: true` pins its tabs. Params

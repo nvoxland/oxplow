@@ -7,6 +7,7 @@
 import { createContext, useContext } from "react";
 
 import { unwrapResult } from "../api.js";
+import { firstLoader } from "./firstLoader.js";
 import type { OptionsSource } from "../kit/ParamControls.js";
 import { commands, type Page, type PageRun, type SqlCell, type SqlQueryResult } from "../tauri-bridge/generated/bindings.js";
 
@@ -48,7 +49,7 @@ export function declaredParams(page: Pick<Page, "params">, values: Record<string
 /** The loader a ref names in `run` (none named: its page's first
  *  declared loader), or null when the run has no such loader. */
 export function namedLoader(run: PageRun, loader: string | null): { name: string; result: SqlQueryResult | null; error: string | null } | null {
-  const name = loader ?? run.page.loaders[0]?.name ?? null;
+  const name = loader ?? firstLoader(run.page)?.name ?? null;
   if (name === null) return null;
   const got = run.loaders[name];
   if (!got) return null;

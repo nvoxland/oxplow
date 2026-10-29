@@ -304,7 +304,7 @@ async fn examples(shared: &Arc<Host>, ext: &Extension, report: &mut TestReport) 
         {
             report.errors.push(format!(
                 "{shown}:1: `{key}` isn't a fixture key — fix: a fixture is `given` (the steps \
-                 first), `when` (what it does), `expect`, `steps` (a scenario), `view`, `model` and `requires` (more extensions to turn on)"
+                 first), `when` (what it does), `expect`, `steps` (a scenario), `view`, `model`, `temp` (files on `oxplow:temp`) and `requires` (more extensions to turn on)"
             ));
             continue;
         }
@@ -416,8 +416,8 @@ fn side_by_side() -> usize {
 }
 
 /// The keys of a fixture file.
-const FIXTURE_KEYS: [&str; 7] = [
-    "requires", "given", "when", "expect", "steps", "view", "model",
+const FIXTURE_KEYS: [&str; 8] = [
+    "requires", "given", "when", "expect", "steps", "view", "model", "temp",
 ];
 
 /// An example's fixture, owned, so it can run on a task of its own.
@@ -431,6 +431,7 @@ struct Fixture {
     steps: Option<Value>,
     view: Value,
     model: Value,
+    temp: Value,
     /// The extensions it turns on beyond the one tested.
     requires: Vec<String>,
 }
@@ -446,6 +447,7 @@ impl Fixture {
             steps: doc.get("steps").cloned(),
             view: doc.get("view").cloned().unwrap_or(Value::Null),
             model: doc.get("model").cloned().unwrap_or(Value::Null),
+            temp: doc.get("temp").cloned().unwrap_or(Value::Null),
             requires: doc
                 .get("requires")
                 .and_then(Value::as_array)
@@ -466,6 +468,7 @@ impl Fixture {
             steps: self.steps.clone(),
             view: self.view.clone(),
             model: self.model.clone(),
+            temp: self.temp.clone(),
         }
     }
 }
@@ -487,6 +490,10 @@ async fn run_example(host: &Host, ext: &Extension, ex: &Example<'_>, report: &mu
     report.ran.push(format!("example {}", ex.name));
     match model_replies(ex, report).map(|replies| host.answer_with(replies)) {
         Some(Ok(())) => {
+            if !seed_temp(host, ex, report).await {
+                report.finish_case(format!("example {}", ex.name), before, started);
+                return;
+            }
             if ex.when.get("page").is_some() {
                 dispatch(host, ext, ex, report).await;
             } else {
@@ -499,6 +506,37 @@ async fn run_example(host: &Host, ext: &Extension, ex: &Example<'_>, report: &mu
         None => {}
     }
     report.finish_case(format!("example {}", ex.name), before, started);
+}
+
+/// The example's `temp: { <name>: <text> }`: each written to `oxplow:temp`
+/// (a scratch file a page reads as `oxplow:oxplow/file?path=<name>&filesystem=oxplow:temp`).
+/// `false`, with the error reported, when it isn't that shape or a name is
+/// refused.
+async fn seed_temp(host: &Host, ex: &Example<'_>, report: &mut TestReport) -> bool {
+    if ex.temp.is_null() {
+        return true;
+    }
+    let files = match serde_json::from_value::<std::collections::BTreeMap<String, String>>(
+        ex.temp.clone(),
+    ) {
+        Ok(files) => files,
+        Err(e) => {
+            report.errors.push(format!(
+                "{}:1: `temp` maps each file name to its text — fix: `temp: {{ view-1.yaml: \"title: One\" }}` ({e})",
+                ex.shown
+            ));
+            return false;
+        }
+    };
+    for (name, text) in files {
+        if let Err(e) = host.svc.temp.put(&name, text.as_bytes()).await {
+            report
+                .errors
+                .push(format!("{}:1: `temp.{name}`: {e}", ex.shown));
+            return false;
+        }
+    }
+    true
 }
 
 /// A fixture that isn't a page's, run as [`run_example`] says.
@@ -684,7 +722,7 @@ const KINDS: &[Kind] = &[
     Kind {
         key: "page",
         when: "{ page: <slug | ext/slug>, params? }",
-        expect: "{ loaders?, nodes?, text?, alert?, badge?, inactive?, actions? }",
+        expect: "{ loaders?, nodes?, text?, alert?, badge?, label?, inactive?, actions? }",
     },
     Kind {
         key: "form",
@@ -3176,6 +3214,9 @@ struct Example<'a> {
     /// What the fixture model answers its model calls with (`model: {
     /// replies }`).
     model: Value,
+    /// Files on `oxplow:temp`, made before the example runs (`temp: { <name>:
+    /// <text> }`).
+    temp: Value,
 }
 
 /// Loader `name` of a run: its own, or — `<embed>/<loader>` — one of the
@@ -3343,9 +3384,11 @@ async fn run_page(
 }
 
 /// The example's `view: { stream?, thread? }` (`str1`, `thr1` or their
-/// numbers) as the context its page runs in; `None`, with the error
+/// numbers) as the context its page runs in — the project's first stream
+/// when it names none, so a page that binds `stream_id` needs no param; `None`, with the error
 /// reported, when it isn't that shape.
-fn view_context(
+async fn view_context(
+    host: &Host,
     ex: &Example<'_>,
     report: &mut TestReport,
 ) -> Option<oxplow_app::pages::spec::ViewContext> {
@@ -3375,7 +3418,12 @@ fn view_context(
         }),
     ) {
         (Ok(stream_id), Ok(thread_id)) => Some(oxplow_app::pages::spec::ViewContext {
-            stream_id,
+            // A page is viewed from the project's first stream unless the
+            // fixture says another.
+            stream_id: match stream_id {
+                Some(id) => Some(id),
+                None => first_stream(host).await.ok().map(|s| s.value()),
+            },
             thread_id,
             active: None,
         }),
@@ -3396,7 +3444,7 @@ fn view_context(
 /// example's, and `bind` to keep a value of the run) runs the page again
 /// and checks it. `expect: { loaders?: { <name>: { rows: n | $any | [ {
 /// col: val } | [ val, … ] ], columns? } }, nodes?: [{ id, kind?, actions?
-/// }], text?, alert?, badge?, inactive?, actions? }`. A row map matches when
+/// }], text?, alert?, badge?, label?, inactive?, actions? }`. A row map matches when
 /// every column it names equals; a row list matches the loader's rows in
 /// order. Anything may use what was bound (`$name.path`).
 async fn page_example(
@@ -3408,7 +3456,7 @@ async fn page_example(
 ) {
     let shown = ex.shown;
     let mut binds = Binds::default();
-    let Some(ctx) = view_context(ex, report) else {
+    let Some(ctx) = view_context(host, ex, report).await else {
         return;
     };
     if !ex.given.is_null()
@@ -3641,7 +3689,7 @@ async fn sql_example(host: &Host, ex: &Example<'_>, sql: &str, report: &mut Test
         Ok(page) => page,
         Err(e) => return report.errors.push(format!("{shown}:1: the query: {e}")),
     };
-    let Some(ctx) = view_context(ex, report) else {
+    let Some(ctx) = view_context(host, ex, report).await else {
         return;
     };
     let at = PageAt {
@@ -3881,6 +3929,7 @@ impl PageAt<'_> {
         let parts = [
             ("alert", json!(run.alert)),
             ("badge", json!(run.badge)),
+            ("label", json!(oxplow_app::pages::label::run_label(&run))),
             ("inactive", json!(run.inactive)),
             ("actions", Value::Null),
         ];
@@ -7508,7 +7557,7 @@ resources:
         write(
             root,
             ".oxplow/extensions/acme/pages/pr.yaml",
-            "title: Pull request\ncategory: Work\nfor: acme/pr\ndefault: true\nparams: [{ name: id }]\n\
+            "title: Pull request\nfor: acme/pr\ndefault: true\nparams: [{ name: uri }, { name: id }]\n\
              loaders:\n  n: { sql: \"SELECT 1 AS n\" }\nview: { viz: table, from: n }\n",
         );
         write(

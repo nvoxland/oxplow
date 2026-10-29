@@ -1065,7 +1065,7 @@ pub async fn run_as_page_in(
                 _ => None,
             })
         })
-        .or_else(|| page.loaders.first().map(|l| l.name.clone()))
+        .or_else(|| page.first_loader().map(|l| l.name.clone()))
         .expect("a loader");
     // A loader only a switch's child shows runs when the switch's param
     // names that child.

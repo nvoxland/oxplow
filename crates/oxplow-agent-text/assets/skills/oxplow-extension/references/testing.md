@@ -77,7 +77,7 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
 <!-- fixture-kinds -->
 | kind | `when` | `expect` |
 |---|---|---|
-| page | `{ page: <slug \| ext/slug>, params? }` | `{ loaders?, nodes?, text?, alert?, badge?, inactive?, actions? }` |
+| page | `{ page: <slug \| ext/slug>, params? }` | `{ loaders?, nodes?, text?, alert?, badge?, label?, inactive?, actions? }` |
 | form | `{ form: <page>, node?, params? }` | `{ values?, fixed?, fields? }` |
 | job | `{ job: <id>, intentKey, request, cancel?, setup?, rows? }` | `{ state, result?, text?, toolCalls?, output?, effects?, commands?, pages? }` |
 | component | `{ component: <id>, items?, invokes?: [{ command, input? }] }` | `{ invokes: [{ ok, result? } \| { ok: false, refused }] }` |
@@ -106,7 +106,15 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
      compared on the fields they name, spelled as in the page YAML:
      `{ id: rename, form: true, one_row: true }`).
      `view: { stream: str1, thread: thr1 }` runs it from that stream and
-     thread. `bind: <name>` on a step keeps the command's result, and
+     thread; with none, it runs from the project's first stream, so a page
+     that declares `stream_id` gets it without a param.
+     `expect.label` is the text of the page's tab (its `label` filled from
+     the params and the first authored loader's row, else its title).
+     `temp: { <name>: <text> }` (a fixture key beside `given`) writes those
+     files to `oxplow:temp` before the fixture runs: a resource page for
+     `oxplow/file` is tested by opening
+     `oxplow:oxplow/file?path=<name>&filesystem=oxplow:temp` as its `uri`
+     param (`expect.loaders.content` is the record it was handed). `bind: <name>` on a step keeps the command's result, and
      `$name.uri` (any `.key` / `[n]` path) in a later input, `params` or
      `expect` is that value. `confirmed: true` runs a command that asks a
      person first. Example:

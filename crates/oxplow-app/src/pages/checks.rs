@@ -139,7 +139,8 @@ const MAX_COLUMNS: usize = 8;
 /// are filled in for it.
 pub fn launcher_unfilled_params(page: &Page) -> Vec<String> {
     use crate::pages::spec::ParamRole;
-    if page.hidden || page.category.is_none() {
+    // A resource page (`for:`) is opened from its resource, never the launcher.
+    if page.hidden || page.category.is_none() || page.is_resource_page() {
         return Vec::new();
     }
     page.params
@@ -244,9 +245,9 @@ pub fn layout_warnings(page: &Page) -> Vec<String> {
                 || range
                     && (read.contains(&format!("{}_from", p.name))
                         || read.contains(&format!("{}_to", p.name)))
-                // A renderer is run with the URI it shows and the stream and
-                // thread it is shown in: the host's to give.
-                || renderer && ["uri", "stream_id", "thread_id"].contains(&p.name.as_str());
+                // A renderer is run with the stream and thread it is shown in:
+                // the host's to give (its `uri` is read by `content`).
+                || renderer && ["stream_id", "thread_id"].contains(&p.name.as_str());
             if !is_read {
                 out.push(format!(
                     "param `{0}` isn't read by any loader of the page — remove it, or read it as `:{0}`",

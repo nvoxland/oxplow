@@ -7,6 +7,11 @@ still shows. A loader no visible node shows still runs when a later loader,
 an embed or the badge uses it; one only a hidden `switch` child shows does
 not.
 
+A page with `for:` (a resource page, `page-format.md` "Renderers") also has
+one loader you never write: `content`, always first, the record its `uri`
+names. Read it like any earlier loader (`SELECT … FROM content`, `{ from:
+content.path }`); the name is reserved.
+
 A loader has exactly one of `sql`, `command`, `page` or `rows`, plus
 optional `columns` (keys, labels and formats its nodes default to) and
 `empty` (text when it has no rows).

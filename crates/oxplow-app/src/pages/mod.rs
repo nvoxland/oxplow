@@ -4,6 +4,8 @@
 
 pub mod actions;
 pub mod checks;
+pub mod content;
+pub mod label;
 pub mod open_runs;
 pub mod runner;
 pub mod schema;
@@ -12,6 +14,8 @@ pub mod text;
 
 #[cfg(test)]
 mod actions_tests;
+#[cfg(test)]
+mod content_tests;
 #[cfg(test)]
 mod doc_examples_tests;
 #[cfg(test)]

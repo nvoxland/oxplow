@@ -24,6 +24,7 @@ import type { TabRef } from "../tabs/tabState.js";
 import { remoteBaseUrl } from "../tauri-bridge/transport.js";
 import type { Node, PageRun } from "../tauri-bridge/generated/bindings.js";
 import { NodeRegistryContext, PageTree } from "./PageTree.js";
+import { firstLoader } from "./firstLoader.js";
 
 /** How long a frame may take to say `ready`. */
 const READY_MS = 3000;
@@ -234,7 +235,7 @@ export function useInlineView(store: PageRuns, streamId: string | null, threadId
         handle.close();
         throw Object.assign(new Error(state.error ?? "The page couldn't run."), { code: "INVALID" });
       }
-      const name = state.run.page.loaders[0]?.name ?? null;
+      const name = firstLoader(state.run.page)?.name ?? null;
       const first = name !== null ? state.run.loaders[name] : undefined;
       if (name !== null && first?.error) {
         handle.close();

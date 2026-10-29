@@ -11,13 +11,19 @@ import { mergeDirectory } from "../viz/vizModel.js";
 import { refFromTabId, withResourceParams } from "../tabs/pageRefs.js";
 import type { PageDirectoryEntry } from "./RailHud/sections.js";
 
+/** A page the launcher lists: standalone (a page with `for:` is a display mode
+ *  of its resource, opened from the resource), with a category, not hidden. */
+function inLauncher(page: Page): boolean {
+  return page.for.length === 0 && !!page.category && !page.hidden;
+}
+
 export function launcherPages(extensions: Extension[], counts: Record<string, number> = {}): PageDirectoryEntry[] {
   const pages: PageDirectoryEntry[] = [];
   const listed = new Set<string>();
   for (const ext of extensions) {
     if (!ext.enabled) continue;
     for (const page of ext.pageFiles ?? []) {
-      const ref = page.category && !page.hidden ? refFromTabId(pageFileUri(extensions, page)) : null;
+      const ref = inLauncher(page) ? refFromTabId(pageFileUri(extensions, page)) : null;
       if (!page.category || !ref) continue;
       listed.add(ref.id);
       const badge = page.badge ? counts[page.id] : undefined;
@@ -64,7 +70,7 @@ const daemonRunPage: RunPageOnce = async (page, streamId) => unwrapResult(await 
 /** Each badge page's count, by page id: one run of it, its `badge` (0 when
  *  it fails or has none). */
 export async function launcherCounts(extensions: Extension[], streamId: string | null, runPage: RunPageOnce = daemonRunPage): Promise<Record<string, number>> {
-  const pages = extensions.flatMap((e) => (e.enabled ? (e.pageFiles ?? []).filter((p) => p.badge && p.category && !p.hidden) : []));
+  const pages = extensions.flatMap((e) => (e.enabled ? (e.pageFiles ?? []).filter((p) => p.badge && inLauncher(p)) : []));
   const entries = await Promise.all(
     pages.map((p) =>
       runPage(p.id, streamId)

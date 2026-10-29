@@ -29,6 +29,7 @@ import { usePageBranches } from "./pageBranches.js";
 import { ComponentNode } from "./PageComponent.js";
 import { pageData } from "../viz/componentBridge.js";
 import { declaredParams, namedLoader, parsePageRef, usePageReads } from "./pageReads.js";
+import { firstLoader } from "./firstLoader.js";
 import { VizPagesContext, type ExpansionProps, type VizPages } from "../viz/vizPages.js";
 import { HostedViewContext } from "../viz/hostedView.js";
 import { usePageRunsStore, usePageRunWith } from "../pageRuns.js";
@@ -269,7 +270,7 @@ function EmbeddedActions({ embed, node, runId, streamId }: { embed: PageRun; nod
   const forms = useNodeForms(runId, node);
   const target = useMemo(() => ({ config: { id: embed.page.id }, params: embed.params }), [embed.page.id, embed.params]);
   const actions = useVizActions(target, streamId, runner);
-  const first = embed.page.loaders[0]?.name;
+  const first = firstLoader(embed.page)?.name;
   const firstResult = first ? embed.loaders[first]?.result : undefined;
   const offered = embed.page.actions.filter((a) => offeredWholePage(a, firstResult ?? { columns: [], rows: [] }));
   if (offered.length === 0 && !actions.pending && !actions.form) return null;

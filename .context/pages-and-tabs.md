@@ -208,6 +208,47 @@ moved into the project DB and started fresh again) — see the decision in [reso
 | symbol | `oxplow:oxplow/symbol?path=<path>&symbol=<name>` (`v_symbol.uri`, `symbolRef(uri)`) — no revision in the id; never a tab: opening one (`handleOpenPage`, or in-tab navigation) resolves it (`resolve_symbol`) and opens its file at the name's line (`openSymbol`). A pinned one (`rev=snap:<id>` / `rev=git:<sha>`) opens the file viewer at that revision; if the version is gone it shows a notice and opens the current symbol | `oxplow:oxplow/symbol?path=src/lib.rs&symbol=Widget::spin` |
 | agent_session | `oxplow:oxplow/agent_session?id=<ses id>` (`agentSessionRef(id)`, pinned; the one URI whose tab is pinned) — an open agent session's terminal; its tab draws its harness's declared logo (`CenterTab.icon` from `HarnessListing.icon`, `AgentIcon`; the generic robot when it declares none) | `oxplow:oxplow/agent_session?id=ses3` |
 
+## Resource pages and standalone pages
+
+Every page is one of two kinds, told by `for:`.
+
+- A **resource page** (`for: <resource>`) is a *display mode* of the
+  resources it names: a commit, a metric, a file. It is never opened on its
+  own and never listed. The resource is what search finds and what Open With
+  offers modes of. So it takes no `category`, `hidden`, `keywords` or `badge`
+  (load errors), must declare a `uri` param (the URI it shows; the host
+  gives it), and the launcher, `launcher_unfilled_params`, `launcherCounts`
+  and `oxplow_find_page` (without `about`) skip it. `v_page` keeps its `for`
+  column.
+- A **standalone page** (no `for:`) has its own loaders and is the page the
+  launcher and search list.
+
+**The system hands a resource page its content.** The first loader of every
+resource page is `content`, declared by the system, never by the author
+(`Loader::Content`, `pages/content.rs::resolve_content`). The page reads it
+as `FROM content` or `{ from: content.<col> }`; it never queries for the
+record it renders. What `content` holds, by the resource of its `uri` param:
+
+| Resource | `content` |
+|---|---|
+| `oxplow/file` | one row from the filesystem's `stat`: `uri, path, filesystem, rev, kind, size, modified_at, is_text, language`; with `content: { text: true }` also `text` (NULL for a binary file) and `truncated`. No such file: no row. |
+| A resource a dataset resolves (its `resolve:`: commit, work item, metric, …) | that dataset's row, every column (`SELECT * … WHERE uri = <identity>`). No row: no row. |
+| Any other (a folder, a web page) | one row `{ uri }` |
+
+The page key `content: { text: bool, max_bytes }` configures it (default:
+no text, 64 KiB; `max_bytes` at most 4 MiB). Text is read with a ranged
+read of `max_bytes + 1`, so a large file costs no more than a small one.
+`content` is keyed by the resource's identity (the URI without its view)
+and its options, so two views of one resource share one read. A file's
+`content` re-runs when `v_file` changes; a dataset's row, when its dataset
+does. `content` is a reserved name: an author's loader or param named
+`content` is refused, and a standalone page that reads it is too. The
+dry-run check (`checks.rs`) does not run loaders that read `content`.
+
+"The page's row" (`{{row.x}}` in a `label`, a whole-page action's `when`,
+the alert and a count) is the first loader its *author* declared
+(`Page::first_loader`, desktop `firstLoader`), else `content`.
+
 ## Page files
 
 The catalog's runtime publication listener also invalidates every open
@@ -224,7 +265,7 @@ defines what the person sees:
   `keywords`, typed `params` (`role: resource | filter`; a `switch`'s param
   is a filter by default; a param a column `select:`s is a `selection`),
   `for` / `accepts` / `default` / `pinned` (a
-  renderer), `comments`, `refresh`, `hidden`, `needs`, whole-page
+  resource page, see above; it also takes `content:`), `comments`, `refresh`, `hidden`, `needs`, whole-page
   `actions`, `alert`, `tool` (an MCP tool `<namespace>_<tool>` whose
   input is the params and whose call is `oxplow.page.run`; kept for the
   few questions agents ask every session — foundation's `thread_work`,
@@ -233,7 +274,8 @@ defines what the person sees:
   skill? }`: what agents find a page by and what `extension test`
   runs) and `badge`
   (`{ loader, column? }`).
-- **`loaders:`** — named **loaders**, in order; a loader reads only the ones
+- **`loaders:`** — named **loaders**, in order (a resource page's first is the
+  system's `content`); a loader reads only the ones
   before it: `sql` (binds `:param`s; an earlier loader reads as a table of
   its name), `command` (a read-only command run as the viewer, `args`
   each `{ param }`, `{ from: <loader>.<column> }` or a literal; it must

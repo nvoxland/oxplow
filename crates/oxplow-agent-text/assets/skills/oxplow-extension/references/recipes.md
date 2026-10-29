@@ -52,6 +52,26 @@ rows (`<ext>/<page>` alone takes its first loader). Field and `fixed`
 rules are in `commands-and-forms.md`. A form is not allowed in an inline
 page.
 
+## A page for one kind of thing (a resource page)
+
+```yaml page
+# pages/pr.yaml: what `oxplow:acme/pr?id=12` opens
+title: Pull request
+label: '{{row.title}}'
+for: acme/pr
+params: [{ name: uri }]            # the URI it shows
+loaders:
+  # `content` is first and yours to read: the row of the dataset that
+  # resolves `acme/pr`, found by `uri`. Nothing to query for it.
+  summary: { sql: "SELECT title, state FROM content" }
+view: { viz: detail, from: summary }
+```
+
+A page with `for:` is a display mode of the resource: no `category`,
+`hidden`, `keywords` or `badge`, and it is not listed. For a file, `content:
+{ text: true }` adds the file's text. Test it with `temp:` and an `oxplow:temp`
+file URI (`testing.md`).
+
 ## A dashboard
 
 See `dashboards.md`: start one with `oxplow.extension.new_dashboard { title }`,

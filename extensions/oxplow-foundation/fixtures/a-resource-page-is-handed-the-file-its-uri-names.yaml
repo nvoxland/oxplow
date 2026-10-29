@@ -1,0 +1,27 @@
+# A page with `for:` is handed `content`, the record its `uri` names: for a
+# file, what its filesystem knows of it. The File viewer reads none of it
+# (it draws the file from its path), but the system runs the loader first,
+# and a file that is not there is no row.
+temp:
+  note.md: "# Hello\n"
+when:
+  page: oxplow-foundation/file-viewer
+  params:
+    uri: "oxplow:oxplow/file?path=note.md&filesystem=oxplow:temp"
+    path: note.md
+    filesystem: "oxplow:temp"
+expect:
+  label: "note.md (oxplow:temp)"
+  loaders:
+    content:
+      rows:
+        - { path: note.md, filesystem: "oxplow:temp", kind: file, size: 8, is_text: true, language: markdown }
+steps:
+  - expect:
+      loaders:
+        content:
+          rows: 0
+    params:
+      uri: "oxplow:oxplow/file?path=gone.md&filesystem=oxplow:temp"
+      path: gone.md
+      filesystem: "oxplow:temp"

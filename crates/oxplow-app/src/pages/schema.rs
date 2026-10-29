@@ -88,6 +88,22 @@ impl Page {
     pub fn loader(&self, name: &str) -> Option<&LoaderDecl> {
         self.loaders.iter().find(|l| l.name == name)
     }
+
+    /// Whether it is a resource page (`for:`): a display mode of the
+    /// resources it names, handed their `content`; else it is standalone.
+    pub fn is_resource_page(&self) -> bool {
+        !self.renders.is_empty()
+    }
+
+    /// The loader whose first row is "the page's row" (`{{row.x}}`, a
+    /// whole-page action's `when:`, the badge count, the alert): the first
+    /// one its author declared, else the system's `content`.
+    pub fn first_loader(&self) -> Option<&LoaderDecl> {
+        self.loaders
+            .iter()
+            .find(|l| !matches!(l.loader, Loader::Content { .. }))
+            .or_else(|| self.loaders.first())
+    }
 }
 
 /// A question a page answers, with the params that answer it: what an
@@ -199,7 +215,27 @@ pub enum Loader {
         columns: Vec<String>,
         rows: Vec<Vec<SqlCell>>,
     },
+    /// What the system knows of the resource a `for:` page shows: the
+    /// record its `uri` param names (`pages/content.rs`). Never declared by
+    /// an author: it is the first loader of every resource page, named
+    /// [`CONTENT`], configured by the page's `content:` key.
+    Content {
+        /// Read a file's text too (columns `text`, `truncated`).
+        text: bool,
+        /// The most bytes of a file's text read.
+        max_bytes: u32,
+    },
 }
+
+/// The name of a resource page's first loader, which the system declares.
+pub const CONTENT: &str = "content";
+
+/// The bytes of a file's text a resource page's `content` loader reads
+/// when its page doesn't say.
+pub const DEFAULT_CONTENT_BYTES: u32 = 64 * 1024;
+
+/// The most a page's `content: { max_bytes }` may ask for.
+pub const MAX_CONTENT_BYTES: u32 = 4 * 1024 * 1024;
 
 /// A node of a page's view.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
@@ -329,12 +365,26 @@ struct PageFile {
     answers: Vec<PageAnswer>,
     #[serde(default)]
     badge: Option<Badge>,
+    /// How the `content` loader of a resource page reads.
+    #[serde(default)]
+    content: Option<ContentFile>,
     /// Its loaders, in order (a mapping keeps it).
     #[serde(default)]
     loaders: Option<serde_yaml::Mapping>,
     view: serde_yaml::Value,
     #[serde(default)]
     rail: Option<serde_yaml::Value>,
+}
+
+/// A resource page's `content:` key.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ContentFile {
+    /// Read a file's text too.
+    #[serde(default)]
+    text: bool,
+    #[serde(default)]
+    max_bytes: Option<u32>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -452,12 +502,28 @@ pub fn parse_page(
     let file: PageFile = serde_yaml::from_str(text)
         .map_err(|e| oxplow_domain::manifest_keys::hint_unknown_page(&e.to_string()))?;
     let id = format!("{extension}/{slug}");
+    let renders = file
+        .renders
+        .clone()
+        .map(Renders::into_vec)
+        .unwrap_or_default();
+    let resource = !renders.is_empty();
+    if let Some(why) = page_kind_problem(&file, resource) {
+        return Err(why);
+    }
     let origin = PageProvenance {
         extension: extension.to_string(),
         source: None,
         running: rel.to_string(),
         deployment: None,
         bundled: false,
+    };
+    let content = file.content.as_ref();
+    let content_loader = Loader::Content {
+        text: content.is_some_and(|c| c.text),
+        max_bytes: content
+            .and_then(|c| c.max_bytes)
+            .unwrap_or(DEFAULT_CONTENT_BYTES),
     };
     let mut params = file.params;
     let switch_params = switch_params(&file.view);
@@ -470,7 +536,11 @@ pub fn parse_page(
     if let Some(why) = crate::pages::spec::param_problem(&params) {
         return Err(why);
     }
-    let loaders = parse_loaders(file.loaders.unwrap_or_default(), &params)?;
+    let loaders = parse_loaders(
+        file.loaders.unwrap_or_default(),
+        &params,
+        resource.then_some(content_loader),
+    )?;
     let mut ids = Ids::default();
     let mut ctx = NodeCtx {
         extension,
@@ -539,7 +609,7 @@ pub fn parse_page(
         category: file.category,
         keywords: file.keywords,
         params,
-        renders: file.renders.map(Renders::into_vec).unwrap_or_default(),
+        renders,
         accepts: file.accepts,
         default: file.default,
         pinned: file.pinned,
@@ -559,6 +629,56 @@ pub fn parse_page(
     };
     check_page(&page)?;
     Ok(page)
+}
+
+/// Why `file` can't be the kind of page it says it is. A resource page
+/// (`for:`) is a display mode of the resources it names: never listed on
+/// its own, so it has no launcher section, keywords or badge and can't be
+/// hidden, and it is handed the URI it shows as its `uri` param. A
+/// standalone page has no `content`.
+fn page_kind_problem(file: &PageFile, resource: bool) -> Option<String> {
+    if let Some(p) = file.params.iter().find(|p| p.name == CONTENT) {
+        return Some(format!(
+            "param `{}`: `{CONTENT}` is the name of a resource page's loader, so a param can't have it",
+            p.name
+        ));
+    }
+    if !resource {
+        if file.content.is_some() {
+            return Some(
+                "`content:` configures the `content` loader of a resource page: this page has no `for:`"
+                    .into(),
+            );
+        }
+        return None;
+    }
+    for (key, given) in [
+        ("category", file.category.is_some()),
+        ("hidden", file.hidden),
+        ("keywords", file.keywords.is_some()),
+        ("badge", file.badge.is_some()),
+    ] {
+        if given {
+            return Some(format!(
+                "a page with `for:` is a display mode of a resource, opened from the resource and never listed on its own: \
+                 it takes no `{key}` (a page with no `for:` is the one the launcher and search list)"
+            ));
+        }
+    }
+    if !file.params.iter().any(|p| p.name == "uri") {
+        return Some(
+            "a page with `for:` is given the URI it shows: declare `params: [{ name: uri }]`"
+                .into(),
+        );
+    }
+    if let Some(max) = file.content.as_ref().and_then(|c| c.max_bytes) {
+        if max == 0 || max > MAX_CONTENT_BYTES {
+            return Some(format!(
+                "content: `max_bytes: {max}` must be between 1 and {MAX_CONTENT_BYTES} (4 MiB)"
+            ));
+        }
+    }
+    None
 }
 
 /// The id of an inline page: a markdown block's or an agent's one-off.
@@ -663,6 +783,11 @@ fn loader_name_problem(name: &str) -> Option<String> {
             "loader `{name}`: a loader's name is lowercase letters, digits and `_`, starting with a letter"
         ));
     }
+    if name == CONTENT {
+        return Some(format!(
+            "loader `{name}`: `{CONTENT}` is the system's loader of a resource page (a page with `for:`): name it something else"
+        ));
+    }
     if oxplow_db::sql_tokens::is_reserved_word(name) {
         return Some(format!(
             "loader `{name}`: that name is a SQL keyword, which SQL can't name a table by: \
@@ -716,16 +841,60 @@ fn sql_params(sql: &str) -> Result<Vec<String>, String> {
     Ok(out)
 }
 
+/// A resource page's `content` loader, first of its loaders.
+fn content_decl(loader: Loader) -> LoaderDecl {
+    LoaderDecl {
+        name: CONTENT.to_string(),
+        loader,
+        columns: Vec::new(),
+        reads: Vec::new(),
+        refresh: None,
+        empty: None,
+        reads_loaders: Vec::new(),
+        reads_params: vec!["uri".to_string()],
+    }
+}
+
+/// Whether `sql` reads `content` as a table (`FROM content`, `JOIN content`).
+fn reads_content_table(sql: &str) -> bool {
+    use oxplow_db::sql_tokens::{significant, tokenize, TokenKind};
+    let Ok(tokens) = tokenize(sql) else {
+        return false;
+    };
+    let sig: Vec<_> = significant(&tokens).collect();
+    sig.windows(2).any(|w| {
+        w[0].kind == TokenKind::Word
+            && (w[0].text.eq_ignore_ascii_case("from") || w[0].text.eq_ignore_ascii_case("join"))
+            && w[1].kind == TokenKind::Word
+            && w[1].text.eq_ignore_ascii_case(CONTENT)
+    })
+}
+
+const STANDALONE_CONTENT: &str =
+    "`content` is the loader a resource page (a page with `for:`) is handed; \
+     a page with no `for:` has none: query for what it shows";
+
+/// `loaders` as declared, after the system's `content` loader when `content`
+/// is given (a resource page).
 fn parse_loaders(
     loaders: serde_yaml::Mapping,
     params: &[PageParam],
+    content: Option<Loader>,
 ) -> Result<Vec<LoaderDecl>, String> {
-    let names: Vec<String> = loaders
-        .keys()
-        .map(|k| k.as_str().unwrap_or_default().to_string())
-        .collect();
-    let mut out: Vec<LoaderDecl> = Vec::new();
+    let resource = content.is_some();
+    let mut names: Vec<String> = Vec::new();
+    if resource {
+        names.push(CONTENT.to_string());
+    }
+    names.extend(
+        loaders
+            .keys()
+            .map(|k| k.as_str().unwrap_or_default().to_string()),
+    );
+    let mut out: Vec<LoaderDecl> = content.map(content_decl).into_iter().collect();
+    let offset = usize::from(resource);
     for (index, (key, value)) in loaders.into_iter().enumerate() {
+        let index = index + offset;
         let name = key
             .as_str()
             .ok_or_else(|| "loaders: a loader's name is text".to_string())?
@@ -768,6 +937,9 @@ fn parse_loaders(
                 }
                 ArgSource::Column { from } => {
                     let source = from.split('.').next().unwrap_or_default();
+                    if source == CONTENT && !resource {
+                        return Err(format!("loader `{name}`: {STANDALONE_CONTENT}"));
+                    }
                     if !earlier.iter().any(|n| n == source) || !from.contains('.') {
                         return Err(format!(
                             "loader `{name}`: `from: {from}` names `{source}`, which isn't a loader \
@@ -790,6 +962,9 @@ fn parse_loaders(
         let loader = if let Some(sql) = file.sql {
             for arg in file.params.values() {
                 check_arg(arg, &mut reads_loaders, &mut reads_params)?;
+            }
+            if !resource && reads_content_table(&sql) {
+                return Err(format!("loader `{name}`: {STANDALONE_CONTENT}"));
             }
             for word in sql_names(&sql).map_err(|e| format!("loader `{name}`: {e}"))? {
                 if word == name {

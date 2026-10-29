@@ -339,6 +339,12 @@ impl ResourceRegistry {
         self.resources.values().map(|e| &e.decl)
     }
 
+    /// The dataset `name`'s URIs resolve through (its `resolve:`), when it
+    /// names one.
+    pub fn resolving_dataset(&self, name: &ResourceName) -> Option<&str> {
+        self.get(name)?.resolve.as_deref()
+    }
+
     /// The resource whose `[[<prefix>:…]]` sugar this is.
     pub fn for_wikilink(&self, prefix: &str) -> Option<&ResourceDecl> {
         self.wikilinks.get(prefix).and_then(|n| self.get(n))
