@@ -4,15 +4,14 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useContextMenu } from "../components/useRowContextMenu.js";
 import { TileGrid, TileSlot, type TileSize } from "../kit/Tiles.js";
 import { moveTile, removeTile } from "./dashboardEdits.js";
-import { DashboardTitle } from "./DashboardTitle.js";
-import { useDashboardAuthoring } from "./dashboardAuthoring.js";
+import { useDashboardAuthoring, useDashboardWritable } from "./dashboardAuthoring.js";
 
 export interface DashboardChild { id: string; size: TileSize; body: ReactNode }
 const TILE_MIME = "application/x-oxplow-dashboard-tile";
 
-export function DashboardGrid({ page, title, tiles }: { page: string; title: string; tiles: DashboardChild[] }) {
+export function DashboardGrid({ page, tiles }: { page: string; tiles: DashboardChild[] }) {
   const authoring = useDashboardAuthoring();
-  const [writable, setWritable] = useState(false);
+  const writable = useDashboardWritable(page);
   const [order, setOrder] = useState<string[] | null>(null);
   const [removing, setRemoving] = useState<string | null>(null);
   const [over, setOver] = useState<string | null>(null);
@@ -21,12 +20,6 @@ export function DashboardGrid({ page, title, tiles }: { page: string; title: str
   const menu = useContextMenu();
   const signature = JSON.stringify(tiles.map((t) => t.id));
   useEffect(() => { setOrder(null); }, [page, signature]);
-  useEffect(() => {
-    let live = true;
-    setWritable(false);
-    authoring.read(page).then((spec) => { if (live) setWritable(spec.writable); }).catch(() => {});
-    return () => { live = false; };
-  }, [page, authoring]);
   async function edit(change: (source: string) => string, optimistic?: string[]) {
     if (saving.current) return;
     saving.current = true;
@@ -48,7 +41,6 @@ export function DashboardGrid({ page, title, tiles }: { page: string; title: str
   }
   const shown = order ? order.flatMap((id) => tiles.filter((t) => t.id === id)) : tiles;
   return <>
-    {writable ? <DashboardTitle page={page} title={title} /> : <h1 className="ox-title">{title}</h1>}
     <TileGrid testId="dashboard-grid" aria-busy={busy}>
       {shown.map((tile, index) => {
         const items = [{ id: "remove", label: "Remove tile…", enabled: !busy, run: () => setRemoving(tile.id) }];

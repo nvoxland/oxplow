@@ -227,14 +227,20 @@ export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, re
   const [body, setBody] = useState<HTMLDivElement | null>(null);
   const outOfDate = useOutOfDate(page?.origin.extension ?? null, page?.origin.deployment ?? null);
   const reading = useDelayed(!run && !error, LOADING_AFTER_MS);
+  const dashboard = page?.category === "Dashboards" && page.view.kind === "grid" && !page.origin.bundled ? page.id : null;
+  const editableDashboard = useDashboardWritable(dashboard);
   const fills = run ? whole || anyFills(run) : false;
+  // The nav bar carries the title, always: a switch page's is the section in
+  // view, a writable dashboard's renames it in place.
+  const shownTitle = run ? sectionTitle(run) ?? title : title;
+  const navTitle = editableDashboard && page ? <DashboardTitle page={page.id} title={shownTitle} /> : shownTitle;
   const full = fills || (run ? wide(run) : false);
 
   return (
     <Page
       testId="page-host"
       kind="page"
-      titleInBody={!fills}
+      title={navTitle}
       width={full ? "full" : "reading"}
       fill={fills}
       actions={pageActions}
@@ -270,7 +276,6 @@ export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, re
           style={fills ? fillStyle : undefined}
           {...(pageComments ? contextNodeProps(pageComments.target) : {})}
         >
-          {page && !fills && !(page.category === "Dashboards" && page.view.kind === "grid" && !page.origin.bundled) ? <h1 className="ox-title">{sectionTitle(run!) ?? title}</h1> : null}
           {actions.pending ? (
             <CommandConfirm
               label={actions.pending.action.label}

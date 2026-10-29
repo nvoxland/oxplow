@@ -359,6 +359,7 @@ export function PageNavBar({
           ) : null}
           <span
             data-testid="page-nav-title"
+            title={typeof title === "string" ? title : undefined}
             style={{
               fontSize: "var(--text-base)",
               fontWeight: 600,

@@ -33,7 +33,8 @@ and key order need not be discarded. Visual editing uses the same path:
 `pages/dashboardEdits.ts` edits YAML Document nodes, preserving comments,
 scalar styles and key order. `DashboardGrid` previews drag order, restores
 the server order on failure, and offers tile removal through a right-click
-menu and an inline confirmation. `DashboardTitle` saves an inline rename
+menu and an inline confirmation. `DashboardTitle` is the page's title in the nav bar
+(the body has no heading) and saves an inline rename
 on Enter; Escape cancels. Bundled or missing sources are read-only.
 
 `page_spec { page }` reads the writable primary source immediately before

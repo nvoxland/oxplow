@@ -4,7 +4,7 @@ import { InlineEdit } from "../components/InlineEdit.js";
 import { rename } from "./dashboardEdits.js";
 import { useDashboardAuthoring } from "./dashboardAuthoring.js";
 
-/** The writable dashboard's heading. Enter/blur saves; Escape cancels.
+/** The writable dashboard's title, in the nav bar. Enter/blur saves; Escape cancels.
  * Read the current source before editing it, preserving edits that have
  * not been deployed. write_page currently has no concurrent-write CAS. */
 export function DashboardTitle({ page, title, onSaved }: {
@@ -45,8 +45,9 @@ export function DashboardTitle({ page, title, onSaved }: {
     }
   };
 
-  return <div data-testid="dashboard-title" aria-busy={busy}>
-    <h1 style={{ margin: 0, fontSize: "var(--text-xl)", color: "var(--text-primary)" }}>
+  // Drawn in the nav bar as the page's title, so it is inline, not a heading.
+  return <span data-testid="dashboard-title" aria-busy={busy}>
+    <span>
       <InlineEdit
         key={page}
         value={title}
@@ -63,8 +64,8 @@ export function DashboardTitle({ page, title, onSaved }: {
           style={{ border: 0, padding: 0, background: "transparent", color: "inherit", font: "inherit", textAlign: "left", cursor: busy ? "wait" : "text" }}
         >{value}</button>}
       />
-    </h1>
+    </span>
     {busy ? <span role="status" className="ox-muted">Saving…</span> : null}
-    {error ? <div role="alert" className="ox-error">{error}</div> : null}
-  </div>;
+    {error ? <span role="alert" className="ox-error">{error}</span> : null}
+  </span>;
 }

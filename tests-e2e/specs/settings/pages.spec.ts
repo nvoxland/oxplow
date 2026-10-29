@@ -18,12 +18,11 @@ const AREAS: [string, string][] = [
 test("every Settings area renders, reached from the rail", async ({ page }) => {
   await page.goto("/");
   await openFromLauncher(page, "Settings");
-  const settings = page.locator('[data-testid="page-file"]:visible');
-  await expect(settings.getByRole("heading", { level: 1 })).toHaveText("Every Setting");
+  await expect(page.getByTestId("page-nav-title").filter({ visible: true })).toHaveText("Every Setting");
   await expect(page.getByTestId("page-param-q").filter({ visible: true })).toBeVisible();
   for (const [id, title] of AREAS) {
     await page.getByTestId(`page-section-${id}`).filter({ visible: true }).click();
-    await expect(page.locator('[data-testid="page-file"]:visible').getByRole("heading", { level: 1 })).toHaveText(title);
+    await expect(page.getByTestId("page-nav-title").filter({ visible: true })).toHaveText(title);
   }
   await page.getByTestId("page-section-extensions").filter({ visible: true }).click();
   await expect(page.locator('[data-testid="page-file"]:visible').getByRole("heading", { name: "Health" })).toBeVisible();
@@ -48,7 +47,7 @@ test("a Settings area is the page's view: the same page, and Back returns to the
   await expect(body.getByTestId("page-file")).toHaveAttribute("data-mounted-once", "yes");
   await page.getByTestId("page-nav-back").filter({ visible: true }).click();
   await expect(body).toHaveAttribute("data-testid", "center-tab-body-oxplow:oxplow/page?page=settings");
-  await expect(body.getByRole("heading", { level: 1 })).toHaveText("Every Setting");
+  await expect(body.getByTestId("page-nav-title")).toHaveText("Every Setting");
 });
 
 // The Agents area's prompt addition is an edit form over

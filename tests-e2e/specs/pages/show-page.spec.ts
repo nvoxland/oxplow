@@ -36,10 +36,10 @@ test("show_page opens a temp page (a file on oxplow:temp) whose live run survive
   const uri = await show(page, daemon, source("Shown Quoll Count", "Shown Quoll "));
   expect(uri).toContain("oxplow:oxplow/page?page=temp/");
   const body = page.getByTestId("page-file").filter({ visible: true });
-  await expect(body).toContainText("Shown Quoll Count");
+  await expect(page.getByTestId("page-nav-title").filter({ visible: true })).toHaveText("Shown Quoll Count");
   await expect(body.locator('[data-node="count"]')).toContainText("0");
   await page.reload();
-  await expect(body).toContainText("Shown Quoll Count");
+  await expect(page.getByTestId("page-nav-title").filter({ visible: true })).toHaveText("Shown Quoll Count");
   await run(daemon, "oxplow.work_item.create", { title: "Shown Quoll evidence", thread: daemon.thread });
   await expect(body.locator('[data-node="count"]')).toContainText("1");
   await expect(page.getByTestId(`center-tab-${uri}`)).toBeVisible();
@@ -73,7 +73,7 @@ test("Show Definition on a view opens Definition of its temp file", async ({ pag
   await show(page, daemon, source("Defined Potoroo Count", "Defined Potoroo "));
   await action(page, "page-definition");
   const file = page.getByTestId("page-file").filter({ visible: true });
-  await expect(file.locator("h1")).toHaveText(/^Definition: v[0-9a-f]{16}\.yaml$/);
+  await expect(page.getByTestId("page-nav-title").filter({ visible: true })).toHaveText(/^Definition: v[0-9a-f]{16}\.yaml$/);
   await expect(file.getByTestId("node-about")).toContainText("Defined Potoroo Count");
   await expect(file.getByTestId("node-about")).toContainText("temp/v");
 });

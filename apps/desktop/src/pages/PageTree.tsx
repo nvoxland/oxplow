@@ -226,7 +226,7 @@ function NodeBody(props: NodeViewProps & { def: Node; id: string }) {
     }
     case "grid":
       if (props.run.page.category === "Dashboards" && props.run.page.view.id === def.id && !props.run.page.origin.bundled) {
-        return <DashboardGrid page={props.run.page.id} title={props.run.page.title} tiles={at.children.map((c) => ({
+        return <DashboardGrid page={props.run.page.id} tiles={at.children.map((c) => ({
           id: c.id, size: nodeById(props.run.page, c.id)?.size ?? "small", body: <NodeView {...props} at={c} placement="tile" />,
         }))} />;
       }

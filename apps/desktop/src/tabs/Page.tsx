@@ -108,11 +108,6 @@ export interface PageProps {
   /** Drawn before the title in the nav bar: what the page is (an agent
    *  session's harness logo). */
   titleIcon?: ReactNode;
-  /** When true, the page renders its OWN title as an `<h1>` in the body
-   *  (via {@link pageH1Style}), so the chrome (nav bar / header) does NOT
-   *  render the title — avoiding a duplicate. The tab-strip label
-   *  (`usePageTitle`) is unaffected. Defaults to false. */
-  titleInBody?: boolean;
   /** The body's width: `"full"` (default) is every pixel, and the page
    *  owns its padding; `"reading"` is a padded, bounded reading column
    *  (`.oxplow-reading-column`, 78ch, centered) that its children fill. */
@@ -134,17 +129,6 @@ export interface PageProps {
  *  center column). */
 const DETAILS_RAIL_THRESHOLD_PX = 960;
 
-/** The shared page-title `<h1>` style for pages that render their title in the
- *  body (with `titleInBody` on {@link Page}) rather than in the chrome. Keeps
- *  the in-body title consistent across pages (metric detail, diff view, …). */
-export const pageH1Style: CSSProperties = {
-  margin: 0,
-  fontSize: "var(--text-2xl)",
-  fontWeight: 700,
-  color: "var(--text-primary)",
-  lineHeight: 1.2,
-};
-
 /**
  * Shared chrome for every page rendered inside a tab body. Provides:
  *  - A header (title + kind chip + status/metadata chips + actions slot)
@@ -154,7 +138,7 @@ export const pageH1Style: CSSProperties = {
  * The chrome reads only semantic CSS variables. Both light and dark
  * themes are styled by `public/index.html`.
  */
-export function Page({ title, titleIcon, kind, chips: ownChips, actions, pin, children, backlinks, outbound, commentsNav, navBar, testId, titleInBody = false, width = "full", fill = false, rightRail, rightRailTitle }: PageProps) {
+export function Page({ title, titleIcon, kind, chips: ownChips, actions, pin, children, backlinks, outbound, commentsNav, navBar, testId, width = "full", fill = false, rightRail, rightRailTitle }: PageProps) {
   const [backlinksOpen, setBacklinksOpen] = useState(false);
   // Pages that don't pass an explicit `navBar` prop still get one
   // when rendered inside a PageNavigationContext provider — that's
@@ -267,8 +251,8 @@ export function Page({ title, titleIcon, kind, chips: ownChips, actions, pin, ch
           onBack={effectiveNavBar.onBack}
           onForward={effectiveNavBar.onForward}
           siblings={effectiveNavBar.siblings}
-          title={titleInBody ? undefined : effectiveTitle}
-          titleIcon={titleInBody ? undefined : titleIcon}
+          title={effectiveTitle}
+          titleIcon={titleIcon}
           pageLabel={typeof effectiveTitle === "string" ? effectiveTitle : undefined}
           bookmark={effectiveNavBar.bookmark}
           backlinks={effectiveNavBar.backlinks}
@@ -294,21 +278,20 @@ export function Page({ title, titleIcon, kind, chips: ownChips, actions, pin, ch
         }}
       >
         <div style={{ display: "flex", alignItems: "baseline", gap: 10, flex: 1, minWidth: 0 }}>
-          {titleInBody ? null : (
-            <span
-              data-testid="page-title"
-              style={{
-                fontSize: "var(--text-lg)",
-                fontWeight: 600,
-                color: "var(--text-primary)",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
-              }}
-            >
-              {effectiveTitle}
-            </span>
-          )}
+          <span
+            data-testid="page-title"
+            title={typeof effectiveTitle === "string" ? effectiveTitle : undefined}
+            style={{
+              fontSize: "var(--text-lg)",
+              fontWeight: 600,
+              color: "var(--text-primary)",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {effectiveTitle}
+          </span>
           {chips?.map((chip, i) => <Chip key={i} chip={chip} />)}
         </div>
         {actions && actions.length > 0 ? <ActionButtons actions={actions} /> : null}

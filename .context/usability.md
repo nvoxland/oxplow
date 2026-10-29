@@ -574,6 +574,9 @@ not a pick and isn't in the address.
   label the hover; give a prominent action one when the icon says it
   plainly. A section's actions are `PageAction[]` too, at its heading. A
   primary action is the accent button; one per place.
+- **A page's title is in the nav bar, always**, with its icon; the body
+  starts with its first section and draws no heading of its own. A long
+  title ends in an ellipsis and the full text is its hover.
 - **A section is a heading over a rule**, no box (`kit/Section`). A card
   is a dashboard tile's, not a page section's. Every section has a title
   (it is its Contents entry); a heading that would look wrong is hidden
@@ -1164,7 +1167,9 @@ A page has **one place for its controls: its rail** (`PageRail`). It
 has no toolbar, and where a control goes is not the author's to say. The
 rail stacks its groups in a fixed order, so nothing moves as values
 change: **Filters** (its filter params) and **Selection** (what a row click
-picked). Page-level actions — About this page (a popover: what the page
+picked). A `role: view` param (state the page or the system sets, in the
+`#` like a filter) is in neither: the rail never draws it, and a person
+never edits it. Page-level actions — About this page (a popover: what the page
 is for, its extension and the source file to edit, and a line when the
 source changed since its deploy; a page's description is said only
 there, never above its body), Copy, Add to Context, the page's whole-page actions, and

@@ -27,7 +27,9 @@ test("Show Definition opens the running copy drawn as Definition, and Open With 
 
   const file = page.getByTestId("page-file").filter({ visible: true });
   // The tab names the file, not the page.
-  await expect(file.locator("h1")).toHaveText("Definition: numbat.yaml");
+  await expect(page.getByTestId("page-nav-title").filter({ visible: true })).toHaveText("Definition: numbat.yaml");
+  // The title is the nav bar's alone: the body draws no heading of its own.
+  await expect(file.locator("h1")).toHaveCount(0);
   await expect(file.getByTestId("node-about")).toContainText("Defined Numbat");
   await expect(file.getByTestId("node-about")).toContainText("e2e-defn/numbat");
   await expect(file.getByTestId("node-description")).toContainText("What the numbats are.");
@@ -62,16 +64,16 @@ test("Definition drawn again after another tab was shown still names its file an
   await page.getByTestId("page-nav-menu").filter({ visible: true }).click();
   await page.getByTestId("menu-item-action-page-definition").click();
   const file = page.getByTestId("page-file").filter({ visible: true });
-  await expect(file.locator("h1")).toHaveText("Definition: numbat.yaml");
+  await expect(page.getByTestId("page-nav-title").filter({ visible: true })).toHaveText("Definition: numbat.yaml");
 
   // Another tab is shown while the extension is deployed again (its running
   // copy is another deployment); coming back, the tab still names its file
   // and its sections read it.
   const tab = page.locator('[data-testid^="center-tab-"]').filter({ hasText: "Definition: numbat.yaml" }).first();
   await openFromLauncher(page, "Other Numbat");
-  await expect(page.getByTestId("page-file").filter({ visible: true }).locator("h1")).toHaveText("Other Numbat");
+  await expect(page.getByTestId("page-nav-title").filter({ visible: true })).toHaveText("Other Numbat");
   await installExtension(daemon, "e2e-defn", { files: { "pages/numbat.yaml": numbat.replace("What the numbats are.", "What they were."), "pages/other.yaml": other } });
   await tab.click();
-  await expect(file.locator("h1")).toHaveText("Definition: numbat.yaml");
+  await expect(page.getByTestId("page-nav-title").filter({ visible: true })).toHaveText("Definition: numbat.yaml");
   await expect(file.getByTestId("node-about")).toContainText("e2e-defn/numbat");
 });

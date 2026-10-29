@@ -40,7 +40,7 @@ test("the Local History page draws its snapshots and keeps its grouping in the a
   await page.goto("/");
   await openFromLauncher(page, "Local History");
   const body = page.locator('[data-testid^="center-tab-body-oxplow:oxplow/page?"][data-testid$="page=local-history"]:visible');
-  await expect(body.getByRole("heading", { level: 1 })).toHaveText("Local History");
+  await expect(body.getByTestId("page-nav-title")).toHaveText("Local History");
   await page.getByTestId("page-param-mode-value").filter({ visible: true }).click();
   await page.getByTestId("page-param-mode-edit").filter({ visible: true }).selectOption("by-commit");
   await expect(page.locator('[data-testid="center-tab-body-oxplow:oxplow/page?page=local-history#mode=by-commit"]:visible')).toHaveCount(1);

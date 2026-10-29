@@ -56,8 +56,27 @@ test("a shown view (a temp page) offers Save and Show definition of its temp fil
 
 test("the title is the page's label over its params and its first loader's first row", async () => {
   const { runs } = fakePageRuns(tablePage());
-  const { findByText } = render(<PageHost pageKey={key} runs={runs} />);
-  expect((await findByText("Items: Alpha")).tagName).toBe("H1");
+  const { findByTestId, container } = render(<PageHost pageKey={key} runs={runs} />);
+  // In the page chrome (nav bar), never a heading of its own in the body.
+  expect((await findByTestId("page-title")).textContent).toBe("Items: Alpha");
+  expect(container.querySelector("h1")).toBeNull();
+});
+
+// The dashboard's rename lives in the nav bar title now, not a body heading.
+test("a writable dashboard's title is the renaming button in the page chrome, with no body heading", async () => {
+  const { DashboardEditContext } = await import("./dashboardAuthoring.js");
+  const base = gridPage();
+  const dash = { ...base, page: { ...base.page, category: "Dashboards" } };
+  const { runs } = fakePageRuns(dash);
+  const spec = { page: "acme/page", extension: "acme", slug: "page", yaml: "title: x\n", writable: true };
+  const view = render(
+    <DashboardEditContext.Provider value={{ read: async () => spec, write: async () => {}, report: () => {} }}>
+      <PageHost pageKey={key} runs={runs} />
+    </DashboardEditContext.Provider>,
+  );
+  const edit = await view.findByTestId("dashboard-title-edit");
+  expect(view.getByTestId("page-title").contains(edit)).toBe(true);
+  expect(view.container.querySelector("h1")).toBeNull();
 });
 
 test("a whole-page action presses on the run, asking first when its command does", async () => {
@@ -237,7 +256,8 @@ test("a switch page's sections are links in its rail; the one in view titles the
   const { runs } = fakePageRuns(run);
   const changes: Record<string, SqlCell>[] = [];
   const view = render(<PageHost pageKey={key} runs={runs} onChange={(p) => changes.push(p)} />);
-  expect((await view.findByRole("heading", { level: 1 })).textContent).toBe("Every Setting");
+  expect((await view.findByTestId("page-title")).textContent).toBe("Every Setting");
+  expect(view.container.querySelector("h1")).toBeNull();
   expect(view.getByTestId("page-section-overview").getAttribute("aria-current")).toBe("page");
   // The switch's param is the sections, not a filter.
   expect(view.queryByTestId("page-param-area")).toBeNull();

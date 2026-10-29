@@ -88,3 +88,17 @@ test("a chip that opens something is a button", () => {
   fireEvent.click(getByRole("button", { name: "Fresh" }));
   expect(opened).toBe(1);
 });
+
+// The title is the nav bar's, always: a scrolling page's body has no heading.
+test("the title is in the nav bar and the body draws no heading", () => {
+  const { getByTestId, container } = render(
+    <PageNavigationContext.Provider value={nav()}>
+      <Page title="A rather long page title" titleIcon={<i data-testid="ico" />}>body</Page>
+    </PageNavigationContext.Provider>,
+  );
+  const title = getByTestId("page-nav-title");
+  expect(title.textContent).toBe("A rather long page title");
+  expect(title.getAttribute("title")).toBe("A rather long page title");
+  expect(getByTestId("page-nav-title-icon").contains(getByTestId("ico"))).toBe(true);
+  expect(container.querySelector("h1")).toBeNull();
+});

@@ -32,7 +32,7 @@ function fixture({ writable = true, write = async (_input: { spec: string }): Pr
     read: async () => { reads += 1; return spec; },
     write: async (input) => { writes.push(input); return write(input); },
     report: (error) => errors.push(error),
-  }}><DashboardGrid page={spec.page} title="Build health" tiles={tiles} /></DashboardEditContext.Provider>);
+  }}><DashboardGrid page={spec.page} tiles={tiles} /></DashboardEditContext.Provider>);
   const order = () => Array.from(view.getByTestId("dashboard-grid").children)
     .map((element) => element.getAttribute("data-testid"));
   const ready = async () => {
@@ -76,10 +76,9 @@ test("dragging a writable dashboard tile saves the new order and preserves curre
   expect(f.errors).toEqual([]);
 });
 
-test("read-only dashboards expose no title editing, drag or remove menu", async () => {
+test("read-only dashboards expose no drag or remove menu", async () => {
   const f = fixture({ writable: false });
   await f.ready();
-  expect(f.view.queryByTestId("dashboard-title-edit") === null).toBe(true);
   fireEvent.contextMenu(f.view.getByTestId("dashboard-tile-tests"));
   expect(f.view.queryByText("Remove tile…") === null).toBe(true);
   drag(f.view.getByTestId("dashboard-tile-coverage"), f.view.getByTestId("dashboard-tile-tests"));

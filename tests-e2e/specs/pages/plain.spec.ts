@@ -81,7 +81,7 @@ test("oxplow's pages are complete with every enhancement off", async ({ fresh })
   await nothingAdded(page);
 
   await openFromLauncher(page, "Tasks");
-  await expect(host.getByRole("heading", { name: "Tasks", level: 1 })).toBeVisible();
+  await expect(page.getByTestId("page-nav-title").filter({ visible: true })).toHaveText("Tasks");
   await expect(host.getByRole("alert")).toHaveCount(0);
   await nothingAdded(page);
 });
