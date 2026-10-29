@@ -1,6 +1,6 @@
 # What an extension may reach is its scopes as written, each an item with
-# its explanation as the hover: [{ text, hint }]. Nothing waits on a person
-# for an extension that runs.
+# its explanation as the hover: [{ text, hint }]. An extension with
+# nothing wrong has no Problems line.
 when:
   page: oxplow-foundation/extension
   params:
@@ -14,4 +14,4 @@ expect:
           - { scope: sql.read, text: "read your project's data with SQL" }
     about_facts:
       rows:
-        - { approval_items: null }
+        - { problems_label: null }

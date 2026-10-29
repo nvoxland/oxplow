@@ -213,7 +213,7 @@ intent:
       expect: a section per extension headed by its name, each fact a sentence, the ones needing attention first, no repair buttons
     - name: extension-problems-collects-what-is-failing-or-turned-off
       input: { page: extension-problems, params: {} }
-      expect: the failing or disabled contributions and the extensions that did not load, under their extension, with Enable Again, Repair with the Agent and Enable All Disabled
+      expect: everything wrong with an extension under its name (stopped or failing contributions, permissions waiting for approval, load errors), with Start Again, Repair with the Agent and Start All Stopped
     - name: extension-pages-are-a-section-each-with-a-linked-heading
       input: { page: extension, params: { uri: 'oxplow:oxplow/extension?name=oxplow-foundation', name: oxplow-foundation } }
       expect: each page of the extension is a subsection, its title linking to the Definition of its running file and its description as the body

@@ -1592,9 +1592,10 @@ its first deploy here (Startup), which asks for what it declares.
 the default): one extension as a document. Its About is a list of sentences
 from `extension-facts` (where it comes from, what runs and whether the
 source moved on, its permissions as the scope keys written (`sql.read`, each an
-item `{text, hint}` whose hint says what it allows), what its source asks for
-that nobody approved ("Needs your approval to run", the same items; the
-Extension page's Deploy approves them), a one-line Problems summary linking to Extension problems) and a link to its
+item `{text, hint}` whose hint says what it allows), a one-line Problems
+summary with counts in words (contributions stopped after failing, failing,
+permissions waiting for approval, load problems; none when nothing is wrong)
+linking to Extension problems filtered to it) and a link to its
 running `extension.yaml`; then its pages (each linking to the Definition of
 the running file, `v_page.running_uri`), the other contributions by count,
 what it may reach, its deployments (newest first, Roll Back to This) and the
@@ -1611,11 +1612,13 @@ those needing attention first, each fact a sentence from the hidden
 `extension-facts` page — the one place that turns `v_extension`,
 `v_extension_source` and `v_contribution_health` into words (a scope keeps its key; its explanation is the hover). It has no table and no buttons.
 
-**Extension problems** (`extension-problems`, System) collects every failing or
-disabled contribution and every extension that did not load cleanly, a
-`sections` subsection each (titled `<extension>: <contribution>`, linking to the
-extension), with Enable Again, Repair with the Agent and Enable All
-Disabled. A link from a one-line summary narrows it with the view param
+**Extension problems** (`extension-problems`, System) collects everything
+wrong with an extension: a contribution stopped after failing (never called
+"disabled": that word is for an extension turned off) or failing, permissions
+waiting for approval (`v_extension.pending`; the person approves with Deploy on
+its page), and load errors. A `sections` subsection each (titled
+`<extension>: <contribution>`, linking to the extension), with Start Again,
+Repair with the Agent and Start All Stopped. A link from a one-line summary narrows it with the view param
 `#extension=<name>`; Alerts' failing-extension rows link the same way.
 
 `v_extension.permissions` is the declaration as JSON (`{}`: baseline);

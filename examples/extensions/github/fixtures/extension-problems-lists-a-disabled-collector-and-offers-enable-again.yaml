@@ -8,4 +8,4 @@ expect:
     problems:
       rows:
         contains:
-          - { contribution: prs, what: "Turned off, 3 failures in a row; the last: boom.", can_enable: 1, can_repair: 0 }
+          - { contribution: prs, what: "Stopped after 3 failures in a row; the last: boom.", can_enable: 1, can_repair: 0 }

@@ -35,7 +35,8 @@ loaders:
         SELECT e.name, e.uri, e.origin, e.enabled, e.deployment, e.hash, e.shared, e.pending,
                s.hash AS source_hash,
                COALESCE(h.failing, 0) AS failing, COALESCE(h.disabled, 0) AS disabled,
-               json_array_length(e.errors) AS load_problems
+               json_array_length(e.errors) AS load_problems,
+               json_array_length(e.pending) AS awaiting
         FROM v_extension e LEFT JOIN v_extension_source s ON s.name = e.name
              LEFT JOIN (SELECT extension, sum(state = 'failing') AS failing, sum(state = 'disabled') AS disabled
                         FROM v_contribution_health GROUP BY extension) h ON h.extension = e.name
@@ -60,18 +61,14 @@ loaders:
              -- as its hover.
              NULLIF((SELECT json_group_array(json_object('text', r.scope, 'hint', 'May ' || r.text || '.'))
                      FROM reach r WHERE r.extension = x.name), '[]') AS permission_items,
-             -- What its source asks for that nobody approved yet: a pending
-             -- line is `<what> — <what it allows>`.
-             NULLIF((SELECT json_group_array(json_object(
-                       'text', CASE WHEN instr(w.value, ' — ') > 0 THEN substr(w.value, 1, instr(w.value, ' — ') - 1) ELSE w.value END,
-                       'hint', CASE WHEN instr(w.value, ' — ') > 0 THEN substr(w.value, instr(w.value, ' — ') + 3) END))
-              FROM json_each(x.pending) w), '[]') AS approval_items,
-             CASE WHEN x.failing + x.disabled + x.load_problems > 0 THEN
-               trim(
-                 CASE WHEN x.failing > 0 THEN x.failing || CASE WHEN x.failing = 1 THEN ' contribution failing' ELSE ' contributions failing' END || CASE WHEN x.disabled + x.load_problems > 0 THEN ', ' ELSE '' END ELSE '' END
-                 || CASE WHEN x.disabled > 0 THEN x.disabled || ' disabled' || CASE WHEN x.load_problems > 0 THEN ', ' ELSE '' END ELSE '' END
-                 || CASE WHEN x.load_problems > 0 THEN x.load_problems || CASE WHEN x.load_problems = 1 THEN ' problem loading it' ELSE ' problems loading it' END ELSE '' END)
-               END AS problems_label,
+             CASE WHEN x.failing + x.disabled + x.load_problems + x.awaiting > 0 THEN
+               'Problems: ' || (
+                 SELECT group_concat(part, '; ') FROM (
+                   SELECT x.disabled || CASE WHEN x.disabled = 1 THEN ' contribution' ELSE ' contributions' END || ' stopped after failing' AS part WHERE x.disabled > 0
+                   UNION ALL SELECT x.failing || CASE WHEN x.failing = 1 THEN ' contribution' ELSE ' contributions' END || ' failing' WHERE x.failing > 0
+                   UNION ALL SELECT x.awaiting || CASE WHEN x.awaiting = 1 THEN ' permission' ELSE ' permissions' END || ' waiting for your approval' WHERE x.awaiting > 0
+                   UNION ALL SELECT x.load_problems || CASE WHEN x.load_problems = 1 THEN ' problem' ELSE ' problems' END || ' loading it' WHERE x.load_problems > 0))
+             END AS problems_label,
              uri('oxplow/page', 'page', 'extension-problems') || '#extension=' || x.name AS problems_target,
              (NOT x.enabled OR json_array_length(x.pending) > 0 OR x.load_problems > 0 OR x.failing + x.disabled > 0
               OR (x.source_hash IS NOT NULL AND x.hash IS NOT NULL AND x.source_hash <> x.hash)) AS attention
@@ -85,5 +82,4 @@ view:
   - { key: origin_text, label: From }
   - { key: runs_text, label: Runs }
   - { key: permission_items, label: Permissions }
-  - { key: approval_items, label: Needs your approval to run }
   empty: No extensions.

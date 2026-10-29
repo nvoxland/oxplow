@@ -15,5 +15,4 @@ view:
   - { key: origin_text, label: From }
   - { key: runs_text, label: Runs }
   - { key: permission_items, label: Permissions }
-  - { key: approval_items, label: Needs your approval to run }
   empty: No extensions. One you or your agent writes in .oxplow/extensions/ shows here.

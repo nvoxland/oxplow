@@ -1,5 +1,5 @@
 title: Extension problems
-description: "Every extension contribution that is failing or turned off, and every extension that did not load cleanly, under the extension it belongs to: what failed and when."
+description: "Everything wrong with an extension, a subsection each under its name: contributions that failed or stopped after failing, permissions waiting for approval, and load errors."
 icon: triangle-alert
 category: System
 keywords: failing disabled repair collector effect provider
@@ -16,7 +16,7 @@ loaders:
       SELECT h.extension || ': ' || h.contribution AS title, h.extension || '/' || h.kind || '/' || h.contribution AS id,
              e.uri AS extension_uri, h.extension, h.kind, h.contribution,
              CASE h.state
-               WHEN 'disabled' THEN 'Turned off, ' || coalesce(h.reason, 'no reason recorded') || '.'
+               WHEN 'disabled' THEN 'Stopped after ' || coalesce(h.reason, 'repeated failures') || '.'
                ELSE 'Failing, ' || h.consecutive_failures || ' in a row.' END AS what,
              h.last_error AS error, h.last_ok_at, h.updated_at,
              (h.state = 'disabled') AS can_enable,
@@ -29,6 +29,16 @@ loaders:
              'It did not load cleanly.', j.value, NULL, NULL, 0, 0, ''
       FROM v_extension e, json_each(e.errors) j
       WHERE NULLIF(:extension, '') IS NULL OR e.name = :extension
+      UNION ALL
+      -- What its source asks for that nobody approved: a pending line is
+      -- `<what> — <what it allows>`; the person approves on its page (Deploy).
+      SELECT e.name || ': needs your approval', e.name || '/approval/' || j.key, e.uri, e.name, 'extension', e.name,
+             'Waiting for your approval: ' || CASE WHEN instr(j.value, ' — ') > 0 THEN substr(j.value, 1, instr(j.value, ' — ') - 1) ELSE j.value END || '.',
+             CASE WHEN instr(j.value, ' — ') > 0 THEN 'It ' || substr(j.value, instr(j.value, ' — ') + 3) || '. Deploy it on its page to approve.'
+                  ELSE 'Deploy it on its page to approve.' END,
+             NULL, NULL, 0, 0, ''
+      FROM v_extension e, json_each(e.pending) j
+      WHERE NULLIF(:extension, '') IS NULL OR e.name = :extension
       ORDER BY 4, 5, 6
 view:
   from: problems
@@ -38,10 +48,10 @@ view:
   - { key: kind, label: Kind }
   - { key: what, label: State }
   - { key: last_ok_at, label: Last worked, format: relative }
-  empty: Nothing is failing or turned off.
+  empty: Nothing is wrong with any extension.
   actions:
   - id: enable
-    label: Enable Again
+    label: Start Again
     command: oxplow.contribution.enable
     row: true
     when: can_enable
@@ -57,6 +67,6 @@ view:
     input:
       text: '{{row.ask}}'
   - id: enable-all
-    label: Enable All Disabled
+    label: Start All Stopped
     command: oxplow.contribution.enable_all
     input: {}
