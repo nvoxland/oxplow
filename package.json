@@ -14,7 +14,7 @@
     "test:collect": "sh scripts/test-collect.sh",
     "test:fast": "sh scripts/test-prereqs.sh && cargo nextest run",
     "test:fast:ts": "bun run --cwd apps/desktop test:junit",
-    "test:ext": "cargo run -q -p oxplow-dev -- extension test --junit target/extension-tests/junit.xml",
+    "test:ext": "cargo build -q -p oxplow-script --bin oxplow-script-worker && cargo run -q -p oxplow-dev -- extension test --junit target/extension-tests/junit.xml",
     "lint:collect": "sh scripts/test-prereqs.sh && cargo clippy --workspace --all-targets --message-format=json -- -D warnings > target/clippy.json",
     "lint:searchable": "python3 scripts/check-control-chars.py",
     "lint:docs": "python3 scripts/check-docs-portable.py",

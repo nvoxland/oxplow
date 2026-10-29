@@ -105,7 +105,7 @@ daemon; it *copies* the one staged in `apps/desktop/src-tauri/binaries/`
 (`externalBin`) over `target/debug/oxplow-daemon`, every time
 oxplow-desktop's build script runs. So **stage before you build the
 shell** (`bash apps/desktop/src-tauri/scripts/stage-sidecars.sh debug`
-builds the daemon, the MCP adapter and the script worker and restages
+builds the daemon, the MCP adapter and the script worker (every script run needs it in `target/debug/`, beside the executable) and restages
 the ones that changed): a bare `cargo build -p oxplow-desktop` or
 `cargo build --bin oxplow` runs whatever daemon was staged last, even
 right after you built a new one. The symptom is a backend older than
