@@ -208,6 +208,9 @@ intent:
     - name: the-file-viewer-opens-the-current-version-of-a-local-file-at-a-past-revision
       input: { page: file-viewer, params: { path: 'src/main.rs', rev: 'git:HEAD' } }
       expect: the working-tree file's URI in current_uri, which the Open current version page action opens; none for the working tree or another filesystem
+    - name: the-extensions-page-lists-every-extension-and-what-needs-repair
+      input: { page: extensions, params: {} }
+      expect: one row per extension with its state, linking to its page; the failing or disabled contributions under Needs repair; a slot for the runs across extensions
     - name: the-extension-page-reads-a-shipped-extension
       input: { page: extension, params: { uri: 'oxplow:oxplow/extension?name=oxplow-foundation', name: oxplow-foundation } }
       expect: its origin, what runs, its pages with a link to each Definition, its permissions, and a slot for its runs

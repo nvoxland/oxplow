@@ -1,0 +1,18 @@
+# The overview reads the whole set: one row per extension, each linking to
+# its own page; the contributions that fail or are disabled sit under Needs
+# repair; the runs across extensions are a slot oxplow-bundled fills.
+when:
+  page: oxplow-foundation/extensions
+expect:
+  label: Extensions
+  loaders:
+    extensions_list:
+      rows:
+        contains:
+          - { name: oxplow-foundation, uri: "oxplow:oxplow/extension?name=oxplow-foundation", origin: bundled, state: Healthy, can_disable: 0 }
+    repairs:
+      rows: 0
+  nodes:
+    - { id: list, kind: viz }
+    - { id: repairs, kind: viz }
+    - { id: runs, kind: slot }

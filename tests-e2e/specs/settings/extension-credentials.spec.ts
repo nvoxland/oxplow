@@ -2,14 +2,14 @@ import { installExample } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
 import { openFromLauncher } from "../../support/ui.js";
 
-// Settings → Extensions lists the credentials extensions' collectors
+// Settings → Data lists the credentials extensions' collectors
 // declare, from the foundation's `extensions-credentials` page. Set… asks
 // for the value in a masked field; it goes to the keychain, and the row
 // says only that one is saved.
 test("a collector's credential is set from its row and cleared again", async ({ page, daemon }) => {
   await installExample(daemon, "github");
   await page.goto("/");
-  await openFromLauncher(page, "Settings: Extensions");
+  await openFromLauncher(page, "Settings: Data");
   const section = page.locator('[data-node="extensions-credentials"]').filter({ visible: true });
   const row = section.getByRole("row", { name: /GITHUB_TOKEN/ });
   await expect(row).toContainText("Not set");

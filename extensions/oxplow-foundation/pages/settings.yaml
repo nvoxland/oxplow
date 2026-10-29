@@ -42,7 +42,6 @@ loaders:
                  WHEN c.key IN ('agents', 'agentConfig', 'agentPromptAppend', 'personal.newThreadSession') THEN 'agents'
                  WHEN c.key = 'ai' OR c.key LIKE 'ai.%' THEN 'ai'
                  WHEN c.key = 'lsp' THEN 'lsp'
-                 WHEN c.key = 'extensions' THEN 'extensions'
                  WHEN c.key IN ('extensionInstances', 'activeProviders') THEN 'integrations'
                END AS area,
                c.value AS raw
@@ -148,24 +147,6 @@ loaders:
       WHERE language NOT IN (SELECT language_id FROM v_lsp_server)
       GROUP BY package
       ORDER BY package
-  extensions_health:
-    sql: |
-      SELECT h.extension, h.kind, h.contribution,
-             CASE h.state
-               WHEN 'disabled' THEN 'Disabled: ' || coalesce(h.reason, 'no reason recorded')
-               WHEN 'failing' THEN 'Failing (' || h.consecutive_failures || ' in a row)'
-                                   || CASE WHEN h.last_error IS NULL THEN '' ELSE ': ' || h.last_error END
-               ELSE 'OK' || CASE WHEN h.mean_ms IS NULL THEN '' ELSE ' · ' || CAST(round(h.mean_ms) AS INTEGER) || ' ms on average' END
-                         || CASE WHEN h.fresh THEN '' ELSE ' · missed its schedule' END
-                         || CASE WHEN h.dead_letters > 0 THEN ' · ' || h.dead_letters || ' undelivered' ELSE '' END
-             END AS status,
-             CASE h.state WHEN 'disabled' THEN 'danger' WHEN 'failing' THEN 'warn'
-                  ELSE CASE WHEN h.fresh AND h.dead_letters = 0 THEN 'muted' ELSE 'warn' END END AS tone,
-             (h.state = 'disabled') AS can_enable,
-             (h.state = 'disabled' AND h.repair_item IS NOT NULL) AS can_repair,
-             'Repair the extension described in [oxplow uri ' || coalesce(h.repair_item, '') || '] — read it first.' AS ask
-      FROM v_contribution_health h
-      ORDER BY h.extension, h.contribution
   extensions_credentials:
     sql: |
       SELECT substr(uri_param(c.collector, 'collector'), 1, instr(uri_param(c.collector, 'collector'), '/') - 1) AS extension,
@@ -502,123 +483,6 @@ view:
           input:
             package: '{{row.package}}'
           row: true
-    - id: extensions
-      title: Extensions
-      stack:
-      - id: extensions-list
-        embed:
-          page: oxplow-foundation/extensions-list
-      - id: extensions-deployments
-        embed:
-          page: oxplow-foundation/extensions-deployments
-      - id: extensions-health
-        title: Health
-        from: extensions_health
-        viz: table
-        group:
-          by: extension
-        columns:
-        - key: contribution
-          label: Contribution
-        - key: kind
-          label: Kind
-          width: 90
-        - key: status
-          label: State
-          tone: tone
-        empty: Nothing to repair.
-        actions:
-        - id: enable
-          label: Enable Again
-          command: oxplow.contribution.enable
-          row: true
-          when: can_enable
-          input:
-            extension: '{{row.extension}}'
-            kind: '{{row.kind}}'
-            contribution: '{{row.contribution}}'
-        - id: repair
-          label: Repair with the Agent
-          command: oxplow.agent.draft
-          row: true
-          when: can_repair
-          input:
-            text: '{{row.ask}}'
-        - id: enable-all
-          label: Enable All Disabled
-          command: oxplow.contribution.enable_all
-          input: {}
-      - id: extensions-credentials
-        title: Credentials
-        from: extensions_credentials
-        viz: table
-        group:
-          by: extension
-        columns:
-        - key: name
-          label: Credential
-        - key: status
-          label: Value
-          width: 160
-        empty: No extension asks for a credential.
-        actions:
-        - id: set
-          label: Set…
-          command: oxplow.collector.set_credential
-          row: true
-          form: true
-          about: name
-          fixed:
-          - collector
-          - name
-          input:
-            collector: '{{row.collector}}'
-            name: '{{row.name}}'
-        - id: clear
-          label: Clear
-          command: oxplow.collector.set_credential
-          row: true
-          when: is_set
-          input:
-            collector: '{{row.collector}}'
-            name: '{{row.name}}'
-      - id: extensions-secrets
-        title: Provider secrets
-        from: extensions_secrets
-        viz: table
-        group:
-          by: extension
-        columns:
-        - key: name
-          label: Secret
-        - key: provider
-          label: Provider
-          width: 160
-        - key: status
-          label: Value
-          width: 100
-        empty: No provider keeps a secret.
-        actions:
-        - id: set
-          label: Set…
-          command: oxplow.extension.set_secret
-          row: true
-          form: true
-          about: name
-          fixed:
-          - extension
-          - reference
-          input:
-            extension: '{{row.extension}}'
-            reference: '{{row.reference|json}}'
-        - id: revoke
-          label: Revoke
-          command: oxplow.extension.revoke_secret
-          row: true
-          when: is_set
-          input:
-            extension: '{{row.extension}}'
-            reference: '{{row.reference|json}}'
     - id: data
       title: Data
       stack:
@@ -713,6 +577,40 @@ view:
         title: Undelivered events
         embed:
           page: oxplow-foundation/alerts-deliveries
+      - id: extensions-credentials
+        title: Credentials
+        from: extensions_credentials
+        viz: table
+        group:
+          by: extension
+        columns:
+        - key: name
+          label: Credential
+        - key: status
+          label: Value
+          width: 160
+        empty: No extension asks for a credential.
+        actions:
+        - id: set
+          label: Set…
+          command: oxplow.collector.set_credential
+          row: true
+          form: true
+          about: name
+          fixed:
+          - collector
+          - name
+          input:
+            collector: '{{row.collector}}'
+            name: '{{row.name}}'
+        - id: clear
+          label: Clear
+          command: oxplow.collector.set_credential
+          row: true
+          when: is_set
+          input:
+            collector: '{{row.collector}}'
+            name: '{{row.name}}'
     - id: integrations
       title: Integrations
       stack:
@@ -807,6 +705,43 @@ view:
         viz: custom
         custom:
           component: integrations
+      - id: extensions-secrets
+        title: Provider secrets
+        from: extensions_secrets
+        viz: table
+        group:
+          by: extension
+        columns:
+        - key: name
+          label: Secret
+        - key: provider
+          label: Provider
+          width: 160
+        - key: status
+          label: Value
+          width: 100
+        empty: No provider keeps a secret.
+        actions:
+        - id: set
+          label: Set…
+          command: oxplow.extension.set_secret
+          row: true
+          form: true
+          about: name
+          fixed:
+          - extension
+          - reference
+          input:
+            extension: '{{row.extension}}'
+            reference: '{{row.reference|json}}'
+        - id: revoke
+          label: Revoke
+          command: oxplow.extension.revoke_secret
+          row: true
+          when: is_set
+          input:
+            extension: '{{row.extension}}'
+            reference: '{{row.reference|json}}'
     - id: ai
       title: AI
       stack:

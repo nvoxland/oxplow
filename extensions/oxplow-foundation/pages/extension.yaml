@@ -42,6 +42,16 @@ loaders:
              CASE WHEN p.running_uri IS NOT NULL THEN p.running_uri || '#oxplow.renderer=oxplow-foundation/definition' END AS definition
       FROM content c JOIN v_page p ON p.extension = c.name
       ORDER BY p.title
+  deployments:
+    sql: |
+      SELECT d.name, substr(d.hash, 1, 7) AS deployment, d.hash, d.deployed_at,
+             CASE WHEN d.active THEN 'runs' ELSE '' END AS running,
+             NOT d.active AS inactive,
+             COALESCE((SELECT group_concat(p.key, ', ') FROM json_each(d.permissions) p), '') AS approved,
+             COALESCE(substr(d."commit", 1, 7) || CASE WHEN d.dirty THEN ' (uncommitted)' ELSE '' END, '') AS version,
+             d.source
+      FROM content c JOIN v_extension_deployment d ON d.name = c.name
+      ORDER BY d.deployed_at DESC
   permissions:
     sql: |
       SELECT j.key AS permission, j.value AS reach
@@ -90,7 +100,23 @@ view:
     - { key: reach, label: Reach }
   - id: deployments
     title: Deployments
-    embed:
-      page: oxplow-foundation/extensions-deployments
-      params: { extension: { from: about.extension } }
+    viz: table
+    from: deployments
+    empty: No deployments yet. A deploy copies the extension's source here.
+    columns:
+    - { key: deployment, label: Deployment, width: 90 }
+    - { key: deployed_at, label: Deployed, format: relative, width: 120 }
+    - { key: running, label: Runs, width: 60 }
+    - { key: version, label: Commit, width: 150 }
+    - { key: approved, label: Approved to reach }
+    - { key: source, label: From }
+    actions:
+    - id: rollback
+      label: Roll Back to This
+      command: oxplow.extension.rollback
+      input:
+        name: '{{row.name}}'
+        to: '{{row.hash}}'
+      row: true
+      when: inactive
   - slot: runs

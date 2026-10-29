@@ -1,15 +1,171 @@
 title: Extensions
-description: "Every extension this project knows: what runs, whether its source moved on since, what it may reach, and its deployments."
+description: "Every extension this project knows, those needing attention first: what runs, its source, its health and what it may reach; below, the failing or disabled contributions."
 icon: package
 category: System
-keywords: deploy rollback permissions enable disable share
+keywords: deploy rollback permissions enable disable share health
+loaders:
+  extensions_list:
+    sql: |
+      SELECT e.name, e.uri, e.origin, e.enabled, e.deployment,
+             substr(e.hash, 1, 7) AS running,
+             CASE WHEN s.hash IS NOT NULL AND e.hash IS NOT NULL AND s.hash != e.hash
+                  THEN 'out of date' ELSE '' END AS source_state,
+             CASE WHEN NOT e.enabled THEN 'Disabled'
+                  WHEN json_array_length(e.pending) > 0 THEN 'Waiting on approval'
+                  WHEN json_array_length(e.errors) > 0 THEN json_array_length(e.errors) || ' problem(s)'
+                  WHEN h.unhealthy > 0 THEN h.unhealthy || ' failing or disabled'
+                  ELSE 'Healthy' END AS state,
+             CASE WHEN NOT e.enabled THEN 'muted'
+                  WHEN json_array_length(e.pending) > 0 OR json_array_length(e.errors) > 0 OR h.unhealthy > 0 THEN 'warn'
+                  END AS tone,
+             COALESCE((SELECT group_concat(p.key, ', ') FROM json_each(e.permissions) p), '') AS permissions,
+             COALESCE((SELECT group_concat(w.value, '; ') FROM json_each(e.pending) w), '') AS waiting_on,
+             (s.hash IS NOT NULL AND (e.deployment = 'undeployed'
+                OR (e.hash IS NOT NULL AND s.hash != e.hash))) AS can_deploy,
+             (e.deployment = 'deployed') AS can_rollback,
+             (NOT e.enabled) AS can_enable,
+             (e.enabled AND e.name != 'oxplow-foundation') AS can_disable,
+             (e.origin = 'project') AS can_remove,
+             (e.origin = 'project' AND NOT e.shared AND s.path LIKE '.oxplow/extensions/%') AS can_share,
+             (e.origin = 'project' AND e.shared) AS can_unshare
+      FROM v_extension e LEFT JOIN v_extension_source s USING (name)
+           LEFT JOIN (SELECT extension, count(*) AS unhealthy FROM v_contribution_health
+                      WHERE state <> 'ok' GROUP BY extension) h ON h.extension = e.name
+      ORDER BY (NOT e.enabled OR json_array_length(e.pending) > 0 OR json_array_length(e.errors) > 0
+                OR COALESCE(h.unhealthy, 0) > 0 OR (s.hash IS NOT NULL AND e.hash IS NOT NULL AND s.hash != e.hash)) DESC,
+               e.origin, e.name
+  # The contributions that are failing or disabled, across every extension.
+  repairs:
+    sql: |
+      SELECT h.extension, h.kind, h.contribution,
+             CASE h.state
+               WHEN 'disabled' THEN 'Disabled: ' || coalesce(h.reason, 'no reason recorded')
+               ELSE 'Failing (' || h.consecutive_failures || ' in a row)'
+                    || CASE WHEN h.last_error IS NULL THEN '' ELSE ': ' || h.last_error END END AS status,
+             CASE h.state WHEN 'disabled' THEN 'danger' ELSE 'warn' END AS tone,
+             (h.state = 'disabled') AS can_enable,
+             (h.state = 'disabled' AND h.repair_item IS NOT NULL) AS can_repair,
+             'Repair the extension described in [oxplow uri ' || coalesce(h.repair_item, '') || '] — read it first.' AS ask
+      FROM v_contribution_health h
+      WHERE h.state <> 'ok'
+      ORDER BY h.extension, h.contribution
 view:
   stack:
   - id: list
     title: Extensions
-    embed:
-      page: oxplow-foundation/extensions-list
-  - id: deployments
-    title: Deployments
-    embed:
-      page: oxplow-foundation/extensions-deployments
+    from: extensions_list
+    viz: table
+    columns:
+    - key: name
+      label: Extension
+      link:
+        kind: page
+        from: uri
+    - key: origin
+      label: From
+      width: 90
+    - key: state
+      label: State
+      tone: tone
+    - key: deployment
+      label: Runs
+      width: 100
+    - key: running
+      label: Deployment
+      width: 90
+    - key: source_state
+      label: Source
+      width: 90
+    - key: permissions
+      label: May reach
+    - key: waiting_on
+      label: Waiting on
+    empty: No extensions. One you or your agent writes in .oxplow/extensions/ shows here, ready to deploy.
+    actions:
+    - id: deploy
+      label: Deploy
+      command: oxplow.extension.deploy
+      input:
+        name: '{{row.name}}'
+      row: true
+      when: can_deploy
+    - id: rollback
+      label: Roll Back
+      command: oxplow.extension.rollback
+      input:
+        name: '{{row.name}}'
+      row: true
+      when: can_rollback
+    - id: enable
+      label: Enable
+      command: oxplow.extension.enable
+      input:
+        name: '{{row.name}}'
+      row: true
+      when: can_enable
+    - id: disable
+      label: Disable
+      command: oxplow.extension.disable
+      input:
+        name: '{{row.name}}'
+      row: true
+      when: can_disable
+    - id: share
+      label: Share with the Team
+      command: oxplow.extension.share
+      input:
+        name: '{{row.name}}'
+      row: true
+      when: can_share
+    - id: unshare
+      label: Stop Sharing
+      command: oxplow.extension.unshare
+      input:
+        name: '{{row.name}}'
+      row: true
+      when: can_unshare
+    - id: remove
+      label: Remove…
+      command: oxplow.extension.remove
+      input:
+        name: '{{row.name}}'
+      row: true
+      when: can_remove
+  - id: repairs
+    title: Needs repair
+    from: repairs
+    viz: table
+    group:
+      by: extension
+    columns:
+    - key: contribution
+      label: Contribution
+    - key: kind
+      label: Kind
+      width: 90
+    - key: status
+      label: State
+      tone: tone
+    empty: Nothing to repair.
+    actions:
+    - id: enable
+      label: Enable Again
+      command: oxplow.contribution.enable
+      row: true
+      when: can_enable
+      input:
+        extension: '{{row.extension}}'
+        kind: '{{row.kind}}'
+        contribution: '{{row.contribution}}'
+    - id: repair
+      label: Repair with the Agent
+      command: oxplow.agent.draft
+      row: true
+      when: can_repair
+      input:
+        text: '{{row.ask}}'
+    - id: enable-all
+      label: Enable All Disabled
+      command: oxplow.contribution.enable_all
+      input: {}
+  - slot: runs

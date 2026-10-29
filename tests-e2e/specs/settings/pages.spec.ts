@@ -9,7 +9,6 @@ import { openFromLauncher } from "../../support/ui.js";
 const AREAS: [string, string][] = [
   ["agents", "Agents"],
   ["lsp", "Language Servers"],
-  ["extensions", "Extensions"],
   ["data", "Data"],
   ["integrations", "Integrations"],
   ["ai", "AI"],
@@ -24,8 +23,6 @@ test("every Settings area renders, reached from the rail", async ({ page }) => {
     await page.getByTestId(`page-section-${id}`).filter({ visible: true }).click();
     await expect(page.getByTestId("page-nav-title").filter({ visible: true })).toHaveText(title);
   }
-  await page.getByTestId("page-section-extensions").filter({ visible: true }).click();
-  await expect(page.locator('[data-testid="page-file"]:visible').getByRole("heading", { name: "Health" })).toBeVisible();
   await page.getByTestId("page-section-data").filter({ visible: true }).click();
   await expect(page.locator('[data-testid="page-file"]:visible').getByRole("heading", { name: "Collectors" })).toBeVisible();
 });
