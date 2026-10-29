@@ -344,7 +344,7 @@ extension and the step and rolls the whole candidate back: every layer stays at
 its old version and the extension is held back exactly like one whose dataset does
 not compile (`Failed::hold`: its last working version keeps serving, on the
 settings that version reads; a first-time extension stays out), the problem
-shown in Settings → Extensions. Fixing the step and activating again migrates.
+shown in the Extensions page. Fixing the step and activating again migrates.
 
 Reset uses an empty override object at a newer revision, retaining stale-token
 rejection. Disable/uninstall retain local rows for explicit recovery/reinstall;
@@ -1013,7 +1013,7 @@ the user guide is `docs/guide/pages.md`.
   into `Extension.sources`. A bad source is reported in `errors` without
   hiding the extension's pages. Settings → Data shows each source
   (runtime, schedule, row counts or failure, Sync Now);
-  Settings → Extensions keeps each extension's source credentials.
+  Settings → Data keeps each extension's source credentials.
 - **Settings shows what `extension check` finds.** Loading can't
   catch a page whose SQL fails (it never runs the SQL), so Settings →
   Extensions runs `oxplow_validate_extension` — the same dry run `oxplow extension
@@ -1081,7 +1081,7 @@ the user guide is `docs/guide/pages.md`.
   `enabled: false` and no pages, slots or sources, so every consumer
   ignores it; `find_page` and `run_page` say it's disabled. Which are
   on is the team's `extensions:` plus the person's `enableExtensions` /
-  `disableExtensions` ("Sources and deployments"). Settings → Extensions
+  `disableExtensions` ("Sources and deployments"). the Extensions page
   toggles it through `oxplow.extension.enable` / `disable`.
 - **A page of sections leads with what matters.** In a `stack`, a
   titled `viz` section with no rows (no error, not `replaceable`) folds
@@ -1592,23 +1592,27 @@ the default): one extension. About reads the `content` row (`v_extension`)
 and `v_extension_source` (origin, what runs, whether the source moved on
 since the deploy, a link to the running `extension.yaml`); then its pages
 (each linking to the Definition of the running file, `v_page.running_uri`),
-`extension-contributions` by kind, its permissions, `extensions-deployments`
-narrowed by its `extension` param, and the slot `oxplow-foundation/extension.runs`,
+`extension-contributions` by kind, its permissions, its deployments (newest
+first, Roll Back to This), and the slot `oxplow-foundation/extension.runs`,
 which oxplow-bundled fills with `extension-runs` (foundation never depends on
 bundled). The Extensions list's names and Definition's Extension fact link to it.
 
-**The Extensions page** (foundation's `extensions` page, which embeds
-`extensions-list` and `extensions-deployments`; Settings → Extensions
-embeds the same two pages): `extensions-list` is every
-extension from `v_extension` joined to `v_extension_source` — the live
+**The Extensions page** (foundation's `extensions`, the launcher's System
+page; Settings has no Extensions area): the whole set at once. Its table is
+every extension from `v_extension` joined to `v_extension_source` — the live
 dataset of each source as it is now, so an edit shows at once ("out of date"
-when its hash isn't the running deployment's) — with its permissions and
-what it waits on, and the row actions Deploy (offered only when undeployed
-or out of date), Roll Back, Enable, Disable, Share with the Team, Stop
-Sharing and Remove, each offered by a `when:` column the query computes;
-`extensions-deployments` is `v_extension_deployment`, newest first, with
-Roll Back to This. A row action that adds permissions asks inline like any
-deploy.
+when its hash isn't the running deployment's) — those needing attention
+first (disabled, waiting on approval, problems, failing or disabled
+contributions, a source that moved on), each name linking to its Extension
+page, with what it may reach and the row actions Deploy (offered only when
+undeployed or out of date), Roll Back, Enable, Disable, Share with the Team,
+Stop Sharing and Remove, each offered by a `when:` column the query computes.
+"Needs repair" is `v_contribution_health` where not ok, with Enable Again,
+Repair with the Agent and Enable All Disabled; the slot
+`oxplow-foundation/extensions.runs` is filled by oxplow-bundled's `runs`.
+Every deployment of every extension is not on this page: each Extension page
+lists its own, newest first, with Roll Back to This. A row action that adds
+permissions asks inline like any deploy.
 
 `v_extension.permissions` is the declaration as JSON (`{}`: baseline);
 `v_extension.pending` is what an undeployed extension waits on a person
@@ -3188,7 +3192,7 @@ live set, the same in every stream) and one event subscription
 however many readers are mounted (slots, decorators, rail panels,
 extension pages, the launcher). It reloads on `extensionsChanged`. The
 listing lives while something reads it, so a later mount loads afresh.
-Only Settings → Extensions lists them itself — it reloads after its own
+Only the Extensions page lists them itself — it reloads after its own
 deploys and toggles.
 
 ## Custom components
@@ -3732,7 +3736,7 @@ its scope trace.
   **Reading it:** the bundled `runs` page (`oxplow-bundled/runs`, titled
   "Extension runs", in the launcher under Activity) lists, per extension
   and for the last 7 days, its runs, failures, denials, mean `cpu_ms` and
-  model calls, the ones needing attention first. Settings → Extensions
+  model calls, the ones needing attention first. the Extensions page
   shows each extension's worst current run (`v_extension_run`, `latest =
   1`). Opening an extension's row (the hidden `oxplow-bundled/extension-runs`
   page, param `extension`) lists its runs one by one for the same week:
@@ -3830,7 +3834,7 @@ uses):
   lists every scope (id, access, host, summary) for an agent; `docs/reference/extensions.md`
   "Services" is generated from it (`the_reference_lists_every_service`,
   sharing `test_fixtures::generated_section` with the kinds table).
-- **Where a person sees them.** Settings → Extensions shows a line per
+- **Where a person sees them.** the Extensions page shows a line per
   script under each project extension's row — "Collector triage — Read the
   captured tree · Ask a dataset (you approve it)" — worded from the service
   titles (`list_services`, one rpc over `SERVICES`; the surface-parity
@@ -4727,7 +4731,7 @@ capability / feature, and the entry is a file in the
 extension that parses and defines `transform` (`check_starlark`), and
 it declares at most `MAX_EXAMPLES` (10) examples. The
 script's text is kept on the `ExtensionCommand` (not serialized).
-`check_extension` (Settings → Extensions, `oxplow extension check`) runs
+`check_extension` (the Extensions page, `oxplow extension check`) runs
 `check_commands`: with a running oxplow's registry, each example is
 dry-run (`dry_run`) — `compose_calls`, its `sql.read` calls answered by the
 example's `answers` or through the check's `SqlGateway` (its overlay
@@ -4861,7 +4865,7 @@ Every contribution that runs — an external provider instance, a collector, an 
   included, a lost race to another delivery not; `skipped` and `proposed`
   never do, and a reaction whose commands ran starts the count over. Nothing cascades: a page over its view still runs.
 - **Repairing.** Core detects and reports (the health row,
-  `contribution.disabled@1`, Settings → Extensions) with or without a work
+  `contribution.disabled@1`, the Extensions page) with or without a work
   list. Filing the repair item is the bundled effect
   `oxplow-bundled/repair-disabled` (`effects/repair_disabled.star`, on
   `contribution.disabled`, `needs: [sql.read]`): it composes
@@ -4892,7 +4896,7 @@ Every contribution that runs — an external provider instance, a collector, an 
   contribution }`. It names the kind — a provider and a
   collector may share an id; there must be a failed one of that kind (or
   a provider instance the registry knows).
-- **In the app (C3).** Settings → Extensions shows one health line per
+- **In the app (C3).** the Extensions page shows one health line per
   contribution under its extension (`contributionHealth.ts`, live over
   `v_contribution_health`): `OK` with its average time, a missed schedule and
   undelivered events; `Failing (N in a row): <error>`; or `Disabled:
@@ -5657,7 +5661,7 @@ required import whose owner is out) replaced by its version in the active
 generation, or left out when it has none; everything else activates together
 as one coherent generation. Required bundled extensions are never replaced:
 their errors still reject the candidate. The held extensions and why are the
-activation's `problems` (Settings → Extensions), so the reason is visible
+activation's `problems` (the Extensions page), so the reason is visible
 while the last working version keeps running. A held extension's declarations
 are its last working ones; its scripts are read from disk as they are now.
 A failure later in staging that names one extension — a dataset whose SQL
@@ -5687,7 +5691,7 @@ commit (the in-memory maps part swapped, the boundary refusing readers) is
 recovered at once: the database is the truth, so the activation stages the
 generation again from it and publishes that, which clears `unavailable`; if
 that fails too, the boundary stays unavailable and the failure is a `<host>`
-problem in Settings → Extensions. Cancelling the async caller does not release
+problem in the Extensions page. Cancelling the async caller does not release
 the worker's writer while it can still commit. Test hooks (`panic_at`) inject
 the panic right after the commit or after the maps and providers are published,
 any number of times, so both points and the failed restage are pinned
@@ -6024,8 +6028,8 @@ dataset carries it. Presence is the live dataset `v_extension_secret` (`extensio
 `provider`, `name`, `reference` as JSON, `is_set`), read from the catalog's
 provider credentials and the keychain; it follows `CredentialChanged`. Secret
 bytes and keychain error details are never returned or audited. Values are
-bounded to 16 KiB. Settings → Extensions lists them in the foundation's
-`extensions-secrets` page (Set… / Rotate…, a form over the command whose
+bounded to 16 KiB. Settings → Integrations lists them in the foundation's
+`extensions-secrets` node (Set… / Rotate…, a form over the command whose
 `value` field is masked by the schema, and Revoke). The old
 `save_extension_secret`, `extension_secret_is_set` and
 `revoke_extension_secret` IPCs are gone.

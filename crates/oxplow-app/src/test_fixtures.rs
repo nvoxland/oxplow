@@ -754,16 +754,6 @@ pub async fn run_as_page_in(
             "lsp-suggestions",
         ),
         (
-            "oxplow-foundation/settings-extensions",
-            "settings",
-            "extensions",
-        ),
-        (
-            "oxplow-foundation/extensions-health",
-            "settings",
-            "extensions-health",
-        ),
-        (
             "oxplow-foundation/extensions-credentials",
             "settings",
             "extensions-credentials",

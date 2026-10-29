@@ -2513,7 +2513,7 @@ mod tests {
         deploy(svc, "acme", true).await.unwrap();
         let acme = || async {
             let run =
-                crate::test_fixtures::run_as_page(svc, "oxplow-foundation/extensions-list", &[])
+                crate::test_fixtures::run_as_page(svc, "oxplow-foundation/extensions", &[])
                     .await;
             let col = |name: &str| run.columns.iter().position(|c| c == name).unwrap();
             let row = run
@@ -2555,7 +2555,7 @@ mod tests {
                 .open(
                     svc,
                     RunRequest {
-                        target: RunTarget::Page("oxplow-foundation/extensions-list".into()),
+                        target: RunTarget::Page("oxplow-foundation/extensions".into()),
                         params: Default::default(),
                         ctx: crate::pages::spec::ViewContext::default(),
                         viewer: oxplow_domain::Actor::Human,
@@ -2582,7 +2582,7 @@ mod tests {
                 &runs,
                 PageActionCall {
                     run_id: id,
-                    node: Some("extensions_list".into()),
+                    node: Some("list".into()),
                     action: action.into(),
                     row: Some(row),
                     input: None,

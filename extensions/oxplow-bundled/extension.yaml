@@ -279,6 +279,7 @@ intent:
 ui:
   mounts:
     - { page: extension-runs, at: oxplow-foundation/extension.runs }
+    - { page: runs, at: oxplow-foundation/extensions.runs }
     - { page: change-review, at: oxplow-foundation/diff-view.sections }
     - { page: change-review, at: oxplow-foundation/commit.sections }
     - { page: change-review, at: oxplow-foundation/uncommitted-changes.sections }

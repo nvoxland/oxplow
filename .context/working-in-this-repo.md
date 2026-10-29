@@ -143,7 +143,7 @@ named, fails it). It refuses while oxplow holds the project
 (the instance lock: a running daemon keeps the live set in memory and its
 next publication would undo it), so quit oxplow, deploy, then start it.
 With foundation running, deploy from inside oxplow instead
-(`oxplow.extension.deploy`, or Deploy in Settings → Extensions): it
+(`oxplow.extension.deploy`, or Deploy in the Extensions page): it
 replaces what runs at once, no restart. Nothing deploys on its own: a
 source may be mid-way on purpose, so a person or their agent decides.
 

@@ -23,5 +23,5 @@ expect:
     - { id: about, kind: viz }
     - { id: pages, kind: viz }
     - { id: permissions, kind: viz }
-    - { id: deployments, kind: embed }
+    - { id: deployments, kind: viz }
     - { id: runs, kind: slot }

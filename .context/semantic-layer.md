@@ -989,7 +989,7 @@ collectors:
     entry: sync.sh             # relative, inside the extension folder
     on: { every: 15m }    # or manual; { on: [<event type>], where?: {field: value} }
     env: [GITHUB_REPOSITORY]   # host env vars passed through; nothing else is
-    credentials: [GITHUB_TOKEN] # keychain secrets, set in Settings → Extensions
+    credentials: [GITHUB_TOKEN] # keychain secrets, set in Settings → Data
     entities:
       - name: pr               # view: v_<extension>_<entity> = v_github_pr
         doc: One pull request.
