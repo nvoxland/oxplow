@@ -1,5 +1,5 @@
 title: Agent Session
-description: An agent's session — its terminal, and what it asked for that waits on you. Rename it, move it to another of its saved conversations or fork one.
+description: An agent's session — its terminal, and what it asked for that waits on you.
 label: '{{row.display_name}}'
 for: oxplow/agent_session
 default: true
