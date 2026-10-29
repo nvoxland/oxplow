@@ -170,7 +170,6 @@ view:
   stack:
   - id: about
     title: About
-    hide_title: true
     viz: detail
     from: about
     columns:
