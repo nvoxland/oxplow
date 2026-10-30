@@ -606,7 +606,7 @@ run takes new params itself (`setParams`). `PageHost` takes a `PageKey`,
 holds its run (`usePageRunWith` over `usePageRunsStore()`: the
 `PageRunsContext`'s store, else the window's; `RunState` carries the
 `runId`, `rerun` is Refresh) and draws the `tabs/Page.tsx` chrome:
-the rail's groups, top to bottom: `PageRail` first (Filters, the `rail:` tree, Selection), then Contents and See also (the page's `see_also:` links, `RailSeeAlso`); every group's body starts at its heading's left edge (the Contents active bar hangs in the gutter)
+the rail's groups, top to bottom: `PageRail` first (Filters, the `rail:` tree, Selection), then Contents and See also (the page's `see_also:` links, `RailSeeAlso`); every group's body sits a little in from its heading, the same in each (`.ox-rail-group > :not(.ox-rail-group-head)`; the Contents active bar hangs in that indent)
 in the
 rail (`pages/railGroups.tsx`), which `railHas` (`pages/railHas.ts`) decides
 from the run: with nothing in it (no switch, `filter` or `selection` param,

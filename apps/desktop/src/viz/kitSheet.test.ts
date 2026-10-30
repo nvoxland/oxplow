@@ -52,3 +52,10 @@ test("only the first section has no space above it", () => {
   expect(sheet).toMatch(/\[data-node\]:first-child\s*>\s*\.ox-section[^{]*\{[^}]*margin-top:\s*0/);
   expect(sheet).not.toMatch(/(^|[},]\s*)\.ox-section:first-child\s*[,{]/);
 });
+
+// A rail group's body sits a little in from its heading, the same for
+// every group (Filters, Contents, See also): one rule on the group.
+test("every rail group's body is indented from its heading", () => {
+  const sheet = readFileSync(SHEET, "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  expect(sheet).toMatch(/\.ox-rail-group\s*>\s*:not\(\.ox-rail-group-head\)\s*\{[^}]*margin-left:\s*var\(--space-3\)/);
+});

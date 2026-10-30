@@ -214,6 +214,8 @@
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
+/* Every group's body sits a little in from its heading, the same in each. */
+.ox-rail-group > :not(.ox-rail-group-head) { margin-left: var(--space-3); }
 .ox-rail-group-head .ox-link { text-transform: none; letter-spacing: 0; background: none; border: none; padding: 0; font: inherit; }
 .ox-rail-line { margin: 0; color: var(--text-muted); font-size: var(--text-sm); }
 /* About this page's description: normal text, a little space before the facts. */
@@ -347,8 +349,8 @@
 .ox-markdown-editor-actions { display: flex; gap: var(--space-2); justify-content: flex-end; }
 
 /* A page's Contents (its markdown headings) in the rail; the one on
-   screen marked. An item's text starts at its group heading's left edge
-   (like every rail body); the active bar hangs in the gutter before it. */
+   screen marked. An item's text starts where every rail body does; the
+   active bar hangs in the indent before it. */
 .ox-contents { display: flex; flex-direction: column; gap: 2px; }
 .ox-contents-item {
   background: transparent; border: 0; border-left: 2px solid transparent;
