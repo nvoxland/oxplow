@@ -132,11 +132,6 @@ pub fn compare_exchange_tx(
     if actual != expected {
         return Err(StateError::Conflict { actual });
     }
-    if actual.is_some_and(|stamp| schema_version < stamp.schema_version) {
-        return Err(StateError::Invalid(
-            "extension state schema version cannot move backwards".into(),
-        ));
-    }
     let revision = match actual {
         Some(stamp) if stamp.revision < i64::MAX as u64 => stamp.revision + 1,
         Some(_) => {
@@ -390,20 +385,22 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_schema_version_never_moves_backwards() {
+    async fn the_writer_sets_the_schema_version_either_way() {
+        // The running version writes at its own schema: a later one moves
+        // it up, a rolled-back one down. Only the stamp's revision guards.
         let store = store();
         let space = ns("notes", Scope::Project, Area::State);
         let first = store
             .compare_exchange(space.clone(), None, 2, BTreeMap::new())
             .await
             .unwrap();
-        invalid(
-            store
-                .compare_exchange(space.clone(), Some(first.stamp), 1, BTreeMap::new())
-                .await,
-        );
+        let back = store
+            .compare_exchange(space.clone(), Some(first.stamp), 1, BTreeMap::new())
+            .await
+            .unwrap();
+        assert_eq!(back.stamp.schema_version, 1);
         let forward = store
-            .compare_exchange(space, Some(first.stamp), 5, BTreeMap::new())
+            .compare_exchange(space, Some(back.stamp), 5, BTreeMap::new())
             .await
             .unwrap();
         assert_eq!(forward.stamp.schema_version, 5);

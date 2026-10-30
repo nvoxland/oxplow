@@ -453,11 +453,9 @@ async fn a_rollback_restores_the_earlier_version_over_what_the_later_one_stored(
 }
 
 /// What `data-model.md` says of a layer at another schema version: it
-/// fails closed until the extension's own command rewrites it. After a
-/// rollback the layer is newer than the running version, and the store
-/// rejects a schema downgrade, so that command's write is refused too.
+/// fails closed until the extension's own command rewrites it — after a
+/// rollback too, where the layer is newer than the running version.
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "the config store rejects schema downgrades, so a rolled-back version cannot rewrite a newer layer"]
 async fn a_rolled_back_version_rewrites_the_configuration_layer_the_later_one_wrote() {
     let fx = booted().await;
     let root = fx.svc.layout.project_dir.clone();

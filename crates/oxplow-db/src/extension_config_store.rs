@@ -222,9 +222,6 @@ pub fn compare_exchange_tx(
     if actual != expected {
         return Err(ConfigStoreError::Conflict { actual });
     }
-    if actual.is_some_and(|stamp| schema_version < stamp.schema_version) {
-        return Err(ConfigStoreError::InvalidData);
-    }
     let revision = match actual {
         Some(stamp) if stamp.revision < MAX_REVISION => stamp.revision + 1,
         Some(_) => return Err(ConfigStoreError::InvalidData),
@@ -561,18 +558,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_schema_version_cannot_decrease_but_inspect_reports_it() {
+    async fn a_write_at_an_older_schema_version_replaces_the_layer_and_inspect_reports_it() {
+        // A rolled-back version writes its settings at its own schema.
         let store = store();
         let space = ns("notes", Scope::Project);
         let first = store
             .compare_exchange(space.clone(), None, 3, json!({}))
             .await
             .unwrap();
-        refused(
-            store
-                .compare_exchange(space.clone(), Some(first.stamp()), 2, json!({}))
-                .await,
-        );
+        let back = store
+            .compare_exchange(space.clone(), Some(first.stamp()), 2, json!({}))
+            .await
+            .unwrap();
         let inspected = store
             .db
             .read_or({
@@ -581,7 +578,7 @@ mod tests {
             })
             .await
             .unwrap();
-        assert_eq!(inspected, Some(first.stamp()));
+        assert_eq!(inspected, Some(back.stamp()));
     }
 
     #[tokio::test]

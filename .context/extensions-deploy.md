@@ -331,9 +331,8 @@ collector and an effect (the old collector's rows stay); disable then enable
 (the dataset, page, command and an importing consumer go and come back, a
 paced collector run that was due runs after enable); rollback (the earlier
 version returns, private state outlives it, a configuration layer written at
-a newer schema fails closed — and, because the store takes no schema
-downgrade, the rolled-back version cannot rewrite it: an `#[ignore]`d test
-holds that gap); a deploy that loads but does not activate (the running
+a newer schema fails closed until the rolled-back version's command writes
+it again at its own schema); a deploy that loads but does not activate (the running
 version keeps working and the error says why); private state read by the
 next version; a producer's export changing under two consumers (the
 unversioned one keeps working; the one pinned to the old contract is held

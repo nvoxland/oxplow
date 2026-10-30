@@ -56,8 +56,10 @@ into deletion; there is no foreign key to the current contribution registry.
 `oxplow_domain::extension_state` defines validated namespaces, stamps and
 snapshots. `SqliteExtensionStateStore` reads consistent snapshots and uses
 compare-and-swap on both version and revision to replace the whole map and
-schema version in one retried transaction. It rejects schema downgrades,
-revision overflow, invalid keys, more than 256 keys or more than 1 MiB of
+schema version in one retried transaction. The writer sets the schema
+version either way — a later version moves it up, a rolled-back one down
+(only the running deployment's commands write, so an older version is the
+one running); the stamp's revision is what guards. It rejects revision overflow, invalid keys, more than 256 keys or more than 1 MiB of
 serialized data or 64 levels of JSON nesting (including the namespace map),
 so a valid write remains within the decoder's recursion limit. Reads reject
 oversized stored bytes before decoding and reject corrupt data rather than defaulting. Conflicts carry the current stamp and do
@@ -86,9 +88,8 @@ separate owned read per call. Provider namespace ownership is captured from
 its active provider declaration, independently of the invoking command.
 Public write commands still require private audit/proposal input handling.
 Neither configuration nor state has a migration runner: a stored configuration layer at
-another schema version fails closed until the extension's own command rewrites it (an older
-layer; the store takes no schema downgrade, so after a rollback a layer written at a newer
-version stays unreadable and unwritable until the later version runs again). The
+another schema version fails closed until the extension's own command rewrites it at its
+version — after a rollback too, where the layer is newer than the running version. The
 lower-level store APIs grant no authority themselves. Configuration continues to
 use the project/personal file layers. A file edit and a SQLite
 reset cannot be represented as one atomic DB transaction.
