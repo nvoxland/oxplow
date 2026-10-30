@@ -1,4 +1,4 @@
-SELECT c.uri, c.extension, c.local AS id,
+SELECT c.uri, c.extension, c.local AS id, c.description,
        CAST(json_extract(c.runs_on, '$.on') AS TEXT) AS trigger,
        CAST(h.state IS NOT 'disabled' AS INTEGER) AS enabled,
        CAST(CASE

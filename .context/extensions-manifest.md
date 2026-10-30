@@ -553,7 +553,7 @@ intent:                  # required
 # kinds
 measures:    [...]   # also what the project's own extension declares
 metrics:     [...]   # `key:` definitions; `measure:` must be declared here or oxplow.*
-dimensions:  [...]
+dimensions:  [...]   # each may carry a one-sentence `description:` (`v_dimension.description`)
 collectors:  [...]   # entity collectors (exec / starlark / jaq / read → entities) and
                      # fact collectors (`facts:`; starlark / jaq only; facts must be declared here or oxplow.*)
                      # see semantic-layer.md "Collectors"
@@ -566,9 +566,9 @@ advisories:  [...]   # see extensions-commands.md "Advisories"
 datasets:   [...]   # SQL datasets: DatasetDecl entries (`fields:`, optional `relationships: [{ from, to: <dataset>.<field> }]`) + datasets/<name>.sql → v_<ext>_<name>; `key: [fields]`; `materialize: on_change | { every: 1h } | { incremental: <field> }` stores one (semantic-layer.md "Datasets" vocabulary, "Extension datasets", "Materialized datasets"); the old `datasets:` / `columns:` are unknown keys with a hint
 panels: …           # left-nav panels, each a page compact (see "Panels")
 commands:  [...]   # Starlark scripts composing core commands, a scope's or its provider's operations (see extensions-commands.md "Commands")
-resources: …        # kinds of thing a URI can name (see extensions-events.md "Resources")
+resources: …        # kinds of thing a URI can name (see extensions-events.md "Resources"); each has an optional one-sentence `description:`
 event_types: …      # its own namespace's event types (stable; see extensions-events.md "Event types", P8)
-implementations: …  # capability implementations it declares (oxplow-foundation declares the defaults)
+implementations: …  # capability implementations it declares (oxplow-foundation declares the defaults); each has an optional one-sentence `description:`
 skills: …           # skills and slash commands for the coding agent
 providers: [...]    # external providers over the provider protocol — a program, or an MCP server behind oxplow's adapter (providers.md)
 effects: …          # scripts reacting to logged events by composing commands (see extensions-events.md "Effects")

@@ -1007,7 +1007,7 @@
     - { not_null: target }
     - { unique: target }
 - name: resource
-  version: 6
+  version: 8
   key: [resource]
   description: "Every resource a URI may name (`oxplow:<extension>/<resource>?<params>`), as the extensions declare them in `resources:` — oxplow-foundation's included, so none is special. Says what each one's params are and which view names it."
   fields:
@@ -1021,6 +1021,7 @@
     - { name: "searchable", type: "TEXT", doc: "The view search indexes it from; NULL when search doesn't." }
     - { name: "icon", type: "TEXT", doc: "The icon it is drawn with." }
     - { name: "wikilink", type: "TEXT", doc: "JSON `{ prefix, param }`: `[[<prefix>:<value>]]` names it with that param set; NULL when it has no sugar." }
+    - { name: "description", type: "TEXT", doc: "One sentence saying what the resource is (`description:` in `resources:`); NULL when its declaration says nothing. Also `v_contribution.description` of the same resource (join on `global_name = resource`)." }
   tests:
     - { not_null: resource }
     - { unique: resource }
@@ -1294,13 +1295,14 @@
     - { not_null: subject }
     - { relationships: { column: stream_id, to: stream, field: id } }
 - name: collector
-  version: 1
+  version: 2
   key: [uri]
   description: "Every enabled extension's collectors, one row each, with their standing: whether this machine has them on, their last run and its outcome, and when the next scheduled run is due. What Settings → Data lists. Run one with `oxplow.collector.sync` (`input.collector` is `<extension>/<id>`); turn a disabled one back on with `oxplow.contribution.enable`. Its network and credential standing on this machine is `v_collector_state` and `v_collector_credential` (join on `uri`); its declaration is `v_contribution`; its run history is `v_extension_run`."
   fields:
     - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/collector?collector=<extension>/<id>`: its URI, the same as `v_contribution.uri` and `v_collector_run.uri`." }
     - { name: "extension", type: "TEXT", doc: "The extension that declares it (`project` for the project's own)." }
     - { name: "id", type: "TEXT", doc: "Its id within the extension; `<extension>/<id>` is what `oxplow.collector.sync` takes as `collector`." }
+    - { name: "description", type: "TEXT", doc: "One sentence saying what it collects: its `doc:` in the manifest. Joins `v_contribution` on `uri`." }
     - { name: "trigger", type: "TEXT", doc: "How it comes to run: `call` (manual), `schedule` (`every:`), `events` (`on:`) or `run` (after a test or analysis run)." }
     - { name: "enabled", type: "INT", doc: "1 unless failures disabled it on this machine (`disabled_reason` says why)." }
     - { name: "state", type: "TEXT", doc: "`disabled`, `failing` (its health is failing or its last run failed), `never_run` or `ok`." }
@@ -1341,7 +1343,7 @@
     - { name: "since", type: "TEXT", doc: "When its run was first deferred (RFC 3339)." }
     - { name: "touched", type: "TEXT", doc: "When a triggering event last arrived for it (RFC 3339): what `settle` counts from." }
 - name: contribution
-  version: 7
+  version: 9
   key: [uri]
   description: "Every enabled extension's contributions, one row each, as their descriptors say: its URI (`<kind>:<extension>/<id>`, or `<kind>:<name>` for a command, metric, measure, dimension, event type or ref kind — the dataset that owns every contribution kind's URI), who contributed it and at what version, how it runs, what it needs, and the shared name it holds. What `list_extensions` counts and the reference documents. Kinds move onto descriptors one by one; a kind not yet listed here keeps its own listing."
   fields:
@@ -1359,6 +1361,7 @@
     - { name: "global_name", type: "TEXT", doc: "The name it holds in a space every extension shares (a metric key, a skill name, `<capability>/<id>`); NULL when none." }
     - { name: "file", type: "TEXT", doc: "The manifest it's declared in." }
     - { name: "line", type: "INTEGER", doc: "Its line there, when the kind tracks lines." }
+    - { name: "description", type: "TEXT", doc: "One sentence saying what it is, a collector's `doc:`, or the `description:` of a resource, a dimension or an implementation (the same text as on `v_collector`, `v_resource`, `v_dimension` and `v_capability_provider`); NULL for a kind whose declaration has none." }
   tests:
     - { not_null: uri }
 - name: page
@@ -1482,7 +1485,7 @@
     - { not_null: source_uri }
     - { not_null: target_uri }
 - name: capability_provider
-  version: 8
+  version: 9
   description: "Each capability's implementations — core's, the built-ins extensions declare (`oxplow-bundled`'s defaults, `oxplow-foundation`'s agent harnesses and AI providers), running provider instances', and `none` for an optional capability — with the features each declares, which is active and why. A capability many implementations serve at once (`agent_harness`, `acp_adapter`, `ai_provider`) has every declared row active. A choice that isn't available (its extension disabled, its instance stopped) is listed with `available = 0`; the active row is then the fallback. Settings lists the choices from here, and the UI shows an implementation's enhancements only when its features allow them."
   fields:
     - { name: "capability", type: "TEXT", doc: "`work_items`, `effort_policy`, `snapshots`, `vcs`, `knowledge`, `agent_harness`, `ai_provider`." }
@@ -1499,6 +1502,7 @@
     - { name: "optional", type: "INTEGER", doc: "1 when the capability may be `none`. (v4)" }
     - { name: "fields", type: "TEXT", doc: "Its own fields as a JSON array of `{ name, title, kind: enum|text|number, values? }`: what a work list keeps in `native` (oxplow's tasks: `priority`)." }
     - { name: "id_pattern", type: "TEXT", doc: "What a work list's own ids look like, a regex matched whole (oxplow's tasks: `tsk\\d+`): how its ids are recognized in text, as core's vocabulary recognizes them. NULL when it doesn't say. (v6)" }
+    - { name: "description", type: "TEXT", doc: "One sentence saying what this implementation is (`description:` in `implementations:`); NULL when its declaration says nothing or it is core's own. Joins `v_contribution` where `kind = 'implementation'` on `extension` and `local = capability || '.' || provider`." }
   tests:
     - { not_null: capability }
     - { not_null: provider }
@@ -1912,7 +1916,7 @@
     - { name: detail, type: TEXT, doc: "How many rows broke it, or the error; NULL when passed." }
     - { name: ran_at, type: TEXT, doc: "RFC 3339 time it ran." }
 - name: dimension
-  version: 2
+  version: 3
   description: "Dimensions: what metrics can be sliced by — `metric_grid('<bucket>', '<dimension>')` groups by one of these keys."
   fields:
     - { name: key, type: TEXT, doc: "The dimension key, e.g. `zone`; `oxplow.*` keys are built in." }
@@ -1925,6 +1929,7 @@
     - { name: entity_json, type: TEXT, doc: "For an entity dimension, the view and expression it slices (`{\"view\", \"expr\"}`)." }
     - { name: extension, type: TEXT, doc: "The extension that declared it; NULL for core." }
     - { name: ai_context, type: TEXT, doc: "Guidance for an agent reading the dimension, as JSON `{\"instructions\", \"synonyms\", \"examples\"}`; NULL when none. Not part of the contract. (v2)" }
+    - { name: description, type: TEXT, doc: "One sentence saying what it slices by (`description:` in `dimensions:`); NULL when the declaration says nothing. Joins `v_contribution` where `kind = 'dimension'` on `local = key`." }
   tests:
     - { not_null: key }
     - { unique: key }

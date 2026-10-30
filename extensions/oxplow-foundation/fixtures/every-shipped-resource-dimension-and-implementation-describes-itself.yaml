@@ -1,0 +1,11 @@
+# A resource, a dimension and an implementation that foundation declares
+# says in a sentence what it is (`description:`), on its own dataset.
+when:
+  sql: |
+    SELECT
+      (SELECT count(*) FROM v_resource WHERE extension = 'oxplow-foundation' AND coalesce(description, '') = '') AS resources,
+      (SELECT count(*) FROM v_dimension WHERE extension = 'oxplow-foundation' AND coalesce(description, '') = '') AS dimensions,
+      (SELECT count(*) FROM v_capability_provider WHERE extension = 'oxplow-foundation' AND coalesce(description, '') = '') AS implementations
+expect:
+  rows:
+    - { resources: 0, dimensions: 0, implementations: 0 }

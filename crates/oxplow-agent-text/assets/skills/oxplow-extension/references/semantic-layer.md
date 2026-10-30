@@ -76,6 +76,11 @@ Carry URIs; never assemble or dissect them:
   extension removed; store the URI anyway, and expect a reader to show it
   as unresolved rather than fail.
 
+A collector's `doc:`, and the optional `description:` of a `resources:`,
+`dimensions:` or `implementations:` entry, are one sentence each; they show as
+`description` on `v_collector`, `v_resource`, `v_dimension`, `v_capability_provider`
+and `v_contribution`.
+
 `v_command` is every registered command with its summary, scope and whether a
 person confirms it; `v_skill`, `v_slot` and `v_custom_component` describe what
 an extension gives the agent, mounts and draws. Each carries the `uri` that

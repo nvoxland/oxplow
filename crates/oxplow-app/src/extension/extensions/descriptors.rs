@@ -75,6 +75,7 @@ pub fn describe(ext: &Extension) -> Vec<Descriptor> {
             RunsOn::Declared,
         );
         d.global = Some(r.decl.name.to_string());
+        d.description = r.decl.description.clone();
         d.source = declared_at(&r.declared_at);
         out.push(d);
     }
@@ -128,6 +129,7 @@ pub fn describe(ext: &Extension) -> Vec<Descriptor> {
         };
         let mut d = new(ContributionKind::Collector, &c.id, trigger);
         d.after = c.after.clone();
+        d.description = Some(c.doc.clone());
         d.needs = c.service_needs();
         // A fact collector's id is flat across owners (the fact engine's
         // key); an entity collector's is `<owner>/<id>`.
@@ -191,6 +193,7 @@ pub fn describe(ext: &Extension) -> Vec<Descriptor> {
         );
         d.needs = i.needs.clone();
         d.global = Some(format!("{}/{}", i.capability, i.id));
+        d.description = i.description.clone();
         out.push(d);
     }
     // A provider's id is its default instance's id, its refs' segment and
@@ -220,6 +223,7 @@ pub fn describe(ext: &Extension) -> Vec<Descriptor> {
         if let Some(key) = &dim.key {
             let mut d = new(ContributionKind::Dimension, key, RunsOn::Query);
             d.global = Some(key.clone());
+            d.description = dim.description.clone();
             out.push(d);
         }
     }

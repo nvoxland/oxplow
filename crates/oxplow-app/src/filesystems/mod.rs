@@ -24,6 +24,7 @@ pub fn implementations() -> Vec<Implementation> {
         id_pattern: None,
         icon: None,
         config: json!({}),
+        description: None,
     };
     vec![
         row("local", "The stream's files", json!({ "writable": true })),

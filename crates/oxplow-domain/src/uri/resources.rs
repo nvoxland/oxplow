@@ -97,6 +97,8 @@ pub struct ResourceDecl {
     pub searchable: Option<String>,
     pub icon: Option<String>,
     pub wikilink: Option<WikilinkDecl>,
+    /// One sentence saying what the resource is (`v_resource.description`).
+    pub description: Option<String>,
 }
 
 /// A `resources:` entry as a manifest holds it. `resolve` and `searchable`
@@ -122,6 +124,9 @@ pub struct ResourceEntry {
     pub icon: Option<String>,
     #[serde(default)]
     pub wikilink: Option<WikilinkDecl>,
+    /// One sentence saying what the resource is.
+    #[serde(default)]
+    pub description: Option<String>,
 }
 
 impl ResourceEntry {
@@ -144,6 +149,7 @@ impl ResourceEntry {
             searchable: self.searchable,
             icon: self.icon,
             wikilink: self.wikilink,
+            description: self.description,
         })
     }
 }
@@ -169,6 +175,7 @@ impl ResourceDecl {
             searchable: None,
             icon: None,
             wikilink: None,
+            description: None,
         }
     }
 }
@@ -441,6 +448,7 @@ mod tests {
             searchable: None,
             icon: None,
             wikilink: None,
+            description: None,
         }
     }
 
@@ -531,5 +539,18 @@ mod tests {
             r.register(decl("acme/bad", &[("id", true, Some("("))])),
             Err(ResourceError::BadPattern { .. })
         ));
+    }
+
+    #[test]
+    fn a_resource_entry_keeps_its_description() {
+        let entry: ResourceEntry = serde_yaml::from_str(
+            "{ name: pr, label: Pull request, description: A pull request on the forge. }",
+        )
+        .expect("an entry");
+        let decl = entry.into_decl("acme").expect("a resource");
+        assert_eq!(
+            decl.description.as_deref(),
+            Some("A pull request on the forge.")
+        );
     }
 }

@@ -178,6 +178,8 @@ pub struct NewDimension {
     pub entity_json: Option<String>,
     /// Guidance for an agent reading the dimension.
     pub ai_context: Option<AiContext>,
+    /// One sentence saying what it slices by.
+    pub description: Option<String>,
 }
 
 impl NewDimension {
@@ -193,6 +195,7 @@ impl NewDimension {
             promoted: false,
             entity_json: None,
             ai_context: None,
+            description: None,
         }
     }
 }
@@ -637,15 +640,16 @@ pub fn upsert_dimension_tx(
         .optional()
         .map_err(map_sql_err)?;
     tx.execute(
-        "INSERT INTO dimension (key, label, value_type, subject_kind, vocabulary_json, scope, promoted, entity_json, extension, ai_context_json)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+        "INSERT INTO dimension (key, label, value_type, subject_kind, vocabulary_json, scope, promoted, entity_json, extension, ai_context_json, description)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
          ON CONFLICT(key) DO UPDATE SET
             label=excluded.label, value_type=excluded.value_type,
             subject_kind=excluded.subject_kind,
             vocabulary_json=excluded.vocabulary_json, scope=excluded.scope,
             promoted=excluded.promoted, entity_json=excluded.entity_json,
-            extension=excluded.extension, ai_context_json=excluded.ai_context_json",
-        params![d.key, d.label, d.value_type, d.subject_kind, d.vocabulary_json, scope, d.promoted, d.entity_json, extension, AiContext::to_column(&d.ai_context)],
+            extension=excluded.extension, ai_context_json=excluded.ai_context_json,
+            description=excluded.description",
+        params![d.key, d.label, d.value_type, d.subject_kind, d.vocabulary_json, scope, d.promoted, d.entity_json, extension, AiContext::to_column(&d.ai_context), d.description],
     )
     .map_err(map_sql_err)?;
     let grain_changed = match prior {

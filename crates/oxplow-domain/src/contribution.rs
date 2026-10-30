@@ -626,6 +626,9 @@ pub struct Descriptor {
     /// event type, a skill name, `<capability>/<id>`); two contributions
     /// of a kind that doesn't share names can't hold the same one.
     pub global: Option<String>,
+    /// One sentence saying what it is, for the kinds whose declaration
+    /// carries one (a collector's `doc:`); `None` otherwise.
+    pub description: Option<String>,
     pub source: DeclaredAt,
 }
 
@@ -642,6 +645,7 @@ impl Descriptor {
             after: Vec::new(),
             order_level: None,
             global: None,
+            description: None,
             source,
         }
     }

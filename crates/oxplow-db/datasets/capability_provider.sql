@@ -1,4 +1,4 @@
 SELECT capability, provider, extension, features_json AS features, active, title, source,
        available, chosen_by, capability_title, choosable, optional, fields_json AS fields,
-       id_pattern
+       id_pattern, description
 FROM source('capability_provider')

@@ -514,7 +514,7 @@ metrics:
   - { key: oxplow.csharp.blocking_async_calls, title: "blocking async calls (.Result / .Wait())", measure: oxplow.ast_hit, expression: "SUM(value) FILTER (WHERE dim('oxplow.rule') = 'blocking_async')", unit: count, direction: lower-better, displayKind: gauge, category: static-quality, language: csharp, description: "Blocking calls on async code (`.Result` / `.Wait()`).", sliceableDims: [oxplow.package, oxplow.language, oxplow.vcs_rev], collector: oxplow.csharp.blocking_async_calls, default: off }
 collectors:
   - id: oxplow_bundled.effort_churn
-    doc: An effort's churn, from its change, when it finishes.
+    doc: How many lines an effort added and removed in each file, recorded when it finishes.
     runtime: starlark
     entry: collectors/effort_churn.star
     on: [effort.finished]
@@ -530,22 +530,22 @@ collectors:
   # A whole-tree scan is minutes of CPU on a large tree, and a commit or
   # rebase moves several refs at once: one scan of the latest tree once
   # they settle, on a uri move (`trigger: git_refs`) rather than every save.
-  - { id: oxplow.todos, doc: "TODO / FIXME markers", runtime: starlark, entry: collectors/code/todos.star, on: [snapshot.taken], facts: [oxplow.todo] }
-  - { id: oxplow.fn_count, doc: "function count", runtime: starlark, entry: collectors/code/fn_count.star, on: [snapshot.taken], facts: [oxplow.parameter_count] }
-  - { id: oxplow.high_complexity_fns, doc: "high-complexity functions", runtime: starlark, entry: collectors/code/high_complexity_fns.star, on: [snapshot.taken], facts: [oxplow.complexity] }
-  - { id: oxplow.long_functions, doc: "long functions (>60 lines)", runtime: starlark, entry: collectors/code/long_functions.star, on: [snapshot.taken], facts: [oxplow.fn_length] }
-  - { id: oxplow.doc_coverage, doc: "Doc coverage", runtime: starlark, entry: collectors/code/doc_coverage.star, on: [snapshot.taken], facts: [oxplow.doc_coverage] }
-  - { id: oxplow.duplicate_lines, doc: "Duplicated lines", runtime: starlark, entry: collectors/code/duplicate_lines.star, whole_tree: true, on: [snapshot.taken], where: { trigger: git_refs }, settle: 60s, at_most: 15m, facts: [oxplow.duplicate_lines] }
-  - { id: oxplow.rust.unsafe_blocks, doc: "unsafe blocks", runtime: starlark, entry: collectors/rust/unsafe_blocks.star, on: [snapshot.taken], facts: [oxplow.ast_hit] }
-  - { id: oxplow.rust.unwrap_expect_calls, doc: "unwrap / expect calls", runtime: starlark, entry: collectors/rust/unwrap_expect_calls.star, on: [snapshot.taken], facts: [oxplow.ast_hit] }
-  - { id: oxplow.rust.panic_macros, doc: "panic-family macros", runtime: starlark, entry: collectors/rust/panic_macros.star, on: [snapshot.taken], facts: [oxplow.ast_hit] }
-  - { id: oxplow.ts.any_usage, doc: "any usage", runtime: starlark, entry: collectors/ts/any_usage.star, on: [snapshot.taken], facts: [oxplow.ast_hit] }
-  - { id: oxplow.ts.non_null_assertions, doc: "non-null assertions", runtime: starlark, entry: collectors/ts/non_null_assertions.star, on: [snapshot.taken], facts: [oxplow.ast_hit] }
-  - { id: oxplow.ts.console_calls, doc: "console.* calls", runtime: starlark, entry: collectors/ts/console_calls.star, on: [snapshot.taken], facts: [oxplow.ast_hit] }
-  - { id: oxplow.ts.ts_ignore, doc: "ts-ignore / ts-expect-error", runtime: starlark, entry: collectors/ts/ts_ignore.star, on: [snapshot.taken], facts: [oxplow.ast_hit] }
-  - { id: oxplow.clojure.defn_count, doc: "defn count", runtime: starlark, entry: collectors/clojure/defn_count.star, on: [snapshot.taken], facts: [oxplow.ast_hit] }
-  - { id: oxplow.csharp.empty_catch, doc: "empty catch blocks", runtime: starlark, entry: collectors/csharp/empty_catch.star, on: [snapshot.taken], facts: [oxplow.ast_hit] }
-  - { id: oxplow.csharp.blocking_async_calls, doc: "blocking async calls (.Result / .Wait())", runtime: starlark, entry: collectors/csharp/blocking_async_calls.star, on: [snapshot.taken], facts: [oxplow.ast_hit] }
+  - { id: oxplow.todos, doc: "Counts the TODO and FIXME markers in the project's files.", runtime: starlark, entry: collectors/code/todos.star, on: [snapshot.taken], facts: [oxplow.todo] }
+  - { id: oxplow.fn_count, doc: "Counts the functions in each file, and their parameters.", runtime: starlark, entry: collectors/code/fn_count.star, on: [snapshot.taken], facts: [oxplow.parameter_count] }
+  - { id: oxplow.high_complexity_fns, doc: "Finds the functions whose complexity is high.", runtime: starlark, entry: collectors/code/high_complexity_fns.star, on: [snapshot.taken], facts: [oxplow.complexity] }
+  - { id: oxplow.long_functions, doc: "Finds the functions longer than 60 lines.", runtime: starlark, entry: collectors/code/long_functions.star, on: [snapshot.taken], facts: [oxplow.fn_length] }
+  - { id: oxplow.doc_coverage, doc: "Measures how many items of the code have a doc comment.", runtime: starlark, entry: collectors/code/doc_coverage.star, on: [snapshot.taken], facts: [oxplow.doc_coverage] }
+  - { id: oxplow.duplicate_lines, doc: "Finds the lines that the project's files repeat.", runtime: starlark, entry: collectors/code/duplicate_lines.star, whole_tree: true, on: [snapshot.taken], where: { trigger: git_refs }, settle: 60s, at_most: 15m, facts: [oxplow.duplicate_lines] }
+  - { id: oxplow.rust.unsafe_blocks, doc: "Counts the `unsafe` blocks in Rust files.", runtime: starlark, entry: collectors/rust/unsafe_blocks.star, on: [snapshot.taken], facts: [oxplow.ast_hit] }
+  - { id: oxplow.rust.unwrap_expect_calls, doc: "Counts the `unwrap` and `expect` calls in Rust files.", runtime: starlark, entry: collectors/rust/unwrap_expect_calls.star, on: [snapshot.taken], facts: [oxplow.ast_hit] }
+  - { id: oxplow.rust.panic_macros, doc: "Counts the `panic!`, `todo!` and similar macros in Rust files.", runtime: starlark, entry: collectors/rust/panic_macros.star, on: [snapshot.taken], facts: [oxplow.ast_hit] }
+  - { id: oxplow.ts.any_usage, doc: "Counts the uses of the `any` type in TypeScript files.", runtime: starlark, entry: collectors/ts/any_usage.star, on: [snapshot.taken], facts: [oxplow.ast_hit] }
+  - { id: oxplow.ts.non_null_assertions, doc: "Counts the non-null assertions in TypeScript files.", runtime: starlark, entry: collectors/ts/non_null_assertions.star, on: [snapshot.taken], facts: [oxplow.ast_hit] }
+  - { id: oxplow.ts.console_calls, doc: "Counts the `console.*` calls in TypeScript files.", runtime: starlark, entry: collectors/ts/console_calls.star, on: [snapshot.taken], facts: [oxplow.ast_hit] }
+  - { id: oxplow.ts.ts_ignore, doc: "Counts the `@ts-ignore` and `@ts-expect-error` comments in TypeScript files.", runtime: starlark, entry: collectors/ts/ts_ignore.star, on: [snapshot.taken], facts: [oxplow.ast_hit] }
+  - { id: oxplow.clojure.defn_count, doc: "Counts the `defn` forms in Clojure files.", runtime: starlark, entry: collectors/clojure/defn_count.star, on: [snapshot.taken], facts: [oxplow.ast_hit] }
+  - { id: oxplow.csharp.empty_catch, doc: "Counts the empty `catch` blocks in C# files.", runtime: starlark, entry: collectors/csharp/empty_catch.star, on: [snapshot.taken], facts: [oxplow.ast_hit] }
+  - { id: oxplow.csharp.blocking_async_calls, doc: "Counts the blocking calls on async code (`.Result`, `.Wait()`) in C# files.", runtime: starlark, entry: collectors/csharp/blocking_async_calls.star, on: [snapshot.taken], facts: [oxplow.ast_hit] }
 configuration:
   version: 1
   schema:
