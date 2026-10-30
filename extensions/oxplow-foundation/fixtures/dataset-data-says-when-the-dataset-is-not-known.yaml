@@ -1,0 +1,9 @@
+# A dataset URI naming no dataset: no query is built and the page says so.
+when:
+  page: oxplow-foundation/dataset-data
+  params: { uri: "oxplow:oxplow/dataset?dataset=nothing_like_it" }
+expect:
+  loaders:
+    about: { rows: 0 }
+    data: { rows: 0 }
+  text: { contains: ["isn't a dataset"] }

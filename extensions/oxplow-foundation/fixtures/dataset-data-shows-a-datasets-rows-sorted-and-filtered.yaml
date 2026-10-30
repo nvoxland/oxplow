@@ -1,0 +1,37 @@
+# The Dataset data page shows a dataset's rows as they are. Sort, direction and a
+# "field = value" filter come from its params; a field the dataset lacks is ignored.
+given:
+  - { command: oxplow.work_item.create, input: { title: Alpha } }
+  - { command: oxplow.work_item.create, input: { title: Beta } }
+when:
+  page: oxplow-foundation/dataset-data
+  params: { uri: "oxplow:oxplow/dataset?dataset=work_item" }
+expect:
+  label: v_work_item data
+  loaders:
+    about: { rows: [{ view: v_work_item, owner: core }] }
+    data: { rows: 2 }
+  see_also:
+    - { title: Definition, uri: "oxplow:oxplow/dataset?dataset=work_item#oxplow.renderer=oxplow-foundation/dataset-definition" }
+    - { title: Explore Data, uri: "oxplow:oxplow/page?dataset=v_work_item&page=explore-data" }
+steps:
+  - params: { sort: title, direction: desc }
+    expect:
+      loaders:
+        data: { rows: [{ title: Beta }, { title: Alpha }] }
+  - params: { sort: title, direction: asc }
+    expect:
+      loaders:
+        data: { rows: [{ title: Alpha }, { title: Beta }] }
+  - params: { where_field: title, where_value: Alpha }
+    expect:
+      loaders:
+        data: { rows: [{ title: Alpha }] }
+  - params: { where_field: title, where_value: "x' OR '1'='1" }
+    expect:
+      loaders:
+        data: { rows: 0 }
+  - params: { limit: "50", where_field: nope, where_value: Alpha, sort: nope }
+    expect:
+      loaders:
+        data: { rows: 2 }

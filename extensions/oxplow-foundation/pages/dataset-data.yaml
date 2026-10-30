@@ -1,0 +1,90 @@
+title: Dataset data
+description: The rows of one dataset, as they are, with a limit, a sort and one field = value filter.
+label: '{{row.view}} data'
+icon: database
+for: oxplow/dataset
+default: true
+refresh: true
+params:
+- name: uri
+  label: Dataset
+- name: limit
+  type: choice
+  role: filter
+  label: Rows
+  options: [{ value: '50', label: '50' }, { value: '200', label: '200' }, { value: '1000', label: '1000' }]
+  default: '200'
+- name: sort
+  type: choice
+  role: filter
+  label: Sort by
+  options_from: oxplow-foundation/dataset-fields
+- name: direction
+  type: choice
+  role: filter
+  label: Direction
+  options: [{ value: asc, label: Ascending }, { value: desc, label: Descending }]
+  default: asc
+- name: where_field
+  type: choice
+  role: filter
+  label: Filter field
+  options_from: oxplow-foundation/dataset-fields
+- name: where_value
+  role: filter
+  label: Equals
+answers:
+- {"question":"What rows does this dataset hold?","about":"oxplow/dataset","params":{"uri":"oxplow:oxplow/dataset?dataset=work_item"},"skill":"oxplow-extension"}
+loaders:
+  about:
+    sql: |
+      SELECT d.view, d.name, d.owner, d.kind, d.description
+      FROM v_dataset d
+      WHERE (d.owner = 'core' AND d.name = uri_param(:uri, 'dataset'))
+         OR d.owner || '/' || d.name = uri_param(:uri, 'dataset')
+  # The one query the page runs. Only a view of v_dataset and fields of v_field
+  # for that view reach its text, and a value is quoted: a param cannot inject SQL.
+  q:
+    sql: |
+      SELECT a.view,
+             'SELECT * FROM "' || replace(a.view, '"', '""') || '"'
+             || COALESCE((SELECT ' WHERE CAST("' || replace(f.name, '"', '""') || '" AS TEXT) = ' || quote(:where_value)
+                          FROM v_field f WHERE f.view = a.view AND f.name = :where_field AND :where_value IS NOT NULL AND :where_value <> ''), '')
+             || COALESCE((SELECT ' ORDER BY "' || replace(f.name, '"', '""') || '" ' || CASE WHEN :direction = 'desc' THEN 'DESC' ELSE 'ASC' END
+                          FROM v_field f WHERE f.view = a.view AND f.name = :sort), '')
+             || ' LIMIT ' || CASE WHEN :limit IN ('50', '1000') THEN :limit ELSE '200' END AS sql
+      FROM about a
+      -- No such dataset: a query with no rows, and the About section says why.
+      UNION ALL
+      SELECT NULL, 'SELECT 1 AS dataset WHERE 0' WHERE NOT EXISTS (SELECT 1 FROM about)
+  data:
+    command: oxplow.sql.query
+    args: { sql: { from: q.sql }, limit: 1000 }
+    refresh: manual
+  links:
+    sql: |
+      SELECT 'Definition' AS title,
+             :uri || '#oxplow.renderer=oxplow-foundation/dataset-definition' AS uri,
+             'What this dataset holds and its fields' AS description
+      FROM about
+      UNION ALL
+      SELECT 'Explore Data', uri('oxplow/page', 'page', 'explore-data', 'dataset', view), 'Try a query over this dataset'
+      FROM about
+view:
+  stack:
+  - id: about
+    title: About
+    viz: detail
+    from: about
+    columns:
+    - { key: name, label: Dataset }
+    - { key: description, label: What it is }
+    - { key: owner, label: Owner }
+    empty: That isn't a dataset oxplow publishes.
+  - id: rows
+    title: Rows
+    viz: table
+    from: data
+    empty: The dataset has no rows for this filter.
+see_also:
+  - { from: links }

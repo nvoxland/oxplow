@@ -1,0 +1,54 @@
+title: Dataset definition
+description: One dataset — what it holds, who publishes it and its fields with their types and docs.
+label: '{{row.view}}'
+icon: database
+for: oxplow/dataset
+params:
+- name: uri
+  label: Dataset
+answers:
+- {"question":"What does this dataset hold, and what are its fields?","about":"oxplow/dataset","params":{"uri":"oxplow:oxplow/dataset?dataset=work_item"},"skill":"oxplow-extension"}
+loaders:
+  about:
+    sql: |
+      SELECT d.view, d.name, d.owner, d.kind, d.description
+      FROM v_dataset d
+      WHERE (d.owner = 'core' AND d.name = uri_param(:uri, 'dataset'))
+         OR d.owner || '/' || d.name = uri_param(:uri, 'dataset')
+  fields:
+    sql: |
+      SELECT f.name, f.sql_type, f.doc || CASE WHEN f.key_part IS NOT NULL THEN ' (part of the key)' ELSE '' END AS doc
+      FROM about a JOIN v_field f ON f.view = a.view
+      ORDER BY f.position
+  links:
+    sql: |
+      SELECT 'Data' AS title,
+             :uri || '#oxplow.renderer=oxplow-foundation/dataset-data' AS uri,
+             'The rows of this dataset' AS description
+      FROM about
+      UNION ALL
+      SELECT 'Explore Data', uri('oxplow/page', 'page', 'explore-data', 'dataset', view), 'Try a query over this dataset'
+      FROM about
+view:
+  stack:
+  - id: about
+    title: About
+    viz: detail
+    from: about
+    columns:
+    - { key: view, label: View }
+    - { key: description, label: What it is }
+    - { key: owner, label: Owner }
+    - { key: kind, label: Kind }
+    empty: That isn't a dataset oxplow publishes.
+  - id: fields
+    title: Fields
+    viz: table
+    from: fields
+    columns:
+    - { key: name, label: Field }
+    - { key: sql_type, label: Type }
+    - { key: doc, label: What it holds }
+    empty: No fields.
+see_also:
+  - { from: links }

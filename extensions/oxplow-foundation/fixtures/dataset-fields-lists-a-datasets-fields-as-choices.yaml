@@ -1,0 +1,7 @@
+# The Sort by and Filter field choices of a dataset's data page: none, then each field.
+when:
+  page: oxplow-foundation/dataset-fields
+  params: { uri: "oxplow:oxplow/dataset?dataset=work_item" }
+expect:
+  loaders:
+    dataset_fields: { rows: { contains: [{ value: "", label: None }, { value: title, label: title }] } }

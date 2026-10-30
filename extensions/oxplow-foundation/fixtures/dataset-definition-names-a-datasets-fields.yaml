@@ -1,0 +1,12 @@
+# The definition mode of a dataset: what it holds, its owner and kind, and each field with its type and doc.
+when:
+  page: oxplow-foundation/dataset-definition
+  params: { uri: "oxplow:oxplow/dataset?dataset=work_item" }
+expect:
+  label: v_work_item
+  loaders:
+    about: { rows: [{ view: v_work_item, owner: core, kind: sql }] }
+    fields: { rows: { contains: [{ name: uri, sql_type: TEXT }, { name: title }] } }
+  see_also:
+    - { title: Data, uri: "oxplow:oxplow/dataset?dataset=work_item#oxplow.renderer=oxplow-foundation/dataset-data" }
+    - { title: Explore Data, uri: "oxplow:oxplow/page?dataset=v_work_item&page=explore-data" }

@@ -361,6 +361,21 @@ intent:
     - name: a-configured-language-server-is-listed-and-not-suggested-again
       input: { page: settings, params: { area: lsp } }
       expect: a language server of project.yaml is listed, can't be removed, and isn't suggested again
+    - name: dataset-data-shows-a-datasets-rows-sorted-and-filtered
+      input: { page: dataset-data, params: { uri: "oxplow:oxplow/dataset?dataset=work_item" } }
+      expect: a dataset's rows as they are, sorted and narrowed by its params
+    - name: dataset-data-says-when-the-dataset-is-not-known
+      input: { page: dataset-data, params: { uri: "oxplow:oxplow/dataset?dataset=nothing_like_it" } }
+      expect: no query is built and the page says it is not a dataset
+    - name: dataset-definition-names-a-datasets-fields
+      input: { page: dataset-definition, params: { uri: "oxplow:oxplow/dataset?dataset=work_item" } }
+      expect: a dataset's description, owner, kind and each field with its type and doc
+    - name: dataset-fields-lists-a-datasets-fields-as-choices
+      input: { page: dataset-fields, params: { uri: "oxplow:oxplow/dataset?dataset=work_item" } }
+      expect: none, then each field of the dataset, as choices
+    - name: data-catalog-links-each-dataset-to-its-definition
+      input: { page: data-catalog, params: { dataset: work_item } }
+      expect: each dataset links to its definition page
 # What the coding agent reads about the work list: its commands (with no
 # list they're a sink), and oxplow's tasks' ready queue while they are it.
 skills:
