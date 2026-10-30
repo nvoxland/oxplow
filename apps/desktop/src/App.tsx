@@ -30,7 +30,7 @@ import {
   type Stream,
   type WorkspaceContext,
 } from "./api.js";
-import { buildMenuBar, buildNativeMenuSnapshots, INSTALL_CLI_ID, menuItemById, OPEN_RECENT_PREFIX } from "./menuBar.js";
+import { buildMenuBar, buildNativeMenuSnapshots, favoriteIdFromMenuId, INSTALL_CLI_ID, menuItemById, OPEN_RECENT_PREFIX } from "./menuBar.js";
 import type { EditorNavigationTarget } from "./lsp.js";
 import { Navigator } from "./components/Navigator.js";
 import { StatusBar } from "./components/StatusBar.js";
@@ -849,9 +849,12 @@ export function App() {
   // The menu bar (File, Edit) and what search lists: the bus's offers,
   // and the shell's project commands.
   const menuGroups = useMemo(() => buildMenuBar(offers), [offers]);
+  // The stars the thread sees; the Favorites menu follows them (it re-reads
+  // when `v_bookmark` changes) and the thread/stream selection.
+  const bookmarks = useBookmarks(selectedThreadId, stream?.id ?? null);
   const nativeMenuSnapshots = useMemo(
-    () => buildNativeMenuSnapshots(menuGroups, recentProjects),
-    [menuGroups, recentProjects],
+    () => buildNativeMenuSnapshots(menuGroups, recentProjects, bookmarks),
+    [menuGroups, recentProjects, bookmarks],
   );
 
   // The launcher (QuickOpen) is the single discovery surface — pages,
@@ -918,6 +921,12 @@ export function App() {
         });
         return;
       }
+      const favoriteId = favoriteIdFromMenuId(commandId);
+      if (favoriteId !== null) {
+        const star = bookmarks.find((b) => b.ref.id === favoriteId);
+        if (star) flushSync(() => handleOpenPageRef.current?.(star.ref));
+        return;
+      }
       if (commandId === INSTALL_CLI_ID) {
         installCli().then(
           (done) => showToast({ message: `Installed ${done.path}. ${done.hint ?? ""}`.trim() }),
@@ -939,7 +948,7 @@ export function App() {
       const run = command.run;
       flushSync(() => { void run(); });
     });
-  }, [menuGroups]);
+  }, [menuGroups, bookmarks]);
 
   const pageTabsForActiveThread = selectedThreadId ? threadPageTabs[selectedThreadId] ?? [] : [];
   const availableCenterIds = useMemo(() => new Set(pageTabsForActiveThread.map((ref) => ref.id)), [pageTabsForActiveThread]);
@@ -1170,8 +1179,6 @@ export function App() {
       );
     }
   }
-
-  const bookmarks = useBookmarks(selectedThreadId, stream?.id ?? null);
 
   const handleOpenPage = useCallback((ref: TabRef) => {
     // Every kind not handled below opens as a per-thread page tab.

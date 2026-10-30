@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { buildMenuBar, buildNativeMenuSnapshots, INSTALL_CLI_ID, menuItemById, OPEN_RECENT_PREFIX } from "./menuBar.js";
+import { buildMenuBar, buildNativeMenuSnapshots, favoriteIdFromMenuId, FAVORITE_PREFIX, favoritesMenuItems, INSTALL_CLI_ID, menuItemById, OPEN_RECENT_PREFIX } from "./menuBar.js";
 import type { CommandEntry } from "./components/quickOpenResults.js";
 import type { MenuItemSnapshot } from "./tauri-bridge/generated/bindings.js";
 
@@ -122,4 +122,41 @@ test("File ▸ Install `oxplow` command line… is in the native menu", () => {
   const item = file.items.find((i) => i.id === INSTALL_CLI_ID);
   expect(item?.label).toBe("Install `oxplow` command line…");
   expect(item?.enabled).toBe(true);
+});
+
+const star = (id: string, label: string | null) => ({ ref: { id }, label, scope: "project" as const });
+
+test("the Favorites menu lists the starred pages alphabetically, ignoring case", () => {
+  const groups = buildNativeMenuSnapshots(buildMenuBar([]), [], [
+    star("work-next", "work"),
+    star("board", "Board"),
+    star("alerts", "alerts"),
+  ]);
+  const fav = groups.find((g) => g.id === "favorites")!;
+  expect(groups[groups.length - 1].id).toBe("favorites");
+  expect(fav.label).toBe("Favorites");
+  expect(fav.items.map((i) => i.label)).toEqual(["alerts", "Board", "work"]);
+  expect(fav.items.map((i) => i.id)).toEqual([
+    `${FAVORITE_PREFIX}alerts`,
+    `${FAVORITE_PREFIX}board`,
+    `${FAVORITE_PREFIX}work-next`,
+  ]);
+  expect(fav.items.every((i) => i.enabled && i.shortcut === null)).toBe(true);
+});
+
+test("a star with no label shows its page id", () => {
+  const items = favoritesMenuItems([star("git-dashboard", null)]);
+  expect(items[0].label).toBe("git-dashboard");
+});
+
+test("with nothing starred, Favorites is one disabled hint", () => {
+  const items = favoritesMenuItems([]);
+  expect(items).toEqual([
+    { id: "favorites.none", label: "No favorites yet — star a page to add it", shortcut: null, enabled: false, checked: null },
+  ]);
+});
+
+test("a favorite's menu id gives back the page it opens", () => {
+  expect(favoriteIdFromMenuId(`${FAVORITE_PREFIX}a:b?x=1`)).toBe("a:b?x=1");
+  expect(favoriteIdFromMenuId("oxplow.editor.save")).toBeNull();
 });

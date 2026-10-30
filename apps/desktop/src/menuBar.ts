@@ -5,6 +5,7 @@
 /// … Select All): the OS's responder chain does those, never our
 /// dispatch — WKWebView only delivers ⌘C/⌘V with them in the menu.
 import type { MenuGroup as SharedMenuGroup, MenuItem } from "./menu.js";
+import type { Bookmark } from "./tabs/bookmarks.js";
 import type { CommandEntry } from "./components/quickOpenResults.js";
 import type {
   MenuGroupSnapshot as NativeMenuGroupSnapshot,
@@ -84,6 +85,26 @@ export function menuItemById(groups: MenuGroup[], id: string): MenuItem | undefi
 /// trailing path in a new window.
 export const OPEN_RECENT_PREFIX = "project.openRecent:";
 
+/// Menu-command id prefix for a "Favorites ▸ <page>" entry; the rest is
+/// the starred page's id (its URI), which the dispatch opens.
+export const FAVORITE_PREFIX = "favorites.open:";
+
+/// The page id a Favorites menu id opens, or null for any other id.
+export function favoriteIdFromMenuId(menuId: string): string | null {
+  return menuId.startsWith(FAVORITE_PREFIX) ? menuId.slice(FAVORITE_PREFIX.length) : null;
+}
+
+/// The Favorites items: the starred pages by title, case-insensitive; one
+/// disabled hint when there are none.
+export function favoritesMenuItems(favorites: Bookmark[]): NativeMenuItemSnapshot[] {
+  if (favorites.length === 0) {
+    return [{ id: "favorites.none", label: "No favorites yet — star a page to add it", shortcut: null, enabled: false, checked: null }];
+  }
+  return favorites
+    .map((b) => ({ id: `${FAVORITE_PREFIX}${b.ref.id}`, label: b.label || b.ref.id, shortcut: null, enabled: true, checked: null }))
+    .sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: "base" }) || a.id.localeCompare(b.id));
+}
+
 /// The File item that puts the `oxplow` command on the PATH (the shell's).
 export const INSTALL_CLI_ID = "shell.install_cli";
 
@@ -92,12 +113,13 @@ const OPEN_RECENT_AFTER = "oxplow.project.open_in_new_window";
 
 /// The native-menu snapshot: `groups` plus a File ▸ Open Recent ▸
 /// <project> submenu built from the recents list (the in-window Menubar
-/// shows `groups` as they are).
+/// shows `groups` as they are), then a Favorites menu of the starred pages.
 export function buildNativeMenuSnapshots(
   groups: MenuGroup[],
   recents: { path: string; title: string; exists: boolean }[],
+  favorites: Bookmark[] = [],
 ): NativeMenuGroupSnapshot[] {
-  return groups.map((group) => {
+  const native = groups.map((group) => {
     const items = group.items.map(nativeItem);
     if (group.id === "file") {
       const openRecent: NativeMenuItemSnapshot = {
@@ -126,6 +148,7 @@ export function buildNativeMenuSnapshots(
     }
     return { id: group.id, label: group.label, items };
   });
+  return [...native, { id: "favorites", label: "Favorites", items: favoritesMenuItems(favorites) }];
 }
 
 /// A menu item as the shell's `MenuItemSnapshot`: what it draws, no more
