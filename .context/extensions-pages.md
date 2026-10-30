@@ -139,7 +139,11 @@ Where it lives, and what is loaded:
   warning. At run time a failed loader or an unknown page gives no link, never
   an error; links come in order, a uri once. A fixture's `expect.see_also`
   compares them. Use it for related pages and the list a thing belongs to
-  (`.context/usability.md`).
+  (`.context/usability.md`). Do not declare the page's other views of the
+  same item (`View as Data`, a link to the same `:uri` with
+  `#oxplow.renderer=`): the rail's See also lists every other renderer of the
+  tab's URI by itself, below the declared links. A link to a different
+  resource stays declared.
 - `for` / `accepts` / `default` / `pinned`: a renderer, see
   [pages-and-tabs.md](./pages-and-tabs.md) (`renderer_problem` checks
   them at load). `comments: true`: the person

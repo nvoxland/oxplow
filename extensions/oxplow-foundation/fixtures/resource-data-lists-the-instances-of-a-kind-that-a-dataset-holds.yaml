@@ -8,5 +8,4 @@ expect:
     resolved: { rows: [{ view: v_stream }] }
     instances: { rows: 1 }
   see_also:
-    - { title: Definition, uri: "oxplow:oxplow/resource?resource=oxplow-foundation/stream#oxplow.renderer=oxplow-foundation/resource" }
     - { title: Explore Data, uri: "oxplow:oxplow/page?dataset=v_stream&page=explore-data" }

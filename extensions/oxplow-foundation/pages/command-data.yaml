@@ -42,12 +42,6 @@ loaders:
         AND (:range_from IS NULL OR a.at >= :range_from)
         AND (:range_to IS NULL OR a.at <= :range_to)
       ORDER BY a.at DESC, a.id DESC LIMIT 500
-  links:
-    sql: |
-      SELECT 'Definition' AS title,
-             :uri || '#oxplow.renderer=oxplow-foundation/command' AS uri,
-             'What this command does and whether it asks first' AS description
-      FROM about
 view:
   stack:
   - id: about
@@ -68,5 +62,3 @@ view:
     - { key: outcome, label: Outcome }
     - { key: error, label: Error }
     empty: No runs in this range.
-see_also:
-  - { from: links }

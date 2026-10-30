@@ -8,6 +8,7 @@ import { querySql, type SqlCell } from "../api.js";
 import { Facts, type Fact } from "../kit/Facts.js";
 import { paramOf } from "../uri/uri.js";
 import { definitionUri } from "./viewActions.js";
+import type { OpenWith } from "./renderers.js";
 import { humanize } from "../kit/humanize.js";
 import { RailGroup } from "../kit/RailGroup.js";
 import type { TabRef } from "../tabs/tabState.js";
@@ -64,15 +65,24 @@ export function RailSelection({
 }
 
 /** The page's "See also" links (its `see_also:`), after Contents: related
- *  pages and the list a thing belongs to. A description is a link's hover. */
-export function RailSeeAlso({ run, onOpenPage }: { run: PageRun; onOpenPage?(ref: TabRef): void }) {
-  if (run.seeAlso.length === 0) return null;
+ *  pages and the list a thing belongs to. A description is a link's hover.
+ *  Below them, one "View as" link per other renderer of the tab's URI
+ *  (`openWith`, what the nav bar's Open With lists): the same item, drawn
+ *  another way. */
+export function RailSeeAlso({ run, onOpenPage, openWith }: { run: PageRun; onOpenPage?(ref: TabRef): void; openWith?: OpenWith }) {
+  const views = openWith ? openWith.options.filter((o) => o.name !== openWith.current) : [];
+  if (run.seeAlso.length === 0 && views.length === 0) return null;
   return (
     <RailGroup title="See also" testId="page-rail-see-also">
       <nav aria-label="See also" className="ox-contents">
         {run.seeAlso.map((l) => (
           <button key={l.uri} type="button" className="ox-contents-item" title={l.description ?? undefined} onClick={() => onOpenPage?.({ id: l.uri })}>
             {l.title}
+          </button>
+        ))}
+        {views.map((o) => (
+          <button key={o.name} type="button" className="ox-contents-item" data-testid={`see-also-view-${o.name}`} onClick={() => openWith!.pick(o.name)}>
+            View as {o.title}
           </button>
         ))}
       </nav>

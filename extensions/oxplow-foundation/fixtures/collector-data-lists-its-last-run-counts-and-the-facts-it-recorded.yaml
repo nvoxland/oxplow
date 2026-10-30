@@ -13,5 +13,4 @@ expect:
     about: { rows: [{ name: oxplow.effort_test_outcome }] }
     recorded: { rows: { contains: [{ measure_key: oxplow.effort_test_outcome }] } }
   see_also:
-    - { title: Definition, uri: "oxplow:oxplow/collector?collector=oxplow-foundation/oxplow.effort_test_outcome#oxplow.renderer=oxplow-foundation/collector" }
     - { title: Explore Data, uri: "oxplow:oxplow/page?dataset=v_fact&page=explore-data" }

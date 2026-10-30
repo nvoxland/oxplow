@@ -11,8 +11,6 @@ expect:
   loaders:
     about: { rows: [{ name: oxplow.work_item.create }] }
     runs: { rows: 2 }
-  see_also:
-    - { title: Definition, uri: "oxplow:oxplow/command?command=oxplow.work_item.create#oxplow.renderer=oxplow-foundation/command" }
 steps:
   - params: { outcome: failed }
     expect:

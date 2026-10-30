@@ -11,7 +11,6 @@ expect:
     about: { rows: [{ name: Agent tokens, fold: sum }] }
     facts: { rows: 3 }
   see_also:
-    - { title: Definition, uri: "oxplow:oxplow/measure?measure=oxplow.tokens#oxplow.renderer=oxplow-foundation/measure" }
     - { title: Explore Data, uri: "oxplow:oxplow/page?dataset=v_fact&page=explore-data" }
 steps:
   - params: { subject: zzz-nothing }

@@ -42,11 +42,6 @@ loaders:
     sql: |
       SELECT a.extension AS title, a.extension_target AS uri, e.description
       FROM about a LEFT JOIN v_extension e ON e.name = a.extension
-  data:
-    sql: |
-      SELECT 'Data' AS title, :uri || '#oxplow.renderer=oxplow-foundation/dimension-data' AS uri,
-             'The values facts carry for this dimension and how often' AS description
-      FROM about
 view:
   stack:
   - id: about
@@ -69,4 +64,3 @@ view:
     empty: Dimension not found.
 see_also:
   - { from: related }
-  - { from: data }

@@ -12,7 +12,6 @@ expect:
     about: { rows: [{ view: v_work_item, owner: core }] }
     data: { rows: 2 }
   see_also:
-    - { title: Definition, uri: "oxplow:oxplow/dataset?dataset=work_item#oxplow.renderer=oxplow-foundation/dataset-definition" }
     - { title: Explore Data, uri: "oxplow:oxplow/page?dataset=v_work_item&page=explore-data" }
 steps:
   - params: { sort: title, direction: desc }

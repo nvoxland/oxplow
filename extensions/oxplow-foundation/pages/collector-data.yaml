@@ -40,12 +40,7 @@ loaders:
       ORDER BY f.id DESC LIMIT 200
   links:
     sql: |
-      SELECT 'Definition' AS title,
-             :uri || '#oxplow.renderer=oxplow-foundation/collector' AS uri,
-             'When this collector runs and how it last went' AS description
-      FROM about
-      UNION ALL
-      SELECT 'Explore Data', uri('oxplow/page', 'page', 'explore-data', 'dataset', 'v_fact'), 'Try a query over every fact' FROM about
+      SELECT 'Explore Data' AS title, uri('oxplow/page', 'page', 'explore-data', 'dataset', 'v_fact') AS uri, 'Try a query over every fact' AS description FROM about
 view:
   stack:
   - id: about

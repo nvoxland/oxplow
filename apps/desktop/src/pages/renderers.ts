@@ -39,6 +39,32 @@ export function pickRenderer(renderers: readonly Renderer[], view: Record<string
   );
 }
 
+/** What Open With offers for a tab: the renderers to pick among, the one
+ *  drawing now and what picking one does (a view change in the tab; the
+ *  default renderer is the absent key, so tabs match on it). Undefined
+ *  with fewer than two renderers (a route has none). The nav bar's ☰ and
+ *  the rail's See also both draw from it. */
+export interface OpenWith {
+  options: { name: string; title: string }[];
+  current: string;
+  pick(name: string): void;
+}
+
+export function openWithOf(
+  renderers: readonly Renderer[] | undefined,
+  view: Record<string, unknown> | undefined,
+  patchView: ((patch: Record<string, SqlCell | undefined>) => void) | undefined,
+): OpenWith | undefined {
+  if (!renderers || !patchView) return undefined;
+  const current = pickRenderer(renderers, view ?? {});
+  if (renderers.length < 2 || !current) return undefined;
+  return {
+    options: renderers.map((r) => ({ name: r.page, title: r.title })),
+    current: current.page,
+    pick: (name) => patchView({ [RENDERER_VIEW_KEY]: renderers.find((r) => r.page === name)?.default ? undefined : name }),
+  };
+}
+
 /** What a renderer's page is once its params change: the URI `uri` with
  *  each of `params` set (one set to nothing dropped; its page's own `uri`
  *  param is the page, not one of them) and `view` as its `#`. A URI that

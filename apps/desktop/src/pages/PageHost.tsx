@@ -38,7 +38,7 @@ import { ComponentPage, type ComponentPageHost } from "./PageComponent.js";
 import type { BridgeHost } from "../viz/ComponentFrame.js";
 import type { FrameAction } from "../viz/componentBridge.js";
 import { NodeRegistryContext, PageTree, createNodeRegistry, useNodeFocus } from "./PageTree.js";
-import { labelRow, tabLabel } from "./renderers.js";
+import { labelRow, openWithOf, tabLabel } from "./renderers.js";
 import { useNodeActions, useNodeForms } from "./useNodeActions.js";
 import { SaveTempViewForm } from "./SaveViewForm.js";
 import { TEMP_EXTENSION } from "./viewActions.js";
@@ -236,7 +236,8 @@ export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, re
   const navTitle = editableDashboard && page ? <DashboardTitle page={page.id} title={shownTitle} /> : shownTitle;
   // A rail with nothing in it is not drawn (`railHas`), and its body then
   // takes the full width.
-  const hasRail = run ? railHas(run, { fills, saveOpen: !!(saveAs && viewFile) }) : false;
+  const openWith = useMemo(() => openWithOf(nav?.renderers, nav?.viewParams, nav?.patchViewParams), [nav?.renderers, nav?.viewParams, nav?.patchViewParams]);
+  const hasRail = run ? railHas(run, { fills, saveOpen: !!(saveAs && viewFile), views: !!openWith }) : false;
   const full = fills || (run ? wide(run) : false);
 
   return (
@@ -254,7 +255,7 @@ export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, re
             {/* Filters (and the page's own rail) first: the controls, then where to go. */}
             <PageRail run={run} runId={runId} onApply={apply} picked={picked} streamId={streamId} onOpenPage={onOpenPage} />
             {contentsHas(run, fills) ? <Contents root={body} /> : null}
-            {fills ? null : <RailSeeAlso run={run} onOpenPage={onOpenPage} />}
+            {fills ? null : <RailSeeAlso run={run} onOpenPage={onOpenPage} openWith={openWith} />}
             {saveAs && viewFile ? <SaveTempViewForm key={saveAs} kind={saveAs} file={viewFile} streamId={streamId} initialTitle={title} onClose={() => setSaveAs(null)} onSaved={open} /> : null}
           </>
         ) : undefined

@@ -1,6 +1,6 @@
 import type { CSSProperties, ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { RENDERER_VIEW_KEY, pickRenderer } from "../pages/renderers.js";
+import { openWithOf } from "../pages/renderers.js";
 import { PageNavBar } from "./PageNavBar.js";
 import { TabModalHostContext } from "../components/TabModal.js";
 import { useOptionalPageNavigation } from "./PageNavigationContext.js";
@@ -181,17 +181,7 @@ export function Page({ title, titleIcon, chips: ownChips, actions, pin, seeAlso,
   const shownRenderers = ctxNav?.renderers;
   const shownView = ctxNav?.viewParams;
   const patchView = ctxNav?.patchViewParams;
-  const openWith = useMemo(() => {
-    if (!shownRenderers || !patchView) return undefined;
-    const current = pickRenderer(shownRenderers, shownView ?? {});
-    if (shownRenderers.length < 2 || !current) return undefined;
-    return {
-      options: shownRenderers.map((r) => ({ name: r.page, title: r.title })),
-      current: current.page,
-      // The default is the absent key, so tabs match on it (`modeOf`).
-      pick: (name: string) => patchView({ [RENDERER_VIEW_KEY]: shownRenderers.find((r) => r.page === name)?.default ? undefined : name }),
-    };
-  }, [shownRenderers, shownView, patchView]);
+  const openWith = useMemo(() => openWithOf(shownRenderers, shownView, patchView), [shownRenderers, shownView, patchView]);
   const pinned = ctxNav?.pinned ?? false;
   const baseNavBar: PageNavBarConfig | undefined = navBar ?? (ctxNav ? {
     canBack: ctxNav.canGoBack,

@@ -27,3 +27,41 @@ test("a page with no see-also links draws no group", () => {
   const { queryByTestId } = render(<RailSeeAlso run={fakeRun(page, { loaders: { items: loader([], []) } })} onOpenPage={() => {}} />);
   expect(queryByTestId("page-rail-see-also")).toBeNull();
 });
+
+const views = {
+  options: [
+    { name: "oxplow-foundation/measure", title: "Measure" },
+    { name: "oxplow-foundation/measure-data", title: "Measure data" },
+    { name: "oxplow-foundation/definition", title: "Definition" },
+  ],
+  current: "oxplow-foundation/measure",
+  pick: () => {},
+};
+
+test("the other views of the tab's item follow the declared links, the current one left out", () => {
+  const { getByTestId, getByText, queryByTestId } = render(<RailSeeAlso run={run} onOpenPage={() => {}} openWith={views} />);
+  const labels = Array.from(getByTestId("page-rail-see-also").querySelectorAll("button")).map((b) => b.textContent);
+  expect(labels).toEqual(["Collectors", "Extension problems", "View as Measure data", "View as Definition"]);
+  expect(queryByTestId("see-also-view-oxplow-foundation/measure")).toBeNull();
+  expect(getByText("View as Definition")).toBe(getByTestId("see-also-view-oxplow-foundation/definition"));
+});
+
+test("a view link picks that view as Open With does", () => {
+  const picked: string[] = [];
+  const { getByTestId } = render(<RailSeeAlso run={run} onOpenPage={() => {}} openWith={{ ...views, pick: (n) => picked.push(n) }} />);
+  fireEvent.click(getByTestId("see-also-view-oxplow-foundation/measure-data"));
+  expect(picked).toEqual(["oxplow-foundation/measure-data"]);
+});
+
+test("view links alone make the group", () => {
+  const { getByTestId } = render(<RailSeeAlso run={fakeRun(page, { loaders: { items: loader([], []) } })} openWith={views} />);
+  expect(getByTestId("see-also-view-oxplow-foundation/definition")).toBeTruthy();
+});
+
+test("no view links with one view, none without Open With", () => {
+  const one = { options: [views.options[0]!], current: views.options[0]!.name, pick: () => {} };
+  const bare = fakeRun(page, { loaders: { items: loader([], []) } });
+  expect(render(<RailSeeAlso run={bare} openWith={one} />).queryByTestId("page-rail-see-also")).toBeNull();
+  cleanup();
+  expect(render(<RailSeeAlso run={bare} />).queryByTestId("page-rail-see-also")).toBeNull();
+});

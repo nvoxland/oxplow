@@ -37,12 +37,7 @@ loaders:
     refresh: manual
   links:
     sql: |
-      SELECT 'Definition' AS title,
-             :uri || '#oxplow.renderer=oxplow-foundation/resource' AS uri,
-             'How its URIs are written and the pages that draw it' AS description
-      FROM resolved
-      UNION ALL
-      SELECT 'Explore Data', uri('oxplow/page', 'page', 'explore-data', 'dataset', view), 'Try a query over this dataset' FROM resolved
+      SELECT 'Explore Data' AS title, uri('oxplow/page', 'page', 'explore-data', 'dataset', view) AS uri, 'Try a query over this dataset' AS description FROM resolved
 view:
   stack:
   - id: about

@@ -21,12 +21,7 @@ loaders:
       WHERE s.key = uri_param(:uri, 'metric')
   links:
     sql: |
-      SELECT 'Data' AS title,
-             :uri || '#oxplow.renderer=oxplow-foundation/metric-detail' AS uri,
-             'How it moved over time and its recordings' AS description
-      FROM about
-      UNION ALL
-      SELECT a.extension, a.extension_target, e.description
+      SELECT a.extension AS title, a.extension_target AS uri, e.description
       FROM about a LEFT JOIN v_extension e ON e.name = a.extension WHERE a.extension IS NOT NULL
 view:
   stack:

@@ -13,7 +13,6 @@ expect:
     measure: { rows: [{ key: oxplow.tokens, title: Agent tokens }] }
     seen: { rows: [{ value: opus, facts: 2 }, { value: haiku, facts: 1 }] }
   see_also:
-    - { title: Definition, uri: "oxplow:oxplow/dimension?dimension=oxplow.model#oxplow.renderer=oxplow-foundation/dimension" }
     - { title: Explore Data, uri: "oxplow:oxplow/page?dataset=v_fact&page=explore-data" }
 steps:
   - params: { measure: oxplow.complexity }

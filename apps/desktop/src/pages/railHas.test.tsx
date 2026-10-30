@@ -143,3 +143,9 @@ test("contentsHas: a grouped sections viz counts its groups as well as its rows"
   // One row with no group: one section.
   expect(contentsHas(grouped([["a", ""]]), false)).toBe(false);
 });
+
+test("railHas: another view of the tab's item is something, except on a page that fills", () => {
+  const plain = sections(1);
+  expect(railHas(run(plain), { fills: false, saveOpen: false, views: true })).toBe(true);
+  expect(railHas(run(plain), { fills: true, saveOpen: false, views: true })).toBe(false);
+});

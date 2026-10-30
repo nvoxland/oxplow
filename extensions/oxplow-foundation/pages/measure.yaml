@@ -54,11 +54,6 @@ loaders:
     sql: |
       SELECT a.extension AS title, a.extension_target AS uri, e.description
       FROM about a LEFT JOIN v_extension e ON e.name = a.extension
-  data:
-    sql: |
-      SELECT 'Data' AS title, :uri || '#oxplow.renderer=oxplow-foundation/measure-data' AS uri,
-             'The facts this measure recorded' AS description
-      FROM about
 view:
   stack:
   - id: about
@@ -91,5 +86,4 @@ view:
     - { key: description, label: What it is }
 see_also:
   - { from: related }
-  - { from: data }
   - { page: oxplow-foundation/metrics-recorded }

@@ -606,11 +606,11 @@ run takes new params itself (`setParams`). `PageHost` takes a `PageKey`,
 holds its run (`usePageRunWith` over `usePageRunsStore()`: the
 `PageRunsContext`'s store, else the window's; `RunState` carries the
 `runId`, `rerun` is Refresh) and draws the `tabs/Page.tsx` chrome:
-the rail's groups, top to bottom: `PageRail` first (Filters, the `rail:` tree, Selection), then Contents and See also (the page's `see_also:` links, `RailSeeAlso`); every group's body sits a little in from its heading, the same in each (`.ox-rail-group > :not(.ox-rail-group-head)`; the Contents active bar hangs in that indent)
+the rail's groups, top to bottom: `PageRail` first (Filters, the `rail:` tree, Selection), then Contents and See also (the page's `see_also:` links, then one `View as <renderer title>` link per other renderer of the tab's URI, `RailSeeAlso`; the view links come from the same `openWithOf` list as the nav bar's Open With and run the same pick, so the default renderer drops the key; none for a route or a single renderer; not in the ☰ See also submenu, Open With is there); every group's body sits a little in from its heading, the same in each (`.ox-rail-group > :not(.ox-rail-group-head)`; the Contents active bar hangs in that indent)
 in the
 rail (`pages/railGroups.tsx`), which `railHas` (`pages/railHas.ts`) decides
 from the run: with nothing in it (no switch, `filter` or `selection` param,
-`rail:` node, `see_also` link (a page that fills doesn't count them) or open save form, and no Contents) `rightRail` is undefined,
+`rail:` node, `see_also` link or another view of the item (a page that fills doesn't count them) or open save form, and no Contents) `rightRail` is undefined,
 `Page` draws no Details card and the body takes the full width. Contents is
 automatic only for a page that does not fill: two or more titled
 sections (`CONTENTS_FROM`; a page with one gets none) or markdown that may
