@@ -32,6 +32,8 @@ expect:
         contains:
           - { title: Nudges fired, description: Count of nudges fired to the agent., link: "oxplow:oxplow/metric?metric=agent.nudges.fired" }
     measures: { rows: { contains: [{ title: Nudges fired }] } }
-    dimensions: { rows: { contains: [{ title: Agent }] } }
-    implementations: { rows: { contains: [{ title: Claude, capability: $any }] } }
+    dimensions: { rows: { contains: [{ title: Agent, description: The coding agent that did the work. }] } }
+    implementations: { rows: { contains: [{ title: Claude, capability: $any, description: Runs Claude Code as a coding agent. }] } }
+    resources: { rows: { contains: [{ title: Commit, description: A git commit. }] } }
+    collectors: { rows: { contains: [{ description: "How an effort's tests went, recorded when it finishes." }] } }
   text: { contains: ["## Metrics", "Count of nudges fired to the agent."] }

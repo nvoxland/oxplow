@@ -87,7 +87,7 @@ loaders:
       ORDER BY title
   collectors:
     sql: |
-      SELECT k.id AS title,
+      SELECT k.id AS title, k.description,
              CASE k.trigger WHEN 'events' THEN 'As events arrive' WHEN 'run' THEN 'When it is run' ELSE k.trigger END AS runs,
              k.last_run_at, COALESCE(k.error, k.last_status) AS status,
              CASE WHEN d.resource IS NOT NULL THEN k.uri END AS link
@@ -113,7 +113,7 @@ loaders:
       ORDER BY m.title
   dimensions:
     sql: |
-      SELECT m.label AS title, m.key, m.subject_kind AS of,
+      SELECT m.label AS title, m.description, m.key, m.subject_kind AS of,
              CASE WHEN d.resource IS NOT NULL THEN c.uri END AS link
       FROM about a JOIN v_contribution c ON c.extension = a.extension AND c.kind = 'dimension'
            JOIN v_dimension m ON m.key = c.local
@@ -122,7 +122,7 @@ loaders:
   resources:
     sql: |
       -- A resource kind: its URI form, and the pages that draw it.
-      SELECT r.label AS title, 'oxplow:' || r.resource AS uri_form,
+      SELECT r.label AS title, r.description, 'oxplow:' || r.resource AS uri_form,
              (SELECT count(*) FROM v_page p, json_each(p.renders) j WHERE j.value = r.resource) AS pages,
              CASE WHEN r.searchable THEN 'Yes' END AS searchable
       FROM about a JOIN v_contribution c ON c.extension = a.extension AND c.kind = 'resource'
@@ -130,7 +130,7 @@ loaders:
       ORDER BY r.label
   implementations:
     sql: |
-      SELECT i.title, i.capability_title AS capability,
+      SELECT i.title, i.description, i.capability_title AS capability,
              CASE WHEN i.active THEN 'Yes' END AS active
       FROM about a JOIN v_contribution c ON c.extension = a.extension AND c.kind = 'implementation'
            JOIN v_capability_provider i ON i.extension = c.extension AND i.capability || '.' || i.provider = c.local
@@ -214,6 +214,7 @@ view:
     hide_empty: true
     columns:
     - { key: title, label: Collector, link: { kind: page, from: link } }
+    - { key: description, label: What it collects }
     - { key: runs, label: Runs }
     - { key: last_run_at, label: Last run, format: relative }
     - { key: status, label: Status }
@@ -244,6 +245,7 @@ view:
     hide_empty: true
     columns:
     - { key: title, label: Dimension, link: { kind: page, from: link } }
+    - { key: description, label: What it is }
     - { key: key, label: Key }
     - { key: of, label: Of }
   - id: resources
@@ -253,6 +255,7 @@ view:
     hide_empty: true
     columns:
     - { key: title, label: Resource }
+    - { key: description, label: What it is }
     - { key: uri_form, label: URI }
     - { key: pages, label: Pages that draw it }
     - { key: searchable, label: Searchable }
@@ -263,6 +266,7 @@ view:
     hide_empty: true
     columns:
     - { key: title, label: Provider }
+    - { key: description, label: What it does }
     - { key: capability, label: Of }
     - { key: active, label: Active }
   - id: deployments
