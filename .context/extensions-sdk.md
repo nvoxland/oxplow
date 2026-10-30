@@ -269,7 +269,11 @@ is held by a page with a whole-page action running that command.
 **`oxplow extension test <name> [--only <example>,…]`** (`extension_test.rs`;
 `--only` runs the check and just the named examples, nothing else — the
 quick run while iterating; the text report sums up what ran with the
-examples as one count, the JUnit form names each; an example's `expect`
+examples as one count and the skipped ones as `N skipped`, the JUnit
+form names each; a case is passed, failed or **skipped** (`CaseOutcome`:
+an example the host withholds, `ui` steps with no app or no drawing
+window — `TestReport.skipped` says why, JUnit gets `<skipped>`), never a
+pass for what didn't run; an example's `expect`
 compares numbers by value, so `2.0` holds for `2`) runs on
 **a throwaway oxplow** (`Host`, "The SDK" above: activated as boot
 activates, its entities created empty, the fixture model answering every

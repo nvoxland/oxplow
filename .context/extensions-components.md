@@ -308,12 +308,14 @@ around it** (`component_harness.rs`, `PageAt::ui`):
   shell's `main.rs`); elsewhere it goes to -20000, -20000. Found as `OXPLOW_SHELL`, else an
   `oxplow` beside the running program or up to two folders above it. With
   none, the `ui` steps aren't run, nor the steps after them (they read
-  what the `ui` steps did), and the report warns — never a pass.
+  what the `ui` steps did): the report lists it under `skipped` and its
+  case is **skipped** (`CaseOutcome::Skipped`, a `<skipped>` in the JUnit
+  form) — never a pass.
   Likewise when the window draws no frames: WebKit draws none while the
   display is locked or asleep, so a component that lays itself out never
   draws. The page asks first (`drawsFrames`: a frame within 2 s) and
   records `drawing`; `false` leaves the steps, and those after them, not
-  run with a warning, never failed (`Harness::drawing`). CI builds the app and runs the tests
+  run and the case skipped, never failed (`Harness::drawing`). CI builds the app and runs the tests
   under `xvfb-run`.
 - **Steps**: `click: <sel>`, `fill: { <sel>: text }`, `key: { on, key }`
   (`Mod+Enter`; a plain `Enter` in a form's `<input>` that nothing stopped

@@ -46,8 +46,8 @@ or exact mechanics.
     core change it rebuilds first, so a change to both runs both. A
     fixture's `ui:` steps (a custom component's own code) draw in the
     app's webview, so they need the app built once (`bun run build:dev`)
-    and a display that is awake; without either the report warns they
-    didn't run.
+    and a display that is awake; without either the report lists them
+    as skipped (never passed).
   - `bun run test:fast` (filtered: `-p oxplow-app some_test`) and
     `bun run test:fast:ts` — quick, write the JUnit reports the
     effort's Tests panel shows.

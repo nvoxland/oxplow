@@ -54,8 +54,9 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
    few fixtures, `--only <example>[,<example>…]` (their file names without
    `.yaml`) runs the check and just those: run the whole extension once
    more before you hand over.
-   Its text report lists the errors and warnings, then one line: how many
-   of each, and what ran (`check, 79 examples, answers`; the JUnit form
+   Its text report lists the errors, warnings and what was skipped (`ui`
+   steps with no app or a sleeping display: not run, so never a pass),
+   then one line: how many of each, and what ran (`check, 79 examples, answers`; the JUnit form
    names each example). Its JSON report says the generation, what the extension
    `contributes`, and what it can't run here (`unsupported`: panels, decorators,
    replacements, skills — the app shows them).
