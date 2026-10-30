@@ -15,6 +15,7 @@ mod component_harness;
 pub mod conformance;
 pub mod examples;
 pub mod extension_test;
+mod rename;
 mod throwaway;
 
 use std::path::{Path, PathBuf};
@@ -157,9 +158,10 @@ pub fn scaffold(
 }
 
 /// Copy the example extension `example` (one oxplow ships) into
-/// `.oxplow/extensions/<example>/`. It keeps its name: its commands, datasets
-/// and pages are namespaced by it, so a different `name` is refused —
-/// rename after copying. Refuses an existing folder.
+/// `.oxplow/extensions/<name>/` (`name` defaults to the example's). Under
+/// another name every own reference in its text files is rewritten
+/// ([`rename::Rename`]); binary files copy as they are. Refuses an existing
+/// folder.
 pub fn scaffold_example(
     root: &Path,
     example: &str,
@@ -171,29 +173,49 @@ pub fn scaffold_example(
             examples::names()
         ))
     })?;
-    if let Some(name) = name.filter(|n| *n != found.name) {
+    let name = name.unwrap_or(found.name);
+    if !oxplow_domain::contribution::valid_extension_name(name) {
         return Err(SdkError::Invalid(format!(
-            "`--from {example}` keeps the name `{example}` (its commands and datasets are named by it): copy it as `{example}`, then rename after copying (got `{name}`)"
+            "`{name}` must start with a letter and be lowercase letters, digits and single dashes (e.g. `review-notes`)"
         )));
     }
-    let rel_dir = format!("{EXTENSIONS_DIR}/{}", found.name);
+    let rel_dir = format!("{EXTENSIONS_DIR}/{name}");
     let dir = root.join(&rel_dir);
     if dir.exists() {
         return Err(SdkError::Invalid(format!(
             "{rel_dir} already exists; edit it in place"
         )));
     }
+    let renamer = (name != found.name).then(|| {
+        let manifest = found
+            .files
+            .iter()
+            .find(|(rel, _)| *rel == "extension.yaml")
+            .and_then(|(_, bytes)| std::str::from_utf8(bytes).ok())
+            .unwrap_or_default();
+        rename::Rename::new(
+            found.name,
+            name,
+            rename::namespace_override(manifest).as_deref(),
+        )
+    });
     let mut files = Vec::new();
     for (rel, bytes) in found.files {
         let path = dir.join(rel);
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        std::fs::write(path, bytes)?;
+        match (&renamer, std::str::from_utf8(bytes)) {
+            (Some(r), Ok(text)) if *rel == "extension.yaml" => {
+                std::fs::write(path, r.manifest(text))?
+            }
+            (Some(r), Ok(text)) => std::fs::write(path, r.text(text))?,
+            _ => std::fs::write(path, bytes)?,
+        }
         files.push(format!("{rel_dir}/{rel}"));
     }
     Ok(Scaffolded {
-        name: found.name.to_string(),
+        name: name.to_string(),
         dir: rel_dir,
         files,
     })

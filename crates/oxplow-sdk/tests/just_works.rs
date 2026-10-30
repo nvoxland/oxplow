@@ -128,6 +128,53 @@ async fn every_example_scaffolds_checks_and_tests_clean() {
     }
 }
 
+/// `--from <example> <name>` renames: every example copied as
+/// `renamed-<example>` checks without errors and passes its own fixtures, so
+/// no own reference was left naming the old extension.
+#[tokio::test(flavor = "multi_thread")]
+async fn every_example_renames_and_tests_clean() {
+    let mut failures = Vec::new();
+    for example in oxplow_sdk::examples::all() {
+        let dir = project().await;
+        // An example that builds on another comes with it, under its name.
+        if example.name == "review-badges" {
+            oxplow_sdk::scaffold_example(dir.path(), "effort-review", None).unwrap();
+        }
+        let name = format!("renamed-{}", example.name);
+        let made = oxplow_sdk::scaffold_example(dir.path(), example.name, Some(&name)).unwrap();
+        assert_eq!(made.name, name);
+        let report = check(
+            dir.path(),
+            &name,
+            &ExtensionCatalog::new(),
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        if !report.ok {
+            failures.push(format!(
+                "{name}: check: {}",
+                render_findings(&report, Format::Text)
+            ));
+        }
+        let report = test_extension(dir.path(), &name, false).await.unwrap();
+        failures.extend(report.errors.iter().map(|e| format!("{name}: test: {e}")));
+        failures.extend(
+            report
+                .warnings
+                .iter()
+                .filter(|w| !w.contains("aren't run"))
+                .map(|w| format!("{name}: warning: {w}")),
+        );
+        if report.ran.is_empty() {
+            failures.push(format!("{name}: ran no fixtures"));
+        }
+    }
+    assert_eq!(failures, Vec::<String>::new());
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_scaffolded_page_checks_tests_and_its_row_action_binds() {
     let dir = project().await;

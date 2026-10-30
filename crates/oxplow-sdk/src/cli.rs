@@ -35,10 +35,10 @@ usage:
   oxplow extension new --from <example> [<name>] [--root <dir>]
   oxplow extension new --list-examples
       copy an example extension oxplow ships (a working one: its pages,
-      scripts and fixtures) into .oxplow/extensions/<example>/, then change
-      it. It keeps its name (its commands and datasets are named by it), so a
-      different <name> is refused: rename after copying. --list-examples
-      names them
+      scripts and fixtures) into .oxplow/extensions/<name>/, then change it.
+      With a <name> every reference to the example's own name (its datasets,
+      pages, commands, the manifest's name) is rewritten to it; without one
+      it keeps the example's name. --list-examples names them
   oxplow extension check <name|path> [--impact] [--against <rev>] [--services] [--json] [--root <dir>]
       load the extension and report every problem with file:line, dry-running
       its datasets, commands, pages and advisories on a throwaway oxplow —
@@ -621,9 +621,9 @@ mod tests {
         assert!(err.contains("not a canonical ref"), "{err}");
     }
 
-    /// `new --from <example>` copies an example oxplow ships and keeps its
-    /// name; `--list-examples` names them; a bad example or another name is a
-    /// usage error that says what to do.
+    /// `new --from <example> [<name>]` copies an example oxplow ships, under
+    /// its own name or another; `--list-examples` names them; a bad example is
+    /// a usage error that says what to do.
     #[test]
     fn new_from_copies_an_example_and_lists_them() {
         let dir = tempfile::tempdir().unwrap();
@@ -640,9 +640,19 @@ mod tests {
             err.contains("no example `nope`") && err.contains("triage"),
             "{err}"
         );
-        let (code, _, err) = cli(&["new", "--from", "triage", "mine", "--root", root]);
-        assert_eq!(code, 1);
-        assert!(err.contains("rename after copying"), "{err}");
+        let (code, out, err) = cli(&["new", "--from", "triage", "mine", "--root", root]);
+        assert_eq!(code, 0, "{err}");
+        assert!(out.contains("created .oxplow/extensions/mine"), "{out}");
+        let manifest =
+            std::fs::read_to_string(dir.path().join(".oxplow/extensions/mine/extension.yaml"))
+                .unwrap();
+        assert!(manifest.contains("\nname: mine\n"), "{manifest}");
+        let (code, out, err) = cli(&["check", "mine", "--root", root]);
+        assert_eq!(code, 0, "{out}{err}");
+        // Without a name it keeps the example's (in a project of its own: the
+        // two copies would both declare the collector).
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_str().unwrap();
         let (code, out, err) = cli(&["new", "--from", "triage", "--root", root]);
         assert_eq!(code, 0, "{err}");
         assert!(out.contains("created .oxplow/extensions/triage"), "{out}");
@@ -650,8 +660,8 @@ mod tests {
             .path()
             .join(".oxplow/extensions/triage/extension.yaml")
             .is_file());
-        let (code, _, err) = cli(&["check", "triage", "--root", root]);
-        assert_eq!(code, 0, "{err}");
+        let (code, out, err) = cli(&["check", "triage", "--root", root]);
+        assert_eq!(code, 0, "{out}{err}");
     }
 
     /// `new provider --capability` scaffolds a provider of that

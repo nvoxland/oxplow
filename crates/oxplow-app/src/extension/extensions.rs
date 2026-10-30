@@ -3150,6 +3150,7 @@ pub async fn validate_extension(
 /// the other off. The required foundation, and a command in a namespace it
 /// shares, need no declaration.
 fn check_dependencies(ext: &mut Extension, others: &[Extension], files: &dyn ExtensionFiles) {
+    use oxplow_domain::contribution::RefPart;
     let declared: std::collections::BTreeSet<&str> = ext
         .requires
         .iter()
@@ -3211,35 +3212,27 @@ fn check_dependencies(ext: &mut Extension, others: &[Extension], files: &dyn Ext
         for (n, line) in text.lines().enumerate() {
             let at = format!("{base}/{rel}:{}", n + 1);
             for owner in &others {
-                let dataset = format!("v_{}_", owner.namespace);
-                let page = format!("{}/", owner.name);
-                let command = format!("{}.", owner.namespace);
-                let word = |token: &str| {
-                    line.match_indices(token).find_map(|(i, _)| {
-                        let before = line[..i].chars().next_back();
-                        let starts =
-                            before.is_none_or(|c| !(c.is_alphanumeric() || c == '_' || c == '-'));
-                        starts.then(|| {
-                            line[i..]
-                                .split(|c: char| !(c.is_alphanumeric() || "_-./".contains(c)))
-                                .next()
-                                .unwrap_or_default()
-                                .trim_end_matches('.')
-                                .to_string()
-                        })
-                    })
+                let refs = oxplow_domain::contribution::own_references(
+                    line,
+                    &owner.name,
+                    &owner.namespace,
+                );
+                let word = |part: RefPart| {
+                    refs.iter()
+                        .find(|r| r.part == part)
+                        .map(|r| line[r.token.clone()].to_string())
                 };
                 // Datasets are named by namespace, so extensions sharing one
                 // (oxplow's own shipped ones) can't be told apart by a name.
                 let by_dataset = (owner.namespace != ext.namespace)
-                    .then(|| word(&dataset))
+                    .then(|| word(RefPart::Dataset))
                     .flatten();
                 if let Some(name) = by_dataset {
                     note(&owner.name, format!("its dataset `{name}`"), at.clone());
-                } else if let Some(name) = word(&page) {
+                } else if let Some(name) = word(RefPart::Page) {
                     note(&owner.name, format!("its page `{name}`"), at.clone());
                 } else if !shared.contains(&owner.namespace) {
-                    if let Some(name) = word(&command) {
+                    if let Some(name) = word(RefPart::Command) {
                         note(&owner.name, format!("its command `{name}`"), at.clone());
                     }
                 }

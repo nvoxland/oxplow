@@ -10,4 +10,4 @@ when:
     payload: { effort: "eff1", work_item: $item.uri, end_snapshot: 3 }
 expect:
   effects: { contains: [{ id: effort-review/review-on-finish, state: ok }] }
-  commands: [effort_review.effort.review, oxplow.effort.infer_reasoning]
+  commands: { contains: [effort_review.effort.review, oxplow.effort.infer_reasoning] }

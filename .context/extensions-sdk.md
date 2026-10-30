@@ -14,10 +14,18 @@ and one calling MCP read identical `file:line: what — fix` lines.
   `--list-examples`) copies one of `examples/extensions/*` into the project.
   The SDK carries them (`crates/oxplow-sdk/src/examples.rs`: compiled in by
   `build.rs` in a release build, read from the folder in a debug one, as
-  `oxplow-app` does for `extensions/`). The copy keeps the example's name
-  (its commands and datasets are named by it); another name is refused:
-  rename after copying. `every_example_scaffolds_checks_and_tests_clean`
-  keeps each one passing `check` and `test`.
+  `oxplow-app` does for `extensions/`). Without a `name` the copy keeps the
+  example's. With one, `rename::Rename` rewrites every text file (binary
+  files copy as they are): each own reference, found by the one rule
+  `contribution::own_references` that `check_dependencies` shares — dataset
+  views `v_<ns>_…`, `<name>/…` refs, `<ns>.…` commands, `<name>.<id>` view
+  nodes, at word boundaries — plus the manifest's `name:` and an
+  `extension: <name>` value. A manifest's `namespace:` stays as written.
+  Words that are no reference (a `triage-summary` slug, prose) stay.
+  `every_example_scaffolds_checks_and_tests_clean` keeps each one passing
+  `check` and `test`; `every_example_renames_and_tests_clean` does the same
+  for each renamed. A fixture must not depend on the name (a `commands:`
+  list is sorted by name, so an example lists it with `contains:`).
 - **`scaffold(root, kind, name, origin)`** (`extension new <kind> <name>`)
   writes `.oxplow/extensions/<name>/extension.yaml` (v2, an `intent` whose `origin` is the URI passed with `--origin`,
   one example) and, but for a bare extension, that example's fixture

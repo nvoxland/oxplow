@@ -715,6 +715,74 @@ impl Registry {
     }
 }
 
+/// Which own-reference form a token is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RefPart {
+    /// `v_<namespace>_<dataset>`: the prefix is `v_<namespace>_`.
+    Dataset,
+    /// `<extension>/<id>`: the prefix is `<extension>/`.
+    Page,
+    /// `<namespace>.<area>.<verb>`: the prefix is `<namespace>.`.
+    Command,
+    /// `<extension>.<id>`, a view node an extension adds (only a name that
+    /// differs from its namespace has this form apart from `Command`): the
+    /// prefix is `<extension>.`.
+    Node,
+}
+
+/// One place a text names an extension: `prefix` is the part that holds the
+/// extension's name or namespace (what a rename rewrites), `token` the whole
+/// dotted/slashed word it starts.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OwnReference {
+    pub part: RefPart,
+    pub prefix: std::ops::Range<usize>,
+    pub token: std::ops::Range<usize>,
+}
+
+/// Every place `text` names the extension `name` (namespace `namespace`):
+/// its dataset views, its pages and its commands, by the one rule
+/// (`check_dependencies` and `extension new --from` share it). A token
+/// starts at a word boundary (not after a letter, digit, `_`, `-`, `.` or
+/// `/`: `api.triage.com` and `https://triage.com` name a host) and
+/// something follows the prefix, so prose ending in the name and a slug
+/// such as `triage-summary` are no reference. In order of position.
+pub fn own_references(text: &str, name: &str, namespace: &str) -> Vec<OwnReference> {
+    let forms = [
+        (RefPart::Dataset, format!("v_{namespace}_")),
+        (RefPart::Page, format!("{name}/")),
+        (RefPart::Command, format!("{namespace}.")),
+        (RefPart::Node, format!("{name}.")),
+    ];
+    let mut found = Vec::new();
+    for (part, prefix) in &forms {
+        if *part == RefPart::Node && name == namespace {
+            continue;
+        }
+        for (start, _) in text.match_indices(prefix.as_str()) {
+            let before = text[..start].chars().next_back();
+            if before.is_some_and(|c| c.is_alphanumeric() || "_-./".contains(c)) {
+                continue;
+            }
+            let len = text[start..]
+                .find(|c: char| !(c.is_alphanumeric() || "_-./".contains(c)))
+                .unwrap_or(text.len() - start);
+            let token = start..start + text[start..start + len].trim_end_matches('.').len();
+            let prefix_end = start + prefix.len();
+            if token.end <= prefix_end {
+                continue;
+            }
+            found.push(OwnReference {
+                part: *part,
+                prefix: start..prefix_end,
+                token,
+            });
+        }
+    }
+    found.sort_by_key(|r| r.prefix.start);
+    found
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -866,5 +934,40 @@ mod tests {
             .collect();
         shared.dedup();
         assert_eq!(shared, ["ui.mounts"]);
+    }
+
+    #[test]
+    fn own_references_find_datasets_pages_and_commands_at_word_boundaries() {
+        let text = "FROM v_triage_x t; use triage/summarize and triage.todos.decide, not triage-summary or other-triage/x or v_other_triage_x or api.triage.com or https://triage.com/x. The end of triage.";
+        let found: Vec<(RefPart, &str, &str)> = own_references(text, "triage", "triage")
+            .into_iter()
+            .map(|r| (r.part, &text[r.prefix], &text[r.token]))
+            .collect();
+        assert_eq!(
+            found,
+            [
+                (RefPart::Dataset, "v_triage_", "v_triage_x"),
+                (RefPart::Page, "triage/", "triage/summarize"),
+                (RefPart::Command, "triage.", "triage.todos.decide"),
+            ]
+        );
+    }
+
+    #[test]
+    fn own_references_read_a_dashed_name_and_its_underscored_namespace() {
+        let text = "v_task_views_a task-views/board task_views.x.y task-views.node";
+        let found: Vec<RefPart> = own_references(text, "task-views", "task_views")
+            .into_iter()
+            .map(|r| r.part)
+            .collect();
+        assert_eq!(
+            found,
+            [
+                RefPart::Dataset,
+                RefPart::Page,
+                RefPart::Command,
+                RefPart::Node
+            ]
+        );
     }
 }
