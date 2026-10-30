@@ -229,7 +229,7 @@ Acceptance: The same event produces equivalent envelopes in every supported exec
 
 Validation: Use a shared fixture with provenance and anchors across collector/effect/policy/dev-host paths and replay historical versions. Compare exact supported fields and failure behavior.
 
-Starting points: `crates/oxplow-app/src/effects.rs`, `crates/oxplow-app/src/collector_runner.rs`, `crates/oxplow-app/src/effort_policy_script.rs`, `crates/oxplow-sdk/src/extension_test.rs`.
+Starting points: `crates/oxplow-app/src/effects.rs`, `crates/oxplow-app/src/collector_runner.rs`, `crates/oxplow-app/src/effort_policy_script.rs`, `crates/oxplow-sdk/src/extension_test/mod.rs`.
 
 Prerequisites: Normalize contribution descriptors and public extension terminology.
 
@@ -732,7 +732,7 @@ Acceptance: An agent can validate and preview a whole extension without publishi
 
 Validation: Preview an extension combining a model, event, effect, job and component; compare with a temporary production host, inject invalid changes, and assert isolation and cleanup.
 
-Starting points: `crates/oxplow-sdk/src/throwaway.rs`, `crates/oxplow-sdk/src/extension_test.rs`, `crates/oxplow-sdk/src/conformance.rs`, `crates/oxplow-app/src/extension/extensions.rs`.
+Starting points: `crates/oxplow-sdk/src/throwaway.rs`, `crates/oxplow-sdk/src/extension_test/mod.rs`, `crates/oxplow-sdk/src/conformance.rs`, `crates/oxplow-app/src/extension/extensions.rs`.
 
 Prerequisites: Stage and activate one coherent extension generation; Own and dispose extension resources on disable and update.
 

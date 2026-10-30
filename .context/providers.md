@@ -1332,7 +1332,7 @@ The fake declares and keeps it, which proves the host and nothing about a
 service: a real provider declares it only once its service is known to do
 a keyed write once.
 
-## The conformance kit (`crates/oxplow-sdk/src/conformance.rs`, `extension_test.rs`)
+## The conformance kit (`crates/oxplow-sdk/src/conformance.rs`, `extension_test/`)
 
 (The agent harnesses have their own suite over what core records of a
 session: [agent-model.md](./agent-model.md) "Observe conformance".)

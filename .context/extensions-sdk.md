@@ -266,7 +266,7 @@ is held by a page with a whole-page action running that command.
   extension's own `commands:` — or one of its providers' `<id>.<name>`
   (schema from its declarations).
 
-**`oxplow extension test <name> [--only <example>,…]`** (`extension_test.rs`;
+**`oxplow extension test <name> [--only <example>,…]`** (`extension_test/`;
 `--only` runs the check and just the named examples, nothing else — the
 quick run while iterating; the text report sums up what ran with the
 examples as one count and the skipped ones as `N skipped`, the JUnit
@@ -306,7 +306,7 @@ job and component forms are in "The SDK"). A fixture's keys are `given`
 (steps run first), `when` (what it does: one key names the kind, the rest
 are that kind's), `expect`, `steps`, `view` and `model` (`{ replies }`, the
 fixture model's answers); any other key is an error (`FIXTURE_KEYS`).
-**The kinds are one list** (`extension_test::KINDS`: each kind's key, its
+**The kinds are one list** (`extension_test/runner.rs` `KINDS`: each kind's key, its
 `when` and its `expect`): the runner's "fix:" hints and the skill's table
 (`references/testing.md`, between `<!-- fixture-kinds -->` markers) are
 made from it, and `the_skill_lists_every_fixture_kind_the_runner_runs`
@@ -405,7 +405,7 @@ a `KINDS` entry and a `dispatch` arm. The forms:
   it). The extension's own command with `answers` is still the dry run
   below, until those fixtures make their data.
 - `given: [{ observe: { turn: { prompt?, during?, tools?, write?, answer?, compactions?, context? } } }]`
-  (`observe` in `extension_test.rs`; every kind takes `given` and `steps`) —
+  (`observe` in `extension_test/observe.rs`; every kind takes `given` and `steps`) —
   what oxplow only learns from what happens around it, made through the API
   core makes it with, and a new kind is added to that `match`, red test
   first, one at a time. `turn` is one turn on the primary thread through
