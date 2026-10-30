@@ -29,11 +29,15 @@ loaders:
   recorded:
     sql: |
       SELECT f.captured_at, f.measure_key, f.value, f.subject, f.path, f.branch
-      FROM about a JOIN v_capture c ON c.producer = a.id
-           JOIN v_fact f ON f.capture_id = c.id
-      WHERE (:range_from IS NULL OR c.captured_at >= :range_from)
-        AND (:range_to IS NULL OR c.captured_at <= :range_to)
-      ORDER BY f.captured_at DESC, f.id DESC LIMIT 200
+      -- Its captures first, then their facts: a join the other way scans
+      -- every fact.
+      FROM v_fact f
+      WHERE f.capture_id IN (
+              SELECT c.id FROM v_capture c
+              WHERE c.producer = (SELECT id FROM about)
+                AND (:range_from IS NULL OR c.captured_at >= :range_from)
+                AND (:range_to IS NULL OR c.captured_at <= :range_to))
+      ORDER BY f.id DESC LIMIT 200
   links:
     sql: |
       SELECT 'Definition' AS title,

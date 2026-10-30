@@ -37,13 +37,16 @@ loaders:
       FROM v_measure m WHERE m.key = uri_param(:uri, 'measure')
   facts:
     sql: |
-      SELECT f.captured_at, f.value, a.unit, f.subject, f.path, f.branch, f.dims_json AS dims
-      FROM about a JOIN v_fact f ON f.measure_key = a.key
-      WHERE (COALESCE(:branch, '') = '' OR f.branch = :branch)
+      -- Filtered on a constant key (never a join to `about`), so the fact
+      -- index is used; newest first by id, which follows capture order.
+      SELECT f.captured_at, f.value, (SELECT unit FROM about) AS unit, f.subject, f.path, f.branch, f.dims_json AS dims
+      FROM v_fact f
+      WHERE f.measure_key = (SELECT key FROM about)
+        AND (COALESCE(:branch, '') = '' OR f.branch = :branch)
         AND (:subject IS NULL OR f.subject LIKE '%' || :subject || '%' OR f.path LIKE '%' || :subject || '%')
         AND (:range_from IS NULL OR f.captured_at >= :range_from)
         AND (:range_to IS NULL OR f.captured_at <= :range_to)
-      ORDER BY f.captured_at DESC LIMIT 500
+      ORDER BY f.id DESC LIMIT 500
   # Grouped: the measure's fold (sum, avg, first, else last) over each group's values.
   grouped:
     sql: |
@@ -51,8 +54,9 @@ loaders:
         SELECT f.id, f.value, f.captured_at,
                CASE :group_by WHEN 'subject' THEN COALESCE(f.subject, f.path, '(none)')
                               ELSE substr(f.captured_at, 1, 10) END AS grp
-        FROM about a JOIN v_fact f ON f.measure_key = a.key
-        WHERE (COALESCE(:branch, '') = '' OR f.branch = :branch)
+        FROM v_fact f
+        WHERE f.measure_key = (SELECT key FROM about)
+          AND (COALESCE(:branch, '') = '' OR f.branch = :branch)
           AND (:subject IS NULL OR f.subject LIKE '%' || :subject || '%' OR f.path LIKE '%' || :subject || '%')
           AND (:range_from IS NULL OR f.captured_at >= :range_from)
           AND (:range_to IS NULL OR f.captured_at <= :range_to)

@@ -25,13 +25,23 @@ loaders:
     sql: |
       SELECT d.key, d.label AS name, d.description, d.value_type
       FROM v_dimension d WHERE d.key = uri_param(:uri, 'dimension')
+  # One measure's facts at a time (every fact at once is too many to scan):
+  # the chosen one, else the first the Measure choice offers.
+  chosen:
+    page: oxplow-foundation/dimension-measures
+    loader: dimension_measures
+    params: { uri: { param: uri } }
+  measure:
+    sql: |
+      SELECT COALESCE(NULLIF(:measure, ''), (SELECT value FROM chosen LIMIT 1)) AS key,
+             COALESCE((SELECT label FROM chosen WHERE value = :measure), (SELECT label FROM chosen LIMIT 1)) AS title
   seen:
     sql: |
-      SELECT CAST(json_extract(f.dims_json, '$."' || a.key || '"') AS TEXT) AS value,
+      SELECT CAST(json_extract(f.dims_json, '$."' || (SELECT key FROM about) || '"') AS TEXT) AS value,
              count(*) AS facts, max(f.captured_at) AS latest
-      FROM about a JOIN v_fact f
-        ON json_extract(f.dims_json, '$."' || a.key || '"') IS NOT NULL
-      WHERE (COALESCE(:measure, '') = '' OR f.measure_key = :measure)
+      FROM v_fact f
+      WHERE f.measure_key = (SELECT key FROM measure)
+        AND json_extract(f.dims_json, '$."' || (SELECT key FROM about) || '"') IS NOT NULL
         AND (:range_from IS NULL OR f.captured_at >= :range_from)
         AND (:range_to IS NULL OR f.captured_at <= :range_to)
       GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 500

@@ -1,24 +1,22 @@
-# The Dimension data page lists the values facts carry for a dimension, most common first,
-# narrowed to one measure when asked.
+# The Dimension data page lists the values one measure's facts carry for a
+# dimension, most common first. With no measure chosen it uses the first
+# choice: a measure about what the dimension describes (Model → Agent tokens).
 given:
-  - observe: { facts: { measure: oxplow.tokens, items: [{ value: 10, dims: { oxplow.language: rust } }, { value: 5, dims: { oxplow.language: rust } }, { value: 7, dims: { oxplow.language: ts } }] } }
+  - observe: { facts: { measure: oxplow.tokens, items: [{ value: 10, dims: { oxplow.model: opus } }, { value: 5, dims: { oxplow.model: opus } }, { value: 7, dims: { oxplow.model: haiku } }] } }
 when:
   page: oxplow-foundation/dimension-data
-  params: { uri: "oxplow:oxplow/dimension?dimension=oxplow.language" }
+  params: { uri: "oxplow:oxplow/dimension?dimension=oxplow.model" }
 expect:
-  label: Language data
+  label: Model data
   loaders:
-    about: { rows: [{ name: Language }] }
-    seen: { rows: [{ value: rust, facts: 2 }, { value: ts, facts: 1 }] }
+    about: { rows: [{ name: Model }] }
+    measure: { rows: [{ key: oxplow.tokens, title: Agent tokens }] }
+    seen: { rows: [{ value: opus, facts: 2 }, { value: haiku, facts: 1 }] }
   see_also:
-    - { title: Definition, uri: "oxplow:oxplow/dimension?dimension=oxplow.language#oxplow.renderer=oxplow-foundation/dimension" }
+    - { title: Definition, uri: "oxplow:oxplow/dimension?dimension=oxplow.model#oxplow.renderer=oxplow-foundation/dimension" }
     - { title: Explore Data, uri: "oxplow:oxplow/page?dataset=v_fact&page=explore-data" }
 steps:
-  - params: { measure: oxplow.tokens }
-    expect:
-      loaders:
-        seen: { rows: [{ value: rust, facts: 2 }, { value: ts, facts: 1 }] }
-  - params: { measure: oxplow.coverage }
+  - params: { measure: oxplow.complexity }
     expect:
       loaders:
         seen: { rows: 0 }
