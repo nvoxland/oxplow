@@ -509,6 +509,9 @@ pub struct DimensionEntry {
     /// Guidance for an agent reading the dimension.
     #[serde(default)]
     pub ai_context: Option<AiContext>,
+    /// One sentence saying what the dimension slices by (`v_dimension.description`).
+    #[serde(default)]
+    pub description: Option<String>,
 }
 
 /// A fully-resolved dimension — the flat form the boot seeder upserts into the
@@ -526,6 +529,7 @@ pub struct ResolvedDimension {
     pub promote: bool,
     pub entity: Option<EntityDimensionSpec>,
     pub ai_context: Option<AiContext>,
+    pub description: Option<String>,
 }
 
 /// How this project's tests run (the `testing:` block), written by
@@ -3495,6 +3499,7 @@ pub fn validate_dimensions(
             expr,
             join,
             ai_context: e.ai_context,
+            description: opt(e.description),
         });
     }
     Ok(out)
@@ -3570,6 +3575,7 @@ pub fn resolve_dimensions(
                     join: e.join.clone(),
                 }),
                 ai_context: e.ai_context.clone(),
+                description: e.description.clone(),
             };
             match pos.get(key) {
                 Some(&i) => out[i] = resolved,
@@ -6005,6 +6011,28 @@ metrics:
         // Defaults applied.
         assert_eq!(churn.title, "acme.churn");
         assert_eq!(churn.temporal_semantics, "semi-additive");
+    }
+
+    #[test]
+    fn a_dimension_keeps_its_trimmed_description() {
+        let out = validate_dimensions(
+            Some(vec![DimensionEntry {
+                key: Some("acme.license".into()),
+                description: Some("  The license of a file.  ".into()),
+                ..Default::default()
+            }]),
+            CatalogLayer::Extension("acme"),
+        )
+        .expect("valid");
+        assert_eq!(
+            out[0].description.as_deref(),
+            Some("The license of a file.")
+        );
+        let resolved = resolve_dimensions(&[], &[("acme".to_string(), out)]);
+        assert_eq!(
+            resolved[0].description.as_deref(),
+            Some("The license of a file.")
+        );
     }
 
     #[test]

@@ -24,8 +24,8 @@ pub fn reset_tx(
         .prepare(
             "INSERT OR REPLACE INTO contribution
                (id, extension, kind, local, origin, version, contract_version,
-                runs_on_json, needs_json, after_json, order_level, global_name, file, line)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+                runs_on_json, needs_json, after_json, order_level, global_name, file, line, description)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
         )
         .map_err(map_sql_err)?;
     for d in descriptors {
@@ -44,6 +44,7 @@ pub fn reset_tx(
             d.global,
             d.source.file,
             d.source.line,
+            d.description,
         ])
         .map_err(map_sql_err)?;
     }

@@ -52,6 +52,9 @@ pub struct ImplementationDecl {
     /// (never markup): the SVG `icon:` names inside the extension, checked
     /// by [`load_icon`].
     pub icon: Option<String>,
+    /// One sentence saying what this implementation is
+    /// (`v_capability_provider.description`).
+    pub description: Option<String>,
     /// An effort policy written as a script: its text, when `entry` names a
     /// file of the extension rather than a built-in.
     #[serde(skip)]
@@ -90,6 +93,9 @@ pub(crate) struct ImplementationFile {
     /// capability may declare one.
     #[serde(default)]
     icon: Option<String>,
+    /// One sentence saying what it is.
+    #[serde(default)]
+    description: Option<String>,
 }
 
 /// The largest icon file.
@@ -292,6 +298,7 @@ fn decl_of(
         config,
         needs: Vec::new(),
         icon,
+        description: f.description,
         script: None,
     })
 }
@@ -355,6 +362,7 @@ fn provider_decl(
         config,
         needs: Vec::new(),
         icon,
+        description: f.description,
         script: None,
     })
 }
@@ -408,6 +416,7 @@ fn script_decl(
         config,
         needs: f.needs,
         icon,
+        description: f.description,
         script: Some(script),
     })
 }
@@ -612,7 +621,21 @@ mod tests {
                 needs: vec![],
                 script: None,
                 icon: None,
+                description: None,
             }]
+        );
+    }
+
+    /// A declaration's one-sentence `description:` is kept.
+    #[test]
+    fn an_implementation_keeps_its_description() {
+        let (decls, errors) = parse(
+            "  - { capability: work_items, id: oxplow, entry: oxplow:tasks, description: \"The work list oxplow keeps.\" }\n",
+        );
+        assert_eq!(errors, Vec::<String>::new());
+        assert_eq!(
+            decls[0].description.as_deref(),
+            Some("The work list oxplow keeps.")
         );
     }
 

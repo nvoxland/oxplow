@@ -1060,14 +1060,14 @@ async fn skills_slots_and_components_are_described() {
     let fx = services_with_effort().await;
     let skills = rows(
         &fx,
-        "SELECT count(*), sum(description = '') FROM v_skill s JOIN v_contribution k ON k.uri = s.uri",
+        "SELECT count(*), sum(s.description = '') FROM v_skill s JOIN v_contribution k ON k.uri = s.uri",
     )
     .await;
     assert!(skills[0][0].as_i64().unwrap() > 0, "{skills:?}");
     assert_eq!(skills[0][1].as_i64(), Some(0), "{skills:?}");
     let components = rows(
         &fx,
-        "SELECT count(*), sum(description = '') FROM v_custom_component c JOIN v_contribution k ON k.uri = c.uri",
+        "SELECT count(*), sum(c.description = '') FROM v_custom_component c JOIN v_contribution k ON k.uri = c.uri",
     )
     .await;
     assert!(components[0][0].as_i64().unwrap() > 0, "{components:?}");
@@ -1078,4 +1078,44 @@ async fn skills_slots_and_components_are_described() {
     )
     .await;
     assert_eq!(slots, [vec![json!(0)]]);
+}
+
+/// Every resource, dimension, implementation and collector the shipped
+/// extensions declare says in a sentence what it is, and the sentence is
+/// on `v_contribution` too, so a page can show any kind the same way.
+#[tokio::test]
+async fn shipped_declarations_describe_themselves() {
+    let fx = services_with_effort().await;
+    for (name, sql) in [
+        (
+            "resources",
+            "SELECT count(*) FROM v_resource WHERE description IS NULL OR description = ''",
+        ),
+        (
+            "dimensions",
+            "SELECT count(*) FROM v_dimension WHERE extension IS NOT NULL AND (description IS NULL OR description = '')",
+        ),
+        (
+            "implementations",
+            "SELECT count(*) FROM v_capability_provider WHERE extension IS NOT NULL AND (description IS NULL OR description = '')",
+        ),
+        (
+            "collectors",
+            "SELECT count(*) FROM v_collector WHERE description IS NULL OR description = ''",
+        ),
+    ] {
+        assert_eq!(rows(&fx, sql).await, [vec![json!(0)]], "{name} without a description");
+    }
+    let joined = rows(
+        &fx,
+        "SELECT count(*) FROM v_collector c JOIN v_contribution k ON k.uri = c.uri AND k.description = c.description",
+    )
+    .await;
+    assert!(joined[0][0].as_i64().unwrap() > 0, "{joined:?}");
+    let resource = rows(
+        &fx,
+        "SELECT r.description = k.description FROM v_resource r JOIN v_contribution k ON k.kind = 'resource' AND k.global_name = r.resource WHERE r.resource = 'oxplow/commit'",
+    )
+    .await;
+    assert_eq!(resource, [vec![json!(1)]]);
 }

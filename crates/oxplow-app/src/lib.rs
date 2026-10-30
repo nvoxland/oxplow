@@ -1318,6 +1318,7 @@ impl Services {
                     id_pattern: None,
                     icon: None,
                     config: serde_json::json!({}),
+                    description: None,
                 }]
                 .into_iter()
                 .chain(filesystems::implementations())

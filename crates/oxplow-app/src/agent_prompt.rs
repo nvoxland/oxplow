@@ -188,6 +188,7 @@ mod tests {
             id_pattern: None,
             icon: None,
             config: serde_json::json!({}),
+            description: None,
         }
     }
 

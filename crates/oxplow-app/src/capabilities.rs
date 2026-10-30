@@ -312,6 +312,8 @@ pub struct Implementation {
     /// What its declaration configures (`config:`, checked against its
     /// built-in's schema): an ACP adapter's command, a provider's base URL.
     pub config: Value,
+    /// One sentence saying what it is, from its declaration.
+    pub description: Option<String>,
 }
 
 impl Implementation {
@@ -351,6 +353,7 @@ impl Implementation {
             id_pattern: None,
             icon: None,
             config: Value::Object(Default::default()),
+            description: None,
         }
     }
 }
@@ -622,6 +625,7 @@ impl CapabilityRegistry {
                         id_pattern: b.id_pattern.map(str::to_string),
                         icon: None,
                         config: Value::Object(Default::default()),
+                        description: None,
                     })
                 }),
         );
@@ -1061,6 +1065,7 @@ impl CapabilityRegistry {
                     optional: spec.optional,
                     fields: i.fields.clone(),
                     id_pattern: i.id_pattern.clone(),
+                    description: i.description.clone(),
                 });
             }
             if let Some(wanted) = &resolved.wanted {
@@ -1083,6 +1088,7 @@ impl CapabilityRegistry {
                         optional: spec.optional,
                         fields: Value::Array(Vec::new()),
                         id_pattern: None,
+                        description: None,
                     });
                 }
             }
@@ -1161,6 +1167,7 @@ pub fn declared_by(extensions: &[crate::extension::extensions::Extension]) -> Ve
                     id_pattern: b.id_pattern.map(str::to_string),
                     icon: d.icon.clone(),
                     config: d.config.clone(),
+                    description: d.description.clone(),
                 })
             })
         })
@@ -1186,6 +1193,7 @@ fn provider_implementation(
         id_pattern: None,
         icon: d.icon.clone(),
         config: d.config.clone(),
+        description: d.description.clone(),
     })
 }
 
@@ -1212,6 +1220,7 @@ fn scripted_implementation(
         id_pattern: None,
         icon: d.icon.clone(),
         config: d.config.clone(),
+        description: d.description.clone(),
     }
 }
 
@@ -1359,6 +1368,7 @@ mod tests {
             id_pattern: None,
             icon: None,
             config: Value::Object(Default::default()),
+            description: None,
         }
     }
 
@@ -1468,6 +1478,7 @@ mod tests {
             id_pattern: None,
             icon: None,
             config: Value::Object(Default::default()),
+            description: None,
         };
         r.set_external(issues.clone(), true);
         assert_eq!(r.active(&c, "work_items"), "issues");
@@ -1795,6 +1806,7 @@ mod tests {
                 id_pattern: None,
                 icon: None,
                 config: serde_json::json!({}),
+                description: None,
             },
             true,
         );
@@ -1831,6 +1843,7 @@ mod tests {
                 id_pattern: None,
                 icon: None,
                 config: serde_json::json!({}),
+                description: None,
             },
             true,
         );

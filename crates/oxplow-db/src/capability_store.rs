@@ -47,14 +47,16 @@ pub struct CapabilityProvider {
     /// What a work list's own ids look like (a regex matched whole), if
     /// it says: how its ids are recognized in text.
     pub id_pattern: Option<String>,
+    /// One sentence saying what it is; `None` when its declaration says nothing.
+    pub description: Option<String>,
 }
 
 fn insert_tx(conn: &Connection, row: &CapabilityProvider) -> Result<(), DomainError> {
     conn.execute(
         "INSERT INTO capability_provider
            (capability, provider, extension, features_json, active, title, source, available,
-            chosen_by, capability_title, choosable, optional, fields_json, id_pattern)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+            chosen_by, capability_title, choosable, optional, fields_json, id_pattern, description)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
         params![
             row.capability,
             row.provider,
@@ -70,6 +72,7 @@ fn insert_tx(conn: &Connection, row: &CapabilityProvider) -> Result<(), DomainEr
             row.optional,
             row.fields.to_string(),
             row.id_pattern,
+            row.description,
         ],
     )
     .map_err(map_sql_err)?;
@@ -88,7 +91,7 @@ pub fn list_tx(conn: &Connection) -> Result<Vec<CapabilityProvider>, DomainError
         .prepare(
             "SELECT capability, provider, extension, features_json, active, title, source,
                     available, chosen_by, capability_title, choosable, optional, fields_json,
-                    id_pattern
+                    id_pattern, description
                FROM capability_provider ORDER BY capability, provider",
         )
         .map_err(map_sql_err)?;
@@ -111,6 +114,7 @@ pub fn list_tx(conn: &Connection) -> Result<Vec<CapabilityProvider>, DomainError
                 optional: r.get(11)?,
                 fields: serde_json::from_str(&fields).unwrap_or(Value::Null),
                 id_pattern: r.get(13)?,
+                description: r.get(14)?,
             })
         })
         .map_err(map_sql_err)?;
@@ -154,6 +158,7 @@ mod tests {
             optional: false,
             fields: serde_json::json!([]),
             id_pattern: None,
+            description: None,
         }
     }
 

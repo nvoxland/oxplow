@@ -85,6 +85,7 @@ impl PreparedProviderGeneration {
                 id_pattern: staged.instance.spec.id_pattern.clone(),
                 icon: None,
                 config: serde_json::json!({}),
+                description: None,
             })
             .collect()
     }

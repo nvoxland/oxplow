@@ -10,6 +10,20 @@ Sources (collectors), contributing metrics, jobs and AI profiles. Part of the ex
   (runtime, schedule, row counts or failure, Sync Now);
   Settings → Data keeps each extension's source credentials.
 
+## What a declaration says about itself
+
+Every contribution kind a person sees in a list has a one-sentence
+description, published as a `description` column on its own dataset and on
+`v_contribution`, so a page can show any kind the same way: a collector's
+`doc:` (`v_collector.description`), a resource's `description:`
+(`v_resource`), a dimension's (`v_dimension`) and an implementation's
+(`v_capability_provider`). Metrics and measures carry theirs
+(`v_metric_spec`, `v_measure`); commands, skills, slot mounts and custom
+components are read from `v_command`, `v_skill`, `v_slot` and
+`v_custom_component`. `oxplow extension check` does not warn about a missing
+description: there is no check for one on any of these kinds yet (a collector's
+`doc:` is required, the rest are optional).
+
 ## Contributing metrics (current)
 
 `extension.yaml` takes `measures:`, `metrics:` and `dimensions:` (the

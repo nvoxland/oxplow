@@ -1225,6 +1225,14 @@
             }
           ],
           "default": null
+        },
+        "description": {
+          "description": "One sentence saying what the dimension slices by (`v_dimension.description`).",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
         }
       },
       "additionalProperties": false
@@ -2683,6 +2691,14 @@
             }
           ],
           "default": null
+        },
+        "description": {
+          "description": "One sentence saying what the resource is.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
         }
       },
       "additionalProperties": false,
@@ -2780,6 +2796,14 @@
         },
         "icon": {
           "description": "A path to an SVG in the extension (`icons/claude.svg`): its logo,\nshown wherever the implementation is (a session's tab). Any\ncapability may declare one.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "description": {
+          "description": "One sentence saying what it is.",
           "type": [
             "string",
             "null"

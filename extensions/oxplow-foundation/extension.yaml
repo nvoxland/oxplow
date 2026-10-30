@@ -226,6 +226,9 @@ intent:
     - name: an-extension-lists-its-permissions-as-scopes-with-a-hint-each
       input: { page: extension, params: { uri: 'oxplow:oxplow/extension?name=oxplow-foundation', name: oxplow-foundation } }
       expect: each scope as written with its explanation as a hover; nothing waits on approval for a running extension
+    - name: every-shipped-resource-dimension-and-implementation-describes-itself
+      input: { sql: "SELECT count(*) FROM v_resource WHERE coalesce(description, '') = ''" }
+      expect: foundation's resources, dimensions and implementations each carry a one-sentence description
     - name: the-extension-page-reads-a-shipped-extension
       input: { page: extension, params: { uri: 'oxplow:oxplow/extension?name=oxplow-foundation', name: oxplow-foundation } }
       expect: where it comes from, what runs, its pages with a link to each Definition, what it may reach in words, its deployments, and a slot for its runs
@@ -275,28 +278,28 @@ skills:
 # harnesses and AI providers — core's built-ins, many of each at once (every
 # one of those declared here is active).
 implementations:
-  - { capability: work_items, id: oxplow, entry: "oxplow:tasks", skills: [work-next] }
-  - { capability: effort_policy, id: oxplow, entry: "oxplow:commit-or-switch" }
-  - { capability: snapshots, id: hashes, entry: "oxplow:snapshot-hashes" }
-  - { capability: knowledge, id: oxplow, entry: "oxplow:wiki" }
-  - { capability: agent_harness, id: claude, entry: "oxplow:claude-code", title: Claude, icon: icons/claude.svg }
-  - { capability: agent_harness, id: codex, entry: "oxplow:codex-cli", title: Codex, icon: icons/codex.svg }
-  - { capability: agent_harness, id: opencode, entry: "oxplow:opencode", title: OpenCode, icon: icons/opencode.svg }
+  - { capability: work_items, id: oxplow, entry: "oxplow:tasks", skills: [work-next], description: "The work list that oxplow keeps itself." }
+  - { capability: effort_policy, id: oxplow, entry: "oxplow:commit-or-switch", description: "Ends an effort when its work is committed or the agent switches to other work." }
+  - { capability: snapshots, id: hashes, entry: "oxplow:snapshot-hashes", description: "Saves the project's files as snapshots named by their hashes." }
+  - { capability: knowledge, id: oxplow, entry: "oxplow:wiki", description: "The wiki that oxplow keeps in the project." }
+  - { capability: agent_harness, id: claude, entry: "oxplow:claude-code", title: Claude, icon: icons/claude.svg, description: "Runs Claude Code as a coding agent." }
+  - { capability: agent_harness, id: codex, entry: "oxplow:codex-cli", title: Codex, icon: icons/codex.svg, description: "Runs Codex as a coding agent." }
+  - { capability: agent_harness, id: opencode, entry: "oxplow:opencode", title: OpenCode, icon: icons/opencode.svg, description: "Runs OpenCode as a coding agent." }
   # AI providers: each the Rust kind it is (`provider:`, oxplow-ai-rig) —
   # Rig's for all but TypeSafe — at its API's default URL. Declaring one
   # points a person's key at that URL, so it needs `permissions.ai`.
-  - { capability: ai_provider, id: anthropic, title: Anthropic, provider: anthropic, config: { baseUrl: "https://api.anthropic.com" } }
-  - { capability: ai_provider, id: openai, title: OpenAI, provider: openai, config: { baseUrl: "https://api.openai.com/v1" } }
-  - { capability: ai_provider, id: openai_compatible, title: An OpenAI-compatible API, provider: openai_compatible }
-  - { capability: ai_provider, id: openrouter, title: OpenRouter, provider: openrouter, config: { baseUrl: "https://openrouter.ai/api/v1" } }
-  - { capability: ai_provider, id: gemini, title: Google Gemini, provider: gemini, config: { baseUrl: "https://generativelanguage.googleapis.com" } }
-  - { capability: ai_provider, id: mistral, title: Mistral, provider: mistral, config: { baseUrl: "https://api.mistral.ai" } }
-  - { capability: ai_provider, id: groq, title: Groq, provider: groq, config: { baseUrl: "https://api.groq.com/openai/v1" } }
-  - { capability: ai_provider, id: deepseek, title: DeepSeek, provider: deepseek, config: { baseUrl: "https://api.deepseek.com" } }
-  - { capability: ai_provider, id: xai, title: xAI, provider: xai, config: { baseUrl: "https://api.x.ai" } }
-  - { capability: ai_provider, id: ollama, title: Ollama, provider: ollama, config: { baseUrl: "http://localhost:11434/v1" } }
-  - { capability: ai_provider, id: llamacpp, title: llama.cpp server, provider: llamacpp, config: { baseUrl: "http://localhost:8080/v1" } }
-  - { capability: ai_provider, id: typesafe, title: TypeSafe, provider: typesafe, config: { baseUrl: "https://api.typesafe.ai" } }
+  - { capability: ai_provider, id: anthropic, title: Anthropic, provider: anthropic, config: { baseUrl: "https://api.anthropic.com" }, description: "Anthropic's models, such as Claude." }
+  - { capability: ai_provider, id: openai, title: OpenAI, provider: openai, config: { baseUrl: "https://api.openai.com/v1" }, description: "OpenAI's models." }
+  - { capability: ai_provider, id: openai_compatible, title: An OpenAI-compatible API, provider: openai_compatible, description: "Any service that speaks the OpenAI API." }
+  - { capability: ai_provider, id: openrouter, title: OpenRouter, provider: openrouter, config: { baseUrl: "https://openrouter.ai/api/v1" }, description: "Many makers' models, through OpenRouter." }
+  - { capability: ai_provider, id: gemini, title: Google Gemini, provider: gemini, config: { baseUrl: "https://generativelanguage.googleapis.com" }, description: "Google's Gemini models." }
+  - { capability: ai_provider, id: mistral, title: Mistral, provider: mistral, config: { baseUrl: "https://api.mistral.ai" }, description: "Mistral's models." }
+  - { capability: ai_provider, id: groq, title: Groq, provider: groq, config: { baseUrl: "https://api.groq.com/openai/v1" }, description: "Models that run on Groq's hardware." }
+  - { capability: ai_provider, id: deepseek, title: DeepSeek, provider: deepseek, config: { baseUrl: "https://api.deepseek.com" }, description: "DeepSeek's models." }
+  - { capability: ai_provider, id: xai, title: xAI, provider: xai, config: { baseUrl: "https://api.x.ai" }, description: "xAI's Grok models." }
+  - { capability: ai_provider, id: ollama, title: Ollama, provider: ollama, config: { baseUrl: "http://localhost:11434/v1" }, description: "Models that run on your own machine, through Ollama." }
+  - { capability: ai_provider, id: llamacpp, title: llama.cpp server, provider: llamacpp, config: { baseUrl: "http://localhost:8080/v1" }, description: "Models that run in a local llama.cpp server." }
+  - { capability: ai_provider, id: typesafe, title: TypeSafe, provider: typesafe, config: { baseUrl: "https://api.typesafe.ai" }, description: "A model service that only answers typed questions." }
 collectors:
   # What an effort's test runs came to, recorded when it finishes: the
   # quality gate, the worst run, the tests it broke, the red runs and the time
@@ -304,7 +307,7 @@ collectors:
   # input is the effort's measured runs (`tests` captures) with their failed
   # cases, oldest first.
   - id: oxplow.effort_test_outcome
-    doc: An effort's test outcome, when it finishes.
+    doc: How an effort's tests went, recorded when it finishes.
     runtime: starlark
     entry: collectors/effort/test_outcome.star
     on: [effort.finished]
@@ -363,27 +366,32 @@ metrics:
 # (the resource URI grammar). A param's `pattern` matches its decoded value.
 resources:
   - name: project
+    description: "The project oxplow is open on."
     label: Project
     params: { id: { required: true, pattern: '^[A-Za-z0-9._-]+$' } }
     icon: package
   - name: stream
+    description: "A line of work with its own branch and checkout."
     label: Stream
     params: { id: { required: true, pattern: '^str[0-9]+$' } }
     resolve: stream
     icon: git-branch
   - name: thread
+    description: "A conversation of work inside a stream, with its tasks and agent sessions."
     label: Thread
     params: { id: { required: true, pattern: '^thr[0-9]+$' } }
     resolve: thread
     searchable: search_thread
     icon: message-square
   - name: effort
+    description: "A stretch of one thread's work that oxplow tracks from its start to its finish."
     label: Effort
     params: { id: { required: true, pattern: '^eff[0-9]+$' } }
     resolve: effort
     searchable: search_effort
     icon: flag
   - name: turn
+    description: "One turn of an agent's conversation: a prompt and the agent's reply."
     label: Agent turn
     params: { id: { required: true, pattern: '^trn[0-9]+$' } }
     resolve: agent_turn
@@ -391,12 +399,14 @@ resources:
     searchable: search_turn
     icon: activity
   - name: snapshot
+    description: "A saved copy of the project's files at one moment."
     label: Snapshot
     params: { id: { required: true, pattern: '^[A-Za-z0-9]+$' } }
     resolve: snapshot
     title: created_at
     icon: history
   - name: commit
+    description: "A git commit."
     label: Commit
     params: { sha: { required: true, pattern: '^[0-9a-f]{7,64}$' } }
     resolve: commit
@@ -405,38 +415,45 @@ resources:
     icon: git-commit
     wikilink: { prefix: git, param: sha }
   - name: branch
+    description: "A git branch."
     label: Branch
     params: { name: { required: true } }
     icon: git-branch
   - name: file
+    description: "A file on a filesystem at a revision."
     label: File
     params: { path: { required: true }, rev: { pattern: '^[!-~]+$' }, filesystem: { pattern: '^[a-z][a-z0-9_-]*:[a-z][a-z0-9_-]*$' } }
     icon: file-text
     wikilink: { prefix: file, param: path }
   - name: dir
+    description: "A folder on a filesystem at a revision."
     label: Directory
     params: { path: { required: true }, rev: { pattern: '^[!-~]+$' }, filesystem: { pattern: '^[a-z][a-z0-9_-]*:[a-z][a-z0-9_-]*$' } }
     icon: folder
     wikilink: { prefix: dir, param: path }
   - name: symbol
+    description: "A named item in source code, such as a function or a type."
     label: Symbol
     params: { path: { required: true }, symbol: { required: true }, rev: { pattern: '^[a-z]+:[!-~]+$' } }
     resolve: symbol
     title: name
     icon: list-tree
   - name: work_item
+    description: "A task, epic or other item on the project's work list."
     label: Work item
     params: { provider: { required: true, pattern: '^[a-z][a-z0-9_-]*$' }, id: { required: true } }
     resolve: work_item
     searchable: search_work_item
     icon: check-square
   - name: wiki
+    description: "A page of the project's wiki."
     label: Wiki page
     params: { slug: { required: true, pattern: '^[A-Za-z0-9][A-Za-z0-9_-]*$' } }
     resolve: knowledge_page
     searchable: search_wiki
     icon: book-open
   - name: comment
+    description: "A comment a person left on a page or a record."
     label: Comment
     params: { id: { required: true, pattern: '^cmt[0-9]+$' } }
     resolve: comment
@@ -444,35 +461,42 @@ resources:
     searchable: search_comment
     icon: message-square
   - name: event
+    description: "A recorded event, such as an effort finishing."
     label: Event
     params: { id: { required: true, pattern: '^[0-9a-f-]{36}$' } }
     resolve: event
     title: type
     icon: activity
   - name: ai_model
+    description: "A language model an AI provider offers."
     label: Language model
     params: { name: { required: true, pattern: '^[!-~]+$' } }
     icon: server
   - name: extension
+    description: "A bundle of pages, commands and data that adds to oxplow."
     label: Extension
     params: { name: { required: true, pattern: '^[a-z0-9-]+$' } }
     resolve: extension
     title: name
     icon: package
   - name: extension_deployment
+    description: "One deployed copy of an extension's source."
     label: Extension deployment
     params: { name: { required: true, pattern: '^[a-z0-9-]+$' }, hash: { required: true } }
     icon: package
   - name: config
+    description: "A setting in the project's configuration."
     label: Setting
     params: { key: { required: true, pattern: '^[A-Za-z][A-Za-z0-9]*$' } }
     icon: settings
   - name: finding
+    description: "A problem that a code scan found."
     label: Finding
     params: { id: { required: true, pattern: '^[!-~]+$' } }
     icon: triangle-alert
     wikilink: { prefix: finding, param: id }
   - name: agent_session
+    description: "A coding agent's session on a thread."
     label: Agent session
     params: { id: { required: true, pattern: '^ses[0-9]+$' } }
     resolve: agent_session
@@ -480,6 +504,7 @@ resources:
     searchable: search_agent_session
     icon: terminal
   - name: handoff
+    description: "Work that one thread passed to another."
     label: Handoff
     params: { id: { required: true, pattern: '^hnd[0-9]+$' } }
     resolve: handoff
@@ -487,34 +512,40 @@ resources:
     searchable: search_handoff
     icon: inbox
   - name: terminal
+    description: "A terminal running in a stream's checkout."
     label: Terminal
     params: { id: { required: true, pattern: '^trm[0-9]+$' } }
     resolve: terminal
     title: title
     icon: terminal
   - name: subagent
+    description: "A helper agent that an agent session started."
     label: Subagent
     params: { session: { required: true, pattern: '^ses[0-9]+$' }, agent: { required: true, pattern: '^[!-.0-~]+$' } }
     resolve: subagent
     title: id
     icon: terminal
   - name: run
+    description: "One run of a project's tests."
     label: Test run
     params: { id: { required: true, pattern: '^[0-9]+$' } }
     icon: circle-check
   - name: proposal
+    description: "A command waiting for a person to approve it."
     label: Proposal
     params: { id: { required: true, pattern: '^[0-9]+$' } }
     resolve: command_proposal
     title: command
     icon: bell
   - name: claim
+    description: "A statement an agent made about its work, which can be checked."
     label: Claim
     params: { id: { required: true, pattern: '^[0-9]+$' } }
     resolve: claim
     title: statement
     icon: circle-dot
   - name: decision
+    description: "A choice that an agent or a person made, with its reason."
     label: Decision
     params: { id: { required: true, pattern: '^[0-9]+$' } }
     resolve: decision
@@ -522,123 +553,151 @@ resources:
     searchable: search_decision
     icon: circle-dot
   - name: job_run
+    description: "One run of a durable job."
     label: Job run
     params: { id: { required: true, pattern: '^[0-9a-f-]{36}$' } }
     resolve: job_run
     title: intent_key
     icon: activity
   - name: ai_call
+    description: "One call to a language model, with its cost."
     label: Model call
     params: { id: { required: true, pattern: '^[0-9]+$' } }
     resolve: ai_call
     title: role
     icon: server
   - name: consumer
+    description: "A part of oxplow that reads events as they happen."
     label: Event consumer
     params: { name: { required: true } }
     icon: zap
   - name: block
+    description: "A range of lines in a file."
     label: Code block
     params: { path: { required: true }, lines: { required: true, pattern: '^[0-9]+-[0-9]+$' } }
     icon: copy
   - name: test
+    description: "A test, named by its class and name."
     label: Test
     params: { class: { required: true }, name: { required: true } }
     icon: bug
   - name: nudge
+    description: "A reminder that oxplow sent to an agent."
     label: Nudge
     params: { kind: { required: true } }
     icon: bell
   - name: dataset
+    description: "A table or view of data in oxplow's query layer."
     label: Dataset
     params: { dataset: { required: true, pattern: '^[a-z][a-z0-9-]*/[a-z][a-z0-9_.-]*$' } }
     icon: database
   - name: measure
+    description: "A quantity that facts record, such as lines of code."
     label: Measure
     params: { measure: { required: true } }
     icon: bar-chart-3
   - name: metric
+    description: "A number that oxplow tracks over time."
     label: Metric
     params: { metric: { required: true } }
     icon: bar-chart-3
   - name: dimension
+    description: "An axis that metrics can be split by."
     label: Dimension
     params: { dimension: { required: true } }
     icon: columns-3
   - name: collector
+    description: "A program that gathers data into oxplow's datasets."
     label: Collector
     params: { collector: { required: true, pattern: '^[a-z][a-z0-9-]*/[a-z][a-z0-9_.-]*$' } }
     resolve: collector_run
     title: id
     icon: database
   - name: event_type
+    description: "A kind of event that oxplow records."
     label: Event type
     params: { event_type: { required: true } }
     icon: zap
   - name: resource
+    description: "A kind of thing that a URI can name."
     label: Resource
     params: { resource: { required: true, pattern: '^[a-z][a-z0-9-]*/[a-z][a-z0-9_]*$' } }
     icon: link
   - name: command
+    description: "An action that can be run on the command bus."
     label: Command
     params: { command: { required: true } }
     icon: zap
   - name: job
+    description: "A durable task that can call a language model."
     label: Job
     params: { job: { required: true, pattern: '^[a-z][a-z0-9-]*/[a-z][a-z0-9_.-]*$' } }
     icon: server
   - name: ai_profile
+    description: "A saved way of calling a language model."
     label: AI profile
     params: { ai_profile: { required: true, pattern: '^[a-z][a-z0-9-]*/[a-z][a-z0-9_.-]*$' } }
     icon: server
   - name: effect
+    description: "A reaction that runs when an event happens."
     label: Effect
     params: { effect: { required: true, pattern: '^[a-z][a-z0-9-]*/[a-z][a-z0-9_.-]*$' } }
     icon: zap
   - name: advisory
+    description: "A short note that an extension adds to an agent's context."
     label: Advisory
     params: { advisory: { required: true, pattern: '^[a-z][a-z0-9-]*/[a-z][a-z0-9_.-]*$' } }
     icon: bell
   - name: skill
+    description: "Instructions that oxplow gives a coding agent."
     label: Skill
     params: { skill: { required: true, pattern: '^[a-z][a-z0-9-]*/[a-z][a-z0-9_.-]*$' } }
     icon: book-open
   - name: implementation
+    description: "One way to provide a capability, such as a work list or an agent."
     label: Implementation
     params: { implementation: { required: true, pattern: '^[a-z][a-z0-9-]*/[a-z][a-z0-9_.-]*$' } }
     icon: box
   - name: provider
+    description: "A program that connects oxplow to an outside service."
     label: Provider
     params: { provider: { required: true, pattern: '^[a-z][a-z0-9-]*/[a-z][a-z0-9_.-]*$' } }
     icon: server
   - name: page
+    description: "A page that an extension draws."
     label: Page
     params: { page: { required: true } }
     additional: true
     searchable: search_page
     icon: file-text
   - name: view
+    description: "A page made to be looked at, which a person can save."
     label: View
     params: { id: { required: true } }
     additional: true
     icon: sparkles
   - name: panel
+    description: "A panel that an extension adds to the side of the window."
     label: Panel
     params: { panel: { required: true, pattern: '^[a-z][a-z0-9-]*/[a-z][a-z0-9_.-]*$' } }
     icon: layout-dashboard
   - name: slot
+    description: "A place on a page where another extension's page can be shown."
     label: Slot
     params: { slot: { required: true, pattern: '^[a-z][a-z0-9-]*/[a-z][a-z0-9_.-]*$' } }
     icon: box
   - name: decorator
+    description: "A label that an extension adds to a record."
     label: Decorator
     params: { decorator: { required: true, pattern: '^[a-z][a-z0-9-]*/[a-z][a-z0-9_.-]*$' } }
     icon: tag
   - name: replacement
+    description: "A built-in part of the window that an extension replaces."
     label: Replacement
     params: { replacement: { required: true, pattern: '^[a-z][a-z0-9-]*/[a-z][a-z0-9_.-]*$' } }
     icon: copy
   - name: custom_component
+    description: "A part of a page that an extension draws with its own code."
     label: Custom component
     params: { custom_component: { required: true, pattern: '^[a-z][a-z0-9-]*/[a-z][a-z0-9_.-]*$' } }
     icon: box
@@ -1742,15 +1801,15 @@ measures:
   - {"key": "oxplow.coverage.branch", "title": "Branch coverage", "unit": "%", "subjectKind": "file", "temporalSemantics": "semi-additive", "fold": "last", "captureScope": "complete"}
   - {"key": "oxplow.coverage.function", "title": "Function coverage", "unit": "%", "subjectKind": "file", "temporalSemantics": "semi-additive", "fold": "last", "captureScope": "complete"}
 dimensions:
-  - {"key": "oxplow.language", "label": "Language", "valueType": "categorical"}
-  - {"key": "oxplow.severity", "label": "Severity", "valueType": "categorical", "promote": true}
-  - {"key": "oxplow.status", "label": "Status", "valueType": "categorical", "promote": true}
-  - {"key": "oxplow.branch", "label": "Branch", "valueType": "categorical"}
-  - {"key": "oxplow.model", "label": "Model", "valueType": "categorical", "subjectKind": "model"}
-  - {"key": "oxplow.agent", "label": "Agent", "valueType": "categorical", "subjectKind": "agent"}
-  - {"key": "oxplow.package", "label": "Package", "valueType": "categorical"}
-  - {"key": "oxplow.test_suite", "label": "Test suite", "valueType": "categorical"}
-  - {"key": "oxplow.rule", "label": "Rule", "valueType": "categorical", "promote": true}
-  - {"key": "oxplow.token_kind", "label": "Token kind", "valueType": "categorical", "promote": true}
-  - {"key": "oxplow.tests_stat", "label": "Test outcome stat", "valueType": "categorical", "subjectKind": "effort", "promote": true}
-  - {"key": "work.priority", "label": "Priority", "entity": "v_work_item", "expr": "json_extract(e.native, '$.priority')"}
+  - {"key": "oxplow.language", "label": "Language", "valueType": "categorical", "description": "The programming language of a file."}
+  - {"key": "oxplow.severity", "label": "Severity", "valueType": "categorical", "promote": true, "description": "How serious a finding or a diagnostic is."}
+  - {"key": "oxplow.status", "label": "Status", "valueType": "categorical", "promote": true, "description": "The state a thing is in, such as passed or failed."}
+  - {"key": "oxplow.branch", "label": "Branch", "valueType": "categorical", "description": "The git branch a fact was recorded on."}
+  - {"key": "oxplow.model", "label": "Model", "valueType": "categorical", "subjectKind": "model", "description": "The language model that did the work."}
+  - {"key": "oxplow.agent", "label": "Agent", "valueType": "categorical", "subjectKind": "agent", "description": "The coding agent that did the work."}
+  - {"key": "oxplow.package", "label": "Package", "valueType": "categorical", "description": "The package a file belongs to."}
+  - {"key": "oxplow.test_suite", "label": "Test suite", "valueType": "categorical", "description": "The test suite a test belongs to."}
+  - {"key": "oxplow.rule", "label": "Rule", "valueType": "categorical", "promote": true, "description": "The rule that raised a finding."}
+  - {"key": "oxplow.token_kind", "label": "Token kind", "valueType": "categorical", "promote": true, "description": "The kind of token in source code, such as an identifier or a keyword."}
+  - {"key": "oxplow.tests_stat", "label": "Test outcome stat", "valueType": "categorical", "subjectKind": "effort", "promote": true, "description": "Which test figure of an effort a fact holds, such as passed or failed."}
+  - {"key": "work.priority", "label": "Priority", "entity": "v_work_item", "expr": "json_extract(e.native, '$.priority')", "description": "The priority of a work item."}
