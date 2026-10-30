@@ -20,6 +20,7 @@
 
 use std::path::Path;
 
+use oxplow_domain::extension_path::is_extension_relative;
 use serde::{Deserialize, Serialize};
 
 use super::manifest_v2::{at, item_lines, key_line};
@@ -477,15 +478,6 @@ fn valid_id(id: &str) -> bool {
     )
 }
 
-/// A relative path inside the extension, without `..`.
-fn inside(rel: &str) -> bool {
-    let p = Path::new(rel);
-    !rel.is_empty()
-        && p.is_relative()
-        && p.components()
-            .all(|c| matches!(c, std::path::Component::Normal(_)))
-}
-
 /// Parse `custom_components:`: the valid ones and an error (`file:line:
 /// …`) for each broken one. `stat` describes a bundle folder by its path
 /// inside the extension (`None`: no such folder).
@@ -527,7 +519,7 @@ pub fn parse_custom_components(
             ))
         } else if out.iter().any(|o| o.id == c.id) {
             Some(format!("custom component `{}` is declared twice", c.id))
-        } else if !inside(&bundle) {
+        } else if !is_extension_relative(&bundle) {
             Some(format!(
                 "custom component `{}`: bundle `{bundle}` must be a folder inside the extension",
                 c.id

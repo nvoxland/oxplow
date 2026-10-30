@@ -20,6 +20,7 @@ pub mod error;
 pub mod events;
 pub mod extension_job;
 pub mod extension_job_context;
+pub mod extension_path;
 pub mod extension_secret;
 pub mod extension_state;
 pub mod filesystem;

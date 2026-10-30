@@ -654,15 +654,12 @@ fn program_problem(spec: &ProviderSpec, read: &dyn Fn(&str) -> Option<String>) -
 }
 
 /// A path inside the extension folder that the approval's tree hash
-/// covers: relative, no `..`, not the manifest, not under `pages/`.
+/// covers: an extension-relative path, not the manifest, not under
+/// `pages/`.
 fn inside(path: &str) -> bool {
-    let p = std::path::Path::new(path);
-    !path.is_empty()
-        && p.is_relative()
-        && p.components()
-            .all(|c| matches!(c, std::path::Component::Normal(_)))
+    oxplow_domain::extension_path::is_extension_relative(path)
         && path != "extension.yaml"
-        && !p.starts_with("pages")
+        && !std::path::Path::new(path).starts_with("pages")
 }
 
 /// An arg that names a path (it has a `/`, or is `.`/`..`; a flag's

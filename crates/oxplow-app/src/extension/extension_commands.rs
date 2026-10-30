@@ -24,6 +24,7 @@
 
 use std::collections::BTreeMap;
 
+use oxplow_domain::extension_path::is_extension_relative;
 use oxplow_domain::{Access, CommandCall, CommandSpec, Confirm, InputValidator};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -384,15 +385,6 @@ fn valid_command_name(name: &str) -> bool {
     parts.len() == 2 && parts.iter().all(|p| valid_segment(p))
 }
 
-/// A path inside the extension folder.
-fn inside(rel: &str) -> bool {
-    let p = std::path::Path::new(rel);
-    !rel.is_empty()
-        && p.is_relative()
-        && p.components()
-            .all(|c| matches!(c, std::path::Component::Normal(_)))
-}
-
 /// Parse an extension's `commands:` block: the valid commands, and an
 /// error (`file:line: …`) for each broken one. `manifest` is the
 /// manifest's text (for lines); `read` reads a file in the extension.
@@ -592,7 +584,7 @@ fn command_of(
             InputValidator::compile(&input_schema)
                 .map_err(|e| at_name(format!("`input_schema` doesn't compile: {e}")))?;
             let access = script_access(&f.access, &f.confirm, &f.needs).map_err(at_name)?;
-            if !inside(&entry) {
+            if !is_extension_relative(&entry) {
                 return Err(at_name(format!(
                     "entry `{entry}` must be a path inside the extension folder"
                 )));
