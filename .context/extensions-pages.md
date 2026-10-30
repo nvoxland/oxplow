@@ -433,6 +433,15 @@ whose loader does not return one (`viz_column_problems`). An agent reads
   hint on hover, the uri a link; an agent reads `text (hint) · text`). It
   changes only what a person sees; an agent reads the raw value (but for `items`).
 - A timestamp cell shows in local time, its full time on hover.
+- A `table` sizes its columns and stripes its rows with no page settings.
+  The renderer picks each column's wrap from its `format` and the texts
+  it shows (`columnWrap` in `vizModel.ts`): `ox-nowrap` for a date,
+  number, `unit` or short (<= 20 chars, no space) values; `ox-words`
+  (break only between words) when the longest word is <= 24 chars;
+  `ox-breakable` (break anywhere) for long tokens such as URIs and paths,
+  the column that gives way. Every other row of a table or group is
+  `ox-stripe` (`--surface-row-stripe`); hover, selected, cursor and
+  emphasis backgrounds win over it.
 
 **Row styling** (`row_style_problem`), each naming a result column:
 `group: { by, link?, values? }` (`list` / `table` / `board`) puts rows

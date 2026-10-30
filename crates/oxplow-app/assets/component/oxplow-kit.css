@@ -115,15 +115,19 @@
 .ox-table.ox-fixed { table-layout: fixed; }
 .ox-table th,
 .ox-table td { padding: var(--space-2); text-align: left; vertical-align: top; border-bottom: 1px solid var(--border-subtle); }
-/* A long word (a dotted id, a URI) breaks rather than widening the table
-   past its column: the table stays as wide as the reading column. */
-.ox-table td { overflow-wrap: anywhere; }
-/* The first column names the row: `anywhere` lets the layout narrow a
-   column to one letter, so a name would wrap mid-word. Its words keep
-   whole, and the column is at least its longest word wide. */
-.ox-table td:first-child { overflow-wrap: break-word; }
+/* How a column wraps is the renderer's call (`columnWrap`), by its format
+   and values: `ox-nowrap` (dates, numbers, short values) stays on one
+   line; `ox-words` breaks between words, so the column is at least its
+   longest word wide; `ox-breakable` holds long unbroken tokens (URIs,
+   paths) and breaks anywhere, so it is the column that gives way. */
+.ox-table td.ox-nowrap { white-space: nowrap; }
+.ox-table td.ox-words { overflow-wrap: break-word; }
+.ox-table td.ox-breakable { overflow-wrap: anywhere; }
 .ox-table th { padding-block: var(--space-2); background: var(--surface-elevated); border-bottom-color: var(--border-strong); color: var(--text-primary); font-size: var(--text-xs); font-weight: var(--weight-medium); }
 .ox-table .ox-group { padding: 0; }
+/* Every other row is quietly raised; hover, selection, the cursor and
+   emphasis below come later and win. */
+.ox-table tr.ox-stripe { background: var(--surface-row-stripe); }
 .ox-table tr.ox-clickable { cursor: pointer; }
 .ox-table tr.ox-clickable:hover,
 .ox-table tr.ox-selected { background: var(--accent-soft-bg); }

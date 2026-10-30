@@ -323,3 +323,26 @@ test("a Section with `opens` draws an arrow after its plain heading text, named 
   expect(plain.queryByRole("button", { name: /Open/ })).toBeNull();
   expect(queryByRole("button", { name: "Open Alpha" })).toBeNull();
 });
+
+// A cell carries its column's wrap class; every other row of a group is striped.
+test("DataTable classes each cell by its column's wrap and stripes alternate rows", () => {
+  const { container } = render(
+    <DataTable
+      columns={[
+        { key: "a", label: "A", wrap: "nowrap", render: (r: { id: string }) => r.id },
+        { key: "b", label: "B", render: (r: { id: string }) => r.id },
+      ]}
+      groups={[{ key: "g", heading: "G", rows: [{ id: "1" }, { id: "2" }, { id: "3" }] }]}
+      rowKey={(r) => r.id}
+      rowProps={(r) => ({ className: r.id === "2" ? "ox-selected" : undefined })}
+    />,
+  );
+  const rows = [...container.querySelectorAll("tbody tr")];
+  expect(rows[0]!.className).toBe("");
+  expect(rows[1]!.className).toBe("");
+  expect(rows[2]!.className).toBe("ox-stripe ox-selected");
+  expect(rows[3]!.className).toBe("");
+  const cells = rows[1]!.querySelectorAll("td");
+  expect(cells[0]!.className).toContain("ox-nowrap");
+  expect(cells[1]!.className).toContain("ox-words");
+});

@@ -372,6 +372,27 @@ export function itemList(v: SqlCell | undefined): Item[] | null {
   }
 }
 
+/** How a table column's cells wrap. `nowrap`: a date, a number, a value
+ *  with a unit, or short values with no spaces stay on one line.
+ *  `words`: breaks only between words, so the column is at least its
+ *  longest word wide. `breakable`: holds long unbroken tokens (a URI, a
+ *  path) that break anywhere, so it is the column that gives way. */
+export type ColumnWrap = "nowrap" | "words" | "breakable";
+
+const NOWRAP_FORMATS: ReadonlySet<ColumnFormat> = new Set(["date", "datetime", "relative", "bytes", "duration", "integer", "percent", "badge"]);
+const SHORT_VALUE = 20;
+const LONGEST_WORD = 24;
+
+/** The wrap of a column from its `format`, whether it has a `unit`, and the
+ *  texts its cells show. */
+export function columnWrap(format: ColumnFormat | null, hasUnit: boolean, values: readonly string[]): ColumnWrap {
+  if ((format !== null && NOWRAP_FORMATS.has(format)) || hasUnit) return "nowrap";
+  const shown = values.filter((v) => v !== "");
+  if (shown.length > 0 && shown.every((v) => v.length <= SHORT_VALUE && !/\s/.test(v))) return "nowrap";
+  const longest = Math.max(0, ...shown.flatMap((v) => v.split(/\s+/).map((w) => w.length)));
+  return longest > LONGEST_WORD ? "breakable" : "words";
+}
+
 /** `v` read by `format`; null when it isn't the kind of value the format
  *  reads (the cell then shows as it would without one). */
 function byFormat(v: string | number, format: ColumnFormat): string | null {

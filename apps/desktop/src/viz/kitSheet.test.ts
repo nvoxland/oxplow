@@ -20,13 +20,27 @@ test("every var(--x) in the kit's sheet is a theme token, and it names no color"
   expect(sheet).not.toMatch(/#[0-9a-fA-F]{3,8}\b|\brgba?\(|\bhsla?\(/);
 });
 
-// A table's first column is the row's name: its words never break inside
-// (a word a letter wide made "Alerts" read "Aler/ts"); the other columns'
-// long words (a URI, a dotted id) still break anywhere.
-test("a table's first column breaks only between words", () => {
+// A column's wrap class (`columnWrap`) decides its cells: dates and short
+// values stay on a line, words break between words only, and only a column
+// of long tokens breaks anywhere.
+test("a table column wraps by its class", () => {
   const sheet = readFileSync(SHEET, "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
-  expect(sheet).toMatch(/\.ox-table td:first-child\s*\{[^}]*overflow-wrap:\s*break-word/);
-  expect(sheet).toMatch(/\.ox-table td\s*\{[^}]*overflow-wrap:\s*anywhere/);
+  expect(sheet).toMatch(/\.ox-table td\.ox-nowrap\s*\{[^}]*white-space:\s*nowrap/);
+  expect(sheet).toMatch(/\.ox-table td\.ox-words\s*\{[^}]*overflow-wrap:\s*break-word/);
+  expect(sheet).toMatch(/\.ox-table td\.ox-breakable\s*\{[^}]*overflow-wrap:\s*anywhere/);
+  expect(sheet).not.toMatch(/\.ox-table td\s*\{[^}]*overflow-wrap/);
+  expect(sheet).not.toMatch(/td:first-child/);
+});
+
+// Rows are striped by default; hover, selection, the cursor and emphasis
+// are declared after the stripe, so they win.
+test("striped rows give way to hover, selection, cursor and emphasis", () => {
+  const sheet = readFileSync(SHEET, "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  expect(sheet).toMatch(/\.ox-table tr\.ox-stripe\s*\{[^}]*background:\s*var\(--surface-row-stripe\)/);
+  const stripe = sheet.indexOf(".ox-table tr.ox-stripe");
+  for (const later of [".ox-table tr.ox-clickable:hover", ".ox-table:focus-within tr[data-cursor", ".ox-table tr.ox-emphasis"]) {
+    expect(sheet.indexOf(later)).toBeGreaterThan(stripe);
+  }
 });
 
 // Sections stack apart, but the first one starts at the top of its page:

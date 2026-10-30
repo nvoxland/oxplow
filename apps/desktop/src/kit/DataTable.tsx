@@ -12,6 +12,9 @@ export interface DataColumn<R> {
    *  `width` (`false` lets it wrap); a cut cell shows its whole text on
    *  hover. */
   truncate?: boolean;
+  /** How its cells wrap (`columnWrap`): on one line, between words
+   *  (default), or anywhere. */
+  wrap?: "nowrap" | "words" | "breakable";
   render(row: R): ReactNode;
   /** The cell's hover text; else a cut cell's own text. */
   title?(row: R): string | undefined;
@@ -66,6 +69,7 @@ export function DataTable<R>({ columns, rows, groups, rowKey, rowProps, rowDetai
   const parts: readonly { key: string; heading: ReactNode | null; rows: readonly R[] }[] =
     groups ?? [{ key: "", heading: null, rows: rows ?? [] }];
   let index = 0;
+  const wrapClass = (c: DataColumn<R>) => `ox-${c.wrap ?? "words"}`;
   return (
     <table className={fixed ? "ox-table ox-fixed" : "ox-table"} data-testid={testId} {...tableProps}>
       {fixed ? (
@@ -96,19 +100,22 @@ export function DataTable<R>({ columns, rows, groups, rowKey, rowProps, rowDetai
                 </td>
               </tr>
             ) : null}
-            {part.rows.map((row) => {
+            {part.rows.map((row, n) => {
               const i = index++;
+              const props = rowProps?.(row, i);
+              // Every other row of a group (or of the table) is striped.
+              const stripe = n % 2 === 1 ? "ox-stripe" : "";
               const detail = rowDetail?.(row, i);
               return (
                 <Fragment key={rowKey(row, i)}>
-                <tr {...rowProps?.(row, i)}>
+                <tr {...props} className={[stripe, props?.className].filter(Boolean).join(" ") || undefined}>
                   {columns.map((c, j) => {
                     const cut = cuts(c);
                     const title = c.title?.(row);
                     return (
                       <td
                         key={c.key}
-                        className={[c.numeric ? "ox-num" : "", cut ? "ox-truncate" : ""].filter(Boolean).join(" ") || undefined}
+                        className={[wrapClass(c), c.numeric ? "ox-num" : "", cut ? "ox-truncate" : ""].filter(Boolean).join(" ") || undefined}
                         title={title}
                         onMouseEnter={cut && title === undefined ? showWhole : undefined}
                         style={cellStyle?.(row, c, j)}
@@ -120,7 +127,9 @@ export function DataTable<R>({ columns, rows, groups, rowKey, rowProps, rowDetai
                 </tr>
                 {detail ? (
                   <tr>
-                    <td colSpan={Math.max(columns.length, 1)}>{detail}</td>
+                    <td className="ox-breakable" colSpan={Math.max(columns.length, 1)}>
+                      {detail}
+                    </td>
                   </tr>
                 ) : null}
                 </Fragment>

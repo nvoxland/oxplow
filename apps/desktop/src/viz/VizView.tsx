@@ -37,6 +37,7 @@ import {
   type LinkTarget,
   displayColumns,
   formatCell,
+  columnWrap,
   hunkRows,
   sectionRows,
   itemList,
@@ -1922,6 +1923,11 @@ function TableViz({ rows, cols, cell, rowMenu, view }: RowsVizProps) {
     key: c.key,
     label: c.label,
     width: c.width ?? undefined,
+    wrap: columnWrap(
+      c.format,
+      c.unitIndex !== null,
+      rows.map((row) => formatCell(row[c.index] ?? null, c.unitIndex === null ? undefined : (row[c.unitIndex] ?? null), c.format)),
+    ),
     render: ([row]) => cell(row, c),
   }));
   const parts = sections(rows, view);

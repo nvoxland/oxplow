@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Extension, VizConfig, VizRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
-import { rowMention, markParts, treeNodes, lazyTreeNodes, lazyTreeProblem, drawnTreeRows, wantedBranches, timelineEntries, stepItems, sectionRows, sectionParts, itemList, hunkRows, codeRows, diffRow, editorRow, embedRow, parseLines, mergeDirectory, barRows, lineSeries, sparklineValues, numericRowId, treemapItems, cellLinkRef, changedParams, foldEmpty, foldedAway, displayColumns, formatCell, parseParamInput, limitRows, slugify, rowAssistantContext, effortRowId, isTimestamp, rowGroups, rowEmphasized, rowDepth, rowContextRef } from "./vizModel.js";
+import { rowMention, markParts, treeNodes, lazyTreeNodes, lazyTreeProblem, drawnTreeRows, wantedBranches, timelineEntries, stepItems, sectionRows, sectionParts, itemList, hunkRows, codeRows, diffRow, editorRow, embedRow, parseLines, mergeDirectory, barRows, lineSeries, sparklineValues, numericRowId, treemapItems, cellLinkRef, changedParams, foldEmpty, foldedAway, displayColumns, formatCell, parseParamInput, limitRows, slugify, rowAssistantContext, effortRowId, isTimestamp, rowGroups, rowEmphasized, rowDepth, rowContextRef, columnWrap } from "./vizModel.js";
 import { formatMetricValue, formatShortDateTime } from "../components/format.js";
 import { diffSpecOf, duplicateBlockOf, isPage, lineOf, pagePayload } from "../tabs/pageRefs.js";
 import type { TabRef } from "../tabs/tabState.js";
@@ -732,5 +732,30 @@ describe("itemList", () => {
     expect(itemList('{"text":"a"}')).toBeNull();
     expect(itemList(null)).toBeNull();
     expect(itemList(3)).toBeNull();
+  });
+});
+
+// How a table column's cells wrap, decided from its format and its values.
+describe("columnWrap", () => {
+  test("dates, numbers and unit columns never wrap", () => {
+    expect(columnWrap("datetime", false, ["Oct 17 at 11:00 PM"])).toBe("nowrap");
+    expect(columnWrap("relative", false, ["3 minutes ago, roughly"])).toBe("nowrap");
+    expect(columnWrap("integer", false, ["12"])).toBe("nowrap");
+    expect(columnWrap("bytes", false, ["1.2 MB"])).toBe("nowrap");
+    expect(columnWrap(null, true, ["5 counts of a very long unit name"])).toBe("nowrap");
+  });
+  test("short values without spaces never wrap", () => {
+    expect(columnWrap(null, false, ["resource", "date_range", "1 count".replace(" ", "_")])).toBe("nowrap");
+  });
+  test("words break only between words", () => {
+    expect(columnWrap(null, false, ["a long session title", "short"])).toBe("words");
+    expect(columnWrap(null, false, ["1 count", "2 counts"])).toBe("words");
+  });
+  test("a long unbroken token breaks anywhere", () => {
+    expect(columnWrap(null, false, ["oxplow:file:/a/very/long/path/to/some/file.rs", "x"])).toBe("breakable");
+    expect(columnWrap(null, false, ["two words", "x".repeat(25)])).toBe("breakable");
+  });
+  test("an empty column is words", () => {
+    expect(columnWrap(null, false, [])).toBe("words");
   });
 });
