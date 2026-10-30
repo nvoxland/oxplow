@@ -251,10 +251,11 @@ export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, re
       rightRail={
         run && hasRail ? (
           <>
+            {/* Filters (and the page's own rail) first: the controls, then where to go. */}
+            <PageRail run={run} runId={runId} onApply={apply} picked={picked} streamId={streamId} onOpenPage={onOpenPage} />
             {contentsHas(run, fills) ? <Contents root={body} /> : null}
             {fills ? null : <RailSeeAlso run={run} onOpenPage={onOpenPage} />}
             {saveAs && viewFile ? <SaveTempViewForm key={saveAs} kind={saveAs} file={viewFile} streamId={streamId} initialTitle={title} onClose={() => setSaveAs(null)} onSaved={open} /> : null}
-            <PageRail run={run} runId={runId} onApply={apply} picked={picked} streamId={streamId} onOpenPage={onOpenPage} />
           </>
         ) : undefined
       }

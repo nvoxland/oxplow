@@ -57,7 +57,7 @@ links. Concretely:
 - **Related pages go in "See also", not in a section.** A page's `see_also:`
   names the pages that are about the same thing or the list it belongs to (a
   commit → Git History, a collector → Collectors, a contribution → its
-  extension). It is the rail's "See also" group after Contents and, on
+  extension). It is the rail's "See also" group after Contents (the rail runs Filters, Contents, See also) and, on
   every page, a "See also ▸" submenu of the ☰ beside About this page; a page
   that fills (a file, a diff, a terminal) has no rail for it, only the ☰. A
   section is the page's own content. A link that belongs to a fact stays a link in

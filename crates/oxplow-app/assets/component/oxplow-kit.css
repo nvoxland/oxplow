@@ -340,11 +340,12 @@
 .ox-markdown-editor-actions { display: flex; gap: var(--space-2); justify-content: flex-end; }
 
 /* A page's Contents (its markdown headings) in the rail; the one on
-   screen marked. */
+   screen marked. An item's text starts at its group heading's left edge
+   (like every rail body); the active bar hangs in the gutter before it. */
 .ox-contents { display: flex; flex-direction: column; gap: 2px; }
 .ox-contents-item {
   background: transparent; border: 0; border-left: 2px solid transparent;
-  padding: 3px 0 3px 8px; margin-left: -2px; text-align: left; cursor: pointer;
+  padding: 3px 0 3px 8px; margin-left: -10px; text-align: left; cursor: pointer;
   color: var(--text-secondary); font: inherit; font-size: var(--text-xs); line-height: 1.4;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }

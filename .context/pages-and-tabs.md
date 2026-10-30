@@ -606,7 +606,8 @@ run takes new params itself (`setParams`). `PageHost` takes a `PageKey`,
 holds its run (`usePageRunWith` over `usePageRunsStore()`: the
 `PageRunsContext`'s store, else the window's; `RunState` carries the
 `runId`, `rerun` is Refresh) and draws the `tabs/Page.tsx` chrome:
-Contents, See also (the page's `see_also:` links, `RailSeeAlso`) and Selection (the rows picked, `picked` history state) in the
+the rail's groups, top to bottom: `PageRail` first (Filters, the `rail:` tree, Selection), then Contents and See also (the page's `see_also:` links, `RailSeeAlso`); every group's body starts at its heading's left edge (the Contents active bar hangs in the gutter)
+in the
 rail (`pages/railGroups.tsx`), which `railHas` (`pages/railHas.ts`) decides
 from the run: with nothing in it (no switch, `filter` or `selection` param,
 `rail:` node, `see_also` link (a page that fills doesn't count them) or open save form, and no Contents) `rightRail` is undefined,

@@ -245,6 +245,15 @@ test("a filter changed in the rail re-runs the page with it; the old rows stay u
   expect(view.getByTestId("page-file").hasAttribute("data-stale")).toBe(false);
 });
 
+test("the rail shows Filters first, above See also", async () => {
+  const base = tablePage({ params: [{ name: "q", label: "Query", role: "filter", type: "text", default: null }] });
+  const { runs } = fakePageRuns({ ...base, seeAlso: [{ title: "Other", uri: "oxplow:oxplow/page?page=acme/other", description: null }] });
+  const view = render(<PageHost pageKey={key} runs={runs} />);
+  const filters = await view.findByTestId("page-rail-filters");
+  const seeAlso = view.getByTestId("page-rail-see-also");
+  expect(filters.compareDocumentPosition(seeAlso) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+});
+
 test("Loading shows only after 150 ms without a run; an open that fails says why", async () => {
   const runs = createPageRuns({
     open: () => new Promise(() => {}),
