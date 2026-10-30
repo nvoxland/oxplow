@@ -43,6 +43,8 @@ links. Concretely:
   several short things (an extension's permissions) is a column with
   `format: items`: drawn inline separated by " · ", each item's `hint` its
   hover text, its `uri` a link. Not a comma-joined string, not a table.
+- **What a thing is, is a paragraph above its facts,** not a "What it is" row: a
+  heading-less `viz: markdown` section bound to its description, then the facts.
 - **Say it in words.** "may run its own SQL over your data", not
   `sql` or `1`; "ships with oxplow", not `bundled`.
 - **Link everything that has a page,** and give a thing that is named

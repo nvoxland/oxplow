@@ -1,0 +1,9 @@
+# What a thing is, is a paragraph of text above its facts (a heading-less
+# markdown section bound to its description), not a "What it is" row.
+when:
+  page: oxplow-foundation/slot
+  params:
+    uri: "oxplow:oxplow/slot?slot=oxplow-foundation/oxplow-foundation.tasks.sections-0"
+expect:
+  nodes:
+    - { id: description, kind: viz, viz: markdown }
