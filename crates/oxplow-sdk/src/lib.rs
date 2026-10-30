@@ -13,6 +13,8 @@ pub mod answerability;
 pub mod cli;
 mod component_harness;
 pub mod conformance;
+pub mod contribution;
+pub use contribution::{add_contribution, contribution, Contribution};
 pub mod examples;
 pub mod extension_test;
 mod rename;
@@ -344,19 +346,21 @@ pub fn scaffold_with(
         example_input: &example_input,
         example_expect,
     });
-    // Every service the table offers, with the builtin that reaches it.
-    let services = oxplow_domain::service::SERVICES
-        .iter()
-        .map(|service| {
-            let via = match service.builtins.first() {
-                Some(builtin) if service.builtins.len() > 1 => format!(" ({builtin}() and more)"),
-                Some(builtin) => format!(" ({builtin}())"),
-                None => String::new(),
-            };
-            format!("{}{via}", service.scope)
-        })
-        .collect::<Vec<_>>()
-        .join(", ");
+    // The kinds `extension add` also takes are built from one contribution.
+    let starter = match kind {
+        Kind::Collector => Some(contribution::build(kind, name, "items", None)?),
+        Kind::Command => Some(contribution::build(
+            kind,
+            name,
+            "notes.add",
+            Some(("handlers/note.star", "Add Note")),
+        )?),
+        Kind::Effect => Some(contribution::build(kind, name, "on-done", None)?),
+        Kind::Page | Kind::Component | Kind::Advisory | Kind::Skill => {
+            Some(contribution::build(kind, name, name, None)?)
+        }
+        _ => None,
+    };
     match kind {
         Kind::Provider { capability } => {
             let starter = provider_starter(capability);
@@ -365,7 +369,10 @@ pub fn scaffold_with(
                  # oxplow doesn't confine it. Deploying it asks you first.\n\
                  permissions: [process.run",
             );
-            if starter.needs.is_some_and(|needs| needs.contains("sql.read")) {
+            if starter
+                .needs
+                .is_some_and(|needs| needs.contains("sql.read"))
+            {
                 manifest.push_str(", sql.read");
             }
             if capability == "effort_policy" {
@@ -380,71 +387,28 @@ pub fn scaffold_with(
                 manifest.push_str(needs);
             }
         }
-        Kind::Collector => manifest.push_str(&format!(
-            "collectors:\n\
-             \x20 # Runs its script over its `input` rows when synced (`on: manual`;\n\
-             \x20 # `{{ every: 15m }}` or `{{ on: [snapshot.taken] }}` run it by themselves).\n\
-             \x20 - id: items\n\
-             \x20   runtime: starlark\n\
-             \x20   entry: collectors/items.star\n\
-             \x20   # Services its script may use: {services}.\n\
-             \x20   needs: []\n\
-             \x20   input: \"SELECT uri, title, state FROM v_work_item\"\n\
-             \x20   entities:\n\
-             \x20     - {{ name: item, key: uri, columns: {{ uri: text, title: text }} }}\n\
-             datasets:\n\
-             \x20 # v_{ns}_open_items: SQL over the entity (`ref('item')`), checked at load.\n\
-             \x20 - name: open_items\n\
-             \x20   version: 1\n\
-             \x20   description: \"TODO: what these rows are.\"\n\
-             \x20   fields:\n\
-             \x20     - {{ name: uri, type: TEXT, doc: \"The work item (oxplow:oxplow/work_item?id=<id>&provider=<provider>).\" }}\n\
-             \x20     - {{ name: title, type: TEXT, doc: \"Its title.\" }}\n"
-        )),
-        Kind::Command => manifest.push_str(&format!(
-            "# Its script runs core commands as the caller.\n\
-             permissions: [commands:oxplow.work_item.comment]\n\
-             commands:\n\
-             \x20 # Registered as {ns}.notes.add (<namespace>.<area>.<verb>); its script composes core commands, run as the\n\
-             \x20 # caller: in one transaction when every one can, else as steps (a work list's verbs run outside it).\n\
-             \x20 - name: notes.add\n\
-             \x20   summary: \"TODO: what it does. Here: comment on a work item.\"\n\
-             \x20   input_schema:\n\
-             \x20     type: object\n\
-             \x20     required: [uri]\n\
-             \x20     properties:\n\
-             \x20       uri: {{ type: string, description: \"The work item (oxplow:oxplow/work_item?id=<id>&provider=<provider>).\" }}\n\
-             \x20     additionalProperties: false\n\
-             \x20   entry: handlers/note.star\n\
-             \x20   # Who may run it: a person, an agent, a page (each child command checks its own too).\n\
-             \x20   \
-             \x20   # On a work item's page (Commands) and a row's right-click.\n\
-             \x20   ui: {{ label: Add Note, about: oxplow/work_item, input: {{ uri: \"{{{{uri}}}}\" }} }}\n\
-             \x20   examples:\n\
-             \x20     - {{ name: happy, input: {{ uri: \"{work_item}\" }}, expect_commands: [oxplow.work_item.comment] }}\n"
-        )),
-        Kind::Effect => manifest.push_str(
-            "# Its script runs core commands as the caller.\n\
-             permissions: [commands:oxplow.work_item.comment]\n\
-             effects:\n\
-             \x20 # Reacts to a logged event by composing commands, run with an agent's\n\
-             \x20 # rights under this extension's permissions, and only on events logged\n\
-             \x20 # after it started; a command that asks becomes a proposal.\n\
-             \x20 - id: on-done\n\
-             \x20   summary: \"TODO: what it does. Here: comment on a work item when it's done.\"\n\
-             \x20   on: [work_item.state_changed]\n\
-             \x20   where: { to: done }\n\
-             \x20   entry: effects/on-done.star\n",
-        ),
-        Kind::Component => manifest.push_str(&format!(
-            "custom_components:\n\
-             \x20 # A web bundle (components/{name}/) a page's `component` node draws in a\n\
-             \x20 # sandboxed frame: scripts only, no network, no storage. It is fed the\n\
-             \x20 # page's loaders and may run the commands in `commands` — as the\n\
-             \x20 # person looking at it — and nothing else.\n\
-             \x20 - id: {name}\n\
-             \x20   commands: []\n"
-        )),
+        Kind::Collector
+        | Kind::Command
+        | Kind::Effect
+        | Kind::Component
+        | Kind::Advisory
+        | Kind::Skill => {
+            // The permissions line (and what says why) opens the kinds whose
+            // scripts or text need one; then the kind's own lists.
+            manifest.push_str(match kind {
+                Kind::Command | Kind::Effect => {
+                    "# Its script runs core commands as the caller.\npermissions: [commands:oxplow.work_item.comment]\n"
+                }
+                Kind::Advisory => {
+                    "# What an advisory says reaches the agent.\npermissions: [agent.write]\n"
+                }
+                Kind::Skill => "# A skill is text the agent reads.\npermissions: [agent.write]\n",
+                _ => "",
+            });
+            for (block, entry) in starter.iter().flat_map(|s| &s.entries) {
+                manifest.push_str(&format!("{block}:\n{entry}"));
+            }
+        }
         Kind::Policy => manifest.push_str(&format!(
             "# Its script reads oxplow with its own SQL (`needs: [sql.read]`) and\n\
              # runs the core commands that open and close efforts.\n\
@@ -460,37 +424,6 @@ pub fn scaffold_with(
              \x20   entry: policies/{name}.star\n\
              \x20   needs: [sql.read]\n",
             title = title_case(name)
-        )),
-        Kind::Advisory => manifest.push_str(&format!(
-            "# What an advisory says reaches the agent.\n\
-             permissions: [agent.write]\n\
-             advisories:\n\
-             \x20 # A {advisory}: a query run at a moment (`on`: post-tool-use, prompt or\n\
-             \x20 # turn-end) whose rows reach the agent (`audience: person` raises them in\n\
-             \x20 # Alerts instead). Each row's `message` is what it hears; `once_per` says how\n\
-             \x20 # often. Params: :thread_id, :stream_id, :turn_id, :effort_id. A shared\n\
-             \x20 # extension's advisories run once a person approves them.\n\
-             \x20 - id: {name}\n\
-             \x20   on: turn-end\n\
-             \x20   once_per: effort\n\
-             \x20   query: |\n\
-             \x20     SELECT printf('TODO: what the agent should hear. Here: this effort has changed %d files.',\n\
-             \x20                    count(DISTINCT f.path)) AS message\n\
-             \x20     FROM v_effort e JOIN v_effort_file f ON f.effort_id = e.id\n\
-             \x20     WHERE e.id = :effort_id AND e.ended_at IS NULL\n\
-             \x20     HAVING count(DISTINCT f.path) >= 15\n",
-            advisory = ContributionKind::Advisory.spec().title.to_lowercase()
-        )),
-        Kind::Skill => manifest.push_str(&format!(
-            "# A skill is text the agent reads.\n\
-             permissions: [agent.write]\n\
-             skills:\n\
-             \x20 # A {skill} the coding agent loads when it's relevant; `kind: command`\n\
-             \x20 # makes it a slash command a person runs. `needs: [work_items]` offers it only\n\
-             \x20 # while that capability is active.\n\
-             \x20 - name: {name}\n\
-             \x20   file: skills/{name}/SKILL.md\n",
-            skill = ContributionKind::Skill.spec().title.to_lowercase()
         )),
         Kind::Panel => manifest.push_str(&format!(
             "panels:\n\
@@ -579,6 +512,11 @@ pub fn scaffold_with(
             ),
         )?;
     }
+    if let Some(starter) = &starter {
+        for (rel, body) in &starter.files {
+            write(&format!("{rel_dir}/{rel}"), body.clone())?;
+        }
+    }
     match kind {
         Kind::Provider { capability } => {
             write(
@@ -610,56 +548,7 @@ pub fn scaffold_with(
                 )?;
             }
         }
-        Kind::Page => write(
-            &format!("{rel_dir}/pages/{name}.yaml"),
-            format!(
-                "title: {title}\n\
-                 description: \"TODO: what this page answers.\"\n\
-                 category: Work\n\
-                 params:\n\
-                 \x20 # Filled in with the viewer's stream unless a value is given.\n\
-                 \x20 - {{ name: stream_id, label: Stream }}\n\
-                 answers:\n\
-                 \x20 # Questions this page answers, in a person's words: how an agent finds it.\n\
-                 \x20 - {{ question: \"TODO: what is open in this stream?\", params: {{ stream_id: 1 }} }}\n\
-                 loaders:\n\
-                 \x20 items:\n\
-                 \x20   sql: |\n\
-                 \x20     SELECT w.uri, w.title, w.state, w.updated_at\n\
-                 \x20     FROM v_work_item w JOIN v_thread t ON t.id = w.thread_id\n\
-                 \x20     WHERE t.stream_id = :stream_id AND w.state IN ('todo', 'in_progress', 'blocked')\n\
-                 \x20     ORDER BY w.updated_at DESC\n\
-                 view:\n\
-                 \x20 viz: table\n\
-                 \x20 from: items\n\
-                 \x20 columns:\n\
-                 \x20   - {{ key: title, label: Item, link: {{ kind: page, from: uri }} }}\n\
-                 \x20   - {{ key: state }}\n\
-                 \x20 actions:\n\
-                 \x20   # In each row's right-click menu: a command run as the person, the\n\
-                 \x20   # row's values bound in (`{{{{row.<column>}}}}`).\n\
-                 \x20   - {{ id: start, label: Start, command: oxplow.work_item.transition, input: {{ uri: \"{{{{row.uri}}}}\", to: in_progress }}, row: true }}\n\
-                 \x20 empty: No open work items in this stream.\n",
-                title = title_case(name)
-            ),
-        )?,
         Kind::Collector => {
-            write(
-                &format!("{rel_dir}/collectors/items.star"),
-                "# Gets {\"rows\": [...]} (its `input` query's) and returns the entities it\n\
-                 # declares. Sandboxed: no files, network or clock.\n\
-                 def transform(x):\n\
-                 \x20   return {\"entities\": {\"item\": [\n\
-                 \x20       {\"uri\": r[\"uri\"], \"title\": r[\"title\"]}\n\
-                 \x20       for r in x[\"rows\"]\n\
-                 \x20       if r[\"state\"] != \"done\"\n\
-                 \x20   ]}}\n"
-                    .to_string(),
-            )?;
-            write(
-                &format!("{rel_dir}/datasets/open_items.sql"),
-                "SELECT uri, title FROM ref('item')\n".to_string(),
-            )?;
             write(
                 &format!("{rel_dir}/pages/{name}.yaml"),
                 format!(
@@ -806,87 +695,6 @@ pub fn scaffold_with(
                 ),
             )?;
         }
-        Kind::Command => write(
-            &format!("{rel_dir}/handlers/note.star"),
-            "# Gets {\"input\": {...}, \"rows\": [...]} and returns the core commands to run\n\
-             # as the caller (in one transaction when every one can, else as steps) — or {\"refuse\": \"why\"}. No I/O.\n\
-             def transform(x):\n\
-             \x20   return {\"commands\": [\n\
-             \x20       {\"name\": \"oxplow.work_item.comment\", \"input\": {\"uri\": x[\"input\"][\"uri\"], \"body\": \"TODO: the note\"}},\n\
-             \x20   ]}\n"
-                .to_string(),
-        )?,
-        Kind::Effect => write(
-            &format!("{rel_dir}/effects/on-done.star"),
-            "# Gets {\"event\": {id, type, v, seq, at, source, subject, anchors, payload, cause}}\n\
-             # (the event envelope, at its type's newest version) and returns the\n\
-             # commands to run — or {\"skip\": \"why\"}. No I/O.\n\
-             def transform(x):\n\
-             \x20   uri = x[\"event\"][\"payload\"][\"work_item\"]\n\
-             \x20   return {\"commands\": [\n\
-             \x20       {\"name\": \"oxplow.work_item.comment\", \"input\": {\"uri\": uri, \"body\": \"TODO: the note\"}},\n\
-             \x20   ]}\n"
-                .to_string(),
-        )?,
-        Kind::Component => {
-            write(
-                &format!("{rel_dir}/pages/{name}.yaml"),
-                format!(
-                    "title: {title}\n\
-                     description: \"TODO: what this view answers.\"\n\
-                     category: Work\n\
-                     params:\n\
-                     \x20 # Filled in with the viewer's stream unless a value is given.\n\
-                     \x20 - {{ name: stream_id, label: Stream }}\n\
-                     answers:\n\
-                     \x20 - {{ question: \"TODO: how many open tasks are there?\", params: {{ stream_id: 1 }} }}\n\
-                     loaders:\n\
-                     \x20 # The rows the component is fed (`component.data.items`), and what an\n\
-                     \x20 # agent reads: agents always see the table, never the frame.\n\
-                     \x20 items:\n\
-                     \x20   sql: |\n\
-                     \x20     SELECT w.uri, w.title, w.state\n\
-                     \x20     FROM v_work_item w JOIN v_thread t ON t.id = w.thread_id\n\
-                     \x20     WHERE t.stream_id = :stream_id AND w.state IN ('todo', 'in_progress', 'blocked')\n\
-                     \x20     ORDER BY w.updated_at DESC\n\
-                     view:\n\
-                     \x20 component: {{ id: {name} }}\n",
-                    title = title_case(name)
-                ),
-            )?;
-            write(
-                &format!("{rel_dir}/components/{name}/index.html"),
-                "<!doctype html>\n\
-                 <meta charset=\"utf-8\">\n\
-                 <!-- oxplow's look: the kit's classes over the theme, set by applyTheme(). -->\n\
-                 <link rel=\"stylesheet\" href=\"/component-lib/oxplow-kit.css\">\n\
-                 <div id=\"out\" class=\"ox-muted\"></div>\n\
-                 <!-- oxplow's client library (it defines `oxplow`), then this bundle's own\n\
-                 \x20    script. Both are plain scripts: a sandboxed frame can't load modules. -->\n\
-                 <script src=\"/component-lib/oxplow-component.js\"></script>\n\
-                 <script src=\"app.js\"></script>\n"
-                    .to_string(),
-            )?;
-            write(
-                &format!("{rel_dir}/components/{name}/app.js"),
-                "// Runs in a sandboxed frame. `oxplow.connect()` resolves once oxplow has\n\
-                 // handed over the page's loaders:\n\
-                 //   component.data                    each loader's rows by name ({ items: { columns, rows } })\n\
-                 //   component.onUpdate(fn)            a loader changed: fn({ data, params, changed })\n\
-                 //   component.invoke(command, input)  a command listed in `commands`\n\
-                 //   component.navigate(ref)           open one of oxplow's pages\n\
-                 oxplow.connect().then((component) => {\n\
-                 \x20 component.applyTheme();\n\
-                 \x20 const out = document.getElementById(\"out\");\n\
-                 \x20 const render = (data) => {\n\
-                 \x20   out.textContent = data.items.rows.length + \" open tasks\";\n\
-                 \x20 };\n\
-                 \x20 render(component.data);\n\
-                 \x20 component.onUpdate(({ data }) => render(data));\n\
-                 });\n"
-                    .to_string(),
-            )?;
-        }
         Kind::Panel => write(
             &format!("{rel_dir}/pages/{name}.yaml"),
             format!(
@@ -912,14 +720,6 @@ pub fn scaffold_with(
                  \x20   - {{ key: title, label: Item, link: {{ kind: page, from: uri }} }}\n\
                  \x20   - {{ key: state }}\n\
                  \x20 empty: No open work items in this stream.\n",
-                title = title_case(name)
-            ),
-        )?,
-        Kind::Skill => write(
-            &format!("{rel_dir}/skills/{name}/SKILL.md"),
-            format!(
-                "---\nname: {name}\ndescription: \"TODO: when the agent should load this.\"\n---\n\n\
-                 # {title}\n\nTODO: what the agent should know or do.\n",
                 title = title_case(name)
             ),
         )?,
@@ -950,7 +750,9 @@ def transform(x):
 "#
             .to_string(),
         )?,
-        Kind::Extension | Kind::Advisory | Kind::Metric => {}
+        Kind::Extension | Kind::Metric => {}
+        // Their files are the starter's, written above.
+        Kind::Page | Kind::Command | Kind::Effect | Kind::Component | Kind::Advisory | Kind::Skill => {}
     }
     Ok(Scaffolded {
         name: name.to_string(),

@@ -1,4 +1,4 @@
-//! `oxplow extension new|check|test` (`.context/extensions-sdk.md`
+//! `oxplow extension new|add|check|test` (`.context/extensions-sdk.md`
 //! "The SDK"). A thin argv shell over `oxplow_sdk`: the same `check` the
 //! agent's `oxplow_validate_extension` runs, printed as `file:line: what — fix`
 //! lines so an agent editing an extension from a terminal gets the same
@@ -39,6 +39,11 @@ usage:
       With a <name> every reference to the example's own name (its datasets,
       pages, commands, the manifest's name) is rewritten to it; without one
       it keeps the example's name. --list-examples names them
+  oxplow extension add <page|collector|command|effect|component|advisory|skill> <id> [<extension>] [--root <dir>]
+      add one contribution to an extension that exists (the only one under
+      .oxplow/extensions/, or <extension>): the kind's starter files, and its
+      entry appended to the manifest's list, with the manifest's comments
+      kept. An id the list already has, or a file that exists, is refused
   oxplow extension check <name|path> [--impact] [--against <rev>] [--services] [--json] [--root <dir>]
       load the extension and report every problem with file:line, dry-running
       its datasets, commands, pages and advisories on a throwaway oxplow —
@@ -300,6 +305,31 @@ fn run_inner(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> Resul
             );
             Ok(0)
         }
+        "add" => {
+            let (Some(kind), Some(id)) = (pos.next(), pos.next()) else {
+                return Err(Failure::Usage(
+                    "add needs a kind and an id: `add <kind> <id> [<extension>]`".into(),
+                ));
+            };
+            let kind = Kind::parse(kind).ok_or_else(|| {
+                Failure::Usage(format!(
+                    "add needs a kind: {}",
+                    crate::contribution::ADDABLE
+                ))
+            })?;
+            let root = p.root.clone().unwrap_or_else(cwd);
+            let made = crate::add_contribution(&root, kind, id, pos.next().map(String::as_str))?;
+            let _ = writeln!(out, "added to {}", made.dir);
+            for f in &made.files {
+                let _ = writeln!(out, "  {f}");
+            }
+            let _ = writeln!(
+                out,
+                "next: fill in the TODOs, then `oxplow extension check {}`",
+                made.name
+            );
+            Ok(0)
+        }
         "check" => {
             let target = pos
                 .next()
@@ -444,6 +474,42 @@ mod tests {
         assert!(p.require_ui);
         assert_eq!(p.positional, ["test", "demo"]);
         assert!(!parse(&args[..2]).ok().unwrap().require_ui);
+    }
+
+    #[test]
+    fn parse_takes_add_with_a_kind_an_id_an_extension_and_a_root() {
+        let args: Vec<String> = ["add", "collector", "sales", "demo", "--root", "/p"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let p = parse(&args).ok().unwrap();
+        assert_eq!(p.positional, ["add", "collector", "sales", "demo"]);
+        assert_eq!(p.root.as_deref(), Some(Path::new("/p")));
+    }
+
+    /// `add <kind> <id>` puts one contribution into the only extension, or
+    /// the named one, and says what it wrote; a missing id is a usage error.
+    #[test]
+    fn add_writes_one_contribution_and_check_passes() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_str().unwrap();
+        crate::scaffold(dir.path(), Kind::Extension, "demo", None).unwrap();
+        let (code, out, err) = cli(&["add", "collector", "sales", "--root", root]);
+        assert_eq!(code, 0, "{out}{err}");
+        assert!(
+            out.contains("added to .oxplow/extensions/demo")
+                && out.contains("collectors/sales.star")
+                && out.contains("extension.yaml"),
+            "{out}"
+        );
+        let (code, out, err) = cli(&["check", "demo", "--root", root]);
+        assert_eq!(code, 0, "{out}{err}");
+        let (code, _, err) = cli(&["add", "collector", "--root", root]);
+        assert_eq!(code, 2);
+        assert!(err.contains("needs a kind and an id"), "{err}");
+        let (code, _, err) = cli(&["add", "collector", "sales", "demo", "--root", root]);
+        assert_eq!(code, 1);
+        assert!(err.contains("already"), "{err}");
     }
 
     fn cli(args: &[&str]) -> (i32, String, String) {

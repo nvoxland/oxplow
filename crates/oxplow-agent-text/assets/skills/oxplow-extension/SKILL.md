@@ -10,6 +10,7 @@ nodes that shows them (`view:`); it updates as the work changes. Pages live
 in **extensions**: plain-file folders at `.oxplow/extensions/<name>/` the
 user can keep and share. Scaffold with `$OXPLOW_BIN extension new <kind> <name>
 --origin <your effort ref>` or write a page with `oxplow.extension.write_page`.
+`extension add <kind> <id>` adds one part to an extension that exists.
 Nothing runs a source until `oxplow.extension.deploy { name }`.
 
 `$OXPLOW_BIN` is the oxplow command line (set in sessions oxplow starts;

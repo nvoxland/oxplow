@@ -14,6 +14,8 @@ use tracing::info;
 
 pub mod collectors;
 pub mod keys;
+pub mod list_edit;
+pub use list_edit::append_list_entry;
 pub mod metric_expr;
 
 pub mod recent;

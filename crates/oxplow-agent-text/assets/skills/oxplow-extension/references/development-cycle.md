@@ -11,7 +11,9 @@ edits change nothing on the person's screen until you deploy.
 1. Write the fixture for what you're about to build
    (`references/testing.md`) and run `$OXPLOW_BIN extension test <name>`:
    it fails, for the reason you expect.
-2. Edit the source. Write as many files as the step needs.
+2. Edit the source. Write as many files as the step needs; `$OXPLOW_BIN
+   extension add <kind> <id>` starts a new collector, command, page and so
+   on in an extension that exists.
 3. Check it after every edit: `oxplow_validate_extension` (the same report
    as `$OXPLOW_BIN extension check`), then run its fixtures with
    `$OXPLOW_BIN extension test <name>` in your terminal until they pass.

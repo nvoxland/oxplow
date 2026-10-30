@@ -12,7 +12,11 @@ an intent, one example and its fixture, and a working starter for the
 kind; then edit. `$OXPLOW_BIN extension new --list-examples` names the
 working examples oxplow ships, and `new --from <example> [<name>]` copies one (with a
 `<name>` it rewrites the example's own name everywhere to it). Each passes `check` and `extension test` as written, so a
-failure after your edit is yours:
+failure after your edit is yours. `$OXPLOW_BIN extension add <kind>
+<id> [<extension>]` adds one more of the `page`, `collector`, `command`,
+`effect`, `component`, `advisory` or `skill` starters below to an extension
+that exists (its files and its manifest entry, comments kept; an id or file
+that exists is refused):
 - `page` — a page over open tasks with a row action (Start);
 - `collector` — a Starlark collector of an entity, a dataset over it
   (`ref('item')`) and a page over the dataset;

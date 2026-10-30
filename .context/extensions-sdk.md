@@ -87,6 +87,26 @@ and one calling MCP read identical `file:line: what — fix` lines.
   `notes.md` is written by hand. `recorded_agent_runs_still_check_and_
   test_clean` replays every `produced/` against today's oxplow. Recorded
   once (it costs a real run): `collector` (2026-10-02, 64 turns, clean).
+- **`contribution(kind, extension, id)`** (`crates/oxplow-sdk/src/contribution.rs`)
+  is one contribution of a kind: the manifest entries it adds (per top-level
+  list: `collectors`, `datasets`, `commands`, …), the permissions its
+  scripts need and its files. `scaffold` builds `new <kind>` from a manifest
+  header plus one (the page, collector, command, effect, component, advisory
+  and skill starters; their output is what it always was), and
+  **`add_contribution(root, kind, id, extension)`** (`extension add <kind>
+  <id> [<extension>]`) puts one into an extension that exists: the only
+  extension under `.oxplow/extensions/`, else the one named. It refuses an
+  id the list already holds or a file that exists (writing nothing), writes
+  the files and appends each entry with
+  `oxplow_config::append_list_entry`, a text edit that keeps the manifest's
+  comments and formatting and re-parses to check that only that list grew by
+  that entry (a missing list is added at the end; an empty `[]` becomes a
+  block list; a non-empty flow list is refused: write it as a block list).
+  Permissions join the `permissions: […]` line, or are added as one. A kind
+  that is a whole extension (provider, metric, policy, panel, job) is
+  refused: use `new`. `add` takes ids that name a script (`sales` →
+  `collectors/sales.star`, dataset `open_sales`; a command `notes.add` →
+  `handlers/notes_add.star`); `tests/add.rs` adds each kind and checks.
 - **`check(root, name, catalog, layer: Option<&SqlGateway>)`** is
   `catalog.named` (manifest shape, lifecycle, cross-refs, page shape;
   a Starlark collector's script must parse and define `transform`, an
