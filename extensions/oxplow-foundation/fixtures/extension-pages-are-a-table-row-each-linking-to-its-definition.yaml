@@ -1,6 +1,5 @@
 # The Extension page lists its pages as a table: a row each, the page's
-# title linking to its running file's Definition, its description beside it,
-# and what it shows: the kinds of thing it draws, else its launcher category.
+# title linking to its running file's Definition, its description beside it.
 when:
   page: oxplow-foundation/extension
   params:
@@ -13,6 +12,5 @@ expect:
     pages:
       rows:
         contains:
-          - { title: Commit, id: oxplow-foundation/commit, definition: $any, shows: Commit }
-          - { title: Board, shows: Work }
+          - { title: Commit, id: oxplow-foundation/commit, link: $any }
   text: { contains: ["Commit"] }

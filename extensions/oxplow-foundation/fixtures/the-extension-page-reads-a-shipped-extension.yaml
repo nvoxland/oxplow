@@ -15,7 +15,7 @@ expect:
     pages:
       rows:
         contains:
-          - { title: Commit, definition: $any }
+          - { title: Commit, link: $any }
   nodes:
     - { id: about, kind: viz }
     - { id: pages, kind: viz }
