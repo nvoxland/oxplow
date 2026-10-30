@@ -3083,17 +3083,7 @@ fn run_json(run: &oxplow_app::pages::runner::PageRun) -> Value {
                 .result
                 .rows
                 .iter()
-                .map(|row| {
-                    Value::Object(
-                        loader
-                            .result
-                            .columns
-                            .iter()
-                            .zip(row)
-                            .map(|(column, cell)| (column.clone(), json!(cell)))
-                            .collect(),
-                    )
-                })
+                .map(|row| Value::Object(loader.result.json_row(row)))
                 .collect();
             (
                 name.clone(),
@@ -3989,15 +3979,7 @@ impl PageAt<'_> {
                 // Each row as its columns by name — or its cells, where the
                 // example lists that row as a list; a count where it gives one.
                 let named = |row: &Vec<oxplow_db::SqlCell>| -> Value {
-                    Value::Object(
-                        loader
-                            .result
-                            .columns
-                            .iter()
-                            .cloned()
-                            .zip(row.iter().map(|c| json!(c)))
-                            .collect(),
-                    )
+                    Value::Object(loader.result.json_row(row))
                 };
                 let listed = want.get("rows").and_then(Value::as_array);
                 let got_rows = match want.get("rows") {

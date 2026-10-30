@@ -311,27 +311,7 @@ async fn rows(
             Some(MAX_RELATED),
         )
         .await?;
-    Ok(out
-        .rows
-        .into_iter()
-        .map(|row| {
-            out.columns
-                .iter()
-                .cloned()
-                .zip(row.into_iter().map(cell))
-                .collect()
-        })
-        .collect())
-}
-
-fn cell(cell: SqlCell) -> Value {
-    match cell {
-        SqlCell::Null(()) => Value::Null,
-        SqlCell::Bool(b) => Value::Bool(b),
-        SqlCell::Int(i) => Value::from(i),
-        SqlCell::Real(r) => Value::from(r),
-        SqlCell::Text(t) => Value::String(t),
-    }
+    Ok(out.json_rows())
 }
 
 /// An event's stored body (`input`, `output` or `prompt`), the caller's

@@ -499,9 +499,11 @@ impl<'a> Calls<'a> {
                      results are not returned"
                 ));
             }
-            return Ok(Value::Array(rows_json(&result)));
+            return Ok(Value::Array(
+                result.json_rows().into_iter().map(Value::Object).collect(),
+            ));
         };
-        let mut rows = rows_json(&result);
+        let mut rows: Vec<Value> = result.json_rows().into_iter().map(Value::Object).collect();
         let more = rows.len() > page.limit;
         rows.truncate(page.limit);
         let mut answer = serde_json::json!({ "rows": rows, "more": more });
@@ -515,24 +517,6 @@ impl<'a> Calls<'a> {
         }
         Ok(answer)
     }
-}
-
-/// A query result as a handler sees it: one object per row.
-pub fn rows_json(result: &oxplow_db::SqlQueryResult) -> Vec<Value> {
-    result
-        .rows
-        .iter()
-        .map(|row| {
-            Value::Object(
-                result
-                    .columns
-                    .iter()
-                    .zip(row)
-                    .map(|(c, v)| (c.clone(), serde_json::to_value(v).unwrap_or(Value::Null)))
-                    .collect(),
-            )
-        })
-        .collect()
 }
 
 #[cfg(test)]

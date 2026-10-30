@@ -46,6 +46,30 @@ pub struct SqlQueryResult {
     pub coverage: Vec<SourceCoverage>,
 }
 
+impl SqlQueryResult {
+    /// The rows as JSON objects, each cell under its column's name. A
+    /// repeated column name keeps the later cell (a JSON object insert).
+    /// A cell becomes the JSON value it serializes to (`NULL` is `null`,
+    /// a non-finite real is `null`).
+    pub fn json_rows(&self) -> Vec<serde_json::Map<String, serde_json::Value>> {
+        self.rows.iter().map(|row| self.json_row(row)).collect()
+    }
+
+    /// One row of this result as a JSON object; see [`Self::json_rows`].
+    pub fn json_row(&self, row: &[SqlCell]) -> serde_json::Map<String, serde_json::Value> {
+        self.columns
+            .iter()
+            .zip(row)
+            .map(|(column, cell)| {
+                (
+                    column.clone(),
+                    serde_json::to_value(cell).unwrap_or(serde_json::Value::Null),
+                )
+            })
+            .collect()
+    }
+}
+
 /// How one collector feeding a dataset a query read stands.
 #[derive(
     Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
@@ -1153,6 +1177,42 @@ fn check_dataset_policy(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn json_rows_name_each_cell_by_its_column() {
+        let result = SqlQueryResult {
+            columns: vec![
+                "n".into(),
+                "a".into(),
+                "a".into(),
+                "r".into(),
+                "t".into(),
+                "b".into(),
+            ],
+            rows: vec![
+                vec![
+                    SqlCell::Null(()),
+                    SqlCell::Int(1),
+                    SqlCell::Int(2),
+                    SqlCell::Real(1.5),
+                    SqlCell::Text("x".into()),
+                    SqlCell::Bool(true),
+                ],
+                vec![SqlCell::Int(7)],
+            ],
+            ..Default::default()
+        };
+        let rows = result.json_rows();
+        assert_eq!(rows.len(), 2);
+        // A repeated column name: the later cell wins.
+        assert_eq!(
+            serde_json::Value::Object(rows[0].clone()),
+            json!({"n": null, "a": 2, "r": 1.5, "t": "x", "b": true})
+        );
+        // A short row names only the cells it has.
+        assert_eq!(serde_json::Value::Object(rows[1].clone()), json!({"n": 7}));
+        assert!(SqlQueryResult::default().json_rows().is_empty());
+    }
 
     async fn seeded() -> (Database, SemanticLayer) {
         let db = Database::in_memory();
