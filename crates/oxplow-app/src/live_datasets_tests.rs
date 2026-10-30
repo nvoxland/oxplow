@@ -1067,11 +1067,10 @@ async fn skills_slots_and_components_are_described() {
     assert_eq!(skills[0][1].as_i64(), Some(0), "{skills:?}");
     let components = rows(
         &fx,
-        "SELECT count(*), sum(c.description = '') FROM v_custom_component c JOIN v_contribution k ON k.uri = c.uri",
+        "SELECT count(*) FROM v_custom_component c JOIN v_contribution k ON k.uri = c.uri",
     )
     .await;
     assert!(components[0][0].as_i64().unwrap() > 0, "{components:?}");
-    assert_eq!(components[0][1].as_i64(), Some(0), "{components:?}");
     let slots = rows(
         &fx,
         "SELECT count(*) FROM v_slot s LEFT JOIN v_contribution k ON k.uri = s.uri WHERE k.uri IS NULL",
@@ -1102,6 +1101,14 @@ async fn shipped_declarations_describe_themselves() {
         (
             "collectors",
             "SELECT count(*) FROM v_collector WHERE description IS NULL OR description = ''",
+        ),
+        (
+            "measures",
+            "SELECT count(*) FROM v_measure WHERE scope NOT IN ('project', 'global') AND (description IS NULL OR description = '')",
+        ),
+        (
+            "custom components",
+            "SELECT count(*) FROM v_custom_component WHERE description IS NULL OR description = ''",
         ),
     ] {
         assert_eq!(rows(&fx, sql).await, [vec![json!(0)]], "{name} without a description");

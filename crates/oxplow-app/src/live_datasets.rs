@@ -1458,16 +1458,8 @@ impl LiveSources {
                             uri(&ext.name, ContributionKind::CustomComponent, &c.id),
                             text(ext.name.clone()),
                             text(c.id.clone()),
-                            text(title.clone()),
-                            text(format!(
-                                "{title}: a component drawn by code in `{}`{}.",
-                                c.bundle,
-                                if c.sql.is_some() {
-                                    ", which reads data with SQL"
-                                } else {
-                                    ""
-                                }
-                            )),
+                            text(title),
+                            opt(c.description.clone()),
                             text(c.bundle.clone()),
                             text(serde_json::to_string(&c.commands).unwrap_or_default()),
                             opt(c.sql.as_ref().map(wire_name)),

@@ -2161,7 +2161,7 @@
     - { name: "page", type: "TEXT", doc: "The page it shows there (`<extension>/<slug>`)." }
     - { name: "description", type: "TEXT", doc: "What the mount does, in a sentence." }
 - name: custom_component
-  version: 1
+  version: 2
   key: [uri]
   description: "Each custom component an enabled extension draws with its own code (`custom_components:`), with what it may reach. Read live from the catalog."
   fields:
@@ -2169,7 +2169,7 @@
     - { name: "extension", type: "TEXT", doc: "The extension that declares it." }
     - { name: "id", type: "TEXT", doc: "Its id, which a page's `component` node names." }
     - { name: "title", type: "TEXT", doc: "What a person calls it; its id when it has no title." }
-    - { name: "description", type: "TEXT", doc: "What it is, in a sentence." }
+    - { name: "description", type: "TEXT", doc: "One sentence saying what it is (`description:` in `custom_components:`); NULL when its declaration says nothing." }
     - { name: "bundle", type: "TEXT", doc: "The folder in the extension that holds its code." }
     - { name: "commands", type: "TEXT", doc: "The commands it may invoke, as a JSON array." }
     - { name: "sql", type: "TEXT", doc: "`read` when it runs its own read-only SQL over the datasets; NULL otherwise." }

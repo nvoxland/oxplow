@@ -14,13 +14,13 @@ build: { run: "bun install --frozen-lockfile && bun run build", output: dist, ex
 custom_components:
   # Efforts, sessions, threads and commits on a zoomable time axis
   # (vis-timeline, which the kit has no viz for).
-  - { id: timeline, title: Timeline, bundle: dist/timeline, sql: read }
+  - { id: timeline, title: Timeline, bundle: dist/timeline, sql: read, description: "Efforts, sessions, threads and commits on a zoomable time axis." }
   # Explore Data: an SQL box and a viz picker over the datasets; oxplow draws
   # the result under it with its own components (`showView`: an inline page).
-  - { id: explore-data, title: Explore Data, bundle: dist/explore-data, sql: read, commands: [oxplow.page.draft_with_agent] }
+  - { id: explore-data, title: Explore Data, bundle: dist/explore-data, sql: read, commands: [oxplow.page.draft_with_agent], description: "An SQL box and a viz picker over the datasets, to try a query and see its result drawn." }
   # Settings → Integrations: hand-written (no build), so it lives beside the
   # built components, not in dist/.
-  - { id: integrations, title: Integrations, bundle: components/integrations, sql: read, commands: [oxplow.provider.check_instance, oxplow.provider.set_instance, oxplow.provider.add_instance, oxplow.provider.turn_off_here, oxplow.provider.remove_instance, oxplow.provider.set_credential, oxplow.provider.begin_sign_in, oxplow.provider.complete_sign_in, oxplow.provider.cancel_sign_in, oxplow.provider.sync] }
+  - { id: integrations, title: Integrations, bundle: components/integrations, sql: read, commands: [oxplow.provider.check_instance, oxplow.provider.set_instance, oxplow.provider.add_instance, oxplow.provider.turn_off_here, oxplow.provider.remove_instance, oxplow.provider.set_credential, oxplow.provider.begin_sign_in, oxplow.provider.complete_sign_in, oxplow.provider.cancel_sign_in, oxplow.provider.sync], description: "The Settings area for the instances of external providers: adding one, signing in and checking it." }
 intent:
   purpose: >-
     Declare oxplow's own commands — what a person, an agent and a page can
@@ -1809,27 +1809,27 @@ commands:
 # (tokens, efforts, tests, coverage, analysis) and the code collectors write
 # facts on, and the metrics over them; the producers' Rust only records the facts.
 measures:
-  - {"key": "oxplow.complexity", "title": "Cyclomatic complexity", "unit": "count", "subjectKind": "symbol", "temporalSemantics": "semi-additive", "fold": "last", "captureScope": "per-path"}
-  - {"key": "oxplow.fn_length", "title": "Function length", "unit": "lines", "subjectKind": "symbol", "temporalSemantics": "semi-additive", "fold": "last", "captureScope": "per-path"}
-  - {"key": "oxplow.parameter_count", "title": "Parameter count", "unit": "count", "subjectKind": "symbol", "temporalSemantics": "semi-additive", "fold": "last", "captureScope": "per-path"}
-  - {"key": "oxplow.coverage", "title": "Line coverage", "unit": "%", "subjectKind": "file", "temporalSemantics": "semi-additive", "fold": "last", "captureScope": "complete"}
-  - {"key": "oxplow.test_case", "title": "Test case", "unit": "count", "subjectKind": "test", "temporalSemantics": "semi-additive", "fold": "last", "captureScope": "per-subject"}
-  - {"key": "oxplow.lint_hit", "title": "Static-analysis hit", "unit": "count", "subjectKind": "file", "temporalSemantics": "semi-additive", "fold": "last", "captureScope": "complete"}
-  - {"key": "oxplow.tokens", "title": "Agent tokens", "unit": "count", "subjectKind": "model", "temporalSemantics": "additive", "fold": "sum", "captureScope": "complete"}
-  - {"key": "oxplow.cycle_time", "title": "Effort cycle time", "unit": "ms", "subjectKind": "effort", "temporalSemantics": "non-additive", "fold": "sum", "captureScope": "complete"}
-  - {"key": "oxplow.turn", "title": "Agent turns", "unit": "count", "subjectKind": "model", "temporalSemantics": "additive", "fold": "sum", "captureScope": "complete"}
-  - {"key": "oxplow.work_item_effort", "title": "Efforts per work item", "unit": "count", "subjectKind": "work_item", "temporalSemantics": "non-additive", "fold": "sum", "captureScope": "complete"}
-  - {"key": "oxplow.nudge", "title": "Nudges fired", "unit": "count", "temporalSemantics": "additive", "fold": "sum", "captureScope": "complete"}
-  - {"key": "oxplow.effort_test_outcome", "title": "Effort test outcome", "unit": "count", "subjectKind": "effort", "temporalSemantics": "non-additive", "fold": "sum", "captureScope": "complete"}
-  - {"key": "oxplow.test_duration", "title": "Test duration", "unit": "ms", "subjectKind": "test", "temporalSemantics": "semi-additive", "fold": "last", "captureScope": "per-subject"}
-  - {"key": "oxplow.cache_tokens", "title": "Prompt-cache tokens", "unit": "count", "subjectKind": "model", "temporalSemantics": "additive", "fold": "sum", "captureScope": "complete"}
-  - {"key": "oxplow.cache_usage", "title": "Prompt-cache hit ratio", "unit": "%", "subjectKind": "model", "temporalSemantics": "non-additive", "fold": "sum", "captureScope": "complete"}
-  - {"key": "oxplow.effort_tokens", "title": "Effort token spend", "unit": "count", "subjectKind": "effort", "temporalSemantics": "non-additive", "fold": "sum", "captureScope": "complete"}
-  - {"key": "oxplow.effort_steering", "title": "Effort steering events", "unit": "count", "subjectKind": "effort", "temporalSemantics": "non-additive", "fold": "sum", "captureScope": "complete"}
-  - {"key": "oxplow.effort_time_to_green", "title": "Effort time to green", "unit": "ms", "subjectKind": "effort", "temporalSemantics": "non-additive", "fold": "sum", "captureScope": "complete"}
-  - {"key": "oxplow.token_waste", "title": "Reverted-effort token waste", "unit": "count", "subjectKind": "effort", "temporalSemantics": "non-additive", "fold": "sum", "captureScope": "complete"}
-  - {"key": "oxplow.coverage.branch", "title": "Branch coverage", "unit": "%", "subjectKind": "file", "temporalSemantics": "semi-additive", "fold": "last", "captureScope": "complete"}
-  - {"key": "oxplow.coverage.function", "title": "Function coverage", "unit": "%", "subjectKind": "file", "temporalSemantics": "semi-additive", "fold": "last", "captureScope": "complete"}
+  - {"key": "oxplow.complexity", "title": "Cyclomatic complexity", "unit": "count", "subjectKind": "symbol", "temporalSemantics": "semi-additive", "fold": "last", "captureScope": "per-path", "description": "Cyclomatic complexity of a function."}
+  - {"key": "oxplow.fn_length", "title": "Function length", "unit": "lines", "subjectKind": "symbol", "temporalSemantics": "semi-additive", "fold": "last", "captureScope": "per-path", "description": "Length of a function, in lines."}
+  - {"key": "oxplow.parameter_count", "title": "Parameter count", "unit": "count", "subjectKind": "symbol", "temporalSemantics": "semi-additive", "fold": "last", "captureScope": "per-path", "description": "Number of parameters a function takes."}
+  - {"key": "oxplow.coverage", "title": "Line coverage", "unit": "%", "subjectKind": "file", "temporalSemantics": "semi-additive", "fold": "last", "captureScope": "complete", "description": "Share of a file's lines that tests ran."}
+  - {"key": "oxplow.test_case", "title": "Test case", "unit": "count", "subjectKind": "test", "temporalSemantics": "semi-additive", "fold": "last", "captureScope": "per-subject", "description": "A test case and how its last run went."}
+  - {"key": "oxplow.lint_hit", "title": "Static-analysis hit", "unit": "count", "subjectKind": "file", "temporalSemantics": "semi-additive", "fold": "last", "captureScope": "complete", "description": "One finding of a static-analysis rule."}
+  - {"key": "oxplow.tokens", "title": "Agent tokens", "unit": "count", "subjectKind": "model", "temporalSemantics": "additive", "fold": "sum", "captureScope": "complete", "description": "Tokens an agent used, by model."}
+  - {"key": "oxplow.cycle_time", "title": "Effort cycle time", "unit": "ms", "subjectKind": "effort", "temporalSemantics": "non-additive", "fold": "sum", "captureScope": "complete", "description": "Time from an effort's start to its finish."}
+  - {"key": "oxplow.turn", "title": "Agent turns", "unit": "count", "subjectKind": "model", "temporalSemantics": "additive", "fold": "sum", "captureScope": "complete", "description": "Turns an agent took in a conversation."}
+  - {"key": "oxplow.work_item_effort", "title": "Efforts per work item", "unit": "count", "subjectKind": "work_item", "temporalSemantics": "non-additive", "fold": "sum", "captureScope": "complete", "description": "Efforts spent on a work item."}
+  - {"key": "oxplow.nudge", "title": "Nudges fired", "unit": "count", "temporalSemantics": "additive", "fold": "sum", "captureScope": "complete", "description": "Nudges that oxplow sent to an agent."}
+  - {"key": "oxplow.effort_test_outcome", "title": "Effort test outcome", "unit": "count", "subjectKind": "effort", "temporalSemantics": "non-additive", "fold": "sum", "captureScope": "complete", "description": "A figure of how an effort's tests went, such as runs or failures."}
+  - {"key": "oxplow.test_duration", "title": "Test duration", "unit": "ms", "subjectKind": "test", "temporalSemantics": "semi-additive", "fold": "last", "captureScope": "per-subject", "description": "Time a test run took."}
+  - {"key": "oxplow.cache_tokens", "title": "Prompt-cache tokens", "unit": "count", "subjectKind": "model", "temporalSemantics": "additive", "fold": "sum", "captureScope": "complete", "description": "Tokens an agent read from or wrote to the model's prompt cache."}
+  - {"key": "oxplow.cache_usage", "title": "Prompt-cache hit ratio", "unit": "%", "subjectKind": "model", "temporalSemantics": "non-additive", "fold": "sum", "captureScope": "complete", "description": "Share of an agent's prompt tokens that the cache served."}
+  - {"key": "oxplow.effort_tokens", "title": "Effort token spend", "unit": "count", "subjectKind": "effort", "temporalSemantics": "non-additive", "fold": "sum", "captureScope": "complete", "description": "Tokens an agent spent during an effort."}
+  - {"key": "oxplow.effort_steering", "title": "Effort steering events", "unit": "count", "subjectKind": "effort", "temporalSemantics": "non-additive", "fold": "sum", "captureScope": "complete", "description": "Times a person steered an agent during an effort."}
+  - {"key": "oxplow.effort_time_to_green", "title": "Effort time to green", "unit": "ms", "subjectKind": "effort", "temporalSemantics": "non-additive", "fold": "sum", "captureScope": "complete", "description": "Time from an effort's first red test run to its first green one."}
+  - {"key": "oxplow.token_waste", "title": "Reverted-effort token waste", "unit": "count", "subjectKind": "effort", "temporalSemantics": "non-additive", "fold": "sum", "captureScope": "complete", "description": "Tokens spent on an effort that was later reverted."}
+  - {"key": "oxplow.coverage.branch", "title": "Branch coverage", "unit": "%", "subjectKind": "file", "temporalSemantics": "semi-additive", "fold": "last", "captureScope": "complete", "description": "Share of a file's branches that tests ran."}
+  - {"key": "oxplow.coverage.function", "title": "Function coverage", "unit": "%", "subjectKind": "file", "temporalSemantics": "semi-additive", "fold": "last", "captureScope": "complete", "description": "Share of a file's functions that tests ran."}
 dimensions:
   - {"key": "oxplow.language", "label": "Language", "valueType": "categorical", "description": "The programming language of a file."}
   - {"key": "oxplow.severity", "label": "Severity", "valueType": "categorical", "promote": true, "description": "How serious a finding or a diagnostic is."}

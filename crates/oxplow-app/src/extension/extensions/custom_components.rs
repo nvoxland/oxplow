@@ -42,6 +42,10 @@ pub struct CustomComponent {
     /// `sql.read` permission.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sql: Option<oxplow_domain::permissions::SqlAccess>,
+    /// One sentence saying what it is (`v_custom_component.description`);
+    /// `None` when its declaration says nothing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
 }
 
 /// A `custom_components:` entry as the manifest holds it.
@@ -59,6 +63,9 @@ pub(crate) struct ComponentFile {
     /// (`querySql`); its extension needs `sql.read` in `permissions:`.
     #[serde(default)]
     sql: Option<oxplow_domain::permissions::SqlAccess>,
+    /// One sentence saying what the component is.
+    #[serde(default)]
+    description: Option<String>,
 }
 
 /// What a bundle folder holds, as far as loading cares.
@@ -563,6 +570,10 @@ pub fn parse_custom_components(
                 bundle,
                 commands: c.commands,
                 sql: c.sql,
+                description: c
+                    .description
+                    .map(|d| d.trim().to_string())
+                    .filter(|d| !d.is_empty()),
             }),
         }
     }
@@ -908,6 +919,30 @@ mod tests {
         let ext = load(d.path(), "  - { id: burndown }\n");
         assert!(ext.errors.is_empty(), "{:?}", ext.errors);
         assert_eq!(ext.custom_components.len(), 1);
+    }
+
+    /// A component's `description:` is kept, trimmed; one without it has none
+    /// (nothing is made up).
+    #[test]
+    fn a_component_keeps_its_description_and_never_invents_one() {
+        let d = tempfile::tempdir().unwrap();
+        let ext = load_permitted(
+            d.path(),
+            "permissions: [commands:oxplow.work_item.transition]\n",
+            "  - { id: burndown, title: Burndown, description: '  Work left in a sprint.  ', commands: [oxplow.work_item.transition] }\n",
+        );
+        assert!(ext.errors.is_empty(), "{:?}", ext.errors);
+        assert_eq!(
+            ext.custom_components[0].description.as_deref(),
+            Some("Work left in a sprint.")
+        );
+        let d = tempfile::tempdir().unwrap();
+        let plain = load_permitted(
+            d.path(),
+            "permissions: [commands:oxplow.work_item.transition]\n",
+            "  - { id: burndown, title: Burndown, commands: [oxplow.work_item.transition] }\n",
+        );
+        assert_eq!(plain.custom_components[0].description, None);
     }
 
     #[test]

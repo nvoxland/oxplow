@@ -3309,6 +3309,14 @@
             }
           ],
           "default": null
+        },
+        "description": {
+          "description": "One sentence saying what the component is.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
         }
       },
       "additionalProperties": false,
