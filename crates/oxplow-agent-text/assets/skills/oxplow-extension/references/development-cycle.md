@@ -90,6 +90,7 @@ extensions that loaded (`enabled`, `errors`, `warnings`, `deployment`) and
 What a contribution is, in words, is in its kind's own dataset, joined on `uri`:
 `v_command`, `v_skill`, `v_slot`, `v_custom_component`, `v_metric_spec`,
 `v_measure`, `v_dimension`, `v_resource` and `v_capability_provider`.
+`v_command_audit` is every command run: when, by whom, and whether it failed.
 `oxplow_read { uri: "oxplow:oxplow/page?page=<ext>/<slug>" }` gives one
 page's definition and deployment; **Definition** in a page's ☰ menu, About this page, is
 the same for the person (the running page file, drawn as Definition, a

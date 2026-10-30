@@ -54,7 +54,8 @@ FROM metric_findings('oxplow.rust.unsafe_blocks') ORDER BY path, line
 metric's thresholds. The catalog and raw data are views: `v_metric_spec`
 (definitions and thresholds), `v_metric_catalog` (what's available and
 on), `v_measure`, `v_dimension`, `v_capture` and `v_fact` (every fact ever
-recorded — history, including items since fixed).
+recorded — history, including items since fixed). A metric's
+`extension` names the extension that declares it, in `v_extension`.
 
 For a CI-imported or agent-asserted number oxplow can't compute itself, use
 the `oxplow.metric.record` command, `{ key, value, subject?, dims? }` (stored

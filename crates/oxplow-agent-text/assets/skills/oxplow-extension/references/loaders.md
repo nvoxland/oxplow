@@ -62,6 +62,11 @@ loaders:
 - The result is `{ columns, rows }` as is, an array of objects (a row each),
   else one `value` row. `items: <field>` takes the list inside the result's
   `<field>` as the rows (a command that returns `{ title, nodes: […] }`).
+- A table whose query is only known at run time (which dataset, which
+  columns, from params): build the SQL in a `sql` loader, then run it with
+  the read command `oxplow.sql.query { sql }` — `args: { sql: { from:
+  query.sql } }` — which returns `{ columns, rows }` over the same `v_*`
+  datasets.
 
 ## `page`
 
