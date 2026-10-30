@@ -272,32 +272,15 @@ graph writer and the link checker never drift. The desktop's
   visits, ui-preference scopes, fact subjects, event subjects and payload
   fields, command inverses and pending proposals.
 
-## The migration (V99)
+## The migrations (V99, V100)
 
-`V99__uris.sql` rewrote every stored URI in one transaction, through
-`ref_to_uri(text[, extension])` and `ref_to_uri_in_json(json, field, …)`
-— SQL functions over `oxplow_db::uri_migration`, **the one place the old
-grammar survives** (`uri_migration/v1.rs` parses it; nothing else does).
-It is frozen: its table of old kinds never grows. Notable reads: a work
-item `work_item:<provider>:<id>`; a symbol `<path>/<symbol>` or, as the
-metric scans spelled one, `<path>::<name>` (told apart by the file name
-before the first `::`); a block `<path>:<lines>`; a test `<class>::<name>`;
-a contribution's id → its key param, a page's own params kept;
-`@rev` → `rev`, `#L10-20` → `#lines=10-20`; an old URI whose params can't
-be a URI's is left as it was. Event payloads rewrite a fixed list of URI
-fields (and `work_item.recorded`'s item); `command.executed` payloads and
-executed audit inputs stay as history. Tables restated at boot (the
-`contribution` table) are emptied; an extension kind's search entries go
-and rebuild from its view. On a 1.5 GB local database it takes about 30 s.
-
-## The bare-id migration (V100)
-
-`V100__bare_ids.sql` moved the fields of "Bare ids" off URIs, through
-`uri_keys_in_json(json, field, …)` (a field written `<name>:int` becomes
-a number): every event type whose payload changed, at its new version
-(no reader carries an upcast, as at V70); undo inverses; pending
-proposals, whose old URIs V99 missed (it looked for a NULL decision, not
-`'pending'`). A job's `intent_key` is immutable and keeps an embedded URI.
+`V99__uris.sql` rewrote every stored ref of the old grammar as its URI,
+and `V100__bare_ids.sql` moved the fields of "Bare ids" off URIs. Both
+are in the squashed baseline now, with the SQL functions and the parser
+of the old grammar they used: no code reads the old grammar any more. A
+database or a file that still holds an old ref is history: rewrite it by
+hand, or leave it. Command inputs and results logged before V99 stay as
+they were.
 
 ## The rename (V101)
 

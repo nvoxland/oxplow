@@ -65,7 +65,6 @@ pub mod thread_store;
 pub mod token_usage_store;
 pub mod tool_call_store;
 pub mod ui_preference_store;
-pub mod uri_migration;
 pub mod wiki_page_store;
 pub mod wiki_page_thread_updates;
 pub mod work_item_refs;

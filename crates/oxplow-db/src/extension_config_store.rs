@@ -634,9 +634,8 @@ mod tests {
 
     #[test]
     fn a_write_needs_a_caller_owned_transaction() {
-        let conn = Connection::open_in_memory().unwrap();
-        conn.execute_batch(include_str!("../migrations/V53__extension_config.sql"))
-            .unwrap();
+        let db = Database::in_memory();
+        let conn = db.conn().unwrap();
         let space = ns("notes", Scope::Project);
         // Autocommit: refused before touching the table.
         assert!(matches!(

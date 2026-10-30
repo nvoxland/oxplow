@@ -813,7 +813,7 @@ pub struct SnapshotChangeEntry {
 
 /// `snapshot` row — one per `request_snapshot()` call that had
 /// dirty files. Groups the `file_snapshot` rows captured in that
-/// batch. See [[crates/oxplow-db/migrations/V13__snapshot.sql]].
+/// batch. See [[crates/oxplow-db/migrations/V1__baseline.sql]].
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct Snapshot {
     #[specta(type = oxplow_domain::JsNumber)]

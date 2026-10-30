@@ -1141,11 +1141,9 @@ fn hand_made_refs() -> Vec<String> {
     let mut out = Vec::new();
     for (path, text) in production_sources() {
         // A work list builds its own items' refs; the grammar module is the
-        // one place a prefix is written. The migration reads the frozen old
-        // grammar by design, and a preference scope's `resource:` and
+        // one place a prefix is written, and a preference scope's `resource:` and
         // `component:` prefixes name a scope, not a URI.
         if path.starts_with("crates/oxplow-domain/src/uri/")
-            || path.starts_with("crates/oxplow-db/src/uri_migration/")
             || path == "crates/oxplow-db/src/ui_preference_store.rs"
             || path == "crates/oxplow-tasks/src/refs.rs"
         {

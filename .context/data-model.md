@@ -97,17 +97,17 @@ All persistence lives in one SQLite file under `.oxplow/local.sqlite`, opened
 through `Database::open` (`crates/oxplow-db/src/database.rs`). Every store is
 a thin class wrapping that connection. Schema changes go through versioned
 refinery migrations in `crates/oxplow-db/migrations/`, append-only; never
-edit a prior version. **The history was squashed (tsk1080):** V1..V168
-became one `V1__baseline.sql`, the schema they built, dumped from
-`sqlite_master` with the rows they seeded; V2 (`change_file_stage`) is the
-first after it, then V3 (`pending_run`, paced collector and change-analysis runs, and
-`change.elapsed_ms` — metrics.md "Pacing"). The
-`V<n>` names elsewhere in these docs are that history — which step brought
-a table in — not files that exist. Existing databases were converted by a
-one-off tool that checked their tables, indexes and triggers equal the
-baseline's (materialized `m_v_*` tables aside) and rewrote
-`refinery_schema_history` to the baseline row. With no other users, a
-squash like that is the sanctioned way to drop history; editing a
+edit a prior version. **The history has been squashed twice.** Each
+time every migration so far became one `V1__baseline.sql`: the schema
+they built, dumped from `sqlite_master` (tables, then indexes, then
+triggers; no views, no FTS shadow tables), with the rows they seeded. The
+second squash took V1 (the first baseline) through V124. The `V<n>` names
+elsewhere in these docs are that history — which step brought a table in
+— not files that exist. Existing databases were converted once, outside
+the app, by a script that checked their tables, indexes and triggers equal
+a fresh baseline's (views and materialized `m_v_*` tables aside) and
+rewrote `refinery_schema_history` to the baseline row. With no other
+users, a squash like that is the sanctioned way to drop history; editing a
 migration in place is not.
 
 A sweeping rename (an id, a column, a command) skips the applied
@@ -1345,7 +1345,7 @@ V99 rewrote the stored rows from the old `(kind, id)` pairs; the boot
 backfill regenerates the derived ones. `V100__bare_ids.sql` then moved the
 event payload fields named for one resource (and undo inverses, pending
 proposals) from URIs to bare ids, at new event versions; see
-[resources.md](./resources.md) "The bare-id migration (V100)".
+[resources.md](./resources.md) "The migrations (V99, V100)".
 `V103__resource_page_drop.sql` dropped `resource.page` (a resource opens
 as itself; the pages that render it declare `for`), and `v_resource` is
 at v4 without that column.

@@ -40,7 +40,6 @@ oxplow-dev wiki show <slug>
 oxplow-dev wiki write <slug> [--title T] [--file F]   body from F, else stdin
 oxplow-dev wiki delete <slug>
 oxplow-dev wiki search <text>                pages whose slug, title or body has it
-oxplow-dev uri convert [<kind>=<extension> …] each stdin line that is an old ref, as its URI
 oxplow-dev extension status                  what the next boot would run, and what it
                                              would hold back and why (safe while oxplow runs)
 oxplow-dev extension deploy [<name>]         deploy <name>'s source as the app does,
@@ -102,41 +101,8 @@ async fn run(mut args: Vec<String>, env_thread: Option<String>) -> Result<String
             tasks.wiki(args.split_off(1)).await
         }
         Some("extension") => extension(&project, &args[1..]).await,
-        Some("uri") if args.get(1).is_some_and(|a| a == "convert") => {
-            let mut input = String::new();
-            std::io::Read::read_to_string(&mut std::io::stdin(), &mut input)
-                .map_err(|e| e.to_string())?;
-            uri_convert(&input, &args[2..])
-        }
         _ => Err(format!("usage:\n{USAGE}")),
     }
-}
-
-/// `uri convert [<kind>=<extension> …]`: each line of `input` that is a
-/// ref of the old grammar, as its URI (the same table the migration that
-/// rewrote the stored refs used, `oxplow_db::uri_migration`); any other
-/// line as it was. An extension's kind names its extension
-/// (`acme_pr=acme`).
-fn uri_convert(input: &str, args: &[String]) -> Result<String, String> {
-    let extensions: Vec<(&str, &str)> = args
-        .iter()
-        .map(|a| {
-            a.split_once('=')
-                .ok_or_else(|| format!("`{a}`: expected <kind>=<extension>"))
-        })
-        .collect::<Result<_, _>>()?;
-    Ok(input
-        .lines()
-        .map(|line| {
-            let kind = line.split_once(':').map(|(k, _)| k);
-            let extension = extensions
-                .iter()
-                .find(|(k, _)| Some(*k) == kind)
-                .map(|(_, e)| *e);
-            oxplow_db::uri_migration::v1_to_uri(line, extension).unwrap_or_else(|| line.to_string())
-        })
-        .collect::<Vec<_>>()
-        .join("\n"))
 }
 
 /// Deploy from outside oxplow, as the app does: `name`'s source, or with
