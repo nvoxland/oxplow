@@ -508,6 +508,9 @@ struct VizFile {
     empty: Option<String>,
     #[serde(default)]
     hide_empty: bool,
+    /// A column whose first row's text is a paragraph under the heading.
+    #[serde(default)]
+    lead: Option<String>,
     #[serde(default)]
     chart: Option<VizChart>,
     #[serde(default)]
@@ -1426,6 +1429,7 @@ fn leaf_viz(
         columns: f.columns,
         empty: f.empty,
         hide_empty: f.hide_empty,
+        lead: f.lead,
         chart: f.chart,
         tree: f.tree,
         timeline: f.timeline,

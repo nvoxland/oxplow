@@ -326,10 +326,16 @@ function VizNode(props: NodeViewProps & { def: Node; id: string }) {
   if (!vizRun || def.kind !== "viz") return null;
   const failed = def.from !== null ? run.loaders[def.from]?.error : null;
   if (failed) return <NodeError message={failed} />;
+  const lead = leadOf(vizRun);
   return (
     <VizActionRunnerContext.Provider value={runner}>
     <FormSourceContext.Provider value={forms}>
     <VizPagesContext.Provider value={pages}>
+      {lead ? (
+        <p className="ox-section-desc" data-testid={`node-${id}-lead`}>
+          {lead}
+        </p>
+      ) : null}
       <VizView
         run={vizRun}
         streamId={streamId}
@@ -344,6 +350,16 @@ function VizNode(props: NodeViewProps & { def: Node; id: string }) {
     </FormSourceContext.Provider>
     </VizActionRunnerContext.Provider>
   );
+}
+
+/** A node's `lead`: the first row's text of its column, a paragraph under
+ *  the heading; none when the column is missing, null or empty. */
+export function leadOf(run: { config: { lead?: string | null }; result: { columns: string[]; rows: unknown[][] } }): string | null {
+  const column = run.config.lead;
+  if (!column) return null;
+  const at = run.result.columns.indexOf(column);
+  const cell = at < 0 ? null : run.result.rows[0]?.[at];
+  return typeof cell === "string" && cell.trim() !== "" ? cell.trim() : null;
 }
 
 /** The children of stack `at` that fold away: titled, not replaceable

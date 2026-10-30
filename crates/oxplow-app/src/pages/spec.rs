@@ -1859,6 +1859,10 @@ pub struct VizConfig {
     /// something the subject may not have (a kind of contribution).
     #[serde(default)]
     pub hide_empty: bool,
+    /// A column of the loader whose first row's text is a paragraph under
+    /// the node's heading, above its viz (what a thing is, above its
+    /// facts). Null or empty: nothing is drawn.
+    pub lead: Option<String>,
     /// Columns a chart viz draws from.
     pub chart: Option<VizChart>,
     pub tree: Option<VizTree>,
@@ -1935,6 +1939,9 @@ impl VizConfig {
     /// returns.
     pub fn role_columns(&self) -> Vec<(&'static str, &String)> {
         let mut out: Vec<(&'static str, &String)> = Vec::new();
+        if let Some(l) = &self.lead {
+            out.push(("lead", l));
+        }
         if let Some(c) = &self.chart {
             out.extend(c.columns().into_iter().map(|k| ("chart", k)));
         }

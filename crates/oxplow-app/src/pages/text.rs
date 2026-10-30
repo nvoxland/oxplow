@@ -113,6 +113,9 @@ fn write_tree<'r>(
                 match (failed, node_run(run, def)) {
                     (Some(error), _) => out.push_str(&format!("({error})\n")),
                     (None, Some(viz_run)) => {
+                        if let Some(lead) = lead_text(&viz_run) {
+                            out.push_str(&format!("{lead}\n\n"));
+                        }
                         let resolved = crate::viz_text::resolve(svc, root, &viz_run).await?;
                         out.push_str(&crate::viz_text::render(&viz_run, &resolved));
                         out.push('\n');
@@ -154,4 +157,15 @@ fn write_tree<'r>(
         }
         Ok(())
     })
+}
+
+/// The node's `lead` paragraph: its column's text in the first row, none
+/// when null or empty.
+fn lead_text(run: &VizRun) -> Option<String> {
+    let column = run.config.lead.as_ref()?;
+    let at = run.result.columns.iter().position(|c| c == column)?;
+    match run.result.rows.first()?.get(at)? {
+        oxplow_db::SqlCell::Text(t) if !t.trim().is_empty() => Some(t.trim().to_string()),
+        _ => None,
+    }
 }

@@ -6240,6 +6240,12 @@ export type VizConfig_Deserialize = {
 	 *  something the subject may not have (a kind of contribution).
 	 */
 	hideEmpty?: boolean,
+	/**
+	 *  A column of the loader whose first row's text is a paragraph under
+	 *  the node's heading, above its viz (what a thing is, above its
+	 *  facts). Null or empty: nothing is drawn.
+	 */
+	lead: string | null,
 	/**  Columns a chart viz draws from. */
 	chart: VizChart | null,
 	tree: VizTree | null,
@@ -6297,6 +6303,12 @@ export type VizConfig_Serialize = {
 	 *  something the subject may not have (a kind of contribution).
 	 */
 	hideEmpty: boolean,
+	/**
+	 *  A column of the loader whose first row's text is a paragraph under
+	 *  the node's heading, above its viz (what a thing is, above its
+	 *  facts). Null or empty: nothing is drawn.
+	 */
+	lead: string | null,
 	/**  Columns a chart viz draws from. */
 	chart: VizChart | null,
 	tree: VizTree | null,

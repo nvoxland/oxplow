@@ -64,3 +64,18 @@ async fn see_also_ends_the_text_and_is_absent_without_links() {
     let text = page_text(&svc, &svc.layout.project_dir, &r).await.unwrap();
     assert!(!text.contains("See also"), "{text}");
 }
+
+/// A node's `lead` is the first row's text, a paragraph under its heading and
+/// above its viz; an empty one writes nothing.
+#[tokio::test]
+async fn a_lead_is_a_paragraph_under_the_heading_and_an_empty_one_is_nothing() {
+    let (_dir, svc) = fixture().await;
+    let r = run(&svc, "acme/led", &[]).await;
+    let text = page_text(&svc, &svc.layout.project_dir, &r).await.unwrap();
+    assert!(
+        text.contains("## With [node with]\n\nThis is what it is.\n\n"),
+        "{text}"
+    );
+    assert!(text.contains("## Without [node without]\n\n"), "{text}");
+    assert_eq!(text.matches("This is what it is.").count(), 1, "{text}");
+}

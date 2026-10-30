@@ -49,12 +49,15 @@ view:
 
 ## `viz`
 
-`{ viz: <kind>, from: <loader>, columns?, empty?, hide_empty?, actions?, <role block> }`.
+`{ viz: <kind>, from: <loader>, columns?, empty?, hide_empty?, lead?, actions?, <role block> }`.
 Rows come from the loader (a viz has no query). A viz that reads no rows
 (`form`, `approvals`) has no `from`. `hide_empty: true` leaves the node
 out of the page when its loader has no rows (no heading, no Contents
 entry) — for a section about something the subject may not have, like
 one kind of an extension's contributions; it can't have `empty:` too.
+`lead: <column>` puts that column's first-row text as a plain paragraph
+under the node's heading, above its viz: what a thing is, above its facts
+(null or blank draws nothing, no gap).
 It doesn't count toward a page's 8-section limit, which is on the
 sections a page always has.
 

@@ -325,6 +325,19 @@ see_also:
 "#,
     ),
     (
+        "led",
+        r#"
+title: Led
+loaders:
+  about: { rows: [{ description: This is what it is., fact: 1 }] }
+  blank: { rows: [{ description: "", fact: 2 }] }
+view:
+  stack:
+    - { id: with, title: With, viz: detail, from: about, lead: description, columns: [{ key: fact, label: Fact }] }
+    - { id: without, title: Without, viz: detail, from: blank, lead: description, columns: [{ key: fact, label: Fact }] }
+"#,
+    ),
+    (
         "writes",
         r#"
 title: Writes

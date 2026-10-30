@@ -1051,3 +1051,24 @@ fn see_also_entries_parse_and_are_checked() {
         assert!(why.contains(want), "{entry}: {why}");
     }
 }
+
+/// `lead: <column>` on a viz node is kept; its column must be in the loader.
+#[test]
+fn a_viz_keeps_its_lead_column() {
+    let p = page(
+        "title: T\nloaders:\n  q: { rows: [{ d: x }] }\nview: { viz: detail, from: q, lead: d }\n",
+    )
+    .expect("loads");
+    let crate::pages::schema::NodeKind::Viz { config, .. } = &p.view.kind else {
+        panic!("a viz");
+    };
+    assert_eq!(config.lead.as_deref(), Some("d"));
+    assert_eq!(
+        config
+            .role_columns()
+            .iter()
+            .filter(|(b, k)| *b == "lead" && *k == "d")
+            .count(),
+        1
+    );
+}

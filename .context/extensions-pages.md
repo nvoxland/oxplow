@@ -280,6 +280,11 @@ unique in the page. `#node=<id>` in a link lands on it. `title`,
   its loader ran clean with no rows, the runner leaves the node out of the
   run tree (`runner.rs` `left_out`), so the desktop, Contents and the
   page's text all skip it; a failed loader still shows its error.
+  `lead: <column>`: the first row's text of that column is a plain paragraph
+  under the node's heading and above its viz (what a thing is, above its
+  facts); null or blank draws nothing. It is a column of the loader, checked
+  in a dry run like a role block's; the desktop draws it in `VizNode`
+  (`leadOf`) and `text.rs` writes it under the heading.
 
 **Vizes** (`Viz`): `table`, `list`, `number`, `markdown` (the first row's
 `markdown: { text: <column> }`, else its first column, drawn by the one
