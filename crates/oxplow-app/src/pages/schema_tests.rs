@@ -18,8 +18,7 @@ fn refused(text: &str) -> String {
     page(text).expect_err("refused")
 }
 
-/// A page's loaders are under `loaders:`; the old `data:` is refused, and
-/// the refusal says what to write.
+/// A page's loaders are under `loaders:`; any other key is refused.
 #[test]
 fn a_pages_loaders_are_under_loaders_and_data_is_refused_naming_it() {
     let body = "view:\n  viz: table\n  from: q\n";
@@ -31,8 +30,7 @@ fn a_pages_loaders_are_under_loaders_and_data_is_refused_naming_it() {
     let why = refused(&format!(
         "title: T\ndata:\n  q: {{ rows: [{{ a: 1 }}] }}\n{body}"
     ));
-    assert!(why.contains("unknown key `data`"), "{why}");
-    assert!(why.contains("write `loaders:`"), "{why}");
+    assert!(why.contains("unknown field `data`"), "{why}");
 }
 
 /// A section — a child of a `stack`, `grid` or `switch`, in the view or the

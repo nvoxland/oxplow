@@ -79,8 +79,7 @@ declare collectors in the same format. A collector runs on its `on`: `manual`
 report collector, `{ run: test | analysis }`. An effect's `on`/`where` are
 the same grammar, read by one parser and one matcher
 (`collectors::parse_trigger`, `Trigger::fires`); the old nested
-`trigger:` key is refused, its refusal naming the new spelling
-(`oxplow_domain::manifest_keys`). Its runtime is `exec`, `starlark`, `jaq` or
+`trigger:` key is an unknown field like any other. Its runtime is `exec`, `starlark`, `jaq` or
 `read` (`crates/oxplow-config/src/collectors.rs`; "Collectors" below).
 
 ### 2. Dimensions slice data
@@ -154,8 +153,9 @@ where they name machinery, not the declaration: the compiler module
 `dataset_contract`, `dataset_test`), `v_dataset_lineage` / `v_dataset_test`,
 the SQL folder (`datasets/<name>.sql`, core's `datasets.yaml`), and the
 contribution kind's URI (`oxplow:oxplow/dataset?dataset=<ext>/<name>`). An
-old `datasets:` or a dataset's `columns:` is an unknown key whose error says
-what to write (`manifest_keys::RENAMED`); nothing reads the old spelling.
+old spelling (`models:`, a dataset's `columns:`, a `models/` folder) is an
+unknown field or an unread folder, like any other; oxplow keeps no table of
+retired keys.
 
 **Relationships.** A dataset may declare `relationships: [{ from:
 <field>, to: <dataset>.<field> }]`: its field `from` holds values of

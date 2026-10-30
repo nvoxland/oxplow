@@ -1495,8 +1495,8 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
         ));
         return ext;
     }
-    let parsed: Result<ManifestV2, String> = serde_yaml::from_str::<ManifestV2>(&manifest)
-        .map_err(|e| oxplow_domain::manifest_keys::hint_unknown(&e.to_string()));
+    let parsed: Result<ManifestV2, String> =
+        serde_yaml::from_str::<ManifestV2>(&manifest).map_err(|e| e.to_string());
     let m = match parsed {
         Ok(m) if m.name != name => {
             ext.errors.push(format!(
@@ -1963,18 +1963,9 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                     Err(e) => ext.errors.push(err_at("datasets", e.to_string())),
                 }
             }
-            Err(e) => ext.errors.push(err_at(
-                "datasets",
-                oxplow_domain::manifest_keys::hint_unknown(&format!("datasets: {e}")),
-            )),
-        }
-        // `models/` is the old name of `datasets/`: not read, so say so.
-        if files.list("models").iter().any(|f| f.ends_with(".sql")) {
-            ext.errors.push(err_at(
-                "datasets",
-                "`models/` is now `datasets/`: move `models/<name>.sql` to `datasets/<name>.sql`"
-                    .to_string(),
-            ));
+            Err(e) => ext
+                .errors
+                .push(err_at("datasets", format!("datasets: {e}"))),
         }
         // Cross-references inside the catalog: a metric's source measure
         // and a collector's fact measures are normally ones this extension
@@ -7617,59 +7608,6 @@ commands:
             ext.errors
                 .iter()
                 .any(|e| e.contains("datasets") && e.contains("colour")),
-            "{:?}",
-            ext.errors
-        );
-    }
-
-    /// A `models/` folder is the old name of `datasets/`: the load error
-    /// says to move each file, and the file is not read.
-    #[test]
-    fn an_old_models_folder_says_to_move_its_files() {
-        let dir = tempfile::tempdir().unwrap();
-        write(
-            dir.path(),
-            ".oxplow/extensions/x/extension.yaml",
-            "manifest: 2\nname: x\nintent:\n  purpose: test\ndatasets:\n  - { name: late, version: 1, description: d, fields: [] }\n",
-        );
-        write(
-            dir.path(),
-            ".oxplow/extensions/x/models/late.sql",
-            "SELECT 1 AS n",
-        );
-        let ext = project_extensions(dir.path()).remove(0);
-        assert!(
-            ext.errors
-                .iter()
-                .any(|e| e.contains("move `models/<name>.sql` to `datasets/<name>.sql`")),
-            "{:?}",
-            ext.errors
-        );
-    }
-
-    /// The old spellings are unknown keys whose error says what to write:
-    /// `models:` is `datasets:`, a dataset's `columns:` is `fields:`.
-    #[test]
-    fn old_models_and_columns_keys_say_what_to_write() {
-        let (_d, ext) = load_x(
-            &[],
-            "models:\n  - { name: late, version: 1, description: d, fields: [] }\n",
-        );
-        assert!(
-            ext.errors
-                .iter()
-                .any(|e| e.contains("unknown key `models` — write `datasets:`")),
-            "{:?}",
-            ext.errors
-        );
-        let (_d, ext) = load_x(
-            &[],
-            "datasets:\n  - { name: late, version: 1, description: d, columns: [] }\n",
-        );
-        assert!(
-            ext.errors
-                .iter()
-                .any(|e| e.contains("unknown key `columns` — write `fields:`")),
             "{:?}",
             ext.errors
         );

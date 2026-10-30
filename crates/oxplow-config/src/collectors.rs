@@ -555,10 +555,7 @@ pub fn parse_collectors_indexed(
         let raw: RawCollector = match serde_yaml::from_value(item.clone()) {
             Ok(r) => r,
             Err(e) => {
-                errors.push((
-                    Some(i),
-                    oxplow_domain::manifest_keys::hint_unknown(&e.to_string()),
-                ));
+                errors.push((Some(i), e.to_string()));
                 continue;
             }
         };
@@ -1705,10 +1702,7 @@ mod tests {
             ("on: { at: noon }", "`on` is `manual`"),
             ("on: manual\n  settle: 30s", "stands alone"),
             ("on: [collector.synced]", "can't run on `collector.synced`"),
-            (
-                "trigger: { every: 5m }",
-                "unknown key `trigger` — write `on:`",
-            ),
+            ("trigger: { every: 5m }", "unknown field `trigger`"),
         ] {
             let (s, e) = with(t);
             assert!(s.is_empty(), "{t}");

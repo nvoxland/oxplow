@@ -27,8 +27,8 @@ permissions:
   - agent.write                # advisories and skills: text that reaches the agent
 ```
 
-The map it used to be (`{ sql: read, process: true, … }`) is refused,
-the refusal naming the list (`oxplow_domain::manifest_keys`). Inside oxplow
+A map is refused as serde's type error (no retired-key hints: the skill
+teaches the current shape). Inside oxplow
 the declaration is still the typed `Permissions`; only its spelling is
 the list — and what a deployment stores (`v_extension.permissions`,
 `v_extension_deployment.permissions`, V117 rewrote the stored maps).

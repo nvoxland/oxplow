@@ -583,8 +583,7 @@ pub fn parse_page(
     rel: &str,
     text: &str,
 ) -> Result<Page, String> {
-    let file: PageFile = serde_yaml::from_str(text)
-        .map_err(|e| oxplow_domain::manifest_keys::hint_unknown_page(&e.to_string()))?;
+    let file: PageFile = serde_yaml::from_str(text).map_err(|e| e.to_string())?;
     let id = format!("{extension}/{slug}");
     let renders = file
         .renders
