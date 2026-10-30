@@ -1,0 +1,8 @@
+# A measure's "metrics built on it" open each metric's definition, not its data.
+when: { page: oxplow-foundation/measure, params: { uri: "oxplow:oxplow/measure?measure=oxplow.tokens" } }
+expect:
+  loaders:
+    metrics:
+      rows:
+        contains:
+          - { title: Total tokens, uri: "oxplow:oxplow/metric?metric=agent.tokens.total#oxplow.renderer=oxplow-foundation/metric-definition" }

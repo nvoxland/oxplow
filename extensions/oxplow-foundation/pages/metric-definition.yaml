@@ -1,0 +1,53 @@
+title: Metric definition
+description: One metric — its unit, how it aggregates and which direction is better, its targets, the measure it is built on and the expression that reads it.
+label: '{{row.name}}'
+icon: bar-chart-3
+for: oxplow/metric
+params:
+- name: uri
+  label: Metric
+answers:
+- {"question":"What is this metric built from, and what are its targets?","about":"oxplow/metric","params":{"uri":"oxplow:oxplow/metric?metric=agent.tokens.total"},"skill":"oxplow-metrics"}
+loaders:
+  about:
+    sql: |
+      SELECT s.title AS name, s.key, s.description, s.unit, s.aggregation, s.direction,
+             s.target, s.warn_at, s.fail_at,
+             m.title AS measure,
+             CASE WHEN m.key IS NOT NULL THEN uri('oxplow/measure', 'measure', m.key) || '#oxplow.renderer=oxplow-foundation/measure' END AS measure_target,
+             s.expression, s.scope, s.extension,
+             CASE WHEN s.extension IS NOT NULL THEN 'oxplow:oxplow/extension?name=' || s.extension END AS extension_target
+      FROM v_metric_spec s LEFT JOIN v_measure m ON m.key = s.source_measure
+      WHERE s.key = uri_param(:uri, 'metric')
+  links:
+    sql: |
+      SELECT 'Data' AS title,
+             :uri || '#oxplow.renderer=oxplow-foundation/metric-detail' AS uri,
+             'How it moved over time and its recordings' AS description
+      FROM about
+      UNION ALL
+      SELECT a.extension, a.extension_target, e.description
+      FROM about a LEFT JOIN v_extension e ON e.name = a.extension WHERE a.extension IS NOT NULL
+view:
+  stack:
+  - id: about
+    title: About
+    viz: detail
+    from: about
+    columns:
+    - { key: description, label: What it is }
+    - { key: key, label: Key }
+    - { key: unit, label: Unit }
+    - { key: aggregation, label: Aggregation }
+    - { key: direction, label: Better when }
+    - { key: target, label: Target }
+    - { key: warn_at, label: Warn at }
+    - { key: fail_at, label: Fail at }
+    - { key: measure, label: Built on, link: { kind: page, from: measure_target } }
+    - { key: expression, label: Expression }
+    - { key: scope, label: Scope }
+    - { key: extension, label: Extension, link: { kind: page, from: extension_target } }
+    empty: That metric isn't known to this project.
+see_also:
+  - { from: links }
+  - { page: oxplow-foundation/metrics-recorded }

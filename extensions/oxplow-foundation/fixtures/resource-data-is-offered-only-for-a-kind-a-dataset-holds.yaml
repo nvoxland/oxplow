@@ -1,0 +1,21 @@
+# A kind some dataset holds opens on its data, with Definition as the other mode;
+# a kind no dataset holds (a file) is drawn by Definition alone.
+when:
+  command: oxplow.page.renderers
+  input: { uri: "oxplow:oxplow/resource?resource=oxplow-foundation/stream" }
+expect:
+  ok: true
+  result:
+    renderers:
+      contains:
+        - { page: oxplow-foundation/resource-data, default: true }
+        - { page: oxplow-foundation/resource, default: false }
+steps:
+  - when:
+      command: oxplow.page.renderers
+      input: { uri: "oxplow:oxplow/resource?resource=oxplow-foundation/file" }
+    expect:
+      ok: true
+      result:
+        renderers:
+          - { page: oxplow-foundation/resource, default: false }

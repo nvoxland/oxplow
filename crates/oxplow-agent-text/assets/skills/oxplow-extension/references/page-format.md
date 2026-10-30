@@ -142,6 +142,14 @@ params fit; `default: true` (only for a resource your extension declares)
 makes it the page a plain open uses; `pinned: true` pins its tabs. Params
 named like the URI's (`uri`, `sha`, `path`) are filled from it.
 
+A resource with both a data view and a definition view: make the data page
+(a simple table of its records or facts) the `default: true` one and the
+definition page the other mode, and let each link the other in `see_also:`
+as the same URI with `#oxplow.renderer=<extension>/<page>`. A page that is
+about the definition (a list of an extension's contributions, a catalog)
+links the same way, pinning the definition renderer, because the bare URI
+opens the data page.
+
 `accepts: { content: <loader> }` also looks at what the URI names: the
 loader (one of your page's own, or `content` itself) must yield at least
 one row, or the page is not offered for that URI. Example: `accepts: { path:

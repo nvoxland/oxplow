@@ -1,0 +1,71 @@
+title: Collector data
+description: What one collector recorded — the rows its last run counted and, for a collector that records facts, the facts of its recent runs.
+label: '{{row.name}} data'
+icon: activity
+for: oxplow/collector
+default: true
+params:
+- name: uri
+  label: Collector
+- name: range
+  type: date_range
+  role: filter
+  label: Range
+  default: 7d
+  presets: [1d, 7d, 30d, 90d, all]
+answers:
+- {"question":"What did this collector record?","about":"oxplow/collector","params":{"uri":"oxplow:oxplow/collector?collector=oxplow-foundation/oxplow.effort_test_outcome"},"skill":"oxplow-extension"}
+loaders:
+  about:
+    sql: |
+      SELECT k.id AS name, k.description, k.uri, k.id,
+             k.last_run_at, k.last_status,
+             NULLIF((SELECT json_group_array(json_object('text', j.key || ': ' || j.value))
+                     FROM json_each(r.row_counts_json) j), '[]') AS row_counts
+      FROM v_collector k LEFT JOIN v_collector_run r ON r.uri = k.uri
+      WHERE k.uri = :uri
+  # A fact collector's captures carry its id as their producer; a report collector
+  # records under the producer its report names, so it may have none here.
+  recorded:
+    sql: |
+      SELECT f.captured_at, f.measure_key, f.value, f.subject, f.path, f.branch
+      FROM about a JOIN v_capture c ON c.producer = a.id
+           JOIN v_fact f ON f.capture_id = c.id
+      WHERE (:range_from IS NULL OR c.captured_at >= :range_from)
+        AND (:range_to IS NULL OR c.captured_at <= :range_to)
+      ORDER BY f.captured_at DESC, f.id DESC LIMIT 200
+  links:
+    sql: |
+      SELECT 'Definition' AS title,
+             :uri || '#oxplow.renderer=oxplow-foundation/collector' AS uri,
+             'When this collector runs and how it last went' AS description
+      FROM about
+      UNION ALL
+      SELECT 'Explore Data', uri('oxplow/page', 'page', 'explore-data', 'dataset', 'v_fact'), 'Try a query over every fact' FROM about
+view:
+  stack:
+  - id: about
+    title: About
+    viz: detail
+    from: about
+    columns:
+    - { key: name, label: Collector }
+    - { key: description, label: What it gathers }
+    - { key: last_run_at, label: Last run, format: datetime }
+    - { key: last_status, label: Last result }
+    - { key: row_counts, label: Rows after the last run, format: items }
+    empty: This collector isn't known to the project.
+  - id: recorded
+    title: Facts it recorded
+    viz: table
+    from: recorded
+    hide_empty: true
+    columns:
+    - { key: captured_at, label: Captured, format: datetime }
+    - { key: measure_key, label: Measure }
+    - { key: value, label: Value }
+    - { key: subject, label: Subject }
+    - { key: path, label: Path }
+    - { key: branch, label: Branch }
+see_also:
+  - { from: links }

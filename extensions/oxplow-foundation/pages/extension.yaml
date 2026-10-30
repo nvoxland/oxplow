@@ -57,7 +57,7 @@ loaders:
   commands:
     sql: |
       SELECT m.id AS title, m.summary AS description,
-             CASE WHEN d.resource IS NOT NULL THEN m.uri END AS link
+             CASE WHEN d.resource IS NOT NULL THEN m.uri || '#oxplow.renderer=oxplow-foundation/command' END AS link
       FROM about a JOIN v_command m ON m.extension = a.extension
            LEFT JOIN drawn d ON d.resource = 'oxplow/command'
       ORDER BY m.id
@@ -89,14 +89,14 @@ loaders:
   collectors:
     sql: |
       SELECT k.id AS title, k.description,
-             CASE WHEN d.resource IS NOT NULL THEN k.uri END AS link
+             CASE WHEN d.resource IS NOT NULL THEN k.uri || '#oxplow.renderer=oxplow-foundation/collector' END AS link
       FROM about a JOIN v_collector k ON k.extension = a.extension
            LEFT JOIN drawn d ON d.resource = 'oxplow/collector'
       ORDER BY k.id
   metrics:
     sql: |
       SELECT m.title, m.description,
-             CASE WHEN d.resource IS NOT NULL THEN c.uri END AS link
+             CASE WHEN d.resource IS NOT NULL THEN c.uri || '#oxplow.renderer=oxplow-foundation/metric-definition' END AS link
       FROM about a JOIN v_contribution c ON c.extension = a.extension AND c.kind = 'metric'
            JOIN v_metric_spec m ON m.key = c.local
            LEFT JOIN drawn d ON d.resource = 'oxplow/metric'
@@ -104,7 +104,7 @@ loaders:
   measures:
     sql: |
       SELECT m.title, m.description,
-             CASE WHEN d.resource IS NOT NULL THEN c.uri END AS link
+             CASE WHEN d.resource IS NOT NULL THEN c.uri || '#oxplow.renderer=oxplow-foundation/measure' END AS link
       FROM about a JOIN v_contribution c ON c.extension = a.extension AND c.kind = 'measure'
            JOIN v_measure m ON m.key = c.local
            LEFT JOIN drawn d ON d.resource = 'oxplow/measure'
@@ -112,7 +112,7 @@ loaders:
   dimensions:
     sql: |
       SELECT m.label AS title, m.description,
-             CASE WHEN d.resource IS NOT NULL THEN c.uri END AS link
+             CASE WHEN d.resource IS NOT NULL THEN c.uri || '#oxplow.renderer=oxplow-foundation/dimension' END AS link
       FROM about a JOIN v_contribution c ON c.extension = a.extension AND c.kind = 'dimension'
            JOIN v_dimension m ON m.key = c.local
            LEFT JOIN drawn d ON d.resource = 'oxplow/dimension'
@@ -120,7 +120,7 @@ loaders:
   resources:
     sql: |
       SELECT r.label AS title, r.description,
-             CASE WHEN d.resource IS NOT NULL THEN c.uri END AS link
+             CASE WHEN d.resource IS NOT NULL THEN c.uri || '#oxplow.renderer=oxplow-foundation/resource' END AS link
       FROM about a JOIN v_contribution c ON c.extension = a.extension AND c.kind = 'resource'
            JOIN v_resource r ON r.resource = c.global_name
            LEFT JOIN drawn d ON d.resource = 'oxplow/resource'

@@ -8,3 +8,4 @@ expect:
     contains:
       - { title: oxplow-foundation, uri: "oxplow:oxplow/extension?name=oxplow-foundation" }
       - { title: Collectors, uri: "oxplow:oxplow/page?page=collectors" }
+      - { title: Data, uri: "oxplow:oxplow/collector?collector=oxplow-foundation/oxplow.effort_test_outcome#oxplow.renderer=oxplow-foundation/collector-data" }

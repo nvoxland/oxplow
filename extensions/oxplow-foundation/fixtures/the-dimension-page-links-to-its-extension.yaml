@@ -7,3 +7,4 @@ expect:
   see_also:
     contains:
       - { title: oxplow-foundation, uri: "oxplow:oxplow/extension?name=oxplow-foundation" }
+      - { title: Data, uri: "oxplow:oxplow/dimension?dimension=oxplow.language#oxplow.renderer=oxplow-foundation/dimension-data" }

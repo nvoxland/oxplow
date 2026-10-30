@@ -1,0 +1,7 @@
+# A component's commands open each command's definition, not its runs.
+when: { page: oxplow-foundation/custom-component, params: { uri: "oxplow:oxplow/custom_component?custom_component=oxplow-foundation/explore-data" } }
+expect:
+  loaders:
+    commands:
+      rows:
+        - items: '[{"text":"oxplow.page.draft_with_agent","hint":"Start a prompt asking your agent to build a page, in its input, unsent.","uri":"oxplow:oxplow/command?command=oxplow.page.draft_with_agent#oxplow.renderer=oxplow-foundation/command"}]'

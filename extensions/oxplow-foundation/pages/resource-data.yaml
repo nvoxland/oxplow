@@ -1,0 +1,62 @@
+title: Resource data
+description: The instances of one kind of resource — the rows of the dataset that holds them.
+label: '{{row.name}} data'
+icon: file-text
+for: oxplow/resource
+default: true
+# Offered only for a kind some dataset holds; the others have Definition alone.
+accepts: { content: resolved }
+params:
+- name: uri
+  label: Resource
+- name: limit
+  type: choice
+  role: filter
+  label: Rows
+  options: [{ value: '50', label: '50' }, { value: '200', label: '200' }, { value: '1000', label: '1000' }]
+  default: '200'
+answers:
+- {"question":"Which instances of this kind of resource are there?","about":"oxplow/resource","params":{"uri":"oxplow:oxplow/resource?resource=oxplow-foundation/stream"},"skill":"oxplow-extension"}
+loaders:
+  # One row when the kind resolves to a published dataset.
+  resolved:
+    sql: |
+      SELECT r.label AS name, r.description, d.view
+      FROM content n JOIN v_contribution c ON c.uri = n.uri
+           JOIN v_resource r ON r.resource = c.global_name
+           JOIN v_dataset d ON d.view = r.resolve
+      WHERE c.kind = 'resource'
+  q:
+    sql: |
+      SELECT 'SELECT * FROM "' || replace(a.view, '"', '""') || '" LIMIT '
+             || CASE WHEN :limit IN ('50', '1000') THEN :limit ELSE '200' END AS sql
+      FROM resolved a
+  instances:
+    command: oxplow.sql.query
+    args: { sql: { from: q.sql }, limit: 1000 }
+    refresh: manual
+  links:
+    sql: |
+      SELECT 'Definition' AS title,
+             :uri || '#oxplow.renderer=oxplow-foundation/resource' AS uri,
+             'How its URIs are written and the pages that draw it' AS description
+      FROM resolved
+      UNION ALL
+      SELECT 'Explore Data', uri('oxplow/page', 'page', 'explore-data', 'dataset', view), 'Try a query over this dataset' FROM resolved
+view:
+  stack:
+  - id: about
+    title: About
+    viz: detail
+    from: resolved
+    columns:
+    - { key: name, label: Kind }
+    - { key: description, label: What it is }
+    - { key: view, label: Held in }
+  - id: instances
+    title: Instances
+    viz: table
+    from: instances
+    empty: There are none yet.
+see_also:
+  - { from: links }

@@ -5,4 +5,4 @@ expect:
     commands:
       rows:
         contains:
-          - { link: "oxplow:oxplow/command?command=oxplow.agent.draft" }
+          - { link: "oxplow:oxplow/command?command=oxplow.agent.draft#oxplow.renderer=oxplow-foundation/command" }

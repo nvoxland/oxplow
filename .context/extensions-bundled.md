@@ -165,6 +165,23 @@ screens and oxplow-bundled's add the review and analysis:
   (`for: oxplow/<kind>`) that draws its `v_contribution.uri` with its full
   definition, its extension and where it is declared. The Extension page's
   tables link a row to it.
+- **Data is the default view, Definition the other mode.** A kind that has
+  data opens on a simple raw page, `<kind>-data` (`dataset-data`,
+  `measure-data`, `dimension-data`, `command-data`, `collector-data`,
+  `resource-data`; a metric's is `metric-detail`), with `default: true`; the
+  kind's definition page above (`dataset-definition`, `metric-definition`
+  for the new two) is the alternate, in Open With. A data page is a title,
+  the subject's name and one line, then the rows in a table with a few
+  filters in the rail; a dataset's rows come from `oxplow.sql.query` over a
+  query a `sql` loader builds from the page's params, only from names in
+  `v_dataset` and `v_field`, with values quoted. `resource-data` is
+  offered only for a kind that resolves to a dataset (`accepts: { content:
+  resolved }`), so the others have Definition alone. Each data page's See
+  also has Definition and each definition page's has Data, linked as the
+  same URI with `#oxplow.renderer=oxplow-foundation/<page>`. A page about
+  definitions (the Extension page's tables, the definition pages' links to
+  each other, the data catalog) links the same way, pinning the definition
+  renderer, because the bare URI opens the data view.
 - **Dashboards and review.** `planning`, `review`, `quality` and `usage`;
   the code-quality `findings`; the `change-review` page (treemap,
   look-here-first, functions, co-change, zones) mounted in the

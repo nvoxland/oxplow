@@ -55,6 +55,14 @@ loaders:
     sql: |
       SELECT a.extension AS title, a.extension_target AS uri, e.description
       FROM about a LEFT JOIN v_extension e ON e.name = a.extension
+  # Its data page is offered only for a kind some dataset holds.
+  data:
+    sql: |
+      SELECT 'Data' AS title, :uri || '#oxplow.renderer=oxplow-foundation/resource-data' AS uri,
+             'The instances of this kind' AS description
+      FROM v_contribution c JOIN v_resource r ON r.resource = c.global_name
+           JOIN v_dataset d ON d.view = r.resolve
+      WHERE c.kind = 'resource' AND c.uri = :uri
 view:
   stack:
   - id: about
@@ -87,3 +95,4 @@ view:
     - { key: description, label: What it is }
 see_also:
   - { from: related }
+  - { from: data }

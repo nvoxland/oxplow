@@ -44,7 +44,7 @@ loaders:
       WHERE c.kind = 'measure' AND c.uri = :uri
   metrics:
     sql: |
-      SELECT s.title, s.description, 'oxplow:oxplow/metric?metric=' || s.key AS uri
+      SELECT s.title, s.description, 'oxplow:oxplow/metric?metric=' || s.key || '#oxplow.renderer=oxplow-foundation/metric-definition' AS uri
       FROM v_contribution c JOIN v_measure m ON m.key = c.local
            JOIN v_metric_spec s ON s.source_measure = m.key
       WHERE c.kind = 'measure' AND c.uri = :uri
@@ -54,6 +54,11 @@ loaders:
     sql: |
       SELECT a.extension AS title, a.extension_target AS uri, e.description
       FROM about a LEFT JOIN v_extension e ON e.name = a.extension
+  data:
+    sql: |
+      SELECT 'Data' AS title, :uri || '#oxplow.renderer=oxplow-foundation/measure-data' AS uri,
+             'The facts this measure recorded' AS description
+      FROM about
 view:
   stack:
   - id: about
@@ -86,4 +91,5 @@ view:
     - { key: description, label: What it is }
 see_also:
   - { from: related }
+  - { from: data }
   - { page: oxplow-foundation/metrics-recorded }

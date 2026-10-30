@@ -49,6 +49,11 @@ loaders:
              uri('oxplow/page', 'page', 'extension-problems') || '#extension=' || h.extension AS uri,
              'What is wrong in ' || h.extension AS description
       FROM v_contribution_health h WHERE h.uri = :uri AND h.state <> 'ok'
+  data:
+    sql: |
+      SELECT 'Data' AS title, :uri || '#oxplow.renderer=oxplow-foundation/collector-data' AS uri,
+             'What this collector recorded' AS description
+      FROM about
 view:
   stack:
   - id: about
@@ -74,5 +79,6 @@ view:
     empty: Collector not found.
 see_also:
   - { from: related }
+  - { from: data }
   - { from: problems }
   - { page: oxplow-foundation/collectors }

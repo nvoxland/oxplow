@@ -7,3 +7,4 @@ expect:
   see_also:
     contains:
       - { title: oxplow-foundation, uri: "oxplow:oxplow/extension?name=oxplow-foundation" }
+      - { title: Data, uri: "oxplow:oxplow/command?command=oxplow.agent.draft#oxplow.renderer=oxplow-foundation/command-data" }

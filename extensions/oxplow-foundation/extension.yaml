@@ -391,6 +391,30 @@ intent:
     - name: command-data-lists-its-runs-newest-first
       input: { page: command-data, params: { uri: "oxplow:oxplow/command?command=oxplow.work_item.create" } }
       expect: a command's audited runs, newest first, narrowed by outcome, who and date
+    - name: collector-data-lists-its-last-run-counts-and-the-facts-it-recorded
+      input: { page: collector-data, params: { uri: "oxplow:oxplow/collector?collector=oxplow-foundation/oxplow.effort_test_outcome", range: all } }
+      expect: the rows a collector's last run counted and the facts it recorded
+    - name: resource-data-lists-the-instances-of-a-kind-that-a-dataset-holds
+      input: { page: resource-data, params: { uri: "oxplow:oxplow/resource?resource=oxplow-foundation/stream" } }
+      expect: the instances of a kind, the rows of the dataset it resolves to
+    - name: resource-data-is-offered-only-for-a-kind-a-dataset-holds
+      input: { command: oxplow.page.renderers, input: { uri: "oxplow:oxplow/resource?resource=oxplow-foundation/stream" } }
+      expect: a kind a dataset holds opens on its data with Definition as the other mode; a kind no dataset holds has Definition alone
+    - name: the-resource-page-offers-data-only-for-a-kind-a-dataset-holds
+      input: { page: resource, params: { uri: "oxplow:oxplow/resource?resource=oxplow-foundation/stream" } }
+      expect: a kind a dataset holds links to its data; a kind none holds does not
+    - name: the-metric-definition-says-what-a-metric-is-built-from
+      input: { page: metric-definition, params: { uri: "oxplow:oxplow/metric?metric=agent.tokens.total" } }
+      expect: a metric's unit, aggregation, targets, source measure, expression and scope
+    - name: the-measure-page-links-its-metrics-to-their-definitions
+      input: { page: measure, params: { uri: "oxplow:oxplow/measure?measure=oxplow.tokens" } }
+      expect: a measure's metrics open each metric's definition
+    - name: the-component-page-links-its-commands-to-their-definitions
+      input: { page: custom-component, params: { uri: "oxplow:oxplow/custom_component?custom_component=oxplow-foundation/explore-data" } }
+      expect: a component's commands open each command's definition
+    - name: the-extension-page-links-each-contribution-to-its-definition
+      input: { page: extension, params: { uri: "oxplow:oxplow/extension?name=oxplow-foundation", name: oxplow-foundation } }
+      expect: each contribution table opens the definition, not the data
 # What the coding agent reads about the work list: its commands (with no
 # list they're a sink), and oxplow's tasks' ready queue while they are it.
 skills:
