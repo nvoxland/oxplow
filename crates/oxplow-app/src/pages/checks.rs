@@ -255,10 +255,15 @@ pub fn layout_warnings(page: &Page) -> Vec<String> {
         ));
     }
     if let NodeKind::Stack { children } = &page.view.kind {
-        if children.len() > MAX_SECTIONS {
+        // The sections a page always has: a `hide_empty` one shows only when
+        // its subject has rows for it.
+        let always = children
+            .iter()
+            .filter(|c| !matches!(&c.kind, NodeKind::Viz { config, .. } if config.hide_empty))
+            .count();
+        if always > MAX_SECTIONS {
             out.push(format!(
-                "{} sections — a page reads best with {MAX_SECTIONS} at most; split it",
-                children.len()
+                "{always} sections — a page reads best with {MAX_SECTIONS} at most; split it"
             ));
         }
     }
