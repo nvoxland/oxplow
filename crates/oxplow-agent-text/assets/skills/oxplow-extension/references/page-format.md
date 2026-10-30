@@ -82,6 +82,13 @@ examples.
   first row (else its row count). `alert`: `{ min_rows: 1 }` or `{ column,
   below | above }`, with a `label`: marks the page as an alert while it fires.
 - `rail:` a second node tree drawn in the page's rail (`view-nodes.md`).
+- `see_also:` related pages, drawn as "See also" in the page's rail after
+  Contents: each entry is `{ page: <page id>, params? }` (a link titled with
+  that page's title; `params` bind as an embed's) or `{ from: <loader> }` (a
+  link per row, from its `title` and `uri` columns, `description` as the
+  hover). Use it for pages about the same thing and the list a thing belongs
+  to, not for the page's own content. A loader that fails or a page that is
+  not there gives no link.
 
 ## Params
 

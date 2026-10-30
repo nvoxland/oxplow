@@ -37,6 +37,11 @@ loaders:
              CASE WHEN d.promoted THEN 'Yes, each value is stored apart' ELSE 'No, it is chosen when you ask' END AS stored_per_value
       FROM v_contribution c JOIN v_dimension d ON d.key = c.local
       WHERE c.kind = 'dimension' AND c.uri = :uri
+  # The extension that declares it: one link.
+  related:
+    sql: |
+      SELECT a.extension AS title, a.extension_target AS uri, e.description
+      FROM about a LEFT JOIN v_extension e ON e.name = a.extension
 view:
   stack:
   - id: about
@@ -58,3 +63,5 @@ view:
     - { key: describes, label: Describes }
     - { key: stored_per_value, label: Stored per value }
     empty: Dimension not found.
+see_also:
+  - { from: related }

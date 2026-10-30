@@ -46,3 +46,21 @@ async fn a_loader_that_failed_says_why_where_its_node_is() {
     let text = page_text(&svc, &svc.layout.project_dir, &r).await.unwrap();
     assert!(text.contains("isn't a read"), "{text}");
 }
+
+/// "See also" ends the page's text, a `- [title](uri)` line per link;
+/// a page with none has no such heading.
+#[tokio::test]
+async fn see_also_ends_the_text_and_is_absent_without_links() {
+    let (_dir, svc) = fixture().await;
+    let r = run(&svc, "acme/related", &[]).await;
+    let text = page_text(&svc, &svc.layout.project_dir, &r).await.unwrap();
+    assert!(
+        text.ends_with(
+            "\n## See also\n\n- [Numbers](oxplow:oxplow/page?n=3&page=acme/numbers)\n- [Docs](oxplow:oxplow/page?page=acme/numbers)\n"
+        ),
+        "{text}"
+    );
+    let r = run(&svc, "acme/numbers", &[("n", SqlCell::Int(2))]).await;
+    let text = page_text(&svc, &svc.layout.project_dir, &r).await.unwrap();
+    assert!(!text.contains("See also"), "{text}");
+}

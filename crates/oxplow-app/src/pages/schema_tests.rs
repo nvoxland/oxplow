@@ -1021,3 +1021,35 @@ fn hide_empty_with_an_empty_text_is_refused() {
     .unwrap_err();
     assert!(err.contains("`hide_empty` leaves it out"), "{err}");
 }
+
+/// `see_also:` is a list of `{ page, params? }` and `{ from }` entries; an
+/// entry that is neither, both, or names a loader or a param that is not
+/// there is refused saying so.
+#[test]
+fn see_also_entries_parse_and_are_checked() {
+    let ok = page(
+        "title: T\nparams: [{ name: n }]\nloaders:\n  q: { rows: [{ title: A, uri: 'oxplow:oxplow/page?page=x' }] }\nview: { viz: table, from: q }\nsee_also:\n  - { page: other, params: { n: { param: n } } }\n  - { from: q }\n",
+    )
+    .expect("loads");
+    assert_eq!(ok.see_also.len(), 2);
+    assert!(matches!(&ok.see_also[0], SeeAlsoDecl::Page { page, .. } if page == "other"));
+    assert!(matches!(&ok.see_also[1], SeeAlsoDecl::Rows { from } if from == "q"));
+    let base = "title: T\nloaders:\n  q: { rows: [{ a: 1 }] }\nview: { viz: table, from: q }\n";
+    for (entry, want) in [
+        ("{ page: a, from: q }", "an entry is"),
+        ("{}", "an entry is"),
+        ("{ from: nope }", "no loader `nope`"),
+        ("{ from: q, params: { n: 1 } }", "`params` go with `page:`"),
+        (
+            "{ page: a, params: { n: { param: ghost } } }",
+            "isn't one of the page's params",
+        ),
+        (
+            "{ page: a, params: { n: { from: ghost.col } } }",
+            "no loader `ghost`",
+        ),
+    ] {
+        let why = refused(&format!("{base}see_also:\n  - {entry}\n"));
+        assert!(why.contains(want), "{entry}: {why}");
+    }
+}

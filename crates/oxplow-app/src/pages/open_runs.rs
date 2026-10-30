@@ -619,6 +619,7 @@ mod diff_tests {
             rail: None,
             alert: None,
             badge: None,
+            see_also: Vec::new(),
         }
     }
 

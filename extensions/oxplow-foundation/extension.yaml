@@ -259,6 +259,39 @@ intent:
     - name: every-shipped-resource-dimension-and-implementation-describes-itself
       input: { sql: "SELECT count(*) FROM v_resource WHERE coalesce(description, '') = ''" }
       expect: foundation's resources, dimensions and implementations each carry a one-sentence description
+    - name: the-command-page-links-to-its-extension
+      input: { page: command, params: { uri: 'oxplow:oxplow/command?command=oxplow.agent.draft' } }
+      expect: its see-also links name the extension that declares it
+    - name: the-skill-page-links-to-its-extension
+      input: { page: skill, params: { uri: 'oxplow:oxplow/skill?skill=oxplow-foundation/work-items' } }
+      expect: its see-also links name the extension that declares it
+    - name: the-custom-component-page-links-to-its-extension
+      input: { page: custom-component, params: { uri: 'oxplow:oxplow/custom_component?custom_component=oxplow-foundation/integrations' } }
+      expect: its see-also links name the extension that declares it
+    - name: the-slot-page-links-to-its-extension
+      input: { page: slot, params: { uri: 'oxplow:oxplow/slot?slot=oxplow-foundation/oxplow-foundation.tasks.sections-0' } }
+      expect: its see-also links name the extension that declares it
+    - name: the-dimension-page-links-to-its-extension
+      input: { page: dimension, params: { uri: 'oxplow:oxplow/dimension?dimension=oxplow.language' } }
+      expect: its see-also links name the extension that declares it
+    - name: the-resource-page-links-to-its-extension
+      input: { page: resource, params: { uri: 'oxplow:oxplow/resource?resource=oxplow-foundation/commit' } }
+      expect: its see-also links name the extension that declares it
+    - name: the-implementation-page-links-to-its-extension
+      input: { page: implementation, params: { uri: 'oxplow:oxplow/implementation?implementation=oxplow-foundation/work_items.oxplow' } }
+      expect: its see-also links name the extension that declares it
+    - name: the-measure-page-links-to-its-extension-and-the-list-it-belongs-to
+      input: { page: measure, params: { uri: 'oxplow:oxplow/measure?measure=oxplow.tokens' } }
+      expect: its see-also links name the extension that declares it and the list it belongs to
+    - name: the-collector-page-links-to-its-extension-and-the-list-it-belongs-to
+      input: { page: collector, params: { uri: 'oxplow:oxplow/collector?collector=oxplow-foundation/oxplow.effort_test_outcome' } }
+      expect: its see-also links name the extension that declares it and the list it belongs to
+    - name: the-extension-page-links-to-all-extensions-and-its-problems
+      input: { page: extension, params: { uri: 'oxplow:oxplow/extension?name=oxplow-foundation', name: oxplow-foundation } }
+      expect: its see-also links are Extensions and Extension problems for this extension
+    - name: the-commit-page-links-to-git-history
+      input: { page: commit, params: { uri: 'oxplow:oxplow/commit?sha=abc1234', sha: abc1234, stream_id: 1 } }
+      expect: its see-also link is Git History
     - name: the-extension-page-reads-a-shipped-extension
       input: { page: extension, params: { uri: 'oxplow:oxplow/extension?name=oxplow-foundation', name: oxplow-foundation } }
       expect: where it comes from, what runs, its pages with a link to each Definition, what it may reach in words, its deployments, and a slot for its runs

@@ -11,7 +11,7 @@ import { definitionUri } from "./viewActions.js";
 import { humanize } from "../kit/humanize.js";
 import { RailGroup } from "../kit/RailGroup.js";
 import type { TabRef } from "../tabs/tabState.js";
-import type { PageParam, PageProvenance } from "../tauri-bridge/generated/bindings.js";
+import type { PageParam, PageProvenance, PageRun } from "../tauri-bridge/generated/bindings.js";
 
 /** The row a click picked for a selection param: its value and what the
  *  row showed, labelled as its columns are. */
@@ -59,6 +59,23 @@ export function RailSelection({
           </div>
         );
       })}
+    </RailGroup>
+  );
+}
+
+/** The page's "See also" links (its `see_also:`), after Contents: related
+ *  pages and the list a thing belongs to. A description is a link's hover. */
+export function RailSeeAlso({ run, onOpenPage }: { run: PageRun; onOpenPage?(ref: TabRef): void }) {
+  if (run.seeAlso.length === 0) return null;
+  return (
+    <RailGroup title="See also" testId="page-rail-see-also">
+      <nav aria-label="See also" className="ox-contents">
+        {run.seeAlso.map((l) => (
+          <button key={l.uri} type="button" className="ox-contents-item" title={l.description ?? undefined} onClick={() => onOpenPage?.({ id: l.uri })}>
+            {l.title}
+          </button>
+        ))}
+      </nav>
     </RailGroup>
   );
 }

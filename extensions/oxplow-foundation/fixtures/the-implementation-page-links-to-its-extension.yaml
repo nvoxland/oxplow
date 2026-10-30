@@ -1,0 +1,9 @@
+# "See also": the page links to the extension that declares it.
+when:
+  page: oxplow-foundation/implementation
+  params:
+    uri: "oxplow:oxplow/implementation?implementation=oxplow-foundation/work_items.oxplow"
+expect:
+  see_also:
+    contains:
+      - { title: oxplow-foundation, uri: "oxplow:oxplow/extension?name=oxplow-foundation" }

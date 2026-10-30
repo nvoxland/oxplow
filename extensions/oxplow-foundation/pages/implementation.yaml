@@ -42,6 +42,11 @@ loaders:
       FROM v_contribution c JOIN v_capability_provider i
            ON i.extension = c.extension AND i.capability || '.' || i.provider = c.local
       WHERE c.kind = 'implementation' AND c.uri = :uri
+  # The extension that declares it: one link.
+  related:
+    sql: |
+      SELECT a.extension AS title, a.extension_target AS uri, e.description
+      FROM about a LEFT JOIN v_extension e ON e.name = a.extension
 view:
   stack:
   - id: about
@@ -64,3 +69,5 @@ view:
     - { key: chosen, label: Chosen }
     - { key: feature_items, label: It can, format: items }
     empty: Implementation not found.
+see_also:
+  - { from: related }

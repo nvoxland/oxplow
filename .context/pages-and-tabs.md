@@ -604,10 +604,10 @@ run takes new params itself (`setParams`). `PageHost` takes a `PageKey`,
 holds its run (`usePageRunWith` over `usePageRunsStore()`: the
 `PageRunsContext`'s store, else the window's; `RunState` carries the
 `runId`, `rerun` is Refresh) and draws the `tabs/Page.tsx` chrome:
-Contents and Selection (the rows picked, `picked` history state) in the
+Contents, See also (the page's `see_also:` links, `RailSeeAlso`) and Selection (the rows picked, `picked` history state) in the
 rail (`pages/railGroups.tsx`), which `railHas` (`pages/railHas.ts`) decides
 from the run: with nothing in it (no switch, `filter` or `selection` param,
-`rail:` node or open save form, and no Contents) `rightRail` is undefined,
+`rail:` node, `see_also` link or open save form, and no Contents) `rightRail` is undefined,
 `Page` draws no Details card and the body takes the full width. Contents is
 automatic only for a page that does not fill: two or more titled
 sections (`CONTENTS_FROM`; a page with one gets none) or markdown that may

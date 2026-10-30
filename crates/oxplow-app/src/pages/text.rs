@@ -27,6 +27,12 @@ pub async fn page_text(
         out.push_str("\n## Rail\n");
         write_tree(svc, root, run, rail, "", 3, &mut out).await?;
     }
+    if !run.see_also.is_empty() {
+        out.push_str("\n## See also\n\n");
+        for link in &run.see_also {
+            out.push_str(&format!("- [{}]({})\n", link.title, link.uri));
+        }
+    }
     Ok(out)
 }
 

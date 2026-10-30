@@ -23,6 +23,9 @@ A page whose whole `view:` is one node needs no title, and a `slot` or
 `embed` takes its title from the page it shows (an embed's own `title`
 replaces it).
 
+Related pages are not a node: the page key `see_also:` (`page-format.md`) puts
+them in the rail as "See also", after Contents.
+
 ## Layout
 
 ```yaml

@@ -34,6 +34,11 @@ loaders:
       SELECT CASE k.kind WHEN 'command' THEN 'A slash command' WHEN 'skill' THEN 'A skill an agent loads when it applies' ELSE k.kind END AS is_a,
              NULLIF((SELECT json_group_array(json_object('text', j.value)) FROM json_each(k.needs) j), '[]') AS needs_items
       FROM v_skill k WHERE k.uri = :uri
+  # The extension that declares it: one link.
+  related:
+    sql: |
+      SELECT a.extension AS title, a.extension_target AS uri, e.description
+      FROM about a LEFT JOIN v_extension e ON e.name = a.extension
 view:
   stack:
   - id: about
@@ -53,3 +58,5 @@ view:
     - { key: is_a, label: It is }
     - { key: needs_items, label: Needs, format: items }
     empty: Skill not found.
+see_also:
+  - { from: related }

@@ -39,6 +39,11 @@ loaders:
       SELECT json_group_array(json_object('text', j.value, 'hint', v.summary, 'uri', v.uri)) AS items
       FROM v_custom_component k, json_each(k.commands) j LEFT JOIN v_command v ON v.id = j.value
       WHERE k.uri = :uri HAVING count(*) > 0
+  # The extension that declares it: one link.
+  related:
+    sql: |
+      SELECT a.extension AS title, a.extension_target AS uri, e.description
+      FROM about a LEFT JOIN v_extension e ON e.name = a.extension
 view:
   stack:
   - id: about
@@ -66,3 +71,5 @@ view:
     hide_empty: true
     columns:
     - { key: items, label: Commands, format: items }
+see_also:
+  - { from: related }

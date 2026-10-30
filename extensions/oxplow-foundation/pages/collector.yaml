@@ -35,10 +35,13 @@ loaders:
                             WHEN 'run' THEN 'On a run'
                             ELSE k.trigger END AS runs,
              CASE WHEN k.enabled THEN 'Yes' ELSE 'No' || COALESCE(': ' || k.disabled_reason, '') END AS enabled,
-             k.state, k.last_run_at, k.last_status, k.error, k.next_due_at,
-             (SELECT p.uri FROM v_page p WHERE p.id = 'oxplow-foundation/collectors') AS collectors_target,
-             'Every collector and its runs' AS collectors
+             k.state, k.last_run_at, k.last_status, k.error, k.next_due_at
       FROM v_collector k WHERE k.uri = :uri
+  # The extension that declares it: one link.
+  related:
+    sql: |
+      SELECT a.extension AS title, a.extension_target AS uri, e.description
+      FROM about a LEFT JOIN v_extension e ON e.name = a.extension
 view:
   stack:
   - id: about
@@ -62,5 +65,7 @@ view:
     - { key: last_status, label: Last result }
     - { key: error, label: Error }
     - { key: next_due_at, label: Next due, format: datetime }
-    - { key: collectors, label: See also, link: { kind: page, from: collectors_target } }
     empty: Collector not found.
+see_also:
+  - { from: related }
+  - { page: oxplow-foundation/collectors }

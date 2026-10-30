@@ -44,6 +44,11 @@ loaders:
              CASE WHEN k.undoable THEN 'Yes' ELSE 'No' END AS can_undo,
              CASE WHEN k.ui_label IS NOT NULL THEN k.ui_label || COALESCE(' (in ' || k.ui_group || ')', '') END AS menu
       FROM v_command k WHERE k.uri = :uri
+  # The extension that declares it: one link.
+  related:
+    sql: |
+      SELECT a.extension AS title, a.extension_target AS uri, e.description
+      FROM about a LEFT JOIN v_extension e ON e.name = a.extension
 view:
   stack:
   - id: about
@@ -66,3 +71,5 @@ view:
     - { key: can_undo, label: Can be undone }
     - { key: menu, label: Shown in menus as }
     empty: Command not found.
+see_also:
+  - { from: related }

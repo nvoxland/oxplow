@@ -19,7 +19,7 @@ import { Contents } from "../viz/Contents.js";
 import { VizStreamContext } from "../viz/VizStream.js";
 import type { Stream } from "../api.js";
 import { identityOf } from "../uri/uri.js";
-import { PageAbout, useOutOfDate, type PickedRow } from "./railGroups.js";
+import { PageAbout, RailSeeAlso, useOutOfDate, type PickedRow } from "./railGroups.js";
 import { TabModal } from "../components/TabModal.js";
 import type { PageAction } from "../kit/actions.js";
 import { Loading } from "../kit/Loading.js";
@@ -252,6 +252,7 @@ export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, re
         run && hasRail ? (
           <>
             {contentsHas(run, fills) ? <Contents root={body} /> : null}
+            <RailSeeAlso run={run} onOpenPage={onOpenPage} />
             {saveAs && viewFile ? <SaveTempViewForm key={saveAs} kind={saveAs} file={viewFile} streamId={streamId} initialTitle={title} onClose={() => setSaveAs(null)} onSaved={open} /> : null}
             <PageRail run={run} runId={runId} onApply={apply} picked={picked} streamId={streamId} onOpenPage={onOpenPage} />
           </>

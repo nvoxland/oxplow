@@ -77,6 +77,8 @@ pub struct Page {
     pub view: Node,
     /// A second tree drawn in the page's rail.
     pub rail: Option<Node>,
+    /// Related pages, drawn as "See also" in the page's Details rail.
+    pub see_also: Vec<SeeAlsoDecl>,
     pub origin: PageProvenance,
 }
 
@@ -151,6 +153,51 @@ pub struct PageAnswer {
     /// own extensions).
     #[serde(default)]
     pub skill: Option<String>,
+}
+
+/// One `see_also:` entry: a link to a page, or one link per row of a
+/// loader.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum SeeAlsoDecl {
+    /// A link to a page, labeled with its title; `params` bind as an
+    /// embed's do (a param, an earlier loader's column, a literal).
+    Page {
+        page: String,
+        params: BTreeMap<String, ArgSource>,
+    },
+    /// One link per row of a loader: its `title` and `uri` columns, and
+    /// `description` (when present) as the hover.
+    Rows { from: String },
+}
+
+/// A `see_also:` entry as the page file holds it.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SeeAlsoFile {
+    #[serde(default)]
+    page: Option<String>,
+    #[serde(default)]
+    params: BTreeMap<String, ArgSource>,
+    #[serde(default)]
+    from: Option<String>,
+}
+
+impl SeeAlsoFile {
+    fn into_decl(self) -> Result<SeeAlsoDecl, String> {
+        match (self.page, self.from) {
+            (Some(page), None) => Ok(SeeAlsoDecl::Page {
+                page,
+                params: self.params,
+            }),
+            (None, Some(from)) if self.params.is_empty() => Ok(SeeAlsoDecl::Rows { from }),
+            (None, Some(_)) => Err("see_also: `params` go with `page:`, not `from:`".into()),
+            _ => Err(
+                "see_also: an entry is `{ page: <page id>, params? }` or `{ from: <loader> }`"
+                    .into(),
+            ),
+        }
+    }
 }
 
 /// What a page's badge counts: a loader's first row's `column` (else
@@ -404,6 +451,9 @@ struct PageFile {
     view: serde_yaml::Value,
     #[serde(default)]
     rail: Option<serde_yaml::Value>,
+    /// Related pages: "See also" in the Details rail.
+    #[serde(default)]
+    see_also: Vec<SeeAlsoFile>,
 }
 
 /// A resource page's `content:` key.
@@ -628,6 +678,11 @@ pub fn parse_page(
         ));
     }
     let alert = file.alert.map(AlertFile::into_alert).transpose()?;
+    let see_also = file
+        .see_also
+        .into_iter()
+        .map(SeeAlsoFile::into_decl)
+        .collect::<Result<Vec<_>, _>>()?;
     for need in &file.needs {
         oxplow_domain::capability::check_need(need)?;
     }
@@ -668,6 +723,7 @@ pub fn parse_page(
         loaders,
         view,
         rail,
+        see_also,
         origin,
     };
     check_page(&page)?;
@@ -1490,6 +1546,38 @@ fn check_page(page: &Page) -> Result<(), String> {
                 "badge: there is no loader `{}` in `loaders:`",
                 b.loader
             ));
+        }
+    }
+    for entry in &page.see_also {
+        match entry {
+            SeeAlsoDecl::Rows { from } if page.loader(from).is_none() => {
+                return Err(format!(
+                    "see_also: there is no loader `{from}` in `loaders:`"
+                ));
+            }
+            SeeAlsoDecl::Page { params, .. } => {
+                for source in params.values() {
+                    match source {
+                        ArgSource::Param { param }
+                            if !page.params.iter().any(|p| &p.name == param) =>
+                        {
+                            return Err(format!(
+                                "see_also: `param: {param}` isn't one of the page's params"
+                            ));
+                        }
+                        ArgSource::Column { from } => {
+                            let loader = from.split('.').next().unwrap_or(from);
+                            if page.loader(loader).is_none() {
+                                return Err(format!(
+                                    "see_also: `from: {from}` names no loader `{loader}` in `loaders:`"
+                                ));
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            SeeAlsoDecl::Rows { .. } => {}
         }
     }
     for a in &page.answers {

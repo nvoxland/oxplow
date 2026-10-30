@@ -858,6 +858,7 @@ pub(super) fn resolve_catalog(
     }
     descriptors::check_catalog(&mut out);
     warn_unplaced_mounts(&mut out);
+    warn_unknown_see_also(&mut out);
     public_contracts::activate(&mut out);
     let out: Vec<Extension> = out
         .into_iter()
@@ -910,6 +911,37 @@ fn warn_unplaced_mounts(out: &mut [Extension]) {
                     m.page
                 )),
                 Some(_) => None,
+            })
+            .collect();
+        ext.warnings.extend(warnings);
+    }
+}
+
+/// A `see_also:` link to another extension's page that no enabled extension
+/// has shows nowhere: a warning on the page's extension (the other may only
+/// be off). A page of its own extension that is missing is an error at load.
+fn warn_unknown_see_also(out: &mut [Extension]) {
+    let known: Vec<String> = out
+        .iter()
+        .filter(|e| e.enabled)
+        .flat_map(|e| e.page_files.iter().map(|p| p.id.clone()))
+        .collect();
+    for ext in out.iter_mut().filter(|e| e.enabled) {
+        let warnings: Vec<String> = ext
+            .page_files
+            .iter()
+            .flat_map(|p| {
+                p.see_also.iter().filter_map(|e| match e {
+                    crate::pages::schema::SeeAlsoDecl::Page { page: to, .. }
+                        if !known.contains(to) =>
+                    {
+                        Some(format!(
+                            "{}: see_also page `{to}` isn't loaded; the link shows nowhere",
+                            p.origin.running
+                        ))
+                    }
+                    _ => None,
+                })
             })
             .collect();
         ext.warnings.extend(warnings);
@@ -2446,6 +2478,11 @@ pub(crate) fn qualify_page_refs(page: &mut crate::pages::schema::Page) {
     }
     let extension = page.extension.clone();
     params(&extension, &mut page.params);
+    for entry in &mut page.see_also {
+        if let crate::pages::schema::SeeAlsoDecl::Page { page: to, .. } = entry {
+            whole(&extension, to);
+        }
+    }
     walk(&extension, &mut page.view);
     if let Some(rail) = &mut page.rail {
         walk(&extension, rail);
@@ -2477,6 +2514,12 @@ fn page_ref_problem(page: &crate::pages::schema::Page, slugs: &[String]) -> Opti
             ))
         })
         .collect();
+    refs.extend(page.see_also.iter().filter_map(|e| match e {
+        crate::pages::schema::SeeAlsoDecl::Page { page: to, .. } => {
+            Some(("see_also".to_string(), to.as_str(), false))
+        }
+        crate::pages::schema::SeeAlsoDecl::Rows { .. } => None,
+    }));
     for n in page.nodes() {
         let crate::pages::schema::NodeKind::Viz { config, .. } = &n.kind else {
             continue;
@@ -3627,6 +3670,22 @@ async fn prepare(
             for problem in action_column_problems(&page.actions, &first.columns) {
                 ext.errors
                     .push(format!("{}: page {problem}", page.origin.running));
+            }
+        }
+        for entry in &page.see_also {
+            let crate::pages::schema::SeeAlsoDecl::Rows { from } = entry else {
+                continue;
+            };
+            if let Some(Ok(result)) = loaders.get(from) {
+                for col in ["title", "uri"] {
+                    if !result.columns.iter().any(|c| c == col) {
+                        ext.errors.push(format!(
+                            "{}: see_also `from: {from}`: the loader must return a `{col}` column (columns: {})",
+                            page.origin.running,
+                            result.columns.join(", ")
+                        ));
+                    }
+                }
             }
         }
         for (node, viz, result) in crate::pages::checks::viz_nodes(&page, loaders) {
@@ -5300,6 +5359,50 @@ view:
             e.warnings
         );
         assert_eq!(e.intent.as_ref().unwrap().purpose, "Review agent work");
+    }
+
+    /// A `see_also:` page of the page's own extension that isn't in `pages/`
+    /// is an error and drops that page; one of another extension that is not
+    /// loaded is a warning and the page stays. A bare slug is the extension's own.
+    #[test]
+    fn see_also_names_a_page_that_is_there() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            ".oxplow/extensions/review/extension.yaml",
+            EXT_V2,
+        );
+        let page = |see_also: &str| {
+            format!("title: T\nloaders:\n  q: {{ rows: [{{ a: 1 }}] }}\nview: {{ viz: table, from: q }}\nsee_also:\n  - {see_also}\n")
+        };
+        write(
+            dir.path(),
+            ".oxplow/extensions/review/pages/tasks.yaml",
+            &page("{ page: tasks-too }"),
+        );
+        write(
+            dir.path(),
+            ".oxplow/extensions/review/pages/tasks-too.yaml",
+            &page("{ page: nope }"),
+        );
+        let e = only(dir.path(), "review");
+        assert!(
+            e.errors.iter().any(|m| m.contains("see_also page `review/nope` isn't in this extension's pages/")),
+            "{:?}",
+            e.errors
+        );
+        assert_eq!(
+            e.page_files.len(),
+            1,
+            "the page that names a missing one is dropped"
+        );
+        assert!(
+            matches!(
+                &e.page_files[0].see_also[0],
+                crate::pages::schema::SeeAlsoDecl::Page { page, .. } if page == "review/tasks-too"
+            ),
+            "a bare slug is qualified"
+        );
     }
 
     #[test]

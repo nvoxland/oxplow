@@ -308,3 +308,6 @@ actions:
   input:
     name: '{{row.extension}}'
   when: can_remove
+see_also:
+  - { page: oxplow-foundation/extensions }
+  - { page: oxplow-foundation/extension-problems, params: { extension: { from: about.extension } } }

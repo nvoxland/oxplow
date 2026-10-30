@@ -75,6 +75,21 @@ pub struct PageRun {
     /// loaders, and says what it needs instead of showing nothing.
     #[serde(default)]
     pub inactive: Option<PageInactive>,
+    /// The page's "See also" links, in order, a uri once.
+    #[serde(default)]
+    pub see_also: Vec<SeeAlso>,
+}
+
+/// A related page the run links to.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SeeAlso {
+    /// What the link says.
+    pub title: String,
+    /// What it opens.
+    pub uri: String,
+    /// The hover, when there is one.
+    pub description: Option<String>,
 }
 
 /// A page that didn't run for want of a capability.
@@ -299,6 +314,7 @@ impl<'a> PageRunner<'a> {
                     rail: None,
                     alert: None,
                     badge: None,
+                    see_also: Vec::new(),
                     inactive: Some(PageInactive {
                         message: crate::capabilities::needs_message(&unmet),
                         needs: unmet,
@@ -358,6 +374,7 @@ impl<'a> PageRunner<'a> {
                     .or_else(|| page.first_loader().map(|l| l.name.as_str()))?;
                 Some(evaluate_alert(a, &loaders.get(watched)?.result))
             });
+            let see_also = self.see_also(&page, &params, &loaders);
             Ok(PageRun {
                 inactive: None,
                 page,
@@ -367,6 +384,7 @@ impl<'a> PageRunner<'a> {
                 rail,
                 alert,
                 badge,
+                see_also,
             })
         })
     }
@@ -831,6 +849,113 @@ impl<'a> PageRunner<'a> {
 }
 
 impl PageRunner<'_> {
+    /// `page`'s "See also" links, resolved in order with a uri once. A page
+    /// that is not there, or a loader that failed, gives no link: never an
+    /// error.
+    fn see_also(
+        &self,
+        page: &Page,
+        params: &BTreeMap<String, SqlCell>,
+        loaders: &BTreeMap<String, LoaderRun>,
+    ) -> Vec<SeeAlso> {
+        use super::schema::SeeAlsoDecl;
+        use crate::pages::spec::ParamRole;
+        let mut out: Vec<SeeAlso> = Vec::new();
+        let mut push = |link: SeeAlso| {
+            if !link.title.is_empty() && !out.iter().any(|l| l.uri == link.uri) {
+                out.push(link);
+            }
+        };
+        for decl in &page.see_also {
+            match decl {
+                SeeAlsoDecl::Page {
+                    page: target,
+                    params: given,
+                } => {
+                    let Ok(child) = self.find(target) else {
+                        continue;
+                    };
+                    // The page's own URI as `v_page.uri` names it: oxplow's
+                    // own extensions' pages by slug alone.
+                    let core = self
+                        .catalog
+                        .unpinned(self.root, "a see-also link names a page by its extension")
+                        .iter()
+                        .any(|e| {
+                            e.name == child.extension
+                                && e.namespace == crate::extension::extensions::CORE_NAMESPACE
+                        });
+                    let named = if core {
+                        child.slug.clone()
+                    } else {
+                        child.id.clone()
+                    };
+                    let mut query: Vec<(String, String)> = vec![("page".into(), named)];
+                    let mut view: Vec<(String, String)> = Vec::new();
+                    for (name, value) in bind_args(given, params, loaders) {
+                        let text = match value {
+                            serde_json::Value::Null => continue,
+                            serde_json::Value::String(s) if s.is_empty() => continue,
+                            serde_json::Value::String(s) => s,
+                            other => other.to_string(),
+                        };
+                        let in_view = child.params.iter().any(|p| {
+                            p.name == name
+                                && matches!(
+                                    p.role,
+                                    Some(
+                                        ParamRole::Filter | ParamRole::Selection | ParamRole::View
+                                    )
+                                )
+                        });
+                        if in_view { &mut view } else { &mut query }.push((name, text));
+                    }
+                    let pairs = |v: &[(String, String)]| -> Vec<(String, String)> { v.to_vec() };
+                    let (query, view) = (pairs(&query), pairs(&view));
+                    let q: Vec<(&str, &str)> = query
+                        .iter()
+                        .map(|(k, v)| (k.as_str(), v.as_str()))
+                        .collect();
+                    let w: Vec<(&str, &str)> =
+                        view.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
+                    push(SeeAlso {
+                        title: child.title.clone(),
+                        uri: oxplow_domain::uri::build::of_with_view(
+                            oxplow_domain::uri::resources::PAGE,
+                            &q,
+                            &w,
+                        ),
+                        description: Some(child.description.clone()).filter(|d| !d.is_empty()),
+                    });
+                }
+                SeeAlsoDecl::Rows { from } => {
+                    let Some(run) = loaders.get(from).filter(|r| r.error.is_none()) else {
+                        continue;
+                    };
+                    let at = |name: &str| run.result.columns.iter().position(|c| c == name);
+                    let (Some(title), Some(uri)) = (at("title"), at("uri")) else {
+                        continue;
+                    };
+                    let description = at("description");
+                    let text = |row: &Vec<SqlCell>, i: usize| match row.get(i) {
+                        Some(SqlCell::Text(t)) if !t.is_empty() => Some(t.clone()),
+                        _ => None,
+                    };
+                    for row in &run.result.rows {
+                        if let (Some(title), Some(uri)) = (text(row, title), text(row, uri)) {
+                            push(SeeAlso {
+                                title,
+                                uri,
+                                description: description.and_then(|i| text(row, i)),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+        out
+    }
+
     /// The pages enabled extensions mount at `host`'s slot `slot`, by
     /// extension name.
     fn mounts(&self, host: &str, slot: &str) -> Vec<PageSlot> {

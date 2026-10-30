@@ -100,3 +100,5 @@ view:
         head: head_revision
     empty: The commit changed no files.
   - slot: sections
+see_also:
+  - { page: oxplow-foundation/git-history }

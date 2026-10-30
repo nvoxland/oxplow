@@ -49,6 +49,11 @@ loaders:
            JOIN v_metric_spec s ON s.source_measure = m.key
       WHERE c.kind = 'measure' AND c.uri = :uri
       ORDER BY s.title
+  # The extension that declares it: one link.
+  related:
+    sql: |
+      SELECT a.extension AS title, a.extension_target AS uri, e.description
+      FROM about a LEFT JOIN v_extension e ON e.name = a.extension
 view:
   stack:
   - id: about
@@ -80,3 +85,6 @@ view:
     columns:
     - { key: title, label: Metric, link: { kind: page, from: uri } }
     - { key: description, label: What it is }
+see_also:
+  - { from: related }
+  - { page: oxplow-foundation/metrics-recorded }

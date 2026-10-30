@@ -765,7 +765,8 @@ const KINDS: &[Kind] = &[
     Kind {
         key: "page",
         when: "{ page: <slug | ext/slug>, params? }",
-        expect: "{ loaders?, nodes?, text?, alert?, badge?, label?, inactive?, actions? }",
+        expect:
+            "{ loaders?, nodes?, text?, alert?, badge?, label?, inactive?, actions?, see_also? }",
     },
     Kind {
         key: "form",
@@ -3491,7 +3492,7 @@ async fn view_context(
 /// example's, and `bind` to keep a value of the run) runs the page again
 /// and checks it. `expect: { loaders?: { <name>: { rows: n | $any | [ {
 /// col: val } | [ val, … ] ], columns? } }, nodes?: [{ id, kind?, actions?
-/// }], text?, alert?, badge?, label?, inactive?, actions? }`. A row map matches when
+/// }], text?, alert?, badge?, label?, inactive?, actions?, see_also? }`. A row map matches when
 /// every column it names equals; a row list matches the loader's rows in
 /// order. Anything may use what was bound (`$name.path`).
 async fn page_example(
@@ -3978,6 +3979,7 @@ impl PageAt<'_> {
             ("badge", json!(run.badge)),
             ("label", json!(oxplow_app::pages::label::run_label(&run))),
             ("inactive", json!(run.inactive)),
+            ("see_also", json!(run.see_also)),
             ("actions", Value::Null),
         ];
         for (key, got) in parts {

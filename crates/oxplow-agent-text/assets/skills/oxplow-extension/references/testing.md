@@ -82,7 +82,7 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
 <!-- fixture-kinds -->
 | kind | `when` | `expect` |
 |---|---|---|
-| page | `{ page: <slug \| ext/slug>, params? }` | `{ loaders?, nodes?, text?, alert?, badge?, label?, inactive?, actions? }` |
+| page | `{ page: <slug \| ext/slug>, params? }` | `{ loaders?, nodes?, text?, alert?, badge?, label?, inactive?, actions?, see_also? }` |
 | form | `{ form: <page>, node?, params? }` | `{ values?, fixed?, fields? }` |
 | job | `{ job: <id>, intentKey, request, cancel?, setup?, rows? }` | `{ state, result?, text?, toolCalls?, output?, effects?, commands?, pages? }` |
 | component | `{ component: <id>, items?, invokes?: [{ command, input? }] }` | `{ invokes: [{ ok, result? } \| { ok: false, refused }] }` |
@@ -114,6 +114,8 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
      `view: { stream: str1, thread: thr1 }` runs it from that stream and
      thread; with none, it runs from the project's first stream, so a page
      that declares `stream_id` gets it without a param.
+     `expect.see_also` is the page's "See also" links, `[{ title, uri, description? }]`,
+     compared like any list (`{ contains: [..] }` for some of them).
      `expect.label` is the text of the page's tab (its `label` filled from
      the params and the first authored loader's row, else its title).
      `temp: { <name>: <text> }` (a fixture key beside `given`) writes those

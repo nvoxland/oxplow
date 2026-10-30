@@ -46,6 +46,12 @@ test("railHas: each of a filter, a selection, a rail node, a switch and the save
   expect(railHas(run(plain), { fills: false, saveOpen: true })).toBe(true);
 });
 
+test("railHas: a page with any see-also link has a rail, though nothing else is in it", () => {
+  const plain = run(node.viz("items", "items", cols));
+  expect(railHas({ ...plain, seeAlso: [{ title: "Other", uri: "oxplow:oxplow/page?page=a/b", description: null }] }, no)).toBe(true);
+  expect(railHas({ ...plain, seeAlso: [] }, no)).toBe(false);
+});
+
 test("railHas: a view param is never drawn, so it is not something; a resource param neither", () => {
   const plain = node.viz("items", "items", cols);
   expect(railHas(run(plain, [{ name: "lines", role: "view", type: "text" } as PageParam, { name: "uri", role: "resource", type: "text" } as PageParam]), no)).toBe(false);

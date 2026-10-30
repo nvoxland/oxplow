@@ -50,6 +50,11 @@ loaders:
            v_page p, json_each(p.renders) j
       WHERE c.kind = 'resource' AND c.uri = :uri AND j.value = r.resource AND p.running_uri IS NOT NULL
       ORDER BY p.title
+  # The extension that declares it: one link.
+  related:
+    sql: |
+      SELECT a.extension AS title, a.extension_target AS uri, e.description
+      FROM about a LEFT JOIN v_extension e ON e.name = a.extension
 view:
   stack:
   - id: about
@@ -81,3 +86,5 @@ view:
     columns:
     - { key: title, label: Page, link: { kind: page, from: definition } }
     - { key: description, label: What it is }
+see_also:
+  - { from: related }

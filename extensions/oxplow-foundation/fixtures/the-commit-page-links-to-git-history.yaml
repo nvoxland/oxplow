@@ -1,0 +1,10 @@
+# "See also": a commit links to the history it is part of.
+when:
+  page: oxplow-foundation/commit
+  params:
+    uri: "oxplow:oxplow/commit?sha=abc1234"
+    sha: abc1234
+    stream_id: 1
+expect:
+  see_also:
+    - { title: Git History, uri: "oxplow:oxplow/page?page=git-history" }

@@ -52,7 +52,7 @@ a typo is an error at the line):
 - **Metadata**: `title` (required), `description`, `label`, `icon`,
   `category`, `keywords`, `params`, `for` / `accepts` / `default` /
   `pinned` (a renderer), `comments`, `refresh`, `hidden`, `needs`,
-  `actions`, `alert`, `tool`, `answers`, `badge`.
+  `actions`, `alert`, `tool`, `answers`, `badge`, `see_also`.
   A page's `description` says what the page is (what it shows, for
   what, over which scope and order), not what you can do on it. A page
   whose purpose is an action (a form to file an item, hand off work or
@@ -126,6 +126,20 @@ Where it lives, and what is loaded:
   loader's first row, else its row count). `alert`: `{ min_rows }` or
   `{ column, below | above }`, with a `label`, and the page marks itself
   while it fires; it watches the badge's loader, else the first.
+- `see_also: [...]`: related pages, drawn as "See also" in the page's Details
+  rail after Contents (and ending `oxplow_run_page`'s text as `## See also`).
+  An entry is `{ page: <page id>, params? }` (a link to that page, titled with
+  its title; `params` bind as an embed's do: `{ param: x }`, `{ from:
+  loader.col }` or a literal; a param the target page keeps in the `#` — a
+  `filter`, `selection` or `view` one — goes there) or `{ from: <loader> }` (a
+  link per row: `title` and `uri` columns, `description` as the hover). A
+  `from:` loader the page doesn't have, a `page:` of its own extension that
+  isn't in `pages/`, or a `from:` loader whose dry run returns no `title` or
+  `uri` column is an error; another extension's page that isn't loaded is a
+  warning. At run time a failed loader or an unknown page gives no link, never
+  an error; links come in order, a uri once. A fixture's `expect.see_also`
+  compares them. Use it for related pages and the list a thing belongs to
+  (`.context/usability.md`).
 - `for` / `accepts` / `default` / `pinned`: a renderer, see
   [pages-and-tabs.md](./pages-and-tabs.md) (`renderer_problem` checks
   them at load). `comments: true`: the person

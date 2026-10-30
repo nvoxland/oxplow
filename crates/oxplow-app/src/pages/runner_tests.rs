@@ -23,6 +23,33 @@ fn ints(run: &PageRun, loader: &str) -> Vec<i64> {
         .collect()
 }
 
+/// "See also": a `page:` entry links to that page by its title with its
+/// params, a `from:` entry makes a link per row of a loader; an unknown page,
+/// a loader without `title`/`uri` columns and a repeated uri give no link
+/// and no error.
+#[tokio::test]
+async fn see_also_links_resolve_in_order_without_errors() {
+    let (_dir, svc) = fixture().await;
+    let r = run(&svc, "acme/related", &[]).await;
+    let links: Vec<(&str, &str, Option<&str>)> = r
+        .see_also
+        .iter()
+        .map(|l| (l.title.as_str(), l.uri.as_str(), l.description.as_deref()))
+        .collect();
+    assert_eq!(
+        links,
+        [
+            ("Numbers", "oxplow:oxplow/page?n=3&page=acme/numbers", None),
+            (
+                "Docs",
+                "oxplow:oxplow/page?page=acme/numbers",
+                Some("The numbers.")
+            ),
+        ],
+        "an unknown page, a repeated uri, an empty uri and a loader with no columns give no link"
+    );
+}
+
 #[tokio::test]
 async fn loaders_run_in_order_and_later_ones_read_earlier_ones() {
     let (_dir, svc) = fixture().await;

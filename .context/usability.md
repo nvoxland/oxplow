@@ -51,6 +51,12 @@ links. Concretely:
 - **Problems and work to do get their own page** that collects them,
   linked from where they show as a one-line summary; an informational
   page carries no repair buttons.
+- **Related pages go in "See also", not in a section.** A page's `see_also:`
+  names the pages that are about the same thing or the list it belongs to (a
+  commit → Git History, a collector → Collectors, a contribution → its
+  extension). It is the rail's "See also" group after Contents; a section
+  is the page's own content. A link that belongs to a fact stays a link in
+  that fact.
 - **No layout rules that widen data.** The reading column is the
   default; a page doesn't turn into a wide grid because it holds a table.
 

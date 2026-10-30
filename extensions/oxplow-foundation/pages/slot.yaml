@@ -36,6 +36,11 @@ loaders:
              k.slot AS place
       FROM v_slot k LEFT JOIN v_page mp ON mp.id = k.page LEFT JOIN v_page hp ON hp.id = k.host
       WHERE k.uri = :uri
+  # The extension that declares it: one link.
+  related:
+    sql: |
+      SELECT a.extension AS title, a.extension_target AS uri, e.description
+      FROM about a LEFT JOIN v_extension e ON e.name = a.extension
 view:
   stack:
   - id: about
@@ -56,3 +61,5 @@ view:
     - { key: host, label: Placed on, link: { kind: page, from: host_target } }
     - { key: place, label: In the slot }
     empty: Slot mount not found.
+see_also:
+  - { from: related }

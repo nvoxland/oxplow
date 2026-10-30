@@ -1804,6 +1804,11 @@ export type CustomComponent_Deserialize = {
 	 *  `sql.read` permission.
 	 */
 	sql?: SqlAccess | null,
+	/**
+	 *  One sentence saying what it is (`v_custom_component.description`);
+	 *  `None` when its declaration says nothing.
+	 */
+	description?: string | null,
 };
 
 /**
@@ -1827,6 +1832,11 @@ export type CustomComponent_Serialize = {
 	 *  `sql.read` permission.
 	 */
 	sql?: SqlAccess | null,
+	/**
+	 *  One sentence saying what it is (`v_custom_component.description`);
+	 *  `None` when its declaration says nothing.
+	 */
+	description?: string | null,
 };
 
 /**
@@ -1992,6 +2002,11 @@ export type Descriptor = {
 	 *  of a kind that doesn't share names can't hold the same one.
 	 */
 	global: string | null,
+	/**
+	 *  One sentence saying what it is, for the kinds whose declaration
+	 *  carries one (a collector's `doc:`); `None` otherwise.
+	 */
+	description: string | null,
 	source: DeclaredAt,
 };
 
@@ -2038,6 +2053,8 @@ export type DimensionEntry = {
 	join?: string | null,
 	/**  Guidance for an agent reading the dimension. */
 	ai_context?: AiContext | null,
+	/**  One sentence saying what the dimension slices by (`v_dimension.description`). */
+	description?: string | null,
 };
 
 /**
@@ -3172,6 +3189,11 @@ export type ImplementationDecl = {
 	 *  by [`load_icon`].
 	 */
 	icon: string | null,
+	/**
+	 *  One sentence saying what this implementation is
+	 *  (`v_capability_provider.description`).
+	 */
+	description: string | null,
 };
 
 export type ImportDeclaration = {
@@ -4732,6 +4754,8 @@ export type PageRun_Deserialize = {
 	 *  loaders, and says what it needs instead of showing nothing.
 	 */
 	inactive?: PageInactive | null,
+	/**  The page's "See also" links, in order, a uri once. */
+	seeAlso?: SeeAlso[],
 };
 
 /**  A run of a page. */
@@ -4751,6 +4775,8 @@ export type PageRun_Serialize = {
 	 *  loaders, and says what it needs instead of showing nothing.
 	 */
 	inactive: PageInactive | null,
+	/**  The page's "See also" links, in order, a uri once. */
+	seeAlso: SeeAlso[],
 };
 
 /**  A page another extension's page shows at one of its slots. */
@@ -4851,6 +4877,8 @@ export type Page_Deserialize = {
 	view: Node_Deserialize,
 	/**  A second tree drawn in the page's rail. */
 	rail: Node_Deserialize | null,
+	/**  Related pages, drawn as "See also" in the page's Details rail. */
+	seeAlso: SeeAlsoDecl[],
 	origin: PageProvenance,
 };
 
@@ -4910,6 +4938,8 @@ export type Page_Serialize = {
 	view: Node_Serialize,
 	/**  A second tree drawn in the page's rail. */
 	rail: Node_Serialize | null,
+	/**  Related pages, drawn as "See also" in the page's Details rail. */
+	seeAlso: SeeAlsoDecl[],
 	origin: PageProvenance,
 };
 
@@ -5241,6 +5271,8 @@ export type ResourceDecl = {
 	searchable: string | null,
 	icon: string | null,
 	wikilink: WikilinkDecl | null,
+	/**  One sentence saying what the resource is (`v_resource.description`). */
+	description: string | null,
 };
 
 /**  How long a namespace's event payloads and large content are kept. */
@@ -5425,6 +5457,32 @@ export type SecretRef = {
 	schemaVersion: number,
 	id: string,
 };
+
+/**  A related page the run links to. */
+export type SeeAlso = {
+	/**  What the link says. */
+	title: string,
+	/**  What it opens. */
+	uri: string,
+	/**  The hover, when there is one. */
+	description: string | null,
+};
+
+/**
+ *  One `see_also:` entry: a link to a page, or one link per row of a
+ *  loader.
+ */
+export type SeeAlsoDecl =
+/**
+ *  A link to a page, labeled with its title; `params` bind as an
+ *  embed's do (a param, an earlier loader's column, a literal).
+ */
+{ kind: "page"; page: string; params: { [key in string]: ArgSource } } |
+/**
+ *  One link per row of a loader: its `title` and `uri` columns, and
+ *  `description` (when present) as the hover.
+ */
+{ kind: "rows"; from: string };
 
 export type SelectThreadRequest = {
 	streamId: StreamId,

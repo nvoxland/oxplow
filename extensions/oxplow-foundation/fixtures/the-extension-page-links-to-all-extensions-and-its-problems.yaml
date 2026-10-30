@@ -1,0 +1,11 @@
+# "See also": the Extension page links to Extensions and to Extension problems
+# narrowed to this extension (a view param, so in the `#`).
+when:
+  page: oxplow-foundation/extension
+  params:
+    uri: "oxplow:oxplow/extension?name=oxplow-foundation"
+    name: oxplow-foundation
+expect:
+  see_also:
+    - { title: Extensions, uri: "oxplow:oxplow/page?page=extensions" }
+    - { title: Extension problems, uri: "oxplow:oxplow/page?page=extension-problems#extension=oxplow-foundation" }

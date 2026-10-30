@@ -68,13 +68,14 @@ export function contentsHas(run: PageRun, fills: boolean): boolean {
 
 /** Whether the rail has anything: a switch's sections, a `filter` param
  *  (a `view` param rides the `#` and is never drawn), a `selection`
- *  param, a `rail:` node, the save-a-view form (`saveOpen`), or Contents. */
+ *  param, a `rail:` node, a see-also link, the save-a-view form (`saveOpen`), or Contents. */
 export function railHas(run: PageRun, opts: { fills: boolean; saveOpen: boolean }): boolean {
   const { params, view } = run.page;
   return (
     view.kind === "switch" ||
     params.some((p) => p.role === "filter" || p.role === "selection") ||
     run.rail !== null ||
+    run.seeAlso.length > 0 ||
     opts.saveOpen ||
     contentsHas(run, opts.fills)
   );

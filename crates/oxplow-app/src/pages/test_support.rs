@@ -302,6 +302,29 @@ view:
 "#,
     ),
     (
+        "related",
+        r#"
+title: Related
+description: A page that links to others.
+params:
+  - { name: n, default: 3 }
+  - { name: pick, role: filter }
+loaders:
+  links:
+    rows:
+      - { title: Docs, uri: "oxplow:oxplow/page?page=acme/numbers", description: The numbers. }
+      - { title: Docs again, uri: "oxplow:oxplow/page?page=acme/numbers" }
+      - { title: Empty uri, uri: "" }
+  bare: { rows: [{ name: x }] }
+view: { viz: table, from: links }
+see_also:
+  - { page: numbers, params: { n: { param: n } } }
+  - { page: beta/nowhere }
+  - { from: links }
+  - { from: bare }
+"#,
+    ),
+    (
         "writes",
         r#"
 title: Writes

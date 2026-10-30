@@ -12,6 +12,7 @@ import type {
   Page,
   PageRun,
   RunNode,
+  SeeAlso,
   SqlCell,
   TileSize,
 } from "../../tauri-bridge/generated/bindings.js";
@@ -167,6 +168,7 @@ export function fakeRun(
     pick?: Record<string, string>;
     embeds?: Record<string, PageRun>;
     tree?: RunNode;
+    seeAlso?: SeeAlso[];
   } = {},
 ): PageRun {
   return {
@@ -177,6 +179,7 @@ export function fakeRun(
     rail: page.rail ? runTreeOf(page.rail, o.pick, o.embeds) : null,
     alert: null,
     badge: null,
+    seeAlso: o.seeAlso ?? [],
   } as PageRun;
 }
 
