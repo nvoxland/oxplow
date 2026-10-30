@@ -2489,11 +2489,6 @@ export type Extension_Deserialize = {
 	contributions: Descriptor[],
 	/**  Validated non-secret settings declaration, not resolved values or grants. */
 	configuration?: ConfigurationFile | null,
-	/**
-	 *  The sources of its configuration migration steps, by `entry`: read
-	 *  and parsed at load so activation runs them without touching files.
-	 */
-	configScripts?: { [key in string]: string },
 	publicContracts?: PublicContracts,
 	/**  Where its files came from. */
 	deployment?: Deployment,
