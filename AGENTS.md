@@ -48,7 +48,9 @@ or exact mechanics.
     app's webview, so they need the app built once (`bun run build:dev`)
     and a display that is awake; without either the report lists them
     as skipped (never passed).
-  - `bun run test:fast` (filtered: `-p oxplow-app some_test`) and
+  - `bun run test:fast` (filtered: `-p oxplow-app some_test`; a
+    `-p` of only pure crates like oxplow-config or oxplow-domain skips the
+    sidecar build) and
     `bun run test:fast:ts` — quick, write the JUnit reports the
     effort's Tests panel shows.
   - `bun run test:collect` — the full suite with coverage, the only run

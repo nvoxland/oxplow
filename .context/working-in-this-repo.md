@@ -247,6 +247,15 @@ run (a no-op when current) and the sidecars restaged when they changed,
 because tauri-build copies a staged sidecar over `target/debug/<name>`:
 a stale one ran old script-worker code under the tests.
 
+**A pure crate's tests start in seconds.** `test:fast` runs through
+`scripts/test-fast.sh`: when every `-p` names a crate whose graph (dev
+dependencies too) never reaches oxplow-script, oxplow-app or
+oxplow-provider-fake (its `PURE` list: oxplow-config, oxplow-domain,
+oxplow-db, oxplow-provider-protocol, …), it skips `test-prereqs.sh`
+(only the target sweep runs), so `bun run test:fast -p oxplow-config
+metric_expr` takes ~4 s instead of rebuilding the sidecars first. A
+crate that gains a dependency on one of those three leaves the list.
+
 **Running oxplow from source: `bun run run:dev`** (`scripts/run-dev.sh`),
 with oxplow quit: `bun run build:dev`, then `oxplow-dev extension deploy`
 (what changed, foundation first), then `./target/debug/oxplow .`; it

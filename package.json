@@ -12,7 +12,7 @@
     "test:rust": "cargo test --workspace",
     "test:ts": "bun run --cwd apps/desktop test",
     "test:collect": "sh scripts/test-collect.sh",
-    "test:fast": "sh scripts/test-prereqs.sh && cargo nextest run",
+    "test:fast": "sh scripts/test-fast.sh",
     "test:fast:ts": "bun run --cwd apps/desktop test:junit",
     "test:ext": "cargo build -q -p oxplow-script --bin oxplow-script-worker && cargo run -q -p oxplow-dev -- extension test --junit target/extension-tests/junit.xml",
     "lint:collect": "sh scripts/test-prereqs.sh && cargo clippy --workspace --all-targets --message-format=json -- -D warnings > target/clippy.json",
