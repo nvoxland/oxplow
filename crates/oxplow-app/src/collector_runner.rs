@@ -690,11 +690,8 @@ pub async fn derive_collector(
         // In a worker: its `ai_*` and `scope` calls are answered here, and
         // the time they wait isn't the script's.
         let read = Box::new(|q: oxplow_db::SqlQuery| handle.block_on(layer.run_in(&cost, q)));
-        let mut calls = crate::scope_calls::Calls::new(&cost, &needs, read)
-            .with_state_source(layer.state_source(), &handle)
-            .with_jobs_source(layer.jobs_source(), &handle)
-            .with_ai_source(layer.ai_source())
-            .with_configuration_source(layer.configuration_source(), &handle);
+        let mut calls =
+            crate::scope_calls::Calls::new(&cost, &needs, read).with_host(Some(&layer), &handle);
         let mut serve = |id: &str, args: serde_json::Value| calls.serve(id, args);
         let script_run = match runtime {
             CollectorRuntime::Jaq => ScriptRun::jaq(&script, input),

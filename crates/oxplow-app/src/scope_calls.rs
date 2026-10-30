@@ -171,7 +171,7 @@ impl<'a> Calls<'a> {
 
     /// A script outside a database transaction reads a fresh owned snapshot for
     /// each call. The worker waits here while the DB owns only the read itself.
-    pub fn with_state_source(
+    fn with_state_source(
         self,
         source: Option<crate::extension::extension_state::StateSource>,
         runtime: &tokio::runtime::Handle,
@@ -195,7 +195,7 @@ impl<'a> Calls<'a> {
         self
     }
 
-    pub fn with_configuration_source(
+    fn with_configuration_source(
         self,
         source: Option<crate::extension::extension_configuration::ConfigurationSource>,
         runtime: &tokio::runtime::Handle,
@@ -217,7 +217,7 @@ impl<'a> Calls<'a> {
         self
     }
 
-    pub fn with_jobs_source(
+    fn with_jobs_source(
         self,
         source: Option<std::sync::Arc<crate::extension::extension_jobs::ExtensionJobs>>,
         runtime: &tokio::runtime::Handle,
@@ -242,10 +242,7 @@ impl<'a> Calls<'a> {
     /// `ai.discover` over the app's AI settings: whether the role (a
     /// built-in, or one of the run's extension's profiles by its id) is
     /// bound to a model. It reads settings only: no key, no probe, no spend.
-    pub fn with_ai_source(
-        self,
-        source: Option<std::sync::Arc<crate::ai_service::AiService>>,
-    ) -> Self {
+    fn with_ai_source(self, source: Option<std::sync::Arc<crate::ai_service::AiService>>) -> Self {
         match source {
             Some(source) => {
                 let extension = self.run.extension().map(str::to_string);
@@ -255,6 +252,24 @@ impl<'a> Calls<'a> {
             }
             None => self,
         }
+    }
+
+    /// Every service a script host serves from `layer` (state, extension
+    /// configuration, jobs, AI settings), each read fresh, outside the
+    /// caller's transaction, on `runtime`. The one way a host attaches them;
+    /// its own `read` keeps the transaction choice. No `layer`: none.
+    pub fn with_host(
+        self,
+        layer: Option<&crate::sql_gateway::SqlGateway>,
+        runtime: &tokio::runtime::Handle,
+    ) -> Self {
+        let Some(layer) = layer else {
+            return self;
+        };
+        self.with_state_source(layer.state_source(), runtime)
+            .with_configuration_source(layer.configuration_source(), runtime)
+            .with_jobs_source(layer.jobs_source(), runtime)
+            .with_ai_source(layer.ai_source())
     }
 
     pub fn with_answers(mut self, answers: &BTreeMap<String, Vec<Value>>) -> Self {
@@ -803,6 +818,42 @@ mod tests {
             }]
         }));
         std::sync::Arc::new(svc)
+    }
+
+    /// Every script host attaches the same services from its gateway
+    /// (`Calls::with_host`): where the gateway has one, a script that needs
+    /// it is never told it's unavailable. An effect once left `jobs` out.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_effect_reaches_every_service_its_gateway_has() {
+        let dir = tempfile::tempdir().unwrap();
+        crate::test_fixtures::init_git_repo(dir.path());
+        let svc = crate::Services::in_memory(dir.path()).await.unwrap();
+        for (scope, args) in [
+            (
+                "jobs.read",
+                json!({ "job_run": "oxplow:oxplow/job_run?id=1" }),
+            ),
+            ("state.read", json!({ "scope": "project", "area": "state" })),
+            ("extension_config.read", json!({})),
+            ("ai.discover", json!({ "role": "main" })),
+        ] {
+            let script = format!(
+                "def transform(x):\n    scope({scope:?}, {args})\n    return {{\"skip\": \"ran\"}}\n"
+            );
+            let out = crate::effects::run_over(
+                &svc.sql,
+                &acme_run(),
+                &needs(&[scope]),
+                &script,
+                json!({}),
+                None,
+                &crate::services::Sources::default(),
+            )
+            .await;
+            if let Err(e) = &out {
+                assert!(!e.contains("where this script runs"), "{scope}: {e}");
+            }
+        }
     }
 
     fn acme_run() -> RunContext {

@@ -960,10 +960,7 @@ pub(crate) async fn run_script(
     tokio::task::spawn_blocking(move || {
         let read = Box::new(|q: oxplow_db::SqlQuery| runtime.block_on(layer.run_in(&composing, q)));
         let mut calls = crate::scope_calls::Calls::new(&composing, &needs, read)
-            .with_state_source(layer.state_source(), &runtime)
-            .with_jobs_source(layer.jobs_source(), &runtime)
-            .with_ai_source(layer.ai_source())
-            .with_configuration_source(layer.configuration_source(), &runtime);
+            .with_host(Some(&layer), &runtime);
         let reaction = effects::run_script(&script, event, given, &mut calls)?;
         // Publication: a revocation during the script is a stopped run, not a reaction.
         composing.check_authority()?;

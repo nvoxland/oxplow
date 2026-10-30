@@ -2752,21 +2752,7 @@ impl FactRunner {
                     )),
                 });
                 let mut calls = crate::scope_calls::Calls::new(run, &needs, read)
-                    .with_state_source(
-                        layer.as_ref().and_then(|layer| layer.state_source()),
-                        &handle,
-                    )
-                    .with_jobs_source(
-                        layer.as_ref().and_then(|layer| layer.jobs_source()),
-                        &handle,
-                    )
-                    .with_configuration_source(
-                        layer
-                            .as_ref()
-                            .and_then(|layer| layer.configuration_source()),
-                        &handle,
-                    )
-                    .with_ai_source(layer.as_ref().and_then(|layer| layer.ai_source()));
+                    .with_host(layer.as_ref(), &handle);
                 let mut serve = |id: &str, args: serde_json::Value| calls.serve(id, args);
                 script(given.onto(ScriptRun::starlark(&text, input.clone()), Some(&mut serve)))
             }

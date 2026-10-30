@@ -155,7 +155,11 @@ its scope trace.
   `cancelled`.
 - **Who carries it:** the bus (`run_in`, `TxCtx::run`, `Invocation::run`
   — an `External` call's run is a child of the command's), scope calls
-  (`scope_calls::Calls::new(run, needs, read)`, counted on its trace),
+  (`scope_calls::Calls::new(run, needs, read)`, counted on its trace;
+  `.with_host(layer, runtime)` is the one way every script host —
+  commands, effects, triggers, entity and fact collectors — attaches the
+  gateway's state, configuration, jobs and AI services, so they can't
+  diverge; the host's own `read` keeps its transaction choice),
   a composer (`Composer` gets a pure child; what it calls becomes the
   run's scopes), effects (`for_effect`: the effect actor on the event's
   thread and stream, caused by the event), the effort policy

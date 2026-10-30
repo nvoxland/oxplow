@@ -1059,11 +1059,8 @@ pub fn extension_command(
             // metric functions included), on the run's activation pin.
             let (sql, runtime) = (composing.sql, composing.runtime);
             let read = Box::new(|q: oxplow_db::SqlQuery| runtime.block_on(sql.run_in(run, q)));
-            let mut calls = crate::scope_calls::Calls::new(run, &needs, read)
-                .with_state_source(sql.state_source(), runtime)
-                .with_configuration_source(sql.configuration_source(), runtime)
-                .with_jobs_source(sql.jobs_source(), runtime)
-                .with_ai_source(sql.ai_source());
+            let mut calls =
+                crate::scope_calls::Calls::new(run, &needs, read).with_host(Some(sql), runtime);
             match compose_calls(&script, input.clone(), &mut calls)? {
                 Composed::Run { calls, events, .. }
                     if reads && !(calls.is_empty() && events.is_empty()) =>
