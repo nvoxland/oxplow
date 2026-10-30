@@ -91,7 +91,18 @@ pub async fn test_extension_in(
     bless: bool,
     env: host::HostEnv,
 ) -> Result<TestReport, SdkError> {
-    run(root, name, bless, env, None).await
+    run(root, name, bless, env, None, false).await
+}
+
+/// [`test_extension`] with `require_ui`: a fixture's `ui` steps that can't
+/// draw (no app build, a window that draws nothing) are errors, not skips.
+pub async fn test_extension_with(
+    root: &Path,
+    name: &str,
+    bless: bool,
+    require_ui: bool,
+) -> Result<TestReport, SdkError> {
+    run(root, name, bless, host::process_env(), None, require_ui).await
 }
 
 /// The check, then only the intent examples named in `only` (their
@@ -101,8 +112,17 @@ pub async fn test_extension_only(
     root: &Path,
     name: &str,
     only: &[String],
+    require_ui: bool,
 ) -> Result<TestReport, SdkError> {
-    run(root, name, false, host::process_env(), Some(only)).await
+    run(
+        root,
+        name,
+        false,
+        host::process_env(),
+        Some(only),
+        require_ui,
+    )
+    .await
 }
 
 async fn run(
@@ -111,6 +131,7 @@ async fn run(
     bless: bool,
     env: host::HostEnv,
     only: Option<&[String]>,
+    require_ui: bool,
 ) -> Result<TestReport, SdkError> {
     let started = std::time::Instant::now();
     let host = Arc::new(
@@ -149,6 +170,7 @@ async fn run(
         unsupported: Vec::new(),
         left: Vec::new(),
         cases: Vec::new(),
+        require_ui,
     };
     // What activation held back: this extension's is an error (unless
     // check already says it), another's a warning — it's beside it.
@@ -246,6 +268,7 @@ async fn examples(
     // examples' order.
     let slots = Arc::new(tokio::sync::Semaphore::new(side_by_side()));
     let mut own = Vec::new();
+    let require_ui = report.require_ui;
     // The oxplows fixtures that turn on more extensions start from, by
     // what they turn on.
     let mut required: std::collections::BTreeMap<Vec<String>, Arc<Host>> = Default::default();
@@ -338,6 +361,7 @@ async fn examples(
             own.push(tokio::spawn(async move {
                 let _slot = slots.acquire_owned().await;
                 let mut part = TestReport::part(&ext.name);
+                part.require_ui = require_ui;
                 match base.fork().await {
                     Ok(host) => run_example(&host, &ext, &fixture.example(), &mut part).await,
                     Err(e) => part
@@ -356,6 +380,7 @@ async fn examples(
             own.push(tokio::spawn(async move {
                 let _slot = slots.acquire_owned().await;
                 let mut part = TestReport::part(&ext.name);
+                part.require_ui = require_ui;
                 match shared.fork().await {
                     Ok(host) => run_example(&host, &ext, &fixture.example(), &mut part).await,
                     Err(e) => part

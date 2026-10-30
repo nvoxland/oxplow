@@ -48,13 +48,15 @@ oxplow-dev extension deploy [<name>]         deploy <name>'s source as the app d
                                              whose source changed (foundation first): the
                                              first run of a checkout, or after a core change;
                                              only while oxplow is quit
-oxplow-dev extension test [<name> …] [--only <example,…>] [--junit F]
+oxplow-dev extension test [<name> …] [--only <example,…>] [--require-ui] [--junit F]
                                              run each extension's tests (check, fixtures,
                                              page answers) on a throwaway oxplow — no
                                              compile for an extension-only change, safe
                                              while oxplow runs; no name: every extension
                                              with a source here; --only: the check and
                                              just those examples (fixture file names);
+                                             --require-ui: `ui` steps that can't draw
+                                             fail, not skip;
                                              --junit writes JUnit to F
 
 oxplow-dev --help                            this
@@ -239,15 +241,16 @@ async fn extension(project: &Path, args: &[String]) -> Result<String, String> {
     }
 }
 
-/// `extension test [<name> …] [--only <example,…>] [--junit <file>]`: each
+/// `extension test [<name> …] [--only <example,…>] [--require-ui] [--junit <file>]`: each
 /// named extension's tests (`oxplow extension test`'s), else every extension
 /// with a source here; with `--only`, the check and just those examples. The
 /// findings as text, and with `--junit` one JUnit file over all of them. Any
 /// failing extension fails the command.
 async fn extension_test(project: &Path, args: &[String]) -> Result<String, String> {
-    use oxplow_sdk::extension_test::{render, test_extension, test_extension_only};
+    use oxplow_sdk::extension_test::{render, test_extension_only, test_extension_with};
     let mut args = args.to_vec();
     let junit = take_flag(&mut args, "--junit");
+    let require_ui = take_switch(&mut args, "--require-ui");
     let only: Option<Vec<String>> = take_flag(&mut args, "--only")
         .map(|names| names.split(',').map(|n| n.trim().to_string()).collect());
     let names = if args.is_empty() {
@@ -262,8 +265,8 @@ async fn extension_test(project: &Path, args: &[String]) -> Result<String, Strin
     let (mut text, mut suites, mut failed) = (String::new(), String::new(), false);
     for name in &names {
         let tested = match &only {
-            Some(only) => test_extension_only(project, name, only).await,
-            None => test_extension(project, name, false).await,
+            Some(only) => test_extension_only(project, name, only, require_ui).await,
+            None => test_extension_with(project, name, false, require_ui).await,
         };
         match tested {
             Ok(report) => {
@@ -296,6 +299,13 @@ async fn extension_test(project: &Path, args: &[String]) -> Result<String, Strin
     } else {
         Ok(text)
     }
+}
+
+/// A bare `--name` out of `args`: whether it was there.
+fn take_switch(args: &mut Vec<String>, name: &str) -> bool {
+    let before = args.len();
+    args.retain(|a| a != name);
+    args.len() != before
 }
 
 /// `--name value` out of `args`, if there.

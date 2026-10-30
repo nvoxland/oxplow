@@ -49,7 +49,7 @@ usage:
       datasets and their rows, collectors' outputs, providers' grants —
       writing nothing. --services lists, per script, the host services it
       uses (sql.read, tree.read, ai.compute) and whether it declared them
-  oxplow extension test <name|path> [--only <example,…>] [--bless] [--json] [--junit <file>] [--root <dir>]
+  oxplow extension test <name|path> [--only <example,…>] [--bless] [--require-ui] [--json] [--junit <file>] [--root <dir>]
       on a throwaway oxplow over a copy of the project's extensions: check,
       then each intent example's fixture (a page's rows, a collector's
       entities, a command's composition), questions.yaml, and each declared
@@ -125,6 +125,8 @@ struct Parsed {
     junit: Option<PathBuf>,
     /// `test --only <a,b>`: just these examples, after the check.
     only: Option<Vec<String>>,
+    /// `test --require-ui`: `ui` steps that can't draw fail, not skip.
+    require_ui: bool,
 }
 
 fn parse(args: &[String]) -> Result<Parsed, Failure> {
@@ -144,6 +146,7 @@ fn parse(args: &[String]) -> Result<Parsed, Failure> {
         against: None,
         junit: None,
         only: None,
+        require_ui: false,
     };
     let mut it = args.iter();
     while let Some(a) = it.next() {
@@ -201,6 +204,7 @@ fn parse(args: &[String]) -> Result<Parsed, Failure> {
                 )
             }
             "--bless" => p.bless = true,
+            "--require-ui" => p.require_ui = true,
             "--only" => {
                 let names = it.next().ok_or_else(|| {
                     Failure::Usage("--only needs example names, comma-separated".into())
@@ -336,8 +340,18 @@ fn run_inner(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> Resul
                         "--only runs examples alone; --bless writes a provider's transcript, which it doesn't run".into(),
                     ))
                 }
-                Some(only) => block_on(crate::extension_test::test_extension_only(&root, &name, only))?,
-                None => block_on(crate::extension_test::test_extension(&root, &name, p.bless))?,
+                Some(only) => block_on(crate::extension_test::test_extension_only(
+                    &root,
+                    &name,
+                    only,
+                    p.require_ui,
+                ))?,
+                None => block_on(crate::extension_test::test_extension_with(
+                    &root,
+                    &name,
+                    p.bless,
+                    p.require_ui,
+                ))?,
             };
             let format = if p.json { Format::Json } else { Format::Text };
             let _ = write!(out, "{}", crate::extension_test::render(&report, format));
@@ -419,6 +433,18 @@ mod tests {
     )]
 
     use super::*;
+
+    #[test]
+    fn parse_takes_require_ui_as_a_switch() {
+        let args: Vec<String> = ["test", "demo", "--require-ui"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let p = parse(&args).ok().unwrap();
+        assert!(p.require_ui);
+        assert_eq!(p.positional, ["test", "demo"]);
+        assert!(!parse(&args[..2]).ok().unwrap().require_ui);
+    }
 
     fn cli(args: &[&str]) -> (i32, String, String) {
         let args: Vec<String> = args.iter().map(|s| s.to_string()).collect();

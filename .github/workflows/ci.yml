@@ -95,7 +95,7 @@ jobs:
       # — through its fixtures (check, examples, answers, `ui` steps), as an
       # agent runs them after an extension edit.
       - name: Extension tests
-        run: xvfb-run -a bun run test:ext
+        run: xvfb-run -a bun run test:ext --require-ui
 
       # Drift guard: if `cargo test` regenerated TS bindings (because a
       # Rust signature changed), the diff fails the PR.

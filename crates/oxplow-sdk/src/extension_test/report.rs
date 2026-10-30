@@ -39,6 +39,9 @@ pub struct TestReport {
     /// `answers <page>`, `provider <id>`, … — a test case each in the JUnit
     /// form.
     pub cases: Vec<TestCase>,
+    /// `--require-ui`: `ui` steps that can't draw are errors, not skips.
+    #[serde(skip)]
+    pub(crate) require_ui: bool,
 }
 
 /// One thing `extension test` ran.
@@ -90,6 +93,7 @@ impl TestReport {
             unsupported: Vec::new(),
             left: Vec::new(),
             cases: Vec::new(),
+            require_ui: false,
         }
     }
 

@@ -1317,13 +1317,13 @@ async fn only_the_named_examples_run() {
                 ("second", "when: { page: items }\nexpect: { loaders: { items: { rows: 5 } } }\n"),
             ],
         );
-    let report = test_extension_only(root, "paged", &["first".into()])
+    let report = test_extension_only(root, "paged", &["first".into()], false)
         .await
         .unwrap();
     assert_eq!(report.errors, Vec::<String>::new());
     assert_eq!(report.ran, ["check", "example first"].map(String::from));
 
-    let report = test_extension_only(root, "paged", &["third".into()])
+    let report = test_extension_only(root, "paged", &["third".into()], false)
         .await
         .unwrap();
     let errors = report.errors.join("\n");
@@ -2518,6 +2518,56 @@ while :; do case "$(post /harness/next '{"result":null}')" in *done*) exit 0;; e
     assert!(xml.contains("<testcase name=\"example drawn\""), "{xml}");
     assert!(xml.contains("<skipped message=\""), "{xml}");
     assert!(render(&report, Format::Text).contains("1 skipped"));
+}
+
+/// With `--require-ui`, a window that draws nothing fails the case: the
+/// run wanted the `ui` steps run, so not running them is an error.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_window_that_draws_nothing_fails_the_ui_steps_when_ui_is_required() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let shell = root.join("fake-shell");
+    std::fs::write(
+        &shell,
+        r#"#!/bin/sh
+base="${2%/harness/}"
+post() { curl -s -X POST -H 'content-type: application/json' -d "$2" "$base$1"; }
+post /harness/record '{"kind":"drawing","value":false}' >/dev/null
+while :; do case "$(post /harness/next '{"result":null}')" in *done*) exit 0;; esac; done
+"#,
+    )
+    .unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&shell, std::fs::Permissions::from_mode(0o755)).unwrap();
+    std::env::set_var("OXPLOW_SHELL", &shell);
+    component_ext(root, "oxplow.connect();");
+    write(
+        root,
+        ".oxplow/extensions/cards/fixtures/drawn.yaml",
+        "when: { page: board }\nsteps:\n  - ui:\n      - expect: { count: { li: 99 } }\n",
+    );
+    let report = test_extension_with(root, "cards", false, true)
+        .await
+        .unwrap();
+    assert!(!report.ok, "{report:?}");
+    assert!(
+        report
+            .errors
+            .iter()
+            .any(|e| e.contains("the steps after them, aren't run")
+                && e.contains("display")
+                && e.contains("--require-ui")),
+        "{:?}",
+        report.errors
+    );
+    assert_eq!(report.skipped, Vec::<String>::new());
+    let case = report
+        .cases
+        .iter()
+        .find(|c| c.name == "example drawn")
+        .unwrap();
+    assert_eq!(case.outcome, CaseOutcome::Failed, "{case:?}");
 }
 
 /// A component page of one custom component, for the `ui` tests: its

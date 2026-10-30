@@ -150,7 +150,8 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
      none of its own). It needs the app (`OXPLOW_SHELL`, or the `oxplow` beside
      `$OXPLOW_BIN`); without it, or while the display is locked or asleep
      (the app's window draws nothing then), the report warns that the
-     `ui` steps, and the steps after them, didn't run.
+     `ui` steps, and the steps after them, didn't run. With `--require-ui` (CI's run) that is an
+     error, not a warning, so a run that can't draw fails.
      Write the `ui` fixture first, then the component. A step can also act as a person would: `{ press: {
      action, node?, row?: { uri: $t.uri }, input? } }` presses one of the
      page's actions, `{ submit: { node, input } }` submits a form node —

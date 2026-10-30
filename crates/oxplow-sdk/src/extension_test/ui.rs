@@ -38,6 +38,19 @@ impl UiState {
     }
 }
 
+/// `ui` steps that can't run here: a skip, or with `--require-ui` an error.
+fn unrun(report: &mut TestReport, why: String) -> bool {
+    if report.require_ui {
+        report.errors.push(format!(
+            "{why} — or fix: build the app (`bun run build:dev`) and wake the display, or run \
+             without --require-ui"
+        ));
+    } else {
+        report.skipped.push(why);
+    }
+    false
+}
+
 impl PageAt<'_> {
     /// Run a step's `ui:` list against the page's custom component — its
     /// `node:`, else the first component node — in the app's own webview
@@ -59,12 +72,14 @@ impl PageAt<'_> {
             false
         };
         let Some(shell) = shell() else {
-            report.skipped.push(format!(
-                "{shown}:1: {label}: its `ui` steps, and the steps after them, aren't run: no \
-                 oxplow app here to draw them — fix: install the Oxplow app, or set \
-                 OXPLOW_SHELL to it"
-            ));
-            return false;
+            return unrun(
+                report,
+                format!(
+                    "{shown}:1: {label}: its `ui` steps, and the steps after them, aren't run: \
+                     no oxplow app here to draw them — fix: install the Oxplow app, or set \
+                     OXPLOW_SHELL to it"
+                ),
+            );
         };
         let Some(steps) = ui.as_array() else {
             return fail(report, "`ui` is a list of steps".into());
@@ -135,13 +150,14 @@ impl PageAt<'_> {
             Some(true) => {}
             Some(false) => {
                 harness.close().await;
-                report.skipped.push(format!(
-                    "{shown}:1: {label}: its `ui` steps, and the steps after them, aren't run: \
-                     the oxplow app's window \
-                     draws nothing while the display is locked or asleep — fix: run it \
-                     again with the display awake"
-                ));
-                return false;
+                return unrun(
+                    report,
+                    format!(
+                        "{shown}:1: {label}: its `ui` steps, and the steps after them, aren't \
+                         run: the oxplow app's window draws nothing while the display is locked \
+                         or asleep — fix: run it again with the display awake"
+                    ),
+                );
             }
             None => {
                 harness.close().await;

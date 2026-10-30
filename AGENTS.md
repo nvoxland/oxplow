@@ -47,7 +47,8 @@ or exact mechanics.
     fixture's `ui:` steps (a custom component's own code) draw in the
     app's webview, so they need the app built once (`bun run build:dev`)
     and a display that is awake; without either the report lists them
-    as skipped (never passed).
+    as skipped (never passed); `--require-ui` makes them errors
+    instead (CI passes it).
   - `bun run test:fast` (filtered: `-p oxplow-app some_test`; a
     `-p` of only pure crates like oxplow-config or oxplow-domain skips the
     sidecar build) and
