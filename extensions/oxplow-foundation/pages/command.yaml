@@ -57,7 +57,6 @@ view:
     from: about
     columns:
     - { key: description, label: What it is }
-    - { key: extension, label: Extension, link: { kind: page, from: extension_target } }
     - { key: declared, label: Declared in, link: { kind: page, from: declared_target } }
     empty: This contribution isn't known to the project.
   - id: facts
