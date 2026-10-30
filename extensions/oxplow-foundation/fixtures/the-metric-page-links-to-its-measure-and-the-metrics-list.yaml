@@ -1,0 +1,14 @@
+# "See also": a metric links to the measure it is built on and to the
+# Metrics page; one built on no measure links to the list only.
+when:
+  page: oxplow-foundation/metric-detail
+  params: { metric: agent.tokens.total }
+expect:
+  see_also:
+    - { title: Agent tokens, uri: "oxplow:oxplow/measure?measure=oxplow.tokens" }
+    - { title: Metrics, uri: "oxplow:oxplow/page?page=metrics-recorded" }
+steps:
+  - params: { metric: work.tasks_completed }
+    expect:
+      see_also:
+        - { title: Metrics, uri: "oxplow:oxplow/page?page=metrics-recorded" }

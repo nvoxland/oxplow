@@ -99,3 +99,6 @@ view:
         kind: page
         from: settings
     empty: Every extension is running as it should.
+see_also:
+  - { page: oxplow-foundation/extension-problems }
+  - { page: oxplow-foundation/collectors }

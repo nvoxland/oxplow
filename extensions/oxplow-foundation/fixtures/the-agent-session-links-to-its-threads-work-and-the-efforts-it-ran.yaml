@@ -1,0 +1,16 @@
+# "See also": a session links to the work of its thread and to the efforts
+# whose files it edited.
+given:
+  - { command: oxplow.agent_session.open, input: { thread: thr1, harness: claude }, bind: ses }
+  - { command: oxplow.effort.open, input: { thread: thr1 } }
+  - observe:
+      turn:
+        session: $ses.id
+        prompt: Make a file
+        tools:
+          - { name: Edit, kind: edit, paths: [a.rs], ok: true }
+when: { page: agent-session, params: { uri: "oxplow:oxplow/agent_session?id=ses1" } }
+expect:
+  see_also:
+    - { title: Thread work, uri: "oxplow:oxplow/page?page=thread-work&thread=thr1" }
+    - { title: Make a file, uri: "oxplow:oxplow/effort?id=eff1" }

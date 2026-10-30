@@ -1,0 +1,19 @@
+# "See also": a folder links to the folder above it (none for a top-level
+# folder: the Files page is the root) and to the Files page.
+given:
+  - observe: { turn: { prompt: c, write: { path: src/sub/c.rs, body: "c\n" } } }
+when: { page: oxplow-foundation/directory, params: { stream_id: 1, path: src/sub } }
+expect:
+  see_also:
+    - { title: src, uri: "oxplow:oxplow/dir?path=src" }
+    - { title: Files, uri: "oxplow:oxplow/page?page=files" }
+steps:
+  - params: { path: src }
+    expect:
+      see_also:
+        - { title: Files, uri: "oxplow:oxplow/page?page=files" }
+  - params: { path: "oxplow-foundation/pages", filesystem: "oxplow:extensions" }
+    expect:
+      see_also:
+        - { title: oxplow-foundation, uri: "oxplow:oxplow/dir?filesystem=oxplow:extensions&path=oxplow-foundation" }
+        - { title: Files, uri: "oxplow:oxplow/page?page=files" }

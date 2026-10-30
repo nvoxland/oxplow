@@ -1,0 +1,14 @@
+# "See also": the File viewer links to a local file's history (the index
+# has none for another filesystem) and to its folder on its filesystem.
+when:
+  page: oxplow-foundation/file-viewer
+  params: { path: "src/sub/c.rs", rev: "git:HEAD" }
+expect:
+  see_also:
+    - { title: File history, uri: "oxplow:oxplow/page?page=file-history&path=src/sub/c.rs" }
+    - { title: src/sub, uri: "oxplow:oxplow/dir?path=src/sub&rev=git:HEAD" }
+steps:
+  - params: { path: "oxplow-foundation/pages/commit.yaml", filesystem: "oxplow:extensions", rev: "" }
+    expect:
+      see_also:
+        - { title: oxplow-foundation/pages, uri: "oxplow:oxplow/dir?filesystem=oxplow:extensions&path=oxplow-foundation/pages" }

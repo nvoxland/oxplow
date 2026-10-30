@@ -1,0 +1,6 @@
+# "See also": the alerts link to the extension problems and the collectors.
+when: { page: alerts }
+expect:
+  see_also:
+    - { title: Extension problems, uri: "oxplow:oxplow/page?page=extension-problems" }
+    - { title: Collectors, uri: "oxplow:oxplow/page?page=collectors" }

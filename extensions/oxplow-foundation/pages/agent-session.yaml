@@ -35,6 +35,18 @@ loaders:
         from: row.thread
       conversation:
         from: row.conversation
+  # Its thread's work, and the efforts whose files it edited.
+  related:
+    sql: |
+      SELECT 'Thread work' AS title, uri('oxplow/page', 'page', 'thread-work', 'thread', 'thr' || s.thread_id) AS uri,
+             'The work items of its thread' AS description, 1 AS ord
+      FROM v_agent_session s WHERE s.uri = :uri
+      UNION ALL
+      SELECT e.title, e.uri, 'An effort whose files this session edited', 2
+      FROM v_effort e
+      WHERE e.id IN (SELECT f.effort_id FROM v_effort_file f
+                     WHERE f.agent_session_id = (SELECT s.id FROM v_agent_session s WHERE s.uri = :uri))
+      ORDER BY ord, 1
 view:
   stack:
   - id: agent-session-waiting
@@ -84,3 +96,5 @@ actions:
   choices:
     conversation: oxplow-foundation/agent-session-conversations
   when: can_fork
+see_also:
+  - { from: related }

@@ -1,0 +1,24 @@
+# "See also": a work item links to the Board of its thread (the Backlog when
+# it is on none), the efforts on it once there are any, and its parent epic.
+given:
+  - { command: oxplow.work_item.create, input: { title: The epic, thread: thr1 }, bind: epic }
+  - { command: oxplow.work_item.create, input: { title: The child, thread: thr1, parent_uri: $epic.uri }, bind: child }
+  - { command: oxplow.work_item.create, input: { title: Loose end }, bind: loose }
+when: { page: work-item, params: { uri: $child.uri, thread_id: 1 } }
+expect:
+  see_also:
+    - { title: Board, uri: "oxplow:oxplow/page?page=board&thread_id=1" }
+    - { title: The epic, uri: $epic.uri }
+steps:
+  - params: { uri: $loose.uri }
+    expect:
+      see_also:
+        - { title: Backlog, uri: "oxplow:oxplow/page?page=backlog" }
+  - given:
+      - { command: oxplow.effort.open, input: { thread: thr1, work_item: $child.uri } }
+    params: { uri: $child.uri }
+    expect:
+      see_also:
+        - { title: Board, uri: "oxplow:oxplow/page?page=board&thread_id=1" }
+        - { title: Efforts }
+        - { title: The epic, uri: $epic.uri }

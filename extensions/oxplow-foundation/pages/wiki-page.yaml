@@ -27,6 +27,18 @@ loaders:
              CASE WHEN r.stale THEN 'warning' ELSE 'success' END AS tone
       FROM v_knowledge_ref r WHERE r.page = uri('oxplow/wiki', 'slug', :slug)
       ORDER BY r.path
+  # What links here: the work items and commits that name it as [[slug]].
+  backlinks:
+    sql: |
+      SELECT coalesce(w.title, c.subject, r.source_uri) AS title, r.source_uri AS uri,
+             'Links to this page' AS description
+      FROM v_page_ref r
+      LEFT JOIN v_work_item w ON w.uri = r.source_uri
+      LEFT JOIN v_commit c ON r.source_resource = 'oxplow/commit' AND c.sha = uri_param(r.source_uri, 'sha')
+      WHERE r.target_uri = uri('oxplow/wiki', 'slug', :slug)
+        AND r.ref_type IN ('wikilink', 'summary_wikilink')
+      GROUP BY r.source_uri
+      ORDER BY title LIMIT 10
 view:
   stack:
   - id: body
@@ -93,3 +105,6 @@ view:
         files:
         - '{{row.path}}'
       row: true
+see_also:
+  - { page: oxplow-foundation/wiki-index }
+  - { from: backlinks }

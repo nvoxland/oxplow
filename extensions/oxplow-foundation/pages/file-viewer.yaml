@@ -30,6 +30,20 @@ loaders:
                     AND :rev IS NOT NULL AND :rev NOT IN ('', 'working')
                THEN uri('oxplow/file', 'path', :path)
              END AS current_uri
+  # Its history (the index has one for a local file only) and its folder, on
+  # the file's own filesystem and revision.
+  related:
+    sql: |
+      SELECT 'File history' AS title, uri('oxplow/page', 'page', 'file-history', 'path', :path) AS uri, 1 AS ord
+      WHERE COALESCE(:filesystem, 'oxplow:local') = 'oxplow:local'
+      UNION ALL
+      SELECT rtrim(rtrim(:path, replace(:path, '/', '')), '/'),
+             uri('oxplow/dir', 'filesystem', NULLIF(:filesystem, 'oxplow:local'),
+                 'path', rtrim(rtrim(:path, replace(:path, '/', '')), '/'),
+                 'rev', NULLIF(NULLIF(:rev, ''), 'working'))
+             , 2
+      WHERE :path LIKE '%/%'
+      ORDER BY ord
 actions:
 - { id: open-current, label: Open current version, open: current_uri, when: current_uri }
 view:
@@ -40,3 +54,5 @@ view:
     filesystem: filesystem
     revision: rev
     lines: lines
+see_also:
+  - { from: related }

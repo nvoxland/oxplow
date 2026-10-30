@@ -17,6 +17,12 @@ loaders:
   editor:
     sql: |
       SELECT :path AS path, :filesystem AS filesystem, :lines AS lines
+  # The file's folder: its path up to the last slash (none at the root).
+  folder:
+    sql: |
+      SELECT rtrim(rtrim(:path, replace(:path, '/', '')), '/') AS title,
+             uri('oxplow/dir', 'path', rtrim(rtrim(:path, replace(:path, '/', '')), '/')) AS uri
+      WHERE :path LIKE '%/%'
 view:
   from: editor
   viz: editor
@@ -24,3 +30,6 @@ view:
     path: path
     filesystem: filesystem
     lines: lines
+see_also:
+  - { page: oxplow-foundation/file-history, params: { path: { param: path } } }
+  - { from: folder }

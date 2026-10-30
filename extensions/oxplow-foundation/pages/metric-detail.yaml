@@ -104,6 +104,11 @@ loaders:
              CASE WHEN c.provenance = 'observed' THEN 'observed' ELSE '⚠ ' || coalesce(c.provenance, '?') END AS trust
       FROM pts p LEFT JOIN v_capture c ON c.id = p.capture_id
       ORDER BY p.captured_at DESC LIMIT 200
+  # The measure it is built on (a metric may have none).
+  built_on:
+    sql: |
+      SELECT m.title, uri('oxplow/measure', 'measure', m.key) AS uri, m.description
+      FROM v_metric_spec s JOIN v_measure m ON m.key = s.source_measure WHERE s.key = :metric
 view:
   stack:
   - id: header
@@ -202,3 +207,6 @@ view:
     - key: trust
       label: Trust
     empty: No recordings in range.
+see_also:
+  - { from: built_on }
+  - { page: oxplow-foundation/metrics-recorded }

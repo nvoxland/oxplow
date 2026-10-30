@@ -42,6 +42,13 @@ loaders:
     sql: |
       SELECT a.extension AS title, a.extension_target AS uri, e.description
       FROM about a LEFT JOIN v_extension e ON e.name = a.extension
+  # Its extension's problems, only while it isn't healthy.
+  problems:
+    sql: |
+      SELECT 'Extension problems' AS title,
+             uri('oxplow/page', 'page', 'extension-problems') || '#extension=' || h.extension AS uri,
+             'What is wrong in ' || h.extension AS description
+      FROM v_contribution_health h WHERE h.uri = :uri AND h.state <> 'ok'
 view:
   stack:
   - id: about
@@ -67,4 +74,5 @@ view:
     empty: Collector not found.
 see_also:
   - { from: related }
+  - { from: problems }
   - { page: oxplow-foundation/collectors }

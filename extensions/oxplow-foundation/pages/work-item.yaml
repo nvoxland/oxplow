@@ -63,6 +63,25 @@ loaders:
              (SELECT count(*) FROM v_effort_file f WHERE f.effort_id = e.id) AS files,
              e.summary
       FROM v_effort e WHERE e.work_item = :uri ORDER BY e.started_at DESC, e.id DESC
+  # Where it is listed, the efforts on it once there are any, its parent epic.
+  related:
+    sql: |
+      SELECT CASE WHEN w.thread_id IS NULL THEN 'Backlog' ELSE 'Board' END AS title,
+             CASE WHEN w.thread_id IS NULL THEN uri('oxplow/page', 'page', 'backlog')
+                  ELSE uri('oxplow/page', 'page', 'board', 'thread_id', w.thread_id) END AS uri,
+             CASE WHEN w.thread_id IS NULL THEN 'The work items on no thread'
+                  ELSE 'The work items of its thread' END AS description,
+             1 AS ord
+      FROM v_work_item w WHERE w.uri = :uri
+      UNION ALL
+      SELECT 'Efforts', uri('oxplow/page', 'page', 'item-efforts', 'work_item', w.uri),
+             'What has been done on it so far', 2
+      FROM v_work_item w
+      WHERE w.uri = :uri AND EXISTS (SELECT 1 FROM v_effort e WHERE e.work_item = w.uri)
+      UNION ALL
+      SELECT p.title, p.uri, 'Its parent epic', 3
+      FROM v_work_item w JOIN v_work_item p ON p.uri = w.parent_uri WHERE w.uri = :uri
+      ORDER BY ord
 view:
   stack:
   - id: state
@@ -240,3 +259,5 @@ view:
       label: Summary
     empty: No effort on this item yet.
   - slot: sections
+see_also:
+  - { from: related }

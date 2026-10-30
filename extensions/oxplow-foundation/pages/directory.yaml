@@ -26,6 +26,14 @@ loaders:
       FROM v_file
       WHERE stream_id = :stream_id AND filesystem = :filesystem AND rev = :rev AND parent = :path
       ORDER BY kind = 'dir' DESC, name
+  # The folder above it (none at the top: the Files page is the root).
+  parent_folder:
+    sql: |
+      SELECT rtrim(rtrim(:path, replace(:path, '/', '')), '/') AS title,
+             uri('oxplow/dir', 'filesystem', NULLIF(:filesystem, 'oxplow:local'),
+                 'path', rtrim(rtrim(:path, replace(:path, '/', '')), '/'),
+                 'rev', NULLIF(:rev, '')) AS uri
+      WHERE :path LIKE '%/%'
 view:
   from: directory
   viz: list
@@ -40,3 +48,6 @@ view:
     label: Change
     format: badge
   empty: (empty)
+see_also:
+  - { from: parent_folder }
+  - { page: oxplow-foundation/files }
