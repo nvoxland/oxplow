@@ -170,7 +170,10 @@ impl Host {
     pub(crate) async fn fork(&self) -> Result<Host, String> {
         let dir = tempfile::tempdir().map_err(|e| e.to_string())?;
         let root = dir.path().to_path_buf();
-        copy_all(&self.root, &root).map_err(|e| e.to_string())?;
+        let store = self
+            .root
+            .join(oxplow_app::extension::extension_store::STORE_DIR);
+        copy_all(&self.root, &root, &store).map_err(|e| e.to_string())?;
         oxplow_app::vcs::GitProvider
             .init_repository(&root)
             .await
@@ -399,8 +402,10 @@ fn problems(
 }
 
 /// Copy throwaway `from` to `to` whole but its git repository: symlinks
-/// stay symlinks, a deployment's read-only files stay read-only.
-fn copy_all(from: &Path, to: &Path) -> std::io::Result<()> {
+/// stay symlinks. The deployment store `store` is linked, not copied:
+/// nothing writes into a deployment after it is made, and a fork per
+/// example copying it was hundreds of files written and removed each time.
+fn copy_all(from: &Path, to: &Path, store: &Path) -> std::io::Result<()> {
     std::fs::create_dir_all(to)?;
     for entry in std::fs::read_dir(from)? {
         let entry = entry?;
@@ -413,7 +418,12 @@ fn copy_all(from: &Path, to: &Path) -> std::io::Result<()> {
             if from.join(".git") == entry.path() {
                 continue;
             }
-            copy_all(&entry.path(), &target)?;
+            if entry.path() == store {
+                #[cfg(unix)]
+                std::os::unix::fs::symlink(entry.path(), &target)?;
+                continue;
+            }
+            copy_all(&entry.path(), &target, store)?;
         } else {
             std::fs::copy(entry.path(), &target)?;
         }
@@ -519,6 +529,41 @@ mod tests {
         assert!(!host.root.join(EXTENSIONS_DIR).join("other").exists());
         assert!(host.problems.is_empty(), "{:?}", host.problems);
         assert!(!host.root.join(".oxplow/personal.yaml").exists());
+    }
+
+    /// A fork links to the deployment store it was made from (a deployment
+    /// never changes after it is made) instead of writing it again: one
+    /// fork per example, and a copy each was hundreds of files written and
+    /// removed. What it runs is still there.
+    #[tokio::test]
+    async fn a_fork_links_to_its_deployments_instead_of_copying_them() {
+        let project = tempfile::tempdir().unwrap();
+        oxplow_app::vcs::GitProvider
+            .init_repository(project.path())
+            .await
+            .unwrap();
+        write(
+            project.path(),
+            ".oxplow/extensions/acme/extension.yaml",
+            "manifest: 2\nname: acme\nintent:\n  purpose: test\n",
+        );
+        let base = Host::start(project.path(), "acme", &[], Arc::new(|_: &str| None), true)
+            .await
+            .unwrap();
+        let fork = base.fork().await.unwrap();
+        let store = fork
+            .root
+            .join(oxplow_app::extension::extension_store::STORE_DIR);
+        assert!(store.symlink_metadata().unwrap().is_symlink(), "{store:?}");
+        let deployments: Vec<_> = std::fs::read_dir(store.join("acme"))
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .collect();
+        assert!(!deployments.is_empty());
+        for d in &deployments {
+            assert!(d.join("extension.yaml").is_file(), "{d:?}");
+        }
+        assert!(fork.problems.is_empty(), "{:?}", fork.problems);
     }
 
     /// An extension whose source the project keeps elsewhere

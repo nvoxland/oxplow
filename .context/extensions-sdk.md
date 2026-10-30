@@ -447,7 +447,11 @@ a `KINDS` entry and a `dispatch` arm. The forms:
     `steps`, `rows` or `setup`, or one that runs a job, logs an event or
     files a component's items (`makes_data`), runs on a fork of the
     throwaway
-    (`Host::fork`: its files copied, and its database as the deploys left
+    (`Host::fork`: its files copied but the deployment store, which is
+    linked — a deployment never changes once made, and copying it per
+    example was ~90% of the files a run wrote and removed (the load
+    `fseventsd` shows); a step that deploys in a fork would write to the
+    store all its siblings share; and its database as the deploys left
     it — `Database::copy_in_memory` of a snapshot taken before anything
     ran — so the fork boots what was deployed and nothing is built or
     deployed again; ~0.8 s, most of it that boot's activation), so no
