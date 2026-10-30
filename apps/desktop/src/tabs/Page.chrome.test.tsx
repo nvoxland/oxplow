@@ -102,3 +102,29 @@ test("the title is in the nav bar and the body draws no heading", () => {
   expect(getByTestId("page-nav-title-icon").contains(getByTestId("ico"))).toBe(true);
   expect(container.querySelector("h1")).toBeNull();
 });
+
+// A long rail scrolls inside the page's visible height (the scroll body's,
+// not the window's, which includes the app's chrome above the page), and
+// its title band is opaque, so what scrolls under it doesn't show through.
+test("the side rail is as tall as the page body shows, under an opaque title", () => {
+  const real = globalThis.ResizeObserver;
+  globalThis.ResizeObserver = class {
+    constructor(private readonly cb: ResizeObserverCallback) {}
+    observe() {
+      this.cb([{ contentRect: { width: 1200, height: 500 } } as ResizeObserverEntry], this as unknown as ResizeObserver);
+    }
+    unobserve() {}
+    disconnect() {}
+  } as unknown as typeof ResizeObserver;
+  try {
+    const { getByTestId } = render(
+      <Page title="T" rightRail={<p>controls</p>}>
+        body
+      </Page>,
+    );
+    expect(getByTestId("page-rail").style.maxHeight).toBe("500px");
+    expect(getByTestId("page-rail-title").style.background).toBe("var(--surface-chrome)");
+  } finally {
+    globalThis.ResizeObserver = real;
+  }
+});

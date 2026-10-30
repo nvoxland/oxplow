@@ -396,6 +396,9 @@ function Chip({ chip }: { chip: PageChip }) {
 function RailBody({ children, width, fill, rightRail, rightRailTitle }: { children: ReactNode; width: "full" | "reading"; fill: boolean; rightRail?: ReactNode; rightRailTitle?: ReactNode }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const [showRail, setShowRail] = useState(true);
+  // How tall the body shows (inside its padding): the side rail scrolls
+  // within it. The window's height would count the app's chrome above.
+  const [shown, setShown] = useState<number | null>(null);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -403,6 +406,7 @@ function RailBody({ children, width, fill, rightRail, rightRailTitle }: { childr
     const ro = new ResizeObserver((entries) => {
       const width = entries[0]?.contentRect.width ?? el.clientWidth;
       setShowRail(width >= DETAILS_RAIL_THRESHOLD_PX);
+      setShown(entries[0]?.contentRect.height ?? null);
     });
     ro.observe(el);
     return () => ro.disconnect();
@@ -426,7 +430,7 @@ function RailBody({ children, width, fill, rightRail, rightRailTitle }: { childr
               position: "sticky",
               top: 0,
               alignSelf: "start",
-              maxHeight: "calc(100vh - 48px)",
+              maxHeight: shown === null ? undefined : `${shown}px`,
               overflow: "auto",
             }
           : fill
@@ -442,6 +446,7 @@ function RailBody({ children, width, fill, rightRail, rightRailTitle }: { childr
       }}
     >
       <div
+        data-testid="page-rail-title"
         style={{
           display: "flex",
           // The title keeps its line; the actions wrap below it when they
@@ -450,14 +455,15 @@ function RailBody({ children, width, fill, rightRail, rightRailTitle }: { childr
           alignItems: "center",
           gap: 8,
           padding: "8px 10px",
-          background: "var(--panel-header-bg)",
+          // Opaque: the rail's items scroll under it.
+          background: "var(--surface-chrome)",
           borderBottom: "1px solid var(--border-subtle)",
           fontSize: 11,
           fontWeight: 600,
           color: "var(--text-secondary)",
           textTransform: "uppercase",
           letterSpacing: 0.4,
-          ...(variant === "aside" ? { position: "sticky", top: 0 } : {}),
+          ...(variant === "aside" ? { position: "sticky", top: 0, zIndex: 1 } : {}),
         }}
       >
         <span style={{ flex: "1 0 auto" }}>{rightRailTitle ?? "Details"}</span>

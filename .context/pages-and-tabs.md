@@ -999,7 +999,10 @@ the body region differs.
 - **The rail** is the page's control panel (params, filters, collapse
   controls, a contents list): a `320px` sticky column beside a body of
   **either** width (the body is padded then), titled by `rightRailTitle`
-  ("Details" by default). A page's rail is `PageRail` — Filters, its
+  ("Details" by default). A long rail scrolls within the height the body
+  shows (`RailBody` measures its scroll body — never `100vh`, which counts
+  the app's chrome above the page), under an opaque sticky title band
+  (`--surface-chrome`). A page's rail is `PageRail` — Filters, its
   `rail:` tree, Selection, built from `RailGroup` and `ParamList`
   (usability.md "A page's controls are in its rail").
   It is orthogonal to the archetype — a dashboard may have one for its
