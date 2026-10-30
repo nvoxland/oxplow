@@ -1,0 +1,66 @@
+title: Collector
+description: One collector — what it gathers, when it runs, its last run and state, and the extension that declares it.
+label: '{{row.name}}'
+icon: activity
+for: oxplow/collector
+params:
+- name: uri
+  label: Collector
+answers:
+- {"question":"When did this collector last run, and did it fail?","about":"oxplow/collector","params":{"uri":"oxplow:oxplow/collector?collector=oxplow-foundation/oxplow.effort_test_outcome"},"skill":"oxplow-extension"}
+loaders:
+  about:
+    sql: |
+      WITH c AS (
+        SELECT *, substr(file, instr(file, '/extensions/' || extension || '/') + length('/extensions/' || extension || '/')) AS r
+        FROM v_contribution WHERE uri = :uri
+      ), f AS (
+        -- The running copy's path: the extension's folder, then the file inside it.
+        SELECT *, CASE WHEN file IS NULL THEN NULL
+                       WHEN instr(file, '/extensions/' || extension || '/') > 0 THEN extension || substr(r, instr(r, '/'))
+                       ELSE extension || '/' || file END AS rel
+        FROM c
+      )
+      SELECT k.id AS name, COALESCE(k.description, f.description) AS description,
+             f.extension, 'oxplow:oxplow/extension?name=' || f.extension AS extension_target,
+             f.rel || CASE WHEN f.line IS NOT NULL THEN ', line ' || f.line ELSE '' END AS declared,
+             CASE WHEN f.rel IS NOT NULL THEN
+                    uri('oxplow/file', 'filesystem', 'oxplow:extensions', 'path', f.rel)
+                    || CASE WHEN f.line IS NOT NULL THEN '#lines=' || f.line || '&' ELSE '#' END
+                    || 'oxplow.renderer=oxplow-foundation/file-viewer' END AS declared_target
+      FROM f JOIN v_collector k ON k.uri = f.uri
+  facts:
+    sql: |
+      SELECT CASE k.trigger WHEN 'events' THEN 'When the events it listens for happen'
+                            WHEN 'run' THEN 'On a run'
+                            ELSE k.trigger END AS runs,
+             CASE WHEN k.enabled THEN 'Yes' ELSE 'No' || COALESCE(': ' || k.disabled_reason, '') END AS enabled,
+             k.state, k.last_run_at, k.last_status, k.error, k.next_due_at,
+             (SELECT p.uri FROM v_page p WHERE p.id = 'oxplow-foundation/collectors') AS collectors_target,
+             'Every collector and its runs' AS collectors
+      FROM v_collector k WHERE k.uri = :uri
+view:
+  stack:
+  - id: about
+    title: About
+    viz: detail
+    from: about
+    columns:
+    - { key: description, label: What it is }
+    - { key: extension, label: Extension, link: { kind: page, from: extension_target } }
+    - { key: declared, label: Declared in, link: { kind: page, from: declared_target } }
+    empty: This contribution isn't known to the project.
+  - id: facts
+    title: How it runs
+    viz: detail
+    from: facts
+    columns:
+    - { key: runs, label: Runs }
+    - { key: enabled, label: Enabled }
+    - { key: state, label: State }
+    - { key: last_run_at, label: Last run, format: datetime }
+    - { key: last_status, label: Last result }
+    - { key: error, label: Error }
+    - { key: next_due_at, label: Next due, format: datetime }
+    - { key: collectors, label: See also, link: { kind: page, from: collectors_target } }
+    empty: Collector not found.

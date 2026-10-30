@@ -1,0 +1,9 @@
+# A command page says what the command does, the permission it needs, whether it asks first and can be undone, and where it is declared.
+when: { page: oxplow-foundation/command, params: { uri: "oxplow:oxplow/command?command=oxplow.agent.draft" } }
+expect:
+  label: oxplow.agent.draft
+  loaders:
+    about:
+      rows: [{ name: oxplow.agent.draft, extension: oxplow-foundation, extension_target: "oxplow:oxplow/extension?name=oxplow-foundation", declared: oxplow-foundation/extension.yaml }]
+    facts:
+      rows: [{ needs: The agent_input.write permission, does: Changes only what you see, asks_first: "No", can_undo: "No" }]

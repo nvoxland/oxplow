@@ -159,6 +159,12 @@ What moved out of core, and what it is now. All of it is pages (files in
 `pages/`, read by `v_page`); oxplow-foundation's pages draw the app's own
 screens and oxplow-bundled's add the review and analysis:
 
+- **A page for each kind of contribution.** Every contribution kind an
+  extension declares (command, skill, custom component, slot, collector,
+  measure, dimension, resource, implementation) has a foundation page
+  (`for: oxplow/<kind>`) that draws its `v_contribution.uri` with its full
+  definition, its extension and where it is declared. The Extension page's
+  tables link a row to it.
 - **Dashboards and review.** `planning`, `review`, `quality` and `usage`;
   the code-quality `findings`; the `change-review` page (treemap,
   look-here-first, functions, co-change, zones) mounted in the

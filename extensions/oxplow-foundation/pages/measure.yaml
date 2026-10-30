@@ -1,0 +1,82 @@
+title: Measure
+description: One measure — what it counts and in which unit, how its values add up over time, and the metrics built on it.
+label: '{{row.name}}'
+icon: bar-chart-3
+for: oxplow/measure
+params:
+- name: uri
+  label: Measure
+answers:
+- {"question":"What does this measure count, and which metrics use it?","about":"oxplow/measure","params":{"uri":"oxplow:oxplow/measure?measure=oxplow.tokens"},"skill":"oxplow-extension"}
+loaders:
+  about:
+    sql: |
+      WITH c AS (
+        SELECT *, substr(file, instr(file, '/extensions/' || extension || '/') + length('/extensions/' || extension || '/')) AS r
+        FROM v_contribution WHERE uri = :uri
+      ), f AS (
+        -- The running copy's path: the extension's folder, then the file inside it.
+        SELECT *, CASE WHEN file IS NULL THEN NULL
+                       WHEN instr(file, '/extensions/' || extension || '/') > 0 THEN extension || substr(r, instr(r, '/'))
+                       ELSE extension || '/' || file END AS rel
+        FROM c
+      )
+      SELECT m.title AS name, COALESCE(m.description, f.description) AS description,
+             f.extension, 'oxplow:oxplow/extension?name=' || f.extension AS extension_target,
+             f.rel || CASE WHEN f.line IS NOT NULL THEN ', line ' || f.line ELSE '' END AS declared,
+             CASE WHEN f.rel IS NOT NULL THEN
+                    uri('oxplow/file', 'filesystem', 'oxplow:extensions', 'path', f.rel)
+                    || CASE WHEN f.line IS NOT NULL THEN '#lines=' || f.line || '&' ELSE '#' END
+                    || 'oxplow.renderer=oxplow-foundation/file-viewer' END AS declared_target
+      FROM f JOIN v_measure m ON m.key = f.local
+  facts:
+    sql: |
+      SELECT m.key, m.unit,
+             COALESCE(m.subject_kind, 'Anything') AS of,
+             CASE m.temporal_semantics
+               WHEN 'additive' THEN 'Adds up over time'
+               WHEN 'semi-additive' THEN 'Does not add up over time: the last value counts'
+               WHEN 'non-additive' THEN 'Does not add up'
+               ELSE m.temporal_semantics END AS over_time,
+             CASE m.fold WHEN 'last' THEN 'The last value in a period' WHEN 'sum' THEN 'The sum of the values' ELSE m.fold END AS combined,
+             CASE m.scope WHEN 'global' THEN 'The whole project' ELSE m.scope END AS scope
+      FROM v_contribution c JOIN v_measure m ON m.key = c.local
+      WHERE c.kind = 'measure' AND c.uri = :uri
+  metrics:
+    sql: |
+      SELECT s.title, s.description, 'oxplow:oxplow/metric?metric=' || s.key AS uri
+      FROM v_contribution c JOIN v_measure m ON m.key = c.local
+           JOIN v_metric_spec s ON s.source_measure = m.key
+      WHERE c.kind = 'measure' AND c.uri = :uri
+      ORDER BY s.title
+view:
+  stack:
+  - id: about
+    title: About
+    viz: detail
+    from: about
+    columns:
+    - { key: description, label: What it is }
+    - { key: extension, label: Extension, link: { kind: page, from: extension_target } }
+    - { key: declared, label: Declared in, link: { kind: page, from: declared_target } }
+    empty: This contribution isn't known to the project.
+  - id: facts
+    title: What it measures
+    viz: detail
+    from: facts
+    columns:
+    - { key: key, label: Key }
+    - { key: unit, label: Unit }
+    - { key: of, label: Measured on }
+    - { key: over_time, label: Over time }
+    - { key: combined, label: A period's value is }
+    - { key: scope, label: Taken for }
+    empty: Measure not found.
+  - id: metrics
+    title: Metrics built on it
+    viz: list
+    from: metrics
+    hide_empty: true
+    columns:
+    - { key: title, label: Metric, link: { kind: page, from: uri } }
+    - { key: description, label: What it is }

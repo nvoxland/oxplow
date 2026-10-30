@@ -133,6 +133,36 @@ intent:
     - name: file-history-lists-the-commits-that-touched-a-file
       input: { page: file-history }
       expect: the commits that touched a file, newest first
+    - name: the-command-page-says-what-a-command-needs-and-whether-it-asks-first
+      input: { page: command, params: { uri: "oxplow:oxplow/command?command=oxplow.agent.draft" } }
+      expect: a command's permission, whether it asks first and can be undone, and where it is declared
+    - name: the-skill-page-says-what-a-skill-is
+      input: { page: skill, params: { uri: "oxplow:oxplow/skill?skill=oxplow-foundation/work-items" } }
+      expect: a skill's description and whether it is a skill or a slash command
+    - name: the-component-page-links-the-commands-it-may-run
+      input: { page: custom-component, params: { uri: "oxplow:oxplow/custom_component?custom_component=oxplow-foundation/integrations" } }
+      expect: a custom component's code, whether it reads data, and a link to each command it may run
+    - name: the-slot-page-links-the-mounted-page-and-its-host
+      input: { page: slot, params: { uri: "oxplow:oxplow/slot?slot=oxplow-foundation/oxplow-foundation.tasks.sections-0" } }
+      expect: the page a slot mount shows, the page that hosts it and the slot
+    - name: the-collector-page-says-when-a-collector-runs-and-how-it-last-went
+      input: { page: collector, params: { uri: "oxplow:oxplow/collector?collector=oxplow-foundation/oxplow.effort_test_outcome" } }
+      expect: when a collector runs, whether it is enabled and its last run
+    - name: the-measure-page-says-what-a-measure-counts-and-lists-its-metrics
+      input: { page: measure, params: { uri: "oxplow:oxplow/measure?measure=oxplow.tokens" } }
+      expect: a measure's unit and how it adds up, and the metrics built on it
+    - name: the-dimension-page-says-what-a-dimension-slices-by
+      input: { page: dimension, params: { uri: "oxplow:oxplow/dimension?dimension=oxplow.language" } }
+      expect: a dimension's value type, what it describes and whether it is stored per value
+    - name: the-resource-page-lists-the-pages-that-draw-a-resource-kind
+      input: { page: resource, params: { uri: "oxplow:oxplow/resource?resource=oxplow-foundation/commit" } }
+      expect: a resource kind's URI form and the pages that draw it
+    - name: the-implementation-page-says-whether-an-implementation-is-in-use
+      input: { page: implementation, params: { uri: "oxplow:oxplow/implementation?implementation=oxplow-foundation/work_items.oxplow" } }
+      expect: an implementation's capability, whether it is in use and what it can do
+    - name: a-command-row-of-an-extension-links-to-the-commands-page
+      input: { page: extension, params: { uri: "oxplow:oxplow/extension?name=oxplow-foundation", name: oxplow-foundation } }
+      expect: each command row of the Extension page links to its own command page
     - name: effort-files-lists-what-an-effort-claimed
       input: { page: effort-files }
       expect: the files an effort claimed, by path

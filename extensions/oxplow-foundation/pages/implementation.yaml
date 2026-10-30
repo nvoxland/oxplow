@@ -1,0 +1,66 @@
+title: Implementation
+description: One implementation of a capability — what it provides, whether it is the one in use, what it can do, and the extension that declares it.
+label: '{{row.name}}'
+icon: settings
+for: oxplow/implementation
+params:
+- name: uri
+  label: Implementation
+answers:
+- {"question":"What does this implementation provide, and is it in use?","about":"oxplow/implementation","params":{"uri":"oxplow:oxplow/implementation?implementation=oxplow-foundation/work_items.oxplow"},"skill":"oxplow-extension"}
+loaders:
+  about:
+    sql: |
+      WITH c AS (
+        SELECT *, substr(file, instr(file, '/extensions/' || extension || '/') + length('/extensions/' || extension || '/')) AS r
+        FROM v_contribution WHERE uri = :uri
+      ), f AS (
+        -- The running copy's path: the extension's folder, then the file inside it.
+        SELECT *, CASE WHEN file IS NULL THEN NULL
+                       WHEN instr(file, '/extensions/' || extension || '/') > 0 THEN extension || substr(r, instr(r, '/'))
+                       ELSE extension || '/' || file END AS rel
+        FROM c
+      )
+      SELECT i.title AS name, COALESCE(i.description, f.description) AS description,
+             f.extension, 'oxplow:oxplow/extension?name=' || f.extension AS extension_target,
+             f.rel || CASE WHEN f.line IS NOT NULL THEN ', line ' || f.line ELSE '' END AS declared,
+             CASE WHEN f.rel IS NOT NULL THEN
+                    uri('oxplow/file', 'filesystem', 'oxplow:extensions', 'path', f.rel)
+                    || CASE WHEN f.line IS NOT NULL THEN '#lines=' || f.line || '&' ELSE '#' END
+                    || 'oxplow.renderer=oxplow-foundation/file-viewer' END AS declared_target
+      FROM f JOIN v_capability_provider i ON i.extension = f.extension AND i.capability || '.' || i.provider = f.local
+  facts:
+    sql: |
+      SELECT i.capability_title AS capability,
+             CASE WHEN i.active THEN 'Yes, this one is in use' ELSE 'No' END AS in_use,
+             CASE WHEN i.available THEN 'Yes' ELSE 'No' END AS available,
+             CASE i.chosen_by WHEN 'default' THEN 'It is the default'
+                              WHEN 'declared' THEN 'A declaration chose it'
+                              ELSE 'Nobody has chosen it' END AS chosen,
+             NULLIF((SELECT json_group_array(json_object('text', j.key)) FROM json_each(i.features) j
+                     WHERE j.value IS NOT NULL AND j.value <> 0 AND j.value <> 'false'), '[]') AS feature_items
+      FROM v_contribution c JOIN v_capability_provider i
+           ON i.extension = c.extension AND i.capability || '.' || i.provider = c.local
+      WHERE c.kind = 'implementation' AND c.uri = :uri
+view:
+  stack:
+  - id: about
+    title: About
+    viz: detail
+    from: about
+    columns:
+    - { key: description, label: What it is }
+    - { key: extension, label: Extension, link: { kind: page, from: extension_target } }
+    - { key: declared, label: Declared in, link: { kind: page, from: declared_target } }
+    empty: This contribution isn't known to the project.
+  - id: facts
+    title: What it provides
+    viz: detail
+    from: facts
+    columns:
+    - { key: capability, label: Capability }
+    - { key: in_use, label: In use }
+    - { key: available, label: Available }
+    - { key: chosen, label: Chosen }
+    - { key: feature_items, label: It can, format: items }
+    empty: Implementation not found.

@@ -1,0 +1,55 @@
+title: Skill
+description: One skill — what it teaches an agent, whether it is a skill or a slash command, what it needs, and the extension that declares it.
+label: '{{row.name}}'
+icon: book-open
+for: oxplow/skill
+params:
+- name: uri
+  label: Skill
+answers:
+- {"question":"What does this skill teach an agent?","about":"oxplow/skill","params":{"uri":"oxplow:oxplow/skill?skill=oxplow-foundation/work-items"},"skill":"oxplow-extension"}
+loaders:
+  about:
+    sql: |
+      WITH c AS (
+        SELECT *, substr(file, instr(file, '/extensions/' || extension || '/') + length('/extensions/' || extension || '/')) AS r
+        FROM v_contribution WHERE uri = :uri
+      ), f AS (
+        -- The running copy's path: the extension's folder, then the file inside it.
+        SELECT *, CASE WHEN file IS NULL THEN NULL
+                       WHEN instr(file, '/extensions/' || extension || '/') > 0 THEN extension || substr(r, instr(r, '/'))
+                       ELSE extension || '/' || file END AS rel
+        FROM c
+      )
+      SELECT k.name AS name, COALESCE(k.description, f.description) AS description,
+             f.extension, 'oxplow:oxplow/extension?name=' || f.extension AS extension_target,
+             f.rel || CASE WHEN f.line IS NOT NULL THEN ', line ' || f.line ELSE '' END AS declared,
+             CASE WHEN f.rel IS NOT NULL THEN
+                    uri('oxplow/file', 'filesystem', 'oxplow:extensions', 'path', f.rel)
+                    || CASE WHEN f.line IS NOT NULL THEN '#lines=' || f.line || '&' ELSE '#' END
+                    || 'oxplow.renderer=oxplow-foundation/file-viewer' END AS declared_target
+      FROM f JOIN v_skill k ON k.uri = f.uri
+  facts:
+    sql: |
+      SELECT CASE k.kind WHEN 'command' THEN 'A slash command' WHEN 'skill' THEN 'A skill an agent loads when it applies' ELSE k.kind END AS is_a,
+             NULLIF((SELECT json_group_array(json_object('text', j.value)) FROM json_each(k.needs) j), '[]') AS needs_items
+      FROM v_skill k WHERE k.uri = :uri
+view:
+  stack:
+  - id: about
+    title: About
+    viz: detail
+    from: about
+    columns:
+    - { key: description, label: What it is }
+    - { key: extension, label: Extension, link: { kind: page, from: extension_target } }
+    - { key: declared, label: Declared in, link: { kind: page, from: declared_target } }
+    empty: This contribution isn't known to the project.
+  - id: facts
+    title: What it is
+    viz: detail
+    from: facts
+    columns:
+    - { key: is_a, label: It is }
+    - { key: needs_items, label: Needs, format: items }
+    empty: Skill not found.

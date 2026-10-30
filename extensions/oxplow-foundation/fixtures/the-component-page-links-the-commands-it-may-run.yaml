@@ -1,0 +1,11 @@
+# A custom component page lists the commands the component may run, each a link to its command.
+when: { page: oxplow-foundation/custom-component, params: { uri: "oxplow:oxplow/custom_component?custom_component=oxplow-foundation/integrations" } }
+expect:
+  label: Integrations
+  loaders:
+    about:
+      rows: [{ name: Integrations, extension: oxplow-foundation }]
+    facts:
+      rows: [{ id: integrations, code: components/integrations, reads_data: "Yes, it reads your data with SQL" }]
+    commands:
+      rows: 1

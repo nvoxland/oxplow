@@ -1,0 +1,9 @@
+# An implementation page says which capability it implements, whether it is in use and what it can do.
+when: { page: oxplow-foundation/implementation, params: { uri: "oxplow:oxplow/implementation?implementation=oxplow-foundation/work_items.oxplow" } }
+expect:
+  label: oxplow's tasks
+  loaders:
+    about:
+      rows: [{ name: "oxplow's tasks", extension: oxplow-foundation }]
+    facts:
+      rows: [{ capability: Work list, in_use: "Yes, this one is in use" }]

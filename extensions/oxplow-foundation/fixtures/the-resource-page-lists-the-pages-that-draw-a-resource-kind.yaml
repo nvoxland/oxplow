@@ -1,0 +1,11 @@
+# A resource page says how its URIs are written and lists the pages that draw it.
+when: { page: oxplow-foundation/resource, params: { uri: "oxplow:oxplow/resource?resource=oxplow-foundation/commit" } }
+expect:
+  label: Commit
+  loaders:
+    about:
+      rows: [{ name: Commit, extension: oxplow-foundation }]
+    facts:
+      rows: [{ uri_form: "oxplow:oxplow/commit", record: Its record is read from v_commit }]
+    pages:
+      rows: [{ title: Commit }]

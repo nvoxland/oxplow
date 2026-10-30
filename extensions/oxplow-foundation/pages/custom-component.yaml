@@ -1,0 +1,68 @@
+title: Custom component
+description: One custom component — what it draws, the code behind it, whether it can read data, the commands it may run, and the extension that declares it.
+label: '{{row.name}}'
+icon: layout-dashboard
+for: oxplow/custom_component
+params:
+- name: uri
+  label: Custom component
+answers:
+- {"question":"What does this custom component draw, and which commands may it run?","about":"oxplow/custom_component","params":{"uri":"oxplow:oxplow/custom_component?custom_component=oxplow-foundation/integrations"},"skill":"oxplow-extension"}
+loaders:
+  about:
+    sql: |
+      WITH c AS (
+        SELECT *, substr(file, instr(file, '/extensions/' || extension || '/') + length('/extensions/' || extension || '/')) AS r
+        FROM v_contribution WHERE uri = :uri
+      ), f AS (
+        -- The running copy's path: the extension's folder, then the file inside it.
+        SELECT *, CASE WHEN file IS NULL THEN NULL
+                       WHEN instr(file, '/extensions/' || extension || '/') > 0 THEN extension || substr(r, instr(r, '/'))
+                       ELSE extension || '/' || file END AS rel
+        FROM c
+      )
+      SELECT k.title AS name, COALESCE(k.description, f.description) AS description,
+             f.extension, 'oxplow:oxplow/extension?name=' || f.extension AS extension_target,
+             f.rel || CASE WHEN f.line IS NOT NULL THEN ', line ' || f.line ELSE '' END AS declared,
+             CASE WHEN f.rel IS NOT NULL THEN
+                    uri('oxplow/file', 'filesystem', 'oxplow:extensions', 'path', f.rel)
+                    || CASE WHEN f.line IS NOT NULL THEN '#lines=' || f.line || '&' ELSE '#' END
+                    || 'oxplow.renderer=oxplow-foundation/file-viewer' END AS declared_target
+      FROM f JOIN v_custom_component k ON k.uri = f.uri
+  facts:
+    sql: |
+      SELECT k.id, k.bundle AS code,
+             CASE WHEN k.sql = 'read' THEN 'Yes, it reads your data with SQL' ELSE 'No' END AS reads_data
+      FROM v_custom_component k WHERE k.uri = :uri
+  commands:
+    sql: |
+      SELECT json_group_array(json_object('text', j.value, 'hint', v.summary, 'uri', v.uri)) AS items
+      FROM v_custom_component k, json_each(k.commands) j LEFT JOIN v_command v ON v.id = j.value
+      WHERE k.uri = :uri HAVING count(*) > 0
+view:
+  stack:
+  - id: about
+    title: About
+    viz: detail
+    from: about
+    columns:
+    - { key: description, label: What it is }
+    - { key: extension, label: Extension, link: { kind: page, from: extension_target } }
+    - { key: declared, label: Declared in, link: { kind: page, from: declared_target } }
+    empty: This contribution isn't known to the project.
+  - id: facts
+    title: What it is
+    viz: detail
+    from: facts
+    columns:
+    - { key: id, label: Id }
+    - { key: code, label: Code }
+    - { key: reads_data, label: Reads data }
+    empty: Component not found.
+  - id: commands
+    title: Commands it may run
+    viz: detail
+    from: commands
+    hide_empty: true
+    columns:
+    - { key: items, label: Commands, format: items }

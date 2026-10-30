@@ -1,0 +1,11 @@
+# A measure page says what it counts, its unit and how it adds up, and lists the metrics built on it.
+when: { page: oxplow-foundation/measure, params: { uri: "oxplow:oxplow/measure?measure=oxplow.tokens" } }
+expect:
+  label: Agent tokens
+  loaders:
+    about:
+      rows: [{ name: Agent tokens, extension: oxplow-foundation }]
+    facts:
+      rows: [{ key: oxplow.tokens }]
+    metrics:
+      rows: 3

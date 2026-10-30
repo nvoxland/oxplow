@@ -1,0 +1,58 @@
+title: Slot
+description: One slot mount — the page an extension places at a named slot of another page, and the extension that declares it.
+label: '{{row.name}}'
+icon: columns-3
+for: oxplow/slot
+params:
+- name: uri
+  label: Slot
+answers:
+- {"question":"Which page does this slot mount show, and where?","about":"oxplow/slot","params":{"uri":"oxplow:oxplow/slot?slot=oxplow-foundation/oxplow-foundation.tasks.sections-0"},"skill":"oxplow-extension"}
+loaders:
+  about:
+    sql: |
+      WITH c AS (
+        SELECT *, substr(file, instr(file, '/extensions/' || extension || '/') + length('/extensions/' || extension || '/')) AS r
+        FROM v_contribution WHERE uri = :uri
+      ), f AS (
+        -- The running copy's path: the extension's folder, then the file inside it.
+        SELECT *, CASE WHEN file IS NULL THEN NULL
+                       WHEN instr(file, '/extensions/' || extension || '/') > 0 THEN extension || substr(r, instr(r, '/'))
+                       ELSE extension || '/' || file END AS rel
+        FROM c
+      )
+      SELECT COALESCE(mp.title, k.page) || ' in ' || COALESCE(hp.title, k.host) AS name, 'Shows ' || COALESCE(mp.title, k.page) || ' in the ' || k.slot || ' slot of ' || COALESCE(hp.title, k.host) || '.' AS description,
+             f.extension, 'oxplow:oxplow/extension?name=' || f.extension AS extension_target,
+             f.rel || CASE WHEN f.line IS NOT NULL THEN ', line ' || f.line ELSE '' END AS declared,
+             CASE WHEN f.rel IS NOT NULL THEN
+                    uri('oxplow/file', 'filesystem', 'oxplow:extensions', 'path', f.rel)
+                    || CASE WHEN f.line IS NOT NULL THEN '#lines=' || f.line || '&' ELSE '#' END
+                    || 'oxplow.renderer=oxplow-foundation/file-viewer' END AS declared_target
+      FROM f JOIN v_slot k ON k.uri = f.uri LEFT JOIN v_page mp ON mp.id = k.page LEFT JOIN v_page hp ON hp.id = k.host
+  mount:
+    sql: |
+      SELECT COALESCE(mp.title, k.page) AS mounted, mp.running_uri || '#oxplow.renderer=oxplow-foundation/definition' AS mounted_target,
+             COALESCE(hp.title, k.host) AS host, hp.running_uri || '#oxplow.renderer=oxplow-foundation/definition' AS host_target,
+             k.slot AS place
+      FROM v_slot k LEFT JOIN v_page mp ON mp.id = k.page LEFT JOIN v_page hp ON hp.id = k.host
+      WHERE k.uri = :uri
+view:
+  stack:
+  - id: about
+    title: About
+    viz: detail
+    from: about
+    columns:
+    - { key: description, label: What it is }
+    - { key: extension, label: Extension, link: { kind: page, from: extension_target } }
+    - { key: declared, label: Declared in, link: { kind: page, from: declared_target } }
+    empty: This contribution isn't known to the project.
+  - id: mount
+    title: The mount
+    viz: detail
+    from: mount
+    columns:
+    - { key: mounted, label: Page shown, link: { kind: page, from: mounted_target } }
+    - { key: host, label: Placed on, link: { kind: page, from: host_target } }
+    - { key: place, label: In the slot }
+    empty: Slot mount not found.

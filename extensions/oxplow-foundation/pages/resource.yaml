@@ -1,0 +1,83 @@
+title: Resource
+description: One kind of resource — how its URIs are written, how it is found and linked, and the pages that draw it.
+label: '{{row.name}}'
+icon: file-text
+for: oxplow/resource
+params:
+- name: uri
+  label: Resource
+answers:
+- {"question":"What does this resource kind name, and which pages draw it?","about":"oxplow/resource","params":{"uri":"oxplow:oxplow/resource?resource=oxplow-foundation/commit"},"skill":"oxplow-extension"}
+loaders:
+  about:
+    sql: |
+      WITH c AS (
+        SELECT *, substr(file, instr(file, '/extensions/' || extension || '/') + length('/extensions/' || extension || '/')) AS r
+        FROM v_contribution WHERE uri = :uri
+      ), f AS (
+        -- The running copy's path: the extension's folder, then the file inside it.
+        SELECT *, CASE WHEN file IS NULL THEN NULL
+                       WHEN instr(file, '/extensions/' || extension || '/') > 0 THEN extension || substr(r, instr(r, '/'))
+                       ELSE extension || '/' || file END AS rel
+        FROM c
+      )
+      SELECT r.label AS name, COALESCE(r.description, f.description) AS description,
+             f.extension, 'oxplow:oxplow/extension?name=' || f.extension AS extension_target,
+             f.rel || CASE WHEN f.line IS NOT NULL THEN ', line ' || f.line ELSE '' END AS declared,
+             CASE WHEN f.rel IS NOT NULL THEN
+                    uri('oxplow/file', 'filesystem', 'oxplow:extensions', 'path', f.rel)
+                    || CASE WHEN f.line IS NOT NULL THEN '#lines=' || f.line || '&' ELSE '#' END
+                    || 'oxplow.renderer=oxplow-foundation/file-viewer' END AS declared_target
+      FROM f JOIN v_resource r ON r.resource = f.global_name
+  facts:
+    sql: |
+      SELECT 'oxplow:' || r.resource AS uri_form,
+             NULLIF((SELECT json_group_array(json_object('text', p.key,
+                       'hint', CASE WHEN p.value ->> '$.required' THEN 'Required' ELSE 'Optional' END
+                               || COALESCE(', matches ' || (p.value ->> '$.pattern'), '')))
+                     FROM json_each(r.params) p), '[]') AS param_items,
+             CASE WHEN r.resolve IS NOT NULL THEN 'Its record is read from ' || r.resolve END AS record,
+             CASE WHEN r.searchable IS NOT NULL THEN 'Yes, it is searchable' ELSE 'No' END AS found,
+             CASE WHEN r.wikilink IS NOT NULL THEN '[[' || (r.wikilink ->> '$.prefix') || ':' || COALESCE(r.wikilink ->> '$.param', '…') || ']]' END AS wikilink,
+             r.icon
+      FROM v_contribution c JOIN v_resource r ON r.resource = c.global_name
+      WHERE c.kind = 'resource' AND c.uri = :uri
+  pages:
+    sql: |
+      SELECT p.title, p.description,
+             p.running_uri || '#oxplow.renderer=oxplow-foundation/definition' AS definition
+      FROM v_contribution c JOIN v_resource r ON r.resource = c.global_name,
+           v_page p, json_each(p.renders) j
+      WHERE c.kind = 'resource' AND c.uri = :uri AND j.value = r.resource AND p.running_uri IS NOT NULL
+      ORDER BY p.title
+view:
+  stack:
+  - id: about
+    title: About
+    viz: detail
+    from: about
+    columns:
+    - { key: description, label: What it is }
+    - { key: extension, label: Extension, link: { kind: page, from: extension_target } }
+    - { key: declared, label: Declared in, link: { kind: page, from: declared_target } }
+    empty: This contribution isn't known to the project.
+  - id: facts
+    title: How it is named
+    viz: detail
+    from: facts
+    columns:
+    - { key: uri_form, label: URI form }
+    - { key: param_items, label: Parts of the URI, format: items }
+    - { key: record, label: Record }
+    - { key: found, label: Found by search }
+    - { key: wikilink, label: Written in notes as }
+    - { key: icon, label: Icon }
+    empty: Resource kind not found.
+  - id: pages
+    title: Pages that draw it
+    viz: list
+    from: pages
+    hide_empty: true
+    columns:
+    - { key: title, label: Page, link: { kind: page, from: definition } }
+    - { key: description, label: What it is }

@@ -1,0 +1,9 @@
+# A skill page names the skill, what it teaches and whether it is a skill or a slash command.
+when: { page: oxplow-foundation/skill, params: { uri: "oxplow:oxplow/skill?skill=oxplow-foundation/work-items" } }
+expect:
+  label: work-items
+  loaders:
+    about:
+      rows: [{ name: work-items, extension: oxplow-foundation }]
+    facts:
+      rows: [{ is_a: A skill an agent loads when it applies }]

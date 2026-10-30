@@ -1,0 +1,60 @@
+title: Dimension
+description: One dimension — a way to slice measures and metrics, the kind of value it takes, what it describes, and the extension that declares it.
+label: '{{row.name}}'
+icon: list-tree
+for: oxplow/dimension
+params:
+- name: uri
+  label: Dimension
+answers:
+- {"question":"What does this dimension slice by?","about":"oxplow/dimension","params":{"uri":"oxplow:oxplow/dimension?dimension=oxplow.language"},"skill":"oxplow-extension"}
+loaders:
+  about:
+    sql: |
+      WITH c AS (
+        SELECT *, substr(file, instr(file, '/extensions/' || extension || '/') + length('/extensions/' || extension || '/')) AS r
+        FROM v_contribution WHERE uri = :uri
+      ), f AS (
+        -- The running copy's path: the extension's folder, then the file inside it.
+        SELECT *, CASE WHEN file IS NULL THEN NULL
+                       WHEN instr(file, '/extensions/' || extension || '/') > 0 THEN extension || substr(r, instr(r, '/'))
+                       ELSE extension || '/' || file END AS rel
+        FROM c
+      )
+      SELECT d.label AS name, COALESCE(d.description, f.description) AS description,
+             f.extension, 'oxplow:oxplow/extension?name=' || f.extension AS extension_target,
+             f.rel || CASE WHEN f.line IS NOT NULL THEN ', line ' || f.line ELSE '' END AS declared,
+             CASE WHEN f.rel IS NOT NULL THEN
+                    uri('oxplow/file', 'filesystem', 'oxplow:extensions', 'path', f.rel)
+                    || CASE WHEN f.line IS NOT NULL THEN '#lines=' || f.line || '&' ELSE '#' END
+                    || 'oxplow.renderer=oxplow-foundation/file-viewer' END AS declared_target
+      FROM f JOIN v_dimension d ON d.key = f.local
+  facts:
+    sql: |
+      SELECT d.key,
+             CASE d.value_type WHEN 'categorical' THEN 'Categorical: one of a set of values' ELSE d.value_type END AS values_are,
+             COALESCE(d.subject_kind, 'Anything') AS describes,
+             CASE WHEN d.promoted THEN 'Yes, each value is stored apart' ELSE 'No, it is chosen when you ask' END AS stored_per_value
+      FROM v_contribution c JOIN v_dimension d ON d.key = c.local
+      WHERE c.kind = 'dimension' AND c.uri = :uri
+view:
+  stack:
+  - id: about
+    title: About
+    viz: detail
+    from: about
+    columns:
+    - { key: description, label: What it is }
+    - { key: extension, label: Extension, link: { kind: page, from: extension_target } }
+    - { key: declared, label: Declared in, link: { kind: page, from: declared_target } }
+    empty: This contribution isn't known to the project.
+  - id: facts
+    title: What it slices by
+    viz: detail
+    from: facts
+    columns:
+    - { key: key, label: Key }
+    - { key: values_are, label: Its values }
+    - { key: describes, label: Describes }
+    - { key: stored_per_value, label: Stored per value }
+    empty: Dimension not found.

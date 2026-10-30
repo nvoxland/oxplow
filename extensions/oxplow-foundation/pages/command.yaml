@@ -1,0 +1,68 @@
+title: Command
+description: One command — what it does, the permission it needs, whether it asks first and can be undone, and the extension that declares it.
+label: '{{row.name}}'
+icon: terminal
+for: oxplow/command
+params:
+- name: uri
+  label: Command
+answers:
+- {"question":"What does this command do, and does it ask first?","about":"oxplow/command","params":{"uri":"oxplow:oxplow/command?command=oxplow.agent.draft"},"skill":"oxplow-extension"}
+loaders:
+  about:
+    sql: |
+      WITH c AS (
+        SELECT *, substr(file, instr(file, '/extensions/' || extension || '/') + length('/extensions/' || extension || '/')) AS r
+        FROM v_contribution WHERE uri = :uri
+      ), f AS (
+        -- The running copy's path: the extension's folder, then the file inside it.
+        SELECT *, CASE WHEN file IS NULL THEN NULL
+                       WHEN instr(file, '/extensions/' || extension || '/') > 0 THEN extension || substr(r, instr(r, '/'))
+                       ELSE extension || '/' || file END AS rel
+        FROM c
+      )
+      SELECT k.id AS name, COALESCE(k.summary, f.description) AS description,
+             f.extension, 'oxplow:oxplow/extension?name=' || f.extension AS extension_target,
+             f.rel || CASE WHEN f.line IS NOT NULL THEN ', line ' || f.line ELSE '' END AS declared,
+             CASE WHEN f.rel IS NOT NULL THEN
+                    uri('oxplow/file', 'filesystem', 'oxplow:extensions', 'path', f.rel)
+                    || CASE WHEN f.line IS NOT NULL THEN '#lines=' || f.line || '&' ELSE '#' END
+                    || 'oxplow.renderer=oxplow-foundation/file-viewer' END AS declared_target
+      FROM f JOIN v_command k ON k.uri = f.uri
+  facts:
+    sql: |
+      SELECT CASE WHEN k.scope IS NULL THEN 'Nothing special' ELSE 'The ' || k.scope || ' permission' END AS needs,
+             CASE k.access WHEN 'read' THEN 'Only reads'
+                           WHEN 'write' THEN 'Changes things'
+                           WHEN 'record' THEN 'Records what happened'
+                           WHEN 'view' THEN 'Changes only what you see'
+                           ELSE k.access END AS does,
+             CASE k.confirm WHEN 'never' THEN 'No'
+                            WHEN 'always' THEN 'Yes, every time'
+                            WHEN 'destructive' THEN 'Yes, it is destructive'
+                            ELSE k.confirm END AS asks_first,
+             CASE WHEN k.undoable THEN 'Yes' ELSE 'No' END AS can_undo,
+             CASE WHEN k.ui_label IS NOT NULL THEN k.ui_label || COALESCE(' (in ' || k.ui_group || ')', '') END AS menu
+      FROM v_command k WHERE k.uri = :uri
+view:
+  stack:
+  - id: about
+    title: About
+    viz: detail
+    from: about
+    columns:
+    - { key: description, label: What it is }
+    - { key: extension, label: Extension, link: { kind: page, from: extension_target } }
+    - { key: declared, label: Declared in, link: { kind: page, from: declared_target } }
+    empty: This contribution isn't known to the project.
+  - id: facts
+    title: What it does
+    viz: detail
+    from: facts
+    columns:
+    - { key: needs, label: Needs }
+    - { key: does, label: It }
+    - { key: asks_first, label: Asks first }
+    - { key: can_undo, label: Can be undone }
+    - { key: menu, label: Shown in menus as }
+    empty: Command not found.
