@@ -107,7 +107,13 @@ async fn a_qualified_read_reaches_only_its_dataset_and_what_derives_from_it() {
         .unpinned(&root, "a test reads declarations")
         .iter()
         .find(|e| e.name == "acme")
-        .map(|e| e.errors.join("\n"))
+        .map(|e| {
+            e.errors
+                .iter()
+                .map(|d| e.shown(d))
+                .collect::<Vec<_>>()
+                .join("\n")
+        })
         .unwrap();
     assert!(errors.is_empty(), "{errors}");
 

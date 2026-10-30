@@ -18,6 +18,7 @@
 //! against its schema (none does today). An `ai_provider` names no entry:
 //! `provider:` is the Rust kind it is (`oxplow_ai_rig::KINDS`).
 
+use oxplow_domain::diagnostic::Diagnostic;
 use serde::{Deserialize, Serialize};
 use serde_yaml::Value;
 
@@ -104,20 +105,37 @@ const ICON_MAX_BYTES: usize = 16 * 1024;
 /// The SVG at `path` in the extension as a data URI. It is only ever
 /// drawn as an image, so a script in it would not run; one is refused all
 /// the same, as is anything but a small `.svg` inside the extension.
-fn load_icon(path: &str, read: &dyn Fn(&str) -> Option<String>) -> Result<String, String> {
+/// A problem not yet placed in a file: `.at(file, line)` places it.
+fn problem(code: &str, message: String) -> Box<Diagnostic> {
+    Box::new(Diagnostic::error(code, message))
+}
+
+fn load_icon(path: &str, read: &dyn Fn(&str) -> Option<String>) -> Result<String, Box<Diagnostic>> {
     if path.starts_with('/') || path.split('/').any(|p| p == "..") {
-        return Err(format!("icon `{path}` must be inside the extension"));
+        return Err(problem(
+            "implementation.icon_outside",
+            format!("icon `{path}` must be inside the extension"),
+        ));
     }
     if !path.to_ascii_lowercase().ends_with(".svg") {
-        return Err(format!("icon `{path}` must be an `.svg` file"));
+        return Err(problem(
+            "implementation.icon_not_svg",
+            format!("icon `{path}` must be an `.svg` file"),
+        ));
     }
     let Some(text) = read(path) else {
-        return Err(format!("icon `{path}` isn't in the extension"));
+        return Err(problem(
+            "implementation.icon_missing",
+            format!("icon `{path}` isn't in the extension"),
+        ));
     };
     if text.len() > ICON_MAX_BYTES {
-        return Err(format!(
-            "icon `{path}` is too big ({} bytes; at most {ICON_MAX_BYTES})",
-            text.len()
+        return Err(problem(
+            "implementation.icon_too_big",
+            format!(
+                "icon `{path}` is too big ({} bytes; at most {ICON_MAX_BYTES})",
+                text.len()
+            ),
         ));
     }
     let body = text.trim_start();
@@ -126,13 +144,15 @@ fn load_icon(path: &str, read: &dyn Fn(&str) -> Option<String>) -> Result<String
         .and_then(|rest| rest.split_once("?>"))
         .map_or(body, |(_, rest)| rest.trim_start());
     if !body.starts_with("<svg") {
-        return Err(format!(
-            "icon `{path}` isn't an SVG (it must start with `<svg`)"
+        return Err(problem(
+            "implementation.icon_invalid",
+            format!("icon `{path}` isn't an SVG (it must start with `<svg`)"),
         ));
     }
     if text.to_ascii_lowercase().contains("<script") {
-        return Err(format!(
-            "icon `{path}` carries a script; an icon is only a picture"
+        return Err(problem(
+            "implementation.icon_script",
+            format!("icon `{path}` carries a script; an icon is only a picture"),
         ));
     }
     use base64::Engine as _;
@@ -149,12 +169,17 @@ pub fn parse_implementations(
     file: &str,
     manifest: &str,
     read: &dyn Fn(&str) -> Option<String>,
-) -> (Vec<ImplementationDecl>, Vec<String>) {
+) -> (Vec<ImplementationDecl>, Vec<Diagnostic>) {
     let block = key_line(manifest, "implementations");
     let Some(items) = value.as_sequence() else {
         return (
             Vec::new(),
-            vec![at(file, block, "`implementations` must be a list")],
+            vec![at(
+                "implementation.not_a_list",
+                file,
+                block,
+                "`implementations` must be a list",
+            )],
         );
     };
     let mut out: Vec<ImplementationDecl> = Vec::new();
@@ -165,7 +190,12 @@ pub fn parse_implementations(
         let f: ImplementationFile = match serde_yaml::from_value(item.clone()) {
             Ok(f) => f,
             Err(e) => {
-                errors.push(at(file, item_line, format!("implementation: {e}")));
+                errors.push(at(
+                    "implementation.invalid",
+                    file,
+                    item_line,
+                    format!("implementation: {e}"),
+                ));
                 continue;
             }
         };
@@ -177,6 +207,7 @@ pub fn parse_implementations(
                     .any(|o| o.capability == d.capability && o.id == d.id) =>
             {
                 errors.push(at(
+                    "implementation.duplicate",
                     file,
                     line,
                     format!(
@@ -186,7 +217,7 @@ pub fn parse_implementations(
                 ))
             }
             Ok(d) => out.push(d),
-            Err(e) => errors.push(at(file, line, e)),
+            Err(e) => errors.push(e.at(file, line)),
         }
     }
     (out, errors)
@@ -195,27 +226,33 @@ pub fn parse_implementations(
 fn decl_of(
     f: ImplementationFile,
     read: &dyn Fn(&str) -> Option<String>,
-) -> Result<ImplementationDecl, String> {
+) -> Result<ImplementationDecl, Box<Diagnostic>> {
     use oxplow_domain::capability;
     let Some(spec) = capability::spec(&f.capability).filter(|c| c.choosable || c.many) else {
-        return Err(format!(
-            "`{}` isn't a capability an extension implements ({})",
-            f.capability,
-            capability::CAPABILITIES
-                .iter()
-                .filter(|c| c.choosable || c.many)
-                .map(|c| c.id)
-                .collect::<Vec<_>>()
-                .join(", ")
+        return Err(problem(
+            "implementation.unknown_capability",
+            format!(
+                "`{}` isn't a capability an extension implements ({})",
+                f.capability,
+                capability::CAPABILITIES
+                    .iter()
+                    .filter(|c| c.choosable || c.many)
+                    .map(|c| c.id)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
         ));
     };
     // A required capability's default is core's own; a many-capability's
     // default is just the one used when nothing names one.
     if !spec.optional && !spec.many && f.id == spec.default {
-        return Err(format!(
-            "`{}` implementation `{}` is core's own (a required capability's default); \
+        return Err(problem(
+            "implementation.core_default",
+            format!(
+                "`{}` implementation `{}` is core's own (a required capability's default); \
              declare another id",
-            spec.id, f.id
+                spec.id, f.id
+            ),
         ));
     }
     if f.id == capability::NONE
@@ -225,9 +262,12 @@ fn decl_of(
             .chars()
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
     {
-        return Err(format!(
-            "implementation id `{}` must be lowercase letters, digits and `_`, and not `none`",
-            f.id
+        return Err(problem(
+            "implementation.invalid_id",
+            format!(
+                "implementation id `{}` must be lowercase letters, digits and `_`, and not `none`",
+                f.id
+            ),
         ));
     }
     let icon = f.icon.as_deref().map(|p| load_icon(p, read)).transpose()?;
@@ -235,56 +275,77 @@ fn decl_of(
         return provider_decl(f, icon);
     }
     if f.provider.is_some() {
-        return Err(format!(
-            "`provider:` names an AI provider's kind; a `{}` implementation names an `entry:`",
-            f.capability
+        return Err(problem(
+            "implementation.provider_on_entry",
+            format!(
+                "`provider:` names an AI provider's kind; a `{}` implementation names an `entry:`",
+                f.capability
+            ),
         ));
     }
     let Some(entry) = f.entry.clone() else {
-        return Err(format!(
-            "`{}` implementation `{}` needs an `entry:`",
-            f.capability, f.id
+        return Err(problem(
+            "implementation.missing_entry",
+            format!(
+                "`{}` implementation `{}` needs an `entry:`",
+                f.capability, f.id
+            ),
         ));
     };
     if !entry.starts_with("oxplow:") {
         return script_decl(f, &entry, read, icon);
     }
     if !f.needs.is_empty() {
-        return Err(format!(
-            "entry `{entry}` takes no `needs` (a built-in is core's code)"
+        return Err(problem(
+            "implementation.built_in_needs",
+            format!("entry `{entry}` takes no `needs` (a built-in is core's code)"),
         ));
     }
     let Some(built_in) = crate::capabilities::built_in(&entry) else {
-        return Err(format!(
-            "entry `{entry}` isn't one of core's built-ins ({})",
-            crate::capabilities::BUILT_INS
-                .iter()
-                .map(|b| b.entry)
-                .collect::<Vec<_>>()
-                .join(", ")
+        return Err(problem(
+            "implementation.unknown_built_in",
+            format!(
+                "entry `{entry}` isn't one of core's built-ins ({})",
+                crate::capabilities::BUILT_INS
+                    .iter()
+                    .map(|b| b.entry)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
         ));
     };
     if built_in.capability != spec.id {
-        return Err(format!(
-            "entry `{entry}` implements `{}`, not `{}`",
-            built_in.capability, spec.id
+        return Err(problem(
+            "implementation.built_in_capability",
+            format!(
+                "entry `{entry}` implements `{}`, not `{}`",
+                built_in.capability, spec.id
+            ),
         ));
     }
     if let Some(provider) = built_in.provider.filter(|p| *p != f.id) {
-        return Err(format!(
+        return Err(problem("implementation.built_in_provider", format!(
             "entry `{entry}` is declared under `{provider}`, the provider its items' refs carry, not `{}`",
             f.id
-        ));
+        )));
     }
     let config = match f.config {
-        Some(v) => serde_json::to_value(v).map_err(|e| format!("config: {e}"))?,
+        Some(v) => serde_json::to_value(v)
+            .map_err(|e| problem("implementation.invalid_config", format!("config: {e}")))?,
         None => serde_json::json!({}),
     };
     match built_in.config_schema {
-        Some(schema) => capability::check_config(schema, &config)
-            .map_err(|e| format!("`{}` implementation `{}`: {e}", spec.id, f.id))?,
+        Some(schema) => capability::check_config(schema, &config).map_err(|e| {
+            problem(
+                "implementation.invalid_config",
+                format!("`{}` implementation `{}`: {e}", spec.id, f.id),
+            )
+        })?,
         None if config != serde_json::json!({}) => {
-            return Err(format!("entry `{entry}` takes no config"))
+            return Err(problem(
+                "implementation.built_in_config",
+                format!("entry `{entry}` takes no config"),
+            ))
         }
         None => {}
     }
@@ -309,46 +370,74 @@ fn decl_of(
 fn provider_decl(
     f: ImplementationFile,
     icon: Option<String>,
-) -> Result<ImplementationDecl, String> {
+) -> Result<ImplementationDecl, Box<Diagnostic>> {
     let known = || oxplow_ai_rig::names().join(", ");
     if f.entry.is_some() {
-        return Err(format!(
+        return Err(problem(
+            "implementation.provider_entry",
+            format!(
             "`ai_provider` implementation `{}` names its kind with `provider:` ({}), not `entry:`",
             f.id,
             known()
+        ),
         ));
     }
     if !f.needs.is_empty() {
-        return Err(format!(
-            "`ai_provider` implementation `{}` takes no `needs` (it calls nothing of oxplow's)",
-            f.id
+        return Err(problem(
+            "implementation.provider_needs",
+            format!(
+                "`ai_provider` implementation `{}` takes no `needs` (it calls nothing of oxplow's)",
+                f.id
+            ),
         ));
     }
     let Some(kind) = f.provider else {
-        return Err(format!(
-            "`ai_provider` implementation `{}` needs `provider:`, the kind it is ({})",
-            f.id,
-            known()
+        return Err(problem(
+            "implementation.provider_missing_kind",
+            format!(
+                "`ai_provider` implementation `{}` needs `provider:`, the kind it is ({})",
+                f.id,
+                known()
+            ),
         ));
     };
-    oxplow_ai_rig::kind(&kind)
-        .map_err(|e| format!("`ai_provider` implementation `{}`: {e}", f.id))?;
+    oxplow_ai_rig::kind(&kind).map_err(|e| {
+        problem(
+            "implementation.invalid_config",
+            format!("`ai_provider` implementation `{}`: {e}", f.id),
+        )
+    })?;
     let config = match f.config {
-        Some(v) => serde_json::to_value(v).map_err(|e| format!("config: {e}"))?,
+        Some(v) => serde_json::to_value(v)
+            .map_err(|e| problem("implementation.invalid_config", format!("config: {e}")))?,
         None => serde_json::json!({}),
     };
-    let bad = |what: String| format!("`ai_provider` implementation `{}`: {what}", f.id);
+    let bad = |code: &'static str, what: String| {
+        problem(
+            code,
+            format!("`ai_provider` implementation `{}`: {what}", f.id),
+        )
+    };
     let Some(fields) = config.as_object() else {
-        return Err(bad("`config` must be a map".into()));
+        return Err(bad(
+            "implementation.invalid_config",
+            "`config` must be a map".into(),
+        ));
     };
     for (key, value) in fields {
         match key.as_str() {
             "baseUrl" if value.is_string() => {}
-            "baseUrl" => return Err(bad("`config.baseUrl` must be a URL".into())),
+            "baseUrl" => {
+                return Err(bad(
+                    "implementation.invalid_config",
+                    "`config.baseUrl` must be a URL".into(),
+                ))
+            }
             other => {
-                return Err(bad(format!(
-                    "config: unknown key `{other}` (an AI provider takes `baseUrl`)"
-                )))
+                return Err(bad(
+                    "implementation.invalid_config",
+                    format!("config: unknown key `{other}` (an AI provider takes `baseUrl`)"),
+                ))
             }
         }
     }
@@ -375,37 +464,57 @@ fn script_decl(
     entry: &str,
     read: &dyn Fn(&str) -> Option<String>,
     icon: Option<String>,
-) -> Result<ImplementationDecl, String> {
+) -> Result<ImplementationDecl, Box<Diagnostic>> {
     let config = match &f.config {
-        Some(v) => serde_json::to_value(v).map_err(|e| format!("config: {e}"))?,
+        Some(v) => serde_json::to_value(v)
+            .map_err(|e| problem("implementation.invalid_config", format!("config: {e}")))?,
         None => serde_json::json!({}),
     };
     if f.capability != "effort_policy" {
-        return Err(format!(
-            "entry `{entry}` is a script, and a script implements an `effort_policy` (others \
+        return Err(problem(
+            "implementation.script_not_policy",
+            format!(
+                "entry `{entry}` is a script, and a script implements an `effort_policy` (others \
              name a built-in: `oxplow:<name>`; an `ai_provider` names its kind with `provider:`)"
+            ),
         ));
     }
     if config != serde_json::json!({}) {
-        return Err(format!(
-            "`effort_policy` implementation `{}`: a policy script takes no config",
-            f.id
+        return Err(problem(
+            "implementation.script_config",
+            format!(
+                "`effort_policy` implementation `{}`: a policy script takes no config",
+                f.id
+            ),
         ));
     }
     for need in &f.needs {
         crate::scope_calls::check_script_need(need).map_err(|e| {
-            format!(
-                "`effort_policy` implementation `{}`: needs `{need}`: {e}",
-                f.id
+            problem(
+                "implementation.script_need",
+                format!(
+                    "`effort_policy` implementation `{}`: needs `{need}`: {e}",
+                    f.id
+                ),
             )
         })?;
     }
-    let script = read(entry).ok_or_else(|| format!("entry `{entry}` isn't in the extension"))?;
+    let script = read(entry).ok_or_else(|| {
+        problem(
+            "implementation.script_missing",
+            format!("entry `{entry}` isn't in the extension"),
+        )
+    })?;
     oxplow_script::runtime::check_starlark(entry, &script)
         .and_then(|()| {
             crate::services::check_uses(&script, &f.needs, crate::scope_calls::check_script_need)
         })
-        .map_err(|e| format!("`effort_policy` implementation `{}`: {e}", f.id))?;
+        .map_err(|e| {
+            problem(
+                "implementation.script_invalid",
+                format!("`effort_policy` implementation `{}`: {e}", f.id),
+            )
+        })?;
     Ok(ImplementationDecl {
         capability: f.capability,
         id: f.id,
@@ -425,14 +534,14 @@ fn script_decl(
 mod tests {
     use super::*;
 
-    fn parse(yaml: &str) -> (Vec<ImplementationDecl>, Vec<String>) {
+    fn parse(yaml: &str) -> (Vec<ImplementationDecl>, Vec<Diagnostic>) {
         parse_with(yaml, &|_| None)
     }
 
     fn parse_with(
         yaml: &str,
         read: &dyn Fn(&str) -> Option<String>,
-    ) -> (Vec<ImplementationDecl>, Vec<String>) {
+    ) -> (Vec<ImplementationDecl>, Vec<Diagnostic>) {
         let manifest = format!("implementations:\n{yaml}");
         let doc: Value = serde_yaml::from_str(&manifest).unwrap();
         parse_implementations(&doc["implementations"], "extension.yaml", &manifest, read)
@@ -446,12 +555,19 @@ mod tests {
         let (decls, errors) = parse(
             "  - { capability: ai_provider, id: acme, title: Acme, provider: openai_compatible, config: { baseUrl: \"https://api.acme.test\" } }\n",
         );
-        assert_eq!(errors, Vec::<String>::new());
+        assert!(errors.is_empty(), "{errors:?}");
         assert_eq!(decls[0].provider.as_deref(), Some("openai_compatible"));
         assert_eq!(decls[0].entry, None);
         assert_eq!(decls[0].script, None);
         assert_eq!(decls[0].config["baseUrl"], "https://api.acme.test");
-        let errors = |yaml: &str| parse(yaml).1.join("\n");
+        let errors = |yaml: &str| {
+            parse(yaml)
+                .1
+                .iter()
+                .map(|d| d.message.clone())
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
         for (yaml, want) in [
             (
                 "  - { capability: ai_provider, id: acme, provider: nope }\n",
@@ -501,10 +617,17 @@ mod tests {
             "  - { capability: effort_policy, id: acme, title: Acme, entry: policies/p.star, needs: [sql.read] }\n",
             &read,
         );
-        assert_eq!(errors, Vec::<String>::new());
+        assert!(errors.is_empty(), "{errors:?}");
         assert_eq!(decls[0].script.as_deref(), Some(POLICY));
         assert_eq!(decls[0].needs, vec!["sql.read".to_string()]);
-        let errors = |yaml: &str| parse_with(yaml, &read).1.join("\n");
+        let errors = |yaml: &str| {
+            parse_with(yaml, &read)
+                .1
+                .iter()
+                .map(|d| d.message.clone())
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
         for (yaml, want) in [
             (
                 "  - { capability: effort_policy, id: acme, entry: policies/p.star, needs: [threads.write] }\n",
@@ -547,7 +670,7 @@ mod tests {
             "  - { capability: agent_harness, id: claude, entry: oxplow:claude-code, icon: icons/a.svg }\n",
             &read,
         );
-        assert_eq!(errors, Vec::<String>::new());
+        assert!(errors.is_empty(), "{errors:?}");
         let uri = decls[0].icon.as_deref().unwrap();
         let b64 = uri.strip_prefix("data:image/svg+xml;base64,").unwrap();
         use base64::Engine as _;
@@ -599,7 +722,15 @@ mod tests {
                 &read,
             );
             assert!(decls.is_empty(), "{icon}");
-            assert!(errors.join("\n").contains(want), "{icon}: {errors:?}");
+            assert!(
+                errors
+                    .iter()
+                    .map(|d| d.message.clone())
+                    .collect::<Vec<_>>()
+                    .join("\n")
+                    .contains(want),
+                "{icon}: {errors:?}"
+            );
         }
     }
 
@@ -607,7 +738,7 @@ mod tests {
     fn a_built_in_is_declared_for_its_capability() {
         let (decls, errors) =
             parse("  - { capability: work_items, id: oxplow, entry: oxplow:tasks }\n");
-        assert_eq!(errors, Vec::<String>::new());
+        assert!(errors.is_empty(), "{errors:?}");
         assert_eq!(
             decls,
             vec![ImplementationDecl {
@@ -632,7 +763,7 @@ mod tests {
         let (decls, errors) = parse(
             "  - { capability: work_items, id: oxplow, entry: oxplow:tasks, description: \"The work list oxplow keeps.\" }\n",
         );
-        assert_eq!(errors, Vec::<String>::new());
+        assert!(errors.is_empty(), "{errors:?}");
         assert_eq!(
             decls[0].description.as_deref(),
             Some("The work list oxplow keeps.")
@@ -649,9 +780,9 @@ mod tests {
         assert!(decls.is_empty());
         assert_eq!(errors.len(), 1, "{errors:?}");
         assert!(
-            errors[0].contains("`oxplow:tasks`") && errors[0].contains("`oxplow`"),
+            errors[0].message.contains("`oxplow:tasks`") && errors[0].message.contains("`oxplow`"),
             "{}",
-            errors[0]
+            errors[0].message
         );
     }
 
@@ -659,21 +790,36 @@ mod tests {
     /// one that takes none (every built-in today) refuses any.
     #[test]
     fn config_is_checked_against_the_built_ins_schema() {
-        let errors = |yaml: &str| parse(yaml).1.join("\n");
+        let errors = |yaml: &str| {
+            parse(yaml)
+                .1
+                .iter()
+                .map(|d| d.message.clone())
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
         assert!(errors(
             "  - { capability: agent_harness, id: claude, entry: oxplow:claude-code, config: { a: 1 } }\n"
         )
         .contains("takes no config"));
         // A many-capability's default id is anyone's to declare.
-        assert_eq!(
-            parse("  - { capability: agent_harness, id: claude, entry: oxplow:claude-code }\n").1,
-            Vec::<String>::new()
-        );
+        assert!(parse(
+            "  - { capability: agent_harness, id: claude, entry: oxplow:claude-code }\n"
+        )
+        .1
+        .is_empty());
     }
 
     #[test]
     fn what_core_doesnt_know_is_refused() {
-        let errors = |yaml: &str| parse(yaml).1.join("\n");
+        let errors = |yaml: &str| {
+            parse(yaml)
+                .1
+                .iter()
+                .map(|d| d.message.clone())
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
         assert!(
             errors("  - { capability: vcs, id: jj, entry: oxplow:tasks }\n")
                 .contains("an extension implements")

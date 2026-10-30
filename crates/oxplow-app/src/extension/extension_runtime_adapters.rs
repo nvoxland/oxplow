@@ -4,6 +4,7 @@
 use crate::{
     extension::extension_catalog::CatalogSnapshot, vocabulary_reactor::VocabularyErrors, Services,
 };
+use oxplow_domain::diagnostic::Diagnostic;
 
 pub struct PreparedRuntimeAdapters {
     work_items: crate::work_items::PreparedWorkItems,
@@ -31,7 +32,10 @@ impl PreparedRuntimeAdapters {
         let mut errors = VocabularyErrors::new();
         let models = crate::ai_service::prepare_built_ins(&declared).map_err(|failures| {
             for (id, message) in failures {
-                errors.insert(format!("<ai:{id}>"), vec![message]);
+                errors.insert(
+                    format!("<ai:{id}>"),
+                    vec![Diagnostic::error("activation.ai_provider_invalid", message)],
+                );
             }
         });
         if !errors.is_empty() {

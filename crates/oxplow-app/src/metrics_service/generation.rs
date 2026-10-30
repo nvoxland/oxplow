@@ -89,14 +89,20 @@ impl MetricsService {
         if measures.len() > 4096 || dimensions.len() > 4096 || specs.len() > 4096 {
             return Err(problem(
                 "<host>",
+                "activation.metric_declaration_limit",
                 "metric candidate exceeds declaration limits",
             ));
         }
         let mut size = CandidateSize {
             remaining: 16 * 1024 * 1024,
         };
-        serde_json::to_writer(&mut size, &(&measures, &dimensions, &specs))
-            .map_err(|_| problem("<host>", "metric candidate exceeds metadata limits"))?;
+        serde_json::to_writer(&mut size, &(&measures, &dimensions, &specs)).map_err(|_| {
+            problem(
+                "<host>",
+                "activation.metric_metadata_limit",
+                "metric candidate exceeds metadata limits",
+            )
+        })?;
         Ok(PreparedMetricCatalog {
             frozen,
             measures,
@@ -146,7 +152,13 @@ impl PreparedMetricCatalog {
         for dim in &self.dimensions {
             if let Some(json) = &dim.entity_json {
                 let entity: oxplow_config::EntityDimensionSpec = serde_json::from_str(json)
-                    .map_err(|_| rejected(&dim.scope, "invalid entity dimension declaration"))?;
+                    .map_err(|_| {
+                        rejected(
+                            &dim.scope,
+                            "metric.entity_dimension_invalid",
+                            "invalid entity dimension declaration",
+                        )
+                    })?;
                 let probe = oxplow_config::EntitySpec {
                     view: entity.view.clone(),
                     where_: None,
@@ -169,7 +181,11 @@ impl PreparedMetricCatalog {
                 && crate::metric_engine::Aggregation::parse(&spec.aggregation).is_none()
             {
                 if oxplow_config::scope_extension(&spec.scope).is_some() {
-                    return Err(rejected(&spec.scope, "metric aggregation is not supported"));
+                    return Err(rejected(
+                        &spec.scope,
+                        "metric.aggregation_unsupported",
+                        "metric aggregation is not supported",
+                    ));
                 }
                 tx.execute("DELETE FROM metric_spec WHERE key = ?1", [key])
                     .map_err(oxplow_db::map_sql_err)?;
@@ -182,7 +198,7 @@ impl PreparedMetricCatalog {
                          (sum, last, first or avg): it says how the series combines over time"
                     );
                     if oxplow_config::scope_extension(&spec.scope).is_some() {
-                        return Err(rejected(&spec.scope, &why));
+                        return Err(rejected(&spec.scope, "metric.fold_missing", &why));
                     }
                     tx.execute("DELETE FROM metric_spec WHERE key = ?1", [key])
                         .map_err(oxplow_db::map_sql_err)?;
@@ -190,15 +206,27 @@ impl PreparedMetricCatalog {
                 }
             }
             if let Some(json) = &spec.entity_json {
-                let entity: oxplow_config::EntitySpec = serde_json::from_str(json)
-                    .map_err(|_| rejected(&spec.scope, "invalid entity metric declaration"))?;
+                let entity: oxplow_config::EntitySpec =
+                    serde_json::from_str(json).map_err(|_| {
+                        rejected(
+                            &spec.scope,
+                            "metric.entity_invalid",
+                            "invalid entity metric declaration",
+                        )
+                    })?;
                 check_entity(tx, &entity, None, &spec.scope)?;
                 let mut dims: Vec<String> = spec
                     .sliceable_dims_json
                     .as_deref()
                     .map(serde_json::from_str)
                     .transpose()
-                    .map_err(|_| rejected(&spec.scope, "invalid metric dimensions"))?
+                    .map_err(|_| {
+                        rejected(
+                            &spec.scope,
+                            "metric.dimensions_invalid",
+                            "invalid metric dimensions",
+                        )
+                    })?
                     .unwrap_or_default();
                 for (view, key) in &entity_dims {
                     if *view == entity.view && !dims.contains(key) {
@@ -274,13 +302,17 @@ impl PreparedMetricCatalog {
     }
 }
 
-fn problem(owner: &str, message: &str) -> VocabularyErrors {
-    VocabularyErrors::from([(owner.into(), vec![message.into()])])
+fn problem(owner: &str, code: &str, message: &str) -> VocabularyErrors {
+    VocabularyErrors::from([(
+        owner.into(),
+        vec![oxplow_domain::diagnostic::Diagnostic::error(code, message)],
+    )])
 }
 
-fn rejected(scope: &str, message: &str) -> TxError<VocabularyErrors> {
+fn rejected(scope: &str, code: &str, message: &str) -> TxError<VocabularyErrors> {
     TxError::Aborted(problem(
         &oxplow_config::scope_extension(scope).unwrap_or_else(|| "<host>".into()),
+        code,
         message,
     ))
 }
@@ -331,6 +363,7 @@ fn check_entity(
         |_| {
             rejected(
                 scope,
+                "metric.entity_uncompilable",
                 "entity metric or dimension does not compile against the candidate datasets",
             )
         },

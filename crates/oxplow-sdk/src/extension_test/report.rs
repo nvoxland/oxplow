@@ -7,13 +7,15 @@ pub struct TestReport {
     pub name: String,
     /// No errors.
     pub ok: bool,
-    /// `file:line: what — fix` lines.
-    pub errors: Vec<String>,
-    pub warnings: Vec<String>,
-    /// `file:line: why` for what wasn't run here (an example its host
-    /// withholds, `ui` steps with no app or no drawing window): never a
-    /// pass, so its case is skipped.
-    pub skipped: Vec<String>,
+    pub errors: Vec<Diagnostic>,
+    pub warnings: Vec<Diagnostic>,
+    /// What wasn't run here (an example its host withholds, `ui` steps
+    /// with no app or no drawing window): never a pass, so its case is
+    /// skipped.
+    pub skipped: Vec<Diagnostic>,
+    /// The folder a person edits (`Extension::root`): what the
+    /// diagnostics are shown under (`Diagnostic::render`).
+    pub root: String,
     /// Golden transcripts written by `--bless`.
     pub blessed: Vec<String>,
     /// What ran: `check`, `provider <id>`, `<capability> suite`.
@@ -50,8 +52,8 @@ pub struct TestReport {
 pub struct TestCase {
     pub name: String,
     pub outcome: CaseOutcome,
-    /// The errors it added, one per line, or why it was skipped; `None`
-    /// when it passed.
+    /// The errors it added as the lines a person reads, one per line, or
+    /// why it was skipped; `None` when it passed.
     pub message: Option<String>,
     pub duration_ms: u64,
 }
@@ -76,14 +78,30 @@ pub(super) struct Mark {
 }
 
 impl TestReport {
+    /// The errors as the lines a person reads (`<folder>/<file>:<line>: …`).
+    pub fn error_lines(&self) -> Vec<String> {
+        self.errors.iter().map(|d| d.render(&self.root)).collect()
+    }
+
+    /// The warnings as the lines a person reads.
+    pub fn warning_lines(&self) -> Vec<String> {
+        self.warnings.iter().map(|d| d.render(&self.root)).collect()
+    }
+
+    /// What wasn't run, as the lines a person reads.
+    pub fn skipped_lines(&self) -> Vec<String> {
+        self.skipped.iter().map(|d| d.render(&self.root)).collect()
+    }
+
     /// An empty report for part of extension `name`'s run, to [`Self::absorb`].
-    pub(super) fn part(name: &str) -> TestReport {
+    pub(super) fn part(name: &str, root: &str) -> TestReport {
         TestReport {
             name: name.to_string(),
             ok: false,
             errors: Vec::new(),
             warnings: Vec::new(),
             skipped: Vec::new(),
+            root: root.to_string(),
             blessed: Vec::new(),
             ran: Vec::new(),
             imports: Vec::new(),
@@ -122,10 +140,17 @@ impl TestReport {
     pub(super) fn finish_case(&mut self, name: String, mark: Mark) {
         let errors = &self.errors[mark.errors.min(self.errors.len())..];
         let skipped = &self.skipped[mark.skipped.min(self.skipped.len())..];
+        let lines = |found: &[Diagnostic]| {
+            found
+                .iter()
+                .map(|d| d.render(&self.root))
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
         let (outcome, message) = if !errors.is_empty() {
-            (CaseOutcome::Failed, Some(errors.join("\n")))
+            (CaseOutcome::Failed, Some(lines(errors)))
         } else if !skipped.is_empty() {
-            (CaseOutcome::Skipped, Some(skipped.join("\n")))
+            (CaseOutcome::Skipped, Some(lines(skipped)))
         } else {
             (CaseOutcome::Passed, None)
         };
@@ -147,16 +172,19 @@ pub fn render(report: &TestReport, format: crate::Format) -> String {
         crate::Format::Text => {
             let mut out = String::new();
             for e in &report.errors {
-                out.push_str(&format!("error: {e}\n"));
+                out.push_str(&format!("error: {}\n", e.render(&report.root)));
             }
             for w in &report.warnings {
-                out.push_str(&format!("warning: {w}\n"));
+                out.push_str(&format!("warning: {}\n", w.render(&report.root)));
             }
             for k in &report.skipped {
-                out.push_str(&format!("skipped: {k}\n"));
+                out.push_str(&format!("skipped: {}\n", k.render(&report.root)));
             }
             for b in &report.blessed {
-                out.push_str(&format!("blessed: {b}\n"));
+                out.push_str(&format!(
+                    "blessed: {}\n",
+                    crate::shown_under(&report.root, b)
+                ));
             }
             for l in &report.left {
                 out.push_str(&format!("left in the provider: {l}\n"));

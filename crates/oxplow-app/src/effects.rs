@@ -24,6 +24,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use crate::extension::extensions::manifest_v2::{at, item_lines, key_line};
+use oxplow_domain::diagnostic::Diagnostic;
 
 /// An effect as loaded (valid ones; invalid ones are in the extension's
 /// `errors`).
@@ -98,12 +99,19 @@ pub fn parse_effects(
     manifest: &str,
     read: &dyn Fn(&str) -> Option<String>,
     knows_event: &dyn Fn(&str) -> bool,
-) -> (Vec<EffectDecl>, Vec<String>) {
+) -> (Vec<EffectDecl>, Vec<Diagnostic>) {
     let block = key_line(manifest, "effects");
+    // The manifest, as the extension's folder holds it.
+    let rel = file.rsplit('/').next().unwrap_or(file);
     let Some(items) = value.as_sequence() else {
         return (
             Vec::new(),
-            vec![at(file, block, "`effects` must be a list")],
+            vec![at(
+                "effect.not_a_list",
+                rel,
+                block,
+                "`effects` must be a list",
+            )],
         );
     };
     let mut out: Vec<EffectDecl> = Vec::new();
@@ -114,20 +122,27 @@ pub fn parse_effects(
         let f: EffectFile = match serde_yaml::from_value(item.clone()) {
             Ok(f) => f,
             Err(e) => {
-                errors.push(at(file, item_line, format!("effect: {e}")));
+                errors.push(at("effect.invalid", rel, item_line, format!("effect: {e}")));
                 continue;
             }
         };
         let line = item_line;
-        let declared_at = at(file, line, "").trim_end_matches(": ").to_string();
+        let declared_at = match line {
+            Some(n) => format!("{file}:{n}"),
+            None => file.to_string(),
+        };
         match decl_of(extension, f, read, knows_event, declared_at) {
-            Ok(d) if out.iter().any(|o| o.id == d.id) => errors.push(at(
-                file,
-                line,
-                format!("effect `{}` is declared twice", d.id),
-            )),
+            Ok(d) if out.iter().any(|o| o.id == d.id) => errors.push(
+                at(
+                    "effect.duplicate",
+                    rel,
+                    line,
+                    format!("effect `{}` is declared twice", d.id),
+                )
+                .contribution(&d.id),
+            ),
             Ok(d) => out.push(d),
-            Err(e) => errors.push(at(file, line, e)),
+            Err(e) => errors.push(at("effect.invalid", rel, line, e)),
         }
     }
     (out, errors)
@@ -601,7 +616,12 @@ effects:
             write_acme(dir.path(), &MANIFEST.replace(from, to), SCRIPT);
             let ext = acme(dir.path());
             assert!(ext.effects.is_empty(), "{to}");
-            let errors = ext.errors.join("\n");
+            let errors = ext
+                .errors
+                .iter()
+                .map(|e| ext.shown(e))
+                .collect::<Vec<_>>()
+                .join("\n");
             assert!(
                 errors.contains("extension.yaml:5:") && errors.contains(says),
                 "{to}: {errors}"

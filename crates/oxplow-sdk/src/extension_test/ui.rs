@@ -39,14 +39,16 @@ impl UiState {
 }
 
 /// `ui` steps that can't run here: a skip, or with `--require-ui` an error.
-fn unrun(report: &mut TestReport, why: String) -> bool {
+fn unrun(report: &mut TestReport, shown: &str, why: String, fix: &str) -> bool {
     if report.require_ui {
-        report.errors.push(format!(
-            "{why} — or fix: build the app (`bun run build:dev`) and wake the display, or run \
-             without --require-ui"
-        ));
+        report.errors.push(
+            error(shown, None, "fixture.ui_unrun", why)
+                .fix(format!("{fix}, or run without --require-ui")),
+        );
     } else {
-        report.skipped.push(why);
+        report
+            .skipped
+            .push(warning(shown, None, "fixture.ui_unrun", why).fix(fix));
     }
     false
 }
@@ -68,17 +70,20 @@ impl PageAt<'_> {
         use crate::component_harness::{shell, Harness};
         let (shown, page) = (self.shown, self.page);
         let fail = |report: &mut TestReport, why: String| {
-            report.errors.push(format!("{shown}:1: {label}: {why}"));
+            report
+                .errors
+                .push(error(shown, None, "fixture.ui", format!("{label}: {why}")));
             false
         };
         let Some(shell) = shell() else {
             return unrun(
                 report,
+                shown,
                 format!(
-                    "{shown}:1: {label}: its `ui` steps, and the steps after them, aren't run: \
-                     no oxplow app here to draw them — fix: install the Oxplow app, or set \
-                     OXPLOW_SHELL to it"
+                    "{label}: its `ui` steps, and the steps after them, aren't run: no oxplow \
+                     app here to draw them"
                 ),
+                "install the Oxplow app, or set OXPLOW_SHELL to it",
             );
         };
         let Some(steps) = ui.as_array() else {
@@ -152,11 +157,12 @@ impl PageAt<'_> {
                 harness.close().await;
                 return unrun(
                     report,
+                    shown,
                     format!(
-                        "{shown}:1: {label}: its `ui` steps, and the steps after them, aren't \
-                         run: the oxplow app's window draws nothing while the display is locked \
-                         or asleep — fix: run it again with the display awake"
+                        "{label}: its `ui` steps, and the steps after them, aren't run: the \
+                         oxplow app's window draws nothing while the display is locked or asleep"
                     ),
+                    "run it again with the display awake",
                 );
             }
             None => {
@@ -198,10 +204,14 @@ impl PageAt<'_> {
                     .op(json!({ "op": "dom", "action": { "page": true } }), wait)
                     .await
                     .unwrap_or_default();
-                report.errors.push(format!(
-                    "{shown}:1: {label}: the component didn't start (it never connected) — the \
-                     frame: {}",
-                    page["value"]
+                report.errors.push(error(
+                    shown,
+                    None,
+                    "fixture.ui",
+                    format!(
+                        "{label}: the component didn't start (it never connected) — the frame: {}",
+                        page["value"]
+                    ),
                 ));
                 return false;
             }
@@ -216,7 +226,9 @@ impl PageAt<'_> {
             let item = match binds.substitute(item) {
                 Ok(item) => item,
                 Err(e) => {
-                    report.errors.push(format!("{shown}:1: {at}: {e}"));
+                    report
+                        .errors
+                        .push(error(shown, None, "fixture.ui", format!("{at}: {e}")));
                     return false;
                 }
             };
@@ -280,14 +292,19 @@ impl PageAt<'_> {
                     .op(json!({ "op": "dom", "action": { "page": true } }), wait)
                     .await
                     .unwrap_or_default();
-                report.errors.push(format!(
-                    "{shown}:1: {at}: {why} — the frame: {} {}",
-                    page["value"]["html"].as_str().unwrap_or("(unreadable)"),
-                    match page["value"]["errors"].as_array() {
-                        Some(errors) if !errors.is_empty() =>
-                            format!("— its errors: {}", json!(errors)),
-                        _ => String::new(),
-                    }
+                report.errors.push(error(
+                    shown,
+                    None,
+                    "fixture.ui",
+                    format!(
+                        "{at}: {why} — the frame: {} {}",
+                        page["value"]["html"].as_str().unwrap_or("(unreadable)"),
+                        match page["value"]["errors"].as_array() {
+                            Some(errors) if !errors.is_empty() =>
+                                format!("— its errors: {}", json!(errors)),
+                            _ => String::new(),
+                        }
+                    ),
                 ));
                 return false;
             }

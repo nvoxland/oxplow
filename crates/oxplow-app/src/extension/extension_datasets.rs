@@ -90,6 +90,7 @@ pub fn register(state: &Arc<crate::Services>) {
 
 #[cfg(test)]
 mod tests {
+    use crate::test_fixtures::ShownErrors as _;
     use std::path::Path;
 
     fn write(root: &Path, rel: &str, body: &str) {
@@ -144,7 +145,7 @@ mod tests {
             shaky
                 .errors
                 .iter()
-                .any(|e| e.contains("datasets/broken.sql")),
+                .any(|e| shaky.shown(e).contains("datasets/broken.sql")),
             "{:?}",
             shaky.errors
         );
@@ -249,7 +250,7 @@ mod tests {
             )
             .await
             .unwrap()
-            .errors
+            .shown_errors()
             .join("\n")
         };
         assert_eq!(validate().await, "");

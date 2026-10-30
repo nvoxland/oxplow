@@ -689,7 +689,7 @@ mod tests {
         )
         .await;
         // Held back from the active catalog; the activation says why.
-        let why = held.get("work").map(|l| l.join("\n")).unwrap_or_default();
+        let why = crate::test_fixtures::shown_held(&fx.svc, &held, "work");
         assert!(why.contains("`no.such_consumer` is none of"), "{held:?}");
         let load = fx
             .svc

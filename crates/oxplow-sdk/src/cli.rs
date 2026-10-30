@@ -969,7 +969,7 @@ mod tests {
         let (code, out, _) = test_on_a_fresh_service(dir.path(), &["test", "fake", "--root", root]);
         assert_eq!(code, 1, "{out}");
         assert!(
-            out.contains("error: .oxplow/extensions/fake/provider.json:1: initialize failed"),
+            out.contains("error: .oxplow/extensions/fake/provider.json: initialize failed"),
             "{out}"
         );
 
@@ -992,7 +992,7 @@ mod tests {
         assert_eq!(code, 1, "{out}");
         assert!(
             out.contains(
-                ".oxplow/extensions/fake/fixtures/provider-fake.yaml:1: check reports `/team`"
+                ".oxplow/extensions/fake/fixtures/provider-fake.yaml: check reports `/team`"
             ),
             "{out}"
         );
@@ -1004,7 +1004,7 @@ mod tests {
         let (code, out, _) = test_on_a_fresh_service(dir.path(), &["test", "fake", "--root", root]);
         assert_eq!(code, 1, "{out}");
         assert!(
-            out.contains("fixtures/transcripts/fake.jsonl:1: no golden transcript"),
+            out.contains("fixtures/transcripts/fake.jsonl: no golden transcript"),
             "{out}"
         );
 
@@ -1057,11 +1057,23 @@ mod tests {
         let report: serde_json::Value = serde_json::from_str(&out).unwrap();
         let errors = report["errors"].as_array().unwrap();
         assert_eq!(errors.len(), 1, "{errors:?}");
-        let e = errors[0].as_str().unwrap();
+        let e = &errors[0];
+        assert_eq!(e["code"], "suite.transcript_differs", "{e}");
+        assert_eq!(e["file"], "fixtures/transcripts/fake.jsonl", "{e}");
+        assert_eq!(e["line"], line, "{e}");
         assert!(
-            e.starts_with(&format!(".oxplow/extensions/fake/fixtures/transcripts/fake.jsonl:{line}: the transcript differs at `/message/params/input/title`")),
+            e["message"]
+                .as_str()
+                .unwrap()
+                .starts_with("the transcript differs at `/message/params/input/title`"),
             "{e}"
         );
+        assert_eq!(
+            e["mismatch"]["pointer"], "/message/params/input/title",
+            "{e}"
+        );
+        assert_eq!(report["root"], ".oxplow/extensions/fake", "{report}");
+        let e = e["fix"].as_str().unwrap();
         assert!(e.contains("--bless"), "{e}");
     }
 

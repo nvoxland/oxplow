@@ -40,9 +40,12 @@ async fn the_triage_example_declares_its_services_and_contributes_its_parts() {
          jobs.read: declared, used\n"
     );
     let tested = test_extension(root, "triage", false).await.unwrap();
-    assert_eq!(tested.errors, Vec::<String>::new());
+    assert_eq!(tested.error_lines(), Vec::<String>::new());
     assert!(
-        !tested.warnings.iter().any(|w| w.contains("calls a model")),
+        !tested
+            .warning_lines()
+            .iter()
+            .any(|w| w.contains("calls a model")),
         "{:?}",
         tested.warnings
     );
@@ -95,7 +98,7 @@ async fn the_review_badges_example_consumes_effort_reviews_and_degrades_without_
     .unwrap();
     assert!(report.ok, "{}", render_findings(&report, Format::Text));
     let tested = test_extension(root, "review-badges", false).await.unwrap();
-    assert_eq!(tested.errors, Vec::<String>::new());
+    assert_eq!(tested.error_lines(), Vec::<String>::new());
     assert_eq!(
         tested.imports,
         ["`reviews` → oxplow:oxplow/dataset?dataset=effort-review/reviews v2: available"]
@@ -129,8 +132,8 @@ async fn the_review_badges_example_consumes_effort_reviews_and_degrades_without_
         ["`reviews` → oxplow:oxplow/dataset?dataset=effort-review/reviews v2: unavailable (effort-review or its contribution isn't here)"]
     );
     assert!(tested.contributes.is_empty(), "{:?}", tested.contributes);
-    let import_warnings: Vec<_> = tested
-        .warnings
+    let warning_lines = tested.warning_lines();
+    let import_warnings: Vec<_> = warning_lines
         .iter()
         .filter(|w| w.contains("import `reviews`") && !w.contains("fixtures/"))
         .collect();
@@ -152,20 +155,20 @@ async fn the_review_badges_example_consumes_effort_reviews_and_degrades_without_
     }
     assert!(
         !tested
-            .warnings
+            .warning_lines()
             .iter()
             .any(|w| w.contains("because an import")),
         "{:?}",
         tested.warnings
     );
-    assert_eq!(tested.errors, Vec::<String>::new());
+    assert_eq!(tested.error_lines(), Vec::<String>::new());
     for (example, page) in [
         ("review-verdicts", "review-verdicts"),
         ("item-review", "item-review"),
     ] {
         assert!(
-            tested.skipped.iter().any(|w| w.contains(&format!(
-                "fixtures/{example}.yaml:1: example `{example}` isn't run: \
+            tested.skipped_lines().iter().any(|w| w.contains(&format!(
+                "fixtures/{example}.yaml: example `{example}` isn't run: \
                  `oxplow:oxplow/page?page=review-badges/{page}` is withheld because import `reviews` is \
                  unavailable (effort-review or its contribution isn't here)"
             ))),

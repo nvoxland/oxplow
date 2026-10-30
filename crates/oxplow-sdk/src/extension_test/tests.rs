@@ -125,13 +125,13 @@ async fn extension_test_runs_a_collector_that_calls_a_model_against_the_fixture_
             "def transform(x):\n    return {\"entities\": {\"thing\": [{\"id\": r[\"id\"], \"label\": ai_summarize(\"t\")} for r in x[\"rows\"]]}}\n",
         );
     let report = test_extension(dir.path(), "tally", false).await.unwrap();
-    assert_eq!(report.errors, Vec::<String>::new());
+    assert_eq!(report.error_lines(), Vec::<String>::new());
     assert!(
         report.ran.iter().any(|r| r == "example things"),
         "{:?}",
         report.ran
     );
-    let warnings = report.warnings.join("\n");
+    let warnings = report.warning_lines().join("\n");
     assert!(!warnings.contains("calls a model"), "{warnings}");
 }
 
@@ -149,7 +149,7 @@ async fn extension_test_runs_every_kinds_examples() {
         "[oxplow.work_item.comment]",
     );
     let report = test_extension(dir.path(), "tally", false).await.unwrap();
-    assert_eq!(report.errors, Vec::<String>::new());
+    assert_eq!(report.error_lines(), Vec::<String>::new());
     for ran in ["check", "example labelled", "example things", "questions"] {
         assert!(
             report.ran.iter().any(|r| r == ran),
@@ -157,10 +157,10 @@ async fn extension_test_runs_every_kinds_examples() {
             report.ran
         );
     }
-    let warnings = report.warnings.join("\n");
+    let warnings = report.warning_lines().join("\n");
     assert!(
         warnings.contains(
-            "fixtures/shell.yaml:1: example `shell` runs collector `shell`, which runs a program"
+            "fixtures/shell.yaml: example `shell` runs collector `shell`, which runs a program"
         ),
         "{warnings}"
     );
@@ -172,10 +172,10 @@ async fn extension_test_runs_every_kinds_examples() {
         "[oxplow.work_item.comment]",
     );
     let report = test_extension(dir.path(), "tally", false).await.unwrap();
-    let errors = report.errors.join("\n");
+    let errors = report.error_lines().join("\n");
     assert!(
         errors
-            .contains("fixtures/things.yaml:1: collector `things` returned 2 at `/entities/thing`"),
+            .contains("fixtures/things.yaml:2: collector `things` returned 2 at `/entities/thing`"),
         "{errors}"
     );
 
@@ -187,7 +187,7 @@ async fn extension_test_runs_every_kinds_examples() {
         "[oxplow.work_item.transition]",
     );
     let report = test_extension(dir.path(), "tally", false).await.unwrap();
-    let errors = report.errors.join("\n");
+    let errors = report.error_lines().join("\n");
     assert!(
             errors.contains("example `happy`: composed [oxplow.work_item.comment] but `expect_commands` is [oxplow.work_item.transition]"),
             "{errors}"
@@ -229,7 +229,7 @@ async fn extension_test_reports_how_each_import_resolved() {
     let dir = tempfile::tempdir().unwrap();
     producer_and_consumer(dir.path(), 1);
     let report = test_extension(dir.path(), "reader", false).await.unwrap();
-    assert_eq!(report.errors, Vec::<String>::new());
+    assert_eq!(report.error_lines(), Vec::<String>::new());
     assert_eq!(
         report.imports,
         ["`items` → oxplow:oxplow/dataset?dataset=maker/items v1: available"]
@@ -303,7 +303,7 @@ async fn a_read_commands_example_checks_its_result() {
                 ),
             );
         let report = test_extension(dir.path(), "tally", false).await.unwrap();
-        let errors = report.errors.join("\n");
+        let errors = report.error_lines().join("\n");
         if ok {
             assert_eq!(errors, "", "{want}");
             assert!(
@@ -313,7 +313,7 @@ async fn a_read_commands_example_checks_its_result() {
             );
         } else {
             assert!(
-                    errors.contains("fixtures/counted.yaml:1: command `tally.things.count` answered 2 at `/result/count`, the example expects 3"),
+                    errors.contains("fixtures/counted.yaml:2: command `tally.things.count` answered 2 at `/result/count`, the example expects 3"),
                     "{errors}"
                 );
         }
@@ -375,7 +375,7 @@ async fn extension_test_checks_incremental_datasets_against_a_full_refill() {
     let dir = tempfile::tempdir().unwrap();
     visits(dir.path(), 1, 2);
     let report = test_extension(dir.path(), "visits", false).await.unwrap();
-    assert_eq!(report.errors, Vec::<String>::new());
+    assert_eq!(report.error_lines(), Vec::<String>::new());
     assert!(
         report.ran.iter().any(|r| r == "incremental long_visits"),
         "{:?}",
@@ -386,7 +386,7 @@ async fn extension_test_checks_incremental_datasets_against_a_full_refill() {
     // A visit that arrives with a smaller id than one already appended.
     visits(dir.path(), 2, 1);
     let report = test_extension(dir.path(), "visits", false).await.unwrap();
-    let errors = report.errors.join("\n");
+    let errors = report.error_lines().join("\n");
     assert!(
         errors.contains(
             ".oxplow/extensions/visits/extension.yaml:8: incremental dataset `long_visits`"
@@ -422,10 +422,10 @@ async fn a_scaffolded_effect_tests_clean_and_a_mismatch_names_its_fixture() {
     )
     .unwrap();
     let report = test_extension(dir.path(), "notes", false).await.unwrap();
-    let errors = report.errors.join("\n");
+    let errors = report.error_lines().join("\n");
     assert!(
         errors
-            .contains(".oxplow/extensions/notes/fixtures/basic.yaml:1: effect `on-done` composed"),
+            .contains(".oxplow/extensions/notes/fixtures/basic.yaml:4: effect `on-done` composed"),
         "{errors}"
     );
 }
@@ -816,7 +816,7 @@ expect: {{ rows: [{{ here: 1 }}] }}
         &fixture("requires: [oxplow-bundled]\n"),
     );
     let report = test_extension(dir.path(), "notes", false).await.unwrap();
-    assert_eq!(report.errors, Vec::<String>::new());
+    assert_eq!(report.error_lines(), Vec::<String>::new());
     // Without it its pages aren't there.
     std::fs::write(
         dir.path()
@@ -835,10 +835,10 @@ expect: {{ rows: [{{ here: 1 }}] }}
     let errors = test_extension(dir.path(), "notes", false)
         .await
         .unwrap()
-        .errors
+        .error_lines()
         .join("\n");
     assert!(
-        errors.contains("fixtures/basic.yaml:1: `requires` names `no-such-extension`"),
+        errors.contains("fixtures/basic.yaml: `requires` names `no-such-extension`"),
         "{errors}"
     );
 }
@@ -1053,13 +1053,13 @@ async fn a_policy_example_that_doesnt_match_names_its_fixture() {
     )
     .unwrap();
     let report = test_extension(dir.path(), "acme", false).await.unwrap();
-    let errors = report.errors.join("\n");
+    let errors = report.error_lines().join("\n");
     assert!(
-        errors.contains("acme/fixtures/basic.yaml:1: effort policy `tidy` skipped"),
+        errors.contains("acme/fixtures/basic.yaml:2: effort policy `tidy` skipped"),
         "{errors}"
     );
     assert!(
-        errors.contains("acme/fixtures/finish.yaml:1: example `finish` names effort policy `nope`"),
+        errors.contains("acme/fixtures/finish.yaml: example `finish` names effort policy `nope`"),
         "{errors}"
     );
 }
@@ -1091,7 +1091,7 @@ async fn an_example_event_is_the_envelope_and_one_that_couldnt_happen_says_why()
         )
         .unwrap();
     let report = test_extension(root, "acme", false).await.unwrap();
-    let errors = report.errors.join("\n");
+    let errors = report.error_lines().join("\n");
     assert!(!errors.contains("fixtures/basic.yaml"), "{errors}");
 
     for (event, needle) in [
@@ -1120,9 +1120,9 @@ async fn an_example_event_is_the_envelope_and_one_that_couldnt_happen_says_why()
             ),
         );
         let report = test_extension(root, "acme", false).await.unwrap();
-        let errors = report.errors.join("\n");
+        let errors = report.error_lines().join("\n");
         assert!(
-            errors.contains("acme/fixtures/basic.yaml:1: example `basic`: event: ")
+            errors.contains("acme/fixtures/basic.yaml: example `basic`: event: ")
                 && errors.contains(needle),
             "{event}: {errors}"
         );
@@ -1195,10 +1195,10 @@ async fn a_policy_script_that_never_closes_fails_the_suite() {
     let opens_only = TIDY.replace(r#"if to == "done" or to == "canceled":"#, "if False:");
     policy(dir.path(), &opens_only, "{ skip: $any }");
     let report = test_extension(dir.path(), "acme", false).await.unwrap();
-    let errors = report.errors.join("\n");
+    let errors = report.error_lines().join("\n");
     assert!(
         errors.contains(
-            "acme/extension.yaml:1: effort_policy conformance `a_finished_item_closes_its_effort`"
+            "acme/extension.yaml: effort_policy conformance `a_finished_item_closes_its_effort`"
         ),
         "{errors}"
     );
@@ -1281,14 +1281,16 @@ fn one_rule_compares_what_an_example_expects() {
 /// examples as a count, not one by one (the JUnit form names them).
 #[test]
 fn the_text_report_counts_the_examples_it_ran() {
-    let mut report = TestReport::part("acme");
+    let mut report = TestReport::part("acme", ".oxplow/extensions/acme");
     report.ran = ["check", "example first", "example second", "answers"]
         .map(String::from)
         .to_vec();
-    report.errors.push("fixtures/second.yaml:1: wrong".into());
+    report
+        .errors
+        .push(Diagnostic::error("fixture.compare", "wrong").at("fixtures/second.yaml", Some(1)));
     let text = render(&report, Format::Text);
     assert!(
-        text.contains("error: fixtures/second.yaml:1: wrong\n"),
+        text.contains("error: .oxplow/extensions/acme/fixtures/second.yaml:1: wrong\n"),
         "{text}"
     );
     assert!(
@@ -1320,13 +1322,13 @@ async fn only_the_named_examples_run() {
     let report = test_extension_only(root, "paged", &["first".into()], false)
         .await
         .unwrap();
-    assert_eq!(report.errors, Vec::<String>::new());
+    assert_eq!(report.error_lines(), Vec::<String>::new());
     assert_eq!(report.ran, ["check", "example first"].map(String::from));
 
     let report = test_extension_only(root, "paged", &["third".into()], false)
         .await
         .unwrap();
-    let errors = report.errors.join("\n");
+    let errors = report.error_lines().join("\n");
     assert!(
         errors.contains("no example `third`") && errors.contains("first, second"),
         "{errors}"
@@ -1389,7 +1391,7 @@ steps:
         &scenario("false"),
     );
     let report = test_extension(root, "acme", false).await.unwrap();
-    assert_eq!(report.errors, Vec::<String>::new());
+    assert_eq!(report.error_lines(), Vec::<String>::new());
 
     write(
         root,
@@ -1399,10 +1401,10 @@ steps:
     let errors = test_extension(root, "acme", false)
         .await
         .unwrap()
-        .errors
+        .error_lines()
         .join("\n");
     assert!(
-        errors.contains(".oxplow/extensions/acme/fixtures/merged.yaml:1: steps[1]: "),
+        errors.contains(".oxplow/extensions/acme/fixtures/merged.yaml: steps[1]: "),
         "{errors}"
     );
 }
@@ -1471,7 +1473,7 @@ steps:
 ",
         );
     let report = test_extension(root, "acme", false).await.unwrap();
-    assert_eq!(report.errors, Vec::<String>::new());
+    assert_eq!(report.error_lines(), Vec::<String>::new());
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1564,14 +1566,14 @@ resources:
     let errors = test_extension(root, "acme", false)
         .await
         .unwrap()
-        .errors
+        .error_lines()
         .join("\n");
     assert!(
-        errors.contains(".oxplow/extensions/acme/fixtures/merged.yaml:1: `acme.merged@2` refuses"),
+        errors.contains(".oxplow/extensions/acme/fixtures/merged.yaml: `acme.merged@2` refuses"),
         "{errors}"
     );
     assert!(
-        errors.contains(".oxplow/extensions/acme/fixtures/link.yaml:1: `[[pr:12]]` names"),
+        errors.contains(".oxplow/extensions/acme/fixtures/link.yaml: `[[pr:12]]` names"),
         "{errors}"
     );
 }
@@ -1606,7 +1608,7 @@ intent:
             "requires: [oxplow-bundled]\nwhen: { form: edit-item, params: { uri: 'oxplow:oxplow/work_item?id=tsk1&provider=oxplow' } }\nexpect: { values: { uri: 'oxplow:oxplow/work_item?id=tsk1&provider=oxplow' }, fixed: [uri], fields: [title, body] }\n",
         );
     let report = test_extension(root, "editor", false).await.unwrap();
-    assert_eq!(report.errors, Vec::<String>::new());
+    assert_eq!(report.error_lines(), Vec::<String>::new());
     assert!(
         report.ran.contains(&"example edit".to_string()),
         "{:?}",
@@ -1621,11 +1623,11 @@ intent:
     let errors = test_extension(root, "editor", false)
         .await
         .unwrap()
-        .errors
+        .error_lines()
         .join("\n");
     assert!(
         errors.contains(
-            ".oxplow/extensions/editor/fixtures/edit.yaml:1: form `edit-item` opened with"
+            ".oxplow/extensions/editor/fixtures/edit.yaml:3: form `edit-item` opened with"
         ),
         "{errors}"
     );
@@ -1688,7 +1690,7 @@ async fn extension_test_runs_a_page_after_its_given_steps() {
             "{ loaders: { items: { rows: [{ title: Write the page test }], columns: [title] } }, nodes: [{ id: list, kind: viz }] }",
         );
     let report = test_extension(root, "pager", false).await.unwrap();
-    assert_eq!(report.errors, Vec::<String>::new());
+    assert_eq!(report.error_lines(), Vec::<String>::new());
     assert!(
         report.ran.contains(&"example created".to_string()),
         "{:?}",
@@ -1714,13 +1716,13 @@ async fn a_page_fixture_checks_a_nodes_viz_and_refuses_keys_it_does_not_know() {
         "{ nodes: [{ id: list, kind: viz, viz: table }] }",
     );
     let report = test_extension(root, "pager", false).await.unwrap();
-    assert_eq!(report.errors, Vec::<String>::new());
+    assert_eq!(report.error_lines(), Vec::<String>::new());
 
     pager(root, LIST, "{}", "{ nodes: [{ id: list, viz: sections }] }");
     let errors = test_extension(root, "pager", false)
         .await
         .unwrap()
-        .errors
+        .error_lines()
         .join("\n");
     assert!(
         errors.contains("node `list` is a `table` viz, the example expects `sections`"),
@@ -1731,7 +1733,7 @@ async fn a_page_fixture_checks_a_nodes_viz_and_refuses_keys_it_does_not_know() {
     let errors = test_extension(root, "pager", false)
         .await
         .unwrap()
-        .errors
+        .error_lines()
         .join("\n");
     assert!(
         errors.contains("`title` isn't a key of `expect.nodes`")
@@ -1755,10 +1757,10 @@ async fn extension_test_names_the_page_row_that_differs() {
     let errors = test_extension(root, "pager", false)
         .await
         .unwrap()
-        .errors
+        .error_lines()
         .join("\n");
     assert!(
-        errors.contains("fixtures/created.yaml:1: page `items` loader `items` returned")
+        errors.contains("fixtures/created.yaml:5: page `items` loader `items` returned")
             && errors.contains("Something else")
             && errors.contains("Write the page test"),
         "{errors}"
@@ -1782,10 +1784,10 @@ async fn extension_test_fails_an_answer_that_breaks_the_page() {
     let errors = test_extension(root, "pager", false)
         .await
         .unwrap()
-        .errors
+        .error_lines()
         .join("\n");
     assert!(
-        errors.contains("pages/items.yaml:1: the answer to \"What is open?\" doesn't run"),
+        errors.contains("pages/items.yaml: the answer to \"What is open?\" doesn't run"),
         "{errors}"
     );
 }
@@ -1802,13 +1804,13 @@ async fn extension_test_checks_a_pages_text() {
         "{ text: { contains: [Items, Write the page test] } }",
     );
     let report = test_extension(root, "pager", false).await.unwrap();
-    assert_eq!(report.errors, Vec::<String>::new());
+    assert_eq!(report.error_lines(), Vec::<String>::new());
 
     pager(root, LIST, "{}", "{ text: { contains: [Nowhere] } }");
     let errors = test_extension(root, "pager", false)
         .await
         .unwrap()
-        .errors
+        .error_lines()
         .join("\n");
     assert!(
         errors.contains("text doesn't contain \"Nowhere\""),
@@ -1819,7 +1821,7 @@ async fn extension_test_checks_a_pages_text() {
     let errors = test_extension(root, "pager", false)
         .await
         .unwrap()
-        .errors
+        .error_lines()
         .join("\n");
     assert!(
         errors.contains("the example expects \"nothing like it\""),
@@ -1896,7 +1898,7 @@ steps:
         )],
     );
     let report = test_extension(root, "paged", false).await.unwrap();
-    assert_eq!(report.errors, Vec::<String>::new());
+    assert_eq!(report.error_lines(), Vec::<String>::new());
 
     // A step that doesn't hold names its place in the scenario.
     paged(
@@ -1915,10 +1917,10 @@ steps:
     let errors = test_extension(root, "paged", false)
         .await
         .unwrap()
-        .errors
+        .error_lines()
         .join("\n");
     assert!(
-        errors.contains("fixtures/bound.yaml:1: steps[0]: page `items` loader `items` returned"),
+        errors.contains("fixtures/bound.yaml: steps[0]: page `items` loader `items` returned"),
         "{errors}"
     );
 
@@ -1934,7 +1936,7 @@ steps:
     let errors = test_extension(root, "paged", false)
         .await
         .unwrap()
-        .errors
+        .error_lines()
         .join("\n");
     assert!(errors.contains("`$nowhere` isn't bound"), "{errors}");
 }
@@ -1975,7 +1977,7 @@ when: { page: items }
         )],
     );
     let report = test_extension(root, "paged", false).await.unwrap();
-    assert_eq!(report.errors, Vec::<String>::new());
+    assert_eq!(report.error_lines(), Vec::<String>::new());
 
     paged(
         root,
@@ -1993,7 +1995,7 @@ when: { page: items }
     let errors = test_extension(root, "paged", false)
         .await
         .unwrap()
-        .errors
+        .error_lines()
         .join("\n");
     assert!(
         errors.contains("loader `items` returned") && errors.contains("at `/rows/contains/0`"),
@@ -2045,7 +2047,7 @@ steps:
         )],
     );
     let report = test_extension(root, "paged", false).await.unwrap();
-    assert_eq!(report.errors, Vec::<String>::new());
+    assert_eq!(report.error_lines(), Vec::<String>::new());
 
     // A press that says no is checked like any outcome.
     paged(
@@ -2062,7 +2064,7 @@ steps:
             )],
         );
     let report = test_extension(root, "paged", false).await.unwrap();
-    assert_eq!(report.errors, Vec::<String>::new());
+    assert_eq!(report.error_lines(), Vec::<String>::new());
 
     // One that fails where the example expects it to work names its step.
     paged(
@@ -2076,10 +2078,10 @@ steps:
     let errors = test_extension(root, "paged", false)
         .await
         .unwrap()
-        .errors
+        .error_lines()
         .join("\n");
     assert!(
-        errors.contains("fixtures/pressed.yaml:1: steps[0]: press `begin`"),
+        errors.contains("fixtures/pressed.yaml: steps[0]: press `begin`"),
         "{errors}"
     );
 }
@@ -2113,7 +2115,7 @@ steps:
         )],
     );
     let report = test_extension(root, "paged", false).await.unwrap();
-    assert_eq!(report.errors, Vec::<String>::new());
+    assert_eq!(report.error_lines(), Vec::<String>::new());
 }
 
 /// What another extension mounts at a page's slot runs inside it: a
@@ -2149,7 +2151,7 @@ async fn a_page_fixture_checks_what_is_mounted_at_a_slot() {
             "when: { page: host/items }\nexpect:\n  nodes: [{ id: beta.extra }]\n  loaders: { n: { rows: 1 }, beta.extra/words: { rows: [{ word: hello }] } }\n",
         );
     let report = test_extension(root, "beta", false).await.unwrap();
-    assert_eq!(report.errors, Vec::<String>::new());
+    assert_eq!(report.error_lines(), Vec::<String>::new());
 }
 
 /// `when: { sql }` reads the published datasets as a page loader would —
@@ -2195,7 +2197,7 @@ expect: {{ rows: {want} }}
         &fixture("[{ title: One }, { title: Three }, { title: Two }]"),
     );
     let report = test_extension(root, "acme", false).await.unwrap();
-    assert_eq!(report.errors, Vec::<String>::new());
+    assert_eq!(report.error_lines(), Vec::<String>::new());
 
     write(
         root,
@@ -2205,10 +2207,10 @@ expect: {{ rows: {want} }}
     let errors = test_extension(root, "acme", false)
         .await
         .unwrap()
-        .errors
+        .error_lines()
         .join("\n");
     assert!(
-        errors.contains("fixtures/read.yaml:1: page `query` loader `rows` returned"),
+        errors.contains("fixtures/read.yaml:4: page `query` loader `rows` returned"),
         "{errors}"
     );
 }
@@ -2245,11 +2247,11 @@ expect: { ok: true }
     let errors = test_extension(root, "paged", false)
         .await
         .unwrap()
-        .errors
+        .error_lines()
         .join("\n");
     assert!(!errors.contains("fixtures/ran.yaml"), "{errors}");
     assert!(
-        errors.contains("fixtures/wrong.yaml:1: command `oxplow.work_item.transition` gave"),
+        errors.contains("fixtures/wrong.yaml:3: command `oxplow.work_item.transition` gave"),
         "{errors}"
     );
 }
@@ -2297,7 +2299,7 @@ steps:
 ",
         );
     let report = test_extension(root, "acme", false).await.unwrap();
-    assert_eq!(report.errors, Vec::<String>::new());
+    assert_eq!(report.error_lines(), Vec::<String>::new());
 }
 
 /// `when: { advisory }` runs one of the extension's advisories for a
@@ -2338,7 +2340,7 @@ expect: {{ lines: {want} }}
         &fixture("{ contains: [Hello Fix it] }"),
     );
     let report = test_extension(root, "acme", false).await.unwrap();
-    assert_eq!(report.errors, Vec::<String>::new());
+    assert_eq!(report.error_lines(), Vec::<String>::new());
 
     write(
         root,
@@ -2348,10 +2350,10 @@ expect: {{ lines: {want} }}
     let errors = test_extension(root, "acme", false)
         .await
         .unwrap()
-        .errors
+        .error_lines()
         .join("\n");
     assert!(
-        errors.contains("fixtures/greeted.yaml:1: advisory `hello` said"),
+        errors.contains("fixtures/greeted.yaml: advisory `hello` said"),
         "{errors}"
     );
 }
@@ -2441,7 +2443,7 @@ steps:
         &fixture(3),
     );
     let report = test_extension(root, "cards", false).await.unwrap();
-    assert_eq!(report.errors, Vec::<String>::new());
+    assert_eq!(report.error_lines(), Vec::<String>::new());
     if !report.skipped.is_empty() {
         // The display is locked or asleep: the window draws nothing, so the
         // steps were not run (`a_window_that_draws_nothing_…` covers that).
@@ -2456,10 +2458,10 @@ steps:
     let errors = test_extension(root, "cards", false)
         .await
         .unwrap()
-        .errors
+        .error_lines()
         .join("\n");
     assert!(
-        errors.contains("fixtures/drawn.yaml:1: steps[0]: ui[5]:")
+        errors.contains("fixtures/drawn.yaml: steps[0]: ui[5]:")
             && errors.contains("<li>From the bar</li>"),
         "{errors}"
     );
@@ -2497,10 +2499,10 @@ while :; do case "$(post /harness/next '{"result":null}')" in *done*) exit 0;; e
     );
     let report = test_extension(root, "cards", false).await.unwrap();
     // What follows the `ui` steps reads what they did: it isn't run either.
-    assert_eq!(report.errors, Vec::<String>::new());
+    assert_eq!(report.error_lines(), Vec::<String>::new());
     assert!(
         report
-            .skipped
+            .skipped_lines()
             .iter()
             .any(|w| w.contains("the steps after them, aren't run") && w.contains("display")),
         "{:?}",
@@ -2553,7 +2555,7 @@ while :; do case "$(post /harness/next '{"result":null}')" in *done*) exit 0;; e
     assert!(!report.ok, "{report:?}");
     assert!(
         report
-            .errors
+            .error_lines()
             .iter()
             .any(|e| e.contains("the steps after them, aren't run")
                 && e.contains("display")
@@ -2561,7 +2563,7 @@ while :; do case "$(post /harness/next '{"result":null}')" in *done*) exit 0;; e
         "{:?}",
         report.errors
     );
-    assert_eq!(report.skipped, Vec::<String>::new());
+    assert_eq!(report.skipped_lines(), Vec::<String>::new());
     let case = report
         .cases
         .iter()
@@ -2649,7 +2651,7 @@ steps:
 ",
         );
     let report = test_extension(root, "cards", false).await.unwrap();
-    assert_eq!(report.errors, Vec::<String>::new());
+    assert_eq!(report.error_lines(), Vec::<String>::new());
 }
 
 /// A component's view params re-run its page, as the app's tab does: a
@@ -2702,7 +2704,7 @@ steps:
 ",
     );
     let report = test_extension(root, "cards", false).await.unwrap();
-    assert_eq!(report.errors, Vec::<String>::new());
+    assert_eq!(report.error_lines(), Vec::<String>::new());
 }
 
 /// `shown` is the view the core drew: the spec when it opened, `null`
@@ -2760,7 +2762,7 @@ steps:
 "##,
     );
     let report = test_extension(root, "cards", false).await.unwrap();
-    assert_eq!(report.errors, Vec::<String>::new());
+    assert_eq!(report.error_lines(), Vec::<String>::new());
 }
 
 /// A `ui` step drives a component inside what the page embeds — here
@@ -2840,7 +2842,7 @@ steps:
 ",
         );
     let report = test_extension(root, "lanes", false).await.unwrap();
-    assert_eq!(report.errors, Vec::<String>::new());
+    assert_eq!(report.error_lines(), Vec::<String>::new());
 }
 
 /// `rows: []` is no rows, like `rows: 0`.
@@ -2856,7 +2858,7 @@ async fn an_empty_row_list_is_no_rows() {
     let errors = test_extension(root, "paged", false)
         .await
         .unwrap()
-        .errors
+        .error_lines()
         .join("\n");
     assert!(errors.contains("loader `items` returned"), "{errors}");
 }
@@ -2881,7 +2883,7 @@ view: { from: items, viz: table }
         &[("one", fixture), ("two", fixture)],
     );
     let report = test_extension(root, "paged", false).await.unwrap();
-    assert_eq!(report.errors, Vec::<String>::new());
+    assert_eq!(report.error_lines(), Vec::<String>::new());
 }
 
 /// `confirmed: true` runs a step that asks for confirmation; `view:`
@@ -2914,7 +2916,7 @@ expect:
         )],
     );
     let report = test_extension(root, "paged", false).await.unwrap();
-    assert_eq!(report.errors, Vec::<String>::new());
+    assert_eq!(report.error_lines(), Vec::<String>::new());
 
     paged(
         root,
@@ -2931,7 +2933,7 @@ when: { page: items }
     let errors = test_extension(root, "paged", false)
         .await
         .unwrap()
-        .errors
+        .error_lines()
         .join("\n");
     assert!(
         errors.contains("`given[1]` `oxplow.ai.remove_provider` failed")
@@ -2998,5 +3000,50 @@ steps:
             )],
         );
     let report = test_extension(root, "paged", false).await.unwrap();
-    assert_eq!(report.errors, Vec::<String>::new());
+    assert_eq!(report.error_lines(), Vec::<String>::new());
+}
+
+/// A problem in an extension under test names the file to edit — its
+/// source folder — once, never the copy the throwaway oxplow runs.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_problem_names_the_source_file_once_not_the_running_copy() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write(
+        root,
+        ".oxplow/extensions/cards/extension.yaml",
+        "manifest: 2
+name: cards
+intent:
+  purpose: Cards.
+permissions: [commands:cards.nothing]
+custom_components:
+  - { id: cards, title: Cards, commands: [cards.nothing] }
+",
+    );
+    write(
+        root,
+        ".oxplow/extensions/cards/components/cards/index.html",
+        "<!doctype html><html><head><title>cards</title></head><body></body></html>",
+    );
+    let report = test_extension(root, "cards", false).await.unwrap();
+    let named: Vec<_> = report
+        .errors
+        .iter()
+        .filter(|e| e.message.contains("`cards.nothing`"))
+        .collect();
+    assert_eq!(named.len(), 1, "{:#?}", report.errors);
+    assert_eq!(named[0].file.as_deref(), Some("extension.yaml"));
+    let shown = named[0].render(&report.root);
+    assert!(
+        shown.starts_with(".oxplow/extensions/cards/extension.yaml"),
+        "{shown}"
+    );
+    let rendered = report.error_lines();
+    assert!(
+        rendered.iter().all(|e| !e.contains("runtime/extensions")
+            && !e.contains(root.to_str().unwrap())
+            && !e.starts_with('/')),
+        "{rendered:#?}"
+    );
 }

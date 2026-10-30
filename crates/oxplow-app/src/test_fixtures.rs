@@ -4,6 +4,22 @@
 
 pub(crate) mod lifecycle;
 
+/// An extension's errors as the lines a person reads.
+pub(crate) fn shown_errors(ext: &crate::extension::extensions::Extension) -> Vec<String> {
+    ext.errors.iter().map(|d| ext.shown(d)).collect()
+}
+
+/// `ext.shown_errors()` for a test that holds the extension in a chain.
+pub(crate) trait ShownErrors {
+    fn shown_errors(&self) -> Vec<String>;
+}
+
+impl ShownErrors for crate::extension::extensions::Extension {
+    fn shown_errors(&self) -> Vec<String> {
+        shown_errors(self)
+    }
+}
+
 use oxplow_tasks::work_item_ref;
 use std::path::Path;
 use std::sync::Arc;
@@ -93,6 +109,31 @@ pub async fn activate_with_problems(
     }
 }
 
+/// What `held` says against extension `name`, one line each, shown under
+/// the folder the extension is edited in; empty when nothing is held back.
+pub(crate) fn shown_held(
+    svc: &crate::Services,
+    held: &crate::vocabulary_reactor::VocabularyErrors,
+    name: &str,
+) -> String {
+    let snapshot = svc.extension_catalog.snapshot(&svc.layout.project_dir);
+    let root = snapshot
+        .extensions()
+        .iter()
+        .find(|e| e.name == name)
+        .map(|e| e.root().to_string())
+        .unwrap_or_default();
+    held.get(name)
+        .map(|lines| {
+            lines
+                .iter()
+                .map(|d| d.render(&root))
+                .collect::<Vec<_>>()
+                .join("\n")
+        })
+        .unwrap_or_default()
+}
+
 /// Deploy and activate what the test wrote, then everything that is said
 /// against extension `name`: the errors of what is live and what held the
 /// new source back (a source that doesn't load never goes live).
@@ -104,9 +145,15 @@ pub async fn load_errors(svc: &Arc<crate::Services>, name: &str) -> String {
         .extensions()
         .iter()
         .find(|e| e.name == name)
-        .map(|e| e.errors.join("\n"))
+        .map(|e| {
+            e.errors
+                .iter()
+                .map(|d| e.shown(d))
+                .collect::<Vec<_>>()
+                .join("\n")
+        })
         .unwrap_or_default();
-    let held = held.get(name).map(|l| l.join("\n")).unwrap_or_default();
+    let held = shown_held(svc, &held, name);
     format!("{live}\n{held}")
 }
 

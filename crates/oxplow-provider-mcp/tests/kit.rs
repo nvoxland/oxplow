@@ -55,7 +55,7 @@ async fn the_notes_extension_passes_extension_test_over_the_adapter() {
 
     let bless = std::env::var_os("OXPLOW_BLESS").is_some();
     let report = test_extension(dir.path(), "notes", bless).await.unwrap();
-    assert_eq!(report.errors, Vec::<String>::new());
+    assert_eq!(report.error_lines(), Vec::<String>::new());
     if bless {
         std::fs::create_dir_all(fixture.join("fixtures/transcripts")).unwrap();
         std::fs::copy(
@@ -117,7 +117,7 @@ async fn the_notes_extension_passes_extension_test_with_its_server_by_url() {
     .unwrap();
 
     let report = test_extension(dir.path(), "notes", true).await.unwrap();
-    assert_eq!(report.errors, Vec::<String>::new());
+    assert_eq!(report.error_lines(), Vec::<String>::new());
     for ran in ["work_items suite", "read items", "discover"] {
         assert!(
             report.ran.iter().any(|r| r == ran),

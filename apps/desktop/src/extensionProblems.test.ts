@@ -5,10 +5,11 @@ import { extensionProblemLine, problemsFromResult } from "./extensionProblems.js
 const res = (rows: unknown[][]) =>
   ({ columns: ["name", "enabled", "errors", "deployment"], rows, truncated: false, reads: { datasets: [], tables: [], measures: [] }, freshness: {} }) as never;
 
-test("rows become problems with parsed errors", () => {
-  expect(problemsFromResult(res([["a", 0, '["x","y"]', null], ["b", 1, "oops", null]]))).toEqual([
+test("rows become problems with each diagnostic's shown line", () => {
+  const errors = JSON.stringify([{ code: "manifest.parse", message: "bad", shown: "x" }, { code: "page.invalid", message: "worse", shown: "y" }]);
+  expect(problemsFromResult(res([["a", 0, errors, null], ["b", 1, "[]", null]]))).toEqual([
     { name: "a", errors: ["x", "y"] },
-    { name: "b", errors: ["oops"] },
+    { name: "b", errors: [] },
   ]);
 });
 

@@ -1,18 +1,45 @@
 use super::*;
 
+/// An error in `file` (relative to the extension's folder), at `line`
+/// when known.
+pub(super) fn error(
+    file: &str,
+    line: Option<usize>,
+    code: &str,
+    message: impl Into<String>,
+) -> Diagnostic {
+    Diagnostic::error(code, message).at(file, line)
+}
+
+/// A warning in `file`, at `line` when known.
+pub(super) fn warning(
+    file: &str,
+    line: Option<usize>,
+    code: &str,
+    message: impl Into<String>,
+) -> Diagnostic {
+    Diagnostic::warning(code, message).at(file, line)
+}
+
 /// An intent example's fixture (`fixtures/<name>.yaml`): `None` when it
-/// has none; the parsed document, or why it isn't one.
+/// has none; its file (relative to the extension's folder), its text, and
+/// the parsed document or why it isn't one.
 pub(super) fn example_fixture(
     read: &(dyn Fn(&str) -> Option<String> + Sync),
-    rel: &str,
     example: &str,
-) -> Option<(String, Result<Value, String>)> {
+) -> Option<(String, String, Result<Value, Diagnostic>)> {
     let file = format!("fixtures/{example}.yaml");
-    let shown = format!("{rel}/{file}");
     let text = read(&file)?;
-    let doc = serde_yaml::from_str::<Value>(&text)
-        .map_err(|e| format!("{shown}:1: not YAML: {e} — fix: correct it"));
-    Some((shown, doc))
+    let doc = serde_yaml::from_str::<Value>(&text).map_err(|e| {
+        error(
+            &file,
+            e.location().map(|l| l.line()),
+            "fixture.parse",
+            format!("not YAML: {e}"),
+        )
+        .fix("correct it")
+    });
+    Some((file, text, doc))
 }
 
 /// The keys of a fixture file.
@@ -25,6 +52,8 @@ pub(super) struct Fixture {
     pub(super) name: String,
     /// The fixture file, as findings name it.
     pub(super) shown: String,
+    /// Its text, to find a key's line in.
+    pub(super) text: String,
     pub(super) when: Value,
     pub(super) expect: Value,
     pub(super) given: Value,
@@ -37,10 +66,11 @@ pub(super) struct Fixture {
 }
 
 impl Fixture {
-    pub(super) fn of(name: String, shown: String, doc: &Value) -> Fixture {
+    pub(super) fn of(name: String, shown: String, text: String, doc: &Value) -> Fixture {
         Fixture {
             name,
             shown,
+            text,
             when: doc.get("when").cloned().unwrap_or(Value::Null),
             expect: doc.get("expect").cloned().unwrap_or(Value::Null),
             given: doc.get("given").cloned().unwrap_or(Value::Null),
@@ -62,6 +92,7 @@ impl Fixture {
         Example {
             name: &self.name,
             shown: &self.shown,
+            text: &self.text,
             when: self.when.clone(),
             expect: self.expect.clone(),
             given: self.given.clone(),
@@ -81,23 +112,31 @@ pub(super) async fn seed_temp(host: &Host, ex: &Example<'_>, report: &mut TestRe
     if ex.temp.is_null() {
         return true;
     }
-    let files = match serde_json::from_value::<std::collections::BTreeMap<String, String>>(
-        ex.temp.clone(),
-    ) {
-        Ok(files) => files,
-        Err(e) => {
-            report.errors.push(format!(
-                "{}:1: `temp` maps each file name to its text — fix: `temp: {{ view-1.yaml: \"title: One\" }}` ({e})",
-                ex.shown
-            ));
-            return false;
-        }
-    };
+    let files =
+        match serde_json::from_value::<std::collections::BTreeMap<String, String>>(ex.temp.clone())
+        {
+            Ok(files) => files,
+            Err(e) => {
+                report.errors.push(
+                    error(
+                        ex.shown,
+                        None,
+                        "fixture.temp",
+                        "`temp` maps each file name to its text",
+                    )
+                    .fix(format!("`temp: {{ view-1.yaml: \"title: One\" }}` ({e})")),
+                );
+                return false;
+            }
+        };
     for (name, text) in files {
         if let Err(e) = host.svc.temp.put(&name, text.as_bytes()).await {
-            report
-                .errors
-                .push(format!("{}:1: `temp.{name}`: {e}", ex.shown));
+            report.errors.push(error(
+                ex.shown,
+                None,
+                "fixture.temp",
+                format!("`temp.{name}`: {e}"),
+            ));
             return false;
         }
     }
@@ -132,8 +171,11 @@ pub(super) async fn publish_rows(
     ) {
         Ok(rows) => rows,
         Err(e) => {
-            report.errors.push(format!(
-                "{shown}:1: `rows` must map each entity to its rows: {e}"
+            report.errors.push(error(
+                shown,
+                None,
+                "fixture.rows",
+                format!("`rows` must map each entity to its rows: {e}"),
             ));
             return false;
         }
@@ -141,7 +183,9 @@ pub(super) async fn publish_rows(
     if let Err(e) =
         oxplow_app::collector_runner::publish_declared_rows(&host.svc.db, ext, &rows).await
     {
-        report.errors.push(format!("{shown}:1: `rows`: {e}"));
+        report
+            .errors
+            .push(error(shown, None, "fixture.rows", format!("`rows`: {e}")));
         return false;
     }
     true
@@ -201,6 +245,8 @@ pub(super) struct Example<'a> {
     pub(super) name: &'a str,
     /// Its fixture file, as findings name it.
     pub(super) shown: &'a str,
+    /// Its text, to find a key's line in.
+    pub(super) text: &'a str,
     /// What it does: one key names the kind (`page`, `command`, `event`,
     /// …), the rest are that kind's.
     pub(super) when: Value,
@@ -219,4 +265,11 @@ pub(super) struct Example<'a> {
     /// Files on `oxplow:temp`, made before the example runs (`temp: { <name>:
     /// <text> }`).
     pub(super) temp: Value,
+}
+
+impl Example<'_> {
+    /// The line of its fixture's top-level `key` (`expect`, `when`, …).
+    pub(super) fn line(&self, key: &str) -> Option<usize> {
+        oxplow_app::extension::extensions::manifest_v2::key_line(self.text, key)
+    }
 }

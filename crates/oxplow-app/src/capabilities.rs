@@ -21,6 +21,7 @@
 //! writes what it holds, with the active row and why, to
 //! `v_capability_provider`.
 
+use oxplow_domain::diagnostic::Diagnostic;
 use std::collections::BTreeSet;
 use std::sync::{Arc, RwLock};
 
@@ -696,14 +697,20 @@ impl CapabilityRegistry {
             return Err(errors);
         }
         if let Some(external) = &external {
-            let mut errors = Vec::new();
+            let mut errors: Vec<Diagnostic> = Vec::new();
             let mut identities = BTreeSet::new();
             for implementation in external {
                 if implementation.source != Source::External {
-                    errors.push("external capability metadata must use the external source".into());
+                    errors.push(Diagnostic::error(
+                        "activation.external_capability_source",
+                        "external capability metadata must use the external source",
+                    ));
                 }
                 if capability::spec(&implementation.capability).is_none() {
-                    errors.push("external capability metadata names an unknown capability".into());
+                    errors.push(Diagnostic::error(
+                        "activation.external_capability_unknown",
+                        "external capability metadata names an unknown capability",
+                    ));
                 }
                 if implementation.id.is_empty()
                     || implementation.id.len() > 256
@@ -712,13 +719,19 @@ impl CapabilityRegistry {
                         .bytes()
                         .all(|byte| byte.is_ascii_graphic())
                 {
-                    errors.push("external capability metadata has an invalid id".into());
+                    errors.push(Diagnostic::error(
+                        "activation.external_capability_id",
+                        "external capability metadata has an invalid id",
+                    ));
                 }
                 if !identities.insert((
                     implementation.capability.as_str(),
                     implementation.id.as_str(),
                 )) {
-                    errors.push("external capability metadata has a duplicate identity".into());
+                    errors.push(Diagnostic::error(
+                        "activation.external_capability_duplicate",
+                        "external capability metadata has a duplicate identity",
+                    ));
                 }
             }
             if !errors.is_empty() {

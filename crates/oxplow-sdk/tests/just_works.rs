@@ -32,14 +32,14 @@ async fn scaffolded(root: &Path, kind: &str, name: &str) {
         .await
         .unwrap();
     assert!(report.ok, "{}", render_findings(&report, Format::Text));
-    assert_eq!(report.warnings, Vec::<String>::new(), "{name}");
+    assert_eq!(report.warning_lines(), Vec::<String>::new(), "{name}");
 }
 
 /// `extension test` is clean; what ran.
 async fn tested(root: &Path, name: &str) -> Vec<String> {
     let report = test_extension(root, name, false).await.unwrap();
-    assert_eq!(report.errors, Vec::<String>::new(), "{name}");
-    assert_eq!(report.warnings, Vec::<String>::new(), "{name}");
+    assert_eq!(report.error_lines(), Vec::<String>::new(), "{name}");
+    assert_eq!(report.warning_lines(), Vec::<String>::new(), "{name}");
     report.ran
 }
 
@@ -60,7 +60,11 @@ fn loaded(
         .find(|e| e.name == name)
         .cloned()
         .unwrap_or_else(|| panic!("{name} loads"));
-    assert_eq!(ext.errors, Vec::<String>::new(), "{name}");
+    assert_eq!(
+        ext.errors,
+        Vec::<oxplow_domain::diagnostic::Diagnostic>::new(),
+        "{name}"
+    );
     ext
 }
 
@@ -99,10 +103,15 @@ async fn every_example_scaffolds_checks_and_tests_clean() {
         let report = test_extension(dir.path(), example.name, false)
             .await
             .unwrap();
-        assert_eq!(report.errors, Vec::<String>::new(), "{}", example.name);
+        assert_eq!(
+            report.error_lines(),
+            Vec::<String>::new(),
+            "{}",
+            example.name
+        );
         // A component's `ui` steps need an app and a display that is awake.
-        let unexpected: Vec<_> = report
-            .warnings
+        let warning_lines = report.warning_lines();
+        let unexpected: Vec<_> = warning_lines
             .iter()
             .filter(|w| !w.contains("aren't run"))
             .collect();
@@ -160,10 +169,15 @@ async fn every_example_renames_and_tests_clean() {
             ));
         }
         let report = test_extension(dir.path(), &name, false).await.unwrap();
-        failures.extend(report.errors.iter().map(|e| format!("{name}: test: {e}")));
         failures.extend(
             report
-                .warnings
+                .error_lines()
+                .iter()
+                .map(|e| format!("{name}: test: {e}")),
+        );
+        failures.extend(
+            report
+                .warning_lines()
                 .iter()
                 .filter(|w| !w.contains("aren't run"))
                 .map(|w| format!("{name}: warning: {w}")),
@@ -204,7 +218,7 @@ async fn a_scaffolded_extension_checks_and_loads() {
     let dir = project().await;
     scaffolded(dir.path(), "extension", "my-notes").await;
     let report = test_extension(dir.path(), "my-notes", false).await.unwrap();
-    assert_eq!(report.errors, Vec::<String>::new());
+    assert_eq!(report.error_lines(), Vec::<String>::new());
     let svc = booted(dir.path()).await;
     loaded(&svc, dir.path(), "my-notes");
 }
@@ -517,7 +531,10 @@ async fn a_scaffolded_provider_is_red_until_a_program_speaks_for_it() {
     scaffolded(dir.path(), "provider", "fake").await;
     let report = test_extension(dir.path(), "fake", false).await.unwrap();
     assert!(
-        report.errors.join("\n").contains("initialize failed"),
+        report
+            .error_lines()
+            .join("\n")
+            .contains("initialize failed"),
         "{:?}",
         report.errors
     );
@@ -539,9 +556,9 @@ async fn a_scaffolded_provider_is_red_until_a_program_speaks_for_it() {
     )
     .unwrap();
     let blessed = kit_on_a_fresh_service(dir.path(), true).await;
-    assert_eq!(blessed.errors, Vec::<String>::new());
+    assert_eq!(blessed.error_lines(), Vec::<String>::new());
     let report = kit_on_a_fresh_service(dir.path(), false).await;
-    assert_eq!(report.errors, Vec::<String>::new());
+    assert_eq!(report.error_lines(), Vec::<String>::new());
     for ran in ["work_items suite", "read work_items", "discover"] {
         assert!(
             report.ran.iter().any(|r| r == ran),
@@ -560,7 +577,7 @@ async fn a_scaffolded_provider_is_red_until_a_program_speaks_for_it() {
     let report = kit_on_a_fresh_service(dir.path(), false).await;
     assert!(
         report
-            .errors
+            .error_lines()
             .iter()
             .any(|e| e.contains("collector `work_items`") && e.contains("doesn't advance")),
         "{:?}",
@@ -583,7 +600,10 @@ async fn a_scaffolded_effort_policy_is_red_until_a_program_speaks_for_it() {
     .unwrap();
     let report = test_extension(dir.path(), "fake", false).await.unwrap();
     assert!(
-        report.errors.join("\n").contains("initialize failed"),
+        report
+            .error_lines()
+            .join("\n")
+            .contains("initialize failed"),
         "{:?}",
         report.errors
     );
@@ -607,9 +627,9 @@ async fn a_scaffolded_effort_policy_is_red_until_a_program_speaks_for_it() {
     )
     .unwrap();
     let blessed = kit_on_a_fresh_service(dir.path(), true).await;
-    assert_eq!(blessed.errors, Vec::<String>::new());
+    assert_eq!(blessed.error_lines(), Vec::<String>::new());
     let report = kit_on_a_fresh_service(dir.path(), false).await;
-    assert_eq!(report.errors, Vec::<String>::new());
+    assert_eq!(report.error_lines(), Vec::<String>::new());
     for ran in ["provider fake", "effort_policy suite"] {
         assert!(
             report.ran.iter().any(|r| r == ran),
@@ -629,7 +649,7 @@ async fn a_scaffolded_effort_policy_is_red_until_a_program_speaks_for_it() {
     let report = kit_on_a_fresh_service(dir.path(), false).await;
     assert!(
         report
-            .errors
+            .error_lines()
             .iter()
             .any(|e| e.contains("fixtures/basic.yaml")),
         "{:?}",
@@ -675,7 +695,10 @@ async fn a_scaffolded_harness_provider_is_red_until_a_program_speaks_for_it() {
         .await
         .unwrap();
     assert!(
-        report.errors.join("\n").contains("initialize failed"),
+        report
+            .error_lines()
+            .join("\n")
+            .contains("initialize failed"),
         "{:?}",
         report.errors
     );
@@ -701,11 +724,11 @@ async fn a_scaffolded_harness_provider_is_red_until_a_program_speaks_for_it() {
     let blessed = test_extension_in(dir.path(), "relay", true, env.0.clone())
         .await
         .unwrap();
-    assert_eq!(blessed.errors, Vec::<String>::new());
+    assert_eq!(blessed.error_lines(), Vec::<String>::new());
     let report = test_extension_in(dir.path(), "relay", false, env.0)
         .await
         .unwrap();
-    assert_eq!(report.errors, Vec::<String>::new());
+    assert_eq!(report.error_lines(), Vec::<String>::new());
     assert!(
         report.ran.iter().any(|r| r == "agent_harness suite"),
         "{:?}",
@@ -784,11 +807,11 @@ async fn extension_test_runs_the_harness_suite_over_a_harness_provider() {
     let blessed = test_extension_in(dir.path(), "relay", true, env.clone())
         .await
         .unwrap();
-    assert_eq!(blessed.errors, Vec::<String>::new());
+    assert_eq!(blessed.error_lines(), Vec::<String>::new());
     let report = test_extension_in(dir.path(), "relay", false, env)
         .await
         .unwrap();
-    assert_eq!(report.errors, Vec::<String>::new());
+    assert_eq!(report.error_lines(), Vec::<String>::new());
     assert!(
         report.ran.iter().any(|r| r == "agent_harness suite"),
         "{:?}",
@@ -843,9 +866,9 @@ async fn extension_test_runs_the_knowledge_suite_over_a_knowledge_provider() {
         .unwrap();
     }
     let blessed = test_extension(dir.path(), "shelf", true).await.unwrap();
-    assert_eq!(blessed.errors, Vec::<String>::new());
+    assert_eq!(blessed.error_lines(), Vec::<String>::new());
     let report = test_extension(dir.path(), "shelf", false).await.unwrap();
-    assert_eq!(report.errors, Vec::<String>::new());
+    assert_eq!(report.error_lines(), Vec::<String>::new());
     assert!(
         report.ran.iter().any(|r| r == "knowledge suite"),
         "{:?}",
@@ -906,9 +929,9 @@ async fn extension_test_runs_the_snapshot_suite_over_a_snapshots_provider() {
         .unwrap();
     }
     let blessed = test_extension(dir.path(), "shutter", true).await.unwrap();
-    assert_eq!(blessed.errors, Vec::<String>::new());
+    assert_eq!(blessed.error_lines(), Vec::<String>::new());
     let report = test_extension(dir.path(), "shutter", false).await.unwrap();
-    assert_eq!(report.errors, Vec::<String>::new());
+    assert_eq!(report.error_lines(), Vec::<String>::new());
     assert!(
         report.ran.iter().any(|r| r == "snapshots suite"),
         "{:?}",
@@ -931,7 +954,10 @@ async fn a_scaffolded_snapshots_provider_is_red_until_a_program_speaks_for_it() 
     .unwrap();
     let report = test_extension(dir.path(), "shutter", false).await.unwrap();
     assert!(
-        report.errors.join("\n").contains("initialize failed"),
+        report
+            .error_lines()
+            .join("\n")
+            .contains("initialize failed"),
         "{:?}",
         report.errors
     );
@@ -955,9 +981,9 @@ async fn a_scaffolded_snapshots_provider_is_red_until_a_program_speaks_for_it() 
     )
     .unwrap();
     let blessed = test_extension(dir.path(), "shutter", true).await.unwrap();
-    assert_eq!(blessed.errors, Vec::<String>::new());
+    assert_eq!(blessed.error_lines(), Vec::<String>::new());
     let report = test_extension(dir.path(), "shutter", false).await.unwrap();
-    assert_eq!(report.errors, Vec::<String>::new());
+    assert_eq!(report.error_lines(), Vec::<String>::new());
     assert!(
         report.ran.iter().any(|r| r == "snapshots suite"),
         "{:?}",
@@ -980,7 +1006,10 @@ async fn a_scaffolded_knowledge_provider_is_red_until_a_program_speaks_for_it() 
     .unwrap();
     let report = test_extension(dir.path(), "shelf", false).await.unwrap();
     assert!(
-        report.errors.join("\n").contains("initialize failed"),
+        report
+            .error_lines()
+            .join("\n")
+            .contains("initialize failed"),
         "{:?}",
         report.errors
     );
@@ -1004,9 +1033,9 @@ async fn a_scaffolded_knowledge_provider_is_red_until_a_program_speaks_for_it() 
     )
     .unwrap();
     let blessed = test_extension(dir.path(), "shelf", true).await.unwrap();
-    assert_eq!(blessed.errors, Vec::<String>::new());
+    assert_eq!(blessed.error_lines(), Vec::<String>::new());
     let report = test_extension(dir.path(), "shelf", false).await.unwrap();
-    assert_eq!(report.errors, Vec::<String>::new());
+    assert_eq!(report.error_lines(), Vec::<String>::new());
     assert!(
         report.ran.iter().any(|r| r == "knowledge suite"),
         "{:?}",
@@ -1084,7 +1113,7 @@ async fn recorded_agent_runs_still_check_and_test_clean() {
             .unwrap();
             assert!(report.ok, "{}", render_findings(&report, Format::Text));
             let tested = test_extension(dir.path(), &name, false).await.unwrap();
-            assert_eq!(tested.errors, Vec::<String>::new(), "{name}");
+            assert_eq!(tested.error_lines(), Vec::<String>::new(), "{name}");
             replayed += 1;
         }
     }
@@ -1118,7 +1147,7 @@ async fn a_scaffolded_advisory_checks_loads_and_stays_quiet() {
     let report = test_extension(dir.path(), "watch-effort", false)
         .await
         .unwrap();
-    assert_eq!(report.errors, Vec::<String>::new());
+    assert_eq!(report.error_lines(), Vec::<String>::new());
     let svc = booted(dir.path()).await;
     let ext = loaded(&svc, dir.path(), "watch-effort");
     assert_eq!(ext.advisories.len(), 1);
@@ -1132,7 +1161,7 @@ async fn a_scaffolded_skill_checks_and_is_declared() {
     let report = test_extension(dir.path(), "house-style", false)
         .await
         .unwrap();
-    assert_eq!(report.errors, Vec::<String>::new());
+    assert_eq!(report.error_lines(), Vec::<String>::new());
     let svc = booted(dir.path()).await;
     let ext = loaded(&svc, dir.path(), "house-style");
     assert_eq!(ext.skills.len(), 1);
@@ -1163,7 +1192,7 @@ async fn the_bundled_extensions_runs_page_example_runs_and_passes() {
     let report = test_extension(dir.path(), "oxplow-bundled", false)
         .await
         .unwrap();
-    assert_eq!(report.errors, Vec::<String>::new());
+    assert_eq!(report.error_lines(), Vec::<String>::new());
     assert!(
         report
             .ran
@@ -1179,7 +1208,7 @@ async fn the_shipped_extensions_pass_their_own_test() {
     let dir = project().await;
     for name in ["oxplow-foundation", "oxplow-bundled"] {
         let report = test_extension(dir.path(), name, false).await.unwrap();
-        assert_eq!(report.errors, Vec::<String>::new(), "{name}");
+        assert_eq!(report.error_lines(), Vec::<String>::new(), "{name}");
         if name == "oxplow-foundation" {
             assert!(
                 report.ran.contains(&"answers".to_string()),

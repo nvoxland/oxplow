@@ -19,7 +19,7 @@ loaders:
   extensions:
     sql: |
       SELECT name,
-             '`' || name || '` isn''t running as it should: ' || coalesce(json_extract(errors, '$[0]'), 'unknown error')
+             '`' || name || '` isn''t running as it should: ' || coalesce(json_extract(errors, '$[0].shown'), 'unknown error')
                || CASE WHEN json_array_length(errors) > 1 THEN ' (+' || (json_array_length(errors) - 1) || ' more)' ELSE '' END AS what,
              'Open the problems' AS open,
              uri('oxplow/page', 'page', 'extension-problems') || '#extension=' || name AS settings

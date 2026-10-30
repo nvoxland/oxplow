@@ -61,9 +61,13 @@ async fn a_fact_collectors_examples_run_over_their_files() {
     );
     assert_eq!(tested.errors.len(), 1, "{:?}", tested.errors);
     assert!(
-        tested.errors[0].contains("wrong-count"),
+        tested.error_lines()[0].contains("wrong-count"),
         "{:?}",
         tested.errors
     );
-    assert!(tested.errors[0].contains("facts"), "{:?}", tested.errors);
+    assert!(
+        tested.error_lines()[0].contains("facts"),
+        "{:?}",
+        tested.errors
+    );
 }

@@ -31,6 +31,7 @@ use std::collections::BTreeMap;
 
 use oxplow_app::ai_service::{AiService, Question as Ask, Role};
 use oxplow_app::sql_gateway::SqlGateway;
+use oxplow_domain::diagnostic::Diagnostic;
 use oxplow_domain::InputValidator;
 use serde::Deserialize;
 use serde_json::Value;
@@ -226,64 +227,122 @@ pub struct Checker<'a> {
     pub tool_schema: &'a (dyn Fn(&str) -> Option<Value> + Sync),
 }
 
-/// What checking a file found: `<file>: question N (…): what — fix`
-/// lines.
+/// What checking a file found: the problems, each in the file (relative
+/// to the extension's folder) and about the question it names.
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct Checked {
-    pub errors: Vec<String>,
-    pub warnings: Vec<String>,
+    pub errors: Vec<Diagnostic>,
+    pub warnings: Vec<Diagnostic>,
+}
+
+impl Checked {
+    /// The errors as lines (`<file>: <message> — fix: …`).
+    pub fn error_lines(&self) -> Vec<String> {
+        self.errors.iter().map(|d| d.render("")).collect()
+    }
+
+    /// The warnings as lines.
+    pub fn warning_lines(&self) -> Vec<String> {
+        self.warnings.iter().map(|d| d.render("")).collect()
+    }
+}
+
+/// Which question a problem is about: its file, relative to the
+/// extension's folder, and the question's name (`question 2 ("…")`).
+struct Place {
+    file: String,
+    label: String,
+    contribution: Option<String>,
+}
+
+impl Place {
+    fn error(&self, code: &str, message: impl std::fmt::Display) -> Diagnostic {
+        self.diagnostic(Diagnostic::error(
+            code,
+            format!("{}: {message}", self.label),
+        ))
+    }
+
+    fn warning(&self, code: &str, message: impl std::fmt::Display) -> Diagnostic {
+        self.diagnostic(Diagnostic::warning(
+            code,
+            format!("{}: {message}", self.label),
+        ))
+    }
+
+    fn diagnostic(&self, d: Diagnostic) -> Diagnostic {
+        let d = d.at(&self.file, None);
+        match &self.contribution {
+            Some(c) => d.contribution(c),
+            None => d,
+        }
+    }
 }
 
 /// Check every question in `file` (shown as `file`).
 pub async fn check(file: &str, questions: &[Question], c: &Checker<'_>) -> Checked {
     let mut out = Checked::default();
     for (i, q) in questions.iter().enumerate() {
-        let at = format!("{file}: question {} ({:?})", i + 1, q.question);
+        let at = Place {
+            file: file.to_string(),
+            label: format!("question {} ({:?})", i + 1, q.question),
+            contribution: None,
+        };
         if let Some(about) = &q.about {
             if let Some(why) = oxplow_app::extension::extension_resources::resource_problem(about) {
-                out.errors.push(format!(
-                    "{at}: `about: {about}`: {why} — fix: `oxplow/file`, `oxplow/commit`, \
-                     `oxplow/effort`, `oxplow/work_item`, …"
-                ));
+                out.errors.push(at.error("answer.about_unknown", format!("`about: {about}`: {why}")).fix("`oxplow/file`, `oxplow/commit`, `oxplow/effort`, `oxplow/work_item`, …"));
             }
         }
         let Some(text) = (c.skill_text)(&q.skill) else {
-            out.errors.push(format!(
-                "{at}: no skill `{}` — fix: name a skill that exists",
-                q.skill
-            ));
+            out.errors.push(
+                at.error("answer.skill_missing", format!("no skill `{}`", q.skill))
+                    .fix("name a skill that exists"),
+            );
             continue;
         };
         match (&q.reaches.sql, &q.reaches.command, &q.reaches.tool) {
             (Some(sql), None, None) => {
                 for dataset in datasets_in(sql) {
                     if !names(&text, &dataset) {
-                        out.errors.push(format!(
-                            "{at}: skill `{}` never names `{dataset}` — fix: say in the skill what \
-                             `{dataset}` answers",
-                            q.skill
-                        ));
+                        out.errors.push(
+                            at.error(
+                                "answer.skill_silent",
+                                format!("skill `{}` never names `{dataset}`", q.skill),
+                            )
+                            .fix(format!("say in the skill what `{dataset}` answers")),
+                        );
                     }
                 }
                 let Some(shape) = &q.shape else {
-                    out.errors.push(format!(
-                        "{at}: a sql question needs `shape.columns` — fix: add them"
-                    ));
+                    out.errors.push(
+                        at.error(
+                            "answer.shape_missing",
+                            "a sql question needs `shape.columns`",
+                        )
+                        .fix("add them"),
+                    );
                     continue;
                 };
                 match c.sql {
-                    None => out.warnings.push(format!(
-                        "{at}: the SQL wasn't run (no database) — fix: none needed here"
-                    )),
+                    None => out
+                        .warnings
+                        .push(at.warning("answer.sql_not_run", "the SQL wasn't run (no database)")),
                     Some(gateway) => match gateway.query_sql(sql, vec![], Some(1)).await {
                         Ok(result) if result.columns == shape.columns => {}
-                        Ok(result) => out.errors.push(format!(
-                            "{at}: the SQL returns {:?}, the shape says {:?} — fix: one of them",
-                            result.columns, shape.columns
-                        )),
-                        Err(e) => out
-                            .errors
-                            .push(format!("{at}: the SQL fails: {e} — fix: the query")),
+                        Ok(result) => out.errors.push(
+                            at.error(
+                                "answer.shape_mismatch",
+                                format!(
+                                    "the SQL returns {:?}, the shape says {:?}",
+                                    result.columns, shape.columns
+                                ),
+                            )
+                            .fix("one of them"),
+                        ),
+                        Err(e) => out.errors.push(
+                            at.error("answer.sql_failed", format!("the SQL fails: {e}"))
+                                .fix("the query"),
+                        ),
                     },
                 }
             }
@@ -293,9 +352,13 @@ pub async fn check(file: &str, questions: &[Question], c: &Checker<'_>) -> Check
             (None, None, Some(name)) => {
                 reach(&mut out, &at, q, &text, "tool", name, c.tool_schema);
             }
-            _ => out.errors.push(format!(
-                "{at}: `reaches` is `{{ sql }}`, `{{ command, input }}` or `{{ tool, input }}` — fix: pick one"
-            )),
+            _ => out.errors.push(
+                at.error(
+                    "answer.reaches_unknown",
+                    "`reaches` is `{ sql }`, `{ command, input }` or `{ tool, input }`",
+                )
+                .fix("pick one"),
+            ),
         }
     }
     out
@@ -305,7 +368,7 @@ pub async fn check(file: &str, questions: &[Question], c: &Checker<'_>) -> Check
 /// input fits its schema.
 fn reach(
     out: &mut Checked,
-    at: &str,
+    at: &Place,
     q: &Question,
     text: &str,
     what: &str,
@@ -313,24 +376,32 @@ fn reach(
     schema_of: &(dyn Fn(&str) -> Option<Value> + Sync),
 ) {
     if !names(text, name) {
-        out.errors.push(format!(
-            "{at}: skill `{}` never names `{name}` — fix: say in the skill when to use it",
-            q.skill
-        ));
+        out.errors.push(
+            at.error(
+                "answer.skill_silent",
+                format!("skill `{}` never names `{name}`", q.skill),
+            )
+            .fix("say in the skill when to use it"),
+        );
     }
     match schema_of(name) {
-        None => out.errors.push(format!(
-            "{at}: no {what} `{name}` — fix: name a registered one"
-        )),
+        None => out.errors.push(
+            at.error("answer.unregistered", format!("no {what} `{name}`"))
+                .fix("name a registered one"),
+        ),
         Some(schema) => {
             let input = q.reaches.input.clone().unwrap_or(Value::Null);
             let valid = InputValidator::compile(&schema)
                 .map_err(|e| e.to_string())
                 .and_then(|v| v.check(&input).map_err(|e| e.to_string()));
             if let Err(e) = valid {
-                out.errors.push(format!(
-                    "{at}: the input doesn't fit `{name}`: {e} — fix: the input"
-                ));
+                out.errors.push(
+                    at.error(
+                        "answer.input_mismatch",
+                        format!("the input doesn't fit `{name}`: {e}"),
+                    )
+                    .fix("the input"),
+                );
             }
         }
     }
@@ -435,44 +506,44 @@ pub async fn check_pages(
     use oxplow_app::pages::runner::{PageRunner, RunRequest, RunTarget};
     let mut out = Checked::default();
     for ext in extensions {
-        let rel = ext.path.trim_end_matches('/');
         for page in &ext.page_files {
             for (i, answer) in page.answers.iter().enumerate() {
-                let at = format!(
-                    "{rel}/pages/{}.yaml: answer {} ({:?})",
-                    page.slug,
-                    i + 1,
-                    answer.question
-                );
+                let at = Place {
+                    file: format!("pages/{}.yaml", page.slug),
+                    label: format!("answer {} ({:?})", i + 1, answer.question),
+                    contribution: Some(format!("{}/{}", ext.name, page.slug)),
+                };
                 // A question is put into the agent's input, never sent, and
                 // the terminal treats a pasted line break as Enter: one line.
                 if answer.question.trim().is_empty() || answer.question.contains(['\n', '\r']) {
-                    out.errors.push(format!(
-                        "{at}: a question is one non-empty line (a line break pasted into the \
-                         agent's input would send it) — fix: write it on one line"
-                    ));
+                    out.errors.push(at.error("answer.question_multiline", "a question is one non-empty line (a line break pasted into the agent's input would send it)").fix("write it on one line"));
                 }
                 if let Some(about) = &answer.about {
                     if let Some(why) =
                         oxplow_app::extension::extension_resources::resource_problem(about)
                     {
-                        out.errors.push(format!(
-                            "{at}: `about: {about}`: {why} — fix: a resource kind"
-                        ));
+                        out.errors.push(
+                            at.error("answer.about_unknown", format!("`about: {about}`: {why}"))
+                                .fix("a resource kind"),
+                        );
                     }
                 }
                 if let Some(skill) = &answer.skill {
                     match skill_text(skill) {
-                        None => out.errors.push(format!(
-                            "{at}: no skill `{skill}` — fix: name a skill that exists"
-                        )),
+                        None => out.errors.push(
+                            at.error("answer.skill_missing", format!("no skill `{skill}`"))
+                                .fix("name a skill that exists"),
+                        ),
                         Some(text) => {
                             for reach in page_reaches(page) {
                                 if !names(&text, &reach) {
-                                    out.errors.push(format!(
-                                        "{at}: skill `{skill}` never names `{reach}` — fix: say in \
-                                         the skill what `{reach}` answers"
-                                    ));
+                                    out.errors.push(
+                                        at.error(
+                                            "answer.skill_silent",
+                                            format!("skill `{skill}` never names `{reach}`"),
+                                        )
+                                        .fix(format!("say in the skill what `{reach}` answers")),
+                                    );
                                 }
                             }
                         }
@@ -489,19 +560,28 @@ pub async fn check_pages(
                         continue;
                     };
                     match svc.commands.spec(command) {
-                        None => out.errors.push(format!(
-                            "{at}: action `{}` runs no command `{}` — fix: name a registered one",
-                            action.id, command
-                        )),
+                        None => out.errors.push(
+                            at.error(
+                                "answer.action_unregistered",
+                                format!("action `{}` runs no command `{}`", action.id, command),
+                            )
+                            .fix("name a registered one"),
+                        ),
                         Some(spec) => {
                             let valid = InputValidator::compile(&spec.input_schema)
                                 .map_err(|e| e.to_string())
                                 .and_then(|v| v.check(&action.input).map_err(|e| e.to_string()));
                             if let Err(e) = valid {
-                                out.errors.push(format!(
-                                    "{at}: action `{}`'s input doesn't fit `{}`: {e} — fix: the input",
-                                    action.id, command
-                                ));
+                                out.errors.push(
+                                    at.error(
+                                        "answer.input_mismatch",
+                                        format!(
+                                            "action `{}`'s input doesn't fit `{}`: {e}",
+                                            action.id, command
+                                        ),
+                                    )
+                                    .fix("the input"),
+                                );
                             }
                         }
                     }
@@ -520,19 +600,26 @@ pub async fn check_pages(
                     })
                     .await;
                 match ran {
-                    Err(e) => out.errors.push(format!(
-                        "{at}: the page doesn't run with its params: {e} — fix: the params, or the page"
-                    )),
+                    Err(e) => out.errors.push(
+                        at.error(
+                            "answer.page_run",
+                            format!("the page doesn't run with its params: {e}"),
+                        )
+                        .fix("the params, or the page"),
+                    ),
                     Ok(run) => {
                         if let Some((name, e)) = run
                             .loaders
                             .iter()
                             .find_map(|(n, l)| l.error.as_ref().map(|e| (n, e)))
                         {
-                            out.errors.push(format!(
-                                "{at}: loader `{name}` fails with its params: {e} — fix: the \
-                                 params, or the page"
-                            ));
+                            out.errors.push(
+                                at.error(
+                                    "answer.loader_run",
+                                    format!("loader `{name}` fails with its params: {e}"),
+                                )
+                                .fix("the params, or the page"),
+                            );
                         }
                     }
                 }
@@ -658,7 +745,7 @@ mod tests {
             .cloned()
             .collect();
         let checked = check_pages(&shipped, &skill, Some(&svc)).await;
-        let mut errors = checked.errors;
+        let mut errors = checked.error_lines();
         if std::env::var("OXPLOW_LIVE_ANSWERABILITY").as_deref() == Ok("1") {
             let ai = AiService::for_this_machine(
                 std::sync::Arc::new(oxplow_db::SqliteAiCallStore::new(svc.db.clone())),
@@ -722,7 +809,7 @@ mod tests {
 
         let ok = extension("params: { state: open }, skill: acme-skill", list);
         let checked = check_pages(&[ok], &skill, Some(&svc)).await;
-        assert_eq!(checked.errors, Vec::<String>::new());
+        assert_eq!(checked.error_lines(), Vec::<String>::new());
 
         let unnamed = extension(
             "params: { state: open }, skill: acme-skill",
@@ -731,7 +818,7 @@ mod tests {
         let checked = check_pages(&[unnamed], &skill, Some(&svc)).await;
         assert!(
             checked
-                .errors
+                .error_lines()
                 .iter()
                 .any(|e| e.contains("never names `v_effort`")),
             "{:?}",
@@ -745,7 +832,7 @@ mod tests {
         let checked = check_pages(&[broken], &skill, Some(&svc)).await;
         assert!(
             checked
-                .errors
+                .error_lines()
                 .iter()
                 .any(|e| e.contains("loader `items` fails")),
             "{:?}",
@@ -787,8 +874,8 @@ mod tests {
                 },
             )
             .await;
-            assert_eq!(checked.errors, Vec::<String>::new());
-            assert_eq!(checked.warnings, Vec::<String>::new());
+            assert_eq!(checked.error_lines(), Vec::<String>::new());
+            assert_eq!(checked.warning_lines(), Vec::<String>::new());
         }
         assert!(asked >= 3, "{asked}");
     }
@@ -844,18 +931,21 @@ mod tests {
             &checker,
         )
         .await;
-        assert_eq!(ok.errors, Vec::<String>::new());
+        assert_eq!(ok.error_lines(), Vec::<String>::new());
         let unknown = check("q.yaml", &ask("oxplow_nope", "{}"), &checker).await;
         assert!(
             unknown
-                .errors
+                .error_lines()
                 .iter()
                 .any(|e| e.contains("no tool `oxplow_nope`")),
             "{:?}",
             unknown.errors
         );
         assert!(
-            unknown.errors.iter().any(|e| e.contains("never names")),
+            unknown
+                .error_lines()
+                .iter()
+                .any(|e| e.contains("never names")),
             "{:?}",
             unknown.errors
         );
@@ -866,7 +956,7 @@ mod tests {
         )
         .await;
         assert!(
-            bad.errors.iter().any(|e| e.contains("doesn't fit")),
+            bad.error_lines().iter().any(|e| e.contains("doesn't fit")),
             "{:?}",
             bad.errors
         );

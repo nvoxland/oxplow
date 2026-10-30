@@ -1225,7 +1225,7 @@ impl LiveSources {
                     text(head.clone()),
                     text(c.name),
                     text(wire_name(&c.change)),
-                    json(&c.errors),
+                    json(&crate::extension::extensions::listed(&c.root, &c.errors)),
                     json(&lines),
                     json(&pages),
                     SqlCell::Int(stream.id.value()),

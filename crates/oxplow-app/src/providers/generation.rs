@@ -383,7 +383,10 @@ impl ProviderRegistry {
             != snapshot.source_generation()
         {
             cleanup(&mut staged).await;
-            return Err(host_error("provider catalog changed during preparation"));
+            return Err(host_error(
+                "activation.provider_catalog_changed",
+                "provider catalog changed during preparation",
+            ));
         }
 
         Ok(PreparedProviderGeneration {
@@ -415,6 +418,7 @@ impl ProviderRegistry {
                 .all(|(name, base)| current.get(name).is_some_and(|now| Arc::ptr_eq(now, base)));
         if !same_base {
             return Err(host_error(
+                "activation.provider_instances_changed",
                 "running provider instances changed during preparation",
             ));
         }
@@ -423,7 +427,10 @@ impl ProviderRegistry {
             .iter()
             .any(|staged| self.disable_epoch(&staged.instance.name) != staged.epoch)
         {
-            return Err(host_error("provider enablement changed during preparation"));
+            return Err(host_error(
+                "activation.provider_enablement_changed",
+                "provider enablement changed during preparation",
+            ));
         }
         if self
             .deps
@@ -433,7 +440,10 @@ impl ProviderRegistry {
             != prepared.source_generation
             || self.global_mtime() != prepared.global_mtime
         {
-            return Err(host_error("provider source changed during preparation"));
+            return Err(host_error(
+                "activation.provider_source_changed",
+                "provider source changed during preparation",
+            ));
         }
 
         let mut configured: BTreeMap<_, _> = self
@@ -449,6 +459,7 @@ impl ProviderRegistry {
         );
         if configured != prepared.configured {
             return Err(host_error(
+                "activation.provider_configuration_changed",
                 "provider configuration changed during preparation",
             ));
         }
@@ -473,6 +484,7 @@ impl ProviderGenerationReservation<'_> {
                 {
                     return Err(error(
                         &staged.instance.name,
+                        "activation.provider_event_undeclared",
                         "provider event declaration is not in the candidate vocabulary",
                     ));
                 }
@@ -497,12 +509,14 @@ impl ProviderGenerationReservation<'_> {
             if !valid {
                 return Err(error(
                     &staged.instance.name,
+                    "activation.provider_not_live",
                     "provider candidate is no longer live or authorized",
                 ));
             }
             if self.registry.disable_epoch(&staged.instance.name) != staged.epoch {
                 return Err(error(
                     &staged.instance.name,
+                    "activation.provider_enablement_changed",
                     "provider enablement changed during preparation",
                 ));
             }
@@ -516,7 +530,10 @@ impl ProviderGenerationReservation<'_> {
             != self.prepared.source_generation
             || self.registry.global_mtime() != self.prepared.global_mtime
         {
-            return Err(host_error("provider source changed during preparation"));
+            return Err(host_error(
+                "activation.provider_source_changed",
+                "provider source changed during preparation",
+            ));
         }
         Ok(())
     }
@@ -652,10 +669,13 @@ async fn cleanup(staged: &mut Vec<Staged>) {
     staged.clear();
 }
 
-fn error(instance: &str, message: &str) -> VocabularyErrors {
-    VocabularyErrors::from([(instance.to_string(), vec![message.to_string()])])
+fn error(instance: &str, code: &str, message: &str) -> VocabularyErrors {
+    VocabularyErrors::from([(
+        instance.to_string(),
+        vec![oxplow_domain::diagnostic::Diagnostic::error(code, message)],
+    )])
 }
 
-fn host_error(message: &str) -> VocabularyErrors {
-    error("<host>", message)
+fn host_error(code: &str, message: &str) -> VocabularyErrors {
+    error("<host>", code, message)
 }

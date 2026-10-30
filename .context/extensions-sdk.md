@@ -10,6 +10,41 @@ CLI, the agent's `oxplow_validate_extension`, and `write_page`. Every
 door gives an author the same report, so an agent editing from a terminal
 and one calling MCP read identical `file:line: what — fix` lines.
 
+### Diagnostics
+
+Every problem a load, check, activation or fixture run finds is one
+`oxplow_domain::diagnostic::Diagnostic { severity, code, file, line,
+contribution, message, fix, mismatch }`:
+
+- **`code`** is stable and dotted, a family then the problem
+  (`manifest.name_mismatch`, `page.unknown_column`, `import.withheld`,
+  `descriptor.after_cycle`, `activation.held`, `fixture.compare`,
+  `answer.*`, `suite.*`); `valid_code` says the shape. The same problem has
+  the same code wherever it is found.
+- **`file`** is relative to the extension's own folder (`extension.yaml`,
+  `pages/board.yaml`, `fixtures/decide.yaml`), never the copy that runs
+  (`.oxplow/runtime/extensions/<name>/<hash>`), a throwaway's temp dir or
+  an absolute path. `line` is the real line or none, never a stand-in `1`.
+- **`contribution`** is the contribution's URI or a command's bus id, when
+  it is about one; a problem of several (a cycle of `after:`) names none.
+- **`fix`** is what to change, apart from the problem's words.
+- **`mismatch`** (`{ pointer, expected, actual }`) is a fixture compare
+  that didn't hold.
+
+A person reads `render(root)`: `<root>/<file>:<line>: <message> — fix:
+<fix>`, where `root` is the folder they edit — `Extension::root()`, the
+source when the extension was read from a deployed copy (`source`,
+which `locate` and a deploy set), else where it was read from;
+`Extension::shown(d)` is that. `CheckReport` and `TestReport` carry the
+diagnostics and their `root`: text and JUnit render the lines, `--json`
+gives the objects. `v_extension.errors`/`warnings` and
+`v_extension_change.errors` list each diagnostic's fields plus `shown`, its
+rendered line (`extensions::listed`); the desktop renders the IPC
+`Extension`'s with `renderDiagnostic` (`apps/desktop/src/diagnostics.ts`),
+the same line. Two passes that find one problem compare with `same_as`
+(code, file, line, contribution), never by text: an activation problem the
+check already reported is not repeated.
+
 - **`scaffold_example(root, example, name)`** (`extension new --from <example>`,
   `--list-examples`) copies one of `examples/extensions/*` into the project.
   The SDK carries them (`crates/oxplow-sdk/src/examples.rs`: compiled in by
@@ -139,8 +174,9 @@ and one calling MCP read identical `file:line: what — fix` lines.
   (`chart`, `tree`, …), a column's `key`, `link`, `icon` or `tone`
   column, an action's `when:` or a `{{row.x}}` placeholder. Layout
   problems are warnings. It returns a `CheckReport { ok, errors,
-  warnings, dry_run, extension }`; `render_findings` prints it as text
-  (`error: <file:line …>` lines then a one-line summary) or JSON.
+  warnings, root, dry_run, extension }` (diagnostics, "Diagnostics" above);
+  `render_findings` prints it as text (`error: <file:line …>` lines then a
+  one-line summary) or JSON.
   `oxplow_validate_extension` also warns about a `fixtures/*.yaml` no intent
   example names (`check_fixture_pairing`; `dataset-*` / `provider-*` belong
   to a dataset or a provider); `extension test` warns about the reverse, an
@@ -225,8 +261,9 @@ and one calling MCP read identical `file:line: what — fix` lines.
   command example that refuses or fails is `refused: <its reason>`. Then, per declared provider, the conformance kit
   ([providers.md](./providers.md) "The conformance kit"), the effort
   policy suite for a policy script, `questions.yaml` and incremental
-  datasets. `TestReport { ok, errors, warnings, blessed, ran, generation,
-  contributes, unsupported, left }`: `contributes` is the extension's
+  datasets. `TestReport { ok, errors, warnings, skipped, root, blessed,
+  ran, generation, contributes, unsupported, left }` (diagnostics, with
+  `error_lines()` and the like for the rendered lines): `contributes` is the extension's
   descriptors by public id, `unsupported` what only the app shows
   (panels, decorators, replacements, skills; a slot mount runs in its
   host page's run, so a fixture of the host page checks it); `render`

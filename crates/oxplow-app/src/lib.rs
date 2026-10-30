@@ -814,17 +814,12 @@ impl Services {
                         // errors: each is said once.
                         for key in [extension.name.as_str(), "<host>"] {
                             for error in problems.get(key).into_iter().flatten() {
-                                if !extension.errors.contains(error) {
+                                if !extension.errors.iter().any(|d| d.same_as(error)) {
                                     extension.errors.push(error.clone());
                                 }
                             }
                         }
                     }
-                }
-
-                for extension in &mut loaded {
-                    let mut seen = std::collections::BTreeSet::new();
-                    extension.errors.retain(|error| seen.insert(error.clone()));
                 }
 
                 // Keep changed candidate owners visible for repair without
@@ -839,20 +834,21 @@ impl Services {
                     let mut pending = candidate.clone();
                     pending.enabled = false;
                     extension::extensions::clear_contributions(&mut pending);
-                    pending.errors.push(
-                        "candidate changes are not active until extension activation succeeds"
-                            .into(),
-                    );
+                    pending
+                        .errors
+                        .push(oxplow_domain::diagnostic::Diagnostic::error(
+                            "activation.candidate",
+                            "candidate changes are not active until extension activation succeeds",
+                        ));
                     if let Some(problems) = &problems {
-                        if let Some(errors) = problems.get(&pending.name) {
-                            pending.errors.extend(errors.iter().cloned());
-                        }
-                        if let Some(errors) = problems.get("<host>") {
-                            pending.errors.extend(errors.iter().cloned());
+                        for key in [pending.name.as_str(), "<host>"] {
+                            for error in problems.get(key).into_iter().flatten() {
+                                if !pending.errors.iter().any(|d| d.same_as(error)) {
+                                    pending.errors.push(error.clone());
+                                }
+                            }
                         }
                     }
-                    let mut seen = std::collections::BTreeSet::new();
-                    pending.errors.retain(|error| seen.insert(error.clone()));
                     loaded.push(pending);
                 }
                 loaded
@@ -870,7 +866,10 @@ impl Services {
                     extension::extensions::clear_contributions(extension);
                     extension
                         .errors
-                        .push("extension activation is unavailable".into());
+                        .push(oxplow_domain::diagnostic::Diagnostic::error(
+                            "activation.unavailable",
+                            "extension activation is unavailable",
+                        ));
                 }
                 unavailable
             }

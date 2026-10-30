@@ -10,6 +10,7 @@
 //! (a slot mount to its page, a metric to its measure) with what it
 //! loads.
 
+use oxplow_domain::diagnostic::Diagnostic;
 use serde::{Deserialize, Serialize};
 use serde_yaml::Value;
 
@@ -373,7 +374,7 @@ fn entries<T: serde::de::DeserializeOwned>(
     kind: &str,
     file: &str,
     text: &str,
-) -> (Vec<T>, Vec<String>) {
+) -> (Vec<T>, Vec<Diagnostic>) {
     let lines = item_lines(text, kind);
     let mut out = Vec::new();
     let mut errors = Vec::new();
@@ -382,7 +383,12 @@ fn entries<T: serde::de::DeserializeOwned>(
             Ok(t) => out.push(t),
             Err(e) => {
                 let line = lines.get(i).copied().or(kind_line(text, kind));
-                errors.push(at(file, line, format!("`{kind}`: {e}")));
+                errors.push(at(
+                    "manifest.invalid_entry",
+                    file,
+                    line,
+                    format!("`{kind}`: {e}"),
+                ));
             }
         }
     }
@@ -391,7 +397,7 @@ fn entries<T: serde::de::DeserializeOwned>(
 
 /// The manifest's intent, its examples typed one by one: a
 /// broken one is left out and is an error at its line.
-pub fn intent_of(m: &ManifestV2, file: &str, text: &str) -> (Option<Intent>, Vec<String>) {
+pub fn intent_of(m: &ManifestV2, file: &str, text: &str) -> (Option<Intent>, Vec<Diagnostic>) {
     let Some(raw) = &m.intent else {
         return (None, Vec::new());
     };
@@ -416,13 +422,15 @@ pub fn mounts_of(m: &ManifestV2, file: &str, text: &str) -> Mounts {
         let mount: Mount = match serde_yaml::from_value(item.clone()) {
             Ok(mount) => mount,
             Err(e) => {
-                out.errors.push(at(file, line, format!("`ui.mounts`: {e}")));
+                out.errors
+                    .push(at("mount.invalid", file, line, format!("`ui.mounts`: {e}")));
                 continue;
             }
         };
         if mount.at.contains('/') {
             if mount.version.is_some() {
                 out.errors.push(at(
+                    "mount.version_on_slot",
                     file,
                     line,
                     format!(
@@ -445,6 +453,7 @@ pub fn mounts_of(m: &ManifestV2, file: &str, text: &str) -> Mounts {
         } else {
             if mount.position.is_some() || mount.title.is_some() || mount.size.is_some() {
                 out.errors.push(at(
+                    "mount.slot_key_on_component",
                     file,
                     line,
                     format!(
@@ -469,15 +478,18 @@ pub fn mounts_of(m: &ManifestV2, file: &str, text: &str) -> Mounts {
 pub struct Mounts {
     pub slots: Vec<(Option<usize>, SlotMount)>,
     pub replacements: Vec<(Option<usize>, super::replacements::ReplacementFile)>,
-    pub errors: Vec<String>,
+    pub errors: Vec<Diagnostic>,
 }
 
-/// `file:line: message`, or `file: message` when no line is known.
-pub fn at(file: &str, line: Option<usize>, message: impl std::fmt::Display) -> String {
-    match line {
-        Some(n) => format!("{file}:{n}: {message}"),
-        None => format!("{file}: {message}"),
-    }
+/// An error `code` in `file` (relative to the extension's folder), at
+/// `line` when known.
+pub fn at(
+    code: &str,
+    file: &str,
+    line: Option<usize>,
+    message: impl std::fmt::Display,
+) -> Diagnostic {
+    Diagnostic::error(code, message.to_string()).at(file, line)
 }
 
 /// Does the running oxplow satisfy `engine`? Only `>=MAJOR.MINOR[.PATCH]`
@@ -542,24 +554,40 @@ pub struct Build {
 }
 
 /// The manifest's `build:`, checked: errors at its line.
-pub fn build_of(m: &ManifestV2, file: &str, text: &str) -> (Option<Build>, Vec<String>) {
+pub fn build_of(m: &ManifestV2, file: &str, text: &str) -> (Option<Build>, Vec<Diagnostic>) {
     let Some(raw) = &m.build else {
         return (None, Vec::new());
     };
     let line = key_line(text, "build");
     let build = match serde_yaml::from_value::<Build>(raw.clone()) {
         Ok(build) => build,
-        Err(e) => return (None, vec![at(file, line, format!("build: {e}"))]),
+        Err(e) => {
+            return (
+                None,
+                vec![at(
+                    "manifest.invalid_build",
+                    file,
+                    line,
+                    format!("build: {e}"),
+                )],
+            )
+        }
     };
     let mut errors = Vec::new();
     if build.run.trim().is_empty() {
-        errors.push(at(file, line, "build: `run` is empty"));
+        errors.push(at(
+            "manifest.build_run_empty",
+            file,
+            line,
+            "build: `run` is empty",
+        ));
     }
     for dir in std::iter::once(&build.output).chain(&build.exclude) {
         let inside = oxplow_domain::service::valid_path(dir)
             && !dir.split('/').any(|part| part == "extension.yaml");
         if !inside {
             errors.push(at(
+                "manifest.build_dir_outside",
                 file,
                 line,
                 format!("build: `{dir}` isn't a folder inside the extension"),
@@ -569,6 +597,7 @@ pub fn build_of(m: &ManifestV2, file: &str, text: &str) -> (Option<Build>, Vec<S
     let trim = |d: &str| d.trim_end_matches('/').to_string();
     if build.exclude.iter().any(|d| trim(d) == trim(&build.output)) {
         errors.push(at(
+            "manifest.build_output_excluded",
             file,
             line,
             format!(
@@ -590,7 +619,10 @@ pub fn configuration_of(
     m: &ManifestV2,
     file: &str,
     text: &str,
-) -> (Option<super::config_schema::ConfigurationFile>, Vec<String>) {
+) -> (
+    Option<super::config_schema::ConfigurationFile>,
+    Vec<Diagnostic>,
+) {
     let Some(raw) = &m.configuration else {
         return (None, Vec::new());
     };
@@ -601,7 +633,12 @@ pub fn configuration_of(
         Err(_) => {
             return (
                 None,
-                vec![at(file, line, "configuration: invalid_declaration")],
+                vec![at(
+                    "config.invalid_declaration",
+                    file,
+                    line,
+                    "configuration: invalid_declaration",
+                )],
             )
         }
     };
@@ -613,6 +650,7 @@ pub fn configuration_of(
                 .into_iter()
                 .map(|issue| {
                     at(
+                        "config.invalid_declaration",
                         file,
                         line,
                         format!("configuration: {} at {}", issue.code, issue.pointer),
@@ -626,12 +664,13 @@ pub fn configuration_of(
 /// Problems with a manifest's own shape and lifecycle (not its
 /// cross-references, which need the loaded pages). `file` is how the
 /// manifest is named in messages; `text` its source, for lines.
-pub fn check(m: &ManifestV2, file: &str, text: &str) -> (Vec<String>, Vec<String>) {
+pub fn check(m: &ManifestV2, file: &str, text: &str) -> (Vec<Diagnostic>, Vec<Diagnostic>) {
     let mut errors = Vec::new();
     let mut warnings = Vec::new();
     errors.extend(configuration_of(m, file, text).1);
     if m.manifest != CURRENT {
         errors.push(at(
+            "manifest.unsupported_version",
             file,
             key_line(text, "manifest"),
             format!(
@@ -643,30 +682,38 @@ pub fn check(m: &ManifestV2, file: &str, text: &str) -> (Vec<String>, Vec<String
     let (intent, intent_errors) = intent_of(m, file, text);
     errors.extend(intent_errors);
     match &intent {
-        None => errors.push(at(
-            file,
-            Some(1),
-            "`intent` is required: `intent: { purpose: <what it is for>, origin: <thread or effort ref>, examples: [...] }`",
-        )),
+        None => errors.push(
+            at(
+                "intent.required",
+                file,
+                Some(1),
+                "`intent` is required",
+            )
+            .fix("add `intent: { purpose: <what it is for>, origin: <thread or effort ref>, examples: [...] }`"),
+        ),
         Some(intent) => {
             if intent.purpose.trim().is_empty() {
-                errors.push(at(file, key_line(text, "intent"), "`intent.purpose` is empty"));
+                errors.push(at("intent.purpose_empty", file, key_line(text, "intent"), "`intent.purpose` is empty"));
             }
             if let Some(origin) = &intent.origin {
                 if oxplow_domain::uri::OxplowUri::parse(origin).is_err() {
-                    errors.push(at(
-                        file,
-                        key_line(text, "intent"),
-                        format!("`intent.origin` `{origin}` is not an oxplow URI (`oxplow:oxplow/effort?id=eff42`, `oxplow:oxplow/thread?id=thr3`)"),
-                    ));
+                    errors.push(
+                        at(
+                            "intent.origin_not_uri",
+                            file,
+                            key_line(text, "intent"),
+                            format!("`intent.origin` `{origin}` is not an oxplow URI"),
+                        )
+                        .fix("use `oxplow:oxplow/effort?id=eff42` or `oxplow:oxplow/thread?id=thr3`"),
+                    );
                 }
             }
             if intent.examples.is_empty() {
-                warnings.push(at(
-                    file,
-                    key_line(text, "intent"),
-                    "`intent.examples` is empty: add at least one input → expected output so the extension can be tested and regenerated",
-                ));
+                warnings.push(
+                    Diagnostic::warning("intent.examples_empty", "`intent.examples` is empty")
+                        .at(file, key_line(text, "intent"))
+                        .fix("add at least one input → expected output so the extension can be tested and regenerated"),
+                );
             }
         }
     }
@@ -675,15 +722,22 @@ pub fn check(m: &ManifestV2, file: &str, text: &str) -> (Vec<String>, Vec<String
         match engine_check(engine, current_engine()) {
             Ok(true) => {}
             Ok(false) => errors.push(at(
+                "manifest.engine_unmet",
                 file,
                 key_line(text, "engine"),
                 format!("needs oxplow {engine}; this is {}", current_engine()),
             )),
-            Err(e) => errors.push(at(file, key_line(text, "engine"), e)),
+            Err(e) => errors.push(at(
+                "manifest.invalid_engine",
+                file,
+                key_line(text, "engine"),
+                e,
+            )),
         }
     }
     match &m.version {
         Some(v) if !valid_version(v) => errors.push(at(
+            "manifest.invalid_version",
             file,
             key_line(text, "version"),
             format!("`version: {v}` must be MAJOR.MINOR.PATCH (a `-pre` suffix is fine)"),
@@ -728,7 +782,9 @@ mod tests {
         let text = "manifest: 2\nname: acme\n";
         let (errors, _) = check(&parse(text), "e/extension.yaml", text);
         assert!(
-            errors.iter().any(|e| e.contains("`intent` is required")),
+            errors
+                .iter()
+                .any(|e| e.message.contains("`intent` is required")),
             "{errors:?}"
         );
         let text = "manifest: 2\nname: acme\nintent:\n  purpose: x\n";
@@ -736,9 +792,9 @@ mod tests {
         assert!(errors.is_empty(), "{errors:?}");
         assert_eq!(warnings.len(), 1);
         assert!(
-            warnings[0].starts_with("e/extension.yaml:3:"),
+            warnings[0].render("").starts_with("e/extension.yaml:3:"),
             "{}",
-            warnings[0]
+            warnings[0].render("")
         );
     }
 
@@ -770,7 +826,9 @@ mod tests {
         let text = "manifest: 2\nname: acme\nengine: \">=99.0\"\nintent:\n  purpose: x\n  examples: [{ name: a }]\n";
         let (errors, _) = check(&parse(text), "e/extension.yaml", text);
         assert!(
-            errors.iter().any(|e| e.contains("needs oxplow >=99.0")),
+            errors
+                .iter()
+                .any(|e| e.message.contains("needs oxplow >=99.0")),
             "{errors:?}"
         );
     }
@@ -796,12 +854,17 @@ mod tests {
         let text = "manifest: 3\nname: acme\nintent: { purpose: x, examples: [{ name: a }] }\n";
         let (errors, _) = check(&parse(text), "e/extension.yaml", text);
         assert!(
-            errors[0].contains("manifest version 3 is not supported"),
+            errors[0]
+                .message
+                .contains("manifest version 3 is not supported"),
             "{errors:?}"
         );
         let text = "manifest: 2\nname: acme\nintent: { purpose: x, origin: nope, examples: [{ name: a }] }\n";
         let (errors, _) = check(&parse(text), "e/extension.yaml", text);
-        assert!(errors[0].contains("is not an oxplow URI"), "{errors:?}");
+        assert!(
+            errors[0].message.contains("is not an oxplow URI"),
+            "{errors:?}"
+        );
     }
 
     #[test]

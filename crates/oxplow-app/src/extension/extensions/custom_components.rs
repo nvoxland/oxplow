@@ -18,6 +18,7 @@
 //!     commands: [oxplow.work_item.transition]
 //! ```
 
+use oxplow_domain::diagnostic::Diagnostic;
 use std::path::Path;
 
 use oxplow_domain::extension_path::is_extension_relative;
@@ -172,19 +173,17 @@ pub const LIB_SCRIPT: &str = "/component-lib/oxplow-component.js";
 pub fn bundle_problems(
     ext: &super::Extension,
     read: &dyn Fn(&str) -> Option<String>,
-) -> Vec<String> {
-    let dir = ext.path.trim_end_matches('/');
+) -> Vec<Diagnostic> {
     let mut out = Vec::new();
     for c in &ext.custom_components {
         let rel = format!("{}/index.html", c.bundle.trim_end_matches('/'));
         let Some(html) = read(&rel) else {
             continue;
         };
-        out.extend(
-            page_problems(&html, true)
-                .into_iter()
-                .map(|p| format!("{dir}/{rel}: {p}")),
-        );
+        out.extend(page_problems(&html, true).into_iter().map(|p| {
+            p.at(&rel, None)
+                .contribution(format!("{}/{}", ext.name, c.id))
+        }));
     }
     out
 }
@@ -198,8 +197,7 @@ pub fn bundle_problems(
 pub fn bundle_warnings(
     ext: &super::Extension,
     read: &dyn Fn(&str) -> Option<String>,
-) -> Vec<String> {
-    let dir = ext.path.trim_end_matches('/');
+) -> Vec<Diagnostic> {
     let mut out = Vec::new();
     for c in &ext.custom_components {
         let bundle = c.bundle.trim_end_matches('/');
@@ -224,12 +222,19 @@ pub fn bundle_warnings(
             let Some(script) = read(&rel) else { continue };
             for store in ["localStorage", "sessionStorage"] {
                 if script.contains(store) {
-                    out.push(format!(
-                        "{dir}/{rel}: it uses `{store}` — a component keeps its view in its page's \
-                         view params, which its tab keeps (`component.setViewParams`, \
-                         `onViewParams`), this step's in its history state (`setHistoryState`) and \
-                         its own memory for the person in `component.pageMemory`"
-                    ));
+                    out.push(
+                        Diagnostic::warning(
+                            "component.browser_storage",
+                            format!(
+                                "it uses `{store}` — a component keeps its view in its page's \
+                                 view params, which its tab keeps (`component.setViewParams`, \
+                                 `onViewParams`), this step's in its history state (`setHistoryState`) and \
+                                 its own memory for the person in `component.pageMemory`"
+                            ),
+                        )
+                        .at(&rel, None)
+                        .contribution(format!("{}/{}", ext.name, c.id)),
+                    );
                 }
             }
         }
@@ -246,13 +251,16 @@ pub fn bundle_warnings(
 /// A `<form>` is fine: the frame allows forms (`allow-forms`) and its CSP
 /// never lets one submit anywhere (`form-action 'none'`), so a component
 /// handles `submit` in its script and runs a command with `invoke`.
-pub fn page_problems(html: &str, index: bool) -> Vec<String> {
+pub fn page_problems(html: &str, index: bool) -> Vec<Diagnostic> {
     let mut out = Vec::new();
     let mut loads_lib = false;
     let outside_bundle = |url: &str| {
-        format!(
-            "`{url}` is outside the bundle — the frame's CSP loads only the bundle's own \
-             files and oxplow's `/component-lib/`"
+        Diagnostic::error(
+            "component.outside_bundle",
+            format!(
+                "`{url}` is outside the bundle — the frame's CSP loads only the bundle's own \
+                 files and oxplow's `/component-lib/`"
+            ),
         )
     };
     for tag in tags(html) {
@@ -270,10 +278,15 @@ pub fn page_problems(html: &str, index: bool) -> Vec<String> {
                     && name.starts_with("on")
                     && name[2..].chars().all(|c| c.is_ascii_alphabetic())
                 {
-                    out.push(format!(
-                        "an inline event handler (`{name}`) — the frame's CSP refuses it; add \
-                         the listener from a script file"
-                    ));
+                    out.push(
+                        Diagnostic::error(
+                            "component.inline_event_handler",
+                            format!(
+                                "an inline event handler (`{name}`) — the frame's CSP refuses it"
+                            ),
+                        )
+                        .fix("add the listener from a script file"),
+                    );
                 }
             }
         }
@@ -289,7 +302,7 @@ pub fn page_problems(html: &str, index: bool) -> Vec<String> {
             }
             _ => None,
         };
-        out.extend(refused.map(str::to_string));
+        out.extend(refused.map(|m| Diagnostic::error("component.refused_markup", m)));
         let loaded = match tag.name.as_str() {
             "link" => attr("href"),
             "a" | "base" | "iframe" | "frame" | "object" | "embed" => None,
@@ -315,9 +328,11 @@ pub fn page_problems(html: &str, index: bool) -> Vec<String> {
             let kind = attr("type").map(|t| t.trim().to_ascii_lowercase());
             if kind.as_deref() == Some("module") {
                 out.push(
-                    "a `type=\"module\"` script — a sandboxed frame can't load modules; use a \
-                     classic script"
-                        .into(),
+                    Diagnostic::error(
+                        "component.module_script",
+                        "a `type=\"module\"` script — a sandboxed frame can't load modules",
+                    )
+                    .fix("use a classic script"),
                 );
             }
             // A script of another type is a data block (JSON, a template):
@@ -328,18 +343,23 @@ pub fn page_problems(html: &str, index: bool) -> Vec<String> {
             );
             if runs && attr("src").is_none() && !tag.body.trim().is_empty() {
                 out.push(
-                    "an inline <script> — the frame's CSP runs only script files; move it into a \
-                     `.js` file"
-                        .into(),
+                    Diagnostic::error(
+                        "component.inline_script",
+                        "an inline <script> — the frame's CSP runs only script files",
+                    )
+                    .fix("move it into a `.js` file"),
                 );
             }
         }
     }
     if index && !loads_lib {
-        out.push(format!(
-            "doesn't load the client library (`<script src=\"{LIB_SCRIPT}\"></script>`), which \
-             is how a component talks to oxplow"
-        ));
+        out.push(
+            Diagnostic::error(
+                "component.no_client_library",
+                "doesn't load the client library, which is how a component talks to oxplow",
+            )
+            .fix(format!("add `<script src=\"{LIB_SCRIPT}\"></script>`")),
+        );
     }
     out
 }
@@ -487,12 +507,17 @@ pub fn parse_custom_components(
     file: &str,
     manifest: &str,
     stat: &dyn Fn(&str) -> BundleLook,
-) -> (Vec<CustomComponent>, Vec<String>) {
+) -> (Vec<CustomComponent>, Vec<Diagnostic>) {
     let block = key_line(manifest, "custom_components");
     let Some(items) = value.as_sequence() else {
         return (
             Vec::new(),
-            vec![at(file, block, "`custom_components` must be a list")],
+            vec![at(
+                "component.not_a_list",
+                file,
+                block,
+                "`custom_components` must be a list",
+            )],
         );
     };
     let mut out: Vec<CustomComponent> = Vec::new();
@@ -503,7 +528,12 @@ pub fn parse_custom_components(
         let c: ComponentFile = match serde_yaml::from_value(item.clone()) {
             Ok(c) => c,
             Err(e) => {
-                errors.push(at(file, item_line, format!("custom component: {e}")));
+                errors.push(at(
+                    "component.invalid",
+                    file,
+                    item_line,
+                    format!("custom component: {e}"),
+                ));
                 continue;
             }
         };
@@ -513,48 +543,66 @@ pub fn parse_custom_components(
             .clone()
             .unwrap_or_else(|| format!("components/{}", c.id));
         let problem = if !valid_id(&c.id) {
-            Some(format!(
-                "custom component id `{}` must be lowercase letters, digits and dashes",
-                c.id
+            Some((
+                "component.invalid_id",
+                format!(
+                    "custom component id `{}` must be lowercase letters, digits and dashes",
+                    c.id
+                ),
             ))
         } else if out.iter().any(|o| o.id == c.id) {
-            Some(format!("custom component `{}` is declared twice", c.id))
+            Some((
+                "component.duplicate",
+                format!("custom component `{}` is declared twice", c.id),
+            ))
         } else if !is_extension_relative(&bundle) {
-            Some(format!(
-                "custom component `{}`: bundle `{bundle}` must be a folder inside the extension",
-                c.id
+            Some((
+                "component.bundle_outside",
+                format!(
+                    "custom component `{}`: bundle `{bundle}` must be a folder inside the extension",
+                    c.id
+                ),
             ))
         } else if let Some(bad) = c
             .commands
             .iter()
             .find(|n| oxplow_domain::CommandSpec::validate_id(n).is_err())
         {
-            Some(format!(
-                "custom component `{}`: `{bad}` isn't a command name",
-                c.id
+            Some((
+                "component.invalid_command_name",
+                format!("custom component `{}`: `{bad}` isn't a command name", c.id),
             ))
         } else {
             match stat(&bundle) {
                 BundleLook::Unknown => None,
-                BundleLook::Absent => Some(format!(
-                    "custom component `{}`: bundle `{bundle}` isn't a folder in the extension",
-                    c.id
+                BundleLook::Absent => Some((
+                    "component.bundle_missing",
+                    format!(
+                        "custom component `{}`: bundle `{bundle}` isn't a folder in the extension",
+                        c.id
+                    ),
                 )),
-                BundleLook::Found(s) if s.symlink.is_some() => Some(format!(
-                    "custom component `{}`: bundle `{bundle}` holds a symlink (`{}`); a bundle is \
-                     plain files",
-                    c.id,
-                    s.symlink.unwrap_or_default()
+                BundleLook::Found(s) if s.symlink.is_some() => Some((
+                    "component.bundle_symlink",
+                    format!(
+                        "custom component `{}`: bundle `{bundle}` holds a symlink (`{}`); a bundle is \
+                         plain files",
+                        c.id,
+                        s.symlink.unwrap_or_default()
+                    ),
                 )),
-                BundleLook::Found(s) if !s.has_index => Some(format!(
-                    "custom component `{}`: bundle `{bundle}` has no `index.html`",
-                    c.id
+                BundleLook::Found(s) if !s.has_index => Some((
+                    "component.bundle_no_index",
+                    format!(
+                        "custom component `{}`: bundle `{bundle}` has no `index.html`",
+                        c.id
+                    ),
                 )),
                 BundleLook::Found(_) => None,
             }
         };
         match problem {
-            Some(p) => errors.push(at(file, line, p)),
+            Some((code, p)) => errors.push(at(code, file, line, p)),
             None => out.push(CustomComponent {
                 id: c.id,
                 extension: extension.to_string(),
@@ -599,13 +647,20 @@ mod tests {
         assert!(built.errors.is_empty(), "{:?}", built.errors);
         let broken = tree(&[("ui/chart/app.js", "1")]);
         assert!(
-            broken.errors.join("\n").contains("has no `index.html`"),
+            said(&broken.errors).contains("has no `index.html`"),
             "{:?}",
             broken.errors
         );
     }
 
-    use super::{bundle_problems, bundle_warnings, page_problems};
+    use super::{bundle_problems, bundle_warnings, page_problems, Diagnostic};
+
+    fn said(d: &[Diagnostic]) -> String {
+        d.iter()
+            .map(|d| d.render(""))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
     use crate::extension::extensions::{load_extensions, Extension};
     use crate::pages::schema::NodeKind;
     use crate::pages::spec::{Viz, VizConfig};
@@ -675,7 +730,7 @@ mod tests {
              <script src=\"app.js\"></script><img src=\"data:image/png;base64,AA==\">\
              <a href=\"https://example.com\">a link</a>"
         );
-        assert_eq!(page_problems(&ok, true), Vec::<String>::new());
+        assert!(page_problems(&ok, true).is_empty());
         for (html, says) in [
             ("<script>render()</script>", "an inline <script>"),
             (
@@ -693,7 +748,7 @@ mod tests {
             ("<button onclick=\"go()\">Go</button>", "`onclick`"),
             ("<SCRIPT>render()</SCRIPT>", "an inline <script>"),
         ] {
-            let problems = page_problems(&format!("{LIB_TAG}{html}"), true).join("\n");
+            let problems = said(&page_problems(&format!("{LIB_TAG}{html}"), true));
             assert!(problems.contains(says), "{html}: {problems}");
         }
         // tsk983: the frame loads its own folder and the library only — a
@@ -716,7 +771,7 @@ mod tests {
                 "`data:text/javascript,1` is outside the bundle",
             ),
         ] {
-            let problems = page_problems(&format!("{LIB_TAG}{html}"), true).join("\n");
+            let problems = said(&page_problems(&format!("{LIB_TAG}{html}"), true));
             assert!(problems.contains(says), "{html}: {problems}");
         }
         for inside in [
@@ -727,21 +782,18 @@ mod tests {
         ] {
             assert_eq!(
                 page_problems(&format!("{LIB_TAG}{inside}"), true),
-                Vec::<String>::new(),
+                Vec::<Diagnostic>::new(),
                 "{inside}"
             );
         }
         // tsk994: no panic on an `=` attribute before a multibyte char, and
         // it doesn't swallow the next tag.
-        assert_eq!(
-            page_problems(&format!("{LIB_TAG}<a =\"x\"é>"), true),
-            Vec::<String>::new()
-        );
-        assert!(
-            page_problems(&format!("{LIB_TAG}<a =\"x\"><script>evil()</script>"), true)
-                .join("\n")
-                .contains("an inline <script>")
-        );
+        assert!(page_problems(&format!("{LIB_TAG}<a =\"x\"é>"), true).is_empty());
+        assert!(said(&page_problems(
+            &format!("{LIB_TAG}<a =\"x\"><script>evil()</script>"),
+            true
+        ))
+        .contains("an inline <script>"));
         // What the frame runs fine isn't reported…
         for fine in [
             "<script type=\"application/json\" id=data>{\"a\": 1}</script>",
@@ -752,7 +804,7 @@ mod tests {
         ] {
             assert_eq!(
                 page_problems(&format!("{LIB_TAG}{fine}"), true),
-                Vec::<String>::new(),
+                Vec::<Diagnostic>::new(),
                 "{fine}"
             );
         }
@@ -761,7 +813,7 @@ mod tests {
                 "<script src=\"/component-lib/oxplow-component.js?v=2\"></script>",
                 true
             ),
-            Vec::<String>::new(),
+            Vec::<Diagnostic>::new(),
             "the library with a query"
         );
         // …and what it refuses is.
@@ -779,7 +831,7 @@ mod tests {
                 "a refresh",
             ),
         ] {
-            let problems = page_problems(&format!("{LIB_TAG}{html}"), true).join("\n");
+            let problems = said(&page_problems(&format!("{LIB_TAG}{html}"), true));
             assert!(problems.contains(says), "{html}: {problems}");
         }
         assert_eq!(
@@ -789,15 +841,14 @@ mod tests {
                 ),
                 true
             ),
-            Vec::<String>::new(),
+            Vec::<Diagnostic>::new(),
             "a form is a component's own, handled in its script"
         );
-        assert!(page_problems("<script src=app.js></script>", true)
-            .join("\n")
+        assert!(said(&page_problems("<script src=app.js></script>", true))
             .contains("doesn't load the client library"));
         assert_eq!(
             page_problems("<p>another page</p>", false),
-            Vec::<String>::new(),
+            Vec::<Diagnostic>::new(),
             "only index.html must load it"
         );
     }
@@ -813,17 +864,15 @@ mod tests {
             (rel == "components/burndown/index.html")
                 .then(|| "<!doctype html><script>render()</script>".to_string())
         };
-        let problems = bundle_problems(&ext, &candidate).join("\n");
+        let problems = said(&bundle_problems(&ext, &candidate));
         assert!(
-            problems.contains(
-                ".oxplow/extensions/x/components/burndown/index.html: an inline <script>"
-            ),
+            problems.contains("components/burndown/index.html: an inline <script>"),
             "{problems}"
         );
         // A version without the built page (a revision's tree) has nothing
         // to lint: loading says when a bundle has no `index.html`.
         let missing = |_: &str| None;
-        assert_eq!(bundle_problems(&ext, &missing), Vec::<String>::new());
+        assert_eq!(bundle_problems(&ext, &missing), Vec::<Diagnostic>::new());
     }
 
     /// A component keeps its view in its page's view params, never
@@ -849,9 +898,11 @@ mod tests {
         let warnings = bundle_warnings(&ext, &files);
         assert_eq!(warnings.len(), 1, "{warnings:?}");
         assert!(
-            warnings[0].starts_with(".oxplow/extensions/x/components/burndown/app.js: ")
-                && warnings[0].contains("`localStorage`")
-                && warnings[0].contains("setViewParams"),
+            warnings[0]
+                .render("")
+                .starts_with("components/burndown/app.js: ")
+                && warnings[0].message.contains("`localStorage`")
+                && warnings[0].message.contains("setViewParams"),
             "{warnings:?}"
         );
     }
@@ -872,11 +923,9 @@ mod tests {
         let v = crate::extension::extensions::validate_extension(&layer, &cat, d.path(), "x", None)
             .await
             .unwrap();
-        let errs = v.errors.join("\n");
+        let errs = said(&v.errors);
         assert!(
-            errs.contains(
-                ".oxplow/extensions/x/components/burndown/index.html: an inline <script>"
-            ),
+            errs.contains("components/burndown/index.html: an inline <script>"),
             "{errs}"
         );
         assert!(errs.contains("doesn't load the client library"), "{errs}");
@@ -886,7 +935,7 @@ mod tests {
             (rel == "components/burndown/index.html")
                 .then(|| "<!doctype html><script>render()</script>".to_string())
         };
-        let problems = bundle_problems(&ext, &page).join("\n");
+        let problems = said(&bundle_problems(&ext, &page));
         assert!(problems.contains("an inline <script>"), "{problems}");
         assert!(!problems.contains("comes with oxplow"), "{problems}");
     }
@@ -1018,7 +1067,7 @@ mod tests {
                 _ => {}
             }
             let ext = load(d.path(), &format!("  - {entry}\n  - {{ id: burndown }}\n"));
-            let errs = ext.errors.join("\n");
+            let errs = said(&ext.errors);
             assert!(
                 errs.contains(says) && errs.contains("extension.yaml:"),
                 "{entry}: {errs}"
@@ -1040,7 +1089,7 @@ mod tests {
     fn a_shared_extension_loads_a_component_and_its_page() {
         let d = tempfile::tempdir().unwrap();
         let ext = load(d.path(), "  - { id: burndown }\n");
-        assert_eq!(ext.errors, Vec::<String>::new());
+        assert_eq!(ext.errors, Vec::<Diagnostic>::new());
         assert_eq!(
             ext.custom_components
                 .iter()
@@ -1069,7 +1118,7 @@ mod tests {
             write(d.path(), ".oxplow/extensions/x/pages/other.yaml", page);
             let ext = load(d.path(), "  - { id: burndown }\n");
             assert!(
-                ext.errors.join("\n").contains(says),
+                said(&ext.errors).contains(says),
                 "{page}: {:?}",
                 ext.errors
             );
@@ -1105,16 +1154,14 @@ mod tests {
         )
         .await
         .unwrap();
-        let errs = v.errors.join("\n");
+        let errs = said(&v.errors);
         assert!(
             errs.contains("declares command `nope.no.cmd`, which isn't registered"),
             "{errs}"
         );
         assert!(!errs.contains("oxplow.work_item.transition"), "{errs}");
         assert!(
-            v.warnings
-                .join("\n")
-                .contains("the kit's `chart` viz may already cover it"),
+            said(&v.warnings).contains("the kit's `chart` viz may already cover it"),
             "{:?}",
             v.warnings
         );

@@ -1,17 +1,30 @@
 use super::*;
 
 /// The instance config the kit checks with: `fixtures/provider-<id>.yaml`.
-pub(super) fn fixture_config(dir: &Path, rel: &str, spec: &ProviderSpec) -> Result<Value, String> {
+pub(super) fn fixture_config(dir: &Path, spec: &ProviderSpec) -> Result<Value, Box<Diagnostic>> {
     let file = format!("fixtures/provider-{}.yaml", spec.id);
     let text = std::fs::read_to_string(dir.join(&file)).map_err(|_| {
-        format!(
-            "{rel}/{file}:1: provider `{}` has no test config — fix: write `config: {{ … }}` \
-             (the instance config its `check` accepts) to that file",
-            spec.id
+        Box::new(
+            error(
+                &file,
+                None,
+                "suite.config_missing",
+                format!("provider `{}` has no test config", spec.id),
+            )
+            .fix("write `config: { … }` (the instance config its `check` accepts) to that file"),
         )
     })?;
-    let doc: Value = serde_yaml::from_str(&text)
-        .map_err(|e| format!("{rel}/{file}:1: not YAML: {e} — fix: `config: {{ … }}`"))?;
+    let doc: Value = serde_yaml::from_str(&text).map_err(|e| {
+        Box::new(
+            error(
+                &file,
+                e.location().map(|l| l.line()),
+                "fixture.parse",
+                format!("not YAML: {e}"),
+            )
+            .fix("`config: { … }`"),
+        )
+    })?;
     Ok(doc.get("config").cloned().unwrap_or_else(|| json!({})))
 }
 
@@ -42,23 +55,22 @@ pub(super) async fn test_provider(
 ) {
     let rel = ext.path.trim_end_matches('/').to_string();
     let dir = root.join(&rel);
-    let manifest = format!("{rel}/extension.yaml");
     let declared = match providers::spec::read_declarations(spec, &|f| {
         std::fs::read_to_string(dir.join(f)).ok()
     }) {
         Ok(d) => d,
         Err(e) => {
-            report.errors.push(format!(
-                "{manifest}:1: {e} — fix: correct {}",
-                spec.declarations
-            ));
+            report.errors.push(
+                error("extension.yaml", None, "suite.declarations", e.to_string())
+                    .fix(format!("correct {}", spec.declarations)),
+            );
             return;
         }
     };
-    let config = match fixture_config(&dir, &rel, spec) {
+    let config = match fixture_config(&dir, spec) {
         Ok(c) => c,
         Err(e) => {
-            report.errors.push(e);
+            report.errors.push(*e);
             return;
         }
     };
@@ -89,7 +101,7 @@ pub(super) async fn test_provider(
             };
             report
                 .errors
-                .push(format!("{manifest}:1: {e} — fix: {fix}"));
+                .push(error("extension.yaml", None, "suite.launch", format!("{e}")).fix(fix));
             return;
         }
     };
@@ -98,19 +110,14 @@ pub(super) async fn test_provider(
         spec,
         declared: &declared,
         dir: &dir,
-        rel: &rel,
         env,
     };
     session(&client, &under_test, config.clone(), report).await;
     let recorded = client.finish().await;
     for v in &recorded.violations {
-        report.errors.push(format!(
-            "{manifest}:1: provider `{}`: {v} — fix: send what the provider protocol's JSON schemas \
-             describe (`initialize`, `discover`, `check`, …)",
-            spec.id
-        ));
+        report.errors.push(error("extension.yaml", None, "suite.protocol", format!("provider `{}`: {v}", spec.id)).fix("send what the provider protocol's JSON schemas describe (`initialize`, `discover`, `check`, …)"));
     }
-    transcript(&dir, &rel, spec, &recorded.transcript, bless, report);
+    transcript(&dir, spec, &recorded.transcript, bless, report);
     suite(host, ext, spec, config, env, report).await;
 }
 
@@ -120,9 +127,8 @@ pub(super) struct UnderTest<'a> {
     pub(super) spec: &'a ProviderSpec,
     /// Its declarations file, as read.
     pub(super) declared: &'a InitializeResult,
-    /// The extension folder, shown as `rel`.
+    /// The extension folder.
     pub(super) dir: &'a Path,
-    pub(super) rel: &'a str,
     /// The environment its credentials come from.
     pub(super) env: &'a host::HostEnv,
 }
@@ -139,11 +145,10 @@ pub(super) async fn session(
         spec,
         declared,
         dir,
-        rel,
         env,
     } = *t;
-    let decl_file = format!("{rel}/{}", spec.declarations);
-    let fixture = format!("{rel}/fixtures/provider-{}.yaml", spec.id);
+    let decl_file = spec.declarations.clone();
+    let fixture = format!("fixtures/provider-{}.yaml", spec.id);
     let live: InitializeResult = match client
         .peer
         .call(method::INITIALIZE, &host::initialize_params())
@@ -151,19 +156,34 @@ pub(super) async fn session(
     {
         Ok(l) => l,
         Err(e) => {
-            report.errors.push(format!(
-                "{decl_file}:1: initialize failed: {e} — fix: answer `initialize`"
-            ));
+            report.errors.push(
+                error(
+                    &decl_file,
+                    None,
+                    "suite.initialize",
+                    format!("initialize failed: {e}"),
+                )
+                .fix("answer `initialize`"),
+            );
             return;
         }
     };
     if live != *declared {
-        report.errors.push(format!(
-            "{decl_file}:1: the running provider declares something else: {} — fix: make {} and \
-             the program agree (a changed declaration needs approving again)",
-            host::first_difference(declared, &live),
-            spec.declarations
-        ));
+        report.errors.push(
+            error(
+                &decl_file,
+                None,
+                "suite.declarations_differ",
+                format!(
+                    "the running provider declares something else: {}",
+                    host::first_difference(declared, &live)
+                ),
+            )
+            .fix(format!(
+                "make {} and the program agree (a changed declaration needs approving again)",
+                spec.declarations
+            )),
+        );
     }
     let checked: CheckResult = match client
         .peer
@@ -178,25 +198,39 @@ pub(super) async fn session(
     {
         Ok(c) => c,
         Err(e) => {
-            report.errors.push(format!(
-                "{fixture}:1: check failed: {e} — fix: answer `check`"
-            ));
+            report.errors.push(
+                error(&fixture, None, "suite.check", format!("check failed: {e}"))
+                    .fix("answer `check`"),
+            );
             return;
         }
     };
     let Some(handle) = checked.handle.filter(|_| checked.problems.is_empty()) else {
         for p in &checked.problems {
-            report.errors.push(format!(
-                "{fixture}:1: check reports `{}`: {} — fix: set it in the fixture's `config`",
-                if p.path.is_empty() { "/" } else { &p.path },
-                p.message
-            ));
+            report.errors.push(
+                error(
+                    &fixture,
+                    None,
+                    "suite.check",
+                    format!(
+                        "check reports `{}`: {}",
+                        if p.path.is_empty() { "/" } else { &p.path },
+                        p.message
+                    ),
+                )
+                .fix("set it in the fixture's `config`"),
+            );
         }
         if checked.problems.is_empty() {
-            report.errors.push(format!(
-                "{fixture}:1: check returned neither problems nor a handle — fix: return a handle \
-                 for a clean config"
-            ));
+            report.errors.push(
+                error(
+                    &fixture,
+                    None,
+                    "suite.check",
+                    "check returned neither problems nor a handle",
+                )
+                .fix("return a handle for a clean config"),
+            );
         }
         return;
     };
@@ -209,17 +243,22 @@ pub(super) async fn session(
     // broken fixture) are `examples`'.
     for example in examples {
         let read = |file: &str| std::fs::read_to_string(dir.join(file)).ok();
-        let Some((shown, Ok(doc))) = example_fixture(&read, rel, &example.name) else {
+        let Some((shown, _, Ok(doc))) = example_fixture(&read, &example.name) else {
             continue;
         };
         let Some(command) = doc.pointer("/when/command").and_then(Value::as_str) else {
             continue;
         };
         let Some(input) = doc.pointer("/when/input") else {
-            report.errors.push(format!(
-                "{shown}:1: a provider example's `when` is `{{ command, input }}` — fix: give \
-                 the command's input"
-            ));
+            report.errors.push(
+                error(
+                    &shown,
+                    None,
+                    "suite.example",
+                    "a provider example's `when` is `{ command, input }`",
+                )
+                .fix("give the command's input"),
+            );
             continue;
         };
         let expect = doc.get("expect").cloned().unwrap_or(Value::Null);
@@ -251,15 +290,18 @@ pub(super) async fn session(
                     }
                 }
                 if let Some((path, want, got)) = compare(&expect, &out.result) {
-                    report.errors.push(format!(
-                        "{shown}:1: `{command}` returned {got} at `{path}`, the example expects \
-                         {want} — fix: the provider or the example's `expect`"
-                    ));
+                    report.errors.push(error(&shown, None, "fixture.compare", format!("`{command}` returned {got} at `{path}`, the example expects {want}")).fix("the provider or the example's `expect`").mismatch(path, want, got));
                 }
             }
-            Err(e) => report.errors.push(format!(
-                "{shown}:1: `{command}` failed: {e} — fix: the provider, or the example's input"
-            )),
+            Err(e) => report.errors.push(
+                error(
+                    &shown,
+                    None,
+                    "suite.invoke_failed",
+                    format!("`{command}` failed: {e}"),
+                )
+                .fix("the provider, or the example's input"),
+            ),
         }
     }
     if !declared.collectors.is_empty() {
@@ -280,7 +322,7 @@ pub(super) async fn read_back(
 ) {
     use oxplow_provider_protocol::codec::notify;
     use oxplow_provider_protocol::model::{DiscoverParams, DiscoverResult, ReadParams, ReadResult};
-    let decl_file = format!("{}/{}", t.rel, t.spec.declarations);
+    let decl_file = t.spec.declarations.clone();
     report.ran.push("discover".into());
     match client
         .peer
@@ -292,18 +334,30 @@ pub(super) async fn read_back(
         )
         .await
     {
-        Err(e) => report.errors.push(format!(
-            "{decl_file}:1: discover failed: {e} — fix: answer `discover` with the entities its \
-             collectors read"
-        )),
+        Err(e) => report.errors.push(
+            error(
+                &decl_file,
+                None,
+                "suite.discover",
+                format!("discover failed: {e}"),
+            )
+            .fix("answer `discover` with the entities its collectors read"),
+        ),
         Ok(found) => {
             for c in &t.declared.collectors {
                 if !found.entities.iter().any(|e| e.name == c.entity) {
-                    report.errors.push(format!(
-                        "{decl_file}:1: collector `{}` reads entity `{}`, which `discover` \
-                         doesn't list — fix: list it, or correct the collector's entity",
-                        c.name, c.entity
-                    ));
+                    report.errors.push(
+                        error(
+                            &decl_file,
+                            None,
+                            "suite.discover",
+                            format!(
+                                "collector `{}` reads entity `{}`, which `discover` doesn't list",
+                                c.name, c.entity
+                            ),
+                        )
+                        .fix("list it, or correct the collector's entity"),
+                    );
                 }
             }
         }
@@ -336,60 +390,75 @@ pub(super) async fn read_back(
         let first = match read(None).await {
             Ok(r) => r,
             Err(e) => {
-                report.errors.push(format!(
-                    "{decl_file}:1: collector `{}`: read failed: {e} — fix: answer `read`",
-                    c.name
-                ));
+                report.errors.push(
+                    error(
+                        &decl_file,
+                        None,
+                        "suite.read",
+                        format!("collector `{}`: read failed: {e}", c.name),
+                    )
+                    .fix("answer `read`"),
+                );
                 continue;
             }
         };
         let (said, records, last) = first;
         if said != records.len() as u64 {
-            report.errors.push(format!(
-                "{decl_file}:1: collector `{}`: read says {said} records but streamed {} — fix: \
-                 count every `$/record` it sends",
-                c.name,
-                records.len()
-            ));
+            report.errors.push(
+                error(
+                    &decl_file,
+                    None,
+                    "suite.read",
+                    format!(
+                        "collector `{}`: read says {said} records but streamed {}",
+                        c.name,
+                        records.len()
+                    ),
+                )
+                .fix("count every `$/record` it sends"),
+            );
         }
         if let Some(r) = records
             .iter()
             .find(|r| r.get("entity").and_then(Value::as_str) != Some(c.entity.as_str()))
         {
-            report.errors.push(format!(
-                "{decl_file}:1: collector `{}`: read streamed a record of `{}`, not its entity \
-                 `{}` — fix: stream only what it declares",
-                c.name,
-                r.get("entity").and_then(Value::as_str).unwrap_or("?"),
-                c.entity
-            ));
+            report.errors.push(
+                error(
+                    &decl_file,
+                    None,
+                    "suite.read",
+                    format!(
+                        "collector `{}`: read streamed a record of `{}`, not its entity `{}`",
+                        c.name,
+                        r.get("entity").and_then(Value::as_str).unwrap_or("?"),
+                        c.entity
+                    ),
+                )
+                .fix("stream only what it declares"),
+            );
         }
         if records.is_empty() {
             continue;
         }
         let Some(state) = last else {
-            report.errors.push(format!(
-                "{decl_file}:1: collector `{}`: read streamed {} records but no `$/state` \
-                 checkpoint — fix: send `$/state` after each batch",
-                c.name,
-                records.len()
-            ));
+            report.errors.push(
+                error(
+                    &decl_file,
+                    None,
+                    "suite.read",
+                    format!(
+                        "collector `{}`: read streamed {} records but no `$/state` checkpoint",
+                        c.name,
+                        records.len()
+                    ),
+                )
+                .fix("send `$/state` after each batch"),
+            );
             continue;
         };
         match read(Some(state)).await {
-            Err(e) => report.errors.push(format!(
-                "{decl_file}:1: collector `{}`: a read from its own checkpoint failed: {e} — \
-                 fix: accept the `$/state` it sent",
-                c.name
-            )),
-            Ok((_, again, _)) if again.len() >= records.len() => report.errors.push(format!(
-                "{decl_file}:1: collector `{}`: its cursor doesn't advance — read again from its \
-                 last `$/state`, it streamed {} of its {} records again — fix: checkpoint past \
-                 what it streamed",
-                c.name,
-                again.len(),
-                records.len()
-            )),
+            Err(e) => report.errors.push(error(&decl_file, None, "suite.read", format!("collector `{}`: a read from its own checkpoint failed: {e}", c.name)).fix("accept the `$/state` it sent")),
+            Ok((_, again, _)) if again.len() >= records.len() => report.errors.push(error(&decl_file, None, "suite.read", format!("collector `{}`: its cursor doesn't advance — read again from its last `$/state`, it streamed {} of its {} records again", c.name, again.len(), records.len())).fix("checkpoint past what it streamed")),
             Ok(_) => {}
         }
     }
@@ -398,14 +467,13 @@ pub(super) async fn read_back(
 /// Compare the session with its golden, or write it with `bless`.
 pub(super) fn transcript(
     dir: &Path,
-    rel: &str,
     spec: &ProviderSpec,
     recorded: &[(crate::conformance::Side, Value)],
     bless: bool,
     report: &mut TestReport,
 ) {
     let file = format!("fixtures/transcripts/{}.jsonl", spec.id);
-    let shown = format!("{rel}/{file}");
+    let shown = file.to_string();
     let lines = normalize(recorded);
     if bless {
         let path = dir.join(&file);
@@ -416,53 +484,78 @@ pub(super) fn transcript(
             .and_then(|_| std::fs::write(&path, lines.join("\n") + "\n"));
         match written {
             Ok(()) => report.blessed.push(shown),
-            Err(e) => report.errors.push(format!(
-                "{shown}:1: couldn't write it: {e} — fix: check the folder"
-            )),
+            Err(e) => report.errors.push(
+                error(
+                    &shown,
+                    None,
+                    "suite.transcript",
+                    format!("couldn't write it: {e}"),
+                )
+                .fix("check the folder"),
+            ),
         }
         return;
     }
     let Ok(golden) = std::fs::read_to_string(dir.join(&file)) else {
-        report.errors.push(format!(
-            "{shown}:1: no golden transcript — fix: run `oxplow extension test <name> --bless` and \
-             commit it"
-        ));
+        report.errors.push(
+            error(
+                &shown,
+                None,
+                "suite.transcript_missing",
+                "no golden transcript",
+            )
+            .fix("run `oxplow extension test <name> --bless` and commit it"),
+        );
         return;
     };
     let golden: Vec<&str> = golden.lines().filter(|l| !l.trim().is_empty()).collect();
     for (i, want) in golden.iter().enumerate() {
         let Some(got) = lines.get(i) else {
-            report.errors.push(format!(
-                "{shown}:{}: the session ended before this message — fix: if the change is \
-                 intended, run with --bless",
-                i + 1
-            ));
+            report.errors.push(
+                error(
+                    &shown,
+                    Some(i + 1),
+                    "suite.transcript_differs",
+                    "the session ended before this message",
+                )
+                .fix("if the change is intended, run with --bless"),
+            );
             return;
         };
         let (Ok(want_v), Ok(got_v)) = (
             serde_json::from_str::<Value>(want),
             serde_json::from_str::<Value>(got),
         ) else {
-            report
-                .errors
-                .push(format!("{shown}:{}: not JSON — fix: re-bless it", i + 1));
+            report.errors.push(
+                error(&shown, Some(i + 1), "suite.transcript_differs", "not JSON")
+                    .fix("re-bless it"),
+            );
             return;
         };
         if let Some((path, w, g)) = first_mismatch(&want_v, &got_v) {
-            report.errors.push(format!(
-                "{shown}:{}: the transcript differs at `{path}`: expected {w}, got {g} — fix: \
-                 if the change is intended, run with --bless",
-                i + 1
-            ));
+            report.errors.push(
+                error(
+                    &shown,
+                    Some(i + 1),
+                    "suite.transcript_differs",
+                    format!("the transcript differs at `{path}`: expected {w}, got {g}"),
+                )
+                .fix("if the change is intended, run with --bless")
+                .mismatch(path, w, g),
+            );
             return;
         }
     }
     if lines.len() > golden.len() {
-        report.errors.push(format!(
-            "{shown}:{}: the session sent more than the golden has — fix: if the change is \
-             intended, run with --bless",
-            golden.len() + 1
-        ));
+        report.errors.push(
+            error(
+                &shown,
+                Some(golden.len() + 1),
+                "suite.transcript_differs",
+                "the session sent more than the golden has",
+            )
+            .fix("if the change is intended, run with --bless"),
+        );
     }
 }
 
@@ -534,7 +627,6 @@ pub(super) async fn policy_suite(
     decl: &oxplow_app::extension::extensions::implementations::ImplementationDecl,
     report: &mut TestReport,
 ) {
-    let manifest = format!("{}/extension.yaml", ext.path.trim_end_matches('/'));
     report.ran.push(format!("{EFFORT_POLICY} suite"));
     let run = async {
         // The suite files work, so it runs on an oxplow with a work list.
@@ -553,17 +645,26 @@ pub(super) async fn policy_suite(
         Ok(run) => {
             report.left.extend(run.left);
             for f in run.findings {
-                report.errors.push(format!(
-                    "{manifest}:1: {EFFORT_POLICY} conformance `{}`: {} — fix: the policy \
-                     script's `{}` handling",
-                    f.check, f.message, f.check
-                ));
+                report.errors.push(
+                    error(
+                        "extension.yaml",
+                        None,
+                        "suite.conformance",
+                        format!("{EFFORT_POLICY} conformance `{}`: {}", f.check, f.message),
+                    )
+                    .fix(format!("the policy script's `{}` handling", f.check)),
+                );
             }
         }
-        Err(e) => report.errors.push(format!(
-            "{manifest}:1: effort policy `{}` couldn't run under a host: {e} — fix: see the message",
-            decl.id
-        )),
+        Err(e) => report.errors.push(
+            error(
+                "extension.yaml",
+                None,
+                "suite.host_failed",
+                format!("effort policy `{}` couldn't run under a host: {e}", decl.id),
+            )
+            .fix("see the message"),
+        ),
     }
 }
 
@@ -575,7 +676,6 @@ pub(super) async fn suite(
     env: &host::HostEnv,
     report: &mut TestReport,
 ) {
-    let manifest = format!("{}/extension.yaml", ext.path.trim_end_matches('/'));
     report.ran.push(format!("{} suite", spec.capability));
     let run = async {
         // On an oxplow of its own: what the suite files, no example sees. An
@@ -718,15 +818,28 @@ pub(super) async fn suite(
         Ok(run) => {
             report.left.extend(run.left);
             for f in run.findings {
-                report.errors.push(format!(
-                    "{manifest}:1: {} conformance `{}`: {} — fix: the provider's `{}` handling",
-                    spec.capability, f.check, f.message, f.check
-                ));
+                report.errors.push(
+                    error(
+                        "extension.yaml",
+                        None,
+                        "suite.conformance",
+                        format!(
+                            "{} conformance `{}`: {}",
+                            spec.capability, f.check, f.message
+                        ),
+                    )
+                    .fix(format!("the provider's `{}` handling", f.check)),
+                );
             }
         }
-        Err(e) => report.errors.push(format!(
-            "{manifest}:1: provider `{}` couldn't run under a host: {e} — fix: see the message",
-            spec.id
-        )),
+        Err(e) => report.errors.push(
+            error(
+                "extension.yaml",
+                None,
+                "suite.host_failed",
+                format!("provider `{}` couldn't run under a host: {e}", spec.id),
+            )
+            .fix("see the message"),
+        ),
     }
 }

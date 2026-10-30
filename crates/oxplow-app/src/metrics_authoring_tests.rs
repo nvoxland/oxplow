@@ -582,7 +582,7 @@ async fn the_page_rows_carry_file_refs_to_the_path_and_line() {
         .find(|e| e.name == NAME)
         .cloned()
         .expect("the extension loads");
-    assert_eq!(ext.errors, Vec::<String>::new());
+    assert!(ext.errors.is_empty(), "{:?}", ext.errors);
     let page = &ext.page_files[0];
     let run = run_page(&p.svc, &page.id, vec![]).await;
     let config = page
@@ -956,7 +956,7 @@ async fn a_page_joins_metric_facts_with_an_efforts_files() {
         .find(|e| e.name == NAME)
         .cloned()
         .expect("the extension loads");
-    assert_eq!(ext.errors, Vec::<String>::new());
+    assert!(ext.errors.is_empty(), "{:?}", ext.errors);
     let page = ext
         .page_files
         .iter()

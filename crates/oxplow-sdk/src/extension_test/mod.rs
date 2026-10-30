@@ -36,6 +36,7 @@ use std::sync::Arc;
 use oxplow_app::extension::extensions::Extension;
 use oxplow_app::providers::host::{self, Launch};
 use oxplow_app::providers::{self, ProviderSpec};
+use oxplow_domain::diagnostic::Diagnostic;
 use oxplow_domain::Actor;
 use oxplow_provider_protocol::model::{
     method, CheckParams, CheckResult, InitializeResult, InvokeParams, InvokeResult,
@@ -155,6 +156,7 @@ async fn run(
         errors: checked.errors.clone(),
         warnings: checked.warnings.clone(),
         skipped: Vec::new(),
+        root: checked.root.clone(),
         blessed: Vec::new(),
         ran: vec!["check".into()],
         generation: host
@@ -174,16 +176,27 @@ async fn run(
     };
     // What activation held back: this extension's is an error (unless
     // check already says it), another's a warning — it's beside it.
-    let prefix = format!("{name}: ");
-    for problem in &host.problems {
-        match problem.strip_prefix(&prefix) {
-            Some(why) if !report.errors.iter().any(|e| e.contains(why)) => report
-                .errors
-                .push(format!("{name}: it doesn't activate: {why}")),
-            Some(_) => {}
-            None => report.warnings.push(format!(
-                "another extension here doesn't activate — {problem}"
-            )),
+    for (owner, problem) in &host.problems {
+        if owner == name {
+            // A deploy that fails because the extension doesn't load says
+            // what check already says, with the copy's path.
+            let derived = problem.code == "activation.deploy_failed" && !report.errors.is_empty();
+            if !derived && !report.errors.iter().any(|e| e.same_as(problem)) {
+                let mut found = problem.clone();
+                found.severity = oxplow_domain::diagnostic::Severity::Error;
+                report.errors.push(found);
+            }
+        } else {
+            report.warnings.push(
+                Diagnostic::warning(
+                    "activation.other_extension",
+                    format!(
+                        "another extension here, `{owner}`, doesn't activate: {}",
+                        problem.message
+                    ),
+                )
+                .contribution(owner.clone()),
+            );
         }
     }
     let ext = checked.extension;
@@ -204,10 +217,15 @@ async fn run(
             .map(|i| i.examples.iter().map(|e| e.name.clone()).collect())
             .unwrap_or_default();
         for unknown in only.iter().filter(|n| !there.contains(n)) {
-            report.errors.push(format!(
-                "{name}: no example `{unknown}` — fix: one of {}",
-                there.join(", ")
-            ));
+            report.errors.push(
+                error(
+                    "extension.yaml",
+                    None,
+                    "fixture.unknown",
+                    format!("no example `{unknown}`"),
+                )
+                .fix(format!("one of {}", there.join(", "))),
+            );
         }
         if report.errors.is_empty() {
             examples(&host, &ext, Some(only), &mut report).await;
@@ -250,7 +268,6 @@ async fn examples(
     only: Option<&[String]>,
     report: &mut TestReport,
 ) {
-    let rel = ext.path.trim_end_matches('/').to_string();
     // Read as the extension's files are everywhere: a bundled extension's
     // fixtures are embedded with it, not on disk.
     let read = |file: &str| {
@@ -272,15 +289,30 @@ async fn examples(
     // The oxplows fixtures that turn on more extensions start from, by
     // what they turn on.
     let mut required: std::collections::BTreeMap<Vec<String>, Arc<Host>> = Default::default();
+    let manifest_text = read("extension.yaml").unwrap_or_default();
+    let report_root = report.root.clone();
     for example in examples {
-        let Some((shown, doc)) = example_fixture(&read, &rel, &example.name) else {
-            report.warnings.push(format!(
-                "{rel}/extension.yaml:1: intent example `{}` has no fixture, so it isn't run — fix: \
-                 add fixtures/{}.yaml: `given?`, `expect` and a `when` that is one of {}",
-                example.name,
-                example.name,
-                kinds_hint()
-            ));
+        let Some((shown, text, doc)) = example_fixture(&read, &example.name) else {
+            report.warnings.push(
+                warning(
+                    "extension.yaml",
+                    oxplow_app::extension::extensions::manifest_v2::line_under(
+                        &manifest_text,
+                        "intent",
+                        &example.name,
+                    ),
+                    "fixture.missing",
+                    format!(
+                        "intent example `{}` has no fixture, so it isn't run",
+                        example.name
+                    ),
+                )
+                .fix(format!(
+                    "add fixtures/{}.yaml: `given?`, `expect` and a `when` that is one of {}",
+                    example.name,
+                    kinds_hint()
+                )),
+            );
             continue;
         };
         let doc = match doc {
@@ -294,19 +326,18 @@ async fn examples(
             .as_object()
             .and_then(|o| o.keys().find(|k| !FIXTURE_KEYS.contains(&k.as_str())))
         {
-            report.errors.push(format!(
-                "{shown}:1: `{key}` isn't a fixture key — fix: a fixture is `given` (the steps \
-                 first), `when` (what it does), `expect`, `steps` (a scenario), `view`, `model`, `temp` (files on `oxplow:temp`) and `requires` (more extensions to turn on)"
-            ));
+            report.errors.push(error(&shown, None, "fixture.unknown_key", format!("`{key}` isn't a fixture key")).fix("a fixture is `given` (the steps first), `when` (what it does), `expect`, `steps` (a scenario), `view`, `model`, `temp` (files on `oxplow:temp`) and `requires` (more extensions to turn on)"));
             continue;
         }
-        let fixture = Fixture::of(example.name.clone(), shown, &doc);
+        let fixture = Fixture::of(example.name.clone(), shown, text, &doc);
         let ex = fixture.example();
         if let Some(why) = withheld_target(ext, &ex.when) {
             let mark = report.mark();
-            report.skipped.push(format!(
-                "{}:1: example `{}` isn't run: {why}",
-                fixture.shown, fixture.name
+            report.skipped.push(warning(
+                &fixture.shown,
+                None,
+                "example.not_run",
+                format!("example `{}` isn't run: {why}", fixture.name),
             ));
             report.finish_case(format!("example {}", fixture.name), mark);
             continue;
@@ -319,11 +350,7 @@ async fn examples(
                 .iter()
                 .find(|n| !Host::knows(&shared.checkout, n))
             {
-                report.errors.push(format!(
-                    "{}:1: `requires` names `{unknown}`, which isn't an extension here — fix: an \
-                     extension oxplow ships (`oxplow-bundled`) or one in `.oxplow/extensions/`",
-                    fixture.shown
-                ));
+                report.errors.push(error(&fixture.shown, None, "fixture.unknown", format!("`requires` names `{unknown}`, which isn't an extension here")).fix("an extension oxplow ships (`oxplow-bundled`) or one in `.oxplow/extensions/`"));
                 continue;
             }
             let base = match required.get(&fixture.requires) {
@@ -347,26 +374,30 @@ async fn examples(
                             base
                         }
                         Err(e) => {
-                            report.errors.push(format!(
-                                "{}:1: an oxplow with {}: {e}",
-                                fixture.shown,
-                                fixture.requires.join(", ")
+                            report.errors.push(error(
+                                &fixture.shown,
+                                None,
+                                "example.host_failed",
+                                format!("an oxplow with {}: {e}", fixture.requires.join(", ")),
                             ));
                             continue;
                         }
                     }
                 }
             };
-            let (ext, slots) = (ext.clone(), slots.clone());
+            let (ext, slots, report_root) = (ext.clone(), slots.clone(), report_root.clone());
             own.push(tokio::spawn(async move {
                 let _slot = slots.acquire_owned().await;
-                let mut part = TestReport::part(&ext.name);
+                let mut part = TestReport::part(&ext.name, &report_root);
                 part.require_ui = require_ui;
                 match base.fork().await {
                     Ok(host) => run_example(&host, &ext, &fixture.example(), &mut part).await,
-                    Err(e) => part
-                        .errors
-                        .push(format!("{}:1: an oxplow of its own: {e}", fixture.shown)),
+                    Err(e) => part.errors.push(error(
+                        &fixture.shown,
+                        None,
+                        "example.host_failed",
+                        format!("an oxplow of its own: {e}"),
+                    )),
                 }
                 part
             }));
@@ -376,16 +407,24 @@ async fn examples(
         // a component's filed items — runs on an oxplow of its own, so no
         // other example sees what it made or what reacted to it.
         if makes_data(&ex) {
-            let (shared, ext, slots) = (shared.clone(), ext.clone(), slots.clone());
+            let (shared, ext, slots, report_root) = (
+                shared.clone(),
+                ext.clone(),
+                slots.clone(),
+                report_root.clone(),
+            );
             own.push(tokio::spawn(async move {
                 let _slot = slots.acquire_owned().await;
-                let mut part = TestReport::part(&ext.name);
+                let mut part = TestReport::part(&ext.name, &report_root);
                 part.require_ui = require_ui;
                 match shared.fork().await {
                     Ok(host) => run_example(&host, &ext, &fixture.example(), &mut part).await,
-                    Err(e) => part
-                        .errors
-                        .push(format!("{}:1: an oxplow of its own: {e}", fixture.shown)),
+                    Err(e) => part.errors.push(error(
+                        &fixture.shown,
+                        None,
+                        "example.host_failed",
+                        format!("an oxplow of its own: {e}"),
+                    )),
                 }
                 part
             }));
@@ -396,9 +435,13 @@ async fn examples(
     for task in own {
         match task.await {
             Ok(part) => report.absorb(part),
-            Err(e) => report
-                .errors
-                .push(format!("{}: an example's run stopped: {e}", ext.name)),
+            Err(e) => report.errors.push(
+                Diagnostic::error(
+                    "example.run_stopped",
+                    format!("an example's run stopped: {e}"),
+                )
+                .contribution(ext.name.clone()),
+            ),
         }
     }
 }

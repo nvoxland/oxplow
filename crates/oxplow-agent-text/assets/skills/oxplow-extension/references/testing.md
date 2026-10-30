@@ -50,7 +50,11 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
    real provider. It works before the extension's first deploy. Run it in
    the foreground after `oxplow_validate_extension` and before handing
    over; `--junit <file>` also writes a report for the Tests panel, `--json`
-   the full report. It exits 1 when anything failed. While you work on a
+   the full report: each error is `{ code, file, line, contribution,
+   message, fix, mismatch }` — `file` relative to the extension's folder,
+   `mismatch` a failed `expect` as `{ pointer, expected, actual }` — so read
+   the fields rather than the text. `oxplow_validate_extension` answers in
+   the same shape. It exits 1 when anything failed. While you work on a
    few fixtures, `--only <example>[,<example>…]` (their file names without
    `.yaml`) runs the check and just those: run the whole extension once
    more before you hand over.

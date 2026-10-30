@@ -596,7 +596,7 @@ resources:
             .await
             .into_iter()
             .filter(|e| e.name == "acme")
-            .flat_map(|e| e.errors)
+            .flat_map(|e| e.errors.iter().map(|d| e.shown(d)).collect::<Vec<_>>())
             .collect();
         assert_eq!(errors, Vec::<String>::new());
         let listed = svc

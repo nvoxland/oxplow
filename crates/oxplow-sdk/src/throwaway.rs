@@ -17,6 +17,7 @@ use std::sync::Arc;
 use oxplow_ai::config::{BuiltinRole, ProviderConfig, RoleBinding};
 use oxplow_app::extension::extensions::EXTENSIONS_DIR;
 use oxplow_app::providers::host::HostEnv;
+use oxplow_domain::diagnostic::Diagnostic;
 
 /// The fixture model's provider instance, which every role is bound to.
 const FIXTURE_INSTANCE: &str = "fixture";
@@ -28,7 +29,9 @@ pub(crate) struct Host {
     pub(crate) checkout: PathBuf,
     pub(crate) svc: Arc<oxplow_app::Services>,
     /// What its activation held back, and why (`<extension>: <reason>`).
-    pub(crate) problems: Vec<String>,
+    /// What activation held back, by the extension it is about, and the
+    /// deploys that failed.
+    pub(crate) problems: Vec<(String, Diagnostic)>,
     /// How it was made, for [`Host::fork`]: the extensions on, where each
     /// copied source is (relative to `root`), its programs' environment,
     /// and whether built sources were deployed.
@@ -256,7 +259,14 @@ impl Host {
                 if let Err(e) =
                     oxplow_app::extension::extension_deploy::deploy(&svc, name, true).await
                 {
-                    deploys.push(format!("{name}: {e}"));
+                    deploys.push((
+                        name.clone(),
+                        Diagnostic::error(
+                            "activation.deploy_failed",
+                            format!("deploying it failed: {e}"),
+                        )
+                        .at("extension.yaml", None),
+                    ));
                 }
             }
         }
@@ -374,13 +384,16 @@ impl Host {
 /// Copy an extension's source; a folder its `build:` excludes
 /// (`node_modules`) is linked instead, so a build in the copy still finds
 /// it.
-/// What `svc`'s activation held back and the `deploys` that failed, as
-/// `<extension>: <reason>`.
-fn problems(svc: &oxplow_app::Services, deploys: Vec<String>) -> Vec<String> {
+/// What `svc`'s activation held back and the `deploys` that failed, each
+/// with the extension it is about.
+fn problems(
+    svc: &oxplow_app::Services,
+    deploys: Vec<(String, Diagnostic)>,
+) -> Vec<(String, Diagnostic)> {
     svc.extension_activation
         .problems()
         .into_iter()
-        .flat_map(|(owner, why)| why.into_iter().map(move |w| format!("{owner}: {w}")))
+        .flat_map(|(owner, why)| why.into_iter().map(move |d| (owner.clone(), d)))
         .chain(deploys)
         .collect()
 }
@@ -539,14 +552,17 @@ mod tests {
             .unwrap();
         assert!(
             report
-                .warnings
+                .warning_lines()
                 .iter()
                 .any(|w| w.starts_with("extensions/acme/extension.yaml:")),
             "{:?}",
             report.warnings
         );
         assert!(
-            !report.warnings.iter().any(|w| w.contains(EXTENSIONS_DIR)),
+            !report
+                .warning_lines()
+                .iter()
+                .any(|w| w.contains(EXTENSIONS_DIR)),
             "{:?}",
             report.warnings
         );

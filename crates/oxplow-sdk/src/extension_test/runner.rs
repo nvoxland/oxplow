@@ -32,9 +32,12 @@ pub(super) async fn run_example(
                 scenario(host, ext, ex, report).await;
             }
         }
-        Some(Err(e)) => report
-            .errors
-            .push(format!("{shown}:1: the fixture model: {e}")),
+        Some(Err(e)) => report.errors.push(error(
+            shown,
+            None,
+            "fixture.model",
+            format!("the fixture model: {e}"),
+        )),
         None => {}
     }
     report.finish_case(format!("example {}", ex.name), mark);
@@ -58,10 +61,15 @@ pub(super) async fn scenario(
         None => Vec::new(),
         Some(Value::Array(steps)) => steps.clone(),
         Some(_) => {
-            report.errors.push(format!(
-                "{shown}:1: `steps` isn't a list — fix: `steps: [{{ given: [..] }} | {{ when?, \
-                 expect }}]`"
-            ));
+            report.errors.push(
+                error(
+                    shown,
+                    ex.line("steps"),
+                    "fixture.step",
+                    "`steps` isn't a list",
+                )
+                .fix("`steps: [{ given: [..] } | { when?, expect }]`"),
+            );
             return;
         }
     };
@@ -89,10 +97,15 @@ pub(super) async fn scenario(
             continue;
         }
         let Some(expect) = step.get("expect") else {
-            return report.errors.push(format!(
-                "{shown}:1: `{label}` has no `given` or `expect` — fix: `{{ given: [..] }}` or \
-                 `{{ when?, expect }}`"
-            ));
+            return report.errors.push(
+                error(
+                    shown,
+                    None,
+                    "fixture.step",
+                    format!("`{label}` has no `given` or `expect`"),
+                )
+                .fix("`{ given: [..] }` or `{ when?, expect }`"),
+            );
         };
         // Its `when` keys over the fixture's — or, naming another kind,
         // its own.
@@ -150,13 +163,16 @@ pub(super) async fn step_run(
             // A page's scenario runs steps, so this nests.
             Box::pin(dispatch(host, ext, &run, report)).await;
         }
-        (Err(e), _) | (_, Err(e)) => report.errors.push(format!("{shown}:1: {e}")),
+        (Err(e), _) | (_, Err(e)) => {
+            report
+                .errors
+                .push(error(shown, None, "example.failed", e.to_string()))
+        }
     }
     if !label.is_empty() {
-        let prefix = format!("{shown}:1: ");
-        for error in &mut report.errors[at..] {
-            if let Some(rest) = error.strip_prefix(&prefix) {
-                *error = format!("{prefix}{label}: {rest}");
+        for found in &mut report.errors[at..] {
+            if found.file.as_deref() == Some(shown) {
+                found.message = format!("{label}: {}", found.message);
             }
         }
     }
@@ -210,11 +226,15 @@ pub(super) async fn dispatch(
     } else if let Some(command) = ex.when.get("command").and_then(Value::as_str) {
         command_run(host, ex, command, report).await;
     } else if ex.when.get("command").is_none() || ext.providers.is_empty() {
-        report.errors.push(format!(
-            "{shown}:1: example `{}`'s `when` names no kind of fixture — fix: one of {}",
-            ex.name,
-            kinds_hint()
-        ));
+        report.errors.push(
+            error(
+                shown,
+                None,
+                "fixture.when",
+                format!("example `{}`'s `when` names no kind of fixture", ex.name),
+            )
+            .fix(format!("one of {}", kinds_hint())),
+        );
     }
 }
 
@@ -410,19 +430,11 @@ pub(super) fn model_replies(
     match replies {
         Some(Ok(replies)) => Some(replies),
         Some(Err(e)) => {
-            report.errors.push(format!(
-                "{}:1: example `{}`: a model reply is a string or `{{ text?, toolCalls?: \
-                 [{{ name, arguments }}], chunkDelayMs? }}`: {e}",
-                ex.shown, ex.name
-            ));
+            report.errors.push(error(ex.shown, ex.line("model"), "fixture.model", format!("example `{}`: a model reply is a string or `{{ text?, toolCalls?: [{{ name, arguments }}], chunkDelayMs? }}`: {e}", ex.name)));
             None
         }
         None => {
-            report.errors.push(format!(
-                "{}:1: example `{}`: `model` must be `{{ replies: [ … ] }}` — what the fixture \
-                 model answers, in turn",
-                ex.shown, ex.name
-            ));
+            report.errors.push(error(ex.shown, ex.line("model"), "fixture.model", format!("example `{}`: `model` must be `{{ replies: [ … ] }}` — what the fixture model answers, in turn", ex.name)));
             None
         }
     }

@@ -23,10 +23,12 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
+use oxplow_domain::diagnostic::Diagnostic;
 use oxplow_domain::DomainError;
 use parking_lot::Mutex;
 
 use crate::extension::extensions::{self, Deployment, Extension};
+use crate::vocabulary_reactor::VocabularyErrors;
 
 /// `(path, len, mtime)` for every file the load depends on, sorted.
 type Fingerprint = Vec<(PathBuf, u64, Option<std::time::SystemTime>)>;
@@ -74,7 +76,7 @@ impl CatalogSnapshot {
         &self,
         published: Option<&CatalogSnapshot>,
         failed: &Failed,
-    ) -> (Arc<CatalogSnapshot>, BTreeMap<String, Vec<String>>) {
+    ) -> (Arc<CatalogSnapshot>, VocabularyErrors) {
         let can_load = |e: &Extension| {
             e.errors.is_empty() && !e.public_contracts.blocked && !failed.0.contains_key(&e.name)
         };
@@ -83,7 +85,7 @@ impl CatalogSnapshot {
                 && !e.public_contracts.blocked
                 && failed.0.get(&e.name).is_none_or(|f| f.keep_last)
         };
-        let mut held = BTreeMap::<String, Vec<String>>::new();
+        let mut held = VocabularyErrors::new();
         let mut admitted: Vec<Extension> = Vec::with_capacity(self.extensions.len());
         for extension in self.extensions.iter() {
             // A contract-blocked extension is cleared to `enabled: false` by
@@ -97,16 +99,22 @@ impl CatalogSnapshot {
                     .iter()
                     .find(|e| e.name == extension.name && e.enabled && may_keep_last(e))
             });
-            let mut why = extension.errors.clone();
+            let mut why: Vec<Diagnostic> = extension.errors.clone();
             if let Some(f) = failed.0.get(&extension.name) {
                 why.extend(f.reasons.iter().cloned());
             }
             match last {
                 Some(last) => {
-                    why.push("its last working version stays active until these are fixed".into());
+                    why.push(Diagnostic::error(
+                        HELD_LAST_STAYS,
+                        "its last working version stays active until these are fixed",
+                    ));
                     admitted.push(last.clone());
                 }
-                None => why.push("it isn't active until these are fixed".into()),
+                None => why.push(Diagnostic::error(
+                    HELD_INACTIVE,
+                    "it isn't active until these are fixed",
+                )),
             }
             held.insert(extension.name.clone(), why);
         }
@@ -129,7 +137,10 @@ impl CatalogSnapshot {
             let out = admitted.remove(index);
             let why = held.entry(out.name.clone()).or_default();
             for r in out.requires.iter().filter(|r| absent(r)) {
-                why.push(format!("it requires `{r}`, which isn't active"));
+                why.push(Diagnostic::error(
+                    "activation.requires_inactive",
+                    format!("it requires `{r}`, which isn't active"),
+                ));
             }
             let owners: Vec<String> = out
                 .public_contracts
@@ -139,9 +150,9 @@ impl CatalogSnapshot {
                 .map(|i| format!("`{}`", i.contribution.extension))
                 .collect();
             if !owners.is_empty() {
-                why.push(format!(
-                    "it imports from {}, which isn't active",
-                    owners.join(", ")
+                why.push(Diagnostic::error(
+                    "activation.import_inactive",
+                    format!("it imports from {}, which isn't active", owners.join(", ")),
                 ));
             }
         }
@@ -173,6 +184,11 @@ impl CatalogSnapshot {
     }
 }
 
+/// Held, and its last working version keeps running.
+pub(crate) const HELD_LAST_STAYS: &str = "activation.held_last_stays";
+/// Held, and nothing of it runs.
+pub(crate) const HELD_INACTIVE: &str = "activation.held_inactive";
+
 /// Extensions whose preparation failed while one candidate was staged
 /// (a model that doesn't compile, a provider that can't stage), held back
 /// as one that can't load is (`CatalogSnapshot::admitted`).
@@ -180,7 +196,7 @@ impl CatalogSnapshot {
 pub(crate) struct Failed(BTreeMap<String, FailedExtension>);
 
 struct FailedExtension {
-    reasons: Vec<String>,
+    reasons: Vec<Diagnostic>,
     /// Its last working version may stand in; false once that failed too.
     keep_last: bool,
 }
@@ -200,11 +216,7 @@ impl Failed {
     /// extension of `snapshot` that can still be held (a
     /// second failure takes its last working version out too). False when
     /// the problems aren't one extension's to hold: the candidate fails.
-    pub(crate) fn hold(
-        &mut self,
-        snapshot: &CatalogSnapshot,
-        problems: &BTreeMap<String, Vec<String>>,
-    ) -> bool {
+    pub(crate) fn hold(&mut self, snapshot: &CatalogSnapshot, problems: &VocabularyErrors) -> bool {
         let holdable = |name: &String| {
             snapshot
                 .extensions()
@@ -563,7 +575,7 @@ impl ExtensionCatalog {
             if ext.public_contracts.blocked {
                 return Err(DomainError::Invalid(format!(
                     "extension `{name}` cannot activate because its public contracts are invalid or unavailable: {}",
-                    ext.errors.join("; ")
+                    ext.errors.iter().map(|d| ext.shown(d)).collect::<Vec<_>>().join("; ")
                 )));
             }
             return Err(extensions::disabled_error(name));
@@ -778,19 +790,21 @@ mod tests {
         assert_eq!(names(&next), ["edited:one", "good:two"]);
         assert_eq!(held.keys().collect::<Vec<_>>(), ["edited", "fresh"]);
         assert!(
-            held["edited"].iter().any(|e| e.contains("bogus")),
+            held["edited"]
+                .iter()
+                .any(|e| e.render("").contains("bogus")),
             "{held:?}"
         );
         assert!(
             held["edited"]
                 .iter()
-                .any(|e| e.contains("last working version stays active")),
+                .any(|e| e.message.contains("last working version stays active")),
             "{held:?}"
         );
         assert!(
             held["fresh"]
                 .iter()
-                .any(|e| e.contains("isn't active until")),
+                .any(|e| e.message.contains("isn't active until")),
             "{held:?}"
         );
         assert_ne!(next.generation(), catalog.snapshot(dir.path()).generation());
@@ -826,7 +840,7 @@ mod tests {
         assert!(
             held["oxplow-foundation"]
                 .iter()
-                .any(|e| e.contains("last working version stays active")),
+                .any(|e| e.message.contains("last working version stays active")),
             "{held:?}"
         );
         let running = kept
@@ -845,7 +859,10 @@ mod tests {
         let mut failed = Failed::new();
         assert!(failed.hold(
             &good,
-            &BTreeMap::from([("oxplow-foundation".to_string(), vec!["no".to_string()])])
+            &VocabularyErrors::from([(
+                "oxplow-foundation".to_string(),
+                vec![Diagnostic::error("activation.test", "no")]
+            )])
         ));
     }
 
@@ -876,13 +893,13 @@ mod tests {
         assert!(
             held["needy"]
                 .iter()
-                .any(|e| e == "it requires `ghost`, which isn't active"),
+                .any(|e| e.message == "it requires `ghost`, which isn't active"),
             "{held:?}"
         );
         assert!(
             held["chained"]
                 .iter()
-                .any(|e| e == "it requires `needy`, which isn't active"),
+                .any(|e| e.message == "it requires `needy`, which isn't active"),
             "{held:?}"
         );
     }

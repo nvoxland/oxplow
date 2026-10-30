@@ -55,14 +55,23 @@ pub(crate) fn build(root: &Path, project: &Path, mut candidate: Extension) -> Ca
     for ext in extensions.iter().filter(|ext| {
         ext.name != name && previously_active.contains(&ext.name) && ext.public_contracts.blocked
     }) {
-        regressions.extend(
-            ext.errors
-                .iter()
-                .map(|error| format!("candidate `{name}` blocks consumer `{}`: {error}", ext.name)),
-        );
+        regressions.extend(ext.errors.iter().map(|error| {
+            oxplow_domain::diagnostic::Diagnostic::error(
+                "requires.candidate_blocks_consumer",
+                format!(
+                    "candidate `{name}` blocks consumer `{}`: {}",
+                    ext.name,
+                    ext.shown(error)
+                ),
+            )
+        }));
     }
     for error in regressions {
-        if !extensions[target].errors.contains(&error) {
+        if !extensions[target]
+            .errors
+            .iter()
+            .any(|e| e.code == error.code && e.message == error.message)
+        {
             extensions[target].errors.push(error);
         }
     }

@@ -1994,6 +1994,36 @@ export type Descriptor = {
 	source: DeclaredAt,
 };
 
+/**  One problem. */
+export type Diagnostic = {
+	severity: Severity,
+	/**
+	 *  Stable and dotted, by family: `manifest.name_mismatch`,
+	 *  `page.unknown_column`, `fixture.compare`.
+	 */
+	code: string,
+	/**
+	 *  Relative to the extension's folder; `None` when no one file is at
+	 *  fault (a cycle of `requires:`).
+	 */
+	file: string | null,
+	/**  1-based. */
+	line: number | null,
+	/**
+	 *  What it is about: a contribution's URI
+	 *  (`oxplow:oxplow/effect?effect=acme/notify`) or a command's bus id.
+	 */
+	contribution: string | null,
+	message: string,
+	/**  What to change, when the check knows. */
+	fix: string | null,
+	/**
+	 *  A fixture's comparison that didn't hold (boxed: only fixtures carry
+	 *  one, and every other diagnostic stays small).
+	 */
+	mismatch: Mismatch | null,
+};
+
 /**
  *  One entry in the top-level `dimensions:` block — the **conformed-dimension
  *  catalog** authoring surface. A dimension is a
@@ -2375,18 +2405,30 @@ export type Extension_Deserialize = {
 	 */
 	namespace: string,
 	description: string,
-	/**  Repo-relative path of the extension folder. */
+	/**
+	 *  The folder it was read from: repo-relative for a source, the
+	 *  deployment's folder for a deployed copy, `bundled:<name>` for a
+	 *  shipped one.
+	 */
 	path: string,
 	/**
-	 *  Problems found while loading; empty when healthy. A page that
-	 *  failed to load is listed here and missing from `page_files`.
+	 *  The repo-relative source folder a person edits, when there is one
+	 *  (a deployed copy's source); `None` when `path` is that folder or
+	 *  there is no source here (a shipped copy).
 	 */
-	errors: string[],
+	source?: string | null,
+	/**
+	 *  Problems found while loading; empty when healthy. A page that
+	 *  failed to load is listed here and missing from `page_files`. Each
+	 *  names its file relative to the extension's folder: show it with
+	 *  [`Extension::shown`].
+	 */
+	errors: Diagnostic[],
 	/**
 	 *  Things worth fixing that don't stop it loading: an intent with no
 	 *  examples.
 	 */
-	warnings: string[],
+	warnings: Diagnostic[],
 	/**  The manifest version it was read as (`manifest:`). */
 	manifestVersion: number,
 	/**  Why it exists (required; `None` only when the manifest didn't load). */
@@ -2524,18 +2566,30 @@ export type Extension_Serialize = {
 	 */
 	namespace: string,
 	description: string,
-	/**  Repo-relative path of the extension folder. */
+	/**
+	 *  The folder it was read from: repo-relative for a source, the
+	 *  deployment's folder for a deployed copy, `bundled:<name>` for a
+	 *  shipped one.
+	 */
 	path: string,
 	/**
-	 *  Problems found while loading; empty when healthy. A page that
-	 *  failed to load is listed here and missing from `page_files`.
+	 *  The repo-relative source folder a person edits, when there is one
+	 *  (a deployed copy's source); `None` when `path` is that folder or
+	 *  there is no source here (a shipped copy).
 	 */
-	errors: string[],
+	source: string | null,
+	/**
+	 *  Problems found while loading; empty when healthy. A page that
+	 *  failed to load is listed here and missing from `page_files`. Each
+	 *  names its file relative to the extension's folder: show it with
+	 *  [`Extension::shown`].
+	 */
+	errors: Diagnostic[],
 	/**
 	 *  Things worth fixing that don't stop it loading: an intent with no
 	 *  examples.
 	 */
-	warnings: string[],
+	warnings: Diagnostic[],
 	/**  The manifest version it was read as (`manifest:`). */
 	manifestVersion: number,
 	/**  Why it exists (required; `None` only when the manifest didn't load). */
@@ -3713,6 +3767,14 @@ export type MetricEntry = {
 	 *  definition — a `use:` can't override.
 	 */
 	ai_context?: AiContext | null,
+};
+
+/**  Where a fixture's expectation and what happened differ. */
+export type Mismatch = {
+	/**  A JSON pointer into what was compared (`/rows/0/state`). */
+	pointer: string,
+	expected: unknown,
+	actual: unknown,
 };
 
 /**  Features callers may discover before requesting a model operation. */
@@ -5479,6 +5541,9 @@ export type ServiceListing = {
 	title: string,
 	summary: string,
 };
+
+/**  Whether it stops the extension (or the run) or is only worth fixing. */
+export type Severity = "error" | "warning";
 
 /**  How handing a redirect to a sign-in went (`oxplow.provider.complete_sign_in`). */
 export type SignInCompletion =

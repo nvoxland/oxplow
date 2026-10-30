@@ -26,6 +26,7 @@ use std::sync::Arc;
 
 use oxplow_db::event_retention::{restate_declared_tx, DeclaredRetention};
 use oxplow_db::event_type_store::{recorded_schema_tx, restate_tx, EventTypeRow};
+use oxplow_domain::diagnostic::Diagnostic;
 use oxplow_domain::events::schema::{extension_namespace, EventSchemaRegistry};
 use oxplow_domain::vocabulary::Vocabulary;
 use oxplow_domain::DomainError;
@@ -60,7 +61,9 @@ struct Declares {
 
 type Declared = Vec<Declares>;
 
-pub type VocabularyErrors = BTreeMap<String, Vec<String>>;
+/// What held each extension back, by name: its diagnostics, files relative
+/// to its folder (show them under the folder a person edits).
+pub type VocabularyErrors = BTreeMap<String, Vec<crate::extension::extensions::Diagnostic>>;
 
 /// Frozen declarations for one candidate catalog. Preparing these does not
 /// change either the database or the running vocabulary.
@@ -116,17 +119,21 @@ impl PreparedVocabulary {
                 // A bad recognizer rejects the candidate instead of
                 // silently dropping recognition.
                 match self.work_item_ids.as_ref() {
-                    Some((provider, pattern)) => match vocabulary
-                        .resources
-                        .clone()
-                        .with_work_item_ids(provider, pattern)
-                    {
-                        Ok(resources) => vocabulary.resources = resources,
-                        Err(error) => errors
-                            .entry("<host>".to_string())
-                            .or_default()
-                            .push(format!("work item id recognizer: {error}")),
-                    },
+                    Some((provider, pattern)) => {
+                        match vocabulary
+                            .resources
+                            .clone()
+                            .with_work_item_ids(provider, pattern)
+                        {
+                            Ok(resources) => vocabulary.resources = resources,
+                            Err(error) => errors.entry("<host>".to_string()).or_default().push(
+                                Diagnostic::error(
+                                    "activation.work_item_id_recognizer",
+                                    format!("work item id recognizer: {error}"),
+                                ),
+                            ),
+                        }
+                    }
                     None => vocabulary.resources = vocabulary.resources.without_work_item_ids(),
                 }
                 errors.retain(|_, messages| !messages.is_empty());
@@ -206,9 +213,9 @@ fn build_tx(
     tx: &rusqlite::Connection,
     declared: &Declared,
     now: &str,
-) -> Result<(Vocabulary, BTreeMap<String, Vec<String>>), DomainError> {
+) -> Result<(Vocabulary, VocabularyErrors), DomainError> {
     let mut events = EventSchemaRegistry::core();
-    let mut errors: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    let mut errors = VocabularyErrors::new();
     let mut retention = Vec::new();
     for Declares {
         extension, types, ..
@@ -224,19 +231,26 @@ fn build_tx(
         });
         for d in &types.types {
             let refused = match recorded_schema_tx(tx, &d.event_type, d.v)? {
-                Some(recorded) if recorded != d.schema => Some(format!(
-                    "{}: the schema of `{}@{}` changed since that version was recorded; declare \
-                     the new shape as v{} with an upcast",
-                    d.declared_at,
-                    d.event_type,
-                    d.v,
-                    d.v + 1
-                )),
+                Some(recorded) if recorded != d.schema => Some(
+                    declared_at(
+                        "event_type.schema_changed",
+                        &d.declared_at,
+                        format!(
+                            "the schema of `{}@{}` changed since that version was recorded",
+                            d.event_type, d.v
+                        ),
+                    )
+                    .fix(format!(
+                        "declare the new shape as v{} with an upcast",
+                        d.v + 1
+                    )),
+                ),
                 _ => events
                     .register_declared(extension, d.declared())
                     .err()
-                    .map(|e| format!("{}: {e}", d.declared_at)),
+                    .map(|e| declared_at("event_type.refused", &d.declared_at, e.to_string())),
             };
+            let refused = refused.map(|p| p.contribution(d.event_type.clone()));
             if let Some(e) = refused {
                 errors.entry(extension.clone()).or_default().push(e);
             }
@@ -252,12 +266,20 @@ fn build_tx(
     {
         for s in subscriptions {
             if events.latest(&s.event_type).is_none() {
-                errors.entry(extension.clone()).or_default().push(format!(
-                    "{}: {} reacts to `{}`, which no enabled extension registers: install or \
-                     enable the extension that declares it (or see that one's errors, if its \
-                     declaration was refused)",
-                    s.declared_at, s.by, s.event_type
-                ));
+                errors.entry(extension.clone()).or_default().push(
+                    declared_at(
+                        "event_type.subscription_unregistered",
+                        &s.declared_at,
+                        format!(
+                            "{} reacts to `{}`, which no enabled extension registers",
+                            s.by, s.event_type
+                        ),
+                    )
+                    .fix(
+                        "install or enable the extension that declares it (or see that one's \
+                         errors, if its declaration was refused)",
+                    ),
+                );
             }
         }
     }
@@ -280,11 +302,40 @@ fn build_tx(
     Ok((Vocabulary::new(events, resources), errors))
 }
 
+/// What held each extension back as text, `<extension>: <line>` per problem,
+/// each shown under the folder of the extension it belongs to (found in
+/// `extensions`; a host problem has none and shows without a folder).
+pub fn render_problems(errors: &VocabularyErrors, extensions: &[Extension]) -> Vec<String> {
+    errors
+        .iter()
+        .flat_map(|(owner, why)| {
+            let root = extensions
+                .iter()
+                .find(|e| &e.name == owner)
+                .map(|e| e.root())
+                .unwrap_or("");
+            why.iter()
+                .map(move |d| format!("{owner}: {}", d.render(root)))
+        })
+        .collect()
+}
+
+/// A problem at a declaration: `declared_at` is `<folder>/<file>:<line>`;
+/// the diagnostic names the file relative to the extension's folder.
+fn declared_at(code: &str, declared_at: &str, message: String) -> Diagnostic {
+    let (place, line) = match declared_at.rsplit_once(':') {
+        Some((p, n)) if n.parse::<usize>().is_ok() => (p, n.parse().ok()),
+        _ => (declared_at, None),
+    };
+    let file = place.rsplit('/').next().unwrap_or(place);
+    Diagnostic::error(code, message).at(file, line)
+}
+
 /// Every extension's resources, in load order: one an earlier extension
 /// already declares is an error on the later one, and isn't registered.
 fn register_resources<'a>(
     declared: &'a Declared,
-    errors: &mut BTreeMap<String, Vec<String>>,
+    errors: &mut VocabularyErrors,
 ) -> (ResourceRegistry, Vec<(&'a ResourceDecl, &'a str)>) {
     let mut registry = ResourceRegistry::default();
     let mut rows = Vec::new();
@@ -297,10 +348,10 @@ fn register_resources<'a>(
         for r in resources {
             match registry.register(r.decl.clone()) {
                 Ok(()) => rows.push((&r.decl, extension.as_str())),
-                Err(e) => errors
-                    .entry(extension.clone())
-                    .or_default()
-                    .push(format!("{}: {e}", r.declared_at)),
+                Err(e) => errors.entry(extension.clone()).or_default().push(
+                    declared_at("resource.refused", &r.declared_at, e.to_string())
+                        .contribution(r.decl.name.to_string()),
+                ),
             }
         }
     }
@@ -310,6 +361,7 @@ fn register_resources<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_fixtures::ShownErrors as _;
     use oxplow_db::event_log_store::SqliteEventLogStore;
     use oxplow_db::SqlCell;
     use oxplow_domain::Envelope;
@@ -387,7 +439,7 @@ mod tests {
             .into_iter()
             .find(|e| e.name == "acme-pr")
             .unwrap()
-            .errors;
+            .shown_errors();
         assert!(
             errors.iter().any(|e| e.contains("extension.yaml:6")
                 && e.contains("changed since that version was recorded")),
@@ -645,7 +697,7 @@ resources:
                     .iter()
                     .find(|e| e.name == *name)
                     .unwrap()
-                    .errors
+                    .shown_errors()
                     .join("\n")
             })
             .collect();
@@ -735,9 +787,9 @@ resources:
         let loaded = crate::extension::extensions::load_extensions(dir.path());
         let ext = loaded.iter().find(|e| e.name == "acme-pr").unwrap();
         assert!(
-            ext.errors
-                .iter()
-                .any(|e| e.contains("`acme_pr.closed` isn't a registered event type")),
+            ext.errors.iter().any(|e| e
+                .message
+                .contains("`acme_pr.closed` isn't a registered event type")),
             "{:?}",
             ext.errors
         );
@@ -752,9 +804,9 @@ resources:
         assert!(ext.errors.is_empty(), "{:?}", ext.errors);
         assert_eq!(ext.subscriptions.len(), 1);
         assert!(
-            ext.warnings
-                .iter()
-                .any(|w| w.contains("collector `tally` reacts to `other_ext.thing`")),
+            ext.warnings.iter().any(|w| w
+                .message
+                .contains("collector `tally` reacts to `other_ext.thing`")),
             "{:?}",
             ext.warnings
         );
@@ -801,7 +853,7 @@ resources:
         assert!(
             errors("acme_pr")
                 .iter()
-                .any(|e| e.contains("isn't an extension name")),
+                .any(|e| e.message.contains("isn't an extension name")),
             "{:?}",
             errors("acme_pr")
         );
@@ -845,11 +897,12 @@ resources:
             .into_iter()
             .find(|e| e.name == "beta")
             .unwrap();
-        assert_eq!(loaded.errors, Vec::<String>::new());
+        assert!(loaded.errors.is_empty(), "{:?}", loaded.errors);
         assert_eq!((loaded.effects.len(), loaded.collectors.len()), (1, 1));
         let foreign: Vec<&String> = loaded
             .warnings
             .iter()
+            .map(|w| &w.message)
             .filter(|w| w.contains("`acme_pr.merged`") && w.contains("another extension's"))
             .collect();
         assert_eq!(foreign.len(), 2, "{:?}", loaded.warnings);
@@ -869,7 +922,7 @@ resources:
                 })
                 .count()
         };
-        let errors = listed(svc, "beta").await.errors;
+        let errors = listed(svc, "beta").await.shown_errors();
         assert_eq!(unresolved(&errors), 2, "{errors:?}");
         assert!(
             errors
@@ -887,7 +940,7 @@ resources:
             &schema("number"),
         );
         crate::test_fixtures::activate_with_problems(svc).await;
-        assert_eq!(listed(svc, "beta").await.errors, Vec::<String>::new());
+        assert!(listed(svc, "beta").await.errors.is_empty());
 
         // The owner's declaration is refused (a new shape at a recorded
         // version): the type isn't registered, and the subscriber says so.
@@ -897,14 +950,14 @@ resources:
             &schema("pr"),
         );
         crate::test_fixtures::activate_with_problems(svc).await;
-        assert_eq!(unresolved(&listed(svc, "beta").await.errors), 2);
+        assert_eq!(unresolved(&listed(svc, "beta").await.shown_errors()), 2);
 
         // The owner goes: unresolved again.
         std::fs::remove_dir_all(root.join(".oxplow/extensions/acme-pr")).unwrap();
         crate::extension::extension_deploy::remove(svc, "acme-pr")
             .await
             .unwrap();
-        assert_eq!(unresolved(&listed(svc, "beta").await.errors), 2);
+        assert_eq!(unresolved(&listed(svc, "beta").await.shown_errors()), 2);
     }
 
     /// P9.D1: what isn't another extension's type is still refused at
@@ -933,7 +986,10 @@ resources:
             let refused = loaded
                 .errors
                 .iter()
-                .filter(|e| e.contains(&format!("`{bad}` isn't a registered event type")))
+                .filter(|e| {
+                    e.message
+                        .contains(&format!("`{bad}` isn't a registered event type"))
+                })
                 .count();
             assert_eq!(refused, 2, "{bad}: {:?}", loaded.errors);
             assert!(

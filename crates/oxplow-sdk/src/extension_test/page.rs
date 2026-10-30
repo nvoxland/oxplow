@@ -22,9 +22,12 @@ pub(super) async fn component_example(
     let version = match load_component(&host.svc, &host.root, &key) {
         Ok(v) => v,
         Err(e) => {
-            report
-                .errors
-                .push(format!("{shown}:1: component `{id}` doesn't load: {e}"));
+            report.errors.push(error(
+                shown,
+                None,
+                "example.component_failed",
+                format!("component `{id}` doesn't load: {e}"),
+            ));
             return;
         }
     };
@@ -47,9 +50,12 @@ pub(super) async fn component_example(
             )
             .await;
         if let Err(e) = made {
-            report
-                .errors
-                .push(format!("{shown}:1: filing its item `{title}`: {e}"));
+            report.errors.push(error(
+                shown,
+                None,
+                "example.component_failed",
+                format!("filing its item `{title}`: {e}"),
+            ));
             return;
         }
     }
@@ -89,11 +95,7 @@ pub(super) async fn component_example(
     }
     let got = json!({ "invokes": invokes });
     if let Some((path, want, got)) = compare(&ex.expect, &got) {
-        report.errors.push(format!(
-            "{shown}:1: component `{id}` answered {got} at `{path}`, the example expects {want} \
-             — fix: the component's declarations, or the example's `expect` (`{{ invokes: [{{ \
-             ok, refused? }}] }}`)"
-        ));
+        report.errors.push(error(shown, ex.line("expect"), "fixture.compare", format!("component `{id}` answered {got} at `{path}`, the example expects {want}")).fix("the component's declarations, or the example's `expect` (`{ invokes: [{ ok, refused? }] }`)").mismatch(path, want, got));
     }
 }
 
@@ -127,20 +129,13 @@ pub(super) async fn form_example(
     let start = match start {
         Ok(start) => start,
         Err(e) => {
-            report.errors.push(format!(
-                "{shown}:1: form `{slug}` didn't open: {e} — fix: the form (a `viz: form` node with \
-                 a `form:` naming a command; `node` names which), or the example's params"
-            ));
+            report.errors.push(error(shown, None, "example.form_failed", format!("form `{slug}` didn't open: {e}")).fix("the form (a `viz: form` node with a `form:` naming a command; `node` names which), or the example's params"));
             return;
         }
     };
     let got = json!({ "values": start.values, "fixed": start.fixed, "fields": start.fields });
     if let Some((path, want, got)) = compare(&ex.expect, &got) {
-        report.errors.push(format!(
-            "{shown}:1: form `{slug}` opened with {got} at `{path}`, the example expects {want} \
-             — fix: the form's `defaults`, `fixed` or `fields`, or the example's `expect` (`{{ \
-             values?, fixed?, fields? }}`)"
-        ));
+        report.errors.push(error(shown, ex.line("expect"), "fixture.compare", format!("form `{slug}` opened with {got} at `{path}`, the example expects {want}")).fix("the form's `defaults`, `fixed` or `fields`, or the example's `expect` (`{ values?, fixed?, fields? }`)").mismatch(path, want, got));
     }
 }
 
@@ -374,9 +369,11 @@ pub(super) async fn view_context(
     }
     let view = &ex.view;
     if !(view.is_null() || view.is_object()) {
-        report.errors.push(format!(
-            "{}:1: `view` isn't `{{ stream?, thread? }}`",
-            ex.shown
+        report.errors.push(error(
+            ex.shown,
+            None,
+            "fixture.view",
+            "`view` isn't `{ stream?, thread? }`",
         ));
         return None;
     }
@@ -399,11 +396,15 @@ pub(super) async fn view_context(
             active: None,
         }),
         _ => {
-            report.errors.push(format!(
-                "{}:1: `view` names a stream or thread that isn't one — fix: `{{ stream: str1, \
-                 thread: thr1 }}`",
-                ex.shown
-            ));
+            report.errors.push(
+                error(
+                    ex.shown,
+                    None,
+                    "fixture.view",
+                    "`view` names a stream or thread that isn't one",
+                )
+                .fix("`{ stream: str1, thread: thr1 }`"),
+            );
             None
         }
     }
@@ -445,6 +446,7 @@ pub(super) async fn page_example(
     };
     let params = ex.when.get("params").cloned().unwrap_or(Value::Null);
     let at = PageAt {
+        ex,
         host,
         shown,
         page,
@@ -455,10 +457,15 @@ pub(super) async fn page_example(
         None => Vec::new(),
         Some(Value::Array(steps)) => steps.clone(),
         Some(_) => {
-            report.errors.push(format!(
-                "{shown}:1: `steps` isn't a list — fix: `steps: [{{ given: [..] }} | {{ expect, \
-                 params?, bind? }}]`"
-            ));
+            report.errors.push(
+                error(
+                    shown,
+                    ex.line("steps"),
+                    "fixture.step",
+                    "`steps` isn't a list",
+                )
+                .fix("`steps: [{ given: [..] } | { expect, params?, bind? }]`"),
+            );
             return;
         }
     };
@@ -522,10 +529,15 @@ pub(super) async fn page_example(
         }
         let Some(expect) = step.get("expect") else {
             if step.get("given").is_none() {
-                report.errors.push(format!(
-                    "{shown}:1: `{label}` has no `given` or `expect` — fix: `{{ given: [..] }}` \
-                     or `{{ expect, params?, bind? }}`"
-                ));
+                report.errors.push(
+                    error(
+                        shown,
+                        None,
+                        "fixture.step",
+                        format!("`{label}` has no `given` or `expect`"),
+                    )
+                    .fix("`{ given: [..] }` or `{ expect, params?, bind? }`"),
+                );
                 return;
             }
             continue;
@@ -552,6 +564,8 @@ pub(super) async fn page_example(
 pub(super) struct PageAt<'a> {
     pub(super) host: &'a Host,
     pub(super) shown: &'a str,
+    /// The fixture, to find a key's line in.
+    pub(super) ex: &'a Example<'a>,
     /// The page as the fixture names it.
     pub(super) page: &'a str,
     /// What runs: the page (`<extension>/<slug>`), or an inline one.
@@ -585,7 +599,12 @@ impl PageAt<'_> {
         ) {
             (Ok(p), Ok(what), Ok(e)) => (p, what, e),
             (Err(e), _, _) | (_, Err(e), _) | (_, _, Err(e)) => {
-                report.errors.push(format!("{shown}:1: {label}: {e}"));
+                report.errors.push(error(
+                    shown,
+                    self.ex.line("steps"),
+                    "fixture.step",
+                    format!("{label}: {e}"),
+                ));
                 return None;
             }
         };
@@ -593,10 +612,7 @@ impl PageAt<'_> {
             .get(if submit { "node" } else { "action" })
             .and_then(Value::as_str)
         else {
-            report.errors.push(format!(
-                "{shown}:1: {label}: `press` is `{{ action, node?, row?, input?, confirmed? }}`, \
-                 `submit` is `{{ node, input, confirmed? }}`"
-            ));
+            report.errors.push(error(shown, self.ex.line("steps"), "fixture.step", format!("{label}: `press` is `{{ action, node?, row?, input?, confirmed? }}`, `submit` is `{{ node, input, confirmed? }}`")));
             return None;
         };
         let cells = |v: &Value| -> std::collections::BTreeMap<String, oxplow_db::SqlCell> {
@@ -622,9 +638,12 @@ impl PageAt<'_> {
         let run_id = match opened {
             Ok((run_id, _)) => run_id,
             Err(e) => {
-                report
-                    .errors
-                    .push(format!("{shown}:1: {label}: page `{page}`: {e}"));
+                report.errors.push(error(
+                    shown,
+                    None,
+                    "example.page_failed",
+                    format!("{label}: page `{page}`: {e}"),
+                ));
                 return None;
             }
         };
@@ -669,20 +688,23 @@ impl PageAt<'_> {
         match expect {
             Some(expect) => {
                 if let Some((path, want, at)) = compare(&expect, &got) {
-                    report.errors.push(format!(
-                        "{shown}:1: {label}: {kind} `{action}` on page `{page}` gave {at} at \
-                         `{path}`, the example expects {want} — fix: the action, or the step's \
-                         `expect` (`{{ ok, result? }}` or `{{ ok: false, refused }}`)"
-                    ));
+                    report.errors.push(error(shown, self.ex.line("expect"), "fixture.compare", format!("{label}: {kind} `{action}` on page `{page}` gave {at} at `{path}`, the example expects {want}")).fix("the action, or the step's `expect` (`{ ok, result? }` or `{ ok: false, refused }`)").mismatch(path, want, at));
                     return None;
                 }
             }
             None if got["ok"] == false => {
-                report.errors.push(format!(
-                    "{shown}:1: {label}: {kind} `{action}` on page `{page}` said no: {} — fix: \
-                     the action, or `expect: {{ ok: false, refused }}` on the step",
-                    got["refused"]
-                ));
+                report.errors.push(
+                    error(
+                        shown,
+                        None,
+                        "example.action_refused",
+                        format!(
+                            "{label}: {kind} `{action}` on page `{page}` said no: {}",
+                            got["refused"]
+                        ),
+                    )
+                    .fix("the action, or `expect: { ok: false, refused }` on the step"),
+                );
                 return None;
             }
             None => {}
@@ -705,27 +727,42 @@ impl PageAt<'_> {
         let (params, expect) = match (binds.substitute(params), binds.substitute(expect)) {
             (Ok(params), Ok(expect)) => (params, expect),
             (Err(e), _) | (_, Err(e)) => {
-                report.errors.push(format!("{shown}:1: {label}{e}"));
+                report.errors.push(error(
+                    shown,
+                    self.ex.line("steps"),
+                    "fixture.step",
+                    format!("{label}{e}"),
+                ));
                 return None;
             }
         };
         let run = match run_page(self.host, self.target.clone(), &params, self.ctx).await {
             Ok(run) => run,
             Err(e) => {
-                report.errors.push(format!(
-                    "{shown}:1: {label}page `{page}`: {e} — fix: the page, or the example's \
-                     `params` and `given`"
-                ));
+                report.errors.push(
+                    error(
+                        shown,
+                        None,
+                        "example.page_failed",
+                        format!("{label}page `{page}`: {e}"),
+                    )
+                    .fix("the page, or the example's `params` and `given`"),
+                );
                 return None;
             }
         };
         if let Some(loaders) = expect.get("loaders").and_then(Value::as_object) {
             for (name, want) in loaders {
                 let Some(loader) = loader_at(&run, name) else {
-                    report.errors.push(format!(
-                        "{shown}:1: {label}page `{page}` has no loader `{name}` — fix: the \
-                         example's `expect.loaders`"
-                    ));
+                    report.errors.push(
+                        error(
+                            shown,
+                            None,
+                            "fixture.unknown",
+                            format!("{label}page `{page}` has no loader `{name}`"),
+                        )
+                        .fix("the example's `expect.loaders`"),
+                    );
                     continue;
                 };
                 let rows = &loader.result.rows;
@@ -752,12 +789,7 @@ impl PageAt<'_> {
                     got["columns"] = json!(loader.result.columns);
                 }
                 if let Some((path, want, got)) = compare(want, &got) {
-                    report.errors.push(format!(
-                        "{shown}:1: {label}page `{page}` loader `{name}` returned {got} at \
-                         `{path}`, the example expects {want} — fix: the page, or the example's \
-                         `expect.loaders.{name}` (`{{ rows: n | $any | [..] | {{ contains: [..] }}, \
-                         columns? }}`)"
-                    ));
+                    report.errors.push(error(shown, self.ex.line("expect"), "fixture.compare", format!("{label}page `{page}` loader `{name}` returned {got} at `{path}`, the example expects {want}")).fix(format!("the page, or the example's `expect.loaders.{name}` (`{{ rows: n | $any | [..] | {{ contains: [..] }}, columns? }}`)")).mismatch(path, want, got));
                 }
             }
         }
@@ -779,17 +811,20 @@ impl PageAt<'_> {
                 _ => got,
             };
             if let Some((path, want, got)) = compare(want, &got) {
-                report.errors.push(format!(
-                    "{shown}:1: {label}page `{page}`'s {key} is {got} at `{key}{path}`, the \
-                     example expects {want} — fix: the page, or `expect.{key}`"
-                ));
+                report.errors.push(error(shown, self.ex.line("expect"), "fixture.compare", format!("{label}page `{page}`'s {key} is {got} at `{key}{path}`, the example expects {want}")).fix(format!("the page, or `expect.{key}`")).mismatch(format!("/{key}{path}"), want, got));
             }
         }
         if let Some(want) = expect.get("text") {
             match oxplow_app::pages::text::page_text(&self.host.svc, &self.host.root, &run).await {
-                Err(e) => report.errors.push(format!(
-                    "{shown}:1: {label}page `{page}` has no text: {e} — fix: the page"
-                )),
+                Err(e) => report.errors.push(
+                    error(
+                        shown,
+                        None,
+                        "example.page_text",
+                        format!("{label}page `{page}` has no text: {e}"),
+                    )
+                    .fix("the page"),
+                ),
                 Ok(text) => {
                     let missing: Vec<&str> = want
                         .get("contains")
@@ -800,17 +835,20 @@ impl PageAt<'_> {
                         .filter(|needle| !text.contains(*needle))
                         .collect();
                     if matches!(want, Value::String(exact) if *exact != text) {
-                        report.errors.push(format!(
-                            "{shown}:1: {label}page `{page}`'s text is {text:?}, the example \
-                             expects {want} — fix: the page, or `expect.text` (`{{ contains: [..] \
-                             }}` or the exact text)"
-                        ));
+                        report.errors.push(error(shown, self.ex.line("expect"), "fixture.compare", format!("{label}page `{page}`'s text is {text:?}, the example expects {want}")).fix("the page, or `expect.text` (`{ contains: [..] }` or the exact text)").mismatch("/text", want.clone(), Value::String(text.clone())));
                     }
                     for needle in missing {
-                        report.errors.push(format!(
-                            "{shown}:1: {label}page `{page}`'s text doesn't contain {needle:?} — \
-                             fix: the page, or `expect.text.contains`; the text is:\n{text}"
-                        ));
+                        report.errors.push(
+                            error(
+                                shown,
+                                None,
+                                "example.page_text",
+                                format!("{label}page `{page}`'s text doesn't contain {needle:?}"),
+                            )
+                            .fix(format!(
+                                "the page, or `expect.text.contains`; the text is:\n{text}"
+                            )),
+                        );
                     }
                 }
             }
@@ -819,8 +857,11 @@ impl PageAt<'_> {
             let present = run_nodes(&run);
             for want in nodes {
                 let Some(id) = want.get("id").and_then(Value::as_str) else {
-                    report.errors.push(format!(
-                        "{shown}:1: {label}`expect.nodes` entries are `{{ id, kind?, actions? }}`"
+                    report.errors.push(error(
+                        shown,
+                        None,
+                        "fixture.nodes",
+                        format!("{label}`expect.nodes` entries are `{{ id, kind?, actions? }}`"),
                     ));
                     continue;
                 };
@@ -828,23 +869,37 @@ impl PageAt<'_> {
                     .as_object()
                     .and_then(|o| o.keys().find(|k| !NODE_KEYS.contains(&k.as_str())))
                 {
-                    report.errors.push(format!(
-                        "{shown}:1: {label}`{key}` isn't a key of `expect.nodes` — fix: a node is \
-                         {}",
-                        NODE_KEYS.map(|k| format!("`{k}`")).join(", ")
-                    ));
+                    report.errors.push(
+                        error(
+                            shown,
+                            None,
+                            "fixture.unknown_key",
+                            format!("{label}`{key}` isn't a key of `expect.nodes`"),
+                        )
+                        .fix(format!(
+                            "a node is {}",
+                            NODE_KEYS.map(|k| format!("`{k}`")).join(", ")
+                        )),
+                    );
                     continue;
                 }
                 let Some((_, declared)) = present.iter().find(|(have, _)| have == id) else {
-                    report.errors.push(format!(
-                        "{shown}:1: {label}page `{page}` has no node `{id}` in this run (it has \
-                         {}) — fix: the example, or the page's view",
-                        present
-                            .iter()
-                            .map(|(n, _)| format!("`{n}`"))
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    ));
+                    report.errors.push(
+                        error(
+                            shown,
+                            None,
+                            "example.page_node",
+                            format!(
+                                "{label}page `{page}` has no node `{id}` in this run (it has {})",
+                                present
+                                    .iter()
+                                    .map(|(n, _)| format!("`{n}`"))
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            ),
+                        )
+                        .fix("the example, or the page's view"),
+                    );
                     continue;
                 };
                 let has = |key: &str| {
@@ -855,11 +910,7 @@ impl PageAt<'_> {
                 };
                 if let Some(k) = want.get("kind").and_then(Value::as_str) {
                     if k != has("kind") {
-                        report.errors.push(format!(
-                            "{shown}:1: {label}page `{page}` node `{id}` is a `{}`, the \
-                             example expects `{k}`",
-                            has("kind")
-                        ));
+                        report.errors.push(error(shown, None, "example.page_node", format!("{label}page `{page}` node `{id}` is a `{}`, the example expects `{k}`", has("kind"))));
                     }
                 }
                 // A viz node's viz is in its config.
@@ -869,21 +920,13 @@ impl PageAt<'_> {
                     .unwrap_or_default();
                 if let Some(v) = want.get("viz").and_then(Value::as_str) {
                     if v != viz {
-                        report.errors.push(format!(
-                            "{shown}:1: {label}page `{page}` node `{id}` is a `{viz}` viz, the \
-                             example expects `{v}` — fix: the page, or the node's `viz` in \
-                             `expect.nodes`"
-                        ));
+                        report.errors.push(error(shown, None, "example.page_node", format!("{label}page `{page}` node `{id}` is a `{viz}` viz, the example expects `{v}`")).fix("the page, or the node's `viz` in `expect.nodes`"));
                     }
                 }
                 if let Some(want) = want.get("actions") {
                     let got = actions_like(want, &node_actions(&run, id));
                     if let Some((path, want, got)) = compare(want, &got) {
-                        report.errors.push(format!(
-                            "{shown}:1: {label}page `{page}` node `{id}`'s actions are {got} at \
-                             `{path}`, the example expects {want} — fix: the page, or the node's \
-                             `actions` in `expect.nodes`"
-                        ));
+                        report.errors.push(error(shown, self.ex.line("expect"), "fixture.compare", format!("{label}page `{page}` node `{id}`'s actions are {got} at `{path}`, the example expects {want}")).fix("the page, or the node's `actions` in `expect.nodes`").mismatch(path, want, got));
                     }
                 }
             }
@@ -949,13 +992,13 @@ pub(super) fn node_actions(
 /// Every page's `answers:` entry runs with its params: the page opens and
 /// none of its loaders fails. A test case per page.
 pub(super) async fn page_answers(host: &Host, ext: &Extension, report: &mut TestReport) {
-    let rel = ext.path.trim_end_matches('/').to_string();
     let mut any = false;
     // An answer may name the primary stream's thread.
     if let Err(e) = host.svc.streams.ensure_primary().await {
-        report
-            .errors
-            .push(format!("{rel}: the primary thread: {e}"));
+        report.errors.push(Diagnostic::error(
+            "example.thread_failed",
+            format!("the primary thread: {e}"),
+        ));
         return;
     }
     let ctx = oxplow_app::pages::spec::ViewContext::default();
@@ -975,11 +1018,16 @@ pub(super) async fn page_answers(host: &Host, ext: &Extension, report: &mut Test
             )
             .await
             {
-                report.errors.push(format!(
-                    "{rel}/pages/{}.yaml:1: the answer to \"{}\" doesn't run: {e} — fix: the \
-                     answer's `params`, or the page",
-                    page.slug, answer.question
-                ));
+                report.errors.push(
+                    error(
+                        &format!("pages/{}.yaml", page.slug),
+                        None,
+                        "example.answer_failed",
+                        format!("the answer to \"{}\" doesn't run: {e}", answer.question),
+                    )
+                    .contribution(format!("{}/{}", ext.name, page.slug))
+                    .fix("the answer's `params`, or the page"),
+                );
             }
         }
         report.finish_case(format!("answers {}", page.slug), mark);
@@ -1001,10 +1049,11 @@ pub(super) fn answers(
         None => Some(Default::default()),
         Some(Ok(answers)) => Some(answers),
         Some(Err(e)) => {
-            report.errors.push(format!(
-                "{}:1: {what}: `answers` must map each scope to its answers in call \
-                 order: {e}",
-                ex.shown
+            report.errors.push(error(
+                ex.shown,
+                None,
+                "fixture.answers",
+                format!("{what}: `answers` must map each scope to its answers in call order: {e}"),
             ));
             None
         }

@@ -9,6 +9,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use oxplow_db::TxError;
+use oxplow_domain::diagnostic::Diagnostic;
 use oxplow_domain::{run::RunContext, DomainError, Timestamp};
 use tokio::sync::{OwnedRwLockReadGuard, OwnedRwLockWriteGuard, RwLock};
 
@@ -286,7 +287,7 @@ impl ExtensionActivation {
         // A required extension with nothing to run is the first
         // activation's to list, kept until it runs.
         for (name, why) in &missing {
-            tracing::warn!(%name, why = %why.join("; "), "oxplow's own extension has nothing to run");
+            tracing::warn!(%name, why = %why.iter().map(|d| d.render("")).collect::<Vec<_>>().join("; "), "oxplow's own extension has nothing to run");
         }
         *self.problems.lock() = missing;
         let changes = LiveChanges::new();
@@ -302,13 +303,12 @@ impl ExtensionActivation {
                     if problems.contains_key("<host>") && attempts < 3 => {}
                 Err(error) => {
                     self.record_failure(&svc, error);
-                    let why: Vec<String> = self
-                        .problems()
-                        .into_iter()
-                        .flat_map(|(owner, why)| {
-                            why.into_iter().map(move |w| format!("{owner}: {w}"))
-                        })
-                        .collect();
+                    let why = crate::vocabulary_reactor::render_problems(
+                        &self.problems(),
+                        svc.extension_catalog
+                            .snapshot(&svc.layout.project_dir)
+                            .extensions(),
+                    );
                     return Err(DomainError::Invalid(format!(
                         "the extensions could not activate: {}",
                         why.join("; ")
@@ -324,7 +324,10 @@ impl ExtensionActivation {
             TxError::Aborted(problems) => problems,
             TxError::Storage(_) => VocabularyErrors::from([(
                 "<host>".into(),
-                vec!["extension activation could not commit its database state".into()],
+                vec![Diagnostic::error(
+                    "activation.commit_failed",
+                    "extension activation could not commit its database state",
+                )],
             )]),
         };
         svc.extension_catalog.runtime_changed();
@@ -612,7 +615,7 @@ impl ExtensionActivation {
             // A deployment of an extension that ships with oxplow that is
             // held with nothing of it running gives way to the copy that
             // ships, and the candidate is admitted again.
-            let giving_way: Vec<(String, Vec<String>)> = held
+            let giving_way: Vec<(String, Vec<Diagnostic>)> = held
                 .iter()
                 .filter(|(name, _)| {
                     !snapshot
@@ -635,11 +638,14 @@ impl ExtensionActivation {
                     tracing::warn!(%name, "a deployment of an extension that ships with oxplow doesn't activate; running the shipped one");
                     svc.extension_catalog.give_way(&name);
                     failed.forget(&name);
-                    why.retain(|w| !w.ends_with("until these are fixed"));
-                    why.push(
-                        "its deployment doesn't activate; the shipped version runs until it is deployed again"
-                            .into(),
-                    );
+                    why.retain(|w| {
+                        w.code != crate::extension::extension_catalog::HELD_LAST_STAYS
+                            && w.code != crate::extension::extension_catalog::HELD_INACTIVE
+                    });
+                    why.push(Diagnostic::error(
+                        "activation.gave_way",
+                        "its deployment doesn't activate; the shipped version runs until it is deployed again",
+                    ));
                     gave_way.insert(name, why);
                 }
                 raw = svc.extension_catalog.snapshot(&svc.layout.project_dir);
@@ -886,17 +892,22 @@ impl ExtensionActivation {
                     _ => None,
                 })
                 .unwrap_or_else(|| "it doesn't activate".to_string());
-            let line = format!(
-                "oxplow's own `{name}` isn't running: {failed}, and while developing oxplow \
+            let line = Diagnostic::error(
+                "activation.required_not_running",
+                format!(
+                    "oxplow's own `{name}` isn't running: {failed}, and while developing oxplow \
                  nothing runs in its place, so what it provides (the agent harnesses, \
-                 Alerts, core commands and pages) is missing. Fix its source, quit oxplow, \
-                 run `{deploy}` in the project, then start oxplow again",
-                name = b.name,
-                deploy = crate::extension::extension_deploy::DEPLOY_FROM_OUTSIDE
-            );
-            tracing::warn!(name = b.name, why = %held[b.name].join("; "), "{line}");
+                 Alerts, core commands and pages) is missing",
+                    name = b.name,
+                ),
+            )
+            .fix(format!(
+                "fix its source, quit oxplow, run `{}` in the project, then start oxplow again",
+                crate::extension::extension_deploy::DEPLOY_FROM_OUTSIDE
+            ));
+            tracing::warn!(name = b.name, why = %held[b.name].iter().map(|d| d.render("")).collect::<Vec<_>>().join("; "), "{}", line.render(""));
             let why = held.get_mut(b.name).expect("checked above");
-            if !why.contains(&line) {
+            if !why.iter().any(|d| d.same_as(&line)) {
                 why.push(line);
             }
         }
@@ -957,14 +968,7 @@ impl ExtensionActivation {
             .extension_commands
             .stage(snapshot)
             .await
-            .map_err(|problems| {
-                TxError::Aborted(
-                    problems
-                        .into_iter()
-                        .map(|(owner, problem)| (owner, vec![problem]))
-                        .collect(),
-                )
-            })?;
+            .map_err(TxError::Aborted)?;
         let adapters =
             crate::extension::extension_runtime_adapters::PreparedRuntimeAdapters::prepare(
                 svc, snapshot,
@@ -1016,6 +1020,6 @@ impl ExtensionActivation {
 fn rejected(message: &str) -> TxError<VocabularyErrors> {
     TxError::Aborted(VocabularyErrors::from([(
         "<host>".into(),
-        vec![message.into()],
+        vec![Diagnostic::error("activation.rejected", message)],
     )]))
 }

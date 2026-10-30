@@ -59,7 +59,7 @@ pub struct Resolution {
     pub imports: Vec<ResolvedImport>,
     pub blocked: BTreeSet<String>,
     pub activation_order: Vec<String>,
-    pub diagnostics: Vec<Diagnostic>,
+    pub diagnostics: Vec<Finding>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, specta::Type)]
@@ -113,15 +113,12 @@ impl UnavailableReason {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, specta::Type)]
-#[serde(rename_all = "snake_case")]
-pub enum Severity {
-    Error,
-    Warning,
-}
+pub use oxplow_domain::diagnostic::Severity;
 
+/// A problem the resolution found, on the extension it belongs to: what
+/// `public_contracts` records as that extension's diagnostic.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, specta::Type)]
-pub struct Diagnostic {
+pub struct Finding {
     pub extension: String,
     pub binding: Option<String>,
     pub source: DeclaredAt,
@@ -972,7 +969,7 @@ fn diagnostic(
     code: &str,
     message: String,
 ) {
-    resolution.diagnostics.push(Diagnostic {
+    resolution.diagnostics.push(Finding {
         extension: candidate.name.clone(),
         binding,
         source,

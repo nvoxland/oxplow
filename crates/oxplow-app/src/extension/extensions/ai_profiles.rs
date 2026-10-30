@@ -4,6 +4,7 @@
 
 use oxplow_ai::capabilities::ModelFeature;
 use oxplow_ai::config::BuiltinRole;
+use oxplow_domain::diagnostic::Diagnostic;
 use serde::{Deserialize, Serialize};
 use serde_yaml::Value;
 
@@ -90,18 +91,24 @@ pub fn parse_ai_profiles(
     value: &Value,
     file: &str,
     manifest: &str,
-) -> (Vec<AiProfileDecl>, Vec<String>) {
+) -> (Vec<AiProfileDecl>, Vec<Diagnostic>) {
     let block = key_line(manifest, "ai_profiles");
     let Some(items) = value.as_sequence() else {
         return (
             Vec::new(),
-            vec![at(file, block, "`ai_profiles` must be a list")],
+            vec![at(
+                "ai_profile.not_a_list",
+                file,
+                block,
+                "`ai_profiles` must be a list",
+            )],
         );
     };
     if items.len() > MAX_PROFILES {
         return (
             Vec::new(),
             vec![at(
+                "ai_profile.too_many",
                 file,
                 block,
                 "`ai_profiles` may declare at most 128 profiles",
@@ -116,12 +123,18 @@ pub fn parse_ai_profiles(
         let raw = match serde_yaml::from_value::<AiProfileFile>(item.clone()) {
             Ok(raw) => raw,
             Err(e) => {
-                errors.push(at(file, line, fields_error(&e.to_string())));
+                errors.push(at(
+                    "ai_profile.invalid_fields",
+                    file,
+                    line,
+                    fields_error(&e.to_string()),
+                ));
                 continue;
             }
         };
         if raw.id.len() > 256 || !valid_id(&raw.id) {
             errors.push(at(
+                "ai_profile.invalid_id",
                 file,
                 line,
                 format!(
@@ -130,9 +143,15 @@ pub fn parse_ai_profiles(
                 ),
             ));
         } else if raw.description.len() > MAX_DESCRIPTION_BYTES {
-            errors.push(at(file, line, "ai profile description exceeds 4096 bytes"));
+            errors.push(at(
+                "ai_profile.description_too_long",
+                file,
+                line,
+                "ai profile description exceeds 4096 bytes",
+            ));
         } else if profiles.iter().any(|p| p.id == raw.id) {
             errors.push(at(
+                "ai_profile.duplicate_id",
                 file,
                 line,
                 format!("ai profile id `{}` is declared twice", raw.id),
@@ -185,9 +204,9 @@ mod tests {
 
     const MANIFEST: &str = "ai_profiles:\n  - id: review\n    description: Reviews.\n    fallback: summarize\n    features: [tool_calling]\n  - id: bad-id\n    description: x\n    fallback: main\n";
 
-    fn parse(manifest: &str) -> (Vec<AiProfileDecl>, Vec<String>) {
+    fn parse(manifest: &str) -> (Vec<AiProfileDecl>, Vec<Diagnostic>) {
         let doc: Value = serde_yaml::from_str(manifest).unwrap();
-        parse_ai_profiles(&doc["ai_profiles"], "x/extension.yaml", manifest)
+        parse_ai_profiles(&doc["ai_profiles"], "extension.yaml", manifest)
     }
 
     #[test]
@@ -204,7 +223,9 @@ mod tests {
         );
         assert_eq!(errors.len(), 1, "{errors:?}");
         assert!(
-            errors[0].starts_with("x/extension.yaml:6: ai profile id `bad-id`"),
+            errors[0]
+                .render("")
+                .starts_with("extension.yaml:6: ai profile id `bad-id`"),
             "{errors:?}"
         );
     }
@@ -234,7 +255,7 @@ mod tests {
             assert!(
                 errors
                     .iter()
-                    .any(|e| e.contains(says) && e.contains("extension.yaml:")),
+                    .any(|e| e.message.contains(says) && e.render("").contains("extension.yaml:")),
                 "{manifest}: {errors:?}"
             );
         }
@@ -242,6 +263,6 @@ mod tests {
             "ai_profiles:\n  - {{ id: a, description: \"{}\", fallback: main }}\n",
             "x".repeat(MAX_DESCRIPTION_BYTES + 1)
         );
-        assert!(parse(&long).1[0].contains("exceeds 4096 bytes"));
+        assert!(parse(&long).1[0].message.contains("exceeds 4096 bytes"));
     }
 }

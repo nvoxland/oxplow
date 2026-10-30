@@ -5,6 +5,7 @@
 
 use std::sync::Arc;
 
+use oxplow_domain::diagnostic::Diagnostic;
 use oxplow_domain::events::schema::{DeclaredEventType, EventSchemaRegistry, Upcast};
 use oxplow_domain::DomainError;
 use serde::{Deserialize, Serialize};
@@ -108,14 +109,20 @@ pub fn parse_event_types(
     file: &str,
     manifest: &str,
     read: &dyn Fn(&str) -> Option<String>,
-) -> (EventTypes, Vec<String>) {
+) -> (EventTypes, Vec<Diagnostic>) {
+    let rel = file.rsplit('/').next().unwrap_or(file);
     let block_line = key_line(manifest, "event_types");
     let block: EventTypesFile = match serde_yaml::from_value(value.clone()) {
         Ok(b) => b,
         Err(e) => {
             return (
                 EventTypes::default(),
-                vec![at(file, block_line, format!("event_types: {e}"))],
+                vec![at(
+                    "event_type.invalid",
+                    rel,
+                    block_line,
+                    format!("event_types: {e}"),
+                )],
             )
         }
     };
@@ -134,7 +141,12 @@ pub fn parse_event_types(
             Ok(()) => Some(window),
             Err(e) => {
                 let line = line_under(manifest, "event_types", "retention").or(block_line);
-                errors.push(at(file, line, format!("event_types.retention: {e}")));
+                errors.push(at(
+                    "event_type.retention",
+                    rel,
+                    line,
+                    format!("event_types.retention: {e}"),
+                ));
                 None
             }
         }
@@ -149,13 +161,18 @@ pub fn parse_event_types(
         let t: TypeFile = match serde_yaml::from_value(item) {
             Ok(t) => t,
             Err(e) => {
-                errors.push(at(file, line, format!("event type: {e}")));
+                errors.push(at(
+                    "event_type.invalid",
+                    rel,
+                    line,
+                    format!("event type: {e}"),
+                ));
                 continue;
             }
         };
         match decl_of(extension, t, file, line, read, &mut scratch) {
             Ok(d) => out.push(d),
-            Err(e) => errors.push(at(file, line, e)),
+            Err(e) => errors.push(at("event_type.invalid", rel, line, e)),
         }
     }
     (
@@ -197,7 +214,10 @@ fn decl_of(
         summary: t.summary,
         upcast: t.upcast,
         upcast_source,
-        declared_at: at(file, line, "").trim_end_matches(": ").to_string(),
+        declared_at: match line {
+            Some(n) => format!("{file}:{n}"),
+            None => file.to_string(),
+        },
     };
     scratch
         .register_declared(extension, decl.declared())
@@ -241,9 +261,12 @@ mod tests {
             .iter()
             .map(|(p, b)| (p.to_string(), b.to_string()))
             .collect();
-        parse_event_types("acme-pr", &doc["event_types"], FILE, manifest, &|rel| {
-            files.iter().find(|(p, _)| p == rel).map(|(_, b)| b.clone())
-        })
+        let (types, errors) =
+            parse_event_types("acme-pr", &doc["event_types"], FILE, manifest, &|rel| {
+                files.iter().find(|(p, _)| p == rel).map(|(_, b)| b.clone())
+            });
+        let root = FILE.trim_end_matches("/extension.yaml");
+        (types, errors.iter().map(|e| e.render(root)).collect())
     }
 
     const SCHEMA: &str = r#"{"type": "object", "required": ["number"], "properties": {"number": {"type": "integer"}}}"#;

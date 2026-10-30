@@ -13,9 +13,12 @@ pub(super) async fn event_example(
 ) {
     let shown = ex.shown;
     if let Err(e) = start_effects(host, ext).await {
-        report
-            .errors
-            .push(format!("{shown}:1: starting its effects: {e}"));
+        report.errors.push(error(
+            shown,
+            None,
+            "example.effects_failed",
+            format!("starting its effects: {e}"),
+        ));
         return;
     }
     let Some(view) = example_event(host, ex, report) else {
@@ -29,7 +32,12 @@ pub(super) async fn event_example(
     ) {
         Ok(env) => env,
         Err(e) => {
-            report.errors.push(format!("{shown}:1: the event: {e}"));
+            report.errors.push(error(
+                shown,
+                None,
+                "fixture.event",
+                format!("the event: {e}"),
+            ));
             return;
         }
     };
@@ -38,20 +46,19 @@ pub(super) async fn event_example(
     let seq = match host.svc.event_log_store.append(env).await {
         Ok(seq) => seq,
         Err(e) => {
-            report
-                .errors
-                .push(format!("{shown}:1: logging the event: {e}"));
+            report.errors.push(error(
+                shown,
+                None,
+                "example.event_failed",
+                format!("logging the event: {e}"),
+            ));
             return;
         }
     };
     let (effects, commands) = effect_outcome(host, seq, "=").await;
     let got = json!({ "effects": effects, "commands": commands });
     if let Some((path, want, got)) = compare(&ex.expect, &got) {
-        report.errors.push(format!(
-            "{shown}:1: the event led to {got} at `{path}`, the example expects {want} — fix: \
-             the effects, or the example's `expect` (`{{ effects: [{{ id, state }}], commands: \
-             [names] }}`)"
-        ));
+        report.errors.push(error(shown, ex.line("expect"), "fixture.compare", format!("the event led to {got} at `{path}`, the example expects {want}")).fix("the effects, or the example's `expect` (`{ effects: [{ id, state }], commands: [names] }`)").mismatch(path, want, got));
     }
 }
 
@@ -182,11 +189,7 @@ pub(super) async fn job_example(
         by_op("jobs.write", "enqueue"),
         by_op("jobs.read", "snapshot"),
     ) else {
-        report.errors.push(format!(
-            "{shown}:1: job `{id}`: the extension declares no command over \
-             `jobs.write/enqueue` and `jobs.read/snapshot` to run it with — fix: declare both \
-             (`scope: jobs.write, op: enqueue`; `scope: jobs.read, op: snapshot`)"
-        ));
+        report.errors.push(error(shown, None, "example.job_needs_command", format!("job `{id}`: the extension declares no command over `jobs.write/enqueue` and `jobs.read/snapshot` to run it with")).fix("declare both (`scope: jobs.write, op: enqueue`; `scope: jobs.read, op: snapshot`)"));
         return;
     };
     let delivers = ["effects", "commands", "pages"]
@@ -194,9 +197,12 @@ pub(super) async fn job_example(
         .any(|k| ex.expect.get(k).is_some());
     if delivers {
         if let Err(e) = start_effects(host, ext).await {
-            report
-                .errors
-                .push(format!("{shown}:1: starting its effects: {e}"));
+            report.errors.push(error(
+                shown,
+                None,
+                "example.effects_failed",
+                format!("starting its effects: {e}"),
+            ));
             return;
         }
     }
@@ -233,26 +239,37 @@ pub(super) async fn job_example(
     let queued = match host.svc.commands.run(&asker, &enqueue, input, false).await {
         Ok(out) => out.result,
         Err(e) => {
-            report
-                .errors
-                .push(format!("{shown}:1: job `{id}` wasn't recorded: {e}"));
+            report.errors.push(error(
+                shown,
+                None,
+                "example.job_failed",
+                format!("job `{id}` wasn't recorded: {e}"),
+            ));
             return;
         }
     };
     let Some(job) = queued.get("jobRun").and_then(Value::as_str).and_then(|r| {
         oxplow_domain::uri::build::id_of(r, oxplow_domain::uri::resources::JOB_RUN).ok()
     }) else {
-        report
-            .errors
-            .push(format!("{shown}:1: job `{id}`: {queued} names no job"));
+        report.errors.push(error(
+            shown,
+            None,
+            "example.job_failed",
+            format!("job `{id}`: {queued} names no job"),
+        ));
         return;
     };
     if ex.when.get("cancel") == Some(&json!(true)) {
         let Some(cancel) = by_op("jobs.write", "cancel") else {
-            report.errors.push(format!(
-                "{shown}:1: job `{id}`: `cancel: true` needs a command over `jobs.write/cancel` \
-                 — fix: declare one (`scope: jobs.write, op: cancel`)"
-            ));
+            report.errors.push(
+                error(
+                    shown,
+                    None,
+                    "example.job_cancel_needs_command",
+                    format!("job `{id}`: `cancel: true` needs a command over `jobs.write/cancel`"),
+                )
+                .fix("declare one (`scope: jobs.write, op: cancel`)"),
+            );
             return;
         };
         let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
@@ -291,9 +308,12 @@ pub(super) async fn job_example(
             )
             .await
         {
-            report
-                .errors
-                .push(format!("{shown}:1: cancelling job `{id}`: {e}"));
+            report.errors.push(error(
+                shown,
+                None,
+                "example.job_failed",
+                format!("cancelling job `{id}`: {e}"),
+            ));
             return;
         }
     }
@@ -320,9 +340,12 @@ pub(super) async fn job_example(
             Ok(s) if tokio::time::Instant::now() >= deadline => break s,
             Ok(_) => tokio::time::sleep(std::time::Duration::from_millis(50)).await,
             Err(e) => {
-                report
-                    .errors
-                    .push(format!("{shown}:1: job `{id}`'s snapshot: {e}"));
+                report.errors.push(error(
+                    shown,
+                    None,
+                    "example.job_failed",
+                    format!("job `{id}`'s snapshot: {e}"),
+                ));
                 return;
             }
         }
@@ -398,11 +421,7 @@ pub(super) async fn job_example(
     }
     let got = ended;
     if let Some((path, want, got)) = compare(&ex.expect, &got) {
-        report.errors.push(format!(
-            "{shown}:1: job `{id}` ended {got} at `{path}`, the example expects {want} — fix: \
-             the job's request, or the example's `expect` (`{{ state, result?, text?, toolCalls?, \
-             output?, effects?, commands?, pages? }}`)"
-        ));
+        report.errors.push(error(shown, ex.line("expect"), "fixture.compare", format!("job `{id}` ended {got} at `{path}`, the example expects {want}")).fix("the job's request, or the example's `expect` (`{ state, result?, text?, toolCalls?, output?, effects?, commands?, pages? }`)").mismatch(path, want, got));
     }
 }
 
@@ -420,7 +439,11 @@ pub(super) async fn command_run(
     host.current().await;
     let actor = match step_actor(&ex.when) {
         Ok(actor) => actor,
-        Err(e) => return report.errors.push(format!("{shown}:1: {e}")),
+        Err(e) => {
+            return report
+                .errors
+                .push(error(shown, None, "example.failed", e.to_string()))
+        }
     };
     let head = host
         .svc
@@ -492,11 +515,7 @@ pub(super) async fn command_run(
     let ran = composed;
     got["commands"] = json!(ran);
     if let Some((path, want, at)) = compare(&ex.expect, &got) {
-        report.errors.push(format!(
-            "{shown}:1: command `{command}` gave {at} at `{path}`, the example expects {want} — \
-             fix: the command's input or the steps before it, or the example's `expect` (`{{ ok, \
-             result?, commands? }}` or `{{ ok: false, refused }}`)"
-        ));
+        report.errors.push(error(shown, ex.line("expect"), "fixture.compare", format!("command `{command}` gave {at} at `{path}`, the example expects {want}")).fix("the command's input or the steps before it, or the example's `expect` (`{ ok, result?, commands? }` or `{ ok: false, refused }`)").mismatch(path, want, at));
     }
 }
 
@@ -513,24 +532,40 @@ pub(super) async fn advisory_example(
 ) {
     let shown = ex.shown;
     let Some(advisory) = ext.advisories.iter().find(|a| a.id == id) else {
-        return report.errors.push(format!(
-            "{shown}:1: `{id}` isn't one of the extension's advisories — fix: the example's \
-             `when.advisory`"
-        ));
+        return report.errors.push(
+            error(
+                shown,
+                None,
+                "fixture.unknown",
+                format!("`{id}` isn't one of the extension's advisories"),
+            )
+            .fix("the example's `when.advisory`"),
+        );
     };
     let thread = match ex.when.get("thread").and_then(Value::as_str) {
         None => oxplow_domain::ThreadId::new(1),
         Some(t) => match oxplow_domain::ThreadId::try_from_str(t) {
             Some(thread) => thread,
             None => {
-                return report.errors.push(format!(
-                    "{shown}:1: `when.thread: {t}` isn't a thread — fix: `thr1`"
-                ))
+                return report.errors.push(
+                    error(
+                        shown,
+                        None,
+                        "fixture.unknown",
+                        format!("`when.thread: {t}` isn't a thread"),
+                    )
+                    .fix("`thr1`"),
+                )
             }
         },
     };
     if let Err(e) = host.svc.streams.ensure_primary().await {
-        return report.errors.push(format!("{shown}:1: its thread: {e}"));
+        return report.errors.push(error(
+            shown,
+            None,
+            "example.thread_failed",
+            format!("its thread: {e}"),
+        ));
     }
     host.current().await;
     let hits =
@@ -543,10 +578,16 @@ pub(super) async fn advisory_example(
         .collect();
     let got = json!({ "lines": lines });
     if let Some((path, want, at)) = compare(&ex.expect, &got) {
-        report.errors.push(format!(
-            "{shown}:1: advisory `{id}` said {at} at `{path}`, the example expects {want} — fix: \
-             its query, or the example's `given` and `expect` (`{{ lines: [..] }}`)"
-        ));
+        report.errors.push(
+            error(
+                shown,
+                None,
+                "fixture.compare",
+                format!("advisory `{id}` said {at} at `{path}`, the example expects {want}"),
+            )
+            .fix("its query, or the example's `given` and `expect` (`{ lines: [..] }`)")
+            .mismatch(path, want, at),
+        );
     }
 }
 
@@ -574,12 +615,20 @@ pub(super) async fn sql_example(host: &Host, ex: &Example<'_>, sql: &str, report
         .and_then(|text| oxplow_app::pages::schema::parse_inline_page(&text));
     let page = match page {
         Ok(page) => page,
-        Err(e) => return report.errors.push(format!("{shown}:1: the query: {e}")),
+        Err(e) => {
+            return report.errors.push(error(
+                shown,
+                None,
+                "example.query_failed",
+                format!("the query: {e}"),
+            ))
+        }
     };
     let Some(ctx) = view_context(host, ex, report).await else {
         return;
     };
     let at = PageAt {
+        ex,
         host,
         shown,
         page: "query",
@@ -638,11 +687,7 @@ pub(super) async fn command_example(
         }
     };
     if let Some(p) = problem {
-        report.errors.push(format!(
-            "{shown}:1: command `{}` {p} — fix: its script, or the example's `expect` \
-             (`{{ commands: [names], result: {{ … }} }}` or `{{ refused: <part of the reason> }}`)",
-            cmd.name
-        ));
+        report.errors.push(error(shown, ex.line("expect"), "example.command", format!("command `{}` {p}", cmd.name)).fix("its script, or the example's `expect` (`{ commands: [names], result: { … } }` or `{ refused: <part of the reason> }`)"));
     }
 }
 
@@ -661,11 +706,18 @@ pub(super) async fn effect_example(
     use oxplow_app::effects::{dry_run, reacts_to};
     let (shown, example) = (ex.shown, ex.name);
     let Some(decl) = ext.effects.iter().find(|e| e.id == id) else {
-        report.errors.push(format!(
-            "{shown}:1: example `{example}` names effect `{id}`, which `{}` doesn't declare — \
-             fix: the effect's `id`",
-            ext.name
-        ));
+        report.errors.push(
+            error(
+                shown,
+                None,
+                "fixture.unknown",
+                format!(
+                    "example `{example}` names effect `{id}`, which `{}` doesn't declare",
+                    ext.name
+                ),
+            )
+            .fix("the effect's `id`"),
+        );
         return;
     };
     let Some(event) = example_event(host, ex, report) else {
@@ -679,16 +731,11 @@ pub(super) async fn effect_example(
         .and_then(Value::as_bool)
         .unwrap_or(true);
     if reacts != want_reacts {
-        report.errors.push(format!(
-            "{shown}:1: effect `{id}` {} a `{event_type}` event like this one, the example \
-             expects it {} — fix: its `on`/`where`, or the example's `expect`",
-            if reacts {
+        report.errors.push(error(shown, None, "example.effect_trigger", format!("effect `{id}` {} a `{event_type}` event like this one, the example expects it {}", if reacts {
                 "reacts to"
             } else {
                 "doesn't react to"
-            },
-            if want_reacts { "to react" } else { "not to" },
-        ));
+            }, if want_reacts { "to react" } else { "not to" })).fix("its `on`/`where`, or the example's `expect`"));
         return;
     }
     if !reacts {
@@ -708,10 +755,7 @@ pub(super) async fn effect_example(
     )
     .await;
     if let Some(p) = reaction_problem(&ex.expect, decided) {
-        report.errors.push(format!(
-            "{shown}:1: effect `{id}` {p} — fix: its script, or the example's `expect` \
-             (`{{ commands: [names] }}`, `{{ skip: <part of the reason> }}` or `{{ reacts: false }}`)"
-        ));
+        report.errors.push(error(shown, ex.line("expect"), "example.effect", format!("effect `{id}` {p}")).fix("its script, or the example's `expect` (`{ commands: [names] }`, `{ skip: <part of the reason> }` or `{ reacts: false }`)"));
     }
 }
 
@@ -751,13 +795,15 @@ pub(super) fn example_event(
     match EventView::fixture(&given, &host.svc.vocabulary.current()) {
         Ok(view) => Some(view),
         Err(e) => {
-            report.errors.push(format!(
-                "{}:1: example `{}`: {} — fix: the fixture's `event` \
-                 (extensions reference: the event envelope)",
-                ex.shown,
-                ex.name,
-                e.message()
-            ));
+            report.errors.push(
+                error(
+                    ex.shown,
+                    None,
+                    "fixture.event",
+                    format!("example `{}`: {}", ex.name, e.message()),
+                )
+                .fix("the fixture's `event` (extensions reference: the event envelope)"),
+            );
             None
         }
     }
@@ -783,12 +829,7 @@ pub(super) async fn policy_example(
         .filter(|d| d.id == id && d.capability == EFFORT_POLICY)
         .find_map(|d| d.script.as_deref().map(|s| (d, s)))
     else {
-        report.errors.push(format!(
-            "{shown}:1: example `{example}` names effort policy `{id}`, which `{}` doesn't \
-             declare as a script — fix: an `implementations:` entry with `capability: \
-             effort_policy`, `id: {id}` and a `.star` entry",
-            ext.name
-        ));
+        report.errors.push(error(shown, None, "fixture.unknown", format!("example `{example}` names effort policy `{id}`, which `{}` doesn't declare as a script", ext.name)).fix(format!("an `implementations:` entry with `capability: effort_policy`, `id: {id}` and a `.star` entry")));
         return;
     };
     let Some(event) = example_event(host, ex, report) else {
@@ -821,10 +862,7 @@ pub(super) async fn policy_example(
         Reaction::Skip(_) => Ok(reaction),
     });
     if let Some(p) = reaction_problem(&ex.expect, decided) {
-        report.errors.push(format!(
-            "{shown}:1: effort policy `{id}` {p} — fix: its script, or the example's `expect` \
-             (`{{ commands: [names] }}` or `{{ skip: <part of the reason> | $any }}`)"
-        ));
+        report.errors.push(error(shown, ex.line("expect"), "example.effort_policy", format!("effort policy `{id}` {p}")).fix("its script, or the example's `expect` (`{ commands: [names] }` or `{ skip: <part of the reason> | $any }`)"));
     }
 }
 
@@ -852,11 +890,18 @@ pub(super) fn event_type_example(
         .map(|v| v as u32)
         .or_else(|| registry.latest(event_type))
     else {
-        report.errors.push(format!(
-            "{shown}:1: example `{}` names event type `{event_type}`, which `{}` doesn't declare \
-             — fix: the type, or its `event_types:`",
-            ex.name, ext.name
-        ));
+        report.errors.push(
+            error(
+                shown,
+                None,
+                "fixture.unknown",
+                format!(
+                    "example `{}` names event type `{event_type}`, which `{}` doesn't declare",
+                    ex.name, ext.name
+                ),
+            )
+            .fix("the type, or its `event_types:`"),
+        );
         return;
     };
     let payload = ex.when.get("payload").cloned().unwrap_or_else(|| json!({}));
@@ -867,28 +912,38 @@ pub(super) fn event_type_example(
         .and_then(Value::as_bool)
         .unwrap_or(true);
     if valid.is_ok() != want_valid {
-        report.errors.push(format!(
-            "{shown}:1: `{event_type}@{v}` {} this payload{}, the example expects {} — fix: its \
-             schema, or the example",
-            if valid.is_ok() { "accepts" } else { "refuses" },
-            valid.err().map(|e| format!(" ({e})")).unwrap_or_default(),
-            if want_valid { "it valid" } else { "it refused" },
-        ));
+        report.errors.push(
+            error(
+                shown,
+                None,
+                "example.event_payload",
+                format!(
+                    "`{event_type}@{v}` {} this payload{}, the example expects {}",
+                    if valid.is_ok() { "accepts" } else { "refuses" },
+                    valid.err().map(|e| format!(" ({e})")).unwrap_or_default(),
+                    if want_valid { "it valid" } else { "it refused" }
+                ),
+            )
+            .fix("its schema, or the example"),
+        );
         return;
     }
     if let Some(want) = ex.expect.get("upcast") {
         match registry.upcast_to_latest(event_type, v, payload) {
             Ok((_, got)) => {
                 if let Some((path, want, got)) = compare(want, &got) {
-                    report.errors.push(format!(
-                        "{shown}:1: `{event_type}@{v}` upcasts to {got} at `{path}`, the example \
-                         expects {want} — fix: its upcast, or the example's `expect.upcast`"
-                    ));
+                    report.errors.push(error(shown, ex.line("expect"), "fixture.compare", format!("`{event_type}@{v}` upcasts to {got} at `{path}`, the example expects {want}")).fix("its upcast, or the example's `expect.upcast`").mismatch(path, want, got));
                 }
             }
-            Err(e) => report.errors.push(format!(
-                "{shown}:1: `{event_type}@{v}` doesn't upcast: {e} — fix: its upcast"
-            )),
+            Err(e) => report.errors.push(
+                error(
+                    shown,
+                    None,
+                    "example.upcast_failed",
+                    format!("`{event_type}@{v}` doesn't upcast: {e}"),
+                )
+                .fix("its upcast"),
+            ),
         }
     }
 }
@@ -908,10 +963,15 @@ pub(super) fn wikilink_example(
     }
     let got = oxplow_domain::uri::canonical_wikilink(&resources, link).map(|u| u.to_string());
     if let Some((path, want, got)) = compare(&ex.expect, &json!({ "uri": got })) {
-        report.errors.push(format!(
-            "{}:1: `[[{link}]]` names {got} at `{path}`, the example expects {want} — fix: the \
-             resource's `params`/`wikilink`, or the example's `expect`",
-            ex.shown
-        ));
+        report.errors.push(
+            error(
+                ex.shown,
+                None,
+                "fixture.compare",
+                format!("`[[{link}]]` names {got} at `{path}`, the example expects {want}"),
+            )
+            .fix("the resource's `params`/`wikilink`, or the example's `expect`")
+            .mismatch(path, want, got),
+        );
     }
 }

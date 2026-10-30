@@ -44,6 +44,7 @@ use crate::pages::spec::{
 };
 use manifest_v2::{at, entry_line, item_lines, key_line, line_under, ManifestV2};
 pub use manifest_v2::{Intent, IntentExample};
+pub use oxplow_domain::diagnostic::{relative_to, Diagnostic, Severity};
 pub use oxplow_domain::permissions::Permissions;
 
 /// Where an extension's source is by default, relative to a checkout
@@ -345,14 +346,23 @@ pub struct Extension {
     /// `namespace:`, else the name with `-` → `_`.
     pub namespace: String,
     pub description: String,
-    /// Repo-relative path of the extension folder.
+    /// The folder it was read from: repo-relative for a source, the
+    /// deployment's folder for a deployed copy, `bundled:<name>` for a
+    /// shipped one.
     pub path: String,
+    /// The repo-relative source folder a person edits, when there is one
+    /// (a deployed copy's source); `None` when `path` is that folder or
+    /// there is no source here (a shipped copy).
+    #[serde(default)]
+    pub source: Option<String>,
     /// Problems found while loading; empty when healthy. A page that
-    /// failed to load is listed here and missing from `page_files`.
-    pub errors: Vec<String>,
+    /// failed to load is listed here and missing from `page_files`. Each
+    /// names its file relative to the extension's folder: show it with
+    /// [`Extension::shown`].
+    pub errors: Vec<Diagnostic>,
     /// Things worth fixing that don't stop it loading: an intent with no
     /// examples.
-    pub warnings: Vec<String>,
+    pub warnings: Vec<Diagnostic>,
     /// The manifest version it was read as (`manifest:`).
     pub manifest_version: u32,
     /// Why it exists (required; `None` only when the manifest didn't load).
@@ -454,7 +464,42 @@ pub struct Extension {
     pub shared: bool,
 }
 
+/// Diagnostics as a dataset lists them (`v_extension.errors`): each one's
+/// fields, and `shown`, the line a person reads — rendered under `root`,
+/// the folder they edit.
+pub fn listed(root: &str, diagnostics: &[Diagnostic]) -> serde_json::Value {
+    serde_json::Value::Array(
+        diagnostics
+            .iter()
+            .map(|d| {
+                let mut v = serde_json::to_value(d).unwrap_or_default();
+                if let Some(o) = v.as_object_mut() {
+                    o.insert("shown".into(), serde_json::Value::String(d.render(root)));
+                }
+                v
+            })
+            .collect(),
+    )
+}
+
 impl Extension {
+    /// The folder a person edits, that its diagnostics are shown under:
+    /// the source when it was read from a deployed copy, else where it was
+    /// read from.
+    pub fn root(&self) -> &str {
+        self.source.as_deref().unwrap_or(&self.path)
+    }
+
+    /// One of its diagnostics as the line a person reads.
+    pub fn shown(&self, diagnostic: &Diagnostic) -> String {
+        diagnostic.render(self.root())
+    }
+
+    /// Its `diagnostics` as a dataset lists them ([`listed`]).
+    pub fn listed(&self, diagnostics: &[Diagnostic]) -> serde_json::Value {
+        listed(self.root(), diagnostics)
+    }
+
     /// Its declared configuration with no project or personal override: what a
     /// check, which reads no stored settings, compiles `config()` reads against.
     pub fn default_configuration(&self) -> Option<serde_json::Value> {
@@ -598,10 +643,12 @@ fn shipped(project: &Path, b: &crate::bundled_extensions::BundledExtension) -> E
             }
         }
         Err(e) => Extension {
-            errors: vec![format!(
-                "{}: the copy that ships with oxplow couldn't be written to {}: {e}",
-                b.name,
-                crate::extension::extension_store::STORE_DIR
+            errors: vec![Diagnostic::error(
+                "activation.shipped_unwritable",
+                format!(
+                    "the copy that ships with oxplow couldn't be written to {}: {e}",
+                    crate::extension::extension_store::STORE_DIR
+                ),
             )],
             ..empty_extension(b.name, b.name, "bundled")
         },
@@ -609,11 +656,14 @@ fn shipped(project: &Path, b: &crate::bundled_extensions::BundledExtension) -> E
 }
 
 /// The warning on a shipped extension whose name a project folder also has.
-fn ignored_folder(folder: &str, name: &str) -> String {
-    format!(
-        "{folder}: ignored — `{name}` ships with oxplow, which runs the copy built into it; \
-         give the folder another name"
+fn ignored_folder(folder: &str, name: &str) -> Diagnostic {
+    Diagnostic::warning(
+        "manifest.ignored_folder",
+        format!(
+            "{folder}: ignored — `{name}` ships with oxplow, which runs the copy built into it"
+        ),
     )
+    .fix("give the folder another name")
 }
 
 /// The extension named `name` in `extensions`, a load's list. A load holds
@@ -749,16 +799,9 @@ fn locate(ext: &mut Extension, project: &Path, settings: &oxplow_config::Extensi
     // A shipped copy has no source here: a folder with its name is ignored.
     let shipped = matches!(ext.deployment, Deployment::Shipped { .. });
     let source = (!shipped && dir.is_dir()).then(|| shown(project, &dir));
-    // What it reports names the source files, the ones to edit, not the
-    // copy that runs.
-    if let Some(source) = source.as_ref().filter(|s| **s != ext.path) {
-        let (from, to) = (format!("{}/", ext.path), format!("{source}/"));
-        for message in ext.errors.iter_mut().chain(ext.warnings.iter_mut()) {
-            if let Some(rest) = message.strip_prefix(&from) {
-                *message = format!("{to}{rest}");
-            }
-        }
-    }
+    // What it reports is shown under the source folder, the one to edit,
+    // not the copy that runs.
+    ext.source = source.clone().filter(|s| *s != ext.path);
     for page in &mut ext.page_files {
         let file = page.origin.running.rsplit('/').next().unwrap_or_default();
         let at = source.as_ref().map(|dir| format!("{dir}/pages/{file}"));
@@ -809,10 +852,13 @@ fn refuse_requires_cycles(out: &mut [Extension]) {
                 i += 1;
             }
             if back {
-                ext.errors.push(format!(
-                    "{}/extension.yaml: it requires `{next}`, which requires it back",
-                    ext.path
-                ));
+                ext.errors.push(
+                    Diagnostic::error(
+                        "requires.cycle",
+                        format!("it requires `{next}`, which requires it back"),
+                    )
+                    .at("extension.yaml", None),
+                );
             }
         }
     }
@@ -889,23 +935,34 @@ fn warn_unplaced_mounts(out: &mut [Extension]) {
         })
         .collect();
     for ext in out.iter_mut().filter(|e| e.enabled) {
-        let warnings: Vec<String> = ext
+        let warnings: Vec<Diagnostic> = ext
             .ui
             .page_slots
             .iter()
             .filter_map(|m| match slots.get(&m.host) {
-                None => Some(format!(
-                    "{}/extension.yaml: slot `{}.{}` mounts `{}` on page `{}`, which isn't loaded; it shows nowhere",
-                    ext.path, m.host, m.slot, m.page, m.host
-                )),
-                Some(names) if !names.contains(&m.slot) => Some(format!(
-                    "{}/extension.yaml: page `{}` has no slot `{}` (its slots: {}); `{}` shows nowhere",
-                    ext.path,
-                    m.host,
-                    m.slot,
-                    if names.is_empty() { "none".to_string() } else { names.join(", ") },
-                    m.page
-                )),
+                None => Some(
+                    Diagnostic::warning(
+                        "slot.host_not_loaded",
+                        format!(
+                            "slot `{}.{}` mounts `{}` on page `{}`, which isn't loaded; it shows nowhere",
+                            m.host, m.slot, m.page, m.host
+                        ),
+                    )
+                    .at("extension.yaml", None),
+                ),
+                Some(names) if !names.contains(&m.slot) => Some(
+                    Diagnostic::warning(
+                        "slot.unknown",
+                        format!(
+                            "page `{}` has no slot `{}` (its slots: {}); `{}` shows nowhere",
+                            m.host,
+                            m.slot,
+                            if names.is_empty() { "none".to_string() } else { names.join(", ") },
+                            m.page
+                        ),
+                    )
+                    .at("extension.yaml", None),
+                ),
                 Some(_) => None,
             })
             .collect();
@@ -923,7 +980,8 @@ fn warn_unknown_see_also(out: &mut [Extension]) {
         .flat_map(|e| e.page_files.iter().map(|p| p.id.clone()))
         .collect();
     for ext in out.iter_mut().filter(|e| e.enabled) {
-        let warnings: Vec<String> = ext
+        let root = ext.path.clone();
+        let warnings: Vec<Diagnostic> = ext
             .page_files
             .iter()
             .flat_map(|p| {
@@ -931,10 +989,18 @@ fn warn_unknown_see_also(out: &mut [Extension]) {
                     crate::pages::schema::SeeAlsoDecl::Page { page: to, .. }
                         if !known.contains(to) =>
                     {
-                        Some(format!(
-                            "{}: see_also page `{to}` isn't loaded; the link shows nowhere",
-                            p.origin.running
-                        ))
+                        Some(
+                            Diagnostic::warning(
+                                "page.see_also_not_loaded",
+                                format!(
+                                    "see_also page `{to}` isn't loaded; the link shows nowhere"
+                                ),
+                            )
+                            .at(
+                                oxplow_domain::diagnostic::relative_to(&root, &p.origin.running),
+                                None,
+                            ),
+                        )
                     }
                     _ => None,
                 })
@@ -1236,7 +1302,9 @@ pub struct ExtensionChange {
     /// What the change does; `None` for a removed extension.
     pub impact: Option<crate::extension::extension_impact::ImpactReport>,
     /// What's wrong with the later version.
-    pub errors: Vec<String>,
+    pub errors: Vec<Diagnostic>,
+    /// The folder its diagnostics are shown under ([`Extension::root`]).
+    pub root: String,
 }
 
 /// The extensions under `.oxplow/extensions/` whose files differ between
@@ -1276,6 +1344,7 @@ pub async fn extension_changes_between(
                     change: crate::extension::extension_impact::Change::Removed,
                     impact: None,
                     errors: Vec::new(),
+                    root: String::new(),
                 });
             }
             continue;
@@ -1306,6 +1375,7 @@ pub async fn extension_changes_between(
             },
             name,
             impact: Some(impact),
+            root: side.extension.root().to_string(),
             errors: side.extension.errors,
         });
     }
@@ -1384,12 +1454,20 @@ pub struct ForeignSubscription {
 
 impl ForeignSubscription {
     /// What loading says: not an error — the owner may not be here yet.
-    fn warning(&self) -> String {
-        format!(
-            "{}: {} reacts to `{}`, another extension's event type; it runs once an enabled \
-             extension registers that type (`v_event_type`)",
-            self.declared_at, self.by, self.event_type
+    fn warning(&self, root: &str) -> Diagnostic {
+        let (file, line) = match self.declared_at.rsplit_once(':') {
+            Some((f, n)) if n.parse::<usize>().is_ok() => (f, n.parse().ok()),
+            _ => (self.declared_at.as_str(), None),
+        };
+        Diagnostic::warning(
+            "event_type.foreign_subscription",
+            format!(
+                "{} reacts to `{}`, another extension's event type; it runs once an enabled \
+                 extension registers that type (`v_event_type`)",
+                self.by, self.event_type
+            ),
         )
+        .at(oxplow_domain::diagnostic::relative_to(root, file), line)
     }
 }
 
@@ -1428,6 +1506,7 @@ pub(crate) fn empty_extension(name: &str, path: &str, origin: &str) -> Extension
         namespace: oxplow_domain::contribution::extension_namespace(name),
         description: String::new(),
         path: path.to_string(),
+        source: None,
         errors: Vec::new(),
         warnings: Vec::new(),
         manifest_version: manifest_v2::CURRENT,
@@ -1474,14 +1553,21 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
     let mut ext = empty_extension(name, rel, origin);
 
     let Some(manifest) = files.read("extension.yaml") else {
-        ext.errors.push(format!("{rel}: missing extension.yaml"));
+        ext.errors.push(
+            Diagnostic::error("manifest.missing", "missing extension.yaml")
+                .at("extension.yaml", None),
+        );
         return ext;
     };
+    // `file` is what declared-at places carry (the folder it was read
+    // from); a diagnostic's file is `man`, relative to that folder.
     let file = format!("{rel}/extension.yaml");
+    let man = "extension.yaml";
     // `manifest:` says which shape to read; this oxplow reads one.
     if key_line(&manifest, "manifest").is_none() {
         ext.errors.push(at(
-            &file,
+            "manifest.missing_version",
+            man,
             Some(1),
             format!(
                 "`manifest: {}` is required: it says which shape the file is in",
@@ -1494,15 +1580,19 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
         serde_yaml::from_str::<ManifestV2>(&manifest).map_err(|e| e.to_string());
     let m = match parsed {
         Ok(m) if m.name != name => {
-            ext.errors.push(format!(
-                "{file}: name `{}` must match its folder `{name}`",
-                m.name
-            ));
+            ext.errors.push(
+                Diagnostic::error(
+                    "manifest.name_mismatch",
+                    format!("name `{}` must match its folder `{name}`", m.name),
+                )
+                .at(man, None),
+            );
             return ext;
         }
         Ok(m) => m,
         Err(e) => {
-            ext.errors.push(format!("{file}: {e}"));
+            ext.errors
+                .push(Diagnostic::error("manifest.parse", e).at(man, None));
             return ext;
         }
     };
@@ -1514,17 +1604,27 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
         m.version.clone()
     };
     if origin != "bundled" && !oxplow_domain::contribution::valid_extension_name(name) {
-        ext.errors.push(format!(
-            "{file}: the name `{name}` must be lowercase letters, digits and single dashes, \
-             starting with a letter (rename the folder)"
-        ));
+        ext.errors.push(
+            Diagnostic::error(
+                "manifest.invalid_name",
+                format!(
+                    "the name `{name}` must be lowercase letters, digits and single dashes, \
+                     starting with a letter"
+                ),
+            )
+            .at(man, None)
+            .fix("rename the folder"),
+        );
     }
     if let Some(ns) = &m.namespace {
         match crate::extension::extension_commands::check_namespace(ns, origin == "bundled") {
             Ok(()) => ext.namespace = ns.clone(),
-            Err(e) => ext
-                .errors
-                .push(at(&file, key_line(&manifest, "namespace"), e)),
+            Err(e) => ext.errors.push(at(
+                "manifest.invalid_namespace",
+                man,
+                key_line(&manifest, "namespace"),
+                e,
+            )),
         }
     }
     for required in &m.requires {
@@ -1537,21 +1637,22 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
         };
         match problem {
             Some(p) => ext.errors.push(at(
-                &file,
+                "manifest.invalid_requires",
+                man,
                 key_line(&manifest, "requires"),
                 format!("requires: {p}"),
             )),
             None => ext.requires.push(required.clone()),
         }
     }
-    let (build, errors) = manifest_v2::build_of(&m, &file, &manifest);
+    let (build, errors) = manifest_v2::build_of(&m, man, &manifest);
     ext.build = build;
     ext.errors.extend(errors);
-    ext.intent = manifest_v2::intent_of(&m, &file, &manifest).0;
+    ext.intent = manifest_v2::intent_of(&m, man, &manifest).0;
     ext.description = m.description.clone();
-    ext.configuration = manifest_v2::configuration_of(&m, &file, &manifest).0;
-    public_contracts::load(&mut ext, &m, &manifest, &file);
-    let (errors, warnings) = manifest_v2::check(&m, &file, &manifest);
+    ext.configuration = manifest_v2::configuration_of(&m, man, &manifest).0;
+    public_contracts::load(&mut ext, &m, &manifest, man);
+    let (errors, warnings) = manifest_v2::check(&m, man, &manifest);
     if !errors.is_empty()
         && (!m.exports.is_empty() || !m.imports.is_empty() || !m.import_guards.is_empty())
     {
@@ -1603,13 +1704,13 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             ext.errors.extend(errors);
         }
         if let Some(v) = m.skills.as_ref() {
-            let (declared, errors) = skills::parse_skills(v, &file, &manifest, files);
+            let (declared, errors) = skills::parse_skills(v, man, &manifest, files);
             ext.skills = declared;
             ext.errors.extend(errors);
         }
         if let Some(v) = m.implementations.as_ref() {
             let (declared, errors) =
-                implementations::parse_implementations(v, &file, &manifest, &|rel| files.read(rel));
+                implementations::parse_implementations(v, man, &manifest, &|rel| files.read(rel));
             // An implementation owns the skills it lists: they must be its
             // extension's.
             for d in &declared {
@@ -1618,11 +1719,15 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                     .iter()
                     .filter(|s| !ext.skills.iter().any(|k| &k.name == *s))
                 {
-                    ext.errors.push(at(
-                        &file,
-                        entry_line(&manifest, "implementations", "id", &d.id),
-                        format!("implementation `{}` lists skill `{skill}`, which `skills:` doesn't declare", d.id),
-                    ));
+                    ext.errors.push(
+                        at(
+                            "implementation.unknown_skill",
+                            man,
+                            entry_line(&manifest, "implementations", "id", &d.id),
+                            format!("implementation `{}` lists skill `{skill}`, which `skills:` doesn't declare", d.id),
+                        )
+                        .contribution(format!("{name}/{}", d.id)),
+                    );
                 }
             }
             ext.implementations = declared;
@@ -1646,7 +1751,12 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             let lines = item_lines(&manifest, "collectors");
             ext.errors.extend(errors.into_iter().map(|(i, e)| {
                 let at_entry = i.and_then(|i| lines.get(i).copied());
-                at(&file, at_entry.or(line), format!("collector: {e}"))
+                at(
+                    "collector.invalid",
+                    man,
+                    at_entry.or(line),
+                    format!("collector: {e}"),
+                )
             }));
             // A script or program the collector runs must be in the folder,
             // and a Starlark script must parse and define `transform`; a
@@ -1659,14 +1769,18 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                     continue;
                 }
                 match c.entry.as_deref().map(|entry| (entry, files.read(entry))) {
-                    Some((entry, None)) => ext.errors.push(at(
-                        &file,
-                        c_line,
-                        format!(
-                            "collector `{}`: entry `{entry}` isn't in the extension",
-                            c.id
-                        ),
-                    )),
+                    Some((entry, None)) => ext.errors.push(
+                        at(
+                            "collector.entry_missing",
+                            man,
+                            c_line,
+                            format!(
+                                "collector `{}`: entry `{entry}` isn't in the extension",
+                                c.id
+                            ),
+                        )
+                        .contribution(format!("{name}/{}", c.id)),
+                    ),
                     Some((entry, Some(script)))
                         if c.runtime == oxplow_config::collectors::CollectorRuntime::Starlark =>
                     {
@@ -1677,11 +1791,15 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                             });
                         match checked {
                             Ok(()) => ext.collectors.push(c),
-                            Err(e) => ext.errors.push(at(
-                                &file,
-                                c_line,
-                                format!("collector `{}`: `{entry}` {e}", c.id),
-                            )),
+                            Err(e) => ext.errors.push(
+                                at(
+                                    "collector.script_invalid",
+                                    man,
+                                    c_line,
+                                    format!("collector `{}`: `{entry}` {e}", c.id),
+                                )
+                                .contribution(format!("{name}/{}", c.id)),
+                            ),
                         }
                     }
                     _ => ext.collectors.push(c),
@@ -1697,17 +1815,17 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                         ext.subscriptions.push(ForeignSubscription {
                             by: format!("collector `{}`", c.id),
                             event_type: t.clone(),
-                            declared_at: at(&file, c_line, "").trim_end_matches(": ").to_string(),
+                            declared_at: match c_line {
+                                Some(n) => format!("{file}:{n}"),
+                                None => file.clone(),
+                            },
                         });
                     }
                 }
             }
         }
-        let foreign: Vec<String> = ext
-            .subscriptions
-            .iter()
-            .map(ForeignSubscription::warning)
-            .collect();
+        let root = ext.path.clone();
+        let foreign: Vec<Diagnostic> = ext.subscriptions.iter().map(|s| s.warning(&root)).collect();
         ext.warnings.extend(foreign);
         if let Some(v) = &m.providers {
             let (providers, errors) = crate::providers::parse_providers(v, &|rel| files.read(rel));
@@ -1715,7 +1833,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             ext.errors.extend(
                 errors
                     .into_iter()
-                    .map(|e| at(&file, key_line(&manifest, "providers"), e)),
+                    .map(|e| at("provider.invalid", man, key_line(&manifest, "providers"), e)),
             );
         }
         if let Some(v) = &m.commands {
@@ -1754,19 +1872,18 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             ext.errors.extend(errors);
         }
         if let Some(v) = &m.jobs {
-            let (jobs, errors) =
-                jobs::parse_jobs(v, &file, &manifest, &ext.namespace, &ext.commands);
+            let (jobs, errors) = jobs::parse_jobs(v, man, &manifest, &ext.namespace, &ext.commands);
             ext.jobs = jobs;
             ext.errors.extend(errors);
         }
         if let Some(v) = &m.ai_profiles {
-            let (profiles, errors) = ai_profiles::parse_ai_profiles(v, &file, &manifest);
+            let (profiles, errors) = ai_profiles::parse_ai_profiles(v, man, &manifest);
             ext.ai_profiles = profiles;
             ext.errors.extend(errors);
         }
         if let Some(v) = &m.custom_components {
             let (components, errors) =
-                custom_components::parse_custom_components(name, v, &file, &manifest, &|rel| {
+                custom_components::parse_custom_components(name, v, man, &manifest, &|rel| {
                     match (files.bundle_stat(rel), &ext.build) {
                         // Not built yet (no output at all): the deployment's
                         // load checks it.
@@ -1802,11 +1919,15 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                 {
                     for need in &a.needs {
                         if let Err(e) = oxplow_domain::capability::check_need(need) {
-                            ext.errors.push(at(
-                                &file,
-                                line_under(&manifest, "advisories", &a.id),
-                                format!("advisory {}: {e}", a.id),
-                            ));
+                            ext.errors.push(
+                                at(
+                                    "advisory.invalid_need",
+                                    man,
+                                    line_under(&manifest, "advisories", &a.id),
+                                    format!("advisory {}: {e}", a.id),
+                                )
+                                .contribution(format!("{name}/{}", a.id)),
+                            );
                         }
                     }
                 }
@@ -1817,7 +1938,8 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                     ) =>
                 {
                     ext.errors.push(at(
-                        &file,
+                        "advisory.invalid_id",
+                        man,
                         line_under(&manifest, "advisories", &a.id),
                         format!(
                             "advisory id `{}` must be lowercase letters, digits and dashes",
@@ -1827,13 +1949,17 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                 }
                 Ok(a) => ext.advisories.push(a),
                 Err(e) => ext.errors.push(at(
-                    &file,
+                    "advisory.invalid",
+                    man,
                     key_line(&manifest, "advisories"),
                     format!("advisory: {e}"),
                 )),
             }
         }
-        let err_at = |key: &str, e: String| at(&file, key_line(&manifest, key), e);
+        let err_at = |code: &str, key: &str, e: String| at(code, man, key_line(&manifest, key), e);
+        let warn_at = |code: &str, key: &str, e: String| {
+            Diagnostic::warning(code, e).at(man, key_line(&manifest, key))
+        };
         match parse_block(m.measures.clone()).and_then(|v| {
             oxplow_config::validate_measures(
                 v,
@@ -1842,7 +1968,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             .map_err(manifest_message)
         }) {
             Ok(v) => ext.measures = v,
-            Err(e) => ext.errors.push(err_at("measures", e)),
+            Err(e) => ext.errors.push(err_at("measure.invalid", "measures", e)),
         }
         match parse_block(m.dimensions.clone()).and_then(|v| {
             oxplow_config::validate_dimensions(
@@ -1858,6 +1984,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                     // cube's grain from the first boot).
                     if d.promote && !own && origin != "bundled" {
                         ext.errors.push(err_at(
+                            "dimension.promote_not_allowed",
                             "dimensions",
                             format!(
                                 "dimension `{}`: `promote` is the project's own extension's (it rebuilds the metric cube)",
@@ -1869,7 +1996,9 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                     }
                 }
             }
-            Err(e) => ext.errors.push(err_at("dimensions", e)),
+            Err(e) => ext
+                .errors
+                .push(err_at("dimension.invalid", "dimensions", e)),
         }
         match parse_block(m.metrics.clone()).and_then(|v| {
             oxplow_config::validate_metrics(
@@ -1886,6 +2015,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                         .filter(|c| !ext.collectors.iter().any(|x| x.id == *c));
                     if let Some(c) = unknown_collector {
                         ext.errors.push(err_at(
+                            "metric.unknown_collector",
                             "metrics",
                             format!(
                                 "metric `{}`: collector `{c}` is not a collector this extension declares",
@@ -1896,6 +2026,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                         ext.metrics.push(e);
                     } else {
                         ext.errors.push(err_at(
+                            "metric.use_in_extension",
                             "metrics",
                             format!(
                                 "metrics: `use: {}` belongs in .oxplow/project.yaml; an extension defines metrics with `key:`",
@@ -1905,7 +2036,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                     }
                 }
             }
-            Err(e) => ext.errors.push(err_at("metrics", e)),
+            Err(e) => ext.errors.push(err_at("metric.invalid", "metrics", e)),
         }
         match parse_block::<oxplow_db::datasets::DatasetDecl>(m.datasets.clone()) {
             Ok(decls) => {
@@ -1925,12 +2056,16 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                 );
                 match joined {
                     Ok(datasets) => ext.datasets = datasets,
-                    Err(e) => ext.errors.push(err_at("datasets", e.to_string())),
+                    Err(e) => ext
+                        .errors
+                        .push(err_at("dataset.invalid", "datasets", e.to_string())),
                 }
             }
-            Err(e) => ext
-                .errors
-                .push(err_at("datasets", format!("datasets: {e}"))),
+            Err(e) => ext.errors.push(err_at(
+                "dataset.invalid",
+                "datasets",
+                format!("datasets: {e}"),
+            )),
         }
         // Cross-references inside the catalog: a metric's source measure
         // and a collector's fact measures are normally ones this extension
@@ -1948,7 +2083,8 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
         for spec in &ext.metrics {
             if let Some(sm) = spec.source_measure.as_deref() {
                 if !measure_known(sm) {
-                    ext.warnings.push(err_at(
+                    ext.warnings.push(warn_at(
+                        "metric.unknown_measure",
                         "metrics",
                         format!(
                             "metric `{}`: measure `{sm}` is not a measure this extension declares; it must come from the project's or another extension's `measures:`",
@@ -1961,7 +2097,8 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
         for c in &ext.collectors {
             for fact in &c.facts {
                 if !measure_known(fact) {
-                    ext.warnings.push(err_at(
+                    ext.warnings.push(warn_at(
+                        "collector.unknown_measure",
                         "collectors",
                         format!(
                             "collector `{}`: facts `{fact}`, which is not a measure this extension declares; it must come from the project's or another extension's `measures:`",
@@ -1971,7 +2108,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                 }
             }
         }
-        manifest_v2::mounts_of(&m, &file, &manifest)
+        manifest_v2::mounts_of(&m, man, &manifest)
     };
     let manifest_v2::Mounts {
         slots: slot_files,
@@ -1985,11 +2122,14 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
         .iter()
         .any(|f| f.ends_with(".yaml") || f.ends_with(".yml"))
     {
-        ext.errors.push(format!(
-            "{rel}/lenses/: lenses are pages now — rewrite each as `pages/<slug>.yaml` \
-             (metadata, `loaders:` loaders and a `view:`; the oxplow-extension skill's \
-             page format) and remove the folder"
-        ));
+        ext.errors.push(
+            Diagnostic::error("page.lenses_removed", "lenses are pages now")
+                .at("lenses/", None)
+                .fix(
+                    "rewrite each as `pages/<slug>.yaml` (metadata, `loaders:` loaders and a \
+                     `view:`; the oxplow-extension skill's page format) and remove the folder",
+                ),
+        );
     }
 
     let mut page_names: Vec<String> = files
@@ -2004,6 +2144,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             .trim_end_matches(".yml")
             .to_string();
         let page_rel = format!("{rel}/pages/{file}");
+        let page_file = format!("pages/{file}");
         let text = files.read(&format!("pages/{file}"));
         let parsed = text
             .as_deref()
@@ -2016,32 +2157,46 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                 page.origin.bundled = origin == "bundled";
                 qualify_page_refs(&mut page);
                 for param in crate::pages::checks::launcher_unfilled_params(&page) {
-                    ext.warnings.push(at(
-                        &page_rel,
-                        text.as_deref()
-                            .and_then(|t| entry_line(t, "params", "name", &param)),
-                        format!(
-                            "param `{param}` opens empty from the launcher — fix: give it a `default`, \
-                             a `filter` or `selection` role, or options from a loader (`options_from`); \
-                             or hide the page (`hidden: true`) and open it from a slot that fills it"
+                    ext.warnings.push(
+                        Diagnostic::warning(
+                            "page.param_opens_empty",
+                            format!("param `{param}` opens empty from the launcher"),
+                        )
+                        .at(
+                            &page_file,
+                            text.as_deref()
+                                .and_then(|t| entry_line(t, "params", "name", &param)),
+                        )
+                        .fix(
+                            "give it a `default`, a `filter` or `selection` role, or options from a \
+                             loader (`options_from`); or hide the page (`hidden: true`) and open it \
+                             from a slot that fills it",
                         ),
-                    ));
+                    );
                 }
                 ext.warnings.extend(
                     crate::pages::checks::layout_warnings(&page)
                         .into_iter()
-                        .map(|w| format!("{page_rel}: {w}")),
+                        .map(|w| Diagnostic::warning("page.layout", w).at(&page_file, None)),
                 );
                 ext.page_files.push(page);
             }
-            Err(e) => ext.errors.push(format!("{page_rel}: {e}")),
+            Err(e) => ext
+                .errors
+                .push(Diagnostic::error("page.invalid", e).at(&page_file, None)),
         }
     }
     let slugs: Vec<String> = ext.page_files.iter().map(|p| p.slug.clone()).collect();
     ext.page_files.retain(|page| {
-        match page_icon_problem(page).or_else(|| page_ref_problem(page, &slugs)) {
-            Some(e) => {
-                ext.errors.push(format!("{}: {e}", page.origin.running));
+        let problem = page_icon_problem(page)
+            .map(|e| ("page.invalid_icon", e))
+            .or_else(|| page_ref_problem(page, &slugs).map(|e| ("page.invalid_ref", e)));
+        match problem {
+            Some((code, e)) => {
+                ext.errors.push(
+                    Diagnostic::error(code, e)
+                        .at(relative_to(&ext.path, &page.origin.running), None),
+                );
                 false
             }
             None => true,
@@ -2052,7 +2207,8 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
         let page = s.page.clone();
         if !ext.page_files.iter().any(|p| p.slug == page) {
             ext.errors.push(at(
-                &file,
+                "slot.unknown_page",
+                man,
                 mount_line,
                 format!(
                     "slot `{}` mounts page `{page}`, which isn't in pages/",
@@ -2063,7 +2219,8 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
         }
         let Some((host, slot_name)) = s.slot.rsplit_once('.') else {
             ext.errors.push(at(
-                &file,
+                "slot.invalid",
+                man,
                 mount_line,
                 format!(
                     "slot `{}`: a page mounts at a page's slot, `<extension>/<page>.<slot>`",
@@ -2074,7 +2231,8 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
         };
         if !host.contains('/') {
             ext.errors.push(at(
-                &file,
+                "slot.unknown",
+                man,
                 mount_line,
                 format!(
                     "unknown slot `{}`: a page mounts at a page's slot, `<extension>/<page>.<slot>`",
@@ -2094,7 +2252,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
     }
     if let Some(v) = decorator_files {
         let (decorators, errors) =
-            decorators::parse_decorators(name, &ext.datasets, &v, &file, &manifest);
+            decorators::parse_decorators(name, &ext.datasets, &v, man, &manifest);
         ext.ui.decorators = decorators;
         ext.errors.extend(errors);
     }
@@ -2106,7 +2264,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             &capabilities,
             &ext.page_files,
             replacement_files,
-            &file,
+            man,
         );
         ext.ui.replacements = replaced;
         ext.errors.extend(errors);
@@ -2133,7 +2291,10 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             .and_then(|()| component_problem(&page, &ext.custom_components));
         match checks {
             Ok(()) => checked.push(page),
-            Err(e) => ext.errors.push(format!("{}: {e}", page.origin.running)),
+            Err(e) => ext.errors.push(
+                Diagnostic::error("page.invalid", e)
+                    .at(relative_to(&ext.path, &page.origin.running), None),
+            ),
         }
     }
     ext.page_files = checked;
@@ -2143,12 +2304,17 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
         let lines = item_lines(&manifest, "panels");
         ext.errors.extend(errors.into_iter().map(|(i, e)| {
             let line = i.and_then(|i| lines.get(i).copied());
-            at(&file, line.or(key_line(&manifest, "panels")), e)
+            at(
+                "manifest.invalid_panel",
+                man,
+                line.or(key_line(&manifest, "panels")),
+                e,
+            )
         }));
     }
     check_config_reads(&mut ext);
     ext.permissions = m.permissions.clone();
-    check_permissions(&mut ext, files, &file, &manifest);
+    check_permissions(&mut ext, files, man, &manifest);
     ext.contributions = descriptors::describe(&ext);
     descriptors::check_ids(&mut ext);
     public_contracts::prepare(&mut ext);
@@ -2293,12 +2459,13 @@ fn needed_permissions(
 /// until its manifest says what it reaches.
 fn check_permissions(ext: &mut Extension, files: &dyn ExtensionFiles, file: &str, manifest: &str) {
     let fallback = key_line(manifest, "permissions").or(Some(1));
-    let errors: Vec<String> = needed_permissions(ext, files, manifest)
+    let errors: Vec<Diagnostic> = needed_permissions(ext, files, manifest)
         .into_iter()
         .filter_map(|(line, what, needed)| {
             let missing = ext.permissions.missing(&needed);
             (!missing.is_empty()).then(|| {
                 at(
+                    "manifest.missing_permission",
                     file,
                     line.or(fallback),
                     format!("{what} needs {} in `permissions:`", missing.join(", ")),
@@ -2311,23 +2478,26 @@ fn check_permissions(ext: &mut Extension, files: &dyn ExtensionFiles, file: &str
 
 /// The SQL of `ext` that may read its own configuration — a dataset, a page's
 /// loader, an advisory — with where each is declared.
-fn config_sql(ext: &Extension) -> Vec<(String, &str)> {
+fn config_sql(ext: &Extension) -> Vec<(String, Option<String>, &str)> {
     let datasets = ext
         .datasets
         .iter()
-        .map(|m| (m.file.clone(), m.sql.as_str()));
+        .map(|m| (m.file.clone(), None, m.sql.as_str()));
     let pages = ext.page_files.iter().flat_map(|p| {
         p.loaders.iter().filter_map(|d| match &d.loader {
             crate::pages::schema::Loader::Sql { sql, .. } => {
-                Some((p.origin.running.clone(), sql.as_str()))
+                Some((p.origin.running.clone(), None, sql.as_str()))
             }
             _ => None,
         })
     });
-    let advisories = ext
-        .advisories
-        .iter()
-        .map(|a| (format!("advisory `{}`", a.id), a.query.as_str()));
+    let advisories = ext.advisories.iter().map(|a| {
+        (
+            "extension.yaml".to_string(),
+            Some(format!("advisory `{}`", a.id)),
+            a.query.as_str(),
+        )
+    });
     datasets.chain(pages).chain(advisories).collect()
 }
 
@@ -2337,35 +2507,54 @@ fn config_sql(ext: &Extension) -> Vec<(String, &str)> {
 /// a read in an extension that declares no configuration.
 fn check_config_reads(ext: &mut Extension) {
     let mut problems = Vec::new();
-    for (place, sql) in config_sql(ext) {
+    for (place, what, sql) in config_sql(ext) {
+        let file = relative_to(&ext.path, &place).to_string();
+        let problem = |code: &str, message: String| {
+            let message = match &what {
+                Some(what) => format!("{what}: {message}"),
+                None => message,
+            };
+            Diagnostic::error(code, message).at(&file, None)
+        };
         let reads = match oxplow_db::datasets::config_reads(sql) {
             Ok(reads) => reads,
             Err(e) => {
-                problems.push(format!("{place}: {e}"));
+                problems.push(problem("config.unreadable_sql", e.to_string()));
                 continue;
             }
         };
         for read in reads {
             let Some(declaration) = &ext.configuration else {
-                problems.push(format!(
-                    "{place}: config('{}') reads the extension's own configuration, which it \
-                     doesn't declare (`configuration:` in extension.yaml)",
-                    read.pointer
+                problems.push(problem(
+                    "config.undeclared",
+                    format!(
+                        "config('{}') reads the extension's own configuration, which it \
+                             doesn't declare (`configuration:` in extension.yaml)",
+                        read.pointer
+                    ),
                 ));
                 continue;
             };
             match config_key_type(&declaration.schema, &read.pointer) {
                 Some("integer" | "number" | "string" | "boolean") => {}
-                Some(other) => problems.push(format!(
-                    "{place}: config('{}') is a `{other}` in the configuration schema; \
-                     SQL reads a number, string or boolean",
-                    read.pointer
+                Some(other) => problems.push(problem(
+                    "config.not_scalar",
+                    format!(
+                        "config('{}') is a `{other}` in the configuration schema; \
+                         SQL reads a number, string or boolean",
+                        read.pointer
+                    ),
                 )),
-                None => problems.push(format!(
-                    "{place}: config('{}') names no key of `configuration.schema` (declare it \
-                     under `properties` with a scalar `type`)",
-                    read.pointer
-                )),
+                None => problems.push(
+                    problem(
+                        "config.unknown_key",
+                        format!(
+                            "config('{}') names no key of `configuration.schema`",
+                            read.pointer
+                        ),
+                    )
+                    .fix("declare it under `properties` with a scalar `type`"),
+                ),
             }
         }
     }
@@ -3162,7 +3351,6 @@ fn check_dependencies(ext: &mut Extension, others: &[Extension], files: &dyn Ext
                 .map(|i| i.contribution.extension.as_str()),
         )
         .collect();
-    let base = ext.path.trim_end_matches('/').to_string();
     // A command namespace the required foundation, or `ext` itself, holds
     // too is no one other extension's to declare.
     let shared: Vec<String> = others
@@ -3179,10 +3367,10 @@ fn check_dependencies(ext: &mut Extension, others: &[Extension], files: &dyn Ext
                 && !declared.contains(o.name.as_str())
         })
         .collect();
-    let mut found: Vec<(String, String, String)> = Vec::new();
-    let mut note = |owner: &str, what: String, at: String| {
-        if !found.iter().any(|(o, _, _)| o == owner) {
-            found.push((owner.to_string(), what, at));
+    let mut found: Vec<(String, String, String, usize)> = Vec::new();
+    let mut note = |owner: &str, what: String, file: String, line: usize| {
+        if !found.iter().any(|(o, _, _, _)| o == owner) {
+            found.push((owner.to_string(), what, file, line));
         }
     };
     // A slot it mounts at.
@@ -3194,7 +3382,8 @@ fn check_dependencies(ext: &mut Extension, others: &[Extension], files: &dyn Ext
             note(
                 &owner.name,
                 format!("its slot `{}.{}`", mount.host, mount.slot),
-                format!("{base}/extension.yaml:1"),
+                "extension.yaml".to_string(),
+                1,
             );
         }
     }
@@ -3210,7 +3399,7 @@ fn check_dependencies(ext: &mut Extension, others: &[Extension], files: &dyn Ext
             continue;
         };
         for (n, line) in text.lines().enumerate() {
-            let at = format!("{base}/{rel}:{}", n + 1);
+            let line_no = n + 1;
             for owner in &others {
                 let refs = oxplow_domain::contribution::own_references(
                     line,
@@ -3228,24 +3417,47 @@ fn check_dependencies(ext: &mut Extension, others: &[Extension], files: &dyn Ext
                     .then(|| word(RefPart::Dataset))
                     .flatten();
                 if let Some(name) = by_dataset {
-                    note(&owner.name, format!("its dataset `{name}`"), at.clone());
+                    note(
+                        &owner.name,
+                        format!("its dataset `{name}`"),
+                        rel.clone(),
+                        line_no,
+                    );
                 } else if let Some(name) = word(RefPart::Page) {
-                    note(&owner.name, format!("its page `{name}`"), at.clone());
+                    note(
+                        &owner.name,
+                        format!("its page `{name}`"),
+                        rel.clone(),
+                        line_no,
+                    );
                 } else if !shared.contains(&owner.namespace) {
                     if let Some(name) = word(RefPart::Command) {
-                        note(&owner.name, format!("its command `{name}`"), at.clone());
+                        note(
+                            &owner.name,
+                            format!("its command `{name}`"),
+                            rel.clone(),
+                            line_no,
+                        );
                     }
                 }
             }
         }
     }
-    for (owner, what, at) in found {
-        ext.errors.push(format!(
-            "{at}: uses `{owner}` ({what}) without declaring it — a test runs `{}` without \
-             `{owner}`, and a person may turn it off — fix: `requires: [{owner}]` in \
-             extension.yaml (or import what it reads)",
-            ext.name
-        ));
+    for (owner, what, file, line) in found {
+        ext.errors.push(
+            Diagnostic::error(
+                "requires.undeclared",
+                format!(
+                    "uses `{owner}` ({what}) without declaring it — a test runs `{}` without \
+                     `{owner}`, and a person may turn it off",
+                    ext.name
+                ),
+            )
+            .at(file, Some(line))
+            .fix(format!(
+                "`requires: [{owner}]` in extension.yaml (or import what it reads)"
+            )),
+        );
     }
 }
 
@@ -3255,7 +3467,6 @@ fn check_dependencies(ext: &mut Extension, others: &[Extension], files: &dyn Ext
 fn check_credentials(ext: &mut Extension, files: &dyn ExtensionFiles) {
     let Ok(mut paths) = files.paths() else { return };
     paths.sort_unstable();
-    let base = ext.path.trim_end_matches('/').to_string();
     for rel in paths {
         let scanned =
             rel == "extension.yaml" || rel.ends_with(".star") || rel.starts_with("fixtures/");
@@ -3263,10 +3474,21 @@ fn check_credentials(ext: &mut Extension, files: &dyn ExtensionFiles) {
             continue;
         }
         if let Some(text) = files.read(&rel) {
-            ext.warnings.extend(crate::credential_lint::warnings(
-                &format!("{base}/{rel}"),
-                &text,
-            ));
+            ext.warnings
+                .extend(crate::credential_lint::suspects(&text).into_iter().map(|s| {
+                    Diagnostic::warning(
+                        "manifest.credential",
+                        format!(
+                            "looks like {} in a shared extension, which travels with the repository",
+                            s.what
+                        ),
+                    )
+                    .at(&rel, Some(s.line))
+                    .fix(
+                        "keep it out of the files (a collector's `credentials:` holds one in the \
+                         keychain) and rotate it if it was ever real",
+                    )
+                }));
         }
     }
 }
@@ -3287,11 +3509,14 @@ fn check_fixture_pairing(ext: &mut Extension, files: &dyn ExtensionFiles) {
         .collect();
     orphans.sort_unstable();
     for name in orphans {
-        ext.warnings.push(format!(
-            "{}/fixtures/{name}.yaml:1: no intent example names this fixture, so it never runs — \
-             fix: add `{name}` to intent.examples",
-            ext.path.trim_end_matches('/'),
-        ));
+        ext.warnings.push(
+            Diagnostic::warning(
+                "intent.orphan_fixture",
+                "no intent example names this fixture, so it never runs",
+            )
+            .at(format!("fixtures/{name}.yaml"), Some(1))
+            .fix(format!("add `{name}` to intent.examples")),
+        );
     }
 }
 
@@ -3341,15 +3566,20 @@ fn check_action_fields(ext: &mut Extension, commands: Option<CommandSchemas<'_>>
                 };
                 for field in &a.fields {
                     if !props.contains_key(field.name()) {
-                        problems.push(format!(
-                            "{}: page `{}`: action `{}`: `fields` names `{}`, which isn't an input of `{}` (inputs: {})",
-                            page.origin.running,
-                            page.slug,
-                            a.id,
-                            field.name(),
-                            a.command.as_deref().unwrap_or_default(),
-                            props.keys().cloned().collect::<Vec<_>>().join(", ")
-                        ));
+                        problems.push(
+                            Diagnostic::error(
+                                "page.unknown_action_field",
+                                format!(
+                                    "page `{}`: action `{}`: `fields` names `{}`, which isn't an input of `{}` (inputs: {})",
+                                    page.slug,
+                                    a.id,
+                                    field.name(),
+                                    a.command.as_deref().unwrap_or_default(),
+                                    props.keys().cloned().collect::<Vec<_>>().join(", ")
+                                ),
+                            )
+                            .at(relative_to(&ext.path, &page.origin.running), None),
+                        );
                     }
                 }
             }
@@ -3382,11 +3612,17 @@ fn check_components(
             })
             .collect();
         for (component, command) in missing {
-            ext.errors.push(format!(
-                "{}/extension.yaml: custom component `{component}` declares command `{command}`, \
-                 which isn't registered",
-                ext.path
-            ));
+            ext.errors.push(
+                Diagnostic::error(
+                    "component.unregistered_command",
+                    format!(
+                        "custom component `{component}` declares command `{command}`, \
+                         which isn't registered"
+                    ),
+                )
+                .at("extension.yaml", None)
+                .contribution(format!("{}/{component}", ext.name)),
+            );
         }
     }
     let lookalikes: Vec<(String, &'static str)> = ext
@@ -3419,10 +3655,14 @@ fn check_components(
         })
         .collect();
     for (path, block) in lookalikes {
-        ext.warnings.push(format!(
-            "{path}: a custom viz that fills `{block}`: the kit's `{block}` viz may already cover \
-             it — prefer the kit where it does"
-        ));
+        ext.warnings.push(
+            Diagnostic::warning(
+                "page.custom_viz_lookalike",
+                format!("a custom viz that fills `{block}`: the kit's `{block}` viz may already cover it"),
+            )
+            .at(relative_to(&ext.path, &path), None)
+            .fix("prefer the kit where it does"),
+        );
     }
 }
 
@@ -3464,7 +3704,7 @@ pub struct Prepared {
 async fn dataset_overlay(
     layer: &crate::sql_gateway::SqlGateway,
     candidate: &candidates::CandidateCatalog,
-) -> (Vec<oxplow_db::TempView>, Vec<String>) {
+) -> (Vec<oxplow_db::TempView>, Vec<Diagnostic>) {
     let datasets = candidate
         .extensions
         .iter()
@@ -3491,16 +3731,25 @@ async fn dataset_overlay(
                 .flat_map(|(owner, errors)| {
                     errors.into_iter().map(move |error| {
                         if &owner == target {
-                            error
+                            Diagnostic::error("dataset.invalid", error)
                         } else {
-                            format!("consumer `{owner}`: {error}")
+                            Diagnostic::error(
+                                "dataset.consumer_invalid",
+                                format!("consumer `{owner}`: {error}"),
+                            )
                         }
                     })
                 })
                 .collect();
             (checked.views, errors)
         }
-        Err(e) => (Vec::new(), vec![format!("datasets: {e}")]),
+        Err(e) => (
+            Vec::new(),
+            vec![Diagnostic::error(
+                "dataset.invalid",
+                format!("datasets: {e}"),
+            )],
+        ),
     }
 }
 
@@ -3559,11 +3808,18 @@ async fn prepare(
         ) {
             Ok(query) => query,
             Err(e) => {
-                ext.errors.push(format!(
-                    "advisory {}: {}",
-                    a.id,
-                    e.to_string().replacen("invalid value: ", "", 1)
-                ));
+                ext.errors.push(
+                    Diagnostic::error(
+                        "advisory.invalid_query",
+                        format!(
+                            "advisory {}: {}",
+                            a.id,
+                            e.to_string().replacen("invalid value: ", "", 1)
+                        ),
+                    )
+                    .at("extension.yaml", None)
+                    .contribution(format!("{}/{}", ext.name, a.id)),
+                );
                 continue;
             }
         };
@@ -3580,11 +3836,18 @@ async fn prepare(
             )
             .await;
         match run {
-            Err(e) => ext.errors.push(format!(
-                "advisory {}: {}",
-                a.id,
-                e.to_string().replacen("invalid value: ", "", 1)
-            )),
+            Err(e) => ext.errors.push(
+                Diagnostic::error(
+                    "advisory.invalid_query",
+                    format!(
+                        "advisory {}: {}",
+                        a.id,
+                        e.to_string().replacen("invalid value: ", "", 1)
+                    ),
+                )
+                .at("extension.yaml", None)
+                .contribution(format!("{}/{}", ext.name, a.id)),
+            ),
             Ok(r) => {
                 let mut need = vec!["message"];
                 if a.once_per == AdvisoryOncePer::Row {
@@ -3592,11 +3855,18 @@ async fn prepare(
                 }
                 for col in need {
                     if !r.columns.iter().any(|c| c == col) {
-                        ext.errors.push(format!(
-                            "advisory {}: the query must return a `{col}` column (columns: {})",
-                            a.id,
-                            r.columns.join(", ")
-                        ));
+                        ext.errors.push(
+                            Diagnostic::error(
+                                "advisory.missing_column",
+                                format!(
+                                    "advisory {}: the query must return a `{col}` column (columns: {})",
+                                    a.id,
+                                    r.columns.join(", ")
+                                ),
+                            )
+                            .at("extension.yaml", None)
+                            .contribution(format!("{}/{}", ext.name, a.id)),
+                        );
                     }
                 }
             }
@@ -3610,15 +3880,19 @@ async fn prepare(
         };
         for (name, result) in loaders {
             if let Err(e) = result {
-                ext.errors
-                    .push(format!("{}: loader `{name}`: {e}", page.origin.running));
+                ext.errors.push(
+                    Diagnostic::error("page.loader_failed", format!("loader `{name}`: {e}"))
+                        .at(relative_to(&ext.path, &page.origin.running), None),
+                );
             }
         }
         // A whole-page action reads the first loader's row.
         if let Some(Ok(first)) = page.first_loader().and_then(|l| loaders.get(&l.name)) {
             for problem in action_column_problems(&page.actions, &first.columns) {
-                ext.errors
-                    .push(format!("{}: page {problem}", page.origin.running));
+                ext.errors.push(
+                    Diagnostic::error("page.action_column", format!("page {problem}"))
+                        .at(relative_to(&ext.path, &page.origin.running), None),
+                );
             }
         }
         for entry in &page.see_also {
@@ -3628,11 +3902,16 @@ async fn prepare(
             if let Some(Ok(result)) = loaders.get(from) {
                 for col in ["title", "uri"] {
                     if !result.columns.iter().any(|c| c == col) {
-                        ext.errors.push(format!(
-                            "{}: see_also `from: {from}`: the loader must return a `{col}` column (columns: {})",
-                            page.origin.running,
-                            result.columns.join(", ")
-                        ));
+                        ext.errors.push(
+                            Diagnostic::error(
+                                "page.see_also_column",
+                                format!(
+                                    "see_also `from: {from}`: the loader must return a `{col}` column (columns: {})",
+                                    result.columns.join(", ")
+                                ),
+                            )
+                            .at(relative_to(&ext.path, &page.origin.running), None),
+                        );
                     }
                 }
             }
@@ -3640,8 +3919,10 @@ async fn prepare(
         for (node, viz, result) in crate::pages::checks::viz_nodes(&page, loaders) {
             let Ok(result) = result else { continue };
             for problem in viz_column_problems(viz, &result.columns) {
-                ext.errors
-                    .push(format!("{}: node `{node}`: {problem}", page.origin.running));
+                ext.errors.push(
+                    Diagnostic::error("page.viz_column", format!("node `{node}`: {problem}"))
+                        .at(relative_to(&ext.path, &page.origin.running), None),
+                );
             }
         }
     }
@@ -3656,7 +3937,6 @@ async fn check_collector_inputs(
     ext: &mut Extension,
     read: &(dyn Fn(&str) -> Option<String> + Sync),
 ) {
-    let file = format!("{}/extension.yaml", ext.path);
     let manifest = read("extension.yaml").unwrap_or_default();
     for c in ext.collectors.clone() {
         let Some(input) = &c.input else { continue };
@@ -3684,11 +3964,15 @@ async fn check_collector_inputs(
             },
         };
         if let Some(problem) = problem {
-            ext.errors.push(manifest_v2::at(
-                &file,
-                line,
-                format!("collector `{}` input: {problem}", c.id),
-            ));
+            ext.errors.push(
+                manifest_v2::at(
+                    "collector.invalid_input",
+                    "extension.yaml",
+                    line,
+                    format!("collector `{}` input: {problem}", c.id),
+                )
+                .contribution(format!("{}/{}", ext.name, c.id)),
+            );
         }
     }
 }
@@ -3870,6 +4154,26 @@ pub fn scaffold_manifest(m: &ManifestScaffold<'_>) -> String {
 
 #[cfg(test)]
 mod tests {
+    /// An extension's errors as the lines a person reads, one per line.
+    fn shown_errors(ext: &Extension) -> String {
+        ext.errors
+            .iter()
+            .map(|e| ext.shown(e))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// Whether the line a diagnostic reads as (its file relative to the
+    /// extension's folder, then its message and fix) holds `text`.
+    trait Says {
+        fn contains(&self, text: &str) -> bool;
+    }
+
+    impl Says for Diagnostic {
+        fn contains(&self, text: &str) -> bool {
+            self.render("").contains(text)
+        }
+    }
 
     /// A malformed list entry is reported on its own line — the shape
     /// error too, which has no name to find it by — in every list block.
@@ -3896,7 +4200,7 @@ mod tests {
                 .into_iter()
                 .find(|e| e.name == "x")
                 .unwrap();
-            let errors = ext.errors.join("\n");
+            let errors = shown_errors(&ext);
             assert!(
                 errors.contains(&format!("extension.yaml:{second}:")) && errors.contains("bogus"),
                 "{says}: want line {second}\n{errors}"
@@ -3926,7 +4230,7 @@ mod tests {
             .into_iter()
             .find(|e| e.name == "x")
             .unwrap();
-        let errors = ext.errors.join("\n");
+        let errors = shown_errors(&ext);
         assert!(
             errors.contains("extension.yaml:7:") && errors.contains("bogus"),
             "{errors}"
@@ -4449,7 +4753,7 @@ mod tests {
         for slug in ["notext", "other", "table", "block"] {
             assert!(viz(slug).is_none(), "{slug} is refused");
         }
-        let errs = ext.errors.join("\n");
+        let errs = shown_errors(&ext);
         for says in [
             "`save` saves the text: give the viz `markdown: { text: body }`",
             "`save` saves `body`, but the viz shows `slug2`",
@@ -4482,7 +4786,7 @@ mod tests {
         let b = viz("b").expect("b loads");
         assert_eq!(b.group.as_ref().unwrap().values, vec!["todo", "done"]);
         assert!(viz("nob").is_none());
-        let errs = ext.errors.join("\n");
+        let errs = shown_errors(&ext);
         assert!(
             errs.contains("`board` needs `group: { by: <column> }`"),
             "{errs}"
@@ -4493,10 +4797,11 @@ mod tests {
     /// a deployment is, its permission errors alone.
     fn permission_errors(dir: &Path, manifest: &str) -> Vec<String> {
         write(dir, "extension.yaml", manifest);
-        load_extension_at(dir, "acme")
-            .errors
-            .into_iter()
+        let ext = load_extension_at(dir, "acme");
+        ext.errors
+            .iter()
             .filter(|e| e.contains("in `permissions:`"))
+            .map(|e| ext.shown(e))
             .collect()
     }
 
@@ -4514,11 +4819,7 @@ mod tests {
     }
 
     fn errors_of(exts: &[Extension], name: &str) -> String {
-        exts.iter()
-            .find(|e| e.name == name)
-            .unwrap()
-            .errors
-            .join("\n")
+        shown_errors(exts.iter().find(|e| e.name == name).unwrap())
     }
 
     /// `requires` names other extensions: a bad name or the extension's
@@ -4915,7 +5216,7 @@ view:
             "title: Old\nquery: SELECT 1\n",
         );
         let e = &project_extensions(dir.path())[0];
-        let errs = e.errors.join("\n");
+        let errs = shown_errors(e);
         assert!(
             errs.contains("review/lenses/") && errs.contains("pages/<slug>.yaml"),
             "{errs}"
@@ -5285,10 +5586,11 @@ view:
         let e = only(dir.path(), "review");
         assert_eq!(e.manifest_version, 2);
         assert!(
-            e.errors.iter().any(
-                |m| m.starts_with(".oxplow/extensions/review/extension.yaml:1:")
-                    && m.contains("`intent` is required")
-            ),
+            e.errors.iter().any(|m| {
+                let line = e.shown(m);
+                line.starts_with(".oxplow/extensions/review/extension.yaml:1:")
+                    && line.contains("`intent` is required")
+            }),
             "{:?}",
             e.errors
         );
@@ -5376,8 +5678,9 @@ view:
             .find(|m| m.contains("mounts page `nope`, which isn't in pages/"))
             .unwrap_or_else(|| panic!("{:?}", e.errors));
         assert!(
-            err.starts_with(".oxplow/extensions/review/extension.yaml:11:"),
-            "{err}"
+            e.shown(err)
+                .starts_with(".oxplow/extensions/review/extension.yaml:11:"),
+            "{err:?}"
         );
     }
 
@@ -5399,7 +5702,7 @@ view:
             .iter()
             .find(|m| m.contains("measure `review.missing`"))
             .unwrap_or_else(|| panic!("{:?}", e.warnings));
-        assert!(warn.contains("extension.yaml:"), "{warn}");
+        assert!(e.shown(warn).contains("extension.yaml:"), "{warn:?}");
         assert_eq!(e.metrics.len(), 2, "both specs still load");
     }
 
@@ -5514,7 +5817,7 @@ commands:
         let v = validate_extension(&layer().await, &cat(), dir.path(), "tally", None)
             .await
             .unwrap();
-        let errs = v.errors.join("\n");
+        let errs = shown_errors(&v);
         assert!(errs.contains("colour"), "{errs}");
     }
 
@@ -5525,7 +5828,7 @@ commands:
         let dir = tempfile::tempdir().unwrap();
         write_tally(dir.path(), "def other(x):\n    return {}\n");
         let ext = only(dir.path(), "tally");
-        let errs = ext.errors.join("\n");
+        let errs = shown_errors(&ext);
         assert!(
             errs.contains("extension.yaml:5:")
                 && errs.contains("collector `things`")
@@ -5554,7 +5857,7 @@ commands:
             .into_iter()
             .find(|e| e.name == "x")
             .unwrap();
-        assert_eq!(ext.errors, Vec::<String>::new());
+        assert_eq!(ext.errors, Vec::<Diagnostic>::new());
         assert_eq!(ext.effects.len(), 1);
         assert_eq!(ext.commands.len(), 1);
     }
@@ -5893,7 +6196,7 @@ commands:
                 size: None,
             }]
         );
-        let errs = addon.errors.join("\n");
+        let errs = shown_errors(&addon);
         assert!(
             errs.contains("`at: page.sections` is neither a page's slot"),
             "{errs}"
@@ -5969,7 +6272,7 @@ commands:
             "",
         );
         assert!(node(&ext, "form").is_some(), "{:?}", ext.errors);
-        let errs = ext.errors.join("\n");
+        let errs = shown_errors(&ext);
         for (slug, says) in [
             ("bare", "needs `from`: the loader whose rows it shows"),
             (
@@ -6039,7 +6342,7 @@ commands:
             Some("zone")
         );
         assert!(viz("nobar").is_none());
-        let errs = ext.errors.join("\n");
+        let errs = shown_errors(&ext);
         assert!(
             errs.contains("nobar.yaml") && errs.contains("`chart: { x: <column>, y: <column> }`"),
             "{errs}"
@@ -6098,7 +6401,7 @@ commands:
             Some("p")
         );
         assert!(viz("notree").is_none() && viz("nohunks").is_none());
-        let errs = ext.errors.join("\n");
+        let errs = shown_errors(&ext);
         assert!(
             errs.contains("notree") && errs.contains("`tree: { parent: <column> }`"),
             "{errs}"
@@ -6148,7 +6451,7 @@ commands:
             "",
         );
         assert!(ext.page_files.is_empty());
-        let errs = ext.errors.join("\n");
+        let errs = shown_errors(&ext);
         assert!(
             errs.contains("`section` is the page's view key (`#section=`): rename the param"),
             "{errs}"
@@ -6188,7 +6491,7 @@ commands:
             (t.lazy.as_deref(), t.branch.as_deref()),
             (Some("folder"), Some("d"))
         );
-        let errs = ext.errors.join("\n");
+        let errs = shown_errors(&ext);
         for (slug, says) in [
             ("undeclared", "`tree.lazy` names param `nope`, which the viz doesn't declare"),
             ("nodefault", "`tree.lazy` param `folder` needs a `default`: the top level"),
@@ -6262,7 +6565,7 @@ commands:
             Some("b")
         );
         assert!(viz("nocode").is_none() && viz("nodiff").is_none());
-        let errs = ext.errors.join("\n");
+        let errs = shown_errors(&ext);
         assert!(errs.contains("`code: { revision: <column> }`"), "{errs}");
         assert!(
             errs.contains("`diff: { path: <column>, from: <column>, to: <column> }`"),
@@ -6297,7 +6600,7 @@ commands:
         );
         assert!(e.fills);
         assert!(node(&ext, "noembed").is_none());
-        let errs = ext.errors.join("\n");
+        let errs = shown_errors(&ext);
         assert!(errs.contains("`embed: { url: <column> }`"), "{errs}");
     }
 
@@ -6331,7 +6634,7 @@ commands:
         );
         assert!(e.fills);
         assert!(node(&ext, "noeditor").is_none());
-        let errs = ext.errors.join("\n");
+        let errs = shown_errors(&ext);
         assert!(errs.contains("`editor: { path: <column> }`"), "{errs}");
         let inline = crate::pages::schema::parse_inline_page(&viz_page(
             "",
@@ -6373,10 +6676,7 @@ commands:
         );
         assert!(t.fills);
         assert!(node(&ext, "noterminal").is_none());
-        assert!(ext
-            .errors
-            .join("\n")
-            .contains("`terminal: { of: <column> }`"));
+        assert!(shown_errors(&ext).contains("`terminal: { of: <column> }`"));
         let inline = crate::pages::schema::parse_inline_page(&viz_page(
             "",
             "SELECT 'u' AS u",
@@ -6400,7 +6700,7 @@ commands:
         let ok = page_of(&ext, "ok").expect("ok loads");
         assert_eq!(ok.params[0].options[1].label, "Most visited");
         assert!(page_of(&ext, "bad").is_none());
-        let errs = ext.errors.join("\n");
+        let errs = shown_errors(&ext);
         assert!(errs.contains("`mode`") && errs.contains("`all`"), "{errs}");
         let ok = node(&ext, "ok").unwrap();
         let supplied = BTreeMap::from([("mode".to_string(), SqlCell::Text("top".into()))]);
@@ -6460,7 +6760,7 @@ commands:
             .map(|p| p.options_from.as_deref())
             .collect();
         assert_eq!(from, [Some("x/ends"), Some("other/ends")]);
-        let errs = ext.errors.join("\n");
+        let errs = shown_errors(&ext);
         for (slug, says) in [
             (
                 "choice_without_options",
@@ -6632,7 +6932,7 @@ commands:
         let rows = node(&ext, "rows").expect("rows loads");
         assert_eq!(rows.columns[0].select.as_deref(), Some("commit"));
         assert!(page_of(&ext, "nope").is_none());
-        let errs = ext.errors.join("\n");
+        let errs = shown_errors(&ext);
         assert!(
             errs.contains("nope.yaml") && errs.contains("`select: commit`"),
             "{errs}"
@@ -6652,9 +6952,7 @@ commands:
         assert!(page_of(&ext, "ok").is_some(), "{:?}", ext.errors);
         assert!(page_of(&ext, "bad").is_none());
         assert!(
-            ext.errors
-                .join("\n")
-                .contains("unknown placeholder filter `upper`"),
+            shown_errors(&ext).contains("unknown placeholder filter `upper`"),
             "{:?}",
             ext.errors
         );
@@ -6700,7 +6998,7 @@ commands:
                 Some("x/detail")
             );
         }
-        let errs = ext.errors.join("\n");
+        let errs = shown_errors(&ext);
         for (slug, says) in [
             (
                 "missing",
@@ -6752,7 +7050,7 @@ commands:
         assert_eq!(trend.columns[1].format, Some(ColumnFormat::Badge));
         assert_eq!(trend.columns[2].format, Some(ColumnFormat::Items));
         assert!(page_of(&ext, "bars").is_none());
-        let errs = ext.errors.join("\n");
+        let errs = shown_errors(&ext);
         assert!(
             errs.contains("bars.yaml") && errs.contains("`targets`"),
             "{errs}"
@@ -6798,7 +7096,7 @@ commands:
             )],
             "",
         );
-        let errs = ext.errors.join("\n");
+        let errs = shown_errors(&ext);
         assert!(
             errs.contains("`role: selection` follows from the columns"),
             "{errs}"
@@ -6867,11 +7165,15 @@ commands:
     fn layout_of(page: &str) -> (Vec<String>, bool) {
         let (_d, ext) = load_x(&[("p", page)], "");
         assert!(ext.errors.is_empty(), "{:?}", ext.errors);
-        (layout_only(&ext.warnings), page_of(&ext, "p").is_some())
+        let shown = layout_only(&ext.warnings)
+            .iter()
+            .map(|w| ext.shown(w))
+            .collect();
+        (shown, page_of(&ext, "p").is_some())
     }
 
     /// The layout warnings among `warnings`.
-    fn layout_only(warnings: &[String]) -> Vec<String> {
+    fn layout_only(warnings: &[Diagnostic]) -> Vec<Diagnostic> {
         const MARKS: [&str; 6] = [
             " filters; ",
             "isn't read by any loader",
@@ -6998,14 +7300,15 @@ commands:
             .into_iter()
             .find(|e| e.name == "x")
             .unwrap();
-        let unread: Vec<&String> = ext
+        let unread: Vec<&Diagnostic> = ext
             .warnings
             .iter()
             .filter(|w| w.contains("param `z`"))
             .collect();
         assert_eq!(unread.len(), 1, "{:?}", ext.warnings);
         assert!(
-            unread[0].starts_with(".oxplow/extensions/x/pages/ok.yaml: "),
+            ext.shown(unread[0])
+                .starts_with(".oxplow/extensions/x/pages/ok.yaml: "),
             "{unread:?}"
         );
         assert!(
@@ -7169,18 +7472,19 @@ commands:
         };
         let params = "  - { name: effort_id, label: Effort }\n  - { name: state, default: open }\n  - { name: q, role: filter }\n  - { name: thread_id }\n";
         let (_d, ext) = load_x(&[("p", &page("", params))], "");
-        let warned: Vec<&String> = ext
+        let warned: Vec<&Diagnostic> = ext
             .warnings
             .iter()
             .filter(|w| w.contains("opens empty"))
             .collect();
         assert_eq!(warned.len(), 1, "{:?}", ext.warnings);
         assert!(
-            warned[0].contains("/pages/p.yaml:4: param `effort_id` opens empty from the launcher"),
-            "{}",
+            ext.shown(warned[0])
+                .contains("/pages/p.yaml:4: param `effort_id` opens empty from the launcher"),
+            "{:?}",
             warned[0]
         );
-        assert!(warned[0].contains(" — fix: "), "{}", warned[0]);
+        assert!(ext.shown(warned[0]).contains(" — fix: "), "{:?}", warned[0]);
         // Hidden, or in no category, it isn't opened from the launcher.
         let (_d, ext) = load_x(&[("p", &page("hidden: true\n", params))], "");
         assert!(
@@ -7239,7 +7543,7 @@ commands:
                 .iter()
                 .find(|m| m.contains(what) && m.contains("`work_item` is a physical table"));
             let found = found.unwrap_or_else(|| panic!("{what}: {:?}", e.errors));
-            assert!(found.contains("read v_work_item"), "{found}");
+            assert!(found.contains("read v_work_item"), "{found:?}");
         }
     }
 
@@ -7260,7 +7564,7 @@ commands:
         let v = validate_extension(&layer().await, &cat(), d.path(), "x", None)
             .await
             .unwrap();
-        let errs = v.errors.join("\n");
+        let errs = shown_errors(&v);
         assert!(
             errs.contains("a.yaml: node `q`: steps column `gone`"),
             "{errs}"
@@ -7304,7 +7608,7 @@ commands:
         assert_eq!(ok.link.as_deref(), Some("uri"));
         assert_eq!(ok.body.as_deref(), Some("note"));
         assert!(node(&ext, "notitle").is_none());
-        let errs = ext.errors.join("\n");
+        let errs = shown_errors(&ext);
         assert!(
             errs.contains("notitle.yaml") && errs.contains("`sections: { title: <column> }`"),
             "{errs}"
@@ -7312,7 +7616,7 @@ commands:
         let v = validate_extension(&layer().await, &cat(), d.path(), "x", None)
             .await
             .unwrap();
-        let errs = v.errors.join("\n");
+        let errs = shown_errors(&v);
         for k in ["nolink", "nobody", "noid"] {
             assert!(errs.contains(&format!("sections column `{k}`")), "{errs}");
         }
@@ -7344,7 +7648,7 @@ commands:
         let v = validate_extension(&layer().await, &cat(), d.path(), "x", None)
             .await
             .unwrap();
-        let errs = v.errors.join("\n");
+        let errs = shown_errors(&v);
         assert!(
             errs.contains("`missing`") && errs.contains("`ln`"),
             "{errs}"
@@ -7393,7 +7697,7 @@ commands:
             .into_iter()
             .find(|e| e.name == "project")
             .expect("the repo's own extension");
-        assert_eq!(ext.errors, Vec::<String>::new());
+        assert_eq!(ext.errors, Vec::<Diagnostic>::new());
         assert!(ext.is_own());
         assert!(ext
             .collectors
@@ -7525,7 +7829,7 @@ commands:
             Vec::<&str>::new(),
             "a broken declaration set loads no datasets"
         );
-        let errors = ext.errors.join("\n");
+        let errors = shown_errors(&ext);
         assert!(
             errors.contains(".oxplow/extensions/x/datasets/gone.sql is missing"),
             "{errors}"
@@ -7556,7 +7860,7 @@ commands:
         );
         let ext = project_extensions(dir.path()).remove(0);
         assert!(
-            ext.errors.join("\n").contains("stray.sql has no entry"),
+            shown_errors(&ext).contains("stray.sql has no entry"),
             "{:?}",
             ext.errors
         );
@@ -7750,7 +8054,7 @@ commands:
             "manifest: 2\nintent:\n  purpose: p\nui:\n  mounts:\n    - { page: c, at: commit }\n    - { page: c, at: commit.sections }\n",
         );
         assert!(ext.ui.page_slots.is_empty());
-        let errs = ext.errors.join("\n");
+        let errs = shown_errors(&ext);
         assert!(
             errs.contains("`at: commit` is neither a page's slot")
                 && errs.contains("`at: commit.sections` is neither a page's slot")
@@ -7763,7 +8067,7 @@ commands:
                 &[],
                 &format!("manifest: 2\nintent:\n  purpose: p\n{key}: []\n"),
             );
-            let errs = ext.errors.join("\n");
+            let errs = shown_errors(&ext);
             assert!(
                 errs.contains(&format!("unknown field `{key}`")),
                 "{key}: {errs}"
@@ -7854,7 +8158,7 @@ commands:
                 &pages,
                 &format!("manifest: 2\nintent:\n  purpose: p\npanels:\n  - {panel}\n"),
             );
-            let errs = ext.errors.join("\n");
+            let errs = shown_errors(&ext);
             assert!(
                 errs.contains(says) && errs.contains("extension.yaml"),
                 "{panel}: {errs}"
@@ -7925,7 +8229,7 @@ commands:
                 &pages,
                 &format!("manifest: 2\nintent:\n  purpose: p\npanels:\n  - {panel}\n"),
             );
-            let errs = ext.errors.join("\n");
+            let errs = shown_errors(&ext);
             assert!(errs.contains(says), "{panel}: {errs}");
             assert!(ext.panels.is_empty(), "{panel}");
         }
@@ -8016,7 +8320,7 @@ commands:
         let v = validate_extension(&layer().await, &cat(), d.path(), "x", None)
             .await
             .unwrap();
-        let errs = v.errors.join("\n");
+        let errs = shown_errors(&v);
         for k in ["g1", "g2", "e1", "d1", "i1", "t1"] {
             assert!(errs.contains(&format!("`{k}`")), "{k}: {errs}");
         }
@@ -8283,7 +8587,7 @@ commands:
             ext.errors
                 .iter()
                 .find(|e| e.contains(&format!("{slug}.yaml")))
-                .cloned()
+                .map(|e| ext.shown(e))
                 .unwrap_or_default()
         };
         for (slug, says) in [
@@ -8330,7 +8634,7 @@ commands:
             .await
             .unwrap();
         assert!(
-            v.errors.join("\n").contains("`{{row.gone}}`"),
+            shown_errors(&v).contains("`{{row.gone}}`"),
             "{:?}",
             v.errors
         );
@@ -8380,7 +8684,7 @@ commands:
         assert!(a.comments && !a.hidden);
         assert!(page("b").unwrap().hidden);
         assert!(page("c").is_none() && page("d").is_none());
-        let errs = ext.errors.join("\n");
+        let errs = shown_errors(&ext);
         assert!(
             errs.contains("c.yaml") && errs.contains("Nowhere"),
             "{errs}"
@@ -8396,7 +8700,7 @@ commands:
     #[test]
     fn a_page_file_names_a_valid_id() {
         let (_d, ext) = load_x(&[("Bad_Page", &viz_page("", "SELECT 1", ""))], "");
-        let errs = ext.errors.join("\n");
+        let errs = shown_errors(&ext);
         assert!(errs.contains("Bad_Page"), "{errs}");
     }
 
@@ -8452,12 +8756,12 @@ commands:
             ext.advisories[1].heading.as_deref(),
             Some("# Metric thresholds")
         );
-        assert!(ext.errors.join("\n").contains("Bad Id"), "{:?}", ext.errors);
+        assert!(shown_errors(&ext).contains("Bad Id"), "{:?}", ext.errors);
 
         let v = validate_extension(&layer().await, &cat(), d.path(), "x", None)
             .await
             .unwrap();
-        let errs = v.errors.join("\n");
+        let errs = shown_errors(&v);
         assert!(errs.contains("nokey") && errs.contains("`key`"), "{errs}");
         assert!(
             !errs.contains("low-coverage") && !errs.contains("crossings"),
@@ -8541,7 +8845,7 @@ commands:
             (renderer("{{param.id|loud}}"), "`label` filter `loud`"),
         ] {
             let (_d, ext) = load_x(&[("a", &page)], resources);
-            let errs = ext.errors.join("\n");
+            let errs = shown_errors(&ext);
             assert!(errs.contains(says), "{page}: {errs}");
             assert!(page_of(&ext, "a").is_none(), "{page}");
         }
@@ -8634,7 +8938,7 @@ commands:
             ),
         ] {
             let (_d, ext) = load_x(&[("a", &page)], resources);
-            let errs = ext.errors.join("\n");
+            let errs = shown_errors(&ext);
             assert!(errs.contains(says), "{page}: {errs}");
             assert!(page_of(&ext, "a").is_none(), "{page}");
         }
@@ -8646,7 +8950,7 @@ commands:
             resources,
         );
         assert!(
-            ext.errors.join("\n").contains("another default renderer"),
+            shown_errors(&ext).contains("another default renderer"),
             "{:?}",
             ext.errors
         );

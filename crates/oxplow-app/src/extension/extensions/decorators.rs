@@ -13,6 +13,7 @@
 //! The dataset is `v_<extension>_<dataset>`; it must declare a `ref` column
 //! and the `label` (and `color`) columns named.
 
+use oxplow_domain::diagnostic::Diagnostic;
 use serde::{Deserialize, Serialize};
 
 use super::manifest_v2::{at, item_lines, key_line, line_under};
@@ -74,12 +75,17 @@ pub fn parse_decorators(
     value: &serde_yaml::Value,
     file: &str,
     manifest: &str,
-) -> (Vec<UiDecorator>, Vec<String>) {
+) -> (Vec<UiDecorator>, Vec<Diagnostic>) {
     let block = line_under(manifest, "ui", "decorators:").or(key_line(manifest, "ui"));
     let Some(items) = value.as_sequence() else {
         return (
             Vec::new(),
-            vec![at(file, block, "`ui.decorators` must be a list")],
+            vec![at(
+                "decorator.not_a_list",
+                file,
+                block,
+                "`ui.decorators` must be a list",
+            )],
         );
     };
     let mut out = Vec::new();
@@ -92,12 +98,24 @@ pub fn parse_decorators(
             Err(e) => {
                 // `model:` is the old name of `dataset:` (the manifest-wide
                 // renamed-key list can't say so: `model` is valid elsewhere).
-                let message = if item.get("model").is_some() && item.get("dataset").is_none() {
-                    "unknown key `model` — write `dataset:`".to_string()
+                let old_model = item.get("model").is_some() && item.get("dataset").is_none();
+                let d = if old_model {
+                    at(
+                        "decorator.unknown_key",
+                        file,
+                        item_line,
+                        "`ui.decorators`: unknown key `model`",
+                    )
+                    .fix("write `dataset:`")
                 } else {
-                    e.to_string()
+                    at(
+                        "decorator.invalid",
+                        file,
+                        item_line,
+                        format!("`ui.decorators`: {e}"),
+                    )
                 };
-                errors.push(at(file, item_line, format!("`ui.decorators`: {message}")));
+                errors.push(d);
                 continue;
             }
         };
@@ -111,25 +129,41 @@ pub fn parse_decorators(
         let problem = if let Some(why) =
             crate::extension::extension_resources::resource_problem(&d.resource)
         {
-            Some(format!("`resource: {}`: {why}", d.resource))
+            Some((
+                "decorator.invalid_resource",
+                format!("`resource: {}`: {why}", d.resource),
+                None,
+            ))
         } else if dataset.is_none() {
-            Some(format!(
-                "`dataset: {}` isn't one of this extension's datasets (`datasets:`)",
-                d.dataset
+            Some((
+                "decorator.unknown_dataset",
+                format!(
+                    "`dataset: {}` isn't one of this extension's datasets (`datasets:`)",
+                    d.dataset
+                ),
+                None,
             ))
         } else if let Some(bad) = wanted.iter().find(|c| !identifier(c)) {
-            Some(format!("`{bad}` isn't a column name"))
+            Some((
+                "decorator.invalid_column",
+                format!("`{bad}` isn't a column name"),
+                None,
+            ))
         } else if let Some(missing) = wanted.iter().find(|c| !has(c)) {
-            Some(format!(
-                "dataset `{}` has no `{missing}` column (a decorator's dataset needs `uri` and the \
-                 columns it names)",
-                d.dataset
+            Some((
+                "decorator.missing_column",
+                format!("dataset `{}` has no `{missing}` column", d.dataset),
+                Some("a decorator's dataset needs `uri` and the columns it names"),
             ))
         } else {
             None
         };
-        if let Some(p) = problem {
-            errors.push(at(file, line, format!("`ui.decorators`: {p}")));
+        if let Some((code, p, fix)) = problem {
+            let d = at(code, file, line, format!("`ui.decorators`: {p}"));
+            errors.push(match fix {
+                Some(fix) => d.fix(fix),
+                None => d,
+            });
             continue;
         }
         out.push(UiDecorator {
@@ -209,7 +243,7 @@ mod tests {
             ),
         ] {
             let ext = load(&format!("    - {entry}\n"));
-            let errs = ext.errors.join("\n");
+            let errs = ext.errors.iter().map(|e| ext.shown(e)).collect::<Vec<_>>().join("\n");
             assert!(
                 errs.contains(says) && errs.contains("extension.yaml:"),
                 "{entry}: {errs}"
@@ -222,10 +256,19 @@ mod tests {
     #[test]
     fn an_old_model_key_says_to_write_dataset() {
         let ext = load("    - { model: flags, resource: oxplow/work_item, placement: ref-chip, label: label }\n");
-        let errs = ext.errors.join("\n");
+        let errs = ext
+            .errors
+            .iter()
+            .map(|e| ext.shown(e))
+            .collect::<Vec<_>>()
+            .join("\n");
         assert!(
-            errs.contains("unknown key `model` — write `dataset:`")
-                && errs.contains("extension.yaml:"),
+            ext.errors
+                .iter()
+                .any(|e| e.message.contains("unknown key `model`")
+                    && e.fix.as_deref() == Some("write `dataset:`")
+                    && e.file.as_deref() == Some("extension.yaml")
+                    && e.line.is_some()),
             "{errs}"
         );
         assert!(ext.ui.decorators.is_empty());
@@ -237,7 +280,7 @@ mod tests {
     fn a_shared_extension_may_declare_decorators() {
         let ext =
             load("    - { dataset: flags, resource: oxplow/work_item, placement: ref-chip, label: label }\n");
-        assert_eq!(ext.errors, Vec::<String>::new());
+        assert!(ext.errors.is_empty(), "{:?}", ext.errors);
         assert_eq!(ext.ui.decorators.len(), 1);
     }
 }

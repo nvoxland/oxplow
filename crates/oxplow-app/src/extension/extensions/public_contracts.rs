@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use oxplow_domain::contribution::{ContributionId, ContributionKind, ContributionRef, DeclaredAt};
 use serde::{Deserialize, Serialize};
 
-use super::{imports, manifest_v2, Extension};
+use super::{imports, manifest_v2, Diagnostic, Extension};
 
 #[derive(
     Debug,
@@ -192,8 +192,10 @@ fn parse_id(
         })),
         Err(error) => {
             ext.public_contracts.invalid = true;
+            let file = oxplow_domain::diagnostic::relative_to(&ext.path, &source.file).to_string();
             ext.errors.push(manifest_v2::at(
-                &source.file,
+                "import.invalid_contribution",
+                &file,
                 source.line.and_then(|line| usize::try_from(line).ok()),
                 format!("invalid public contribution `{text}`: {error}"),
             ));
@@ -349,8 +351,10 @@ pub(super) fn prepare(ext: &mut Extension) {
 
 fn invalid(ext: &mut Extension, source: &DeclaredAt, message: String) {
     ext.public_contracts.invalid = true;
+    let file = oxplow_domain::diagnostic::relative_to(&ext.path, &source.file).to_string();
     ext.errors.push(manifest_v2::at(
-        &source.file,
+        "import.invalid_contract",
+        &file,
         source.line.and_then(|line| usize::try_from(line).ok()),
         message,
     ));
@@ -419,28 +423,25 @@ fn record_diagnostics(
     resolution: &imports::Resolution,
     causes: &BTreeMap<ContributionId, BTreeSet<String>>,
 ) {
-    for diagnostic in &resolution.diagnostics {
+    for finding in &resolution.diagnostics {
         for ext in extensions
             .iter_mut()
-            .filter(|ext| ext.name == diagnostic.extension)
+            .filter(|ext| ext.name == finding.extension)
         {
-            let file = if diagnostic.source.file == format!("{}/extension.yaml", ext.name) {
-                format!("{}/extension.yaml", ext.path.trim_end_matches('/'))
+            // A finding about the extension as a whole is placed at its
+            // manifest (`<name>/extension.yaml`); the rest where declared.
+            let root_file = format!("{}/extension.yaml", ext.name);
+            let file = if finding.source.file == root_file {
+                "extension.yaml"
             } else {
-                diagnostic.source.file.clone()
+                oxplow_domain::diagnostic::relative_to(&ext.path, &finding.source.file)
             };
-            let at = |text: String| {
-                manifest_v2::at(
-                    &file,
-                    diagnostic
-                        .source
-                        .line
-                        .and_then(|line| usize::try_from(line).ok()),
-                    text,
-                )
-            };
-            let base = format!("{}: {}", diagnostic.code, diagnostic.message);
-            let withheld: Vec<_> = match (&diagnostic.binding, diagnostic.severity) {
+            let line = finding
+                .source
+                .line
+                .and_then(|line| usize::try_from(line).ok());
+            let code = format!("import.{}", finding.code);
+            let withheld: Vec<_> = match (&finding.binding, finding.severity) {
                 (Some(binding), imports::Severity::Warning) => causes
                     .iter()
                     .filter(|(id, bindings)| id.extension == ext.name && bindings.contains(binding))
@@ -449,17 +450,27 @@ fn record_diagnostics(
                 _ => Vec::new(),
             };
             let message = if withheld.is_empty() {
-                at(base.clone())
+                finding.message.clone()
             } else {
-                at(format!("{base}; withheld: {}", withheld.join(", ")))
+                format!("{}; withheld: {}", finding.message, withheld.join(", "))
             };
-            let messages = match diagnostic.severity {
+            let diagnostic = match finding.severity {
+                imports::Severity::Error => Diagnostic::error(&code, message),
+                imports::Severity::Warning => Diagnostic::warning(&code, message),
+            }
+            .at(file, line);
+            let diagnostic = match &finding.binding {
+                Some(binding) => diagnostic.contribution(format!("{}/{binding}", ext.name)),
+                None => diagnostic,
+            };
+            let messages = match finding.severity {
                 imports::Severity::Error => &mut ext.errors,
                 imports::Severity::Warning => &mut ext.warnings,
             };
-            let earlier = at(base);
-            messages.retain(|m| m != &message && !m.starts_with(&earlier));
-            messages.push(message);
+            // A later pass's finding replaces an earlier one's for the same
+            // import (its `withheld` list may have grown).
+            messages.retain(|m| !m.same_as(&diagnostic));
+            messages.push(diagnostic);
         }
     }
 }
@@ -570,11 +581,12 @@ fn resolve(extensions: &mut [Extension], publish: bool) {
             .iter()
             .filter(|(id, bindings)| id.extension == ext.name && bindings.is_empty())
         {
-            let message = manifest_v2::at(
-                &format!("{}/extension.yaml", ext.path.trim_end_matches('/')),
-                None,
+            let message = Diagnostic::warning(
+                "import.withheld",
                 format!("withheld `{id}`: what it mounts from another extension was withheld"),
-            );
+            )
+            .at("extension.yaml", None)
+            .contribution(id.to_string());
             if !ext.warnings.contains(&message) {
                 ext.warnings.push(message);
             }

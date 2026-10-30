@@ -75,11 +75,7 @@ pub(crate) async fn readable(svc: &crate::Services, view: &str) -> bool {
 /// What activation said against `extension`, one line each; empty when
 /// nothing is held back.
 pub(crate) fn problem(svc: &crate::Services, extension: &str) -> String {
-    svc.extension_activation
-        .problems()
-        .get(extension)
-        .map(|lines| lines.join("\n"))
-        .unwrap_or_default()
+    crate::test_fixtures::shown_held(svc, &svc.extension_activation.problems(), extension)
 }
 
 /// Page `id` run as a person: an error when it isn't there (withheld)

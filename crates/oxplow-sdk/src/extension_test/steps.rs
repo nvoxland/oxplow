@@ -84,15 +84,19 @@ pub(super) async fn run_steps(
     report: &mut TestReport,
 ) -> bool {
     let Some(steps) = steps.as_array() else {
-        report.errors.push(format!(
-            "{shown}:1: `{key}` isn't a list — fix: `{key}: [{{ command, input?, as? }}]`"
-        ));
+        report.errors.push(
+            error(shown, None, "fixture.step", format!("`{key}` isn't a list"))
+                .fix(format!("`{key}: [{{ command, input?, as? }}]`")),
+        );
         return false;
     };
     if let Err(e) = host.svc.streams.ensure_primary().await {
-        report
-            .errors
-            .push(format!("{shown}:1: `{key}`: its thread: {e}"));
+        report.errors.push(error(
+            shown,
+            None,
+            "example.thread_failed",
+            format!("`{key}`: its thread: {e}"),
+        ));
         return false;
     }
     for (index, step) in steps.iter().enumerate() {
@@ -104,9 +108,12 @@ pub(super) async fn run_steps(
         }
         if let Some(project) = step.get("project") {
             if let Err(e) = given_project(host, project) {
-                report
-                    .errors
-                    .push(format!("{shown}:1: `{key}[{index}]` `project`: {e}"));
+                report.errors.push(error(
+                    shown,
+                    None,
+                    "fixture.step",
+                    format!("`{key}[{index}]` `project`: {e}"),
+                ));
                 return false;
             }
             host.settle().await;
@@ -116,34 +123,40 @@ pub(super) async fn run_steps(
             let observed = match binds.substitute(observed) {
                 Ok(observed) => observed,
                 Err(e) => {
-                    report
-                        .errors
-                        .push(format!("{shown}:1: `{key}[{index}]`: {e}"));
+                    report.errors.push(error(
+                        shown,
+                        None,
+                        "fixture.step",
+                        format!("`{key}[{index}]`: {e}"),
+                    ));
                     return false;
                 }
             };
             if let Err(e) = observe(host, ext, &observed).await {
-                report
-                    .errors
-                    .push(format!("{shown}:1: `{key}[{index}]` `observe`: {e}"));
+                report.errors.push(error(
+                    shown,
+                    None,
+                    "fixture.step",
+                    format!("`{key}[{index}]` `observe`: {e}"),
+                ));
                 return false;
             }
             host.settle().await;
             continue;
         }
         let Some(command) = step.get("command").and_then(Value::as_str) else {
-            report.errors.push(format!(
-                "{shown}:1: `{key}[{index}]` names no command — fix: `{{ command, input?, as? }}`, \
-                 `{{ observe: {{ <kind>: {{ .. }} }} }}` or `{{ rows: {{ <entity>: [..] }} }}`"
-            ));
+            report.errors.push(error(shown, None, "fixture.step", format!("`{key}[{index}]` names no command")).fix("`{ command, input?, as? }`, `{ observe: { <kind>: { .. } } }` or `{ rows: { <entity>: [..] } }`"));
             return false;
         };
         let actor = match step_actor(step) {
             Ok(actor) => actor,
             Err(e) => {
-                report
-                    .errors
-                    .push(format!("{shown}:1: `{key}[{index}]`: {e}"));
+                report.errors.push(error(
+                    shown,
+                    None,
+                    "fixture.step",
+                    format!("`{key}[{index}]`: {e}"),
+                ));
                 return false;
             }
         };
@@ -151,9 +164,12 @@ pub(super) async fn run_steps(
         {
             Ok(input) => input,
             Err(e) => {
-                report
-                    .errors
-                    .push(format!("{shown}:1: `{key}[{index}]`: {e}"));
+                report.errors.push(error(
+                    shown,
+                    None,
+                    "fixture.step",
+                    format!("`{key}[{index}]`: {e}"),
+                ));
                 return false;
             }
         };
@@ -176,15 +192,22 @@ pub(super) async fn run_steps(
                 host.settle().await;
             }
             Err(e) => {
-                report.errors.push(format!(
-                    "{shown}:1: `{key}[{index}]` `{command}` failed: {e} — fix: its input, or the \
-                     steps before it{}",
-                    if confirmed {
-                        ""
-                    } else {
-                        " (a command that asks first runs with `confirmed: true`)"
-                    }
-                ));
+                report.errors.push(
+                    error(
+                        shown,
+                        None,
+                        "fixture.step",
+                        format!("`{key}[{index}]` `{command}` failed: {e}"),
+                    )
+                    .fix(format!(
+                        "its input, or the steps before it{}",
+                        if confirmed {
+                            ""
+                        } else {
+                            " (a command that asks first runs with `confirmed: true`)"
+                        }
+                    )),
+                );
                 return false;
             }
         }
@@ -322,10 +345,7 @@ pub(super) fn bind_from(
                 binds.0.insert(name.clone(), value);
             }
             None => {
-                report.errors.push(format!(
-                    "{shown}:1: {label}: `bind.{name}` reads nothing in {seen} — fix: a path \
-                     like `loaders.<name>.rows[0].<column>` (a run) or `result.<key>` (a press)"
-                ));
+                report.errors.push(error(shown, None, "fixture.step", format!("{label}: `bind.{name}` reads nothing in {seen}")).fix("a path like `loaders.<name>.rows[0].<column>` (a run) or `result.<key>` (a press)"));
                 return false;
             }
         }

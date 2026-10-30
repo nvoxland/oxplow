@@ -15,6 +15,7 @@
 //! `capabilities::agent_text`'s to say; the agent runtimes write them
 //! (`oxplow_domain::agent::text::AgentText`).
 
+use oxplow_domain::diagnostic::Diagnostic;
 use serde::{Deserialize, Serialize};
 use serde_yaml::Value;
 
@@ -76,10 +77,18 @@ pub(crate) fn parse_skills(
     file: &str,
     manifest: &str,
     files: &dyn ExtensionFiles,
-) -> (Vec<SkillDecl>, Vec<String>) {
+) -> (Vec<SkillDecl>, Vec<Diagnostic>) {
     let block = key_line(manifest, "skills");
     let Some(items) = value.as_sequence() else {
-        return (Vec::new(), vec![at(file, block, "`skills` must be a list")]);
+        return (
+            Vec::new(),
+            vec![at(
+                "skill.not_a_list",
+                file,
+                block,
+                "`skills` must be a list",
+            )],
+        );
     };
     let core = oxplow_agent_text::core_text();
     let mut out: Vec<SkillDecl> = Vec::new();
@@ -90,34 +99,46 @@ pub(crate) fn parse_skills(
         let f: SkillFile = match serde_yaml::from_value(item.clone()) {
             Ok(f) => f,
             Err(e) => {
-                errors.push(at(file, item_line, format!("skill: {e}")));
+                errors.push(at("skill.invalid", file, item_line, format!("skill: {e}")));
                 continue;
             }
         };
         let line = item_line;
         let problem = if !well_formed(&f.name) {
-            Some(format!(
-                "skill name `{}` must be lowercase letters, digits and `-`, starting with a letter",
-                f.name
+            Some((
+                "skill.invalid_name",
+                format!(
+                    "skill name `{}` must be lowercase letters, digits and `-`, starting with a letter",
+                    f.name
+                ),
             ))
         } else if core.names(&f.name) {
-            Some(format!("skill name `{}` is one of oxplow's own", f.name))
+            Some((
+                "skill.reserved_name",
+                format!("skill name `{}` is one of oxplow's own", f.name),
+            ))
         } else if out.iter().any(|o| o.name == f.name) {
-            Some(format!("skill `{}` is declared twice", f.name))
+            Some((
+                "skill.duplicate",
+                format!("skill `{}` is declared twice", f.name),
+            ))
         } else if let Some(e) = f
             .needs
             .iter()
             .find_map(|n| oxplow_domain::capability::check_need(n).err())
         {
-            Some(e)
+            Some(("skill.unknown_need", e))
         } else {
             match files.read(&f.file) {
-                None => Some(format!("skill `{}`: no file `{}`", f.name, f.file)),
+                None => Some((
+                    "skill.missing_file",
+                    format!("skill `{}`: no file `{}`", f.name, f.file),
+                )),
                 Some(body) => body_problem(&f, &body),
             }
         };
         match problem {
-            Some(p) => errors.push(at(file, line, p)),
+            Some((code, p)) => errors.push(at(code, file, line, p)),
             None => out.push(SkillDecl {
                 description: description_of(&files.read(&f.file).unwrap_or_default()),
                 name: f.name,
@@ -148,14 +169,14 @@ fn well_formed(name: &str) -> bool {
 
 /// A skill's frontmatter names it (the runtimes key discovery on it) and
 /// says when it applies; a command's says what it does.
-fn body_problem(f: &SkillFile, body: &str) -> Option<String> {
+fn body_problem(f: &SkillFile, body: &str) -> Option<(&'static str, String)> {
     let Some((front, _)) = body
         .strip_prefix("---\n")
         .and_then(|rest| rest.split_once("\n---"))
     else {
-        return Some(format!(
-            "skill `{}`: `{}` has no `---` frontmatter",
-            f.name, f.file
+        return Some((
+            "skill.no_frontmatter",
+            format!("skill `{}`: `{}` has no `---` frontmatter", f.name, f.file),
         ));
     };
     let field = |key: &str| {
@@ -166,16 +187,19 @@ fn body_problem(f: &SkillFile, body: &str) -> Option<String> {
             .filter(|v| !v.is_empty())
     };
     if field("description:").is_none() {
-        return Some(format!(
-            "skill `{}`: its frontmatter has no `description:`",
-            f.name
+        return Some((
+            "skill.no_description",
+            format!("skill `{}`: its frontmatter has no `description:`", f.name),
         ));
     }
     match (f.kind, field("name:")) {
         (SkillKind::Skill, Some(name)) if name == f.name => None,
-        (SkillKind::Skill, _) => Some(format!(
-            "skill `{}`: its frontmatter `name:` must be `{}`",
-            f.name, f.name
+        (SkillKind::Skill, _) => Some((
+            "skill.frontmatter_name",
+            format!(
+                "skill `{}`: its frontmatter `name:` must be `{}`",
+                f.name, f.name
+            ),
         )),
         (SkillKind::Command, _) => None,
     }
@@ -185,7 +209,7 @@ fn body_problem(f: &SkillFile, body: &str) -> Option<String> {
 mod tests {
     use super::*;
 
-    fn parse(yaml: &str, files: &[(&str, &str)]) -> (Vec<SkillDecl>, Vec<String>) {
+    fn parse(yaml: &str, files: &[(&str, &str)]) -> (Vec<SkillDecl>, Vec<Diagnostic>) {
         let dir = tempfile::tempdir().unwrap();
         for (path, body) in files {
             let p = dir.path().join(path);
@@ -210,7 +234,7 @@ mod tests {
             "  - { name: work-items, file: s/SKILL.md, needs: [work_items] }\n  - { name: work-next, kind: command, file: c.md }\n",
             &[("s/SKILL.md", SKILL), ("c.md", "---\ndescription: Next.\n---\nGo.\n")],
         );
-        assert_eq!(errors, Vec::<String>::new());
+        assert!(errors.is_empty(), "{errors:?}");
         assert_eq!(
             decls,
             vec![
@@ -234,7 +258,14 @@ mod tests {
 
     #[test]
     fn what_wont_install_is_refused() {
-        let errors = |yaml: &str, files: &[(&str, &str)]| parse(yaml, files).1.join("\n");
+        let errors = |yaml: &str, files: &[(&str, &str)]| {
+            parse(yaml, files)
+                .1
+                .iter()
+                .map(|d| d.render(""))
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
         assert!(errors("  - { name: Work, file: s.md }\n", &[]).contains("lowercase"));
         assert!(
             errors("  - { name: configure, kind: command, file: s.md }\n", &[])

@@ -42,7 +42,7 @@ fn extension(project: &Path) -> Extension {
         .into_iter()
         .find(|e| e.name == EXT)
         .expect("the tracker extension loads");
-    assert_eq!(ext.errors, Vec::<String>::new());
+    assert!(ext.errors.is_empty(), "{:?}", ext.errors);
     ext
 }
 
@@ -1072,7 +1072,12 @@ async fn a_provider_command_is_declared_over_an_operation_it_lists() {
             .into_iter()
             .find(|e| e.name == EXT)
             .unwrap();
-        let errs = loaded.errors.join("\n");
+        let errs = loaded
+            .errors
+            .iter()
+            .map(|d| loaded.shown(d))
+            .collect::<Vec<_>>()
+            .join("\n");
         assert!(errs.contains(says), "{entry}: {errs}");
     }
 }
@@ -1110,7 +1115,7 @@ async fn provider_args_stay_inside_the_extension_folder() {
         loaded
             .errors
             .iter()
-            .any(|e| e.contains("../../../tools/tracker.py")),
+            .any(|e| loaded.shown(e).contains("../../../tools/tracker.py")),
         "{:?}",
         loaded.errors
     );
@@ -1176,7 +1181,7 @@ async fn an_adapter_provider_names_its_server_mapping_and_tools_inside_the_folde
             .unwrap();
         assert!(loaded.providers.is_empty(), "{to}");
         assert!(
-            loaded.errors.iter().any(|e| e.contains(says)),
+            loaded.errors.iter().any(|e| loaded.shown(e).contains(says)),
             "{to}: {:?}",
             loaded.errors
         );
@@ -1188,7 +1193,10 @@ async fn an_adapter_provider_names_its_server_mapping_and_tools_inside_the_folde
         .find(|e| e.name == EXT)
         .unwrap();
     assert!(
-        loaded.errors.iter().any(|e| e.contains("mcp/tools.json")),
+        loaded
+            .errors
+            .iter()
+            .any(|e| loaded.shown(e).contains("mcp/tools.json")),
         "pinned tools are a list: {:?}",
         loaded.errors
     );
@@ -1265,10 +1273,10 @@ async fn a_provider_cannot_declare_another_core_event_type() {
         .unwrap();
     assert!(loaded.providers.is_empty());
     assert!(
-        loaded
-            .errors
-            .iter()
-            .any(|e| e.contains("contribution.enabled@1") && e.contains("work_items")),
+        loaded.errors.iter().any(|e| {
+            let e = loaded.shown(e);
+            e.contains("contribution.enabled@1") && e.contains("work_items")
+        }),
         "{:?}",
         loaded.errors
     );
@@ -1481,9 +1489,7 @@ async fn unreadable_declarations_are_held_back_naming_the_file() {
     .unwrap();
     let problems = crate::test_fixtures::activate_with_problems(&fx.svc).await;
     assert!(
-        problems
-            .get(EXT)
-            .is_some_and(|why| why.join("\n").contains("provider.json")),
+        crate::test_fixtures::shown_held(&fx.svc, &problems, EXT).contains("provider.json"),
         "{problems:?}"
     );
 }
@@ -3624,7 +3630,7 @@ async fn an_oauth_credential_is_declared_and_checked() {
             .unwrap();
         assert!(loaded.providers.is_empty(), "{says}");
         assert!(
-            loaded.errors.iter().any(|e| e.contains(says)),
+            loaded.errors.iter().any(|e| loaded.shown(e).contains(says)),
             "{says}: {:?}",
             loaded.errors
         );
@@ -4713,7 +4719,7 @@ async fn an_adapter_server_by_url_is_declared_and_checked() {
             .unwrap();
         assert!(loaded.providers.is_empty(), "{to}");
         assert!(
-            loaded.errors.iter().any(|e| e.contains(says)),
+            loaded.errors.iter().any(|e| loaded.shown(e).contains(says)),
             "{to}: {:?}",
             loaded.errors
         );
@@ -5940,7 +5946,12 @@ async fn a_provider_needs_only_scopes_host_call_serves() {
         .into_iter()
         .find(|e| e.name == EXT)
         .unwrap();
-    let errs = loaded.errors.join("\n");
+    let errs = loaded
+        .errors
+        .iter()
+        .map(|d| loaded.shown(d))
+        .collect::<Vec<_>>()
+        .join("\n");
     assert!(
         errs.contains("`config.read` is a scope a script can't call"),
         "{errs}"
@@ -5989,7 +6000,7 @@ async fn running_policy(hooks: &str) -> (EffortFixture, Extension) {
         .into_iter()
         .find(|e| e.name == "steward")
         .expect("the policy extension loads");
-    assert_eq!(ext.errors, Vec::<String>::new());
+    assert!(ext.errors.is_empty(), "{:?}", ext.errors);
     deploy(&fx, &ext).await;
     enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
     fx.svc
@@ -6289,7 +6300,7 @@ async fn running_harness(hooks: &str) -> (EffortFixture, Extension) {
         .into_iter()
         .find(|e| e.name == "conductor")
         .expect("the harness extension loads");
-    assert_eq!(ext.errors, Vec::<String>::new());
+    assert!(ext.errors.is_empty(), "{:?}", ext.errors);
     deploy(&fx, &ext).await;
     enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
     (fx, ext)
@@ -6504,7 +6515,7 @@ async fn running_snapshots(
         .into_iter()
         .find(|e| e.name == "shutter")
         .expect("the snapshots extension loads");
-    assert_eq!(ext.errors, Vec::<String>::new());
+    assert!(ext.errors.is_empty(), "{:?}", ext.errors);
     deploy(&fx, &ext).await;
     let stream = oxplow_domain::StreamId::new(1);
     let capture = std::sync::Arc::new(
@@ -6720,7 +6731,7 @@ async fn a_knowledge_provider_keeps_pages_and_core_records_them() {
         .into_iter()
         .find(|e| e.name == "shelf")
         .expect("the knowledge extension loads");
-    assert_eq!(ext.errors, Vec::<String>::new());
+    assert!(ext.errors.is_empty(), "{:?}", ext.errors);
     deploy(&fx, &ext).await;
     enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
     fx.svc
@@ -6907,7 +6918,7 @@ async fn running_filesystem(name: &str, writable: bool) -> EffortFixture {
         .into_iter()
         .find(|e| e.name == name)
         .expect("the filesystem extension loads");
-    assert_eq!(ext.errors, Vec::<String>::new());
+    assert!(ext.errors.is_empty(), "{:?}", ext.errors);
     deploy(&fx, &ext).await;
     enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
     fx

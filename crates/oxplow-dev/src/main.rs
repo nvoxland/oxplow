@@ -192,16 +192,34 @@ async fn deploy_from_outside(project: &Path, name: Option<&String>) -> Result<St
             Err(e) => failed.push(format!("deploy `{name}`: {e}")),
         }
     }
-    for (other, why) in svc.extension_activation.problems() {
-        out.push(format!("held back: {other}"));
-        out.extend(why.iter().map(|w| format!("  - {w}")));
-    }
+    out.extend(held_back(&svc.extension_activation.problems(), project));
     if failed.is_empty() {
         Ok(out.join("\n"))
     } else {
         out.extend(failed);
         Err(out.join("\n"))
     }
+}
+
+/// What held each extension back, as lines: `held back: <name>`, then a
+/// `  - <file:line: what — fix>` per problem, each under the folder of the
+/// extension it belongs to (the one a person edits).
+fn held_back(
+    problems: &oxplow_app::vocabulary_reactor::VocabularyErrors,
+    project: &Path,
+) -> Vec<String> {
+    let extensions = oxplow_app::extension::extensions::load_extensions(project);
+    problems
+        .iter()
+        .flat_map(|(owner, why)| {
+            let root = extensions
+                .iter()
+                .find(|e| &e.name == owner)
+                .map_or("", |e| e.root());
+            std::iter::once(format!("held back: {owner}"))
+                .chain(why.iter().map(move |d| format!("  - {}", d.render(root))))
+        })
+        .collect()
 }
 
 /// `extension status` and `extension deploy <name>`: an agent outside
@@ -225,9 +243,11 @@ async fn extension(project: &Path, args: &[String]) -> Result<String, String> {
                 .iter()
                 .map(|(name, what)| format!("{name}: {what}"))
                 .collect();
-            for (name, why) in &next.problems {
-                out.push(format!("\nheld back: {name}"));
-                out.extend(why.iter().map(|w| format!("  - {w}")));
+            for line in held_back(&next.problems, project) {
+                out.push(match line.strip_prefix("held back: ") {
+                    Some(_) => format!("\n{line}"),
+                    None => line,
+                });
             }
             if next.problems.is_empty() {
                 out.push("\nnothing held back".into());

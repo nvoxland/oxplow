@@ -3,8 +3,15 @@ import { expect, test } from "bun:test";
 import type { Extension } from "./api.js";
 import { FOUNDATION, foundationDown, foundationDownText } from "./foundationDown.js";
 
+// Each error a diagnostic with no file: it reads as its message.
 const ext = (name: string, enabled: boolean, errors: string[] = []) =>
-  ({ name, enabled, errors }) as unknown as Extension;
+  ({
+    name,
+    enabled,
+    path: `extensions/${name}`,
+    source: null,
+    errors: errors.map((message) => ({ severity: "error", code: "manifest.parse", file: null, line: null, contribution: null, message, fix: null, mismatch: null })),
+  }) as unknown as Extension;
 
 test("nothing is reported before the listing loads", () => {
   expect(foundationDown(null)).toBeNull();

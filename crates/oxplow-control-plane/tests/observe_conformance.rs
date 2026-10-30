@@ -232,7 +232,10 @@ async fn a_provider_launched_session_is_recorded_canonically() {
         .find(|e| e.name == "relay")
         .cloned()
         .expect("the harness extension loads");
-    assert_eq!(ext.errors, Vec::<String>::new());
+    assert_eq!(
+        ext.errors.iter().map(|d| ext.shown(d)).collect::<Vec<_>>(),
+        Vec::<String>::new()
+    );
     // Deployed (which turns it on, reloading the config), then its
     // instance enabled as a person would, then activated.
     oxplow_app::extension::extension_deploy::deploy(&svc, "relay", true)

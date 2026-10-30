@@ -1,6 +1,6 @@
 /**
  * Extensions that have problems: read from `v_extension` (`errors`, a JSON
- * array of strings). An extension with errors counts whether or not it is
+ * array of diagnostics; each one's `shown` is the line a person reads). An extension with errors counts whether or not it is
  * enabled — a held one is listed with the reasons it is held, even
  * `oxplow-foundation`. Alerts lists each, with a way to Settings →
  * Extensions.
@@ -18,15 +18,11 @@ export interface ExtensionProblem {
   errors: string[];
 }
 
+/** The lines `errors` holds: each diagnostic's `shown`. */
 function parseErrors(raw: unknown): string[] {
-  if (Array.isArray(raw)) return raw.map(String);
   if (typeof raw !== "string" || raw === "") return [];
-  try {
-    const v: unknown = JSON.parse(raw);
-    return Array.isArray(v) ? v.map(String) : [raw];
-  } catch {
-    return [raw];
-  }
+  const v: unknown = JSON.parse(raw);
+  return Array.isArray(v) ? v.map((d) => String((d as { shown?: unknown }).shown ?? "")) : [];
 }
 
 export function problemsFromResult(result: SqlQueryResult): ExtensionProblem[] {

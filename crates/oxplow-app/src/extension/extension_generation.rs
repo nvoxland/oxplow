@@ -3,6 +3,7 @@
 
 use oxplow_db::datasets::{self, ExtensionDatasets};
 use oxplow_db::TxError;
+use oxplow_domain::diagnostic::Diagnostic;
 use oxplow_domain::{vocabulary::Vocabulary, DomainError, Timestamp};
 
 use crate::capabilities::PreparedCapabilities;
@@ -78,7 +79,10 @@ impl PreparedExtensionDatabase {
         if snapshot.generation() != capabilities.generation() {
             return Err(VocabularyErrors::from([(
                 "<host>".to_string(),
-                vec!["capabilities and database declarations belong to different catalogs".into()],
+                vec![Diagnostic::error(
+                    "activation.catalog_mismatch",
+                    "capabilities and database declarations belong to different catalogs",
+                )],
             )]));
         }
         let vocabulary = PreparedVocabulary::prepare(snapshot, capabilities.work_item_ids())?;
@@ -167,14 +171,21 @@ impl PreparedExtensionDatabase {
                     rows.last_mut().expect("just pushed")
                 }
             };
-            let mut errors: Vec<String> =
+            let mut errors: Vec<Diagnostic> =
                 serde_json::from_str(&row.errors_json).unwrap_or_default();
             for reason in why {
-                if !errors.contains(reason) {
+                if !errors.iter().any(|d| d.same_as(reason)) {
                     errors.push(reason.clone());
                 }
             }
-            row.errors_json = json_text(&errors);
+            // Shown under the folder its source is in, as the row's own are.
+            let root = raw
+                .extensions()
+                .iter()
+                .find(|e| &e.name == name)
+                .map(|e| e.root().to_string())
+                .unwrap_or_default();
+            row.errors_json = json_text(&crate::extension::extensions::listed(&root, &errors));
         }
     }
 
@@ -206,17 +217,35 @@ impl PreparedExtensionDatabase {
                 .map_err(|error| {
                     TxError::Aborted(VocabularyErrors::from([(
                         extension.clone(),
-                        vec![format!(
-                            "its stored configuration can't be read for its datasets' \
-                                     config() ({error:?}); fix or reset it"
-                        )],
+                        vec![Diagnostic::error(
+                            "activation.configuration_unreadable",
+                            format!(
+                                "its stored configuration can't be read for its datasets' \
+                                 config() ({error:?})"
+                            ),
+                        )
+                        .fix("fix or reset it")],
                     )]))
                 })?;
                 if let Some(datasets) = candidate.iter_mut().find(|m| &m.extension == extension) {
                     datasets.config = Some(values);
                 }
             }
-            datasets::replace_extensions(tx, &candidate)?;
+            datasets::replace_extensions(tx, &candidate).map_err(|error| match error {
+                TxError::Aborted(refused) => TxError::Aborted(
+                    refused
+                        .into_iter()
+                        .map(|(owner, why)| {
+                            let why = why
+                                .into_iter()
+                                .map(|line| Diagnostic::error("dataset.invalid", line))
+                                .collect();
+                            (owner, why)
+                        })
+                        .collect(),
+                ),
+                TxError::Storage(error) => TxError::Storage(error),
+            })?;
             let vocabulary = self.vocabulary.replace_tx(tx, now)?;
             oxplow_db::contribution_store::reset_tx(tx, &self.contributions)?;
             oxplow_db::catalog_listing_store::reset_tx(tx, &self.listing)?;
@@ -343,8 +372,8 @@ pub(crate) fn extension_row(
             | crate::extension::extensions::Deployment::Deployed { hash } => Some(hash.clone()),
             _ => None,
         },
-        errors_json: json_text(&extension.errors),
-        warnings_json: json_text(&extension.warnings),
+        errors_json: json_text(&extension.listed(&extension.errors)),
+        warnings_json: json_text(&extension.listed(&extension.warnings)),
         permissions_json: json_text(&extension.permissions),
         pending_json: json_text(&extension.pending),
         shared: extension.shared,

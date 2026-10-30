@@ -14,6 +14,7 @@ pub mod code_intel;
 pub mod commands;
 pub mod comment;
 pub mod contribution;
+pub mod diagnostic;
 pub mod effort_impact;
 pub mod effort_policy;
 pub mod error;

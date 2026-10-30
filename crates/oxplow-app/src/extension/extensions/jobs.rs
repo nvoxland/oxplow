@@ -1,6 +1,7 @@
 //! Validated `jobs:` declarations. A declaration names a host operation;
 //! scheduling and execution are separate host services.
 
+use oxplow_domain::diagnostic::Diagnostic;
 use serde::{Deserialize, Serialize};
 use serde_yaml::Value;
 
@@ -126,15 +127,23 @@ pub fn parse_jobs(
     manifest: &str,
     namespace: &str,
     commands: &[crate::extension::extension_commands::ExtensionCommand],
-) -> (Vec<JobDecl>, Vec<String>) {
+) -> (Vec<JobDecl>, Vec<Diagnostic>) {
     let block = key_line(manifest, "jobs");
     let Some(items) = value.as_sequence() else {
-        return (Vec::new(), vec![at(file, block, "`jobs` must be a list")]);
+        return (
+            Vec::new(),
+            vec![at("job.not_a_list", file, block, "`jobs` must be a list")],
+        );
     };
     if items.len() > MAX_JOBS {
         return (
             Vec::new(),
-            vec![at(file, block, "`jobs` may declare at most 128 operations")],
+            vec![at(
+                "job.too_many",
+                file,
+                block,
+                "`jobs` may declare at most 128 operations",
+            )],
         );
     }
 
@@ -144,7 +153,12 @@ pub fn parse_jobs(
     for (index, item) in items.iter().enumerate() {
         let line = lines.get(index).copied().or(block);
         let Ok(raw) = serde_yaml::from_value::<JobFile>(item.clone()) else {
-            errors.push(at(file, line, "job declaration has invalid fields"));
+            errors.push(at(
+                "job.invalid_fields",
+                file,
+                line,
+                "job declaration has invalid fields",
+            ));
             continue;
         };
         if raw.id.len() > 256
@@ -153,29 +167,69 @@ pub fn parse_jobs(
                 &raw.id,
             )
         {
-            errors.push(at(file, line, "job id has invalid syntax"));
-        } else if raw.description.len() > MAX_DESCRIPTION_BYTES {
-            errors.push(at(file, line, "job description exceeds 4096 bytes"));
-        } else if raw.version == 0 {
-            errors.push(at(file, line, "job version must be positive"));
-        } else if !needs_hold(&raw.needs) {
             errors.push(at(
+                "job.invalid_id",
                 file,
                 line,
-                "job needs are [ai.compute], or [ai.compute, sql.read] to let its model query",
+                "job id has invalid syntax",
             ));
+        } else if raw.description.len() > MAX_DESCRIPTION_BYTES {
+            errors.push(
+                at(
+                    "job.description_too_long",
+                    file,
+                    line,
+                    "job description exceeds 4096 bytes",
+                )
+                .contribution(format!("{namespace}/{}", raw.id)),
+            );
+        } else if raw.version == 0 {
+            errors.push(
+                at(
+                    "job.invalid_version",
+                    file,
+                    line,
+                    "job version must be positive",
+                )
+                .contribution(format!("{namespace}/{}", raw.id)),
+            );
+        } else if !needs_hold(&raw.needs) {
+            errors.push(
+                at("job.invalid_needs", file, line, "job needs are wrong")
+                    .contribution(format!("{namespace}/{}", raw.id))
+                    .fix("use [ai.compute], or [ai.compute, sql.read] to let its model query"),
+            );
         } else if jobs.iter().any(|job| job.id == raw.id) {
-            errors.push(at(file, line, "job id is declared twice"));
+            errors.push(
+                at("job.duplicate_id", file, line, "job id is declared twice")
+                    .contribution(format!("{namespace}/{}", raw.id)),
+            );
         } else if raw
             .max_tool_rounds
             .is_some_and(|n| !(1..=MAX_TOOL_ROUNDS).contains(&n))
         {
-            errors.push(at(file, line, "job max_tool_rounds is 1 to 16"));
+            errors.push(
+                at(
+                    "job.invalid_max_tool_rounds",
+                    file,
+                    line,
+                    "job max_tool_rounds is 1 to 16",
+                )
+                .contribution(format!("{namespace}/{}", raw.id)),
+            );
         } else if raw
             .timeout
             .is_some_and(|n| !(1..=MAX_TIMEOUT_SECS).contains(&n))
         {
-            errors.push(at(file, line, "job timeout is 1 to 600 seconds"));
+            errors.push(
+                at(
+                    "job.invalid_timeout",
+                    file,
+                    line,
+                    "job timeout is 1 to 600 seconds",
+                )
+                .contribution(format!("{namespace}/{}", raw.id)),
+            );
         } else {
             match tools(&raw, namespace, commands) {
                 Ok(tools) => jobs.push(JobDecl {
@@ -189,7 +243,10 @@ pub fn parse_jobs(
                     max_tool_rounds: raw.max_tool_rounds.unwrap_or(DEFAULT_TOOL_ROUNDS),
                     timeout: raw.timeout.unwrap_or(DEFAULT_TIMEOUT_SECS),
                 }),
-                Err(e) => errors.push(at(file, line, &e)),
+                Err(e) => errors.push(
+                    e.at(file, line)
+                        .contribution(format!("{namespace}/{}", raw.id)),
+                ),
             }
         }
     }
@@ -209,34 +266,49 @@ fn tools(
     raw: &JobFile,
     namespace: &str,
     commands: &[crate::extension::extension_commands::ExtensionCommand],
-) -> Result<Vec<JobTool>, String> {
+) -> Result<Vec<JobTool>, Box<Diagnostic>> {
     let mut out: Vec<JobTool> = Vec::new();
     for local in &raw.tools {
         let command = format!("{namespace}.{local}");
         let Some(declared) = commands.iter().find(|c| c.name == command) else {
-            return Err(format!(
-                "job tool `{local}` is none of this extension's commands"
-            ));
+            return Err(Box::new(Diagnostic::error(
+                "job.tool_unknown_command",
+                format!("job tool `{local}` is none of this extension's commands"),
+            )));
         };
         if !declared.job {
-            return Err(format!(
-                "job tool `{local}` doesn't admit a job: its command says `job: true`"
+            return Err(Box::new(
+                Diagnostic::error(
+                    "job.tool_not_job",
+                    format!("job tool `{local}` doesn't admit a job"),
+                )
+                .fix("its command says `job: true`"),
             ));
         }
         if !declared.access.reads_only() {
-            return Err(format!(
-                "job tool `{local}` writes: a tool only reads (`access: read`); write from an \
-                 effect on the job's `contribution.job.completed`"
+            return Err(Box::new(
+                Diagnostic::error(
+                    "job.tool_writes",
+                    format!("job tool `{local}` writes: a tool only reads (`access: read`)"),
+                )
+                .fix("write from an effect on the job's `contribution.job.completed`"),
             ));
         }
         if declared.input_schema.is_none() {
-            return Err(format!(
-                "job tool `{local}` has no `input_schema`: the model is told what it takes"
+            return Err(Box::new(
+                Diagnostic::error(
+                    "job.tool_no_input_schema",
+                    format!("job tool `{local}` has no `input_schema`"),
+                )
+                .fix("the model is told what the tool takes"),
             ));
         }
         let name = local.replace('.', "_");
         if name == QUERY_SQL_TOOL || out.iter().any(|t| t.name == name) {
-            return Err(format!("job tool `{local}` is named like another tool"));
+            return Err(Box::new(Diagnostic::error(
+                "job.tool_name_clash",
+                format!("job tool `{local}` is named like another tool"),
+            )));
         }
         out.push(JobTool {
             name,

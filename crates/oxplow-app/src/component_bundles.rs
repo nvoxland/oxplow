@@ -12,6 +12,7 @@
 //! the manifest's `bundle` — so a spelling that differs from the disk's
 //! only in case still hashes every file it serves.
 
+use oxplow_domain::diagnostic::Diagnostic;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -86,7 +87,11 @@ impl PreparedComponentBundles {
                     add_error(
                         &mut errors,
                         &ext.name,
-                        "custom component bundle identity is duplicated",
+                        Diagnostic::error(
+                            "component.bundle_duplicate",
+                            "custom component bundle identity is duplicated",
+                        )
+                        .contribution(component.id.clone()),
                     );
                     continue;
                 }
@@ -99,10 +104,25 @@ impl PreparedComponentBundles {
                     Ok(bundle) => {
                         bundles.insert(key, bundle);
                     }
-                    Err(_) => add_error(
+                    Err(error) => add_error(
                         &mut errors,
                         &ext.name,
-                        "custom component bundle could not be staged",
+                        match error {
+                            BundleError::NoIndex => Diagnostic::error(
+                                "component.bundle_missing",
+                                "the component's bundle has no `index.html`",
+                            )
+                            .at(
+                                format!("{}/index.html", component.bundle.trim_end_matches('/')),
+                                None,
+                            ),
+                            BundleError::Other(_) => Diagnostic::error(
+                                "component.bundle_unreadable",
+                                "custom component bundle could not be staged",
+                            )
+                            .at(component.bundle.trim_end_matches('/'), None),
+                        }
+                        .contribution(component.id.clone()),
                     ),
                 }
             }
@@ -159,7 +179,7 @@ impl ComponentBundles {
         };
         let snapshot = match active {
             Some(active) => active.ok_or(DomainError::NotFound)?,
-            None => build_snapshot(root, ext, component, None)?,
+            None => build_snapshot(root, ext, component, None).map_err(DomainError::from)?,
         };
         self.loaded
             .lock()
@@ -189,6 +209,23 @@ impl ComponentBundles {
     }
 }
 
+/// Why a bundle couldn't be read.
+#[derive(Debug)]
+enum BundleError {
+    /// The folder has no `index.html`.
+    NoIndex,
+    Other(DomainError),
+}
+
+impl From<BundleError> for DomainError {
+    fn from(error: BundleError) -> Self {
+        match error {
+            BundleError::NoIndex => DomainError::Invalid("a bundle has no `index.html`".into()),
+            BundleError::Other(error) => error,
+        }
+    }
+}
+
 /// `component`'s bundle folder under `root`: its file names and its
 /// version, hashed from the files on disk. A symlink in it is an error
 /// (`Disk::paths`).
@@ -197,17 +234,18 @@ fn build_snapshot(
     ext: &Extension,
     component: &CustomComponent,
     generation: Option<String>,
-) -> Result<Arc<BundleSnapshot>, DomainError> {
+) -> Result<Arc<BundleSnapshot>, BundleError> {
     let folder = format!(
         "{}/{}",
         ext.path.trim_end_matches('/'),
         component.bundle.trim_end_matches('/')
     );
-    let invalid = |e: std::io::Error| DomainError::Invalid(format!("{folder}: {e}"));
+    let invalid =
+        |e: std::io::Error| BundleError::Other(DomainError::Invalid(format!("{folder}: {e}")));
     let source = crate::extension::extensions::files_at(root, &folder).map_err(invalid)?;
     let files: BTreeSet<String> = source.paths().map_err(invalid)?.into_iter().collect();
     if !files.contains("index.html") {
-        return Err(DomainError::Invalid(format!("{folder}: no `index.html`")));
+        return Err(BundleError::NoIndex);
     }
     let version = bundle_version(component, source.as_ref()).map_err(invalid)?;
     Ok(Arc::new(BundleSnapshot {
@@ -254,10 +292,10 @@ pub(crate) fn bundle_version(
     Ok(hex::encode(h.finalize()))
 }
 
-fn add_error(errors: &mut VocabularyErrors, owner: &str, message: &str) {
+fn add_error(errors: &mut VocabularyErrors, owner: &str, problem: Diagnostic) {
     let owner_errors = errors.entry(owner.to_string()).or_default();
-    if !owner_errors.iter().any(|error| error == message) {
-        owner_errors.push(message.to_string());
+    if !owner_errors.iter().any(|error| error.same_as(&problem)) {
+        owner_errors.push(problem);
     }
 }
 

@@ -1,4 +1,5 @@
 import type { Extension } from "./api.js";
+import { shownErrors } from "./diagnostics.js";
 
 export const FOUNDATION = "oxplow-foundation";
 
@@ -13,7 +14,7 @@ export function foundationDown(extensions: Extension[] | null): string[] | null 
   const entry = extensions.find((e) => e.name === FOUNDATION);
   if (!entry) return [`${FOUNDATION} isn't in the extension listing.`];
   if (entry.enabled) return null;
-  return entry.errors.length > 0 ? entry.errors : [`${FOUNDATION} is held back, with no reason given.`];
+  return entry.errors.length > 0 ? shownErrors(entry) : [`${FOUNDATION} is held back, with no reason given.`];
 }
 
 /**

@@ -508,10 +508,10 @@ fn an_extensions_page_files_load_and_a_broken_one_names_its_file() {
         ["acme/busy"]
     );
     assert!(
-        loaded
-            .errors
-            .iter()
-            .any(|e| e.contains("pages/broken.yaml") && e.contains("needs `from`")),
+        loaded.errors.iter().any(|e| {
+            let e = loaded.shown(e);
+            e.contains("pages/broken.yaml") && e.contains("needs `from`")
+        }),
         "{:?}",
         loaded.errors
     );
@@ -575,7 +575,8 @@ fn a_panel_names_its_extensions_pages() {
         loaded
             .errors
             .iter()
-            .any(|e| e.contains("panel `bad`") && e.contains("no `badge` or `alert`")),
+            .any(|e| e.message.contains("panel `bad`")
+                && e.message.contains("no `badge` or `alert`")),
         "{:?}",
         loaded.errors
     );
@@ -611,7 +612,12 @@ fn two_core_named_extensions_cannot_declare_one_page() {
     assert_eq!(exts[0].page_files.len(), 1, "the first keeps it");
     assert!(exts[0].errors.is_empty(), "{:?}", exts[0].errors);
     assert!(exts[1].page_files.is_empty(), "the second loses it");
-    let errors = exts[1].errors.join("\n");
+    let errors = exts[1]
+        .errors
+        .iter()
+        .map(|d| exts[1].shown(d))
+        .collect::<Vec<_>>()
+        .join("\n");
     assert!(
         errors.contains("page `comments` is also `first`'s"),
         "{errors}"

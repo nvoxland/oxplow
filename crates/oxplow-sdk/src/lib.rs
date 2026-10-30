@@ -27,6 +27,7 @@ use oxplow_app::extension::extensions::{self, Extension, EXTENSIONS_DIR};
 pub use oxplow_app::metric_scaffold::MetricStarter;
 use oxplow_app::sql_gateway::SqlGateway;
 use oxplow_domain::contribution::ContributionKind;
+use oxplow_domain::diagnostic::Diagnostic;
 use oxplow_domain::DomainError;
 use serde::Serialize;
 
@@ -1093,9 +1094,11 @@ pub struct CheckReport {
     pub name: String,
     /// No errors (warnings don't fail a check).
     pub ok: bool,
-    /// `file:line: what — fix` lines.
-    pub errors: Vec<String>,
-    pub warnings: Vec<String>,
+    pub errors: Vec<Diagnostic>,
+    pub warnings: Vec<Diagnostic>,
+    /// The folder a person edits (`Extension::root`): what `errors` and
+    /// `warnings` are shown under (`Diagnostic::render`).
+    pub root: String,
     pub extension: Extension,
     /// With `--impact`: what going from `against` to the working
     /// tree changes; `null` without it.
@@ -1107,6 +1110,18 @@ pub struct CheckReport {
     pub services: Vec<oxplow_app::services::ScriptServices>,
     /// What serves each of its `ai_profiles:` here ([`profile_lines`]).
     pub profiles: Vec<String>,
+}
+
+impl CheckReport {
+    /// The errors as the lines a person reads (`<folder>/<file>:<line>: …`).
+    pub fn error_lines(&self) -> Vec<String> {
+        self.errors.iter().map(|d| d.render(&self.root)).collect()
+    }
+
+    /// The warnings as the lines a person reads.
+    pub fn warning_lines(&self) -> Vec<String> {
+        self.warnings.iter().map(|d| d.render(&self.root)).collect()
+    }
 }
 
 /// Load `name` under `root` and report everything wrong with it: the
@@ -1185,6 +1200,7 @@ pub async fn check(
         name: name.to_string(),
         ok: extension.errors.is_empty(),
         errors: extension.errors.clone(),
+        root: extension.root().to_string(),
         warnings: {
             let mut warnings = extension.warnings.clone();
             warnings.extend(profile_warnings(&extension, &ai_bindings(root)));
@@ -1269,6 +1285,16 @@ pub fn name_of(path_or_name: &str) -> &str {
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or(path_or_name)
+}
+
+/// `file` (relative to an extension's folder) under the folder `root` a
+/// person edits.
+pub(crate) fn shown_under(root: &str, file: &str) -> String {
+    if root.is_empty() {
+        file.to_string()
+    } else {
+        format!("{}/{file}", root.trim_end_matches('/'))
+    }
 }
 
 /// How `render_findings` prints.
@@ -1366,7 +1392,7 @@ pub fn profile_lines(ext: &Extension, ai: &oxplow_ai::config::AiConfig) -> Vec<S
 
 /// Each of `ext`'s profiles whose binding here (its own, else its
 /// fallback's) forbids a feature it declares: the call would be refused.
-pub fn profile_warnings(ext: &Extension, ai: &oxplow_ai::config::AiConfig) -> Vec<String> {
+pub fn profile_warnings(ext: &Extension, ai: &oxplow_ai::config::AiConfig) -> Vec<Diagnostic> {
     ext.ai_profiles
         .iter()
         .filter_map(|decl| {
@@ -1375,7 +1401,13 @@ pub fn profile_warnings(ext: &Extension, ai: &oxplow_ai::config::AiConfig) -> Ve
                 ai.roles
                     .get(&oxplow_ai::config::Role::Builtin(profile.fallback))
             })?;
-            oxplow_app::ai_service::forbidden_feature(&profile, binding)
+            let why = oxplow_app::ai_service::forbidden_feature(&profile, binding)?;
+            Some(
+                Diagnostic::warning("ai_profile.forbidden_feature", why)
+                    .at("extension.yaml", None)
+                    .contribution(format!("{}/{}", ext.name, decl.id))
+                    .fix("allow the feature in the role's binding, or drop it from the profile"),
+            )
         })
         .collect()
 }
@@ -1421,12 +1453,12 @@ pub fn render_findings(report: &CheckReport, format: Format) -> String {
             let mut out = String::new();
             for e in &report.errors {
                 out.push_str("error: ");
-                out.push_str(e);
+                out.push_str(&e.render(&report.root));
                 out.push('\n');
             }
             for w in &report.warnings {
                 out.push_str("warning: ");
-                out.push_str(w);
+                out.push_str(&w.render(&report.root));
                 out.push('\n');
             }
             for i in import_lines(&report.extension) {
@@ -1782,7 +1814,7 @@ mod tests {
             .await
             .unwrap();
         assert!(
-            tested.errors.join("\n").contains("v_no_such_view"),
+            tested.error_lines().join("\n").contains("v_no_such_view"),
             "{:?}",
             tested.errors
         );
@@ -1925,8 +1957,9 @@ mod tests {
         );
         // The project restricts the binding `review` falls back to.
         assert!(
-            report.warnings.iter().any(|w| w
-                == "AI profile `prof/review` needs tool calling, which its binding `p · small` forbids"),
+            report.warnings.iter().any(|w| w.code == "ai_profile.forbidden_feature"
+                && w.message
+                    == "AI profile `prof/review` needs tool calling, which its binding `p · small` forbids"),
             "{:?}",
             report.warnings
         );
@@ -2088,8 +2121,8 @@ mod tests {
             .await
             .unwrap();
         assert!(
-            tested.warnings.iter().any(|w| w.starts_with(
-                ".oxplow/extensions/pairs/extension.yaml:1: intent example `missing` has no fixture, so it isn't run — fix: add fixtures/missing.yaml"
+            tested.warning_lines().iter().any(|w| w.starts_with(
+                ".oxplow/extensions/pairs/extension.yaml:6: intent example `missing` has no fixture, so it isn't run — fix: add fixtures/missing.yaml"
             )),
             "{:?}",
             tested.warnings
@@ -2134,11 +2167,16 @@ mod tests {
                 .filter(|l| l.contains("`acme_pr.merged`"))
                 .count()
         };
-        assert_eq!(reaction(&report.errors), 0, "{:?}", report.errors);
-        assert_eq!(reaction(&report.warnings), 1, "{:?}", report.warnings);
+        assert_eq!(reaction(&report.error_lines()), 0, "{:?}", report.errors);
+        assert_eq!(
+            reaction(&report.warning_lines()),
+            1,
+            "{:?}",
+            report.warnings
+        );
         assert!(
             report
-                .warnings
+                .warning_lines()
                 .iter()
                 .any(|w| w.contains("extension.yaml:8")
                     && w.contains("another extension's event type")),

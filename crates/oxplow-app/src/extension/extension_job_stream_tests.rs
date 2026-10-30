@@ -552,7 +552,7 @@ async fn a_tool_that_does_not_admit_a_job_is_a_load_error() {
         let errors =
             crate::extension::extensions::load_project_extension(dir.path(), "triage").errors;
         assert!(
-            errors.iter().any(|e| e.contains(says)),
+            errors.iter().any(|e| e.message.contains(says)),
             "{says}: {errors:?}"
         );
     }

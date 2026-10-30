@@ -10,6 +10,7 @@
 use oxplow_domain::contribution::{
     Collision, ContributionId, ContributionKind, DeclaredAt, Descriptor, Owner, Registry, RunsOn,
 };
+use oxplow_domain::diagnostic::{relative_to, Diagnostic};
 
 use super::Extension;
 
@@ -233,10 +234,16 @@ pub fn describe(ext: &Extension) -> Vec<Descriptor> {
 
 /// Each descriptor's id problem, as `ext`'s load errors.
 pub fn check_ids(ext: &mut Extension) {
-    let problems: Vec<String> = ext
+    let problems: Vec<Diagnostic> = ext
         .contributions
         .iter()
-        .filter_map(|d| d.id.problem().map(|p| format!("{}: {p}", d.source.file)))
+        .filter_map(|d| {
+            d.id.problem().map(|p| {
+                Diagnostic::error("descriptor.invalid_id", p.to_string())
+                    .at(relative_to(&ext.path, &d.source.file), None)
+                    .contribution(d.id.to_string())
+            })
+        })
         .collect();
     ext.errors.extend(problems);
 }
@@ -261,10 +268,11 @@ pub fn check_catalog(exts: &mut [Extension]) -> Registry {
     }
     for (ext, refused) in exts.iter_mut().zip(refused) {
         for c in refused {
-            ext.errors.push(format!(
-                "{}/extension.yaml: {c}",
-                ext.path.trim_end_matches('/')
-            ));
+            ext.errors.push(
+                Diagnostic::error("descriptor.collision", c.to_string())
+                    .at("extension.yaml", None)
+                    .contribution(c.refused.to_string()),
+            );
             remove(ext, &c);
         }
     }
@@ -369,23 +377,32 @@ fn order_catalog(exts: &mut [Extension], consumers: &[&str]) {
                     Ok(After::Contribution(target))
                         if target.extension().is_some_and(|x| idle.contains(x)) =>
                     {
-                        warnings.push(format!(
-                            "{}: runs after {target}, whose extension is disabled: it runs \
-                             without waiting",
-                            d.id
-                        ))
+                        warnings.push(
+                            Diagnostic::warning(
+                                "descriptor.after_disabled",
+                                format!(
+                                    "runs after {target}, whose extension is disabled: it runs \
+                                     without waiting"
+                                ),
+                            )
+                            .at("extension.yaml", None)
+                            .contribution(d.id.to_string()),
+                        )
                     }
                     Ok(after) => resolved.push(after.to_ref()),
-                    Err(e) => refused.push((d.id.clone(), format!("{}: `after`: {e}", d.id))),
+                    Err(e) => refused.push((
+                        d.id.clone(),
+                        Diagnostic::error("descriptor.unresolved_after", format!("`after`: {e}"))
+                            .at("extension.yaml", None)
+                            .contribution(d.id.reference().to_string()),
+                    )),
                 }
             }
             d.after = resolved;
         }
-        let file = format!("{}/extension.yaml", ext.path.trim_end_matches('/'));
-        ext.warnings
-            .extend(warnings.into_iter().map(|w| format!("{file}: {w}")));
-        for (id, message) in refused {
-            ext.errors.push(format!("{file}: {message}"));
+        ext.warnings.extend(warnings);
+        for (id, diagnostic) in refused {
+            ext.errors.push(diagnostic);
             remove_id(ext, &id);
         }
     }
@@ -404,40 +421,52 @@ fn order_catalog(exts: &mut [Extension], consumers: &[&str]) {
                     .collect(),
             })
             .collect();
-        let mut problems: Vec<(oxplow_domain::contribution::ContributionRef, String)> =
-            match Order::compile(&nodes, consumers) {
-                Ok(order) => {
-                    let crossing = crossings(&nodes);
-                    if crossing.is_empty() {
-                        for ext in exts.iter_mut().filter(|e| live(e)) {
-                            for d in ext.contributions.iter_mut().filter(|d| ordered(d)) {
-                                d.order_level = order.level(&d.id.reference()).map(|l| l as u32);
-                            }
+        let mut problems: Vec<(
+            oxplow_domain::contribution::ContributionRef,
+            &'static str,
+            String,
+        )> = match Order::compile(&nodes, consumers) {
+            Ok(order) => {
+                let crossing = crossings(&nodes);
+                if crossing.is_empty() {
+                    for ext in exts.iter_mut().filter(|e| live(e)) {
+                        for d in ext.contributions.iter_mut().filter(|d| ordered(d)) {
+                            d.order_level = order.level(&d.id.reference()).map(|l| l as u32);
                         }
-                        return;
                     }
-                    crossing
+                    return;
                 }
-                Err(errors) => errors
-                    .into_iter()
-                    .flat_map(|e| match &e {
-                        OrderError::Unknown { by, .. } => vec![(by.clone(), e.to_string())],
-                        OrderError::Cycle { cycle } => {
-                            cycle.iter().map(|c| (c.clone(), e.to_string())).collect()
-                        }
-                    })
-                    .collect(),
-            };
+                crossing
+            }
+            Err(errors) => errors
+                .into_iter()
+                .flat_map(|e| match &e {
+                    OrderError::Unknown { by, .. } => {
+                        vec![(by.clone(), "descriptor.after_unknown", e.to_string())]
+                    }
+                    OrderError::Cycle { cycle } => cycle
+                        .iter()
+                        .map(|c| (c.clone(), "descriptor.after_cycle", e.to_string()))
+                        .collect(),
+                })
+                .collect(),
+        };
         problems.dedup();
-        for (id, message) in problems {
+        for (id, code, message) in problems {
             let Some(ext) = exts
                 .iter_mut()
                 .find(|e| Some(e.name.as_str()) == id.extension())
             else {
                 continue;
             };
-            let file = format!("{}/extension.yaml", ext.path.trim_end_matches('/'));
-            let error = format!("{file}: {message}");
+            let error = Diagnostic::error(code, message).at("extension.yaml", None);
+            // A cycle is one problem of all its members: it names them,
+            // and is listed once.
+            let error = if code == "descriptor.after_cycle" {
+                error
+            } else {
+                error.contribution(id.to_string())
+            };
             if !ext.errors.contains(&error) {
                 ext.errors.push(error);
             }
@@ -452,7 +481,11 @@ fn order_catalog(exts: &mut [Extension], consumers: &[&str]) {
 /// it crosses both ways: each consumer would wait on the other.
 fn crossings(
     nodes: &[oxplow_domain::ordering::Node],
-) -> Vec<(oxplow_domain::contribution::ContributionRef, String)> {
+) -> Vec<(
+    oxplow_domain::contribution::ContributionRef,
+    &'static str,
+    String,
+)> {
     use oxplow_domain::ordering::After;
     let cross: Vec<(&oxplow_domain::ordering::Node, &After)> = nodes
         .iter()
@@ -469,6 +502,7 @@ fn crossings(
         .map(|(n, a)| {
             (
                 n.id.clone(),
+                "descriptor.after_crossing",
                 format!(
                     "{} runs after {}, while elsewhere effects and collectors wait on each                      other the other way: on one event the two would each wait for the other.                      Order effects after collectors or collectors after effects, not both",
                     n.id,
@@ -600,7 +634,7 @@ mod tests {
 
     #[test]
     fn the_fixture_extension_loads_clean() {
-        assert_eq!(acme().errors, Vec::<String>::new());
+        assert_eq!(acme().errors, Vec::<Diagnostic>::new());
     }
 
     /// An implementation is chosen by its capability and id, so one id
@@ -630,7 +664,7 @@ mod tests {
             .iter()
             .map(|d| d.id.to_string())
             .collect();
-        assert_eq!(ext.errors, Vec::<String>::new());
+        assert_eq!(ext.errors, Vec::<Diagnostic>::new());
         assert_eq!(
             ids,
             [
@@ -784,22 +818,23 @@ mod tests {
         let mut exts = vec![first, second];
         check_catalog(&mut exts);
         let (first, second) = (&exts[0], &exts[1]);
-        assert_eq!(first.errors, Vec::<String>::new());
+        assert_eq!(first.errors, Vec::<Diagnostic>::new());
         for (what, name) in [
             ("dataset", "v_acme_pr_prs"),
             ("event type", "acme_pr.merged"),
             ("resource", "acme-pr/pr"),
         ] {
-            let reports: Vec<&String> = second
+            let reports: Vec<&Diagnostic> = second
                 .errors
                 .iter()
-                .filter(|e| e.contains(&format!("{what} `{name}`")))
+                .filter(|e| e.message.contains(&format!("{what} `{name}`")))
                 .collect();
             assert_eq!(reports.len(), 1, "{what}: {:?}", second.errors);
             assert!(
-                reports[0].contains("`acme-pr`") && reports[0].contains("`acme-qr`"),
+                reports[0].message.contains("`acme-pr`")
+                    && reports[0].message.contains("`acme-qr`"),
                 "{}",
-                reports[0]
+                reports[0].message
             );
         }
         assert!(second.datasets.is_empty() && second.resources.is_empty());
@@ -875,19 +910,19 @@ mod catalog_tests {
         let exts = crate::extension::extensions::load_extensions(dir.path());
         let alpha = exts.iter().find(|e| e.name == "alpha").unwrap();
         let beta = exts.iter().find(|e| e.name == "beta").unwrap();
-        assert_eq!(alpha.errors, Vec::<String>::new());
+        assert_eq!(alpha.errors, Vec::<Diagnostic>::new());
         assert_eq!(alpha.skills.len(), 1);
         assert!(beta.skills.is_empty());
         let errors: Vec<_> = beta
             .errors
             .iter()
-            .filter(|e| e.contains("`deploy`"))
+            .filter(|e| e.message.contains("`deploy`"))
             .collect();
         assert_eq!(errors.len(), 1, "{:?}", beta.errors);
         assert!(
-            errors[0].contains("`alpha`") && errors[0].contains("`beta`"),
+            errors[0].message.contains("`alpha`") && errors[0].message.contains("`beta`"),
             "{}",
-            errors[0]
+            errors[0].message
         );
         assert!(beta
             .contributions
@@ -906,7 +941,7 @@ mod catalog_tests {
         );
         let exts = crate::extension::extensions::load_extensions(dir.path());
         let acme = exts.iter().find(|e| e.name == "acme").unwrap();
-        assert_eq!(acme.errors, Vec::<String>::new());
+        assert_eq!(acme.errors, Vec::<Diagnostic>::new());
         let ids: Vec<String> = acme
             .contributions
             .iter()
@@ -929,6 +964,8 @@ mod catalog_tests {
 #[cfg(test)]
 mod ordering_tests {
     use std::path::Path;
+
+    use oxplow_domain::diagnostic::Diagnostic;
 
     use crate::extension::extensions::{load_extensions, Extension};
 
@@ -996,7 +1033,7 @@ mod ordering_tests {
         );
         let exts = load_extensions(dir.path());
         let second = named(&exts, "second");
-        assert_eq!(second.errors, Vec::<String>::new());
+        assert_eq!(second.errors, Vec::<Diagnostic>::new());
         assert_eq!(
             placed(named(&exts, "first"), "effect", "seed"),
             Some((0, vec![]))
@@ -1036,12 +1073,20 @@ mod ordering_tests {
         );
         let exts = load_extensions(dir.path());
         let acme = named(&exts, "acme");
-        let errors = acme.errors.join("\n");
+        let errors = acme
+            .errors
+            .iter()
+            .map(|e| e.message.clone())
+            .collect::<Vec<_>>()
+            .join("\n");
         assert!(
-            errors.contains(
-                "oxplow:oxplow/effect?effect=acme/bare: `after`: `no.such.thing` is none of"
-            ),
-            "{errors}"
+            acme.errors
+                .iter()
+                .any(|e| e.code == "descriptor.unresolved_after"
+                    && e.contribution.as_deref() == Some("oxplow:oxplow/effect?effect=acme/bare")
+                    && e.message.contains("`after`: `no.such.thing` is none of")),
+            "{:#?}",
+            acme.errors
         );
         assert!(
             errors.contains(
@@ -1064,7 +1109,12 @@ mod ordering_tests {
         );
         let exts = load_extensions(dir.path());
         let acme = named(&exts, "acme");
-        let errors = acme.errors.join("\n");
+        let errors = acme
+            .errors
+            .iter()
+            .map(|e| e.message.clone())
+            .collect::<Vec<_>>()
+            .join("\n");
         assert!(
             errors.contains(
                 "these contributions wait on each other: oxplow:oxplow/effect?effect=acme/a → oxplow:oxplow/effect?effect=acme/b → oxplow:oxplow/effect?effect=acme/c"
@@ -1100,9 +1150,9 @@ mod ordering_tests {
         .unwrap();
         let exts = load_extensions(dir.path());
         let second = named(&exts, "second");
-        assert_eq!(second.errors, Vec::<String>::new());
+        assert_eq!(second.errors, Vec::<Diagnostic>::new());
         assert!(
-            second.warnings.iter().any(|w| w.contains(
+            second.warnings.iter().any(|w| w.message.contains(
                 "runs after oxplow:oxplow/effect?effect=first/seed, whose extension is disabled"
             )),
             "{:?}",
@@ -1122,7 +1172,12 @@ mod ordering_tests {
         );
         let exts = load_extensions(dir.path());
         let acme = named(&exts, "acme");
-        let errors = acme.errors.join("\n");
+        let errors = acme
+            .errors
+            .iter()
+            .map(|e| e.message.clone())
+            .collect::<Vec<_>>()
+            .join("\n");
         assert!(
             errors.contains("the two would each wait for the other"),
             "{errors}"
@@ -1136,6 +1191,6 @@ mod ordering_tests {
             &[("gather", "")],
         );
         let exts = load_extensions(dir.path());
-        assert_eq!(named(&exts, "acme").errors, Vec::<String>::new());
+        assert_eq!(named(&exts, "acme").errors, Vec::<Diagnostic>::new());
     }
 }

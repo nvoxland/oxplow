@@ -983,7 +983,8 @@ mod tests {
                 .as_array()
                 .unwrap()
                 .iter()
-                .any(|e| e.as_str().unwrap().contains("broken")),
+                .any(|e| e["file"].as_str().is_some_and(|f| f.contains("broken"))
+                    || e["message"].as_str().is_some_and(|m| m.contains("broken"))),
             "{v}"
         );
     }

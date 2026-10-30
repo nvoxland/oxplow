@@ -27,7 +27,7 @@ loaders:
       WHERE h.state <> 'ok' AND (NULLIF(:extension, '') IS NULL OR h.extension = :extension)
       UNION ALL
       SELECT 'Did not load cleanly', e.name || '/load/' || j.key, e.uri, e.name, 'extension', e.name,
-             NULL, j.value, NULL, NULL, 0, 0, '', NULL
+             NULL, json_extract(j.value, '$.shown'), NULL, NULL, 0, 0, '', NULL
       FROM v_extension e, json_each(e.errors) j
       WHERE NULLIF(:extension, '') IS NULL OR e.name = :extension
       UNION ALL

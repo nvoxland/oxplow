@@ -16,6 +16,7 @@
 //! active provider changes without a reload; the person's choice for an
 //! unbound target is config), so that rule is the renderer's.
 
+use oxplow_domain::diagnostic::Diagnostic;
 use serde::{Deserialize, Serialize};
 
 use super::manifest_v2::at;
@@ -111,7 +112,7 @@ pub fn parse_replacements(
     pages: &[crate::pages::schema::Page],
     items: Vec<(Option<usize>, ReplacementFile)>,
     file: &str,
-) -> (Vec<UiReplacement>, Vec<String>) {
+) -> (Vec<UiReplacement>, Vec<Diagnostic>) {
     let mut out: Vec<UiReplacement> = Vec::new();
     let mut errors = Vec::new();
     for (line, r) in items {
@@ -124,13 +125,19 @@ pub fn parse_replacements(
             .find(|p| p.slug == r.page)
             .map(|p| p.params.iter().map(|x| x.name.clone()).collect());
         let problem = match (target, declared.as_ref()) {
-            (None, _) => Some(format!(
-                "`at: {}` is neither a page's slot (`<extension>/<page>.<slot>`) nor a \
-                 replaceable component ({})",
-                r.target,
-                oxplow_domain::replaceable::targets()
+            (None, _) => Some((
+                "replacement.unknown_target",
+                format!(
+                    "`at: {}` is neither a page's slot (`<extension>/<page>.<slot>`) nor a \
+                     replaceable component ({})",
+                    r.target,
+                    oxplow_domain::replaceable::targets()
+                ),
             )),
-            (Some(_), None) => Some(format!("{name} isn't one of this extension's")),
+            (Some(_), None) => Some((
+                "replacement.unknown_page",
+                format!("{name} isn't one of this extension's"),
+            )),
             (Some(t), Some(params)) => {
                 // The contract: the replacement is given these and nothing
                 // of the host's, so it takes them all.
@@ -141,33 +148,45 @@ pub fn parse_replacements(
                     .map(|p| format!("`{p}`"))
                     .collect();
                 if !missing.is_empty() {
-                    Some(format!(
-                        "{name} must declare {} (`params:`) — what `{}` gives its replacement",
-                        missing.join(", "),
-                        t.target
+                    Some((
+                        "replacement.missing_params",
+                        format!(
+                            "{name} must declare {} (`params:`) — what `{}` gives its replacement",
+                            missing.join(", "),
+                            t.target
+                        ),
                     ))
                 } else if r.version.is_some_and(|v| v != t.version) {
-                    Some(format!(
-                        "`{}` is at version {} of its props contract, not {} (`v_replaceable`)",
-                        t.target,
-                        t.version,
-                        r.version.unwrap_or_default()
+                    Some((
+                        "replacement.version_mismatch",
+                        format!(
+                            "`{}` is at version {} of its props contract, not {} (`v_replaceable`)",
+                            t.target,
+                            t.version,
+                            r.version.unwrap_or_default()
+                        ),
                     ))
                 } else if t.bound_to_provider && !capabilities.iter().any(|c| c == t.capability) {
-                    Some(format!(
-                        "only an extension that brings a `{}` provider may replace `{}` \
-                         (`providers:`); it shows while that provider is the active one",
-                        t.capability, t.target
+                    Some((
+                        "replacement.provider_required",
+                        format!(
+                            "only an extension that brings a `{}` provider may replace `{}` \
+                             (`providers:`); it shows while that provider is the active one",
+                            t.capability, t.target
+                        ),
                     ))
                 } else if out.iter().any(|o| o.target == t.target) {
-                    Some(format!("`{}` is already replaced above", t.target))
+                    Some((
+                        "replacement.duplicate",
+                        format!("`{}` is already replaced above", t.target),
+                    ))
                 } else {
                     None
                 }
             }
         };
-        if let Some(p) = problem {
-            errors.push(at(file, line, format!("`ui.mounts`: {p}")));
+        if let Some((code, p)) = problem {
+            errors.push(at(code, file, line, format!("`ui.mounts`: {p}")));
             continue;
         }
         let Some(t) = target else {
@@ -358,8 +377,8 @@ mod tests {
     fn said(ext: &Extension) -> String {
         ext.errors
             .iter()
-            .filter(|e| e.contains("ui.mounts"))
-            .cloned()
+            .filter(|e| e.message.contains("ui.mounts"))
+            .map(|e| ext.shown(e))
             .collect::<Vec<_>>()
             .join("\n")
     }

@@ -53,9 +53,15 @@ pub(super) async fn fact_collector_example(
     {
         Ok(f) => f,
         Err(why) => {
-            report.errors.push(format!(
-                "{shown}:1: collector `{id}` failed: {why} — fix: its script, or the example's files"
-            ));
+            report.errors.push(
+                error(
+                    shown,
+                    None,
+                    "collector.failed",
+                    format!("collector `{id}` failed: {why}"),
+                )
+                .fix("its script, or the example's files"),
+            );
             return;
         }
     };
@@ -76,11 +82,7 @@ pub(super) async fn fact_collector_example(
         )
         .collect();
     if let Some((path, want, got)) = compare(&ex.expect, &json!({ "facts": got })) {
-        report.errors.push(format!(
-            "{shown}:1: collector `{id}` returned {got} at `{path}`, the example expects {want} — \
-             fix: the script, or the example's `expect` (`{{ facts: [{{ measure, value?, path?, \
-             subject?, line?, rule?, dims? }}] }}`)"
-        ));
+        report.errors.push(error(shown, ex.line("expect"), "fixture.compare", format!("collector `{id}` returned {got} at `{path}`, the example expects {want}")).fix("the script, or the example's `expect` (`{ facts: [{ measure, value?, path?, subject?, line?, rule?, dims? }] }`)").mismatch(path, want, got));
     }
 }
 
@@ -96,11 +98,18 @@ pub(super) async fn collector_example(
 ) {
     let (shown, example, expect) = (ex.shown, ex.name, &ex.expect);
     let Some(spec) = ext.collectors.iter().find(|c| c.id == id) else {
-        report.errors.push(format!(
-            "{shown}:1: example `{example}` names collector `{id}`, which `{}` doesn't declare — \
-             fix: the collector's `id`",
-            ext.name
-        ));
+        report.errors.push(
+            error(
+                shown,
+                None,
+                "fixture.unknown",
+                format!(
+                    "example `{example}` names collector `{id}`, which `{}` doesn't declare",
+                    ext.name
+                ),
+            )
+            .fix("the collector's `id`"),
+        );
         return;
     };
     {
@@ -111,11 +120,7 @@ pub(super) async fn collector_example(
             _ => None,
         };
         if let Some(does) = does {
-            report.warnings.push(format!(
-                "{shown}:1: example `{example}` runs collector `{id}`, which {does}: `extension \
-                 test` doesn't run programs or providers — fix: none; run it with \
-                 `oxplow.collector.sync` once it's deployed"
-            ));
+            report.warnings.push(warning(shown, None, "collector.not_run", format!("example `{example}` runs collector `{id}`, which {does}: `extension test` doesn't run programs or providers")).fix("none; run it with `oxplow.collector.sync` once it's deployed"));
             return;
         }
     }
@@ -144,9 +149,15 @@ pub(super) async fn collector_example(
                 E::Denied(m) | E::Failed(m) | E::Disabled(m) => m,
                 E::Storage(e) => e.to_string(),
             };
-            report.errors.push(format!(
-                "{shown}:1: collector `{id}` failed: {why} — fix: its script, or the example's rows"
-            ));
+            report.errors.push(
+                error(
+                    shown,
+                    None,
+                    "collector.failed",
+                    format!("collector `{id}` failed: {why}"),
+                )
+                .fix("its script, or the example's rows"),
+            );
             return;
         }
     };
@@ -169,11 +180,7 @@ pub(super) async fn collector_example(
         got["events"] = Value::Array(events);
     }
     if let Some((path, want, got)) = compare(expect, &got) {
-        report.errors.push(format!(
-            "{shown}:1: collector `{id}` returned {got} at `{path}`, the example expects {want} — \
-             fix: the script, or the example's `expect` (`{{ entities: {{ <name>: n | $any }}, \
-             events?: [{{ type, payload? }}] }}`)"
-        ));
+        report.errors.push(error(shown, ex.line("expect"), "fixture.compare", format!("collector `{id}` returned {got} at `{path}`, the example expects {want}")).fix("the script, or the example's `expect` (`{ entities: { <name>: n | $any }, events?: [{ type, payload? }] }`)").mismatch(path, want, got));
     }
 }
 
@@ -199,17 +206,10 @@ pub(super) async fn incremental_datasets(host: &Host, ext: &Extension, report: &
         }
         let line = oxplow_app::extension::extensions::manifest_v2::entry_line(
             &manifest, "datasets", "name", &decl.name,
-        )
-        .unwrap_or(1);
-        let at = format!("{rel}/extension.yaml:{line}");
+        );
         let fixture = format!("fixtures/dataset-{}.yaml", decl.name);
         let Ok(text) = std::fs::read_to_string(dir.join(&fixture)) else {
-            report.warnings.push(format!(
-                "{at}: incremental dataset `{}` has no {rel}/{fixture}, so appending isn't checked \
-                 against a full refill — fix: write its `before:` and `after:` rows \
-                 (`{{ <table>: [{{ column: value }}] }}`)",
-                decl.name
-            ));
+            report.warnings.push(warning("extension.yaml", line, "collector.no_incremental_fixture", format!("incremental dataset `{}` has no {fixture}, so appending isn't checked against a full refill", decl.name)).fix("write its `before:` and `after:` rows (`{ <table>: [{ column: value }] }`)"));
             continue;
         };
         let rows = |doc: &Value, part: &str| -> Result<oxplow_db::datasets::FixtureRows, String> {
@@ -242,9 +242,10 @@ pub(super) async fn incremental_datasets(host: &Host, ext: &Extension, report: &
         let (before, after) = match parsed {
             Ok(p) => p,
             Err(e) => {
-                report
-                    .errors
-                    .push(format!("{rel}/{fixture}:1: {e} — fix: correct the fixture"));
+                report.errors.push(
+                    error(&fixture, None, "fixture.parse", e.to_string())
+                        .fix("correct the fixture"),
+                );
                 continue;
             }
         };
@@ -260,16 +261,27 @@ pub(super) async fn incremental_datasets(host: &Host, ext: &Extension, report: &
             .await;
         match checked {
             Ok(None) => {}
-            Ok(Some(problem)) => report.errors.push(format!(
-                "{at}: incremental dataset `{}` {problem} — fix: `materialize: on_change`, or a \
-                 watermark that only grows as rows arrive",
-                decl.name
-            )),
-            Err(e) => report.errors.push(format!(
-                "{rel}/{fixture}:1: incremental dataset `{}` couldn't run on the fixture: {e} — \
-                 fix: the fixture's rows",
-                decl.name
-            )),
+            Ok(Some(problem)) => report.errors.push(
+                error(
+                    "extension.yaml",
+                    line,
+                    "collector.incremental_mismatch",
+                    format!("incremental dataset `{}` {problem}", decl.name),
+                )
+                .fix("`materialize: on_change`, or a watermark that only grows as rows arrive"),
+            ),
+            Err(e) => report.errors.push(
+                error(
+                    &fixture,
+                    None,
+                    "collector.incremental_failed",
+                    format!(
+                        "incremental dataset `{}` couldn't run on the fixture: {e}",
+                        decl.name
+                    ),
+                )
+                .fix("the fixture's rows"),
+            ),
         }
     }
 }
@@ -282,7 +294,7 @@ pub(super) async fn incremental_datasets(host: &Host, ext: &Extension, report: &
 pub(super) async fn questions(host: &Host, ext: &Extension, report: &mut TestReport) {
     let rel = ext.path.trim_end_matches('/').to_string();
     let dir = host.root.join(&rel);
-    let file = format!("{rel}/questions.yaml");
+    let file = "questions.yaml";
     let Ok(text) = std::fs::read_to_string(dir.join("questions.yaml")) else {
         return;
     };
@@ -290,9 +302,10 @@ pub(super) async fn questions(host: &Host, ext: &Extension, report: &mut TestRep
     let questions = match crate::answerability::parse(&text) {
         Ok(q) => q,
         Err(e) => {
-            report.errors.push(format!(
-                "{file}:1: {e} — fix: a list of {{ question, skill, reaches, shape }}"
-            ));
+            report.errors.push(
+                error(file, None, "answer.parse", e.to_string())
+                    .fix("a list of { question, skill, reaches, shape }"),
+            );
             return;
         }
     };
@@ -337,7 +350,7 @@ pub(super) async fn questions(host: &Host, ext: &Extension, report: &mut TestRep
     .unwrap_or_default();
     let tool_schema = |name: &str| tools.get(name).cloned();
     let checked = crate::answerability::check(
-        &file,
+        file,
         &questions,
         &crate::answerability::Checker {
             skill_text: &skill_text,

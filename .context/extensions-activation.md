@@ -187,7 +187,12 @@ generation, or left out when it has none; everything else activates together
 as one coherent generation. Required bundled extensions are never replaced:
 their errors still reject the candidate. The held extensions and why are the
 activation's `problems` (the Extensions page), so the reason is visible
-while the last working version keeps running. A held extension's declarations
+while the last working version keeps running. `problems` (`VocabularyErrors`)
+holds diagnostics by extension (extensions-sdk.md "Diagnostics"): an
+extension's own load errors as they are, a problem found while staging
+(`activation.*`, `component.bundle_*`, …) made here; a refusal's text
+renders each under its extension's source folder
+(`vocabulary_reactor::render_problems`). A held extension's declarations
 are its last working ones; its scripts are read from disk as they are now.
 A failure later in staging that names one extension — a dataset whose SQL
 doesn't compile (checked inside the publication transaction, which rolls

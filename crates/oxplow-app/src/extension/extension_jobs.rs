@@ -535,7 +535,10 @@ fn replay(policy: crate::extension::extensions::jobs::JobReplay) -> ReplayPolicy
 fn job_problem() -> crate::vocabulary_reactor::VocabularyErrors {
     crate::vocabulary_reactor::VocabularyErrors::from([(
         "<host>".into(),
-        vec!["job operation registry candidate is invalid".into()],
+        vec![oxplow_domain::diagnostic::Diagnostic::error(
+            "activation.job_registry_invalid",
+            "job operation registry candidate is invalid",
+        )],
     )])
 }
 /// The run a job run's id names.

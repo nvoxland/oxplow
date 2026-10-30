@@ -24,6 +24,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+use oxplow_domain::diagnostic::Diagnostic;
 use oxplow_domain::uri::resources::{ParamDecl, ResourceDecl};
 
 use crate::extension::extensions::manifest_v2::{at, item_lines, key_line};
@@ -159,7 +160,7 @@ fn svg_problem(svg: &str) -> Option<String> {
 /// an error at the resource's line, and the resource is dropped.
 pub(crate) fn inline_svg_icons(
     resources: Vec<ExtensionResource>,
-    errors: &mut Vec<String>,
+    errors: &mut Vec<Diagnostic>,
     files: &dyn crate::extension::extensions::ExtensionFiles,
 ) -> Vec<ExtensionResource> {
     use base64::Engine as _;
@@ -193,10 +194,20 @@ pub(crate) fn inline_svg_icons(
             match why {
                 None => Some(r),
                 Some(why) => {
-                    errors.push(format!(
-                        "{}: resource `{}`: {why}",
-                        r.declared_at, r.decl.name
-                    ));
+                    // `declared_at` is `<folder>/extension.yaml:<line>`.
+                    let (place, line) = match r.declared_at.rsplit_once(':') {
+                        Some((p, n)) if n.parse::<usize>().is_ok() => (p, n.parse().ok()),
+                        _ => (r.declared_at.as_str(), None),
+                    };
+                    let file = place.rsplit('/').next().unwrap_or(place);
+                    errors.push(
+                        Diagnostic::error(
+                            "resource.icon",
+                            format!("resource `{}`: {why}", r.decl.name),
+                        )
+                        .at(file, line)
+                        .contribution(r.decl.name.to_string()),
+                    );
                     None
                 }
             }
@@ -236,12 +247,18 @@ pub fn parse_resources(
     value: &serde_yaml::Value,
     file: &str,
     manifest: &str,
-) -> (Vec<ExtensionResource>, Vec<String>) {
+) -> (Vec<ExtensionResource>, Vec<Diagnostic>) {
+    let rel = file.rsplit('/').next().unwrap_or(file);
     let block = key_line(manifest, "resources");
     let Some(items) = value.as_sequence() else {
         return (
             Vec::new(),
-            vec![at(file, block, "`resources` must be a list")],
+            vec![at(
+                "resource.not_a_list",
+                rel,
+                block,
+                "`resources` must be a list",
+            )],
         );
     };
     let segment = resource_extension(extension, namespace);
@@ -260,22 +277,30 @@ pub fn parse_resources(
         let f: ResourceFile = match serde_yaml::from_value(item.clone()) {
             Ok(f) => f,
             Err(e) => {
-                errors.push(at(file, line, format!("resource: {e}")));
+                errors.push(at("resource.invalid", rel, line, format!("resource: {e}")));
                 continue;
             }
         };
         if out.iter().any(|r| r.decl.name.name() == f.name) {
-            errors.push(at(
-                file,
-                line,
-                format!("resource `{}` is declared twice", f.name),
-            ));
+            errors.push(
+                at(
+                    "resource.duplicate",
+                    rel,
+                    line,
+                    format!("resource `{}` is declared twice", f.name),
+                )
+                .contribution(&f.name),
+            );
             continue;
         }
-        let declared_at = at(file, line, "").trim_end_matches(": ").to_string();
+        let declared_at = match line {
+            Some(n) => format!("{file}:{n}"),
+            None => file.to_string(),
+        };
+        let name = f.name.clone();
         match decl_of(&segment, extension, core, datasets, f) {
             Ok(decl) => out.push(ExtensionResource { decl, declared_at }),
-            Err(e) => errors.push(at(file, line, e)),
+            Err(e) => errors.push(at("resource.invalid", rel, line, e).contribution(name)),
         }
     }
     (out, errors)
@@ -489,7 +514,7 @@ resources:
             ("params: { id:", "params: { 'bad key':", "a key is a letter"),
         ] {
             let ext = acme(&MANIFEST.replace(from, to));
-            let errors = ext.errors.join("\n");
+            let errors = crate::test_fixtures::shown_errors(&ext).join("\n");
             assert!(ext.resources.is_empty(), "{to}: {:?}", ext.resources);
             assert!(
                 errors.contains(says) && errors.contains("extension.yaml:12"),
@@ -553,7 +578,7 @@ resources:
             ),
         ] {
             let ext = acme_with(&manifest, &files);
-            let errors = ext.errors.join("\n");
+            let errors = crate::test_fixtures::shown_errors(&ext).join("\n");
             assert!(ext.resources.is_empty(), "{says}: {:?}", ext.resources);
             assert!(errors.contains(says), "{says}: {errors}");
         }
@@ -589,7 +614,7 @@ resources:
     fn a_dataset_that_titles_nothing_is_refused() {
         let ext =
             acme(&MANIFEST.replace("      - { name: title, type: TEXT, doc: Its title. }\n", ""));
-        let errors = ext.errors.join("\n");
+        let errors = crate::test_fixtures::shown_errors(&ext).join("\n");
         assert!(
             errors.contains("dataset `prs` has no `title` column"),
             "{errors}"

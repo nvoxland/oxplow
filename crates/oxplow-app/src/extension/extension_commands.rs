@@ -24,6 +24,7 @@
 
 use std::collections::BTreeMap;
 
+use oxplow_domain::diagnostic::Diagnostic;
 use oxplow_domain::extension_path::is_extension_relative;
 use oxplow_domain::{Access, CommandCall, CommandSpec, Confirm, InputValidator};
 use serde::{Deserialize, Serialize};
@@ -274,8 +275,9 @@ pub fn refuse_duplicate_tools(extensions: &mut [Extension]) {
         };
         for &i in &exts {
             let ext = &mut extensions[i];
-            ext.errors
-                .push(format!("{}/extension.yaml: {message}", ext.path));
+            ext.errors.push(
+                Diagnostic::error("command.tool_clash", message.clone()).at("extension.yaml", None),
+            );
             for c in &mut ext.commands {
                 if c.tool.as_deref() == Some(tool.as_str()) {
                     c.tool = None;
@@ -331,10 +333,12 @@ pub fn check_about_when(extensions: &mut [Extension]) {
                 continue;
             };
             let at = |m: String| {
-                format!(
-                    "{}/extension.yaml: command `{}`: `/ui/about_when`: {m}",
-                    ext.path, c.name
+                Diagnostic::error(
+                    "command.about_when",
+                    format!("command `{}`: `/ui/about_when`: {m}", c.name),
                 )
+                .at("extension.yaml", None)
+                .contribution(&c.name)
             };
             let Some(view) = views.get(about.as_str()) else {
                 problems.push(at(format!(
@@ -396,12 +400,18 @@ pub fn parse_commands(
     manifest: &str,
     read: &dyn Fn(&str) -> Option<String>,
     provider_ops: &ProviderOps<'_>,
-) -> (Vec<ExtensionCommand>, Vec<String>) {
+) -> (Vec<ExtensionCommand>, Vec<Diagnostic>) {
+    let rel = file.rsplit('/').next().unwrap_or(file);
     let block_line = key_line(manifest, "commands");
     let Some(items) = value.as_sequence() else {
         return (
             Vec::new(),
-            vec![at(file, block_line, "`commands` must be a list")],
+            vec![at(
+                "command.not_a_list",
+                rel,
+                block_line,
+                "`commands` must be a list",
+            )],
         );
     };
     let mut out: Vec<ExtensionCommand> = Vec::new();
@@ -412,31 +422,37 @@ pub fn parse_commands(
         let entry: CommandFile = match serde_yaml::from_value(item.clone()) {
             Ok(e) => e,
             Err(e) => {
-                errors.push(at(file, line, format!("command: {e}")));
+                errors.push(at("command.invalid", rel, line, format!("command: {e}")));
                 continue;
             }
         };
         match command_of(namespace, bundled, entry, read, provider_ops) {
-            Ok(c) if out.iter().any(|o| o.name == c.name) => errors.push(at(
-                file,
-                line,
-                format!("command `{}` is declared twice", c.name),
-            )),
+            Ok(c) if out.iter().any(|o| o.name == c.name) => errors.push(
+                at(
+                    "command.duplicate",
+                    rel,
+                    line,
+                    format!("command `{}` is declared twice", c.name),
+                )
+                .contribution(&c.name),
+            ),
             // A provider's inverse names its operation, and maps back to
             // the one command over it (`CommandBus::command_for_op`).
             Ok(c) if same_provider_op(&out, &c).is_some() => {
                 let (provider, op, other) = same_provider_op(&out, &c).expect("matched");
-                errors.push(at(
-                    file,
-                    line,
-                    format!(
-                        "`{provider}`'s `{op}` already backs `{other}` — one command per provider \
-                         operation (its inverse names the operation)"
-                    ),
-                ))
+                errors.push(
+                    at(
+                        "command.provider_op_clash",
+                        rel,
+                        line,
+                        format!("`{provider}`'s `{op}` already backs `{other}`"),
+                    )
+                    .contribution(&c.name)
+                    .fix("one command per provider operation (its inverse names the operation)"),
+                )
             }
             Ok(c) => out.push(c),
-            Err(e) => errors.push(at(file, line, e)),
+            Err(e) => errors.push(at("command.invalid", rel, line, e)),
         }
     }
     (out, errors)
@@ -747,12 +763,18 @@ pub fn refuse_shared_namespaces(extensions: &mut [Extension]) {
             .collect();
         for &i in &owners {
             let ext = &mut extensions[i];
-            ext.errors.push(format!(
-                "{}/extension.yaml: {} both register commands under `{ns}` (an extension's \
-                 `namespace:`, else its name with `-` → `_`); declare another `namespace:` in one",
-                ext.path,
-                names.join(" and ")
-            ));
+            ext.errors.push(
+                Diagnostic::error(
+                    "command.namespace_clash",
+                    format!(
+                        "{} both register commands under `{ns}` (an extension's `namespace:`, \
+                         else its name with `-` → `_`)",
+                        names.join(" and ")
+                    ),
+                )
+                .at("extension.yaml", None)
+                .fix("declare another `namespace:` in one"),
+            );
             ext.commands.clear();
         }
     }
@@ -1255,7 +1277,7 @@ impl ExtensionCommands {
     pub async fn stage(
         &self,
         snapshot: &crate::extension::extension_catalog::CatalogSnapshot,
-    ) -> Result<StagedExtensionCommands, BTreeMap<String, String>> {
+    ) -> Result<StagedExtensionCommands, crate::vocabulary_reactor::VocabularyErrors> {
         let registered = self.registered.lock().await;
         self.stage_from(snapshot, &registered)
     }
@@ -1287,13 +1309,13 @@ impl ExtensionCommands {
         &self,
         snapshot: &crate::extension::extension_catalog::CatalogSnapshot,
         registered: &BTreeMap<String, RegisteredCommands>,
-    ) -> Result<StagedExtensionCommands, BTreeMap<String, String>> {
+    ) -> Result<StagedExtensionCommands, crate::vocabulary_reactor::VocabularyErrors> {
         let wanted = Self::wanted(snapshot);
-        let mut problems: BTreeMap<String, String> = snapshot
+        let mut problems: crate::vocabulary_reactor::VocabularyErrors = snapshot
             .extensions()
             .iter()
             .filter(|e| e.enabled && !e.errors.is_empty())
-            .map(|e| (e.name.clone(), e.errors.join("\n")))
+            .map(|e| (e.name.clone(), e.errors.clone()))
             .collect();
         if !problems.is_empty() {
             return Err(problems);
@@ -1307,7 +1329,10 @@ impl ExtensionCommands {
                     commands,
                 }),
                 Err(problem) => {
-                    problems.insert(extension.clone(), problem);
+                    problems.insert(
+                        extension.clone(),
+                        vec![Diagnostic::error("activation.commands_invalid", problem)],
+                    );
                 }
             }
         }
@@ -1327,7 +1352,10 @@ impl ExtensionCommands {
             .bus
             .prepare_namespaces(replacements)
             .map_err(|refusal| {
-                let problem = registration_problem(refusal.error);
+                let problem = Diagnostic::error(
+                    "activation.command_registration_refused",
+                    registration_problem(refusal.error),
+                );
                 // The source refused is held, and the one it collided with
                 // when that is an extension of this batch; nothing else.
                 let ours = |source: &str| {
@@ -1341,8 +1369,8 @@ impl ExtensionCommands {
                 std::iter::once(refusal.source.as_str())
                     .chain(refusal.holder.as_deref())
                     .filter_map(ours)
-                    .map(|name| (name, problem.clone()))
-                    .collect::<BTreeMap<_, _>>()
+                    .map(|name| (name, vec![problem.clone()]))
+                    .collect::<crate::vocabulary_reactor::VocabularyErrors>()
             })?;
         Ok(StagedExtensionCommands {
             generation: snapshot.generation().to_string(),
@@ -1510,11 +1538,14 @@ pub async fn check_extension_commands(
             .namespace_owner(&ns)
             .filter(|o| *o != mine && ns != oxplow_domain::OXPLOW_NAMESPACE)
         {
-            ext.errors.push(format!(
-                "{}/extension.yaml: the command namespace `{ns}` is {owner}'s; declare another \
-                 `namespace:`",
-                ext.path
-            ));
+            ext.errors.push(
+                Diagnostic::error(
+                    "command.namespace_taken",
+                    format!("the command namespace `{ns}` is {owner}'s"),
+                )
+                .at("extension.yaml", None)
+                .fix("declare another `namespace:`"),
+            );
         }
     }
     let with_examples: Vec<ExtensionCommand> = ext
@@ -1527,21 +1558,27 @@ pub async fn check_extension_commands(
         return;
     }
     let Some(schema_of) = commands else {
-        ext.warnings.push(format!(
-            "{}/extension.yaml: command examples weren't checked (no running oxplow to ask which \
-             commands exist) — check the extension from inside oxplow (Settings → Extensions)",
-            ext.path
-        ));
+        ext.warnings.push(
+            Diagnostic::warning(
+                "command.examples_unchecked",
+                "command examples weren't checked (no running oxplow to ask which commands exist)",
+            )
+            .at("extension.yaml", None)
+            .fix("check the extension from inside oxplow (Settings → Extensions)"),
+        );
         return;
     };
     for cmd in with_examples {
         for ex in &cmd.examples {
-            let prefix = format!(
-                "{}/extension.yaml: command `{}` example `{}`",
-                ext.path, cmd.name, ex.name
-            );
             if let Err(e) = check_example(layer, &cmd, ex, schema_of).await {
-                ext.errors.push(format!("{prefix}: {e}"));
+                ext.errors.push(
+                    Diagnostic::error(
+                        "command.example_failed",
+                        format!("command `{}` example `{}`: {e}", cmd.name, ex.name),
+                    )
+                    .at("extension.yaml", None)
+                    .contribution(&cmd.name),
+                );
             }
         }
     }
@@ -1644,15 +1681,15 @@ pub fn check_calls(registry: CommandSchemas<'_>, calls: &[CommandCall]) -> Resul
 mod tests {
     /// Why `extension` is held back by the last activation, if it is.
     fn held_problem(fx: &crate::test_fixtures::EffortFixture, extension: &str) -> Option<String> {
-        fx.svc
-            .extension_activation
-            .problems()
-            .get(extension)
-            .map(|lines| lines.join("\n"))
+        let problems = fx.svc.extension_activation.problems();
+        problems
+            .contains_key(extension)
+            .then(|| crate::test_fixtures::shown_held(&fx.svc, &problems, extension))
     }
 
     use super::*;
     use crate::extension::extensions::{load_extensions, validate_extension, Extension};
+    use crate::test_fixtures::ShownErrors as _;
     use std::path::Path;
 
     fn write(root: &Path, rel: &str, body: &str) {
@@ -1708,7 +1745,7 @@ mod tests {
             &commands,
             &[("handlers/finish_review.star", HANDLER)],
         );
-        let errors = project(d.path(), "my-review").errors.join("\n");
+        let errors = crate::test_fixtures::shown_errors(&project(d.path(), "my-review")).join("\n");
         assert!(
             errors.contains("`threads.write` is a scope a script can't use"),
             "{errors}"
@@ -1730,7 +1767,7 @@ mod tests {
             &commands,
             &[("handlers/finish_review.star", HANDLER)],
         );
-        let errors = project(d.path(), "my-review").errors.join("\n");
+        let errors = crate::test_fixtures::shown_errors(&project(d.path(), "my-review")).join("\n");
         assert!(
             errors.contains("`/ui/input`") && errors.contains("`{{tread}}` isn't a binding"),
             "{errors}"
@@ -1754,7 +1791,7 @@ mod tests {
             &[("handlers/finish_review.star", HANDLER)],
         );
         let ext = project(d.path(), "keeps");
-        assert_eq!(ext.errors, Vec::<String>::new());
+        assert!(ext.errors.is_empty(), "{:?}", ext.errors);
         assert_eq!(ext.commands[0].unrecorded, vec!["token".to_string()]);
         write_ext(
             d.path(),
@@ -1762,7 +1799,7 @@ mod tests {
             &format!("{GOOD}    unrecorded: [token]\n"),
             &[("handlers/finish_review.star", HANDLER)],
         );
-        let errors = project(d.path(), "gone").errors.join("\n");
+        let errors = crate::test_fixtures::shown_errors(&project(d.path(), "gone")).join("\n");
         assert!(
             errors.contains("`unrecorded` names `token`, which isn't a property of its input"),
             "{errors}"
@@ -1859,7 +1896,8 @@ mod tests {
                     ),
                 ],
             );
-            let errors = project(d.path(), "my-review").errors.join("\n");
+            let errors =
+                crate::test_fixtures::shown_errors(&project(d.path(), "my-review")).join("\n");
             assert!(
                 errors.contains(says),
                 "{command_tool}/{page_tool}: {errors}"
@@ -1896,7 +1934,7 @@ mod tests {
         for e in &exts {
             assert_eq!(e.page_files[0].tool, None, "{}", e.name);
             assert!(
-                e.errors
+                crate::test_fixtures::shown_errors(e)
                     .join("\n")
                     .contains("`shared_waiting` is offered by `first` and `second`"),
                 "{:?}",
@@ -1947,7 +1985,7 @@ mod tests {
                 &format!("{GOOD}{}", tail(about, when)),
                 &[("handlers/finish_review.star", HANDLER)],
             );
-            project(d.path(), name).errors
+            crate::test_fixtures::shown_errors(&project(d.path(), name))
         };
         assert_eq!(
             load("good-when", "oxplow/agent_session", "reopenable"),
@@ -2079,7 +2117,7 @@ mod tests {
             let d = tempfile::tempdir().unwrap();
             write_ext(d.path(), "x", &block, &files);
             let ext = project(d.path(), "x");
-            let errs = ext.errors.join("\n");
+            let errs = crate::test_fixtures::shown_errors(&ext).join("\n");
             assert!(
                 errs.contains(says) && errs.contains("extension.yaml:"),
                 "{block}: {errs}"
@@ -2113,7 +2151,7 @@ mod tests {
         for name in ["a-b", "ab"] {
             let ext = project(d.path(), name);
             assert!(
-                ext.errors
+                crate::test_fixtures::shown_errors(&ext)
                     .join("\n")
                     .contains("both register commands under `a_b`"),
                 "{name}: {:?}",
@@ -2212,7 +2250,7 @@ mod tests {
         )
         .await
         .unwrap();
-        let errs = v.errors.join("\n");
+        let errs = crate::test_fixtures::shown_errors(&v).join("\n");
         assert!(
             errs.contains("the command namespace `held` is provider:held's"),
             "{errs}"
@@ -2237,7 +2275,13 @@ mod tests {
         )
         .await
         .unwrap();
-        assert!(!v.errors.join("\n").contains("namespace"), "{:?}", v.errors);
+        assert!(
+            !crate::test_fixtures::shown_errors(&v)
+                .join("\n")
+                .contains("namespace"),
+            "{:?}",
+            v.errors
+        );
     }
 
     /// `check_extension` runs each example's script and checks what it
@@ -2303,7 +2347,7 @@ mod tests {
         let v = validate_extension(&layer, &cat, d.path(), "x", Some(&schema))
             .await
             .unwrap();
-        let errs = v.errors.join("\n");
+        let errs = crate::test_fixtures::shown_errors(&v).join("\n");
         assert!(
             errs.contains("example `happy`")
                 && errs.contains("`sql.read`")
@@ -2333,7 +2377,7 @@ mod tests {
             let v = validate_extension(&layer, &cat, d.path(), "x", Some(&schema))
                 .await
                 .unwrap();
-            let errs = v.errors.join("\n");
+            let errs = crate::test_fixtures::shown_errors(&v).join("\n");
             assert!(errs.contains(says), "{handler}: {errs}");
         }
 
@@ -2344,6 +2388,9 @@ mod tests {
             .unwrap();
         assert!(
             v.warnings
+                .iter()
+                .map(|d| v.shown(d))
+                .collect::<Vec<_>>()
                 .join("\n")
                 .contains("command examples weren't checked"),
             "{:?}",
@@ -3018,7 +3065,7 @@ mod tests {
                 validate_extension(layer, cat, d.path(), "x", Some(schema))
                     .await
                     .unwrap()
-                    .errors
+                    .shown_errors()
                     .join("\n")
             }
         };

@@ -1614,11 +1614,19 @@ pub fn refuse_shared_core_pages(extensions: &mut [crate::extension::extensions::
         let mut errors = Vec::new();
         ext.page_files.retain(|page| match owner.get(&page.slug) {
             Some(first) => {
-                errors.push(format!(
-                    "{}/pages/{}.yaml: page `{}` is also `{first}`'s, and oxplow's own \
-                     extensions share page names; rename one",
-                    ext.path, page.slug, page.slug
-                ));
+                errors.push(
+                    oxplow_domain::diagnostic::Diagnostic::error(
+                        "page.shared_core_slug",
+                        format!(
+                            "page `{}` is also `{first}`'s, and oxplow's own extensions share \
+                             page names",
+                            page.slug
+                        ),
+                    )
+                    .at(format!("pages/{}.yaml", page.slug), None)
+                    .contribution(&page.slug)
+                    .fix("rename one"),
+                );
                 false
             }
             None => true,

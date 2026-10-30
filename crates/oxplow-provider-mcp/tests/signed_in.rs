@@ -111,7 +111,14 @@ async fn a_signed_in_bearer_renews_once_when_its_server_stops_taking_it() {
         .find(|e| e.name == "notes")
         .cloned()
         .unwrap();
-    assert_eq!(hosted.errors, Vec::<String>::new());
+    assert_eq!(
+        hosted
+            .errors
+            .iter()
+            .map(|d| hosted.shown(d))
+            .collect::<Vec<_>>(),
+        Vec::<String>::new()
+    );
     // Every create files on the notes tracker.
     svc.config
         .write()

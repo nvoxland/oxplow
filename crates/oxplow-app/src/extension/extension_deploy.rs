@@ -15,6 +15,7 @@ use std::sync::Arc;
 use oxplow_config::ExtensionSettings;
 use oxplow_db::extension_deployment_store::{self as store_rows, DeploymentRow};
 use oxplow_db::TxError;
+use oxplow_domain::diagnostic::Diagnostic;
 use oxplow_domain::{DomainError, Timestamp};
 use serde::Serialize;
 
@@ -373,7 +374,8 @@ pub async fn write_page(
         }
         let why: Vec<String> = loaded
             .errors
-            .into_iter()
+            .iter()
+            .map(|e| loaded.shown(e))
             .filter(|e| e.contains(&format!("{page}.yaml")))
             .collect();
         return Err(invalid(format!(
@@ -634,19 +636,23 @@ async fn activate(svc: &Arc<Services>, changes: &LiveChanges) -> Result<(), Doma
                 return Ok(());
             }
             Err(TxError::Aborted(problems)) if problems.contains_key("<host>") && attempts < 3 => {}
-            Err(error) => return Err(problems_of(error)),
+            Err(error) => return Err(problems_of(svc, error)),
         }
     }
 }
 
-fn problems_of(error: TxError<VocabularyErrors>) -> DomainError {
+/// A refusal as text: `<extension>: <line>` per problem, each shown under
+/// the folder of the extension it belongs to.
+fn problems_of(svc: &Services, error: TxError<VocabularyErrors>) -> DomainError {
     match error {
         TxError::Aborted(problems) => invalid(
-            problems
-                .iter()
-                .map(|(name, why)| format!("{name}: {}", why.join("; ")))
-                .collect::<Vec<_>>()
-                .join("\n"),
+            crate::vocabulary_reactor::render_problems(
+                &problems,
+                svc.extension_catalog
+                    .snapshot(&svc.layout.project_dir)
+                    .extensions(),
+            )
+            .join("\n"),
         ),
         TxError::Storage(error) => error,
     }
@@ -735,7 +741,7 @@ pub async fn deploy(
     let project = svc.layout.project_dir.clone();
     let source = source_of(&project, name)?;
     let (commit, dirty) = provenance(svc, &project, &source).await;
-    let (hash, size, loaded) = {
+    let (hash, size, mut loaded) = {
         let (source, owned) = (source.clone(), name.to_string());
         tokio::task::spawn_blocking(move || {
             let hash = extension_store::source_hash(&source)?;
@@ -750,6 +756,9 @@ pub async fn deploy(
         .map_err(storage)?
         .map_err(|e| invalid(format!("extension `{name}`: {e}")))?
     };
+    // What it reports is shown under the source folder as the project
+    // names it, not the absolute path it was read from.
+    loaded.source = Some(crate::extension::extensions::shown(&project, &source));
     let target = target_of(shipped_of(svc, name), &hash);
     // Already the one that runs: chosen, and not held (a held deployment
     // stays chosen; deploying it again activates it again).
@@ -768,7 +777,12 @@ pub async fn deploy(
         if !loaded.errors.is_empty() {
             return Err(invalid(format!(
                 "extension `{name}` doesn't load:\n{}",
-                loaded.errors.join("\n")
+                loaded
+                    .errors
+                    .iter()
+                    .map(|d| loaded.shown(d))
+                    .collect::<Vec<_>>()
+                    .join("\n")
             ))
             .into());
         }
@@ -791,7 +805,7 @@ pub async fn deploy(
             name: name.to_string(),
             hash,
             already: true,
-            warnings: loaded.warnings,
+            warnings: loaded.warnings.iter().map(|w| loaded.shown(w)).collect(),
             commit,
             dirty,
         });
@@ -855,7 +869,14 @@ pub async fn deploy(
                 undo_turn_on(svc, name, enabled_now);
                 return Err(invalid(format!(
                     "extension `{name}` doesn't load once built:\n{}",
-                    built.errors.join("\n")
+                    // Under the source folder, the one to edit, not the
+                    // deployed copy.
+                    built
+                        .errors
+                        .iter()
+                        .map(|d| loaded.shown(d))
+                        .collect::<Vec<_>>()
+                        .join("\n")
                 ))
                 .into());
             }
@@ -886,7 +907,7 @@ pub async fn deploy(
         hash,
         already: false,
         warnings: [
-            loaded.warnings,
+            loaded.warnings.iter().map(|w| loaded.shown(w)).collect(),
             size_warnings(name, size),
             removal.into_iter().collect(),
         ]
@@ -1355,13 +1376,18 @@ pub(crate) async fn start(svc: &Arc<Services>) -> Result<VocabularyErrors, Domai
         }
         missing.insert(
             b.name.to_string(),
-            vec![format!(
-                "oxplow's own `{name}` has no deployment here and no copy of it ships with \
-                 this build, so what it provides (the agent harnesses, Alerts, core commands \
-                 and pages) is missing: quit oxplow, run `{DEPLOY_FROM_OUTSIDE}` in the \
-                 project, then start oxplow again",
-                name = b.name
-            )],
+            vec![Diagnostic::error(
+                "activation.required_not_deployed",
+                format!(
+                    "oxplow's own `{name}` has no deployment here and no copy of it ships with \
+                     this build, so what it provides (the agent harnesses, Alerts, core \
+                     commands and pages) is missing",
+                    name = b.name
+                ),
+            )
+            .fix(format!(
+                "quit oxplow, run `{DEPLOY_FROM_OUTSIDE}` in the project, then start oxplow again"
+            ))],
         );
     }
     Ok(missing)
@@ -2923,7 +2949,7 @@ mod tests {
         assert!(
             problems
                 .get(name)
-                .is_some_and(|p| p.iter().any(|m| m.contains("not_a_key"))),
+                .is_some_and(|p| p.iter().any(|m| m.render("").contains("not_a_key"))),
             "{problems:?}"
         );
         assert_eq!(
@@ -3020,8 +3046,9 @@ mod tests {
             );
             let why = svc.extension_activation.problems();
             assert!(
-                why.get(name)
-                    .is_some_and(|p| p.iter().any(|m| m.contains("the shipped version runs"))),
+                why.get(name).is_some_and(|p| p
+                    .iter()
+                    .any(|m| m.render("").contains("the shipped version runs"))),
                 "{name}: {why:?}"
             );
             assert!(svc.commands.spec("oxplow.config.get").is_some());
@@ -3105,7 +3132,7 @@ mod tests {
             assert!(
                 why.get("oxplow-foundation").is_some_and(|p| p
                     .iter()
-                    .any(|m| m.contains("oxplow-dev -- extension deploy"))),
+                    .any(|m| m.render("").contains("oxplow-dev -- extension deploy"))),
                 "{why:?}"
             );
             svc.extension_activation
@@ -3166,6 +3193,9 @@ mod tests {
             .problems
             .get("oxplow-foundation")
             .expect("it is held")
+            .iter()
+            .map(|d| d.render(""))
+            .collect::<Vec<_>>()
             .join("\n");
         assert!(
             why.contains("not_a_key") && why.contains("00000000000000ba"),

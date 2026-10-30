@@ -174,7 +174,7 @@ loaders:
   extensions:
     sql: |
       SELECT c.name, c.change,
-             coalesce((SELECT group_concat(e.value, char(10)) FROM json_each(c.errors) e), '') AS errors,
+             coalesce((SELECT group_concat(json_extract(e.value, '$.shown'), char(10)) FROM json_each(c.errors) e), '') AS errors,
              coalesce((SELECT group_concat(l.value, char(10)) FROM json_each(c.lines) l), '') AS does,
              coalesce((SELECT group_concat(json_extract(x.value, '$.id') || ' (' || json_extract(x.value, '$.change') || ')', ', ')
                        FROM json_each(c.page_changes) x), '') AS pages

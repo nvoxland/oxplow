@@ -5868,7 +5868,7 @@ def transform(input):
             .listed_extensions(dir.path())
             .await
             .into_iter()
-            .flat_map(|e| e.errors)
+            .flat_map(|e| e.errors.iter().map(|d| e.shown(d)).collect::<Vec<_>>())
             .filter(|e| e.contains("shared.todos"))
             .collect();
         assert_eq!(reports.len(), 1, "one load error, got {reports:?}");
@@ -5912,7 +5912,7 @@ def transform(input):
                 .listed_extensions(dir.path())
                 .await
                 .into_iter()
-                .flat_map(|e| e.errors)
+                .flat_map(|e| e.errors.iter().map(|d| e.shown(d)).collect::<Vec<_>>())
                 .filter(|e| e.contains("acme.todos"))
                 .collect();
             let spec = svc.fact_store.get_spec("acme.todos").await.unwrap();
