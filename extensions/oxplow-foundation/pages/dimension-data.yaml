@@ -1,0 +1,67 @@
+title: Dimension data
+description: The values facts carry for one dimension, with how many facts have each, most common first.
+label: '{{row.name}} data'
+icon: list-tree
+for: oxplow/dimension
+default: true
+params:
+- name: uri
+  label: Dimension
+- name: measure
+  type: choice
+  role: filter
+  label: Measure
+  options_from: oxplow-foundation/dimension-measures
+- name: range
+  type: date_range
+  role: filter
+  label: Range
+  default: 30d
+  presets: [1d, 7d, 30d, 90d, all]
+answers:
+- {"question":"Which values does this dimension take, and how often?","about":"oxplow/dimension","params":{"uri":"oxplow:oxplow/dimension?dimension=oxplow.language"},"skill":"oxplow-extension"}
+loaders:
+  about:
+    sql: |
+      SELECT d.key, d.label AS name, d.description, d.value_type
+      FROM v_dimension d WHERE d.key = uri_param(:uri, 'dimension')
+  seen:
+    sql: |
+      SELECT CAST(json_extract(f.dims_json, '$."' || a.key || '"') AS TEXT) AS value,
+             count(*) AS facts, max(f.captured_at) AS latest
+      FROM about a JOIN v_fact f
+        ON json_extract(f.dims_json, '$."' || a.key || '"') IS NOT NULL
+      WHERE (COALESCE(:measure, '') = '' OR f.measure_key = :measure)
+        AND (:range_from IS NULL OR f.captured_at >= :range_from)
+        AND (:range_to IS NULL OR f.captured_at <= :range_to)
+      GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 500
+  links:
+    sql: |
+      SELECT 'Definition' AS title,
+             :uri || '#oxplow.renderer=oxplow-foundation/dimension' AS uri,
+             'What this dimension slices by' AS description
+      FROM about
+      UNION ALL
+      SELECT 'Explore Data', uri('oxplow/page', 'page', 'explore-data', 'dataset', 'v_fact'), 'Try a query over every fact' FROM about
+view:
+  stack:
+  - id: about
+    title: About
+    viz: detail
+    from: about
+    columns:
+    - { key: name, label: Dimension }
+    - { key: description, label: What it is }
+    - { key: value_type, label: Its values }
+    empty: That dimension isn't known to the project.
+  - id: seen
+    title: Values
+    viz: table
+    from: seen
+    columns:
+    - { key: value, label: Value }
+    - { key: facts, label: Facts, format: integer }
+    - { key: latest, label: Latest, format: datetime }
+    empty: No fact carries this dimension in this range.
+see_also:
+  - { from: links }

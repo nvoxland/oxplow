@@ -1,0 +1,24 @@
+# The Dimension data page lists the values facts carry for a dimension, most common first,
+# narrowed to one measure when asked.
+given:
+  - observe: { facts: { measure: oxplow.tokens, items: [{ value: 10, dims: { oxplow.language: rust } }, { value: 5, dims: { oxplow.language: rust } }, { value: 7, dims: { oxplow.language: ts } }] } }
+when:
+  page: oxplow-foundation/dimension-data
+  params: { uri: "oxplow:oxplow/dimension?dimension=oxplow.language" }
+expect:
+  label: Language data
+  loaders:
+    about: { rows: [{ name: Language }] }
+    seen: { rows: [{ value: rust, facts: 2 }, { value: ts, facts: 1 }] }
+  see_also:
+    - { title: Definition, uri: "oxplow:oxplow/dimension?dimension=oxplow.language#oxplow.renderer=oxplow-foundation/dimension" }
+    - { title: Explore Data, uri: "oxplow:oxplow/page?dataset=v_fact&page=explore-data" }
+steps:
+  - params: { measure: oxplow.tokens }
+    expect:
+      loaders:
+        seen: { rows: [{ value: rust, facts: 2 }, { value: ts, facts: 1 }] }
+  - params: { measure: oxplow.coverage }
+    expect:
+      loaders:
+        seen: { rows: 0 }

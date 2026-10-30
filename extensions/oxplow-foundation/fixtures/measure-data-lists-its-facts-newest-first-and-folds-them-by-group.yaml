@@ -1,0 +1,32 @@
+# The Measure data page lists a measure's facts newest first, narrowed by subject and
+# branch, or grouped by subject or day and combined with the measure's fold (tokens: sum).
+given:
+  - observe: { facts: { measure: oxplow.tokens, items: [{ value: 10, path: a.rs, dims: { oxplow.language: rust } }, { value: 5, path: b.rs, dims: { oxplow.language: rust } }, { value: 7, path: a.rs, dims: { oxplow.language: ts } }] } }
+when:
+  page: oxplow-foundation/measure-data
+  params: { uri: "oxplow:oxplow/measure?measure=oxplow.tokens" }
+expect:
+  label: Agent tokens data
+  loaders:
+    about: { rows: [{ name: Agent tokens, fold: sum }] }
+    facts: { rows: 3 }
+  see_also:
+    - { title: Definition, uri: "oxplow:oxplow/measure?measure=oxplow.tokens#oxplow.renderer=oxplow-foundation/measure" }
+    - { title: Explore Data, uri: "oxplow:oxplow/page?dataset=v_fact&page=explore-data" }
+steps:
+  - params: { subject: zzz-nothing }
+    expect:
+      loaders:
+        facts: { rows: 0 }
+  - params: { group_by: day }
+    expect:
+      loaders:
+        grouped: { rows: [{ value: 22, facts: 3 }] }
+  - params: { group_by: subject }
+    expect:
+      loaders:
+        grouped: { rows: [{ group: a.rs, value: 17, facts: 2 }, { group: b.rs, value: 5, facts: 1 }] }
+  - params: { branch: no-such-branch }
+    expect:
+      loaders:
+        facts: { rows: 0 }

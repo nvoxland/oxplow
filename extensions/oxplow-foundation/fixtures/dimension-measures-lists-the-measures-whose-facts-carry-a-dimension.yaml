@@ -1,0 +1,9 @@
+# The Measure choices of a dimension's data page: all, then each measure whose facts carry it.
+given:
+  - observe: { facts: { measure: oxplow.tokens, items: [{ value: 10, dims: { oxplow.language: rust } }] } }
+when:
+  page: oxplow-foundation/dimension-measures
+  params: { uri: "oxplow:oxplow/dimension?dimension=oxplow.language" }
+expect:
+  loaders:
+    dimension_measures: { rows: [{ value: "", label: All measures }, { value: oxplow.tokens }] }

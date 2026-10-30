@@ -1,0 +1,133 @@
+title: Measure data
+description: The facts one measure recorded, newest first, or grouped by subject or day and combined the way the measure folds.
+label: '{{row.name}} data'
+icon: bar-chart-3
+for: oxplow/measure
+default: true
+params:
+- name: uri
+  label: Measure
+- name: range
+  type: date_range
+  role: filter
+  label: Range
+  default: 30d
+  presets: [1d, 7d, 30d, 90d, all]
+- name: branch
+  type: choice
+  role: filter
+  label: Branch
+  options_from: oxplow-foundation/measure-branches
+- name: subject
+  type: search
+  role: filter
+  label: Subject contains
+- name: group_by
+  type: choice
+  role: filter
+  label: Group by
+  options: [{ value: none, label: No grouping }, { value: subject, label: Subject }, { value: day, label: Day }]
+  default: none
+answers:
+- {"question":"What facts did this measure record?","about":"oxplow/measure","params":{"uri":"oxplow:oxplow/measure?measure=oxplow.tokens"},"skill":"oxplow-extension"}
+loaders:
+  about:
+    sql: |
+      SELECT m.key, m.title AS name, m.description, m.unit, m.fold, m.subject_kind
+      FROM v_measure m WHERE m.key = uri_param(:uri, 'measure')
+  facts:
+    sql: |
+      SELECT f.captured_at, f.value, a.unit, f.subject, f.path, f.branch, f.dims_json AS dims
+      FROM about a JOIN v_fact f ON f.measure_key = a.key
+      WHERE (COALESCE(:branch, '') = '' OR f.branch = :branch)
+        AND (:subject IS NULL OR f.subject LIKE '%' || :subject || '%' OR f.path LIKE '%' || :subject || '%')
+        AND (:range_from IS NULL OR f.captured_at >= :range_from)
+        AND (:range_to IS NULL OR f.captured_at <= :range_to)
+      ORDER BY f.captured_at DESC LIMIT 500
+  # Grouped: the measure's fold (sum, avg, first, else last) over each group's values.
+  grouped:
+    sql: |
+      WITH f AS (
+        SELECT f.id, f.value, f.captured_at,
+               CASE :group_by WHEN 'subject' THEN COALESCE(f.subject, f.path, '(none)')
+                              ELSE substr(f.captured_at, 1, 10) END AS grp
+        FROM about a JOIN v_fact f ON f.measure_key = a.key
+        WHERE (COALESCE(:branch, '') = '' OR f.branch = :branch)
+          AND (:subject IS NULL OR f.subject LIKE '%' || :subject || '%' OR f.path LIKE '%' || :subject || '%')
+          AND (:range_from IS NULL OR f.captured_at >= :range_from)
+          AND (:range_to IS NULL OR f.captured_at <= :range_to)
+      ), r AS (
+        SELECT *, row_number() OVER (PARTITION BY grp ORDER BY captured_at DESC, id DESC) AS newest,
+                  row_number() OVER (PARTITION BY grp ORDER BY captured_at, id) AS oldest
+        FROM f
+      )
+      SELECT r.grp AS "group",
+             CASE (SELECT fold FROM about)
+               WHEN 'sum' THEN sum(r.value)
+               WHEN 'avg' THEN avg(r.value)
+               WHEN 'first' THEN max(CASE WHEN r.oldest = 1 THEN r.value END)
+               ELSE max(CASE WHEN r.newest = 1 THEN r.value END) END AS value,
+             (SELECT unit FROM about) AS unit,
+             count(*) AS facts, max(r.captured_at) AS latest
+      FROM r GROUP BY r.grp
+      ORDER BY CASE WHEN :group_by = 'subject' THEN count(*) END DESC, 1 DESC
+      LIMIT 500
+  links:
+    sql: |
+      SELECT 'Definition' AS title,
+             :uri || '#oxplow.renderer=oxplow-foundation/measure' AS uri,
+             'What this measure counts and the metrics built on it' AS description
+      FROM about
+      UNION ALL
+      SELECT 'Explore Data', uri('oxplow/page', 'page', 'explore-data', 'dataset', 'v_fact'), 'Try a query over every fact' FROM about
+view:
+  stack:
+  - id: about
+    title: About
+    viz: detail
+    from: about
+    columns:
+    - { key: name, label: Measure }
+    - { key: description, label: What it is }
+    - { key: unit, label: Unit }
+    - { key: fold, label: A group's value is }
+    empty: That measure isn't known to the project.
+  - title: Facts
+    hide_title: true
+    switch:
+      param: group_by
+      children:
+      - id: none
+        title: Facts
+        viz: table
+        from: facts
+        columns:
+        - { key: captured_at, label: Captured, format: datetime }
+        - { key: value, label: Value, unit: unit }
+        - { key: subject, label: Subject }
+        - { key: path, label: Path }
+        - { key: branch, label: Branch }
+        - { key: dims, label: Dimensions }
+        empty: No facts in this range.
+      - id: subject
+        title: Facts by subject
+        viz: table
+        from: grouped
+        columns:
+        - { key: group, label: Subject }
+        - { key: value, label: Value, unit: unit }
+        - { key: facts, label: Facts, format: integer }
+        - { key: latest, label: Latest, format: datetime }
+        empty: No facts in this range.
+      - id: day
+        title: Facts by day
+        viz: table
+        from: grouped
+        columns:
+        - { key: group, label: Day }
+        - { key: value, label: Value, unit: unit }
+        - { key: facts, label: Facts, format: integer }
+        - { key: latest, label: Latest, format: datetime }
+        empty: No facts in this range.
+see_also:
+  - { from: links }

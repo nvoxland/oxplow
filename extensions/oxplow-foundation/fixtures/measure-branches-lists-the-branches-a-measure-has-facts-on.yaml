@@ -1,0 +1,9 @@
+# The Branch choices of a measure's data page: all branches, then those its facts were taken on.
+given:
+  - observe: { facts: { measure: oxplow.tokens, items: [{ value: 1 }] } }
+when:
+  page: oxplow-foundation/measure-branches
+  params: { uri: "oxplow:oxplow/measure?measure=oxplow.tokens" }
+expect:
+  loaders:
+    measure_branches: { rows: { contains: [{ value: "", label: All branches }] } }

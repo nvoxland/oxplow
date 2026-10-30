@@ -1,0 +1,18 @@
+title: Measures that carry a dimension
+description: The measures whose facts carry a dimension, for the Measure choice of its data page.
+hidden: true
+params:
+- name: uri
+loaders:
+  dimension_measures:
+    sql: |
+      SELECT '' AS value, 'All measures' AS label
+      UNION ALL
+      SELECT value, label FROM (
+        SELECT DISTINCT f.measure_key AS value, COALESCE(m.title, f.measure_key) AS label
+        FROM v_fact f LEFT JOIN v_measure m ON m.key = f.measure_key
+        WHERE json_extract(f.dims_json, '$."' || uri_param(:uri, 'dimension') || '"') IS NOT NULL
+        ORDER BY 2)
+view:
+  from: dimension_measures
+  viz: table

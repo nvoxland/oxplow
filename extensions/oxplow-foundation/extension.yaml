@@ -376,6 +376,21 @@ intent:
     - name: data-catalog-links-each-dataset-to-its-definition
       input: { page: data-catalog, params: { dataset: work_item } }
       expect: each dataset links to its definition page
+    - name: measure-data-lists-its-facts-newest-first-and-folds-them-by-group
+      input: { page: measure-data, params: { uri: "oxplow:oxplow/measure?measure=oxplow.tokens" } }
+      expect: a measure's facts newest first, narrowed, or grouped and folded
+    - name: measure-branches-lists-the-branches-a-measure-has-facts-on
+      input: { page: measure-branches, params: { uri: "oxplow:oxplow/measure?measure=oxplow.tokens" } }
+      expect: all branches, then those the measure's facts were taken on
+    - name: dimension-data-counts-the-values-its-facts-carry
+      input: { page: dimension-data, params: { uri: "oxplow:oxplow/dimension?dimension=oxplow.language" } }
+      expect: the values facts carry for the dimension with a count, most common first
+    - name: dimension-measures-lists-the-measures-whose-facts-carry-a-dimension
+      input: { page: dimension-measures, params: { uri: "oxplow:oxplow/dimension?dimension=oxplow.language" } }
+      expect: all measures, then each whose facts carry the dimension
+    - name: command-data-lists-its-runs-newest-first
+      input: { page: command-data, params: { uri: "oxplow:oxplow/command?command=oxplow.work_item.create" } }
+      expect: a command's audited runs, newest first, narrowed by outcome, who and date
 # What the coding agent reads about the work list: its commands (with no
 # list they're a sink), and oxplow's tasks' ready queue while they are it.
 skills:

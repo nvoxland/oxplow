@@ -1,0 +1,72 @@
+title: Command data
+description: The runs of one command from the audit log, newest first, with who ran it and how it ended.
+label: '{{row.name}} data'
+icon: terminal
+for: oxplow/command
+default: true
+params:
+- name: uri
+  label: Command
+- name: outcome
+  type: choice
+  role: filter
+  label: Outcome
+  options: [{ value: all, label: All }, { value: failed, label: Failed }]
+  default: all
+- name: who
+  type: choice
+  role: filter
+  label: Who
+  options: [{ value: all, label: Anyone }, { value: person, label: A person }, { value: agent, label: An agent }]
+  default: all
+- name: range
+  type: date_range
+  role: filter
+  label: Range
+  default: 30d
+  presets: [1d, 7d, 30d, 90d, all]
+answers:
+- {"question":"When did this command run, who ran it and did it fail?","about":"oxplow/command","params":{"uri":"oxplow:oxplow/command?command=oxplow.work_item.create"},"skill":"oxplow-extension"}
+loaders:
+  about:
+    sql: |
+      SELECT k.id AS name, k.summary AS description FROM v_command k WHERE k.id = uri_param(:uri, 'command')
+  runs:
+    sql: |
+      SELECT a.at, CASE a.actor_kind WHEN 'human' THEN 'A person' WHEN 'agent' THEN 'Agent ' || COALESCE(a.actor_id, '')
+                                     ELSE a.actor_kind || COALESCE(' ' || a.actor_id, '') END AS who,
+             a.outcome, a.error
+      FROM about k JOIN v_command_audit a ON a.command = k.name
+      WHERE (:outcome <> 'failed' OR a.outcome <> 'ok')
+        AND (:who = 'all' OR (:who = 'person' AND a.actor_kind = 'human') OR (:who = 'agent' AND a.actor_kind = 'agent'))
+        AND (:range_from IS NULL OR a.at >= :range_from)
+        AND (:range_to IS NULL OR a.at <= :range_to)
+      ORDER BY a.at DESC, a.id DESC LIMIT 500
+  links:
+    sql: |
+      SELECT 'Definition' AS title,
+             :uri || '#oxplow.renderer=oxplow-foundation/command' AS uri,
+             'What this command does and whether it asks first' AS description
+      FROM about
+view:
+  stack:
+  - id: about
+    title: About
+    viz: detail
+    from: about
+    columns:
+    - { key: name, label: Command }
+    - { key: description, label: What it does }
+    empty: That command isn't known to the project.
+  - id: runs
+    title: Runs
+    viz: table
+    from: runs
+    columns:
+    - { key: at, label: When, format: datetime }
+    - { key: who, label: Who }
+    - { key: outcome, label: Outcome }
+    - { key: error, label: Error }
+    empty: No runs in this range.
+see_also:
+  - { from: links }
