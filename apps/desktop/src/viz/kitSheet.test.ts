@@ -28,3 +28,10 @@ test("a table's first column breaks only between words", () => {
   expect(sheet).toMatch(/\.ox-table td:first-child\s*\{[^}]*overflow-wrap:\s*break-word/);
   expect(sheet).toMatch(/\.ox-table td\s*\{[^}]*overflow-wrap:\s*anywhere/);
 });
+
+// Sections stack apart, but the first one starts at the top of its page:
+// a margin above it is a gap under the toolbar.
+test("the first section has no space above it", () => {
+  const sheet = readFileSync(SHEET, "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  expect(sheet).toMatch(/\.ox-section:first-child\s*\{[^}]*margin-top:\s*0/);
+});
