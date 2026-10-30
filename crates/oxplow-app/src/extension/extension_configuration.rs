@@ -47,8 +47,8 @@ pub struct Stamps {
     pub project: Option<Stamp>,
     pub personal: Option<Stamp>,
     /// Which stored layers are at a schema version other than the declared
-    /// one: reads of them fail closed until activation migrates them (or an
-    /// explicit write replaces them).
+    /// one: reads of them fail closed until the extension's own write
+    /// replaces them at the declared version.
     pub needs_migration: NeedsMigration,
 }
 

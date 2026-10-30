@@ -427,10 +427,6 @@ pub struct Extension {
     /// Validated non-secret settings declaration, not resolved values or grants.
     #[serde(default)]
     pub configuration: Option<config_schema::ConfigurationFile>,
-    /// The sources of its configuration migration steps, by `entry`: read
-    /// and parsed at load so activation runs them without touching files.
-    #[serde(default, skip_serializing)]
-    pub config_scripts: std::collections::BTreeMap<String, String>,
     #[serde(default)]
     pub public_contracts: public_contracts::PublicContracts,
     /// Where its files came from.
@@ -1461,7 +1457,6 @@ pub(crate) fn empty_extension(name: &str, path: &str, origin: &str) -> Extension
         version: None,
         contributions: Vec::new(),
         configuration: None,
-        config_scripts: Default::default(),
         public_contracts: Default::default(),
         deployment: Deployment::Source,
         permissions: Permissions::default(),
@@ -1555,36 +1550,6 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
     ext.intent = manifest_v2::intent_of(&m, &file, &manifest).0;
     ext.description = m.description.clone();
     ext.configuration = manifest_v2::configuration_of(&m, &file, &manifest).0;
-    if let Some(configuration) = &ext.configuration {
-        let line = key_line(&manifest, "configuration");
-        for step in &configuration.migrations {
-            match files.read(&step.entry) {
-                None => ext.errors.push(at(
-                    &file,
-                    line,
-                    format!(
-                        "configuration migration {} -> {}: `{}` isn't in the extension",
-                        step.from, step.to, step.entry
-                    ),
-                )),
-                Some(script) => {
-                    match oxplow_script::runtime::check_starlark(&step.entry, &script) {
-                        Ok(()) => {
-                            ext.config_scripts.insert(step.entry.clone(), script);
-                        }
-                        Err(e) => ext.errors.push(at(
-                            &file,
-                            line,
-                            format!(
-                                "configuration migration {} -> {}: `{}` {e}",
-                                step.from, step.to, step.entry
-                            ),
-                        )),
-                    }
-                }
-            }
-        }
-    }
     public_contracts::load(&mut ext, &m, &manifest, &file);
     let (errors, warnings) = manifest_v2::check(&m, &file, &manifest);
     if !errors.is_empty()

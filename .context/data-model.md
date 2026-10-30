@@ -85,8 +85,8 @@ use their current connection, while external hosts use StateSource for a
 separate owned read per call. Provider namespace ownership is captured from
 its active provider declaration, independently of the invoking command.
 Public write commands still require private audit/proposal input handling.
-Configuration schema migrations run at activation (`extension_config_migration.rs`);
-state has no migration runner. The
+Neither configuration nor state has a migration runner: a stored configuration layer at
+another schema version fails closed until the extension's own command rewrites it. The
 lower-level store APIs grant no authority themselves. Configuration continues to
 use the project/personal file layers. A file edit and a SQLite
 reset cannot be represented as one atomic DB transaction.

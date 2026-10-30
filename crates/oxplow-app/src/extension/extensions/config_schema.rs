@@ -24,23 +24,6 @@ pub struct ConfigurationFile {
     #[serde(default = "empty_object")]
     #[specta(type = oxplow_domain::Json)]
     pub defaults: Value,
-    /// How a layer stored at an older `version` becomes the declared one:
-    /// steps that chain without gaps up to `version`.
-    #[serde(default)]
-    pub migrations: Vec<ConfigMigration>,
-}
-
-/// One step of a configuration schema migration: a pure Starlark
-/// `transform(values) -> values` (the extension's `entry`, relative to its
-/// folder) from stored schema version `from` to `to`.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct ConfigMigration {
-    #[schemars(range(min = 1))]
-    pub from: u32,
-    #[schemars(range(min = 1))]
-    pub to: u32,
-    pub entry: String,
 }
 
 fn empty_object() -> Value {
@@ -107,9 +90,6 @@ impl ConfigurationFile {
         if self.version == 0 {
             return Err(vec![violation("invalid_version")]);
         }
-        if let Some(issue) = self.migration_problem() {
-            return Err(vec![issue]);
-        }
         let schema = ConfigSchema::compile(&self.schema).map_err(|issue| vec![issue])?;
         let issues = schema.validate_defaults(&self.defaults);
         if issues.is_empty() {
@@ -117,54 +97,6 @@ impl ConfigurationFile {
         } else {
             Err(issues)
         }
-    }
-}
-
-impl ConfigurationFile {
-    /// The first problem with the declared migration steps: each goes
-    /// forward, none starts where another does, they chain end to start
-    /// without gaps, and the last arrives at the declared `version`.
-    fn migration_problem(&self) -> Option<SchemaViolation> {
-        if self.migrations.is_empty() {
-            return None;
-        }
-        let mut steps: Vec<&ConfigMigration> = self.migrations.iter().collect();
-        steps.sort_by_key(|m| (m.from, m.to));
-        for (i, step) in steps.iter().enumerate() {
-            if step.from == 0 || step.from >= step.to {
-                return Some(violation_at("migration_not_forward", i));
-            }
-            if steps.get(i + 1).is_some_and(|next| next.from == step.from) {
-                return Some(violation_at("migration_duplicate", i));
-            }
-            if steps.get(i + 1).is_some_and(|next| next.from != step.to) {
-                return Some(violation_at("migration_chain", i));
-            }
-        }
-        if steps.last().is_some_and(|last| last.to != self.version) {
-            return Some(violation_at("migration_target", steps.len() - 1));
-        }
-        None
-    }
-
-    /// The steps that take a layer stored at `stored` to `version`, in
-    /// order; none when `stored` isn't a version a step starts from.
-    pub fn migration_path(&self, stored: u32) -> Option<Vec<&ConfigMigration>> {
-        let mut path = Vec::new();
-        let mut at = stored;
-        while at < self.version {
-            let step = self.migrations.iter().find(|m| m.from == at)?;
-            path.push(step);
-            at = step.to;
-        }
-        (at == self.version).then_some(path)
-    }
-}
-
-fn violation_at(code: &str, index: usize) -> SchemaViolation {
-    SchemaViolation {
-        pointer: format!("/migrations/{index}"),
-        code: code.to_owned(),
     }
 }
 
@@ -375,66 +307,5 @@ mod tests {
             .err()
             .expect("an external ref is refused");
         assert!(!format!("{issues:?}").contains("example.invalid"));
-    }
-
-    fn migrating(version: u32, steps: &[(u32, u32)]) -> ConfigurationFile {
-        let mut declaration = declaration();
-        declaration.version = version;
-        declaration.migrations = steps
-            .iter()
-            .map(|(from, to)| ConfigMigration {
-                from: *from,
-                to: *to,
-                entry: format!("config/{from}_{to}.star"),
-            })
-            .collect();
-        declaration
-    }
-
-    fn code(declaration: &ConfigurationFile) -> Option<String> {
-        declaration
-            .prepare()
-            .err()
-            .map(|issues| issues[0].code.clone())
-    }
-
-    #[test]
-    fn migration_steps_chain_forward_to_the_declared_version() {
-        assert_eq!(code(&migrating(3, &[(1, 2), (2, 3)])), None);
-        // The earliest storable version is wherever the chain starts.
-        assert_eq!(code(&migrating(3, &[(2, 3)])), None);
-        assert_eq!(code(&migrating(1, &[])), None);
-        assert_eq!(code(&migrating(3, &[(1, 3)])), None);
-        for (steps, expected) in [
-            (vec![(2, 2)], "migration_not_forward"),
-            (vec![(3, 2)], "migration_not_forward"),
-            (vec![(1, 2), (1, 3)], "migration_duplicate"),
-            (vec![(1, 2), (3, 4)], "migration_chain"),
-            (vec![(1, 3), (2, 3)], "migration_chain"),
-            (vec![(1, 2)], "migration_target"),
-        ] {
-            let version = if expected == "migration_target" { 3 } else { 4 };
-            assert_eq!(
-                code(&migrating(version, &steps)).as_deref(),
-                Some(expected),
-                "{steps:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn a_migration_path_runs_from_the_stored_version_only() {
-        let declaration = migrating(4, &[(1, 2), (2, 4)]);
-        let path = |stored| {
-            declaration
-                .migration_path(stored)
-                .map(|p| p.iter().map(|m| (m.from, m.to)).collect::<Vec<_>>())
-        };
-        assert_eq!(path(1), Some(vec![(1, 2), (2, 4)]));
-        assert_eq!(path(2), Some(vec![(2, 4)]));
-        assert_eq!(path(4), Some(vec![]));
-        // 3 is never stored by a declared chain; 5 is a newer schema.
-        assert_eq!(path(3), None);
-        assert_eq!(path(5), None);
     }
 }

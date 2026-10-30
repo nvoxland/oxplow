@@ -1,5 +1,4 @@
-//! Extension configuration end to end: schema migrations at activation, the
-//! stale-layer contract, and the hardening of the three native operations
+//! Extension configuration end to end: the stale-layer contract, and the hardening of the three native operations
 //! and the hosts that serve them.
 
 use std::sync::Arc;
@@ -16,14 +15,6 @@ use crate::extension::extension_private_state_tests::{
 };
 use crate::test_fixtures::{services_with_effort, EffortFixture};
 
-fn ext_file(fx: &EffortFixture, rel: &str, body: &str) {
-    write(
-        fx._dir.path(),
-        &format!(".oxplow/extensions/alpha/{rel}"),
-        body,
-    );
-}
-
 /// `CONFIGURATION` at version 2: `limit` was `max` at version 1.
 const V2: &str = "configuration:
   version: 2
@@ -35,15 +26,6 @@ const V2: &str = "configuration:
       limit: { type: integer, minimum: 1, maximum: 100 }
       label: { type: string }
   defaults: { limit: 10 }
-  migrations:
-    - { from: 1, to: 2, entry: config/migrate_1_2.star }
-";
-
-const RENAME_MAX: &str = "def transform(values):
-    out = dict(values)
-    if \"max\" in out:
-        out[\"limit\"] = out.pop(\"max\")
-    return out
 ";
 
 async fn store_layer(fx: &EffortFixture, scope: Scope, version: u32, values: Value) {
@@ -58,177 +40,44 @@ async fn stamp_of(fx: &EffortFixture, which: &str) -> Value {
     run(fx, "alpha.config.inspect", json!({})).await.unwrap()[which].clone()
 }
 
-/// A project at configuration version 1 with both layers stored in the
-/// old shape, then `alpha` redeclared at version 2.
-async fn old_layers_under_v2(script: &str, version_two: &str) -> EffortFixture {
+#[tokio::test(flavor = "multi_thread")]
+async fn activation_leaves_an_old_layer_alone_until_the_extension_writes_it_again() {
     let fx = services_with_effort().await;
     declare(fx._dir.path(), "alpha", CONFIGURATION);
     reconcile(&fx).await;
     store_layer(&fx, Scope::Project, 1, json!({"max": 20})).await;
-    store_layer(&fx, Scope::Personal, 1, json!({"max": 30, "label": "mine"})).await;
-    ext_file(&fx, "config/migrate_1_2.star", script);
-    declare(fx._dir.path(), "alpha", version_two);
-    ext_file(&fx, "config/migrate_1_2.star", script);
-    fx
-}
-
-// ---- migrations -------------------------------------------------------
-
-#[tokio::test(flavor = "multi_thread")]
-async fn activation_carries_every_old_layer_to_the_declared_version() {
-    let fx = old_layers_under_v2(RENAME_MAX, V2).await;
-    reconcile(&fx).await;
-
-    let config = run(&fx, "alpha.config.read", json!({})).await.unwrap();
-    assert_eq!(config["values"], json!({"limit": 30, "label": "mine"}));
-    assert_eq!(config["origins"]["/limit"], json!("personal"));
-    // Both layers moved in the one activation, each a revision on.
-    assert_eq!(
-        stamp_of(&fx, "project").await,
-        json!({"schema_version": 2, "revision": 2})
-    );
-    assert_eq!(
-        stamp_of(&fx, "personal").await,
-        json!({"schema_version": 2, "revision": 2})
-    );
-    let inspected = run(&fx, "alpha.config.inspect", json!({})).await.unwrap();
-    assert_eq!(
-        inspected["needs_migration"],
-        json!({"project": false, "personal": false})
-    );
-    // A second activation has nothing left to do.
-    reconcile(&fx).await;
-    assert_eq!(
-        stamp_of(&fx, "project").await,
-        json!({"schema_version": 2, "revision": 2})
-    );
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn a_failing_step_leaves_the_layers_alone_and_holds_the_extension_back() {
-    let fx = old_layers_under_v2("def transform(values):\n    fail(\"cannot cope\")\n", V2).await;
-    let problems = crate::test_fixtures::activate_with_problems(&fx.svc).await;
-    let reason = format!("{problems:?}");
-    assert!(
-        reason.contains("alpha") && reason.contains("cannot cope") && reason.contains("1 -> 2"),
-        "{reason}"
-    );
-    // Held like a broken dataset: the version that worked keeps serving, on
-    // settings still at the version it reads.
-    let config = run(&fx, "alpha.config.inspect", json!({})).await.unwrap();
-    assert_eq!(config["schema_version"], json!(1));
-    assert_eq!(
-        stamp_of(&fx, "project").await,
-        json!({"schema_version": 1, "revision": 1})
-    );
-    assert_eq!(
-        stamp_of(&fx, "personal").await,
-        json!({"schema_version": 1, "revision": 1})
-    );
-    // Fixing the step lets the next activation migrate.
-    ext_file(&fx, "config/migrate_1_2.star", RENAME_MAX);
-    reconcile(&fx).await;
-    assert_eq!(
-        stamp_of(&fx, "project").await,
-        json!({"schema_version": 2, "revision": 2})
-    );
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn migrated_settings_the_schema_refuses_hold_the_extension_back() {
-    // The step forgets the rename, so `max` survives into a schema that
-    // forbids it. Neither layer is written.
-    let fx = old_layers_under_v2("def transform(values):\n    return values\n", V2).await;
-    let problems = crate::test_fixtures::activate_with_problems(&fx.svc).await;
-    let reason = format!("{problems:?}");
-    assert!(
-        reason.contains("alpha") && reason.contains("satisf"),
-        "{reason}"
-    );
-    assert!(
-        !reason.contains("20") || !reason.contains("\"max\": 20"),
-        "{reason}"
-    );
-    assert_eq!(
-        stamp_of(&fx, "project").await,
-        json!({"schema_version": 1, "revision": 1})
-    );
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn a_step_that_returns_a_non_object_holds_the_extension_back() {
-    let fx = old_layers_under_v2("def transform(values):\n    return [1]\n", V2).await;
-    let problems = crate::test_fixtures::activate_with_problems(&fx.svc).await;
-    assert!(
-        format!("{problems:?}").contains("must return an object"),
-        "{problems:?}"
-    );
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn a_chain_runs_each_step_from_the_stored_version() {
-    let fx = services_with_effort().await;
-    let v3 = "configuration:
-  version: 3
-  schema:
-    type: object
-    additionalProperties: false
-    properties:
-      limit: { type: integer }
-      label: { type: string }
-  migrations:
-    - { from: 1, to: 2, entry: config/one.star }
-    - { from: 2, to: 3, entry: config/two.star }
-";
-    declare(fx._dir.path(), "alpha", CONFIGURATION);
-    reconcile(&fx).await;
-    store_layer(&fx, Scope::Project, 1, json!({"a": 1})).await;
-    store_layer(&fx, Scope::Personal, 2, json!({"b": 2})).await;
-    declare(fx._dir.path(), "alpha", v3);
-    ext_file(
-        &fx,
-        "config/one.star",
-        "def transform(v):\n    return {\"limit\": v[\"a\"]}\n",
-    );
-    ext_file(
-        &fx,
-        "config/two.star",
-        "def transform(v):\n    out = dict(v)\n    if \"b\" in out:\n        out[\"label\"] = str(out.pop(\"b\"))\n    return out\n",
-    );
-    reconcile(&fx).await;
-    let config = run(&fx, "alpha.config.read", json!({})).await.unwrap();
-    assert_eq!(config["values"], json!({"limit": 1, "label": "2"}));
-    assert_eq!(
-        stamp_of(&fx, "project").await,
-        json!({"schema_version": 3, "revision": 2})
-    );
-    assert_eq!(
-        stamp_of(&fx, "personal").await,
-        json!({"schema_version": 3, "revision": 2})
-    );
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn a_migration_declaration_that_cannot_chain_is_a_load_error() {
-    let fx = services_with_effort().await;
-    let bad = V2.replace("{ from: 1, to: 2,", "{ from: 1, to: 1,");
-    declare(fx._dir.path(), "alpha", &bad);
-    ext_file(&fx, "config/migrate_1_2.star", RENAME_MAX);
-    let problems = crate::test_fixtures::activate_with_problems(&fx.svc).await;
-    let reason = format!("{problems:?}");
-    assert!(reason.contains("migration_not_forward"), "{reason}");
-
-    // A step whose script is missing, or doesn't define transform.
-    let fx = services_with_effort().await;
     declare(fx._dir.path(), "alpha", V2);
-    let problems = crate::test_fixtures::activate_with_problems(&fx.svc).await;
-    assert!(format!("{problems:?}").contains("isn't in the extension"));
-    ext_file(&fx, "config/migrate_1_2.star", "x = 1\n");
-    let problems = crate::test_fixtures::activate_with_problems(&fx.svc).await;
-    assert!(
-        format!("{problems:?}").contains("transform"),
-        "{problems:?}"
+    reconcile(&fx).await;
+
+    // Activation did not touch the stored row.
+    assert_eq!(
+        stamp_of(&fx, "project").await,
+        json!({"schema_version": 1, "revision": 1})
     );
+    // The read fails closed instead of returning old values.
+    let refused = run(&fx, "alpha.config.read", json!({}))
+        .await
+        .expect_err("a layer at another version is not read");
+    let CommandError::Invalid { field, .. } = refused else {
+        panic!("{refused:?}")
+    };
+    assert_eq!(field.as_deref(), Some("/schema_version"));
+    // The extension's own command replaces it at the new version.
+    let stamps = run(
+        &fx,
+        "alpha.config.write",
+        json!({"schema_version": 2,
+               "project": {"expected": {"schema_version": 1, "revision": 1},
+                           "values": {"limit": 20}}}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        stamps["project"],
+        json!({"schema_version": 2, "revision": 2})
+    );
+    let config = run(&fx, "alpha.config.read", json!({})).await.unwrap();
+    assert_eq!(config["values"]["limit"], json!(20));
 }
 
 // ---- stale layers fail closed -----------------------------------------
@@ -237,7 +86,6 @@ async fn a_migration_declaration_that_cannot_chain_is_a_load_error() {
 async fn a_layer_behind_the_declared_version_fails_closed_and_says_so() {
     let fx = services_with_effort().await;
     declare(fx._dir.path(), "alpha", V2);
-    ext_file(&fx, "config/migrate_1_2.star", RENAME_MAX);
     reconcile(&fx).await;
     // A row from before the schema moved (a restored backup, say).
     store_layer(&fx, Scope::Project, 1, json!({"max": 5})).await;
@@ -249,7 +97,7 @@ async fn a_layer_behind_the_declared_version_fails_closed_and_says_so() {
         panic!("{refused:?}")
     };
     assert_eq!(field.as_deref(), Some("/schema_version"));
-    assert!(message.contains("migration"), "{message}");
+    assert!(message.contains("schema"), "{message}");
 
     let inspected = run(&fx, "alpha.config.inspect", json!({})).await.unwrap();
     assert_eq!(
@@ -306,7 +154,6 @@ async fn a_layer_behind_the_declared_version_fails_closed_and_says_so() {
 async fn an_explicit_migration_writes_both_layers_in_one_commit() {
     let fx = services_with_effort().await;
     declare(fx._dir.path(), "alpha", V2);
-    ext_file(&fx, "config/migrate_1_2.star", RENAME_MAX);
     reconcile(&fx).await;
     store_layer(&fx, Scope::Project, 1, json!({"max": 5})).await;
     store_layer(&fx, Scope::Personal, 1, json!({"max": 6})).await;

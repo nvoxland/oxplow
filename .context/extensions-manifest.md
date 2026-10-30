@@ -290,9 +290,9 @@ A native `scope: extension_config.write`, `op: compare_exchange` takes
 `schema_version` and optional `project`/`personal` objects, each containing
 `expected` (exact prior stamp or null for creation) and `values` (object
 fragment). The host validates the complete candidate before either CAS mutation.
-Both layers can be replaced atomically for an explicit schema migration. An
+Both layers can be replaced atomically when the schema version changes. An
 untouched layer must already use the current manifest version; reads of old
-versions fail closed. `inspect` supplies the old stamps needed for migration.
+versions fail closed. `inspect` supplies the old stamps the replacing write needs.
 Version decrease is refused. Failure rolls back both layers; storage errors
 abort the outer audited command transaction. The write runs no script and waits
 on nothing external. Writes return stamps and omit both layer inputs from audit;
@@ -302,27 +302,12 @@ whether a stored layer is at a schema version other than the declared one.
 Reading such a layer fails closed with a `/schema_version` error, distinct
 from a stale-stamp conflict (`/expected`).
 
-**Schema migrations.** `configuration.migrations` lists steps
-`{ from, to, entry }`, each a pure Starlark `transform(values) -> values` in
-the extension folder (the sandbox of every other script: no I/O, no services).
-At load the steps must each go forward, start at distinct versions, chain end to
-start with no gap or overlap, and the last must arrive at `version`; each entry
-must exist and parse (a violation is a load error, `migration_not_forward` /
-`migration_duplicate` / `migration_chain` / `migration_target`). The runner
-(`extension_config_migration.rs`) runs at activation inside the generation's
-database transaction, for each enabled extension and each stored layer
-(project, personal) behind the declared version: it chains the steps from the
-stored version, checks that each returned an object, resolves the carried
-layers (with the neighbouring layer) against the declared schema, and writes
-each with a compare-and-swap at the new version. The schema describes only the
-declared version, so it is checked once on the result, not between steps. Any
-failure (a step that errors or returns a non-object, settings the schema refuses,
-a stored version no step starts from or newer than declared) names the
-extension and the step and rolls the whole candidate back: every layer stays at
-its old version and the extension is held back exactly like one whose dataset does
-not compile (`Failed::hold`: its last working version keeps serving, on the
-settings that version reads; a first-time extension stays out), the problem
-shown in the Extensions page. Fixing the step and activating again migrates.
+**Changing the schema version.** There is no migration runner. When an
+extension changes its configuration schema `version`, activation leaves stored
+layers alone. A layer stored at the old version fails closed on every read
+(`/schema_version`) until the extension's own command writes it at the new
+version: a compare-and-swap with the old stamp as `expected`, both layers in
+one audited transaction. Values are never discarded or rewritten by the host.
 
 Reset uses an empty override object at a newer revision, retaining stale-token
 rejection. Disable/uninstall retain local rows for explicit recovery/reinstall;
@@ -435,7 +420,7 @@ new revision; it does not delete/recreate the namespace. No inverse stores old
 private values. Nested compositions inherit private-input recording and child
 metadata is redacted. Calls that require confirmation cannot retain these inputs
 in a public proposal; a person must invoke them directly with confirmation.
-State has no migration runner (configuration's is above), and lifecycle cleanup
+State has no migration runner, and neither has configuration, and lifecycle cleanup
 beyond retaining rows is unbuilt. Raw secrets do not belong in state payloads.
 
 Current-generation checks use the filesystem catalog, including its stat walk;

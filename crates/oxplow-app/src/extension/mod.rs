@@ -8,7 +8,6 @@ mod extension_activation_tests;
 pub(crate) mod extension_build;
 pub mod extension_catalog;
 pub mod extension_commands;
-pub(crate) mod extension_config_migration;
 #[cfg(test)]
 mod extension_config_tests;
 pub(crate) mod extension_configuration;

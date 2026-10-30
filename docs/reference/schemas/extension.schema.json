@@ -444,45 +444,12 @@
         "schema": true,
         "defaults": {
           "default": {}
-        },
-        "migrations": {
-          "description": "How a layer stored at an older `version` becomes the declared one:\nsteps that chain without gaps up to `version`.",
-          "type": "array",
-          "items": {
-            "$ref": "#/definitions/ConfigMigration"
-          },
-          "default": []
         }
       },
       "additionalProperties": false,
       "required": [
         "version",
         "schema"
-      ]
-    },
-    "ConfigMigration": {
-      "description": "One step of a configuration schema migration: a pure Starlark\n`transform(values) -> values` (the extension's `entry`, relative to its\nfolder) from stored schema version `from` to `to`.",
-      "type": "object",
-      "properties": {
-        "from": {
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 1
-        },
-        "to": {
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 1
-        },
-        "entry": {
-          "type": "string"
-        }
-      },
-      "additionalProperties": false,
-      "required": [
-        "from",
-        "to",
-        "entry"
       ]
     },
     "Build": {

@@ -184,30 +184,14 @@ complete replacement values, so their objects must include required fields.
 Branch constraints such as `anyOf` still apply to defaults as written. Schema
 `default` annotations do not supply values.
 
-### Migrating settings
+### Changing the settings schema
 
 When a later version of the extension changes the settings schema, bump
-`version` and list how stored settings move forward:
-
-```yaml
-configuration:
-  version: 3
-  schema: { ... }
-  migrations:
-    - { from: 1, to: 2, entry: config/migrate_1_2.star }
-    - { from: 2, to: 3, entry: config/migrate_2_3.star }
-```
-
-Each `entry` is a Starlark file in the extension folder defining
-`def transform(values):` that takes a layer's stored settings (an object) and
-returns the settings for the next version. It is pure: it cannot read files or
-call services. The steps must each go forward, chain with no gap or overlap, and
-end at `version`. When oxplow starts the new version it carries every stored
-layer (project and personal) from its version to `version`, and checks the result
-against the schema. If a step fails, or its result does not satisfy the schema,
-nothing is changed: the extension is held back with the step's error shown in
-Settings → Extensions, and the previous version, if any, keeps running on the
-settings it reads. Fix the step and activate again.
+`version`. Oxplow does not rewrite stored settings. A stored layer (project or
+personal) at the old version is refused on every read, with a schema-version
+error, until one of the extension's own commands writes it again at the new
+version. That write replaces both layers in one audited transaction, and the
+old stamp from `inspect` must match.
 
 Schema compilation is offline. Diagnostics contain locations and error codes,
 with values omitted. Use non-secret settings only: credentials belong to the

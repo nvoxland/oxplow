@@ -1709,17 +1709,6 @@ export type CommitRefLabel = {
 export type CommitRefLabelKind = "branch" | "tag";
 
 /**
- *  One step of a configuration schema migration: a pure Starlark
- *  `transform(values) -> values` (the extension's `entry`, relative to its
- *  folder) from stored schema version `from` to `to`.
- */
-export type ConfigMigration = {
-	from: number,
-	to: number,
-	entry: string,
-};
-
-/**
  *  A versioned declaration of non-secret settings. This is data, not consent
  *  or a credential reference. Stored overrides and host services are separate.
  */
@@ -1727,11 +1716,6 @@ export type ConfigurationFile = {
 	version: number,
 	schema: unknown,
 	defaults?: unknown,
-	/**
-	 *  How a layer stored at an older `version` becomes the declared one:
-	 *  steps that chain without gaps up to `version`.
-	 */
-	migrations?: ConfigMigration[],
 };
 
 /**
