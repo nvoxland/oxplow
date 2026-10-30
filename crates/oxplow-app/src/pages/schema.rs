@@ -457,6 +457,8 @@ struct VizFile {
     #[serde(default)]
     empty: Option<String>,
     #[serde(default)]
+    hide_empty: bool,
+    #[serde(default)]
     chart: Option<VizChart>,
     #[serde(default)]
     tree: Option<VizTree>,
@@ -1353,6 +1355,12 @@ fn leaf_viz(
         holds_one_row(f.viz),
     )
     .map_err(|e| format!("node `{node_id}`: {e}"))?;
+    if f.hide_empty && f.empty.is_some() {
+        return Err(format!(
+            "node `{node_id}`: `hide_empty` leaves it out when it has no rows, so `empty:` would \
+             never show — fix: drop one of them"
+        ));
+    }
     let cfg = VizConfig {
         id: format!("{}#{node_id}", ctx.page_id),
         extension: ctx.extension.to_string(),
@@ -1362,6 +1370,7 @@ fn leaf_viz(
         params: ctx.params.to_vec(),
         columns: f.columns,
         empty: f.empty,
+        hide_empty: f.hide_empty,
         chart: f.chart,
         tree: f.tree,
         timeline: f.timeline,

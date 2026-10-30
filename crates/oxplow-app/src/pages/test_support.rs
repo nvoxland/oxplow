@@ -60,6 +60,20 @@ view:
 "#,
     ),
     (
+        "sparse",
+        r#"
+title: Sparse
+loaders:
+  some: { sql: "SELECT 'x' AS a" }
+  none: { sql: "SELECT 'x' AS a WHERE 0" }
+view:
+  stack:
+    - { id: some, title: Some, viz: list, from: some, hide_empty: true }
+    - { id: none, title: None, viz: list, from: none, hide_empty: true }
+    - { id: shown, title: Shown, viz: list, from: none, empty: Nothing here. }
+"#,
+    ),
+    (
         "areas",
         r#"
 title: Areas

@@ -262,7 +262,10 @@ unique in the page. `#node=<id>` in a link lands on it. `title`,
 - `viz` (+ `from: <loader>`, a role block, `columns`, row `actions`,
   `empty`): a `VizConfig` with no query of its own. A viz that reads no
   rows (`form`, `approvals`) has no `from`. The YAML only binds; logic is
-  SQL or a read command.
+  SQL or a read command. `hide_empty: true` (never with `empty:`): when
+  its loader ran clean with no rows, the runner leaves the node out of the
+  run tree (`runner.rs` `left_out`), so the desktop, Contents and the
+  page's text all skip it; a failed loader still shows its error.
 
 **Vizes** (`Viz`): `table`, `list`, `number`, `markdown` (the first row's
 `markdown: { text: <column> }`, else its first column, drawn by the one

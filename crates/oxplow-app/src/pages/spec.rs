@@ -1855,6 +1855,10 @@ pub struct VizConfig {
     pub params: Vec<PageParam>,
     pub columns: Vec<PageColumn>,
     pub empty: Option<String>,
+    /// Left out of the page when its loader has no rows: a section about
+    /// something the subject may not have (a kind of contribution).
+    #[serde(default)]
+    pub hide_empty: bool,
     /// Columns a chart viz draws from.
     pub chart: Option<VizChart>,
     pub tree: Option<VizTree>,

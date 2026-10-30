@@ -102,8 +102,9 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
      confirmed?, bind? }` or `{ rows: { <entity>: [..] } }`.
      `expect: { loaders: { <name>: { rows: n | $any | [ { col: val } ] |
      { contains: [ { col: val } ] }, columns? } }, nodes: [{ id, kind?,
-     actions? }], text: { contains: [..] } | "<exact>", alert?, badge?,
-     inactive?, actions? }` (a loader of an embedded or slot-mounted page
+     viz?, actions? }], text: { contains: [..] } | "<exact>", alert?, badge?,
+     inactive?, actions? }` (an `expect.nodes` key besides those four is
+     refused, never ignored; a loader of an embedded or slot-mounted page
      is `<node id>/<loader>` — a mount's node id is its page's with `/` as
      `.`, so test a mount from the host page: `when: { page: host/items }`,
      `loaders: { beta.extra/words: { rows: 1 } }`; `text` is the page's text, as `oxplow_run_page`

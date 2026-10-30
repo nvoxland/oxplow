@@ -1,0 +1,37 @@
+# Each kind an extension contributes is a top-level table of its own, a row
+# per contribution: its name (linking where a page draws its kind), what it
+# is in words from its kind's dataset, and the few facts that matter for
+# that kind. A kind the extension doesn't have isn't on the page at all.
+when:
+  page: oxplow-foundation/extension
+  params:
+    uri: "oxplow:oxplow/extension?name=oxplow-foundation"
+    name: oxplow-foundation
+expect:
+  nodes:
+    - { id: commands, kind: viz, viz: table }
+    - { id: skills, kind: viz, viz: table }
+    - { id: components, kind: viz, viz: table }
+    - { id: slots, kind: viz, viz: table }
+    - { id: collectors, kind: viz, viz: table }
+    - { id: metrics, kind: viz, viz: table }
+    - { id: measures, kind: viz, viz: table }
+    - { id: dimensions, kind: viz, viz: table }
+    - { id: resources, kind: viz, viz: table }
+    - { id: implementations, kind: viz, viz: table }
+  loaders:
+    commands:
+      rows:
+        contains:
+          - { command: oxplow.agent.draft, description: $any, link: null }
+          - { command: oxplow.extension.remove, asks: Destructive }
+    skills: { rows: { contains: [{ description: $any }] } }
+    components: { rows: { contains: [{ description: $any, can_run: $any }] } }
+    metrics:
+      rows:
+        contains:
+          - { title: Nudges fired, description: Count of nudges fired to the agent., link: "oxplow:oxplow/metric?metric=agent.nudges.fired" }
+    measures: { rows: { contains: [{ title: Nudges fired }] } }
+    dimensions: { rows: { contains: [{ title: Agent }] } }
+    implementations: { rows: { contains: [{ title: Claude, capability: $any }] } }
+  text: { contains: ["## Metrics", "Count of nudges fired to the agent."] }

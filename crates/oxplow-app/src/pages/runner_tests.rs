@@ -52,6 +52,16 @@ async fn an_embed_takes_params_by_name_from_the_hosts_loaders() {
     assert_eq!(r.loaders["colors"].result.rows.len(), 2);
 }
 
+/// A viz node with `hide_empty` whose loader has no rows isn't in the run
+/// at all (no heading, no Contents entry); one with `empty:` still says so.
+#[tokio::test]
+async fn an_empty_section_that_hides_when_empty_is_left_out() {
+    let (_dir, svc) = fixture().await;
+    let r = run(&svc, "acme/sparse", &[]).await;
+    let ids: Vec<&str> = r.tree.children.iter().map(|c| c.id.as_str()).collect();
+    assert_eq!(ids, ["some", "shown"]);
+}
+
 #[tokio::test]
 async fn a_switch_runs_only_the_child_in_view() {
     let (_dir, svc) = fixture().await;

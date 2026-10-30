@@ -5466,6 +5466,11 @@ export type SkillDecl = {
 	file: string,
 	/**  What it needs active (`work_items`, `work_items.comments`). */
 	needs: string[],
+	/**
+	 *  The `description:` of its frontmatter: when the agent loads a skill,
+	 *  what a command does.
+	 */
+	description: string,
 };
 
 /**  What the agent's runtime makes of it. */
@@ -6193,6 +6198,11 @@ export type VizConfig_Deserialize = {
 	params: PageParam[],
 	columns: PageColumn[],
 	empty: string | null,
+	/**
+	 *  Left out of the page when its loader has no rows: a section about
+	 *  something the subject may not have (a kind of contribution).
+	 */
+	hideEmpty?: boolean,
 	/**  Columns a chart viz draws from. */
 	chart: VizChart | null,
 	tree: VizTree | null,
@@ -6245,6 +6255,11 @@ export type VizConfig_Serialize = {
 	params: PageParam[],
 	columns: PageColumn[],
 	empty: string | null,
+	/**
+	 *  Left out of the page when its loader has no rows: a section about
+	 *  something the subject may not have (a kind of contribution).
+	 */
+	hideEmpty: boolean,
 	/**  Columns a chart viz draws from. */
 	chart: VizChart | null,
 	tree: VizTree | null,

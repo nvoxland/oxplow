@@ -46,9 +46,12 @@ view:
 
 ## `viz`
 
-`{ viz: <kind>, from: <loader>, columns?, empty?, actions?, <role block> }`.
+`{ viz: <kind>, from: <loader>, columns?, empty?, hide_empty?, actions?, <role block> }`.
 Rows come from the loader (a viz has no query). A viz that reads no rows
-(`form`, `approvals`) has no `from`.
+(`form`, `approvals`) has no `from`. `hide_empty: true` leaves the node
+out of the page when its loader has no rows (no heading, no Contents
+entry) — for a section about something the subject may not have, like
+one kind of an extension's contributions; it can't have `empty:` too.
 
 - `table`: rows. `list`: one line per row, headlined by the first column.
   `number`: the first cell, big. `markdown`: the first row's text

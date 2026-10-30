@@ -1010,3 +1010,14 @@ fn a_sections_viz_can_group_its_rows() {
     assert_eq!(s.group.as_deref(), Some("ext"));
     assert_eq!(s.group_link.as_deref(), Some("ext_uri"));
 }
+
+/// `hide_empty` and `empty:` contradict each other: one says to leave the
+/// section out, the other what to say in it.
+#[test]
+fn hide_empty_with_an_empty_text_is_refused() {
+    let err = page(
+        "title: P\nloaders:\n  l: { sql: \"SELECT 1 AS n\" }\nview: { id: v, viz: list, from: l, hide_empty: true, empty: None. }\n",
+    )
+    .unwrap_err();
+    assert!(err.contains("`hide_empty` leaves it out"), "{err}");
+}

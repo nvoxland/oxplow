@@ -3359,22 +3359,24 @@ fn component_at(
 }
 
 /// A page run's node ids (`<embed>/<id>` inside an embed) with their kinds.
-fn run_nodes(run: &oxplow_app::pages::runner::PageRun) -> Vec<(String, String)> {
+/// What an `expect.nodes` entry may say about a node.
+const NODE_KEYS: [&str; 4] = ["id", "kind", "viz", "actions"];
+
+fn run_nodes(run: &oxplow_app::pages::runner::PageRun) -> Vec<(String, Value)> {
     fn walk(
         run: &oxplow_app::pages::runner::PageRun,
         node: &oxplow_app::pages::runner::RunNode,
         prefix: &str,
-        out: &mut Vec<(String, String)>,
+        out: &mut Vec<(String, Value)>,
     ) {
-        let kind = run
+        let declared = run
             .page
             .nodes()
             .into_iter()
             .find(|n| n.id == node.id)
             .and_then(|n| serde_json::to_value(n).ok())
-            .and_then(|v| v.get("kind").and_then(Value::as_str).map(str::to_string))
-            .unwrap_or_default();
-        out.push((format!("{prefix}{}", node.id), kind));
+            .unwrap_or(Value::Null);
+        out.push((format!("{prefix}{}", node.id), declared));
         if let Some(sub) = &node.embed {
             walk(sub, &sub.tree, &format!("{prefix}{}/", node.id), out);
         }
@@ -4032,7 +4034,18 @@ impl PageAt<'_> {
                     ));
                     continue;
                 };
-                let Some((_, kind)) = present.iter().find(|(have, _)| have == id) else {
+                if let Some(key) = want
+                    .as_object()
+                    .and_then(|o| o.keys().find(|k| !NODE_KEYS.contains(&k.as_str())))
+                {
+                    report.errors.push(format!(
+                        "{shown}:1: {label}`{key}` isn't a key of `expect.nodes` — fix: a node is \
+                         {}",
+                        NODE_KEYS.map(|k| format!("`{k}`")).join(", ")
+                    ));
+                    continue;
+                }
+                let Some((_, declared)) = present.iter().find(|(have, _)| have == id) else {
                     report.errors.push(format!(
                         "{shown}:1: {label}page `{page}` has no node `{id}` in this run (it has \
                          {}) — fix: the example, or the page's view",
@@ -4044,11 +4057,32 @@ impl PageAt<'_> {
                     ));
                     continue;
                 };
+                let has = |key: &str| {
+                    declared
+                        .get(key)
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                };
                 if let Some(k) = want.get("kind").and_then(Value::as_str) {
-                    if k != kind {
+                    if k != has("kind") {
                         report.errors.push(format!(
-                            "{shown}:1: {label}page `{page}` node `{id}` is a `{kind}`, the \
-                             example expects `{k}`"
+                            "{shown}:1: {label}page `{page}` node `{id}` is a `{}`, the \
+                             example expects `{k}`",
+                            has("kind")
+                        ));
+                    }
+                }
+                // A viz node's viz is in its config.
+                let viz = declared
+                    .pointer("/config/viz")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                if let Some(v) = want.get("viz").and_then(Value::as_str) {
+                    if v != viz {
+                        report.errors.push(format!(
+                            "{shown}:1: {label}page `{page}` node `{id}` is a `{viz}` viz, the \
+                             example expects `{v}` — fix: the page, or the node's `viz` in \
+                             `expect.nodes`"
                         ));
                     }
                 }
@@ -7855,6 +7889,45 @@ expect: {expect}
             report.ran.contains(&"answers".to_string()),
             "{:?}",
             report.ran
+        );
+    }
+
+    /// A node's `viz` is checked like its `kind`; a key `expect.nodes`
+    /// doesn't know is a finding, never ignored.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_page_fixture_checks_a_nodes_viz_and_refuses_keys_it_does_not_know() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        pager(
+            root,
+            LIST,
+            "{}",
+            "{ nodes: [{ id: list, kind: viz, viz: table }] }",
+        );
+        let report = test_extension(root, "pager", false).await.unwrap();
+        assert_eq!(report.errors, Vec::<String>::new());
+
+        pager(root, LIST, "{}", "{ nodes: [{ id: list, viz: sections }] }");
+        let errors = test_extension(root, "pager", false)
+            .await
+            .unwrap()
+            .errors
+            .join("\n");
+        assert!(
+            errors.contains("node `list` is a `table` viz, the example expects `sections`"),
+            "{errors}"
+        );
+
+        pager(root, LIST, "{}", "{ nodes: [{ id: list, title: Items }] }");
+        let errors = test_extension(root, "pager", false)
+            .await
+            .unwrap()
+            .errors
+            .join("\n");
+        assert!(
+            errors.contains("`title` isn't a key of `expect.nodes`")
+                && errors.contains("`id`, `kind`, `viz`, `actions`"),
+            "{errors}"
         );
     }
 

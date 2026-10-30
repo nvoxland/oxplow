@@ -217,12 +217,12 @@ intent:
     - name: extension-problems-collects-what-is-failing-or-turned-off
       input: { page: extension-problems, params: {} }
       expect: everything wrong with an extension under its name (stopped or failing contributions, permissions waiting for approval, load errors), with Start Again, Repair with the Agent and Start All Stopped
-    - name: extension-pages-are-a-section-each-with-a-linked-heading
+    - name: extension-pages-are-a-table-row-each-linking-to-its-definition
       input: { page: extension, params: { uri: 'oxplow:oxplow/extension?name=oxplow-foundation', name: oxplow-foundation } }
-      expect: each page of the extension is a subsection, its title linking to the Definition of its running file and its description as the body
-    - name: extension-contributions-are-sections-grouped-by-kind
+      expect: its pages as a table, each title linking to the Definition of its running file, with its description and what it shows
+    - name: extension-contributions-are-a-table-per-kind
       input: { page: extension, params: { uri: 'oxplow:oxplow/extension?name=oxplow-foundation', name: oxplow-foundation } }
-      expect: each contribution besides its pages is a subsection under its kind's plural name, with its human name, its description where its dataset has one, and a link where a page draws it (a metric's page)
+      expect: each kind it contributes is a top-level table, a row per contribution with its name (a link where a page draws it), its description and the facts that matter for its kind; a kind it doesn't have isn't shown
     - name: an-extension-lists-its-permissions-as-scopes-with-a-hint-each
       input: { page: extension, params: { uri: 'oxplow:oxplow/extension?name=oxplow-foundation', name: oxplow-foundation } }
       expect: each scope as written with its explanation as a hover; nothing waits on approval for a running extension

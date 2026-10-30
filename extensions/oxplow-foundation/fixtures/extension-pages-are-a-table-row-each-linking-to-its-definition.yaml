@@ -1,6 +1,5 @@
-# `viz: sections`: the Extension page gives each of its pages a subsection,
-# the page's title linking to its running file's Definition and its
-# description as the body.
+# The Extension page lists its pages as a table: a row each, the page's
+# title linking to its running file's Definition, its description beside it.
 when:
   page: oxplow-foundation/extension
   params:
@@ -8,7 +7,7 @@ when:
     name: oxplow-foundation
 expect:
   nodes:
-    - { id: pages, kind: viz, viz: sections }
+    - { id: pages, kind: viz, viz: table }
   loaders:
     pages:
       rows:
