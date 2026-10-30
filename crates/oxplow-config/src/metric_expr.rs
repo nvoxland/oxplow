@@ -10,6 +10,7 @@
 //! formula    := METRIC('a') (+ | - | * | /) METRIC('b')
 //! ```
 //!
+//! `n` is a signed decimal, with an optional exponent (`-1`, `0.5`, `1e-3`).
 //! `value >= n` and `value <= n` are the bounds a fact filter has
 //! (`minValue`, `maxValue`); a strict `>` or `<` has no stored form, so it is
 //! refused with the closest spelling. At most one of each condition; one
@@ -105,6 +106,19 @@ fn lex(src: &str) -> Result<Vec<Tok>, String> {
                 {
                     i += 1;
                 }
+                // An exponent: `e` or `E`, an optional sign, then digits.
+                if matches!(chars.get(i), Some('e' | 'E')) {
+                    let mut j = i + 1;
+                    if matches!(chars.get(j), Some('+' | '-')) {
+                        j += 1;
+                    }
+                    if chars.get(j).is_some_and(|c| c.is_ascii_digit()) {
+                        while chars.get(j).is_some_and(|c| c.is_ascii_digit()) {
+                            j += 1;
+                        }
+                        i = j;
+                    }
+                }
                 let text: String = chars[start..i].iter().collect();
                 out.push(Tok::Num(
                     text.parse()
@@ -172,8 +186,22 @@ impl Parser {
     }
 
     fn number(&mut self) -> Result<f64, String> {
+        // A sign belongs to the literal here; the only binary `-` is between
+        // two `METRIC(…)` terms, which never reach this.
+        let negative = match self.peek() {
+            Some(Tok::Sym("-")) => {
+                self.at += 1;
+                true
+            }
+            Some(Tok::Sym("+")) => {
+                self.at += 1;
+                false
+            }
+            _ => false,
+        };
         match self.next() {
-            Some(Tok::Num(n)) => Ok(n),
+            Some(Tok::Num(n)) if n.is_finite() => Ok(if negative { -n } else { n }),
+            Some(Tok::Num(n)) => Err(format!("`{n}` isn't a finite number")),
             other => Err(format!("expected a number, found {}", show(other.as_ref()))),
         }
     }
@@ -489,6 +517,58 @@ mod tests {
             let err = compile(expr).expect_err(expr);
             assert!(err.contains(says), "{expr}: {err}");
             assert!(err.contains("the grammar is"), "{expr}: {err}");
+        }
+    }
+
+    fn min_of(expr: &str) -> Option<f64> {
+        match compile(expr).unwrap_or_else(|e| panic!("{expr}: {e}")) {
+            Compiled::Measure { filter, .. } => filter.and_then(|f| f.min_value),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_negative_bound_is_a_number() {
+        assert_eq!(min_of("COUNT(*) FILTER (WHERE value >= -1)"), Some(-1.0));
+        assert_eq!(min_of("COUNT(*) FILTER (WHERE value >= - 2.5)"), Some(-2.5));
+        assert_eq!(min_of("COUNT(*) FILTER (WHERE value >= +3)"), Some(3.0));
+    }
+
+    #[test]
+    fn an_exponent_number_is_lexed() {
+        assert_eq!(min_of("COUNT(*) FILTER (WHERE value >= 1e-3)"), Some(0.001));
+        assert_eq!(
+            min_of("COUNT(*) FILTER (WHERE value >= 2.5E+2)"),
+            Some(250.0)
+        );
+        assert_eq!(
+            min_of("COUNT(*) FILTER (WHERE value >= -1e2)"),
+            Some(-100.0)
+        );
+    }
+
+    #[test]
+    fn a_non_finite_number_is_refused() {
+        let err = compile("COUNT(*) FILTER (WHERE value >= 1e999)").expect_err("inf");
+        assert!(err.contains("finite"), "{err}");
+    }
+
+    #[test]
+    fn a_stored_bound_round_trips_through_text() {
+        for n in [-1.0, -2.5, -1e-9, 1e-9, 1e20, -1e20, 0.001, 123456.789] {
+            let stored = Compiled::Measure {
+                aggregation: "count".into(),
+                filter: Some(FilterConfig {
+                    min_value: Some(n),
+                    max_value: Some(-n),
+                    ..Default::default()
+                }),
+            };
+            let text = render(&stored);
+            assert_eq!(
+                compile(&text).unwrap_or_else(|e| panic!("{text}: {e}")),
+                stored
+            );
         }
     }
 }
