@@ -278,7 +278,7 @@ welded to collection.
 > counted it, one timeout would supersede everything and silently zero the
 > metric. Worse than the bug it reports.
 >
-> `needs_tree_baseline` asks ONE question **per collector** (`collectors_needing_baseline`):
+> `collectors_needing_baseline` asks ONE question **per collector**:
 > *does this collector have a completed `scan_kind='full'` capture at its current logic
 > fingerprint?* (`SqliteFactStore::has_full_capture`; fingerprint =
 > `collector_fingerprint` — a hash of script text + runtime/report + `facts` (+ the
@@ -1342,11 +1342,6 @@ reached through `run_command`, audited like every command):
   `v_capture_exclusion` with `v_fact`/`v_capture`. A capture before this was
   recorded has no exclusions. Oversize files can also be listed from
   `v_snapshot_file` (`storage`).
-- `oxplow extension check` against a project database resolves a metric the
-  extension under check declares even when the app has not loaded it yet
-  (`MetricEngine::with_declared`, `declared_metric_specs`): the store's spec
-  wins, else the extension's own, so a page reading `metric_findings()` or
-  `metric_grid()` of it dry-runs.
 - `oxplow.metric.scaffold { name, language?, glob?, origin? }` — a `Read`: the
   files of a code metric extension (`{ name, dir, files: [{ path, content }] }`),
   which the agent writes with its own tools; then `extension check` and
@@ -1418,7 +1413,7 @@ dimensions:                        # custom conformed slice axes
   served from cache (`with_global_catalog`); `reseed` clears it on every
   config change (`config.metrics`) and extension change before reseeding (an external edit to a global file
   needs a config change to refresh). Project config (`use:` entries) stays read fresh from the in-memory `RwLock`.
-  `with_global_dir` forks a fresh cache (dir changed). Two more per-read memos:
+  Two more per-read memos:
   `effort_metric_deltas` loads each measure's history **once** across the
   File-family specs sharing it (a per-call `fact_cache`), and `dim_value` parses
   a fact's `dims_json` **once** per lookup (`parse_dims` + `dim_from_map`).

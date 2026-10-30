@@ -927,22 +927,6 @@ impl CommandBus {
         self.commands.write().add(namespace, source, commands)
     }
 
-    /// Replace this source's commands through one registry swap. Rejection
-    /// preserves the prior commands and namespace ownership. Empty removes
-    /// the source. Already resolved commands retain their Arc handlers.
-    pub fn replace_namespace(
-        &self,
-        namespace: &str,
-        source: &str,
-        commands: Vec<Command>,
-    ) -> Result<(), CommandError> {
-        self.replace_namespaces(vec![NamespaceCommands {
-            namespace: namespace.to_owned(),
-            source: source.to_owned(),
-            commands,
-        }])
-    }
-
     /// Validate and swap several sources together. All prior source holdings
     /// are removed from the candidate before additions, so sources can exchange
     /// namespaces, IDs and shortcuts without a transient collision. A rejection

@@ -527,12 +527,6 @@ pub(crate) struct CapabilityReservation<'a> {
 }
 
 impl CapabilityReservation<'_> {
-    /// The caller has committed the matching database candidate and excluded
-    /// readers. All rejection checks already happened during reservation.
-    pub(crate) fn publish(mut self) {
-        self.apply();
-    }
-
     /// Retain the writer through the remaining maps and follow policies.
     pub(crate) fn apply(&mut self) {
         *self.state = self
@@ -753,19 +747,6 @@ impl CapabilityRegistry {
             rows,
             resolved,
         })
-    }
-
-    /// Swap a prepared registry only if no intervening declaration/instance
-    /// mutation occurred and the supplied config still resolves the captured
-    /// choices. The activation owner must hold its config/catalog publication
-    /// boundary and coordinate the database; this method makes no outer commit.
-    pub fn publish_prepared(
-        &self,
-        prepared: PreparedCapabilities,
-        config: &OxplowConfig,
-    ) -> Result<(), oxplow_domain::CommandError> {
-        self.reserve_prepared(&prepared, config)?.publish();
-        Ok(())
     }
 
     pub(crate) fn reserve_prepared(

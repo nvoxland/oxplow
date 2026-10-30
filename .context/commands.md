@@ -47,7 +47,7 @@ namespace's **holder** (`namespace_owner`: `oxplow`, or the one source
 holding it). `register` is core's (under `oxplow`); `register_namespace(ns,
 source, commands)` registers a source's commands all-or-nothing. Duplicate
 IDs within the submitted batch are rejected before mutation. For replacement,
-`replace_namespace` delegates to `replace_namespaces`: an atomic list of
+`replace_namespaces` takes an atomic list of
 `NamespaceCommands` (namespace, source, prepared commands). Each source appears
 once. Every replaced source is removed from a cloned registry before any new
 batch is validated, so participating sources can exchange namespaces, IDs or

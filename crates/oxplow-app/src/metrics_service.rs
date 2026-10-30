@@ -275,10 +275,6 @@ pub struct MetricsService {
     vcs: Arc<dyn oxplow_domain::vcs::Vcs>,
     config: Arc<RwLock<OxplowConfig>>,
     project_dir: PathBuf,
-    /// Override for the global config dir (the parent of `metrics/`). `None` →
-    /// the platform `global_config_dir()`. A field (not the free fn) so tests
-    /// can point it at a tempdir without racing on a process-global env var.
-    global_dir: Option<PathBuf>,
     /// The fact substrate, for seeding config-declared `measures:`/`dimensions:`
     /// into the catalog (epic tsk12, E). `None` in test fixtures that don't
     /// exercise catalog seeding; wired at boot via [`Self::with_fact_store`].
@@ -464,7 +460,6 @@ impl MetricsService {
             vcs,
             config,
             project_dir,
-            global_dir: None,
             fact_store: None,
             background_tasks: None,
             global_catalog: Arc::new(std::sync::Mutex::new(None)),
@@ -487,15 +482,6 @@ impl MetricsService {
     /// What a fact collector that asks a model asks (`ai.compute`).
     pub fn with_ai(mut self, ai: Arc<crate::ai_compute::AiCompute>) -> Self {
         self.ai = Some(ai);
-        self
-    }
-
-    /// Override the global config dir (test seam; default `global_config_dir()`).
-    pub fn with_global_dir(mut self, dir: PathBuf) -> Self {
-        self.global_dir = Some(dir);
-        // Changing the source dir must not serve the shared cache's entries from
-        // the old dir — give this handle a fresh cache (tsk17).
-        self.global_catalog = Arc::new(std::sync::Mutex::new(None));
         self
     }
 
@@ -525,12 +511,6 @@ impl MetricsService {
         self
     }
 
-    /// The effective global config dir (the field override, else the platform
-    /// `global_config_dir()`); `metrics/` hangs under it.
-    fn effective_global_dir(&self) -> Option<PathBuf> {
-        self.global_dir.clone().or_else(global_config_dir)
-    }
-
     /// Share the loaded-extensions cache with the rest of `Services`.
     pub fn with_extension_catalog(
         mut self,
@@ -553,7 +533,7 @@ impl MetricsService {
             .lock()
             .unwrap_or_else(|p| p.into_inner());
         if guard.is_none() {
-            let dir = self.effective_global_dir();
+            let dir = global_config_dir();
             *guard = Some(match dir {
                 Some(d) => GlobalCatalog {
                     metrics: load_global_metric_entries(&d),
@@ -925,20 +905,6 @@ impl MetricsService {
             dir,
             files: crate::metric_scaffold::extension_files(name, origin.as_deref(), &starter),
         })
-    }
-
-    /// True when at least one on-snapshot collector still needs a full-tree
-    /// baseline in this stream — a fresh project, a newly added collector, or a
-    /// collector whose script changed since its last baseline.
-    ///
-    /// A `per-path` measure's fold needs each collector to have restated the whole
-    /// tree at least once; delta captures alone would let the metric creep up
-    /// from 0 over months instead of reporting the repo (tsk41). The baseline
-    /// is a `scan_kind = 'full'` capture over the RECONSTRUCTED tree of an
-    /// ordinary snapshot (tsk71) — the on-snapshot sweep drains
-    /// [`Self::collectors_needing_baseline`] on the next snapshot that lands.
-    pub async fn needs_tree_baseline(&self, stream_id: i64) -> bool {
-        !self.collectors_needing_baseline(stream_id).await.is_empty()
     }
 
     /// Enabled on-snapshot collectors that have not been baselined at their CURRENT logic —
@@ -2613,23 +2579,6 @@ impl MetricsService {
 
 /// Map a resolved `ResolvedSpec` to a `metric_spec` write (for config-declared
 /// metrics). A formula metric has no `source_measure`.
-/// The metrics `extension` declares, as stored specs would read: the
-/// extension's own layer alone, with the defaults applied. What a check
-/// resolves them to before the app has loaded the extension.
-pub fn declared_metric_specs(
-    extension: &crate::extension::extensions::Extension,
-) -> Vec<oxplow_db::MetricSpec> {
-    MetricLayers {
-        global: Vec::new(),
-        extensions: vec![(extension.name.clone(), extension.metrics.clone())],
-        project: Vec::new(),
-    }
-    .resolve()
-    .iter()
-    .map(|spec| spec_to_new_spec(spec).as_stored())
-    .collect()
-}
-
 pub(crate) fn spec_to_new_spec(s: &ResolvedSpec) -> NewMetricSpec {
     let spec = NewMetricSpec {
         key: s.key.clone(),

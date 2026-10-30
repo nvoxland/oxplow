@@ -185,43 +185,6 @@ pub fn for_policy(
     reacting(run, event)
 }
 
-/// Collector `id` of `ext`, run as `actor` — the system on its schedule
-/// or an event, whoever ran it by hand — caused by its trigger event when
-/// it has one.
-pub fn for_collector(
-    catalog: &ExtensionCatalog,
-    root: &Path,
-    ext: &Extension,
-    id: &str,
-    actor: Actor,
-    event: Option<&StoredEvent>,
-) -> RunContext {
-    let run = RunContext::contribution(
-        contribution(catalog, root, ext, ContributionKind::Collector, id),
-        actor,
-        Mode::External,
-    );
-    match event {
-        Some(e) => reacting(run, e),
-        None => run,
-    }
-}
-
-/// An extension command's run of `decl`, as `actor`.
-pub fn for_command(
-    catalog: &ExtensionCatalog,
-    root: &Path,
-    ext: &Extension,
-    command: &str,
-    actor: Actor,
-) -> RunContext {
-    RunContext::contribution(
-        contribution(catalog, root, ext, ContributionKind::Command, command),
-        actor,
-        Mode::External,
-    )
-}
-
 /// A dry run — `extension test`, a review — of something that would run
 /// as the system: pure, nothing behind it to cause or anchor it.
 pub fn for_dry_run() -> RunContext {

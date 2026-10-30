@@ -133,7 +133,7 @@ anchors, subject and cause, its mode, its budget, its cancel flag and
 its scope trace.
 
 - **Built by a named constructor, never assembled.** `for_effect`,
-  `for_policy`, `for_collector`, `for_command`, `for_dry_run` and
+  `for_policy`, `for_dry_run` and
   `RunContext::core` fill what that run has and leave the rest `None`.
   Nested work is `child()`: a new run id with this one as parent, the
   same actor, cancel flag and generation, the budget no larger than

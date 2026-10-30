@@ -87,17 +87,6 @@ impl SqlGateway {
         Self::new(db).with_engine(engine)
     }
 
-    /// Also resolve the metrics `specs` declare (an extension under check)
-    /// that this gateway's database has not stored yet.
-    pub fn with_declared_metrics(&self, specs: Vec<oxplow_db::MetricSpec>) -> Self {
-        let mut out = self.clone();
-        out.engine = self
-            .engine
-            .as_ref()
-            .map(|engine| std::sync::Arc::new(engine.as_ref().clone().with_declared(specs)));
-        out
-    }
-
     /// Speak `vocabulary` (the app's).
     pub fn with_vocabulary(
         mut self,
