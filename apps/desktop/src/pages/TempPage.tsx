@@ -52,7 +52,7 @@ export function TempPage({ id, resource, stream, threadId, onOpenPage, runs, get
     return <PageFileView page={loaded.result.page} resource={resource} stream={stream} threadId={threadId} onOpenPage={onOpenPage} runs={runs} />;
   }
   return (
-    <Chrome testId="view-gone" title="View" kind="page">
+    <Chrome testId="view-gone" title="View">
       <div style={{ padding: 16 }}>
         <EmptyState title="This view is gone" text={loaded.result.gone ?? "oxplow keeps a view for a week after you last opened it. Ask the agent to show it again."} />
       </div>

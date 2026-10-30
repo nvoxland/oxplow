@@ -75,7 +75,7 @@ const nav = {
 const page = () =>
   render(
     <PageNavigationContext.Provider value={nav}>
-      <Page title="Their bug" kind="work_item" chips={[{ label: "todo" }]}>
+      <Page title="Their bug" chips={[{ label: "todo" }]}>
         body
       </Page>
     </PageNavigationContext.Provider>,
@@ -101,7 +101,7 @@ test("an effort page shows its review verdict as a chip", async () => {
   const effortNav = { ...nav, ask: { ref: "oxplow:oxplow/effort?id=eff7" } } as unknown as PageNavigation;
   const view = render(
     <PageNavigationContext.Provider value={effortNav}>
-      <Page title="Changes" kind="diff-view" chips={[{ label: "closed" }]}>
+      <Page title="Changes" chips={[{ label: "closed" }]}>
         body
       </Page>
     </PageNavigationContext.Provider>,

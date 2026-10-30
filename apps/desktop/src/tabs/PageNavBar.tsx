@@ -48,6 +48,9 @@ export interface PageNavBarProps {
   pageLabel?: string;
   /** Drawn before the title: what the page is (an agent's logo). */
   titleIcon?: ReactNode;
+  /** What kind of thing the tab shows ("Measure"), a muted chip before
+   *  the title; none for a page route. */
+  kind?: string | null;
   /** Optional bookmark affordance — when omitted, no star renders.
    *  The button always opens a popover that lets the user toggle this
    *  page's bookmark at one scope (thread / stream / project). */
@@ -106,6 +109,7 @@ export function PageNavBar({
   siblings,
   title,
   titleIcon,
+  kind = null,
   pageLabel,
   bookmark,
   backlinks,
@@ -358,6 +362,11 @@ export function PageNavBar({
           {titleIcon ? (
             <span data-testid="page-nav-title-icon" style={{ display: "inline-flex", flexShrink: 0, color: "var(--text-secondary)" }}>
               {titleIcon}
+            </span>
+          ) : null}
+          {kind ? (
+            <span data-testid="page-nav-kind" className="ox-badge" style={{ flexShrink: 0, color: "var(--text-secondary)" }}>
+              {kind}
             </span>
           ) : null}
           <span

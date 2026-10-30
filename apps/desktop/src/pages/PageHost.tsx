@@ -242,7 +242,6 @@ export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, re
   return (
     <Page
       testId="page-host"
-      kind="page"
       title={navTitle}
       width={full ? "full" : "reading"}
       fill={fills}

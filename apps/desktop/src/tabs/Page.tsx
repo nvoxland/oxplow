@@ -4,6 +4,8 @@ import { RENDERER_VIEW_KEY, pickRenderer } from "../pages/renderers.js";
 import { PageNavBar } from "./PageNavBar.js";
 import { TabModalHostContext } from "../components/TabModal.js";
 import { useOptionalPageNavigation } from "./PageNavigationContext.js";
+import { useResources } from "../resources.js";
+import { typeOf } from "../uri/uri.js";
 import type { BookmarkScope } from "./bookmarks.js";
 import type { AskTarget } from "../components/Prompts/askTarget.js";
 import { chipsFor } from "../components/decorators.js";
@@ -74,9 +76,7 @@ export interface PageProps {
    *  so the same string drives both the chrome header and the tab
    *  strip label. */
   title?: ReactNode;
-  /** Optional kind/type label rendered as a small chip ("file", "tasks"…). */
-  kind?: string;
-  /** Optional status / metadata chips rendered next to the kind. */
+  /** Optional status / metadata chips rendered next to the title. */
   chips?: PageChip[];
   /** What the page can do, as data: core draws them in the nav bar (in
    *  the header when the page shows no bar). */
@@ -134,20 +134,23 @@ const DETAILS_RAIL_THRESHOLD_PX = 960;
 
 /**
  * Shared chrome for every page rendered inside a tab body. Provides:
- *  - A header (title + kind chip + status/metadata chips + actions slot)
+ *  - A header (title + status/metadata chips + actions slot); the nav
+ *    bar names the kind of thing the tab shows (`kindOfTab`)
  *  - The page body
  *  - A collapsible Backlinks panel anchored at the bottom
  *
  * The chrome reads only semantic CSS variables. Both light and dark
  * themes are styled by `public/index.html`.
  */
-export function Page({ title, titleIcon, kind, chips: ownChips, actions, pin, seeAlso, children, backlinks, outbound, commentsNav, navBar, testId, width = "full", fill = false, rightRail, rightRailTitle }: PageProps) {
+export function Page({ title, titleIcon, chips: ownChips, actions, pin, seeAlso, children, backlinks, outbound, commentsNav, navBar, testId, width = "full", fill = false, rightRail, rightRailTitle }: PageProps) {
   const [backlinksOpen, setBacklinksOpen] = useState(false);
   // Pages that don't pass an explicit `navBar` prop still get one
   // when rendered inside a PageNavigationContext provider — that's
   // how the host (App.tsx) injects browser-style back/forward into
   // every page without requiring each page module to wire it.
   const ctxNav = useOptionalPageNavigation();
+  const resources = useResources();
+  const kind = kindOfTab(ctxNav?.ref?.id ?? null, resources);
   // Extensions' decorations for this page's ref (P6b.C5), after the page's
   // own chips: additive, the header is complete without them.
   const pageRef = ctxNav?.ask?.ref ?? null;
@@ -258,6 +261,7 @@ export function Page({ title, titleIcon, kind, chips: ownChips, actions, pin, se
           siblings={effectiveNavBar.siblings}
           title={effectiveTitle}
           titleIcon={titleIcon}
+          kind={kind}
           pageLabel={typeof effectiveTitle === "string" ? effectiveTitle : undefined}
           bookmark={effectiveNavBar.bookmark}
           backlinks={effectiveNavBar.backlinks}
@@ -509,4 +513,14 @@ function RailBody({ children, width, fill, rightRail, rightRailTitle }: { childr
       {railAside ? railPanel("aside") : null}
     </div>
   );
+}
+
+/** What kind of thing a tab shows: its URI's resource's label ("Measure",
+ *  "Work item"). A page route names none — the page is the thing, and its
+ *  title says it. */
+export function kindOfTab(uri: string | null, resources: ReadonlyMap<string, { label: string }>): string | null {
+  const resource = uri ? typeOf(uri) : null;
+  if (!resource || resource === "oxplow/page") return null;
+  const label = resources.get(resource)?.label ?? "";
+  return label === "" ? null : label;
 }

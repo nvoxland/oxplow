@@ -15,7 +15,7 @@ export function ResourcePage({ uri }: { uri: string }) {
   // Dead: nothing declares it, or the dataset that names its rows has none.
   const dead = resource === null || (resource.resolve !== null && title === null);
   return (
-    <Page testId="page-resource" title={title ?? resource?.label ?? uri} kind={resource?.label ?? "Link"}>
+    <Page testId="page-resource" title={title ?? resource?.label ?? uri}>
       <div style={{ padding: 16 }}>
         {dead ? (
           <p data-testid="resource-dead-link" style={{ color: "var(--text-secondary)" }}>
