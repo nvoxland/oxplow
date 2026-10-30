@@ -79,6 +79,8 @@ loaders:
                    UNION ALL SELECT x.awaiting || CASE WHEN x.awaiting = 1 THEN ' permission' ELSE ' permissions' END || ' waiting for your approval' WHERE x.awaiting > 0
                    UNION ALL SELECT x.load_problems || CASE WHEN x.load_problems = 1 THEN ' problem' ELSE ' problems' END || ' loading it' WHERE x.load_problems > 0))
              END AS problems_label,
+             x.failing + x.disabled + x.load_problems + x.awaiting AS problem_count,
+             CASE WHEN x.deployment IN ('deployed', 'shipped') THEN 'yes' ELSE 'no' END AS deployed,
              uri('oxplow/page', 'page', 'extension-problems') || '#extension=' || x.name AS problems_target,
              (NOT x.enabled OR json_array_length(x.pending) > 0 OR x.load_problems > 0 OR x.failing + x.disabled > 0
               OR (x.source_hash IS NOT NULL AND x.hash IS NOT NULL AND x.source_hash <> x.hash)) AS attention

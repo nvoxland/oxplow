@@ -86,13 +86,19 @@ loaders:
       SELECT 'Explore Data', uri('oxplow/page', 'page', 'explore-data', 'dataset', 'v_fact'), 'Try a query over every fact' FROM about
 view:
   stack:
+  # What it is: a paragraph above the facts.
+  - id: description
+    title: Description
+    hide_title: true
+    viz: markdown
+    from: about
+    markdown: { text: description }
   - id: about
     title: About
     viz: detail
     from: about
     columns:
     - { key: name, label: Measure }
-    - { key: description, label: What it is }
     - { key: unit, label: Unit }
     - { key: fold, label: A group's value is }
     empty: That measure isn't known to the project.

@@ -45,13 +45,19 @@ loaders:
       SELECT 'Explore Data', uri('oxplow/page', 'page', 'explore-data', 'dataset', view), 'Try a query over this dataset' FROM resolved
 view:
   stack:
+  # What it is: a paragraph above the facts.
+  - id: description
+    title: Description
+    hide_title: true
+    viz: markdown
+    from: resolved
+    markdown: { text: description }
   - id: about
     title: About
     viz: detail
     from: resolved
     columns:
     - { key: name, label: Kind }
-    - { key: description, label: What it is }
     - { key: view, label: Held in }
   - id: instances
     title: Instances

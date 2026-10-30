@@ -1,16 +1,18 @@
-# The overview is a document: a section per extension, headed by its name
-# (a link to its page), each fact a sentence. It has no repair buttons: a
-# problem (stopped contributions, permissions waiting for approval, load errors) is one line linking to the problems page.
+# The overview is one table, an extension a row: its name (a link to its
+# page, with "(disabled)" when it is off), whether a deployment runs, its
+# permissions, and its problems ("no", else how many, linking to the
+# problems page).
 when:
   page: oxplow-foundation/extensions
 expect:
   label: Extensions
   loaders:
-    summary:
+    extensions:
+      columns: [name, uri, deployed, permission_items, problems, problems_tone, problems_target]
       rows:
         contains:
-          - { extension: oxplow-foundation, uri: "oxplow:oxplow/extension?name=oxplow-foundation", heading: oxplow-foundation, origin_text: Shipped with oxplow, origin_target: null, permission_items: $any }
+          - { name: oxplow-foundation, uri: "oxplow:oxplow/extension?name=oxplow-foundation", deployed: "yes", permission_items: $any, problems: "no", problems_tone: null, problems_target: null }
   nodes:
-    - { id: summary, kind: viz, viz: sections }
+    - { id: extensions, kind: viz, viz: table }
   actions: []
-  text: { contains: ["oxplow-foundation", "Shipped with oxplow"] }
+  text: { contains: ["oxplow-foundation"] }
