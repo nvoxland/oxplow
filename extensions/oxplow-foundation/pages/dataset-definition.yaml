@@ -31,17 +31,11 @@ loaders:
       FROM about
 view:
   stack:
-  # What it is: a paragraph above the facts.
-  - id: description
-    title: Description
-    hide_title: true
-    viz: markdown
-    from: about
-    markdown: { text: description }
   - id: about
     title: About
     viz: detail
     from: about
+    lead: description
     columns:
     - { key: view, label: View }
     - { key: owner, label: Owner }

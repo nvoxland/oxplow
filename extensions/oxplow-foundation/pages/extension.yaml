@@ -146,17 +146,11 @@ loaders:
       ORDER BY d.deployed_at DESC
 view:
   stack:
-  # What it is: a paragraph above the facts.
-  - id: description
-    title: Description
-    hide_title: true
-    viz: markdown
-    from: about_facts
-    markdown: { text: description }
   - id: about
     title: About
     viz: detail
     from: about_facts
+    lead: description
     columns:
     - { key: origin_text, label: From, link: { kind: page, from: origin_target } }
     - { key: version_text, label: Version }

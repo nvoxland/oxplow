@@ -1,9 +1,10 @@
-# What a thing is, is a paragraph of text above its facts (a heading-less
-# markdown section bound to its description), not a "What it is" row.
+# What a thing is, is a paragraph under the About heading, above its facts
+# (the node's `lead:`), not a "What it is" row and not a section of its own.
 when:
   page: oxplow-foundation/command
   params:
     uri: "oxplow:oxplow/command?command=oxplow.agent.draft"
 expect:
   nodes:
-    - { id: description, kind: viz, viz: markdown }
+    - { id: about, kind: viz, viz: detail }
+  text: { contains: ["## About [node about]\n\nPut text in the shown thread's agent inp"] }

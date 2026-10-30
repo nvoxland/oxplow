@@ -55,17 +55,11 @@ loaders:
       SELECT 'Explore Data', uri('oxplow/page', 'page', 'explore-data', 'dataset', 'v_fact'), 'Try a query over every fact' FROM about
 view:
   stack:
-  # What it is: a paragraph above the facts.
-  - id: description
-    title: Description
-    hide_title: true
-    viz: markdown
-    from: about
-    markdown: { text: description }
   - id: about
     title: About
     viz: detail
     from: about
+    lead: description
     columns:
     - { key: name, label: Dimension }
     - { key: value_type, label: Its values }
