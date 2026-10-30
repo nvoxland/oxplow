@@ -92,11 +92,16 @@ actions (the ☰ menu), each offered by a `can_*` column of its first loader;
 one that adds permissions asks inline like any deploy.
 
 **The Extensions page** (`extensions`, the launcher's System page; Settings
-has no Extensions area) is a document too: one headed section per extension
-(`viz: sections`, a row per extension from `extension-facts`' `summary`: an arrow after the heading opens its Extension page, the facts are columns, a Problems line is the body; an extension turned off has " (disabled)" after its name),
-those needing attention first, each fact a sentence from the hidden
-`extension-facts` page — the one place that turns `v_extension`,
-`v_extension_source` and `v_contribution_health` into words (a scope keeps its key; its explanation is the hover). It has no table and no buttons.
+has no Extensions area) is one table, an extension a row, those needing
+attention first: Name (a link to its Extension page; " (disabled)" after it
+when it is off), Deployed (`yes` when a deployment runs, the shipped copy
+included; `no` for one never deployed or read from its source), Permissions
+(the scope keys, alphabetically, each with its explanation as the hover) and
+Problems (`no`, else how many, in the problem color and linking to Extension
+problems for that extension). Its rows come from the hidden `extension-facts`
+page's `summary` — the one place that turns `v_extension`,
+`v_extension_source` and `v_contribution_health` into words and counts.
+It has no buttons.
 
 **Extension problems** (`extension-problems`, System) collects everything
 wrong with an extension: a contribution stopped after failing (never called
