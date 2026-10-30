@@ -247,12 +247,13 @@ export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, re
       width={full ? "full" : "reading"}
       fill={fills}
       actions={pageActions}
+      seeAlso={run && run.seeAlso.length > 0 ? { links: run.seeAlso, open: (uri) => onOpenPage?.({ id: uri }) } : undefined}
       pin={pageKey.page && page && onOpenPage ? { tile: { kind: "page", page: page.id, params: run!.params, title: page.title }, onOpenPage } : undefined}
       rightRail={
         run && hasRail ? (
           <>
             {contentsHas(run, fills) ? <Contents root={body} /> : null}
-            <RailSeeAlso run={run} onOpenPage={onOpenPage} />
+            {fills ? null : <RailSeeAlso run={run} onOpenPage={onOpenPage} />}
             {saveAs && viewFile ? <SaveTempViewForm key={saveAs} kind={saveAs} file={viewFile} streamId={streamId} initialTitle={title} onClose={() => setSaveAs(null)} onSaved={open} /> : null}
             <PageRail run={run} runId={runId} onApply={apply} picked={picked} streamId={streamId} onOpenPage={onOpenPage} />
           </>

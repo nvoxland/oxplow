@@ -1,6 +1,6 @@
 /// The page nav bar's ☰ menu, as data: everything a page can be acted on
 /// with that isn't how it is navigated, in a fixed order — oxplow's own
-/// first (Ask the Assistant, then Add to Context, then the standard actions, in their order), then the page's
+/// first (Ask the Assistant, then Add to Context, then the standard actions, in their order, then See also, the page's related pages), then the page's
 /// and its extensions' own sorted by label (an action, a command about the
 /// page's resource — all at the top level, the command's `ui.group` is its
 /// palette heading and its row menu's grouping, not a submenu here — or a
@@ -41,6 +41,8 @@ export interface PageMenuSource {
   /** How many pages link here / this page links to. */
   backlinks?: number;
   outbound?: number;
+  /** The page's "See also" links, and how one opens. */
+  seeAlso?: { links: ReadonlyArray<{ title: string; uri: string; description?: string | null }>; open(uri: string): void };
   /** The page can be pinned; with a reason, not now. */
   pin?: { disabledReason?: string | null };
   openPanel(panel: PagePanel): void;
@@ -91,6 +93,22 @@ export function pageMenuItems(source: PageMenuSource): MenuItem[] {
     });
   }
   standard.push(...inMenu.filter((a) => a.standard).map(item));
+  // Related pages, beside About this page.
+  const seeAlso = source.seeAlso;
+  if (seeAlso && seeAlso.links.length > 0) {
+    standard.push({
+      id: "page-see-also",
+      label: "See also",
+      enabled: true,
+      submenu: seeAlso.links.map((l, i) => ({
+        id: `page-see-also-${i}`,
+        label: l.title,
+        enabled: true,
+        hint: l.description ?? undefined,
+        run: () => seeAlso.open(l.uri),
+      })),
+    });
+  }
   sections.push(standard);
 
   // The page's and its extensions' own, sorted by label: an action or a

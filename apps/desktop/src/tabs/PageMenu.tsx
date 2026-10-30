@@ -25,6 +25,8 @@ export interface PageMenuProps {
   /** The page's name, for its basket entry. */
   label?: string;
   openWith?: OpenWithProps;
+  /** The page's "See also" links (a submenu) and how one opens. */
+  seeAlso?: { links: ReadonlyArray<{ title: string; uri: string; description?: string | null }>; open(uri: string): void };
   backlinks?: { count: number; body: ReactNode };
   outbound?: { count: number; body: ReactNode };
   pin?: { tile: PagePin; onOpenPage(ref: TabRef): void; disabledReason?: string | null };
@@ -34,7 +36,7 @@ export interface PageMenuProps {
 /** The widest the menu is, px; it opens leftward from the button. */
 const MENU_WIDTH = 240;
 
-export function PageMenu({ actions, ask, label, openWith, backlinks, outbound, pin, buttonStyle }: PageMenuProps) {
+export function PageMenu({ actions, ask, label, openWith, seeAlso, backlinks, outbound, pin, buttonStyle }: PageMenuProps) {
   const offersFor = useRefOffers();
   const [at, setAt] = useState<MenuPosition | null>(null);
   // The commands about the page's ref that apply now: asked when the menu
@@ -53,6 +55,7 @@ export function PageMenu({ actions, ask, label, openWith, backlinks, outbound, p
       : undefined,
     commands: ask ? offers : undefined,
     openWith,
+    seeAlso,
     backlinks: backlinks?.count,
     outbound: outbound?.count,
     pin: pin ? { disabledReason: pin.disabledReason } : undefined,

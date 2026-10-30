@@ -140,6 +140,8 @@ daemon's list:
    nothing declares the resource or its dataset has no row. Never an
    error, never a toast.
 
+**See also** in the nav bar's ☰ (a submenu, `page-see-also`, right after the standard items beside About this page; each link's description is its hover, `MenuItem.hint`; none when the page has no links) lists the page's `see_also:` links on every page; a document page also draws them as the rail's group, a page that fills only here.
+
 **Open With** in the nav bar's ☰ (a submenu, `menu-item-page-open-with`,
 each renderer `menu-item-page-open-with-<extension>/<page>`, the one
 drawing it checked) lists the daemon's list (`PageNavigation.renderers`)
@@ -607,7 +609,7 @@ holds its run (`usePageRunWith` over `usePageRunsStore()`: the
 Contents, See also (the page's `see_also:` links, `RailSeeAlso`) and Selection (the rows picked, `picked` history state) in the
 rail (`pages/railGroups.tsx`), which `railHas` (`pages/railHas.ts`) decides
 from the run: with nothing in it (no switch, `filter` or `selection` param,
-`rail:` node, `see_also` link or open save form, and no Contents) `rightRail` is undefined,
+`rail:` node, `see_also` link (a page that fills doesn't count them) or open save form, and no Contents) `rightRail` is undefined,
 `Page` draws no Details card and the body takes the full width. Contents is
 automatic only for a page that does not fill: two or more titled
 sections (`CONTENTS_FROM`; a page with one gets none) or markdown that may

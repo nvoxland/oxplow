@@ -86,6 +86,8 @@ export interface PageNavBarProps {
   ask?: AskTarget;
   /** The pages that render the URI shown, when there are several. */
   openWith?: OpenWithProps;
+  /** The page's "See also" links, listed in the ☰. */
+  seeAlso?: { links: ReadonlyArray<{ title: string; uri: string; description?: string | null }>; open(uri: string): void };
 }
 
 /**
@@ -113,6 +115,7 @@ export function PageNavBar({
   pin,
   ask,
   openWith,
+  seeAlso,
 }: PageNavBarProps) {
   const [scopeOpen, setScopeOpen] = useState(false);
   const [siblingListOpen, setSiblingListOpen] = useState(false);
@@ -471,6 +474,7 @@ export function PageNavBar({
         ask={ask}
         label={pageLabel}
         openWith={openWith}
+        seeAlso={seeAlso}
         backlinks={backlinks}
         outbound={outbound}
         pin={pin}

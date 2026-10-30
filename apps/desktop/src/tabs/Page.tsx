@@ -84,6 +84,8 @@ export interface PageProps {
   /** What the page would add to a dashboard: the nav bar's Pin to
    *  Dashboard. */
   pin?: { tile: PagePin; onOpenPage(ref: TabRef): void };
+  /** The page's "See also" links: a submenu of the ☰, and how one opens. */
+  seeAlso?: { links: ReadonlyArray<{ title: string; uri: string; description?: string | null }>; open(uri: string): void };
   /** Page body. */
   children: ReactNode;
   /** Optional backlinks. When the active page has a nav bar (which it
@@ -139,7 +141,7 @@ const DETAILS_RAIL_THRESHOLD_PX = 960;
  * The chrome reads only semantic CSS variables. Both light and dark
  * themes are styled by `public/index.html`.
  */
-export function Page({ title, titleIcon, kind, chips: ownChips, actions, pin, children, backlinks, outbound, commentsNav, navBar, testId, width = "full", fill = false, rightRail, rightRailTitle }: PageProps) {
+export function Page({ title, titleIcon, kind, chips: ownChips, actions, pin, seeAlso, children, backlinks, outbound, commentsNav, navBar, testId, width = "full", fill = false, rightRail, rightRailTitle }: PageProps) {
   const [backlinksOpen, setBacklinksOpen] = useState(false);
   // Pages that don't pass an explicit `navBar` prop still get one
   // when rendered inside a PageNavigationContext provider — that's
@@ -265,6 +267,7 @@ export function Page({ title, titleIcon, kind, chips: ownChips, actions, pin, ch
           pin={pin}
           ask={effectiveNavBar.ask}
           openWith={effectiveNavBar.openWith}
+          seeAlso={seeAlso}
         />
       ) : null}
       {!effectiveNavBar ? (

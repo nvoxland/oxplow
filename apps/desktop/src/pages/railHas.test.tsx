@@ -52,6 +52,13 @@ test("railHas: a page with any see-also link has a rail, though nothing else is 
   expect(railHas({ ...plain, seeAlso: [] }, no)).toBe(false);
 });
 
+test("railHas: a page that fills gets no rail for see-also links alone (its ☰ shows them)", () => {
+  const link = { title: "Other", uri: "oxplow:oxplow/page?page=a/b", description: null };
+  const filled = { ...run(filling()), seeAlso: [link] };
+  expect(railHas(filled, { fills: true, saveOpen: false })).toBe(false);
+  expect(railHas({ ...run(node.viz("items", "items", cols)), seeAlso: [link] }, no)).toBe(true);
+});
+
 test("railHas: a view param is never drawn, so it is not something; a resource param neither", () => {
   const plain = node.viz("items", "items", cols);
   expect(railHas(run(plain, [{ name: "lines", role: "view", type: "text" } as PageParam, { name: "uri", role: "resource", type: "text" } as PageParam]), no)).toBe(false);

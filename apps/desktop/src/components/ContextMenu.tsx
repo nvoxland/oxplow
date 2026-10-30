@@ -153,6 +153,7 @@ export function MenuList({ items, header, onAction, minWidth = 220, framed = tru
                 }
               }}
               disabled={!item.enabled}
+              title={item.hint}
               style={{
                 ...menuItemStyle,
                 opacity: item.enabled ? 1 : 0.45,

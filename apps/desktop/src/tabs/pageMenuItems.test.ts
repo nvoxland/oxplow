@@ -127,3 +127,30 @@ test("Add to Context follows Ask and is disabled with a reason when no thread is
   const off = pageMenuItems({ context: { add: noop, disabledReason: "Select a thread first" }, openPanel: noop });
   expect(off[0]).toMatchObject({ id: "page-add-to-context", enabled: false, label: "Add to Context (Select a thread first)" });
 });
+
+test("See also is a submenu of the page's links, right after the standard items, each opening its uri with the description as its hint", () => {
+  const opened: string[] = [];
+  const items = pageMenuItems({
+    actions: [{ id: "about", label: "About this page", run: noop, standard: true }, { id: "zip", label: "Zip", run: noop }],
+    seeAlso: {
+      links: [
+        { title: "Collectors", uri: "oxplow:oxplow/page?page=collectors", description: "Every collector." },
+        { title: "Extension", uri: "oxplow:oxplow/extension?name=a", description: null },
+      ],
+      open: (uri) => opened.push(uri),
+    },
+    openPanel: noop,
+  });
+  expect(ids(items)).toEqual(["action-about", "page-see-also", "—", "action-zip"]);
+  const see = items.find((i) => i.id === "page-see-also")!;
+  expect(see.label).toBe("See also");
+  expect(see.submenu!.map((i) => [i.label, i.hint])).toEqual([["Collectors", "Every collector."], ["Extension", undefined]]);
+  void see.submenu![1]!.run!();
+  expect(opened).toEqual(["oxplow:oxplow/extension?name=a"]);
+});
+
+test("a page with no see-also links has no See also submenu", () => {
+  const none = pageMenuItems({ actions: [{ id: "about", label: "About this page", run: noop, standard: true }], seeAlso: { links: [], open: noop }, openPanel: noop });
+  expect(ids(none)).toEqual(["action-about"]);
+  expect(ids(pageMenuItems({ actions: [{ id: "about", label: "About this page", run: noop, standard: true }], openPanel: noop }))).toEqual(["action-about"]);
+});

@@ -10,6 +10,8 @@ export interface MenuItem {
   swatch?: string;
   /** An icon oxplow draws (`ICONS` in `resources.ts`) before the label. */
   icon?: string;
+  /** What the item does, as a tooltip. */
+  hint?: string;
   submenu?: MenuItem[];
   /** One line above the submenu's items saying what they do. */
   submenuHeader?: string;
