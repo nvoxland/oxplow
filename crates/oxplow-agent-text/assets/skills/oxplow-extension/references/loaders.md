@@ -88,3 +88,14 @@ snapshot of numbers you computed, and the `choices` of a form.
 Do filtering, grouping and `LIMIT` in SQL. `oxplow_run_page` shows up to
 200 rows per loader (json) with `truncated`, 50 in text. Keep a page to a
 handful of loaders; one nothing shows is wasted work.
+
+**Filter a large dataset by a constant, never a join from an earlier
+loader.** An earlier loader is a temp table, and `FROM about a JOIN v_fact f
+ON f.measure_key = a.key` makes SQLite scan every fact (on a real project it
+times out at 5 s). Write the filter as a scalar subquery instead —
+`FROM v_fact f WHERE f.measure_key = (SELECT key FROM about)` — which is
+evaluated once and uses the index; for a two-step lookup, `f.capture_id IN
+(SELECT c.id FROM v_capture c WHERE c.producer = (SELECT id FROM about))`.
+Order newest-first by the row's `id`, not a timestamp from a joined table.
+A fixture's throwaway data is too small to show this: check such a page with
+`oxplow_run_page` on the project's own data.
