@@ -159,6 +159,22 @@ test("timeline viz nodes list entries oldest first", () => {
   expect(container.querySelector('[data-testid="viz-timeline-entry-0"]')?.textContent).toContain("started");
 });
 
+test("an empty detail fact reads (none) and never links", () => {
+  const link = { kind: "page", from: "target", line: null, base: null, head: null } as const;
+  const { container } = render(
+    <VizView
+      run={{
+        ...run({ viz: "detail" }, ["problems", "target"], [[null as unknown as string, "oxplow:oxplow/page?page=problems"]]),
+        config: { ...base, viz: "detail", columns: [{ key: "problems", label: "Problems", link }] } as VizConfig,
+      }}
+      onOpenPage={() => {}}
+    />,
+  );
+  const fact = container.querySelector('[data-testid="viz-detail"] dd');
+  expect(fact?.textContent).toBe("(none)");
+  expect(fact?.querySelector("a")).toBeNull();
+});
+
 test("detail and steps viz nodes", () => {
   const detail = render(
     <VizView run={run({ viz: "detail" }, ["title", "state"], [["Fix it", "done"]])} onOpenPage={() => {}} />,

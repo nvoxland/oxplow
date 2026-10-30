@@ -550,7 +550,8 @@ function RowsBody({
     const toneName = c.toneIndex === null ? null : (row[c.toneIndex] ?? null);
     const tone = toneColor(toneName);
     const icon = c.iconIndex === null ? null : vizIcon(row[c.iconIndex] ?? null, extensions);
-    const ref = c.link ? cellLinkRef(c.link, c.key, row, result.columns) : null;
+    // An empty value is no link: there is nothing there to open.
+    const ref = c.link && raw !== null ? cellLinkRef(c.link, c.key, row, result.columns) : null;
     const mine = ref ? badges.filter((b) => b.ref === linkTargetId(ref)) : [];
     const body = ref ? (
       <RouteLink to={ref} onNavigate={tabNavigate(ref, onOpenPage)} origin={origins.get(c.key)?.(row)} style={tone ? { ...linkStyle, color: tone } : linkStyle}>
@@ -1597,9 +1598,11 @@ function TimelineViz({
   );
 }
 
-/** `detail`: the first row as label/value pairs. */
+/** `detail`: the first row as label/value pairs. An empty value reads
+ *  "(none)", a word rather than a mark beside its label. */
 function DetailViz({ row, cols, cell, rowMenu }: { row: SqlCell[]; cols: DisplayColumn[]; cell: CellRenderer; rowMenu: RowMenu }) {
-  return <Facts testId="viz-detail" facts={cols.map((c) => ({ key: c.key, label: c.label, value: cell(row, c) }))} {...rowMenu(row)} />;
+  const value = (c: DisplayColumn) => ((row[c.index] ?? null) === null ? <span className="ox-faint">(none)</span> : cell(row, c));
+  return <Facts testId="viz-detail" facts={cols.map((c) => ({ key: c.key, label: c.label, value: value(c) }))} {...rowMenu(row)} />;
 }
 
 const STEP_MARK: Record<StepStatus, { mark: string; color: string; label: string }> = {

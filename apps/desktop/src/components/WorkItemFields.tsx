@@ -53,7 +53,7 @@ export function FieldPill({
   onChange(value: string | number): void;
 }) {
   const text = fieldText(value);
-  if (field.read_only) return <span style={{ color: "var(--text-secondary)" }}>{text.replace(/_/g, " ") || "—"}</span>;
+  if (field.read_only) return <span style={{ color: "var(--text-secondary)" }}>{text.replace(/_/g, " ") || "(none)"}</span>;
   if (field.kind === "enum") {
     return (
       <PillSelect
@@ -134,7 +134,7 @@ export function PillSelect({
       }}
     >
       <span style={{ width: 8, height: 8, borderRadius: "50%", background: color, flexShrink: 0 }} aria-hidden />
-      <span>{value ? render(value) : "—"}</span>
+      <span>{value ? render(value) : "(none)"}</span>
       <select
         aria-label={label}
         value={value}

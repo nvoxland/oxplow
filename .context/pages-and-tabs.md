@@ -957,7 +957,8 @@ A cell's match is drawn with the kit class `.ox-mark` (a column's
 `highlight`; `VizConfig` in `crates/oxplow-app/src/pages/spec.rs`).
 
 The kit: `Section` (`id`, `title`, `description`, `actions`, `collapsible` / `defaultCollapsed` — a toggle in the heading, remembered per page, see usability.md "Collapsible page sections" — `source` —
-the extension that added it), `DataTable` (fixed `<col>` widths,
+the extension that added it), `DataTable` (a table's first column names the row, so its words never
+break inside while the other columns' long words break anywhere; fixed `<col>` widths,
 `numeric` and `truncate` columns, groups, per-row props — the `table`
 viz draws through it), `Toolbar` (a core list's filter and actions; a
 page file has none; `useSearchFilter(key, …)` builds its `filter` on the `key` view
@@ -965,7 +966,9 @@ param) with `useListNav`
 (the one ↑/↓/Enter/Escape contract, usability.md "Keyboard"; a list that
 holds focus itself spreads its `keyProps`), `Stat` (a figure; `big` when
 it is its place's whole — the `number` viz), `Facts` (labels beside
-values — the `detail` viz, a metric's definition),
+values — the `detail` viz, a metric's definition; in the `detail` viz an
+empty value reads "(none)" and never links: a word, not a dash beside its
+label),
 `TileGrid` / `TileSlot` / `Tile`, `Loading`, `ActionButtons`, and
 `EmptyState` (re-exported; it lives beside the agent prompts it offers).
 Lengths come from the spacing and radius tokens (theming.md).
