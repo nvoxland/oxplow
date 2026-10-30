@@ -113,7 +113,8 @@ pub fn describe(ext: &Extension) -> Vec<Descriptor> {
         out.push(d);
     }
     for c in &ext.custom_components {
-        let d = new(ContributionKind::CustomComponent, &c.id, RunsOn::Mount);
+        let mut d = new(ContributionKind::CustomComponent, &c.id, RunsOn::Mount);
+        d.description = c.description.clone();
         out.push(d);
     }
     for c in &ext.collectors {

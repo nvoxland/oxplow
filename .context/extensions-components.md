@@ -137,6 +137,7 @@ a project one's.
 custom_components:
   - id: burndown                       # [a-z0-9-]+
     title: Burndown
+    description: Open work items against the days left in a sprint.   # optional: one sentence (v_custom_component.description; none is made up)
     bundle: components/burndown        # default components/<id>; holds index.html
     commands: [oxplow.work_item.transition]
     sql: read                          # optional: its own read-only SQL (querySql); needs sql.read in permissions

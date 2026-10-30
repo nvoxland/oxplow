@@ -16,8 +16,9 @@ Every contribution kind a person sees in a list has a one-sentence
 description, published as a `description` column on its own dataset and on
 `v_contribution`, so a page can show any kind the same way: a collector's
 `doc:` (`v_collector.description`), a resource's `description:`
-(`v_resource`), a dimension's (`v_dimension`) and an implementation's
-(`v_capability_provider`). Metrics and measures carry theirs
+(`v_resource`), a dimension's (`v_dimension`), an implementation's
+(`v_capability_provider`) and a custom component's (`v_custom_component`; none
+is made up when it declares none). Metrics and measures carry theirs
 (`v_metric_spec`, `v_measure`); commands, skills, slot mounts and custom
 components are read from `v_command`, `v_skill`, `v_slot` and
 `v_custom_component`. `oxplow extension check` does not warn about a missing

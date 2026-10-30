@@ -315,7 +315,7 @@ ui:
     - { dataset: verdict, resource: oxplow/effort, placement: ref-chip, label: label, color: color }
     - { dataset: verdict, resource: oxplow/effort, placement: row-badge, label: label, color: color }
 custom_components:
-  - { id: history-graph, title: History graph }
+  - { id: history-graph, title: History graph, description: "The commits of the project drawn as lanes by branch, with filters by message, author and branch." }
 panels:
   - { id: go-to, title: Go To, icon: compass, scope: thread, body: go-to-panel, collapsed: go-to-bookmarks, open: 'oxplow:oxplow/page?page=go-to' }
   - { id: waiting, title: Waiting on You, icon: bell, scope: project, body: waiting-on-me, badge: waiting-on-me }
@@ -479,14 +479,15 @@ advisories:
       GROUP BY other
 measures:
   - key: oxplow_bundled.effort_churn_lines
+    description: "Lines an effort added and removed."
     unit: lines
     subjectKind: effort
     temporalSemantics: additive
     fold: sum
-  - {"key": "oxplow.todo", "title": "TODO markers", "unit": "count", "subjectKind": "file", "temporalSemantics": "semi-additive", "fold": "last", "captureScope": "per-path"}
-  - {"key": "oxplow.duplicate_lines", "title": "Duplicated lines", "unit": "lines", "subjectKind": "symbol", "temporalSemantics": "semi-additive", "fold": "last", "captureScope": "complete"}
-  - {"key": "oxplow.ast_hit", "title": "AST idiom hits", "unit": "count", "subjectKind": "file", "temporalSemantics": "semi-additive", "fold": "last", "captureScope": "per-path"}
-  - {"key": "oxplow.doc_coverage", "title": "Doc coverage", "unit": "%", "subjectKind": "file", "temporalSemantics": "semi-additive", "fold": "last", "captureScope": "per-path"}
+  - {"key": "oxplow.todo", "title": "TODO markers", "unit": "count", "subjectKind": "file", "temporalSemantics": "semi-additive", "fold": "last", "captureScope": "per-path", "description": "A TODO or FIXME marker in a file."}
+  - {"key": "oxplow.duplicate_lines", "title": "Duplicated lines", "unit": "lines", "subjectKind": "symbol", "temporalSemantics": "semi-additive", "fold": "last", "captureScope": "complete", "description": "Lines that the project's files repeat."}
+  - {"key": "oxplow.ast_hit", "title": "AST idiom hits", "unit": "count", "subjectKind": "file", "temporalSemantics": "semi-additive", "fold": "last", "captureScope": "per-path", "description": "A match of a rule that looks for an idiom in code, such as an `unwrap` call."}
+  - {"key": "oxplow.doc_coverage", "title": "Doc coverage", "unit": "%", "subjectKind": "file", "temporalSemantics": "semi-additive", "fold": "last", "captureScope": "per-path", "description": "Share of a file's items that have a doc comment."}
 metrics:
   - key: oxplow_bundled.effort_churn_lines
     title: Effort churn

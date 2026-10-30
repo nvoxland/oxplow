@@ -77,7 +77,7 @@ Carry URIs; never assemble or dissect them:
   as unresolved rather than fail.
 
 A collector's `doc:`, and the optional `description:` of a `resources:`,
-`dimensions:` or `implementations:` entry, are one sentence each; they show as
+`dimensions:`, `implementations:`, `measures:` or `custom_components:` entry, are one sentence each; they show as
 `description` on `v_collector`, `v_resource`, `v_dimension`, `v_capability_provider`
 and `v_contribution`.
 

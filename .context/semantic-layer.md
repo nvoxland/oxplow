@@ -1207,9 +1207,10 @@ entities from data already in the semantic layer:
 | `v_data_entity` (live: datasets + unsynced entities; `row_count` for the pinned one), `v_effect_backfill` (live: what a backfill would react to), `v_replacement` (live: each replaceable component with its candidates and the chosen one), `v_command` (live: the command registry `list_commands` reads — uri, id, declaring extension, summary, scope, access, whether a person confirms it, undoable, UI label and group), `v_skill` / `v_slot` / `v_custom_component` (live: the catalog's skills and slash commands with their frontmatter description, page mounts with host, slot and page, custom components with a sentence; each under its `v_contribution.uri`, so they join), `v_provider_instance` / `v_provider_credential` / `v_provider_collector` (live: the provider instances, their credentials' presence and sign-in state, their collectors' reads) | `crates/oxplow-app/src/live_datasets.rs` |
 
 What a contribution is, in a sentence: `v_contribution.description` carries it for a
-collector (its `doc:`), a resource, a dimension and an implementation (their
-`description:`), the same text as `v_collector`, `v_resource`, `v_dimension` and
-`v_capability_provider`; the other kinds have their own datasets (`v_command`,
+collector (its `doc:`), a resource, a dimension, an implementation and a custom
+component (their `description:`, NULL when absent: none is made up), the same text as
+`v_collector`, `v_resource`, `v_dimension`, `v_capability_provider` and
+`v_custom_component`; a measure's is on `v_measure`; the other kinds have their own datasets (`v_command`,
 `v_skill`, `v_slot`, `v_custom_component`, `v_metric_spec`, `v_measure`).
 
 **Decisions (epic tsk289, 2026-09-27).**

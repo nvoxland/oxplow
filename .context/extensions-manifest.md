@@ -551,7 +551,7 @@ intent:                  # required
   examples:              # inputs → expected outputs; fixtures for `extension test`
     - { name: …, input: {…}, expect: … }
 # kinds
-measures:    [...]   # also what the project's own extension declares
+measures:    [...]   # also what the project's own extension declares; each may carry a one-sentence `description:` (`v_measure.description`)
 metrics:     [...]   # `key:` definitions; `measure:` must be declared here or oxplow.*
 dimensions:  [...]   # each may carry a one-sentence `description:` (`v_dimension.description`)
 collectors:  [...]   # entity collectors (exec / starlark / jaq / read → entities) and
@@ -572,7 +572,7 @@ implementations: …  # capability implementations it declares (oxplow-foundatio
 skills: …           # skills and slash commands for the coding agent
 providers: [...]    # external providers over the provider protocol — a program, or an MCP server behind oxplow's adapter (providers.md)
 effects: …          # scripts reacting to logged events by composing commands (see extensions-events.md "Effects")
-custom_components: …   # sandboxed components a page's `component` node or `custom` viz draws (see extensions-components.md "Custom components")
+custom_components: …   # sandboxed components a page's `component` node or `custom` viz draws (see extensions-components.md "Custom components"); each has an optional one-sentence `description:`
 ```
 
 Pages aren't listed here: every `pages/*.yaml` file in the folder is

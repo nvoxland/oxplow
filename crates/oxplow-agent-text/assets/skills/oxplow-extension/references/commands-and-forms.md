@@ -47,7 +47,7 @@
   `ui.input` says otherwise, so name its input field `uri`. The `oxplow-bundled` extension (see it in
   Settings → Extensions) is a working example.
 - **`custom_components:`** (stable; not in a bundled extension) are web bundles a
-  component node renders: `{ id, title?, bundle?: components/<id>,
+  component node renders: `{ id, title?, description?, bundle?: components/<id>,
   commands: [names] }`. The bundle (an `index.html`
   and its files, at most 256 files / 5 MiB) runs sandboxed — no network,
   no storage, no token — and reaches oxplow only by asking the host to
