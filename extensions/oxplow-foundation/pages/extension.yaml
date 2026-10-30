@@ -50,7 +50,7 @@ loaders:
       -- What a page shows: the resource kinds it draws, else its launcher category.
       SELECT p.title, p.id, p.description,
              CASE WHEN p.running_uri IS NOT NULL THEN p.running_uri || '#oxplow.renderer=oxplow-foundation/definition' END AS definition,
-             COALESCE((SELECT 'A ' || group_concat(lower(r.label), ', ')
+             COALESCE((SELECT group_concat(r.label, ', ')
                        FROM json_each(p.renders) j JOIN v_resource r ON r.resource = j.value),
                       p.category) AS shows
       FROM about a JOIN v_page p ON p.extension = a.extension
