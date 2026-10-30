@@ -97,7 +97,6 @@ view:
     - { key: fold, label: A group's value is }
     empty: That measure isn't known to the project.
   - title: Facts
-    hide_title: true
     switch:
       param: group_by
       children:

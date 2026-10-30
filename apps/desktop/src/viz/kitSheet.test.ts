@@ -30,8 +30,11 @@ test("a table's first column breaks only between words", () => {
 });
 
 // Sections stack apart, but the first one starts at the top of its page:
-// a margin above it is a gap under the toolbar.
-test("the first section has no space above it", () => {
+// a margin above it is a gap under the toolbar. A page's section is the
+// first child of its node's frame (`[data-node]`), so the first section is
+// the one whose frame is first — every section is its own frame's first.
+test("only the first section has no space above it", () => {
   const sheet = readFileSync(SHEET, "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
-  expect(sheet).toMatch(/\.ox-section:first-child\s*\{[^}]*margin-top:\s*0/);
+  expect(sheet).toMatch(/\[data-node\]:first-child\s*>\s*\.ox-section[^{]*\{[^}]*margin-top:\s*0/);
+  expect(sheet).not.toMatch(/(^|[},]\s*)\.ox-section:first-child\s*[,{]/);
 });

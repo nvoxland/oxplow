@@ -163,8 +163,11 @@
 .ox-section:not([data-level="2"]) { margin-top: var(--space-4); }
 .ox-section:not([data-level="2"]) > .ox-section-head > .ox-section-title { font-size: var(--text-md); }
 /* Sections stack apart; the first starts at the top of its page (after the
-   level rule above, which it overrides). */
-.ox-section:first-child { margin-top: 0; }
+   level rule above, which it overrides). A page's section is its node
+   frame's (`[data-node]`) only child, so the first is the one in the first
+   frame; a section outside a frame is first by itself. */
+[data-node]:first-child > .ox-section,
+:not([data-node]) > .ox-section:first-child { margin-top: 0; }
 .ox-section-toggle { display: flex; align-items: baseline; gap: var(--space-2); width: 100%; padding: 0; border: none; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 /* The arrow after a heading whose thing has a page of its own: the one
    "open this page" mark, used for nothing else. */
