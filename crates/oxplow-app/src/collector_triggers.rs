@@ -334,7 +334,7 @@ impl CollectorTriggers {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use oxplow_domain::events::Anchors;
+    use crate::test_fixtures::lifecycle::log_claim as log;
     use oxplow_domain::Envelope;
     use serde_json::json;
 
@@ -365,24 +365,6 @@ mod tests {
         format!(
             "  - id: seen\n    runtime: starlark\n    entry: seen.star\n    on: [effort.claim_verified]{filter}\n    input: \"SELECT :effort_id AS effort, :event_seq AS ev, :event_id AS id\"\n    sync: upsert\n    entities:\n      - {{ name: seen, key: ev, columns: {{ ev: int, id: text, effort: int, kind: text }} }}\n"
         )
-    }
-
-    async fn log(svc: &Services, effort: oxplow_domain::EffortId, evidence: &str) -> StoredEvent {
-        let env = Envelope::typed::<oxplow_domain::events::schema::EffortClaimVerified>(
-            "human",
-            &oxplow_domain::events::schema::EffortClaimVerifiedV2 {
-                claim: 1,
-                effort: None,
-                evidence: Some(evidence.into()),
-            },
-        )
-        .with_anchors(Anchors {
-            effort_id: Some(effort),
-            ..Anchors::default()
-        });
-        let id = env.id.clone();
-        svc.event_log_store.append(env).await.unwrap();
-        svc.event_log_store.get(id).await.unwrap().unwrap()
     }
 
     /// A `where` value names the payload's field as written in YAML (always

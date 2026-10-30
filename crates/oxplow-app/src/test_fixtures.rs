@@ -2,6 +2,8 @@
 
 #![cfg(test)]
 
+pub(crate) mod lifecycle;
+
 use oxplow_tasks::work_item_ref;
 use std::path::Path;
 use std::sync::Arc;

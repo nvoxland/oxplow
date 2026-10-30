@@ -7,6 +7,7 @@ use oxplow_domain::uri::build::keyed;
 fn dataset_ref(owner: &str) -> String {
     keyed("oxplow/dataset", &format!("{owner}/items"))
 }
+use crate::test_fixtures::lifecycle::{page, problem, readable};
 use std::{path::Path, sync::Arc};
 
 fn write(root: &Path, rel: &str, body: &str) {
@@ -252,40 +253,6 @@ async fn project(exts: &[Ext<'_>]) -> (tempfile::TempDir, Arc<crate::Services>) 
 /// Activate; a held extension is not an activation failure.
 async fn activate(svc: &Arc<crate::Services>) {
     crate::test_fixtures::activate_with_problems(svc).await;
-}
-
-async fn readable(svc: &crate::Services, view: &str) -> bool {
-    svc.sql
-        .query_sql(&format!("SELECT uri FROM {view}"), vec![], None)
-        .await
-        .is_ok()
-}
-
-fn problem(svc: &crate::Services, extension: &str) -> String {
-    svc.extension_activation
-        .problems()
-        .get(extension)
-        .map(|lines| lines.join("\n"))
-        .unwrap_or_default()
-}
-
-/// Page `id` run as a person: an error when it isn't there (withheld)
-/// or a loader of it failed.
-async fn page(svc: &crate::Services, id: &str) -> Result<crate::pages::runner::PageRun, String> {
-    use crate::pages::runner::{PageRunner, RunRequest, RunTarget};
-    let run = PageRunner::of(svc)
-        .run(RunRequest {
-            target: RunTarget::Page(id.to_string()),
-            params: Default::default(),
-            ctx: Default::default(),
-            viewer: oxplow_domain::Actor::Human,
-        })
-        .await
-        .map_err(|e| e.to_string())?;
-    match run.loaders.values().find_map(|l| l.error.clone()) {
-        Some(error) => Err(error),
-        None => Ok(run),
-    }
 }
 
 fn disable(root: &Path, names: &str) {

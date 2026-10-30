@@ -13,20 +13,8 @@ use crate::extension::extension_configuration::ConfigurationHost;
 use crate::extension::extension_private_state_tests::{
     declare, reconcile, run, write, CONFIGURATION,
 };
+use crate::test_fixtures::lifecycle::CONFIGURATION_V2;
 use crate::test_fixtures::{services_with_effort, EffortFixture};
-
-/// `CONFIGURATION` at version 2: `limit` was `max` at version 1.
-const V2: &str = "configuration:
-  version: 2
-  schema:
-    type: object
-    required: [limit]
-    additionalProperties: false
-    properties:
-      limit: { type: integer, minimum: 1, maximum: 100 }
-      label: { type: string }
-  defaults: { limit: 10 }
-";
 
 async fn store_layer(fx: &EffortFixture, scope: Scope, version: u32, values: Value) {
     let namespace = ConfigNamespace::new("alpha".into(), scope).unwrap();
@@ -46,7 +34,7 @@ async fn activation_leaves_an_old_layer_alone_until_the_extension_writes_it_agai
     declare(fx._dir.path(), "alpha", CONFIGURATION);
     reconcile(&fx).await;
     store_layer(&fx, Scope::Project, 1, json!({"max": 20})).await;
-    declare(fx._dir.path(), "alpha", V2);
+    declare(fx._dir.path(), "alpha", CONFIGURATION_V2);
     reconcile(&fx).await;
 
     // Activation did not touch the stored row.
@@ -85,7 +73,7 @@ async fn activation_leaves_an_old_layer_alone_until_the_extension_writes_it_agai
 #[tokio::test(flavor = "multi_thread")]
 async fn a_layer_behind_the_declared_version_fails_closed_and_says_so() {
     let fx = services_with_effort().await;
-    declare(fx._dir.path(), "alpha", V2);
+    declare(fx._dir.path(), "alpha", CONFIGURATION_V2);
     reconcile(&fx).await;
     // A row from before the schema moved (a restored backup, say).
     store_layer(&fx, Scope::Project, 1, json!({"max": 5})).await;
@@ -153,7 +141,7 @@ async fn a_layer_behind_the_declared_version_fails_closed_and_says_so() {
 #[tokio::test(flavor = "multi_thread")]
 async fn an_explicit_migration_writes_both_layers_in_one_commit() {
     let fx = services_with_effort().await;
-    declare(fx._dir.path(), "alpha", V2);
+    declare(fx._dir.path(), "alpha", CONFIGURATION_V2);
     reconcile(&fx).await;
     store_layer(&fx, Scope::Project, 1, json!({"max": 5})).await;
     store_layer(&fx, Scope::Personal, 1, json!({"max": 6})).await;

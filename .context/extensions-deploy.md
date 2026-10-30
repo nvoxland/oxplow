@@ -321,6 +321,28 @@ way. A bundled extension is never written to
 A malformed extension shows an error for that extension only; it never
 breaks the others or core.
 
+**Lifecycle scenarios.** `crates/oxplow-app/src/extension/extension_lifecycle_tests.rs`
+runs an extension through its life as a person or agent would: every
+transition is a bus command (`oxplow.extension.deploy`, `disable`,
+`enable`, `rollback`, `oxplow.capability.choose`), every read is what users
+see (`v_*` over the SQL gateway, the extension's own commands, page runs).
+One test per story: a redeploy that changes a command, a dataset, a
+collector and an effect (the old collector's rows stay); disable then enable
+(the dataset, page, command and an importing consumer go and come back, a
+paced collector run that was due runs after enable); rollback (the earlier
+version returns, private state outlives it, a configuration layer written at
+a newer schema fails closed — and, because the store takes no schema
+downgrade, the rolled-back version cannot rewrite it: an `#[ignore]`d test
+holds that gap); a deploy that loads but does not activate (the running
+version keeps working and the error says why); private state read by the
+next version; a producer's export changing under two consumers (the
+unversioned one keeps working; the one pinned to the old contract is held
+with a problem naming the import, and keeps serving its last working
+version); switching the work list between oxplow's and a provider's; and a
+queued job across disable then enable (it waits, then runs). The shared
+setup is `test_fixtures::lifecycle` (`booted()` registers the pump
+reactors a running oxplow has but in-memory services lack).
+
 ## Reviewing by impact
 
 A review looks at an extension's **impact**: what changing it would

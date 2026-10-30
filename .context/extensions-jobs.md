@@ -203,6 +203,9 @@ commands:
   ended as above. A running job whose
   declaration changes or whose extension is disabled is cancelled with
   what it had, never completed under the new declaration.
+  A *queued* job is not cancelled by disabling its extension: nothing of it
+  ran, so it stays queued while the extension is off and runs once it is on
+  again (pinned by `a_queued_job_waits_while_its_extension_is_off_and_runs_when_it_is_on_again`).
 - **A job belongs to its extension's deployment, not to a catalog
   generation.** Its owner is the extension, its package version, the
   job's contract `version` and the deployment's hash

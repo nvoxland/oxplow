@@ -10,32 +10,12 @@ use serde_json::json;
 
 use super::*;
 use crate::extension::extensions::Extension;
+use crate::test_fixtures::lifecycle::{fake_bin, write_extension, EXT};
 use crate::test_fixtures::{
     services_with_effort, services_with_task_effort, EffortFixture, TaskEffortFixture,
 };
 use crate::work_items_conformance::{suite, ServicesProbe, WorkItemsProbe as _};
 
-const EXT: &str = "tracker";
-
-/// The fake provider's binary, built beside this test binary (the
-/// workspace build builds every crate's bins).
-fn fake_bin() -> PathBuf {
-    let exe = std::env::current_exe().expect("test exe");
-    let dir = exe
-        .parent()
-        .and_then(Path::parent)
-        .expect("target/<profile>/deps");
-    let bin = dir.join("oxplow-provider-fake");
-    assert!(
-        bin.is_file(),
-        "{} is missing; build it with `cargo build -p oxplow-provider-fake`",
-        bin.display()
-    );
-    bin
-}
-
-/// A private extension declaring the fake as its work-items provider,
-/// its entry a script running the fake with `hooks`.
 /// The manifest `text` with `secrets` declared beside its `process` permission.
 fn permit_secrets(text: &str, secrets: &[&str]) -> String {
     text.replacen(
@@ -50,42 +30,6 @@ fn permit_secrets(text: &str, secrets: &[&str]) -> String {
         ),
         1,
     )
-}
-
-fn write_extension(project: &Path, hooks: &str) {
-    let dir = project.join(".oxplow/extensions").join(EXT);
-    std::fs::create_dir_all(dir.join("bin")).unwrap();
-    std::fs::write(
-        dir.join("extension.yaml"),
-        "manifest: 2\nname: tracker\nintent:\n  purpose: the fake tracker\n  examples: [{ name: a }]\ncommands:\n  - name: item.estimate\n    summary: Set a work item's points.\n    provider: fake\n    op: estimate\n    ui: { label: \"Estimate in Fake…\", group: Tracker, about: oxplow/work_item, input: { uri: \"{{uri}}\", points: 3 } }\npermissions: [process.run]\nproviders:\n  - id: fake\n    capability: work_items\n    entry: bin/provider\n    declarations: provider.json\n",
-    )
-    .unwrap();
-    let script = dir.join("bin/provider");
-    // Its service's state outlives its process, as a real service's does
-    // (each instance its own file): what a restart re-sends against.
-    let state = project.join(".oxplow");
-    std::fs::write(
-        &script,
-        format!(
-            "#!/bin/sh\nOXPLOW_FAKE_HOOKS='{hooks}' OXPLOW_FAKE_STATE=\"{}/fake-state-$OXPLOW_PROVIDER_ID.json\" exec '{}' \"$@\"\n",
-            state.display(),
-            fake_bin().display()
-        ),
-    )
-    .unwrap();
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
-    // `plain-writes` declares no `idempotent_writes`: what is approved.
-    let declared = if hooks.split(',').any(|h| h.trim() == "plain-writes") {
-        oxplow_provider_fake::plain_declarations()
-    } else {
-        oxplow_provider_fake::declarations()
-    };
-    std::fs::write(
-        dir.join("provider.json"),
-        serde_json::to_string_pretty(&declared).unwrap(),
-    )
-    .unwrap();
 }
 
 /// Whether instance `id` runs: its work list is registered.
@@ -137,9 +81,7 @@ fn configure(fx: &EffortFixture, enabled: bool, config: serde_json::Value) {
     );
 }
 
-/// Make `provider` the active work-items tracker: where every create
-/// files (tsk1058).
-/// `provider` the active work list, as a `oxplow.config.set` would leave it:
+/// Make `provider` the active work list, as a `oxplow.config.set` would leave it:
 /// the config, and the capability rows the interface reads.
 async fn make_active(fx: &EffortFixture, provider: &str) {
     // Unchanged, no new generation: the running instances keep running.
@@ -162,6 +104,14 @@ async fn make_active(fx: &EffortFixture, provider: &str) {
         .insert("work_items".into(), provider.into());
     republish(fx);
     crate::test_fixtures::activate_with_problems(&fx.svc).await;
+}
+
+fn republish(fx: &EffortFixture) {
+    let config = crate::config_service::read_config(&fx.svc.config);
+    fx.svc
+        .capabilities
+        .publish_now(&config, &fx.svc.db)
+        .unwrap();
 }
 
 /// Enable `spec`'s default instance with `config`, as the person's
@@ -200,14 +150,6 @@ async fn turn_off(svc: &std::sync::Arc<crate::Services>, instance: &str) {
             .enabled = false;
     }
     crate::test_fixtures::activate_with_problems(svc).await;
-}
-
-fn republish(fx: &EffortFixture) {
-    let config = crate::config_service::read_config(&fx.svc.config);
-    fx.svc
-        .capabilities
-        .publish_now(&config, &fx.svc.db)
-        .unwrap();
 }
 
 async fn logged(fx: &EffortFixture, event_type: &str) -> Vec<serde_json::Value> {

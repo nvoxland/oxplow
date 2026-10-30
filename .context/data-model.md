@@ -86,7 +86,9 @@ separate owned read per call. Provider namespace ownership is captured from
 its active provider declaration, independently of the invoking command.
 Public write commands still require private audit/proposal input handling.
 Neither configuration nor state has a migration runner: a stored configuration layer at
-another schema version fails closed until the extension's own command rewrites it. The
+another schema version fails closed until the extension's own command rewrites it (an older
+layer; the store takes no schema downgrade, so after a rollback a layer written at a newer
+version stays unreadable and unwritable until the later version runs again). The
 lower-level store APIs grant no authority themselves. Configuration continues to
 use the project/personal file layers. A file edit and a SQLite
 reset cannot be represented as one atomic DB transaction.
