@@ -50,14 +50,19 @@ impl Rename {
                     (r.prefix, to)
                 })
                 .collect();
-        for (at, _) in text.match_indices("extension:") {
+        // A YAML `extension` key (a fixture's provider, an import; block or
+        // flow style) whose value is the name names the extension itself.
+        const KEY: &str = "extension";
+        for (at, _) in text.match_indices(KEY) {
             let before = text[..at].chars().next_back();
             if before.is_some_and(|c| c.is_alphanumeric() || "_-".contains(c)) {
                 continue;
             }
-            let rest = &text[at + "extension:".len()..];
+            let Some(rest) = text[at + KEY.len()..].strip_prefix(':') else {
+                continue;
+            };
             let spaces = rest.len() - rest.trim_start_matches(' ').len();
-            let value_at = at + "extension:".len() + spaces;
+            let value_at = text.len() - rest.len() + spaces;
             let quote = text[value_at..].starts_with('"');
             let start = value_at + usize::from(quote);
             if !text[start..].starts_with(&self.from_name) {
