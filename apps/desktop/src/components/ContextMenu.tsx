@@ -9,6 +9,7 @@ import {
 
 import type { MenuItem, MenuPosition } from "../menu.js";
 import { ICONS } from "../icons.js";
+import { formatShortcut } from "../keybindings.js";
 
 interface ContextMenuProps {
   items: MenuItem[];
@@ -165,7 +166,7 @@ export function MenuList({ items, header, onAction, minWidth = 220, framed = tru
               {item.swatch ? <span aria-hidden style={{ ...swatchStyle, background: item.swatch }} /> : null}
               {item.icon && ICONS[item.icon] ? <MenuIcon name={item.icon} /> : null}
               <span style={{ flex: 1 }}>{item.label}</span>
-              <span style={shortcutStyle}>{hasSubmenu ? "▸" : item.shortcut ?? ""}</span>
+              <span style={shortcutStyle}>{hasSubmenu ? "▸" : item.shortcut ? formatShortcut(item.shortcut) : ""}</span>
             </button>
             {hasSubmenu && openSubmenuId === item.id ? (
               <Submenu

@@ -1,6 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { cleanup, fireEvent, render } from "@testing-library/react";
 
+import { formatShortcut } from "../keybindings.js";
 import { ContextMenu, MenuList } from "./ContextMenu.js";
 
 afterEach(cleanup);
@@ -51,4 +52,15 @@ test("a context menu has one frame: its list draws no second border inside it", 
   render(<ContextMenu items={[{ id: "a", label: "A", run: () => {} }]} position={{ x: 10, y: 10 }} onClose={() => {}} />);
   const framed = [...document.body.querySelectorAll<HTMLElement>("div")].filter((d) => (d.getAttribute("style") ?? "").includes("--border-strong"));
   expect(framed).toHaveLength(1);
+});
+
+/** A command's shortcut is declared for every platform (`Ctrl/Cmd+Shift+N`);
+ *  the menu shows this platform's keys, as the launcher does. */
+test("a menu item shows its shortcut in this platform's keys", () => {
+  const { getByTestId } = render(
+    <MenuList items={[{ id: "new", label: "New Task…", enabled: true, shortcut: "Ctrl/Cmd+Shift+N" }]} />,
+  );
+  const text = getByTestId("menu-item-new").textContent ?? "";
+  expect(text).not.toContain("Ctrl/Cmd");
+  expect(text).toContain(formatShortcut("Ctrl/Cmd+Shift+N"));
 });
