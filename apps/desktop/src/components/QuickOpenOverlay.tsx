@@ -4,6 +4,7 @@ import { commandUri, fileUri, pageUri, shortResource } from "../uri/uri.js";
 import { SEARCH_TRIGGER_TESTID } from "./TitleBar.js";
 import type { CSSProperties } from "react";
 import { useResources } from "../resources.js";
+import { formatShortcut } from "../keybindings.js";
 import { useListNav } from "../kit/index.js";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { NO_READS, useRerunOnChange } from "../viz/rerun.js";
@@ -487,7 +488,7 @@ export function QuickOpenOverlay({ open, initialQuery, stream, threadId, selecte
                       {result.entry.label}
                     </span>
                     {result.entry.shortcut ? (
-                      <span style={{ color: "var(--muted)", fontSize: 11, fontFamily: "ui-monospace, monospace" }}>{result.entry.shortcut}</span>
+                      <span style={{ color: "var(--muted)", fontSize: 11, fontFamily: "ui-monospace, monospace" }}>{formatShortcut(result.entry.shortcut)}</span>
                     ) : null}
                     <span style={{ color: "var(--muted)", fontSize: 11 }}>command</span>
                   </button>
@@ -566,7 +567,7 @@ export function QuickOpenOverlay({ open, initialQuery, stream, threadId, selecte
                   <span style={{ width: 18, display: "inline-flex", justifyContent: "center" }}>
                     <PageKindIcon kind="file" size={14} style={{ color: "var(--text-secondary)" }} />
                   </span>
-                  <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis" }}>{result.file.path}</span>
+                  <FilePath path={result.file.path} />
                   <span style={{ color: "var(--muted)", fontSize: 11 }}>{shortStatus(result.file.status)}</span>
                 </button>
               );
@@ -716,3 +717,14 @@ const badgeStyle: CSSProperties = {
   padding: "1px 6px",
   borderRadius: 999,
 };
+
+/** A path that, when too long, loses the middle of its folders and keeps the file name. */
+function FilePath({ path }: { path: string }) {
+  const cut = path.lastIndexOf("/") + 1;
+  return (
+    <span style={{ flex: 1, minWidth: 0, display: "flex" }} title={path}>
+      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>{path.slice(0, cut)}</span>
+      <span style={{ flexShrink: 0, whiteSpace: "nowrap" }}>{path.slice(cut)}</span>
+    </span>
+  );
+}

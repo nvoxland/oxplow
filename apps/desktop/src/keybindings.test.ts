@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { offerForShortcut } from "./keybindings.js";
+import { formatShortcut, offerForShortcut } from "./keybindings.js";
 import type { CommandEntry } from "./components/quickOpenResults.js";
 
 const offer = (id: string, shortcut: string, whileTyping = false, enabled = true): CommandEntry => ({
@@ -56,3 +56,17 @@ function eventLike(
 ) {
   return { key, metaKey: false, ctrlKey: false, shiftKey: false, altKey: false, ...overrides };
 }
+
+describe("formatShortcut", () => {
+  test("macOS shows symbols", () => {
+    expect(formatShortcut("Ctrl/Cmd+Shift+N", true)).toBe("⇧⌘N");
+    expect(formatShortcut("Ctrl/Cmd+S", true)).toBe("⌘S");
+    expect(formatShortcut("Alt+F2", true)).toBe("⌥F2");
+    expect(formatShortcut("F12", true)).toBe("F12");
+  });
+  test("elsewhere shows Ctrl", () => {
+    expect(formatShortcut("Ctrl/Cmd+Shift+N", false)).toBe("Ctrl+Shift+N");
+    expect(formatShortcut("Ctrl/Cmd+S", false)).toBe("Ctrl+S");
+    expect(formatShortcut("F12", false)).toBe("F12");
+  });
+});
