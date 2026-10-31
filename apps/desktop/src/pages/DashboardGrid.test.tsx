@@ -121,3 +121,13 @@ test("a failed save restores the optimistic drag order and records the error", a
   expect(f.errors[0].message).toContain("Page changed before save");
   expect(f.order()).toEqual(["dashboard-tile-tests", "dashboard-tile-coverage"]);
 });
+
+// A new dashboard has no tiles: it says how to add one, not a blank page.
+test("a dashboard with no tiles says how to add one", () => {
+  const view = render(<DashboardEditContext.Provider value={{
+    read: async () => ({ page: "my-pages/empty", extension: "my-pages", slug: "empty", yaml: "title: Empty\nview:\n  grid: []\n", writable: true }),
+    write: async () => {},
+    report: () => {},
+  }}><DashboardGrid page="my-pages/empty" tiles={[]} /></DashboardEditContext.Provider>);
+  expect(view.getByTestId("dashboard-empty").textContent).toContain("Pin to Dashboard");
+});

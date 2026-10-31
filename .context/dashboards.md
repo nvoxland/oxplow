@@ -23,7 +23,8 @@ only pages in the default personal extension.
 and asks for the title; the command derives the page slug, creates an
 empty grid, writes the page and deploys it. An existing slug is refused
 rather than overwritten. The command's `ui.open_after` opens the returned
-page URI. Like `extension.write_page`, authoring is refused for bundled
+page URI. A dashboard with no tiles says how to add one (Pin to Dashboard…),
+not a blank page (`DashboardGrid`). Like `extension.write_page`, authoring is refused for bundled
 extensions and for an in-project source from a worktree stream.
 
 Read or edit the YAML for an existing dashboard, then use
