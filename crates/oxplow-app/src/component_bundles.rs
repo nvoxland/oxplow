@@ -316,7 +316,10 @@ mod tests {
             .find(|e| e.name == "oxplow-bundled")
             .expect("bundled")
             .clone();
-        let component = ext.custom_components[0].clone();
+        let component = CustomComponent {
+            sql: None,
+            ..ext.custom_components[0].clone()
+        };
         let with_sql = CustomComponent {
             sql: Some(oxplow_domain::permissions::SqlAccess::Read),
             ..component.clone()
