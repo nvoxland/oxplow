@@ -1336,3 +1336,10 @@ A column or param with no `label` is headed by its key in words
 (`kit/humanize.ts`: `committed_at` → "Committed at"). The page-layout
 rules extension authors follow are in the `oxplow-extension` skill
 (`references/view-nodes.md`); the loader warns when a page breaks them.
+
+## The rail in a narrow window
+
+Under 800 px the rail leaves its place so the page keeps its width. A small
+"Show the rail" button (`rail-show`, tooltip and aria-label) at the page's left
+edge shows the rail as an overlay (`rail-overlay`). Escape, a click outside it,
+or opening a page from it hides it; widening the window resets it (`NarrowRail`).

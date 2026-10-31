@@ -57,6 +57,7 @@ import type { DiffSpec } from "./components/Diff/DiffPane.js";
 import { builtInPages } from "./pages/builtInPages.js";
 import type { SlotNav } from "./pages/slotNav.js";
 import { RailHud } from "./components/RailHud/RailHud.js";
+import { NarrowRail } from "./components/RailHud/NarrowRail.js";
 import { useNarrowWindow } from "./windowWidth.js";
 import type { TabRef } from "./tabs/tabState.js";
 import { navigationKey } from "./tabs/navigationKeys.js";
@@ -1972,13 +1973,18 @@ export function App() {
           vcsEnabled={workspaceContext.vcsEnabled}
         />
         <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, minWidth: 0, background: "var(--surface-chrome)" }}>
-        <div style={{ flex: 1, display: "flex", flexDirection: "row", minHeight: 0, minWidth: 0 }}>
-        {narrowWindow ? null : (
-          <RailHud
-            streamId={stream?.id ?? null}
-            onOpenPage={handleOpenPage}
-          />
-        )}
+        <div style={{ flex: 1, display: "flex", flexDirection: "row", minHeight: 0, minWidth: 0, position: "relative" }}>
+        <NarrowRail narrow={narrowWindow}>
+          {(closeRail) => (
+            <RailHud
+              streamId={stream?.id ?? null}
+              onOpenPage={(ref) => {
+                closeRail();
+                handleOpenPage(ref);
+              }}
+            />
+          )}
+        </NarrowRail>
         <div style={{
           flex: 1,
           display: "flex",
