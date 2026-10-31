@@ -8,7 +8,7 @@ import { recordOpError } from "./opErrors.js";
 import { showToast } from "./components/toastStore.js";
 import { needsConfirmation } from "./ipc-error.js";
 import type { CommandOutcome } from "./tauri-bridge/generated/bindings.js";
-import { doneMessage, undoneMessage } from "./commandToast.js";
+import { doneMessage, resultUri, undoneMessage } from "./commandToast.js";
 
 export interface PendingCommand {
   label: string;
@@ -20,8 +20,10 @@ export interface PersonCommandDeps {
   runCommand(name: string, input: unknown, confirmed: boolean): Promise<CommandOutcome>;
   /** Undo the run recorded as `auditId`, as the person (`undo_command`). */
   undo(auditId: number): Promise<unknown>;
-  /** A toast; with `undo`, it offers Undo. */
-  toast(message: string, undo?: () => void): void;
+  /** A toast; with `undo`, it offers Undo; with `open`, an Open link. */
+  toast(message: string, undo?: () => void, open?: () => void): void;
+  /** Open the page a result's `uri` names. */
+  openPage?(uri: string): void;
   recordError(label: string, message: string): void;
 }
 
@@ -49,7 +51,12 @@ export function createPersonCommands(deps: PersonCommandDeps) {
       set(null);
       // A run that came back undoable offers its Undo.
       const auditId = out.inverse && out.audit_id != null ? out.audit_id : null;
-      deps.toast(doneMessage(p.label), auditId === null ? undefined : () => void undo(p.label, auditId));
+      const uri = resultUri(out.result);
+      deps.toast(
+        doneMessage(p.label),
+        auditId === null ? undefined : () => void undo(p.label, auditId),
+        uri && deps.openPage ? () => deps.openPage?.(uri) : undefined,
+      );
       return out;
     } catch (e) {
       if (!confirmed && needsConfirmation(e)) {
@@ -79,10 +86,23 @@ export function createPersonCommands(deps: PersonCommandDeps) {
 
 export type PersonCommands = ReturnType<typeof createPersonCommands>;
 
+/** How the app opens a page (set once, by `App`). */
+let opener: ((uri: string) => void) | null = null;
+export function setPersonCommandsOpener(open: ((uri: string) => void) | null): void {
+  opener = open;
+}
+
+/** Open the page `uri` names, as a toast's Open link does. */
+export function openPersonUri(uri: string): void {
+  opener?.(uri);
+}
+
 export const personCommands: PersonCommands = createPersonCommands({
   runCommand: (name, input, confirmed) => runCommand(name, input, confirmed),
   // The person's click on Undo is their confirmation of it.
   undo: (auditId) => undoCommand(auditId, true),
-  toast: (message, undo) => showToast({ message, onUndo: undo }),
+  toast: (message, undo, open) =>
+    showToast({ message, onUndo: undo, ...(open ? { link: { label: "Open", onClick: open } } : {}) }),
+  openPage: openPersonUri,
   recordError: (label, message) => recordOpError({ label, message }),
 });

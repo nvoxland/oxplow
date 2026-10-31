@@ -469,6 +469,11 @@ markdown itself, nor edits it in a `<textarea>`.
   task permanently) push a toast without `onUndo` so the user
   still sees confirmation feedback even if they can't undo. Don't
   block the renderer with a centered confirm modal.
+  A command's toast (`commandToast.ts`) also carries an **Open** link
+  (`showToast({ link })`) when the result names a thing (`result.uri`); a
+  command with `ui.open_after` already opens its page, so it needs none.
+  Undo shows only for a command whose run has an inverse (a git commit has
+  none, so its toast has no Undo).
 - **Closing an agent session's tab closes the session at once**, with an
   Undo toast: one click on its × runs `oxplow.agent_session.close`
   through `personCommands`, and Undo runs its inverse,

@@ -15,6 +15,8 @@ export interface ToastInput {
   onUndo?: () => void;
   /** Optional override for the action label. Default: "Undo". */
   actionLabel?: string;
+  /** Optional link to what the command made ("Open"). Following it dismisses the toast. */
+  link?: { label: string; onClick: () => void };
 }
 
 export interface Toast {
@@ -22,6 +24,7 @@ export interface Toast {
   message: string;
   onUndo?: () => void;
   actionLabel: string;
+  link?: { label: string; onClick: () => void };
   createdAt: number;
 }
 
@@ -31,6 +34,8 @@ export interface ToastStore {
   push(input: ToastInput): string;
   dismiss(id: string): void;
   undo(id: string): void;
+  /** Follow the toast's link: dismiss it and run the link. */
+  follow(id: string): void;
 }
 
 let nextSeq = 1;
@@ -63,6 +68,7 @@ export function createToastStore(): ToastStore {
         message: input.message,
         onUndo: input.onUndo,
         actionLabel: input.actionLabel ?? "Undo",
+        link: input.link,
         createdAt: Date.now(),
       };
       toasts = [...toasts, toast];
@@ -81,6 +87,13 @@ export function createToastStore(): ToastStore {
       toasts = toasts.filter((t) => t.id !== id);
       emit();
       toast.onUndo?.();
+    },
+    follow(id) {
+      const toast = toasts.find((t) => t.id === id);
+      if (!toast) return;
+      toasts = toasts.filter((t) => t.id !== id);
+      emit();
+      toast.link?.onClick();
     },
   };
 }

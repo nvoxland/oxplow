@@ -5,7 +5,8 @@ import { showToast } from "../components/toastStore.js";
 import { fieldErrors, needsConfirmation } from "../ipc-error.js";
 import { recordOpError } from "../opErrors.js";
 import { undoCommand } from "../api.js";
-import { doneMessage } from "../commandToast.js";
+import { doneMessage, resultUri } from "../commandToast.js";
+import { openPersonUri } from "../personCommands.js";
 
 /** A form submitted, as `FormViz` and `ActionForm` both submit one: the
  *  person's input runs; a command that asks is held for them to confirm;
@@ -30,6 +31,17 @@ export function useFormSubmit(
       const auditId = outcome.inverse && outcome.audit_id != null ? outcome.audit_id : null;
       showToast({
         message: doneMessage(label),
+        ...(resultUri(outcome.result) === null
+          ? {}
+          : {
+              link: {
+                label: "Open",
+                onClick: () => {
+                  const uri = resultUri(outcome.result);
+                  if (uri) openPersonUri(uri);
+                },
+              },
+            }),
         ...(auditId === null
           ? {}
           : {

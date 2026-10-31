@@ -63,3 +63,13 @@ describe("createToastStore", () => {
     expect(store.getSnapshot()).toEqual([]);
   });
 });
+
+test("a toast with a link keeps it, and following it dismisses the toast", () => {
+  const store = createToastStore();
+  let opened = 0;
+  const id = store.push({ message: "✓ New", link: { label: "Open", onClick: () => void opened++ } });
+  expect(store.getSnapshot()[0]!.link?.label).toBe("Open");
+  store.follow(id);
+  expect(opened).toBe(1);
+  expect(store.getSnapshot()).toEqual([]);
+});

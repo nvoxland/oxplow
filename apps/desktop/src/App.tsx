@@ -137,7 +137,7 @@ import { streamOfThread } from "./tabs/threadTabOps.js";
 import { planNavigation } from "./tabs/navigation.js";
 import { openRef as openRefAt, setWindowRefOpener } from "./tabs/openRef.js";
 import { usePersonCommands } from "./personCommandsStore.js";
-import { personCommands } from "./personCommands.js";
+import { personCommands, setPersonCommandsOpener } from "./personCommands.js";
 import { getUiClientId, logUi, setUiLogContext } from "./logger.js";
 
 /// Prompt for a folder and open it as an **existing** project.
@@ -805,6 +805,14 @@ export function App() {
   // Cancel the native WKWebView context menu everywhere except inputs,
   // contenteditable, Monaco, and the terminal (see context-menu.ts).
   useEffect(() => installContextMenuSuppressor(), []);
+  // A toast's Open link opens a page the way a command offer does.
+  useEffect(() => {
+    setPersonCommandsOpener((tabId) => {
+      const ref = refFromTabId(tabId);
+      if (ref) handleOpenPageRef.current?.(ref);
+    });
+    return () => setPersonCommandsOpener(null);
+  }, []);
   // What the command bus offers a person (Pull, New Task, …): search lists
   // them with the app's own commands, and a shortcut may run one.
   const personSpecs = usePersonCommands();

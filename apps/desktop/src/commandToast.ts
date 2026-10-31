@@ -16,6 +16,13 @@ export function doneMessage(label: string): string {
   return `✓ ${plain(label)}`;
 }
 
+/** The thing a command's result names (its `uri`), which a toast offers to
+ *  open; null when the result names none. */
+export function resultUri(result: unknown): string | null {
+  const uri = (result as { uri?: unknown } | null | undefined)?.uri;
+  return typeof uri === "string" && uri !== "" ? uri : null;
+}
+
 /** The toast for a command taken back with Undo. */
 export function undoneMessage(label: string): string {
   return `Undone: ${plain(label)}`;

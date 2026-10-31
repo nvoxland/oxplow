@@ -212,3 +212,19 @@ test("actionDoes says the command an action runs, or the column it opens", () =>
   expect(actionDoes(action)).toBe("oxplow.work_item.transition");
   expect(actionDoes({ ...action, command: null, open: "current_uri" })).toBe("opens current_uri");
 });
+
+test("an action whose result names a thing offers an Open link to it", async () => {
+  const log: string[] = [];
+  const d: VizActionDeps = {
+    press: async () => ({ result: { uri: "task:t1" }, audit_id: null, event_id: null, inverse: null }),
+    toast: (m, _undo, open) => {
+      log.push(`toast ${m} ${open ? "with open" : "without"}`);
+      open?.();
+    },
+    recordError: () => {},
+    openAfter: async () => null,
+    openPage: (page) => log.push(`open ${page}`),
+  };
+  await performVizAction(action, run, null, "str1", false, d);
+  expect(log).toEqual(["toast ✓ Finish with open", "open task:t1"]);
+});

@@ -80,3 +80,21 @@ test("an undoable command's toast offers Undo, which undoes that run", async () 
   expect(undone).toEqual([7]);
   expect(toasts.at(-1)![0]).toBe("Undone: Move to Done");
 });
+
+test("a result that names a thing gets an Open link on its toast", async () => {
+  const opened: string[] = [];
+  const links: Array<(() => void) | undefined> = [];
+  const store = createPersonCommands({
+    runCommand: async (name) =>
+      ({ result: name === "a" ? { uri: "task:t1" } : {}, audit_id: null, event_id: null, inverse: null }) satisfies CommandOutcome,
+    undo: async () => {},
+    toast: (_m, _undo, open) => links.push(open),
+    openPage: (uri) => opened.push(uri),
+    recordError: () => {},
+  });
+  await store.run("New", "a", {});
+  await store.run("Other", "b", {});
+  expect(links[1]).toBeUndefined();
+  links[0]!();
+  expect(opened).toEqual(["task:t1"]);
+});

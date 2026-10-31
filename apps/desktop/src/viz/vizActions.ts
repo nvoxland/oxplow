@@ -6,7 +6,7 @@
 import { fieldsOf, secretFields, shownFields, type Field } from "../components/SchemaForm/schemaFormModel.js";
 import { IpcCallError, needsConfirmation } from "../ipc-error.js";
 import type { CommandOutcome, Drop, FormStart, PageAction, VizRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
-import { doneMessage } from "../commandToast.js";
+import { doneMessage, resultUri } from "../commandToast.js";
 
 export interface VizActionDeps {
   /** Press it on the page run the viz is in. */
@@ -21,7 +21,7 @@ export interface VizActionDeps {
     drop?: Drop | null,
   ): Promise<CommandOutcome>;
   /** A toast; with `undo`, it offers Undo. */
-  toast(message: string, undo?: () => void): void;
+  toast(message: string, undo?: () => void, open?: () => void): void;
   /** Undo the run recorded as `auditId`, as the person. */
   undo(auditId: number): Promise<unknown>;
   recordError(label: string, message: string): void;
@@ -105,7 +105,12 @@ export async function performVizAction(
     }
     // A run that came back undoable offers its Undo.
     const auditId = outcome.inverse && outcome.audit_id != null ? outcome.audit_id : null;
-    deps.toast(doneMessage(action.label), auditId === null ? undefined : () => void deps.undo(auditId).catch((e: unknown) => deps.recordError(`Undo ${action.label}`, e instanceof Error ? e.message : String(e))));
+    const uri = resultUri(outcome.result);
+    deps.toast(
+      doneMessage(action.label),
+      auditId === null ? undefined : () => void deps.undo(auditId).catch((e: unknown) => deps.recordError(`Undo ${action.label}`, e instanceof Error ? e.message : String(e))),
+      uri === null ? undefined : () => deps.openPage(uri, false),
+    );
     await openAfterAction(action, outcome, deps);
     return "done";
   } catch (e) {

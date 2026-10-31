@@ -50,6 +50,16 @@ function ToastRow({ toast, isLatest }: { toast: Toast; isLatest: boolean }) {
       data-toast-id={toast.id}
     >
       <span style={messageStyle}>{toast.message}</span>
+      {toast.link ? (
+        <button
+          type="button"
+          onClick={() => store.follow(toast.id)}
+          data-testid={isLatest ? "undo-toast-link" : `undo-toast-link-${toast.id}`}
+          style={actionStyle}
+        >
+          {toast.link.label}
+        </button>
+      ) : null}
       {toast.onUndo ? (
         <button
           type="button"

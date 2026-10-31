@@ -348,7 +348,8 @@ export function useVizActions(run: ActionTarget, streamId: string | null, runner
       confirmed: boolean,
       drop?: Drop | null,
     ) => pressOnRun(id, action, params, row, stream, confirmed, null, drop ?? null),
-    toast: (message: string, undo?: () => void) => showToast({ message, onUndo: undo }),
+    toast: (message: string, undo?: () => void, open?: () => void) =>
+      showToast({ message, onUndo: undo, ...(open ? { link: { label: "Open", onClick: open } } : {}) }),
     // The person's click on Undo is their confirmation of it.
     undo: (auditId: number) => undoCommand(auditId, true),
     ...openAfter,
