@@ -1319,7 +1319,7 @@ the bodies, Back/Forward, Up/Down, the star, Ask, what agents read.
 | `history.state` | `Entry.historyState` (persisted when it is JSON) |
 | the page you came from a list of | `Entry.from: Origin { title, items: [{ ref, label }], index }` |
 | pushState / replaceState | one `navigate(s, slot, entry, { replace })` |
-| back-forward cache | `bodies(tab)`: hidden bodies stay mounted, keyed by identity and mode |
+| back-forward cache | `bodies(tab)`: hidden bodies stay mounted, keyed by identity and mode; `CenterTabs` draws them in key order, never the strip's, because a body React moves reloads its iframes (a custom component reads that as navigating away) |
 | a SPA re-rendering on popstate | **every page is live**: one body per page identity and mode, keyed `slot/identity` (`slot/identity\nmode` in a mode), so entries that differ only in the `#` re-render it — no remount, no Loading |
 
 **Operations** (pure, tested in `session.test.ts`): `open` (finds the tab

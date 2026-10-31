@@ -40,6 +40,12 @@ export function DashboardGrid({ page, tiles }: { page: string; tiles: DashboardC
     }
   }
   const shown = order ? order.flatMap((id) => tiles.filter((t) => t.id === id)) : tiles;
+  // A new dashboard has no tiles: say how to add one, not a blank page.
+  if (tiles.length === 0) {
+    return <p data-testid="dashboard-empty" className="ox-empty-line">
+      No tiles yet. Open a page and choose Pin to Dashboard… in its page menu to add it here.
+    </p>;
+  }
   return <>
     <TileGrid testId="dashboard-grid" aria-busy={busy}>
       {shown.map((tile, index) => {

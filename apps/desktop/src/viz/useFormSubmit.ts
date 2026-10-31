@@ -5,6 +5,7 @@ import { showToast } from "../components/toastStore.js";
 import { fieldErrors, needsConfirmation } from "../ipc-error.js";
 import { recordOpError } from "../opErrors.js";
 import { undoCommand } from "../api.js";
+import { doneMessage } from "../commandToast.js";
 
 /** A form submitted, as `FormViz` and `ActionForm` both submit one: the
  *  person's input runs; a command that asks is held for them to confirm;
@@ -28,7 +29,7 @@ export function useFormSubmit(
       // does (the person's click on Undo is their confirmation of it).
       const auditId = outcome.inverse && outcome.audit_id != null ? outcome.audit_id : null;
       showToast({
-        message: `${label}: done.`,
+        message: doneMessage(label),
         ...(auditId === null
           ? {}
           : {

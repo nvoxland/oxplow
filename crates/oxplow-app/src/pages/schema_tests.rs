@@ -432,6 +432,12 @@ fn an_inline_page_only_reads() {
         let e = parse_inline_page(text).expect_err(why);
         assert!(e.contains(why), "{why}: {e}");
     }
+    // A command loader's refusal says how to try one: a draft page file.
+    let e = parse_inline_page(
+        "title: T\nloaders:\n  a: { command: acme.ci.x, refresh: manual }\nview: { viz: table, from: a }\n",
+    )
+    .unwrap_err();
+    assert!(e.contains("draft: true"), "{e}");
 }
 
 /// A temp page (an agent's shown view, a file on `oxplow:temp`) has the
