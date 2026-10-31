@@ -60,7 +60,11 @@ examples.
 
 - `title` (required), `description`, `label` (the tab's name:
   `{{param.x}}`, `{{row.col}}` of the first loader's first row (a `for:`
-  page's first loader is the one you declare first, not `content`); filters
+  page's first loader is the one you declare first, not `content`). The
+  first loader is the first one declared, and a loader can read only
+  loaders declared before it, so it cannot be moved after the ones it
+  reads: have it return the column the label names, or check warns
+  that `row.<col>` is not one of its columns. Filters
   `|short`, `|basename`, `|url`), `icon`, `category` (the launcher
   section: `Work`, `Code`, `Git`, `Activity`, `Knowledge`, `Data`,
   `Dashboards`, `System`; none means opened only from elsewhere),

@@ -98,6 +98,9 @@ Where it lives, and what is loaded:
 - `label` is the tab's name: `{{param.x}}` and `{{row.col}}` (the first
   authored loader's first row, else `content`'s), filters `|short`, `|basename`, `|url`. Any other
   `{{…}}` is refused (`label_refs`).
+  Check warns (`page.label_column`) when a `{{row.col}}` names a column the
+  first loader's dry run doesn't return: a loader reads only the ones declared
+  before it, so that loader can't move; it returns the column instead.
 - `category` is the launcher section (`LauncherCategory`); none means the
   page opens only from elsewhere. `hidden` keeps it out of the launcher.
   A page with `for:` is a resource page, a display mode of its resource:
