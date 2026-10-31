@@ -1,0 +1,73 @@
+title: Metric data
+description: 'The recordings of one metric over a range and branch, newest first, with the files its measure could not check. Its definition and trend are the metric''s own page.'
+label: '{{row.title}} data'
+icon: bar-chart-3
+for: oxplow/metric
+params:
+- name: uri
+  label: Metric
+- name: metric
+- name: range
+  type: date_range
+  role: filter
+  label: Range
+  default: 7d
+  presets: [1d, 2d, 3d, 7d, 30d, all]
+- name: branch
+  type: branch
+  role: filter
+  label: Branch
+answers:
+- {"question":"What did this metric record, newest first?","about":"oxplow/metric","params":{"uri":"oxplow:oxplow/metric?metric=oxplow.coverage.abs_pct","metric":"oxplow.coverage.abs_pct"},"skill":"oxplow-metrics"}
+loaders:
+  row:
+    sql: |
+      SELECT c.title AS title FROM v_metric_catalog c WHERE c.key = :metric
+    columns:
+    - key: title
+  recordings:
+    sql: |
+      WITH pts AS (
+        SELECT p.captured_at, p.value, p.branch, p.capture_id FROM v_metric_point p
+        WHERE p.metric = :metric
+          AND (:branch IS NULL OR p.branch = :branch)
+          AND (:range_from IS NULL OR p.captured_at >= :range_from)
+          AND (:range_to IS NULL OR p.captured_at <= :range_to)
+      )
+      SELECT p.captured_at AS time, p.value, (SELECT unit FROM v_metric_spec WHERE key = :metric) AS unit,
+             p.branch, substr(c.closest_vcs_rev, 1, 8) AS version,
+             CASE WHEN c.provenance = 'observed' THEN 'observed' ELSE '⚠ ' || coalesce(c.provenance, '?') END AS trust
+      FROM pts p LEFT JOIN v_capture c ON c.id = p.capture_id
+      ORDER BY p.captured_at DESC LIMIT 200
+  unchecked:
+    sql: |
+      SELECT DISTINCT e.path,
+             CASE e.reason WHEN 'oversize' THEN 'over the size limit' WHEN 'binary' THEN 'binary' WHEN 'unreadable' THEN 'unreadable' ELSE e.reason END AS reason
+      FROM v_capture_exclusion e
+      WHERE e.unchecked = 1 AND e.producer IN (
+        SELECT DISTINCT c.producer FROM v_capture c JOIN v_fact f ON f.capture_id = c.id
+        WHERE f.measure_key = (SELECT source_measure FROM v_metric_spec WHERE key = :metric))
+      ORDER BY e.path LIMIT 200
+view:
+  stack:
+  - id: recordings
+    title: Recordings
+    from: recordings
+    viz: table
+    columns:
+    - { key: time, label: Time, format: datetime }
+    - { key: value, label: Value, unit: unit }
+    - { key: branch, label: Branch }
+    - { key: version, label: Version }
+    - { key: trust, label: Trust }
+    empty: No recordings in range.
+  - id: unchecked
+    title: Unchecked files
+    from: unchecked
+    viz: list
+    columns:
+    - { key: path, label: File, link: { kind: file, from: path } }
+    - { key: reason, label: Why }
+    empty: ''
+see_also:
+  - { page: oxplow-foundation/metrics-recorded }

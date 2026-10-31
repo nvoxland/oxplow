@@ -1,12 +1,13 @@
-# The definition mode of a metric: its unit, aggregation and direction, targets, the measure it is
+# A metric's page: its unit, aggregation and direction, targets, the measure it is
 # built on (linked to the measure's definition), its expression, scope and extension.
 when:
-  page: oxplow-foundation/metric-definition
-  params: { uri: "oxplow:oxplow/metric?metric=agent.tokens.total" }
+  page: oxplow-foundation/metric
+  params: { uri: "oxplow:oxplow/metric?metric=agent.tokens.total", metric: agent.tokens.total }
 expect:
   label: Total tokens
   loaders:
     about: { rows: [{ name: Total tokens, key: agent.tokens.total, unit: tokens, aggregation: sum, direction: neutral, expression: "SUM(value)", scope: extension, extension: oxplow-foundation, measure: Agent tokens, measure_target: "oxplow:oxplow/measure?measure=oxplow.tokens#oxplow.renderer=oxplow-foundation/measure" }] }
   see_also:
     - { title: oxplow-foundation, uri: "oxplow:oxplow/extension?name=oxplow-foundation" }
+    - { title: Agent tokens, uri: "oxplow:oxplow/measure?measure=oxplow.tokens" }
     - { title: Metrics, uri: "oxplow:oxplow/page?page=metrics-recorded" }

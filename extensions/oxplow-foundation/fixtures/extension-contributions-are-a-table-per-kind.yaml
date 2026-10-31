@@ -33,7 +33,7 @@ expect:
     metrics:
       rows:
         contains:
-          - { title: Nudges fired, description: Count of nudges fired to the agent., link: "oxplow:oxplow/metric?metric=agent.nudges.fired#oxplow.renderer=oxplow-foundation/metric-definition" }
+          - { title: Nudges fired, description: Count of nudges fired to the agent., link: "oxplow:oxplow/metric?metric=agent.nudges.fired" }
     measures: { rows: { contains: [{ title: Nudges fired }] } }
     dimensions: { rows: { contains: [{ title: Agent, description: The coding agent that did the work. }] } }
     implementations: { rows: { contains: [{ title: Claude, description: Runs Claude Code as a coding agent. }] } }

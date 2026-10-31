@@ -96,7 +96,7 @@ loaders:
   metrics:
     sql: |
       SELECT m.title, m.description,
-             CASE WHEN d.resource IS NOT NULL THEN c.uri || '#oxplow.renderer=oxplow-foundation/metric-definition' END AS link
+             CASE WHEN d.resource IS NOT NULL THEN c.uri END AS link
       FROM about a JOIN v_contribution c ON c.extension = a.extension AND c.kind = 'metric'
            JOIN v_metric_spec m ON m.key = c.local
            LEFT JOIN drawn d ON d.resource = 'oxplow/metric'

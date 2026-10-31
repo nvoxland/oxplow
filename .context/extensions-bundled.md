@@ -168,9 +168,11 @@ screens and oxplow-bundled's add the review and analysis:
 - **Data is the default view, Definition the other mode.** A kind that has
   data opens on a simple raw page, `<kind>-data` (`dataset-data`,
   `measure-data`, `dimension-data`, `command-data`, `collector-data`,
-  `resource-data`; a metric's is `metric-detail`), with `default: true`; the
-  kind's definition page above (`dataset-definition`, `metric-definition`
-  for the new two) is the alternate, in Open With. A data page is a title,
+  `resource-data`), with `default: true`; the
+  kind's definition page above (`dataset-definition` for a dataset) is the
+  alternate, in Open With. A metric is the other way round: `metric` (its
+  definition, every fact about it, and its trend at the bottom) is the
+  default, and `metric-data` (its recordings alone) the other mode. A data page is a title,
   the subject's name and one line, then the rows in a table with a few
   filters in the rail; a dataset's rows come from `oxplow.sql.query` over a
   query a `sql` loader builds from the page's params, only from names in

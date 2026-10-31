@@ -44,7 +44,7 @@ loaders:
       WHERE c.kind = 'measure' AND c.uri = :uri
   metrics:
     sql: |
-      SELECT s.title, s.description, 'oxplow:oxplow/metric?metric=' || s.key || '#oxplow.renderer=oxplow-foundation/metric-definition' AS uri
+      SELECT s.title, s.description, 'oxplow:oxplow/metric?metric=' || s.key AS uri
       FROM v_contribution c JOIN v_measure m ON m.key = c.local
            JOIN v_metric_spec s ON s.source_measure = m.key
       WHERE c.kind = 'measure' AND c.uri = :uri

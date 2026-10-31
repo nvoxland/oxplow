@@ -295,8 +295,11 @@ intent:
     - name: the-work-item-page-links-to-its-board-efforts-and-parent-epic
       input: { page: work-item, params: { uri: 'oxplow:oxplow/work_item?id=tsk1&provider=oxplow' } }
       expect: its see-also links open the board (or backlog), its efforts and its parent epic
+    - name: the-metric-data-page-lists-its-recordings-alone
+      input: { page: metric-data, params: { uri: "oxplow:oxplow/metric?metric=agent.tokens.total", metric: agent.tokens.total } }
+      expect: its recordings and the files its measure could not check, and no definition or trend
     - name: the-metric-page-links-to-its-measure-and-the-metrics-list
-      input: { page: metric-detail, params: { metric: agent.tokens.total } }
+      input: { page: metric, params: { metric: agent.tokens.total } }
       expect: its see-also links open the measure it is built on and the metrics list
     - name: the-definition-page-links-to-the-page-and-its-extension
       input: { page: definition, params: { uri: 'oxplow:oxplow/file?path=oxplow-foundation/pages/board.yaml&filesystem=oxplow:extensions', path: oxplow-foundation/pages/board.yaml, stream_id: 1 } }
@@ -349,8 +352,8 @@ intent:
     - name: the-dataset-data-page-says-what-it-is-in-a-paragraph-above-its-facts
       input: { page: dataset-data, params: {uri:"oxplow:oxplow/dataset?dataset=work_item"} }
       expect: its description is a paragraph above the facts
-    - name: the-metric-definition-page-says-what-it-is-in-a-paragraph-above-its-facts
-      input: { page: metric-definition, params: {uri:"oxplow:oxplow/metric?metric=agent.tokens.total"} }
+    - name: the-metric-page-says-what-it-is-in-a-paragraph-above-its-facts
+      input: { page: metric, params: {uri:"oxplow:oxplow/metric?metric=agent.tokens.total",metric:"agent.tokens.total"} }
       expect: its description is a paragraph above the facts
     - name: the-extension-page-says-what-it-is-in-a-paragraph-above-its-facts
       input: { page: extension, params: {uri:"oxplow:oxplow/extension?name=oxplow-foundation",name:"oxplow-foundation"} }
@@ -448,11 +451,8 @@ intent:
     - name: resource-data-is-offered-only-for-a-kind-a-dataset-holds
       input: { command: oxplow.page.renderers, input: { uri: "oxplow:oxplow/resource?resource=oxplow-foundation/stream" } }
       expect: a kind a dataset holds opens on its data with Definition as the other mode; a kind no dataset holds has Definition alone
-    - name: the-resource-page-offers-data-only-for-a-kind-a-dataset-holds
-      input: { page: resource, params: { uri: "oxplow:oxplow/resource?resource=oxplow-foundation/stream" } }
-      expect: a kind a dataset holds links to its data; a kind none holds does not
-    - name: the-metric-definition-says-what-a-metric-is-built-from
-      input: { page: metric-definition, params: { uri: "oxplow:oxplow/metric?metric=agent.tokens.total" } }
+    - name: the-metric-page-says-what-a-metric-is-built-from
+      input: { page: metric, params: { uri: "oxplow:oxplow/metric?metric=agent.tokens.total", metric: agent.tokens.total } }
       expect: a metric's unit, aggregation, targets, source measure, expression and scope
     - name: the-measure-page-links-its-metrics-to-their-definitions
       input: { page: measure, params: { uri: "oxplow:oxplow/measure?measure=oxplow.tokens" } }

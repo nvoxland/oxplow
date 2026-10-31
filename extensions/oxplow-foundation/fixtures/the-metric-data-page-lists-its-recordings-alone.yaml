@@ -1,0 +1,10 @@
+# A metric's Data view is its recordings, newest first, and nothing of its
+# definition or trend: those are the metric's own page.
+when:
+  page: oxplow-foundation/metric-data
+  params: { uri: "oxplow:oxplow/metric?metric=agent.tokens.total", metric: agent.tokens.total }
+expect:
+  label: Total tokens data
+  nodes:
+    - { id: recordings, kind: viz, viz: table }
+    - { id: unchecked, kind: viz, viz: list }

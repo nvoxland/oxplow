@@ -1774,17 +1774,20 @@ just carries a Help blurb pointing there.
 > branch are the query's own `WHERE` on `captured_at` and `branch`
 > (the point's capture time sorts as text).
 
-- **Metric Detail** (the `metric-detail` page, the renderer of `oxplow/metric`
-  — `metricUri(key)`) — a page
-  of `metric-header`, `metric-chart`, `metric-unchecked` and
-  `metric-recordings`, all over `v_metric_point` (pinned to the page's
-  `metric`) and the definition models. Range (a `date_range`, 7 days by
-  default), branch and **Slice by** are the page's filters, in its address.
-  The header is a `detail`: the metric's name and description, the
+- **Metric Detail** (the `metric` page, the default renderer of
+  `oxplow/metric` — `metricUri(key)`) — About, then the Trend, over
+  `v_metric_point` (pinned to the page's `metric`) and the definition
+  models; its recordings and unchecked files are its Data view
+  (`metric-data`, the other mode, in Open With and as "View as Metric
+  data" in See also). Range (a `date_range`, 7 days by default), branch
+  and **Slice by** are the page's filters, in its address (the Data view
+  has range and branch).
+  About (node `about`) is a `detail`: the metric's description as its lead, the
   agg-aware **in range** headline (a total for a `sum`, an average for an
   `avg`, the change first to last otherwise: `inRangeStat`'s rule in
-  SQL), the definition (ID, type, aggregation, measure, scope, category,
-  language, unit, direction, target, warn and fail thresholds, enabled),
+  SQL), the definition (key, type, unit, aggregation, direction, target,
+  warn and fail thresholds, the measure it is built on, its expression,
+  scope, category, language, enabled, extension),
   and the actions **Enable**, **Disable** (`oxplow.metric.enable`) and
   **Add to Dashboard…** (`oxplow.dashboard.add_item` with the metric's
   key and a choice of dashboards). The chart is a `line` chart, the metric
@@ -1814,7 +1817,7 @@ There is **no Metric Settings page anymore**. Configuration was a dedicated
 page ("Metrics Catalog" tsk282, retitled "Metric Settings" tsk80) until tsk117
 folded it into the surfaces where you already look at a metric:
 
-- **Per-metric config lives on the Metric Detail page** — its header's
+- **Per-metric config lives on the Metric Detail page** — its About's
   **Enable** and **Disable** actions (`oxplow.metric.enable`); targets are set in
   `.oxplow/project.yaml`. The header reads the **catalog** (`v_metric_catalog`),
   NOT only the spec: a disabled metric's spec is pruned, so the page still has

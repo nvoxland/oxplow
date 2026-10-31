@@ -1,0 +1,134 @@
+title: Metric
+description: 'One metric: what it is, how it aggregates, its targets and the measure it is built on, then its trend over a range and branch. Its recordings are its Data view.'
+label: '{{row.name}}'
+icon: bar-chart-3
+for: oxplow/metric
+default: true
+params:
+- name: uri
+  label: Metric
+- name: metric
+- name: range
+  type: date_range
+  role: filter
+  label: Range
+  default: 7d
+  presets: [1d, 2d, 3d, 7d, 30d, all]
+- name: branch
+  type: branch
+  role: filter
+  label: Branch
+- name: slice
+  type: choice
+  role: filter
+  label: Slice by
+  options_from: oxplow-foundation/metrics-dimensions
+  default: ''
+answers:
+- {"question":"What is this metric built from, what are its targets, and how has it moved?","about":"oxplow/metric","params":{"uri":"oxplow:oxplow/metric?metric=agent.tokens.total","metric":"agent.tokens.total"},"skill":"oxplow-metrics"}
+loaders:
+  about:
+    sql: |
+      WITH pts AS (
+        SELECT p.captured_at, p.value FROM v_metric_point p
+        WHERE p.metric = :metric
+          AND (:branch IS NULL OR p.branch = :branch)
+          AND (:range_from IS NULL OR p.captured_at >= :range_from)
+          AND (:range_to IS NULL OR p.captured_at <= :range_to)
+      ), agg AS (
+        SELECT coalesce(json_extract(s.entity_json, '$.aggregation'), s.aggregation) AS aggregation
+        FROM v_metric_spec s WHERE s.key = :metric
+      )
+      SELECT c.title AS name, c.key, s.description,
+             s.display_kind AS type, (SELECT aggregation FROM agg) AS aggregation,
+             s.unit, s.direction, s.target, s.warn_at, s.fail_at,
+             CASE (SELECT aggregation FROM agg)
+               WHEN 'sum' THEN 'Total: ' || (SELECT round(sum(value), 2) FROM pts)
+               WHEN 'avg' THEN 'Average: ' || (SELECT round(avg(value), 2) FROM pts)
+               ELSE CASE WHEN (SELECT count(*) FROM pts) >= 2
+                         THEN 'Change: ' || (SELECT round((SELECT value FROM pts ORDER BY captured_at DESC LIMIT 1)
+                                                           - (SELECT value FROM pts ORDER BY captured_at LIMIT 1), 2)) END
+             END AS in_range,
+             m.title AS measure,
+             CASE WHEN m.key IS NOT NULL THEN uri('oxplow/measure', 'measure', m.key) || '#oxplow.renderer=oxplow-foundation/measure' END AS measure_target,
+             s.expression, s.scope, s.category, s.language, c.enabled, (c.enabled = 0) AS can_enable,
+             s.extension,
+             CASE WHEN s.extension IS NOT NULL THEN 'oxplow:oxplow/extension?name=' || s.extension END AS extension_target
+      FROM v_metric_catalog c
+      LEFT JOIN v_metric_spec s ON s.key = c.key
+      LEFT JOIN v_measure m ON m.key = s.source_measure
+      WHERE c.key = :metric
+  chart:
+    sql: |
+      WITH pts AS (
+        SELECT p.captured_at, p.value, p.group_value FROM v_metric_point p
+        WHERE p.metric = :metric AND p.dimension = :slice
+          AND (:branch IS NULL OR p.branch = :branch)
+          AND (:range_from IS NULL OR p.captured_at >= :range_from)
+          AND (:range_to IS NULL OR p.captured_at <= :range_to)
+      ), agg AS (
+        SELECT coalesce(json_extract(s.entity_json, '$.aggregation'), s.aggregation) AS aggregation, s.target
+        FROM v_metric_spec s WHERE s.key = :metric
+      )
+      SELECT p.captured_at AS at,
+             CASE (SELECT aggregation FROM agg)
+               WHEN 'sum' THEN sum(p.value) OVER (PARTITION BY p.group_value ORDER BY p.captured_at)
+               WHEN 'avg' THEN avg(p.value) OVER (PARTITION BY p.group_value ORDER BY p.captured_at ROWS BETWEEN 4 PRECEDING AND CURRENT ROW)
+               ELSE p.value END AS value,
+             coalesce(p.group_value, 'all') AS series,
+             CASE WHEN coalesce((SELECT aggregation FROM agg), '') NOT IN ('sum', 'avg') THEN (SELECT target FROM agg) END AS target
+      FROM pts p ORDER BY p.captured_at
+  # The extension it comes from, and the measure it is built on (a metric
+  # may have neither).
+  links:
+    sql: |
+      SELECT a.extension AS title, a.extension_target AS uri, e.description
+      FROM about a LEFT JOIN v_extension e ON e.name = a.extension WHERE a.extension IS NOT NULL
+      UNION ALL
+      SELECT m.title, uri('oxplow/measure', 'measure', m.key), m.description
+      FROM v_metric_spec s JOIN v_measure m ON m.key = s.source_measure WHERE s.key = :metric
+view:
+  stack:
+  - id: about
+    title: About
+    viz: detail
+    from: about
+    lead: description
+    columns:
+    - { key: key, label: Key }
+    - { key: in_range, label: In range }
+    - { key: type, label: Type }
+    - { key: unit, label: Unit }
+    - { key: aggregation, label: Aggregation }
+    - { key: direction, label: Better when }
+    - { key: target, label: Target }
+    - { key: warn_at, label: Warn at }
+    - { key: fail_at, label: Fail at }
+    - { key: measure, label: Built on, link: { kind: page, from: measure_target } }
+    - { key: expression, label: Expression }
+    - { key: scope, label: Scope }
+    - { key: category, label: Category }
+    - { key: language, label: Language }
+    - { key: enabled, label: Enabled }
+    - { key: extension, label: Extension, link: { kind: page, from: extension_target } }
+    empty: That metric isn't known to this project.
+    actions:
+    - id: enable
+      label: Enable
+      command: oxplow.metric.enable
+      when: can_enable
+      input: { keys: ['{{param.metric}}'], enabled: true }
+    - id: disable
+      label: Disable
+      command: oxplow.metric.enable
+      when: enabled
+      input: { keys: ['{{param.metric}}'], enabled: false }
+  - id: chart
+    title: Trend
+    from: chart
+    viz: line
+    chart: { x: at, y: value, series: series, targets: target }
+    empty: No recordings in this range.
+see_also:
+  - { from: links }
+  - { page: oxplow-foundation/metrics-recorded }

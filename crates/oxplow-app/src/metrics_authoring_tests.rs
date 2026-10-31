@@ -449,19 +449,25 @@ async fn the_metric_page_reads_the_definition_the_trend_and_the_recordings() {
     p.delta().await;
 
     let metric = || vec![("metric", SqlCell::Text(MEASURE.into()))];
+    // The metric's page: what it is and its trend; its Data view: the
+    // recordings.
     let detail = |loader: &'static str, params: Vec<(&'static str, SqlCell)>| {
         let svc = p.svc.clone();
-        async move { loader_rows(&svc, "metric-detail", loader, params).await }
+        async move { loader_rows(&svc, "metric", loader, params).await }
     };
-    let header = detail("header", metric()).await;
+    let data = |loader: &'static str, params: Vec<(&'static str, SqlCell)>| {
+        let svc = p.svc.clone();
+        async move { loader_rows(&svc, "metric-data", loader, params).await }
+    };
+    let header = detail("about", metric()).await;
     assert_eq!(header.len(), 1, "{header:?}");
-    // The page's row names its tab: the metric's title.
-    let page = detail("row", metric()).await;
+    // The Data view's row names its tab: the metric's title.
+    let page = data("row", metric()).await;
     assert!(
         matches!(&page[0]["title"], SqlCell::Text(t) if !t.is_empty()),
         "{page:?}"
     );
-    assert_eq!(header[0]["id"], SqlCell::Text(MEASURE.into()));
+    assert_eq!(header[0]["key"], SqlCell::Text(MEASURE.into()));
     assert_eq!(header[0]["enabled"], SqlCell::Int(1));
     assert!(
         matches!(&header[0]["in_range"], SqlCell::Text(t) if !t.is_empty()),
@@ -491,18 +497,18 @@ async fn the_metric_page_reads_the_definition_the_trend_and_the_recordings() {
         .collect();
     assert_eq!(series, ["engine".to_string(), "ui".to_string()].into());
 
-    let recordings = detail("recordings", metric()).await;
+    let recordings = data("recordings", metric()).await;
     assert_eq!(recordings.len(), 2, "{recordings:?}");
     assert_eq!(recordings[0]["trust"], SqlCell::Text("observed".into()));
 
-    // Off, then on again, from the header's actions.
+    // Off, then on again, from About's actions.
     // Each press is on a fresh open run of the page.
     let runs = crate::pages::open_runs::PageRuns::default();
     let act = |action: &'static str| {
         let (svc, runs) = (p.svc.clone(), &runs);
         async move {
             let (run_id, _) = runs
-                .open(&svc, page_request("metric-detail", metric()), "w")
+                .open(&svc, page_request("metric", metric()), "w")
                 .await
                 .unwrap();
             run_page_action(
@@ -510,7 +516,7 @@ async fn the_metric_page_reads_the_definition_the_trend_and_the_recordings() {
                 runs,
                 PageActionCall {
                     run_id,
-                    node: Some("header".into()),
+                    node: Some("about".into()),
                     action: action.into(),
                     row: None,
                     input: None,

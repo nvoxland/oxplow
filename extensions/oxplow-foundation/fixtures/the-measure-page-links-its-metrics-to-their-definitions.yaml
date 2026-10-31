@@ -5,4 +5,4 @@ expect:
     metrics:
       rows:
         contains:
-          - { title: Total tokens, uri: "oxplow:oxplow/metric?metric=agent.tokens.total#oxplow.renderer=oxplow-foundation/metric-definition" }
+          - { title: Total tokens, uri: "oxplow:oxplow/metric?metric=agent.tokens.total" }

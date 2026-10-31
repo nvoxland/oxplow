@@ -926,16 +926,16 @@ pub async fn run_as_page_in(
         ),
         ("oxplow-foundation/commit-detail", "commit", "detail"),
         ("oxplow-foundation/commit-files", "commit", "files"),
-        ("oxplow-foundation/metric-header", "metric-detail", "header"),
-        ("oxplow-foundation/metric-chart", "metric-detail", "chart"),
+        ("oxplow-foundation/metric-header", "metric", "about"),
+        ("oxplow-foundation/metric-chart", "metric", "chart"),
         (
             "oxplow-foundation/metric-unchecked",
-            "metric-detail",
+            "metric-data",
             "unchecked",
         ),
         (
             "oxplow-foundation/metric-recordings",
-            "metric-detail",
+            "metric-data",
             "recordings",
         ),
         (

@@ -14,7 +14,7 @@ expect:
     metrics:
       rows:
         contains:
-          - { link: "oxplow:oxplow/metric?metric=agent.tokens.total#oxplow.renderer=oxplow-foundation/metric-definition" }
+          - { link: "oxplow:oxplow/metric?metric=agent.tokens.total" }
     measures:
       rows:
         contains:
