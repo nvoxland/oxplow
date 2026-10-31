@@ -177,8 +177,34 @@ pub fn render(report: &TestReport, format: crate::Format) -> String {
             for w in &report.warnings {
                 out.push_str(&format!("warning: {}\n", w.render(&report.root)));
             }
+            // The same skip in several files (the display asleep for every
+            // fixture with `ui` steps) is one line naming each file.
+            let mut said: Vec<(&Diagnostic, Vec<String>)> = Vec::new();
             for k in &report.skipped {
-                out.push_str(&format!("skipped: {}\n", k.render(&report.root)));
+                let file = crate::shown_under(&report.root, k.file.as_deref().unwrap_or(""));
+                match said
+                    .iter_mut()
+                    .find(|(d, _)| (&d.code, &d.message, &d.fix) == (&k.code, &k.message, &k.fix))
+                {
+                    Some((_, files)) => files.push(file),
+                    None => said.push((k, vec![file])),
+                }
+            }
+            for (k, files) in said {
+                if files.len() == 1 {
+                    out.push_str(&format!("skipped: {}\n", k.render(&report.root)));
+                } else {
+                    let fix = k
+                        .fix
+                        .as_deref()
+                        .map(|f| format!(" — fix: {f}"))
+                        .unwrap_or_default();
+                    out.push_str(&format!(
+                        "skipped: {}: {}{fix}\n",
+                        files.join(", "),
+                        k.message
+                    ));
+                }
             }
             for b in &report.blessed {
                 out.push_str(&format!(

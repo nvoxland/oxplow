@@ -2520,6 +2520,21 @@ while :; do case "$(post /harness/next '{"result":null}')" in *done*) exit 0;; e
     assert!(xml.contains("<testcase name=\"example drawn\""), "{xml}");
     assert!(xml.contains("<skipped message=\""), "{xml}");
     assert!(render(&report, Format::Text).contains("1 skipped"));
+    // The same skip in several fixtures is said once, naming each file.
+    write(
+        root,
+        ".oxplow/extensions/cards/fixtures/also.yaml",
+        "when: { page: board }\nsteps:\n  - ui:\n      - expect: { count: { li: 99 } }\n",
+    );
+    let report = test_extension(root, "cards", false).await.unwrap();
+    assert_eq!(report.skipped.len(), 2, "{:?}", report.skipped);
+    let text = render(&report, Format::Text);
+    let lines: Vec<&str> = text.lines().filter(|l| l.starts_with("skipped:")).collect();
+    assert_eq!(lines.len(), 1, "{text}");
+    assert!(
+        lines[0].contains("fixtures/also.yaml") && lines[0].contains("fixtures/drawn.yaml"),
+        "{text}"
+    );
 }
 
 /// With `--require-ui`, a window that draws nothing fails the case: the

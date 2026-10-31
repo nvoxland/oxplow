@@ -39,6 +39,8 @@ impl UiState {
 }
 
 /// `ui` steps that can't run here: a skip, or with `--require-ui` an error.
+/// `why` names no step: it is the same in every fixture, so the report
+/// says it once (`render`).
 fn unrun(report: &mut TestReport, shown: &str, why: String, fix: &str) -> bool {
     if report.require_ui {
         report.errors.push(
@@ -79,10 +81,9 @@ impl PageAt<'_> {
             return unrun(
                 report,
                 shown,
-                format!(
-                    "{label}: its `ui` steps, and the steps after them, aren't run: no oxplow \
-                     app here to draw them"
-                ),
+                "its `ui` steps, and the steps after them, aren't run: no oxplow app here to \
+                 draw them"
+                    .into(),
                 "install the Oxplow app, or set OXPLOW_SHELL to it",
             );
         };
@@ -158,10 +159,9 @@ impl PageAt<'_> {
                 return unrun(
                     report,
                     shown,
-                    format!(
-                        "{label}: its `ui` steps, and the steps after them, aren't run: the \
-                         oxplow app's window draws nothing while the display is locked or asleep"
-                    ),
+                    "its `ui` steps, and the steps after them, aren't run: the oxplow app's \
+                     window draws nothing while the display is locked or asleep"
+                        .into(),
                     "run it again with the display awake",
                 );
             }
