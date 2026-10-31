@@ -85,23 +85,23 @@ export function menuItemById(groups: MenuGroup[], id: string): MenuItem | undefi
 /// trailing path in a new window.
 export const OPEN_RECENT_PREFIX = "project.openRecent:";
 
-/// Menu-command id prefix for a "Favorites ▸ <page>" entry; the rest is
+/// Menu-command id prefix for a "Bookmarks ▸ <page>" entry; the rest is
 /// the starred page's id (its URI), which the dispatch opens.
-export const FAVORITE_PREFIX = "favorites.open:";
+export const BOOKMARK_PREFIX = "bookmarks.open:";
 
-/// The page id a Favorites menu id opens, or null for any other id.
-export function favoriteIdFromMenuId(menuId: string): string | null {
-  return menuId.startsWith(FAVORITE_PREFIX) ? menuId.slice(FAVORITE_PREFIX.length) : null;
+/// The page id a Bookmarks menu id opens, or null for any other id.
+export function bookmarkIdFromMenuId(menuId: string): string | null {
+  return menuId.startsWith(BOOKMARK_PREFIX) ? menuId.slice(BOOKMARK_PREFIX.length) : null;
 }
 
-/// The Favorites items: the starred pages by title, case-insensitive; one
+/// The Bookmarks items: the starred pages by title, case-insensitive; one
 /// disabled hint when there are none.
-export function favoritesMenuItems(favorites: Bookmark[]): NativeMenuItemSnapshot[] {
-  if (favorites.length === 0) {
-    return [{ id: "favorites.none", label: "No favorites yet — star a page to add it", shortcut: null, enabled: false, checked: null }];
+export function bookmarksMenuItems(bookmarks: Bookmark[]): NativeMenuItemSnapshot[] {
+  if (bookmarks.length === 0) {
+    return [{ id: "bookmarks.none", label: "No bookmarks yet — star a page to add it", shortcut: null, enabled: false, checked: null }];
   }
-  return favorites
-    .map((b) => ({ id: `${FAVORITE_PREFIX}${b.ref.id}`, label: b.label || b.ref.id, shortcut: null, enabled: true, checked: null }))
+  return bookmarks
+    .map((b) => ({ id: `${BOOKMARK_PREFIX}${b.ref.id}`, label: b.label || b.ref.id, shortcut: null, enabled: true, checked: null }))
     .sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: "base" }) || a.id.localeCompare(b.id));
 }
 
@@ -113,11 +113,11 @@ const OPEN_RECENT_AFTER = "oxplow.project.open_in_new_window";
 
 /// The native-menu snapshot: `groups` plus a File ▸ Open Recent ▸
 /// <project> submenu built from the recents list (the in-window Menubar
-/// shows `groups` as they are), then a Favorites menu of the starred pages.
+/// shows `groups` as they are), then a Bookmarks menu of the starred pages.
 export function buildNativeMenuSnapshots(
   groups: MenuGroup[],
   recents: { path: string; title: string; exists: boolean }[],
-  favorites: Bookmark[] = [],
+  bookmarks: Bookmark[] = [],
 ): NativeMenuGroupSnapshot[] {
   const native = groups.map((group) => {
     const items = group.items.map(nativeItem);
@@ -148,7 +148,7 @@ export function buildNativeMenuSnapshots(
     }
     return { id: group.id, label: group.label, items };
   });
-  return [...native, { id: "favorites", label: "Favorites", items: favoritesMenuItems(favorites) }];
+  return [...native, { id: "bookmarks", label: "Bookmarks", items: bookmarksMenuItems(bookmarks) }];
 }
 
 /// A menu item as the shell's `MenuItemSnapshot`: what it draws, no more

@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { buildMenuBar, buildNativeMenuSnapshots, favoriteIdFromMenuId, FAVORITE_PREFIX, favoritesMenuItems, INSTALL_CLI_ID, menuItemById, OPEN_RECENT_PREFIX } from "./menuBar.js";
+import { buildMenuBar, buildNativeMenuSnapshots, bookmarkIdFromMenuId, BOOKMARK_PREFIX, bookmarksMenuItems, INSTALL_CLI_ID, menuItemById, OPEN_RECENT_PREFIX } from "./menuBar.js";
 import type { CommandEntry } from "./components/quickOpenResults.js";
 import type { MenuItemSnapshot } from "./tauri-bridge/generated/bindings.js";
 
@@ -126,37 +126,37 @@ test("File ▸ Install `oxplow` command line… is in the native menu", () => {
 
 const star = (id: string, label: string | null) => ({ ref: { id }, label, scope: "project" as const });
 
-test("the Favorites menu lists the starred pages alphabetically, ignoring case", () => {
+test("the Bookmarks menu lists the starred pages alphabetically, ignoring case", () => {
   const groups = buildNativeMenuSnapshots(buildMenuBar([]), [], [
     star("work-next", "work"),
     star("board", "Board"),
     star("alerts", "alerts"),
   ]);
-  const fav = groups.find((g) => g.id === "favorites")!;
-  expect(groups[groups.length - 1].id).toBe("favorites");
-  expect(fav.label).toBe("Favorites");
-  expect(fav.items.map((i) => i.label)).toEqual(["alerts", "Board", "work"]);
-  expect(fav.items.map((i) => i.id)).toEqual([
-    `${FAVORITE_PREFIX}alerts`,
-    `${FAVORITE_PREFIX}board`,
-    `${FAVORITE_PREFIX}work-next`,
+  const bm = groups.find((g) => g.id === "bookmarks")!;
+  expect(groups[groups.length - 1].id).toBe("bookmarks");
+  expect(bm.label).toBe("Bookmarks");
+  expect(bm.items.map((i) => i.label)).toEqual(["alerts", "Board", "work"]);
+  expect(bm.items.map((i) => i.id)).toEqual([
+    `${BOOKMARK_PREFIX}alerts`,
+    `${BOOKMARK_PREFIX}board`,
+    `${BOOKMARK_PREFIX}work-next`,
   ]);
-  expect(fav.items.every((i) => i.enabled && i.shortcut === null)).toBe(true);
+  expect(bm.items.every((i) => i.enabled && i.shortcut === null)).toBe(true);
 });
 
 test("a star with no label shows its page id", () => {
-  const items = favoritesMenuItems([star("git-dashboard", null)]);
+  const items = bookmarksMenuItems([star("git-dashboard", null)]);
   expect(items[0].label).toBe("git-dashboard");
 });
 
-test("with nothing starred, Favorites is one disabled hint", () => {
-  const items = favoritesMenuItems([]);
+test("with nothing starred, Bookmarks is one disabled hint", () => {
+  const items = bookmarksMenuItems([]);
   expect(items).toEqual([
-    { id: "favorites.none", label: "No favorites yet — star a page to add it", shortcut: null, enabled: false, checked: null },
+    { id: "bookmarks.none", label: "No bookmarks yet — star a page to add it", shortcut: null, enabled: false, checked: null },
   ]);
 });
 
-test("a favorite's menu id gives back the page it opens", () => {
-  expect(favoriteIdFromMenuId(`${FAVORITE_PREFIX}a:b?x=1`)).toBe("a:b?x=1");
-  expect(favoriteIdFromMenuId("oxplow.editor.save")).toBeNull();
+test("a bookmark's menu id gives back the page it opens", () => {
+  expect(bookmarkIdFromMenuId(`${BOOKMARK_PREFIX}a:b?x=1`)).toBe("a:b?x=1");
+  expect(bookmarkIdFromMenuId("oxplow.editor.save")).toBeNull();
 });
