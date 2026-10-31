@@ -10,7 +10,7 @@
 //! file is adding it to the folder. One whose manifest declares `build:`
 //! (`run`, `output`) is built here first, so its output ships in the binary
 //! without being committed: building oxplow runs its command (`/bin/sh
-//! -c`, in its folder — `bun` for the Timeline).
+//! -c`, in its folder — `bun` for Explore Data and the Timeline).
 //!
 //! Cargo reruns this when an input changes: the manifest, every input file,
 //! and the input folders — but only folders that hold nothing skipped. Cargo

@@ -4,6 +4,11 @@ Custom components (the sandboxed frame, protocol, testing a component) and the E
 
 ## What works today: Explore Data
 
+- **Timeline: oxplow-bundled's other built component** (`pages/timeline.yaml`,
+  source `src/timeline/`, built with `vis-timeline` by bundled's
+  `package.json`). The page is the worked example of a component that owns
+  its window through `from` / `to` view params. Foundation's only custom
+  component is the hand-written `integrations`.
 - **Explore Data: oxplow-bundled's data app.** Deliberately simple,
   and the proof that an extension ships a data app: a **page with a
   component node** (`pages/explore-data.yaml`: `view: { component: { id:

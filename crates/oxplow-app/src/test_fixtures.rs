@@ -193,10 +193,6 @@ pub async fn services_with_effort() -> EffortFixture {
     services_with_effort_in(dir).await
 }
 
-/// oxplow-foundation's build command, as its manifest quotes it: tests
-/// that deploy its source swap it for a no-op (cargo built its output).
-pub const FOUNDATION_BUILD: &str = "\"bun install --frozen-lockfile && bun run build\"";
-
 /// [`services_with_effort`] while developing oxplow: oxplow's own
 /// extensions run from their sources (`enableBundledExtensions: false`),
 /// each a copy of the repo's folder in the project's
@@ -213,12 +209,6 @@ pub async fn services_developing_oxplow() -> EffortFixture {
             std::fs::write(file, bytes).unwrap();
         }
     }
-    // Its output is the one cargo built; a deploy here rebuilds nothing.
-    let manifest = dir
-        .path()
-        .join(".oxplow/extensions/oxplow-foundation/extension.yaml");
-    let text = std::fs::read_to_string(&manifest).unwrap();
-    std::fs::write(&manifest, text.replacen(FOUNDATION_BUILD, "\"true\"", 1)).unwrap();
     std::fs::write(
         dir.path().join(".oxplow/project.yaml"),
         "enableBundledExtensions: false\n",

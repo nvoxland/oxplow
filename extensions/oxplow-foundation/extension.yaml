@@ -5,18 +5,10 @@ namespace: oxplow
 description: oxplow's own commands, declared like any extension's — each backed by an operation of a scope. Required; it can't be disabled.
 engine: ">=0.7"
 # What it reaches beyond the baseline: its AI providers call models, its
-# effort collector reads the datasets with its own SQL, and the Timeline page
-# reads them too.
+# effort collector reads the datasets with its own SQL.
 permissions: [sql.read, files.read, ai.compute, agent.write]
-# Its custom components are TypeScript (src/), built into dist/ when oxplow
-# is built and on every deploy; dist/ and node_modules/ aren't committed.
-build: { run: "bun install --frozen-lockfile && bun run build", output: dist, exclude: [node_modules] }
 custom_components:
-  # Efforts, sessions, threads and commits on a zoomable time axis
-  # (vis-timeline, which the kit has no viz for).
-  - { id: timeline, title: Timeline, bundle: dist/timeline, sql: read, description: "Efforts, sessions, threads and commits on a zoomable time axis." }
-  # Settings → Integrations: hand-written (no build), so it lives beside the
-  # built components, not in dist/.
+  # Settings → Integrations: hand-written, with no build step.
   - { id: integrations, title: Integrations, bundle: components/integrations, sql: read, commands: [oxplow.provider.check_instance, oxplow.provider.set_instance, oxplow.provider.add_instance, oxplow.provider.turn_off_here, oxplow.provider.remove_instance, oxplow.provider.set_credential, oxplow.provider.begin_sign_in, oxplow.provider.complete_sign_in, oxplow.provider.cancel_sign_in, oxplow.provider.sync], description: "The Settings area for the instances of external providers: adding one, signing in and checking it." }
 intent:
   purpose: >-
@@ -178,9 +170,6 @@ intent:
     - name: git-history-lists-commits-newest-first-narrowed-by-text-and-author
       input: { page: git-history }
       expect: the git-history page lists what its loaders read
-    - name: the-timeline-draws-the-projects-activity-and-titles-itself
-      input: { page: timeline }
-      expect: the timeline draws items, titles itself and offers Today and Fit; Fit writes from and to
     - name: the-commit-page-reads-a-commit-its-change-and-its-files-as-a-tree
       input: { page: commit }
       expect: a commit page makes its change and lists the files as a tree

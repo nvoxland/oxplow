@@ -894,8 +894,7 @@ mod tests {
     }
 
     /// A project developing oxplow (`enableBundledExtensions: false`):
-    /// foundation's source as it ships (its build a no-op, the output
-    /// cargo built already there), set up by the app, and an older
+    /// foundation's source as it ships (it has no build step), set up by the app, and an older
     /// foundation recorded as its active deployment that no longer loads.
     async fn developing_oxplow_with_a_stale_foundation() -> tempfile::TempDir {
         let dir = tempfile::tempdir().unwrap();
@@ -921,13 +920,7 @@ mod tests {
                 std::fs::write(file, text).unwrap();
             }
         };
-        write_files(&p.join(".oxplow/extensions/oxplow-foundation"), &|t| {
-            t.replacen(
-                "\"bun install --frozen-lockfile && bun run build\"",
-                "\"true\"",
-                1,
-            )
-        });
+        write_files(&p.join(".oxplow/extensions/oxplow-foundation"), &|t| t);
         std::fs::write(
             p.join(".oxplow/project.yaml"),
             "enableBundledExtensions: false\n",

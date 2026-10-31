@@ -28,7 +28,7 @@ expect:
         contains:
           - { title: oxplow.agent.draft, description: "Put text in the shown thread's agent input, unsent." }
     skills: { rows: { contains: [{ description: $any }] } }
-    components: { rows: { contains: [{ title: Timeline }] } }
+    components: { rows: { contains: [{ title: Integrations }] } }
     metrics:
       rows:
         contains:

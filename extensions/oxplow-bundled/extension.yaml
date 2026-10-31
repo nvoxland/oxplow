@@ -8,9 +8,10 @@ engine: ">=0.7"
 # their own SQL, its jobs and effects ask models, its churn collector reads
 # the project's files, and its advisories and skills speak to the agent.
 permissions: [sql.read, files.read, ai.compute, agent.write]
-# Its Explore Data component is TypeScript (src/), built into dist/ when oxplow
-# is built and on every deploy; dist/ isn't committed.
-build: { run: "bun run build", output: dist }
+# Its Explore Data and Timeline components are TypeScript (src/), built into
+# dist/ when oxplow is built and on every deploy; dist/ and node_modules/
+# aren't committed.
+build: { run: "bun install --frozen-lockfile && bun run build", output: dist, exclude: [node_modules] }
 intent:
   purpose: >-
     Show what a reviewer must check before accepting an agent's work — the
@@ -327,6 +328,9 @@ intent:
     - name: dashboards-list-the-dashboard-pages
       input: { page: dashboards }
       expect: the dashboards index lists the page-file dashboards and offers a title form
+    - name: the-timeline-draws-the-projects-activity-and-titles-itself
+      input: { page: timeline }
+      expect: the timeline draws items, titles itself and offers Today and Fit; Fit writes from and to
 ui:
   mounts:
     - { page: thread-handoffs-in, at: oxplow-bundled/tasks.sections, position: { before: list } }
@@ -372,6 +376,9 @@ custom_components:
   # the result under it with its own components (`showView`: an inline page).
   # Built from src/ into dist/ (bun build, no dependencies).
   - { id: explore-data, title: Explore Data, bundle: dist/explore-data, sql: read, commands: [oxplow.page.draft_with_agent], description: "An SQL box and a viz picker over the datasets, to try a query and see its result drawn." }
+  # Efforts, sessions, threads and commits on a zoomable time axis
+  # (vis-timeline, which the kit has no viz for).
+  - { id: timeline, title: Timeline, bundle: dist/timeline, sql: read, description: "Efforts, sessions, threads and commits on a zoomable time axis." }
   - { id: history-graph, title: History graph, description: "The commits of the project drawn as lanes by branch, with filters by message, author and branch." }
 panels:
   - { id: go-to, title: Go To, icon: compass, scope: thread, body: go-to-panel, collapsed: go-to-bookmarks, open: 'oxplow:oxplow/page?page=go-to' }

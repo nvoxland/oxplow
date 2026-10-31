@@ -3155,9 +3155,7 @@ mod tests {
         crate::test_fixtures::init_git_repo(dir.path());
         let project = dir.path();
         let source = project.join(".oxplow/extensions/oxplow-foundation");
-        for (rel, text) in shipped_with("oxplow-foundation", |t| {
-            t.replacen(crate::test_fixtures::FOUNDATION_BUILD, "\"true\"", 1)
-        }) {
+        for (rel, text) in shipped_with("oxplow-foundation", |t| t) {
             write(&source, rel, &text);
         }
         write(
@@ -3255,9 +3253,7 @@ mod tests {
     async fn developing_oxplow_a_foundation_deployment_that_fails_at_boot_says_what_happened() {
         let (dir, svc) = unbooted();
         let source = dir.path().join(".oxplow/extensions/oxplow-foundation");
-        for (rel, text) in shipped_with("oxplow-foundation", |t| {
-            t.replacen(crate::test_fixtures::FOUNDATION_BUILD, "\"true\"", 1)
-        }) {
+        for (rel, text) in shipped_with("oxplow-foundation", |t| t) {
             write(&source, rel, &text);
         }
         write(

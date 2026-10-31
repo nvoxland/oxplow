@@ -1,4 +1,4 @@
-// The Timeline page (oxplow-foundation, `pages: [{ id: timeline, component:
+// The Timeline page (oxplow-bundled, `pages: [{ id: timeline, component:
 // timeline }]`): efforts, agent sessions, threads and commits on a
 // zoomable time axis. A custom page: it reads its rows with `querySql`
 // (the component declares `sql: read`), titles its page with the range,

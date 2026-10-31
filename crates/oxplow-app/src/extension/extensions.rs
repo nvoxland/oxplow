@@ -6214,7 +6214,7 @@ commands:
         let exts = load_extensions(dir.path());
         let ext = |name: &str| exts.iter().find(|e| e.name == name).unwrap();
         let (foundation, bundled) = (ext("oxplow-foundation"), ext("oxplow-bundled"));
-        for slug in ["zones", "dashboards"] {
+        for slug in ["zones", "dashboards", "timeline"] {
             assert!(
                 foundation.page_files.iter().all(|p| p.slug != slug),
                 "foundation still has {slug}"
@@ -6224,6 +6224,13 @@ commands:
                 "bundled lacks {slug}"
             );
         }
+        let components: Vec<&str> = foundation
+            .custom_components
+            .iter()
+            .map(|c| c.id.as_str())
+            .collect();
+        assert_eq!(components, ["integrations"]);
+        assert!(bundled.custom_components.iter().any(|c| c.id == "timeline"));
     }
 
     #[test]

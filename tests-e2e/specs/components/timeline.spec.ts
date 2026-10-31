@@ -1,7 +1,7 @@
 import { expect, test } from "../../support/fixtures.js";
 import { openFromLauncher } from "../../support/ui.js";
 
-// The Timeline: oxplow-foundation's custom page, a component
+// The Timeline: oxplow-bundled's custom page, a component
 // built with a library the kit doesn't have, filling its page under core's
 // nav bar. It reads with its own SQL, titles its page with the range and
 // puts Today and Fit in the bar, which core draws.

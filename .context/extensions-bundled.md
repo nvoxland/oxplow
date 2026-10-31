@@ -112,7 +112,7 @@ The `oxplow-foundation` and `oxplow-bundled` extensions, the review packet, and 
   **Recent Decisions** and **Unbacked Claims**, scoped by the implicit
   `stream_id`.
 
-## The rule: data in foundation, work list, wiki and Explore Data UI here
+## The rule: data in foundation, person-facing screens here
 
 oxplow-foundation holds the data of the work list and the wiki: their
 datasets, the `work_item` and `wiki` resources, the `oxplow:tasks` and
@@ -124,7 +124,8 @@ oxplow-bundled holds that UI: the pages above and the menu commands.
 With oxplow-bundled off, a work item or wiki link opens core's generic
 resource page. That is intended. Foundation must never link to a bundled
 page, because it cannot name oxplow-bundled. The Rust test
-`foundation_has_no_task_or_wiki_ui` guards this.
+`foundation_has_no_task_or_wiki_ui` and
+`foundation_has_no_zones_dashboards_or_timeline` guard this.
 
 ## Example extensions (`examples/extensions/`)
 
@@ -223,6 +224,12 @@ screens and oxplow-bundled's add the review and analysis:
 - **Explore Data.** The `explore-data` page and its component (source in
   `src/explore-data/`, built into `dist/` by `package.json`; the manifest's
   `build:` runs it). Foundation's dataset pages do not link to it.
+- **Timeline.** The `timeline` page and its component (efforts, sessions,
+  threads and commits on a zoomable axis; source in `src/timeline/`, built
+  with the npm dependency `vis-timeline` by bundled's `package.json`). It
+  moved with the rest of the person-facing screens. Foundation has no build
+  step, no `package.json` and no `node_modules`; its only custom component
+  is the hand-written `integrations`.
 - **Dashboards.** The `dashboards` index page (launcher Data section) and
   the `dashboard.new` menu command, over foundation's
   `extension.new_dashboard`. See [dashboards.md](./dashboards.md).

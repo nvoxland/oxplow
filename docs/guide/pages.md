@@ -415,7 +415,7 @@ memory** (yours, in every tab of the component; JSON, 64 KB a value and
 `oxplow extension check` warns when a component's script uses
 `localStorage` or `sessionStorage`. A component written in
 TypeScript or with a library declares a `build:` ("Extensions" → "Builds"),
-so only its sources are committed. oxplow-foundation's Timeline page is a
+so only its sources are committed. oxplow-bundled's Timeline page is a
 working example: it reads
 its window from `from` and `to`, writes every change of it back with
 `setViewParams`, and follows `onViewParams` when Back or Forward moves the
