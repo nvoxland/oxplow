@@ -302,3 +302,21 @@ export function nextSectionIndex(rows: LauncherNavRow[], current: number, dir: 1
   }
   return dir > 0 ? rows.length - 1 : 0;
 }
+
+/** A part of a content hit's snippet: matched text (`hit`) or not. */
+export interface SnippetPart {
+  text: string;
+  hit: boolean;
+}
+
+/** A content hit's snippet as parts: the index marks each match with «
+ *  and » (`search_store`'s `snippet()`), which are drawn as matches and
+ *  never shown, and a markdown heading's `#`s aren't text. */
+export function snippetParts(snippet: string): SnippetPart[] {
+  const text = snippet.replace(/(^|\s)#{1,6}\s+/g, "$1");
+  const parts: SnippetPart[] = [];
+  for (const [i, piece] of text.split(/[«»]/).entries()) {
+    if (piece) parts.push({ text: piece, hit: i % 2 === 1 });
+  }
+  return parts;
+}

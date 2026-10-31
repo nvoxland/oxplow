@@ -12,6 +12,7 @@ import {
   searchableCommands,
   type CommandEntry,
   nextSectionIndex,
+  snippetParts,
   type LauncherNavRow,
   type LauncherSection,
 } from "./quickOpenResults.js";
@@ -297,4 +298,26 @@ describe("buildRecentEntries", () => {
     expect(entries[1]!.label).toBe("oxplow:oxplow/wiki?slug=architecture");
     expect(entries[1]!.ref.id).toBe("oxplow:oxplow/wiki?slug=architecture");
   });
+});
+
+// A content hit's snippet marks its matches with « and » (the index's
+// `snippet()`): they are drawn as matches, never shown, and a markdown
+// heading's `#` isn't text.
+test("a snippet's marks are its matches and its markdown heading marks are dropped", () => {
+  expect(snippetParts("# «QA» «note» Body text plain")).toEqual([
+    { text: "QA", hit: true },
+    { text: " ", hit: false },
+    { text: "note", hit: true },
+    { text: " Body text plain", hit: false },
+  ]);
+  expect(snippetParts("…before ## Heading «word» after")).toEqual([
+    { text: "…before Heading ", hit: false },
+    { text: "word", hit: true },
+    { text: " after", hit: false },
+  ]);
+  expect(snippetParts("plain")).toEqual([{ text: "plain", hit: false }]);
+  expect(snippetParts("issue #42 is «open»")).toEqual([
+    { text: "issue #42 is ", hit: false },
+    { text: "open", hit: true },
+  ]);
 });

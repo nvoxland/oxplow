@@ -23,6 +23,7 @@ import {
   buildRecentEntries,
   searchableCommands,
   nextSectionIndex,
+  snippetParts,
   type LauncherNavRow,
   type LauncherPageEntry,
   type LauncherSection,
@@ -512,7 +513,15 @@ export function QuickOpenOverlay({ open, initialQuery, stream, threadId, selecte
                       {result.hit.title || result.hit.uri}
                     </span>
                     <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--muted)", fontSize: 11 }}>
-                      {result.hit.snippet}
+                      {snippetParts(result.hit.snippet).map((part, i) =>
+                        part.hit ? (
+                          <strong key={i} style={{ color: "var(--text-primary)", fontWeight: 600 }}>
+                            {part.text}
+                          </strong>
+                        ) : (
+                          <span key={i}>{part.text}</span>
+                        ),
+                      )}
                     </span>
                     <span style={{ color: "var(--muted)", fontSize: 11 }}>{pageKindLabel(shortResource(result.hit.resource))}</span>
                   </button>
