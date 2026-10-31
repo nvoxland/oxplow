@@ -665,7 +665,13 @@ impl WorkspaceFilter {
                         // given to its effort), committed or not. Watching
                         // never runs them; only a deploy does. In git's view
                         // too: a shared one is committed code (git decides
-                        // which are there).
+                        // which are there): in a tree, `.oxplow/.gitignore`
+                        // decides, so a personal source is no one's
+                        // uncommitted work.
+                        Some("extensions") if !watching => {
+                            let abs = self.root.join(path);
+                            gitignore_decision(&self.gitignores, &abs, is_dir).is_ignore()
+                        }
                         Some("extensions") => false,
                         // Every other SUBDIRECTORY is pruned wholesale, so a
                         // walk never descends into `snapshots/` (thousands of
@@ -1291,6 +1297,33 @@ mod tests {
         assert!(filter.ignore_in_trees(inside, false));
         assert!(filter.ignore(Path::new(".claude/worktrees/x"), true));
         assert!(!filter.ignore(Path::new("src/a.rs"), false));
+    }
+
+    /// A personal extension source (`.oxplow/.gitignore` ignores it) is
+    /// watched but is no one's uncommitted work: out of a tree. A shared one
+    /// and `project/` are in both.
+    #[test]
+    fn a_personal_extension_source_is_out_of_a_tree_but_watched() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("repo");
+        std::fs::create_dir_all(root.join(".oxplow/extensions")).unwrap();
+        std::fs::write(
+            root.join(".oxplow/.gitignore"),
+            "*\n!.gitignore\n!project.yaml\n!extensions/\nextensions/*\n!extensions/project/\n!extensions/project/**\n!extensions/team/\n!extensions/team/**\n",
+        )
+        .unwrap();
+        let f = WorkspaceFilter::build(&root, Vec::<String>::new(), Vec::<String>::new(), None);
+        let mine = Path::new(".oxplow/extensions/my-pages/pages/a.yaml");
+        assert!(!f.ignore(mine, false), "watched");
+        assert!(f.ignore_in_trees(mine, false), "not uncommitted work");
+        assert!(f.ignore_in_trees(Path::new(".oxplow/extensions/my-pages"), true));
+        assert!(!f.ignore_in_trees(Path::new(".oxplow/extensions"), true));
+        for kept in ["project", "team"] {
+            let file = format!(".oxplow/extensions/{kept}/pages/a.yaml");
+            assert!(!f.ignore_in_trees(Path::new(&file), false), "{kept}");
+            let folder = format!(".oxplow/extensions/{kept}");
+            assert!(!f.ignore_in_trees(Path::new(&folder), true), "{kept}");
+        }
     }
 
     #[test]

@@ -79,7 +79,10 @@ source directly: an edit changes nothing until it is deployed.
   every `root.join(ext.path)` reader finds it. The file watcher never looks
   under `.oxplow/runtime/`; it does watch `.oxplow/extensions/` (an agent's
   edits to a source are its work, snapshotted and given to its effort), and
-  watching never activates anything.
+  watching never activates anything. A tree (the Uncommitted page, a diff)
+  is git's view: a personal source, which `.oxplow/.gitignore` ignores, is
+  no one's uncommitted work there (`WorkspaceFilter::ignore_in_trees`), a
+  shared one and `project/` are.
 - **Shipped deployments:** `oxplow-foundation` and `oxplow-bundled` ship
   inside oxplow (`bundled_extensions::BUNDLED`, each one's files through
   `BundledExtension::files()`) and are written to the store once per hash as
