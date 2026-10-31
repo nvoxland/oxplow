@@ -222,7 +222,6 @@ metrics:
   title: Avg cyclomatic complexity
   measure: oxplow.complexity
   expression: "AVG(value)"
-  unit: count
   direction: lower-better
   displayKind: gauge
   category: static-quality

@@ -138,7 +138,8 @@ test("sparkline and badge formats draw a line and a pill", () => {
   const view = render(<VizView run={run} onOpenPage={() => {}} />);
   const first = view.getByTestId("viz-row-0");
   expect(first.querySelector("[data-testid=viz-sparkline] svg")).not.toBeNull();
-  expect(first.querySelector("[data-testid=viz-sparkline]")!.textContent).toContain("4");
+  // The drawing alone: the last value is a column of its own, not raw text beside it.
+  expect(first.querySelector("[data-testid=viz-sparkline]")!.textContent).toBe("");
   expect(first.querySelector("[data-testid=viz-badge]")!.textContent).toBe("high");
   // A cell that isn't a series stays plain text.
   const second = view.getByTestId("viz-row-1");

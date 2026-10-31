@@ -520,9 +520,8 @@ function RowsBody({
     const text = itemsList ? (
       <ItemsCell items={itemsList} linkStyle={linkStyle} />
     ) : series ? (
-      <span data-testid="viz-sparkline" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+      <span data-testid="viz-sparkline" title={formatted} style={{ display: "inline-flex", alignItems: "center" }}>
         <Sparkline values={series} width={72} height={18} />
-        <span>{formatted}</span>
       </span>
     ) : c.format === "badge" && formatted !== "" ? (
       <span
