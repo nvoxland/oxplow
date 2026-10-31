@@ -645,37 +645,13 @@ pub fn run_exec_authorized_at(
             .env("OXPLOW_PROJECT_DIR", &location.project)
             .env("OXPLOW_CODE_DIR", &location.directory);
     }
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        command.process_group(0);
-    }
+    crate::process_group::ProcessGroup::prepare(&mut command);
     check().map_err(CollectError::Exec)?;
     let mut child = command
         .spawn()
         .map_err(|e| CollectError::Exec(format!("spawn {program}: {e}")))?;
 
-    struct Group(Option<u32>);
-    impl Group {
-        fn stop(&mut self) {
-            let pid = self.0.take();
-            #[cfg(not(unix))]
-            let _ = pid;
-            #[cfg(unix)]
-            if let Some(pid) = pid.and_then(|p| i32::try_from(p).ok()).filter(|p| *p > 0) {
-                // SAFETY: the host created this child's process group.
-                unsafe {
-                    libc::kill(-pid, libc::SIGKILL);
-                }
-            }
-        }
-    }
-    impl Drop for Group {
-        fn drop(&mut self) {
-            self.stop();
-        }
-    }
-    let mut group = Group(Some(child.id()));
+    let group = crate::process_group::ProcessGroup::new(child.id());
 
     // Every pipe gets its own thread (tsk161). Writing the whole report to
     // stdin and only THEN calling `wait_with_output` deadlocks any streaming
@@ -1079,6 +1055,45 @@ mod tests {
             "returned in {:?} — the child was not actually killed",
             started.elapsed()
         );
+    }
+
+    /// The daemon's exit runs no destructors, so an `exec` program still
+    /// running then is ended by `process_group::stop_all`, with what it
+    /// started.
+    #[cfg(unix)]
+    #[test]
+    fn stop_all_ends_an_exec_program_and_what_it_started() {
+        let dir = tempfile::tempdir().unwrap();
+        let pidfile = dir.path().join("pid");
+        let script = format!("sleep 300 & echo $! > {}; wait", pidfile.display());
+        let runner = std::thread::spawn(move || {
+            let budget = Budget::with_timeout(std::time::Duration::from_secs(60));
+            let argv = vec!["sh".to_string(), "-c".to_string(), script];
+            run_exec_authorized(&budget, &argv, "{}", &|| Ok(()))
+        });
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let grandchild: i32 = loop {
+            if let Some(pid) = std::fs::read_to_string(&pidfile)
+                .ok()
+                .and_then(|t| t.trim().parse().ok())
+            {
+                break pid;
+            }
+            assert!(std::time::Instant::now() < deadline, "no pid written");
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        };
+        // SAFETY: signal 0 only probes whether the process exists.
+        let alive = || unsafe { libc::kill(grandchild, 0) == 0 };
+        assert!(alive());
+
+        crate::process_group::stop_all();
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while alive() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert!(!alive(), "the program's child outlived stop_all");
+        let _ = runner.join();
     }
 
     #[test]

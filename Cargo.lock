@@ -5024,6 +5024,7 @@ dependencies = [
  "starlark",
  "sxd-document",
  "sxd-xpath",
+ "tempfile",
  "thiserror 2.0.21",
 ]
 
