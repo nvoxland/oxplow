@@ -24,6 +24,12 @@ loaders:
       SELECT subject, body, author || CASE WHEN email = '' THEN '' ELSE ' <' || email || '>' END AS author,
              committed_at, sha, parents
       FROM v_commit WHERE sha = :sha
+  parent_commits:
+    sql: |
+      SELECT j.value AS sha, p.subject AS subject
+      FROM v_commit c, json_each(c.parents) j LEFT JOIN v_commit p ON p.sha = j.value
+      WHERE c.sha = :sha
+      ORDER BY j.key
   files:
     sql: |
       WITH RECURSIVE f(path, status, additions, deletions) AS (
@@ -54,19 +60,16 @@ view:
     title: Commit
     from: detail
     viz: detail
+    lead: body
     columns:
     - key: subject
       label: Subject
-    - key: body
-      label: Message
     - key: author
       label: Author
     - key: committed_at
       label: Date
     - key: sha
-      label: Version
-    - key: parents
-      label: Parents
+      label: Commit
     empty: Commit not found.
     actions:
     - id: cherry-pick
@@ -81,6 +84,19 @@ view:
       input:
         stream: str{{param.stream_id}}
         rev: '{{param.sha}}'
+  - id: parents
+    title: Parents
+    from: parent_commits
+    viz: table
+    hide_empty: true
+    columns:
+    - key: sha
+      label: Commit
+      link:
+        kind: commit
+        from: sha
+    - key: subject
+      label: Subject
   - id: files
     title: Files
     from: files

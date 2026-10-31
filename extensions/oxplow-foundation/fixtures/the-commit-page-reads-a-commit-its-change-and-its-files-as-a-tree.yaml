@@ -14,6 +14,7 @@ expect:
   loaders:
     row: { rows: [{ change_id: $any, head_revision: $any }] }
     detail: { rows: [{ subject: add things, sha: $change.rev }] }
+    parent_commits: { rows: [{ sha: $any, subject: base }] }
     files:
       rows:
         - { id: src, parent: null, name: src, icon: folder, file: null }
