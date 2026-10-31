@@ -570,6 +570,8 @@ async fn confirmation_is_a_persons_move_and_an_agents_run_doesnt_ask() {
     };
     assert_eq!(preview.command, "oxplow.kv.set");
     assert!(!preview.destructive);
+    // The person is told what it acts on, not only what it is.
+    assert_eq!(preview.details, ["k: a", "v: 1"]);
     assert_eq!(kv_value(&db, "a").await, None);
     assert!(
         bus.audit_store().list_recent(5).await.unwrap().is_empty(),

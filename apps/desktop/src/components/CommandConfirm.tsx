@@ -76,7 +76,7 @@ export function ConfirmBox({
     >
       <div style={{ fontSize: "var(--text-sm)" }}>
         <strong title={command}>{label}</strong>
-        {destructive ? <span style={{ color: "var(--severity-critical)" }}> — it can't be undone</span> : null}.
+        {destructive ? <span style={{ color: "var(--severity-critical)" }}> — this removes or rewrites something</span> : null}.
       </div>
       {spec ? <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>{spec.summary}</div> : null}
       {details.length > 0 ? (

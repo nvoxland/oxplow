@@ -1433,7 +1433,7 @@ impl CommandBus {
                 summary: spec.summary.clone(),
                 input: input.clone(),
                 destructive: matches!(confirm, oxplow_domain::Confirm::Destructive),
-                details: Vec::new(),
+                details: acts_on(&input),
             };
             let prepared = Prepared {
                 command: &command,
@@ -1896,3 +1896,36 @@ pub(crate) fn asks(command: &Command, actor: &Actor, input: &Value) -> oxplow_do
 
 #[cfg(test)]
 mod tests;
+
+/// What a confirmation names beyond the command: the call's plain input
+/// values, one `name: value` line each (a long one cut), so the person sees
+/// which commit or page it acts on.
+fn acts_on(input: &Value) -> Vec<String> {
+    const SHOWN: usize = 80;
+    let Some(fields) = input.as_object() else {
+        return Vec::new();
+    };
+    fields
+        .iter()
+        .filter_map(|(name, value)| {
+            // A secret is never echoed into a confirmation, a record or a log.
+            if ["secret", "password", "token", "credential"]
+                .iter()
+                .any(|word| name.to_lowercase().contains(word))
+            {
+                return None;
+            }
+            let text = match value {
+                Value::String(s) if !s.is_empty() => s.clone(),
+                Value::Number(n) => n.to_string(),
+                Value::Bool(b) => b.to_string(),
+                _ => return None,
+            };
+            let text = match text.char_indices().nth(SHOWN) {
+                Some((cut, _)) => format!("{}…", &text[..cut]),
+                None => text,
+            };
+            Some(format!("{name}: {text}"))
+        })
+        .collect()
+}
