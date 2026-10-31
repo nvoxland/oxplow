@@ -117,6 +117,9 @@ export function CenterTabs({ tabs, activeId, onActivate, onClose, header, onReor
       if (items.length > 0) {
         items.push({ id: "tab.close-sep", label: "", enabled: false, separator: true });
       }
+      if (tab.closable && !tab.pinned) {
+        items.push({ id: "tab.close", label: "Close", enabled: true, run: () => onClose(tab.id) });
+      }
       items.push({
         id: "tab.close-others",
         label: "Close Other Tabs",

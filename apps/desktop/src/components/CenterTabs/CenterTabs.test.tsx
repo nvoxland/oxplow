@@ -40,6 +40,18 @@ test("right-click any tab exposes the universal close items", () => {
   expect(getByTestId("menu-item-tab.close-right")).toBeTruthy();
 });
 
+test("right-click a closable tab offers Close for that tab", () => {
+  const closed: string[] = [];
+  const { getByTestId } = renderTabs({ onClose: (id) => closed.push(id) });
+  fireEvent.contextMenu(getByTestId("center-tab-oxplow:oxplow/file?path=b.ts"), { clientX: 10, clientY: 10 });
+  fireEvent.click(getByTestId("menu-item-tab.close"));
+  expect(closed).toEqual(["oxplow:oxplow/file?path=b.ts"]);
+  cleanup();
+  const again = renderTabs({});
+  fireEvent.contextMenu(again.getByTestId("center-tab-oxplow:oxplow/page?page=agent"), { clientX: 10, clientY: 10 });
+  expect(again.queryByTestId("menu-item-tab.close")).toBeNull();
+});
+
 test("Close Other Tabs closes every closable tab except the anchor", () => {
   const closed: string[] = [];
   const { getByTestId } = renderTabs({ onClose: (id) => closed.push(id) });
