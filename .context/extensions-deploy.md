@@ -306,6 +306,10 @@ naming its page (`<name>/…`), mounting at its slot or running its command
 one finding per extension, at the first place, `fix: requires: [x]`. The
 required foundation needs no declaration. A test turns on only what is
 declared, so the check says why before a fixture fails on a missing table.
+A metric's or a collector's measure must be declared by the extension,
+foundation or one it `requires:` (`check_measures`, also in
+`validate_extension`, where the other extensions are loaded); any other is
+a warning, so a typo isn't silent.
 
 **Writing a page** (`oxplow.extension.write_page { extension, page, spec,
 deploy? }`, `extension_deploy::write_page`) writes `pages/<page>.yaml` into

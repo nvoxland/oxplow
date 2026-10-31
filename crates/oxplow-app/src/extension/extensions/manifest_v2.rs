@@ -661,12 +661,11 @@ pub fn configuration_of(
     }
 }
 
-/// Problems with a manifest's own shape and lifecycle (not its
+/// The errors in a manifest's own shape and lifecycle (not its
 /// cross-references, which need the loaded pages). `file` is how the
 /// manifest is named in messages; `text` its source, for lines.
-pub fn check(m: &ManifestV2, file: &str, text: &str) -> (Vec<Diagnostic>, Vec<Diagnostic>) {
+pub fn check(m: &ManifestV2, file: &str, text: &str) -> Vec<Diagnostic> {
     let mut errors = Vec::new();
-    let mut warnings = Vec::new();
     errors.extend(configuration_of(m, file, text).1);
     if m.manifest != CURRENT {
         errors.push(at(
@@ -708,13 +707,6 @@ pub fn check(m: &ManifestV2, file: &str, text: &str) -> (Vec<Diagnostic>, Vec<Di
                     );
                 }
             }
-            if intent.examples.is_empty() {
-                warnings.push(
-                    Diagnostic::warning("intent.examples_empty", "`intent.examples` is empty")
-                        .at(file, key_line(text, "intent"))
-                        .fix("add at least one input → expected output so the extension can be tested and regenerated"),
-                );
-            }
         }
     }
     // An `engine` it names must be met by this oxplow.
@@ -744,7 +736,7 @@ pub fn check(m: &ManifestV2, file: &str, text: &str) -> (Vec<Diagnostic>, Vec<Di
         )),
         _ => {}
     }
-    (errors, warnings)
+    errors
 }
 
 /// `MAJOR.MINOR.PATCH`, numbers each, with an optional `-pre` suffix.
@@ -772,15 +764,17 @@ mod tests {
     #[test]
     fn a_minimal_manifest_is_clean() {
         let m = parse(OK);
-        let (errors, warnings) = check(&m, "ext/extension.yaml", OK);
+        let errors = check(&m, "ext/extension.yaml", OK);
         assert!(errors.is_empty(), "{errors:?}");
-        assert!(warnings.is_empty(), "{warnings:?}");
     }
 
+    /// `intent` is required. Its examples may be empty here: fixture files
+    /// are examples too, so whether it has none is the load's to say
+    /// (`fixtures_are_examples`), where the folder is.
     #[test]
-    fn intent_is_required_and_an_empty_examples_list_warns() {
+    fn intent_is_required() {
         let text = "manifest: 2\nname: acme\n";
-        let (errors, _) = check(&parse(text), "e/extension.yaml", text);
+        let errors = check(&parse(text), "e/extension.yaml", text);
         assert!(
             errors
                 .iter()
@@ -788,14 +782,8 @@ mod tests {
             "{errors:?}"
         );
         let text = "manifest: 2\nname: acme\nintent:\n  purpose: x\n";
-        let (errors, warnings) = check(&parse(text), "e/extension.yaml", text);
+        let errors = check(&parse(text), "e/extension.yaml", text);
         assert!(errors.is_empty(), "{errors:?}");
-        assert_eq!(warnings.len(), 1);
-        assert!(
-            warnings[0].render("").starts_with("e/extension.yaml:3:"),
-            "{}",
-            warnings[0].render("")
-        );
     }
 
     /// `permissions:` is checked as it parses: a misspelled or unknown
@@ -818,13 +806,10 @@ mod tests {
     #[test]
     fn an_engine_named_must_be_met() {
         let text = "manifest: 2\nname: acme\nengine: \">=0.1\"\nversion: 0.1.0\nintent:\n  purpose: x\n  examples: [{ name: a }]\n";
-        let (errors, warnings) = check(&parse(text), "e/extension.yaml", text);
-        assert!(
-            errors.is_empty() && warnings.is_empty(),
-            "{errors:?} {warnings:?}"
-        );
+        let errors = check(&parse(text), "e/extension.yaml", text);
+        assert!(errors.is_empty(), "{errors:?}");
         let text = "manifest: 2\nname: acme\nengine: \">=99.0\"\nintent:\n  purpose: x\n  examples: [{ name: a }]\n";
-        let (errors, _) = check(&parse(text), "e/extension.yaml", text);
+        let errors = check(&parse(text), "e/extension.yaml", text);
         assert!(
             errors
                 .iter()
@@ -852,7 +837,7 @@ mod tests {
         // schema is its provider's declarations'.
         assert!(serde_yaml::from_str::<ManifestV2>("manifest: 2\nname: a\nconfig: {}\n").is_err());
         let text = "manifest: 3\nname: acme\nintent: { purpose: x, examples: [{ name: a }] }\n";
-        let (errors, _) = check(&parse(text), "e/extension.yaml", text);
+        let errors = check(&parse(text), "e/extension.yaml", text);
         assert!(
             errors[0]
                 .message
@@ -860,7 +845,7 @@ mod tests {
             "{errors:?}"
         );
         let text = "manifest: 2\nname: acme\nintent: { purpose: x, origin: nope, examples: [{ name: a }] }\n";
-        let (errors, _) = check(&parse(text), "e/extension.yaml", text);
+        let errors = check(&parse(text), "e/extension.yaml", text);
         assert!(
             errors[0].message.contains("is not an oxplow URI"),
             "{errors:?}"

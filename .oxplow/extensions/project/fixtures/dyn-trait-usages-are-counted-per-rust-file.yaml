@@ -1,0 +1,11 @@
+# repo.rust_dyn: each `dyn Trait` in a Rust file counts; a file with none
+# and a file in another language give no fact.
+when:
+  collector: repo.scan_dyn
+  files:
+    "src/a.rs": "fn a(x: &dyn Fn()) -> Box<dyn std::error::Error> { todo!() }\n"
+    "src/b.rs": "fn b<T: Clone>(t: T) -> T { t }\n"
+    "web/c.ts": "const dyn = 1;\n"
+expect:
+  facts:
+    - {"measure": "repo.rust_dyn", "value": 2, "subject": "oxplow:oxplow/file?path=src/a.rs", "path": "src/a.rs", "dims": {"oxplow.language": "rust"}}

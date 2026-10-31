@@ -74,7 +74,9 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
    others; `$any` any value that's there; `{ $exact: v }` the whole value;
    `refused: <text>` a reason containing the text (anything that refuses
    or fails says `refused`). So a row `{ title: A }` checks its title only.
-   Give each example a fixture, `fixtures/<example>.yaml`: `given` (steps
+   Every `fixtures/<example>.yaml` runs, whether or not an
+   `intent.examples` entry names it (one that does adds a description; one
+   with no fixture runs nothing and is a warning). A fixture has `given` (steps
    run first), `when` (what it does — one key names the kind), `expect`
    (`$any` matches anything), and `model: { replies: [...] }` when it calls
    a model, and `requires: [<extension>…]` for more extensions that fixture

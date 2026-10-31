@@ -1663,17 +1663,17 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
     ext.build = build;
     ext.errors.extend(errors);
     ext.intent = manifest_v2::intent_of(&m, man, &manifest).0;
+    fixtures_are_examples(&mut ext, files);
     ext.description = m.description.clone();
     ext.configuration = manifest_v2::configuration_of(&m, man, &manifest).0;
     public_contracts::load(&mut ext, &m, &manifest, man);
-    let (errors, warnings) = manifest_v2::check(&m, man, &manifest);
+    let errors = manifest_v2::check(&m, man, &manifest);
     if !errors.is_empty()
         && (!m.exports.is_empty() || !m.imports.is_empty() || !m.import_guards.is_empty())
     {
         ext.public_contracts.invalid = true;
     }
     ext.errors.extend(errors);
-    ext.warnings.extend(warnings);
     let panel_files = m.panels.clone();
     let decorator_files = m.ui.decorators.clone();
     let resource_files = m.resources.clone();
@@ -1971,9 +1971,6 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             }
         }
         let err_at = |code: &str, key: &str, e: String| at(code, man, key_line(&manifest, key), e);
-        let warn_at = |code: &str, key: &str, e: String| {
-            Diagnostic::warning(code, e).at(man, key_line(&manifest, key))
-        };
         match parse_block(m.measures.clone()).and_then(|v| {
             oxplow_config::validate_measures(
                 v,
@@ -2080,47 +2077,6 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                 "datasets",
                 format!("datasets: {e}"),
             )),
-        }
-        // Cross-references inside the catalog: a metric's source measure
-        // and a collector's fact measures are normally ones this extension
-        // declares. A measure from another scope
-        // (the project's or another extension's `measures:`) resolves
-        // when the catalog is assembled, so that is a warning, not an
-        // error — but a typo would be silent otherwise.
-        // The `oxplow` namespace is shared by the extensions that ship with
-        // oxplow, so one of them may name a measure a sibling declares.
-        let shares = ext.namespace == oxplow_config::OXPLOW_NAMESPACE;
-        let measure_known = |key: &str| {
-            ext.measures.iter().any(|mm| mm.key.as_deref() == Some(key))
-                || (shares && key.starts_with("oxplow."))
-        };
-        for spec in &ext.metrics {
-            if let Some(sm) = spec.source_measure.as_deref() {
-                if !measure_known(sm) {
-                    ext.warnings.push(warn_at(
-                        "metric.unknown_measure",
-                        "metrics",
-                        format!(
-                            "metric `{}`: measure `{sm}` is not a measure this extension declares; it must come from the project's or another extension's `measures:`",
-                            spec.key.clone().unwrap_or_default()
-                        ),
-                    ));
-                }
-            }
-        }
-        for c in &ext.collectors {
-            for fact in &c.facts {
-                if !measure_known(fact) {
-                    ext.warnings.push(warn_at(
-                        "collector.unknown_measure",
-                        "collectors",
-                        format!(
-                            "collector `{}`: facts `{fact}`, which is not a measure this extension declares; it must come from the project's or another extension's `measures:`",
-                            c.id
-                        ),
-                    ));
-                }
-            }
         }
         manifest_v2::mounts_of(&m, man, &manifest)
     };
@@ -3338,11 +3294,65 @@ pub async fn validate_extension(
     let read = |rel: &str| files_at(root, &path).ok().and_then(|f| f.read(rel));
     prepare(layer, catalog, root, &mut ext, &read, commands).await;
     if let Ok(files) = files_at(root, &path) {
-        check_fixture_pairing(&mut ext, files.as_ref());
         check_credentials(&mut ext, files.as_ref());
+        check_measures(&mut ext, &declared, files.as_ref());
         check_dependencies(&mut ext, &declared, files.as_ref());
     }
     Ok(ext)
+}
+
+/// A metric's source measure and a collector's fact measures are normally
+/// ones `ext` declares, or ones an extension it may use declares: the
+/// required foundation, or one it `requires:`. Any other resolves only if
+/// something else happens to declare it when the catalog is assembled, so
+/// it is a warning, not an error — but a typo would be silent otherwise.
+/// The `oxplow` namespace is shared by the extensions that ship with
+/// oxplow, so one of them may name a measure a sibling declares.
+fn check_measures(ext: &mut Extension, others: &[Extension], files: &dyn ExtensionFiles) {
+    let shares = ext.namespace == oxplow_config::OXPLOW_NAMESPACE;
+    let usable: Vec<&str> = others
+        .iter()
+        .filter(|o| {
+            crate::bundled_extensions::is_required(&o.name) || ext.requires.contains(&o.name)
+        })
+        .flat_map(|o| o.measures.iter().filter_map(|m| m.key.as_deref()))
+        .chain(ext.measures.iter().filter_map(|m| m.key.as_deref()))
+        .collect();
+    let known = |key: &str| usable.contains(&key) || (shares && key.starts_with("oxplow."));
+    let manifest = files.read("extension.yaml").unwrap_or_default();
+    let warn_at = |code: &str, key: &str, e: String| {
+        Diagnostic::warning(code, e).at("extension.yaml", key_line(&manifest, key))
+    };
+    let mut found = Vec::new();
+    for spec in &ext.metrics {
+        if let Some(sm) = spec.source_measure.as_deref().filter(|sm| !known(sm)) {
+            found.push(warn_at(
+                "metric.unknown_measure",
+                "metrics",
+                format!(
+                    "metric `{}`: measure `{sm}` isn't declared by this extension, foundation \
+                     or an extension it requires",
+                    spec.key.clone().unwrap_or_default()
+                ),
+            ));
+        }
+    }
+    for c in &ext.collectors {
+        for fact in c.facts.iter().filter(|f| !known(f)) {
+            found.push(warn_at(
+                "collector.unknown_measure",
+                "collectors",
+                format!(
+                    "collector `{}`: facts `{fact}`, which isn't declared by this extension, \
+                     foundation or an extension it requires",
+                    c.id
+                ),
+            ));
+        }
+    }
+    ext.warnings.extend(found.into_iter().map(|d| {
+        d.fix("declare it under `measures:`, or add the extension that declares it to `requires:`")
+    }));
 }
 
 /// Another extension `ext` uses but doesn't declare — reads its dataset
@@ -3507,29 +3517,43 @@ fn check_credentials(ext: &mut Extension, files: &dyn ExtensionFiles) {
     }
 }
 
-/// A fixture runs only when an intent example names it, so a
-/// `fixtures/<name>.yaml` no example lists silently runs nothing (the
-/// reverse, an example with no fixture, is `extension test`'s warning: a
-/// fresh scaffold has such examples). `dataset-*` and `provider-*` fixtures
-/// belong to a dataset or a provider, not to an example.
-fn check_fixture_pairing(ext: &mut Extension, files: &dyn ExtensionFiles) {
-    let Some(intent) = &ext.intent else { return };
+/// A fixture file is an example: each `fixtures/<name>.yaml` no intent
+/// example names joins `intent.examples` (by name, after the listed ones),
+/// so writing a test is writing one file and everything that runs or reads
+/// the examples sees it. `dataset-*` and `provider-*` fixtures belong to a
+/// dataset or a provider, not to an example. An extension with neither is
+/// a warning: nothing tests it. (An intent example with no fixture is
+/// `extension test`'s warning: a fresh scaffold has such examples.)
+fn fixtures_are_examples(ext: &mut Extension, files: &dyn ExtensionFiles) {
+    let Some(intent) = &mut ext.intent else {
+        return;
+    };
     let fixtures = files.list("fixtures");
-    let mut orphans: Vec<&str> = fixtures
+    let mut unlisted: Vec<&str> = fixtures
         .iter()
         .filter_map(|f| f.strip_suffix(".yaml"))
         .filter(|n| !n.starts_with("dataset-") && !n.starts_with("provider-"))
         .filter(|n| !intent.examples.iter().any(|e| e.name == *n))
         .collect();
-    orphans.sort_unstable();
-    for name in orphans {
+    unlisted.sort_unstable();
+    intent
+        .examples
+        .extend(unlisted.into_iter().map(|name| manifest_v2::IntentExample {
+            name: name.to_string(),
+            input: serde_json::Value::Null,
+            expect: serde_json::Value::Null,
+        }));
+    if intent.examples.is_empty() {
+        let line = files
+            .read("extension.yaml")
+            .and_then(|text| manifest_v2::key_line(&text, "intent"));
         ext.warnings.push(
-            Diagnostic::warning(
-                "intent.orphan_fixture",
-                "no intent example names this fixture, so it never runs",
-            )
-            .at(format!("fixtures/{name}.yaml"), Some(1))
-            .fix(format!("add `{name}` to intent.examples")),
+            Diagnostic::warning("intent.examples_empty", "`intent.examples` is empty")
+                .at("extension.yaml", line)
+                .fix(
+                    "add a fixture (`fixtures/<example>.yaml`) so the extension can be tested \
+                     and regenerated",
+                ),
         );
     }
 }
@@ -5698,28 +5722,6 @@ view:
         );
     }
 
-    #[test]
-    fn a_metric_naming_a_measure_from_elsewhere_is_a_warning() {
-        let dir = tempfile::tempdir().unwrap();
-        let manifest = format!(
-            "{EXT_V2}measures:\n  - {{ key: review.todo, title: TODOs, unit: count, subjectKind: file, fold: last }}\nmetrics:\n  - {{ key: review.todo_total, title: TODO total, measure: review.todo, expression: \"SUM(value)\" }}\n  - {{ key: review.bad, title: Bad, measure: review.missing, expression: \"SUM(value)\" }}\n"
-        );
-        write(
-            dir.path(),
-            ".oxplow/extensions/review/extension.yaml",
-            &manifest,
-        );
-        let e = only(dir.path(), "review");
-        assert!(e.errors.is_empty(), "{:?}", e.errors);
-        let warn = e
-            .warnings
-            .iter()
-            .find(|m| m.contains("measure `review.missing`"))
-            .unwrap_or_else(|| panic!("{:?}", e.warnings));
-        assert!(e.shown(warn).contains("extension.yaml:"), "{warn:?}");
-        assert_eq!(e.metrics.len(), 2, "both specs still load");
-    }
-
     /// A manifest says its version, or it doesn't load — there is
     /// no v1 reader any more.
     #[test]
@@ -7785,11 +7787,12 @@ commands:
                 ext.errors
             );
         }
-        // A measure it doesn't declare is a warning, not an error.
+        // A measure it doesn't declare isn't the load's to judge: the
+        // check sees the extensions it may use (`check_measures`).
         assert!(
-            ext.warnings.iter().any(|w| w.contains("acme.other")),
+            !ext.errors.iter().any(|w| w.contains("acme.other")),
             "{:?}",
-            ext.warnings
+            ext.errors
         );
         // `gauges:` is a key the manifest doesn't have.
         let (_d, ext) = load_x(&[], "gauges:\n  - { key: acme.x }\n");

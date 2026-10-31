@@ -226,7 +226,8 @@ check already reported is not repeated.
   and binds every AI role to the **fixture model** (`oxplow_ai::fixture`,
   a host-registered kind no activation replaces): an example's `dataset: {
   replies }` is what it answers, in turn. No paid call, no provider.
-  It runs `check`, then every intent example with a fixture
+  It runs `check`, then every intent example with a fixture (every
+  fixture file is one: the load adds those no entry names)
   (`fixtures/<name>.yaml`: `input`, `expect`, `$any` matching anything):
   a page (`{ page, params? }` with `given:` steps, below), an event (`{ event
   }`: appended to the throwaway's log and delivered; the extension's

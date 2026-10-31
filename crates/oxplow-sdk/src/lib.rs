@@ -2007,9 +2007,6 @@ mod tests {
         assert!(!team_text.contains(&token), "{team_text}");
     }
 
-    /// A fixture that no intent example names never runs, and an example
-    /// without a fixture runs nothing: each is a finding that names the file
-    /// or example and the fix, not a bare "not found" later.
     /// An extension that reads another's dataset, mounts at its page or runs
     /// its command without declaring it (`requires:`, or importing what it
     /// reads) is a finding naming where and the fix: a test runs it
@@ -2085,15 +2082,63 @@ mod tests {
         assert!(!text.contains("uses `other`"), "{text}");
     }
 
+    /// A metric or collector over a measure another extension declares is
+    /// fine when that extension is one it may use: foundation (always
+    /// running), or one it `requires:`. A measure no such extension
+    /// declares is a warning (a typo would be silent otherwise).
     #[tokio::test]
-    async fn check_reports_fixtures_and_intent_examples_that_do_not_pair_up() {
+    async fn a_measure_from_an_extension_it_may_use_is_known() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            ".oxplow/extensions/other/extension.yaml",
+            "manifest: 2\nname: other\nintent:\n  purpose: x\nmeasures:\n  - { key: other.count, unit: count, subjectKind: repo, temporalSemantics: semi-additive, fold: last }\n",
+        );
+        let metric = |measure: &str| {
+            format!("  - {{ key: user.{}, title: T, measure: {measure}, expression: \"SUM(value)\", unit: count, direction: neutral, displayKind: gauge, category: static-quality, description: D. }}\n", measure.replace('.', "_"))
+        };
+        write(
+            dir.path(),
+            ".oxplow/extensions/user/extension.yaml",
+            &format!(
+                "manifest: 2\nname: user\nrequires: [other]\nintent:\n  purpose: x\nmetrics:\n{}{}{}",
+                metric("other.count"),
+                metric("oxplow.complexity"),
+                metric("nope.thing"),
+            ),
+        );
+        let report = check(
+            dir.path(),
+            "user",
+            &ExtensionCatalog::new(),
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        let text = render_findings(&report, Format::Text);
+        assert!(text.contains("measure `nope.thing`"), "{text}");
+        assert!(
+            !text.contains("measure `other.count`")
+                && !text.contains("measure `oxplow.complexity`"),
+            "{text}"
+        );
+    }
+
+    /// A fixture file is an example: it runs whether or not an intent
+    /// example names it, so writing a test is writing one file. An intent
+    /// example without a fixture runs nothing, which is a finding naming
+    /// the example and the fix.
+    #[tokio::test]
+    async fn a_fixture_runs_without_an_intent_example_naming_it() {
         let dir = tempfile::tempdir().unwrap();
         write(
             dir.path(),
             ".oxplow/extensions/pairs/extension.yaml",
             "manifest: 2\nname: pairs\nengine: \">=0.1\"\nintent:\n  purpose: x\n  examples: [{ name: listed }, { name: missing }]\n",
         );
-        for fixture in ["listed", "orphan", "dataset-counts", "provider-feed"] {
+        for fixture in ["listed", "unlisted", "dataset-counts", "provider-feed"] {
             write(
                 dir.path(),
                 &format!(".oxplow/extensions/pairs/fixtures/{fixture}.yaml"),
@@ -2111,15 +2156,15 @@ mod tests {
         .await
         .unwrap();
         let text = render_findings(&report, Format::Text);
-        assert!(
-            text.contains(
-                ".oxplow/extensions/pairs/fixtures/orphan.yaml:1: no intent example names this fixture, so it never runs — fix: add `orphan` to intent.examples"
-            ),
-            "{text}"
-        );
+        assert!(!text.contains("unlisted"), "{text}");
         let tested = extension_test::test_extension(dir.path(), "pairs", false)
             .await
             .unwrap();
+        let cases: Vec<&str> = tested.cases.iter().map(|c| c.name.as_str()).collect();
+        assert!(
+            cases.contains(&"example listed") && cases.contains(&"example unlisted"),
+            "{cases:?}"
+        );
         assert!(
             tested.warning_lines().iter().any(|w| w.starts_with(
                 ".oxplow/extensions/pairs/extension.yaml:6: intent example `missing` has no fixture, so it isn't run — fix: add fixtures/missing.yaml"
@@ -2127,12 +2172,31 @@ mod tests {
             "{:?}",
             tested.warnings
         );
-        // A kit's fixtures aren't intent examples.
+        // A kit's fixtures aren't examples.
         assert!(
-            !text.contains("dataset-counts") && !text.contains("provider-feed"),
-            "{text}"
+            !cases
+                .iter()
+                .any(|c| c.contains("dataset-counts") || c.contains("provider-feed")),
+            "{cases:?}"
         );
-        assert!(!text.contains("`listed`"), "{text}");
+        // An extension whose only examples are fixture files has examples.
+        write(
+            dir.path(),
+            ".oxplow/extensions/pairs/extension.yaml",
+            "manifest: 2\nname: pairs\nengine: \">=0.1\"\nintent:\n  purpose: x\n",
+        );
+        let report = check(
+            dir.path(),
+            "pairs",
+            &ExtensionCatalog::new(),
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        let text = render_findings(&report, Format::Text);
+        assert!(!text.contains("`intent.examples` is empty"), "{text}");
     }
 
     /// P9.D1: an effect reacting to another extension's event type checks

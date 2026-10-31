@@ -574,8 +574,10 @@ delete the YAML files in `lenses/`: they are what the loader refuses.
 
 **What the loader checks** (`Extension.errors` / `Extension.warnings`):
 - shape: unknown keys, `manifest` version, `intent` present and
-  `intent.origin` a canonical URI; an empty `intent.examples` is a
-  warning;
+  `intent.origin` a canonical URI; each `fixtures/<name>.yaml` no
+  intent example names joins `intent.examples` (`fixtures_are_examples`:
+  a fixture file is an example, so a test is one file), and an extension
+  with no example after that is a warning;
 - page files: each `pages/*.yaml` parses (`pages::schema::parse_page`:
   unknown keys are errors; a `replaceable` names a replaceable component
   and is placed once); an `icon` oxplow draws; the pages that a param's
