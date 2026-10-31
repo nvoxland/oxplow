@@ -181,6 +181,35 @@ test("↑/↓ and Enter work from the input, and the input names the row under t
   expect(closed).toBe(afterPick + 1);
 });
 
+// Pressing a row (a section header that opens, say) leaves the typing in
+// the input, so the keys that follow — Escape, ↑/↓ — still work.
+test("pressing a row keeps the input focused, so Escape still closes", async () => {
+  let closed = 0;
+  const view = render(
+    <QuickOpenOverlay
+      open
+      stream={stream}
+      threadId="thr1"
+      selectedFilePath={null}
+      offers={[]}
+      onClose={() => closed++}
+      onOpenFile={() => {}}
+      onOpenPage={() => {}}
+      onOpenSearchHit={() => {}}
+    />,
+  );
+  const input = view.getByPlaceholderText(/Search everything/);
+  input.focus();
+  const header = await view.findByTestId("launcher-category-Work");
+  // A press whose default isn't prevented moves focus to the button.
+  const pressed = fireEvent.mouseDown(header);
+  expect(pressed).toBe(false);
+  fireEvent.click(header);
+  expect(document.activeElement).toBe(input);
+  fireEvent.keyDown(input, { key: "Escape" });
+  expect(closed).toBe(1);
+});
+
 // Opened with a query (Find Usages from a file's menu), the box starts on it.
 test("a launcher opened with a query starts on it", () => {
   const view = render(

@@ -351,7 +351,13 @@ export function QuickOpenOverlay({ open, initialQuery, stream, threadId, selecte
       <div
         ref={panelRef}
         style={{ ...panelStyle, ...panelCoords }}
-        onMouseDown={(event) => event.stopPropagation()}
+        onMouseDown={(event) => {
+          event.stopPropagation();
+          // Pressing a row leaves focus in the input, where the keys are
+          // (Escape, ↑/↓, Enter): a row is a button, and a button pressed
+          // takes focus.
+          if ((event.target as HTMLElement).closest("button")) event.preventDefault();
+        }}
         // While it is open the launcher is where typing goes. After a reload
         // the window settles under it — a restored tab or terminal mounts and
         // takes focus — and the keys that follow reached neither (tsk1055).
