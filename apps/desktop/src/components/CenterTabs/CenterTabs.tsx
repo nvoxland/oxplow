@@ -432,6 +432,11 @@ export function CenterTabs({ tabs, activeId, onActivate, onClose, header, onReor
          *  order, not the strip's: a body React moves in the DOM reloads
          *  any frame in it (a custom component's iframe loads again, which
          *  reads as navigating away), so reordering the strip moves none. */}
+        {tabs.length === 0 ? (
+          <div role="status" data-testid="center-tabs-loading" style={{ padding: "8px 12px", color: "var(--text-muted)", fontSize: "var(--text-xs)" }}>
+            Loading…
+          </div>
+        ) : null}
         {[...tabs].sort((a, b) => byKey(a).localeCompare(byKey(b))).map((tab) => {
           const isActive = tab.id === active?.id;
           return (

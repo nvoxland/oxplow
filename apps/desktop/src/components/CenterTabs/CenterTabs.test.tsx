@@ -190,3 +190,10 @@ test("reordering the tabs moves no tab body", () => {
   observer.disconnect();
   expect(moved).toEqual([]);
 });
+
+test("with no tab ready yet, the body says Loading…", () => {
+  const { getByTestId } = render(
+    <CenterTabs tabs={[]} activeId={null} onActivate={() => {}} onClose={() => {}} onReorder={() => {}} />,
+  );
+  expect(getByTestId("center-tabs-loading").textContent).toBe("Loading…");
+});

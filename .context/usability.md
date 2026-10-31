@@ -1106,6 +1106,7 @@ declaring *what it is* and mounting the generic layer.
   (not a box on the target tab): the cursor's half of the hovered tab
   picks before/after, and the drop lands exactly there (`moveToIndex`).
   Pure reorder math lives in `centerTabsReorder.ts` (unit-tested).
+- **A tab area with no tab ready yet says "Loading…"** (`center-tabs-loading`), quiet and muted; the app shows the same line before the first stream loads. A blank pane is never the loading state.
 - **Right-clicking a center tab** opens its action menu: any kind-specific
   entries (the `CenterTab.contextMenu` slot) followed by a **"Close"** (closable, unpinned tabs only) and the universal **"Close Other Tabs"** /
   **"Close Tabs to the Right"** pair that `CenterTabs` appends for every

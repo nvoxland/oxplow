@@ -57,6 +57,7 @@ import type { DiffSpec } from "./components/Diff/DiffPane.js";
 import { builtInPages } from "./pages/builtInPages.js";
 import type { SlotNav } from "./pages/slotNav.js";
 import { RailHud } from "./components/RailHud/RailHud.js";
+import { useNarrowWindow } from "./windowWidth.js";
 import type { TabRef } from "./tabs/tabState.js";
 import { navigationKey } from "./tabs/navigationKeys.js";
 import { PageNavigationContext, type PageNavigation, type TabEditing } from "./tabs/PageNavigationContext.js";
@@ -220,6 +221,8 @@ function changeView(
 }
 
 export function App() {
+  // A window under 800 px wide gives the rail up so the page keeps the room.
+  const narrowWindow = useNarrowWindow();
   const [streams, setStreams] = useState<Stream[]>([]);
   const [threadStates, setThreadStates] = useState<Record<string, ThreadState>>({});
   const harnesses = useAgentHarnesses();
@@ -1962,10 +1965,12 @@ export function App() {
         />
         <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, minWidth: 0, background: "var(--surface-chrome)" }}>
         <div style={{ flex: 1, display: "flex", flexDirection: "row", minHeight: 0, minWidth: 0 }}>
-        <RailHud
-          streamId={stream?.id ?? null}
-          onOpenPage={handleOpenPage}
-        />
+        {narrowWindow ? null : (
+          <RailHud
+            streamId={stream?.id ?? null}
+            onOpenPage={handleOpenPage}
+          />
+        )}
         <div style={{
           flex: 1,
           display: "flex",
@@ -1978,7 +1983,7 @@ export function App() {
           // stays flush/square against the window edge. The border is
           // drawn on the panel itself so the corners stay closed
           // regardless of tab state.
-          marginLeft: 6,
+          marginLeft: narrowWindow ? 0 : 6,
           border: "1px solid var(--border-strong)",
           borderTopLeftRadius: 8,
           borderBottomLeftRadius: 8,
@@ -2010,7 +2015,7 @@ export function App() {
               }}
               onReorder={handleReorderCenterTabs}
             />
-          ) : <div style={{ padding: 12 }}>loading…</div>}
+          ) : <TabLoading />}
           {/* Generic comment layer for every plain-DOM page. Mounted once
               here (not per page): captureSelection only fires inside a
               data-ref-* region and skips editor/terminal surfaces, so a
