@@ -2388,6 +2388,7 @@ mod tests {
                 "oxplow.vcs.resolve_conflict",
                 "oxplow.vcs.stage",
                 "oxplow.vcs.status",
+                "oxplow.vcs.uncommit",
                 // Every work list's verbs, oxplow's own included.
                 "oxplow.work_item.comment",
                 "oxplow.work_item.create",

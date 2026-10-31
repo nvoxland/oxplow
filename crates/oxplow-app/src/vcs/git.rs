@@ -718,6 +718,17 @@ impl Vcs for GitProvider {
         .await
     }
 
+    async fn uncommit(&self, ws: &Path, rev: &str, parent: &str) -> Result<(), VcsError> {
+        not_an_option("rev", rev)?;
+        not_an_option("parent", parent)?;
+        let (ws, rev, parent) = (ws.to_path_buf(), rev.to_string(), parent.to_string());
+        blocking(move || {
+            repo_check(&ws)?;
+            oxplow_git::uncommit(&ws, &rev, &parent).map_err(VcsError::Failed)
+        })
+        .await
+    }
+
     async fn stage(&self, ws: &Path, paths: &[String]) -> Result<(), VcsError> {
         let (ws, paths) = (ws.to_path_buf(), paths.to_vec());
         blocking(move || {

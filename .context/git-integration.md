@@ -466,7 +466,9 @@ invoked as a separate binary, never linked as a library.
   applies anywhere else a sha is turned into an OID.
 - `oxplow.vcs.commit` runs `git add -u` (or `git add -A` with
   `include_untracked`) then `git commit -m`. Only the Files panel and the
-  uncommitted-changes page run it; no MCP tool commits.
+  uncommitted-changes page run it; no MCP tool commits. Its result carries an
+  inverse, `oxplow.vcs.uncommit` (soft reset to the prior head, changes stay
+  staged; refused once pushed, built on, or mid-merge), so the toast offers Undo.
 - Push, pull, fetch, merge and rebase are long: the desktop runs each
   command inside a `BackgroundTaskStore` row (`runAsBackgroundTask` in
   `api.ts`) so the bottom-bar `BackgroundTaskIndicator` shows progress.

@@ -4,7 +4,7 @@
 //! bus audits it, the result (the VCS's `OpOutcome`, conflicts included)
 //! on the audit row. A person's or an agent's — an agent's on its own
 //! stream only, as its terminal's `git` reaches only its own worktree; a
-//! destructive one asks a person first. None is undoable. Each names the stream it acts on; the router resolves
+//! destructive one asks a person first. Only `commit` is undoable (its inverse is `uncommit`, a soft reset of an unpushed commit). Each names the stream it acts on; the router resolves
 //! it strictly, so a missing stream never lands on the primary's branch.
 //!
 //! `vcs.*` go through the `Vcs` trait; `git.*` (rebase, cherry-pick,
@@ -19,7 +19,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use oxplow_domain::vcs::{ConflictChoice, OpOutcome, RemoteBranch, Vcs, VcsError};
-use oxplow_domain::{CommandError, DomainError, StreamId};
+use oxplow_domain::{CommandCall, CommandError, DomainError, StreamId};
 use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -90,13 +90,44 @@ where
     F: Fn(VcsTarget, PathBuf, I) -> Fut + Send + Sync + 'static,
     Fut: Future<Output = Result<Value, CommandError>> + Send + 'static,
 {
+    vcs_op_with_inverse(
+        capability,
+        name,
+        touched,
+        confirm,
+        false,
+        target,
+        move |t, ws, i| {
+            let ran = op(t, ws, i);
+            async move { ran.await.map(|v| (v, None)) }
+        },
+    )
+}
+
+/// `vcs_op` for an operation that can say how it is undone: the op
+/// answers its result and, when there is something to undo, the call that
+/// does it.
+fn vcs_op_with_inverse<I, F, Fut>(
+    capability: &str,
+    name: &str,
+    touched: Touched,
+    confirm: Confirm,
+    undoable: bool,
+    target: &VcsTarget,
+    op: F,
+) -> Op
+where
+    I: DeserializeOwned + JsonSchema + StreamInput + Send + 'static,
+    F: Fn(VcsTarget, PathBuf, I) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = Result<(Value, Option<CommandCall>), CommandError>> + Send + 'static,
+{
     let target = target.clone();
     let op = Arc::new(op);
     Op::new(
         capability,
         name,
         schema::<I>(),
-        false,
+        undoable,
         Handler::External(Arc::new(move |invocation: Invocation, input: Value| {
             let target = target.clone();
             let op = op.clone();
@@ -124,8 +155,9 @@ where
                 match ran {
                     // Once the run is recorded: what shows the workspace
                     // and its refs reads them again.
-                    Ok(result) => Ok(HandlerOutput {
+                    Ok((result, inverse)) => Ok(HandlerOutput {
                         result,
+                        inverse,
                         after_commit: Some(Box::new(announce)),
                         ..HandlerOutput::default()
                     }),
@@ -218,6 +250,22 @@ pub struct CommitInput {
 fn yes() -> bool {
     true
 }
+
+/// The inverse of `commit`: take the commit back, its changes staying
+/// staged.
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct UncommitInput {
+    /// The stream whose workspace holds the commit (`str1`).
+    pub stream: String,
+    /// The commit to take back; it must still be the head.
+    pub rev: String,
+    /// Its parent, where the head returns to.
+    pub parent: String,
+}
+
+/// Run by `commit`'s undo.
+const UNCOMMIT: &str = "oxplow.vcs.uncommit";
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -320,6 +368,7 @@ pub struct IgnoreInput {
 
 stream_input!(
     CommitInput,
+    UncommitInput,
     PathsInput,
     FetchInput,
     RemoteBranchInput,
@@ -334,13 +383,18 @@ stream_input!(
 pub fn ops(target: VcsTarget) -> Vec<Op> {
     let t = &target;
     vec![
-        vcs_op(
+        vcs_op_with_inverse(
             "vcs.write",
             "commit",
             Touched::Refs,
             Confirm::Never,
+            true,
             t,
             |t, ws, i: CommitInput| async move {
+                // The head the commit builds on; a first commit has none,
+                // and nothing to move back to.
+                let parent = t.vcs.head(&ws).await.map_err(vcs_err)?.revision;
+                let stream = i.stream.clone();
                 let rev = t
                     .vcs
                     .commit(
@@ -352,12 +406,33 @@ pub fn ops(target: VcsTarget) -> Vec<Op> {
                     )
                     .await
                     .map_err(vcs_err)?;
-                Ok(json!({
-                    "success": true,
-                    "revision": format!("{}:{rev}", t.vcs.rev_kind()),
-                    // The commit's id in its VCS (a git sha), for what takes it bare.
-                    "rev": rev,
-                }))
+                let inverse = parent.map(|parent| CommandCall {
+                    name: UNCOMMIT.into(),
+                    input: json!({ "stream": stream, "rev": rev, "parent": parent }),
+                });
+                Ok((
+                    json!({
+                        "success": true,
+                        "revision": format!("{}:{rev}", t.vcs.rev_kind()),
+                        // The commit's id in its VCS (a git sha), for what takes it bare.
+                        "rev": rev,
+                    }),
+                    inverse,
+                ))
+            },
+        ),
+        vcs_op(
+            "vcs.write",
+            "uncommit",
+            Touched::Refs,
+            Confirm::Never,
+            t,
+            |t, ws, i: UncommitInput| async move {
+                t.vcs
+                    .uncommit(&ws, &i.rev, &i.parent)
+                    .await
+                    .map_err(vcs_err)?;
+                done()
             },
         ),
         vcs_op(
@@ -793,5 +868,137 @@ mod tests {
             .await
             .unwrap_err();
         assert!(format!("{err:?}").contains("str999"), "{err:?}");
+    }
+
+    fn git(root: &std::path::Path, args: &[&str]) -> String {
+        let out = std::process::Command::new("git")
+            .args(args)
+            .current_dir(root)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "git {args:?}: {out:?}");
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    }
+
+    /// A commit says how it is undone; undoing it moves the head back to
+    /// its parent and leaves the changes staged, the files as they were.
+    /// A first commit (no parent) has nothing to go back to.
+    #[tokio::test]
+    async fn a_commit_is_undone_by_a_soft_reset() {
+        let f = services_with_effort().await;
+        let svc = &f.svc;
+        let root = svc.layout.project_dir.clone();
+        std::fs::write(root.join("a.txt"), "one\n").unwrap();
+        let base = commit_all(&root, "base");
+        let stream = svc.stream_store.list().await.unwrap()[0].id.to_string();
+        std::fs::write(root.join("a.txt"), "two\n").unwrap();
+        std::fs::write(root.join("new.txt"), "new\n").unwrap();
+        let out = svc
+            .commands
+            .run(
+                &Actor::Human,
+                "oxplow.vcs.commit",
+                json!({ "stream": stream, "message": "work" }),
+                false,
+            )
+            .await
+            .unwrap();
+        let rev = out.result["rev"].as_str().unwrap().to_string();
+        let inverse = out.inverse.clone().expect("a commit is undoable");
+        assert_eq!(inverse.name, "oxplow.vcs.uncommit");
+        assert_eq!(
+            inverse.input,
+            json!({ "stream": stream, "rev": rev, "parent": base })
+        );
+        svc.commands
+            .undo(&Actor::Human, out.audit_id.unwrap(), false)
+            .await
+            .expect("the commit is undone");
+        assert_eq!(git(&root, &["rev-parse", "HEAD"]), base);
+        assert_eq!(
+            git(&root, &["status", "--porcelain"]),
+            "M  a.txt\nA  new.txt"
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.join("a.txt")).unwrap(),
+            "two\n"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_first_commit_has_no_inverse() {
+        let f = services_with_effort().await;
+        let svc = &f.svc;
+        let root = svc.layout.project_dir.clone();
+        let stream = svc.stream_store.list().await.unwrap()[0].id.to_string();
+        // A repository with no commit yet.
+        git(&root, &["update-ref", "-d", "HEAD"]);
+        std::fs::write(root.join("a.txt"), "one\n").unwrap();
+        let out = svc
+            .commands
+            .run(
+                &Actor::Human,
+                "oxplow.vcs.commit",
+                json!({ "stream": stream, "message": "first" }),
+                false,
+            )
+            .await
+            .unwrap();
+        assert!(out.inverse.is_none());
+    }
+
+    /// Undo is refused, and changes nothing, once something is committed
+    /// on top, once a remote holds the commit, or mid-merge.
+    #[tokio::test]
+    async fn undoing_a_commit_is_refused_when_it_moved_on_was_pushed_or_is_mid_merge() {
+        let f = services_with_effort().await;
+        let svc = &f.svc;
+        let root = svc.layout.project_dir.clone();
+        std::fs::write(root.join("a.txt"), "one\n").unwrap();
+        commit_all(&root, "base");
+        let stream = svc.stream_store.list().await.unwrap()[0].id.to_string();
+        let commit = |body: &'static str| {
+            let (svc, root, stream) = (svc.clone(), root.clone(), stream.clone());
+            async move {
+                std::fs::write(root.join("a.txt"), body).unwrap();
+                svc.commands
+                    .run(
+                        &Actor::Human,
+                        "oxplow.vcs.commit",
+                        json!({ "stream": stream, "message": body }),
+                        false,
+                    )
+                    .await
+                    .unwrap()
+            }
+        };
+        let refused = |out: crate::commands::CommandOutcome, why: &'static str| {
+            let (svc, root) = (svc.clone(), root.clone());
+            async move {
+                let head = git(&root, &["rev-parse", "HEAD"]);
+                let err = svc
+                    .commands
+                    .undo(&Actor::Human, out.audit_id.unwrap(), false)
+                    .await
+                    .unwrap_err();
+                assert!(format!("{err:?}").contains(why), "{err:?}");
+                assert_eq!(git(&root, &["rev-parse", "HEAD"]), head, "nothing moved");
+            }
+        };
+        // Something on top.
+        let first = commit("two\n").await;
+        let _second = commit("three\n").await;
+        refused(first, "no longer that commit").await;
+        // Pushed.
+        let third = commit("four\n").await;
+        let sha = git(&root, &["rev-parse", "HEAD"]);
+        git(&root, &["update-ref", "refs/remotes/origin/main", &sha]);
+        refused(third, "was pushed").await;
+        // Mid-merge.
+        git(&root, &["update-ref", "-d", "refs/remotes/origin/main"]);
+        let fourth = commit("five\n").await;
+        let head = git(&root, &["rev-parse", "HEAD"]);
+        std::fs::write(root.join(".git/MERGE_HEAD"), format!("{head}\n")).unwrap();
+        refused(fourth, "in progress").await;
     }
 }

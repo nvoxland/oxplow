@@ -496,6 +496,11 @@ pub trait Vcs: Send + Sync {
     // --- mutations (through the `vcs.*` commands only) ---
     /// Commit the workspace's changes; the new revision's id.
     async fn commit(&self, ws: &Path, req: CommitRequest) -> Result<String, VcsError>;
+    /// Take back the unpushed commit `rev` whose parent is `parent`: the
+    /// head returns to `parent`, the commit's changes stay staged. Refused,
+    /// nothing changed, when the head is no longer `rev`, a remote holds
+    /// it, or an operation (merge, rebase, …) is in progress.
+    async fn uncommit(&self, ws: &Path, rev: &str, parent: &str) -> Result<(), VcsError>;
     async fn stage(&self, ws: &Path, paths: &[String]) -> Result<(), VcsError>;
     /// Throw away the workspace's changes to `paths`.
     async fn discard(&self, ws: &Path, paths: &[String]) -> Result<(), VcsError>;

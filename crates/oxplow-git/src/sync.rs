@@ -95,6 +95,40 @@ pub fn commit(repo: &Path, message: &str, include_untracked: bool) -> std::io::R
     run(&["commit", "-m", message], repo)
 }
 
+/// Take back the commit `sha` that `parent` precedes: a soft reset, so
+/// the head moves to `parent` and the commit's changes stay staged
+/// (index and working tree untouched). Refused, with nothing changed,
+/// when the head is no longer `sha`, `parent` isn't its parent, a remote
+/// branch holds the commit (it was pushed), or the repository is
+/// mid-merge, rebase, cherry-pick or revert.
+pub fn uncommit(repo: &Path, sha: &str, parent: &str) -> Result<(), String> {
+    let io = |e: std::io::Error| e.to_string();
+    if let Some(op) = crate::conflict::get_repo_conflict_state(repo).operation {
+        return Err(format!("a {op:?} is in progress; finish or abort it first").to_lowercase());
+    }
+    let head = run(&["rev-parse", "--verify", "HEAD^{commit}"], repo).map_err(io)?;
+    if !head.success || head.stdout.trim() != sha {
+        return Err("the head is no longer that commit (something was committed after it, or the branch moved)".into());
+    }
+    let actual = run(&["rev-parse", "--verify", &format!("{sha}^")], repo).map_err(io)?;
+    if !actual.success || actual.stdout.trim() != parent {
+        return Err("the commit's parent is not the one expected".into());
+    }
+    let remote = run(&["branch", "-r", "--contains", sha], repo).map_err(io)?;
+    if !remote.success {
+        return Err(remote.stderr.trim().to_string());
+    }
+    if !remote.stdout.trim().is_empty() {
+        return Err("the commit was pushed (a remote branch holds it); revert it instead".into());
+    }
+    let reset = run(&["reset", "--soft", parent], repo).map_err(io)?;
+    if reset.success {
+        Ok(())
+    } else {
+        Err(reset.stderr.trim().to_string())
+    }
+}
+
 /// Switch the workspace to branch `name`, creating it at the current
 /// head when `create`.
 pub fn checkout_branch(repo: &Path, name: &str, create: bool) -> std::io::Result<GitOpResult> {

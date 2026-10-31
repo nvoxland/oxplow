@@ -1814,6 +1814,11 @@ commands:
     op: merge
     confirm: destructive
     example: {"stream": "str1", "rev": "main"}
+  - name: vcs.uncommit
+    summary: "Take back the stream's last commit (`rev`, whose parent is `parent`): the head returns to `parent` and the commit's changes stay staged. Refused when the head moved on, a remote holds the commit, or a merge or rebase is in progress. This is what Undo on a commit runs."
+    scope: vcs.write
+    op: uncommit
+    example: {"stream": "str1", "rev": "3f9c2a1", "parent": "8b41d0e"}
   - name: vcs.rename_branch
     summary: "Rename a branch."
     scope: vcs.write
