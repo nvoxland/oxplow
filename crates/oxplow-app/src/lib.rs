@@ -2286,6 +2286,8 @@ mod tests {
                 // A provider's process restarts (P7.C1; was provider.enable).
                 "oxplow.contribution.enable",
                 "oxplow.contribution.enable_all",
+                // The person's New Dashboard… over extension.new_dashboard.
+                "oxplow.dashboard.new",
                 // A consumer's handler runs again (the event pump owns the
                 // letter; the handler may reach outside oxplow).
                 "oxplow.delivery.discard",
