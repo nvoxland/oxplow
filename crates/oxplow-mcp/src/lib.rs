@@ -53,7 +53,15 @@ impl ExtensionChecks for SdkChecks {
         let report = oxplow_sdk::check(root, name, &svc.extension_catalog, None, None, None)
             .await
             .map_err(sdk_check_error)?;
-        serde_json::to_value(report).map_err(|e| CheckError::Failed(e.to_string()))
+        let mut report =
+            serde_json::to_value(report).map_err(|e| CheckError::Failed(e.to_string()))?;
+        // The report only: the parsed extension is megabytes for a large
+        // one, more than an agent's tool output holds (`oxplow extension
+        // check --json` still prints it).
+        if let Some(fields) = report.as_object_mut() {
+            fields.remove("extension");
+        }
+        Ok(report)
     }
 }
 
@@ -987,6 +995,10 @@ mod tests {
                     || e["message"].as_str().is_some_and(|m| m.contains("broken"))),
             "{v}"
         );
+        // The report only: the parsed extension (megabytes for a large
+        // one) is `oxplow extension check --json`'s, not an agent's.
+        assert!(v.get("extension").is_none(), "{v}");
+        assert!(v.get("ok").is_some() && v.get("warnings").is_some(), "{v}");
     }
 
     #[tokio::test]
