@@ -131,9 +131,10 @@ export function rowGroups(viz: VizConfig, result: SqlQueryResult): RowGroup[] | 
   const by = viz.group?.by;
   const i = by ? result.columns.indexOf(by) : -1;
   if (!by || i === -1) return null;
+  const labelOf = (v: SqlCell): string => (v !== null && viz.group?.labels?.[String(v)]) || formatCell(v);
   const groups = new Map<string, RowGroup>();
   for (const v of viz.group?.values ?? []) {
-    groups.set(v, { key: v, value: v, label: formatCell(v), rows: [], ref: null });
+    groups.set(v, { key: v, value: v, label: labelOf(v), rows: [], ref: null });
   }
   for (const row of result.rows) {
     const v = row[i] ?? null;
@@ -148,7 +149,7 @@ export function rowGroups(viz: VizConfig, result: SqlQueryResult): RowGroup[] | 
     groups.set(key, {
       key,
       value: v,
-      label: formatCell(v),
+      label: labelOf(v),
       rows: [row],
       ref: link ? cellLinkRef(link, by, row, result.columns) : null,
     });

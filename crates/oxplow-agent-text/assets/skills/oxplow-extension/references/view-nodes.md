@@ -180,7 +180,7 @@ exists for actions and links).
   `tone: <column>`: `accent`, `success`, `warning`, `danger`, `muted`.
   Unknown values draw nothing.
 
-Row styling on `list`/`table`: `group: { by: <column>, link? }` puts rows
+Row styling on `list`/`table`: `group: { by: <column>, link?, labels? }` (`labels: { stored_value: Heading }` names a heading in plain words) puts rows
 under a heading per value; `emphasis: <column>` highlights rows whose value
 is truthy; `depth: <column>` indents.
 

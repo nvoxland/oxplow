@@ -6485,6 +6485,12 @@ export type VizGroup = {
 	 *  rows have beyond these follow, in the order each first appears.
 	 */
 	values?: string[],
+	/**
+	 *  The heading to show for a value, where the value itself (what a
+	 *  drop binds as `{{group.value}}`) reads badly: `in_progress: In
+	 *  progress`. A value with none shows as it is.
+	 */
+	labels?: { [key in string]: string },
 };
 
 /**  `hunks` viz: the file and the two revisions each row diffs. */

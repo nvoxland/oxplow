@@ -451,9 +451,11 @@ whose loader does not return one (`viz_column_problems`). An agent reads
   emphasis backgrounds win over it.
 
 **Row styling** (`row_style_problem`), each naming a result column:
-`group: { by, link?, values? }` (`list` / `table` / `board`) puts rows
+`group: { by, link?, values?, labels? }` (`list` / `table` / `board`) puts rows
 under a heading per distinct `by` value, in the order each first appears,
-folding (▾ / ▸) and counting its rows; `emphasis` (`list` / `table` /
+folding (▾ / ▸) and counting its rows; `labels: { value: heading }` names a
+heading in plain words while the value stays what a drop binds
+(`in_progress: In Progress`); `emphasis` (`list` / `table` /
 `tree`) highlights rows with a truthy value; `depth` (`list` / `table`) is
 a whole number 0–8 that indents. They are never shown as cells.
 

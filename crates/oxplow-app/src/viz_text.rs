@@ -1264,6 +1264,7 @@ mod tests {
                 by: "bucket".into(),
                 link: None,
                 values: Vec::new(),
+                labels: Default::default(),
             });
             l.depth = Some("d".into());
         });
@@ -1283,6 +1284,7 @@ mod tests {
                 by: "state".into(),
                 link: None,
                 values: vec!["todo".into(), "done".into()],
+                labels: Default::default(),
             });
         });
         assert_eq!(

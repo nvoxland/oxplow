@@ -854,6 +854,11 @@ pub struct VizGroup {
     /// rows have beyond these follow, in the order each first appears.
     #[serde(default)]
     pub values: Vec<String>,
+    /// The heading to show for a value, where the value itself (what a
+    /// drop binds as `{{group.value}}`) reads badly: `in_progress: In
+    /// progress`. A value with none shows as it is.
+    #[serde(default)]
+    pub labels: std::collections::BTreeMap<String, String>,
 }
 
 /// A value the viewer (or an agent) can set when running the viz,

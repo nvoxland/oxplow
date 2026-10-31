@@ -1,0 +1,14 @@
+title: States of a work item
+description: The states a work item may be moved to, each with its plain name.
+hidden: true
+loaders:
+  work_item_states:
+    rows:
+    - { value: todo, label: To Do }
+    - { value: in_progress, label: In Progress }
+    - { value: blocked, label: Blocked }
+    - { value: done, label: Done }
+    - { value: canceled, label: Canceled }
+view:
+  from: work_item_states
+  viz: table

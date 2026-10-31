@@ -99,6 +99,16 @@ describe("row groups and styling", () => {
     ]);
   });
 
+  test("a group's labels name its headings; the value stays what a drop binds", () => {
+    const l = viz({ viz: "board", group: { by: "bucket", link: null, values: ["Done", "Later"], labels: { Done: "Finished", Later: "Not yet" } } });
+    const groups = rowGroups(l, res)!;
+    expect(groups.map((g) => [g.value, g.label])).toEqual([
+      ["Done", "Finished"],
+      ["Later", "Not yet"],
+      ["Ready", "Ready"],
+    ]);
+  });
+
   test("an ungrouped viz, or one whose group column isn't in the result, has no groups", () => {
     expect(rowGroups(viz({ viz: "list" }), res)).toBeNull();
     expect(rowGroups(viz({ viz: "list", group: { by: "gone", link: null } }), res)).toBeNull();

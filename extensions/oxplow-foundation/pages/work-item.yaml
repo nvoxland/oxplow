@@ -94,6 +94,8 @@ view:
       mode: edit
       fields:
       - to
+      choices:
+        to: oxplow-foundation/work-item-states
   - id: fields
     title: Details
     from: fields

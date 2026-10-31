@@ -8319,6 +8319,7 @@ commands:
                     head: None,
                 }),
                 values: Vec::new(),
+                labels: Default::default(),
             })
         );
         assert_eq!(a.emphasis.as_deref(), Some("current"));

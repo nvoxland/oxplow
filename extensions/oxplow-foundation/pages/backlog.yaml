@@ -70,6 +70,12 @@ view:
       - blocked
       - done
       - canceled
+      labels:
+        todo: To Do
+        in_progress: In Progress
+        blocked: Blocked
+        done: Done
+        canceled: Canceled
     depth: depth
     columns:
     - key: title
@@ -106,7 +112,7 @@ view:
         uri: '{{row.uri}}'
         to: '{{group.value}}'
     - id: to-todo
-      label: Mark Ready
+      label: Mark To Do
       command: oxplow.work_item.transition
       row: true
       bulk: true

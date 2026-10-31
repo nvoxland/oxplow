@@ -4,7 +4,7 @@ hidden: true
 loaders:
   new_task_states:
     sql: |
-      SELECT 'todo' AS value, 'Ready' AS label
+      SELECT 'todo' AS value, 'To Do' AS label
       UNION ALL
       SELECT 'blocked', 'Blocked'
 view:

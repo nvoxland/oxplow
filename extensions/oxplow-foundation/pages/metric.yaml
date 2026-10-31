@@ -51,7 +51,7 @@ loaders:
              END AS in_range,
              m.title AS measure,
              CASE WHEN m.key IS NOT NULL THEN uri('oxplow/measure', 'measure', m.key) || '#oxplow.renderer=oxplow-foundation/measure' END AS measure_target,
-             s.expression, s.scope, s.category, s.language, c.enabled, (c.enabled = 0) AS can_enable,
+             s.expression, s.scope, s.category, s.language, c.enabled, CASE WHEN c.enabled = 1 THEN 'Yes' ELSE 'No' END AS enabled_text, (c.enabled = 0) AS can_enable,
              s.extension,
              CASE WHEN s.extension IS NOT NULL THEN 'oxplow:oxplow/extension?name=' || s.extension END AS extension_target
       FROM v_metric_catalog c
@@ -109,7 +109,7 @@ view:
     - { key: scope, label: Scope }
     - { key: category, label: Category }
     - { key: language, label: Language }
-    - { key: enabled, label: Enabled }
+    - { key: enabled_text, label: Enabled }
     - { key: extension, label: Extension, link: { kind: page, from: extension_target } }
     empty: That metric isn't known to this project.
     actions:

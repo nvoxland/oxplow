@@ -63,6 +63,12 @@ view:
       - blocked
       - done
       - canceled
+      labels:
+        todo: To Do
+        in_progress: In Progress
+        blocked: Blocked
+        done: Done
+        canceled: Canceled
     columns:
     - key: title
       label: Task
