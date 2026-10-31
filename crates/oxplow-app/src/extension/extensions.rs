@@ -3933,6 +3933,33 @@ async fn prepare(
                 );
             }
         }
+        // A page's `label` reads the same first row.
+        if let Some(Ok(first)) = page.first_loader().and_then(|l| loaders.get(&l.name)) {
+            if let Ok(refs) = label_refs(page.label.as_deref()) {
+                for (_, column) in refs.iter().filter(|(from, _)| *from == LabelFrom::Row) {
+                    if !first.columns.contains(column) {
+                        ext.warnings.push(
+                            Diagnostic::warning(
+                                "page.label_column",
+                                format!(
+                                    "`label` names `{{{{row.{column}}}}}`, which the first loader \
+                                     `{}` doesn't return (columns: {})",
+                                    page.first_loader()
+                                        .map(|l| l.name.as_str())
+                                        .unwrap_or_default(),
+                                    first.columns.join(", ")
+                                ),
+                            )
+                            .fix(
+                                "have the first loader return that column: a loader reads only \
+                                 the ones declared before it, so the label's loader cannot move",
+                            )
+                            .at(relative_to(&ext.path, &page.origin.running), None),
+                        );
+                    }
+                }
+            }
+        }
         for entry in &page.see_also {
             let crate::pages::schema::SeeAlsoDecl::Rows { from } = entry else {
                 continue;
@@ -8654,6 +8681,34 @@ commands:
             shown_errors(&v).contains("`{{row.gone}}`"),
             "{:?}",
             v.errors
+        );
+    }
+
+    /// A page's `label` reads the first loader's row: check warns when it
+    /// names a column that loader doesn't return.
+    #[tokio::test]
+    async fn validate_warns_when_the_label_names_a_column_the_first_loader_lacks() {
+        let page = |label: &str| viz_page(&format!("label: '{label}'\n"), "SELECT 1 AS title", "");
+        let (d, _) = load_x(
+            &[
+                ("lacks", &page("Def: {{row.scope}}")),
+                ("has", &page("Def: {{row.title}}")),
+            ],
+            "",
+        );
+        let v = validate_extension(&layer().await, &cat(), d.path(), "x", None)
+            .await
+            .unwrap();
+        let said: Vec<String> = v.warnings.iter().map(|w| v.shown(w)).collect();
+        let hits: Vec<&String> = said
+            .iter()
+            .filter(|w| w.contains("`{{row.scope}}`"))
+            .collect();
+        assert_eq!(hits.len(), 1, "{said:?}");
+        assert!(hits[0].contains("lacks.yaml"), "{hits:?}");
+        assert!(
+            said.iter().all(|w| !w.contains("row.title")),
+            "a returned column is fine: {said:?}"
         );
     }
 

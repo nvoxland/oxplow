@@ -62,6 +62,24 @@ loaders:
 - The result is `{ columns, rows }` as is, an array of objects (a row each),
   else one `value` row. `items: <field>` takes the list inside the result's
   `<field>` as the rows (a command that returns `{ title, nodes: […] }`).
+- **One command, several lists: run it once.** An `items:` loader runs
+  the command again for each loader that names it (the run memo keys on
+  the loader, `items` included), so a page that shows three lists of one
+  result would run it three times. Instead declare one command loader
+  with no `items:`, whose single row holds each list as a JSON column,
+  and read each list with a `sql` loader over it (an earlier loader is a
+  table):
+
+  ```yaml
+  loaders:
+    page: { command: oxplow.page.describe, args: { uri: … }, reads: [v_page] }
+    params:
+      sql: "SELECT j.value ->> '$.name' AS name FROM page, json_each(page.params) j"
+    loaders:
+      sql: "SELECT j.value ->> '$.name' AS name FROM page, json_each(page.loaders) j"
+  ```
+
+  Use `items:` for a command that returns its only list.
 - A table whose query is only known at run time (which dataset, which
   columns, from params): build the SQL in a `sql` loader, then run it with
   the read command `oxplow.sql.query { sql }` — `args: { sql: { from:
