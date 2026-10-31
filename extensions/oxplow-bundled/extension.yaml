@@ -324,6 +324,9 @@ intent:
     - name: the-slot-page-says-what-it-is-in-a-paragraph-above-its-facts
       input: { page: slot, params: {uri:"oxplow:oxplow/slot?slot=oxplow-bundled/oxplow-bundled.tasks.sections-0"} }
       expect: its description is a paragraph above the facts
+    - name: dashboards-list-the-dashboard-pages
+      input: { page: dashboards }
+      expect: the dashboards index lists the page-file dashboards and offers a title form
 ui:
   mounts:
     - { page: thread-handoffs-in, at: oxplow-bundled/tasks.sections, position: { before: list } }
@@ -955,3 +958,10 @@ commands:
     op: link
     ui: { label: "Link to Task…", group: Review, about: oxplow/effort, form: "oxplow:oxplow/page?page=link-effort" }
     example: {"effort": "eff12", "work_item": "oxplow:oxplow/work_item?id=tsk42&provider=oxplow"}
+  # The person's menu entry for foundation's `extension.new_dashboard`.
+  - name: dashboard.new
+    summary: "The person's menu entry for `oxplow.extension.new_dashboard`: New Dashboard… starts an empty dashboard and opens it."
+    scope: pages.author
+    op: new_dashboard
+    ui: { label: "New Dashboard…", group: Pages, keywords: [dashboard, tiles, board], open_after: "oxplow:oxplow/page?page={{result.page}}" }
+    example: {"title": "Release health"}

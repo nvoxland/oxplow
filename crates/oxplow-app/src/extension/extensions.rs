@@ -6068,7 +6068,8 @@ commands:
                 "oxplow.work_item.new",
                 "oxplow.knowledge.new_page",
                 "oxplow.handoff.offer",
-                "oxplow.effort.link_to_task"
+                "oxplow.effort.link_to_task",
+                "oxplow.dashboard.new"
             ]
         );
         let advisories: Vec<&str> = b.advisories.iter().map(|a| a.id.as_str()).collect();
@@ -6197,7 +6198,7 @@ commands:
             "new-task",
         ] {
             assert!(
-                foundation.page_files.iter().all(|p| p.id != slug),
+                foundation.page_files.iter().all(|p| p.slug != slug),
                 "foundation still has {slug}"
             );
         }
@@ -6213,13 +6214,13 @@ commands:
         let exts = load_extensions(dir.path());
         let ext = |name: &str| exts.iter().find(|e| e.name == name).unwrap();
         let (foundation, bundled) = (ext("oxplow-foundation"), ext("oxplow-bundled"));
-        for slug in ["zones"] {
+        for slug in ["zones", "dashboards"] {
             assert!(
-                foundation.page_files.iter().all(|p| p.id != slug),
+                foundation.page_files.iter().all(|p| p.slug != slug),
                 "foundation still has {slug}"
             );
             assert!(
-                bundled.page_files.iter().any(|p| p.id == slug),
+                bundled.page_files.iter().any(|p| p.slug == slug),
                 "bundled lacks {slug}"
             );
         }

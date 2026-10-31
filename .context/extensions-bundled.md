@@ -223,14 +223,16 @@ screens and oxplow-bundled's add the review and analysis:
 - **Explore Data.** The `explore-data` page and its component (source in
   `src/explore-data/`, built into `dist/` by `package.json`; the manifest's
   `build:` runs it). Foundation's dataset pages do not link to it.
+- **Dashboards.** The `dashboards` index page (launcher Data section) and
+  the `dashboard.new` menu command, over foundation's
+  `extension.new_dashboard`. See [dashboards.md](./dashboards.md).
 - **Zones.** The hidden `zones` page holds the questions about the zone
   rules (`v_zone`, `v_zone_unmatched`); nothing links to it.
 - **The app's screens.** foundation's `alerts`,
-  `catalog`, `changes-effort`, `comments`, `commit`, `dashboards`,
+  `catalog`, `changes-effort`, `comments`, `commit`,
   `diff`, `directory`, `file-viewer`, `files`, `git-dashboard`,
   `settings` (an `area` param: overview, agents, lsp, extensions, data,
-  integrations, ai), `uncommitted-changes`, and more. Dashboards are in [dashboards.md](./dashboards.md) and
-  metrics in [metrics.md](./metrics.md).
+  integrations, ai), `uncommitted-changes`, and more. Metrics in [metrics.md](./metrics.md).
 - **Rail panels** (the `panels:` list of oxplow-bundled): Go To
   (`go-to-panel`, collapsed `go-to-bookmarks`), Waiting on You
   (`waiting-on-me`, a badge), Comments (`comments-panel`), Uncommitted
