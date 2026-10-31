@@ -508,6 +508,9 @@ struct VizFile {
     empty: Option<String>,
     #[serde(default)]
     hide_empty: bool,
+    /// The rows start folded under a count; a click opens them.
+    #[serde(default)]
+    fold: bool,
     /// A column whose first row's text is a paragraph under the heading.
     #[serde(default)]
     lead: Option<String>,
@@ -1430,6 +1433,7 @@ fn leaf_viz(
         columns: f.columns,
         empty: f.empty,
         hide_empty: f.hide_empty,
+        fold: f.fold,
         lead: f.lead,
         chart: f.chart,
         tree: f.tree,

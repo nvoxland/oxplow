@@ -67,7 +67,8 @@ loaders:
                    WHEN 'swift' THEN 'Swift' WHEN 'clojure' THEN 'Clojure'
                    ELSE upper(substr(m.language, 1, 1)) || substr(m.language, 2) END
                ELSE coalesce(m.category, 'Other') END AS section,
-             m.trend, m.latest, m.unit, :slice AS slice, :range AS range, :branch AS branch,
+             CASE WHEN m.latest IS NOT NULL THEN m.trend END AS trend, m.latest, m.unit,
+             CASE WHEN m.latest IS NULL THEN 'No data yet' END AS no_data, :slice AS slice, :range AS range, :branch AS branch,
              CASE WHEN m.latest IS NULL OR coalesce(m.direction, 'neutral') = 'neutral' THEN NULL
                   WHEN coalesce(m.target, m.warn_at) IS NOT NULL
                        AND (CASE WHEN m.direction = 'higher-better' THEN m.latest >= coalesce(m.target, m.warn_at)
@@ -100,4 +101,6 @@ view:
     unit: unit
     tone: tone
     width: 140
+  - key: no_data
+    label: Data
   empty: No metrics match. Run tests, coverage or static analysis and oxplow records them here automatically; Show All lists metrics this project has not enabled.

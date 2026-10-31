@@ -1123,6 +1123,7 @@ mod tests {
                 columns: Vec::new(),
                 empty: None,
                 hide_empty: false,
+                fold: false,
                 chart,
                 tree: None,
                 timeline: None,

@@ -438,3 +438,24 @@ test("a click on a row runs the primary action, but not from a link in it", asyn
   fireEvent.keyDown(table, { key: "Enter" });
   await waitFor(() => expect(actionRuns.map((r) => r.action)).toEqual(["take"]));
 });
+
+// A `fold` list starts closed under its row count.
+test("a folded list shows its count in a closed disclosure", () => {
+  const view = render(<VizView run={runOf({ fold: true, columns: [{ key: "title", label: null, link: null, unit: null, icon: null, tone: null }] })} />);
+  const fold = view.getByTestId("viz-fold") as HTMLDetailsElement;
+  expect(fold.open).toBe(false);
+  expect(fold.querySelector("summary")?.textContent).toContain("3 rows");
+});
+
+// A cell with no value is left out of a list row, not drawn as a dash.
+test("a list row leaves out its empty cells", () => {
+  const run = {
+    config: { ...base, columns: [{ key: "title" }, { key: "a" }, { key: "b" }] },
+    params: {},
+    result: { columns: ["title", "a", "b"], rows: [["One", null, null], ["Two", "x", null]], truncated: false },
+  } as unknown as VizRun;
+  const view = render(<VizView run={run} />);
+  expect(view.getByTestId("viz-row-0").textContent).not.toContain("—");
+  expect(view.getByTestId("viz-row-1").textContent).toContain("x");
+  expect(view.getByTestId("viz-row-1").textContent).not.toContain("—");
+});

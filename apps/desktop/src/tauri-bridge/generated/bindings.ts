@@ -6306,6 +6306,11 @@ export type VizConfig_Deserialize = {
 	 */
 	hideEmpty?: boolean,
 	/**
+	 *  The rows start folded under a count; a click opens them (a long
+	 *  list that is rarely read).
+	 */
+	fold?: boolean,
+	/**
 	 *  A column of the loader whose first row's text is a paragraph under
 	 *  the node's heading, above its viz (what a thing is, above its
 	 *  facts). Null or empty: nothing is drawn.
@@ -6368,6 +6373,11 @@ export type VizConfig_Serialize = {
 	 *  something the subject may not have (a kind of contribution).
 	 */
 	hideEmpty: boolean,
+	/**
+	 *  The rows start folded under a count; a click opens them (a long
+	 *  list that is rarely read).
+	 */
+	fold: boolean,
 	/**
 	 *  A column of the loader whose first row's text is a paragraph under
 	 *  the node's heading, above its viz (what a thing is, above its

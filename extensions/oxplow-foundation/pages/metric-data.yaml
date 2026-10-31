@@ -65,6 +65,7 @@ view:
     title: Unchecked files
     from: unchecked
     viz: list
+    fold: true
     columns:
     - { key: path, label: File, link: { kind: file, from: path } }
     - { key: reason, label: Why }

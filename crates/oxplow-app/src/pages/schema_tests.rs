@@ -1032,6 +1032,17 @@ fn hide_empty_with_an_empty_text_is_refused() {
     assert!(err.contains("`hide_empty` leaves it out"), "{err}");
 }
 
+/// `fold: true` starts a viz's rows closed under their count.
+#[test]
+fn fold_is_read_into_the_viz_config() {
+    let p = page("title: P\nloaders:\n  l: { sql: \"SELECT 1 AS n\" }\nview: { id: v, viz: list, from: l, fold: true }\n")
+        .expect("loads");
+    let crate::pages::schema::NodeKind::Viz { config, .. } = &p.view.kind else {
+        panic!("a viz");
+    };
+    assert!(config.fold);
+}
+
 /// `see_also:` is a list of `{ page, params? }` and `{ from }` entries; an
 /// entry that is neither, both, or names a loader or a param that is not
 /// there is refused saying so.

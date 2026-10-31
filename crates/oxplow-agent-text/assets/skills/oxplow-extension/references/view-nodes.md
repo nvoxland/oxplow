@@ -55,6 +55,8 @@ Rows come from the loader (a viz has no query). A viz that reads no rows
 out of the page when its loader has no rows (no heading, no Contents
 entry) — for a section about something the subject may not have, like
 one kind of an extension's contributions; it can't have `empty:` too.
+`fold: true` starts the rows closed under a row count, for a long list
+nobody reads by default.
 `lead: <column>` puts that column's first-row text as a plain paragraph
 under the node's heading, above its viz: what a thing is, above its facts
 (null or blank draws nothing, no gap).

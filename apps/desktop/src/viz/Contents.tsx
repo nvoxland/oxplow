@@ -146,6 +146,12 @@ export function Contents({ root }: { root: HTMLElement | null }) {
       headings.forEach((h, i) => {
         if ((h.at ?? h.el).getBoundingClientRect().top - top - 8 <= 0) current = i;
       });
+      // At the very bottom the last heading is the one in view, even when
+      // the page ends before that heading could reach the top.
+      const atEnd = scroller
+        ? scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 2
+        : window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 2;
+      if (atEnd && (scroller !== null || window.scrollY > 0)) current = headings.length - 1;
       setActive(current);
     };
     compute();

@@ -191,3 +191,21 @@ test("more than ten groups: ten with their rows, then '… N more' to the parent
   expect(texts).not.toContain("G10 row 0");
   expect(texts).not.toContain("Group 10");
 });
+
+// A last section too short to reach the top of the scroller is still the
+// one in view once the person has scrolled to the bottom.
+test("scrolled to the bottom, the last section is the active one", async () => {
+  const root = body(3);
+  root.style.overflowY = "auto";
+  Object.defineProperty(root, "scrollHeight", { value: 1000, configurable: true });
+  Object.defineProperty(root, "clientHeight", { value: 400, configurable: true });
+  Object.defineProperty(root, "scrollTop", { value: 600, configurable: true, writable: true });
+  root.getBoundingClientRect = () => ({ top: 0 }) as DOMRect;
+  root.querySelectorAll("h2").forEach((h, i) => {
+    h.getBoundingClientRect = () => ({ top: i * 300 }) as DOMRect;
+  });
+  const view = render(<Contents root={root} />);
+  await waitFor(() => expect(view.getByTestId("viz-rail-contents")).toBeTruthy());
+  const active = Array.from(view.getByTestId("viz-rail-contents").querySelectorAll("button")).find((b) => b.getAttribute("data-active") === "true");
+  expect(active?.textContent).toBe("Section 2");
+});

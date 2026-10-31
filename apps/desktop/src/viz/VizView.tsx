@@ -137,13 +137,26 @@ export function VizView(props: VizViewProps) {
   const baseRunner = useVizActionRunner();
   const baseForms = useFormSource();
   const routed = useMemo(() => routeBranches(baseRunner, baseForms, branches), [baseRunner, baseForms, branches]);
-  return (
+  const body = (
     <VizActionRunnerContext.Provider value={routed.runner}>
       <FormSourceContext.Provider value={routed.forms}>
         <VizViewBody {...props} lazyOpen={lazy ? lazyOpen : null} branches={branches} />
       </FormSourceContext.Provider>
     </VizActionRunnerContext.Provider>
   );
+  // `fold`: a long list nobody reads by default starts closed under its count.
+  const count = run.result.rows.length;
+  if (run.config.fold && count > 0) {
+    return (
+      <details data-testid="viz-fold" className="ox-viz-fold">
+        <summary className="ox-muted ox-small" style={{ cursor: "pointer" }}>
+          {count} {count === 1 ? "row" : "rows"} (click to show)
+        </summary>
+        {body}
+      </details>
+    );
+  }
+  return body;
 }
 
 /** No page to read branches from (a viz drawn outside a page node, a
@@ -1847,9 +1860,10 @@ function ListViz({ rows, cols, cell, rowMenu, view }: RowsVizProps) {
                     ) : null}
                     {head ? cell(row, head) : null}
                   </div>
-                  {rest.length > 0 ? (
+                  {/* A cell with no value is left out, not drawn as "—". */}
+                  {rest.some((c) => row[c.index] !== null && row[c.index] !== undefined) ? (
                     <div style={{ color: "var(--text-secondary)", fontSize: "var(--text-sm)" }}>
-                      {rest.map((c, j) => (
+                      {rest.filter((c) => row[c.index] !== null && row[c.index] !== undefined).map((c, j) => (
                         <span key={c.key}>
                           {j > 0 ? " · " : null}
                           {cell(row, c)}
