@@ -3351,7 +3351,7 @@ async fn deployment_of(
 fn is_running(running: &BTreeMap<String, Arc<Instance>>, instance: &Instance) -> bool {
     running
         .get(&instance.name)
-        .is_some_and(|r| std::ptr::eq(Arc::as_ptr(r), instance))
+        .is_some_and(|r| std::ptr::eq(Arc::as_ptr(r), instance) && !r.is_stopped())
 }
 
 fn now() -> String {

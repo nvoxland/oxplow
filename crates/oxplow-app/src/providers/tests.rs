@@ -3467,6 +3467,34 @@ async fn a_call_finishing_after_its_instance_stopped_changes_nothing() {
     assert_eq!(state(), Some((InstanceState::Ready, 0)));
 }
 
+/// A stopped instance stays registered until a generation replaces it, so a
+/// call that finishes in between must not count against it: whether it is the
+/// running one is whether it was stopped, not only whether it is registered.
+#[tokio::test]
+async fn a_call_finishing_after_a_plain_stop_changes_nothing() {
+    let (fx, _ext) = deployed("").await;
+    configure(&fx, true, json!({ "team": "core" }));
+    crate::test_fixtures::activate(&fx.svc).await;
+    first_read(&fx).await;
+    let was_running = fx.svc.providers.get(INSTANCE).await.unwrap();
+    let before = fx
+        .svc
+        .providers
+        .health(INSTANCE)
+        .map(|h| h.consecutive_failures);
+    assert!(fx.svc.providers.stop(INSTANCE).await);
+    fx.svc
+        .providers
+        .call_failed(&was_running, "the process went away".into())
+        .await;
+    let after = fx
+        .svc
+        .providers
+        .health(INSTANCE)
+        .map(|h| h.consecutive_failures);
+    assert_eq!(after, before, "a late failure after a stop");
+}
+
 /// A generation restarts only the instances it changed: an unrelated
 /// extension's edit leaves a running provider's process alone, while an
 /// edit to its own program or its config restarts it.
