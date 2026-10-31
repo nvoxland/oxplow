@@ -6203,6 +6203,28 @@ commands:
         }
     }
 
+    /// Foundation keeps data, resource views, the basic git screens and the
+    /// agent's tools. Screens a person opens by choice (Zones, Dashboards,
+    /// Timeline) are oxplow-bundled's, and the only custom component
+    /// foundation keeps is the hand-written Integrations area.
+    #[test]
+    fn foundation_has_no_zones_dashboards_or_timeline() {
+        let dir = tempfile::tempdir().unwrap();
+        let exts = load_extensions(dir.path());
+        let ext = |name: &str| exts.iter().find(|e| e.name == name).unwrap();
+        let (foundation, bundled) = (ext("oxplow-foundation"), ext("oxplow-bundled"));
+        for slug in ["zones"] {
+            assert!(
+                foundation.page_files.iter().all(|p| p.id != slug),
+                "foundation still has {slug}"
+            );
+            assert!(
+                bundled.page_files.iter().any(|p| p.id == slug),
+                "bundled lacks {slug}"
+            );
+        }
+    }
+
     #[test]
     fn a_name_starts_with_a_letter() {
         for ok in ["review", "review-notes", "a1", "x"] {

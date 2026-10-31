@@ -223,6 +223,8 @@ screens and oxplow-bundled's add the review and analysis:
 - **Explore Data.** The `explore-data` page and its component (source in
   `src/explore-data/`, built into `dist/` by `package.json`; the manifest's
   `build:` runs it). Foundation's dataset pages do not link to it.
+- **Zones.** The hidden `zones` page holds the questions about the zone
+  rules (`v_zone`, `v_zone_unmatched`); nothing links to it.
 - **The app's screens.** foundation's `alerts`,
   `catalog`, `changes-effort`, `comments`, `commit`, `dashboards`,
   `diff`, `directory`, `file-viewer`, `files`, `git-dashboard`,

@@ -297,7 +297,7 @@ reading the right skill can answer the questions oxplow, or an extension,
 exists for. The questions live on the **pages** that answer them: a page's
 `answers: [{ question, about?, params, skill? }]` (an entry with `about`
 is phrased with "this" and offered on pages for that kind of ref). Core has
-no questions files: oxplow-foundation's pages carry them, including small
+no questions files: the pages carry them, including small
 hidden pages that exist to hold a question (`collectors`, `zones`,
 `branch-sync`, `work-item-actions`, …), and a question that says "do this"
 is held by a page with a whole-page action running that command.
