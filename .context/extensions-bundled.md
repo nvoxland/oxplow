@@ -112,7 +112,7 @@ The `oxplow-foundation` and `oxplow-bundled` extensions, the review packet, and 
   **Recent Decisions** and **Unbacked Claims**, scoped by the implicit
   `stream_id`.
 
-## The rule: data in foundation, work list and wiki UI here
+## The rule: data in foundation, work list, wiki and Explore Data UI here
 
 oxplow-foundation holds the data of the work list and the wiki: their
 datasets, the `work_item` and `wiki` resources, the `oxplow:tasks` and
@@ -220,6 +220,9 @@ screens and oxplow-bundled's add the review and analysis:
   `work_item.new`, `knowledge.new_page`, `handoff.offer` and
   `effort.link_to_task`. Each runs the same operation as a foundation
   command and adds the label, shortcut and form a person uses.
+- **Explore Data.** The `explore-data` page and its component (source in
+  `src/explore-data/`, built into `dist/` by `package.json`; the manifest's
+  `build:` runs it). Foundation's dataset pages do not link to it.
 - **The app's screens.** foundation's `alerts`,
   `catalog`, `changes-effort`, `comments`, `commit`, `dashboards`,
   `diff`, `directory`, `file-viewer`, `files`, `git-dashboard`,
@@ -263,7 +266,7 @@ change analysis.
 **Deliberately simple.** A basic **metrics explorer** and **simple
 dashboards**. The base version lets people see what metrics exist and
 pin a few to a dashboard as a starting point, a bit like Metabase. It does
-not need to be fancy. Explore Data (oxplow-foundation's `explore-data`
+not need to be fancy. Explore Data (oxplow-bundled's `explore-data`
 page) browses the semantic-layer catalog (entities, measures, metrics),
 shows a table or simple chart sliced by a dimension, and saves the result
 as a page. A dashboard is a page with `category: Dashboards` and a grid

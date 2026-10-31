@@ -7,5 +7,3 @@ expect:
   loaders:
     about: { rows: [{ view: v_work_item, owner: core, kind: sql }] }
     fields: { rows: { contains: [{ name: uri, sql_type: TEXT }, { name: title }] } }
-  see_also:
-    - { title: Explore Data, uri: "oxplow:oxplow/page?dataset=v_work_item&page=explore-data" }

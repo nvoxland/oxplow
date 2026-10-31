@@ -35,9 +35,6 @@ loaders:
     command: oxplow.sql.query
     args: { sql: { from: q.sql }, limit: 1000 }
     refresh: manual
-  links:
-    sql: |
-      SELECT 'Explore Data' AS title, uri('oxplow/page', 'page', 'explore-data', 'dataset', view) AS uri, 'Try a query over this dataset' AS description FROM resolved
 view:
   stack:
   - id: about
@@ -53,5 +50,3 @@ view:
     viz: table
     from: instances
     empty: There are none yet.
-see_also:
-  - { from: links }

@@ -20,10 +20,6 @@ loaders:
       SELECT f.name, f.sql_type, f.doc || CASE WHEN f.key_part IS NOT NULL THEN ' (part of the key)' ELSE '' END AS doc
       FROM about a JOIN v_field f ON f.view = a.view
       ORDER BY f.position
-  links:
-    sql: |
-      SELECT 'Explore Data' AS title, uri('oxplow/page', 'page', 'explore-data', 'dataset', view) AS uri, 'Try a query over this dataset' AS description
-      FROM about
 view:
   stack:
   - id: about
@@ -45,5 +41,3 @@ view:
     - { key: sql_type, label: Type }
     - { key: doc, label: What it holds }
     empty: No fields.
-see_also:
-  - { from: links }

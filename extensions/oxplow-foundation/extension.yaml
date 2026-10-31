@@ -15,9 +15,6 @@ custom_components:
   # Efforts, sessions, threads and commits on a zoomable time axis
   # (vis-timeline, which the kit has no viz for).
   - { id: timeline, title: Timeline, bundle: dist/timeline, sql: read, description: "Efforts, sessions, threads and commits on a zoomable time axis." }
-  # Explore Data: an SQL box and a viz picker over the datasets; oxplow draws
-  # the result under it with its own components (`showView`: an inline page).
-  - { id: explore-data, title: Explore Data, bundle: dist/explore-data, sql: read, commands: [oxplow.page.draft_with_agent], description: "An SQL box and a viz picker over the datasets, to try a query and see its result drawn." }
   # Settings → Integrations: hand-written (no build), so it lives beside the
   # built components, not in dist/.
   - { id: integrations, title: Integrations, bundle: components/integrations, sql: read, commands: [oxplow.provider.check_instance, oxplow.provider.set_instance, oxplow.provider.add_instance, oxplow.provider.turn_off_here, oxplow.provider.remove_instance, oxplow.provider.set_credential, oxplow.provider.begin_sign_in, oxplow.provider.complete_sign_in, oxplow.provider.cancel_sign_in, oxplow.provider.sync], description: "The Settings area for the instances of external providers: adding one, signing in and checking it." }
@@ -187,9 +184,6 @@ intent:
     - name: the-timeline-draws-the-projects-activity-and-titles-itself
       input: { page: timeline }
       expect: the timeline draws items, titles itself and offers Today and Fit; Fit writes from and to
-    - name: explore-data-says-why-a-query-is-refused
-      input: { page: explore-data }
-      expect: a refused query shows its reason in the explorer and draws nothing
     - name: the-commit-page-reads-a-commit-its-change-and-its-files-as-a-tree
       input: { page: commit }
       expect: a commit page makes its change and lists the files as a tree
@@ -418,9 +412,6 @@ intent:
     - name: the-measure-page-links-its-metrics-to-their-definitions
       input: { page: measure, params: { uri: "oxplow:oxplow/measure?measure=oxplow.tokens" } }
       expect: a measure's metrics open each metric's definition
-    - name: the-component-page-links-its-commands-to-their-definitions
-      input: { page: custom-component, params: { uri: "oxplow:oxplow/custom_component?custom_component=oxplow-foundation/explore-data" } }
-      expect: a component's commands open each command's definition
     - name: the-extension-page-links-each-contribution-to-its-definition
       input: { page: extension, params: { uri: "oxplow:oxplow/extension?name=oxplow-foundation", name: oxplow-foundation } }
       expect: each contribution table opens the definition, not the data

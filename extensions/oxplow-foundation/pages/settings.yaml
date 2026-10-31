@@ -503,12 +503,6 @@ view:
         - key: description
           label: What it holds
         empty: Nothing is published yet.
-        actions:
-        - id: explore
-          label: Explore Data
-          command: oxplow.window.navigate
-          input:
-            uri: oxplow:oxplow/page?page=explore-data
       - id: data-sources
         title: Collectors
         from: data_sources

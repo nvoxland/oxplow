@@ -7,5 +7,3 @@ expect:
   loaders:
     resolved: { rows: [{ view: v_stream }] }
     instances: { rows: 1 }
-  see_also:
-    - { title: Explore Data, uri: "oxplow:oxplow/page?dataset=v_stream&page=explore-data" }

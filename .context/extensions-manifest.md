@@ -449,7 +449,7 @@ over a database file); adversarial and concurrency coverage is still to do.
 >   - sharing: `oxplow.extension.share` / `unshare` move a source in or out
 >     of git, and a teammate deploys it in their checkout ("Sources and
 >     deployments": boot deploys nothing);
->   - Explore Data (oxplow-foundation's custom page, with Save as Page);
+>   - Explore Data (oxplow-bundled's custom page, with Save as Page);
 >   - **bundled extensions** (compiled in, read-only, reserved names).
 >     `oxplow-bundled` holds the effort review packet and the analytics
 >     pages; core works with it disabled;

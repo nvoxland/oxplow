@@ -10,8 +10,6 @@ expect:
   loaders:
     about: { rows: [{ name: Agent tokens, fold: sum }] }
     facts: { rows: 3 }
-  see_also:
-    - { title: Explore Data, uri: "oxplow:oxplow/page?dataset=v_fact&page=explore-data" }
 steps:
   - params: { subject: zzz-nothing }
     expect:

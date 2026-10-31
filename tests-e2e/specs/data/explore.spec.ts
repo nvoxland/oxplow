@@ -10,7 +10,7 @@ async function writes(daemon: Parameters<typeof ipc>[0]): Promise<number> {
   return out.rows.length;
 }
 
-// Explore Data is oxplow-foundation's custom page: the catalog is its rail
+// Explore Data is oxplow-bundled's custom page: the catalog is its rail
 // (a viz node picking the page's `dataset`), the SQL box its component, and
 // the result oxplow draws under it from the inline page the component
 // hands it, with Save as Page beside it.

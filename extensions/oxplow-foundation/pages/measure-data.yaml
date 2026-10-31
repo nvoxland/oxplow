@@ -76,9 +76,6 @@ loaders:
       FROM r GROUP BY r.grp
       ORDER BY CASE WHEN :group_by = 'subject' THEN count(*) END DESC, 1 DESC
       LIMIT 500
-  links:
-    sql: |
-      SELECT 'Explore Data' AS title, uri('oxplow/page', 'page', 'explore-data', 'dataset', 'v_fact') AS uri, 'Try a query over every fact' AS description FROM about
 view:
   stack:
   - id: about
@@ -127,5 +124,3 @@ view:
         - { key: facts, label: Facts, format: integer }
         - { key: latest, label: Latest, format: datetime }
         empty: No facts in this range.
-see_also:
-  - { from: links }

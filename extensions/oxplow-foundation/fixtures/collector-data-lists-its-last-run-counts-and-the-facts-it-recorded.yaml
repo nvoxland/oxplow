@@ -12,5 +12,3 @@ expect:
   loaders:
     about: { rows: [{ name: oxplow.effort_test_outcome }] }
     recorded: { rows: { contains: [{ measure_key: oxplow.effort_test_outcome }] } }
-  see_also:
-    - { title: Explore Data, uri: "oxplow:oxplow/page?dataset=v_fact&page=explore-data" }

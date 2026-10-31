@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-// Explore Data is oxplow-foundation's component; its pure half is tested
+// Explore Data is oxplow-bundled's component; its pure half is tested
 // here, where the desktop's tests run (the bundle has no test runner).
 import {
   chartDefaults,
@@ -18,7 +18,7 @@ import {
   specOf,
   templateParam,
   type Rows,
-} from "../../../../extensions/oxplow-foundation/src/explore-data/dataset.js";
+} from "../../../../extensions/oxplow-bundled/src/explore-data/dataset.js";
 
 const result = (columns: string[], rows: (string | number | null)[][]): Rows => ({ columns, rows, truncated: false });
 

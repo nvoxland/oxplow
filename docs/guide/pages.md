@@ -21,7 +21,7 @@ Everything oxplow tracks is exposed as read-only SQL views: `v_work_item`
 **Explore Data** (launcher → Data) lists every view in its rail. Pick one to
 see its columns and sample rows, edit the SQL (++cmd+enter++ runs it), and
 **Save as Page** when it shows what you want. It is itself an extension's
-custom page: oxplow-foundation's.
+custom page: oxplow-bundled's.
 
 ## Writing one by hand
 

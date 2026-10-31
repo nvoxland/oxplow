@@ -4,12 +4,16 @@ Custom components (the sandboxed frame, protocol, testing a component) and the E
 
 ## What works today: Explore Data
 
-- **Explore Data: oxplow-foundation's data app.** Deliberately simple,
+- **Explore Data: oxplow-bundled's data app.** Deliberately simple,
   and the proof that an extension ships a data app: a **page with a
   component node** (`pages/explore-data.yaml`: `view: { component: { id:
   explore-data } }`, the component declared under `custom_components:`,
-  its source in `extensions/oxplow-foundation/src/explore-data/`, built
-  with the Timeline by foundation's `package.json`). Core draws what the
+  its source in `extensions/oxplow-bundled/src/explore-data/`, built
+  into `dist/` by bundled's `package.json` with `bun build`, no
+  dependencies; the manifest's `build:` runs it). It is person-facing UI,
+  so it is bundled's: foundation's dataset, measure, dimension and
+  collector pages do not link to it, and with bundled off there is no
+  Explore Data. Core draws what the
   kit draws; the component holds only the editor and the pickers.
   - **The catalog** is the page's **rail**: a `rail:` node in the same
     page file (a `list` over `v_dataset`, oxplow's own first, its `view`

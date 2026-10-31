@@ -61,10 +61,6 @@ loaders:
     command: oxplow.sql.query
     args: { sql: { from: q.sql }, limit: 1000 }
     refresh: manual
-  links:
-    sql: |
-      SELECT 'Explore Data' AS title, uri('oxplow/page', 'page', 'explore-data', 'dataset', view) AS uri, 'Try a query over this dataset' AS description
-      FROM about
 view:
   stack:
   - id: about
@@ -81,5 +77,3 @@ view:
     viz: table
     from: data
     empty: The dataset has no rows for this filter.
-see_also:
-  - { from: links }

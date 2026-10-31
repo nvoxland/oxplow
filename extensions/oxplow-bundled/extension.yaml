@@ -8,6 +8,9 @@ engine: ">=0.7"
 # their own SQL, its jobs and effects ask models, its churn collector reads
 # the project's files, and its advisories and skills speak to the agent.
 permissions: [sql.read, files.read, ai.compute, agent.write]
+# Its Explore Data component is TypeScript (src/), built into dist/ when oxplow
+# is built and on every deploy; dist/ isn't committed.
+build: { run: "bun run build", output: dist }
 intent:
   purpose: >-
     Show what a reviewer must check before accepting an agent's work — the
@@ -168,6 +171,12 @@ intent:
     - name: the-history-graph-draws-lanes-filters-and-opens-a-commit
       input: { page: oxplow-foundation/git-history }
       expect: a row per commit, a lane for a merge's second parent, a filter that dims, a row that opens its commit
+    - name: explore-data-says-why-a-query-is-refused
+      input: { page: explore-data }
+      expect: a refused query shows its reason in the explorer and draws nothing
+    - name: the-component-page-links-its-commands-to-their-definitions
+      input: { page: oxplow-foundation/custom-component, params: { uri: "oxplow:oxplow/custom_component?custom_component=oxplow-bundled/explore-data" } }
+      expect: a component's commands open each command's definition
     - name: data-effect-backfill-says-what-bundled-effect-would-do
       input: { page: oxplow-foundation/data-effect-backfill }
       expect: a bundled effect's backfill says there is nothing to catch up on
@@ -356,6 +365,10 @@ ui:
     - { dataset: verdict, resource: oxplow/effort, placement: ref-chip, label: label, color: color }
     - { dataset: verdict, resource: oxplow/effort, placement: row-badge, label: label, color: color }
 custom_components:
+  # Explore Data: an SQL box and a viz picker over the datasets; oxplow draws
+  # the result under it with its own components (`showView`: an inline page).
+  # Built from src/ into dist/ (bun build, no dependencies).
+  - { id: explore-data, title: Explore Data, bundle: dist/explore-data, sql: read, commands: [oxplow.page.draft_with_agent], description: "An SQL box and a viz picker over the datasets, to try a query and see its result drawn." }
   - { id: history-graph, title: History graph, description: "The commits of the project drawn as lanes by branch, with filters by message, author and branch." }
 panels:
   - { id: go-to, title: Go To, icon: compass, scope: thread, body: go-to-panel, collapsed: go-to-bookmarks, open: 'oxplow:oxplow/page?page=go-to' }

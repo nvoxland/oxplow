@@ -1,5 +1,5 @@
 # A component's commands open each command's definition, not its runs.
-when: { page: oxplow-foundation/custom-component, params: { uri: "oxplow:oxplow/custom_component?custom_component=oxplow-foundation/explore-data" } }
+when: { page: oxplow-foundation/custom-component, params: { uri: "oxplow:oxplow/custom_component?custom_component=oxplow-bundled/explore-data" } }
 expect:
   loaders:
     commands:
