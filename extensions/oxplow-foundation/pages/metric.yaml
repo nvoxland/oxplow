@@ -131,4 +131,3 @@ view:
     empty: No recordings in this range.
 see_also:
   - { from: links }
-  - { page: oxplow-foundation/metrics-recorded }

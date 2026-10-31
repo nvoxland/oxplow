@@ -1692,8 +1692,8 @@ the change loop announces `OxplowEvent::MetricSamplesChanged` for what landed.
 ## UI
 
 The metric UI is **three pages**, each with one job, all reading the one
-fact table — no per-metric UI code. Recorded Metrics is a declared page (the `metrics-recorded` page, oxplow-foundation's
-`pages/`); Metric Detail is the `oxplow/metric` entity page and cross-links to the others in its header. (History: the
+fact table — no per-metric UI code. Recorded Metrics is a declared page (the `metrics-recorded` page, oxplow-bundled's
+`pages/`, with its row expander `metrics-slices`; foundation has none, and its metric pages do not link to it); Metric Detail is the `oxplow/metric` entity page and cross-links to the others in its header. (History: the
 configure surface was split off as a fourth "Metric Settings" page in
 tsk282/tsk80, then **folded back in by tsk117** — per-metric configuration now
 lives on the Metric Detail page; see "The configure surface" below.) Explorer
@@ -1733,7 +1733,7 @@ just carries a Help blurb pointing there.
   and `v_search_measure`: title, then description, key and unit as the body,
   `stream_id` NULL), so a hit opens the metric's own page. Fixture
   `metrics-and-measures-are-found-by-search`.
-- **Metrics** (the `metrics-recorded` page,
+- **Metrics** (oxplow-bundled's `metrics-recorded` page,
   `metricsIndexRef()`) — every **catalogued** metric as a `title · trend
   sparkline · latest value` row of a grouped list (row set =
   `v_metric_catalog`, the only source that knows `use:`; `v_metric_spec`

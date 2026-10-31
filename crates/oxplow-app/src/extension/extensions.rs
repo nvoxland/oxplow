@@ -6208,12 +6208,18 @@ commands:
     /// Timeline) are oxplow-bundled's, and the only custom component
     /// foundation keeps is the hand-written Integrations area.
     #[test]
-    fn foundation_has_no_zones_dashboards_index_or_timeline() {
+    fn foundation_has_no_zones_dashboards_index_timeline_or_metrics_list() {
         let dir = tempfile::tempdir().unwrap();
         let exts = load_extensions(dir.path());
         let ext = |name: &str| exts.iter().find(|e| e.name == name).unwrap();
         let (foundation, bundled) = (ext("oxplow-foundation"), ext("oxplow-bundled"));
-        for slug in ["zones", "dashboards", "timeline"] {
+        for slug in [
+            "zones",
+            "dashboards",
+            "timeline",
+            "metrics-recorded",
+            "metrics-slices",
+        ] {
             assert!(
                 foundation.page_files.iter().all(|p| p.slug != slug),
                 "foundation still has {slug}"

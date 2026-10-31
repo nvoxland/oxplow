@@ -1,6 +1,6 @@
 # The Metrics list says "No data yet" for a metric nothing has recorded,
 # not a row of dashes: it has no trend and no latest value.
-when: { page: oxplow-foundation/metrics-recorded, params: { show: all } }
+when: { page: oxplow-bundled/metrics-recorded, params: { show: all } }
 expect:
   loaders:
     metrics:

@@ -70,5 +70,3 @@ view:
     - { key: path, label: File, link: { kind: file, from: path } }
     - { key: reason, label: Why }
     empty: ''
-see_also:
-  - { page: oxplow-foundation/metrics-recorded }

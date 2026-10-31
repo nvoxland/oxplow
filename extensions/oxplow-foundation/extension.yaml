@@ -230,9 +230,9 @@ intent:
     - name: the-implementation-page-links-to-its-extension
       input: { page: implementation, params: { uri: 'oxplow:oxplow/implementation?implementation=oxplow-foundation/work_items.oxplow' } }
       expect: its see-also links name the extension that declares it
-    - name: the-measure-page-links-to-its-extension-and-the-list-it-belongs-to
+    - name: the-measure-page-links-to-its-extension
       input: { page: measure, params: { uri: 'oxplow:oxplow/measure?measure=oxplow.tokens' } }
-      expect: its see-also links name the extension that declares it and the list it belongs to
+      expect: its see-also links name the extension that declares it
     - name: the-collector-page-links-to-its-extension-and-the-list-it-belongs-to
       input: { page: collector, params: { uri: 'oxplow:oxplow/collector?collector=oxplow-foundation/oxplow.effort_test_outcome' } }
       expect: its see-also links name the extension that declares it and the list it belongs to
@@ -245,9 +245,9 @@ intent:
     - name: the-metric-data-page-lists-its-recordings-alone
       input: { page: metric-data, params: { uri: "oxplow:oxplow/metric?metric=agent.tokens.total", metric: agent.tokens.total } }
       expect: its recordings and the files its measure could not check, and no definition or trend
-    - name: the-metric-page-links-to-its-measure-and-the-metrics-list
+    - name: the-metric-page-links-to-its-extension-and-its-measure
       input: { page: metric, params: { metric: agent.tokens.total } }
-      expect: its see-also links open the measure it is built on and the metrics list
+      expect: its see-also links open its extension and the measure it is built on
     - name: the-definition-page-links-to-the-page-and-its-extension
       input: { page: definition, params: { uri: 'oxplow:oxplow/file?path=oxplow-foundation/pages/problems.yaml&filesystem=oxplow:extensions', path: oxplow-foundation/pages/problems.yaml, stream_id: 1 } }
       expect: its see-also links open the page it describes and its extension

@@ -344,7 +344,7 @@ async fn the_metrics_list_has_each_metrics_trend_and_its_groups_when_sliced() {
     write(p.dir.path(), "ui/theme.rs", &theme);
     p.delta().await;
 
-    let rows = loader_rows(&p.svc, "metrics-recorded", "metrics", vec![]).await;
+    let rows = loader_rows(&p.svc, "oxplow-bundled/metrics-recorded", "metrics", vec![]).await;
     let mine = rows
         .iter()
         .find(|r| r["key"] == SqlCell::Text(MEASURE.into()))
@@ -355,7 +355,7 @@ async fn the_metrics_list_has_each_metrics_trend_and_its_groups_when_sliced() {
     // Expanded under a slice: the latest value per area, biggest first.
     let groups = loader_rows(
         &p.svc,
-        "metrics-slices",
+        "oxplow-bundled/metrics-slices",
         "metrics_slices",
         vec![
             ("key", SqlCell::Text(MEASURE.into())),

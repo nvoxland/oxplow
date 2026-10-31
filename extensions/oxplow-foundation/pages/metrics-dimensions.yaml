@@ -1,5 +1,5 @@
 title: Dimensions to slice by
-description: The dimensions a metric can be split by, for the Metrics list's Slice By.
+description: The dimensions a metric can be split by, for a metric page's Slice by (and the Metrics list's).
 hidden: true
 loaders:
   metrics_dimensions:

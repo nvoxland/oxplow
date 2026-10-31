@@ -91,7 +91,7 @@ view:
       kind: page
       from: metric_ref
     highlight: q
-    expand: oxplow-foundation/metrics-slices
+    expand: oxplow-bundled/metrics-slices
   - key: trend
     label: Trend
     format: sparkline

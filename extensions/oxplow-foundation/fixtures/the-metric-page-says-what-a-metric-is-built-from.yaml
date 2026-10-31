@@ -10,4 +10,3 @@ expect:
   see_also:
     - { title: oxplow-foundation, uri: "oxplow:oxplow/extension?name=oxplow-foundation" }
     - { title: Agent tokens, uri: "oxplow:oxplow/measure?measure=oxplow.tokens" }
-    - { title: Metrics, uri: "oxplow:oxplow/page?page=metrics-recorded" }

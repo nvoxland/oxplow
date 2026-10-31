@@ -125,7 +125,7 @@ With oxplow-bundled off, a work item or wiki link opens core's generic
 resource page. That is intended. Foundation must never link to a bundled
 page, because it cannot name oxplow-bundled. The Rust test
 `foundation_has_no_task_or_wiki_ui` and
-`foundation_has_no_zones_dashboards_or_timeline` guard this.
+`foundation_has_no_zones_dashboards_index_timeline_or_metrics_list` guard this.
 
 ## Example extensions (`examples/extensions/`)
 
@@ -233,6 +233,14 @@ screens and oxplow-bundled's add the review and analysis:
 - **Dashboards index.** The `dashboards` page (launcher Data section), a
   list the launcher's Dashboards section already gives. New Dashboard… and
   Pin to Dashboard stay in foundation. See [dashboards.md](./dashboards.md).
+- **The Metrics list.** The `metrics-recorded` page (the grouped list of
+  every catalogued metric with trend and latest value) and its row expander
+  `metrics-slices`. Foundation keeps one metric's pages (`metric`,
+  `metric-data`, `measure`), which do not link to the list, and the hidden
+  `metrics-dimensions` options page (the `metric` page's Slice by reads it;
+  the list names it as `oxplow-foundation/metrics-dimensions`). People find
+  a metric from the launcher instead: `metric` and `measure` are
+  `searchable:` ([metrics.md](./metrics.md) "UI").
 - **Zones.** The hidden `zones` page holds the questions about the zone
   rules (`v_zone`, `v_zone_unmatched`); nothing links to it.
 - **The app's screens.** foundation's `alerts`,

@@ -81,4 +81,3 @@ view:
     - { key: description, label: What it is }
 see_also:
   - { from: related }
-  - { page: oxplow-foundation/metrics-recorded }
