@@ -3047,3 +3047,142 @@ custom_components:
         "{rendered:#?}"
     );
 }
+
+/// An extension kept under `extensions/<name>` (`extensionSources`): a page's
+/// loader that fails its dry run, a fixture whose comparison doesn't hold and
+/// an intent example no fixture names are each reported in that source
+/// folder, never under the copy the throwaway runs.
+fn kept_under_extensions(root: &std::path::Path, loader_sql: &str) {
+    write(
+        root,
+        ".oxplow/project.yaml",
+        "extensionSources:\n  lists: extensions/lists\n",
+    );
+    write(
+        root,
+        "extensions/lists/extension.yaml",
+        "manifest: 2
+name: lists
+intent:
+  purpose: Lists.
+  examples:
+    - name: shows-titles
+      input: { page: ok }
+      expect: a number
+    - name: has-no-fixture
+      input: { page: ok }
+      expect: nothing
+",
+    );
+    write(
+        root,
+        "extensions/lists/pages/titles.yaml",
+        &format!(
+            "title: Titles
+loaders:
+  titles: {{ sql: \"{loader_sql}\" }}
+view: {{ from: titles, viz: table }}
+"
+        ),
+    );
+    write(
+        root,
+        "extensions/lists/pages/ok.yaml",
+        "title: Ok
+loaders:
+  ok: { rows: [{ n: 1 }] }
+view: { from: ok, viz: table }
+",
+    );
+    write(
+        root,
+        "extensions/lists/fixtures/shows-titles.yaml",
+        "when: { page: ok }
+expect: { loaders: { ok: { rows: [{ n: 2 }] } } }
+",
+    );
+}
+
+fn in_the_source_folder(root: &std::path::Path, report: &TestReport) -> Vec<String> {
+    let lines: Vec<String> = report
+        .errors
+        .iter()
+        .chain(report.warnings.iter())
+        .map(|d| d.render(&report.root))
+        .collect();
+    assert!(
+        lines
+            .iter()
+            .all(|l| !l.contains("runtime/extensions") && !l.contains(root.to_str().unwrap())),
+        "{lines:#?}"
+    );
+    lines
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_loader_that_fails_names_the_source_folder_not_the_running_copy() {
+    let dir = tempfile::tempdir().unwrap();
+    kept_under_extensions(dir.path(), "SELECT nope FROM v_work_item");
+    let report = test_extension(dir.path(), "lists", false).await.unwrap();
+    let lines = in_the_source_folder(dir.path(), &report);
+    assert!(
+        lines
+            .iter()
+            .any(|l| l.starts_with("extensions/lists/pages/titles.yaml") && l.contains("nope")),
+        "{lines:#?}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_fixture_that_differs_and_an_example_with_no_fixture_name_the_source_folder() {
+    let dir = tempfile::tempdir().unwrap();
+    kept_under_extensions(dir.path(), "SELECT title FROM v_work_item");
+    let report = test_extension(dir.path(), "lists", false).await.unwrap();
+    let lines = in_the_source_folder(dir.path(), &report);
+    assert!(
+        lines
+            .iter()
+            .any(|l| l.starts_with("extensions/lists/fixtures/shows-titles.yaml")),
+        "the differing fixture: {lines:#?}"
+    );
+    assert!(
+        lines.iter().any(|l| l.contains("has-no-fixture")),
+        "the example with no fixture: {lines:#?}"
+    );
+}
+
+/// An extension that ships with oxplow runs the copy built into it, so a
+/// problem is found in that copy; the report still names the folder a
+/// person edits — its source in the checkout, `extensions/<name>` — and
+/// never the deployed copy (a path under the throwaway's runtime store).
+#[tokio::test(flavor = "multi_thread")]
+async fn a_shipped_extension_is_reported_under_its_source_folder() {
+    let dir = tempfile::tempdir().unwrap();
+    write(
+        dir.path(),
+        ".oxplow/project.yaml",
+        "extensionSources:\n  oxplow-bundled: extensions/oxplow-bundled\n",
+    );
+    write(
+        dir.path(),
+        "extensions/oxplow-bundled/extension.yaml",
+        "manifest: 2\nname: oxplow-bundled\nintent:\n  purpose: x\n",
+    );
+    let report = test_extension_only(dir.path(), "oxplow-bundled", &["none".into()], false)
+        .await
+        .unwrap();
+    assert_eq!(
+        report.root, "extensions/oxplow-bundled",
+        "{:#?}",
+        report.errors
+    );
+    let shown: Vec<String> = report
+        .errors
+        .iter()
+        .map(|d| d.render(&report.root))
+        .collect();
+    assert!(
+        shown.iter().all(|l| !l.contains("runtime/extensions")),
+        "{shown:#?}"
+    );
+}

@@ -1200,7 +1200,7 @@ pub async fn check(
         name: name.to_string(),
         ok: extension.errors.is_empty(),
         errors: extension.errors.clone(),
-        root: extension.root().to_string(),
+        root: extensions::source_root(root, name).unwrap_or_else(|| extension.root().to_string()),
         warnings: {
             let mut warnings = extension.warnings.clone();
             warnings.extend(profile_warnings(&extension, &ai_bindings(root)));

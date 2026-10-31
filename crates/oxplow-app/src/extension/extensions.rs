@@ -1026,6 +1026,20 @@ fn parse_block<T: serde::de::DeserializeOwned>(
         .transpose()
 }
 
+/// The folder a person edits for extension `name` in the checkout at `root`
+/// (`extensions/oxplow-foundation`, `.oxplow/extensions/mine`), as the
+/// diagnostics of a check or a test are shown under it; none when the
+/// checkout has no source for it. A throwaway oxplow that tests one that
+/// ships with oxplow runs the copy built into it, so what it read is not
+/// where its problems get fixed.
+pub fn source_root(root: &Path, name: &str) -> Option<String> {
+    let source = oxplow_config::extension_settings(root).source(root, name);
+    source
+        .join("extension.yaml")
+        .is_file()
+        .then(|| shown(root, &source))
+}
+
 /// Where `name`'s files are for a preview in the checkout at `root`: its
 /// source when the checkout has one, else, for an extension that ships with
 /// oxplow, its shipped deployment in `project`'s store.

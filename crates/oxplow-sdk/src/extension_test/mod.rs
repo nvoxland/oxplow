@@ -156,7 +156,8 @@ async fn run(
         errors: checked.errors.clone(),
         warnings: checked.warnings.clone(),
         skipped: Vec::new(),
-        root: checked.root.clone(),
+        root: oxplow_app::extension::extensions::source_root(root, name)
+            .unwrap_or_else(|| checked.root.clone()),
         blessed: Vec::new(),
         ran: vec!["check".into()],
         generation: host

@@ -35,7 +35,10 @@ A person reads `render(root)`: `<root>/<file>:<line>: <message> — fix:
 <fix>`, where `root` is the folder they edit — `Extension::root()`, the
 source when the extension was read from a deployed copy (`source`,
 which `locate` and a deploy set), else where it was read from;
-`Extension::shown(d)` is that. `CheckReport` and `TestReport` carry the
+`Extension::shown(d)` is that. An extension that ships with oxplow is read from the copy built into
+it (a path in the throwaway's runtime store), so a check or a test takes its
+root from the checkout instead (`extensions::source_root`: its
+`extensionSources` folder, `extensions/oxplow-foundation`), never the copy. `CheckReport` and `TestReport` carry the
 diagnostics and their `root`: text and JUnit render the lines, `--json`
 gives the objects. `v_extension.errors`/`warnings` and
 `v_extension_change.errors` list each diagnostic's fields plus `shown`, its
