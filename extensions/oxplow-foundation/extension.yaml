@@ -1225,6 +1225,7 @@ commands:
     summary: "Start a new, empty dashboard. It is a page in the Dashboards launcher category whose view is an empty grid, written into `extension` (default `my-pages`, created when missing) with its name taken from the title, and deployed. Its tiles are other pages, embedded, which the person adds with Pin to Dashboard. Refused when a page by that name exists. Returns `{ page, path, deployed }`."
     scope: pages.author
     op: new_dashboard
+    ui: { label: "New Dashboard…", group: Pages, keywords: [dashboard, tiles, board], open_after: "oxplow:oxplow/page?page={{result.page}}" }
     example: {"title": "Release health"}
   - name: extension.rollback
     summary: "Make an earlier deployment of an extension the one oxplow runs: `to` (a hash or its start, from `v_extension_deployment`), else the one before the active one. A bundled extension with nothing older returns to the deployment that ships with oxplow. Rolling back to one with more `permissions:` than what runs asks a person first, as a deploy does."

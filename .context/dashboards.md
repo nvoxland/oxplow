@@ -22,11 +22,11 @@ only pages in the default personal extension.
 `oxplow.extension.new_dashboard`. The index fixes `extension: my-pages`
 and asks for the title; the command derives the page slug, creates an
 empty grid, writes the page and deploys it. An existing slug is refused
-rather than overwritten. The menu entry is oxplow-bundled's command
-`oxplow.dashboard.new` (same scope and op, with `ui.open_after` opening the
-returned page URI); foundation keeps `oxplow.extension.new_dashboard` with no
-`ui`, for agents. With oxplow-bundled off there is no Dashboards index or
-New Dashboard… entry. A dashboard with no tiles says how to add one (Pin to Dashboard…),
+rather than overwritten. The command is foundation's and carries the
+New Dashboard… menu entry (`ui.open_after` opens the returned page URI):
+making a dashboard and pinning pages to it is part of the bare product.
+With oxplow-bundled off there is no Dashboards index; the launcher's
+Dashboards section lists every dashboard page. A dashboard with no tiles says how to add one (Pin to Dashboard…),
 not a blank page (`DashboardGrid`). Like `extension.write_page`, authoring is refused for bundled
 extensions and for an in-project source from a worktree stream.
 

@@ -221,7 +221,7 @@ mod tests {
             async move {
                 crate::dispatch(
                     "command_open_after",
-                    json!({ "id": "oxplow.dashboard.new", "result": result }),
+                    json!({ "id": "oxplow.extension.new_dashboard", "result": result }),
                     &svc,
                 )
                 .await
@@ -334,7 +334,7 @@ mod tests {
         let new_task = by_id("oxplow.work_item.new").expect("New Task is offered");
         assert_eq!(new_task["ui"]["form"], "oxplow:oxplow/page?page=new-task");
         assert_eq!(new_task["ui"]["open_after"], "{{result.uri}}");
-        let dashboard = by_id("oxplow.dashboard.new").expect("New Dashboard is offered");
+        let dashboard = by_id("oxplow.extension.new_dashboard").expect("New Dashboard is offered");
         assert_eq!(
             dashboard["ui"]["open_after"],
             "oxplow:oxplow/page?page={{result.page}}"

@@ -6068,8 +6068,7 @@ commands:
                 "oxplow.work_item.new",
                 "oxplow.knowledge.new_page",
                 "oxplow.handoff.offer",
-                "oxplow.effort.link_to_task",
-                "oxplow.dashboard.new"
+                "oxplow.effort.link_to_task"
             ]
         );
         let advisories: Vec<&str> = b.advisories.iter().map(|a| a.id.as_str()).collect();
@@ -6209,7 +6208,7 @@ commands:
     /// Timeline) are oxplow-bundled's, and the only custom component
     /// foundation keeps is the hand-written Integrations area.
     #[test]
-    fn foundation_has_no_zones_dashboards_or_timeline() {
+    fn foundation_has_no_zones_dashboards_index_or_timeline() {
         let dir = tempfile::tempdir().unwrap();
         let exts = load_extensions(dir.path());
         let ext = |name: &str| exts.iter().find(|e| e.name == name).unwrap();
@@ -6231,6 +6230,11 @@ commands:
             .collect();
         assert_eq!(components, ["integrations"]);
         assert!(bundled.custom_components.iter().any(|c| c.id == "timeline"));
+        // Making a dashboard is the bare product; the launcher lists them.
+        assert!(foundation
+            .commands
+            .iter()
+            .any(|c| c.name == "oxplow.extension.new_dashboard" && c.ui.is_some()));
     }
 
     #[test]

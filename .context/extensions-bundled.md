@@ -230,9 +230,9 @@ screens and oxplow-bundled's add the review and analysis:
   moved with the rest of the person-facing screens. Foundation has no build
   step, no `package.json` and no `node_modules`; its only custom component
   is the hand-written `integrations`.
-- **Dashboards.** The `dashboards` index page (launcher Data section) and
-  the `dashboard.new` menu command, over foundation's
-  `extension.new_dashboard`. See [dashboards.md](./dashboards.md).
+- **Dashboards index.** The `dashboards` page (launcher Data section), a
+  list the launcher's Dashboards section already gives. New Dashboard… and
+  Pin to Dashboard stay in foundation. See [dashboards.md](./dashboards.md).
 - **Zones.** The hidden `zones` page holds the questions about the zone
   rules (`v_zone`, `v_zone_unmatched`); nothing links to it.
 - **The app's screens.** foundation's `alerts`,
