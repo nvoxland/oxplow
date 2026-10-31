@@ -15,3 +15,4 @@ loaders:
 view:
   from: work_count
   viz: number
+badge: { loader: work_count, column: open }

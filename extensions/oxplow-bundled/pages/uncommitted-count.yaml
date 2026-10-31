@@ -13,3 +13,4 @@ loaders:
 view:
   from: uncommitted_count
   viz: number
+badge: { loader: uncommitted_count, column: files }
