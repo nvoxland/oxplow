@@ -44,3 +44,4 @@ hex = { workspace = true }
 workspace = true
 
 [dev-dependencies]
+tempfile = { workspace = true }

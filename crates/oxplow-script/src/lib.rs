@@ -34,6 +34,7 @@ use serde::{Deserialize, Serialize};
 pub mod ai;
 pub mod exec_io;
 pub mod helpers;
+pub mod process_group;
 pub mod runtime;
 pub mod scope;
 pub mod uri;

@@ -189,9 +189,9 @@ Logs, tab reports and the socket use the same lightweight `uiClientId.ts` identi
     terminal and agent PTY (`TerminalSessionRegistry::close_all`: the
     PTY's whole group), and, after `shutdown`, any program group a
     cancelled job still owns (`external_process::stop_all`: collectors,
-    extension builds).
-  Starlark `exec` programs (`oxplow-script`) keep their own group code and
-  are not in that list yet.
+    extension builds, Starlark `exec` programs). One registry serves all
+    of them: `oxplow_script::process_group` (`external_process`
+    re-exports it), because `oxplow-script` sits below `oxplow-app`.
 - **A second app defers.** `.oxplow/daemon.json` names the running
   daemon. Opening a project whose daemon is alive waits a few seconds
   (one whose app just quit is on its way out), then refuses: "already
