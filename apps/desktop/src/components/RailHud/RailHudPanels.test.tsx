@@ -90,3 +90,20 @@ test("a body page's choice param is a header toggle; picking re-runs the body wi
   // The pick is the panel's memory, not the browser's.
   expect(store.get(panelScope("x/w"), "choices")).toEqual({ mode: "top" });
 });
+
+test("a count of zero draws no badge in the header", async () => {
+  const saved = rowsOf["x/n"];
+  rowsOf["x/n"] = [];
+  try {
+    const { runs } = fakePageRunsBy((key) => pageRun(key.page, key.params));
+    const view = render(
+      <PanelRunsProvider streamId="str1" threadId={null} pageRuns={runs}>
+        <RailHud streamId="str1" onOpenPage={() => {}} />
+      </PanelRunsProvider>,
+    );
+    await waitFor(() => view.getByTestId("rail-panel-collapsed"));
+    expect(view.getByTestId("rail-section-toggle-ext:x/w").textContent).toBe("▸Work");
+  } finally {
+    rowsOf["x/n"] = saved!;
+  }
+});
