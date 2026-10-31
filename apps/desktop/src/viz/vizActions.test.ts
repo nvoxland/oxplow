@@ -31,7 +31,7 @@ test("an action runs its command with the run's params and row", async () => {
   expect(await performVizAction(action, run, { id: 7 }, "str1", false, d)).toBe("done");
   expect(log).toEqual([
     `run acme/prs finish {"repo":"x"} {"id":7} str1 false`,
-    "toast Finish: done.",
+    "toast ✓ Finish",
     "open_after oxplow.work_item.transition {}",
   ]);
 });
@@ -124,7 +124,7 @@ test("an undoable action's toast offers Undo, which undoes the run as the person
     openPage: () => {},
   };
   await performVizAction(action, run, null, null, false, d);
-  expect(log).toEqual(["toast Finish: done. with undo", "undo 7"]);
+  expect(log).toEqual(["toast ✓ Finish with undo", "undo 7"]);
 });
 
 // A form action whose form, less its fixed fields, is one text field is a

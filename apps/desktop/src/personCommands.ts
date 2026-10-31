@@ -8,6 +8,7 @@ import { recordOpError } from "./opErrors.js";
 import { showToast } from "./components/toastStore.js";
 import { needsConfirmation } from "./ipc-error.js";
 import type { CommandOutcome } from "./tauri-bridge/generated/bindings.js";
+import { doneMessage, undoneMessage } from "./commandToast.js";
 
 export interface PendingCommand {
   label: string;
@@ -37,7 +38,7 @@ export function createPersonCommands(deps: PersonCommandDeps) {
   const undo = async (label: string, auditId: number) => {
     try {
       await deps.undo(auditId);
-      deps.toast(`${label}: undone.`);
+      deps.toast(undoneMessage(label));
     } catch (e) {
       deps.recordError(`Undo ${label}`, e instanceof Error ? e.message : String(e));
     }
@@ -48,7 +49,7 @@ export function createPersonCommands(deps: PersonCommandDeps) {
       set(null);
       // A run that came back undoable offers its Undo.
       const auditId = out.inverse && out.audit_id != null ? out.audit_id : null;
-      deps.toast(`${p.label}: done.`, auditId === null ? undefined : () => void undo(p.label, auditId));
+      deps.toast(doneMessage(p.label), auditId === null ? undefined : () => void undo(p.label, auditId));
       return out;
     } catch (e) {
       if (!confirmed && needsConfirmation(e)) {

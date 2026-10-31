@@ -29,7 +29,7 @@ const outcome = (inverse: boolean): CommandOutcome => ({ result: null, audit_id:
 test("an undoable run offers Undo, which undoes it", async () => {
   const { result } = renderHook(() => useFormSubmit("Rename", async () => outcome(true), () => {}));
   await act(() => result.current.submit({}, false));
-  expect(toasts[0]?.message).toBe("Rename: done.");
+  expect(toasts[0]?.message).toBe("✓ Rename");
   await act(async () => toasts[0]!.onUndo!());
   expect(undone).toEqual([7]);
 });

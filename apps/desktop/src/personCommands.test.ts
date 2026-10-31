@@ -27,7 +27,7 @@ test("a command that asks waits for the person, then runs confirmed; Cancel drop
     ["oxplow.work_item.create", { title: "Bug" }, true],
   ]);
   expect(store.pending()).toBeNull();
-  expect(toasts).toEqual(["New Bug: done."]);
+  expect(toasts).toEqual(["✓ New Bug"]);
 
   await store.run("New Bug", "oxplow.work_item.create", { title: "Bug" });
   store.cancel();
@@ -72,11 +72,11 @@ test("an undoable command's toast offers Undo, which undoes that run", async () 
   await store.run("Move to Done", "oxplow.work_item.transition", { uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", to: "done" });
   await store.run("Comment", "oxplow.work_item.comment", {});
   expect(toasts.map(([m, u]) => [m, u !== undefined])).toEqual([
-    ["Move to Done: done.", true],
-    ["Comment: done.", false],
+    ["✓ Move to Done", true],
+    ["✓ Comment", false],
   ]);
   toasts[0]![1]!();
   await new Promise((r) => setTimeout(r, 0));
   expect(undone).toEqual([7]);
-  expect(toasts.at(-1)![0]).toBe("Move to Done: undone.");
+  expect(toasts.at(-1)![0]).toBe("Undone: Move to Done");
 });
