@@ -1,0 +1,21 @@
+# Site search indexes each metric and measure: the title is its name, the
+# body its description, key and unit, and neither belongs to a stream.
+when:
+  sql: "SELECT uri, title, body, stream_id FROM v_search_metric WHERE uri = 'oxplow:oxplow/metric?metric=agent.tokens.total'"
+expect:
+  rows:
+    - uri: "oxplow:oxplow/metric?metric=agent.tokens.total"
+      title: Total tokens
+      stream_id: null
+steps:
+  - when:
+      sql: "SELECT count(*) AS n FROM v_search_metric WHERE body LIKE '%agent.tokens.total%' AND body LIKE '%tokens%' AND body LIKE '%input + output%'"
+    expect:
+      rows: [{ n: 1 }]
+  - when:
+      sql: "SELECT uri, title, stream_id FROM v_search_measure WHERE uri = 'oxplow:oxplow/measure?measure=oxplow.tokens'"
+    expect:
+      rows:
+        - uri: "oxplow:oxplow/measure?measure=oxplow.tokens"
+          title: Agent tokens
+          stream_id: null

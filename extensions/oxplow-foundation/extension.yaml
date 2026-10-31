@@ -728,11 +728,13 @@ resources:
     description: "A quantity that facts record, such as lines of code."
     label: Measure
     params: { measure: { required: true } }
+    searchable: search_measure
     icon: bar-chart-3
   - name: metric
     description: "A number that oxplow tracks over time."
     label: Metric
     params: { metric: { required: true } }
+    searchable: search_metric
     icon: bar-chart-3
   - name: dimension
     description: "An axis that metrics can be split by."

@@ -25820,5 +25820,59 @@
         "uri"
       ]
     }
+  },
+  "search_metric": {
+    "1": {
+      "columns": [
+        {
+          "name": "uri",
+          "type": "TEXT",
+          "doc": "`oxplow:oxplow/metric?metric=<key>`: what a hit opens."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "The metric's title (its key when it has none)."
+        },
+        {
+          "name": "body",
+          "type": "TEXT",
+          "doc": "Its description, key and unit."
+        },
+        {
+          "name": "stream_id",
+          "type": "TEXT",
+          "doc": "Always NULL: metrics belong to the project."
+        }
+      ],
+      "key": []
+    }
+  },
+  "search_measure": {
+    "1": {
+      "columns": [
+        {
+          "name": "uri",
+          "type": "TEXT",
+          "doc": "`oxplow:oxplow/measure?measure=<key>`: what a hit opens."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "The measure's title (its key when it has none)."
+        },
+        {
+          "name": "body",
+          "type": "TEXT",
+          "doc": "Its description, key and unit."
+        },
+        {
+          "name": "stream_id",
+          "type": "TEXT",
+          "doc": "Always NULL: measures belong to the project."
+        }
+      ],
+      "key": []
+    }
   }
 }

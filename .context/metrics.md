@@ -1728,6 +1728,11 @@ just carries a Help blurb pointing there.
 > that matches no files yields no point at all. Nothing auto-detects a project's
 > languages.
 
+- **Finding a metric or measure**: the launcher's site search. The `metric`
+  and `measure` resources are `searchable:` (core datasets `v_search_metric`
+  and `v_search_measure`: title, then description, key and unit as the body,
+  `stream_id` NULL), so a hit opens the metric's own page. Fixture
+  `metrics-and-measures-are-found-by-search`.
 - **Metrics** (the `metrics-recorded` page,
   `metricsIndexRef()`) — every **catalogued** metric as a `title · trend
   sparkline · latest value` row of a grouped list (row set =
