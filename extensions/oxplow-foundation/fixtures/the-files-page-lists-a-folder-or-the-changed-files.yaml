@@ -13,6 +13,9 @@ expect:
       rows:
         contains: [{ value: all }, { value: uncommitted }]
 steps:
+  # With changes, the header offers Commit Changes (dirty).
+  - when: { page: oxplow-foundation/files, params: { stream_id: 1, scope: all } }
+    expect: { loaders: { header: { rows: [{ dirty: 1 }] } } }
   # The working tree scope names a working change.
   - when: { page: oxplow-foundation/files, params: { stream_id: 1, scope: uncommitted } }
     expect: { loaders: { row: { rows: [{ change_kind: working }] } } }

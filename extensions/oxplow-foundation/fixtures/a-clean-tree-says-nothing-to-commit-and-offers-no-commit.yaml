@@ -1,0 +1,16 @@
+# After a commit the tree is clean: the Uncommitted page says "Nothing to
+# commit" once, with no commit form and no empty file list; the Files page
+# offers no Commit Changes.
+given:
+  - observe: { turn: { prompt: base, write: { path: tracked.txt, body: "x\n" } } }
+  - { command: oxplow.vcs.stage, input: { stream: str1, paths: [tracked.txt] } }
+  - { command: oxplow.vcs.commit, input: { stream: str1, message: base } }
+when: { page: oxplow-foundation/uncommitted-changes, params: { stream_id: 1 } }
+expect:
+  loaders:
+    clean: { rows: [{ message: Nothing to commit. }] }
+    commit_form: { rows: [] }
+    files: { rows: [] }
+steps:
+  - when: { page: oxplow-foundation/files, params: { stream_id: 1, scope: all } }
+    expect: { loaders: { header: { rows: [{ dirty: 0 }] } } }

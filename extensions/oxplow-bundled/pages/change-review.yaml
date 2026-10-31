@@ -29,7 +29,7 @@ loaders:
                ELSE '_Analyzing this change…_'
              END AS summary
       FROM v_change c, f
-      WHERE c.id = :change_id
+      WHERE c.id = :change_id AND (f.n > 0 OR c.status <> 'done')
   change_look_here:
     sql: |
       SELECT i.path, round(i.interest, 1) AS interest, i.reasons,

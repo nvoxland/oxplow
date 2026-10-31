@@ -15,6 +15,11 @@ loaders:
     - key: change_id
     - key: base_revision
     - key: head_revision
+  clean:
+    sql: |
+      SELECT 'Nothing to commit.' AS message
+      WHERE NOT EXISTS (SELECT 1 FROM v_change c JOIN v_change_file f ON f.change_id = c.id
+                        WHERE c.kind = 'working' AND c.target = '' AND c.stream_id = :stream_id)
   commit_form:
     sql: |
       SELECT 'str' || :stream_id AS stream, '' AS message
@@ -51,9 +56,18 @@ loaders:
         from: row.head_revision
 view:
   stack:
+  - id: clean
+    title: Status
+    hide_title: true
+    from: clean
+    viz: markdown
+    markdown:
+      text: message
+    hide_empty: true
   - id: commit
     title: Commit
     from: commit_form
+    hide_empty: true
     viz: form
     form:
       command: oxplow.vcs.commit
@@ -77,5 +91,5 @@ view:
         from: file
         base: base_revision
         head: head_revision
-    empty: Working tree is clean.
+    hide_empty: true
   - slot: sections

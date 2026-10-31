@@ -179,6 +179,22 @@ test("a page a slot mounted is a section titled by that page", () => {
   expect(slot.textContent).toContain("look here");
 });
 
+test("a page a slot mounted with nothing to show is left out", () => {
+  const run = stackPage();
+  const mounted = fakeRun(
+    fakePage(node.viz("review", "review", { columns: [{ key: "note" }] }), { id: "beta/review", title: "Change Analysis" }),
+    { loaders: { review: loader(["note"], []) } },
+  );
+  const tree = {
+    ...run.tree,
+    children: run.tree.children.map((c) =>
+      c.id === "more" ? { ...c, children: [{ id: "beta.review", children: [], embed: mounted, error: null }] } : c,
+    ),
+  };
+  const { container } = render(<PageTree run={{ ...run, tree } as PageRun} runId="run-1" />);
+  expect(container.querySelector('[data-node="beta.review"]')).toBeNull();
+});
+
 test("an embedded page's own actions are buttons above it, pressed naming the embed's node", async () => {
   const { calls, press } = recorder();
   const inner = fakeRun(

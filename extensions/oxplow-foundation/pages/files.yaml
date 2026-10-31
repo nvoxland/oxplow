@@ -35,6 +35,7 @@ loaders:
       SELECT :branch AS branch,
              CASE WHEN count(f.status) = 0 THEN 'Working tree is clean'
                   ELSE count(*) || ' changed' END AS changes,
+             count(f.status) > 0 AS dirty,
              CASE WHEN :compare = 'none' THEN NULL ELSE 'Files open as a diff against ' || :compare END AS comparing
       FROM (SELECT cf.status FROM v_change c JOIN v_change_file cf ON cf.change_id = c.id
             WHERE c.kind = 'working' AND c.target = '' AND c.stream_id = :stream_id) f
@@ -112,6 +113,7 @@ view:
       label: Commit Changes…
       command: oxplow.vcs.commit
       form: true
+      when: dirty
       fixed:
       - stream
       input:
