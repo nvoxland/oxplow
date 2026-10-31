@@ -229,7 +229,8 @@
   min-height: 28px;
   font-size: var(--text-sm);
 }
-.ox-param-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); }
+/* A long label wraps; it is never cut off. */
+.ox-param-label { min-width: 0; overflow-wrap: anywhere; color: var(--text-secondary); }
 /* A row whose value isn't its default: a dot before its label. */
 .ox-param-changed .ox-param-label::before {
   content: "";
@@ -250,10 +251,21 @@
   text-align: left;
   color: var(--text-primary);
   background: transparent;
-  border: 1px solid transparent;
+  border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
-  padding: 2px var(--space-2);
+  position: relative;
+  padding: 2px calc(var(--space-2) + 14px) 2px var(--space-2);
   cursor: pointer;
+}
+/* A caret says the value is a control, not a label. */
+.ox-param-value::after {
+  content: "\25BE";
+  position: absolute;
+  right: var(--space-2);
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
 }
 .ox-param-value:hover,
 .ox-param-value:focus-visible { background: var(--surface-app); border-color: var(--border-strong); outline: none; }

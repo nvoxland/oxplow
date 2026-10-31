@@ -173,7 +173,8 @@ markdown itself, nor edits it in a `<textarea>`.
   rail (Contents; a single section gets none), those whose heading is
   hidden (`hide_title`) too; a `sections` viz's rows are listed under
   their parent, the first 10, then one "… N more" that scrolls to the parent
-  (`CONTENTS_SUBSECTIONS_MAX`). A declared document does the same with `view:
+  (`CONTENTS_SUBSECTIONS_MAX`). Scrolled to the very bottom, the last entry is the active one, even
+  when that section is too short to reach the top. A declared document does the same with `view:
   <param>`: the one section in view is the page, the others are its rail,
   a change of section is pushed (Back returns), and the launcher lists
   each section by name. On any page `#section=<id>` lands on that
@@ -1301,7 +1302,8 @@ resource (the code viz's Open file); one in a snippet does.
 A param is a **row**, drawn by the kit's `ParamRow`
 (`src/kit/ParamControls.tsx`): its label beside its value. At rest the
 value is a button ("Any" when it has none; a dot before the label when it
-isn't the default). Clicking it, or Enter/Space on it, edits:
+isn't the default). The value has a border and a caret, so it reads as a
+control, not a label; a long label wraps, never cut off. Clicking it, or Enter/Space on it, edits:
 - **in place**, the control takes the value's place: text (Enter or blur
   applies), search (applies after a 250 ms pause, at once on Enter),
   choice, branch, the id pickers, a date_range's presets. A select applies
