@@ -25,7 +25,7 @@ loaders:
   files:
     sql: |
       WITH RECURSIVE f(path, status) AS (
-        SELECT path, CASE WHEN untracked = 1 THEN 'untracked' ELSE status END
+        SELECT path, status
         FROM v_change_file WHERE change_id = :change_id
       ), d(path) AS (
         SELECT substr(path, 1, length(rtrim(path, replace(path, '/', ''))) - 1) FROM f WHERE instr(path, '/') > 0
