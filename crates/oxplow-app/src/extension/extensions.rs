@@ -2285,7 +2285,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
     check_config_reads(&mut ext);
     ext.permissions = m.permissions.clone();
     check_permissions(&mut ext, files, man, &manifest);
-    ext.contributions = descriptors::describe(&ext);
+    ext.contributions = descriptors::describe(&ext, &manifest);
     descriptors::check_ids(&mut ext);
     public_contracts::prepare(&mut ext);
     ext

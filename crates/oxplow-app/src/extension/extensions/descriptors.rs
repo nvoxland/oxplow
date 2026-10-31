@@ -15,15 +15,35 @@ use oxplow_domain::diagnostic::{relative_to, Diagnostic};
 use super::Extension;
 
 /// The descriptors of `ext`'s contributions, in manifest order per kind.
-pub fn describe(ext: &Extension) -> Vec<Descriptor> {
+/// Each says where it is declared inside the extension (`extension.yaml`
+/// and its entry's line in `manifest`, a page's file, a dataset's SQL),
+/// never the folder it was loaded from: that is a machine path.
+pub fn describe(ext: &Extension, manifest: &str) -> Vec<Descriptor> {
+    use super::manifest_v2::{entry_line, item_lines, kind_line};
+    let line_of = |line: Option<usize>| line.and_then(|l| u32::try_from(l).ok());
     let owner = Owner {
         extension: ext.name.clone(),
         origin: ext.origin.clone(),
         version: ext.version.clone(),
     };
     let source = DeclaredAt {
-        file: format!("{}/extension.yaml", ext.path.trim_end_matches('/')),
+        file: "extension.yaml".into(),
         line: None,
+    };
+    // The manifest entry of `block` whose `key` is `value`, else the block.
+    let entry = |block: &str, key: &str, value: &str| DeclaredAt {
+        file: "extension.yaml".into(),
+        line: line_of(entry_line(manifest, block, key, value).or(kind_line(manifest, block))),
+    };
+    // The `n`th item of list `block` (`ui.mounts`), else the block.
+    let item = |block: &str, n: usize| DeclaredAt {
+        file: "extension.yaml".into(),
+        line: line_of(
+            item_lines(manifest, block)
+                .get(n)
+                .copied()
+                .or(kind_line(manifest, block)),
+        ),
     };
     let new = |kind: ContributionKind, local: &str, trigger: RunsOn| {
         Descriptor::new(
@@ -47,7 +67,7 @@ pub fn describe(ext: &Extension) -> Vec<Descriptor> {
         let mut d = new(ContributionKind::Dataset, &m.decl.name, RunsOn::Query);
         d.contract_version = Some(m.decl.version);
         d.global = Some(view.clone());
-        d.source.file = format!("{}/{}", ext.path.trim_end_matches('/'), m.file);
+        d.source.file = m.file.clone();
         out.push(d);
     }
     // One descriptor per type, whatever versions of it are declared.
@@ -93,29 +113,38 @@ pub fn describe(ext: &Extension) -> Vec<Descriptor> {
         let local =
             p.id.strip_prefix(&format!("{}/", ext.name))
                 .unwrap_or(&p.id);
-        let d = new(ContributionKind::Panel, local, RunsOn::Mount);
+        let mut d = new(ContributionKind::Panel, local, RunsOn::Mount);
+        d.source = entry("panels", "id", local);
         out.push(d);
     }
     for (n, slot) in ext.ui.page_slots.iter().enumerate() {
-        let d = new(ContributionKind::Slot, &slot.local_id(n), RunsOn::Mount);
+        let mut d = new(ContributionKind::Slot, &slot.local_id(n), RunsOn::Mount);
+        d.source = item("ui.mounts", n);
         out.push(d);
     }
-    for dec in &ext.ui.decorators {
+    for (i, dec) in ext.ui.decorators.iter().enumerate() {
         let n = dec.id.rsplit('/').next().unwrap_or_default();
-        let d = new(
+        let mut d = new(
             ContributionKind::Decorator,
             &format!("decorator-{n}"),
             RunsOn::Mount,
         );
+        d.source = item("ui.decorators", i);
         out.push(d);
     }
+    // A replacement is a `ui.mounts` entry at a replaceable target.
     for r in &ext.ui.replacements {
-        let d = new(ContributionKind::Replacement, &r.target, RunsOn::Mount);
+        let mut d = new(ContributionKind::Replacement, &r.target, RunsOn::Mount);
+        d.source.line = line_of(
+            super::manifest_v2::line_under(manifest, "ui", &r.target)
+                .or(kind_line(manifest, "ui.mounts")),
+        );
         out.push(d);
     }
     for c in &ext.custom_components {
         let mut d = new(ContributionKind::CustomComponent, &c.id, RunsOn::Mount);
         d.description = c.description.clone();
+        d.source = entry("custom_components", "id", &c.id);
         out.push(d);
     }
     for c in &ext.collectors {
@@ -130,6 +159,7 @@ pub fn describe(ext: &Extension) -> Vec<Descriptor> {
             oxplow_config::collectors::Trigger::OnRun { .. } => RunsOn::Run,
         };
         let mut d = new(ContributionKind::Collector, &c.id, trigger);
+        d.source = entry("collectors", "id", &c.id);
         d.after = c.after.clone();
         d.description = Some(c.doc.clone());
         d.needs = c.service_needs();
@@ -150,6 +180,7 @@ pub fn describe(ext: &Extension) -> Vec<Descriptor> {
         );
         d.needs = e.needs.clone();
         d.after = e.after.clone();
+        d.source = entry("effects", "id", &e.id);
         out.push(d);
     }
     // A command is named by its bus id (`<namespace>.<area>.<verb>`), its
@@ -157,24 +188,30 @@ pub fn describe(ext: &Extension) -> Vec<Descriptor> {
     for c in &ext.commands {
         let mut d = new(ContributionKind::Command, &c.name, RunsOn::Call);
         d.needs = c.needs.clone();
+        // The manifest names it without its namespace.
+        let written = c
+            .name
+            .strip_prefix(&format!("{}.", ext.namespace))
+            .unwrap_or(&c.name);
+        d.source = entry("commands", "name", written);
         d.global = Some(c.name.clone());
         out.push(d);
     }
     for job in &ext.jobs {
         let mut d = new(ContributionKind::Job, &job.id, RunsOn::Call);
+        d.source = entry("jobs", "id", &job.id);
         d.contract_version = Some(job.version);
         d.needs = job.needs.clone();
         out.push(d);
     }
     for profile in &ext.ai_profiles {
-        out.push(new(
-            ContributionKind::AiProfile,
-            &profile.id,
-            RunsOn::Declared,
-        ));
+        let mut d = new(ContributionKind::AiProfile, &profile.id, RunsOn::Declared);
+        d.source = entry("ai_profiles", "id", &profile.id);
+        out.push(d);
     }
     for a in &ext.advisories {
         let mut d = new(ContributionKind::Advisory, &a.id, RunsOn::Agent);
+        d.source = entry("advisories", "id", &a.id);
         d.needs = a.needs.clone();
         out.push(d);
     }
@@ -182,6 +219,7 @@ pub fn describe(ext: &Extension) -> Vec<Descriptor> {
     // project.
     for k in &ext.skills {
         let mut d = new(ContributionKind::Skill, &k.name, RunsOn::Agent);
+        d.source = entry("skills", "name", &k.name);
         d.needs = k.needs.clone();
         d.global = Some(k.name.clone());
         out.push(d);
@@ -194,6 +232,7 @@ pub fn describe(ext: &Extension) -> Vec<Descriptor> {
             RunsOn::Call,
         );
         d.needs = i.needs.clone();
+        d.source = entry("implementations", "id", &i.id);
         d.global = Some(format!("{}/{}", i.capability, i.id));
         d.description = i.description.clone();
         out.push(d);
@@ -202,12 +241,14 @@ pub fn describe(ext: &Extension) -> Vec<Descriptor> {
     // its commands' namespace: one per project.
     for p in &ext.providers {
         let mut d = new(ContributionKind::Provider, &p.id, RunsOn::Call);
+        d.source = entry("providers", "id", &p.id);
         d.global = Some(p.id.clone());
         out.push(d);
     }
     for m in &ext.measures {
         if let Some(key) = &m.key {
             let mut d = new(ContributionKind::Measure, key, RunsOn::Query);
+            d.source = entry("measures", "key", key);
             d.global = Some(key.clone());
             out.push(d);
         }
@@ -217,6 +258,7 @@ pub fn describe(ext: &Extension) -> Vec<Descriptor> {
     for m in &ext.metrics {
         if let Some(key) = &m.key {
             let mut d = new(ContributionKind::Metric, key, RunsOn::Query);
+            d.source = entry("metrics", "key", key);
             d.global = Some(key.clone());
             out.push(d);
         }
@@ -224,10 +266,14 @@ pub fn describe(ext: &Extension) -> Vec<Descriptor> {
     for dim in &ext.dimensions {
         if let Some(key) = &dim.key {
             let mut d = new(ContributionKind::Dimension, key, RunsOn::Query);
+            d.source = entry("dimensions", "key", key);
             d.global = Some(key.clone());
             d.description = dim.description.clone();
             out.push(d);
         }
+    }
+    for d in &mut out {
+        d.source.file = relative_to(&ext.path, &d.source.file).to_string();
     }
     out
 }
@@ -632,6 +678,36 @@ mod tests {
         all[0]
     }
 
+    /// Where each contribution is declared is a file inside its
+    /// extension (`extension.yaml`, `pages/open.yaml`), never a machine
+    /// path or the folder it was loaded from, and one declared in the
+    /// manifest has its entry's line, so "Declared in" can point at it.
+    #[test]
+    fn every_contribution_says_where_in_its_extension_it_is_declared() {
+        let ext = acme();
+        assert!(!ext.contributions.is_empty());
+        for d in &ext.contributions {
+            assert!(
+                !d.source.file.starts_with('/') && !d.source.file.contains(".oxplow/"),
+                "{}: {:?}",
+                d.id,
+                d.source
+            );
+            if d.source.file == "extension.yaml" {
+                assert!(d.source.line.is_some(), "{}: {:?}", d.id, d.source);
+            }
+        }
+        let page = one(&ext, K::Page);
+        assert_eq!(page.source.file, "pages/open.yaml");
+        assert!(
+            ext.contributions
+                .iter()
+                .any(|d| d.source.file == "extension.yaml"),
+            "{:?}",
+            ext.contributions
+        );
+    }
+
     #[test]
     fn the_fixture_extension_loads_clean() {
         assert_eq!(acme().errors, Vec::<Diagnostic>::new());
@@ -784,7 +860,7 @@ mod tests {
                 view: vec![],
                 label: "board".into(),
             });
-        let d = describe(&ext)
+        let d = describe(&ext, "")
             .into_iter()
             .find(|d| d.id.kind == K::Replacement)
             .expect("described");
@@ -809,7 +885,7 @@ mod tests {
         second.path = ".oxplow/extensions/acme-qr".into();
         // The dataset's view is named for its extension, so a second one's
         // never matches; claim it outright.
-        second.contributions = describe(&second);
+        second.contributions = describe(&second, "");
         for d in &mut second.contributions {
             if d.id.kind == K::Dataset {
                 d.global = Some("v_acme_pr_prs".into());

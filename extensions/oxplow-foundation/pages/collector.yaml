@@ -11,15 +11,10 @@ answers:
 loaders:
   about:
     sql: |
-      WITH c AS (
-        SELECT *, substr(file, instr(file, '/extensions/' || extension || '/') + length('/extensions/' || extension || '/')) AS r
+      WITH f AS (
+        -- The file inside the extension, under the extension's folder.
+        SELECT *, extension || '/' || file AS rel
         FROM v_contribution WHERE uri = :uri
-      ), f AS (
-        -- The running copy's path: the extension's folder, then the file inside it.
-        SELECT *, CASE WHEN file IS NULL THEN NULL
-                       WHEN instr(file, '/extensions/' || extension || '/') > 0 THEN extension || substr(r, instr(r, '/'))
-                       ELSE extension || '/' || file END AS rel
-        FROM c
       )
       SELECT k.id AS name, COALESCE(k.description, f.description) AS description,
              f.extension, 'oxplow:oxplow/extension?name=' || f.extension AS extension_target,

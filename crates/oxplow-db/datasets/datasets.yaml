@@ -1343,7 +1343,7 @@
     - { name: "since", type: "TEXT", doc: "When its run was first deferred (RFC 3339)." }
     - { name: "touched", type: "TEXT", doc: "When a triggering event last arrived for it (RFC 3339): what `settle` counts from." }
 - name: contribution
-  version: 9
+  version: 10
   key: [uri]
   description: "Every enabled extension's contributions, one row each, as their descriptors say: its URI (`<kind>:<extension>/<id>`, or `<kind>:<name>` for a command, metric, measure, dimension, event type or ref kind — the dataset that owns every contribution kind's URI), who contributed it and at what version, how it runs, what it needs, and the shared name it holds. What `list_extensions` counts and the reference documents. Kinds move onto descriptors one by one; a kind not yet listed here keeps its own listing."
   fields:
@@ -1359,8 +1359,8 @@
     - { name: "after", type: "TEXT", doc: "What an effect or a collector runs after when one event reaches it and them (JSON array of refs: `effect:<ext>/<id>`, `oxplow:oxplow/collector?collector=<ext>/<id>`, `oxplow:oxplow/consumer?name=<name>`), as the catalog resolved its `after:`." }
     - { name: "order_level", type: "INTEGER", doc: "Where an effect or a collector runs among what one event reaches: 0 first, each after every contribution it names. NULL for a kind that isn't ordered." }
     - { name: "global_name", type: "TEXT", doc: "The name it holds in a space every extension shares (a metric key, a skill name, `<capability>/<id>`); NULL when none." }
-    - { name: "file", type: "TEXT", doc: "The manifest it's declared in." }
-    - { name: "line", type: "INTEGER", doc: "Its line there, when the kind tracks lines." }
+    - { name: "file", type: "TEXT", doc: "The file it's declared in, inside its extension: `extension.yaml`, a page's `pages/<slug>.yaml`, a dataset's SQL. Join it to the extension (`v_extension`) for where that runs; never a machine path." }
+    - { name: "line", type: "INTEGER", doc: "Its entry's line there; NULL for a contribution that is a whole file (a page, a dataset's SQL)." }
     - { name: "description", type: "TEXT", doc: "One sentence saying what it is, a collector's `doc:`, or the `description:` of a resource, a dimension or an implementation (the same text as on `v_collector`, `v_resource`, `v_dimension` and `v_capability_provider`); NULL for a kind whose declaration has none." }
   tests:
     - { not_null: uri }

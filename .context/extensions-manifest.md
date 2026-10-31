@@ -12,6 +12,12 @@ identity (`ContributionId { extension, kind, local }`; one grammar for
 (extension, origin and the extension's `version:`),
 how it runs (`RunsOn`), its needs and `after`, and the **global name** it
 takes in a space extensions share (a metric key, a fact collector's id).
+Its `source` (`DeclaredAt`, published as `v_contribution.file` and
+`line`) is a file inside the extension — `extension.yaml` with the
+entry's line (`manifest_v2::entry_line` by its id, `item_lines` for
+`ui.mounts`), a page's `pages/<slug>.yaml`, a dataset's SQL — never the
+folder it loaded from (a deployment is a machine path). A page joins it
+to the extension for a link (`extension || '/' || file`).
 The kinds' table (`contribution::KINDS`: manifest key, title, whether two
 extensions may share a name) is the one place those facts live.
 

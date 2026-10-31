@@ -17621,6 +17621,88 @@
       "key": [
         "uri"
       ]
+    },
+    "10": {
+      "columns": [
+        {
+          "name": "uri",
+          "type": "TEXT",
+          "doc": "Its ref: `oxplow:oxplow/job?job=effort-review/review`, `oxplow:oxplow/collector?collector=triage/todos`, `oxplow:oxplow/command?command=oxplow.review.accept`. (v3, was `id`)"
+        },
+        {
+          "name": "extension",
+          "type": "TEXT",
+          "doc": "The extension that declares it."
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "doc": "`collector`, `effect`, `command`, `metric`, `skill`, `provider`, `page`, …"
+        },
+        {
+          "name": "local",
+          "type": "TEXT",
+          "doc": "Its id within the extension, or its global name (a command's bus id, a metric's key)."
+        },
+        {
+          "name": "origin",
+          "type": "TEXT",
+          "doc": "`project` or `bundled`."
+        },
+        {
+          "name": "version",
+          "type": "TEXT",
+          "doc": "The extension's `version:` (a bundled one's is oxplow's); NULL when it declares none."
+        },
+        {
+          "name": "contract_version",
+          "type": "INTEGER",
+          "doc": "The contract's own version (a dataset's, an event type's), when it has one."
+        },
+        {
+          "name": "runs_on",
+          "type": "TEXT",
+          "doc": "How it comes to run, as JSON: `{on: events, types}`, `{on: schedule, every}`, `{on: run}`, `{on: call}`, `{on: query}`, `{on: mount}`, `{on: agent}`, `{on: declared}`."
+        },
+        {
+          "name": "needs",
+          "type": "TEXT",
+          "doc": "What it requires (capabilities, features, scopes), as a JSON array. Never what a person granted."
+        },
+        {
+          "name": "after",
+          "type": "TEXT",
+          "doc": "What an effect or a collector runs after when one event reaches it and them (JSON array of refs: `effect:<ext>/<id>`, `oxplow:oxplow/collector?collector=<ext>/<id>`, `oxplow:oxplow/consumer?name=<name>`), as the catalog resolved its `after:`."
+        },
+        {
+          "name": "order_level",
+          "type": "INTEGER",
+          "doc": "Where an effect or a collector runs among what one event reaches: 0 first, each after every contribution it names. NULL for a kind that isn't ordered."
+        },
+        {
+          "name": "global_name",
+          "type": "TEXT",
+          "doc": "The name it holds in a space every extension shares (a metric key, a skill name, `<capability>/<id>`); NULL when none."
+        },
+        {
+          "name": "file",
+          "type": "TEXT",
+          "doc": "The file it's declared in, inside its extension: `extension.yaml`, a page's `pages/<slug>.yaml`, a dataset's SQL. Join it to the extension (`v_extension`) for where that runs; never a machine path."
+        },
+        {
+          "name": "line",
+          "type": "INTEGER",
+          "doc": "Its entry's line there; NULL for a contribution that is a whole file (a page, a dataset's SQL)."
+        },
+        {
+          "name": "description",
+          "type": "TEXT",
+          "doc": "One sentence saying what it is, a collector's `doc:`, or the `description:` of a resource, a dimension or an implementation (the same text as on `v_collector`, `v_resource`, `v_dimension` and `v_capability_provider`); NULL for a kind whose declaration has none."
+        }
+      ],
+      "key": [
+        "uri"
+      ]
     }
   },
   "extension_run": {

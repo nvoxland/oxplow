@@ -1126,3 +1126,29 @@ async fn shipped_declarations_describe_themselves() {
     .await;
     assert_eq!(resource, [vec![json!(1)]]);
 }
+
+/// Where a shipped contribution is declared is a file inside its
+/// extension, and one declared in the manifest has its entry's line, so
+/// a contribution's page links "Declared in" to it.
+#[tokio::test]
+async fn shipped_contributions_say_where_they_are_declared() {
+    let fx = services_with_effort().await;
+    let lined = rows(
+        &fx,
+        "SELECT count(*) FROM v_contribution WHERE file = 'extension.yaml' AND line IS NOT NULL",
+    )
+    .await;
+    assert!(lined[0][0].as_i64().unwrap() > 100, "{lined:?}");
+    let machine = rows(
+        &fx,
+        "SELECT kind, local, file FROM v_contribution WHERE file LIKE '/%' OR file LIKE '%.oxplow/%' LIMIT 5",
+    )
+    .await;
+    assert!(machine.is_empty(), "{machine:?}");
+    let lineless = rows(
+        &fx,
+        "SELECT kind, local FROM v_contribution WHERE file = 'extension.yaml' AND line IS NULL LIMIT 10",
+    )
+    .await;
+    assert!(lineless.is_empty(), "{lineless:?}");
+}
