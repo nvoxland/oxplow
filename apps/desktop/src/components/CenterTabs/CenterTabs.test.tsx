@@ -158,3 +158,23 @@ test("a tab whose page holds unsaved edits says ● before its label", () => {
   expect(getByTestId(`center-tab-${tabs[1]!.id}`).textContent).toContain("● a.ts");
   expect(queryByTestId(`center-tab-dirty-${tabs[2]!.id}`)).toBeNull();
 });
+
+// A body that moves in the DOM reloads any frame in it (a custom
+// component's iframe loads again and reads as navigating away). The strip
+// may reorder; the bodies never move.
+test("reordering the tabs moves no tab body", () => {
+  const tab = (id: string): CenterTab => ({ id, label: id, closable: true, render: () => <div>{id}</div> });
+  const props = { onActivate: () => {}, onClose: () => {}, onReorder: () => {} };
+  const view = render(<CenterTabs tabs={[tab("a"), tab("b"), tab("c")]} activeId="a" {...props} />);
+  const parent = view.getByTestId("center-tab-body-a").parentElement!;
+  const moved: string[] = [];
+  const observer = new MutationObserver((records) => {
+    for (const r of records) for (const n of Array.from(r.removedNodes)) moved.push((n as HTMLElement).dataset?.testid ?? "?");
+  });
+  observer.observe(parent, { childList: true });
+  view.rerender(<CenterTabs tabs={[tab("c"), tab("a"), tab("d"), tab("b")]} activeId="c" {...props} />);
+  // Records are delivered on the next microtask; takeRecords reads them now.
+  for (const r of observer.takeRecords()) for (const n of Array.from(r.removedNodes)) moved.push((n as HTMLElement).dataset?.testid ?? "?");
+  observer.disconnect();
+  expect(moved).toEqual([]);
+});

@@ -425,12 +425,15 @@ export function CenterTabs({ tabs, activeId, onActivate, onClose, header, onReor
          *  visible. Hidden tabs (back/forward stack entries the host
          *  pushes for each slot) stay mounted so navigating back to
          *  them preserves their React state — scroll position,
-         *  expanded trees, draft text, etc. */}
-        {tabs.map((tab) => {
+         *  expanded trees, draft text, etc. They sit in their keys'
+         *  order, not the strip's: a body React moves in the DOM reloads
+         *  any frame in it (a custom component's iframe loads again, which
+         *  reads as navigating away), so reordering the strip moves none. */}
+        {[...tabs].sort((a, b) => byKey(a).localeCompare(byKey(b))).map((tab) => {
           const isActive = tab.id === active?.id;
           return (
             <div
-              key={tab.key ?? tab.id}
+              key={byKey(tab)}
               style={{
                 display: isActive ? "flex" : "none",
                 flex: 1,
@@ -453,6 +456,11 @@ export function CenterTabs({ tabs, activeId, onActivate, onClose, header, onReor
       {cm.menu}
     </div>
   );
+}
+
+/** A tab body's React key. */
+function byKey(tab: CenterTab): string {
+  return tab.key ?? tab.id;
 }
 
 interface OverflowPanelProps {
