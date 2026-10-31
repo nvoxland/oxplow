@@ -1,0 +1,69 @@
+# Site search indexes the named things a person looks up: each has a uri that
+# opens its own page, a title that is its name, a body of short useful text,
+# and no stream.
+when:
+  sql: "SELECT uri, title, stream_id FROM v_search_command WHERE uri = 'oxplow:oxplow/command?command=oxplow.agent.draft'"
+expect:
+  rows:
+    - uri: "oxplow:oxplow/command?command=oxplow.agent.draft"
+      title: oxplow.agent.draft
+      stream_id: null
+steps:
+  - when:
+      sql: "SELECT count(*) AS n FROM v_search_command WHERE uri = 'oxplow:oxplow/command?command=oxplow.agent.draft' AND body LIKE '%Put text in the shown thread%' AND body LIKE '%oxplow-foundation%'"
+    expect:
+      rows: [{ n: 1 }]
+  - when:
+      sql: "SELECT uri, title FROM v_search_skill WHERE title = 'work-items'"
+    expect:
+      rows:
+        - uri: "oxplow:oxplow/skill?skill=oxplow-foundation/work-items"
+          title: work-items
+  - when:
+      sql: "SELECT uri, title FROM v_search_collector WHERE uri LIKE '%oxplow.effort_test_outcome'"
+    expect:
+      rows:
+        - uri: "oxplow:oxplow/collector?collector=oxplow-foundation/oxplow.effort_test_outcome"
+          title: oxplow.effort_test_outcome
+  - when:
+      sql: "SELECT count(*) AS n FROM v_search_dataset WHERE uri = 'oxplow:oxplow/dataset?dataset=work_item' AND title = 'v_work_item' AND body NOT LIKE '%SELECT%'"
+    expect:
+      rows: [{ n: 1 }]
+  - when:
+      sql: "SELECT uri, title FROM v_search_extension WHERE title = 'oxplow-foundation'"
+    expect:
+      rows:
+        - uri: "oxplow:oxplow/extension?name=oxplow-foundation"
+          title: oxplow-foundation
+  - when:
+      sql: "SELECT uri, title FROM v_search_dimension WHERE uri = 'oxplow:oxplow/dimension?dimension=oxplow.agent'"
+    expect:
+      rows:
+        - uri: "oxplow:oxplow/dimension?dimension=oxplow.agent"
+          title: $any
+  - when:
+      sql: "SELECT count(*) AS n FROM v_search_resource WHERE uri = 'oxplow:oxplow/resource?resource=oxplow-foundation/advisory'"
+    expect:
+      rows: [{ n: 1 }]
+  - when:
+      sql: "SELECT count(*) AS n FROM v_search_implementation WHERE uri LIKE 'oxplow:oxplow/implementation?implementation=oxplow-foundation/%'"
+    expect:
+      rows: [{ n: $any }]
+  - when:
+      sql: "SELECT uri, title, stream_id FROM v_search_event_type WHERE title = 'effort.finished'"
+    expect:
+      rows:
+        - uri: "oxplow:oxplow/event_type?event_type=effort.finished"
+          title: effort.finished
+          stream_id: null
+  - when:
+      sql: "SELECT uri, title FROM v_search_config WHERE title = 'zones'"
+    expect:
+      rows:
+        - uri: "oxplow:oxplow/config?key=zones"
+          title: zones
+  # Kinds the throwaway has nothing of still read: the datasets exist and run.
+  - when:
+      sql: "SELECT (SELECT count(*) FROM v_search_branch) + (SELECT count(*) FROM v_search_job) + (SELECT count(*) FROM v_search_ai_profile) + (SELECT count(*) FROM v_search_advisory) + (SELECT count(*) FROM v_search_effect) + (SELECT count(*) FROM v_search_panel) + (SELECT count(*) FROM v_search_provider) >= 0 AS ok"
+    expect:
+      rows: [{ ok: 1 }]

@@ -551,6 +551,7 @@ resources:
     description: "A git branch."
     label: Branch
     params: { name: { required: true } }
+    searchable: search_branch
     icon: git-branch
   - name: file
     description: "A file on a filesystem at a revision."
@@ -611,6 +612,7 @@ resources:
     params: { name: { required: true, pattern: '^[a-z0-9-]+$' } }
     resolve: extension
     title: name
+    searchable: search_extension
     icon: package
   - name: extension_deployment
     description: "One deployed copy of an extension's source."
@@ -621,6 +623,7 @@ resources:
     description: "A setting in the project's configuration."
     label: Setting
     params: { key: { required: true, pattern: '^[A-Za-z][A-Za-z0-9]*$' } }
+    searchable: search_config
     icon: settings
   - name: finding
     description: "A problem that a code scan found."
@@ -723,6 +726,7 @@ resources:
     description: "A table or view of data in oxplow's query layer."
     label: Dataset
     params: { dataset: { required: true, pattern: '^[a-z][a-z0-9-]*/[a-z][a-z0-9_.-]*$' } }
+    searchable: search_dataset
     icon: database
   - name: measure
     description: "A quantity that facts record, such as lines of code."
@@ -740,6 +744,7 @@ resources:
     description: "An axis that metrics can be split by."
     label: Dimension
     params: { dimension: { required: true } }
+    searchable: search_dimension
     icon: columns-3
   - name: collector
     description: "A program that gathers data into oxplow's datasets."
@@ -747,56 +752,67 @@ resources:
     params: { collector: { required: true, pattern: '^[a-z][a-z0-9-]*/[a-z][a-z0-9_.-]*$' } }
     resolve: collector_run
     title: id
+    searchable: search_collector
     icon: database
   - name: event_type
     description: "A kind of event that oxplow records."
     label: Event type
     params: { event_type: { required: true } }
+    searchable: search_event_type
     icon: zap
   - name: resource
     description: "A kind of thing that a URI can name."
     label: Resource
     params: { resource: { required: true, pattern: '^[a-z][a-z0-9-]*/[a-z][a-z0-9_]*$' } }
+    searchable: search_resource
     icon: link
   - name: command
     description: "An action that can be run on the command bus."
     label: Command
     params: { command: { required: true } }
+    searchable: search_command
     icon: zap
   - name: job
     description: "A durable task that can call a language model."
     label: Job
     params: { job: { required: true, pattern: '^[a-z][a-z0-9-]*/[a-z][a-z0-9_.-]*$' } }
+    searchable: search_job
     icon: server
   - name: ai_profile
     description: "A saved way of calling a language model."
     label: AI profile
     params: { ai_profile: { required: true, pattern: '^[a-z][a-z0-9-]*/[a-z][a-z0-9_.-]*$' } }
+    searchable: search_ai_profile
     icon: server
   - name: effect
     description: "A reaction that runs when an event happens."
     label: Effect
     params: { effect: { required: true, pattern: '^[a-z][a-z0-9-]*/[a-z][a-z0-9_.-]*$' } }
+    searchable: search_effect
     icon: zap
   - name: advisory
     description: "A short note that an extension adds to an agent's context."
     label: Advisory
     params: { advisory: { required: true, pattern: '^[a-z][a-z0-9-]*/[a-z][a-z0-9_.-]*$' } }
+    searchable: search_advisory
     icon: bell
   - name: skill
     description: "Instructions that oxplow gives a coding agent."
     label: Skill
     params: { skill: { required: true, pattern: '^[a-z][a-z0-9-]*/[a-z][a-z0-9_.-]*$' } }
+    searchable: search_skill
     icon: book-open
   - name: implementation
     description: "One way to provide a capability, such as a work list or an agent."
     label: Implementation
     params: { implementation: { required: true, pattern: '^[a-z][a-z0-9-]*/[a-z][a-z0-9_.-]*$' } }
+    searchable: search_implementation
     icon: box
   - name: provider
     description: "A program that connects oxplow to an outside service."
     label: Provider
     params: { provider: { required: true, pattern: '^[a-z][a-z0-9-]*/[a-z][a-z0-9_.-]*$' } }
+    searchable: search_provider
     icon: server
   - name: page
     description: "A page that an extension draws."
@@ -815,6 +831,7 @@ resources:
     description: "A panel that an extension adds to the side of the window."
     label: Panel
     params: { panel: { required: true, pattern: '^[a-z][a-z0-9-]*/[a-z][a-z0-9_.-]*$' } }
+    searchable: search_panel
     icon: layout-dashboard
   - name: slot
     description: "A place on a page where another extension's page can be shown."

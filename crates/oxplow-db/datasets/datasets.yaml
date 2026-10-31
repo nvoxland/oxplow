@@ -800,6 +800,193 @@
   tests:
     - { not_null: uri }
     - { unique: uri }
+- name: search_branch
+  version: 1
+  description: "What site search indexes for each git branch `v_branch` lists (a remote-tracking branch only when no local branch has its name): the `branch` kind's index is restated from these rows when they change."
+  fields:
+    - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/branch?name=<name>`: what a hit opens." }
+    - { name: "title", type: "TEXT", doc: "Its name (`origin/topic` for a remote-tracking branch)." }
+    - { name: "body", type: "TEXT", doc: "Its kind, the commit it points at and its upstream." }
+    - { name: "stream_id", type: "TEXT", doc: "Always NULL: branches live in the repository every stream shares." }
+  tests:
+    - { not_null: uri }
+    - { unique: uri }
+- name: search_extension
+  version: 1
+  description: "What site search indexes for each extension `v_extension` lists: the `extension` kind's index is restated from these rows when they change."
+  fields:
+    - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/extension?name=<name>`: what a hit opens." }
+    - { name: "title", type: "TEXT", doc: "Its name." }
+    - { name: "body", type: "TEXT", doc: "Its description and purpose." }
+    - { name: "stream_id", type: "TEXT", doc: "Always NULL: extensions belong to the project." }
+  tests:
+    - { not_null: uri }
+    - { unique: uri }
+- name: search_dimension
+  version: 1
+  description: "What site search indexes for each dimension `v_dimension` holds: the `dimension` kind's index is restated from these rows when they change."
+  fields:
+    - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/dimension?dimension=<key>`: what a hit opens." }
+    - { name: "title", type: "TEXT", doc: "Its label (its key when it has none)." }
+    - { name: "body", type: "TEXT", doc: "Its description and key." }
+    - { name: "stream_id", type: "TEXT", doc: "Always NULL: dimensions belong to the project." }
+  tests:
+    - { not_null: uri }
+    - { unique: uri }
+- name: search_collector
+  version: 1
+  description: "What site search indexes for each collector `v_contribution` lists: the `collector` kind's index is restated from these rows when they change."
+  fields:
+    - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/collector?collector=<extension>/<id>`: what a hit opens." }
+    - { name: "title", type: "TEXT", doc: "Its id within its extension." }
+    - { name: "body", type: "TEXT", doc: "Its description and extension." }
+    - { name: "stream_id", type: "TEXT", doc: "Always NULL: collectors belong to the project." }
+  tests:
+    - { not_null: uri }
+    - { unique: uri }
+- name: search_dataset
+  version: 1
+  description: "What site search indexes for each dataset `v_dataset` publishes: the `dataset` kind's index is restated from these rows when they change."
+  fields:
+    - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/dataset?dataset=<name>`, or `<extension>/<name>` for an extension's: what a hit opens." }
+    - { name: "title", type: "TEXT", doc: "Its view name (`v_work_item`)." }
+    - { name: "body", type: "TEXT", doc: "Its description, name and owner; never its SQL." }
+    - { name: "stream_id", type: "TEXT", doc: "Always NULL: datasets belong to the project." }
+  tests:
+    - { not_null: uri }
+    - { unique: uri }
+- name: search_command
+  version: 1
+  description: "What site search indexes for each command `v_contribution` lists: the `command` kind's index is restated from these rows when they change."
+  fields:
+    - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/command?command=<id>`: what a hit opens." }
+    - { name: "title", type: "TEXT", doc: "Its bus id." }
+    - { name: "body", type: "TEXT", doc: "Its summary and extension." }
+    - { name: "stream_id", type: "TEXT", doc: "Always NULL: commands belong to the project." }
+  tests:
+    - { not_null: uri }
+    - { unique: uri }
+- name: search_skill
+  version: 1
+  description: "What site search indexes for each skill or slash command `v_contribution` lists: the `skill` kind's index is restated from these rows when they change."
+  fields:
+    - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/skill?skill=<extension>/<name>`: what a hit opens." }
+    - { name: "title", type: "TEXT", doc: "Its name." }
+    - { name: "body", type: "TEXT", doc: "Its description and extension." }
+    - { name: "stream_id", type: "TEXT", doc: "Always NULL: skills belong to the project." }
+  tests:
+    - { not_null: uri }
+    - { unique: uri }
+- name: search_job
+  version: 1
+  description: "What site search indexes for each job `v_contribution` lists: the `job` kind's index is restated from these rows when they change."
+  fields:
+    - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/job?job=<extension>/<id>`: what a hit opens." }
+    - { name: "title", type: "TEXT", doc: "Its id within its extension." }
+    - { name: "body", type: "TEXT", doc: "Its description and extension." }
+    - { name: "stream_id", type: "TEXT", doc: "Always NULL: jobs belong to the project." }
+  tests:
+    - { not_null: uri }
+    - { unique: uri }
+- name: search_ai_profile
+  version: 1
+  description: "What site search indexes for each AI profile `v_contribution` lists: the `ai_profile` kind's index is restated from these rows when they change."
+  fields:
+    - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/ai_profile?ai_profile=<extension>/<id>`: what a hit opens." }
+    - { name: "title", type: "TEXT", doc: "Its id within its extension." }
+    - { name: "body", type: "TEXT", doc: "Its description and extension." }
+    - { name: "stream_id", type: "TEXT", doc: "Always NULL: AI profiles belong to the project." }
+  tests:
+    - { not_null: uri }
+    - { unique: uri }
+- name: search_advisory
+  version: 1
+  description: "What site search indexes for each advisory `v_contribution` lists: the `advisory` kind's index is restated from these rows when they change."
+  fields:
+    - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/advisory?advisory=<extension>/<id>`: what a hit opens." }
+    - { name: "title", type: "TEXT", doc: "Its id within its extension." }
+    - { name: "body", type: "TEXT", doc: "Its extension." }
+    - { name: "stream_id", type: "TEXT", doc: "Always NULL: advisories belong to the project." }
+  tests:
+    - { not_null: uri }
+    - { unique: uri }
+- name: search_effect
+  version: 1
+  description: "What site search indexes for each effect `v_contribution` lists: the `effect` kind's index is restated from these rows when they change."
+  fields:
+    - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/effect?effect=<extension>/<id>`: what a hit opens." }
+    - { name: "title", type: "TEXT", doc: "Its id within its extension." }
+    - { name: "body", type: "TEXT", doc: "Its summary and extension." }
+    - { name: "stream_id", type: "TEXT", doc: "Always NULL: effects belong to the project." }
+  tests:
+    - { not_null: uri }
+    - { unique: uri }
+- name: search_panel
+  version: 1
+  description: "What site search indexes for each panel `v_contribution` lists: the `panel` kind's index is restated from these rows when they change."
+  fields:
+    - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/panel?panel=<extension>/<id>`: what a hit opens." }
+    - { name: "title", type: "TEXT", doc: "Its id within its extension." }
+    - { name: "body", type: "TEXT", doc: "Its title and extension." }
+    - { name: "stream_id", type: "TEXT", doc: "Always NULL: panels belong to the project." }
+  tests:
+    - { not_null: uri }
+    - { unique: uri }
+- name: search_provider
+  version: 1
+  description: "What site search indexes for each provider `v_contribution` lists: the `provider` kind's index is restated from these rows when they change."
+  fields:
+    - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/provider?provider=<extension>/<id>`: what a hit opens." }
+    - { name: "title", type: "TEXT", doc: "Its id within its extension." }
+    - { name: "body", type: "TEXT", doc: "Its extension." }
+    - { name: "stream_id", type: "TEXT", doc: "Always NULL: providers belong to the project." }
+  tests:
+    - { not_null: uri }
+    - { unique: uri }
+- name: search_implementation
+  version: 1
+  description: "What site search indexes for each implementation `v_contribution` lists: the `implementation` kind's index is restated from these rows when they change."
+  fields:
+    - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/implementation?implementation=<extension>/<capability>.<id>`: what a hit opens." }
+    - { name: "title", type: "TEXT", doc: "Its id within its extension." }
+    - { name: "body", type: "TEXT", doc: "Its description and extension." }
+    - { name: "stream_id", type: "TEXT", doc: "Always NULL: implementations belong to the project." }
+  tests:
+    - { not_null: uri }
+    - { unique: uri }
+- name: search_resource
+  version: 1
+  description: "What site search indexes for each resource `v_contribution` lists: the `resource` kind's index is restated from these rows when they change."
+  fields:
+    - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/resource?resource=<extension>/<name>`: what a hit opens." }
+    - { name: "title", type: "TEXT", doc: "Its id within its extension." }
+    - { name: "body", type: "TEXT", doc: "Its description and extension." }
+    - { name: "stream_id", type: "TEXT", doc: "Always NULL: resources belong to the project." }
+  tests:
+    - { not_null: uri }
+    - { unique: uri }
+- name: search_event_type
+  version: 1
+  description: "What site search indexes for each event type `v_event_type` lists, once, at its newest registered version: the `event_type` kind's index is restated from these rows when they change."
+  fields:
+    - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/event_type?event_type=<type>`: what a hit opens." }
+    - { name: "title", type: "TEXT", doc: "Its `namespace.name`." }
+    - { name: "body", type: "TEXT", doc: "What it records and the extension that declares it (`core` for a core type)." }
+    - { name: "stream_id", type: "TEXT", doc: "Always NULL: event types belong to the project." }
+  tests:
+    - { not_null: uri }
+    - { unique: uri }
+- name: search_config
+  version: 1
+  description: "What site search indexes for each setting `v_config_key` lists: the `config` kind's index is restated from these rows when they change."
+  fields:
+    - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/config?key=<key>`: what a hit opens." }
+    - { name: "title", type: "TEXT", doc: "Its key." }
+    - { name: "body", type: "TEXT", doc: "What it is for." }
+    - { name: "stream_id", type: "TEXT", doc: "Always NULL: settings belong to the project." }
+  tests:
+    - { not_null: uri }
+    - { unique: uri }
 - name: search_page
   version: 1
   description: "What site search indexes for each page the launcher lists: the `page` kind's index is restated from these rows when they change. Hidden pages (opened from elsewhere) are left out."

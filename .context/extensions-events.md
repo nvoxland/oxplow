@@ -340,6 +340,26 @@ resource's icon and label). A feed may add a `version` column (a row's
 `updated_at`): a recompute then reads every row's version and the title
 and body of the changed rows only.
 
+- **What is searchable (the rule).** The named things a person looks up
+  are: oxplow-foundation's work items, wiki pages, threads, commits,
+  pages, metrics, measures, branches, extensions, dimensions, datasets,
+  commands, skills, collectors, jobs, AI profiles, advisories, effects,
+  panels, providers, implementations, event types, resources and
+  settings. Not searchable: records that pile up (events, job runs, AI
+  calls, test runs, subagents, nudges, terminals, proposals, claims,
+  snapshots, extension deployments), code-level items (symbols, tests,
+  findings, files and blocks), streams, the project, and the parts of an
+  extension a person reaches through the extension (slots, decorators,
+  replacements, custom components, consumers). The core feeds are
+  `search_<kind>` datasets (`crates/oxplow-db/datasets/`): a one-line
+  description and the names, never a skill body or a dataset's SQL. A
+  contribution kind's feed reads `v_contribution` (its `description` is
+  the command's summary, the skill's description and so on). A feed can
+  not read a live dataset (`command`, `skill`, `config_value`, `scope`):
+  it would read the empty stub. Branches are project-wide, so
+  `stream_id` is NULL. Fixture `named-things-are-found-by-search`. The
+  `ai_model` and `view` resources have no dataset behind them, so they are
+  not searchable.
 - It is **index-time ingestion, as an asset** — not a query-time UNION:
   `search_fts` owns the text it ranks (BM25 and `snippet()` need it in
   the index), and a UNION would run every extension's SQL per keystroke,

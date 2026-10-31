@@ -115,6 +115,7 @@ pub fn describe(ext: &Extension, manifest: &str) -> Vec<Descriptor> {
                 .unwrap_or(&p.id);
         let mut d = new(ContributionKind::Panel, local, RunsOn::Mount);
         d.source = entry("panels", "id", local);
+        d.description = Some(p.title.clone());
         out.push(d);
     }
     for (n, slot) in ext.ui.page_slots.iter().enumerate() {
@@ -181,6 +182,7 @@ pub fn describe(ext: &Extension, manifest: &str) -> Vec<Descriptor> {
         d.needs = e.needs.clone();
         d.after = e.after.clone();
         d.source = entry("effects", "id", &e.id);
+        d.description = Some(e.summary.clone());
         out.push(d);
     }
     // A command is named by its bus id (`<namespace>.<area>.<verb>`), its
@@ -194,12 +196,14 @@ pub fn describe(ext: &Extension, manifest: &str) -> Vec<Descriptor> {
             .strip_prefix(&format!("{}.", ext.namespace))
             .unwrap_or(&c.name);
         d.source = entry("commands", "name", written);
+        d.description = Some(c.summary.clone());
         d.global = Some(c.name.clone());
         out.push(d);
     }
     for job in &ext.jobs {
         let mut d = new(ContributionKind::Job, &job.id, RunsOn::Call);
         d.source = entry("jobs", "id", &job.id);
+        d.description = Some(job.description.clone());
         d.contract_version = Some(job.version);
         d.needs = job.needs.clone();
         out.push(d);
@@ -207,6 +211,7 @@ pub fn describe(ext: &Extension, manifest: &str) -> Vec<Descriptor> {
     for profile in &ext.ai_profiles {
         let mut d = new(ContributionKind::AiProfile, &profile.id, RunsOn::Declared);
         d.source = entry("ai_profiles", "id", &profile.id);
+        d.description = Some(profile.description.clone());
         out.push(d);
     }
     for a in &ext.advisories {
@@ -220,6 +225,7 @@ pub fn describe(ext: &Extension, manifest: &str) -> Vec<Descriptor> {
     for k in &ext.skills {
         let mut d = new(ContributionKind::Skill, &k.name, RunsOn::Agent);
         d.source = entry("skills", "name", &k.name);
+        d.description = Some(k.description.clone());
         d.needs = k.needs.clone();
         d.global = Some(k.name.clone());
         out.push(d);

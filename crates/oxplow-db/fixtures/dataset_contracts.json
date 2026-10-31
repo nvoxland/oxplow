@@ -25874,5 +25874,464 @@
       ],
       "key": []
     }
+  },
+  "search_branch": {
+    "1": {
+      "columns": [
+        {
+          "name": "uri",
+          "type": "TEXT",
+          "doc": "`oxplow:oxplow/branch?name=<name>`: what a hit opens."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "Its name (`origin/topic` for a remote-tracking branch)."
+        },
+        {
+          "name": "body",
+          "type": "TEXT",
+          "doc": "Its kind, the commit it points at and its upstream."
+        },
+        {
+          "name": "stream_id",
+          "type": "TEXT",
+          "doc": "Always NULL: branches live in the repository every stream shares."
+        }
+      ],
+      "key": []
+    }
+  },
+  "search_extension": {
+    "1": {
+      "columns": [
+        {
+          "name": "uri",
+          "type": "TEXT",
+          "doc": "`oxplow:oxplow/extension?name=<name>`: what a hit opens."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "Its name."
+        },
+        {
+          "name": "body",
+          "type": "TEXT",
+          "doc": "Its description and purpose."
+        },
+        {
+          "name": "stream_id",
+          "type": "TEXT",
+          "doc": "Always NULL: extensions belong to the project."
+        }
+      ],
+      "key": []
+    }
+  },
+  "search_dimension": {
+    "1": {
+      "columns": [
+        {
+          "name": "uri",
+          "type": "TEXT",
+          "doc": "`oxplow:oxplow/dimension?dimension=<key>`: what a hit opens."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "Its label (its key when it has none)."
+        },
+        {
+          "name": "body",
+          "type": "TEXT",
+          "doc": "Its description and key."
+        },
+        {
+          "name": "stream_id",
+          "type": "TEXT",
+          "doc": "Always NULL: dimensions belong to the project."
+        }
+      ],
+      "key": []
+    }
+  },
+  "search_collector": {
+    "1": {
+      "columns": [
+        {
+          "name": "uri",
+          "type": "TEXT",
+          "doc": "`oxplow:oxplow/collector?collector=<extension>/<id>`: what a hit opens."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "Its id within its extension."
+        },
+        {
+          "name": "body",
+          "type": "TEXT",
+          "doc": "Its description and extension."
+        },
+        {
+          "name": "stream_id",
+          "type": "TEXT",
+          "doc": "Always NULL: collectors belong to the project."
+        }
+      ],
+      "key": []
+    }
+  },
+  "search_dataset": {
+    "1": {
+      "columns": [
+        {
+          "name": "uri",
+          "type": "TEXT",
+          "doc": "`oxplow:oxplow/dataset?dataset=<name>`, or `<extension>/<name>` for an extension's: what a hit opens."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "Its view name (`v_work_item`)."
+        },
+        {
+          "name": "body",
+          "type": "TEXT",
+          "doc": "Its description, name and owner; never its SQL."
+        },
+        {
+          "name": "stream_id",
+          "type": "TEXT",
+          "doc": "Always NULL: datasets belong to the project."
+        }
+      ],
+      "key": []
+    }
+  },
+  "search_command": {
+    "1": {
+      "columns": [
+        {
+          "name": "uri",
+          "type": "TEXT",
+          "doc": "`oxplow:oxplow/command?command=<id>`: what a hit opens."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "Its bus id."
+        },
+        {
+          "name": "body",
+          "type": "TEXT",
+          "doc": "Its summary and extension."
+        },
+        {
+          "name": "stream_id",
+          "type": "TEXT",
+          "doc": "Always NULL: commands belong to the project."
+        }
+      ],
+      "key": []
+    }
+  },
+  "search_skill": {
+    "1": {
+      "columns": [
+        {
+          "name": "uri",
+          "type": "TEXT",
+          "doc": "`oxplow:oxplow/skill?skill=<extension>/<name>`: what a hit opens."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "Its name."
+        },
+        {
+          "name": "body",
+          "type": "TEXT",
+          "doc": "Its description and extension."
+        },
+        {
+          "name": "stream_id",
+          "type": "TEXT",
+          "doc": "Always NULL: skills belong to the project."
+        }
+      ],
+      "key": []
+    }
+  },
+  "search_job": {
+    "1": {
+      "columns": [
+        {
+          "name": "uri",
+          "type": "TEXT",
+          "doc": "`oxplow:oxplow/job?job=<extension>/<id>`: what a hit opens."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "Its id within its extension."
+        },
+        {
+          "name": "body",
+          "type": "TEXT",
+          "doc": "Its description and extension."
+        },
+        {
+          "name": "stream_id",
+          "type": "TEXT",
+          "doc": "Always NULL: jobs belong to the project."
+        }
+      ],
+      "key": []
+    }
+  },
+  "search_ai_profile": {
+    "1": {
+      "columns": [
+        {
+          "name": "uri",
+          "type": "TEXT",
+          "doc": "`oxplow:oxplow/ai_profile?ai_profile=<extension>/<id>`: what a hit opens."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "Its id within its extension."
+        },
+        {
+          "name": "body",
+          "type": "TEXT",
+          "doc": "Its description and extension."
+        },
+        {
+          "name": "stream_id",
+          "type": "TEXT",
+          "doc": "Always NULL: AI profiles belong to the project."
+        }
+      ],
+      "key": []
+    }
+  },
+  "search_advisory": {
+    "1": {
+      "columns": [
+        {
+          "name": "uri",
+          "type": "TEXT",
+          "doc": "`oxplow:oxplow/advisory?advisory=<extension>/<id>`: what a hit opens."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "Its id within its extension."
+        },
+        {
+          "name": "body",
+          "type": "TEXT",
+          "doc": "Its extension."
+        },
+        {
+          "name": "stream_id",
+          "type": "TEXT",
+          "doc": "Always NULL: advisories belong to the project."
+        }
+      ],
+      "key": []
+    }
+  },
+  "search_effect": {
+    "1": {
+      "columns": [
+        {
+          "name": "uri",
+          "type": "TEXT",
+          "doc": "`oxplow:oxplow/effect?effect=<extension>/<id>`: what a hit opens."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "Its id within its extension."
+        },
+        {
+          "name": "body",
+          "type": "TEXT",
+          "doc": "Its summary and extension."
+        },
+        {
+          "name": "stream_id",
+          "type": "TEXT",
+          "doc": "Always NULL: effects belong to the project."
+        }
+      ],
+      "key": []
+    }
+  },
+  "search_panel": {
+    "1": {
+      "columns": [
+        {
+          "name": "uri",
+          "type": "TEXT",
+          "doc": "`oxplow:oxplow/panel?panel=<extension>/<id>`: what a hit opens."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "Its id within its extension."
+        },
+        {
+          "name": "body",
+          "type": "TEXT",
+          "doc": "Its title and extension."
+        },
+        {
+          "name": "stream_id",
+          "type": "TEXT",
+          "doc": "Always NULL: panels belong to the project."
+        }
+      ],
+      "key": []
+    }
+  },
+  "search_provider": {
+    "1": {
+      "columns": [
+        {
+          "name": "uri",
+          "type": "TEXT",
+          "doc": "`oxplow:oxplow/provider?provider=<extension>/<id>`: what a hit opens."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "Its id within its extension."
+        },
+        {
+          "name": "body",
+          "type": "TEXT",
+          "doc": "Its extension."
+        },
+        {
+          "name": "stream_id",
+          "type": "TEXT",
+          "doc": "Always NULL: providers belong to the project."
+        }
+      ],
+      "key": []
+    }
+  },
+  "search_implementation": {
+    "1": {
+      "columns": [
+        {
+          "name": "uri",
+          "type": "TEXT",
+          "doc": "`oxplow:oxplow/implementation?implementation=<extension>/<capability>.<id>`: what a hit opens."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "Its id within its extension."
+        },
+        {
+          "name": "body",
+          "type": "TEXT",
+          "doc": "Its description and extension."
+        },
+        {
+          "name": "stream_id",
+          "type": "TEXT",
+          "doc": "Always NULL: implementations belong to the project."
+        }
+      ],
+      "key": []
+    }
+  },
+  "search_resource": {
+    "1": {
+      "columns": [
+        {
+          "name": "uri",
+          "type": "TEXT",
+          "doc": "`oxplow:oxplow/resource?resource=<extension>/<name>`: what a hit opens."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "Its id within its extension."
+        },
+        {
+          "name": "body",
+          "type": "TEXT",
+          "doc": "Its description and extension."
+        },
+        {
+          "name": "stream_id",
+          "type": "TEXT",
+          "doc": "Always NULL: resources belong to the project."
+        }
+      ],
+      "key": []
+    }
+  },
+  "search_event_type": {
+    "1": {
+      "columns": [
+        {
+          "name": "uri",
+          "type": "TEXT",
+          "doc": "`oxplow:oxplow/event_type?event_type=<type>`: what a hit opens."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "Its `namespace.name`."
+        },
+        {
+          "name": "body",
+          "type": "TEXT",
+          "doc": "What it records and the extension that declares it (`core` for a core type)."
+        },
+        {
+          "name": "stream_id",
+          "type": "TEXT",
+          "doc": "Always NULL: event types belong to the project."
+        }
+      ],
+      "key": []
+    }
+  },
+  "search_config": {
+    "1": {
+      "columns": [
+        {
+          "name": "uri",
+          "type": "TEXT",
+          "doc": "`oxplow:oxplow/config?key=<key>`: what a hit opens."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "Its key."
+        },
+        {
+          "name": "body",
+          "type": "TEXT",
+          "doc": "What it is for."
+        },
+        {
+          "name": "stream_id",
+          "type": "TEXT",
+          "doc": "Always NULL: settings belong to the project."
+        }
+      ],
+      "key": []
+    }
   }
 }
