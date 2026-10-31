@@ -169,7 +169,7 @@ or an item's description editor (`work_item.detail`) — with a
 page or component over `v_work_item` that changes items only through the
 interface commands, so it works with whichever list is active; the person
 picks whose shows (`replacements`, Settings → Integrations).
-[extensions-slots.md](./extensions-slots.md) "Replacements" has the contracts. The `oxplow-foundation/work-item.sections` slot gets
+[extensions-slots.md](./extensions-slots.md) "Replacements" has the contracts. The `oxplow-bundled/work-item.sections` slot gets
 `{ uri }`. Link…'s link type is free text (default `relates_to`): the
 provider names its own types, and `about` fits any URI. Its target is
 **any URI** (a work item's, `oxplow:oxplow/effort?id=eff12`, `oxplow:oxplow/collector?collector=x/y`); a link row
@@ -182,7 +182,7 @@ link** — its raw text, muted, tooltip "nothing resolves this URI; its
 extension may be gone" — that still unlinks. `BacklinkEdge.resolved` (the
 IPC's `ref_resolver::resolve_ref`) says which.
 
-The **Board** (the `board` page, the foundation's `board` document with its
+The **Board** (the `board` page, oxplow-bundled's `board` document with its
 `board-cards` part: a `viz: board` over `v_work_item`) shows
 items as cards in one column per canonical state. Drag a card to a
 column (a `drag: true` action on `oxplow.work_item.transition`), or
@@ -417,11 +417,11 @@ foundation, the extension tested, and what a fixture `requires:`. What only
 the desktop decides — decorators (`ref-chip` / `row-badge`, `title="from
 <ext>"`), extension commands in the ☰, panels in the rail — is the spec's:
 it opens Git History, a commit and Uncommitted changes and asserts each
-page's core content and no marker of another extension. The Board and Tasks
-read oxplow's own work list, which is `oxplow-bundled`'s: with only
-foundation they have no list, and the spec asserts their empty state
-without an error (their fixtures run `requires: [oxplow-bundled]` and
-cover them with the list). Another provider's item with every flag off gets
+page's core content and no marker of another extension. The work list
+itself (the `oxplow:tasks` implementation) is foundation's, but its pages
+(Board, Tasks, Backlog, a work item) are `oxplow-bundled`'s: with only
+foundation they are not offered, and the spec asserts that. Their
+fixtures live in oxplow-bundled and cover them with the list. Another provider's item with every flag off gets
 an `inactive` page from `work-item.yaml`'s `needs`, not a plain one.
 
 `oxplow_app::work_items_conformance::suite(items, provider, features,

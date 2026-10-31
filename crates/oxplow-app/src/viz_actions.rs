@@ -1431,7 +1431,7 @@ view:
         let me = oxplow_domain::uri::build::thread_uri(fx.thread);
         let start = form_of(
             &fx.svc,
-            "oxplow-foundation/hand-off",
+            "oxplow-bundled/hand-off",
             BTreeMap::from([("uri".to_string(), SqlCell::Text(me.clone()))]),
         )
         .await
@@ -1460,7 +1460,7 @@ view:
     #[tokio::test]
     async fn the_new_item_form_asks_for_the_lists_own_fields() {
         let (fx, _root) = fixture().await;
-        let start = form_of(&fx.svc, "oxplow-foundation/new-task", BTreeMap::new())
+        let start = form_of(&fx.svc, "oxplow-bundled/new-task", BTreeMap::new())
             .await
             .unwrap();
         assert_eq!(start.command.id, "oxplow.work_item.create");

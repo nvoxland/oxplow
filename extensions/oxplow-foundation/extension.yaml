@@ -97,21 +97,6 @@ intent:
     - name: ai-provider-choices-list-the-configured-providers
       input: { page: ai-provider-choices }
       expect: the configured providers
-    - name: board-lists-work-items-by-scope
-      input: { page: board, params: { show: thread, thread_id: 1 } }
-      expect: the thread's cards, the backlog's or all of them by the scope; the row names the scope drawn
-    - name: wiki-page-reads-its-body-even-before-it-is-written
-      input: { page: wiki-page, params: { slug: otters } }
-      expect: the body of a written page and of a slug not written yet, freshness, no references
-    - name: work-item-page-reads-the-item-its-links-and-its-comments
-      input: { page: work-item, params: { uri: "<the item's uri>", thread_id: 1 } }
-      expect: the item, its gated buttons, its links from both ends, its comments
-    - name: backlog-lists-items-on-no-thread-with-epics-and-search
-      input: { page: backlog, params: { q: "", thread_id: 1 } }
-      expect: x
-    - name: tasks-lists-its-scope-by-state-with-epics-and-a-summary
-      input: { page: tasks, params: { show: thread, priority: any, thread_id: 1, stream_id: 1 } }
-      expect: the scope's items by state with epics nested, the priority filter keeping an epic for its child, the last five done, the summary's counts
     - name: changes-frames-an-effort-and-a-picked-range
       input: { page: diff-view, params: { uri: "oxplow:oxplow/effort?id=eff1", stream_id: 1 } }
       expect: an effort's own bracket to the working tree, a picked end as a range, nothing without a URI
@@ -142,9 +127,6 @@ intent:
     - name: the-component-page-links-the-commands-it-may-run
       input: { page: custom-component, params: { uri: "oxplow:oxplow/custom_component?custom_component=oxplow-foundation/integrations" } }
       expect: a custom component's code, whether it reads data, and a link to each command it may run
-    - name: the-slot-page-links-the-mounted-page-and-its-host
-      input: { page: slot, params: { uri: "oxplow:oxplow/slot?slot=oxplow-foundation/oxplow-foundation.tasks.sections-0" } }
-      expect: the page a slot mount shows, the page that hosts it and the slot
     - name: the-collector-page-says-when-a-collector-runs-and-how-it-last-went
       input: { page: collector, params: { uri: "oxplow:oxplow/collector?collector=oxplow-foundation/oxplow.effort_test_outcome" } }
       expect: when a collector runs, whether it is enabled and its last run
@@ -190,9 +172,6 @@ intent:
     - name: hook-events-lists-the-agents-activity-newest-first
       input: { page: hook-events }
       expect: the hook-events page lists what its loaders read
-    - name: done-work-lists-closed-items-latest-first
-      input: { page: done-work }
-      expect: the done-work page lists what its loaders read
     - name: dashboards-list-the-dashboard-pages
       input: { page: dashboards }
       expect: the dashboards page lists what its loaders read
@@ -205,12 +184,6 @@ intent:
     - name: git-history-lists-commits-newest-first-narrowed-by-text-and-author
       input: { page: git-history }
       expect: the git-history page lists what its loaders read
-    - name: wiki-index-lists-pages-newest-change-first-and-searches
-      input: { page: wiki-index }
-      expect: the wiki-index page lists what its loaders read
-    - name: wiki-freshness-lists-the-files-a-page-cites
-      input: { page: wiki-freshness }
-      expect: the wiki-freshness page lists what its loaders read
     - name: the-timeline-draws-the-projects-activity-and-titles-itself
       input: { page: timeline }
       expect: the timeline draws items, titles itself and offers Today and Fit; Fit writes from and to
@@ -268,9 +241,6 @@ intent:
     - name: the-custom-component-page-links-to-its-extension
       input: { page: custom-component, params: { uri: 'oxplow:oxplow/custom_component?custom_component=oxplow-foundation/integrations' } }
       expect: its see-also links name the extension that declares it
-    - name: the-slot-page-links-to-its-extension
-      input: { page: slot, params: { uri: 'oxplow:oxplow/slot?slot=oxplow-foundation/oxplow-foundation.tasks.sections-0' } }
-      expect: its see-also links name the extension that declares it
     - name: the-dimension-page-links-to-its-extension
       input: { page: dimension, params: { uri: 'oxplow:oxplow/dimension?dimension=oxplow.language' } }
       expect: its see-also links name the extension that declares it
@@ -292,9 +262,6 @@ intent:
     - name: the-file-viewer-links-to-the-files-history-and-its-folder
       input: { page: file-viewer, params: { path: src/sub/c.rs, rev: 'git:HEAD' } }
       expect: its see-also links open a local file's history and its folder
-    - name: the-work-item-page-links-to-its-board-efforts-and-parent-epic
-      input: { page: work-item, params: { uri: 'oxplow:oxplow/work_item?id=tsk1&provider=oxplow' } }
-      expect: its see-also links open the board (or backlog), its efforts and its parent epic
     - name: the-metric-data-page-lists-its-recordings-alone
       input: { page: metric-data, params: { uri: "oxplow:oxplow/metric?metric=agent.tokens.total", metric: agent.tokens.total } }
       expect: its recordings and the files its measure could not check, and no definition or trend
@@ -302,7 +269,7 @@ intent:
       input: { page: metric, params: { metric: agent.tokens.total } }
       expect: its see-also links open the measure it is built on and the metrics list
     - name: the-definition-page-links-to-the-page-and-its-extension
-      input: { page: definition, params: { uri: 'oxplow:oxplow/file?path=oxplow-foundation/pages/board.yaml&filesystem=oxplow:extensions', path: oxplow-foundation/pages/board.yaml, stream_id: 1 } }
+      input: { page: definition, params: { uri: 'oxplow:oxplow/file?path=oxplow-foundation/pages/problems.yaml&filesystem=oxplow:extensions', path: oxplow-foundation/pages/problems.yaml, stream_id: 1 } }
       expect: its see-also links open the page it describes and its extension
     - name: the-directory-links-to-its-parent-folder-and-the-files-page
       input: { page: directory, params: { stream_id: 1, path: src/sub } }
@@ -310,9 +277,6 @@ intent:
     - name: the-agent-session-links-to-its-threads-work-and-the-efforts-it-ran
       input: { page: agent-session, params: { uri: 'oxplow:oxplow/agent_session?id=ses1' } }
       expect: its see-also links open its thread's work and the efforts it ran
-    - name: the-wiki-page-links-to-the-wiki-and-the-pages-that-link-to-it
-      input: { page: wiki-page, params: { uri: 'oxplow:oxplow/wiki?slug=otters', slug: otters } }
-      expect: its see-also links open the wiki and the work that links to it
     - name: the-alerts-page-links-to-extension-problems-and-collectors
       input: { page: alerts }
       expect: its see-also links open the extension problems and the collectors
@@ -330,9 +294,6 @@ intent:
       expect: its description is a paragraph above the facts
     - name: the-command-page-says-what-it-is-in-a-paragraph-above-its-facts
       input: { page: command, params: {uri:"oxplow:oxplow/command?command=oxplow.agent.draft"} }
-      expect: its description is a paragraph above the facts
-    - name: the-slot-page-says-what-it-is-in-a-paragraph-above-its-facts
-      input: { page: slot, params: {uri:"oxplow:oxplow/slot?slot=oxplow-foundation/oxplow-foundation.tasks.sections-0"} }
       expect: its description is a paragraph above the facts
     - name: the-custom-component-page-says-what-it-is-in-a-paragraph-above-its-facts
       input: { page: custom-component, params: {uri:"oxplow:oxplow/custom_component?custom_component=oxplow-foundation/integrations"} }
@@ -896,10 +857,6 @@ resources:
     label: Custom component
     params: { custom_component: { required: true, pattern: '^[a-z][a-z0-9-]*/[a-z][a-z0-9_.-]*$' } }
     icon: box
-ui:
-  mounts:
-    - { page: thread-handoffs-in, at: oxplow-foundation/tasks.sections, position: { before: list } }
-    - { page: thread-handoffs-out, at: oxplow-foundation/tasks.sections, position: { before: list } }
 commands:
   # agent_input.write — the window's agent input.
   - name: agent.draft
@@ -1382,7 +1339,6 @@ commands:
     summary: "Hand work to another open thread (any stream's): what it is and what its agent needs to know, and the work item it hands over, if any. The thread's agent is given it at its next prompt; the person sees it at once. Nothing wakes an agent. Returns the handoff and `link_warnings`."
     scope: handoffs.write
     op: send
-    ui: { label: "Hand Off Work…", group: Threads, keywords: [handoff, delegate, give], about: oxplow/thread, form: "oxplow:oxplow/page?page=hand-off" }
     example: {"to_thread": "thr4", "work_item": "oxplow:oxplow/work_item?id=tsk12&provider=oxplow", "body": "The parser fix is in; the remaining failure is the timezone case in [[src/dates.rs]]."}
   - name: handoff.resolve
     summary: "Take or decline a handoff to your thread. Taking one moves its work item onto your thread. Its sender reads the note."
@@ -1465,7 +1421,6 @@ commands:
     summary: "Write a knowledge (wiki) page: its body, every [[link]] resolving, and the files you re-read against it (verified_files) or took out (removed_files)."
     scope: knowledge.write
     op: write_page
-    ui: { label: "New Wiki Page…", group: Knowledge, keywords: [wiki, page, note, write], form: "oxplow:oxplow/page?page=wiki-index", open_after: "oxplow:oxplow/wiki?slug={{result.page}}" }
     example: {"slug": "auth-flow", "title": "Auth flow", "body": "# Auth flow\n\nThe callback validates `next` before redirecting. See [[src/auth.rs]].", "verified_files": ["src/auth.rs"]}
   - name: lsp.restart_server
     summary: "Restart a stream's language server for a language: the session is torn down and started again with the open documents replayed."
@@ -1913,7 +1868,6 @@ commands:
     summary: "File a work item on the active tracker (the one the person chose), optionally straight into a state. `thread` is the thread it's filed on: absent, an agent's own (a person's lands on the backlog). `native` is the tracker's own fields as its create declares them (oxplow: { priority }). On oxplow the result carries `link_warnings`: the `[[…]]` links in the body that don't resolve."
     scope: work_items.write
     op: create
-    ui: {"label": "New Task…", "group": "Tasks", "keywords": ["work item"], "form": "oxplow:oxplow/page?page=new-task", "shortcut": "Ctrl/Cmd+Shift+N", "open_after": "{{result.uri}}"}
     example: {"title": "Fix the login redirect loop", "body": "Signing in from /settings bounces back to /login.", "state": "todo"}
   - name: work_item.delete
     summary: "Delete a work item."

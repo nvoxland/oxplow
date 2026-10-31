@@ -174,17 +174,19 @@ into a foundation page, list it under `ui.mounts` in `extension.yaml`:
 ```yaml
 ui:
   mounts:
-    - { page: item-tokens, at: oxplow-foundation/work-item.sections }
+    - { page: item-tokens, at: oxplow-bundled/work-item.sections }
 ```
 
 The mounted page gets the host's params by name, so it declares the ones it
-needs:
+needs. The work item and Tasks pages are oxplow-bundled's: an extension that
+mounts there lists `requires: [oxplow-bundled]` in `extension.yaml`.
+
 
 | Slot | Page | Param |
 |---|---|---|
 | `oxplow-foundation/diff-view.sections` | an effort's or a range's diff | `effort_id`, `change_id` |
-| `oxplow-foundation/work-item.sections` | a work item's page | `uri` |
-| `oxplow-foundation/tasks.sections` | the Tasks page; `at: { before: list }` puts a strip above the list | `thread_id`, `stream_id` |
+| `oxplow-bundled/work-item.sections` | a work item's page | `uri` |
+| `oxplow-bundled/tasks.sections` | the Tasks page; `at: { before: list }` puts a strip above the list | `thread_id`, `stream_id` |
 | `oxplow-foundation/commit.sections` | a commit's page | `change_id` (the page's row) |
 | `oxplow-foundation/uncommitted-changes.sections` | Uncommitted Changes; `at: { before: commit }` puts a strip above everything | `change_id` (the page's row) |
 | `oxplow-foundation/new-session.sections` | the New Session page (sections `start`, `earlier`) | `thread_id` |

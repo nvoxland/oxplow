@@ -4,12 +4,12 @@
 when:
   page: oxplow-foundation/definition
   params:
-    uri: "oxplow:oxplow/file?path=oxplow-foundation/pages/board.yaml&filesystem=oxplow:extensions"
-    path: oxplow-foundation/pages/board.yaml
+    uri: "oxplow:oxplow/file?path=oxplow-foundation/pages/problems.yaml&filesystem=oxplow:extensions"
+    path: oxplow-foundation/pages/problems.yaml
     stream_id: 1
 expect:
   see_also:
-    - { title: Board, uri: "oxplow:oxplow/page?page=board" }
+    - { title: Problems, uri: "oxplow:oxplow/page?page=problems" }
     - { title: oxplow-foundation, uri: "oxplow:oxplow/extension?name=oxplow-foundation" }
 steps:
   - params:

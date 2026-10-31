@@ -3,7 +3,7 @@
 when:
   page: oxplow-foundation/slot
   params:
-    uri: "oxplow:oxplow/slot?slot=oxplow-foundation/oxplow-foundation.tasks.sections-0"
+    uri: "oxplow:oxplow/slot?slot=oxplow-bundled/oxplow-bundled.tasks.sections-0"
 expect:
   nodes:
     - { id: about, kind: viz, viz: detail }

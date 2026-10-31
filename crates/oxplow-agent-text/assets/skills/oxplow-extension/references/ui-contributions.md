@@ -14,9 +14,9 @@
     puts a strip above the uncommitted page;
   - `oxplow-foundation/diff-view.sections` (an effort's or a range's diff) →
     `effort_id`, `change_id`, …;
-  - `oxplow-foundation/work-item.sections` (a work item's page, whichever
-    list) → `uri`;
-  - `oxplow-foundation/tasks.sections` (the Tasks page) → `thread_id`,
+  - `oxplow-bundled/work-item.sections` (a work item's page, whichever
+    list; oxplow-bundled's, so declare `requires: [oxplow-bundled]`) → `uri`;
+  - `oxplow-bundled/tasks.sections` (the Tasks page; also needs `requires: [oxplow-bundled]`) → `thread_id`,
     `stream_id`;
   - `oxplow-foundation/new-session.sections` (sections `start`, `earlier`) →
     `thread_id`.

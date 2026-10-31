@@ -19,4 +19,4 @@ view:
     - body
     choices:
       to_thread: oxplow-foundation/handoff-recipients
-      work_item: oxplow-foundation/handoff-items
+      work_item: oxplow-bundled/handoff-items

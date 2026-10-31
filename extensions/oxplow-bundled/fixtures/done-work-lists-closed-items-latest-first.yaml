@@ -5,7 +5,7 @@ given:
   - { command: oxplow.work_item.create, input: { title: Open, thread: thr1 } }
   - { command: oxplow.work_item.transition, input: { uri: $a.uri, to: done } }
   - { command: oxplow.work_item.transition, input: { uri: $b.uri, to: canceled } }
-when: { page: oxplow-foundation/done-work, params: { thread_id: 1 } }
+when: { page: oxplow-bundled/done-work, params: { thread_id: 1 } }
 expect:
   loaders:
     done_work:

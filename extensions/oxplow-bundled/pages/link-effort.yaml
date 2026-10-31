@@ -1,0 +1,19 @@
+title: Link Effort to Task
+description: Link an effort to one of the open work items, or take its link away.
+hidden: true
+params:
+- name: uri
+  label: Effort
+view:
+  viz: form
+  form:
+    command: oxplow.effort.link
+    defaults:
+      effort: '{{param.uri.id}}'
+    fixed:
+    - effort
+    fields:
+    - effort
+    - work_item
+    choices:
+      work_item: oxplow-bundled/changes-link-items

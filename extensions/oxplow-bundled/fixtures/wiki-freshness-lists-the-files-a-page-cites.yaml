@@ -3,7 +3,7 @@
 given:
   - observe: { turn: { prompt: Build the holt, write: { path: src/holt.rs, body: "fn holt() {}\n" } } }
   - { command: oxplow.knowledge.write_page, input: { slug: otters, title: Otters, body: "# Otters\n\nSee [[src/holt.rs]].\n" } }
-when: { page: oxplow-foundation/wiki-freshness, params: { slug: otters } }
+when: { page: oxplow-bundled/wiki-freshness, params: { slug: otters } }
 expect:
   loaders:
     wiki_freshness:

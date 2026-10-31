@@ -1,8 +1,0 @@
-# A slot page names the page mounted, the page that hosts it and the slot.
-when: { page: oxplow-foundation/slot, params: { uri: "oxplow:oxplow/slot?slot=oxplow-foundation/oxplow-foundation.tasks.sections-0" } }
-expect:
-  loaders:
-    about:
-      rows: [{ extension: oxplow-foundation }]
-    mount:
-      rows: [{ mounted: $any, host: Tasks, place: sections }]

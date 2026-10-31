@@ -7,14 +7,14 @@ It reads effort-review's exported `reviews` dataset and writes nothing.
 | | |
 |---|---|
 | **Review Verdicts** (Work) | One row per work item: its latest review's effort, how it ended, when, and the first 120 characters. The work item links to its page. |
-| **Review** (the task page, among its sections) | That work item's latest review in full, if there is one. Mounted on the `oxplow-foundation/work-item.sections` slot, which passes the item's `uri`. |
+| **Review** (the task page, among its sections) | That work item's latest review in full, if there is one. Mounted on the `oxplow-bundled/work-item.sections` slot, which passes the item's `uri`. |
 
 ```yaml
 imports:
   - { id: reviews, contribution: oxplow:oxplow/dataset?dataset=effort-review/reviews, version: 2, optional: true }
 ui:
   mounts:
-    - { page: item-review, at: oxplow-foundation/work-item.sections }
+    - { page: item-review, at: oxplow-bundled/work-item.sections }
 ```
 
 Both pages read `import_ref('reviews')`, which is how an extension reads

@@ -24,11 +24,11 @@ view:
     - thread
     - parent_uri
     - name: native
-      from: oxplow-foundation/work-item-fields
+      from: oxplow-bundled/work-item-fields
     choices:
-      state: oxplow-foundation/new-task-states
-      thread: oxplow-foundation/new-task-threads
-      parent_uri: oxplow-foundation/new-task-parents
+      state: oxplow-bundled/new-task-states
+      thread: oxplow-bundled/new-task-threads
+      parent_uri: oxplow-bundled/new-task-parents
     again:
       label: Save and Another
       keep:

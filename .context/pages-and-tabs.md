@@ -225,7 +225,7 @@ launcher's Recent) drop the row rather than open a blank tab. Whether a
 page by a route's id exists is the declaration's business, and an
 undeclared one draws "No such page"; a URI nothing renders draws the
 fallback `resource` page. `newTaskRef(payload)` names the `new-task`
-page (a foundation form page, `new-task`) with its `parent` param.
+page (an oxplow-bundled form page, `new-task`) with its `parent` param.
 
 There are no sentinel tab ids (`HOME_TAB` in `App.tsx` means "nothing
 chosen", never a tab), and "is this the editor's working-tree file" is
@@ -806,9 +806,9 @@ margin; an embed or a slot takes its title from the page it shows):
   `left_at`, `right`, `right_lines`, `right_at`; label `{{param.left}} ↔
   {{param.right}}`): a `code` viz of two rows with `sync: true`, the
   ranges marked.
-- **Lists and boards.** `tasks` (params `show`, `priority`, `thread_id`,
+- **Lists and boards.** oxplow-bundled's `tasks` (params `show`, `priority`, `thread_id`,
   `stream_id`): `list` (the `work_item.list` replaceable), `summary`,
-  `backlog`, then a `sections` slot where bundled mounts the thread's
+  `backlog`, then a `sections` slot (`oxplow-bundled/tasks.sections`) where bundled mounts the thread's
   tokens, plan, shared work and the handoff pages. `backlog` (badge
   `backlog-count`; params `q`, `thread_id`): a quick-add `form` over
   `oxplow.work_item.create` and a state-grouped `list` of the items on no
@@ -832,10 +832,10 @@ margin; an embed or a slot takes its title from the page it shows):
   a commit `form` over `oxplow.vcs.commit` and a `tree` over
   `v_change_file`, then its `sections` slot. `problems` (`stream_id`,
   `severity`), `symbols` (`stream_id`, `path`, `filter`), `closed-threads`,
-  `wiki-index`, `wiki-freshness` (`slug`), `go-to`, `dashboards`,
-  `hook-events`, `done-work`, `catalog`.
+  `go-to`, `dashboards`, `hook-events`, `catalog` (foundation's);
+  oxplow-bundled adds `wiki-index`, `wiki-freshness` (`slug`) and `done-work`.
 - **Forms and settings.** `new-stream` (one `form` over
-  `oxplow.stream.create`, `visible_if` on its source), `new-task`,
+  `oxplow.stream.create`, `visible_if` on its source), bundled's `new-task`,
   `stream-settings` (param `stream`) and `thread-settings` (param
   `thread`; label `{{row.title}} settings`): a hint, the open sessions and
   the prompt as an edit `form` over `v_stream` / `v_thread` with
@@ -1280,12 +1280,12 @@ launcher (type, then assert `page-<kind>` on the body).
 **Work pages split (post-Phase-3).** The single `AllWorkPage` was
 replaced by four focused pages so each has one job:
 
-- **Tasks** (the `tasks` page, a foundation page file) — the thread's items by state,
+- **Tasks** (the `tasks` page, an oxplow-bundled page file) — the thread's items by state,
   or its stream's or everything's (the `show` filter); the last five done and a "View all done →"
   link to Done Work; the agent's open turn is a live row in In progress. Ref helper is `tasksRef()`.
-- **Done work** (the `done-work` page, a foundation page file) —
+- **Done work** (the `done-work` page, an oxplow-bundled page file) —
   full descending list of the current thread's closed items (done and canceled).
-- **Backlog** (the `backlog` page, a foundation page file) — the active list's items on no thread
+- **Backlog** (the `backlog` page, an oxplow-bundled page file) — the active list's items on no thread
   (`v_work_item.thread_id IS NULL`); `oxplow.work_item.move` takes one to a thread and back (its
   Bring to this thread action needs the `lists` feature).
 

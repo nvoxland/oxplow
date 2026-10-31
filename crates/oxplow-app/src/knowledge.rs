@@ -1888,7 +1888,8 @@ mod tests {
     }
 
     /// Writing a page names the page a person goes to next: the ref the
-    /// write's result carries (`ui.open_after`), which a page action's
+    /// write's result carries (`ui.open_after`, on oxplow-bundled's menu
+    /// command over the write), which a page action's
     /// form honors like a command offer does.
     #[tokio::test]
     async fn writing_a_page_opens_that_page_after() {
@@ -1905,7 +1906,7 @@ mod tests {
             .commands
             .list(&Actor::Human)
             .into_iter()
-            .find(|s| s.id == WRITE_PAGE)
+            .find(|s| s.id == "oxplow.knowledge.new_page")
             .unwrap();
         assert_eq!(
             spec.ui.unwrap().open_after_for(&out.result),

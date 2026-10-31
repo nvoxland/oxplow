@@ -6,7 +6,7 @@ given:
   - { command: oxplow.knowledge.write_page, input: { slug: beta, title: Beta, body: "# Beta\n\nNothing here.\n" } }
   - { command: oxplow.knowledge.write_page, input: { slug: gamma, title: Gamma, body: "# Gamma\n\nA lazy dog sleeps.\n" } }
   - observe: { visit: { page: "oxplow:oxplow/wiki?slug=beta", kind: wiki, label: Beta, thread: thr1 } }
-when: { page: oxplow-foundation/wiki-index, params: { stream_id: 1 } }
+when: { page: oxplow-bundled/wiki-index, params: { stream_id: 1 } }
 expect:
   loaders:
     visited:

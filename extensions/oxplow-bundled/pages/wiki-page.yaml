@@ -106,5 +106,5 @@ view:
         - '{{row.path}}'
       row: true
 see_also:
-  - { page: oxplow-foundation/wiki-index }
+  - { page: oxplow-bundled/wiki-index }
   - { from: backlinks }

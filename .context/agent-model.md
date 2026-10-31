@@ -1493,11 +1493,12 @@ block too, injected between turns. The take is two steps
 (`peek_for_prompt`, then `mark_delivered` by id once the agent has the
 text), so a delivery that fails stamps nothing.
 
-The person: at once, through the foundation extension (core's own, so a
-project with `oxplow-bundled` off still has it):
+The person: at once, through oxplow-bundled's UI (with it off, the
+agent's `oxplow.handoff.send` still works and there is no menu entry):
 
-- **Hand Off Work…** is `oxplow.handoff.send`'s `ui` (`about: thread`),
-  so it is on a thread's page and at the end of its Navigator menu. Its
+- **Hand Off Work…** is `oxplow.handoff.offer`'s `ui` (`about: thread`;
+  oxplow-bundled's command over the same operation as
+  `oxplow.handoff.send`), so it is on a thread's page and at the end of its Navigator menu. Its
   form is the `hand-off` page (`viz: form`, `from_thread` fixed to the
   thread), which picks the recipient and the item from lists (`choices`:
   the `handoff-recipients` and `handoff-items` pages) and takes the body

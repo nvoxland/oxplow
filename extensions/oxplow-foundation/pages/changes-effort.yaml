@@ -58,13 +58,3 @@ actions:
   input:
     effort: '{{row.effort}}'
     title: '{{row.title}}'
-- id: link
-  label: Link to task…
-  command: oxplow.effort.link
-  form: true
-  fixed:
-  - effort
-  choices:
-    work_item: oxplow-foundation/changes-link-items
-  input:
-    effort: '{{row.effort}}'

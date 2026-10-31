@@ -459,8 +459,8 @@ over a database file); adversarial and concurrency coverage is still to do.
 >     sources", and a tested example is in `examples/extensions/github/`;
 >   - **slots** on pages (`oxplow-foundation/diff-view.sections`,
 >     `commit.sections`, `uncommitted-changes.sections`,
->     `work-item.sections`, `tasks.sections`, `new-session.sections`,
->     `diff.file-header`), **advisories**, per-project **disabling**;
+>     `new-session.sections`, `diff.file-header`; oxplow-bundled's
+>     `oxplow-bundled/work-item.sections` and `tasks.sections`), **advisories**, per-project **disabling**;
 >   - page alerts, panels, and extension-declared measures, metrics,
 >     dimensions and fact collectors (see extensions-jobs.md "Contributing metrics");
 >   - whole-page and row actions;

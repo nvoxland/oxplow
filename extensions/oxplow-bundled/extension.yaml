@@ -276,8 +276,49 @@ intent:
     - name: duplicate-lines-restates-both-sides-of-every-duplicate-block
       input: { collector: oxplow.duplicate_lines }
       expect: both sides of a duplicate block are facts on their own block
+    - name: board-lists-work-items-by-scope
+      input: { page: board, params: { show: thread, thread_id: 1 } }
+      expect: the thread's cards, the backlog's or all of them by the scope; the row names the scope drawn
+    - name: wiki-page-reads-its-body-even-before-it-is-written
+      input: { page: wiki-page, params: { slug: otters } }
+      expect: the body of a written page and of a slug not written yet, freshness, no references
+    - name: work-item-page-reads-the-item-its-links-and-its-comments
+      input: { page: work-item, params: { uri: "<the item's uri>", thread_id: 1 } }
+      expect: the item, its gated buttons, its links from both ends, its comments
+    - name: backlog-lists-items-on-no-thread-with-epics-and-search
+      input: { page: backlog, params: { q: "", thread_id: 1 } }
+      expect: x
+    - name: tasks-lists-its-scope-by-state-with-epics-and-a-summary
+      input: { page: tasks, params: { show: thread, priority: any, thread_id: 1, stream_id: 1 } }
+      expect: the scope's items by state with epics nested, the priority filter keeping an epic for its child, the last five done, the summary's counts
+    - name: the-slot-page-links-the-mounted-page-and-its-host
+      input: { page: slot, params: { uri: "oxplow:oxplow/slot?slot=oxplow-bundled/oxplow-bundled.tasks.sections-0" } }
+      expect: the page a slot mount shows, the page that hosts it and the slot
+    - name: done-work-lists-closed-items-latest-first
+      input: { page: done-work }
+      expect: the done-work page lists what its loaders read
+    - name: wiki-index-lists-pages-newest-change-first-and-searches
+      input: { page: wiki-index }
+      expect: the wiki-index page lists what its loaders read
+    - name: wiki-freshness-lists-the-files-a-page-cites
+      input: { page: wiki-freshness }
+      expect: the wiki-freshness page lists what its loaders read
+    - name: the-slot-page-links-to-its-extension
+      input: { page: slot, params: { uri: 'oxplow:oxplow/slot?slot=oxplow-bundled/oxplow-bundled.tasks.sections-0' } }
+      expect: its see-also links name the extension that declares it
+    - name: the-work-item-page-links-to-its-board-efforts-and-parent-epic
+      input: { page: work-item, params: { uri: 'oxplow:oxplow/work_item?id=tsk1&provider=oxplow' } }
+      expect: its see-also links open the board (or backlog), its efforts and its parent epic
+    - name: the-wiki-page-links-to-the-wiki-and-the-pages-that-link-to-it
+      input: { page: wiki-page, params: { uri: 'oxplow:oxplow/wiki?slug=otters', slug: otters } }
+      expect: its see-also links open the wiki and the work that links to it
+    - name: the-slot-page-says-what-it-is-in-a-paragraph-above-its-facts
+      input: { page: slot, params: {uri:"oxplow:oxplow/slot?slot=oxplow-bundled/oxplow-bundled.tasks.sections-0"} }
+      expect: its description is a paragraph above the facts
 ui:
   mounts:
+    - { page: thread-handoffs-in, at: oxplow-bundled/tasks.sections, position: { before: list } }
+    - { page: thread-handoffs-out, at: oxplow-bundled/tasks.sections, position: { before: list } }
     - { page: extension-runs, at: oxplow-foundation/extension.runs }
     - { page: change-review, at: oxplow-foundation/diff-view.sections }
     - { page: change-review, at: oxplow-foundation/commit.sections }
@@ -286,11 +327,11 @@ ui:
     - { page: effort-metric-deltas, at: oxplow-foundation/diff-view.sections }
     - { page: effort-nudges, at: oxplow-foundation/diff-view.sections }
     - { page: effort-plan, at: oxplow-foundation/diff-view.sections }
-    - { page: task-tokens, at: oxplow-foundation/work-item.sections }
-    - { page: thread-tokens, at: oxplow-foundation/tasks.sections, position: { before: list } }
-    - { page: thread-plan, at: oxplow-foundation/tasks.sections, position: { before: list } }
-    - { page: thread-shared-work, at: oxplow-foundation/tasks.sections, position: { before: list } }
-    - { page: item-shared-work, at: oxplow-foundation/work-item.sections }
+    - { page: task-tokens, at: oxplow-bundled/work-item.sections }
+    - { page: thread-tokens, at: oxplow-bundled/tasks.sections, position: { before: list } }
+    - { page: thread-plan, at: oxplow-bundled/tasks.sections, position: { before: list } }
+    - { page: thread-shared-work, at: oxplow-bundled/tasks.sections, position: { before: list } }
+    - { page: item-shared-work, at: oxplow-bundled/work-item.sections }
     - { page: file-co-change, at: oxplow-foundation/diff.file-header }
     - { page: decisions, at: oxplow-foundation/diff-view.sections }
     - { page: inferred-decisions, at: oxplow-foundation/diff-view.sections }
@@ -874,3 +915,30 @@ commands:
     access: record
     examples:
       - { name: clears, input: { thread_id: 3 }, expect_commands: [] }
+  # The person's menu entries for foundation's work, wiki, handoff and
+  # effort commands. Foundation keeps the commands (an agent runs them);
+  # these add the labels, shortcuts and forms a person uses.
+  - name: work_item.new
+    summary: "The person's menu entry for `oxplow.work_item.create`: New Task… opens the new-task form and shows the task it files."
+    scope: work_items.write
+    op: create
+    ui: {"label": "New Task…", "group": "Tasks", "keywords": ["work item"], "form": "oxplow:oxplow/page?page=new-task", "shortcut": "Ctrl/Cmd+Shift+N", "open_after": "{{result.uri}}"}
+    example: {"title": "Fix the login redirect loop", "body": "Signing in from /settings bounces back to /login.", "state": "todo"}
+  - name: knowledge.new_page
+    summary: "The person's menu entry for `oxplow.knowledge.write_page`: New Wiki Page… opens the wiki and shows the page it writes."
+    scope: knowledge.write
+    op: write_page
+    ui: { label: "New Wiki Page…", group: Knowledge, keywords: [wiki, page, note, write], form: "oxplow:oxplow/page?page=wiki-index", open_after: "oxplow:oxplow/wiki?slug={{result.page}}" }
+    example: {"slug": "auth-flow", "title": "Auth flow", "body": "# Auth flow\n\nThe callback validates `next` before redirecting.", "verified_files": []}
+  - name: handoff.offer
+    summary: "The person's menu entry for `oxplow.handoff.send`: Hand Off Work… on a thread opens the hand-off form."
+    scope: handoffs.write
+    op: send
+    ui: { label: "Hand Off Work…", group: Threads, keywords: [handoff, delegate, give], about: oxplow/thread, form: "oxplow:oxplow/page?page=hand-off" }
+    example: {"to_thread": "thr4", "work_item": "oxplow:oxplow/work_item?id=tsk12&provider=oxplow", "body": "The parser fix is in; the remaining failure is the timezone case."}
+  - name: effort.link_to_task
+    summary: "The person's menu entry for `oxplow.effort.link`: Link to Task… on an effort opens a form to pick the task."
+    scope: efforts.write
+    op: link
+    ui: { label: "Link to Task…", group: Review, about: oxplow/effort, form: "oxplow:oxplow/page?page=link-effort" }
+    example: {"effort": "eff12", "work_item": "oxplow:oxplow/work_item?id=tsk42&provider=oxplow"}

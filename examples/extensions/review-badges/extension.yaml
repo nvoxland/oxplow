@@ -2,6 +2,7 @@ manifest: 2
 name: review-badges
 description: The latest model review of each work item, from effort-review, as a list and on the task page.
 engine: ">=0.7"
+requires: [oxplow-bundled]
 version: 0.1.0
 intent:
   purpose: >-
@@ -25,4 +26,4 @@ imports:
   - { id: reviews, contribution: oxplow:oxplow/dataset?dataset=effort-review/reviews, version: 2, optional: true }
 ui:
   mounts:
-    - { page: item-review, at: oxplow-foundation/work-item.sections }
+    - { page: item-review, at: oxplow-bundled/work-item.sections }

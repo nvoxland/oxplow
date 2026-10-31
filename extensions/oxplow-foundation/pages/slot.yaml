@@ -7,7 +7,7 @@ params:
 - name: uri
   label: Slot
 answers:
-- {"question":"Which page does this slot mount show, and where?","about":"oxplow/slot","params":{"uri":"oxplow:oxplow/slot?slot=oxplow-foundation/oxplow-foundation.tasks.sections-0"},"skill":"oxplow-extension"}
+- {"question":"Which page does this slot mount show, and where?","about":"oxplow/slot","params":{"uri":"oxplow:oxplow/slot?slot=acme/acme.tasks.sections-0"},"skill":"oxplow-extension"}
 loaders:
   about:
     sql: |

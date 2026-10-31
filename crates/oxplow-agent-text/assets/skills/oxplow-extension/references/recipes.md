@@ -100,12 +100,12 @@ view: { viz: list, from: stale, empty: No stale reviews. }
 # extension.yaml
 ui:
   mounts:
-    - { page: stale-reviews, at: oxplow-foundation/work-item.sections, position: { after: links }, title: Stale reviews }
+    - { page: stale-reviews, at: oxplow-bundled/work-item.sections, position: { after: links }, title: Stale reviews }
 ```
 
-`slot: <extension>/<page>.<name>`; `at` is `start`, `end` (default) or `{
+`slot: <extension>/<page>.<name>` (the work item page is oxplow-bundled's, so an extension that mounts there declares `requires: [oxplow-bundled]`); `at` is `start`, `end` (default) or `{
 before | after: <sibling id> }`. The mounted page gets the host's params by
 name, so declare the ones you need. Check the mount with
 `oxplow_validate_extension`, and see it on the host page with `oxplow_run_page
-{ page: oxplow-foundation/work-item, draft: true }` (its text includes your
+{ page: oxplow-bundled/work-item, draft: true }` (its text includes your
 section, marked with your extension).

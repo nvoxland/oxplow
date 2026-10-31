@@ -6042,7 +6042,7 @@ commands:
             ("oxplow-foundation/diff-view", "sections", "change-review"),
             ("oxplow-foundation/diff-view", "sections", "effort-tests"),
             ("oxplow-foundation/commit", "sections", "tests-weakened"),
-            ("oxplow-foundation/work-item", "sections", "task-tokens"),
+            ("oxplow-bundled/work-item", "sections", "task-tokens"),
         ] {
             assert!(
                 b.ui.page_slots.iter().any(|s| s.host == host
@@ -6064,7 +6064,11 @@ commands:
                 "oxplow.effort.infer_reasoning",
                 "oxplow.review.accept",
                 "oxplow.review.request_changes",
-                "oxplow.work.clear_finished"
+                "oxplow.work.clear_finished",
+                "oxplow.work_item.new",
+                "oxplow.knowledge.new_page",
+                "oxplow.handoff.offer",
+                "oxplow.effort.link_to_task"
             ]
         );
         let advisories: Vec<&str> = b.advisories.iter().map(|a| a.id.as_str()).collect();
@@ -6129,6 +6133,74 @@ commands:
                 .title,
             "Decisions Made"
         );
+    }
+
+    /// The work list and the wiki are foundation's data and the agent's
+    /// tools; how a person sees and edits them is oxplow-bundled's. With
+    /// bundled off a work item or wiki link opens the generic resource
+    /// page, and no menu offers a form that isn't there.
+    #[test]
+    fn foundation_has_no_task_or_wiki_ui() {
+        let dir = tempfile::tempdir().unwrap();
+        let exts = load_extensions(dir.path());
+        let ext = |name: &str| exts.iter().find(|e| e.name == name).unwrap();
+        let (foundation, bundled) = (ext("oxplow-foundation"), ext("oxplow-bundled"));
+        for resource in ["oxplow/work_item", "oxplow/wiki"] {
+            let renders = |e: &Extension| {
+                e.page_files
+                    .iter()
+                    .filter(|p| p.renders.iter().any(|r| r == resource))
+                    .map(|p| p.id.clone())
+                    .collect::<Vec<_>>()
+            };
+            assert_eq!(renders(foundation), Vec::<String>::new(), "{resource}");
+            assert!(!renders(bundled).is_empty(), "{resource}");
+        }
+        let scope_of = |c: &crate::extension::extension_commands::ExtensionCommand| match &c.handler
+        {
+            crate::extension::extension_commands::CommandHandler::Scope { scope, .. } => {
+                scope.clone()
+            }
+            _ => String::new(),
+        };
+        let person_facing = |e: &Extension| {
+            e.commands
+                .iter()
+                .filter(|c| c.ui.is_some())
+                .filter(|c| {
+                    let scope = scope_of(c);
+                    ["work_items.", "knowledge.", "handoffs."]
+                        .iter()
+                        .any(|s| scope.starts_with(s))
+                        || c.name == "effort.link"
+                })
+                .map(|c| c.name.clone())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(person_facing(foundation), Vec::<String>::new());
+        let offered = person_facing(bundled);
+        for scope in ["work_items.write", "knowledge.write", "handoffs.write"] {
+            assert!(
+                bundled
+                    .commands
+                    .iter()
+                    .any(|c| c.ui.is_some() && scope_of(c) == scope),
+                "bundled offers no {scope} form: {offered:?}"
+            );
+        }
+        for slug in [
+            "tasks",
+            "board",
+            "backlog",
+            "wiki-index",
+            "hand-off",
+            "new-task",
+        ] {
+            assert!(
+                foundation.page_files.iter().all(|p| p.id != slug),
+                "foundation still has {slug}"
+            );
+        }
     }
 
     #[test]

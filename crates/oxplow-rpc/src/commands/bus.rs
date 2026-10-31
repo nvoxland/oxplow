@@ -305,7 +305,7 @@ mod tests {
         let thread_uri = oxplow_domain::uri::build::thread_uri(thread);
         assert!(offered(thread_uri)
             .await
-            .contains(&"oxplow.handoff.send".to_string()));
+            .contains(&"oxplow.handoff.offer".to_string()));
         assert_eq!(
             offered("https://example.com".into()).await,
             Vec::<String>::new()
@@ -331,7 +331,7 @@ mod tests {
         assert_eq!(pull["ui"]["group"], "Git");
         assert_eq!(pull["ui"]["input"], json!({ "stream": "{{stream}}" }));
         assert_eq!(pull["ui"]["background"], true);
-        let new_task = by_id("oxplow.work_item.create").expect("New Task is offered");
+        let new_task = by_id("oxplow.work_item.new").expect("New Task is offered");
         assert_eq!(new_task["ui"]["form"], "oxplow:oxplow/page?page=new-task");
         assert_eq!(new_task["ui"]["open_after"], "{{result.uri}}");
         let dashboard = by_id("oxplow.extension.new_dashboard").expect("New Dashboard is offered");

@@ -6,7 +6,7 @@ import type { Page } from "@playwright/test";
 
 import { run, type Daemon } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
-import { openFromLauncher } from "../../support/ui.js";
+import { openFromLauncher, searchLauncher } from "../../support/ui.js";
 
 // Oxplow's own pages are complete with every enhancement off: with only
 // oxplow-foundation on, a page shows its own content, and nothing another
@@ -74,14 +74,12 @@ test("oxplow's pages are complete with every enhancement off", async ({ fresh })
   await expect(host.getByText("dirty.txt").first()).toBeVisible();
   await nothingAdded(page);
 
-  // The work-list pages: the list is empty, so they say so, with no error.
-  await openFromLauncher(page, "Board");
-  await expect(host.getByText("No work items here.")).toBeVisible();
-  await expect(host.getByRole("alert")).toHaveCount(0);
-  await nothingAdded(page);
-
-  await openFromLauncher(page, "Tasks");
-  await expect(page.getByTestId("page-nav-title").filter({ visible: true })).toHaveText("Tasks");
-  await expect(host.getByRole("alert")).toHaveCount(0);
+  // The work list's pages are oxplow-bundled's: with it off, the launcher
+  // does not offer Board or Tasks.
+  for (const name of ["Board", "Tasks"]) {
+    await searchLauncher(page, name);
+    await expect(page.locator('[data-testid^="launcher-page-"]').filter({ hasText: new RegExp(`^\\s*${name}\\s*$`) })).toHaveCount(0);
+    await page.keyboard.press("Escape");
+  }
   await nothingAdded(page);
 });

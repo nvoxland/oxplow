@@ -31,7 +31,7 @@ intent:                 # required: what it is for, and how to know it works
       expect: one row for the blocked task
 ui:                     # optional: what it adds to other pages
   mounts:
-    - { page: task-history, at: oxplow-foundation/work-item.sections }
+    - { page: task-history, at: oxplow-bundled/work-item.sections }   # also add requires: [oxplow-bundled]
 panels:                 # optional: a left-nav panel
   - { id: waiting, title: Waiting on Me, icon: bell, scope: stream, body: waiting-on-me, badge: waiting-on-me }
 ```

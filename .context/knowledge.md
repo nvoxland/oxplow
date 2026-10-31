@@ -157,8 +157,8 @@ reopening the page (the Freshness page re-runs the loaders whose reads changed).
 ## The capability
 
 Knowledge is a **choosable, optional** capability: a project keeps its
-pages in oxplow's wiki (`oxplow:wiki`, which `oxplow-bundled` declares
-under the id `oxplow`), in a documentation system an extension's provider
+pages in oxplow's wiki (`oxplow:wiki`, which `oxplow-foundation` declares
+under the id `oxplow`; the wiki's pages and forms are `oxplow-bundled`'s), in a documentation system an extension's provider
 speaks to (an Obsidian vault, a Confluence or MediaWiki server), or
 nowhere. `Services.knowledge` is an `oxplow_domain::knowledge::
 KnowledgeRegistry`; `active()` is the project's choice

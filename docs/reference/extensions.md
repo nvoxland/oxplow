@@ -143,7 +143,7 @@ pages, collectors, commands, effects, advisories, skills or providers. Their
 exports and dependent mounts are withheld too. Each unavailable optional
 import is one warning naming why and everything it withheld:
 `` optional import `items` for `oxplow:oxplow/dataset?dataset=maker/items` v1 is unavailable: maker
-is disabled; withheld: `oxplow:oxplow/page?page=review-ui/items`, `oxplow:oxplow/slot?slot=review-ui/oxplow-foundation.work-item.sections-0` ``.
+is disabled; withheld: `oxplow:oxplow/page?page=review-ui/items`, `oxplow:oxplow/slot?slot=review-ui/oxplow-bundled.work-item.sections-0` ``.
 Missing required imports and
 dependency cycles block the extension with source-located errors.
 

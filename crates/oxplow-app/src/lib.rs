@@ -2325,6 +2325,7 @@ mod tests {
                 "oxplow.knowledge.delete_page",
                 "oxplow.knowledge.drift",
                 "oxplow.knowledge.link",
+                "oxplow.knowledge.new_page",
                 "oxplow.knowledge.verify_files",
                 "oxplow.knowledge.write_page",
                 // A download into .oxplow/lsp/, a person's call (P8.A9).
@@ -2393,6 +2394,7 @@ mod tests {
                 "oxplow.work_item.delete",
                 "oxplow.work_item.link",
                 "oxplow.work_item.move",
+                "oxplow.work_item.new",
                 "oxplow.work_item.reorder",
                 "oxplow.work_item.transition",
                 "oxplow.work_item.unlink",

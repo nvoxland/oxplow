@@ -2251,7 +2251,7 @@
           "type": "string"
         },
         "at": {
-          "description": "Where: a page's slot (`oxplow-foundation/work-item.sections`) or a\nreplaceable core component (`work_item.board`).",
+          "description": "Where: a page's slot (`oxplow-bundled/work-item.sections`) or a\nreplaceable core component (`work_item.board`).",
           "type": "string"
         },
         "position": {

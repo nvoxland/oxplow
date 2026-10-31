@@ -12,7 +12,6 @@ expect:
     - { id: commands, kind: viz, viz: table }
     - { id: skills, kind: viz, viz: table }
     - { id: components, kind: viz, viz: table }
-    - { id: slots, kind: viz, viz: table }
     - { id: collectors, kind: viz, viz: table }
     - { id: metrics, kind: viz, viz: table }
     - { id: measures, kind: viz, viz: table }

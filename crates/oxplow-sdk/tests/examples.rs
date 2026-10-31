@@ -149,7 +149,7 @@ async fn the_review_badges_example_consumes_effort_reviews_and_degrades_without_
     for id in [
         "`oxplow:oxplow/page?page=review-badges/item-review`",
         "`oxplow:oxplow/page?page=review-badges/review-verdicts`",
-        "`oxplow:oxplow/slot?slot=review-badges/oxplow-foundation.work-item.sections-0`",
+        "`oxplow:oxplow/slot?slot=review-badges/oxplow-bundled.work-item.sections-0`",
     ] {
         assert!(warning.contains(id), "{id}: {warning}");
     }

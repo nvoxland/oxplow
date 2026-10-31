@@ -110,8 +110,21 @@ The `oxplow-foundation` and `oxplow-bundled` extensions, the review packet, and 
   `hidden` from the launcher (opened there they'd show NULL-param empty
   states). The launcher gets stream-level starters instead, under Work:
   **Recent Decisions** and **Unbacked Claims**, scoped by the implicit
-  `stream_id`. `launcher_pages_need_no_slot_params` enforces the rule
-  for every bundled page.
+  `stream_id`.
+
+## The rule: data in foundation, work list and wiki UI here
+
+oxplow-foundation holds the data of the work list and the wiki: their
+datasets, the `work_item` and `wiki` resources, the `oxplow:tasks` and
+`oxplow:wiki` implementations, the bus commands (with no `ui:`), skills,
+metrics and the agent's tool pages (`work-next`, `thread-work`). It has
+no page that a person uses to read or edit them.
+
+oxplow-bundled holds that UI: the pages above and the menu commands.
+With oxplow-bundled off, a work item or wiki link opens core's generic
+resource page. That is intended. Foundation must never link to a bundled
+page, because it cannot name oxplow-bundled. The Rust test
+`foundation_has_no_task_or_wiki_ui` guards this.
 
 ## Example extensions (`examples/extensions/`)
 
@@ -193,19 +206,25 @@ screens and oxplow-bundled's add the review and analysis:
 - **Effort blocks.** `effort-tests` (coverage, untested files, test runs,
   failed tests, analysis findings), `effort-metric-deltas`, `effort-nudges`
   and `effort-plan`, mounted at `oxplow-foundation/diff-view.sections`.
-  `task-tokens` mounts at `work-item.sections`; `thread-tokens` at
-  `tasks.sections`.
+  `task-tokens` mounts at `oxplow-bundled/work-item.sections`;
+  `thread-tokens` at `oxplow-bundled/tasks.sections`.
 - **Metric nudges.** The `threshold-crossed` advisory (with
   `metric-deltas`).
 - **Git History's commit graph.** The `history-graph` component, replacing
   core's plain commit list (`vcs.history.graph`, a `ui.mounts`
   entry).
-- **The app's screens.** foundation's `alerts`, `backlog`, `board`,
+- **The work list and wiki screens.** oxplow-bundled's `tasks`, `backlog`,
+  `board`, `done-work`, `work-item` (and its helper pages), `new-task`,
+  `wiki-index`, `wiki-page`, `wiki-freshness`, `hand-off` and the
+  handoff strips on Tasks. Their menu entries are bundled's commands:
+  `work_item.new`, `knowledge.new_page`, `handoff.offer` and
+  `effort.link_to_task`. Each runs the same operation as a foundation
+  command and adds the label, shortcut and form a person uses.
+- **The app's screens.** foundation's `alerts`,
   `catalog`, `changes-effort`, `comments`, `commit`, `dashboards`,
   `diff`, `directory`, `file-viewer`, `files`, `git-dashboard`,
   `settings` (an `area` param: overview, agents, lsp, extensions, data,
-  integrations, ai), `tasks`, `uncommitted-changes`, `wiki-page`,
-  `work-item`, and more. Dashboards are in [dashboards.md](./dashboards.md) and
+  integrations, ai), `uncommitted-changes`, and more. Dashboards are in [dashboards.md](./dashboards.md) and
   metrics in [metrics.md](./metrics.md).
 - **Rail panels** (the `panels:` list of oxplow-bundled): Go To
   (`go-to-panel`, collapsed `go-to-bookmarks`), Waiting on You
