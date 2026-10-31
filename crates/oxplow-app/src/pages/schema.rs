@@ -880,7 +880,8 @@ fn inline_problem(page: &Page) -> Option<String> {
     {
         return Some(format!(
             "loader `{}`: an inline page reads only through `sql`, `rows` and `page` loaders, \
-             not a command",
+             not a command; to try a page that reads one, write it as a page file in an \
+             extension and run its draft (`oxplow_run_page {{ page, draft: true }}`)",
             l.name
         ));
     }
