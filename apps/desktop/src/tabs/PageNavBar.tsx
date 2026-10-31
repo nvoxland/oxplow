@@ -443,6 +443,9 @@ export function PageNavBar({
                   Bookmarked at other values: update that bookmark
                 </button>
               ) : null}
+              <div style={{ padding: "4px 6px", fontSize: 11, color: "var(--muted)" }} data-testid="page-nav-bookmark-heading">
+                Bookmark for:
+              </div>
               {(["thread", "stream", "project"] as BookmarkScope[]).map((scope) => {
                 const active = bookmark.scope === scope;
                 return (
