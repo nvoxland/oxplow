@@ -31,7 +31,8 @@ view:
   - key: denials
     label: Denied
   - key: mean_cpu_ms
-    label: Mean CPU (ms)
+    label: Mean CPU
+    format: duration
   - key: ai_calls
     label: Model calls
   empty: No extension has run in the last 7 days.
