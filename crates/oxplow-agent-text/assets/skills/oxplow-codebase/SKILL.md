@@ -5,9 +5,8 @@ description: Answering questions about the project's history and code from oxplo
 
 # The project's history and code
 
-oxplow keeps the repository's history and the language servers' view of
-the code as SQL datasets. Read them with `oxplow_query_sql` before `git log`
-or grep: indexed, shared with pages, every stream. `v_field`
+oxplow keeps the repository's history and the code as SQL datasets.
+Read them with `oxplow_query_sql` before `git log` or grep. `v_field`
 documents each column.
 
 ## History (`v_commit`, `v_commit_file`, `v_branch`, `v_tag`)
@@ -34,6 +33,7 @@ documents each column.
   `upstream`, `ahead`, `behind`); **`v_tag`** — tags. A `v_stream` row's
   `head_sha` is where its workspace is. Uncommitted files: `v_change_file`
   of the `v_change` with `kind = 'working'` (`staged`, `untracked`).
+- **`v_file`** — a folder's entries (`references/code.md`).
 - **`v_branch_divergence`**, **`v_commit_between`** — two revisions
   compared, the commits between (`references/history.md`).
 

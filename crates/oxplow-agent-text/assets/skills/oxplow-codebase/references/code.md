@@ -28,3 +28,11 @@
   which: `source`); `oxplow_code_workspace_symbols { language, query }` finds symbols by name across the
   workspace and needs a running server (`v_lsp_server`). `v_symbol` holds the stored symbols of
   files a snapshot captured (not a new uncommitted file).
+
+## Folders (`v_file`)
+
+`v_file` lists one folder's entries (`parent = '<folder>'`: `name`,
+`kind`, `status`, `uri`) on a filesystem at a revision (`filesystem`,
+`rev`; the stream's worktree is `oxplow:local` with `rev = ''`). Files
+marked generated are the `generated` key's `exclude` list in
+`v_config_value`.
