@@ -542,15 +542,11 @@ another tool's checkout.
 
 ## UI commit affordance
 
-The Files page has a **Commit Changes…** action in its header
-node: a form over `oxplow.vcs.commit` (message, include untracked). The
-Uncommitted Changes page has an inline message box, and the command's menu
-entry opens that page. These are the UI entry points for
-user-driven commits. oxplow never steers the agent to commit.
-
-Button carries `data-testid="files-commit"`; the dialog's message
-textarea is `files-commit-message` and the submit button is
-`files-commit-submit`.
+The Uncommitted Changes page has an inline message box over
+`oxplow.vcs.commit`, and the command's menu entry opens that page. These are
+the UI entry points for user-driven commits. oxplow never steers the agent to
+commit. The Files page is only the tree: no commit, pull or push, and no
+branch status (the Git page has those).
 
 ### Commits are not policed (tsk250)
 

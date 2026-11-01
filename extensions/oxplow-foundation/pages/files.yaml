@@ -30,18 +30,6 @@ loaders:
     - key: branch
     - key: change_kind
     - key: change_target
-  header:
-    sql: |
-      SELECT :branch AS branch,
-             CASE WHEN count(f.status) = 0 THEN 'Working tree is clean'
-                  ELSE count(*) || ' changed' END AS changes,
-             count(f.status) > 0 AS dirty,
-             CASE WHEN :compare = 'none' THEN NULL ELSE 'Files open as a diff against ' || :compare END AS comparing
-      FROM (SELECT cf.status FROM v_change c JOIN v_change_file cf ON cf.change_id = c.id
-            WHERE c.kind = 'working' AND c.target = '' AND c.stream_id = :stream_id) f
-    params:
-      branch:
-        from: row.branch
   tree:
     sql: |
       WITH RECURSIVE ch(id, base_revision) AS (
@@ -97,37 +85,6 @@ loaders:
         from: row.change_target
 view:
   stack:
-  - id: header
-    title: Status
-    from: header
-    viz: detail
-    columns:
-    - key: branch
-      label: Branch
-    - key: changes
-      label: Changes
-    - key: comparing
-      label: Comparing
-    actions:
-    - id: commit
-      label: Commit Changes…
-      command: oxplow.vcs.commit
-      form: true
-      when: dirty
-      fixed:
-      - stream
-      input:
-        stream: str{{param.stream_id}}
-    - id: pull
-      label: Pull
-      command: oxplow.vcs.pull
-      input:
-        stream: str{{param.stream_id}}
-    - id: push
-      label: Push
-      command: oxplow.vcs.push
-      input:
-        stream: str{{param.stream_id}}
   - id: tree
     title: Files
     hide_title: true
@@ -146,7 +103,7 @@ view:
       link:
         kind: page
         from: target
-    empty: Nothing here. Pick a different scope.
+    empty: Nothing here. With Show set to changed files, nothing has changed.
     actions:
     - id: new-file
       label: New File…
