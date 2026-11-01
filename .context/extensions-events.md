@@ -382,6 +382,20 @@ and body of the changed rows only.
   touching one re-reads the view after the assets' quiet window and
   restates the resource's entries in its own transaction — never the
   writer's.
+- **The read is whole, or incremental.** A restate reads the whole feed,
+  except for a kind whose view has an INTEGER `seq` column (a unique,
+  only-growing row id) and is core's: when the inputs saw inserts only
+  (`recompute(full = false)`, the incremental datasets' own signal; an
+  UPDATE or DELETE is `full`), it reads only the rows past the highest `seq`
+  it indexed, adds or changes those entries and removes none. The mark is
+  in memory: a deploy, a vocabulary change (the asset is registered anew), a
+  restart and every rewrite read whole. Only a feed whose existing rows no
+  insert can change or remove may declare `seq`: today `search_decision` and
+  `search_turn` (a turn's start is an insert; its end is an update, so a
+  whole read). Every other kind reads whole: its text follows rows an
+  insert elsewhere changes (a work item's comments, a wiki body), or it is
+  a window (`search_commit`'s last 500: a new commit pushes one out), or it
+  is an extension's resource (bounded, and its SQL can say anything).
 - `Assets::sync_search_kinds` keeps them in step with `resource` and the
   dataset registry (the change loop runs it at start and when `resource`,
   `dataset` or `dataset_input` change). A resource that stops being

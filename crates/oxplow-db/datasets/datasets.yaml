@@ -756,7 +756,7 @@
     - { not_null: uri }
     - { unique: uri }
 - name: search_decision
-  version: 3
+  version: 4
   description: "What site search indexes for each decision: the `decision` kind's index is restated from these rows when they change. Decisions on archived threads are included."
   fields:
     - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/decision?id=<n>`: what a hit opens." }
@@ -764,6 +764,7 @@
     - { name: "body", type: "TEXT", doc: "The choice, why, and the alternatives, a line each." }
     - { name: "stream_id", type: "TEXT", doc: "Its thread's stream (`str1`)." }
     - { name: "version", type: "TEXT", doc: "When it was made: a decision never changes." }
+    - { name: "seq", type: "INTEGER", doc: "The row id, unique and only growing: an insert-only recompute of the index reads on from the highest one it indexed." }
   tests:
     - { not_null: uri }
     - { unique: uri }
@@ -1011,7 +1012,7 @@
     - { not_null: uri }
     - { unique: uri }
 - name: search_turn
-  version: 3
+  version: 4
   description: "What site search indexes for each agent turn: the `turn` kind's index is restated from these rows when they change. Turns on archived threads are included."
   fields:
     - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/turn?id=trn<n>`: what a hit opens." }
@@ -1019,6 +1020,7 @@
     - { name: "body", type: "TEXT", doc: "The prompt, then the answer." }
     - { name: "stream_id", type: "TEXT", doc: "Its thread's stream (`str1`)." }
     - { name: "version", type: "TEXT", doc: "When the turn ended, else when it started." }
+    - { name: "seq", type: "INTEGER", doc: "The row id, unique and only growing: an insert-only recompute of the index reads on from the highest one it indexed." }
   tests:
     - { not_null: uri }
     - { unique: uri }

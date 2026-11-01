@@ -663,6 +663,23 @@ Pinned by `only_a_table_without_its_triggers_is_untracked`. Live effect is not
 measured: the acceptance is five minutes of log after `run:dev` with at most
 one hold over 300 ms and no wait over 1 s.
 
+### A search re-index reads on from its watermark (2026-11-01)
+
+Every change to a table behind a searchable kind re-read that kind's whole
+feed (every row's version, or for an unversioned kind every row's text) to
+find the few rows that differ. `KindSearchIndex::recompute(full)` now reads,
+for a core kind whose view has a `seq` column, only the rows past the highest
+`seq` it indexed when the inputs saw inserts only; `full` (any UPDATE or
+DELETE, the first build, a deploy or vocabulary change) and a fresh process
+read whole. `search_decision` and `search_turn` declare `seq` (their row
+id); the others cannot say that no insert changes or removes an existing row
+(see `extensions-events.md`). Pinned by
+`an_insert_only_recompute_reads_only_the_new_rows`: three decisions, a whole
+read of 3; one more, a read of 1; nothing new, a read of 0; a whole read of
+4 leaves the same entries. The saving is bounded by the kinds that qualify
+and by `full` (a turn's end is an update): this is not measured on the live
+database.
+
 ### Opening a folder on the Files page (measured 2026-11-01)
 
 Expanding a folder runs the Directory page once for that folder (a lazy

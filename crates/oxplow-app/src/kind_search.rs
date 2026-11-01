@@ -69,6 +69,11 @@ pub(crate) struct SearchableKind {
     decl: oxplow_domain::uri::resources::ResourceDecl,
     /// Its view has a `version` column: a recompute is planned from it.
     versioned: bool,
+    /// Its view has an INTEGER `seq` column that only grows and is unique
+    /// (a row id): a feed of rows that only appear (and whose text no insert
+    /// elsewhere changes) can be read past the highest `seq` it indexed when
+    /// the inputs saw inserts only, instead of whole. Core's only.
+    incremental: bool,
 }
 
 /// The index of one resource.
@@ -77,6 +82,24 @@ struct KindSearchIndex {
     asset: String,
     kind: String,
     spec: SearchableKind,
+    /// The highest `seq` the index holds, once a whole read has found it:
+    /// where an insert-only recompute reads on from.
+    watermark: parking_lot::Mutex<Option<i64>>,
+    /// How many feed rows the last recompute read.
+    rows_read: std::sync::atomic::AtomicUsize,
+}
+
+impl KindSearchIndex {
+    fn new(db: Database, kind: &str, spec: SearchableKind) -> Self {
+        Self {
+            db,
+            asset: asset_name(kind),
+            kind: kind.to_string(),
+            spec,
+            watermark: parking_lot::Mutex::new(None),
+            rows_read: std::sync::atomic::AtomicUsize::new(0),
+        }
+    }
 }
 
 #[async_trait]
@@ -100,33 +123,46 @@ impl Materializer for KindSearchIndex {
     /// Reads the feed and works out what changed on a read connection (no
     /// write lock), then takes the write lock only to write the changes: an
     /// index that is up to date writes nothing and never waits for a writer.
-    async fn recompute(&self, _full: bool) -> Result<Recomputed, DomainError> {
+    async fn recompute(&self, full: bool) -> Result<Recomputed, DomainError> {
         // The plan is made against what was stored when it was read; the
         // write re-plans (cheap: no feed) and starts over if that no longer
         // fits the texts read.
         for _ in 0..RESTATE_ATTEMPTS {
+            // Inserts only since the last recompute, and a feed whose rows
+            // only appear: read on from the highest `seq` indexed.
+            let since = if !full && self.spec.incremental {
+                *self.watermark.lock()
+            } else {
+                None
+            };
             let (kind, spec) = (self.kind.clone(), self.spec.clone());
             let prepared = self
                 .db
-                .read(move |tx| Feed::of(tx, &kind, &spec)?.prepare())
+                .read(move |tx| Feed::of(tx, &kind, &spec)?.prepare(since))
                 .await?;
+            self.rows_read
+                .store(prepared.read, std::sync::atomic::Ordering::SeqCst);
             let count = prepared.versions.len();
+            let row_count = (!prepared.partial).then_some(count as i64);
             if prepared.plan.is_empty() {
+                self.advance(&prepared);
                 return Ok(Recomputed {
-                    row_count: Some(count as i64),
+                    row_count,
                     ..Recomputed::default()
                 });
             }
             let kind = self.kind.clone();
+            let written = prepared.clone();
             let landed = self
                 .db
                 .transaction_labeled(format!("search kind {kind}"), move |tx| {
-                    prepared.commit(tx, &kind)
+                    written.commit(tx, &kind)
                 })
                 .await?;
             if landed {
+                self.advance(&prepared);
                 return Ok(Recomputed {
-                    row_count: Some(count as i64),
+                    row_count,
                     ..Recomputed::default()
                 });
             }
@@ -138,23 +174,49 @@ impl Materializer for KindSearchIndex {
     }
 }
 
+impl KindSearchIndex {
+    /// Remember how far the feed has been indexed.
+    fn advance(&self, prepared: &Prepared) {
+        if !self.spec.incremental {
+            return;
+        }
+        let mut mark = self.watermark.lock();
+        *mark = match (prepared.partial, *mark, prepared.max_seq) {
+            (true, Some(old), Some(new)) => Some(old.max(new)),
+            (true, old, None) => old,
+            (_, _, new) => new,
+        };
+    }
+}
+
 /// How often a restate starts over because the stored entries moved
 /// between its read and its write.
 const RESTATE_ATTEMPTS: usize = 5;
 
 /// What a feed read says to write: every row's version, the plan against
 /// the stored entries, and the text of each row the plan writes.
+#[derive(Clone)]
 struct Prepared {
     versions: BTreeMap<EntryKey, String>,
     plan: oxplow_db::search_store::RestatePlan,
     texts: BTreeMap<EntryKey, (String, String)>,
+    /// Only the rows past a watermark were read: what isn't in `versions`
+    /// is not gone, so nothing is removed.
+    partial: bool,
+    /// The highest `seq` among the rows read.
+    max_seq: Option<i64>,
+    /// How many feed rows were read.
+    read: usize,
 }
 
 impl Prepared {
     /// Write the plan in `tx`. False: the stored entries moved since it was
     /// made and a text it needs was not read; read again.
     fn commit(&self, tx: &rusqlite::Connection, kind: &str) -> Result<bool, DomainError> {
-        let plan = oxplow_db::search_store::plan_restate_tx(tx, kind, &self.versions)?;
+        let mut plan = oxplow_db::search_store::plan_restate_tx(tx, kind, &self.versions)?;
+        if self.partial {
+            plan.remove.clear();
+        }
         if plan
             .write
             .iter()
@@ -195,11 +257,29 @@ impl<'a> Feed<'a> {
         })
     }
 
-    fn prepare(&self) -> Result<Prepared, DomainError> {
+    /// Read the feed: whole, or (`since`) its rows past a `seq`.
+    fn prepare(&self, since: Option<i64>) -> Result<Prepared, DomainError> {
         if self.spec.versioned {
-            self.prepare_by_version()
+            self.prepare_by_version(since)
         } else {
-            self.prepare_by_text()
+            self.prepare_by_text(since)
+        }
+    }
+
+    /// The feed's `seq` as a column, or none.
+    fn seq(&self) -> &'static str {
+        if self.spec.incremental {
+            "CAST(seq AS INTEGER)"
+        } else {
+            "NULL"
+        }
+    }
+
+    /// The rows past `since`, as a clause.
+    fn past(&self, since: Option<i64>) -> String {
+        match since {
+            Some(seq) if self.spec.incremental => format!(" WHERE seq > {seq}"),
+            _ => String::new(),
         }
     }
 }
@@ -259,11 +339,13 @@ impl Feed<'_> {
     }
 
     /// Every row's text, compared by its hash.
-    fn prepare_by_text(&self) -> Result<Prepared, DomainError> {
+    fn prepare_by_text(&self, since: Option<i64>) -> Result<Prepared, DomainError> {
         let sql = format!(
-            "SELECT CAST(uri AS TEXT), CAST(title AS TEXT), CAST(body AS TEXT), {} FROM {}{}",
+            "SELECT CAST(uri AS TEXT), CAST(title AS TEXT), CAST(body AS TEXT), {}, {} FROM {}{}{}",
             self.stream(),
+            self.seq(),
             self.view(),
+            self.past(since),
             self.limit()
         );
         let mut st = self.tx.prepare(&sql).map_err(oxplow_db::map_sql_err)?;
@@ -272,16 +354,20 @@ impl Feed<'_> {
             Option<String>,
             Option<String>,
             Option<String>,
+            Option<i64>,
         );
         let rows: Vec<Row> = st
-            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
+            .query_map([], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+            })
             .map_err(oxplow_db::map_sql_err)?
             .collect::<rusqlite::Result<_>>()
             .map_err(oxplow_db::map_sql_err)?;
         let total = rows.len();
+        let max_seq = rows.iter().filter_map(|r| r.4).max();
         let mut entries: BTreeMap<EntryKey, (String, String)> = BTreeMap::new();
         let mut skipped = 0usize;
-        for (reference, title, body, stream) in rows.into_iter().take(self.bound()) {
+        for (reference, title, body, stream, _) in rows.into_iter().take(self.bound()) {
             match self.key(reference, stream) {
                 Some(key) => {
                     entries.insert(key, (title.unwrap_or_default(), self.body(body)));
@@ -291,33 +377,43 @@ impl Feed<'_> {
         }
         self.warn_bounds(total, skipped);
         let versions = oxplow_db::search_store::entry_versions(&entries);
-        let plan = oxplow_db::search_store::plan_restate_tx(self.tx, self.kind, &versions)?;
+        let mut plan = oxplow_db::search_store::plan_restate_tx(self.tx, self.kind, &versions)?;
+        let partial = since.is_some();
+        if partial {
+            plan.remove.clear();
+        }
         Ok(Prepared {
             versions,
             plan,
             texts: entries,
+            partial,
+            max_seq,
+            read: total,
         })
     }
 
     /// Every row's version, then the text of the changed rows only.
-    fn prepare_by_version(&self) -> Result<Prepared, DomainError> {
+    fn prepare_by_version(&self, since: Option<i64>) -> Result<Prepared, DomainError> {
         let sql = format!(
-            "SELECT CAST(uri AS TEXT), {}, CAST(version AS TEXT) FROM {}{}",
+            "SELECT CAST(uri AS TEXT), {}, CAST(version AS TEXT), {} FROM {}{}{}",
             self.stream(),
+            self.seq(),
             self.view(),
+            self.past(since),
             self.limit()
         );
         let mut st = self.tx.prepare(&sql).map_err(oxplow_db::map_sql_err)?;
-        type Row = (Option<String>, Option<String>, Option<String>);
+        type Row = (Option<String>, Option<String>, Option<String>, Option<i64>);
         let rows: Vec<Row> = st
-            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
             .map_err(oxplow_db::map_sql_err)?
             .collect::<rusqlite::Result<_>>()
             .map_err(oxplow_db::map_sql_err)?;
         let total = rows.len();
+        let max_seq = rows.iter().filter_map(|r| r.3).max();
         let mut versions: BTreeMap<EntryKey, String> = BTreeMap::new();
         let mut skipped = 0usize;
-        for (reference, stream, version) in rows.into_iter().take(self.bound()) {
+        for (reference, stream, version, _) in rows.into_iter().take(self.bound()) {
             match self.key(reference, stream) {
                 Some(key) => {
                     versions.insert(key, version.unwrap_or_default());
@@ -326,7 +422,11 @@ impl Feed<'_> {
             }
         }
         self.warn_bounds(total, skipped);
-        let plan = oxplow_db::search_store::plan_restate_tx(self.tx, self.kind, &versions)?;
+        let mut plan = oxplow_db::search_store::plan_restate_tx(self.tx, self.kind, &versions)?;
+        let partial = since.is_some();
+        if partial {
+            plan.remove.clear();
+        }
         let mut texts: BTreeMap<EntryKey, (String, String)> = BTreeMap::new();
         for chunk in plan.write.chunks(TEXT_CHUNK) {
             let refs: Vec<String> = chunk.iter().map(|((id, _), ..)| id.clone()).collect();
@@ -362,6 +462,9 @@ impl Feed<'_> {
             versions,
             plan,
             texts,
+            partial,
+            max_seq,
+            read: total,
         })
     }
 
@@ -387,7 +490,16 @@ async fn searchable_kinds(db: &Database) -> Result<Searchable, DomainError> {
     // Each resource with its view's compiled SQL (none while the view
     // isn't published), whether the view has a `version` column, and its
     // params as declared.
-    type Declared = (String, String, bool, Option<String>, bool, String, bool);
+    type Declared = (
+        String,
+        String,
+        bool,
+        Option<String>,
+        bool,
+        String,
+        bool,
+        bool,
+    );
     let kinds: Vec<Declared> = db
         .read(|tx| {
             let mut st = tx
@@ -395,7 +507,8 @@ async fn searchable_kinds(db: &Database) -> Result<Searchable, DomainError> {
                     "SELECT k.resource, k.searchable, k.extension = 'oxplow-foundation', \
                             (SELECT sql FROM sqlite_master WHERE type = 'view' AND name = k.searchable), \
                             EXISTS (SELECT 1 FROM pragma_table_info(k.searchable) WHERE name = 'version'), \
-                            k.params, k.additional \
+                            k.params, k.additional, \
+                            EXISTS (SELECT 1 FROM pragma_table_info(k.searchable) WHERE name = 'seq') \
                      FROM resource k WHERE k.searchable IS NOT NULL ORDER BY k.resource",
                 )
                 .map_err(oxplow_db::map_sql_err)?;
@@ -409,6 +522,7 @@ async fn searchable_kinds(db: &Database) -> Result<Searchable, DomainError> {
                         r.get(4)?,
                         r.get(5)?,
                         r.get(6)?,
+                        r.get(7)?,
                     ))
                 })
                 .map_err(oxplow_db::map_sql_err)?
@@ -424,25 +538,28 @@ async fn searchable_kinds(db: &Database) -> Result<Searchable, DomainError> {
         .into_iter()
         // A view the compiler hasn't published (yet, or any more) has
         // nothing to index; it registers once the registry lists it.
-        .filter_map(|(kind, view, core, sql, versioned, params, additional)| {
-            let tables = tables.get(&view)?.clone();
-            let decl = oxplow_domain::uri::resources::ResourceDecl {
-                params: serde_json::from_str(&params).ok()?,
-                additional,
-                ..oxplow_domain::uri::resources::ResourceDecl::keyed(&kind, "id")
-            };
-            Some((
-                kind,
-                SearchableKind {
-                    view,
-                    sql: sql?,
-                    tables,
-                    core,
-                    versioned,
-                    decl,
-                },
-            ))
-        })
+        .filter_map(
+            |(kind, view, core, sql, versioned, params, additional, seq)| {
+                let tables = tables.get(&view)?.clone();
+                let decl = oxplow_domain::uri::resources::ResourceDecl {
+                    params: serde_json::from_str(&params).ok()?,
+                    additional,
+                    ..oxplow_domain::uri::resources::ResourceDecl::keyed(&kind, "id")
+                };
+                Some((
+                    kind,
+                    SearchableKind {
+                        view,
+                        sql: sql?,
+                        tables,
+                        core,
+                        versioned,
+                        incremental: seq && core,
+                        decl,
+                    },
+                ))
+            },
+        )
         .collect();
     Ok(Searchable { declared, ready })
 }
@@ -472,12 +589,11 @@ impl Assets {
             if have.contains_key(kind) {
                 continue;
             }
-            self.register(Arc::new(KindSearchIndex {
-                db: self.db().clone(),
-                asset: asset_name(kind),
-                kind: kind.clone(),
-                spec: spec.clone(),
-            }));
+            self.register(Arc::new(KindSearchIndex::new(
+                self.db().clone(),
+                kind,
+                spec.clone(),
+            )));
             have.insert(kind.clone(), spec.clone());
         }
         // What was indexed for a resource that is no longer searchable goes —
@@ -1632,6 +1748,61 @@ mod core_tests {
         }
     }
 
+    /// A feed whose rows only appear is read on from the highest `seq` it
+    /// indexed when the inputs saw inserts only: one new decision is one row
+    /// read, and the index is what a whole restate makes. A rewrite (`full`)
+    /// reads the whole feed again.
+    #[tokio::test]
+    async fn an_insert_only_recompute_reads_only_the_new_rows() {
+        use crate::assets::Materializer;
+        use std::sync::atomic::Ordering;
+        let (svc, _dir) = services().await;
+        let stream = svc.streams.ensure_primary().await.unwrap();
+        let thread = crate::test_fixtures::new_thread(&svc, stream.id, "T").await;
+        let t = thread.id.value();
+        let decide = |question: &'static str| {
+            let svc = svc.clone();
+            async move {
+                svc.db
+                    .transaction(move |tx| {
+                        tx.execute(
+                            "INSERT INTO decision (thread_id, question, choice, alternatives_json, confidence, why, created_at)
+                             VALUES (?1, ?2, 'a choice', '[]', 'high', 'a reason', '2026-10-01T00:00:00.000000Z')",
+                            rusqlite::params![t, question],
+                        )
+                        .map_err(oxplow_db::map_sql_err)?;
+                        Ok(())
+                    })
+                    .await
+                    .unwrap();
+            }
+        };
+        for q in ["First question", "Second question", "Third question"] {
+            decide(q).await;
+        }
+        let index = index_of(&svc, "oxplow/decision").await;
+        index.recompute(true).await.unwrap();
+        assert_eq!(index.rows_read.load(Ordering::SeqCst), 3, "a whole read");
+
+        decide("Fourth question").await;
+        index.recompute(false).await.unwrap();
+        assert_eq!(
+            index.rows_read.load(Ordering::SeqCst),
+            1,
+            "one new row, one row read"
+        );
+        let incremental = entries(&svc, "oxplow/decision").await;
+        assert_eq!(incremental.len(), 4);
+
+        // The index is what a whole restate makes, and a recompute with
+        // nothing new reads nothing.
+        index.recompute(false).await.unwrap();
+        assert_eq!(index.rows_read.load(Ordering::SeqCst), 0);
+        index.recompute(true).await.unwrap();
+        assert_eq!(index.rows_read.load(Ordering::SeqCst), 4);
+        assert_eq!(entries(&svc, "oxplow/decision").await, incremental);
+    }
+
     /// A commit is found by its subject, its message, its author and a
     /// path it changed; it belongs to no stream.
     #[tokio::test]
@@ -1797,12 +1968,7 @@ mod core_tests {
             .ready
             .remove(kind)
             .expect("a searchable kind");
-        super::KindSearchIndex {
-            db: svc.db.clone(),
-            asset: super::asset_name(kind),
-            kind: kind.to_string(),
-            spec,
-        }
+        super::KindSearchIndex::new(svc.db.clone(), kind, spec)
     }
 
     /// Another writer holds the write lock until the sender fires. It is

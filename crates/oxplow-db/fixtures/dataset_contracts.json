@@ -21568,6 +21568,41 @@
         }
       ],
       "key": []
+    },
+    "4": {
+      "columns": [
+        {
+          "name": "uri",
+          "type": "TEXT",
+          "doc": "`oxplow:oxplow/decision?id=<n>`: what a hit opens."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "The question."
+        },
+        {
+          "name": "body",
+          "type": "TEXT",
+          "doc": "The choice, why, and the alternatives, a line each."
+        },
+        {
+          "name": "stream_id",
+          "type": "TEXT",
+          "doc": "Its thread's stream (`str1`)."
+        },
+        {
+          "name": "version",
+          "type": "TEXT",
+          "doc": "When it was made: a decision never changes."
+        },
+        {
+          "name": "seq",
+          "type": "INTEGER",
+          "doc": "The row id, unique and only growing: an insert-only recompute of the index reads on from the highest one it indexed."
+        }
+      ],
+      "key": []
     }
   },
   "search_effort": {
@@ -21903,6 +21938,41 @@
           "name": "version",
           "type": "TEXT",
           "doc": "When the turn ended, else when it started."
+        }
+      ],
+      "key": []
+    },
+    "4": {
+      "columns": [
+        {
+          "name": "uri",
+          "type": "TEXT",
+          "doc": "`oxplow:oxplow/turn?id=trn<n>`: what a hit opens."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "The session's name and when the turn started."
+        },
+        {
+          "name": "body",
+          "type": "TEXT",
+          "doc": "The prompt, then the answer."
+        },
+        {
+          "name": "stream_id",
+          "type": "TEXT",
+          "doc": "Its thread's stream (`str1`)."
+        },
+        {
+          "name": "version",
+          "type": "TEXT",
+          "doc": "When the turn ended, else when it started."
+        },
+        {
+          "name": "seq",
+          "type": "INTEGER",
+          "doc": "The row id, unique and only growing: an insert-only recompute of the index reads on from the highest one it indexed."
         }
       ],
       "key": []
