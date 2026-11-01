@@ -8,7 +8,7 @@ given:
   - { command: oxplow.agent_session.open, input: { thread: thr1, harness: codex }, bind: second }
   - observe: { turn: { session: $first.id, prompt: one, tools: [{ name: Edit, kind: edit, paths: [a.rs], ok: true }] } }
   - observe: { turn: { session: $second.id, prompt: two, tools: [{ name: Edit, kind: edit, paths: [b.rs], ok: true }] } }
-when: { page: oxplow-bundled/session-files, params: { effort_id: 1 } }
+when: { part: oxplow-bundled/session-files, params: { effort_id: 1 } }
 expect:
   loaders:
     session_files:

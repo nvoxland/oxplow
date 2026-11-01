@@ -27,7 +27,8 @@ pub struct PageRow {
     pub renders_json: String,
     pub is_default: bool,
     pub pinned: bool,
-    pub hidden: bool,
+    /// `page`, `part` or `query`.
+    pub kind: String,
     pub tool: Option<String>,
     pub needs_json: String,
     /// Its source file, the one to edit; none when no source is here.
@@ -175,7 +176,7 @@ fn insert_pages(conn: &rusqlite::Connection, listing: &CatalogListing) -> Result
         .prepare(
             "INSERT OR REPLACE INTO page
                (uri, extension, id, title, description, label, icon, category, keywords,
-                params_json, renders_json, is_default, pinned, hidden, tool, needs_json,
+                params_json, renders_json, is_default, pinned, kind, tool, needs_json,
                 source, deployment, running_uri)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
         )
@@ -195,7 +196,7 @@ fn insert_pages(conn: &rusqlite::Connection, listing: &CatalogListing) -> Result
             p.renders_json,
             p.is_default,
             p.pinned,
-            p.hidden,
+            p.kind,
             p.tool,
             p.needs_json,
             p.source,

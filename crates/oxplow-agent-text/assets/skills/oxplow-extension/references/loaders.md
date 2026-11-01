@@ -93,7 +93,7 @@ loaders:
   count: { page: acme/numbers, loader: count, params: { n: 1 } }
 ```
 
-Runs that page and takes its loader `loader`. Pages nest at most 8 deep;
+Runs that page, part or query and takes its loader `loader`. Pages nest at most 8 deep;
 the same definition with the same inputs runs once per run, embeds included.
 
 ## `rows`
@@ -104,7 +104,7 @@ loaders:
 ```
 
 Inline rows (columns are the first row's keys). Use for lookup tables, a
-snapshot of numbers you computed, and the `choices` of a form.
+snapshot of numbers you computed, and the `choices` of a form. A list two pages share is a query.
 
 ## Budgets
 

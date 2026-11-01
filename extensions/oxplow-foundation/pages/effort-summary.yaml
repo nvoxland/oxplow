@@ -1,6 +1,5 @@
 title: Effort summary
 description: One effort at a glance — its title and summary, its work item, the files it changed, the test runs, the claims and the decisions recorded in it.
-hidden: true
 tool: effort_summary
 params:
 - name: effort

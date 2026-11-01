@@ -1135,7 +1135,6 @@ fn describe_op(services: ServicesSlot) -> Op {
                         "for": page.renders,
                         "default": page.default,
                         "pinned": page.pinned,
-                        "hidden": page.hidden,
                         "category": page.category,
                         "tool": page.tool,
                         "refresh": page.refresh,

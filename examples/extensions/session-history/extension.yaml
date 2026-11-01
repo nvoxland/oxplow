@@ -11,7 +11,7 @@ intent:
   origin: null
   examples:
     - name: thread-history
-      input: { page: thread-history, params: { thread_id: 1 } }
+      input: { part: thread-history, params: { thread_id: 1 } }
       expect: no rows for a thread with no recorded prompts
     - name: new-session-gets-the-section
       input: { page: oxplow-foundation/new-session, params: { stream_id: 1, thread_id: 1 } }

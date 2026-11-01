@@ -124,15 +124,15 @@ const MAX_DESCRIPTION: usize = 200;
 const MAX_SECTIONS: usize = 8;
 const MAX_COLUMNS: usize = 8;
 
-/// The params of a page shown in the launcher (it has a `category` and isn't
-/// `hidden`) that nothing fills in when it opens there: no default, no
+/// The params of a page shown in the launcher (it has a `category`) that
+/// nothing fills in when it opens there: no default, no
 /// options from a loader, and not one in the `#` view (a filter, selection or view
 /// param starts empty on purpose). The viewer's `stream_id`, `thread_id` and `head_sha`
 /// are filled in for it.
 pub fn launcher_unfilled_params(page: &Page) -> Vec<String> {
     use crate::pages::spec::ParamRole;
     // A resource page (`for:`) is opened from its resource, never the launcher.
-    if page.hidden || page.category.is_none() || page.is_resource_page() {
+    if page.category.is_none() || page.is_resource_page() {
         return Vec::new();
     }
     page.params
@@ -249,7 +249,7 @@ pub fn layout_warnings(page: &Page) -> Vec<String> {
         }
     }
     let described = page.description.chars().count();
-    if described > MAX_DESCRIPTION && !page.hidden {
+    if described > MAX_DESCRIPTION && page.category.is_some() {
         out.push(format!(
             "the description is {described} characters — keep it to a sentence or two; put the rest in a markdown node"
         ));

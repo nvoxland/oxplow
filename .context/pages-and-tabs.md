@@ -260,7 +260,7 @@ Every page is one of two kinds, told by `for:`.
 - A **resource page** (`for: <resource>`) is a *display mode* of the
   resources it names: a commit, a metric, a file. It is never opened on its
   own and never listed. The resource is what search finds and what Open With
-  offers modes of. So it takes no `category`, `hidden`, `keywords` or `badge`
+  offers modes of. So it takes no `category`, `keywords` or `badge`
   (load errors), must declare a `uri` param (the URI it shows; the host
   gives it), and the launcher, `launcher_unfilled_params`, `launcherCounts`
   and `oxplow_find_page` (without `about`) skip it. `v_page` keeps its `for`
@@ -302,15 +302,17 @@ loaders (a dashboard of embeds or a markdown page) on their old definition
 after deploy. The existing listener sends `page_runs.notify_everything()`
 before `ExtensionsChanged`; it does not add another event-bus listener.
 
-A page is `pages/<slug>.yaml` in an extension, three parts
-(`crates/oxplow-app/src/pages/schema.rs`). It is the one unit that
+A page file is `pages/<slug>.yaml` (a page: a tab), `parts/<slug>.yaml`
+(a part: drawn only inside a host) or `queries/<slug>.yaml` (a query: rows
+only, no view; see `.context/extensions-pages.md` "Three kinds, by folder").
+A page has three sections (`crates/oxplow-app/src/pages/schema.rs`). It is the one unit that
 defines what the person sees:
 
 - **Metadata**: `title`, `description`, `label`, `icon`, `category`,
   `keywords`, typed `params` (`role: resource | filter`; a `switch`'s param
   is a filter by default; a param a column `select:`s is a `selection`),
   `for` / `accepts` / `default` / `pinned` (a
-  resource page, see above; it also takes `content:`), `comments`, `refresh`, `hidden`, `needs`, whole-page
+  resource page, see above; it also takes `content:`), `comments`, `refresh`, `needs`, whole-page
   `actions`, `alert`, `tool` (an MCP tool `<namespace>_<tool>` whose
   input is the params and whose call is `oxplow.page.run`; kept for the
   few questions agents ask every session — foundation's `thread_work`,
@@ -446,7 +448,7 @@ embed, the badge or a later loader). The tree resolves a switch to its
 child in view (the param's value, else the first) and an embed to its
 page's run, its params by name: the embed's `params`, else the host's
 param of that name, else that column of the host loaders' first rows in
-order. A `slot` node shows the pages enabled extensions mount there
+order. A `slot` node shows the parts enabled extensions mount there
 (`ui.mounts: [{ page: <slug>, at: <ext>/<page>.<name>, position?, title?,
 size? }]`, loaded as `ExtensionUi.page_slots`): each runs as an embed, its
 params by name from the host, its node id the mounted page's id with `.`
@@ -719,11 +721,10 @@ is a **route** (`oxplow:oxplow/page?page=<slug>` for oxplow's,
 **renderer** of a resource ("Renderers"). Its `label` is what its tab says
 (`{{param.<name>}}` over what it shows, `{{row.<column>}}` over its first
 loader's first row once it has run, filters `|short` and `|basename`;
-none: the title); `icon`, `title`, launcher `category` (none, or
-`hidden`: not in the launcher — a page only opened from elsewhere),
+none: the title); `icon`, `title`, launcher `category` (none: not in the launcher — a page only opened from elsewhere),
 `keywords` and `badge` (the launcher's count, one `run_page` when the
 launcher opens: `launcherCounts`, its `run.badge`). The launcher lists
-the page files with a category that aren't hidden (`launcherPages`, by
+the page files with a category (`launcherPages`, by
 `pageFileUri`); a page whose view is a switch also lists each of its
 other sections (`<page>: <section>` at `#<param>=<id>`).
 
@@ -783,7 +784,7 @@ margin; an embed or a slot takes its title from the page it shows):
   gets the same tree. Show (`scope`: changed files nested in their folders)
   and Compare with (`compare`: files open a git diff) read git (`v_change`,
   `v_change_file`), so they apply only at `oxplow:local` with an empty `rev`;
-  elsewhere the loader ignores them (`row.is_local`) and their choice pages
+  elsewhere the loader ignores them (`row.is_local`) and their choice queries
   (`files-scopes`, `files-refs`, which take `filesystem` and `rev`) offer
   only "all files" and "no comparison". Row actions: New File, New
   Directory, Rename, Delete, Add to .gitignore, Rollback, Add, Mark as
@@ -1128,7 +1129,7 @@ zone grouping); each appears only when it has content:
    group action: `oxplow.work.clear_finished` records an event and the
    `finished_cleared` dataset hides what finished before it — per thread,
    no longer browser-local). Status and kind show as row icons. Collapsed,
-   the `work-line` page: the active item (with its epic), else the last
+   the `work-line` part: the active item (with its epic), else the last
    finished. The header count (`work-count`) is in progress + ready, never
    an alert. Rows link (Cmd-click opens a new tab) and drag into the
    agent's context.
@@ -1142,7 +1143,7 @@ zone grouping); each appears only when it has content:
    +10 −4` and the conflict line, opening the Uncommitted page; the count
    (`uncommitted-count`) is the changed files.
 4. **Comments** — an `oxplow-bundled` panel: the stream-scoped
-   body page `comments-panel` over `v_comment` shows two open-comment count rows split
+   body part `comments-panel` over `v_comment` shows two open-comment count rows split
    by intent — "For me" (`note`) and "For the agent" (`followup`) — each
    row and the header (`open` is the `comments` page) opening the Comments inbox.
 5. **Go To** — an `oxplow-bundled` panel (`ext:oxplow-bundled/go-to`):

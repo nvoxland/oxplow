@@ -1,0 +1,13 @@
+title: Branches of a measure
+description: The branches a measure's facts were taken on, for the Branch choice of its data page.
+params:
+- name: uri
+loaders:
+  measure_branches:
+    sql: |
+      SELECT '' AS value, 'All branches' AS label
+      UNION ALL
+      SELECT value, label FROM (
+        SELECT DISTINCT f.branch AS value, f.branch AS label
+        FROM v_fact f WHERE f.measure_key = read_measure(uri_param(:uri, 'measure')) AND f.branch IS NOT NULL
+        ORDER BY 1)

@@ -1,6 +1,5 @@
 title: "Work item actions"
 description: "Mark a work item done, or record that one blocks another."
-hidden: true
 answers:
 - {"question":"Mark a work item done.","params":{},"skill":"work-items"}
 - {"question":"Record that one work item blocks another.","params":{},"skill":"work-items"}

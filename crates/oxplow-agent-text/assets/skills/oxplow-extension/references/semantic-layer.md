@@ -10,6 +10,11 @@
 - Comment threads on pages are `v_comment`, and each one's messages
   `v_comment_message` (`WHERE comment = <the thread's uri> ORDER BY
   position`).
+- What the Alerts page shows beside undelivered events: `v_op_error`
+  (operations that failed in front of the person — a merge, a save, a
+  query — with `read_event_content(event_id, output)` for what they
+  printed) and `v_agent_nudge` (hints oxplow raised for an agent or a
+  person, shown until dismissed).
 - Work items are `v_work_item` (with `v_work_item_link` and
   `v_work_item_comment`): the active work list's, whichever it is — never
   a particular list's own tables.

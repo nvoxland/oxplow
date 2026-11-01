@@ -5,7 +5,6 @@ import { openFromLauncher } from "../../support/ui.js";
 
 // A replacement takes the target's whole props contract.
 const lanes = `title: Wombat task list
-hidden: true
 params:
 - name: scope
 - name: thread_id
@@ -30,7 +29,7 @@ test("a replaceable node shows the active replacement, and oxplow's own once it 
 
   await installExtension(daemon, "e2e-replacement", {
     manifest: "ui:\n  mounts:\n    - { page: wombat-list, at: work_item.list, version: 1 }\n",
-    files: { "pages/wombat-list.yaml": lanes },
+    files: { "parts/wombat-list.yaml": lanes },
   });
   const replaced = host.getByTestId("replacement-work_item.list");
   await expect(replaced).toContainText("Wombat list for thread");

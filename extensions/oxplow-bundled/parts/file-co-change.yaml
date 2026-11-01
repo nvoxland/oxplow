@@ -1,0 +1,22 @@
+title: Usually Changes With
+description: The files that most often changed in the same commits as this one over the last 180 days.
+params:
+- name: path
+loaders:
+  file_co_change:
+    sql: |
+      SELECT p.other AS path, p.together
+      FROM v_oxplow_bundled_co_change_pair p
+      WHERE p.path = :path
+      ORDER BY p.together DESC, p.other
+      LIMIT 5
+view:
+  from: file_co_change
+  viz: table
+  columns:
+  - key: path
+    label: File
+    link:
+      kind: file
+  - key: together
+    label: Commits Together

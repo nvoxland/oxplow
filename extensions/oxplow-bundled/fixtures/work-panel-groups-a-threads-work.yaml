@@ -6,7 +6,7 @@ given:
   - { command: oxplow.effort.open, input: { thread: thr1 } }
   - { command: oxplow.work_item.create, input: { title: Next up, state: todo, thread: thr1 } }
   - { command: oxplow.work_item.create, input: { title: Shipped, state: done, thread: thr1 } }
-when: { page: oxplow-bundled/work, params: { thread_id: 1 } }
+when: { part: oxplow-bundled/work, params: { thread_id: 1 } }
 expect:
   loaders:
     work:

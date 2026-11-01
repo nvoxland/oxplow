@@ -1,6 +1,5 @@
 title: "Collectors"
 description: "Each collector: when it last ran, how it runs, its state, and the credentials it still lacks."
-hidden: true
 answers:
 - {"question":"When did each collector last run, and did it fail?","params":{},"skill":"oxplow-extension"}
 - {"question":"Which collectors are enabled, how do they run, and what state are they in?","params":{},"skill":"oxplow-extension"}

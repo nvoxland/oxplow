@@ -29,14 +29,14 @@ steps:
               - { section: Epics spread over threads, what: Epic }
   # The thread variant keeps what involves the thread; a third thread sees
   # none of it.
-  - when: { page: oxplow-bundled/thread-shared-work, params: { thread_id: 2 } }
+  - when: { part: oxplow-bundled/thread-shared-work, params: { thread_id: 2 } }
     expect: { loaders: { thread_shared_work: { rows: 3 } } }
   - given:
       - { command: oxplow.thread.create, input: { stream: str1, title: Gamma } }
-  - when: { page: oxplow-bundled/thread-shared-work, params: { thread_id: 3 } }
+  - when: { part: oxplow-bundled/thread-shared-work, params: { thread_id: 3 } }
     expect: { loaders: { thread_shared_work: { rows: 0 } } }
   # The item variant: the item's own row and the files its efforts changed.
-  - when: { page: oxplow-bundled/item-shared-work, params: { uri: $item.uri } }
+  - when: { part: oxplow-bundled/item-shared-work, params: { uri: $item.uri } }
     expect:
       loaders:
         item_shared_work:

@@ -1,6 +1,6 @@
 # An item with no review shows no row.
 when:
-  page: item-review
+  part: item-review
   params: { uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow" }
 expect:
   loaders:

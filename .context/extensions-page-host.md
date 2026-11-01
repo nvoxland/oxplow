@@ -22,9 +22,12 @@ the user guide is `docs/guide/pages.md`.
   - `pages/<slug>.yaml` is one page: metadata (`title`, `description`,
     `label`, `icon`, `category`, `keywords`, `params`, `answers`, `actions`,
     `alert`, `badge`, `needs`, `for` / `accepts` / `default` / `pinned`,
-    `comments`, `refresh`, `hidden`, `tool`), `loaders:` (named loaders: `sql`,
+    `comments`, `refresh`, `tool`), `loaders:` (named loaders: `sql`,
     `command`, `page`, `rows`) and `view:` (a tree of nodes, with an optional
-    `rail:`). Details: [pages-and-tabs.md](./pages-and-tabs.md) "Page files".
+    `rail:`). `parts/<slug>.yaml` is a part (drawn only inside a host) and
+    `queries/<slug>.yaml` a query (rows only); each takes a subset of the
+    keys (extensions-pages.md "Three kinds, by folder"). Details:
+    [pages-and-tabs.md](./pages-and-tabs.md) "Page files".
   - Unknown keys are errors, so typos surface instead of being ignored.
 - **Ids.** A page id is `<extension>/<slug>`.
 - **Reading.** What the app shows is the **live set**: each extension's
@@ -62,8 +65,8 @@ the user guide is `docs/guide/pages.md`.
   `pages::checks::layout_warnings` adds warnings, never errors: more than
   six filters, a `choice` with more than twelve options, a description
   over 200 characters, more than eight sections or eight table columns, a
-  param nothing reads. A page in the launcher (a `category`, not
-  `hidden`) is also warned, at the param's line, for a param nothing
+  param nothing reads. A page in the launcher (one with a `category`)
+  is also warned, at the param's line, for a param nothing
   fills in when it opens there (`launcher_unfilled_params`: no `default`,
   `options_from`, filter or selection role, and not the viewer's
   `stream_id`, `thread_id` or `head_sha`). A collector's `input` query is
@@ -178,8 +181,8 @@ the user guide is `docs/guide/pages.md`.
     re-runs nothing; shown again, a stale run re-runs once and the
     window fetches it. Rail panels and the selected tab stay live.
   - The Cmd+P launcher re-reads pages (the live set's) every time it
-    opens and lists them under their `category` (a page with none, or
-    `hidden: true`, is not listed), merged into the static directory by
+    opens and lists them under their `category` (a page with none, a part
+    and a query are not listed), merged into the static directory by
     category order (`mergeDirectory`).
   - `alert:` marks when a page needs attention: `{ min_rows: N }` (the
     watched loader returned at least N rows) or `{ column: c, above: X }` /
@@ -252,7 +255,7 @@ the user guide is `docs/guide/pages.md`.
       (usability.md "Comments are a page's"). Comments name one URI, so
       `true` is the whole declaration.
     - `default`, `pinned` and `accepts` without `for` are a load error.
-    - A page with `for` takes no `category`, `hidden`, `keywords` or `badge`,
+    - A page with `for` takes no `category`, `keywords` or `badge`,
       declares `params: [{ name: uri }]`, and is handed the `content` loader
       (above, Metadata and Loaders).
     - A renderer is run with the params of the URI it draws: a param it

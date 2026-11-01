@@ -1,0 +1,23 @@
+title: Thread history
+description: The newest prompts recorded on this thread.
+params:
+- name: thread_id
+loaders:
+  thread_history:
+    sql: |
+      SELECT started_at, prompt
+      FROM v_agent_turn
+      WHERE thread_id = :thread_id AND trim(prompt) <> ''
+      ORDER BY started_at DESC, id DESC
+      LIMIT 10
+view:
+  from: thread_history
+  viz: table
+  columns:
+  - key: started_at
+    label: When
+    format: relative
+    width: 96
+  - key: prompt
+    label: Prompt
+  empty: No prompts recorded on this thread yet.

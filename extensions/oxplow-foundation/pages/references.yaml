@@ -1,6 +1,5 @@
 title: "References"
 description: "What points at a thing, and what a wiki page points at."
-hidden: true
 params:
 - name: target
   default: ""

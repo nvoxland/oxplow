@@ -1,7 +1,7 @@
 # The board's page reads its cards and the active provider's features,
 # which its component is fed.
 when:
-  page: swimlanes
+  part: swimlanes
   params: { scope: all }
 expect:
   loaders:

@@ -18,7 +18,6 @@ view:
 
 // The page a row opens: it declares `id`, so the row's id flows in.
 const detail = `title: Wallaby detail
-hidden: true
 params:
 - name: id
 loaders:
@@ -32,7 +31,7 @@ view:
 `;
 
 test("a row expands to the expand page's rows, given that row's values, and folds back", async ({ page, daemon }) => {
-  await installExtension(daemon, "e2e-expand", { files: { "pages/wallaby.yaml": list, "pages/wallaby-detail.yaml": detail } });
+  await installExtension(daemon, "e2e-expand", { files: { "pages/wallaby.yaml": list, "parts/wallaby-detail.yaml": detail } });
   await page.goto("/");
   await openFromLauncher(page, "Expand Wallaby");
   const host = page.getByTestId("page-host").filter({ visible: true });

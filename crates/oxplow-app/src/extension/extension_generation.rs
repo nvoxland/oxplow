@@ -309,7 +309,7 @@ fn page_rows(
             renders_json: json_text(&page.renders),
             is_default: page.default,
             pinned: page.pinned,
-            hidden: page.hidden,
+            kind: variant_name(&page.kind),
             tool: page.tool.clone(),
             needs_json: json_text(&page.needs),
             source: page.origin.source.clone(),

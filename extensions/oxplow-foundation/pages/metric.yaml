@@ -26,6 +26,7 @@ params:
   default: ''
 answers:
 - {"question":"What is this metric built from, what are its targets, and how has it moved?","about":"oxplow/metric","params":{"uri":"oxplow:oxplow/metric?metric=agent.tokens.total","metric":"agent.tokens.total"},"skill":"oxplow-metrics"}
+- {"question":"What is this metric's latest value in each group of a dimension?","about":"oxplow/metric","params":{"uri":"oxplow:oxplow/metric?metric=oxplow.coverage.abs_pct","metric":"oxplow.coverage.abs_pct","slice":"oxplow.language"},"skill":"oxplow-metrics"}
 loaders:
   about:
     sql: |

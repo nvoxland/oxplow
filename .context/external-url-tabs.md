@@ -37,7 +37,7 @@ explicitly grants **zero oxplow commands and zero Tauri plugin permissions**
 — it behaves like a sandboxed browser tab.
 
 The `embed` viz (`apps/desktop/src/viz/EmbedViz.tsx`, `embed: { url: <column> }`
-on foundation's hidden `web-page` page, whose `uri` param is the URL and whose
+on foundation's `external-url` page (`for: https` and `http`, no category), whose `uri` param is the URL and whose
 tab label is `{{param.uri|url}}`: host and path, cut to 40) is not a webview
 host. It calls `desktopBridge().openExternalUrl(url)` (which dispatches
 to `commands::webview::open_external_url` in the Rust shell) once per tab entry

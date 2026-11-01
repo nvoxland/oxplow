@@ -11,7 +11,7 @@ given:
   - { command: oxplow.vcs.commit, input: { stream: str1, message: change }, bind: change }
   - observe: { analyze: { kind: commit, sha: $change.rev } }
 # The analyzed commit is the first change this oxplow made.
-when: { page: oxplow-bundled/change-review, params: { change_id: 1 } }
+when: { part: oxplow-bundled/change-review, params: { change_id: 1 } }
 expect:
   loaders:
     change_summary:

@@ -116,7 +116,7 @@
   field is refused where the page loads. A boolean is a checkbox with its
   label to the right and its help under that. A field in `choices` is a
   select showing each row's `label` and sending its `value`, starting on
-  the `input` value.
+  the `input` value. A field's `from:` names a query (or a loader of this page) for those rows.
 - **Drag, bulk and key actions** (row actions): `drag: true` runs on a
   drop, binding `{{before.x}}` / `{{after.x}}` (the rows below / above
   where it landed; a missing one is left out), `{{onto.x}}`,

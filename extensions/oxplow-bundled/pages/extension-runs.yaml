@@ -1,6 +1,5 @@
 title: Extension Run Detail
 description: One extension's runs in the last 7 days, newest first — which contribution, at which version and catalog generation (blank for a run that holds none), who ran it, what caused it, how it ended and why, and what it cost. The detail behind a row of Extension runs.
-hidden: true
 params:
 - name: extension
 loaders:

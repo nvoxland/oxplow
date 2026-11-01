@@ -569,7 +569,7 @@ custom_components: …   # sandboxed components a page's `component` node or `cu
 Pages aren't listed here: every `pages/*.yaml`, `parts/*.yaml` and
 `queries/*.yaml` file in the folder is loaded, its kind by its folder
 (extensions-pages.md "Three kinds, by folder"). A page gets into the
-launcher through its own `category` (or stays out with `hidden: true`). An old-format UI folder (`lenses/`) is a
+launcher through its own `category` (a page with no `category` is not listed). An old-format UI folder (`lenses/`) is a
 load error that says to rewrite each file as a page.
 
 To move an old extension over: each file in `lenses/` becomes a page

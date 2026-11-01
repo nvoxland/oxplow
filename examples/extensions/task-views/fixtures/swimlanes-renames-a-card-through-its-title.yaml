@@ -2,7 +2,7 @@
 # under the input, Escape puts the title back.
 given:
   - { command: oxplow.work_item.create, input: { title: Card one, thread: thr1 } }
-when: { page: swimlanes, params: { scope: all } }
+when: { part: swimlanes, params: { scope: all } }
 steps:
   - ui:
       - click: ".card .title"

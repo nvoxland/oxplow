@@ -1,6 +1,5 @@
 title: Snapshots
 description: The newest snapshots of a stream's working tree (every stream's when none is named), each with its parent, what triggered it and whether it ran over its time budget.
-hidden: true
 params:
 - name: stream
   label: Stream (`str1`)

@@ -25181,6 +25181,108 @@
       "key": [
         "uri"
       ]
+    },
+    "3": {
+      "columns": [
+        {
+          "name": "uri",
+          "type": "TEXT",
+          "doc": "`oxplow:oxplow/page?page=<extension>/<slug>`; `page=<slug>` for an extension whose namespace is `oxplow`."
+        },
+        {
+          "name": "extension",
+          "type": "TEXT",
+          "doc": "The extension that declares it (v_extension.name)."
+        },
+        {
+          "name": "id",
+          "type": "TEXT",
+          "doc": "`<extension>/<slug>`: the page file's name under the extension."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "What the person sees."
+        },
+        {
+          "name": "description",
+          "type": "TEXT",
+          "doc": "What it shows; empty when it says nothing."
+        },
+        {
+          "name": "label",
+          "type": "TEXT",
+          "doc": "What its tab says, a template over its params, when not its title; NULL otherwise."
+        },
+        {
+          "name": "icon",
+          "type": "TEXT",
+          "doc": "Its icon; NULL for the default."
+        },
+        {
+          "name": "category",
+          "type": "TEXT",
+          "doc": "The launcher section it is listed under (`Work`, `Code`, `Activity`, `Data`, …); NULL when it is opened only from elsewhere."
+        },
+        {
+          "name": "keywords",
+          "type": "TEXT",
+          "doc": "Extra words the launcher matches; NULL for none."
+        },
+        {
+          "name": "params",
+          "type": "TEXT",
+          "doc": "Its params as a JSON array (see `v_page_param` for them as rows)."
+        },
+        {
+          "name": "renders",
+          "type": "TEXT",
+          "doc": "The resource kinds it renders (`oxplow/commit`), as a JSON array; `[]` for a route."
+        },
+        {
+          "name": "default",
+          "type": "INTEGER",
+          "doc": "1 when it is the default page of the kinds it renders."
+        },
+        {
+          "name": "pinned",
+          "type": "INTEGER",
+          "doc": "1 when it is pinned in the rail."
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "doc": "`page` (a tab and a URL; in the launcher when `category` is set), `part` (drawn only inside a host page: an embed, a mount, a panel, a row's expand) or `query` (rows other pages read; no view). (v3)"
+        },
+        {
+          "name": "tool",
+          "type": "TEXT",
+          "doc": "The MCP tool it is also offered as, namespaced; NULL for none."
+        },
+        {
+          "name": "needs",
+          "type": "TEXT",
+          "doc": "The capabilities (or features) it needs, as a JSON array."
+        },
+        {
+          "name": "source",
+          "type": "TEXT",
+          "doc": "Its source file, the one to edit, relative to the project; NULL when no source is here (it ships with oxplow)."
+        },
+        {
+          "name": "deployment",
+          "type": "TEXT",
+          "doc": "Where its extension's files come from: `deployed`, `shipped`, `source`, `undeployed` or `not_here` (`v_extension.deployment`)."
+        },
+        {
+          "name": "running_uri",
+          "type": "TEXT",
+          "doc": "The file URI of the copy that runs, pinned to its deployment (`oxplow:oxplow/file?path=<extension>/pages/<file>&rev=<hash>&filesystem=oxplow:extensions`): comments and links on it stay on that copy, and it changes when a redeploy changes the running one. NULL when the extension runs no deployment (read from its source, or not deployed). (v2)"
+        }
+      ],
+      "key": [
+        "uri"
+      ]
     }
   },
   "page_answer": {

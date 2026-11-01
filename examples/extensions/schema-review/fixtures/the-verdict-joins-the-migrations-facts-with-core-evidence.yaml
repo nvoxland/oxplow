@@ -20,7 +20,7 @@ expect:
       reasons: its last test run was only reported; a new function of complexity 17
       statements: 2.0
 steps:
-  - when: { page: effort-verdict, params: { effort_id: 1 } }
+  - when: { part: effort-verdict, params: { effort_id: 1 } }
     expect:
       loaders:
         effort_verdict:

@@ -1,6 +1,5 @@
 title: "Efforts on a work item"
 description: "What has been done on a work item so far."
-hidden: true
 params:
 - name: work_item
   default: ""

@@ -26,7 +26,12 @@ pub(super) async fn run_example(
                 report.finish_case(format!("example {}", ex.name), mark);
                 return;
             }
-            if ex.when.get("page").is_some() {
+            // A page file's example (a page, a part or a query) runs its own
+            // scenario: the steps re-run it with params, press and submit.
+            if ["page", "part", "query"]
+                .iter()
+                .any(|k| ex.when.get(k).is_some())
+            {
                 dispatch(host, ext, ex, report).await;
             } else {
                 scenario(host, ext, ex, report).await;
@@ -188,7 +193,11 @@ pub(super) async fn dispatch(
 ) {
     let shown = ex.shown;
     if let Some(page) = ex.when.get("page").and_then(Value::as_str) {
-        page_example(host, ext, ex, page, report).await;
+        page_example(host, ext, ex, page, PageKind::Page, report).await;
+    } else if let Some(part) = ex.when.get("part").and_then(Value::as_str) {
+        page_example(host, ext, ex, part, PageKind::Part, report).await;
+    } else if let Some(query) = ex.when.get("query").and_then(Value::as_str) {
+        query_example(host, ext, ex, query, report).await;
     } else if let Some(slug) = ex.when.get("form").and_then(Value::as_str) {
         form_example(host, ext, ex, slug, report).await;
     } else if let Some(id) = ex.when.get("job").and_then(Value::as_str) {
@@ -257,8 +266,19 @@ pub(super) const KINDS: &[Kind] = &[
             "{ loaders?, nodes?, text?, alert?, badge?, label?, inactive?, actions?, see_also? }",
     },
     Kind {
+        key: "part",
+        when: "{ part: <slug | ext/slug>, params? }",
+        expect:
+            "{ loaders?, nodes?, text?, alert?, badge?, label?, inactive?, actions?, see_also? }",
+    },
+    Kind {
+        key: "query",
+        when: "{ query: <slug | ext/slug>[#loader], params? }",
+        expect: "{ rows, columns? }",
+    },
+    Kind {
         key: "form",
-        when: "{ form: <page>, node?, params? }",
+        when: "{ form: <page | part>, node?, params? }",
         expect: "{ values?, fixed?, fields? }",
     },
     Kind {
@@ -373,6 +393,11 @@ pub(super) fn withheld_target(ext: &Extension, input: &Value) -> Option<String> 
     });
     let target = [
         (Kind::Page, named("page")),
+        (Kind::Page, named("part")),
+        (
+            Kind::Page,
+            named("query").map(|q| q.split('#').next().unwrap_or(q)),
+        ),
         (Kind::Page, named("form")),
         (Kind::Job, named("job")),
         (Kind::CustomComponent, named("component")),

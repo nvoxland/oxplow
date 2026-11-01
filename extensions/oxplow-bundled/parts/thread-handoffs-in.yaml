@@ -1,0 +1,60 @@
+title: Handoffs to This Thread
+description: "Work other threads handed to this one, and how each ended. Settled ones stay for a week."
+params:
+- name: thread_id
+loaders:
+  thread_handoffs_in:
+    sql: |
+      SELECT h.uri, h.state, ft.title AS from_thread,
+             coalesce(s.display_name, 'the person') AS sender,
+             w.title AS item, w.uri AS item_ref,
+             h.body, h.sent_at, h.delivered_at, h.note, uri_param(h.uri, 'id') AS handoff
+      FROM v_handoff h
+      JOIN v_thread ft ON ft.id = h.from_thread_id
+      LEFT JOIN v_agent_session s ON s.id = h.from_session_id
+      LEFT JOIN v_work_item w ON w.uri = h.work_item
+      WHERE h.to_thread_id = :thread_id
+        AND (h.state = 'open' OR julianday(h.settled_at) >= julianday('now') - 7)
+      ORDER BY h.state <> 'open', h.sent_at DESC
+view:
+  from: thread_handoffs_in
+  viz: table
+  columns:
+  - key: from_thread
+    label: From
+  - key: sender
+    label: By
+  - key: item
+    label: Item
+    link:
+      kind: page
+      from: item_ref
+  - key: body
+    label: What
+  - key: state
+    label: State
+  - key: sent_at
+    label: Sent
+  - key: delivered_at
+    label: Agent saw it
+  empty: No work was handed to this thread.
+  actions:
+  - id: take
+    label: Take
+    command: oxplow.handoff.resolve
+    input:
+      handoff: '{{row.handoff}}'
+      outcome: taken
+    row: true
+  - id: decline
+    label: Decline…
+    command: oxplow.handoff.resolve
+    input:
+      handoff: '{{row.handoff}}'
+      outcome: declined
+    row: true
+    form: true
+    about: body
+    fixed:
+    - handoff
+    - outcome

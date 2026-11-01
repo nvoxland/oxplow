@@ -9,7 +9,7 @@ given:
         files:
           - { path: src/ui/a.rs, status: modified, additions: 1 }
           - { path: src/new.rs, status: added, additions: 1 }
-when: { page: oxplow-bundled/uncommitted, params: { stream_id: 1 } }
+when: { part: oxplow-bundled/uncommitted, params: { stream_id: 1 } }
 expect:
   loaders:
     uncommitted:
@@ -19,7 +19,7 @@ expect:
         - { id: "d:src/ui", parent: "d:src", label: "ui/  M" }
         - { id: "f:src/ui/a.rs", parent: "d:src/ui", label: "a.rs  M" }
 steps:
-  - when: { page: oxplow-bundled/uncommitted-line, params: { stream_id: 1 } }
+  - when: { part: oxplow-bundled/uncommitted-line, params: { stream_id: 1 } }
     expect: { loaders: { uncommitted_line: { rows: [{ label: "1A 1M  +2 −0" }] } } }
-  - when: { page: oxplow-bundled/uncommitted-count, params: { stream_id: 1 } }
+  - when: { part: oxplow-bundled/uncommitted-count, params: { stream_id: 1 } }
     expect: { loaders: { uncommitted_count: { rows: [{ files: 2 }] } }, badge: 2 }

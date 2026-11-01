@@ -764,7 +764,6 @@ fn a_resource_pages_loaders_read_content() {
 fn a_resource_page_is_never_listed_so_it_takes_no_listing_keys() {
     for (key, line) in [
         ("category", "category: Work"),
-        ("hidden", "hidden: true"),
         ("keywords", "keywords: a b"),
         ("badge", "badge: { loader: q }"),
     ] {
@@ -887,6 +886,19 @@ fn a_query_is_rows_only_and_has_no_view() {
     assert_eq!(page.kind, PageKind::Page);
     assert_eq!(page.file(), "pages/busy.yaml");
     assert_eq!(page.default_loader().map(|l| l.name.as_str()), Some("a"));
+}
+
+/// `hidden` is gone: a page with no `category` isn't listed, and a thing
+/// never opened on its own is a part or a query. The error says so.
+#[test]
+fn hidden_is_gone_and_the_error_says_what_replaces_it() {
+    let why = refused(&format!("title: T\nhidden: true\n{BODY}"));
+    assert!(why.contains("`hidden` is no longer a key"), "{why}");
+    assert!(
+        why.contains("a page with no `category` isn't listed"),
+        "{why}"
+    );
+    assert!(why.contains("a part (parts/)"), "{why}");
 }
 
 /// A page and a part show something, so each needs a `view:`.

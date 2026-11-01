@@ -7,16 +7,14 @@ given:
   - observe: { refs: { branches: [{ name: main, stream: 1, default: true }] } }
   - observe: { analyze: { kind: working } }
 # The scopes on offer: at least all files and the working tree's.
-when: { page: oxplow-foundation/files-scopes, params: { stream_id: 1 } }
+when: { query: oxplow-foundation/files-scopes, params: { stream_id: 1 } }
 expect:
-  loaders:
-    files_scopes:
-      rows:
-        contains: [{ value: all }, { value: uncommitted }]
+  rows:
+    contains: [{ value: all }, { value: uncommitted }]
 steps:
   # Another filesystem has no changes to show: only all files.
-  - when: { page: oxplow-foundation/files-scopes, params: { stream_id: 1, filesystem: "oxplow:extensions" } }
-    expect: { loaders: { files_scopes: { rows: [{ value: all }] } } }
+  - when: { query: oxplow-foundation/files-scopes, params: { stream_id: 1, filesystem: "oxplow:extensions" } }
+    expect: { rows: [{ value: all }] }
   # The working tree scope names a working change.
   - when: { page: oxplow-foundation/directory, params: { stream_id: 1, scope: uncommitted } }
     expect: { loaders: { row: { rows: [{ change_kind: working, is_local: 1 }] } } }

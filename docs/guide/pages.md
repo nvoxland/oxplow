@@ -25,8 +25,11 @@ custom page: oxplow-bundled's.
 
 ## Writing one by hand
 
-Pages live in `.oxplow/extensions/<extension>/pages/<slug>.yaml`. The
-extension folder needs an `extension.yaml`:
+A page file lives in one of three folders of `.oxplow/extensions/<extension>/`.
+`pages/<slug>.yaml` is a page: it opens as a tab. `parts/<slug>.yaml` is a part:
+it is drawn only inside another page, a panel or a mount. `queries/<slug>.yaml`
+is a query: rows only, with no view, read by other pages. The extension folder
+needs an `extension.yaml`:
 
 ```yaml
 # .oxplow/extensions/review/extension.yaml
@@ -85,7 +88,7 @@ name), and its **view** (a tree of nodes: `stack`, `grid`, `switch`, `viz`,
 ### Typed params
 
 A param has a `type`, which picks its control: `text` (the default),
-`choice` (`options: [{ value, label }]`, or `options_from:` a page whose rows
+`choice` (`options: [{ value, label }]`, or `options_from:` a query whose rows
 are the choices), `bool`, `search` (applies as you type), `branch`, and
 `date_range` (a preset `1d 2d 3d 7d 30d 90d all`, or `<from>..<to>`; it
 gives the query `:range_from` and `:range_to`).
@@ -167,8 +170,8 @@ link does. No command runs.
 
 ### Embedding and mounting pages
 
-An `embed` node shows another page inline, handing it params by name. A
-`slot` node is a place other extensions mount their pages at. To mount yours
+An `embed` node shows a page or a part inline, handing it params by name. A
+`slot` node is a place other extensions mount their parts at. To mount yours
 into a foundation page, list it under `ui.mounts` in `extension.yaml`:
 
 ```yaml
@@ -177,7 +180,7 @@ ui:
     - { page: item-tokens, at: oxplow-bundled/work-item.sections }
 ```
 
-The mounted page gets the host's params by name, so it declares the ones it
+The mounted part gets the host's params by name, so it declares the ones it
 needs. The work item and Tasks pages are oxplow-bundled's: an extension that
 mounts there lists `requires: [oxplow-bundled]` in `extension.yaml`.
 
@@ -438,9 +441,9 @@ ui:
     - { page: swimlanes, at: work_item.board, version: 1 }
 ```
 
-The page gets the view's props as params and must declare all of them: the
+The part gets the view's props as params and must declare all of them: the
 Board gets `scope` (`thread`, `backlog` or `all`) and `thread_id`; the list
-gets `scope` (`thread`, `stream` or `all`) and `thread_id`, and its page may
+gets `scope` (`thread`, `stream` or `all`) and `thread_id`, and its part may
 declare `stream_id`; the editor gets `uri`. Settings → Integrations lists
 each replaced view with a choice of whose to show (Default, oxplow's own, or
 an extension); a small "replaced by" badge says whose it is, and if it can't

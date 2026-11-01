@@ -1,6 +1,5 @@
 title: "Comment thread"
 description: "What has been said in a comment thread."
-hidden: true
 params:
 - name: comment
   default: ""

@@ -1,6 +1,5 @@
 title: Pull Requests by Work Item
 description: Recent PRs with the work item their title mentions by its id (tsk42, ENG-12), if any — whichever work list is active.
-hidden: true
 params:
 - name: state
   role: filter

@@ -1,6 +1,5 @@
 title: "Branch divergence"
 description: "How far a branch has moved from a base and whether it would merge cleanly."
-hidden: true
 params:
 - name: base
   default: "main"
@@ -8,6 +7,7 @@ params:
   default: ""
 answers:
 - {"question":"How far has this branch moved from main, and would it merge cleanly?","params":{"base":"main","head":"feature"},"skill":"oxplow-codebase"}
+- {"question":"Which commits does this branch have that main lacks?","params":{"base":"main","head":"feature"},"skill":"oxplow-codebase"}
 loaders:
   divergence:
     sql: "SELECT ahead, behind, readiness, overlapping_files FROM v_branch_divergence WHERE base = :base AND head = :head"

@@ -69,8 +69,9 @@ a typo is an error at the line):
 
 - **Metadata**: `title` (required), `description`, `label`, `icon`,
   `category`, `keywords`, `params`, `for` / `accepts` / `default` /
-  `pinned` (a renderer), `comments`, `refresh`, `hidden`, `needs`,
-  `actions`, `alert`, `tool`, `answers`, `badge`, `see_also`.
+  `pinned` (a renderer), `comments`, `refresh`, `needs`,
+  `actions`, `alert`, `tool`, `answers`, `badge`, `see_also` (a part and a
+  query take a subset: "Three kinds, by folder" above).
   A page's `description` says what the page is (what it shows, for
   what, over which scope and order), not what you can do on it. A page
   whose purpose is an action (a form to file an item, hand off work or
@@ -120,9 +121,12 @@ Where it lives, and what is loaded:
   first loader's dry run doesn't return: a loader reads only the ones declared
   before it, so that loader can't move; it returns the column instead.
 - `category` is the launcher section (`LauncherCategory`); none means the
-  page opens only from elsewhere. `hidden` keeps it out of the launcher.
+  page opens only from elsewhere (a link, a form, an agent) — there is no
+  `hidden` key: a page nothing should open on its own is a part or a
+  query. `v_page.kind` says which; `search_page` indexes pages with a
+  category.
   A page with `for:` is a resource page, a display mode of its resource:
-  it takes none of `category`, `hidden`, `keywords`, `badge` (load
+  it takes none of `category`, `keywords`, `badge` (load
   errors) and must declare a `uri` param. It is handed a `content`
   loader first, configured by `content: { text, max_bytes }`
   ([pages-and-tabs.md](./pages-and-tabs.md) "Resource pages and standalone pages").
@@ -564,15 +568,27 @@ reads the page's first loader's one row. A drag action also binds
 ### Checks
 
 - **Load** (`parse_page`, then the extension's load): a page file's own
-  errors at `file:line`; each `options_from`, `expand` and form `from`
-  page is one of the extension's (`page_ref_problem`); a `component` node
-  or `viz: custom` names a declared `custom_components` entry
-  (`component_problem`); a `replaceable:` node names a target in the
+  errors at `file:line`; **every reference to another page file is typed**
+  (`pages/refs.rs`: `RefSite` is the one table of places — a param's
+  `options_from`, a form's `choices` and field `from`, a column's
+  `expand`, an `embed`, a `{ page, loader }` loader, `see_also`, a panel's
+  body / collapsed / count / badge, a slot mount, a replacement — each with
+  the kind it takes: a query for options and fields, a part or a page for
+  what is drawn inside a host, a page for a link, any for a borrowed
+  loader; `for_each_ref` is the one traversal, so a new place is one
+  variant). At load the target of each must exist in this extension and be
+  the right kind (`page_ref_problem`, `parse_panels`, the mount and
+  replacement checks all call `refs::kind_problem`; only a form's `choices`
+  / `from` may name the page itself); once every extension is loaded, a
+  target in another extension is checked the same way (`check_cross_refs`:
+  the wrong kind is an error and the page is dropped; one no enabled
+  extension has is a warning, `page.ref_not_loaded`, and shows nowhere). A
+  `component` node or `viz: custom` names a declared `custom_components`
+  entry (`component_problem`); a `replaceable:` node names a target in the
   table, placed once per page (`check_page`); a renderer's `for`,
   `accepts`, `default`, `pinned` and `label` fit its resources
-  (`renderer_problem`); a slot mount names a page of the extension and a
-  `<extension>/<page>.<slot>`. A page that fails is dropped, with its
-  error on the extension.
+  (`renderer_problem`). A page that fails is dropped, with its error on the
+  extension.
 - **Layout warnings** (`pages::checks::layout_warnings`): load, validate,
   `v_extension.warnings` and a deploy's result carry them, each naming
   its page file and the fix after the dash. A warning never stops a page
@@ -583,7 +599,7 @@ reads the page's first loader's one row. A drag action also binds
   | `filter` params on a page (a `switch`'s do not count) | 6 — fold related ones into one `choice`, or split the page |
   | options of a `choice` | 12 — use a `search`, or a page that lists them |
   | a param no loader of the page reads (`:x` whole token, a date_range also `:x_from` / `:x_to`, an action's `{{param.x}}`, a column that `select`s or `highlight`s it, a form's defaults, the `label`); not checked on a page with an `embed`, `slot`, `component`, `replaceable` node or `viz: custom`, which pass the params on | none — remove it, or read it |
-  | description of a visible page (`hidden: false`) | 200 characters |
+  | description of a listed page (one with a `category`) | 200 characters |
   | children of the top `stack` | 8 |
   | declared `columns` of a `table` / `list` (not on a page with `tool:`, whose rows are for an agent) | 8 — put the rest in a node a row `select`s |
 

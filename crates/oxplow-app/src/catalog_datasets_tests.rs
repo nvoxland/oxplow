@@ -85,7 +85,7 @@ async fn pages_are_datasets_that_follow_the_catalog() {
     assert_eq!(
         rows(
             &fx,
-            "SELECT uri, extension, id, title, description, hidden FROM v_page WHERE extension = 'acme'"
+            "SELECT uri, extension, id, title, description, kind FROM v_page WHERE extension = 'acme'"
         )
         .await,
         vec![vec![
@@ -94,7 +94,7 @@ async fn pages_are_datasets_that_follow_the_catalog() {
             json!("acme/pr"),
             json!("Acme PR"),
             json!("One acme PR."),
-            json!(0),
+            json!("page"),
         ]]
     );
     assert_eq!(

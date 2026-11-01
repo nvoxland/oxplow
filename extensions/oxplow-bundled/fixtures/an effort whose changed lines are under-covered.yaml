@@ -37,7 +37,7 @@ given:
                 - { path: src/a.rs, uncoveredChangedLines: [4, 9, 12] }
                 - { path: src/b.rs, uncoveredChangedLines: [] }
                 - { path: src/c.rs, uncoveredChangedLines: [2] }
-when: { page: oxplow-bundled/effort-tests, params: { effort_id: 1 } }
+when: { part: oxplow-bundled/effort-tests, params: { effort_id: 1 } }
 expect:
   loaders:
     effort_coverage: { rows: [{ summary: "**60%** of changed lines covered · 6/10" }] }

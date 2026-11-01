@@ -90,7 +90,9 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
 | kind | `when` | `expect` |
 |---|---|---|
 | page | `{ page: <slug \| ext/slug>, params? }` | `{ loaders?, nodes?, text?, alert?, badge?, label?, inactive?, actions?, see_also? }` |
-| form | `{ form: <page>, node?, params? }` | `{ values?, fixed?, fields? }` |
+| part | `{ part: <slug \| ext/slug>, params? }` | `{ loaders?, nodes?, text?, alert?, badge?, label?, inactive?, actions?, see_also? }` |
+| query | `{ query: <slug \| ext/slug>[#loader], params? }` | `{ rows, columns? }` |
+| form | `{ form: <page \| part>, node?, params? }` | `{ values?, fixed?, fields? }` |
 | job | `{ job: <id>, intentKey, request, cancel?, setup?, rows? }` | `{ state, result?, text?, toolCalls?, output?, effects?, commands?, pages? }` |
 | component | `{ component: <id>, items?, invokes?: [{ command, input? }] }` | `{ invokes: [{ ok, result? } \| { ok: false, refused }] }` |
 | event | `{ event: { type, v?, payload, subject?, anchors? } }` | `{ effects?: [{ id, state }], commands?: [names] }` |
@@ -118,6 +120,11 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
      shows it; `actions`, the page's or a node's, list ids, or objects
      compared on the fields they name, spelled as in the page YAML:
      `{ id: rename, form: true, one_row: true }`).
+   - a part: `when: { part: <slug | ext/slug>, params? }`, the same
+     `expect` as a page's; a query: `when: { query: <slug | ext/slug>[#loader],
+     params? }`, `expect: { rows, columns? }` — the rows of its last loader
+     (or the named one), compared as a `sql` example's are. `page:` on a
+     part or a query is a finding that says which key to write.
      `view: { stream: str1, thread: thr1 }` runs it from that stream and
      thread; with none, it runs from the project's first stream, so a page
      that declares `stream_id` gets it without a param.

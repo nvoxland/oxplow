@@ -1,6 +1,5 @@
 title: Command Errors
 description: The most common errors one command gave agents in the last 30 days, with the same text counted together however its choices were listed.
-hidden: true
 params:
 - name: command
 loaders:

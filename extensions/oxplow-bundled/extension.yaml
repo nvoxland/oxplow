@@ -23,13 +23,13 @@ intent:
   origin: null
   examples:
     - name: an effort that claimed passing tests without a run
-      input: { page: unverified-claims, params: { effort_id: 1 } }
+      input: { part: unverified-claims, params: { effort_id: 1 } }
       expect: the claim listed with no verifying test run
     - name: a stream with blocked tasks and open follow-ups
       input: { page: waiting-on-me }
       expect: the blocked tasks and open follow-up comments, and the Waiting panel's badge firing
     - name: an effort whose changed lines are under-covered
-      input: { page: effort-tests, params: { effort_id: 1 } }
+      input: { part: effort-tests, params: { effort_id: 1 } }
       expect: the effort's test runs, its diff coverage and the uncovered changed lines
     - name: extension runs over the last week
       input: { page: runs, params: {} }
@@ -80,22 +80,22 @@ intent:
       input: { page: oxplow-bundled/waiting-on-me }
       expect: a handoff to a thread with no agent session, gone once an agent session is open there
     - name: comments-panel-counts-open-comments-by-who-acts
-      input: { page: oxplow-bundled/comments-panel, params: { stream_id: 1 } }
+      input: { part: oxplow-bundled/comments-panel, params: { stream_id: 1 } }
       expect: open notes for the person and followups for the agent, a resolved one not counted, none for another stream
     - name: work-panel-groups-a-threads-work
-      input: { page: oxplow-bundled/work, params: { thread_id: 1 } }
+      input: { part: oxplow-bundled/work, params: { thread_id: 1 } }
       expect: in progress, ready and finished under headings; clearing hides the finished; an effort no item names shows
     - name: work-count-counts-the-active-item-and-the-ready-ones
-      input: { page: oxplow-bundled/work-count, params: { thread_id: 1 } }
+      input: { part: oxplow-bundled/work-count, params: { thread_id: 1 } }
       expect: the active item and the ready ones, not the finished
     - name: planning-shows-only-the-active-work-list
       input: { page: oxplow-bundled/planning }
       expect: ready and backlog items gone once the work list is none
     - name: work-shows-only-the-active-work-list
-      input: { page: oxplow-bundled/work, params: { thread_id: 1 } }
+      input: { part: oxplow-bundled/work, params: { thread_id: 1 } }
       expect: only the unlinked effort once the work list is none
     - name: work-count-shows-only-the-active-work-list
-      input: { page: oxplow-bundled/work-count, params: { thread_id: 1 } }
+      input: { part: oxplow-bundled/work-count, params: { thread_id: 1 } }
       expect: the count follows the active work list
     - name: waiting-on-me-shows-only-the-active-work-list
       input: { page: oxplow-bundled/waiting-on-me }
@@ -113,7 +113,7 @@ intent:
       input: { sql: v_oxplow_bundled_claim_status }
       expect: a verified claim is backed; a dismissed one is not counted
     - name: the-effort-verdict-says-what-a-reviewer-needs-first
-      input: { page: effort-verdict }
+      input: { part: effort-verdict }
       expect: the verdict says whether it tested, how much ran and what is left to check
     - name: accept-refuses-unreviewed-work-unless-forced
       input: { command: review.accept }
@@ -149,10 +149,10 @@ intent:
       input: { command: review.request_changes }
       expect: a claim is inert text in the checklist
     - name: the-review-pages-declare-their-row-actions
-      input: { page: unverified-claims }
+      input: { part: unverified-claims }
       expect: Mark Verified, Dismiss and Reopen on a claim row
     - name: inferred-decisions-offer-confirm-and-dismiss
-      input: { page: inferred-decisions }
+      input: { part: inferred-decisions }
       expect: Confirm and Dismiss on an inferred decision
     - name: the-review-verbs-log-a-typed-verdict
       input: { command: review.request_changes }
@@ -179,7 +179,7 @@ intent:
       input: { page: oxplow-foundation/custom-component, params: { uri: "oxplow:oxplow/custom_component?custom_component=oxplow-bundled/explore-data" } }
       expect: a component's commands open each command's definition
     - name: data-effect-backfill-says-what-bundled-effect-would-do
-      input: { page: oxplow-foundation/data-effect-backfill }
+      input: { part: oxplow-foundation/data-effect-backfill }
       expect: a bundled effect's backfill says there is nothing to catch up on
     - name: settings-data-area-lists-bundled-effects
       input: { page: oxplow-foundation/settings, params: { area: data } }
@@ -191,10 +191,10 @@ intent:
       input: { page: waiting-on-me }
       expect: a question the agent's last message asked is waiting on the person until a prompt moves it on
     - name: what-deviated-lists-files-outside-the-tasks-stated-area
-      input: { page: what-deviated, params: { effort_id: 1 } }
+      input: { part: what-deviated, params: { effort_id: 1 } }
       expect: files outside the area the task names; none when it names no area
     - name: review-prompt-names-the-task-and-what-changed
-      input: { page: review-prompt, params: { effort_id: 1 } }
+      input: { part: review-prompt, params: { effort_id: 1 } }
       expect: the prompt names the task, its files and claims; a foreign work item is named
     - name: review-starters-read-the-viewers-streams-decisions-and-claims
       input: { page: recent-decisions }
@@ -206,10 +206,10 @@ intent:
       input: { page: thread-activity, params: { thread_id: 1 } }
       expect: a turn's context fill, of its window when known, and how often it compacted
     - name: go-to-panel-lists-bookmarks-then-recent-or-most-visited
-      input: { page: go-to-panel, params: { thread_id: 1 } }
+      input: { part: go-to-panel, params: { thread_id: 1 } }
       expect: the thread's bookmarks, then its recent or most visited pages, each once; collapsed, the bookmarks alone
     - name: uncommitted-panel-is-a-tree-over-the-working-files
-      input: { page: uncommitted, params: { stream_id: 1 } }
+      input: { part: uncommitted, params: { stream_id: 1 } }
       expect: a folder tree of the working files with A/M/D letters, a one-line summary and a count
     - name: waiting-on-me-alerts-while-anything-waits
       input: { page: waiting-on-me }
@@ -218,22 +218,22 @@ intent:
       input: { command: oxplow.review.accept, input: { effort: eff1, force: true } }
       expect: a forced acceptance files one verify checklist item; a second files nothing
     - name: tests-weakened-reports-deleted-tests-fewer-assertions-and-skips
-      input: { page: tests-weakened }
+      input: { part: tests-weakened }
       expect: deleted tests, fewer assertions and new skips in a change
     - name: the-change-review-grid-reads-an-analyzed-commit
-      input: { page: change-review, params: { change_id: 1 } }
+      input: { part: change-review, params: { change_id: 1 } }
       expect: the summary, the changed functions and the test files of an analyzed commit
     - name: token-pages-sum-a-tasks-and-a-threads-turns
-      input: { page: task-tokens }
+      input: { part: task-tokens }
       expect: a task's turns summed and listed, a thread's total, an idle thread nothing
     - name: the-plan-pages-show-the-proposed-plans
-      input: { page: effort-plan, params: { effort_id: 1 } }
+      input: { part: effort-plan, params: { effort_id: 1 } }
       expect: the plans an agent proposed, newest first, under an effort and a thread
     - name: the-shared-work-pages-show-what-two-threads-hold
       input: { page: shared-work }
       expect: items, files and epics shared between threads; the thread and item variants keep their own
     - name: session-files-group-an-efforts-files-by-session
-      input: { page: session-files, params: { effort_id: 1 } }
+      input: { part: session-files, params: { effort_id: 1 } }
       expect: an effort's files grouped by the session that changed them, shared ones apart
     - name: the-agent-interface-pages-count-tools-commands-and-hints
       input: { page: agent-interface }

@@ -1,6 +1,5 @@
 title: Data catalog
 description: 'What oxplow''s data holds: every dataset (`v_*` view) with its owner, what it holds and its fields (name and type); name one (`v_effort` or `effort`) for its fields'' docs, key, relationships to other datasets and any `ai_context` guidance for reading it (a JSON `{instructions, synonyms, examples}`). Query them with `oxplow_query_sql`; metrics are read with `MEASURE(''<key>'')` over `metric_grid()` (their units and aggregation are in `v_metric_spec`).'
-hidden: true
 tool: catalog
 params:
 - name: dataset

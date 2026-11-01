@@ -1,6 +1,6 @@
 # The list reads v_work_item; a fresh project has no items yet.
 when:
-  page: compact-list
+  part: compact-list
   params: { scope: all }
 expect:
   loaders:

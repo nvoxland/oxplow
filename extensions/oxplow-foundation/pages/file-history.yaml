@@ -1,6 +1,5 @@
 title: File history
 description: The commits that touched a file, newest first, from the indexed history. For history past the index, use `oxplow_vcs_log`.
-hidden: true
 params:
 - name: path
   label: File (a repository path)

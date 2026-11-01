@@ -1,0 +1,9 @@
+title: Dimensions to slice by
+description: The dimensions a metric can be split by, for a metric page's Slice by (and the Metrics list's).
+loaders:
+  metrics_dimensions:
+    sql: |
+      SELECT '' AS value, 'No slicing' AS label
+      UNION ALL
+      SELECT key, label FROM v_dimension
+      ORDER BY 2

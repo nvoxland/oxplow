@@ -74,7 +74,7 @@ check already reported is not repeated.
     `{ page: <name>, params: { stream_id: 1 } }`;
   - `component` — a `custom_components:` entry (a bundle under
     `components/<name>/`) and a page whose `component` node it feeds;
-    `panel` — a `panels:` entry whose `body` is a hidden page;
+    `panel` — a `panels:` entry whose `body` is a part (`parts/<name>.yaml`);
   - `collector` — a Starlark collector `items` over `v_work_item` declaring
     entity `item`, a dataset `open_items` over `ref('item')` and a page over
     the dataset; its example runs the collector over fixture rows;
@@ -301,10 +301,12 @@ reading the right skill can answer the questions oxplow, or an extension,
 exists for. The questions live on the **pages** that answer them: a page's
 `answers: [{ question, about?, params, skill? }]` (an entry with `about`
 is phrased with "this" and offered on pages for that kind of ref). Core has
-no questions files: the pages carry them, including small
-hidden pages that exist to hold a question (`collectors`, `zones`,
+no questions files: the pages carry them, including small pages with no
+`category` that exist to hold a question (`collectors`, `zones`,
 `branch-sync`, `work-item-actions`, …), and a question that says "do this"
-is held by a page with a whole-page action running that command.
+is held by a page with a whole-page action running that command. A part
+and a query carry no answers: a question about what one shows goes on a
+page that hosts it.
 
 - **`answerability::check_pages`** (with `live_pages` for the live half):
   the answer's `skill` names every dataset the page's `sql` loaders read,

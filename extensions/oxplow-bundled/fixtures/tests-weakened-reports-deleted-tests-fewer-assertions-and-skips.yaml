@@ -8,7 +8,7 @@ given:
   - { command: oxplow.vcs.commit, input: { stream: str1, message: weaken }, bind: weaken }
   - observe: { analyze: { kind: commit, sha: $weaken.rev } }
 # The analyzed commit is the first change this oxplow made.
-when: { page: oxplow-bundled/tests-weakened, params: { change_id: 1 } }
+when: { part: oxplow-bundled/tests-weakened, params: { change_id: 1 } }
 expect:
   loaders:
     tests_weakened:

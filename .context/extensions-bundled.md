@@ -70,7 +70,7 @@ The `oxplow-foundation` and `oxplow-bundled` extensions, the review packet, and 
     What Deviated stays silent there: with no task text, no area is
     stated)
   - Context Read (`v_context_read`)
-  - Verify a Claim With Evidence (hidden, `viz: form` over
+  - Verify a Claim With Evidence (no category, `viz: form` over
     `oxplow.effort.verify_claim`, `claim` a param)
 
   **Its verdicts (P7.C5, the first bundled `commands:`)**, on an
@@ -107,7 +107,7 @@ The `oxplow-foundation` and `oxplow-bundled` extensions, the review packet, and 
   "Every claim for this effort is backed by evidence."
 
   The slot pages above need `effort_id` / `change_id`, so they're
-  `hidden` from the launcher (opened there they'd show NULL-param empty
+  parts, not in the launcher (opened there they'd show NULL-param empty
   states). The launcher gets stream-level starters instead, under Work:
   **Recent Decisions** and **Unbacked Claims**, scoped by the implicit
   `stream_id`.
@@ -236,12 +236,12 @@ screens and oxplow-bundled's add the review and analysis:
 - **The Metrics list.** The `metrics-recorded` page (the grouped list of
   every catalogued metric with trend and latest value) and its row expander
   `metrics-slices`. Foundation keeps one metric's pages (`metric`,
-  `metric-data`, `measure`), which do not link to the list, and the hidden
-  `metrics-dimensions` options page (the `metric` page's Slice by reads it;
+  `metric-data`, `measure`), which do not link to the list, and the
+  `metrics-dimensions` query (the `metric` page's Slice by reads it;
   the list names it as `oxplow-foundation/metrics-dimensions`). People find
   a metric from the launcher instead: `metric` and `measure` are
   `searchable:` ([metrics.md](./metrics.md) "UI").
-- **Zones.** The hidden `zones` page holds the questions about the zone
+- **Zones.** The `zones` page (no category) holds the questions about the zone
   rules (`v_zone`, `v_zone_unmatched`); nothing links to it.
 - **The app's screens.** foundation's `alerts`,
   `catalog`, `changes-effort`, `comments`, `commit`,
@@ -254,7 +254,7 @@ screens and oxplow-bundled's add the review and analysis:
   (`uncommitted`, collapsed `uncommitted-line`, count `uncommitted-count`)
   and Work (`work`, collapsed `work-line`, count `work-count`). Only the UI
   moved: stores, commands and views stay core. Each panel's `body` is a
-  page.
+  part.
 - **Effort reasoning.** The AI profile `reasoning` (fallback `main`), the
   job `reasoning`, the command `oxplow.effort.infer_reasoning` and the
   effects `infer-reasoning` / `store-reasoning`, writing through core's
@@ -324,7 +324,7 @@ available to every extension:
 - `commit` and `metric` link kinds; `file` links with `line`. (A `task`
   kind came and went: a work item links as `page`, by its URI.)
 - the Work Item and Tasks pages' section slots, with slot params checked at load.
-- Page `category` and `hidden`.
+- Page `category`.
 - Page `actions:` as commands.
 - Disabling extensions per project.
 - Advisories: the generic nudge primitive (see extensions-commands.md "Advisories").

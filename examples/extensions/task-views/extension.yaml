@@ -11,10 +11,10 @@ intent:
   origin: null
   examples:
     - name: compact-list
-      input: { page: compact-list, params: { scope: all } }
+      input: { part: compact-list, params: { scope: all } }
       expect: the work items as a table with title, state and updated
     - name: swimlanes-reads
-      input: { page: swimlanes, params: { scope: all } }
+      input: { part: swimlanes, params: { scope: all } }
       expect: the board's page reads its cards and the active provider's features
     - name: swimlanes-refuses-a-missing-item
       input: { component: swimlanes }
@@ -23,13 +23,13 @@ intent:
       input: { component: swimlanes }
       expect: renaming an item through the board goes through
     - name: edit-item
-      input: { page: edit-item, params: { uri: "oxplow:oxplow/work_item?id=1&provider=oxplow" } }
+      input: { part: edit-item, params: { uri: "oxplow:oxplow/work_item?id=1&provider=oxplow" } }
       expect: a form for the item's title and body, its uri fixed
     - name: swimlanes-drags-a-card-to-a-lane
-      input: { page: swimlanes, params: { scope: all } }
+      input: { part: swimlanes, params: { scope: all } }
       expect: five lanes; a drag moves the card's item to the lane's state
     - name: swimlanes-renames-a-card-through-its-title
-      input: { page: swimlanes, params: { scope: all } }
+      input: { part: swimlanes, params: { scope: all } }
       expect: an empty title is refused under the input, Escape puts it back and Enter saves a new one
 permissions: [commands:oxplow.work_item.transition, commands:oxplow.work_item.reorder, commands:oxplow.work_item.update]
 custom_components:

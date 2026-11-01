@@ -72,8 +72,8 @@ that exists is refused):
 - `skill` — a skill (`SKILL.md` with `name:` and `description:`
   frontmatter) you load when it's relevant; `kind: command` makes it a
   slash command;
-- `panel` — a page compact in the left nav (a panel's `scope` is the param
-  its page declares);
+- `panel` — a part compact in the left nav, written to `parts/<name>.yaml` (a
+  panel's `scope` is the param its part declares);
 - `extension` — the manifest only.
 
 Words used exactly: an **extension** is the folder; a **contribution** is

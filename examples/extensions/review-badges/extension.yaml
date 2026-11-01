@@ -17,7 +17,7 @@ intent:
       input: { page: review-verdicts }
       expect: no rows until effort-review has reviewed an effort
     - name: item-review
-      input: { page: item-review, params: { uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow" } }
+      input: { part: item-review, params: { uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow" } }
       expect: nothing for an item that has no review yet
 # Optional: with effort-review missing, disabled or exporting another
 # version, the two pages below are withheld (a warning in Settings →

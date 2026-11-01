@@ -175,7 +175,7 @@ exists for actions and links).
   no code: loaders that read the param run again). Give the detail an
   `empty:` that says what to click.
 - `highlight: <param>`: marks the param's value in the cell's text (use it
-  with a search param). `expand: <page>`: opens that page under the row, its
+  with a search param). `expand: <part>` (or a page): opens it under the row, its
   params taking the row's same-named columns.
 - `icon: <column>` draws an icon named by that column's value (a work-item
   state, a file status, `epic`, `wiki`, `file`, `folder`, `commit`, …);
@@ -214,7 +214,7 @@ action) or the page (`page-format.md`).
 - { embed: { page: acme/picked, params: { total: { from: first.total } } } }
 ```
 
-Shows another page inline. Its params flow **by name**: the embed's
+Shows a part, or another page, inline. Its params flow **by name**: the embed's
 `params` first, else the host's param of that name, else that column of the
 host loaders' first rows, in loader order. Embedded nodes are
 `<embed-id>/<node-id>`.
@@ -225,8 +225,8 @@ host loaders' first rows, in loader order. Embedded nodes are
 - { slot: sections }
 ```
 
-A named place other extensions mount pages at (`ui-contributions.md`). The
-mounted page runs as an embed: its params by name from the host; its node id
-is the page id with `.` for `/` (`beta.extra`).
+A named place other extensions mount parts at (`ui-contributions.md`). The
+mounted part runs as an embed: its params by name from the host; its node id
+is the part id with `.` for `/` (`beta.extra`).
 
 The YAML binds; logic is SQL or a read command, never the view.

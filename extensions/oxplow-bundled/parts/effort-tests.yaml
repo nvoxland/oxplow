@@ -1,0 +1,154 @@
+title: Coverage and Tests
+description: Diff coverage on the effort's changed lines, the test runs it made, and what failed.
+params:
+- name: effort_id
+loaders:
+  effort_coverage:
+    sql: |
+      SELECT printf('**%d%%** of changed lines covered · %d/%d',
+                    CAST(round(json_extract(payload_json, '$.summaryPct')) AS INTEGER),
+                    json_extract(payload_json, '$.coveredLines'),
+                    json_extract(payload_json, '$.changedLines')) AS summary
+      FROM v_effort_observation
+      WHERE effort_id = :effort_id AND kind = 'diff-coverage'
+      ORDER BY seq DESC
+      LIMIT 1
+  effort_untested_files:
+    sql: |
+      WITH cov AS (
+        SELECT payload_json FROM v_effort_observation
+        WHERE effort_id = :effort_id AND kind = 'diff-coverage'
+        ORDER BY seq DESC LIMIT 1
+      )
+      SELECT json_extract(f.value, '$.path') AS path,
+             json_array_length(f.value, '$.uncoveredChangedLines') AS uncovered,
+             json_extract(f.value, '$.uncoveredChangedLines[0]') AS first_line,
+             (SELECT group_concat(l.value, ', ') FROM json_each(f.value, '$.uncoveredChangedLines') l) AS lines
+      FROM cov, json_each(cov.payload_json, '$.files') f
+      WHERE json_array_length(f.value, '$.uncoveredChangedLines') > 0
+      ORDER BY uncovered DESC, path
+  effort_test_runs:
+    sql: |
+      SELECT created_at AS at,
+             json_extract(payload_json, '$.passed') AS passed,
+             json_extract(payload_json, '$.failed') AS failed,
+             json_extract(payload_json, '$.skipped') AS skipped,
+             json_extract(payload_json, '$.exitCode') AS exit_code,
+             round(json_extract(payload_json, '$.durationMs') / 1000.0, 1) AS seconds,
+             json_extract(payload_json, '$.command') AS command
+      FROM v_effort_observation
+      WHERE effort_id = :effort_id AND kind = 'test-run'
+      ORDER BY seq DESC
+  effort_failed_tests:
+    sql: |
+      WITH cases AS (
+        SELECT o.seq,
+               json_extract(s.value, '$.name') AS suite,
+               json_extract(c.value, '$.classname') AS classname,
+               json_extract(c.value, '$.name') AS name,
+               json_extract(c.value, '$.status') AS status
+        FROM v_effort_observation o,
+             json_each(o.payload_json, '$.suites') s,
+             json_each(s.value, '$.cases') c
+        WHERE o.effort_id = :effort_id AND o.kind = 'test-run'
+      ),
+      failing AS (
+        SELECT suite, classname, name, sum(status = 'failed') AS failed_runs, max(seq) AS last_seq
+        FROM cases
+        GROUP BY suite, classname, name
+        HAVING failed_runs > 0
+      )
+      SELECT f.suite, f.classname || ' › ' || f.name AS test, f.failed_runs,
+             (SELECT c.status FROM cases c
+              WHERE c.suite = f.suite AND c.classname = f.classname AND c.name = f.name AND c.seq = f.last_seq) AS latest
+      FROM failing f
+      ORDER BY latest = 'passed', f.failed_runs DESC, f.suite, test
+  effort_analysis_findings:
+    sql: |
+      WITH a AS (
+        SELECT payload_json FROM v_effort_observation
+        WHERE effort_id = :effort_id AND kind = 'static-analysis'
+        ORDER BY seq DESC LIMIT 1
+      )
+      SELECT json_extract(f.value, '$.severity') AS severity,
+             json_extract(f.value, '$.path') AS path,
+             json_extract(f.value, '$.line') AS line,
+             json_extract(f.value, '$.rule') AS rule,
+             json_extract(f.value, '$.message') AS message
+      FROM a, json_each(a.payload_json, '$.findings') f
+      ORDER BY CASE severity WHEN 'error' THEN 0 WHEN 'warning' THEN 1 WHEN 'info' THEN 2 ELSE 3 END, path, line
+view:
+  stack:
+  - id: effort-coverage
+    title: Diff Coverage
+    from: effort_coverage
+    viz: markdown
+    empty: No coverage recorded for this effort.
+  - id: effort-untested-files
+    title: Most Untested Changes
+    from: effort_untested_files
+    viz: table
+    columns:
+    - key: path
+      label: File
+      link:
+        kind: file
+        line: first_line
+    - key: uncovered
+      label: Uncovered
+    - key: lines
+      label: Lines
+    empty: Every changed line is covered.
+  - id: effort-test-runs
+    title: Test Runs
+    from: effort_test_runs
+    viz: table
+    columns:
+    - key: at
+      label: When
+    - key: passed
+      label: Passed
+    - key: failed
+      label: Failed
+    - key: skipped
+      label: Skipped
+    - key: exit_code
+      label: Exit
+    - key: seconds
+      label: Seconds
+    - key: command
+      label: Command
+    empty: No test runs recorded for this effort.
+  - id: effort-failed-tests
+    title: Tests That Failed
+    from: effort_failed_tests
+    viz: table
+    columns:
+    - key: test
+      label: Test
+    - key: suite
+      label: Suite
+    - key: failed_runs
+      label: Failed runs
+    - key: latest
+      label: Latest
+    empty: No test failed in this effort's runs.
+  - id: effort-analysis-findings
+    title: Static Analysis
+    from: effort_analysis_findings
+    viz: table
+    columns:
+    - key: severity
+      label: Severity
+    - key: path
+      label: File
+      link:
+        kind: file
+        line: line
+    - key: line
+      label: Line
+    - key: rule
+      label: Rule
+    - key: message
+      label: Message
+    empty: No analyzer findings for this effort.

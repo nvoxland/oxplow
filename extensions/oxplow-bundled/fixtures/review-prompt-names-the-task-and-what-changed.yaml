@@ -5,7 +5,7 @@ given:
   - { command: oxplow.work_item.create, input: { title: Fix the hover state, body: Buttons flicker on hover., thread: thr1 }, bind: item }
   - { command: oxplow.work_item.transition, input: { uri: $item.uri, to: in_progress } }
   - observe: { turn: { prompt: Fix it, tools: [{ name: Edit, kind: edit, paths: [src/ui/button.ts], ok: true }], write: { path: src/ui/button.ts, body: "export {};\n" } } }
-when: { page: oxplow-bundled/review-prompt, params: { effort_id: 1 } }
+when: { part: oxplow-bundled/review-prompt, params: { effort_id: 1 } }
 expect:
   text:
     contains:
@@ -17,7 +17,7 @@ expect:
 steps:
   - given:
       - { command: oxplow.effort.open, input: { thread: thr1, work_item: "oxplow:oxplow/work_item?id=ENG-1&provider=issues" } }
-  - when: { page: oxplow-bundled/review-prompt, params: { effort_id: 2 } }
+  - when: { part: oxplow-bundled/review-prompt, params: { effort_id: 2 } }
     expect:
       text:
         contains: ["**oxplow:oxplow/work_item?id=ENG-1&provider=issues**"]

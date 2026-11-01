@@ -1,6 +1,5 @@
 title: "Standing instructions"
 description: "The instructions the person set for a thread and its stream."
-hidden: true
 params:
 - name: thread
   default: "oxplow:oxplow/thread?id=thr1"

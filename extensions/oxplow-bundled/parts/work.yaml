@@ -1,0 +1,38 @@
+title: Work
+description: The thread's work — in progress (with its epic), ready next, and recently finished.
+params:
+- name: thread_id
+  label: Thread
+loaders:
+  work:
+    sql: |
+      SELECT grp, title, icon, uri, depth, active,
+             CASE grp WHEN 'Finished' THEN uri('oxplow/page', 'page', 'thread-activity', 'thread_id', thread_id) END AS grp_ref
+      FROM v_oxplow_bundled_thread_work
+      WHERE thread_id = :thread_id
+      ORDER BY g, ord
+view:
+  from: work
+  viz: list
+  group:
+    by: grp
+    link:
+      kind: page
+      from: grp_ref
+  emphasis: active
+  depth: depth
+  columns:
+  - key: title
+    label: Item
+    icon: icon
+    link:
+      kind: page
+      from: uri
+  empty: No active work
+  actions:
+  - id: clear
+    label: clear
+    command: oxplow.work.clear_finished
+    group: Finished
+    input:
+      thread_id: '{{param.thread_id}}'

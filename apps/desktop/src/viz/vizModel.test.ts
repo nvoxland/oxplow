@@ -25,7 +25,7 @@ const viz = (over: Partial<VizConfig> = {}): VizConfig => ({
   form: null,
   parts: [],
   launcherCategory: null,
-  hidden: false,
+  kind: "page",
   path: ".oxplow/extensions/review/pages/waiting.yaml",
   ...over,
 });

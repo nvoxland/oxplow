@@ -11,10 +11,11 @@ import { mergeDirectory } from "../viz/vizModel.js";
 import { refFromTabId, withResourceParams } from "../tabs/pageRefs.js";
 import type { PageDirectoryEntry } from "./RailHud/sections.js";
 
-/** A page the launcher lists: standalone (a page with `for:` is a display mode
- *  of its resource, opened from the resource), with a category, not hidden. */
+/** A page the launcher lists: a page (never a part or a query), standalone
+ *  (a page with `for:` is a display mode of its resource, opened from the
+ *  resource), with a category. */
 function inLauncher(page: Page): boolean {
-  return page.for.length === 0 && !!page.category && !page.hidden;
+  return page.kind === "page" && page.for.length === 0 && !!page.category;
 }
 
 export function launcherPages(extensions: Extension[], counts: Record<string, number> = {}): PageDirectoryEntry[] {

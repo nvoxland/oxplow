@@ -17,7 +17,14 @@ whichever folder it is in, and a slug lives in one folder only. A part
 takes no `category`, `keywords`, `label`, `icon`, `for`, `answers`, `tool`,
 `see_also`, `rail`, `comments` or `refresh`; a query takes only `title`,
 `description`, `params`, `loaders`, `tool` and `needs`, and its last loader
-is what a reference to it means. Reuse an extension when the page fits it; start a new one
+is what a reference to it means. Which kind do I write?
+
+- A tab or launcher entry: a page (`pages/`).
+- Drawn inside something else: a part (`parts/`).
+- Rows only, read by two or more pages: a query (`queries/`).
+- Rows only, for one page: a loader of that page.
+
+Reuse an extension when the page fits it; start a new one
 for a new area. `oxplow.extension.write_page { extension, page, spec,
 deploy? }` writes a page file (creating the extension), refusing a spec that
 doesn't parse.
@@ -74,7 +81,7 @@ examples.
   `|short`, `|basename`, `|url`), `icon`, `category` (the launcher
   section: `Work`, `Code`, `Git`, `Activity`, `Knowledge`, `Data`,
   `Dashboards`, `System`; none means opened only from elsewhere),
-  `keywords`. (A page with `for:` takes none of `category`, `hidden`,
+  `keywords`. (A page with `for:` takes none of `category`,
   `keywords` or `badge`: see "Renderers".)
 - `description` says what the page is: what it shows, for what, over which
   scope, in which order. A page whose purpose is an action (a form that
@@ -83,13 +90,13 @@ examples.
   controls, and Definition in About this page lists them. Good: "The stream's closed
   threads, newest first, with the work each finished." Bad: "...
   Reopen puts one back on the rail; drag to reorder."
-- `hidden: true`: not in the launcher (a drill-down, an embedded page).
+- A page with no `category` opens only from elsewhere (a link, a form, an agent). Something never opened on its own is a part or a query, not a page.
   `refresh: true`: a Refresh button, for pages reading outside oxplow.
   `comments: true`: the person may comment on its text. `needs:
   [capability]`: what it can't run without (it says so instead of failing).
 - `tool: <name>`: also offered to agents as a typed MCP tool.
 - `badge: { loader, column? }`: a count on its nav entry from that loader's
-  first row (else its row count). `alert`: `{ min_rows: 1 }` or `{ column,
+  first row (else its row count; on a part a panel names as `count` or `badge`, the header count). `alert`: `{ min_rows: 1 }` or `{ column,
   below | above }`, with a `label`: marks the page as an alert while it fires.
 - `rail:` a second node tree drawn in the page's rail (`view-nodes.md`).
 - `see_also:` related pages, drawn as "See also" in the page's rail after
@@ -111,8 +118,8 @@ caller's, else the viewer's context, else `default`. **`stream_id`,
 looking at.** Don't hardcode ids.
 
 - `type`: `text` (default), `choice` (`options: [{ value, label }]` with a
-  `default` that is one of them, or `options_from: <page whose rows are
-  value / label / optional group>`), `bool` (bound 1 or 0), `search`
+  `default` that is one of them, or `options_from: <query>` or `<query>#<loader>`: a query of `queries/` whose rows are
+  `value`, `label`, optional `group`), `bool` (bound 1 or 0), `search`
   (trimmed text, NULL when empty), `branch` (a branch, NULL for all),
   `date_range` (a preset `1d 2d 3d 7d 30d 90d all` or `<from>..<to>`;
   `presets:` picks the quick ones). A `date_range` named `range` gives the
@@ -132,7 +139,7 @@ looking at.** Don't hardcode ids.
 `for: oxplow/commit` (or a list; your own `<extension>/<name>`, another
 extension's, or `https`/`http`) makes the page a **resource page**: a
 display mode of that kind of URI (a commit, a file), opened from the
-resource and never listed on its own. So it takes no `category`, `hidden`,
+resource and never listed on its own. So it takes no `category`,
 `keywords` or `badge`, and it must declare `params: [{ name: uri }]` (the
 URI it shows). A page with no `for:` is **standalone**: its own loaders,
 listed by the launcher and search.

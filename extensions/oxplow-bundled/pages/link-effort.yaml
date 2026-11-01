@@ -1,6 +1,5 @@
 title: Link Effort to Task
 description: Link an effort to one of the open work items, or take its link away.
-hidden: true
 needs:
 - work_items
 params:

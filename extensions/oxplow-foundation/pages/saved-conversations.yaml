@@ -1,6 +1,5 @@
 title: "Saved conversations"
 description: "The saved agent conversations that could be resumed here and the harness that keeps each."
-hidden: true
 answers:
 - {"question":"Which saved agent conversations could be resumed here, and which harness keeps each?","params":{},"skill":"oxplow-extension"}
 loaders:

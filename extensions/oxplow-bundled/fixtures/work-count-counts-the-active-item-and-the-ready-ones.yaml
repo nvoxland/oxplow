@@ -4,5 +4,5 @@ given:
   - { command: oxplow.effort.open, input: { thread: thr1 } }
   - { command: oxplow.work_item.create, input: { title: Next up, state: todo, thread: thr1 } }
   - { command: oxplow.work_item.create, input: { title: Shipped, state: done, thread: thr1 } }
-when: { page: oxplow-bundled/work-count, params: { thread_id: 1 } }
+when: { part: oxplow-bundled/work-count, params: { thread_id: 1 } }
 expect: { loaders: { work_count: { rows: [{ open: 2 }] } }, badge: 2 }

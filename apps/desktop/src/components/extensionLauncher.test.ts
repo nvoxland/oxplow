@@ -15,7 +15,7 @@ const page = (over: Record<string, unknown>) => ({
 const ext = (over: Partial<Extension>): Extension =>
   ({ name: "x", enabled: true, ...over }) as unknown as Extension;
 
-// Page files (`pages/*.yaml`): what the launcher lists.
+// Page files (`pages/*.yaml`, or a part when `kind` says so): what the launcher lists.
 const file = (extension: string, slug: string, over: Record<string, unknown> = {}) => ({
   id: `${extension}/${slug}`,
   extension,
@@ -24,7 +24,7 @@ const file = (extension: string, slug: string, over: Record<string, unknown> = {
   icon: null,
   category: null,
   keywords: null,
-  hidden: false,
+  kind: "page",
   for: [],
   params: [],
   badge: null,
@@ -32,12 +32,12 @@ const file = (extension: string, slug: string, over: Record<string, unknown> = {
   ...over,
 });
 
-test("the launcher lists every page file with a category that isn't hidden, by its route", () => {
+test("the launcher lists every page with a category, by its route; a part is never listed", () => {
   const out = launcherPages([
     ext({
       name: "oxplow-foundation",
       namespace: "oxplow",
-      pageFiles: [file("oxplow-foundation", "tasks", { title: "Tasks", category: "Work", keywords: "dashboard" }), file("oxplow-foundation", "diff"), file("oxplow-foundation", "secret", { category: "Work", hidden: true })],
+      pageFiles: [file("oxplow-foundation", "tasks", { title: "Tasks", category: "Work", keywords: "dashboard" }), file("oxplow-foundation", "diff"), file("oxplow-foundation", "secret", { kind: "part" })],
     } as never),
     ext({ name: "gh", namespace: "gh", pageFiles: [file("gh", "open-prs", { title: "Open PRs", category: "Work" })] } as never),
   ]);

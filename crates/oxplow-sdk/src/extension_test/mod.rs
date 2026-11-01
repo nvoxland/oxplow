@@ -34,6 +34,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use oxplow_app::extension::extensions::Extension;
+use oxplow_app::pages::schema::PageKind;
 use oxplow_app::providers::host::{self, Launch};
 use oxplow_app::providers::{self, ProviderSpec};
 use oxplow_domain::diagnostic::Diagnostic;

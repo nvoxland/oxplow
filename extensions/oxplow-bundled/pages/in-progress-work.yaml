@@ -1,6 +1,5 @@
 title: "Work in progress"
 description: "The work in progress across every provider."
-hidden: true
 answers:
 - {"question":"What work is in progress, across every provider?","params":{},"skill":"work-items"}
 loaders:

@@ -1,6 +1,5 @@
 title: "Contribution health"
 description: "The extension providers and collectors that are failing or disabled, and the repair work item of one."
-hidden: true
 params:
 - name: extension
   default: ""

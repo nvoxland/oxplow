@@ -98,8 +98,8 @@ when it is off), Deployed (`yes` when a deployment runs, the shipped copy
 included; `no` for one never deployed or read from its source), Permissions
 (the scope keys, alphabetically, each with its explanation as the hover) and
 Problems (`no`, else how many, in the problem color and linking to Extension
-problems for that extension). Its rows come from the hidden `extension-facts`
-page's `summary` — the one place that turns `v_extension`,
+problems for that extension). Its rows come from the `extension-facts`
+page's `summary` (a page with no category) — the one place that turns `v_extension`,
 `v_extension_source` and `v_contribution_health` into words and counts.
 It has no buttons.
 
@@ -200,8 +200,8 @@ its scope trace.
   and for the last 7 days, its runs, failures, denials, mean `cpu_ms` and
   model calls, the ones needing attention first. The Extensions page
   shows each extension's worst current run (`v_extension_run`, `latest =
-  1`). Opening an extension's row (the hidden `oxplow-bundled/extension-runs`
-  page, param `extension`) lists its runs one by one for the same week:
+  1`). Opening an extension's row (the `oxplow-bundled/extension-runs`
+  page, which has no category, param `extension`) lists its runs one by one for the same week:
   contribution, version, generation (blank for a run that holds none),
   actor, causing event, outcome, error, wall and CPU time, model calls — the
   small inspector, with no log or secret to read.
@@ -211,7 +211,7 @@ its scope trace.
   `v_tool_call` joined to `v_agent_session`; a call whose session oxplow has
   no record of reads harness `unknown`), `interface-commands` (agents' runs by
   command from `v_command_audit`: runs, invalid, denied, failed and the share
-  not ok; opening a command shows the hidden `interface-command-errors` page,
+  not ok; opening a command shows the `interface-command-errors` page (no category),
   its most common error texts counted together up to the "Expected one of"
   list) and `interface-hints` (`v_hint_stat` per hint, those that never fired
   first). The bundled `hint-never-fires` advisory tells the person, once per

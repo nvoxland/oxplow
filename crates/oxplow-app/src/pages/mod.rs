@@ -7,6 +7,7 @@ pub mod checks;
 pub mod content;
 pub mod label;
 pub mod open_runs;
+pub mod refs;
 pub mod renderers;
 pub mod runner;
 pub mod schema;

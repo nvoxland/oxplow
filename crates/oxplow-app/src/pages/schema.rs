@@ -132,7 +132,6 @@ pub struct Page {
     pub pinned: bool,
     pub comments: bool,
     pub refresh: bool,
-    pub hidden: bool,
     pub needs: Vec<String>,
     /// Its whole-page actions (a row action goes on the viz node that
     /// shows the row).
@@ -513,8 +512,6 @@ struct PageFile {
     #[serde(default)]
     refresh: bool,
     #[serde(default)]
-    hidden: bool,
-    #[serde(default)]
     needs: Vec<String>,
     #[serde(default)]
     actions: Vec<serde_yaml::Value>,
@@ -677,7 +674,15 @@ pub fn parse_page(
     text: &str,
     kind: PageKind,
 ) -> Result<Page, String> {
-    let file: PageFile = serde_yaml::from_str(text).map_err(|e| e.to_string())?;
+    let file: PageFile = serde_yaml::from_str(text).map_err(|e| {
+        if e.to_string().contains("unknown field `hidden`") {
+            return "`hidden` is no longer a key: a page with no `category` isn't listed; a page \
+                    drawn only inside another is a part (parts/); rows other pages read are a \
+                    query (queries/)"
+                .to_string();
+        }
+        e.to_string()
+    })?;
     let id = format!("{extension}/{slug}");
     let renders = file
         .renders
@@ -829,7 +834,6 @@ pub fn parse_page(
         pinned: file.pinned,
         comments: file.comments,
         refresh: file.refresh,
-        hidden: file.hidden,
         needs: file.needs,
         actions,
         alert,
@@ -862,7 +866,6 @@ const KIND_KEYS: &[KindKey] = &[
     ("default", |f| f.default, [true, false, false]),
     ("pinned", |f| f.pinned, [true, false, false]),
     ("content", |f| f.content.is_some(), [true, false, false]),
-    ("hidden", |f| f.hidden, [true, false, false]),
     ("answers", |f| !f.answers.is_empty(), [true, false, false]),
     ("tool", |f| f.tool.is_some(), [true, false, true]),
     ("see_also", |f| !f.see_also.is_empty(), [true, false, false]),
@@ -879,7 +882,7 @@ const KIND_KEYS: &[KindKey] = &[
 /// give a page a tab, a launcher entry or an agent-facing identity. A
 /// resource page (`for:`) is a display mode of the resources it names:
 /// never listed on its own, so it has no launcher section, keywords or
-/// badge and can't be hidden, and it is handed the URI it shows as its
+/// badge, and it is handed the URI it shows as its
 /// `uri` param. A standalone page has no `content`.
 fn kind_problem(file: &PageFile, kind: PageKind, resource: bool) -> Option<String> {
     let column = PageKind::ALL.iter().position(|k| *k == kind)?;
@@ -921,7 +924,6 @@ fn kind_problem(file: &PageFile, kind: PageKind, resource: bool) -> Option<Strin
     }
     for (key, given) in [
         ("category", file.category.is_some()),
-        ("hidden", file.hidden),
         ("keywords", file.keywords.is_some()),
         ("badge", file.badge.is_some()),
     ] {

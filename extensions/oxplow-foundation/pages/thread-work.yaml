@@ -1,6 +1,5 @@
 title: Thread work
 description: The thread's work items, in progress first, then to do and blocked, then the finished ones newest first, with the efforts that worked on each.
-hidden: true
 tool: thread_work
 params:
 - name: thread

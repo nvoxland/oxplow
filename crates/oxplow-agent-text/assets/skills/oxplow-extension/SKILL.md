@@ -6,7 +6,7 @@ description: Build oxplow pages and extensions on request: views over oxplow's d
 # Building oxplow pages
 
 A **page** (`pages/<slug>.yaml`) is named queries (`loaders:`) plus a tree of
-nodes that shows them (`view:`); it updates as the work changes. Pages live
+nodes that shows them (`view:`); it updates as the work changes. A **part** (`parts/`) is drawn only inside a host — an embed, a mount, a panel, a row's expand — and has no tab; a **query** (`queries/`) is rows only, read by `options_from`, form `choices` and `{ page, loader }` loaders. Ids are `<ext>/<slug>` in all three. Pages live
 in **extensions**: plain-file folders at `.oxplow/extensions/<name>/` the
 user can keep and share. Scaffold with `$OXPLOW_BIN extension new <kind> <name>
 --origin <your effort ref>` or write a page with `oxplow.extension.write_page`.

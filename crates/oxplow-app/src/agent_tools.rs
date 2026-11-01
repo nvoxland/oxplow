@@ -337,10 +337,10 @@ mod tests {
              tool: open_work\n",
         )
         .unwrap();
+        std::fs::create_dir_all(root.join("queries")).unwrap();
         std::fs::write(
-            root.join("pages/owners.yaml"),
-            "title: Owners\nloaders:\n  owners:\n    sql: SELECT 'me' AS value, 'Me' AS label\n\
-             view:\n  viz: table\n  from: owners\n",
+            root.join("queries/owners.yaml"),
+            "title: Owners\nloaders:\n  owners:\n    sql: SELECT 'me' AS value, 'Me' AS label\n",
         )
         .unwrap();
         let problems = activate_with_problems(&fx.svc).await;

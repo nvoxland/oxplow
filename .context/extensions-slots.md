@@ -218,7 +218,7 @@ enhancement off are `tests-e2e/specs/pages/plain.spec.ts`'s
 `history-graph` component (`components/history-graph/`, classic scripts on
 the client library and the kit) draws the stream's commits as `git log
 --graph` does — a lane per line of descent, a dot per commit — from its
-hidden `history-graph` page (a recursive walk of `v_commit` from
+`history-graph` part (a recursive walk of `v_commit` from
 `:head_sha`, with local branch and tag labels from `v_branch` / `v_tag`).
 Its text, author and branch filters only dim or hide rows, so typing never
 re-runs the page. On Git History they are the page's `q`, `author` and

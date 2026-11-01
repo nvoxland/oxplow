@@ -40,7 +40,7 @@ const configOf = (viz: VizConfig["viz"]): VizConfig => ({
   depth: null,
   parts: [],
   launcherCategory: null,
-  hidden: false,
+  kind: "page",
   actions: [],
   alert: null,
   needs: [],

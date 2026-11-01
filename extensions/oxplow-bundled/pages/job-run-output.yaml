@@ -1,6 +1,5 @@
 title: Job Run Output
 description: What a job run produced as it ran, in order — its model's text as it streamed, each tool it called and what the tool answered, and each round's tokens.
-hidden: true
 params:
 - name: job_run
 loaders:

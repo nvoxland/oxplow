@@ -47,8 +47,9 @@ view:
 
 A `form` viz has no `from`. `command` is the (write) command the form
 submits, as the person. `defaults` bind params with `{{param.x}}`;
-`choices: { field: <ext>/<page>#<loader> }` reads a loader's value/label
-rows (`<ext>/<page>` alone takes its first loader). Field and `fixed`
+`choices: { field: <ext>/<query>[#<loader>] }` reads a query's rows (`value`,
+`label`, optional `group`); `<ext>/<query>` alone means its last loader. A list
+two pages share is a query. Field and `fixed`
 rules are in `commands-and-forms.md`. A form is not allowed in an inline
 page.
 
@@ -68,7 +69,7 @@ view: { viz: detail, from: summary }
 ```
 
 A page with `for:` is a display mode of the resource: no `category`,
-`hidden`, `keywords` or `badge`, and it is not listed. For a file, `content:
+`keywords` or `badge`, and it is not listed. For a file, `content:
 { text: true }` adds the file's text. Test it with `temp:` and an `oxplow:temp`
 file URI (`testing.md`).
 
@@ -81,16 +82,14 @@ whose `expect.nodes` lists the tile ids, and give it an `answers:` entry.
 
 ## A slot mount (add a section to another page)
 
-Mount a page of yours into a page that has a `slot` node (foundation's
+Mount a part of yours into a page that has a `slot` node (foundation's
 Commit, Uncommitted Changes, Diff View, Work Item, Tasks and New Session
 pages have a `sections` slot):
 
-```yaml page
-# pages/stale-reviews.yaml
+```yaml part
+# parts/stale-reviews.yaml
 title: Stale reviews
 params: [{ name: uri }]            # the params the host passes, by name
-answers:
-  - { question: "Which reviews of this work item are stale?", about: oxplow/work_item }
 loaders:
   stale: { sql: "SELECT title FROM v_review WHERE item = :uri AND age_days > 7" }
 view: { viz: list, from: stale, empty: No stale reviews. }

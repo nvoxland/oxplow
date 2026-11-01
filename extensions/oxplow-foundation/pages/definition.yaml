@@ -33,7 +33,7 @@ loaders:
     sql: |
       SELECT p.title, p.uri, p.description, 1 AS ord
       FROM definition d JOIN v_page p ON p.id = d.page
-      WHERE p.renders = '[]' AND NOT p.hidden
+      WHERE p.renders = '[]' AND p.category IS NOT NULL
       UNION ALL
       SELECT d.extension, uri('oxplow/extension', 'name', d.extension), 'The extension that declares it', 2
       FROM definition d
@@ -67,7 +67,7 @@ loaders:
                        ELSE 'It draws ' || kinds || ', but another page is the one that opens.' END FROM p
         UNION ALL
         SELECT 2, CASE WHEN draws > 0 THEN 'It is a display mode of ' || kinds || ' (Open With).'
-                       WHEN category IS NOT NULL AND NOT hidden THEN 'It is in the launcher, under ' || category || '.'
+                       WHEN category IS NOT NULL THEN 'It is in the launcher, under ' || category || '.'
                        ELSE 'It isn''t in the launcher: links from other pages open it.' END FROM p
         UNION ALL
         SELECT 3, CASE WHEN label IS NULL THEN 'Its tab is named by its title' ELSE 'Its tab is named `' || label || '`' END

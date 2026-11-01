@@ -458,7 +458,7 @@ tool: open_work              # offered as <namespace>_open_work
   one name — in one extension, or two under one namespace (oxplow's own
   share `oxplow`) — are refused at load, on each.
 - **Typed page tools.** `oxplow-foundation/pages/` holds the pages an
-  agent asks for most, each `hidden: true` with a `tool:`: `catalog
+  agent asks for most, each with no `category` and a `tool:`: `catalog
   { dataset? }` (every dataset with its columns), `thread_work { thread }` (the
   thread's items by state, with their efforts), `work_next { thread }` (what
   to pick up next; the bundled `/work-next` command calls it) and
@@ -489,7 +489,7 @@ tool: open_work              # offered as <namespace>_open_work
 **Working with pages**
 
 - `v_page`: every page (`uri`, `extension`, `id`, `title`, `description`,
-  `hidden`), with `v_page_param` (its params) and `v_page_answer` (the
+  `category`, `kind`), with `v_page_param` (its params) and `v_page_answer` (the
   questions it answers); `v_extension` and `v_contribution` give the
   extensions and what they contribute.
 - `oxplow_find_page { question?, about? }` (`oxplow.page.find`): the pages

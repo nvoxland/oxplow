@@ -1677,6 +1677,74 @@ expect: {expect}
 
 const LIST: &str = "SELECT title FROM v_work_item WHERE title = 'Write the page test'";
 
+/// A part is tested with `when: { part }` as a page is, a query with
+/// `when: { query }` against its last loader's rows (or a named loader's);
+/// the wrong key is a finding that says which to write.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_part_and_a_query_fixture_run_by_their_kinds() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write(
+        root,
+        ".oxplow/extensions/kinds/extension.yaml",
+        "manifest: 2\nname: kinds\nintent:\n  purpose: test\n",
+    );
+    write(
+        root,
+        ".oxplow/extensions/kinds/parts/section.yaml",
+        "title: Section\nloaders:\n  rows: { rows: [{ a: 1 }, { a: 2 }] }\nview: { id: list, viz: table, from: rows }\n",
+    );
+    write(
+        root,
+        ".oxplow/extensions/kinds/queries/options.yaml",
+        "title: Options\nparams: [{ name: n, default: 2 }]\nloaders:\n  every: { rows: [{ value: 1, label: one }, { value: 2, label: two }] }\n  some: { sql: 'SELECT value, label FROM every WHERE value <= :n' }\n",
+    );
+    write(
+        root,
+        ".oxplow/extensions/kinds/fixtures/part.yaml",
+        "when: { part: section }\nexpect: { loaders: { rows: { rows: 2 } }, nodes: [{ id: list, viz: table }] }\n",
+    );
+    write(
+        root,
+        ".oxplow/extensions/kinds/fixtures/query.yaml",
+        "when: { query: options, params: { n: 1 } }\nexpect: { rows: [{ value: 1, label: one }], columns: [value, label] }\n",
+    );
+    write(
+        root,
+        ".oxplow/extensions/kinds/fixtures/query-loader.yaml",
+        "when: { query: 'options#every' }\nexpect: { rows: 2 }\n",
+    );
+    let report = test_extension(root, "kinds", false).await.unwrap();
+    assert_eq!(report.error_lines(), Vec::<String>::new());
+    assert!(report.ok);
+
+    write(
+        root,
+        ".oxplow/extensions/kinds/fixtures/wrong.yaml",
+        "when: { page: section }\nexpect: { loaders: { rows: { rows: 2 } } }\n",
+    );
+    write(
+        root,
+        ".oxplow/extensions/kinds/fixtures/wrong-query.yaml",
+        "when: { part: options }\nexpect: { loaders: { every: { rows: 2 } } }\n",
+    );
+    let errors = test_extension(root, "kinds", false)
+        .await
+        .unwrap()
+        .error_lines()
+        .join("\n");
+    assert!(
+        errors.contains("`page: section` names a part")
+            && errors.contains("write `when: { part: section }`"),
+        "{errors}"
+    );
+    assert!(
+        errors.contains("`part: options` names a query")
+            && errors.contains("write `when: { query: options }`"),
+        "{errors}"
+    );
+}
+
 /// A page fixture runs `given` steps first, then the page, and checks
 /// its loaders and nodes; the answers run too.
 #[tokio::test(flavor = "multi_thread")]

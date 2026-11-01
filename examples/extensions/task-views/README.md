@@ -1,10 +1,10 @@
 # Task views: your own Board, list and editor
 
-Three views that stand in for oxplow's own, with no work-items provider of
+Three views, each a part (`parts/`), that stand in for oxplow's own, with no work-items provider of
 their own. They read `v_work_item` and change items only through the
 work-item commands, so they work with whichever list is active.
 
-| Replaces | Page | What it is |
+| Replaces | Part | What it is |
 |---|---|---|
 | `work_item.board` | `swimlanes` | A `viz: custom` component: a column per state, cards you drag |
 | `work_item.list` | `compact-list` | A table with title (a page link), state and updated; row actions **Done** and **Edit…** |
@@ -38,7 +38,7 @@ ui:
 
 May:
 - read any published dataset (`v_work_item`, `v_thread`, …) through its
-  pages' loaders;
+  parts' loaders;
 - change work items through the commands it declares in
   `custom_components[].commands` (a table or form on a page uses `actions` /
   `form`, which run as you);

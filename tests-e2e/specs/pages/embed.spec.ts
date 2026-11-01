@@ -14,7 +14,6 @@ view:
 `;
 
 const inner = `title: Echidna inner
-hidden: true
 params:
 - name: name
 loaders:
@@ -27,7 +26,7 @@ view:
 `;
 
 test("an embedded page's nodes show in the host, with ids <embed>/<child>", async ({ page, daemon }) => {
-  await installExtension(daemon, "e2e-embed", { files: { "pages/echidna.yaml": outer, "pages/echidna-inner.yaml": inner } });
+  await installExtension(daemon, "e2e-embed", { files: { "pages/echidna.yaml": outer, "parts/echidna-inner.yaml": inner } });
   await page.goto("/");
   await openFromLauncher(page, "Embed Echidna");
   const host = page.getByTestId("page-host").filter({ visible: true });

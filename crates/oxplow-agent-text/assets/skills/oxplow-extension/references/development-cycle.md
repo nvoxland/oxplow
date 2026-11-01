@@ -85,7 +85,7 @@ then start it again.
 
 Prefer improving a page over adding a near-duplicate. `oxplow_find_page`
 searches by question; in SQL `v_page` (`uri`, `extension`, `title`,
-`category`, `hidden`, …) lists every page, `v_page_answer` the questions
+`category`, `kind`, …) lists every page, `v_page_answer` the questions
 they answer and `v_page_param` their params; `v_extension` lists the
 extensions that loaded (`enabled`, `errors`, `warnings`, `deployment`) and
 `v_contribution` what each contributes (count it by `extension` and `kind`).

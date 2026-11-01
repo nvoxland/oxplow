@@ -8,7 +8,7 @@ given:
   - observe: { visit: { page: "oxplow:oxplow/file?path=DEV.md", kind: file, label: DEV.md, thread: thr1 } }
   - observe: { visit: { page: "oxplow:oxplow/page?page=settings", kind: settings, label: Settings, thread: thr1 } }
   - observe: { visit: { page: "oxplow:oxplow/agent_session?id=ses1", kind: agent_session, label: Claude, thread: thr1 } }
-when: { page: oxplow-bundled/go-to-panel, params: { thread_id: 1, mode: recent } }
+when: { part: oxplow-bundled/go-to-panel, params: { thread_id: 1, mode: recent } }
 expect:
   loaders:
     go_to:
@@ -27,7 +27,7 @@ steps:
             - { grp: Bookmarks }
             - { grp: Most visited, title: DEV.md, visits: 3 }
             - { grp: Most visited, title: Settings, visits: 1 }
-  - when: { page: oxplow-bundled/go-to-bookmarks, params: { thread_id: 1 } }
+  - when: { part: oxplow-bundled/go-to-bookmarks, params: { thread_id: 1 } }
     expect:
       loaders:
         go_to_bookmarks:

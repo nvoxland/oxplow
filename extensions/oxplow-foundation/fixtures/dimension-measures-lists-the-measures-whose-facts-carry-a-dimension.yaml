@@ -3,8 +3,7 @@
 # every other, by title. No "all measures": a dimension's values are counted
 # over one measure's facts at a time (Dimension data's default is the first).
 when:
-  page: oxplow-foundation/dimension-measures
+  query: oxplow-foundation/dimension-measures
   params: { uri: "oxplow:oxplow/dimension?dimension=oxplow.model" }
 expect:
-  loaders:
-    dimension_measures: { rows: { contains: [{ value: oxplow.tokens, label: Agent tokens }, { value: oxplow.complexity }] } }
+  rows: { contains: [{ value: oxplow.tokens, label: Agent tokens }, { value: oxplow.complexity }] }

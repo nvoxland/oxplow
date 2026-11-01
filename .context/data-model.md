@@ -696,7 +696,7 @@ grid of embeds). It deleted, without rewriting, every stored reference to
 their URIs (the old page, answer and dashboard resources): bookmarks,
 visits, remembered preferences, context items, page-ref edges and search
 rows. Site search indexes pages instead (`v_search_page`, the launcher's
-pages; hidden ones are left out).
+pages; pages with no category are left out).
 
 ### `handoff` (`handoff_store.rs`, V84)
 
@@ -2546,7 +2546,7 @@ the docs in one diff:
 - **Directory scope** — the `scope` filter param of the `directory` page
   (and of the launcher's `files` page, which passes it on; `all`, `uncommitted`, the default branch's name for the branch's
   changes, the upstream's name for the unpushed ones), in the tab's
-  address; its choices come from `files-scopes`, which offers only those
+  address; its choices come from the `files-scopes` query, which offers only those
   that exist (no branch scope on the default branch, no unpushed scope
   without an upstream) and only on the worktree: on another filesystem or
   revision it offers `all` alone and the page ignores any other value.

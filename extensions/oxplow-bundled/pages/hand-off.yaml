@@ -1,6 +1,5 @@
 title: Hand Off Work
 description: Hand work to another open thread, any stream's. Its agent gets it at the start of its next prompt, and nothing wakes it. Taking it moves the work item there.
-hidden: true
 params:
 - name: uri
   label: From thread

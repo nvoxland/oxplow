@@ -1,6 +1,5 @@
 title: Thread Activity
 description: "What a thread's agent did, turn by turn, under the effort each turn fell in: prompt, session, model, context and compactions, files, test runs and tokens."
-hidden: true
 params:
 - name: thread_id
   label: Thread

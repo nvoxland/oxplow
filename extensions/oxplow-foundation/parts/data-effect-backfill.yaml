@@ -1,0 +1,27 @@
+title: Backfill
+description: The matching events an effect never reacted to - those logged before it was approved, or while it waited to be approved again.
+params:
+- name: effect
+loaders:
+  data_effect_backfill:
+    sql: |
+      SELECT effect, planned, to_seq, batch,
+             CASE WHEN planned = 0 THEN 'Nothing to catch up on.'
+                  ELSE planned || ' events it never reacted to. It may call outside oxplow for each; one run reacts to at most ' || batch || '.' END AS what,
+             (planned > 0) AS has_work
+      FROM v_effect_backfill WHERE effect = :effect
+view:
+  from: data_effect_backfill
+  viz: detail
+  columns:
+  - key: what
+    label: Backfill
+  empty: That effect isn't enabled.
+  actions:
+  - id: backfill
+    label: Backfill
+    command: oxplow.effect.backfill
+    when: has_work
+    input:
+      effect: '{{row.effect}}'
+      to_seq: '{{row.to_seq}}'

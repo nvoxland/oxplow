@@ -1,6 +1,5 @@
 title: "Wiki references"
 description: "The wiki pages that cite files that changed, those that talk about a file, and saving a page."
-hidden: true
 params:
 - name: path
   default: ""

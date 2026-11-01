@@ -120,11 +120,16 @@ pub fn parse_replacements(
         // What renders instead: its params are what the contract's props
         // are checked against.
         let name = format!("page `{}`", r.page);
-        let declared: Option<Vec<String>> = pages
-            .iter()
-            .find(|p| p.slug == r.page)
-            .map(|p| p.params.iter().map(|x| x.name.clone()).collect());
+        let found = pages.iter().find(|p| p.slug == r.page);
+        let declared: Option<Vec<String>> =
+            found.map(|p| p.params.iter().map(|x| x.name.clone()).collect());
+        let wrong_kind = found.and_then(|p| {
+            crate::pages::refs::kind_problem(&crate::pages::refs::RefSite::Replacement, p)
+        });
         let problem = match (target, declared.as_ref()) {
+            (Some(_), Some(_)) if wrong_kind.is_some() => {
+                Some(("replacement.unknown_page", wrong_kind.unwrap_or_default()))
+            }
             (None, _) => Some((
                 "replacement.unknown_target",
                 format!(

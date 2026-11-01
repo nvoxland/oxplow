@@ -63,16 +63,16 @@ intent:
       input: { page: comments, params: { stream_id: 1, days: "0" } }
       expect: open threads under their target, a resolved one only when the filter reaches back, a picked thread as its messages in order
     - name: alerts-operation-reads-how-a-failure-ended
-      input: { page: alerts-operation, params: { event_id: "<a failure's event>" } }
+      input: { part: alerts-operation, params: { event_id: "<a failure's event>" } }
       expect: a failure's command and stderr; one that captured nothing says so
     - name: alerts-lists-failures-until-seen-and-dismissed
       input: { page: alerts }
       expect: a failure red until seen, muted after, gone once dismissed; the other parts empty over a quiet project
     - name: alerts-deliveries-list-nothing-over-a-quiet-project
-      input: { page: alerts-deliveries }
+      input: { part: alerts-deliveries }
       expect: nothing listed over a quiet project
     - name: alerts-reactions-list-nothing-over-a-quiet-project
-      input: { page: alerts-reactions }
+      input: { part: alerts-reactions }
       expect: nothing listed over a quiet project
     - name: settings-agents-area-hands-set-agents-each-new-order
       input: { page: settings, params: { area: agents } }
@@ -90,16 +90,16 @@ intent:
       input: { page: diff-view, params: { uri: "oxplow:oxplow/effort?id=eff1", stream_id: 1 } }
       expect: an effort's own bracket to the working tree, a picked end as a range, nothing without a URI
     - name: changes-effort-names-the-effort-it-is-of
-      input: { page: changes-effort, params: { effort_id: 1, effort: eff1 } }
+      input: { part: changes-effort, params: { effort_id: 1, effort: eff1 } }
       expect: the effort is open and named for Rename and Link to task
     - name: settings-data-area-lists-entities-collectors-and-effects
       input: { page: settings, params: { area: data } }
       expect: the entities, the collectors and the declared effects
     - name: data-entity-rows-counts-an-open-entitys-rows
-      input: { page: data-entity-rows, params: { name: v_work_item } }
+      input: { part: data-entity-rows, params: { name: v_work_item } }
       expect: the rows an open entity holds
     - name: data-effect-backfill-says-what-it-would-do
-      input: { page: data-effect-backfill, params: { effect: oxplow-bundled/store-reasoning } }
+      input: { part: data-effect-backfill, params: { effect: oxplow-bundled/store-reasoning } }
       expect: a backfill plan for an enabled effect, none for one nothing declares
     - name: recent-commits-lists-the-latest-first
       input: { page: recent-commits }
@@ -180,7 +180,7 @@ intent:
       input: { page: git-dashboard, params: { stream_id: 1 } }
       expect: the stream's branch with no upstream, the working tree, the last commits; the rest empty
     - name: the-directory-is-a-tree-of-a-folder-or-the-changed-files
-      input: { page: files-scopes, params: { stream_id: 1 } }
+      input: { query: files-scopes, params: { stream_id: 1 } }
       expect: all files a folder at a time, or the changed files in their folders, each opening a diff
     - name: the-directory-lists-a-scratch-folder-as-a-tree-with-no-changes
       input: { page: directory, params: { stream_id: 1, path: '', filesystem: 'oxplow:temp' } }
@@ -369,7 +369,7 @@ intent:
       input: { page: dataset-definition, params: { uri: "oxplow:oxplow/dataset?dataset=work_item" } }
       expect: a dataset's description, owner, kind and each field with its type and doc
     - name: dataset-fields-lists-a-datasets-fields-as-choices
-      input: { page: dataset-fields, params: { uri: "oxplow:oxplow/dataset?dataset=work_item" } }
+      input: { query: dataset-fields, params: { uri: "oxplow:oxplow/dataset?dataset=work_item" } }
       expect: none, then each field of the dataset, as choices
     - name: data-catalog-links-each-dataset-to-its-definition
       input: { page: data-catalog, params: { dataset: work_item } }
@@ -378,13 +378,13 @@ intent:
       input: { page: measure-data, params: { uri: "oxplow:oxplow/measure?measure=oxplow.tokens" } }
       expect: a measure's facts newest first, narrowed, or grouped and folded
     - name: measure-branches-lists-the-branches-a-measure-has-facts-on
-      input: { page: measure-branches, params: { uri: "oxplow:oxplow/measure?measure=oxplow.tokens" } }
+      input: { query: measure-branches, params: { uri: "oxplow:oxplow/measure?measure=oxplow.tokens" } }
       expect: all branches, then those the measure's facts were taken on
     - name: dimension-data-counts-the-values-its-facts-carry
       input: { page: dimension-data, params: { uri: "oxplow:oxplow/dimension?dimension=oxplow.language" } }
       expect: the values facts carry for the dimension with a count, most common first
     - name: dimension-measures-lists-the-measures-whose-facts-carry-a-dimension
-      input: { page: dimension-measures, params: { uri: "oxplow:oxplow/dimension?dimension=oxplow.language" } }
+      input: { query: dimension-measures, params: { uri: "oxplow:oxplow/dimension?dimension=oxplow.language" } }
       expect: all measures, then each whose facts carry the dimension
     - name: command-data-lists-its-runs-newest-first
       input: { page: command-data, params: { uri: "oxplow:oxplow/command?command=oxplow.work_item.create" } }

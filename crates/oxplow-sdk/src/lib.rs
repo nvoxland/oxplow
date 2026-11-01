@@ -290,8 +290,13 @@ pub fn scaffold_with(
     use oxplow_domain::uri::build::work_item_uri;
     let work_item = work_item_uri("oxplow", "tsk1");
     let (example_input, example_expect, fixture_expect) = match kind {
-        Kind::Component | Kind::Page | Kind::Panel => (
+        Kind::Component | Kind::Page => (
             format!("{{ page: {name}, params: {{ stream_id: 1 }} }}"),
+            "one row per open task in the stream, newest first",
+            Some("{ loaders: { items: { rows: $any } } }".to_string()),
+        ),
+        Kind::Panel => (
+            format!("{{ part: {name}, params: {{ stream_id: 1 }} }}"),
             "one row per open task in the stream, newest first",
             Some("{ loaders: { items: { rows: $any } } }".to_string()),
         ),
@@ -697,16 +702,13 @@ pub fn scaffold_with(
             )?;
         }
         Kind::Panel => write(
-            &format!("{rel_dir}/pages/{name}.yaml"),
+            &format!("{rel_dir}/parts/{name}.yaml"),
             format!(
                 "title: {title}\n\
-                 description: \"TODO: what this answers.\"\n\
-                 hidden: true\n\
+                 description: \"TODO: what this shows.\"\n\
                  params:\n\
                  \x20 # Filled in with the viewer's stream unless a value is given.\n\
                  \x20 - {{ name: stream_id, label: Stream }}\n\
-                 answers:\n\
-                 \x20 - {{ question: \"TODO: what is open in this stream?\", params: {{ stream_id: 1 }} }}\n\
                  loaders:\n\
                  \x20 items:\n\
                  \x20   sql: |\n\

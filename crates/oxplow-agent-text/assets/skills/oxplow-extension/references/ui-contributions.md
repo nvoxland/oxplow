@@ -1,8 +1,8 @@
 # Slots, panels, renderers, decorators and replacing a core view
 
-- **Slots** mount a page into another page's `slot` node (`ui: { slots: [{
+- **Slots** mount a part (a page may be mounted too) into another page's `slot` node (`ui: { slots: [{
   slot, page, at?, title?, size? }] }` in `extension.yaml`). `slot:
-  <extension>/<page>.<name>`; the mounted page runs as an embed, getting the
+  <extension>/<page>.<name>`; the mounted part runs as an embed, getting the
   host's params by name (declare the ones you need). `at` is `start`, `end`
   (default) or `{ before | after: <sibling id> }`; an `at` naming a node the
   host doesn't have is a load warning and the mount goes last. `size` is for
@@ -34,13 +34,13 @@
   a `category`; its id carries its params, `label` names its tab.
 
 - **Panels** put a page in the left nav (`panels: [{ id, title, icon?, scope,
-  body, badge?, open?, collapsed?, count?, dock? }]`): `body` is a page drawn
-  compact; `badge` is a page with an `alert` (or `badge:`), giving the
+  body, badge?, open?, collapsed?, count?, dock? }]`): `body` is a part (or a page) drawn
+  compact; `badge` is a part (or a page) with an `alert` (or `badge:`), giving the
   panel's count and listing in the Alerts panel while it fires; `collapsed`
-  is a page shown compact while the panel is collapsed; `count` is a page
+  is a part (or a page) shown compact while the panel is collapsed; `count` is a part (or a page)
   whose value (first cell) or row count is the header count; `open` is the
   URI the header opens. `scope` is `project`, `stream` or `thread` — a
-  `stream`/`thread` panel's pages must declare `stream_id` / `thread_id`,
+  `stream`/`thread` panel's parts must declare `stream_id` / `thread_id`,
   which the nav binds. With `dock: true` the panel is an icon in the dock
   at the bottom left, its count the badge, the body opening above the bar;
   use it for a short list the person checks and dismisses.

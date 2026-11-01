@@ -1574,9 +1574,9 @@
   tests:
     - { not_null: uri }
 - name: page
-  version: 2
+  version: 3
   key: [uri]
-  description: "Every page file of every enabled extension: a page's metadata, what it renders and how an agent finds it. Restated with each extension generation. Its params are `v_page_param`, the questions it answers `v_page_answer`."
+  description: "Every page file of every enabled extension — pages, parts and queries: its metadata, what it renders and how an agent finds it. Restated with each extension generation. Its params are `v_page_param`, the questions it answers `v_page_answer`."
   fields:
     - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/page?page=<extension>/<slug>`; `page=<slug>` for an extension whose namespace is `oxplow`." }
     - { name: "extension", type: "TEXT", doc: "The extension that declares it (v_extension.name)." }
@@ -1591,7 +1591,7 @@
     - { name: "renders", type: "TEXT", doc: "The resource kinds it renders (`oxplow/commit`), as a JSON array; `[]` for a route." }
     - { name: "default", type: "INTEGER", doc: "1 when it is the default page of the kinds it renders." }
     - { name: "pinned", type: "INTEGER", doc: "1 when it is pinned in the rail." }
-    - { name: "hidden", type: "INTEGER", doc: "1 when the launcher doesn't list it." }
+    - { name: "kind", type: "TEXT", doc: "`page` (a tab and a URL; in the launcher when `category` is set), `part` (drawn only inside a host page: an embed, a mount, a panel, a row's expand) or `query` (rows other pages read; no view). (v3)" }
     - { name: "tool", type: "TEXT", doc: "The MCP tool it is also offered as, namespaced; NULL for none." }
     - { name: "needs", type: "TEXT", doc: "The capabilities (or features) it needs, as a JSON array." }
     - { name: "source", type: "TEXT", doc: "Its source file, the one to edit, relative to the project; NULL when no source is here (it ships with oxplow)." }

@@ -1,6 +1,5 @@
 title: "Zones"
 description: "The project's zone rules and the files that fall outside every rule."
-hidden: true
 answers:
 - {"question":"Which zone rules does this project have, and how many files does each claim?","params":{},"skill":"oxplow-extension"}
 - {"question":"Which files fall outside every zone rule?","params":{},"skill":"oxplow-extension"}

@@ -1,6 +1,5 @@
 title: "Project settings"
 description: "The settings this project sets itself."
-hidden: true
 answers:
 - {"question":"Which settings does this project set itself, rather than leaving them at their default?","params":{},"skill":"oxplow-extension"}
 loaders:

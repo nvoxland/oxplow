@@ -4,7 +4,6 @@ import { expect, test } from "../../support/fixtures.js";
 import { expandRailSection } from "../../support/ui.js";
 
 const body = `title: Glider body
-hidden: true
 loaders:
   gliders:
     sql: SELECT title FROM v_work_item WHERE title LIKE 'Glider %' ORDER BY title
@@ -17,7 +16,6 @@ view:
 `;
 
 const count = `title: Glider count
-hidden: true
 loaders:
   n:
     sql: SELECT count(*) AS n FROM v_work_item WHERE title LIKE 'Glider %'
@@ -28,7 +26,7 @@ view: { id: n, viz: number, from: n }
 test("a left-nav panel draws its body page, and its badge page's number", async ({ page, daemon }) => {
   await installExtension(daemon, "e2e-panel", {
     manifest: "panels:\n  - { id: gliders, title: Gliders, icon: bell, scope: project, body: glider-body, badge: glider-count }\n",
-    files: { "pages/glider-body.yaml": body, "pages/glider-count.yaml": count },
+    files: { "parts/glider-body.yaml": body, "parts/glider-count.yaml": count },
   });
   await page.goto("/");
   const id = "ext:e2e-panel/gliders";

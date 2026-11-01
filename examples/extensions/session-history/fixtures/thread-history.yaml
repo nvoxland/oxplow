@@ -1,6 +1,6 @@
 # A thread with no recorded prompts shows no row.
 when:
-  page: thread-history
+  part: thread-history
   params: { thread_id: 1 }
 expect:
   loaders:

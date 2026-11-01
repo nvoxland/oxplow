@@ -2,7 +2,7 @@
 # effort Rename… acts on: offered on its one row.
 given:
   - { command: oxplow.effort.open, input: { thread: thr1 } }
-when: { page: changes-effort, params: { effort_id: 1, effort: eff1 } }
+when: { part: changes-effort, params: { effort_id: 1, effort: eff1 } }
 expect:
   loaders:
     changes_effort: { rows: [{ state: Open, effort: eff1 }] }

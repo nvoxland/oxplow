@@ -1,5 +1,5 @@
 # An effect nothing declares has no backfill plan.
-when: { page: data-effect-backfill, params: { effect: nope/none } }
+when: { part: data-effect-backfill, params: { effect: nope/none } }
 expect:
   loaders:
     data_effect_backfill: { rows: 0 }

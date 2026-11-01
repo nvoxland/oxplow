@@ -4932,7 +4932,6 @@ export type Page_Deserialize = {
 	pinned: boolean,
 	comments: boolean,
 	refresh: boolean,
-	hidden: boolean,
 	needs: string[],
 	/**
 	 *  Its whole-page actions (a row action goes on the viz node that
@@ -4995,7 +4994,6 @@ export type Page_Serialize = {
 	pinned: boolean,
 	comments: boolean,
 	refresh: boolean,
-	hidden: boolean,
 	needs: string[],
 	/**
 	 *  Its whole-page actions (a row action goes on the viz node that

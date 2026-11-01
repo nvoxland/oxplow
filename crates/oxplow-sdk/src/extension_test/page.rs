@@ -99,6 +99,133 @@ pub(super) async fn component_example(
     }
 }
 
+/// The kind of the page file `page` names (a slug of `ext`, or
+/// `<ext>/<slug>` of any enabled extension), when it is loaded.
+fn kind_of_page(host: &Host, ext: &Extension, page: &str) -> Option<PageKind> {
+    let id = if page.contains('/') {
+        page.to_string()
+    } else {
+        format!("{}/{page}", ext.name)
+    };
+    ext.page_files
+        .iter()
+        .find(|p| p.id == id)
+        .map(|p| p.kind)
+        .or_else(|| {
+            host.svc
+                .extension_catalog
+                .find_page(&host.root, &id)
+                .ok()
+                .map(|p| p.kind)
+        })
+}
+
+/// Whether the fixture's key fits what it names: `page:` runs a page,
+/// `part:` a part, `query:` a query. The wrong key is a finding that says
+/// which to write.
+fn kind_matches(
+    host: &Host,
+    ext: &Extension,
+    ex: &Example<'_>,
+    page: &str,
+    wanted: PageKind,
+    report: &mut TestReport,
+) -> bool {
+    let Some(kind) = kind_of_page(host, ext, page) else {
+        return true;
+    };
+    if kind == wanted {
+        return true;
+    }
+    let (key, right) = (wanted_key(wanted), wanted_key(kind));
+    report.errors.push(
+        error(
+            ex.shown,
+            ex.line("when"),
+            "fixture.kind",
+            format!("`{key}: {page}` names {}", kind.article()),
+        )
+        .fix(format!("write `when: {{ {right}: {page} }}`")),
+    );
+    false
+}
+
+fn wanted_key(kind: PageKind) -> &'static str {
+    match kind {
+        PageKind::Page => "page",
+        PageKind::Part => "part",
+        PageKind::Query => "query",
+    }
+}
+
+/// Run query `query` (`<slug | ext/slug>[#loader]`) with the example's
+/// params and compare its rows — its last loader's, or the named one's —
+/// with `expect: { rows, columns? }`, as a `sql` example is compared.
+pub(super) async fn query_example(
+    host: &Host,
+    ext: &Extension,
+    ex: &Example<'_>,
+    query: &str,
+    report: &mut TestReport,
+) {
+    let shown = ex.shown;
+    let (page, loader) = oxplow_app::pages::refs::split(query);
+    if !kind_matches(host, ext, ex, page, PageKind::Query, report) {
+        return;
+    }
+    let id = if page.contains('/') {
+        page.to_string()
+    } else {
+        format!("{}/{page}", ext.name)
+    };
+    let loader = match loader {
+        Some(l) => l.to_string(),
+        None => {
+            let found = ext
+                .page_files
+                .iter()
+                .find(|p| p.id == id)
+                .cloned()
+                .or_else(|| host.svc.extension_catalog.find_page(&host.root, &id).ok());
+            match found.as_ref().and_then(|p| p.default_loader()) {
+                Some(l) => l.name.clone(),
+                None => {
+                    report.errors.push(
+                        error(
+                            shown,
+                            ex.line("when"),
+                            "fixture.unknown_page",
+                            format!("`query: {query}` isn't a query of this extension"),
+                        )
+                        .fix("name one of `queries/`, or `<ext>/<slug>` of another extension"),
+                    );
+                    return;
+                }
+            }
+        }
+    };
+    let Some(ctx) = view_context(host, ex, report).await else {
+        return;
+    };
+    let mut binds = Binds::default();
+    if !ex.given.is_null()
+        && !run_steps(host, ext, shown, "given", &ex.given, &mut binds, report).await
+    {
+        return;
+    }
+    let params = ex.when.get("params").cloned().unwrap_or(Value::Null);
+    let at = PageAt {
+        ex,
+        host,
+        shown,
+        page,
+        target: oxplow_app::pages::runner::RunTarget::Page(id),
+        ctx: &ctx,
+    };
+    let expect = json!({ "loaders": { loader: ex.expect } });
+    at.check(&params, &expect, &binds, "", report).await;
+}
+
 /// Open page `slug`'s form as a person would (`when: { form, node?,
 /// params? }`): `expect: { values?, fixed?, fields? }` against the values
 /// the fields start from (the form's `defaults`, its loader's first row
@@ -424,9 +551,13 @@ pub(super) async fn page_example(
     ext: &Extension,
     ex: &Example<'_>,
     page: &str,
+    wanted: PageKind,
     report: &mut TestReport,
 ) {
     let shown = ex.shown;
+    if !kind_matches(host, ext, ex, page, wanted, report) {
+        return;
+    }
     let mut binds = Binds::default();
     let Some(ctx) = view_context(host, ex, report).await else {
         return;

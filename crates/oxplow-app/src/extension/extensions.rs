@@ -33,9 +33,8 @@ pub mod schema;
 pub mod skills;
 use crate::pages::schema::PageKind;
 use crate::pages::spec::{
-    action_templates, edit_column, label_refs, param_problem, FormField, FormFieldSpec, FormMode,
-    FormSpec, LabelFrom, PageParam, PageProvenance, ParamRole, ViewContext, Viz, VizConfig,
-    VizTree,
+    action_templates, edit_column, label_refs, param_problem, FormMode, FormSpec, LabelFrom,
+    PageProvenance, ParamRole, ViewContext, Viz, VizConfig, VizTree,
 };
 #[cfg(test)]
 use crate::pages::spec::{
@@ -903,7 +902,7 @@ pub(super) fn resolve_catalog(
     }
     descriptors::check_catalog(&mut out);
     warn_unplaced_mounts(&mut out);
-    warn_unknown_see_also(&mut out);
+    check_cross_refs(&mut out);
     public_contracts::activate(&mut out);
     let out: Vec<Extension> = out
         .into_iter()
@@ -973,42 +972,62 @@ fn warn_unplaced_mounts(out: &mut [Extension]) {
     }
 }
 
-/// A `see_also:` link to another extension's page that no enabled extension
-/// has shows nowhere: a warning on the page's extension (the other may only
-/// be off). A page of its own extension that is missing is an error at load.
-fn warn_unknown_see_also(out: &mut [Extension]) {
-    let known: Vec<String> = out
+/// What a page names in another extension, checked once every extension
+/// is loaded: one of the wrong kind for the place is an error on the
+/// page's extension and the page is dropped (`pages::refs::kind_problem`,
+/// the rule its own extension's targets met at load); one no enabled
+/// extension has is a warning — the other may only be off — and the
+/// link, option list or embed shows nowhere.
+fn check_cross_refs(out: &mut [Extension]) {
+    let known: BTreeMap<String, crate::pages::schema::PageKind> = out
         .iter()
         .filter(|e| e.enabled)
-        .flat_map(|e| e.page_files.iter().map(|p| p.id.clone()))
+        .flat_map(|e| e.page_files.iter().map(|p| (p.id.clone(), p.kind)))
         .collect();
     for ext in out.iter_mut().filter(|e| e.enabled) {
         let root = ext.path.clone();
-        let warnings: Vec<Diagnostic> = ext
-            .page_files
-            .iter()
-            .flat_map(|p| {
-                p.see_also.iter().filter_map(|e| match e {
-                    crate::pages::schema::SeeAlsoDecl::Page { page: to, .. }
-                        if !known.contains(to) =>
-                    {
-                        Some(
-                            Diagnostic::warning(
-                                "page.see_also_not_loaded",
+        let mut errors = Vec::new();
+        let mut warnings = Vec::new();
+        ext.page_files.retain(|page| {
+            let at = oxplow_domain::diagnostic::relative_to(&root, &page.origin.running);
+            let mut keep = true;
+            for (site, target) in crate::pages::refs::refs(page) {
+                let (id, _) = crate::pages::refs::split(&target);
+                if id.split_once('/').map(|(e, _)| e) == Some(page.extension.as_str()) {
+                    continue;
+                }
+                match known.get(id) {
+                    Some(kind) if !site.needs().allows(*kind) => {
+                        errors.push(
+                            Diagnostic::error(
+                                "page.invalid_ref",
                                 format!(
-                                    "see_also page `{to}` isn't loaded; the link shows nowhere"
+                                    "{} names `{id}`, {} of another extension: it takes {}",
+                                    site.what(),
+                                    kind.article(),
+                                    site.needs().words()
                                 ),
                             )
-                            .at(
-                                oxplow_domain::diagnostic::relative_to(&root, &p.origin.running),
-                                None,
+                            .at(at, None),
+                        );
+                        keep = false;
+                    }
+                    Some(_) => {}
+                    None => warnings.push(
+                        Diagnostic::warning(
+                            "page.ref_not_loaded",
+                            format!(
+                                "{} names `{id}`, which isn't loaded; it shows nowhere",
+                                site.what()
                             ),
                         )
-                    }
-                    _ => None,
-                })
-            })
-            .collect();
+                        .at(at, None),
+                    ),
+                }
+            }
+            keep
+        });
+        ext.errors.extend(errors);
         ext.warnings.extend(warnings);
     }
 }
@@ -2172,8 +2191,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                         )
                         .fix(
                             "give it a `default`, a `filter` or `selection` role, or options from a \
-                             loader (`options_from`); or hide the page (`hidden: true`) and open it \
-                             from a slot that fills it",
+                             query (`options_from`); or make it a part (parts/) that a host fills",
                         ),
                     );
                 }
@@ -2189,11 +2207,11 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                 .push(Diagnostic::error("page.invalid", e).at(&page_file, None)),
         }
     }
-    let slugs: Vec<String> = ext.page_files.iter().map(|p| p.slug.clone()).collect();
+    let pages = ext.page_files.clone();
     ext.page_files.retain(|page| {
         let problem = page_icon_problem(page)
             .map(|e| ("page.invalid_icon", e))
-            .or_else(|| page_ref_problem(page, &slugs).map(|e| ("page.invalid_ref", e)));
+            .or_else(|| page_ref_problem(page, &pages).map(|e| ("page.invalid_ref", e)));
         match problem {
             Some((code, e)) => {
                 ext.errors.push(
@@ -2208,15 +2226,26 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
 
     for (mount_line, s) in slot_files {
         let page = s.page.clone();
-        if !ext.page_files.iter().any(|p| p.slug == page) {
+        let Some(mounted) = ext.page_files.iter().find(|p| p.slug == page) else {
             ext.errors.push(at(
                 "slot.unknown_page",
                 man,
                 mount_line,
                 format!(
-                    "slot `{}` mounts page `{page}`, which isn't in pages/",
+                    "slot `{}` mounts `{page}`, which isn't one of this extension's pages or parts",
                     s.slot
                 ),
+            ));
+            continue;
+        };
+        if let Some(why) =
+            crate::pages::refs::kind_problem(&crate::pages::refs::RefSite::SlotMount, mounted)
+        {
+            ext.errors.push(at(
+                "slot.unknown_page",
+                man,
+                mount_line,
+                format!("slot `{}`: {why}", s.slot),
             ));
             continue;
         }
@@ -2575,66 +2604,21 @@ fn config_key_type<'a>(schema: &'a serde_json::Value, pointer: &str) -> Option<&
     node.get("type")?.as_str()
 }
 
-/// Name each page `page` refers to by slug — a param's `options_from`, a
-/// column's `expand`, a form field's `from` — whole, as one of its own
-/// extension's: `<extension>/<slug>`, what every reader looks it up by.
+/// Name each page file `page` refers to — a param's `options_from`, a
+/// column's `expand`, a form's `from` and `choices`, an `embed`, a `{ page,
+/// loader }` loader, a `see_also` link (`pages::refs`, the one list) —
+/// whole, as one of its own extension's: `<extension>/<slug>`, what every
+/// reader looks it up by. A bare `#<loader>` is the page's own.
 pub(crate) fn qualify_page_refs(page: &mut crate::pages::schema::Page) {
-    use crate::pages::schema::{Node, NodeKind};
-    fn whole(extension: &str, id: &mut String) {
-        if !id.contains('/') {
+    let own = page.id.clone();
+    let extension = page.extension.clone();
+    crate::pages::refs::for_each_ref(page, |_, id| {
+        if id.starts_with('#') {
+            *id = format!("{own}{id}");
+        } else if !id.contains('/') {
             *id = format!("{extension}/{id}");
         }
-    }
-    fn params(extension: &str, params: &mut [PageParam]) {
-        for p in params {
-            if let Some(from) = &mut p.options_from {
-                whole(extension, from);
-            }
-        }
-    }
-    fn walk(extension: &str, node: &mut Node) {
-        match &mut node.kind {
-            NodeKind::Stack { children }
-            | NodeKind::Grid { children }
-            | NodeKind::Switch { children, .. } => {
-                for c in children {
-                    walk(extension, c);
-                }
-            }
-            NodeKind::Viz { config, .. } => {
-                params(extension, &mut config.params);
-                for c in &mut config.columns {
-                    if let Some(to) = &mut c.expand {
-                        whole(extension, to);
-                    }
-                }
-                let fields = config
-                    .form
-                    .iter_mut()
-                    .flat_map(|f| f.fields.iter_mut().flatten());
-                for f in fields {
-                    if let FormField::Spec(FormFieldSpec {
-                        from: Some(from), ..
-                    }) = f
-                    {
-                        whole(extension, from);
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-    let extension = page.extension.clone();
-    params(&extension, &mut page.params);
-    for entry in &mut page.see_also {
-        if let crate::pages::schema::SeeAlsoDecl::Page { page: to, .. } = entry {
-            whole(&extension, to);
-        }
-    }
-    walk(&extension, &mut page.view);
-    if let Some(rail) = &mut page.rail {
-        walk(&extension, rail);
-    }
+    });
 }
 
 /// A page `icon` oxplow doesn't draw.
@@ -2644,69 +2628,35 @@ fn page_icon_problem(page: &crate::pages::schema::Page) -> Option<String> {
         .then(|| format!("`icon: {icon}` isn't one oxplow draws"))
 }
 
-/// What `page` names by id that isn't there: a param's `options_from`, a
-/// column's `expand` and a form field's `from` name a page (by slug for
-/// one of its own extension's); one of this extension's (`slugs`) must be in
-/// pages/, and only a form field's may be the page itself.
-fn page_ref_problem(page: &crate::pages::schema::Page, slugs: &[String]) -> Option<String> {
-    // Each one: what names it, the page it names, and whether that may be
-    // the page itself (a form's own loader may list a field's choices).
-    let mut refs: Vec<(String, &str, bool)> = page
-        .params
-        .iter()
-        .filter_map(|p| {
-            Some((
-                format!("param `{}`: `options_from`", p.name),
-                p.options_from.as_deref()?,
-                false,
-            ))
+/// What `page` names that it can't: a page file of its own extension
+/// that isn't there, the page itself where that isn't allowed (only a
+/// form's own loader may list a field's choices), or one of the wrong
+/// kind for the place (`pages::refs::kind_problem`). Another extension's
+/// is checked once every extension is loaded (`check_cross_refs`).
+fn page_ref_problem(
+    page: &crate::pages::schema::Page,
+    pages: &[crate::pages::schema::Page],
+) -> Option<String> {
+    crate::pages::refs::refs(page)
+        .into_iter()
+        .find_map(|(site, target)| {
+            // Qualified at load (`qualify_page_refs`): `<extension>/<slug>`.
+            let (id, _) = crate::pages::refs::split(&target);
+            let (extension, slug) = id.split_once('/')?;
+            if extension != page.extension {
+                return None;
+            }
+            if slug == page.slug {
+                return (!site.self_ok()).then(|| format!("{} names the page itself", site.what()));
+            }
+            match pages.iter().find(|p| p.slug == slug) {
+                None => Some(format!(
+                    "{} names `{id}`, which isn't one of this extension's pages, parts or queries",
+                    site.what()
+                )),
+                Some(found) => crate::pages::refs::kind_problem(&site, found),
+            }
         })
-        .collect();
-    refs.extend(page.see_also.iter().filter_map(|e| match e {
-        crate::pages::schema::SeeAlsoDecl::Page { page: to, .. } => {
-            Some(("see_also".to_string(), to.as_str(), false))
-        }
-        crate::pages::schema::SeeAlsoDecl::Rows { .. } => None,
-    }));
-    for n in page.nodes() {
-        let crate::pages::schema::NodeKind::Viz { config, .. } = &n.kind else {
-            continue;
-        };
-        refs.extend(config.columns.iter().filter_map(|c| {
-            Some((
-                format!("node `{}`: column `{}`: `expand`", n.id, c.key),
-                c.expand.as_deref()?,
-                false,
-            ))
-        }));
-        refs.extend(
-            config
-                .form
-                .iter()
-                .flat_map(|f| f.fields.iter().flatten())
-                .filter_map(|f| {
-                    Some((
-                        format!("node `{}`: form field `{}`: `from`", n.id, f.name()),
-                        f.from()?,
-                        true,
-                    ))
-                }),
-        );
-    }
-    refs.into_iter().find_map(|(what, target, self_ok)| {
-        // Qualified at load (`qualify_page_refs`): `<extension>/<slug>`.
-        let (extension, slug) = target.split_once('/')?;
-        let slug = slug.split('#').next().unwrap_or(slug);
-        if extension == page.extension && slug == page.slug && !self_ok {
-            Some(format!("{what} names the page itself"))
-        } else if extension == page.extension && !slugs.iter().any(|s| s == slug) {
-            Some(format!(
-                "{what} page `{target}` isn't in this extension's pages/"
-            ))
-        } else {
-            None
-        }
-    })
 }
 
 /// A page's `component` node or `viz: custom` naming a component its
@@ -2928,18 +2878,26 @@ fn parse_panels(
                 ok = false;
             }
         }
-        for (role, slug) in [
-            ("body", Some(&p.body)),
-            ("badge", p.badge.as_ref()),
-            ("collapsed", p.collapsed.as_ref()),
-            ("count", p.count.as_ref()),
+        use crate::pages::refs::{kind_problem, RefSite};
+        for (role, site, slug) in [
+            ("body", RefSite::PanelBody, Some(&p.body)),
+            ("badge", RefSite::PanelBadge, p.badge.as_ref()),
+            ("collapsed", RefSite::PanelCollapsed, p.collapsed.as_ref()),
+            ("count", RefSite::PanelCount, p.count.as_ref()),
         ] {
             let Some(slug) = slug else { continue };
             let Some(page) = pages.iter().find(|pg| &pg.slug == slug) else {
-                errors.push(err(format!("its {role} page `{slug}` isn't in pages/")));
+                errors.push(err(format!(
+                    "its {role} `{slug}` isn't one of this extension's pages or parts"
+                )));
                 ok = false;
                 continue;
             };
+            if let Some(why) = kind_problem(&site, page) {
+                errors.push(err(why));
+                ok = false;
+                continue;
+            }
             if role == "badge" && page.badge.is_none() && page.alert.is_none() {
                 errors.push(err(format!(
                     "its badge page `{slug}` declares no `badge` or `alert` (the badge is its count)"
@@ -4390,6 +4348,7 @@ mod tests {
         );
     }
     use super::*;
+    use crate::pages::spec::{FormField, FormFieldSpec, PageParam};
     use oxplow_db::Database;
     use std::fs;
 
@@ -5739,7 +5698,7 @@ view:
         );
         let e = only(dir.path(), "review");
         assert!(
-            e.errors.iter().any(|m| m.contains("see_also page `review/nope` isn't in this extension's pages/")),
+            e.errors.iter().any(|m| m.contains("see_also names `review/nope`, which isn't one of this extension's pages, parts or queries")),
             "{:?}",
             e.errors
         );
@@ -5776,7 +5735,9 @@ view:
         let err = e
             .errors
             .iter()
-            .find(|m| m.contains("mounts page `nope`, which isn't in pages/"))
+            .find(|m| {
+                m.contains("mounts `nope`, which isn't one of this extension's pages or parts")
+            })
             .unwrap_or_else(|| panic!("{:?}", e.errors));
         assert!(
             e.shown(err)
@@ -6538,6 +6499,191 @@ commands:
         );
     }
 
+    /// Every place a page file is named from says what kind it takes
+    /// (`pages::refs::RefSite`): a param's options come from a query, what
+    /// is drawn inside a host is a part or a page, a link is a page, a
+    /// borrowed loader may be any kind. The wrong kind is an error naming
+    /// the place, the target, what it is and what the place takes.
+    #[test]
+    fn each_reference_site_needs_its_kind() {
+        let part = viz_page("", "SELECT 1 AS value, 'a' AS label", "");
+        let query = "title: Q\nloaders:\n  rows: { sql: \"SELECT 1 AS value, 'a' AS label\" }\n";
+        let page = viz_page("", "SELECT 1 AS value, 'a' AS label", "");
+        let cases: &[(&str, &str, Option<&str>)] = &[
+            // (what the host page says, its view when not the default, the error it gets)
+            ("params: [{ name: s, type: choice, options_from: part }]\n", "", Some("param `s`: `options_from` names `x/part`, a part (parts/part.yaml): it takes a query (queries/)")),
+            ("params: [{ name: s, type: choice, options_from: query }]\n", "", None),
+            ("params: [{ name: s, type: choice, options_from: page }]\n", "", Some("it takes a query (queries/)")),
+            ("", "view:\n  stack:\n    - { id: t, title: T, viz: table, from: q }\n    - { id: e, title: E, embed: { page: query } }\n", Some("node `e`: `embed` names `x/query`, a query (queries/query.yaml): it takes a part (parts/) or a page (pages/)")),
+            ("", "view:\n  stack:\n    - { id: t, title: T, viz: table, from: q }\n    - { id: e, title: E, embed: { page: part } }\n", None),
+            ("", "view:\n  stack:\n    - { id: t, title: T, viz: table, from: q }\n    - { id: e, title: E, embed: { page: page } }\n", None),
+            ("", "view: { viz: table, from: q, columns: [{ key: a, expand: query }] }\n", Some("column `a`: `expand` names `x/query`")),
+            ("see_also: [{ page: part }]\n", "", Some("see_also names `x/part`, a part (parts/part.yaml): it takes a page (pages/)")),
+            ("see_also: [{ page: page }]\n", "", None),
+            ("loaders:\n  q: { page: part, loader: q }\n  b: { page: query, loader: rows }\n  c: { page: page, loader: q }\n", "view: { viz: table, from: q }\n", None),
+        ];
+        for (head, body, want) in cases {
+            let host = if body.is_empty() {
+                viz_page(head, "SELECT 1 AS a", "")
+            } else if head.starts_with("loaders:") {
+                format!("title: T\n{head}{body}")
+            } else {
+                format!("title: T\n{head}loaders:\n  q: {{ sql: 'SELECT 1 AS a' }}\n{body}")
+            };
+            let (_d, ext) = load_tree(&[
+                ("pages/host.yaml", &host),
+                ("pages/page.yaml", &page),
+                ("parts/part.yaml", &part),
+                ("queries/query.yaml", query),
+            ]);
+            let errs = shown_errors(&ext);
+            match want {
+                Some(text) => {
+                    assert!(
+                        page_of(&ext, "host").is_none(),
+                        "{head}{body}: loaded\n{errs}"
+                    );
+                    assert!(errs.contains(text), "{head}{body}:\n{errs}");
+                    assert!(errs.contains("pages/host.yaml"), "{errs}");
+                }
+                None => assert!(page_of(&ext, "host").is_some(), "{head}{body}:\n{errs}"),
+            }
+        }
+    }
+
+    /// An `embed` and a `{ page, loader }` loader name a page file that
+    /// must exist, as every other reference does; and a bare slug at any
+    /// site is qualified as this extension's.
+    #[test]
+    fn an_embed_and_a_page_loader_must_name_a_page_that_exists() {
+        let (_d, ext) = load_tree(&[
+            (
+                "pages/a.yaml",
+                "title: A\nloaders:\n  q: { sql: 'SELECT 1 AS a' }\nview:\n  stack:\n    - { id: t, title: T, viz: table, from: q }\n    - { id: e, title: E, embed: { page: nowhere } }\n",
+            ),
+            (
+                "pages/b.yaml",
+                "title: B\nloaders:\n  q: { page: gone, loader: q }\nview: { viz: table, from: q }\n",
+            ),
+            (
+                "pages/c.yaml",
+                "title: C\nparams: [{ name: s, type: choice, options_from: opts }]\nloaders:\n  q: { page: c2, loader: q }\nview:\n  stack:\n    - { id: t, title: T, viz: table, from: q }\n    - { id: e, title: E, embed: { page: c2 } }\n    - { id: f, title: F, viz: form, form: { command: oxplow.work_item.create, choices: { state: opts } } }\n",
+            ),
+            ("pages/c2.yaml", &viz_page("", "SELECT 1 AS a", "")),
+            ("queries/opts.yaml", "title: O\nloaders:\n  rows: { sql: \"SELECT 1 AS value, 'a' AS label\" }\n"),
+        ]);
+        let errs = shown_errors(&ext);
+        assert!(
+            page_of(&ext, "a").is_none() && page_of(&ext, "b").is_none(),
+            "{errs}"
+        );
+        assert!(errs.contains("node `e`: `embed` names `x/nowhere`, which isn't one of this extension's pages, parts or queries"), "{errs}");
+        assert!(errs.contains("loader `q`: `page` names `x/gone`, which isn't one of this extension's pages, parts or queries"), "{errs}");
+        let c = page_of(&ext, "c").unwrap_or_else(|| panic!("{errs}"));
+        // The page's params, its loaders, then each node's: a viz node carries
+        // the page's params again, so `opts` is named once per viz node too.
+        let refs: Vec<String> = crate::pages::refs::refs(c)
+            .into_iter()
+            .map(|(_, t)| t)
+            .collect();
+        assert_eq!(
+            refs,
+            ["x/opts", "x/c2", "x/opts", "x/c2", "x/opts", "x/opts"],
+            "{refs:?}"
+        );
+    }
+
+    /// A panel's body, collapsed, count and badge are drawn in the rail:
+    /// a part or a page, never a query. A slot mount likewise.
+    #[test]
+    fn a_panel_and_a_mount_take_a_part_or_a_page_never_a_query() {
+        let query = "title: Q\nloaders:\n  rows: { sql: \"SELECT 1 AS value, 'a' AS label\" }\n";
+        let part = "title: P\nbadge: { loader: q }\nparams: [{ name: stream_id }]\nloaders:\n  q: { sql: 'SELECT :stream_id AS n' }\nview: { viz: number, from: q }\n";
+        let (_d, ext) = load_tree(&[
+            ("parts/body.yaml", part),
+            ("pages/body-page.yaml", part),
+            ("queries/count.yaml", query),
+            ("parts/mounted.yaml", &viz_page("", "SELECT 1 AS a", "")),
+            ("queries/q.yaml", query),
+            (
+                "extension.yaml",
+                "manifest: 2\nname: x\nintent:\n  purpose: test\npanels:\n  - { id: one, title: One, scope: stream, body: body, count: body-page }\n  - { id: two, title: Two, scope: stream, body: body-page, count: count }\nui:\n  mounts:\n    - { page: mounted, at: oxplow-foundation/commit.sections }\n    - { page: q, at: oxplow-foundation/commit.sections }\n",
+            ),
+        ]);
+        let errs = shown_errors(&ext);
+        assert_eq!(ext.panels.len(), 1, "{errs}");
+        assert!(errs.contains("panel `two`: its count names `x/count`, a query (queries/count.yaml): it takes a part (parts/) or a page (pages/)"), "{errs}");
+        assert_eq!(ext.ui.page_slots.len(), 1, "{errs}");
+        assert!(
+            errs.contains("the mount names `x/q`, a query (queries/q.yaml)"),
+            "{errs}"
+        );
+    }
+
+    /// A reference into another extension is checked once every extension
+    /// is loaded: the wrong kind drops the page with an error; a target no
+    /// enabled extension has is a warning, since the other may only be off.
+    #[test]
+    fn a_reference_into_another_extension_is_checked_once_the_catalog_is_whole() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        write(
+            root,
+            ".oxplow/extensions/y/extension.yaml",
+            "manifest: 2\nname: y\nintent:\n  purpose: test\n",
+        );
+        write(
+            root,
+            ".oxplow/extensions/y/queries/opts.yaml",
+            "title: O\nloaders:\n  rows: { sql: \"SELECT 1 AS value, 'a' AS label\" }\n",
+        );
+        write(
+            root,
+            ".oxplow/extensions/y/parts/section.yaml",
+            &viz_page("", "SELECT 1 AS a", ""),
+        );
+        write(
+            root,
+            ".oxplow/extensions/x/extension.yaml",
+            "manifest: 2\nname: x\nintent:\n  purpose: test\n",
+        );
+        write(root, ".oxplow/extensions/x/pages/ok.yaml", &viz_page("params: [{ name: s, type: choice, options_from: y/opts }]\nsee_also: [{ page: oxplow-foundation/tasks }]\n", "SELECT 1 AS a", ""));
+        write(
+            root,
+            ".oxplow/extensions/x/pages/wrong.yaml",
+            &viz_page(
+                "params: [{ name: s, type: choice, options_from: y/section }]\n",
+                "SELECT 1 AS a",
+                "",
+            ),
+        );
+        write(
+            root,
+            ".oxplow/extensions/x/pages/gone.yaml",
+            &viz_page(
+                "params: [{ name: s, type: choice, options_from: y/nowhere }]\n",
+                "SELECT 1 AS a",
+                "",
+            ),
+        );
+        let exts = project_extensions(root);
+        let x = exts.iter().find(|e| e.name == "x").unwrap();
+        let errs = shown_errors(x);
+        assert!(page_of(x, "ok").is_some(), "{errs}");
+        assert!(page_of(x, "gone").is_some(), "{errs}");
+        assert!(page_of(x, "wrong").is_none(), "{errs}");
+        assert!(errs.contains("pages/wrong.yaml") && errs.contains("param `s`: `options_from` names `y/section`, a part of another extension: it takes a query (queries/)"), "{errs}");
+        let warns: Vec<String> = x.warnings.iter().map(|w| x.shown(w)).collect();
+        assert!(
+            warns.iter().any(|w| w.contains("pages/gone.yaml")
+                && w.contains(
+                    "`options_from` names `y/nowhere`, which isn't loaded; it shows nowhere"
+                )),
+            "{warns:?}"
+        );
+        assert!(x.warnings.iter().any(|w| w.code == "page.ref_not_loaded"));
+    }
+
     /// A viz node shows its loader's rows, so it names one (`from`) that
     /// the page has; a form shows none, so it needs none.
     #[test]
@@ -6997,24 +7143,23 @@ commands:
     #[test]
     fn typed_params_are_checked_at_load() {
         let one = |params: &str| viz_page(params, "SELECT 1 AS a", "");
-        let (_d, ext) = load_x(
+        let (_d, ext) = load_tree(
             &[
-                ("ok", &one("params:\n  - { name: range, type: date_range, presets: [7d, all], default: 7d }\n  - { name: flag, type: bool, default: true }\n  - { name: q, type: search }\n  - { name: br, type: branch }\n  - { name: mode, default: a, options: [{ value: a, label: A }] }\n  - { name: free }\n  - { name: end, options_from: ends }\n  - { name: start, type: choice, options_from: other/ends, default: anything }\n")),
-                ("ends", &viz_page("title: Ends\n", "SELECT 'snap:1' AS value, 'One' AS label", "")),
-                ("choice_without_options", &one("params: [{ name: m, type: choice }]\n")),
-                ("both_option_sources", &one("params: [{ name: m, options_from: x/ends, options: [{ value: a, label: A }] }]\n")),
-                ("options_from_on_text", &one("params: [{ name: m, type: text, options_from: x/ends }]\n")),
-                ("options_from_missing", &one("params: [{ name: m, options_from: nowhere }]\n")),
-                ("options_from_itself", &one("params: [{ name: m, options_from: x/options_from_itself }]\n")),
-                ("options_on_text", &one("params: [{ name: m, type: text, options: [{ value: a, label: A }] }]\n")),
-                ("presets_on_text", &one("params: [{ name: m, presets: [7d] }]\n")),
-                ("unknown_preset", &one("params: [{ name: m, type: date_range, presets: [5y] }]\n")),
-                ("bad_range", &one("params: [{ name: m, type: date_range, default: soon }]\n")),
-                ("bad_bool", &one("params: [{ name: m, type: bool, default: maybe }]\n")),
-                ("placed", &one("params: [{ name: m, place: toolbar }]\n")),
-                ("roled", &one("params: [{ name: m, role: selection }]\n")),
+                ("pages/ok.yaml", &one("params:\n  - { name: range, type: date_range, presets: [7d, all], default: 7d }\n  - { name: flag, type: bool, default: true }\n  - { name: q, type: search }\n  - { name: br, type: branch }\n  - { name: mode, default: a, options: [{ value: a, label: A }] }\n  - { name: free }\n  - { name: end, options_from: ends }\n  - { name: start, type: choice, options_from: other/ends, default: anything }\n")),
+                ("queries/ends.yaml", "title: Ends\nloaders:\n  q: { sql: \"SELECT 'snap:1' AS value, 'One' AS label\" }\n"),
+                ("pages/choice_without_options.yaml", &one("params: [{ name: m, type: choice }]\n")),
+                ("pages/both_option_sources.yaml", &one("params: [{ name: m, options_from: x/ends, options: [{ value: a, label: A }] }]\n")),
+                ("pages/options_from_on_text.yaml", &one("params: [{ name: m, type: text, options_from: x/ends }]\n")),
+                ("pages/options_from_missing.yaml", &one("params: [{ name: m, options_from: nowhere }]\n")),
+                ("pages/options_from_itself.yaml", &one("params: [{ name: m, options_from: x/options_from_itself }]\n")),
+                ("pages/options_on_text.yaml", &one("params: [{ name: m, type: text, options: [{ value: a, label: A }] }]\n")),
+                ("pages/presets_on_text.yaml", &one("params: [{ name: m, presets: [7d] }]\n")),
+                ("pages/unknown_preset.yaml", &one("params: [{ name: m, type: date_range, presets: [5y] }]\n")),
+                ("pages/bad_range.yaml", &one("params: [{ name: m, type: date_range, default: soon }]\n")),
+                ("pages/bad_bool.yaml", &one("params: [{ name: m, type: bool, default: maybe }]\n")),
+                ("pages/placed.yaml", &one("params: [{ name: m, place: toolbar }]\n")),
+                ("pages/roled.yaml", &one("params: [{ name: m, role: selection }]\n")),
             ],
-            "",
         );
         let ok = page_of(&ext, "ok").expect("ok loads");
         let kinds: Vec<_> = ok.params.iter().map(|p| p.kind).collect();
@@ -7058,7 +7203,7 @@ commands:
             ),
             (
                 "options_from_missing",
-                "`options_from` page `x/nowhere` isn't in this extension's pages/",
+                "`options_from` names `x/nowhere`, which isn't one of this extension's pages, parts or queries",
             ),
             (
                 "options_from_itself",
@@ -7284,7 +7429,7 @@ commands:
         for (slug, says) in [
             (
                 "missing",
-                "`expand` page `x/gone` isn't in this extension's pages/",
+                "`expand` names `x/gone`, which isn't one of this extension's pages, parts or queries",
             ),
             ("itself", "`expand` names the page itself"),
         ] {
@@ -7646,22 +7791,25 @@ commands:
         );
     }
 
+    /// The launcher shows a page's description, so a listed page keeps it
+    /// short; one with no category is opened from elsewhere and may say more.
     #[test]
-    fn a_long_description_warns() {
-        let page = |n: usize| {
+    fn a_long_description_warns_only_on_a_listed_page() {
+        let page = |n: usize, head: &str| {
             viz_page(
-                &format!("description: {}\n", "d".repeat(n)),
+                &format!("{head}description: {}\n", "d".repeat(n)),
                 "SELECT 1 AS a",
                 "",
             )
         };
-        let (warns, loaded) = layout_of(&page(201));
+        let (warns, loaded) = layout_of(&page(201, "category: Work\n"));
         assert!(loaded);
         assert!(
             warns.iter().any(|w| w.ends_with("the description is 201 characters — keep it to a sentence or two; put the rest in a markdown node")),
             "{warns:?}"
         );
-        assert!(layout_of(&page(200)).0.is_empty());
+        assert!(layout_of(&page(200, "category: Work\n")).0.is_empty());
+        assert!(layout_of(&page(201, "")).0.is_empty());
     }
 
     #[test]
@@ -7767,13 +7915,7 @@ commands:
             warned[0]
         );
         assert!(ext.shown(warned[0]).contains(" — fix: "), "{:?}", warned[0]);
-        // Hidden, or in no category, it isn't opened from the launcher.
-        let (_d, ext) = load_x(&[("p", &page("hidden: true\n", params))], "");
-        assert!(
-            ext.warnings.iter().all(|w| !w.contains("opens empty")),
-            "{:?}",
-            ext.warnings
-        );
+        // In no category, it isn't opened from the launcher.
         let uncategorized = viz_page(
             &format!("params:\n{params}"),
             "SELECT :effort_id || :state || :q || :thread_id AS a",
@@ -8421,7 +8563,7 @@ commands:
             ),
             (
                 "{ id: a, title: A, scope: project, body: nope }",
-                "its body page `nope` isn't in pages/",
+                "its body `nope` isn't one of this extension's pages or parts",
             ),
             (
                 "{ id: a, title: A, scope: project, body: quiet, badge: quiet }",
@@ -8493,11 +8635,11 @@ commands:
         for (panel, says) in [
             (
                 "{ id: a, title: A, scope: project, body: quiet, collapsed: nope }",
-                "its collapsed page `nope` isn't in pages/",
+                "its collapsed `nope` isn't one of this extension's pages or parts",
             ),
             (
                 "{ id: a, title: A, scope: project, body: quiet, count: nope }",
-                "its count page `nope` isn't in pages/",
+                "its count `nope` isn't one of this extension's pages or parts",
             ),
             (
                 "{ id: a, title: A, scope: stream, body: open, collapsed: quiet }",
@@ -8830,22 +8972,22 @@ commands:
     #[test]
     fn a_form_edits_shows_fields_by_value_and_keeps_secrets() {
         let form = |spec: &str| format!("title: F\nview:\n  viz: form\n  form: {spec}\n");
-        let (_d, ext) = load_x(
+        let (_d, ext) = load_tree(
             &[
                 (
-                    "e",
+                    "pages/e.yaml",
                     "title: E\nview:\n  viz: form\n  form:\n    command: a.b.c\n    mode: edit\n    fields:\n      - kind\n      - { name: url, visible_if: { kind: [http, https] } }\n      - { name: token, secret: true, visible_if: { kind: https } }\n",
                 ),
-                ("p", &form("{ command: a.b.c, fields: [title] }")),
-                ("self", &form("{ command: a.b.c, fields: [{ name: a, visible_if: { a: x } }] }")),
-                ("unknown", &form("{ command: a.b.c, fields: [a, { name: b, visible_if: { gone: x } }] }")),
-                ("fixedsecret", &form("{ command: a.b.c, defaults: { a: 1 }, fixed: [a], fields: [{ name: a, secret: true }] }")),
-                ("nofields", &form("{ command: a.b.c, mode: edit }")),
-                ("again", &form("{ command: a.b.c, fields: [a, { name: n, from: again }, { name: m, from: x/e }], again: { label: Again, keep: [a, n] } }")),
-                ("keepgone", &form("{ command: a.b.c, fields: [a], again: { label: Again, keep: [gone] } }")),
-                ("fromgone", &form("{ command: a.b.c, fields: [{ name: n, from: x/nothing }] }")),
+                ("queries/fields.yaml", "title: Fields\nloaders:\n  rows: { rows: [{ name: kind, title: Kind, kind: text }] }\n"),
+                ("pages/p.yaml", &form("{ command: a.b.c, fields: [title] }")),
+                ("pages/self.yaml", &form("{ command: a.b.c, fields: [{ name: a, visible_if: { a: x } }] }")),
+                ("pages/unknown.yaml", &form("{ command: a.b.c, fields: [a, { name: b, visible_if: { gone: x } }] }")),
+                ("pages/fixedsecret.yaml", &form("{ command: a.b.c, defaults: { a: 1 }, fixed: [a], fields: [{ name: a, secret: true }] }")),
+                ("pages/nofields.yaml", &form("{ command: a.b.c, mode: edit }")),
+                ("pages/again.yaml", &form("{ command: a.b.c, fields: [a, { name: n, from: again }, { name: m, from: x/fields }], again: { label: Again, keep: [a, n] } }")),
+                ("pages/keepgone.yaml", &form("{ command: a.b.c, fields: [a], again: { label: Again, keep: [gone] } }")),
+                ("pages/fromgone.yaml", &form("{ command: a.b.c, fields: [{ name: n, from: x/nothing }] }")),
             ],
-            "",
         );
         let e = node(&ext, "e").unwrap_or_else(|| panic!("e: {:?}", ext.errors));
         let form = e.form.as_ref().expect("a form");
@@ -8885,7 +9027,7 @@ commands:
             ("keepgone", "`again.keep` names `gone`"),
             (
                 "fromgone",
-                "form field `n`: `from` page `x/nothing` isn't in this extension's pages/",
+                "form field `n`: `from` names `x/nothing`, which isn't one of this extension's pages, parts or queries",
             ),
         ] {
             assert!(said(slug).contains(says), "{slug}: {:?}", ext.errors);
@@ -8968,7 +9110,7 @@ commands:
     }
 
     /// A page's launcher metadata: its category, keywords and icon, and
-    /// whether it is hidden. An unknown category or an icon oxplow doesn't
+    /// a page with none is opened only from elsewhere. An unknown category or an icon oxplow doesn't
     /// draw is refused.
     #[test]
     fn launcher_metadata_parses_and_is_checked() {
@@ -8982,7 +9124,7 @@ commands:
                         "",
                     ),
                 ),
-                ("b", &viz_page("hidden: true\n", "SELECT 1", "")),
+                ("b", &viz_page("", "SELECT 1", "")),
                 ("c", &viz_page("category: Nowhere\n", "SELECT 1", "")),
                 ("d", &viz_page("icon: unicorn\n", "SELECT 1", "")),
             ],
@@ -8993,8 +9135,8 @@ commands:
         assert_eq!(a.category, Some(LauncherCategory::Activity));
         assert_eq!(a.keywords.as_deref(), Some("pull requests"));
         assert_eq!(a.icon.as_deref(), Some("git-pull-request"));
-        assert!(a.comments && !a.hidden);
-        assert!(page("b").unwrap().hidden);
+        assert!(a.comments);
+        assert!(page("b").unwrap().category.is_none());
         assert!(page("c").is_none() && page("d").is_none());
         let errs = shown_errors(&ext);
         assert!(

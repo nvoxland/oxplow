@@ -1,6 +1,5 @@
 title: "Stream heads"
 description: "The commit each stream's workspace is on."
-hidden: true
 answers:
 - {"question":"Which commit is each stream's workspace on?","params":{},"skill":"oxplow-codebase"}
 loaders:

@@ -1,6 +1,5 @@
 title: Verify a Claim With Evidence
 description: "The form that marks a claim the agent made verified, with what backs it — a test run, a file, a commit — or none when you checked it yourself."
-hidden: true
 params:
 - name: claim
   label: Claim

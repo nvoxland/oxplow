@@ -1,6 +1,5 @@
 title: Extension facts
 description: "What can be said about extensions in words: where each comes from, what runs, its state, what it may reach, what it waits on and any problems. One extension, or every one with the ones needing attention first."
-hidden: true
 params:
 - name: extension
   type: search

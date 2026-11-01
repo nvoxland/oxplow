@@ -2,8 +2,7 @@
 given:
   - observe: { facts: { measure: oxplow.tokens, items: [{ value: 1 }] } }
 when:
-  page: oxplow-foundation/measure-branches
+  query: oxplow-foundation/measure-branches
   params: { uri: "oxplow:oxplow/measure?measure=oxplow.tokens" }
 expect:
-  loaders:
-    measure_branches: { rows: { contains: [{ value: "", label: All branches }] } }
+  rows: { contains: [{ value: "", label: All branches }] }

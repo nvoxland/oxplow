@@ -24,7 +24,7 @@ mock.module("../api.js", () => ({
           title: "Tasks",
           category: "Work",
           keywords: null,
-          hidden: false,
+          kind: "page",
           for: [],
           params: [],
           badge: null,
