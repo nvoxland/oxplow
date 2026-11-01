@@ -91,6 +91,21 @@ pub struct Listener {
 }
 
 impl Listener {
+    /// The moves already waiting, without waiting for more.
+    pub fn pending(&mut self) -> Vec<Moved> {
+        let mut out = Vec::new();
+        loop {
+            match self.rx.try_recv() {
+                Ok(stream) => out.push(Moved::Stream(stream)),
+                Err(broadcast::error::TryRecvError::Lagged(skipped)) => {
+                    tracing::warn!(skipped, "a ref-moves listener fell behind");
+                    out.push(Moved::Missed);
+                }
+                Err(_) => return out,
+            }
+        }
+    }
+
     /// The next move; `None` once the channel closes.
     pub async fn recv(&mut self) -> Option<Moved> {
         match self.rx.recv().await {

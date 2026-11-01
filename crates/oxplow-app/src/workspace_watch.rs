@@ -174,6 +174,7 @@ fn spawn_for_stream(
         let bus = events.clone();
         let id = stream_id;
         let root = worktree.clone();
+        let ref_moves = ref_moves.clone();
         let mut on_orphan_slot = Some(on_orphan);
         tokio::spawn(async move {
             loop {
@@ -200,6 +201,9 @@ fn spawn_for_stream(
                             continue;
                         }
                         let rel = rel_path.to_string_lossy().into_owned();
+                        // The working tree's file list follows the edit
+                        // itself, not the next snapshot take.
+                        ref_moves.index_moved(id);
                         bus.emit(OxplowEvent::WorkspaceChanged {
                             stream_id: id,
                             change_kind: classify(&kind),
@@ -338,6 +342,48 @@ mod tests {
             }
         }
         false
+    }
+
+    /// An edit made outside oxplow reaches the working-tree file list at
+    /// once: the watcher tells the index channel (which relists
+    /// `v_change_file`), rather than the list waiting for a snapshot take
+    /// after the worktree has been quiet for seconds.
+    #[tokio::test]
+    async fn an_edit_on_disk_tells_the_working_files_listener() {
+        let dir = tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        std::fs::create_dir(root.join("src")).unwrap();
+        let bus = EventBus::new();
+        let ref_moves = crate::ref_moves::RefMoves::new(bus.clone());
+        let mut index = ref_moves.subscribe_index();
+        let on_orphan: OnOrphan = Box::new(|| Box::pin(async {}));
+        let _watchers = spawn_for_stream(
+            oxplow_domain::StreamId::new(4),
+            root.clone(),
+            &crate::vcs::GitProvider,
+            Announce {
+                events: bus.clone(),
+                ref_moves,
+            },
+            false,
+            on_orphan,
+            oxplow_fs_watch::WorkspaceFilter::with_user_entries(Vec::<String>::new()),
+        )
+        .expect("watchers");
+        let mut heard = None;
+        for n in 0..60 {
+            std::fs::write(root.join("src").join("edit.txt"), n.to_string()).unwrap();
+            if let Ok(m) = timeout(Duration::from_millis(500), index.recv()).await {
+                heard = m;
+                break;
+            }
+        }
+        assert_eq!(
+            heard,
+            Some(crate::ref_moves::Moved::Stream(
+                oxplow_domain::StreamId::new(4)
+            ))
+        );
     }
 
     #[tokio::test]

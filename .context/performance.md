@@ -479,6 +479,20 @@ dataset; the whole-tree walk is left to the queries that need the tree.
 `stat` per file, 16 at a time, at most 1000 files); the whole-tree walk
 leaves them NULL so Quick Open and the link index pay nothing for them.
 
+### An edit outside oxplow reaches the Uncommitted panel at once (2026-11-01)
+
+The panel read `v_change_file`, restated only on a ref or index move or
+after a snapshot take: a take waits for a quiet worktree (3 s) and then
+queues behind the pump's other consumers, which measured 25-30 s on a
+throwaway clone. Not reproduced in the real app here (no display);
+the fix removes the wait rather than tuning it: the stream's file watcher
+(250 ms debounce) now tells the working-files listener on each event, and
+queued moves are listed once per stream
+(`an_edit_on_disk_tells_the_working_files_listener`). Expected delay:
+the debounce plus one git status of the worktree. A busy worktree (a
+build writing tracked files) now relists about once per debounce window,
+not per event.
+
 ### The Measure data page reads recent captures first (measured 2026-11-01)
 
 `slow page re-run page=oxplow-foundation/measure-data loaders=facts took_ms=646..849`.

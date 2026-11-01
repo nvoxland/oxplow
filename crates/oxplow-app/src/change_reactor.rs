@@ -167,16 +167,30 @@ pub async fn watch_working_files(svc: Arc<Services>) {
             m = refs.recv() => m,
             m = index.recv() => m,
         };
-        match moved {
-            Some(Moved::Stream(s)) => list(s).await,
-            Some(Moved::Missed) => {
-                for s in svc.stream_store.list().await.unwrap_or_default() {
-                    if s.archived_at.is_none() {
-                        list(s.id).await;
-                    }
+        let Some(first) = moved else { break };
+        // A burst of edits queues many moves: list each stream once.
+        let mut heard = vec![first];
+        heard.extend(refs.pending());
+        heard.extend(index.pending());
+        if heard.contains(&Moved::Missed) {
+            for s in svc.stream_store.list().await.unwrap_or_default() {
+                if s.archived_at.is_none() {
+                    list(s.id).await;
                 }
             }
-            None => break,
+            continue;
+        }
+        let mut streams: Vec<_> = heard
+            .into_iter()
+            .filter_map(|m| match m {
+                Moved::Stream(s) => Some(s),
+                Moved::Missed => None,
+            })
+            .collect();
+        streams.sort_by_key(|s| s.value());
+        streams.dedup();
+        for s in streams {
+            list(s).await;
         }
     }
 }

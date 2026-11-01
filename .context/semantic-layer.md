@@ -1423,7 +1423,11 @@ oxplow-bundled change cards) only read them.
   skipped): only the event's thread's effort when a thread's take made
   it, every open effort on the stream otherwise — so the lists are always
   current. `watch_working_files` restates the same working-headed lists
-  on a ref or index move. The deep analysis is
+  on a ref or index move, and on an edit on disk: the stream's file
+  watcher (250 ms debounce) calls `ref_moves.index_moved`, so an edit
+  made outside oxplow shows in `v_change_file` (and the rail's
+  Uncommitted panel) without waiting for a snapshot take. Moves queued
+  during a relist are folded into one relist per stream. The deep analysis is
   **paced** (`change_reactor::deep_pacing`, the same mechanism as
   collectors' — metrics.md "Pacing"): a take records core's job in
   `pending_run` (`owner` `core`, `id` `change/working/<stream>`,
