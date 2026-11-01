@@ -11,6 +11,7 @@ fn page(text: &str) -> Result<Page, String> {
         "busy",
         "extensions/acme/pages/busy.yaml",
         text,
+        PageKind::Page,
     )
 }
 
@@ -775,6 +776,127 @@ fn a_resource_page_is_never_listed_so_it_takes_no_listing_keys() {
     }
     // The same keys are a standalone page's.
     page(&format!("title: T\ncategory: Work\nkeywords: a\n{BODY}")).unwrap();
+}
+
+fn of_kind(kind: PageKind, text: &str) -> Result<Page, String> {
+    parse_page(
+        "acme",
+        "acme",
+        "busy",
+        &format!("extensions/acme/{}/busy.yaml", kind.folder()),
+        text,
+        kind,
+    )
+}
+
+/// A part is drawn only inside a host page: it has no tab, no launcher
+/// entry and no agent-facing identity of its own, so the keys that give a
+/// page those are refused, each naming what a part is.
+#[test]
+fn a_part_takes_no_listing_or_tab_keys() {
+    for (key, line) in [
+        ("category", "category: Work"),
+        ("keywords", "keywords: a b"),
+        ("label", "label: '{{param.x}}'"),
+        ("icon", "icon: git-branch"),
+        ("for", "for: oxplow/file"),
+        ("accepts", "accepts: { path: present }"),
+        ("default", "default: true"),
+        ("pinned", "pinned: true"),
+        ("answers", "answers: [{ question: q, params: {} }]"),
+        ("tool", "tool: busy"),
+        ("see_also", "see_also: [{ page: other }]"),
+        ("rail", "rail: { viz: table, from: q }"),
+        ("comments", "comments: true"),
+        ("refresh", "refresh: true"),
+    ] {
+        let why = of_kind(
+            PageKind::Part,
+            &format!("title: T\nparams: [{{ name: x }}]\n{line}\n{BODY}"),
+        )
+        .expect_err(key);
+        assert!(why.contains(&format!("takes no `{key}`")), "{key}: {why}");
+        assert!(why.contains("is a part"), "{key}: {why}");
+    }
+    // What a part keeps: a title, params, loaders, a view, actions, an
+    // alert, a badge and needs.
+    let part = of_kind(
+        PageKind::Part,
+        &format!(
+            "title: T\nneeds: [vcs]\nbadge: {{ loader: q }}\nalert: {{ min_rows: 1 }}\nactions: [{{ id: go, label: Go, command: oxplow.x.y }}]\n{BODY}"
+        ),
+    )
+    .expect("a part loads");
+    assert_eq!(part.kind, PageKind::Part);
+    assert_eq!(part.file(), "parts/busy.yaml");
+}
+
+/// A query is rows only: its loaders and params, no view and nothing a
+/// person looks at. Its default loader is the last one declared, and the
+/// loaded page carries a synthesized table over it so the runner, the text
+/// rendering and the fixtures need no case of their own.
+#[test]
+fn a_query_is_rows_only_and_has_no_view() {
+    let why = of_kind(PageKind::Query, &format!("title: T\n{BODY}")).expect_err("a view");
+    assert!(why.contains("a query has no `view:`"), "{why}");
+    let why = of_kind(PageKind::Query, "title: T\n").expect_err("no loaders");
+    assert!(why.contains("a query needs `loaders:`"), "{why}");
+    for (key, line) in [
+        (
+            "actions",
+            "actions: [{ id: go, label: Go, command: oxplow.x.y }]",
+        ),
+        ("badge", "badge: { loader: q }"),
+        ("alert", "alert: { min_rows: 1 }"),
+        ("category", "category: Work"),
+        ("answers", "answers: [{ question: q, params: {} }]"),
+    ] {
+        let why = of_kind(
+            PageKind::Query,
+            &format!("title: T\n{line}\nloaders:\n  q: {{ rows: [{{ a: 1 }}] }}\n"),
+        )
+        .expect_err(key);
+        assert!(why.contains(&format!("takes no `{key}`")), "{key}: {why}");
+        assert!(why.contains("is a query"), "{key}: {why}");
+    }
+    let query = of_kind(
+        PageKind::Query,
+        "title: T\ntool: busy\nneeds: [vcs]\nparams: [{ name: x }]\nloaders:\n  first: { rows: [{ a: 1 }] }\n  last: { sql: 'SELECT a AS value, a AS label FROM first WHERE :x IS NULL' }\n",
+    )
+    .expect("a query loads");
+    assert_eq!(query.kind, PageKind::Query);
+    assert_eq!(query.file(), "queries/busy.yaml");
+    assert_eq!(
+        query.default_loader().map(|l| l.name.as_str()),
+        Some("last")
+    );
+    assert_eq!(query.first_loader().map(|l| l.name.as_str()), Some("first"));
+    assert_eq!(query.tool.as_deref(), Some("acme_busy"));
+    match &query.view.kind {
+        NodeKind::Viz { config, from, .. } => {
+            assert_eq!(config.viz, Viz::Table);
+            assert_eq!(from.as_deref(), Some("last"));
+        }
+        other => panic!("a query's view is a table over its last loader: {other:?}"),
+    }
+    // A page's default loader is its first.
+    let page = page(
+        "title: T\nview: { viz: table, from: a }\nloaders:\n  a: { rows: [{ a: 1 }] }\n  b: { rows: [{ b: 1 }] }\n",
+    )
+    .unwrap();
+    assert_eq!(page.kind, PageKind::Page);
+    assert_eq!(page.file(), "pages/busy.yaml");
+    assert_eq!(page.default_loader().map(|l| l.name.as_str()), Some("a"));
+}
+
+/// A page and a part show something, so each needs a `view:`.
+#[test]
+fn a_page_and_a_part_need_a_view() {
+    for kind in [PageKind::Page, PageKind::Part] {
+        let why =
+            of_kind(kind, "title: T\nloaders:\n  q: { rows: [{ a: 1 }] }\n").expect_err("view");
+        assert!(why.contains("needs a `view:`"), "{kind:?}: {why}");
+    }
 }
 
 #[test]

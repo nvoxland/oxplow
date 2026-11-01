@@ -28,6 +28,73 @@ use crate::pages::spec::{
     VizSections, VizSteps, VizTerminal, VizTimeline, VizTree,
 };
 
+/// What a page file is, by the folder it is in. The three kinds share one
+/// base — params, loaders, the load checks, the dry run, fixtures and an
+/// agent's `oxplow_run_page` — and differ in what else they may declare
+/// and where they may be named.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    specta::Type,
+    schemars::JsonSchema,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum PageKind {
+    /// `pages/`: a page with a tab and a URL, listed in the launcher when
+    /// it has a `category`.
+    Page,
+    /// `parts/`: drawn only inside a host — an `embed` node, a slot mount,
+    /// a panel, a row's `expand`. No tab, no launcher entry.
+    Part,
+    /// `queries/`: rows only, for a param's `options_from`, a form's
+    /// `choices` and `{ page, loader }` loaders. No view.
+    Query,
+}
+
+impl PageKind {
+    pub const ALL: [PageKind; 3] = [PageKind::Page, PageKind::Part, PageKind::Query];
+
+    /// The folder of an extension that holds this kind.
+    pub fn folder(self) -> &'static str {
+        match self {
+            PageKind::Page => "pages",
+            PageKind::Part => "parts",
+            PageKind::Query => "queries",
+        }
+    }
+
+    /// The kind a folder of an extension holds, if it is one of the three.
+    pub fn of_folder(dir: &str) -> Option<PageKind> {
+        PageKind::ALL.into_iter().find(|k| k.folder() == dir)
+    }
+
+    /// `a page`, `a part`, `a query`: how an error names one.
+    pub fn article(self) -> &'static str {
+        match self {
+            PageKind::Page => "a page",
+            PageKind::Part => "a part",
+            PageKind::Query => "a query",
+        }
+    }
+
+    /// What the kind is, after its article: for an error that says why a
+    /// key doesn't belong.
+    fn is_what(self) -> &'static str {
+        match self {
+            PageKind::Page => "a page, opened in a tab",
+            PageKind::Part => "a part, drawn only inside a host page",
+            PageKind::Query => "a query, rows that other pages read",
+        }
+    }
+}
+
 /// A loaded page.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
@@ -36,6 +103,8 @@ pub struct Page {
     pub id: String,
     pub extension: String,
     pub slug: String,
+    /// Which folder it came from, and so what it is.
+    pub kind: PageKind,
     pub title: String,
     pub description: String,
     /// What its tab says, when not its title: `{{param.<name>}}` and
@@ -134,6 +203,21 @@ impl Page {
             .iter()
             .find(|l| !matches!(l.loader, Loader::Content { .. }))
             .or_else(|| self.loaders.first())
+    }
+
+    /// The loader a reference to the page with no `#<loader>` means: a
+    /// query's last one (the rows it exists for, built from the ones
+    /// before), else the page's first.
+    pub fn default_loader(&self) -> Option<&LoaderDecl> {
+        match self.kind {
+            PageKind::Query => self.loaders.last(),
+            _ => self.first_loader(),
+        }
+    }
+
+    /// Its file inside its extension: `<folder>/<slug>.yaml`.
+    pub fn file(&self) -> String {
+        format!("{}/{}.yaml", self.kind.folder(), self.slug)
     }
 }
 
@@ -448,7 +532,9 @@ struct PageFile {
     /// Its loaders, in order (a mapping keeps it).
     #[serde(default)]
     loaders: Option<serde_yaml::Mapping>,
-    view: serde_yaml::Value,
+    /// What it shows; a query has none.
+    #[serde(default)]
+    view: Option<serde_yaml::Value>,
     #[serde(default)]
     rail: Option<serde_yaml::Value>,
     /// Related pages: "See also" in the Details rail.
@@ -581,13 +667,15 @@ fn reads_no_rows(viz: Viz) -> bool {
 }
 
 /// Parse and check page file `text`, page `slug` of extension `extension`
-/// (whose commands and tools are under `namespace`), read from `rel`.
+/// (whose commands and tools are under `namespace`), read from `rel`;
+/// `kind` is the folder it was read from.
 pub fn parse_page(
     extension: &str,
     namespace: &str,
     slug: &str,
     rel: &str,
     text: &str,
+    kind: PageKind,
 ) -> Result<Page, String> {
     let file: PageFile = serde_yaml::from_str(text).map_err(|e| e.to_string())?;
     let id = format!("{extension}/{slug}");
@@ -597,9 +685,31 @@ pub fn parse_page(
         .map(Renders::into_vec)
         .unwrap_or_default();
     let resource = !renders.is_empty();
-    if let Some(why) = page_kind_problem(&file, resource) {
+    if let Some(why) = kind_problem(&file, kind, resource) {
         return Err(why);
     }
+    // A query shows nothing itself; loaded, it is a table over its last
+    // loader so one runner, one text rendering and one fixture kind serve
+    // every kind.
+    let view = match (&file.view, kind) {
+        (Some(view), _) => view.clone(),
+        (None, PageKind::Query) => {
+            let last = file
+                .loaders
+                .as_ref()
+                .and_then(|m| m.keys().last())
+                .and_then(|k| k.as_str())
+                .ok_or_else(|| "a query needs `loaders:`: the rows it exists for".to_string())?;
+            serde_yaml::from_str(&format!("{{ viz: table, from: {last} }}"))
+                .map_err(|e| e.to_string())?
+        }
+        (None, _) => {
+            return Err(format!(
+                "{} needs a `view:`: what it shows (a query, in queries/, has none)",
+                kind.article()
+            ))
+        }
+    };
     let origin = PageProvenance {
         extension: extension.to_string(),
         source: None,
@@ -618,7 +728,7 @@ pub fn parse_page(
             .unwrap_or(DEFAULT_CONTENT_BYTES),
     };
     let mut params = file.params;
-    let switch_params = switch_params(&file.view);
+    let switch_params = switch_params(&view);
     for p in &mut params {
         if switch_params.contains(&p.name) && p.role.is_none() {
             p.role = Some(ParamRole::Filter);
@@ -642,7 +752,7 @@ pub fn parse_page(
         origin: &origin,
         ids: &mut ids,
     };
-    let view = parse_node(&file.view, &mut ctx)?;
+    let view = parse_node(&view, &mut ctx)?;
     let rail = file
         .rail
         .as_ref()
@@ -704,6 +814,7 @@ pub fn parse_page(
         id,
         extension: extension.to_string(),
         slug: slug.to_string(),
+        kind,
         title: file.title,
         description: file.description,
         label: file.label,
@@ -735,12 +846,64 @@ pub fn parse_page(
     Ok(page)
 }
 
-/// Why `file` can't be the kind of page it says it is. A resource page
-/// (`for:`) is a display mode of the resources it names: never listed on
-/// its own, so it has no launcher section, keywords or badge and can't be
-/// hidden, and it is handed the URI it shows as its `uri` param. A
-/// standalone page has no `content`.
-fn page_kind_problem(file: &PageFile, resource: bool) -> Option<String> {
+/// One key of a page file: its name, whether a file carries it, and
+/// whether a page, a part and a query take it (`PageKind::ALL`'s order).
+type KindKey = (&'static str, fn(&PageFile) -> bool, [bool; 3]);
+
+/// Each key a page file may carry, and whether a page, a part and a query
+/// take it. One row per key: a key missing here is every kind's.
+const KIND_KEYS: &[KindKey] = &[
+    ("category", |f| f.category.is_some(), [true, false, false]),
+    ("keywords", |f| f.keywords.is_some(), [true, false, false]),
+    ("label", |f| f.label.is_some(), [true, false, false]),
+    ("icon", |f| f.icon.is_some(), [true, false, false]),
+    ("for", |f| f.renders.is_some(), [true, false, false]),
+    ("accepts", |f| !f.accepts.is_empty(), [true, false, false]),
+    ("default", |f| f.default, [true, false, false]),
+    ("pinned", |f| f.pinned, [true, false, false]),
+    ("content", |f| f.content.is_some(), [true, false, false]),
+    ("hidden", |f| f.hidden, [true, false, false]),
+    ("answers", |f| !f.answers.is_empty(), [true, false, false]),
+    ("tool", |f| f.tool.is_some(), [true, false, true]),
+    ("see_also", |f| !f.see_also.is_empty(), [true, false, false]),
+    ("rail", |f| f.rail.is_some(), [true, false, false]),
+    ("comments", |f| f.comments, [true, false, false]),
+    ("refresh", |f| f.refresh, [true, false, false]),
+    ("actions", |f| !f.actions.is_empty(), [true, true, false]),
+    ("alert", |f| f.alert.is_some(), [true, true, false]),
+    ("badge", |f| f.badge.is_some(), [true, true, false]),
+];
+
+/// Why `file` can't be the `kind` its folder says. A part is drawn only
+/// inside a host and a query is rows only, so each refuses the keys that
+/// give a page a tab, a launcher entry or an agent-facing identity. A
+/// resource page (`for:`) is a display mode of the resources it names:
+/// never listed on its own, so it has no launcher section, keywords or
+/// badge and can't be hidden, and it is handed the URI it shows as its
+/// `uri` param. A standalone page has no `content`.
+fn kind_problem(file: &PageFile, kind: PageKind, resource: bool) -> Option<String> {
+    let column = PageKind::ALL.iter().position(|k| *k == kind)?;
+    for (key, given, takes) in KIND_KEYS {
+        if given(file) && !takes[column] {
+            let who = PageKind::ALL
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| takes[*i])
+                .map(|(_, k)| format!("{} in {}/", k.article(), k.folder()))
+                .collect::<Vec<_>>()
+                .join(" or ");
+            return Some(format!(
+                "this is {}: it takes no `{key}` ({who} does)",
+                kind.is_what()
+            ));
+        }
+    }
+    if kind == PageKind::Query && file.view.is_some() {
+        return Some(
+            "a query has no `view:`: it is rows other pages read (a page or a part shows them)"
+                .into(),
+        );
+    }
     if let Some(p) = file.params.iter().find(|p| p.name == CONTENT) {
         return Some(format!(
             "param `{}`: `{CONTENT}` is the name of a resource page's loader, so a param can't have it",
@@ -834,7 +997,14 @@ pub const INLINE_ID: &str = "inline";
 /// one-off — which only reads: its loaders are queries, rows and other
 /// pages' loaders; its nodes show, embed deployed pages, and never act.
 pub fn parse_inline_page(text: &str) -> Result<Page, String> {
-    let mut page = parse_page(INLINE_ID, INLINE_ID, INLINE_ID, INLINE_ID, text)?;
+    let mut page = parse_page(
+        INLINE_ID,
+        INLINE_ID,
+        INLINE_ID,
+        INLINE_ID,
+        text,
+        PageKind::Page,
+    )?;
     page.id = INLINE_ID.to_string();
     if let Some(why) = inline_problem(&page) {
         return Err(why);
@@ -858,7 +1028,7 @@ pub fn temp_file_name(id: &str) -> String {
 pub fn parse_temp_page(id: &str, text: &str) -> Result<Page, String> {
     let file = temp_file_name(id);
     let rel = format!("{}/{file}", crate::filesystems::temp::TEMP_DIR);
-    let mut page = parse_page(TEMP_EXTENSION, INLINE_ID, id, &rel, text)?;
+    let mut page = parse_page(TEMP_EXTENSION, INLINE_ID, id, &rel, text, PageKind::Page)?;
     if let Some(why) = inline_problem(&page) {
         return Err(why);
     }
@@ -1628,7 +1798,7 @@ pub fn refuse_shared_core_pages(extensions: &mut [crate::extension::extensions::
                             page.slug
                         ),
                     )
-                    .at(format!("pages/{}.yaml", page.slug), None)
+                    .at(page.file(), None)
                     .contribution(&page.slug)
                     .fix("rename one"),
                 );

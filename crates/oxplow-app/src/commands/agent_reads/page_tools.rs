@@ -21,7 +21,7 @@ use super::super::{Handler, HandlerOutput, Invocation};
 use super::{check_stream_id, stream_or_actors};
 use crate::pages::runner::{PageRun, PageRunner, RunNode, RunRequest, RunTarget};
 use crate::pages::schema::{
-    parse_inline_page, parse_temp_page, temp_file_name, NodeKind, TEMP_EXTENSION,
+    parse_inline_page, parse_temp_page, temp_file_name, NodeKind, PageKind, TEMP_EXTENSION,
 };
 use crate::Services;
 
@@ -67,10 +67,10 @@ pub struct RunPageInput {
 #[serde(deny_unknown_fields)]
 pub struct DescribePageInput {
     /// The page file, as a file uri (`oxplow:oxplow/file?path=…`): on
-    /// `oxplow:extensions` a page that runs (`<extension>/pages/<slug>.yaml`,
+    /// `oxplow:extensions` a page that runs (`<extension>/<pages|parts|queries>/<slug>.yaml`,
     /// at its `rev`), on `oxplow:temp` a view's file, on the worktree a
-    /// page file under `extensions/<name>/pages/` or
-    /// `.oxplow/extensions/<name>/pages/`.
+    /// page file under `extensions/<name>/<folder>/` or
+    /// `.oxplow/extensions/<name>/<folder>/`.
     pub uri: String,
     /// For a worktree file: its text as you have it (an edit not saved
     /// yet); read when omitted. Other filesystems are always read.
@@ -937,12 +937,14 @@ fn page_slug(file: &str) -> Option<&str> {
         .filter(|slug| !slug.is_empty())
 }
 
-/// `(extension, slug)` of a page file path on the worktree:
-/// `[.oxplow/]extensions/<extension>/pages/<slug>.yaml`.
-fn worktree_page(path: &str) -> Option<(&str, &str)> {
+/// `(extension, kind, slug)` of a page file path on the worktree:
+/// `[.oxplow/]extensions/<extension>/<pages|parts|queries>/<slug>.yaml`.
+fn worktree_page(path: &str) -> Option<(&str, PageKind, &str)> {
     let parts: Vec<&str> = path.split('/').collect();
     match parts.as_slice() {
-        [.., "extensions", ext, "pages", file] => Some((ext, page_slug(file)?)),
+        [.., "extensions", ext, folder, file] => {
+            Some((ext, PageKind::of_folder(folder)?, page_slug(file)?))
+        }
         _ => None,
     }
 }
@@ -998,10 +1000,10 @@ async fn described_page(
         // The running copy, or the copy of an older (or other) deployment.
         EXTENSIONS => {
             let parts: Vec<&str> = path.split('/').collect();
-            let [ext, "pages", file] = parts.as_slice() else {
+            let [ext, folder, file] = parts.as_slice() else {
                 return Ok(None);
             };
-            let Some(slug) = page_slug(file) else {
+            let (Some(kind), Some(slug)) = (PageKind::of_folder(folder), page_slug(file)) else {
                 return Ok(None);
             };
             let id = format!("{ext}/{slug}");
@@ -1019,10 +1021,11 @@ async fn described_page(
             let rel = crate::extension::extensions::shown(
                 project,
                 &crate::extension::extension_store::deployment_dir(project, ext, hash)
-                    .join("pages")
+                    .join(folder)
                     .join(file),
             );
-            let Ok(mut page) = crate::pages::schema::parse_page(ext, &namespace, slug, &rel, &text)
+            let Ok(mut page) =
+                crate::pages::schema::parse_page(ext, &namespace, slug, &rel, &text, kind)
             else {
                 return Ok(None);
             };
@@ -1047,14 +1050,15 @@ async fn described_page(
         // A page file in a worktree, as the caller has it. — a draft, never the shipped copy
         // (`bundled` stays false even for a shipped extension's page).
         LOCAL => {
-            let Some((ext, slug)) = worktree_page(path) else {
+            let Some((ext, kind, slug)) = worktree_page(path) else {
                 return Ok(None);
             };
             let Some(text) = text(LOCAL).await else {
                 return Ok(None);
             };
             let namespace = namespace_of(svc, ext);
-            let Ok(mut page) = crate::pages::schema::parse_page(ext, &namespace, slug, path, &text)
+            let Ok(mut page) =
+                crate::pages::schema::parse_page(ext, &namespace, slug, path, &text, kind)
             else {
                 return Ok(None);
             };
@@ -1118,6 +1122,7 @@ fn describe_op(services: ServicesSlot) -> Op {
                 Ok(HandlerOutput {
                     result: json!({
                         "page": page.id,
+                        "kind": page.kind,
                         "title": page.title,
                         "extension": page.extension,
                         "source": page.origin.source,
@@ -2022,6 +2027,28 @@ mod describe_tests {
             assert_eq!(def["extension"], json!("acme"), "{def}");
             assert_eq!(def["file"], json!(path), "{def}");
         }
+        // A file under `parts/` or `queries/` is that kind, and the
+        // description says so.
+        let part = describe(
+            &fx,
+            json!({ "uri": uri(LOCAL, "extensions/acme/parts/draft.yaml", None), "text": OLD }),
+        )
+        .await;
+        assert_eq!(part["kind"], json!("part"), "{part}");
+        assert_eq!(
+            part["file"],
+            json!("extensions/acme/parts/draft.yaml"),
+            "{part}"
+        );
+        let query = describe(
+            &fx,
+            json!({
+                "uri": uri(LOCAL, "extensions/acme/queries/draft.yaml", None),
+                "text": "title: Q\nloaders:\n  numbers: { sql: 'SELECT 1 AS n' }\n",
+            }),
+        )
+        .await;
+        assert_eq!(query["kind"], json!("query"), "{query}");
         // Without text it is read from the worktree.
         std::fs::write(
             fx.svc

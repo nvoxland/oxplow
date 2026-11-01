@@ -566,9 +566,10 @@ effects: …          # scripts reacting to logged events by composing commands 
 custom_components: …   # sandboxed components a page's `component` node or `custom` viz draws (see extensions-components.md "Custom components"); each has an optional one-sentence `description:`
 ```
 
-Pages aren't listed here: every `pages/*.yaml` file in the folder is
-loaded. A page gets into the launcher through its own `category` (or
-stays out with `hidden: true`). An old-format UI folder (`lenses/`) is a
+Pages aren't listed here: every `pages/*.yaml`, `parts/*.yaml` and
+`queries/*.yaml` file in the folder is loaded, its kind by its folder
+(extensions-pages.md "Three kinds, by folder"). A page gets into the
+launcher through its own `category` (or stays out with `hidden: true`). An old-format UI folder (`lenses/`) is a
 load error that says to rewrite each file as a page.
 
 To move an old extension over: each file in `lenses/` becomes a page
@@ -584,9 +585,11 @@ delete the YAML files in `lenses/`: they are what the loader refuses.
   intent example names joins `intent.examples` (`fixtures_are_examples`:
   a fixture file is an example, so a test is one file), and an extension
   with no example after that is a warning;
-- page files: each `pages/*.yaml` parses (`pages::schema::parse_page`:
-  unknown keys are errors; a `replaceable` names a replaceable component
-  and is placed once); an `icon` oxplow draws; the pages that a param's
+- page files: each `pages/*.yaml`, `parts/*.yaml` and `queries/*.yaml`
+  parses (`pages::schema::parse_page`: unknown keys are errors; a key its
+  kind doesn't take is an error; a `replaceable` names a replaceable
+  component and is placed once); a slug in two folders is neither; an
+  `icon` oxplow draws; the pages that a param's
   `options_from`, a column's `expand` and a form field's `from` name are in
   `pages/`; a page's renderer declarations (`for`, `accepts`, `default`,
   `pinned`) fit the resources it names; a `component` node or `custom`

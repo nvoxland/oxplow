@@ -1020,7 +1020,7 @@ pub(super) async fn page_answers(host: &Host, ext: &Extension, report: &mut Test
             {
                 report.errors.push(
                     error(
-                        &format!("pages/{}.yaml", page.slug),
+                        &page.file(),
                         None,
                         "example.answer_failed",
                         format!("the answer to \"{}\" doesn't run: {e}", answer.question),

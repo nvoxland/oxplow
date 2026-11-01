@@ -644,6 +644,7 @@ mod diff_tests {
             slug,
             "diff-test.yaml",
             "title: Diff test\nloaders:\n  value: { rows: [{ n: 1 }] }\nview: { viz: table, from: value }\nrail: { id: rail-embed, embed: { page: acme/child } }\n",
+            crate::pages::schema::PageKind::Page,
         )
         .unwrap();
         let tree = RunNode {

@@ -31,6 +31,7 @@ pub mod public_contracts;
 pub mod replacements;
 pub mod schema;
 pub mod skills;
+use crate::pages::schema::PageKind;
 use crate::pages::spec::{
     action_templates, edit_column, label_refs, param_problem, FormField, FormFieldSpec, FormMode,
     FormSpec, LabelFrom, PageParam, PageProvenance, ParamRole, ViewContext, Viz, VizConfig,
@@ -367,8 +368,8 @@ pub struct Extension {
     pub manifest_version: u32,
     /// Why it exists (required; `None` only when the manifest didn't load).
     pub intent: Option<Intent>,
-    /// Its page files (`pages/*.yaml`; valid ones — invalid ones are in
-    /// `errors`).
+    /// Its page files — pages, parts and queries (`pages/`, `parts/`,
+    /// `queries/`; valid ones — invalid ones are in `errors`).
     #[serde(default)]
     pub page_files: Vec<crate::pages::schema::Page>,
     /// Declared collectors (valid ones; invalid ones are in `errors`).
@@ -804,10 +805,12 @@ fn locate(ext: &mut Extension, project: &Path, settings: &oxplow_config::Extensi
     ext.source = source.clone().filter(|s| *s != ext.path);
     for page in &mut ext.page_files {
         let file = page.origin.running.rsplit('/').next().unwrap_or_default();
-        let at = source.as_ref().map(|dir| format!("{dir}/pages/{file}"));
-        let running_uri = deployment
-            .as_deref()
-            .map(|hash| crate::filesystems::extensions::page_running_uri(&ext.name, file, hash));
+        let at = source
+            .as_ref()
+            .map(|dir| format!("{dir}/{}/{file}", page.kind.folder()));
+        let running_uri = deployment.as_deref().map(|hash| {
+            crate::filesystems::extensions::page_running_uri(&ext.name, page.kind, file, hash)
+        });
         let mut place = |o: &mut PageProvenance| {
             o.source = at.clone();
             o.deployment = deployment.clone();
@@ -2102,25 +2105,55 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
         );
     }
 
-    let mut page_names: Vec<String> = files
-        .list("pages")
-        .into_iter()
-        .filter(|f| f.ends_with(".yaml") || f.ends_with(".yml"))
-        .collect();
+    // A page file is one of three kinds by its folder. One slug names one
+    // thing: a slug in two folders is neither.
+    let mut page_names: Vec<(String, PageKind, String)> = Vec::new();
+    for kind in PageKind::ALL {
+        for file in files.list(kind.folder()) {
+            if file.ends_with(".yaml") || file.ends_with(".yml") {
+                let slug = file
+                    .trim_end_matches(".yaml")
+                    .trim_end_matches(".yml")
+                    .to_string();
+                page_names.push((slug, kind, file));
+            }
+        }
+    }
     page_names.sort();
-    for file in page_names {
-        let slug = file
-            .trim_end_matches(".yaml")
-            .trim_end_matches(".yml")
-            .to_string();
-        let page_rel = format!("{rel}/pages/{file}");
-        let page_file = format!("pages/{file}");
-        let text = files.read(&format!("pages/{file}"));
+    let twice: std::collections::BTreeSet<String> = page_names
+        .iter()
+        .filter(|(slug, ..)| page_names.iter().filter(|(s, ..)| s == slug).count() > 1)
+        .map(|(slug, ..)| slug.clone())
+        .collect();
+    for slug in &twice {
+        let files: Vec<String> = page_names
+            .iter()
+            .filter(|(s, ..)| s == slug)
+            .map(|(_, kind, file)| format!("{}/{file}", kind.folder()))
+            .collect();
+        ext.errors.push(
+            Diagnostic::error(
+                "page.slug_in_two_folders",
+                format!(
+                    "`{slug}` is in {}: a slug names one thing, in one folder",
+                    files.join(" and ")
+                ),
+            )
+            .at(&files[files.len() - 1], None)
+            .contribution(slug)
+            .fix("keep one, or rename one"),
+        );
+    }
+    page_names.retain(|(slug, ..)| !twice.contains(slug));
+    for (slug, kind, file) in page_names {
+        let page_rel = format!("{rel}/{}/{file}", kind.folder());
+        let page_file = format!("{}/{file}", kind.folder());
+        let text = files.read(&page_file);
         let parsed = text
             .as_deref()
             .ok_or_else(|| "unreadable".to_string())
             .and_then(|t| {
-                crate::pages::schema::parse_page(name, &ext.namespace, &slug, &page_rel, t)
+                crate::pages::schema::parse_page(name, &ext.namespace, &slug, &page_rel, t, kind)
             });
         match parsed {
             Ok(mut page) => {
@@ -3415,7 +3448,10 @@ fn check_dependencies(ext: &mut Extension, others: &[Extension], files: &dyn Ext
     let mut paths = files.paths().unwrap_or_default();
     paths.sort();
     for rel in paths.iter().filter(|p| {
-        (p.starts_with("pages/") && p.ends_with(".yaml"))
+        (p.ends_with(".yaml")
+            && PageKind::ALL
+                .iter()
+                .any(|k| p.starts_with(&format!("{}/", k.folder()))))
             || (p.starts_with("datasets/") && p.ends_with(".sql"))
             || p.ends_with(".star")
     }) {
@@ -6409,6 +6445,97 @@ commands:
         }
         let ext = project_extensions(dir.path()).remove(0);
         (dir, ext)
+    }
+
+    /// Extension `x` with `files` at the given paths inside its folder (so
+    /// a test can write `parts/` and `queries/` beside `pages/`).
+    fn load_tree(files: &[(&str, &str)]) -> (tempfile::TempDir, Extension) {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            ".oxplow/extensions/x/extension.yaml",
+            "manifest: 2\nname: x\nintent:\n  purpose: test\n",
+        );
+        for (rel, body) in files {
+            write(dir.path(), &format!(".oxplow/extensions/x/{rel}"), body);
+        }
+        let ext = project_extensions(dir.path()).remove(0);
+        (dir, ext)
+    }
+
+    /// A page file is one of three kinds by its folder: `pages/` (a page
+    /// with a tab), `parts/` (drawn only inside a host) and `queries/`
+    /// (rows only). Each loads with its kind, and its file and source
+    /// name the folder it is in.
+    #[test]
+    fn parts_and_queries_load_with_their_kind_and_file() {
+        use crate::pages::schema::PageKind;
+        let (_d, ext) = load_tree(&[
+            ("pages/a.yaml", &viz_page("", "SELECT 1", "")),
+            ("parts/b.yaml", &viz_page("", "SELECT 1", "")),
+            (
+                "queries/c.yaml",
+                "title: C\nloaders:\n  rows:\n    sql: \"SELECT 1 AS value, 'one' AS label\"\n",
+            ),
+        ]);
+        assert!(ext.errors.is_empty(), "{}", shown_errors(&ext));
+        let kind = |slug: &str| page_of(&ext, slug).map(|p| p.kind);
+        assert_eq!(kind("a"), Some(PageKind::Page));
+        assert_eq!(kind("b"), Some(PageKind::Part));
+        assert_eq!(kind("c"), Some(PageKind::Query));
+        let b = page_of(&ext, "b").unwrap();
+        assert!(
+            b.origin.running.ends_with("parts/b.yaml"),
+            "{}",
+            b.origin.running
+        );
+        assert!(
+            b.origin
+                .source
+                .as_deref()
+                .is_some_and(|s| s.ends_with("parts/b.yaml")),
+            "{:?}",
+            b.origin.source
+        );
+        assert_eq!(b.file(), "parts/b.yaml");
+        let c = page_of(&ext, "c").unwrap();
+        assert!(
+            c.origin.running.ends_with("queries/c.yaml"),
+            "{}",
+            c.origin.running
+        );
+        assert_eq!(c.id, "x/c");
+        // The running copy's URI names the folder too.
+        assert!(crate::filesystems::extensions::page_running_uri(
+            "x",
+            PageKind::Part,
+            "b.yaml",
+            "h"
+        )
+        .contains("path=x/parts/b.yaml"),);
+    }
+
+    /// One slug names one thing: a slug in two folders loads as neither,
+    /// and the error names both files.
+    #[test]
+    fn a_slug_in_two_folders_loads_neither_and_says_so() {
+        let (_d, ext) = load_tree(&[
+            ("pages/dup.yaml", &viz_page("", "SELECT 1", "")),
+            ("parts/dup.yaml", &viz_page("", "SELECT 1", "")),
+            ("pages/fine.yaml", &viz_page("", "SELECT 1", "")),
+        ]);
+        assert!(page_of(&ext, "dup").is_none());
+        assert!(page_of(&ext, "fine").is_some());
+        let errs = shown_errors(&ext);
+        assert!(errs.contains("pages/dup.yaml"), "{errs}");
+        assert!(errs.contains("parts/dup.yaml"), "{errs}");
+        assert!(errs.contains("one folder"), "{errs}");
+        assert!(
+            ext.errors
+                .iter()
+                .any(|e| e.code == "page.slug_in_two_folders"),
+            "{errs}"
+        );
     }
 
     /// A viz node shows its loader's rows, so it names one (`from`) that

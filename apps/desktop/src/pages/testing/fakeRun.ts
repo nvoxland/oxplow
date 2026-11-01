@@ -101,6 +101,7 @@ export function fakePage(view: Node, over: Partial<Page> = {}): Page {
     id: "acme/page",
     extension: "acme",
     slug: "page",
+    kind: "page",
     title: "Acme Page",
     description: "",
     label: null,

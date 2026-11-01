@@ -291,9 +291,15 @@ async fn changes_during_the_first_read_are_observed_before_publishing_the_run() 
             .unwrap();
         let dataset = if relevant { "v_dataset" } else { "v_page" };
         let yaml = format!("title: Opening\nloaders: {{ read: {{ command: {name}, reads: [{dataset}] }} }}\nview: {{ viz: number, from: read }}\n");
-        let page =
-            super::schema::parse_page("acme", "acme", "opening", "pages/opening.yaml", &yaml)
-                .unwrap();
+        let page = super::schema::parse_page(
+            "acme",
+            "acme",
+            "opening",
+            "pages/opening.yaml",
+            &yaml,
+            super::schema::PageKind::Page,
+        )
+        .unwrap();
         let mut req = request("acme/opening", &[]);
         req.target = RunTarget::Spec(Arc::new(page));
         let (id, run) = runs.open(&svc, req, "window").await.unwrap();
@@ -357,7 +363,8 @@ async fn a_slow_dataset_refresh_cannot_restore_older_params_after_a_newer_reques
         )
         .unwrap();
     let page = super::schema::parse_page("acme", "acme", "delayed", "pages/delayed.yaml",
-        "title: Delayed\nparams: [{ name: n, default: 0 }]\nloaders:\n  read:\n    command: oxplow.test.delayed_read\n    args: { n: { param: n } }\n    reads: [v_dataset]\nview: { viz: number, from: read }\n").unwrap();
+        "title: Delayed\nparams: [{ name: n, default: 0 }]\nloaders:\n  read:\n    command: oxplow.test.delayed_read\n    args: { n: { param: n } }\n    reads: [v_dataset]\nview: { viz: number, from: read }\n",
+        super::schema::PageKind::Page).unwrap();
     let mut req = request("acme/delayed", &[]);
     req.target = RunTarget::Spec(Arc::new(page));
     let (id, _) = runs.open(&svc, req, "window").await.unwrap();
@@ -427,8 +434,15 @@ async fn an_event_a_live_dataset_follows_re_runs_what_reads_it() {
         )
         .unwrap();
     let yaml = "title: Config\nloaders: { read: { command: oxplow.test.config_read, reads: [v_config_value] } }\nview: { viz: number, from: read }\n";
-    let page =
-        super::schema::parse_page("acme", "acme", "config", "pages/config.yaml", yaml).unwrap();
+    let page = super::schema::parse_page(
+        "acme",
+        "acme",
+        "config",
+        "pages/config.yaml",
+        yaml,
+        super::schema::PageKind::Page,
+    )
+    .unwrap();
     let mut req = request("acme/config", &[]);
     req.target = RunTarget::Spec(Arc::new(page));
     let runs = svc.page_runs.clone();

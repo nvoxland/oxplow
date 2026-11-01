@@ -28,6 +28,7 @@ use super::local::{read_range_on_disk, stat_on_disk};
 use crate::extension::extension_catalog::ExtensionCatalog;
 use crate::extension::extension_store::{deployment_dir, STORE_DIR};
 use crate::extension::extensions::{owner, Extension};
+use crate::pages::schema::PageKind;
 
 /// The hash of the deployment `name` runs in `extensions`, a load's list:
 /// none when it isn't there or runs no deployment.
@@ -35,12 +36,13 @@ pub fn running_hash<'a>(extensions: &'a [Extension], name: &str) -> Option<&'a s
     owner(extensions, name).and_then(|ext| ext.deployment.hash())
 }
 
-/// The file URI of page file `file` (`<slug>.yaml`) of extension `name`
-/// as deployment `hash` has it: how `PageProvenance.running_uri` and
-/// `v_page.running_uri` name the copy that runs.
-pub fn page_running_uri(name: &str, file: &str, hash: &str) -> String {
+/// The file URI of page file `file` (`<slug>.yaml`, a `kind` by its
+/// folder) of extension `name` as deployment `hash` has it: how
+/// `PageProvenance.running_uri` and `v_page.running_uri` name the copy
+/// that runs.
+pub fn page_running_uri(name: &str, kind: PageKind, file: &str, hash: &str) -> String {
     oxplow_domain::uri::build::file_uri_at(
-        &format!("{name}/pages/{file}"),
+        &format!("{name}/{}/{file}", kind.folder()),
         Some(EXTENSIONS),
         Some(hash),
         None,

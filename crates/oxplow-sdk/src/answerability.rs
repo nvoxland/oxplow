@@ -509,7 +509,7 @@ pub async fn check_pages(
         for page in &ext.page_files {
             for (i, answer) in page.answers.iter().enumerate() {
                 let at = Place {
-                    file: format!("pages/{}.yaml", page.slug),
+                    file: page.file(),
                     label: format!("answer {} ({:?})", i + 1, answer.question),
                     contribution: Some(format!("{}/{}", ext.name, page.slug)),
                 };

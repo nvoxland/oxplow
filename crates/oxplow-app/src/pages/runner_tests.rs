@@ -279,7 +279,15 @@ async fn a_slot_runs_the_pages_mounted_at_it() {
 }
 
 fn budget_page(slug: &str, yaml: &str) -> super::schema::Page {
-    super::schema::parse_page("acme", "acme", slug, "budget-test.yaml", yaml).unwrap()
+    super::schema::parse_page(
+        "acme",
+        "acme",
+        slug,
+        "budget-test.yaml",
+        yaml,
+        super::schema::PageKind::Page,
+    )
+    .unwrap()
 }
 
 fn result_bytes(run: &PageRun) -> usize {

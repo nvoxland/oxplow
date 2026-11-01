@@ -2439,8 +2439,8 @@ export type Extension_Deserialize = {
 	/**  Why it exists (required; `None` only when the manifest didn't load). */
 	intent: Intent | null,
 	/**
-	 *  Its page files (`pages/*.yaml`; valid ones — invalid ones are in
-	 *  `errors`).
+	 *  Its page files — pages, parts and queries (`pages/`, `parts/`,
+	 *  `queries/`; valid ones — invalid ones are in `errors`).
 	 */
 	pageFiles?: Page_Deserialize[],
 	/**  Declared collectors (valid ones; invalid ones are in `errors`). */
@@ -2600,8 +2600,8 @@ export type Extension_Serialize = {
 	/**  Why it exists (required; `None` only when the manifest didn't load). */
 	intent: Intent | null,
 	/**
-	 *  Its page files (`pages/*.yaml`; valid ones — invalid ones are in
-	 *  `errors`).
+	 *  Its page files — pages, parts and queries (`pages/`, `parts/`,
+	 *  `queries/`; valid ones — invalid ones are in `errors`).
 	 */
 	pageFiles: Page_Serialize[],
 	/**  Declared collectors (valid ones; invalid ones are in `errors`). */
@@ -4703,6 +4703,29 @@ export type PageInactive = {
 };
 
 /**
+ *  What a page file is, by the folder it is in. The three kinds share one
+ *  base — params, loaders, the load checks, the dry run, fixtures and an
+ *  agent's `oxplow_run_page` — and differ in what else they may declare
+ *  and where they may be named.
+ */
+export type PageKind =
+/**
+ *  `pages/`: a page with a tab and a URL, listed in the launcher when
+ *  it has a `category`.
+ */
+"page" |
+/**
+ *  `parts/`: drawn only inside a host — an `embed` node, a slot mount,
+ *  a panel, a row's `expand`. No tab, no launcher entry.
+ */
+"part" |
+/**
+ *  `queries/`: rows only, for a param's `options_from`, a form's
+ *  `choices` and `{ page, loader }` loaders. No view.
+ */
+"query";
+
+/**
  *  A value the viewer (or an agent) can set when running the viz,
  *  bound into the query as `:name`.
  */
@@ -4873,6 +4896,8 @@ export type Page_Deserialize = {
 	id: string,
 	extension: string,
 	slug: string,
+	/**  Which folder it came from, and so what it is. */
+	kind: PageKind,
 	title: string,
 	description: string,
 	/**
@@ -4934,6 +4959,8 @@ export type Page_Serialize = {
 	id: string,
 	extension: string,
 	slug: string,
+	/**  Which folder it came from, and so what it is. */
+	kind: PageKind,
 	title: string,
 	description: string,
 	/**

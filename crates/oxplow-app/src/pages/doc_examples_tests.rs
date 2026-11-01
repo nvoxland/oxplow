@@ -3,7 +3,7 @@
 //! a page file when its info string is `yaml page`, and as an inline page
 //! when it is an `oxplow-page` block.
 
-use super::schema::{parse_inline_page, parse_page};
+use super::schema::{parse_inline_page, parse_page, PageKind};
 
 /// `(line of the opening fence, is inline, text)` of each marked block.
 fn marked_blocks(markdown: &str) -> Vec<(usize, bool, String)> {
@@ -53,7 +53,15 @@ fn every_marked_page_example_in_the_page_references_parses() {
             let parsed = if inline {
                 parse_inline_page(&text).map(|_| ())
             } else {
-                parse_page("acme", "acme", "example", "pages/example.yaml", &text).map(|_| ())
+                parse_page(
+                    "acme",
+                    "acme",
+                    "example",
+                    "pages/example.yaml",
+                    &text,
+                    PageKind::Page,
+                )
+                .map(|_| ())
             };
             if let Err(e) = parsed {
                 failures.push(format!("references/{}.md:{line}: {e}", reference.name));

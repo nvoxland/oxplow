@@ -6,12 +6,18 @@ In the worktree of the stream you're working in:
 
 ```
 .oxplow/extensions/<name>/extension.yaml
-.oxplow/extensions/<name>/pages/<slug>.yaml
+.oxplow/extensions/<name>/pages/<slug>.yaml      # a page: a tab, a URL
+.oxplow/extensions/<name>/parts/<slug>.yaml      # a part: drawn only inside a host page
+.oxplow/extensions/<name>/queries/<slug>.yaml    # a query: rows other pages read, no view
 .oxplow/extensions/<name>/fixtures/<example>.yaml
 ```
 
-`<name>` and `<slug>` are lowercase-with-dashes; the page id is
-`<name>/<slug>`. Reuse an extension when the page fits it; start a new one
+`<name>` and `<slug>` are lowercase-with-dashes; the id is `<name>/<slug>`
+whichever folder it is in, and a slug lives in one folder only. A part
+takes no `category`, `keywords`, `label`, `icon`, `for`, `answers`, `tool`,
+`see_also`, `rail`, `comments` or `refresh`; a query takes only `title`,
+`description`, `params`, `loaders`, `tool` and `needs`, and its last loader
+is what a reference to it means. Reuse an extension when the page fits it; start a new one
 for a new area. `oxplow.extension.write_page { extension, page, spec,
 deploy? }` writes a page file (creating the extension), refusing a spec that
 doesn't parse.

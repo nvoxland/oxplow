@@ -177,7 +177,7 @@ pub async fn page_spec(svc: &Services, page: String) -> Result<PageSpec, IpcErro
     let root = svc.worktrees.project_dir();
     let source = extensions::writable_extension_dir(root, root, &page.extension)
         .ok()
-        .map(|dir| dir.join("pages").join(format!("{}.yaml", page.slug)));
+        .map(|dir| dir.join(page.file()));
     let writable = source.as_ref().is_some_and(|path| path.is_file());
     let path = if writable {
         source.expect("a writable source exists")

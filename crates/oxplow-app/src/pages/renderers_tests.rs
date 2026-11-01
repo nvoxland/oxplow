@@ -6,7 +6,7 @@ use std::time::Duration;
 use oxplow_domain::Actor;
 
 use super::renderers::*;
-use super::schema::{parse_page, Page};
+use super::schema::{parse_page, Page, PageKind};
 use super::spec::ViewContext;
 use super::test_support::write;
 
@@ -21,6 +21,7 @@ fn page(extension: &str, slug: &str, head: &str) -> Page {
         slug,
         &format!("{slug}.yaml"),
         &format!("title: {slug}\nparams: [{{ name: uri }}]\n{head}\n{BODY}"),
+        PageKind::Page,
     )
     .unwrap_or_else(|e| panic!("{slug}: {e}"))
 }
@@ -51,6 +52,7 @@ fn catalog() -> Vec<Page> {
             "tasks",
             "tasks.yaml",
             &format!("title: tasks\n{BODY}"),
+            PageKind::Page,
         )
         .unwrap(),
     ]

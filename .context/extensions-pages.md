@@ -35,10 +35,28 @@ The page YAML: metadata, params, loaders, view nodes, actions, checks, custom co
 
 A **page** is a user- or agent-built way of looking at your work: named
 SQL queries over the semantic layer, plus a tree of nodes that shows them.
-(Not "view", which is taken by the SQL `v_*` views.) A page is one file,
-`pages/<slug>.yaml`, in an extension; its id is `<extension>/<slug>`. The
-extension manifest lists no pages: the folder is the list. A source with
-the old `lenses/` folder does not load.
+(Not "view", which is taken by the SQL `v_*` views.) A page is one file in
+an extension; its id is `<extension>/<slug>`. The extension manifest lists
+no pages: the folders are the list. A source with the old `lenses/` folder
+does not load.
+
+**Three kinds, by folder** (`PageKind`, `pages/schema.rs`; one `Page`
+struct with a `kind`, so the runner, the text rendering, open runs,
+embeds and fixtures serve all three):
+
+| Kind | Folder | What it is | Takes |
+|---|---|---|---|
+| **page** | `pages/` | a page with a tab and a URL; in the launcher when it has a `category` | everything below |
+| **part** | `parts/` | drawn only inside a host — an `embed` node, a slot mount or replacement, a panel's body / collapsed / count / badge, a row's `expand`; no tab | `title`, `description`, `params`, `loaders`, `view`, `actions`, `alert`, `badge`, `needs` |
+| **query** | `queries/` | rows other pages read — a param's `options_from`, a form's `choices` / field `from`, a `{ page, loader }` loader; no view | `title`, `description`, `params`, `loaders`, `tool`, `needs` |
+
+A key a kind doesn't take is a load error naming what the file is and who
+takes the key (`kind_problem`, the `KIND_KEYS` table: one row per key). A
+query's loaded `view` is a `table` over its **last** loader, synthesized,
+so a reference to it with no `#<loader>` means that loader
+(`Page::default_loader`; a page's is its first). `Page::file()` is
+`<folder>/<slug>.yaml`. A slug may live in one folder only: one in two is
+neither (`page.slug_in_two_folders`, both dropped).
 
 The reader's guide is `docs/guide/pages.md`; the agent's is the shipped
 `oxplow-extension` skill (`references/page-format.md`, `loaders.md`,

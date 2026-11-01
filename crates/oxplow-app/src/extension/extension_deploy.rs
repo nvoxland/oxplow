@@ -327,8 +327,15 @@ pub async fn write_page(
     }
     let file = dir.join("pages").join(format!("{page}.yaml"));
     let shown = crate::extension::extensions::shown(&project, &file);
-    crate::pages::schema::parse_page(extension, &extension.replace('-', "_"), page, &shown, spec)
-        .map_err(|e| invalid(format!("page `{extension}/{page}` doesn't parse: {e}")))?;
+    crate::pages::schema::parse_page(
+        extension,
+        &extension.replace('-', "_"),
+        page,
+        &shown,
+        spec,
+        crate::pages::schema::PageKind::Page,
+    )
+    .map_err(|e| invalid(format!("page `{extension}/{page}` doesn't parse: {e}")))?;
     let manifest = dir.join("extension.yaml");
     let made_manifest = !manifest.exists();
     let before = std::fs::read_to_string(&file).ok();
@@ -1926,9 +1933,15 @@ mod tests {
                 .join(".oxplow/extensions/my-pages/pages/release-health.yaml"),
         )
         .unwrap();
-        let page =
-            crate::pages::schema::parse_page("my-pages", "my_pages", "release-health", "x", &text)
-                .unwrap();
+        let page = crate::pages::schema::parse_page(
+            "my-pages",
+            "my_pages",
+            "release-health",
+            "x",
+            &text,
+            crate::pages::schema::PageKind::Page,
+        )
+        .unwrap();
         assert_eq!(page.title, "Release health!");
         assert_eq!(
             page.category,
