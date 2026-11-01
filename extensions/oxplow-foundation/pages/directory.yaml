@@ -40,9 +40,7 @@ loaders:
   row:
     sql: |
       SELECT v.is_local, v.shown, v.scope AS eff_scope, v.compare AS eff_compare,
-             CASE v.scope WHEN 'all' THEN '' WHEN 'uncommitted' THEN 'working' ELSE 'range' END AS change_kind,
-             CASE v.scope WHEN 'all' THEN '' WHEN 'uncommitted' THEN ''
-                  ELSE coalesce((SELECT 'git:' || d.merge_base || '..working' FROM v_branch_divergence d WHERE d.base = v.scope AND d.head = 'HEAD'), '') END AS change_target
+             CASE v.scope WHEN 'all' THEN '' WHEN 'uncommitted' THEN 'working' ELSE 'range' END AS change_kind
       FROM (SELECT (:filesystem = 'oxplow:local' AND :rev = '') AS is_local,
                    CASE WHEN :folder <> '' THEN :folder ELSE :path END AS shown,
                    CASE WHEN :filesystem = 'oxplow:local' AND :rev = '' THEN :scope ELSE 'all' END AS scope,
@@ -53,7 +51,21 @@ loaders:
     - key: eff_scope
     - key: eff_compare
     - key: change_kind
+  # Where a branch comparison starts: the merge base with the branch Show
+  # names. `d.base = :eff_scope` names the one pair, so the divergence
+  # dataset walks that pair alone; a correlated `d.base = v.scope` named no
+  # pair and walked every branch against HEAD on every run of every folder,
+  # also with Show at "all files" (where nothing reads it).
+  range:
+    sql: |
+      SELECT CASE WHEN :eff_scope IN ('all', 'uncommitted') THEN ''
+                  ELSE coalesce((SELECT 'git:' || d.merge_base || '..working' FROM v_branch_divergence d
+                                 WHERE d.base = :eff_scope AND d.head = 'HEAD'), '') END AS change_target
+    columns:
     - key: change_target
+    params:
+      eff_scope:
+        from: row.eff_scope
   tree:
     sql: |
       WITH RECURSIVE ch(id, base_revision) AS (
@@ -111,7 +123,7 @@ loaders:
       change_kind:
         from: row.change_kind
       change_target:
-        from: row.change_target
+        from: range.change_target
       eff_scope:
         from: row.eff_scope
       eff_compare:

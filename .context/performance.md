@@ -479,6 +479,31 @@ dataset; the whole-tree walk is left to the queries that need the tree.
 `stat` per file, 16 at a time, at most 1000 files); the whole-tree walk
 leaves them NULL so Quick Open and the link index pay nothing for them.
 
+### Opening a folder on the Files page (measured 2026-11-01)
+
+Expanding a folder runs the Directory page once for that folder (a lazy
+branch), and every open run re-runs on a change. The daemon log showed
+`slow page re-run … page=oxplow-foundation/files` at 560-900 ms, even
+with `loaders=` empty. That list is the loaders whose *rows changed*, not
+the ones that ran: a re-run runs every loader its changed dataset
+reached and then finds equal rows. Measured on this repo (16 refs, idle
+machine):
+
+| part of one folder listing | before | after |
+|---|---|---|
+| `row` loader: `v_branch_divergence d WHERE d.base = v.scope AND d.head = 'HEAD'` | 444 ms (a `compute_divergence`, merge simulation included, for each of 16 refs) | 0 (read only for a branch comparison, one pair) |
+| three libgit2 status scans (conflicted, staged, statuses) | 3 x 30 ms | 30 ms (`oxplow_git::worktree_status`) |
+| filter rebuilt by walking every folder for `.gitignore`s | 35-100 ms | about 1 ms (`WorkspaceFilter::for_folder`: root, the way to the folder, the folder) |
+
+Causes: `d.base = v.scope` compares to a column, so no pair is named and
+the dataset ranges over all branches (`LiveSources::branch_pairs`); the
+dataset is read whatever the `CASE` later does, so it cost the same with
+Show at "all files". The fix is the `range` loader, which names the one
+pair (`d.base = :eff_scope`). `v_file` itself was already one `read_dir`
+(pinned by a test on the page's own SQL). Rule: a live dataset is read
+when the query mentions it; condition it with a param equality, not a
+join or a `CASE`.
+
 ## Daemon transport: what a loopback HTTP hop costs (tsk255)
 
 Measured for the daemon-backed shell epic ([[tsk254]]), from **inside the real

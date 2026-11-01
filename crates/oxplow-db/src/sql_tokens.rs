@@ -873,6 +873,43 @@ mod tests {
         assert!(cte_names("SELECT x AS y FROM t").unwrap().is_empty());
     }
 
+    /// The Directory page lists a folder through `v_file`: its tree loader
+    /// must say so the dataset reads that folder alone, not the whole tree.
+    #[test]
+    fn the_directory_pages_tree_loader_names_one_folder_of_v_file() {
+        let page: serde_yaml::Value = serde_yaml::from_str(include_str!(
+            "../../../extensions/oxplow-foundation/pages/directory.yaml"
+        ))
+        .unwrap();
+        let sql = page["loaders"]["tree"]["sql"].as_str().unwrap();
+        let found = equality_filters(sql, "v_file", &["filesystem", "rev", "parent"]).unwrap();
+        let columns: Vec<&str> = found.iter().map(|(c, _)| c.as_str()).collect();
+        assert_eq!(columns, vec!["filesystem", "rev", "parent"], "{found:?}");
+    }
+
+    /// A branch comparison reads the divergence of the one pair Show names.
+    /// The `row` loader runs for every folder opened and re-runs on every
+    /// change, so it must not read the dataset (a read that names no pair
+    /// walks every branch against HEAD, ~0.5 s with 15 branches).
+    #[test]
+    fn the_directory_page_reads_one_branch_pair_and_only_in_its_range_loader() {
+        let page: serde_yaml::Value = serde_yaml::from_str(include_str!(
+            "../../../extensions/oxplow-foundation/pages/directory.yaml"
+        ))
+        .unwrap();
+        let sql = |name: &str| page["loaders"][name]["sql"].as_str().unwrap().to_string();
+        assert!(
+            !sql("row").contains("v_branch_divergence"),
+            "{}",
+            sql("row")
+        );
+        assert!(!sql("tree").contains("v_branch_divergence"));
+        let found =
+            equality_filters(&sql("range"), "v_branch_divergence", &["base", "head"]).unwrap();
+        let columns: Vec<&str> = found.iter().map(|(c, _)| c.as_str()).collect();
+        assert_eq!(columns, vec!["base", "head"], "{found:?}");
+    }
+
     fn filters(sql: &str) -> Vec<(String, Operand)> {
         equality_filters(sql, "v_file", &["parent", "path"]).unwrap()
     }

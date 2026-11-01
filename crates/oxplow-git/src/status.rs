@@ -17,10 +17,22 @@ pub enum GitFileStatus {
     Untracked,
 }
 
-/// Map every changed/untracked path under `repo_path` to its
-/// classification. Fast-path: empty map if not a git repo.
-pub fn list_git_statuses(repo_path: &Path) -> HashMap<String, GitFileStatus> {
-    let mut out = HashMap::new();
+/// What one pass over the working tree says of its files.
+#[derive(Debug, Default, Clone)]
+pub struct WorktreeStatus {
+    /// Every changed/untracked path and its classification.
+    pub statuses: HashMap<String, GitFileStatus>,
+    /// Every path with a change in the index (`git add`ed).
+    pub staged: std::collections::HashSet<String>,
+    /// Every path left unmerged, sorted.
+    pub conflicted: Vec<String>,
+}
+
+/// The statuses, the staged paths and the unmerged paths of `repo_path` in
+/// one scan of its tree (a scan is the cost: the three were once three
+/// scans, 30 ms apiece here). Empty when not a git repo.
+pub fn worktree_status(repo_path: &Path) -> WorktreeStatus {
+    let mut out = WorktreeStatus::default();
     let Ok(repo) = git2::Repository::open(repo_path) else {
         return out;
     };
@@ -35,11 +47,23 @@ pub fn list_git_statuses(repo_path: &Path) -> HashMap<String, GitFileStatus> {
     let Ok(statuses) = repo.statuses(Some(&mut opts)) else {
         return out;
     };
+    let in_index = git2::Status::INDEX_NEW
+        | git2::Status::INDEX_MODIFIED
+        | git2::Status::INDEX_DELETED
+        | git2::Status::INDEX_RENAMED
+        | git2::Status::INDEX_TYPECHANGE;
     for entry in statuses.iter() {
         let Ok(path) = entry.path().map(|s| s.to_string()) else {
             continue;
         };
         let s = entry.status();
+        if s.contains(git2::Status::CONFLICTED) {
+            out.conflicted.push(path);
+            continue;
+        }
+        if s.intersects(in_index) {
+            out.staged.insert(path.clone());
+        }
         // Classify in priority order matching the TS contract.
         // Untracked vs Added: Untracked = worktree-only-new (no index
         // entry). Added = staged-new (INDEX_NEW set). Modified covers
@@ -59,38 +83,22 @@ pub fn list_git_statuses(repo_path: &Path) -> HashMap<String, GitFileStatus> {
         } else {
             continue;
         };
-        out.insert(path, classification);
+        out.statuses.insert(path, classification);
     }
+    out.conflicted.sort();
     out
+}
+
+/// Map every changed/untracked path under `repo_path` to its
+/// classification. Fast-path: empty map if not a git repo.
+pub fn list_git_statuses(repo_path: &Path) -> HashMap<String, GitFileStatus> {
+    worktree_status(repo_path).statuses
 }
 
 /// Every path with a change in the index (`git add`ed): new, modified,
 /// deleted or renamed against HEAD. Empty when not a repo.
 pub fn list_staged_paths(repo_path: &Path) -> std::collections::HashSet<String> {
-    let mut out = std::collections::HashSet::new();
-    let Ok(repo) = git2::Repository::open(repo_path) else {
-        return out;
-    };
-    let mut opts = git2::StatusOptions::new();
-    opts.include_untracked(false)
-        .include_ignored(false)
-        .include_unmodified(false);
-    let Ok(statuses) = repo.statuses(Some(&mut opts)) else {
-        return out;
-    };
-    let in_index = git2::Status::INDEX_NEW
-        | git2::Status::INDEX_MODIFIED
-        | git2::Status::INDEX_DELETED
-        | git2::Status::INDEX_RENAMED
-        | git2::Status::INDEX_TYPECHANGE;
-    for entry in statuses.iter() {
-        if entry.status().intersects(in_index) {
-            if let Ok(path) = entry.path() {
-                out.insert(path.to_string());
-            }
-        }
-    }
-    out
+    worktree_status(repo_path).staged
 }
 
 /// mtime as `(unix seconds, nanoseconds)` — compared at nanosecond
@@ -293,6 +301,30 @@ mod tests {
         let staged = list_staged_paths(dir.path());
         assert!(staged.contains("added.txt"), "{staged:?}");
         assert!(!staged.contains("loose.txt"), "{staged:?}");
+    }
+
+    /// One scan says what three scans did: the statuses, the staged paths
+    /// and the unmerged ones.
+    #[test]
+    fn one_scan_gives_statuses_staged_and_conflicted() {
+        let dir = init_repo();
+        let repo = git2::Repository::open(dir.path()).unwrap();
+        std::fs::write(dir.path().join("added.txt"), "a").unwrap();
+        std::fs::write(dir.path().join("loose.txt"), "l").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(std::path::Path::new("added.txt")).unwrap();
+        index.write().unwrap();
+        let scan = worktree_status(dir.path());
+        assert_eq!(scan.statuses.get("added.txt"), Some(&GitFileStatus::Added));
+        assert_eq!(
+            scan.statuses.get("loose.txt"),
+            Some(&GitFileStatus::Untracked)
+        );
+        assert_eq!(scan.staged, ["added.txt".to_string()].into());
+        assert!(scan.conflicted.is_empty());
+        assert!(worktree_status(&dir.path().join("nowhere"))
+            .statuses
+            .is_empty());
     }
 
     #[test]

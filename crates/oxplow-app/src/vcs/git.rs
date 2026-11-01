@@ -574,9 +574,10 @@ impl Vcs for GitProvider {
         let ws = ws.to_path_buf();
         blocking(move || {
             repo_check(&ws)?;
-            let conflicted = oxplow_git::list_conflicted_paths(&ws);
-            let staged = oxplow_git::list_staged_paths(&ws);
-            let mut entries: Vec<StatusEntry> = oxplow_git::list_git_statuses(&ws)
+            let scan = oxplow_git::worktree_status(&ws);
+            let (conflicted, staged) = (scan.conflicted, scan.staged);
+            let mut entries: Vec<StatusEntry> = scan
+                .statuses
                 .into_iter()
                 .filter(|(p, _)| !conflicted.contains(p))
                 .map(|(path, s)| StatusEntry {

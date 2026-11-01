@@ -97,22 +97,7 @@ fn count_unmerged_paths(worktree_path: &Path) -> u32 {
 
 /// Every path left unmerged in the workspace, sorted.
 pub fn list_conflicted_paths(worktree_path: &Path) -> Vec<String> {
-    let Ok(repo) = git2::Repository::open(worktree_path) else {
-        return vec![];
-    };
-    let mut opts = git2::StatusOptions::new();
-    opts.include_unmodified(false);
-    opts.include_ignored(false);
-    let Ok(statuses) = repo.statuses(Some(&mut opts)) else {
-        return vec![];
-    };
-    let mut out: Vec<String> = statuses
-        .iter()
-        .filter(|s| s.status().contains(git2::Status::CONFLICTED))
-        .filter_map(|s| s.path().ok().map(str::to_string))
-        .collect();
-    out.sort();
-    out
+    crate::status::worktree_status(worktree_path).conflicted
 }
 
 #[cfg(test)]

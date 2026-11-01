@@ -574,6 +574,42 @@ impl WorkspaceFilter {
         )
     }
 
+    /// [`Self::for_project`] for a listing of `folder` (workspace-relative;
+    /// empty: the root) alone: the rules that judge its entries are those
+    /// of the root, of each folder on the way to it and of the folder
+    /// itself, so only those `.gitignore`s are read, and the tree is not
+    /// walked for the rest. It judges the folder's entries as
+    /// [`Self::for_project`] does; a path elsewhere in the tree it may
+    /// judge differently.
+    pub fn for_folder<E, S, I, T>(root: &Path, exclude: E, include: I, folder: &str) -> Self
+    where
+        E: IntoIterator<Item = S>,
+        S: AsRef<str>,
+        I: IntoIterator<Item = T>,
+        T: AsRef<str>,
+    {
+        let global = ignore::gitignore::gitconfig_excludes_path();
+        let mut gitignores = vec![root_gitignore(root, global.as_deref())];
+        let mut dir = root.to_path_buf();
+        for segment in folder.split('/').filter(|s| !s.is_empty()) {
+            dir.push(segment);
+            // An ignored folder is never entered: its rules are no one's.
+            if segment == ".git" || gitignore_decision(&gitignores, &dir, true).is_ignore() {
+                break;
+            }
+            if let Some(gi) = folder_gitignore(&dir) {
+                gitignores.push(gi);
+            }
+        }
+        Self {
+            exclude: parse_filter_entries(exclude),
+            include: parse_filter_entries(include),
+            root: root.to_path_buf(),
+            gitignores: std::sync::Arc::new(gitignores),
+            global,
+        }
+    }
+
     /// [`Self::for_project`] with git's global excludes file given
     /// (`core.excludesFile`, found as git finds it), so a test needn't
     /// touch the person's.
@@ -766,29 +802,43 @@ fn matches_filter_entries(entries: &[FilterEntry], path: &Path) -> bool {
 /// descending into an already-ignored directory. Each matcher is rooted
 /// at its own directory so nested patterns anchor correctly.
 fn collect_gitignores(root: &Path, global: Option<&Path>) -> Vec<ignore::gitignore::Gitignore> {
+    let mut out = vec![root_gitignore(root, global)];
+    collect_nested_gitignores(root, &mut out);
+    out
+}
+
+/// The matcher of `root`: lowest precedence first, as git reads them, the
+/// global excludes file (`core.excludesFile`), `.git/info/exclude`,
+/// then the root `.gitignore`.
+fn root_gitignore(root: &Path, global: Option<&Path>) -> ignore::gitignore::Gitignore {
     use ignore::gitignore::GitignoreBuilder;
-    let mut out = Vec::new();
-    // Lowest precedence first, as git reads them: the global excludes
-    // file (`core.excludesFile`, tsk1083), `.git/info/exclude`, then the
-    // root `.gitignore`.
     let mut builder = GitignoreBuilder::new(root);
     if let Some(global) = global {
         let _ = builder.add(global);
     }
     let _ = builder.add(root.join(".git").join("info").join("exclude"));
     let _ = builder.add(root.join(".gitignore"));
-    if let Ok(gi) = builder.build() {
-        out.push(gi);
+    builder
+        .build()
+        .unwrap_or_else(|_| ignore::gitignore::Gitignore::empty())
+}
+
+/// The matcher of the `.gitignore` in `dir`, when it has one.
+fn folder_gitignore(dir: &Path) -> Option<ignore::gitignore::Gitignore> {
+    use ignore::gitignore::GitignoreBuilder;
+    let path = dir.join(".gitignore");
+    if !path.is_file() {
+        return None;
     }
-    collect_nested_gitignores(root, &mut out);
-    out
+    let mut builder = GitignoreBuilder::new(dir);
+    let _ = builder.add(&path);
+    builder.build().ok()
 }
 
 /// Recurse `dir`'s subdirectories, pruning any the matchers-so-far
 /// already ignore (so we never descend into `node_modules`/`target`/…),
 /// and append each surviving subdirectory's `.gitignore` matcher.
 fn collect_nested_gitignores(dir: &Path, out: &mut Vec<ignore::gitignore::Gitignore>) {
-    use ignore::gitignore::GitignoreBuilder;
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
@@ -814,13 +864,8 @@ fn collect_nested_gitignores(dir: &Path, out: &mut Vec<ignore::gitignore::Gitign
         if gitignore_decision(out, &abs, true).is_ignore() {
             continue;
         }
-        let gi_path = abs.join(".gitignore");
-        if gi_path.is_file() {
-            let mut builder = GitignoreBuilder::new(&abs);
-            let _ = builder.add(&gi_path);
-            if let Ok(gi) = builder.build() {
-                out.push(gi);
-            }
+        if let Some(gi) = folder_gitignore(&abs) {
+            out.push(gi);
         }
         collect_nested_gitignores(&abs, out);
     }
@@ -1493,6 +1538,58 @@ mod tests {
         // ... but NOT at the root — it's a nested addition, not global.
         assert!(!f.ignore(Path::new("local-out"), true));
         assert!(!f.ignore(Path::new("src/main.rs"), false));
+    }
+
+    /// A listing of one folder needs the rules above it and in it, not
+    /// those of every folder in the tree: `for_folder` reads only those
+    /// `.gitignore`s (no walk of the tree), and judges the folder's entries
+    /// as `for_project` does.
+    #[test]
+    fn for_folder_reads_only_the_gitignores_on_the_way_to_the_folder() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join(".gitignore"), "*.log\n").unwrap();
+        for d in ["a/b/c", "a/other", "z/deep"] {
+            std::fs::create_dir_all(root.join(d)).unwrap();
+        }
+        std::fs::write(root.join("a/.gitignore"), "from-a\n").unwrap();
+        std::fs::write(root.join("a/b/.gitignore"), "from-b\n!keep.log\n").unwrap();
+        // Off the way: another folder's rules.
+        std::fs::write(root.join("a/other/.gitignore"), "x\n").unwrap();
+        std::fs::write(root.join("z/.gitignore"), "y\n").unwrap();
+        std::fs::write(root.join("z/deep/.gitignore"), "w\n").unwrap();
+
+        let all = WorkspaceFilter::for_project(root, empty(), empty());
+        let one = WorkspaceFilter::for_folder(root, empty(), empty(), "a/b");
+        // Root, `a`, `a/b`: three matchers, against six for the walk.
+        assert_eq!(one.gitignores.len(), 3);
+        assert_eq!(all.gitignores.len(), 6);
+        for (path, is_dir) in [
+            ("a/b/x.log", false),
+            ("a/b/keep.log", false),
+            ("a/b/from-a", false),
+            ("a/b/from-b", true),
+            ("a/b/c", true),
+            ("a/b/plain.rs", false),
+        ] {
+            assert_eq!(
+                one.ignore(Path::new(path), is_dir),
+                all.ignore(Path::new(path), is_dir),
+                "{path}"
+            );
+        }
+        // The root of the tree is the root matcher alone.
+        assert_eq!(
+            WorkspaceFilter::for_folder(root, empty(), empty(), "")
+                .gitignores
+                .len(),
+            1
+        );
+        // An ignored folder stops the way: its own rules aren't read.
+        std::fs::write(root.join(".gitignore"), "*.log\nz\n").unwrap();
+        let blocked = WorkspaceFilter::for_folder(root, empty(), empty(), "z/deep");
+        assert!(blocked.ignore(Path::new("z"), true));
+        assert_eq!(blocked.gitignores.len(), 1);
     }
 
     #[test]

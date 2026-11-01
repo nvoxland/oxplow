@@ -152,7 +152,17 @@ impl WorkspaceFiles {
         folder: Option<String>,
     ) -> Result<Vec<WorkspacePath>, WorkspaceError> {
         let root = self.router.resolve(stream_id).await.into_local_path();
-        let filter = Self::filter_for(&root, generated);
+        // One folder's rules are those on the way to it, not the whole
+        // tree's: reading them is not a walk.
+        let filter = match &folder {
+            Some(folder) => oxplow_fs_watch::WorkspaceFilter::for_folder(
+                &root,
+                &generated.exclude,
+                &generated.include,
+                folder,
+            ),
+            None => Self::filter_for(&root, generated),
+        };
         let statuses = self.statuses(&root).await;
         Self::blocking(move || {
             let ignore = |path: &str, is_dir: bool| filter.ignore(Path::new(path), is_dir);
