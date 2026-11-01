@@ -17,12 +17,13 @@ params:
   label: Compare with
   options_from: oxplow-foundation/files-refs
   default: none
+# The embed alone, not a section of a stack: the page is the one tree, with
+# no Contents.
 view:
-  stack:
-  - id: dir
-    embed:
-      page: oxplow-foundation/directory
-      params:
-        path: ''
-        filesystem: oxplow:local
-        rev: ''
+  id: dir
+  embed:
+    page: oxplow-foundation/directory
+    params:
+      path: ''
+      filesystem: oxplow:local
+      rev: ''
