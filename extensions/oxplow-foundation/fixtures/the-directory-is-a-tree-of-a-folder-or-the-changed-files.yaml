@@ -1,0 +1,63 @@
+# The Directory page is a tree on any filesystem. On the local worktree it
+# lists a folder at a time (lazily), or, with Show set to changed files, the
+# changed files nested in their folders, each opening a diff.
+given:
+  - observe: { turn: { prompt: src, write: { path: src/new.rs, body: "fn main() {}\n" } } }
+  - observe: { turn: { prompt: top, write: { path: top.txt, body: "x\n" } } }
+  - observe: { refs: { branches: [{ name: main, stream: 1, default: true }] } }
+  - observe: { analyze: { kind: working } }
+# The scopes on offer: at least all files and the working tree's.
+when: { page: oxplow-foundation/files-scopes, params: { stream_id: 1 } }
+expect:
+  loaders:
+    files_scopes:
+      rows:
+        contains: [{ value: all }, { value: uncommitted }]
+steps:
+  # Another filesystem has no changes to show: only all files.
+  - when: { page: oxplow-foundation/files-scopes, params: { stream_id: 1, filesystem: "oxplow:extensions" } }
+    expect: { loaders: { files_scopes: { rows: [{ value: all }] } } }
+  # The working tree scope names a working change.
+  - when: { page: oxplow-foundation/directory, params: { stream_id: 1, scope: uncommitted } }
+    expect: { loaders: { row: { rows: [{ change_kind: working, is_local: 1 }] } } }
+  # All files, a folder at a time; only all-files folders open lazily.
+  - when: { page: oxplow-foundation/directory, params: { stream_id: 1, scope: all, path: "" } }
+    expect:
+      loaders:
+        tree:
+          rows:
+            contains:
+              - { name: src, opens: 1, is_dir: 1, can_write: 1 }
+              - { name: top.txt, opens: 0, target: "oxplow:oxplow/file?path=top.txt" }
+  # A branch opened in the tree: the page again, with the folder set.
+  - when: { page: oxplow-foundation/directory, params: { stream_id: 1, scope: all, path: "", folder: src } }
+    expect:
+      loaders:
+        tree:
+          rows:
+            - { name: new.rs, parent: src, target: "oxplow:oxplow/file?path=src/new.rs" }
+  # Compare with a branch: files open a diff against it.
+  - when: { page: oxplow-foundation/directory, params: { stream_id: 1, scope: all, compare: main, folder: src } }
+    expect:
+      loaders:
+        tree:
+          rows:
+            - { name: new.rs, target: "oxplow:oxplow/page?label=main..working&left=git:main&page=diff&path=src/new.rs&right=working" }
+  # Only the changed files: nested, each opening a diff.
+  - when: { page: oxplow-foundation/directory, params: { stream_id: 1, scope: uncommitted, path: "" } }
+    expect:
+      loaders:
+        tree:
+          rows:
+            contains:
+              - { id: src }
+              - { id: src/new.rs, parent: src, target: $any }
+  # The launcher's Files page is this page at the worktree's root.
+  - when: { page: oxplow-foundation/files, params: { stream_id: 1, scope: all } }
+    expect:
+      loaders:
+        dir/tree:
+          rows:
+            contains:
+              - { name: src, opens: 1 }
+              - { name: top.txt, target: "oxplow:oxplow/file?path=top.txt" }

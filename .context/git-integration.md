@@ -103,7 +103,7 @@ registration: we never seed cache for dirs we never care about.
 Subscribes via the **debounced** view (`subscribe_debounced(250ms)`)
 and bridges each batch onto `OxplowEvent::WorkspaceChanged`. Consumed by:
 
-- The Files page's loaders (`v_file` follows `WorkspaceChanged`).
+- The Directory page's loaders (`v_file` follows `WorkspaceChanged`).
 - `EditorPane` for external-file-changed prompts.
 
 Source files mutate constantly; this watcher's job is to keep the
@@ -232,7 +232,7 @@ ref updates from outside the worktree are heard too.
 Fires `vcsRefsChanged` after each debounce. Consumed silently (no
 loading spinner) by:
 
-- The Files page's loaders (`v_file`, `v_branch`, `v_change` follow it).
+- The Directory page's loaders (`v_file`, `v_branch`, `v_change` follow it).
 - `SnapshotCapture::spawn_git_refs_listener` — requests a snapshot for
   the stream, so every commit lands a snapshot row stamped with the new
   HEAD (`snapshot.revision`/`branch`) even when the worktree
@@ -545,7 +545,7 @@ another tool's checkout.
 The Uncommitted Changes page has an inline message box over
 `oxplow.vcs.commit`, and the command's menu entry opens that page. These are
 the UI entry points for user-driven commits. oxplow never steers the agent to
-commit. The Files page is only the tree: no commit, pull or push, and no
+commit. The Directory page (the Files launcher entry) is only the tree: no commit, pull or push, and no
 branch status (the Git page has those).
 
 ### Commits are not policed (tsk250)

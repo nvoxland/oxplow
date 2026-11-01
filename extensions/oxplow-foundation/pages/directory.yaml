@@ -1,5 +1,5 @@
 title: Directory
-description: "A folder's contents, on the stream's worktree or the filesystem and revision its URI names, folders first. The renderer of oxplow's `dir` resource (`[[dir:src]]`)."
+description: "A folder as an expandable tree, on the stream's worktree or the filesystem and revision its URI names. The renderer of oxplow's `dir` resource (`[[dir:src]]`)."
 label: '{{param.path|basename}}'
 for: oxplow/dir
 default: true
@@ -15,39 +15,245 @@ params:
   label: Revision
   default: ''
 - name: stream_id
+# Show and Compare with read git, so they apply only to the worktree now;
+# on any other filesystem or revision they are ignored (the choices offer
+# only "all files" and "no comparison" there).
+- name: scope
+  type: choice
+  role: filter
+  label: Show
+  options_from: oxplow-foundation/files-scopes
+  default: all
+- name: compare
+  type: choice
+  role: filter
+  label: Compare with
+  options_from: oxplow-foundation/files-refs
+  default: none
+# The folder a lazy branch reads; set by the tree, never by a person.
+- name: folder
+  role: view
+  default: ''
 answers:
 - {"question":"What is in the src folder of this stream's worktree, and which of its files changed?","params":{"stream_id":1,"path":"src"},"skill":"oxplow-extension"}
 loaders:
-  directory:
+  row:
     sql: |
-      SELECT name, kind, status,
-             CASE kind WHEN 'dir' THEN 'folder' ELSE 'file' END AS icon,
-             uri AS target
-      FROM v_file
-      WHERE stream_id = :stream_id AND filesystem = :filesystem AND rev = :rev AND parent = :path
-      ORDER BY kind = 'dir' DESC, name
-  # The folder above it (none at the top: the Files page is the root).
+      SELECT v.is_local, v.shown, v.scope AS eff_scope, v.compare AS eff_compare,
+             CASE v.scope WHEN 'all' THEN '' WHEN 'uncommitted' THEN 'working' ELSE 'range' END AS change_kind,
+             CASE v.scope WHEN 'all' THEN '' WHEN 'uncommitted' THEN ''
+                  ELSE coalesce((SELECT 'git:' || d.merge_base || '..working' FROM v_branch_divergence d WHERE d.base = v.scope AND d.head = 'HEAD'), '') END AS change_target
+      FROM (SELECT (:filesystem = 'oxplow:local' AND :rev = '') AS is_local,
+                   CASE WHEN :folder <> '' THEN :folder ELSE :path END AS shown,
+                   CASE WHEN :filesystem = 'oxplow:local' AND :rev = '' THEN :scope ELSE 'all' END AS scope,
+                   CASE WHEN :filesystem = 'oxplow:local' AND :rev = '' THEN :compare ELSE 'none' END AS compare) v
+    columns:
+    - key: is_local
+    - key: shown
+    - key: eff_scope
+    - key: eff_compare
+    - key: change_kind
+    - key: change_target
+  tree:
+    sql: |
+      WITH RECURSIVE ch(id, base_revision) AS (
+        SELECT c.id, c.base_revision FROM v_change c WHERE c.kind = :change_kind AND c.target = :change_target
+      ), f(path, status) AS (
+        SELECT cf.path, CASE WHEN cf.untracked = 1 THEN 'untracked' ELSE cf.status END
+        FROM v_change_file cf WHERE cf.change_id = (SELECT id FROM ch)
+          AND (:path = '' OR cf.path LIKE :path || '/%')
+      ), d(path) AS (
+        SELECT substr(path, 1, length(rtrim(path, replace(path, '/', ''))) - 1) FROM f WHERE instr(path, '/') > 0
+        UNION
+        SELECT substr(path, 1, length(rtrim(path, replace(path, '/', ''))) - 1) FROM d WHERE instr(path, '/') > 0
+      ), listing(path, parent, name, kind, status, uri) AS (
+        SELECT w.path, w.parent, w.name, w.kind, w.status, w.uri FROM v_file w
+        WHERE w.stream_id = :stream_id AND w.filesystem = :filesystem AND w.rev = :rev
+          AND w.parent = :shown
+      ), rows(path, parent, name, kind, status, uri) AS (
+        SELECT path, CASE WHEN instr(path, '/') > 0 THEN substr(path, 1, length(rtrim(path, replace(path, '/', ''))) - 1) END,
+               substr(path, length(rtrim(path, replace(path, '/', ''))) + 1), 'dir', NULL, uri('oxplow/dir', 'path', path)
+        FROM d WHERE :eff_scope <> 'all' AND (:path = '' OR path LIKE :path || '/%')
+        UNION ALL
+        SELECT path, CASE WHEN instr(path, '/') > 0 THEN substr(path, 1, length(rtrim(path, replace(path, '/', ''))) - 1) END,
+               substr(path, length(rtrim(path, replace(path, '/', ''))) + 1), 'file', status, uri('oxplow/file', 'path', path)
+        FROM f WHERE :eff_scope <> 'all'
+        UNION ALL
+        SELECT path, parent, name, kind, status, uri FROM listing WHERE :eff_scope = 'all'
+      )
+      SELECT r.path AS id, r.parent, r.name,
+             CASE WHEN r.kind = 'dir' THEN 'folder' ELSE coalesce(r.status, 'file') END AS icon,
+             r.status, (r.kind = 'dir') AS is_dir,
+             (r.kind = 'dir' AND :eff_scope = 'all') AS opens,
+             CASE
+               WHEN r.kind = 'dir' THEN NULL
+               WHEN :eff_compare <> 'none' THEN uri('oxplow/page', 'page', 'diff', 'path', r.path, 'left', 'git:' || :eff_compare, 'right', 'working', 'label', :eff_compare || '..working')
+               WHEN :eff_scope <> 'all' THEN uri('oxplow/page', 'page', 'diff', 'path', r.path, 'left', (SELECT base_revision FROM ch), 'right', 'working', 'label', 'changes')
+               ELSE r.uri
+             END AS target,
+             CASE WHEN r.kind = 'dir' THEN r.uri END AS folder_uri,
+             json_array(r.path) AS paths_json,
+             (r.kind = 'file') AS is_file,
+             :is_local AS can_write,
+             (:is_local AND r.status IS NOT NULL AND r.kind = 'file') AS is_changed,
+             (:is_local AND r.status = 'untracked') AS is_untracked,
+             (:is_local AND r.kind = 'file') AS is_local_file,
+             CASE WHEN r.kind = 'dir' THEN r.path || '/' ELSE substr(r.path, 1, length(r.path) - length(r.name)) END || 'new-file.txt' AS new_file_path,
+             CASE WHEN r.kind = 'dir' THEN r.path || '/' ELSE substr(r.path, 1, length(r.path) - length(r.name)) END || 'new-folder' AS new_folder_path,
+             (:is_local AND NOT EXISTS (SELECT 1 FROM v_config_value g, json_each(json_extract(g.value, '$.exclude')) e
+                     WHERE g.key = 'generated' AND e.value = r.name)) AS can_mark,
+             (:is_local AND EXISTS (SELECT 1 FROM v_config_value g, json_each(json_extract(g.value, '$.exclude')) e
+                     WHERE g.key = 'generated' AND e.value = r.name)) AS marked,
+             uri('oxplow/page', 'page', 'file-history', 'path', r.path) AS history_uri
+      FROM rows r
+      ORDER BY (r.kind = 'dir') DESC, r.path
+    params:
+      change_kind:
+        from: row.change_kind
+      change_target:
+        from: row.change_target
+      eff_scope:
+        from: row.eff_scope
+      eff_compare:
+        from: row.eff_compare
+      is_local:
+        from: row.is_local
+      shown:
+        from: row.shown
+  # The folder above it (none at the top of the filesystem).
   parent_folder:
     sql: |
-      SELECT rtrim(rtrim(:path, replace(:path, '/', '')), '/') AS title,
+      SELECT CASE WHEN :path LIKE '%/%' THEN rtrim(rtrim(:path, replace(:path, '/', '')), '/') ELSE '' END AS title,
              uri('oxplow/dir', 'filesystem', NULLIF(:filesystem, 'oxplow:local'),
                  'path', rtrim(rtrim(:path, replace(:path, '/', '')), '/'),
                  'rev', NULLIF(:rev, '')) AS uri
       WHERE :path LIKE '%/%'
 view:
-  from: directory
-  viz: list
-  columns:
-  - key: name
-    label: Name
-    link:
-      kind: page
-      from: target
-    icon: icon
-  - key: status
-    label: Change
-    format: badge
-  empty: (empty)
+  stack:
+  - id: tree
+    title: Files
+    hide_title: true
+    from: tree
+    viz: tree
+    tree:
+      id: id
+      parent: parent
+      label: name
+      lazy: folder
+      branch: opens
+    columns:
+    - key: name
+      label: Name
+      icon: icon
+      link:
+        kind: page
+        from: target
+    empty: (empty) With Show set to changed files, nothing has changed.
+    actions:
+    - id: new-file
+      label: New File…
+      command: oxplow.file.create
+      row: true
+      when: can_write
+      form: true
+      fixed:
+      - stream
+      - content
+      input:
+        stream: str{{param.stream_id}}
+        path: '{{row.new_file_path}}'
+        content: ''
+    - id: new-folder
+      label: New Directory…
+      command: oxplow.file.create_directory
+      row: true
+      when: can_write
+      form: true
+      fixed:
+      - stream
+      input:
+        stream: str{{param.stream_id}}
+        path: '{{row.new_folder_path}}'
+    - id: rename
+      label: Rename…
+      command: oxplow.file.rename
+      row: true
+      when: can_write
+      form: true
+      fixed:
+      - stream
+      - from
+      input:
+        stream: str{{param.stream_id}}
+        from: '{{row.id}}'
+        to: '{{row.id}}'
+    - id: delete
+      label: Delete
+      command: oxplow.file.delete
+      row: true
+      when: can_write
+      key: Delete
+      input:
+        stream: str{{param.stream_id}}
+        path: '{{row.id}}'
+    - id: history
+      label: Show History
+      command: oxplow.window.navigate
+      row: true
+      when: is_local_file
+      input:
+        uri: '{{row.history_uri}}'
+    - id: open-folder
+      label: Open Folder
+      command: oxplow.window.navigate
+      row: true
+      when: is_dir
+      input:
+        uri: '{{row.folder_uri}}'
+    - id: usages
+      label: Find Usages
+      command: oxplow.window.quick_open
+      row: true
+      input:
+        query: '{{row.name}}'
+    - id: rollback
+      label: Rollback
+      command: oxplow.vcs.discard
+      row: true
+      when: is_changed
+      input:
+        stream: str{{param.stream_id}}
+        paths: '{{row.paths_json|json}}'
+    - id: add
+      label: Add
+      command: oxplow.vcs.stage
+      row: true
+      when: is_untracked
+      input:
+        stream: str{{param.stream_id}}
+        paths: '{{row.paths_json|json}}'
+    - id: ignore
+      label: Add to .gitignore
+      command: oxplow.git.ignore
+      row: true
+      when: can_write
+      input:
+        stream: str{{param.stream_id}}
+        entry: '{{row.id}}'
+    - id: mark-generated
+      label: Mark as Generated
+      command: oxplow.file.mark_generated
+      row: true
+      when: can_mark
+      input:
+        entry: '{{row.name}}'
+    - id: unmark-generated
+      label: Unmark as Generated
+      command: oxplow.file.mark_generated
+      row: true
+      when: marked
+      input:
+        entry: '{{row.name}}'
+        generated: false
 see_also:
   - { from: parent_folder }
-  - { page: oxplow-foundation/files }

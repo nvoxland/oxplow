@@ -179,9 +179,15 @@ intent:
     - name: the-git-dashboard-reads-the-branch-the-tree-and-the-recent-commits
       input: { page: git-dashboard, params: { stream_id: 1 } }
       expect: the stream's branch with no upstream, the working tree, the last commits; the rest empty
-    - name: the-files-page-lists-a-folder-or-the-changed-files
+    - name: the-directory-is-a-tree-of-a-folder-or-the-changed-files
       input: { page: files-scopes, params: { stream_id: 1 } }
       expect: all files a folder at a time, or the changed files in their folders, each opening a diff
+    - name: the-directory-lists-a-scratch-folder-as-a-tree-with-no-changes
+      input: { page: directory, params: { stream_id: 1, path: '', filesystem: 'oxplow:temp' } }
+      expect: the scratch files as a tree, their links on that filesystem, with no change and no write offered
+    - name: the-directory-tree-nests-an-extensions-folder-with-links-on-its-filesystem
+      input: { page: directory, params: { stream_id: 1, path: 'oxplow-foundation', filesystem: 'oxplow:extensions' } }
+      expect: a running extension's folders and files as a lazy tree, each link on that filesystem
     - name: the-directory-lists-a-folders-folders-then-its-files
       input: { page: directory, params: { stream_id: 1, path: src } }
       expect: the folder's folders, then its files by name, each opening its folder or file
@@ -251,9 +257,9 @@ intent:
     - name: the-definition-page-links-to-the-page-and-its-extension
       input: { page: definition, params: { uri: 'oxplow:oxplow/file?path=oxplow-foundation/pages/problems.yaml&filesystem=oxplow:extensions', path: oxplow-foundation/pages/problems.yaml, stream_id: 1 } }
       expect: its see-also links open the page it describes and its extension
-    - name: the-directory-links-to-its-parent-folder-and-the-files-page
+    - name: the-directory-links-to-its-parent-folder
       input: { page: directory, params: { stream_id: 1, path: src/sub } }
-      expect: its see-also links open the parent folder and the Files page
+      expect: its see-also link opens the parent folder
     - name: the-agent-session-links-to-its-threads-work-and-the-efforts-it-ran
       input: { page: agent-session, params: { uri: 'oxplow:oxplow/agent_session?id=ses1' } }
       expect: its see-also links open its thread's work and the efforts it ran

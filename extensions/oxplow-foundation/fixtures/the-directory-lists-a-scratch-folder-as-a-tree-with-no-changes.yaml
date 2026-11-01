@@ -1,0 +1,17 @@
+# A filesystem with no VCS gets the same tree: its links carry the
+# filesystem, the git-only filters (Show, Compare with) are ignored, and
+# no row is a change or offers a write.
+temp:
+  note.md: "# Hello\n"
+given:
+  - observe: { turn: { prompt: top, write: { path: top.txt, body: "x\n" } } }
+  - observe: { analyze: { kind: working } }
+when:
+  page: oxplow-foundation/directory
+  params: { stream_id: 1, path: "", filesystem: "oxplow:temp", scope: uncommitted, compare: main }
+expect:
+  loaders:
+    row: { rows: [{ is_local: 0, change_kind: "" }] }
+    tree:
+      rows:
+        - { name: note.md, is_file: 1, can_write: 0, is_changed: 0, target: "oxplow:oxplow/file?filesystem=oxplow:temp&path=note.md" }

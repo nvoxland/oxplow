@@ -1216,7 +1216,7 @@ the workspace watcher and the snapshot store. No changes to
 existing snapshots on toggle; newly ignored paths simply stop
 appearing in future dirty sets.
 
-Toggling the list at runtime (the Files page's Mark as Generated →
+Toggling the list at runtime (the Directory page's Mark as Generated →
 `oxplow.file.mark_generated`) takes effect immediately, no restart: the
 command rebuilds the `WorkspaceFilter` and calls
 `SnapshotCaptureRegistry::set_workspace_filter`, which swaps the
@@ -2543,12 +2543,13 @@ A few UI surfaces hold non-persisted state that callers (probes,
 docs, future stores) reference by name. Listed here so renames touch
 the docs in one diff:
 
-- **Files page scope** — the `scope` filter param of the `files` page
-  (`all`, `uncommitted`, the default branch's name for the branch's
+- **Directory scope** — the `scope` filter param of the `directory` page
+  (and of the launcher's `files` page, which passes it on; `all`, `uncommitted`, the default branch's name for the branch's
   changes, the upstream's name for the unpushed ones), in the tab's
   address; its choices come from `files-scopes`, which offers only those
   that exist (no branch scope on the default branch, no unpushed scope
-  without an upstream).
+  without an upstream) and only on the worktree: on another filesystem or
+  revision it offers `all` alone and the page ignores any other value.
 
 ## Related
 

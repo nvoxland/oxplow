@@ -905,7 +905,7 @@ declaring *what it is* and mounting the generic layer.
   Tasks "Dashboard" items that only opened a page are gone — the
   launcher lists every page as a page row. Pull / Push run as background
   tasks (failures record an op-error and a "Show details" toast); Commit
-  opens the Files page and its commit slideover (its `commit` form).
+  opens the Git page's commit slideover (its `commit` form).
 - **Common muscle memory:** Cmd/Ctrl+S save, Cmd/Ctrl+F find,
   Cmd/Ctrl+P quick open, Cmd/Ctrl+Shift+N new task. Don't
   collide with these.

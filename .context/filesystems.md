@@ -67,7 +67,7 @@ file's content, kind and listing go through the filesystem.
   through `Trees::read_at` and slices it. `stat` there is a file's bytes
   read, or a folder when files lie under the path.
 - The working tree's listing honours the workspace filter
-  (`generated:`), as the Files page always has. A past revision lists its
+  (`generated:`), as the Files tree always has. A past revision lists its
   filtered `files_at` with the folders derived from the paths.
 - `write` goes through `WorkspaceFiles::write` (announces
   `WorkspaceChanged`) and needs a stream: it never falls back to the

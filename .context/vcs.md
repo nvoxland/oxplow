@@ -204,7 +204,7 @@ replaced `get_repo_conflict_state`,
 `get_workspace_status_summary`, `git_blame`, `local_blame`,
 `get_commit_detail` and `get_branch_changes`; MCP `git_diff` became
 `diff { from?, to, since_fork }`. On the desktop: the changed-files lists
-diff `head → working` (`streamHead` + `diffRevisions`), the Files page's branch and unpushed scopes read the `v_change` of kind range
+diff `head → working` (`streamHead` + `diffRevisions`), the Directory page's branch and unpushed scopes read the `v_change` of kind range
 from the merge base (`v_branch_divergence.merge_base`) to the working tree, the rail's counts and conflicts come from
 `vcsStatus` (`countStatus`), the commit page and dashboard stats from
 `vcsRevision`, and the blame overlay from `vcsBlame(…, WORKING)`.

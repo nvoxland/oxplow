@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { expect, test } from "../../support/fixtures.js";
 import { openFromLauncher } from "../../support/ui.js";
 
-// The Files page is the foundation's page: a folder at a time, with a file's
+// The Files page is the Directory page at the worktree root: a folder at a time, with a file's
 // actions in its right-click menu (a one-field form is a prompt strip).
 test("the Files page lists the project and renames a file from its menu", async ({ page, daemon }) => {
   writeFileSync(join(daemon.project, "emu.txt"), "emu\n");

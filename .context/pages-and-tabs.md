@@ -773,11 +773,26 @@ margin; an embed or a slot takes its title from the page it shows):
   nothing for the working tree, ` (<rev>)` for a local revision, ` (<filesystem>
   <rev>)` for another filesystem (a hash cut to 7). `fsRevLabel` in
   `filesystem.ts` is the desktop's own twin for the `code` viz's header. `directory` (`for: oxplow/dir`, default,
-  label `{{param.path|basename}}`; params `uri`, `path`, `filesystem`, `rev`, `stream_id`): a
-  `list` viz of `v_file WHERE filesystem = :filesystem AND rev = :rev AND
-  parent = :path` (a folder of any filesystem at any revision; the
-  defaults are `oxplow:local` and `''`, the files now), folders first,
-  each row linking to its `uri`. `commit` (`for: oxplow/commit`,
+  label `{{param.path|basename}}`; params `uri`, `path`, `filesystem`, `rev`, `stream_id`,
+  filters `scope` and `compare`, view `folder`): a lazy `tree` viz of a
+  folder of any filesystem at any revision (`v_file WHERE filesystem =
+  :filesystem AND rev = :rev AND parent = :path`; the defaults are
+  `oxplow:local` and `''`, the files now), folders first. A folder opens in
+  place (the `folder` param is the lazy branch's); a file row links to its
+  `uri`, which carries the filesystem and rev, so an extension's filesystem
+  gets the same tree. Show (`scope`: changed files nested in their folders)
+  and Compare with (`compare`: files open a git diff) read git (`v_change`,
+  `v_change_file`), so they apply only at `oxplow:local` with an empty `rev`;
+  elsewhere the loader ignores them (`row.is_local`) and their choice pages
+  (`files-scopes`, `files-refs`, which take `filesystem` and `rev`) offer
+  only "all files" and "no comparison". Row actions: New File, New
+  Directory, Rename, Delete, Add to .gitignore, Rollback, Add, Mark as
+  Generated and Show History are `when:` the row is local (`can_write`,
+  `is_local_file`...), so a read-only filesystem gets only Open Folder and
+  Find Usages. `files` (launcher, Code) is a stand-in: its view is an `embed`
+  of `directory` at `oxplow:local`, path `''`, with the same two filters
+  declared so the launcher page's rail draws them (a resource page cannot
+  be listed in the launcher). `commit` (`for: oxplow/commit`,
   default, label `{{param.sha|short}}`): a row from `v_change WHERE kind =
   'commit' AND target = :sha` feeds a `detail` over `v_commit` (Cherry-pick
   and Revert through `oxplow.git.cherry_pick` / `revert`) and a `tree` over

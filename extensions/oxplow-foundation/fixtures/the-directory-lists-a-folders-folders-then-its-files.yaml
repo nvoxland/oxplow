@@ -8,8 +8,8 @@ given:
 when: { page: oxplow-foundation/directory, params: { stream_id: 1, path: src } }
 expect:
   loaders:
-    directory:
+    tree:
       rows:
-        - { name: sub, icon: folder, target: "oxplow:oxplow/dir?path=src/sub" }
-        - { name: a.rs, icon: file, target: "oxplow:oxplow/file?path=src/a.rs" }
-        - { name: b.rs, icon: file, target: "oxplow:oxplow/file?path=src/b.rs" }
+        - { name: sub, icon: folder, folder_uri: "oxplow:oxplow/dir?path=src/sub" }
+        - { name: a.rs, status: untracked, target: "oxplow:oxplow/file?path=src/a.rs" }
+        - { name: b.rs, status: untracked, target: "oxplow:oxplow/file?path=src/b.rs" }

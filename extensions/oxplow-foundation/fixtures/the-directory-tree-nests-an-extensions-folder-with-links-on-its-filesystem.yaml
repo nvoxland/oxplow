@@ -1,0 +1,20 @@
+# A folder of the running extensions' files: a lazy tree whose folder and
+# file links both carry the filesystem, and which offers no writes.
+when:
+  page: oxplow-foundation/directory
+  params: { stream_id: 1, path: "oxplow-foundation", filesystem: "oxplow:extensions" }
+expect:
+  loaders:
+    tree:
+      rows:
+        contains:
+          - { name: pages, is_dir: 1, opens: 1, can_write: 0, folder_uri: "oxplow:oxplow/dir?filesystem=oxplow:extensions&path=oxplow-foundation/pages" }
+          - { name: extension.yaml, is_file: 1, target: "oxplow:oxplow/file?filesystem=oxplow:extensions&path=oxplow-foundation/extension.yaml" }
+steps:
+  - params: { path: "oxplow-foundation", filesystem: "oxplow:extensions", folder: "oxplow-foundation/pages" }
+    expect:
+      loaders:
+        tree:
+          rows:
+            contains:
+              - { name: directory.yaml, parent: "oxplow-foundation/pages", target: "oxplow:oxplow/file?filesystem=oxplow:extensions&path=oxplow-foundation/pages/directory.yaml" }

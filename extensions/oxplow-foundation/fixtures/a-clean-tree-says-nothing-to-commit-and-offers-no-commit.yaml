@@ -1,5 +1,5 @@
 # After a commit the tree is clean: the Uncommitted page says "Nothing to
-# commit" once, with no commit form and no empty file list; the Files page's
+# commit" once, with no commit form and no empty file list; the Directory page's
 # changed files are none.
 given:
   - observe: { turn: { prompt: base, write: { path: tracked.txt, body: "x\n" } } }
@@ -12,5 +12,5 @@ expect:
     commit_form: { rows: [] }
     files: { rows: [] }
 steps:
-  - when: { page: oxplow-foundation/files, params: { stream_id: 1, scope: uncommitted } }
+  - when: { page: oxplow-foundation/directory, params: { stream_id: 1, scope: uncommitted } }
     expect: { loaders: { tree: { rows: [] } } }
