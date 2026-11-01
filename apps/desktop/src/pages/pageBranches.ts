@@ -60,6 +60,25 @@ export interface BranchHost {
   forms: PageForms;
 }
 
+/** `fresh`, with a wanted branch that has no answer yet (re-opened while
+ *  it re-runs) keeping the rows it last had, so it does not blank to
+ *  "Loading…". A branch that failed keeps its error. */
+export function keepPrevious(
+  fresh: ReadonlyMap<string, BranchRun>,
+  previous: ReadonlyMap<string, BranchRun>,
+  wanted: Iterable<string>,
+): ReadonlyMap<string, BranchRun> {
+  let out: Map<string, BranchRun> | null = null;
+  for (const id of wanted) {
+    if (fresh.has(id)) continue;
+    const prior = previous.get(id);
+    if (!prior?.run) continue;
+    out ??= new Map(fresh);
+    out.set(id, prior);
+  }
+  return out ?? fresh;
+}
+
 /** The lazy branch runs of a page's tree node: `useLazyBranches`'s shape
  *  (`VizPages.useBranches`), its runs pages'. */
 export function usePageBranches(host: BranchHost, run: VizRun, open: readonly string[], streamId: string | null, maxRows?: number): ReadonlyMap<string, BranchRun> {
@@ -75,6 +94,8 @@ export function usePageBranches(host: BranchHost, run: VizRun, open: readonly st
     [JSON.stringify(wanted), pageRun.page.id, JSON.stringify(pageRun.params), lazy, streamId],
   );
   const states = usePageRunsFor(store, keys);
+  // Every answer so far, by branch id: a re-opened branch draws it until its new run answers.
+  const last = useRef<ReadonlyMap<string, BranchRun>>(new Map());
   const branches = useMemo(() => {
     const out = new Map<string, BranchRun>();
     for (const [id, state] of states) {
@@ -94,11 +115,16 @@ export function usePageBranches(host: BranchHost, run: VizRun, open: readonly st
         forms: nodeFormSource(forms, state.runId, node.id),
       });
     }
-    return out;
+    return keepPrevious(out, last.current, keys.keys());
     // `run.config` is what the branch rows draw as; its rows are the root's.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [states, from, run.config, maxRows, press, forms, node.id]);
   // What the next render's wanted branches are reached through.
-  useEffect(() => setLoaded(branches), [branches]);
+  useEffect(() => {
+    const kept = new Map(last.current);
+    for (const [id, b] of branches) if (b.run) kept.set(id, b);
+    last.current = kept;
+    setLoaded(branches);
+  }, [branches]);
   return branches;
 }

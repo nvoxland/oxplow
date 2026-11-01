@@ -23,6 +23,7 @@ import { PageAbout, RailSeeAlso, useOutOfDate, type PickedRow } from "./railGrou
 import { TabModal } from "../components/TabModal.js";
 import type { PageAction } from "../kit/actions.js";
 import { Loading } from "../kit/Loading.js";
+import { LOADING_AFTER_MS, useDelayed } from "../kit/useDelayed.js";
 import { ActionForm, useVizActions } from "../viz/VizView.js";
 import { FormSourceContext } from "../viz/formSource.js";
 import { actionDoes, offeredWholePage } from "../viz/vizActions.js";
@@ -71,9 +72,6 @@ export interface PageHostProps {
 }
 
 const NO_ROWS = { columns: [], rows: [] };
-
-/** How long a page may take before it says it is reading. */
-export const LOADING_AFTER_MS = 150;
 
 export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, renders = null, stream = null }: PageHostProps) {
   const store = usePageRunsStore();
@@ -348,18 +346,4 @@ function wide(run: PageRun): boolean {
     (n.kind === "viz" && n.config.viz === "board") ||
     ((n.kind === "stack" || n.kind === "switch") && n.children.some(walk));
   return walk(run.page.view);
-}
-
-/** `on`, once it has held for `ms`. */
-function useDelayed(on: boolean, ms: number): boolean {
-  const [shown, setShown] = useState(false);
-  useEffect(() => {
-    if (!on) {
-      setShown(false);
-      return;
-    }
-    const t = setTimeout(() => setShown(true), ms);
-    return () => clearTimeout(t);
-  }, [on, ms]);
-  return on && shown;
 }

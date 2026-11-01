@@ -254,7 +254,7 @@ test("the rail shows Filters first, above See also", async () => {
   expect(filters.compareDocumentPosition(seeAlso) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 });
 
-test("Loading shows only after 150 ms without a run; an open that fails says why", async () => {
+test("Loading shows only after 300 ms without a run; an open that fails says why", async () => {
   const runs = createPageRuns({
     open: () => new Promise(() => {}),
     close: async () => {},
@@ -266,7 +266,7 @@ test("Loading shows only after 150 ms without a run; an open that fails says why
   });
   const view = render(<PageHost pageKey={key} runs={runs} />);
   expect(view.container.querySelector(".ox-loading")).toBeNull();
-  await wait(200);
+  await wait(350);
   expect(view.container.querySelector(".ox-loading")).not.toBeNull();
   cleanup();
   const failing = createPageRuns({

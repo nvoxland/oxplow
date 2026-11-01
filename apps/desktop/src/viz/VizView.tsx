@@ -86,6 +86,7 @@ import { CodeViz } from "./CodeViz.js";
 import { DiffViz } from "./DiffViz.js";
 import { DataTable, type DataColumn, type RowProps } from "../kit/DataTable.js";
 import { Facts } from "../kit/Facts.js";
+import { DelayedLoading } from "../kit/useDelayed.js";
 import { ItemsCell } from "./ItemsCell.js";
 import { OpenPageLink } from "../kit/OpenPageLink.js";
 import { SectionsViz } from "./SectionsViz.js";
@@ -1531,9 +1532,11 @@ function TreeItem({ node, path, closed, lazyOpen, ...rest }: TreeVizProps & { no
         <span>{label ? cell(node.row, label) : node.label}</span>
       </div>
       {open && node.state === "loading" ? (
-        <div data-testid="viz-tree-loading" style={{ ...treeNoteStyle }}>
-          Loading…
-        </div>
+        <DelayedLoading>
+          <div data-testid="viz-tree-loading" style={{ ...treeNoteStyle }}>
+            Loading…
+          </div>
+        </DelayedLoading>
       ) : null}
       {open && node.state && node.state !== "loading" ? (
         <div className="ox-error" data-testid="viz-tree-error" style={treeNoteStyle}>
