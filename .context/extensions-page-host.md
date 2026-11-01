@@ -171,6 +171,12 @@ the user guide is `docs/guide/pages.md`.
     keeps each open run (`pages/open_runs.rs`) and tells the window which
     loaders changed (`PageRunChanged`); `useRerunOnChange` in
     `src/viz/rerun.ts` is the window's side.
+  - A run whose tab is not on screen is paused. `CenterTabs` keeps every
+    tab mounted and hides the others, so `PageHost` reads
+    `useTabVisible()` and tells the daemon (`set_page_visible`) when none
+    of a run's hosts is on screen. A change then marks the run stale and
+    re-runs nothing; shown again, a stale run re-runs once and the
+    window fetches it. Rail panels and the selected tab stay live.
   - The Cmd+P launcher re-reads pages (the live set's) every time it
     opens and lists them under their `category` (a page with none, or
     `hidden: true`, is not listed), merged into the static directory by

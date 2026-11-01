@@ -247,6 +247,7 @@ macro_rules! oxplow_command_table {
                 close_page => $crate::commands::pages::close_page { run_id: String } -> (),
                 set_page_params => $crate::commands::pages::set_page_params { run_id: String, params: ::std::collections::BTreeMap<String, ::oxplow_db::SqlCell> } -> ::oxplow_app::pages::runner::PageRun,
                 rerun_page => $crate::commands::pages::rerun_page { run_id: String } -> ::oxplow_app::pages::runner::PageRun,
+                set_page_visible => $crate::commands::pages::set_page_visible { run_id: String, visible: bool } -> bool,
                 fetch_page_runs => $crate::commands::pages::fetch_page_runs { run_ids: Vec<String> } -> ::std::collections::BTreeMap<String, ::oxplow_app::pages::open_runs::RunSnapshot>,
                 run_page => $crate::commands::pages::run_page { page: Option<String>, spec_yaml: Option<String>, params: Option<::std::collections::BTreeMap<String, ::oxplow_db::SqlCell>>, stream_id: Option<String> } -> ::oxplow_app::pages::runner::PageRun,
                 page_text => $crate::commands::pages::page_text { run_id: String } -> String,

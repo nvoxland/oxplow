@@ -103,6 +103,11 @@ struct OpenRun {
     revision: u64,
     opened_at: Timestamp,
     reported: bool,
+    /// Its tab is not on screen: a change marks it `stale` and does not
+    /// re-run it.
+    hidden: bool,
+    /// A change reached it while it was hidden: showing it runs it once.
+    stale: bool,
 }
 
 /// The open runs.
@@ -259,6 +264,8 @@ impl PageRuns {
                     revision: 0,
                     opened_at: Timestamp::now(),
                     reported: false,
+                    hidden: false,
+                    stale: false,
                 },
             );
             return Ok((id, run));
@@ -313,6 +320,30 @@ impl PageRuns {
             (r.reported && clients.contains(&r.client))
                 || now.unix_ms() - r.opened_at.unix_ms() <= crate::client_reports::FORGET_AFTER_MS
         });
+    }
+
+    /// A window says whether the tab of run `id` is on screen. A hidden
+    /// run is not re-run when datasets change: it is marked stale. Shown
+    /// again, a stale run re-runs once; the answer is whether it did (the
+    /// window then fetches it).
+    pub async fn set_visible(
+        &self,
+        svc: &crate::Services,
+        id: &str,
+        visible: bool,
+    ) -> Result<bool, DomainError> {
+        let rerun = {
+            let mut runs = self.runs.lock();
+            let open = runs
+                .get_mut(id)
+                .ok_or_else(|| DomainError::Invalid(format!("no open page run `{id}`")))?;
+            open.hidden = !visible;
+            visible && std::mem::take(&mut open.stale)
+        };
+        if rerun {
+            self.rerun_with(svc, id, BTreeMap::new(), None).await?;
+        }
+        Ok(rerun)
     }
 
     /// Re-run `id` with `params` over its own (a pick, a filter, a switch's
@@ -406,13 +437,21 @@ impl PageRuns {
     ) -> Vec<RunChange> {
         self.invalidate(&Signal::Datasets(datasets.to_vec()));
         self.invalidate(&Signal::Measures(measures.to_vec()));
-        let ids: Vec<String> = self
-            .runs
-            .lock()
-            .iter()
-            .filter(|(_, r)| reads_any(&r.run, datasets, measures))
-            .map(|(id, _)| id.clone())
-            .collect();
+        let ids: Vec<String> = {
+            let mut runs = self.runs.lock();
+            let mut live = Vec::new();
+            for (id, r) in runs.iter_mut() {
+                if !reads_any(&r.run, datasets, measures) {
+                    continue;
+                }
+                if r.hidden {
+                    r.stale = true;
+                } else {
+                    live.push(id.clone());
+                }
+            }
+            live
+        };
         self.rerun_changed(svc, ids, Some((datasets, measures)))
             .await
     }
@@ -421,7 +460,18 @@ impl PageRuns {
     /// missed something).
     pub async fn all_changed(&self, svc: &crate::Services) -> Vec<RunChange> {
         self.invalidate(&Signal::Everything);
-        let ids = self.ids();
+        let ids: Vec<String> = {
+            let mut runs = self.runs.lock();
+            let mut live = Vec::new();
+            for (id, r) in runs.iter_mut() {
+                if r.hidden {
+                    r.stale = true;
+                } else {
+                    live.push(id.clone());
+                }
+            }
+            live
+        };
         self.rerun_all(svc, ids).await
     }
 

@@ -89,6 +89,17 @@ pub async fn rerun_page(svc: &Services, run_id: String) -> Result<PageRun, IpcEr
     Ok(svc.page_runs.rerun(svc, &run_id).await?.0)
 }
 
+/// A window says whether a run's tab is on screen. Hidden runs are not
+/// re-run on changes; shown with a change missed, it re-runs once (true:
+/// the window fetches it).
+pub async fn set_page_visible(
+    svc: &Services,
+    run_id: String,
+    visible: bool,
+) -> Result<bool, IpcError> {
+    Ok(svc.page_runs.set_visible(svc, &run_id, visible).await?)
+}
+
 /// The open runs a window asks for, as they stand; one it no longer has
 /// open (closed, or the daemon restarted) is left out.
 pub async fn fetch_page_runs(

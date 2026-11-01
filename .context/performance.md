@@ -479,6 +479,21 @@ dataset; the whole-tree walk is left to the queries that need the tree.
 `stat` per file, 16 at a time, at most 1000 files); the whole-tree walk
 leaves them NULL so Quick Open and the link index pay nothing for them.
 
+### Hidden tabs do not re-run (measured 2026-11-01)
+
+`CenterTabs` keeps every tab body mounted (`display: none`), so a tab
+the person left still held an open run, and the daemon re-ran it on
+every change to a dataset it read. A background "Agent tokens data" tab
+(`measure-data`, loader `facts`) re-ran every ~2 s at 0.8-1.3 s a run
+while agents wrote token facts (`slow page re-run` in the daemon log),
+and the daemon sat near 97% CPU; a hidden `dataset-data` tab did the
+same. Fix: a run with no host on screen is marked stale and not
+re-run; it re-runs once when its tab shows (`PageRuns::set_visible`,
+pinned by `a_hidden_run_waits_for_its_tab_to_show_and_then_re_runs_once`
+and the store's test in `pageRuns.test.ts`). The cost of a tab you do
+not look at is now zero. A visible slow page is a separate matter (the
+Measure data page, below).
+
 ### Opening a folder on the Files page (measured 2026-11-01)
 
 Expanding a folder runs the Directory page once for that folder (a lazy

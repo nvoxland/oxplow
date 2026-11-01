@@ -451,3 +451,27 @@ async fn an_event_a_live_dataset_follows_re_runs_what_reads_it() {
     assert_eq!(heard.loaders, ["read"]);
     assert_eq!(calls.load(Ordering::SeqCst), 2);
 }
+
+/// A run whose tab is not on screen is not re-run when a dataset it read
+/// changes; shown again, it re-runs once.
+#[tokio::test]
+async fn a_hidden_run_waits_for_its_tab_to_show_and_then_re_runs_once() {
+    let (_dir, svc) = fixture().await;
+    let runs = PageRuns::default();
+    let (id, before) = runs
+        .open(&svc, request("acme/mixed", &[]), "w")
+        .await
+        .unwrap();
+    assert!(!runs.set_visible(&svc, &id, false).await.unwrap());
+    let changed = runs
+        .datasets_changed(&svc, &["v_dataset".to_string()])
+        .await;
+    assert!(changed.is_empty(), "{changed:?}");
+    runs.all_changed(&svc).await;
+    let r = |run: &super::runner::PageRun| run.loaders["after"].result.rows.clone();
+    assert_eq!(r(&before), r(&runs.get(&id).unwrap()), "it did not re-run");
+    assert!(runs.set_visible(&svc, &id, true).await.unwrap());
+    assert_ne!(r(&before), r(&runs.get(&id).unwrap()), "it ran on show");
+    // Nothing changed since: showing it again runs nothing.
+    assert!(!runs.set_visible(&svc, &id, true).await.unwrap());
+}

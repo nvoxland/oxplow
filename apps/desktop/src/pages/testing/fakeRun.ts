@@ -267,6 +267,7 @@ export function fakePageRuns(run: PageRun, next?: (params: Record<string, SqlCel
       calls.setParams.push(params);
       return next ? next(params) : run;
     },
+    setVisible: async () => false,
     rerun: async () => {
       calls.rerun += 1;
       return run;
@@ -298,6 +299,7 @@ export function fakePageRunsBy(answer: (key: PageKey) => PageRun | Promise<PageR
     fetch: async (ids) => Object.fromEntries(ids.flatMap((id) => (byId.has(id) ? [[id, { run: byId.get(id)!, seq: 0 }]] : []))),
     setParams: async (id) => byId.get(id)!,
     rerun: async (id) => byId.get(id)!,
+    setVisible: async () => false,
     onChange: () => () => {},
     onReconnect: () => () => {},
   };

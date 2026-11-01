@@ -131,6 +131,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::close_page,
             commands::generated::set_page_params,
             commands::generated::rerun_page,
+            commands::generated::set_page_visible,
             commands::generated::fetch_page_runs,
             commands::generated::run_page,
             commands::generated::page_text,

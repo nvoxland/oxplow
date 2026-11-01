@@ -41,6 +41,10 @@ export interface PageRunsTransport {
   setParams(runId: string, params: Record<string, SqlCell>): Promise<PageRun>;
   /** Run it again as it is (Refresh). */
   rerun(runId: string): Promise<PageRun>;
+  /** Whether the run's tab is on screen. The daemon does not re-run a
+   *  hidden run; shown again after a missed change, it runs once (true:
+   *  fetch it). */
+  setVisible(runId: string, visible: boolean): Promise<boolean>;
   /** `pageRunChanged` events; returns an unsubscribe. */
   onChange(handler: (change: RunChange) => void): () => void;
   /** The daemon came back (remote mode): every run is re-opened. */
@@ -64,6 +68,8 @@ export interface RunHandle {
   setParams(params: Record<string, SqlCell>): Promise<void>;
   /** Run it again as it is (Refresh), the old run shown until it answers. */
   rerun(): Promise<void>;
+  /** This host's tab is on screen (the default) or not. */
+  setVisible(visible: boolean): void;
   close(): void;
 }
 
@@ -78,6 +84,8 @@ interface Entry {
   state: RunState;
   listeners: Set<() => void>;
   refs: number;
+  /** Hosts whose tab is on screen; the run is paused at none. */
+  shown: number;
   /** The newest change applied, so an older fetch is dropped. */
   seq: number;
   closeTimer: ReturnType<typeof setTimeout> | null;
@@ -253,6 +261,7 @@ export function createPageRuns(transport: PageRunsTransport) {
       if (entry.closeTimer) clearTimeout(entry.closeTimer);
       entry.closeTimer = null;
       entry.refs += 1;
+      entry.shown += 1;
     } else {
       entry = {
         opening: 0,
@@ -263,6 +272,7 @@ export function createPageRuns(transport: PageRunsTransport) {
         state: NO_RUN,
         listeners: new Set(),
         refs: 1,
+        shown: 1,
         seq: 0,
         closeTimer: null,
       };
@@ -271,7 +281,25 @@ export function createPageRuns(transport: PageRunsTransport) {
     }
     const mine = entry;
     let closed = false;
+    let shown = true;
+    const tell = (visible: boolean) => {
+      void mine.runId.then(async (runId) => {
+        if (!runId || mine.shown > 0 !== visible) return;
+        try {
+          if (await transport.setVisible(runId, visible)) scheduleFetch(runId, 0);
+        } catch {
+          // The run is gone (closed, or the daemon restarted): reopening
+          // runs it fresh.
+        }
+      });
+    };
     return {
+      setVisible: (visible) => {
+        if (closed || visible === shown) return;
+        shown = visible;
+        mine.shown += visible ? 1 : -1;
+        if (visible ? mine.shown === 1 : mine.shown === 0) tell(visible);
+      },
       get: () => mine.state,
       subscribe: (listener) => {
         mine.listeners.add(listener);
@@ -283,6 +311,7 @@ export function createPageRuns(transport: PageRunsTransport) {
         if (closed) return;
         closed = true;
         mine.refs -= 1;
+        if (shown) mine.shown -= 1;
         if (mine.refs > 0) return;
         mine.closeTimer = setTimeout(() => {
           if (mine.refs > 0) return;
@@ -321,7 +350,7 @@ export function createPageRuns(transport: PageRunsTransport) {
 export type PageRuns = ReturnType<typeof createPageRuns>;
 
 /** A host's run of `key` (none: no run), shared by key and kept fresh. */
-export function usePageRunWith(runs: PageRuns, key: PageKey | null): RunState & {
+export function usePageRunWith(runs: PageRuns, key: PageKey | null, visible = true): RunState & {
   setParams: (params: Record<string, SqlCell>) => Promise<void>;
   rerun: () => Promise<void>;
 } {
@@ -330,6 +359,9 @@ export function usePageRunWith(runs: PageRuns, key: PageKey | null): RunState & 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const handle = useMemo(() => (key ? runs.open(key) : null), [runs, k]);
   const [state, setState] = useState<RunState>(() => handle?.get() ?? NO_RUN);
+  useEffect(() => {
+    handle?.setVisible(visible);
+  }, [handle, visible]);
   useEffect(() => {
     if (!handle) {
       setState(NO_RUN);
@@ -369,6 +401,7 @@ export function daemonTransport(): PageRunsTransport {
     fetch: async (runIds) => unwrapResult(await commands.fetchPageRuns(runIds)),
     setParams: async (runId, params) => unwrapResult(await commands.setPageParams(runId, params)),
     rerun: async (runId) => unwrapResult(await commands.rerunPage(runId)),
+    setVisible: async (runId, visible) => unwrapResult(await commands.setPageVisible(runId, visible)),
     onChange: (handler) =>
       subscribeOxplowEvents((event) => {
         if (event.kind === "pageRunChanged") {

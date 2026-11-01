@@ -28,6 +28,7 @@ import { ActionForm, useVizActions } from "../viz/VizView.js";
 import { FormSourceContext } from "../viz/formSource.js";
 import { actionDoes, offeredWholePage } from "../viz/vizActions.js";
 import { VizActionRunnerContext } from "../viz/vizActionRunner.js";
+import { useTabVisible } from "../tabs/TabVisible.js";
 import { usePageRunsStore, usePageRunWith, type PageKey, type PageRuns } from "../pageRuns.js";
 import { Page } from "../tabs/Page.js";
 import { useOptionalPageNavigation, usePageTitle, useTabActions } from "../tabs/PageNavigationContext.js";
@@ -75,7 +76,7 @@ const NO_ROWS = { columns: [], rows: [] };
 
 export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, renders = null, stream = null }: PageHostProps) {
   const store = usePageRunsStore();
-  const state = usePageRunWith(runs ?? store, pageKey);
+  const state = usePageRunWith(runs ?? store, pageKey, useTabVisible());
   const { error, setParams, rerun } = state;
   // A tab re-keys its run when its view changes: the last run of the same
   // page stays on screen, marked, until the new one answers.

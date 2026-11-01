@@ -235,6 +235,7 @@ pub const MANIFEST: &[Capability] = &[
     ui("close_page", "a window drops a page run it no longer shows"),
     ui("set_page_params", "a pick, filter or switch in the page a window shows"),
     ui("rerun_page", "Refresh on the page a window shows"),
+    ui("set_page_visible", "a window says whether a page run's tab is on screen"),
     ui("fetch_page_runs", "a window fetches the open runs it heard changed"),
     both_shaped(
         "run_page",

@@ -201,6 +201,11 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
+	setPageVisible: (runId: string, visible: boolean) => typedError<boolean, IpcError_Serialize>(__TAURI_INVOKE("set_page_visible", { runId, visible })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	fetchPageRuns: (runIds: string[]) => typedError<{ [key in string]: RunSnapshot_Serialize }, IpcError_Serialize>(__TAURI_INVOKE("fetch_page_runs", { runIds })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the

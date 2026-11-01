@@ -12,11 +12,12 @@ function fakeRun(label: string): PageRun {
 
 function fake() {
   let next = 0;
-  const calls = { open: 0, close: [] as string[], fetch: [] as string[][], setParams: 0, rerun: [] as string[] };
+  const calls = { open: 0, close: [] as string[], fetch: [] as string[][], setParams: 0, rerun: [] as string[], visible: [] as [string, boolean][] };
   let change: (c: RunChange) => void = () => {};
   let reconnect: () => void = () => {};
   const current = new Map<string, string>();
   const sequences = new Map<string, number>();
+  let stale = false;
   const transport: PageRunsTransport = {
     open: async (key) => {
       calls.open += 1;
@@ -39,6 +40,10 @@ function fake() {
       calls.rerun.push(runId);
       return fakeRun("refreshed");
     },
+    setVisible: async (runId, visible) => {
+      calls.visible.push([runId, visible]);
+      return visible && stale;
+    },
     onChange: (h) => {
       change = h;
       return () => {};
@@ -48,12 +53,31 @@ function fake() {
       return () => {};
     },
   };
-  return { transport, calls, emit: (c: RunChange) => { sequences.set(c.runId, Math.max(c.seq, sequences.get(c.runId) ?? 0)); change(c); }, reconnect: () => reconnect() };
+  return { transport, calls, missChange: () => { stale = true; }, emit: (c: RunChange) => { sequences.set(c.runId, Math.max(c.seq, sequences.get(c.runId) ?? 0)); change(c); }, reconnect: () => reconnect() };
 }
 
 const key = (page: string) => ({ page, params: {}, streamId: null, threadId: null });
 
 describe("pageRuns", () => {
+  test("a run whose hosts are all hidden is paused, and fetched once when one shows", async () => {
+    const f = fake();
+    const runs = createPageRuns(f.transport);
+    const a = runs.open(key("p"));
+    const b = runs.open(key("p"));
+    await wait(0);
+    a.setVisible(false);
+    await wait(0);
+    expect(f.calls.visible).toEqual([]);
+    b.setVisible(false);
+    await wait(0);
+    expect(f.calls.visible).toEqual([["run-1", false]]);
+    f.missChange();
+    a.setVisible(true);
+    await wait(COALESCE_MS + 20);
+    expect(f.calls.visible).toEqual([["run-1", false], ["run-1", true]]);
+    expect(f.calls.fetch).toEqual([["run-1"]]);
+  });
+
   test("out-of-order fetch replies use their actual snapshot sequences, not their triggering notices", async () => {
     const f = fake();
     const replies: ((value: Record<string, { run: PageRun; seq: number }>) => void)[] = [];

@@ -1,3 +1,4 @@
+import { TabVisibleContext } from "../../tabs/TabVisible.js";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import type { AgentStatus } from "../../api.js";
 import { kindForTabId, PageKindIcon } from "../../pageKinds.js";
@@ -455,7 +456,7 @@ export function CenterTabs({ tabs, activeId, onActivate, onClose, header, onReor
               aria-hidden={!isActive}
             >
               <ErrorBoundary label={tab.label}>
-                {tab.render()}
+                <TabVisibleContext.Provider value={isActive}>{tab.render()}</TabVisibleContext.Provider>
               </ErrorBoundary>
             </div>
           );

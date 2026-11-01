@@ -38,7 +38,7 @@ for (const mode of ["view", "edit"] as const) {
 test("a rejected inline spec shows its source and daemon's validation error", async () => {
   const transport: PageRunsTransport = {
     open: async () => { throw new Error("line 3: inline pages cannot run command loaders"); },
-    close: async () => {}, fetch: async () => ({}), setParams: async () => run(), rerun: async () => run(),
+    close: async () => {}, fetch: async () => ({}), setParams: async () => run(), rerun: async () => run(), setVisible: async () => false,
     onChange: () => () => {}, onReconnect: () => () => {},
   };
   const view = render(<PageRunsContext.Provider value={createPageRuns(transport)}><InlineView specYaml={SPEC} /></PageRunsContext.Provider>);
@@ -62,7 +62,7 @@ test("an inline block inherits explicit scope and releases its run when removed"
   const closed: string[] = [];
   const transport: PageRunsTransport = {
     open: async (key) => { opened.push(key); return { runId: "inline", run: run() }; },
-    close: async (id) => { closed.push(id); }, fetch: async () => ({}), setParams: async () => run(), rerun: async () => run(),
+    close: async (id) => { closed.push(id); }, fetch: async () => ({}), setParams: async () => run(), rerun: async () => run(), setVisible: async () => false,
     onChange: () => () => {}, onReconnect: () => () => {},
   };
   const view = render(<PageRunsContext.Provider value={createPageRuns(transport)}><InlineView specYaml={SPEC} streamId="str2" threadId="thr5" /></PageRunsContext.Provider>);
