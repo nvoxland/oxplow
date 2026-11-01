@@ -1600,4 +1600,98 @@ mod core_tests {
         })
         .await;
     }
+
+    /// A core dataset is named by its bare name in its URI
+    /// (`oxplow:oxplow/dataset?dataset=work_item`), an extension's by
+    /// `owner/name`: both are indexed, none skipped.
+    #[tokio::test]
+    async fn a_core_dataset_is_found_by_its_bare_name() {
+        let (svc, _dir) = services().await;
+        svc.streams.ensure_primary().await.unwrap();
+        change_loop(&svc);
+        eventually("the core dataset is indexed", || async {
+            entries(&svc, "oxplow/dataset")
+                .await
+                .iter()
+                .any(|(uri, _)| uri == "oxplow:oxplow/dataset?dataset=work_item")
+        })
+        .await;
+    }
+
+    /// The loop that restated the dataset index every second: its view read
+    /// `asset_state`, which every recompute (this one's too) writes. Once
+    /// the indexes settle, nothing restates them: no search index is
+    /// recomputed again while nothing it indexes changes.
+    #[tokio::test]
+    async fn settled_indexes_are_not_restated_while_nothing_changes() {
+        let (svc, _dir) = services().await;
+        svc.streams.ensure_primary().await.unwrap();
+        change_loop(&svc);
+        eventually("the dataset index exists", || async {
+            !entries(&svc, "oxplow/dataset").await.is_empty()
+        })
+        .await;
+        let computed = |svc: Arc<Services>| async move {
+            svc.db
+                .read(|tx| {
+                    let mut s = tx
+                        .prepare(
+                            "SELECT asset, computed_at FROM asset_state \
+                             WHERE asset LIKE 'search:%' ORDER BY asset",
+                        )
+                        .map_err(oxplow_db::map_sql_err)?;
+                    let rows = s
+                        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+                        .map_err(oxplow_db::map_sql_err)?
+                        .collect::<rusqlite::Result<Vec<_>>>()
+                        .map_err(oxplow_db::map_sql_err)?;
+                    Ok(rows)
+                })
+                .await
+                .unwrap()
+        };
+        // Let the start-up recomputes finish.
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+        let before = computed(svc.clone()).await;
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+        let after = computed(svc.clone()).await;
+        assert_eq!(before, after, "an index was restated with nothing changed");
+    }
+
+    /// No search index may read a table that the assets themselves write
+    /// (`asset_state`, `asset_failure`, the index): its recompute would
+    /// feed itself.
+    #[tokio::test]
+    async fn no_search_index_reads_what_the_assets_write() {
+        let (svc, _dir) = services().await;
+        svc.streams.ensure_primary().await.unwrap();
+        let views: Vec<String> = svc
+            .db
+            .read(|tx| {
+                let mut s = tx
+                    .prepare("SELECT searchable FROM resource WHERE searchable IS NOT NULL")
+                    .map_err(oxplow_db::map_sql_err)?;
+                let rows = s
+                    .query_map([], |r| r.get::<_, String>(0))
+                    .map_err(oxplow_db::map_sql_err)?
+                    .collect::<rusqlite::Result<Vec<_>>>()
+                    .map_err(oxplow_db::map_sql_err)?;
+                Ok(rows)
+            })
+            .await
+            .unwrap();
+        assert!(!views.is_empty());
+        let tables = crate::assets::tables_behind(&svc.db, &views).await.unwrap();
+        for (view, tables) in tables {
+            for table in &tables {
+                assert!(
+                    !matches!(
+                        table.as_str(),
+                        "asset_state" | "asset_failure" | "search_entry" | "search_fts"
+                    ),
+                    "{view} reads {table}"
+                );
+            }
+        }
+    }
 }

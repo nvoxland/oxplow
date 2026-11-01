@@ -360,6 +360,19 @@ and body of the changed rows only.
   `stream_id` is NULL. Fixture `named-things-are-found-by-search`. The
   `ai_model` and `view` resources have no dataset behind them, so they are
   not searchable.
+- **A search feed's inputs must not churn.** An index recomputes when a
+  table behind its view changes, so a feed that reads a table the assets
+  write themselves (`asset_state`, `asset_failure`, the index) feeds
+  itself: `v_dataset` joins `asset_state` (`computed_at`), and the dataset
+  index built on it restated every second, holding the write lock each
+  time. `search_dataset` reads the registry (`source('dataset')`) instead.
+  Test `no_search_index_reads_what_the_assets_write` and
+  `settled_indexes_are_not_restated_while_nothing_changes`. A core
+  dataset's URI uses the bare name (`dataset=work_item`), an extension's
+  `owner/name`, so the `dataset` param pattern allows an optional
+  `owner/` (a pattern has no groups: one class holds the `/`). Rows that
+  fail the resource's params are skipped with a warning at each restate;
+  a restate is rare now, so it isn't noisy.
 - It is **index-time ingestion, as an asset** — not a query-time UNION:
   `search_fts` owns the text it ranks (BM25 and `snippet()` need it in
   the index), and a UNION would run every extension's SQL per keystroke,

@@ -731,7 +731,8 @@ resources:
   - name: dataset
     description: "A table or view of data in oxplow's query layer."
     label: Dataset
-    params: { dataset: { required: true, pattern: '^[a-z][a-z0-9-]*/[a-z][a-z0-9_.-]*$' } }
+    params: { dataset: { required: true, pattern: '^[a-z][a-z0-9_./-]*$' } }
+    searchable: search_dataset
     icon: database
   - name: measure
     description: "A quantity that facts record, such as lines of code."
