@@ -53,6 +53,15 @@ test("only the first section has no space above it", () => {
   expect(sheet).not.toMatch(/(^|[},]\s*)\.ox-section:first-child\s*[,{]/);
 });
 
+// A section inside an embedded page is its own frame's first, but the
+// embed's frame may follow a table or tree: it keeps its gap above then.
+test("a section in a frame nested in a later frame keeps its space above", () => {
+  const sheet = readFileSync(SHEET, "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  const rule = /\[data-node\]:not\(:first-child\)\s+\[data-node\]\s*>\s*\.ox-section\s*\{[^}]*margin-top:\s*var\(--space-6\)/;
+  expect(sheet).toMatch(rule);
+  expect(sheet.search(rule)).toBeGreaterThan(sheet.search(/\[data-node\]:first-child\s*>\s*\.ox-section/));
+});
+
 // A rail group's body sits a little in from its heading, the same for
 // every group (Filters, Contents, See also): one rule on the group.
 test("every rail group's body is indented from its heading", () => {

@@ -172,6 +172,11 @@
    frame; a section outside a frame is first by itself. */
 [data-node]:first-child > .ox-section,
 :not([data-node]) > .ox-section:first-child { margin-top: 0; }
+/* An embedded page's first section is its own frame's first too, but the
+   embed's frame can follow a table or tree: any frame inside a later
+   frame keeps the gap above its section. */
+[data-node]:not(:first-child) [data-node] > .ox-section { margin-top: var(--space-6); }
+[data-node]:not(:first-child) [data-node] > .ox-section:not([data-level="2"]) { margin-top: var(--space-4); }
 .ox-section-toggle { display: flex; align-items: baseline; gap: var(--space-2); width: 100%; padding: 0; border: none; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 /* The arrow after a heading whose thing has a page of its own: the one
    "open this page" mark, used for nothing else. */

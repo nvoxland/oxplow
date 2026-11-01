@@ -37,6 +37,16 @@ test("the width and the rail are separate: a full-width page can have a rail", (
   expect(bare.queryByTestId("page-rail-body")).toBeNull();
 });
 
+// A page with no rail has the same gutter as one with a rail.
+test("a page with no rail has the same side padding as one with a rail", () => {
+  const withRail = render(<Page title="T" rightRail={<p>controls</p>}>body</Page>);
+  const railPad = withRail.getByTestId("page-rail-body").style.padding;
+  cleanup();
+  const bare = render(<Page title="T">body</Page>);
+  expect(railPad).not.toBe("");
+  expect(bare.getByTestId("page-body").style.padding).toBe(railPad);
+});
+
 // The page says what it can do; the bar draws it, in every layout.
 test("a page's actions are drawn in the nav bar, also beside a rail: the primary one a button, the rest in the ☰", async () => {
   const ran: string[] = [];

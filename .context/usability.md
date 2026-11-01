@@ -1343,3 +1343,8 @@ Under 800 px the rail leaves its place so the page keeps its width. A small
 "Show the rail" button (`rail-show`, tooltip and aria-label) at the page's left
 edge shows the rail as an overlay (`rail-overlay`). Escape, a click outside it,
 or opening a page from it hides it; widening the window resets it (`NarrowRail`).
+
+## Page spacing
+
+- A page body has the same 24 px gutter with a Details pane or without (`PAGE_GUTTER_PX` in `tabs/Page.tsx`).
+- A section keeps its gap above whatever came before it, including inside an embedded page that follows a table or tree. Only the page's first section starts flush (`oxplow-kit.css`, "Sections stack apart").

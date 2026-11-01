@@ -321,7 +321,7 @@ export function Page({ title, titleIcon, chips: ownChips, actions, pin, seeAlso,
           {width === "reading" || rightRail != null ? (
             <RailBody width={width} fill={fill} rightRail={rightRail} rightRailTitle={rightRailTitle}>{children}</RailBody>
           ) : (
-            <div style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: "auto", display: "flex", flexDirection: "column" }}>
+            <div data-testid="page-body" style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: "auto", display: "flex", flexDirection: "column", padding: PAGE_GUTTER_PX }}>
               {children}
             </div>
           )}
@@ -387,6 +387,9 @@ function Chip({ chip }: { chip: PageChip }) {
     </span>
   );
 }
+
+/** The gutter around a page's body, with a rail or without. */
+const PAGE_GUTTER_PX = 24;
 
 /** A padded body: a reading column or every pixel, with the page's rail
  *  beside it (or above it, when narrow). */
@@ -481,7 +484,7 @@ function RailBody({ children, width, fill, rightRail, rightRailTitle }: { childr
         display: "grid",
         gridTemplateColumns: railAside ? "1fr 320px" : "1fr",
         gap: railAside ? 24 : 0,
-        padding: 24,
+        padding: PAGE_GUTTER_PX,
         // A body that fills stretches to the page's height, row and all.
         alignItems: fill ? "stretch" : "start",
         gridTemplateRows: fill ? "minmax(0, 1fr)" : undefined,
