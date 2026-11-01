@@ -250,6 +250,7 @@ pub const MANIFEST: &[Capability] = &[
     // opens pages themselves.
     agent("oxplow_show_page"),
     ui("page_text", "Copy's text on the page a window shows"),
+    ui("page_options", "a choice's options in the rail of the page a window shows; an agent runs the query (or the page) with `run_page`"),
     ui("get_page", "the page a window draws; an agent reads a page's ref with `read`"),
     ui("renderers_for", "the pages that can draw a tab's uri, for the window; an agent asks `oxplow.page.renderers` or `find_page` with `about`"),
     ui("page_spec", "the source YAML a window edits; agents read page definitions through `read`"),
