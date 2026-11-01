@@ -578,6 +578,27 @@ and the store's test in `pageRuns.test.ts`). The cost of a tab you do
 not look at is now zero. A visible slow page is a separate matter (the
 Measure data page, below).
 
+### An async consumer's skipped events are one checkpoint write (measured 2026-11-01)
+
+The daemon log after a restart held 250 `slow database write` lines in 44
+seconds; 140 were `event_pump.rs` (the checkpoint write at the end of
+`deliver_async`), all pure waits (`waited_ms` 390–2516, `held_ms` 0). Every
+async consumer (21) reads every event and wrote its own checkpoint in its
+own transaction, also for an event it has no handler for. One event was
+21 write-slot requests, and at start-up each queued behind the backfills
+that hold the lock (`page_ref_store`, `fact_store` rebuilds, 0.7–1.9 s a
+hold). The 32 + 32 lines at `assets.rs:207` / `:821` are one `track` and one
+`asset_state` write per asset at start-up, also waits (`held` 0–7 ms).
+
+`run_slot` now moves the checkpoint over a run of events the consumer does
+not handle in one write (at the end of the batch, or before a deferral); a
+handled event's own checkpoint covers the skipped ones before it. Pinned
+by `events_an_async_consumer_skips_move_its_checkpoint_in_one_write`
+(ten skipped events: ten writes before, one after). Not changed: the
+holders, and the per-asset start-up writes. Live effect is not measured: the
+acceptance is under 20 slow writes from these callers in five minutes of an
+active session after `run:dev`.
+
 ### Opening a folder on the Files page (measured 2026-11-01)
 
 Expanding a folder runs the Directory page once for that folder (a lazy

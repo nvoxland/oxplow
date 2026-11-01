@@ -351,7 +351,16 @@ impl EventPump {
                 if events.is_empty() {
                     break;
                 }
+                // The last event the consumer has no handler for, whose
+                // checkpoint isn't written yet: a run of them is one write
+                // (a handled event's checkpoint covers the ones before it).
+                let mut skipped_to: Option<i64> = None;
                 for event in events {
+                    if !delivers(consumer.handles(&event.envelope.event_type), &event) {
+                        report.skipped += 1;
+                        skipped_to = Some(event.seq);
+                        continue;
+                    }
                     match self
                         .deliver_async(consumer.clone(), Arc::new(event))
                         .await?
@@ -363,13 +372,32 @@ impl EventPump {
                             // Later events wait behind this one (per-consumer
                             // order); the next run tries it again.
                             report.deferred += 1;
+                            self.checkpoint_skipped(consumer, skipped_to).await?;
                             break 'consumer;
                         }
                     }
+                    skipped_to = None;
                 }
+                self.checkpoint_skipped(consumer, skipped_to).await?;
             }
         }
         Ok(report)
+    }
+
+    /// Move `consumer`'s checkpoint over the events it skipped, in one
+    /// write.
+    async fn checkpoint_skipped(
+        &self,
+        consumer: &Arc<dyn AsyncEventConsumer>,
+        seq: Option<i64>,
+    ) -> Result<(), DomainError> {
+        let Some(seq) = seq else {
+            return Ok(());
+        };
+        let name = consumer.name();
+        self.db
+            .transaction(move |tx| set_checkpoint_tx(tx, name, seq))
+            .await
     }
 
     /// One event to one async consumer: the handler outside any
@@ -927,6 +955,61 @@ mod tests {
         })
         .await
         .unwrap();
+    }
+
+    /// An async consumer that handles none of a run of events writes its
+    /// checkpoint once for the run, not once per event: every consumer
+    /// reads every event, so a per-event write is a queue slot per
+    /// consumer per event behind whatever else is writing.
+    #[tokio::test]
+    async fn events_an_async_consumer_skips_move_its_checkpoint_in_one_write() {
+        struct Deaf;
+        #[async_trait::async_trait]
+        impl AsyncEventConsumer for Deaf {
+            fn name(&self) -> &'static str {
+                "deaf"
+            }
+            fn handles(&self, _: &str) -> bool {
+                false
+            }
+            async fn handle(&self, _: &StoredEvent) -> Result<(), DomainError> {
+                unreachable!("it handles nothing")
+            }
+        }
+        let (db, store) = setup().await;
+        db.transaction(|tx| {
+            tx.execute_batch(
+                "CREATE TABLE checkpoint_writes (n INTEGER);
+                 CREATE TRIGGER count_checkpoint_writes AFTER UPDATE ON event_consumer_checkpoint
+                 BEGIN INSERT INTO checkpoint_writes VALUES (1); END;
+                 CREATE TRIGGER count_checkpoint_inserts AFTER INSERT ON event_consumer_checkpoint
+                 BEGIN INSERT INTO checkpoint_writes VALUES (1); END;",
+            )
+            .map_err(|e| DomainError::Storage(e.to_string()))
+        })
+        .await
+        .unwrap();
+        for i in 0..10 {
+            store
+                .append(config_changed(&format!("k{i}")))
+                .await
+                .unwrap();
+        }
+        let pump = EventPump::new(db.clone(), store.clone(), vec![]);
+        pump.register_async(Arc::new(Deaf));
+        let report = pump.run_once().await.unwrap();
+        assert_eq!(report.skipped, 10);
+        assert_eq!(store.checkpoint("deaf".into()).await.unwrap(), 10);
+        let writes = db
+            .read(|c| {
+                c.query_row("SELECT count(*) FROM checkpoint_writes", [], |r| {
+                    r.get::<_, i64>(0)
+                })
+                .map_err(|e| DomainError::Storage(e.to_string()))
+            })
+            .await
+            .unwrap();
+        assert_eq!(writes, 1, "one checkpoint write for ten skipped events");
     }
 
     #[tokio::test]
