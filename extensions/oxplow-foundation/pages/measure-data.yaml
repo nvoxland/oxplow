@@ -35,18 +35,58 @@ loaders:
     sql: |
       SELECT m.key, m.title AS name, m.description, m.unit, m.fold, m.subject_kind
       FROM v_measure m WHERE m.key = uri_param(:uri, 'measure')
-  facts:
+  # The newest 500 facts, widening the window until it holds them: a
+  # measure keeps a long history (tens of thousands of facts), and the fact
+  # index is by capture, so a bound on `capture_id` reads only the recent
+  # captures while the same bound on `captured_at` reads every fact. A tier
+  # is skipped (its guard is a constant, tested once) when a narrower one
+  # held 500. Newest first is by capture, then by fact id.
+  facts_day:
     sql: |
-      -- Filtered on a constant key (never a join to `about`), so the fact
-      -- index is used; newest first by id, which follows capture order.
-      SELECT f.captured_at, f.value, (SELECT unit FROM about) AS unit, f.subject, f.path, f.branch, f.dims_json AS dims
+      SELECT f.captured_at, f.value, (SELECT unit FROM about) AS unit, f.subject, f.path, f.branch, f.dims_json AS dims,
+             f.capture_id, f.id
       FROM v_fact f
       WHERE f.measure_key = (SELECT key FROM about)
+        AND f.capture_id >= (SELECT min(c.id) FROM v_capture c WHERE c.captured_at >= max(COALESCE(:range_from, ''), strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 day')))
         AND (COALESCE(:branch, '') = '' OR f.branch = :branch)
         AND (:subject IS NULL OR f.subject LIKE '%' || :subject || '%' OR f.path LIKE '%' || :subject || '%')
         AND (:range_from IS NULL OR f.captured_at >= :range_from)
         AND (:range_to IS NULL OR f.captured_at <= :range_to)
-      ORDER BY f.id DESC LIMIT 500
+      ORDER BY f.capture_id DESC, f.id DESC LIMIT 500
+  facts_week:
+    sql: |
+      SELECT f.captured_at, f.value, (SELECT unit FROM about) AS unit, f.subject, f.path, f.branch, f.dims_json AS dims,
+             f.capture_id, f.id
+      FROM v_fact f
+      WHERE f.measure_key = (SELECT key FROM about)
+        AND (SELECT count(*) FROM facts_day) < 500
+        AND f.capture_id >= (SELECT min(c.id) FROM v_capture c WHERE c.captured_at >= max(COALESCE(:range_from, ''), strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-7 days')))
+        AND (COALESCE(:branch, '') = '' OR f.branch = :branch)
+        AND (:subject IS NULL OR f.subject LIKE '%' || :subject || '%' OR f.path LIKE '%' || :subject || '%')
+        AND (:range_from IS NULL OR f.captured_at >= :range_from)
+        AND (:range_to IS NULL OR f.captured_at <= :range_to)
+      ORDER BY f.capture_id DESC, f.id DESC LIMIT 500
+  facts_all:
+    sql: |
+      SELECT f.captured_at, f.value, (SELECT unit FROM about) AS unit, f.subject, f.path, f.branch, f.dims_json AS dims,
+             f.capture_id, f.id
+      FROM v_fact f
+      WHERE f.measure_key = (SELECT key FROM about)
+        AND (SELECT count(*) FROM facts_day) < 500 AND (SELECT count(*) FROM facts_week) < 500
+        AND (COALESCE(:branch, '') = '' OR f.branch = :branch)
+        AND (:subject IS NULL OR f.subject LIKE '%' || :subject || '%' OR f.path LIKE '%' || :subject || '%')
+        AND (:range_from IS NULL OR f.captured_at >= :range_from)
+        AND (:range_to IS NULL OR f.captured_at <= :range_to)
+      ORDER BY f.capture_id DESC, f.id DESC LIMIT 500
+  facts:
+    sql: |
+      SELECT * FROM (
+        SELECT * FROM facts_day WHERE (SELECT count(*) FROM facts_day) >= 500
+        UNION ALL
+        SELECT * FROM facts_week WHERE (SELECT count(*) FROM facts_day) < 500 AND (SELECT count(*) FROM facts_week) >= 500
+        UNION ALL
+        SELECT * FROM facts_all
+      ) ORDER BY capture_id DESC, id DESC
   # Grouped: the measure's fold (sum, avg, first, else last) over each group's values.
   grouped:
     sql: |

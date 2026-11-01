@@ -479,6 +479,39 @@ dataset; the whole-tree walk is left to the queries that need the tree.
 `stat` per file, 16 at a time, at most 1000 files); the whole-tree walk
 leaves them NULL so Quick Open and the link index pay nothing for them.
 
+### The Measure data page reads recent captures first (measured 2026-11-01)
+
+`slow page re-run page=oxplow-foundation/measure-data loaders=facts took_ms=646..849`.
+Measured on this repo's live database with the bundled SQLite (3.51;
+the system `sqlite3` CLI plans differently, so do not time with it), for
+`oxplow.tokens` (138,000 facts, 153,000 `v_fact` rows, 130,000 captures):
+
+| the facts loader's query | time |
+|---|---|
+| `measure_key = K ORDER BY id DESC LIMIT 500` | 790-940 ms |
+| the same with the page's default 30-day `captured_at >= …` | 660-690 ms |
+| the same with a 4-day `captured_at` bound | 170 ms |
+| `capture_id >= (a bound 9,000 captures back)` | 58-66 ms |
+
+The plan was already right (`SEARCH ch/ph USING INDEX … (measure_id=?)`;
+reordering the chain joins gave nothing). The cost is reading every fact
+of the measure in range through five joins to throw all but 500 away: a
+`captured_at` bound is tested after the joins, while a `capture_id` bound
+is a range on `idx_fact_measure_capture`. So the loader now takes the
+newest 500 from the last day's captures, then the last week's, then the
+whole range, each tier skipped (a constant guard on the earlier tiers'
+counts) when a narrower one held 500; newest first is by capture, then
+fact id (held facts keep old ids, so a window by capture is exact only
+ordered by capture). Pinned by the page's fixture (same rows); the
+timings above are not asserted.
+
+Not done: a page that reads `v_fact` re-runs when any measure's facts
+land, since reads are recorded per dataset and only `metric_grid()` reads
+name measures. A run of an unrelated measure's data page still
+re-runs on every token fact. Recording the constant `measure_key` a
+loader filters on would fix that; it needs the read recorder to see it.
+The hidden-tab pause (above) removes the cost of tabs not on screen.
+
 ### `v_dataset` no longer follows the assets (measured 2026-11-01)
 
 `v_dataset` joined `asset_state` for `computed_at`, `events_to` and
