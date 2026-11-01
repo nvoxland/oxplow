@@ -391,7 +391,10 @@ been quiet for the coalesce window, and is recorded in `asset_state`.
 dataset changes when `m_<view>` is refilled, not when its inputs move, so
 `DatasetsChanged` names it and its readers once per recompute. Its
 watermark is therefore when it was computed; `v_dataset` adds
-`materialize`, `computed_at` and `events_to` (from `asset_state`).
+`materialize`; when it was computed is `v_asset` (`asset` = the view).
+`v_dataset` reads no table the assets write (v2 dropped `computed_at`,
+`events_to` and `mode`), so a page that reads it does not re-run on every
+recompute of anything.
 **Keys** (P8.B1). A dataset may declare `key: [col, …]` — the columns
 whose values name one row. Each must be a declared column, named once
 (else an error at the declaration's `file:line`). The key is part of the

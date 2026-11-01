@@ -479,6 +479,22 @@ dataset; the whole-tree walk is left to the queries that need the tree.
 `stat` per file, 16 at a time, at most 1000 files); the whole-tree walk
 leaves them NULL so Quick Open and the link index pay nothing for them.
 
+### `v_dataset` no longer follows the assets (measured 2026-11-01)
+
+`v_dataset` joined `asset_state` for `computed_at`, `events_to` and
+`mode`, which every asset recompute writes, so each page reading it
+(data catalog, dataset definition, Dataset data, resource data) re-ran
+whenever anything recomputed: Dataset data's `about` loader every 3-5 s
+while agents worked, `slow page re-run … loaders=about took_ms=281..1075`
+in the daemon log. Now `v_dataset` is the registry alone (v2; the freshness
+is in `v_asset`). Pinned by
+`the_dataset_catalog_does_not_read_what_the_assets_write`. The view is not
+slow itself: on this repo's live database `SELECT count(*) FROM v_dataset`
+(165 rows, 75 KB of SQL text) takes about 30 ms in the sqlite3 CLI. The
+300-1000 ms a run took was waiting: the same minutes show the 380-935 ms
+search restates holding the write lock (see the next entry), and a run
+queues behind it.
+
 ### A search index restate no longer holds the write lock to read (measured 2026-11-01)
 
 The daemon log showed `slow database write caller=crates/oxplow-app/src/kind_search.rs:105

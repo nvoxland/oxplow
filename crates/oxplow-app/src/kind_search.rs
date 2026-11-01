@@ -1768,6 +1768,25 @@ mod core_tests {
         }
     }
 
+    /// The catalog of datasets changes when a definition does, not when an
+    /// asset recomputes: a page that reads `v_dataset` (the data catalog,
+    /// a dataset's definition, Dataset data) would run again on every
+    /// recompute of anything. What an asset recorded is `v_asset`.
+    #[tokio::test]
+    async fn the_dataset_catalog_does_not_read_what_the_assets_write() {
+        let (svc, _dir) = services().await;
+        let views = vec!["v_dataset".to_string()];
+        let tables = crate::assets::tables_behind(&svc.db, &views).await.unwrap();
+        let behind = &tables["v_dataset"];
+        assert!(!behind.is_empty());
+        for table in behind {
+            assert!(
+                !matches!(table.as_str(), "asset_state" | "asset_failure"),
+                "v_dataset reads {table}"
+            );
+        }
+    }
+
     /// The index of `kind`, built as `sync_search_kinds` builds it.
     async fn index_of(svc: &Services, kind: &str) -> super::KindSearchIndex {
         let spec = super::searchable_kinds(&svc.db)

@@ -25418,6 +25418,66 @@
         }
       ],
       "key": []
+    },
+    "2": {
+      "columns": [
+        {
+          "name": "view",
+          "type": "TEXT",
+          "doc": "The view to query (`v_work_item`)."
+        },
+        {
+          "name": "name",
+          "type": "TEXT",
+          "doc": "The dataset's name within its owner (`work_item`)."
+        },
+        {
+          "name": "owner",
+          "type": "TEXT",
+          "doc": "`core`, or the extension that declares it."
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "doc": "`sql` (compiled from a SQL file) or `entity` (an extension's synced entity)."
+        },
+        {
+          "name": "version",
+          "type": "INTEGER",
+          "doc": "Contract version: a change to the fields bumps it."
+        },
+        {
+          "name": "description",
+          "type": "TEXT",
+          "doc": "What the view holds."
+        },
+        {
+          "name": "sql",
+          "type": "TEXT",
+          "doc": "The SELECT the view was compiled from, references resolved."
+        },
+        {
+          "name": "compiled_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 time of the open that compiled it."
+        },
+        {
+          "name": "materialize",
+          "type": "TEXT",
+          "doc": "NULL when it's computed on read (a view); `on_change` when it's stored and recomputed when an input changes; `every <d>` (`every 1h`) when it's stored and recomputed on that clock; `incremental <column>` when it's stored and kept by appending rows past that watermark."
+        },
+        {
+          "name": "ai_context",
+          "type": "TEXT",
+          "doc": "Guidance for an agent reading the dataset, as JSON `{\"instructions\", \"synonyms\", \"examples\"}`; NULL when none. Not part of the contract."
+        },
+        {
+          "name": "relationships",
+          "type": "TEXT",
+          "doc": "How its fields point into other datasets, as a JSON array of `{\"from\", \"to\", \"to_view\", \"to_field\"}` (`from` its field, `to` as declared, `<dataset>.<field>`, resolved to that dataset's view and field); NULL when it declares none. Not part of the contract."
+        }
+      ],
+      "key": []
     }
   },
   "field": {
