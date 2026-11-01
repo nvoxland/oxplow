@@ -621,6 +621,17 @@ the ids read are still doomed when the write lands). Pinned by
 `captures_are_indexed_by_stream_and_producer`. The ~0.2 s that remains is the
 per-candidate fact probes (18.5k candidates in stream 1); it holds nothing.
 
+### Boot write holders: a finished scan's findings (measured 2026-11-01)
+
+`finish_scan_with_findings` held the write lock 366 ms at boot: a scan files
+up to 7,000 findings (the live database's largest), and each one ran a
+prepared-every-time insert, then `replace_source_tx` for its file edge (two
+deletes for a source that cannot have edges yet, then an insert). Measured
+(debug build, in memory, 5,000 findings): 200 ms. Findings now go through a
+cached statement and `page_ref_store::insert_new_sources_tx` (one cached
+insert, no deletes): 84 ms. `every_finding_of_a_finished_scan_gets_its_file_edge`
+pins that every finding keeps its edge.
+
 ### Opening a folder on the Files page (measured 2026-11-01)
 
 Expanding a folder runs the Directory page once for that folder (a lazy

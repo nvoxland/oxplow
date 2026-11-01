@@ -449,6 +449,39 @@ pub fn replace_source_tx(
     replace_source_for_ref_types_tx(conn, source, &ref_types, edges)
 }
 
+/// Insert the edges of sources that have none yet (a row just inserted, its
+/// id new): [`replace_source_tx`] without its two deletes, and one prepared
+/// statement for all. A finished scan files one source per finding, in the
+/// thousands.
+pub fn insert_new_sources_tx(
+    conn: &rusqlite::Connection,
+    edges: &[PageRefEdge],
+) -> Result<(), DomainError> {
+    let mut stmt = conn
+        .prepare_cached(
+            "INSERT OR IGNORE INTO page_ref
+               (source_resource, source_uri, target_resource, target_uri, ref_type,
+                source_extra, local_snapshot_id, closest_vcs_rev, vcs_rev_exact)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        )
+        .map_err(crate::database::map_sql_err)?;
+    for edge in edges {
+        stmt.execute(params![
+            resource(&edge.source),
+            edge.source,
+            resource(&edge.target),
+            edge.target,
+            edge.ref_type,
+            edge.source_extra,
+            edge.local_snapshot_id,
+            edge.closest_vcs_rev,
+            if edge.vcs_rev_exact { 1 } else { 0 },
+        ])
+        .map_err(crate::database::map_sql_err)?;
+    }
+    Ok(())
+}
+
 /// Sync core of [`SqlitePageRefStore::replace_source_for_ref_types`]:
 /// delete the source's rows whose `ref_type` is in `ref_types`, then
 /// insert `edges` (only those matching the source and one of the
