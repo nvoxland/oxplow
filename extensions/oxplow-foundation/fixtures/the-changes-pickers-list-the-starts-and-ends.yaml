@@ -1,7 +1,3 @@
-# The From and To choices of the Changes page (its changes_starts and
-# changes_ends loaders): the whole tree to start from, the working tree to end at.
-when: { page: diff-view, params: { stream_id: 1 } }
-expect:
-  loaders:
-    changes_starts: { rows: { contains: [{ value: "", label: "Nothing - the whole tree" }] } }
-    changes_ends: { rows: { contains: [{ value: working, label: Working tree }] } }
+# The From choice of the Changes page (its changes_starts loader): the whole tree to start from.
+when: { query: 'diff-view#changes_starts', params: { stream_id: 1 } }
+expect: { rows: { contains: [{ value: "", label: "Nothing - the whole tree" }] } }

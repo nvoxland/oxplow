@@ -121,7 +121,8 @@ looking at.** Don't hardcode ids.
   `default` that is one of them, or `options_from`: a query of `queries/`
   (`<query>`, its last loader, or `<query>#<loader>`) whose rows are
   `value`, `label`, optional `group` — or `'#<loader>'`, a loader of this
-  page, for a list only this page uses), `bool` (bound 1 or 0), `search`
+  page, for a list only this page uses; it runs when the list is asked
+  for, not with the page, and is tested as `query: <page>#<loader>`), `bool` (bound 1 or 0), `search`
   (trimmed text, NULL when empty), `branch` (a branch, NULL for all),
   `date_range` (a preset `1d 2d 3d 7d 30d 90d all` or `<from>..<to>`;
   `presets:` picks the quick ones). A `date_range` named `range` gives the

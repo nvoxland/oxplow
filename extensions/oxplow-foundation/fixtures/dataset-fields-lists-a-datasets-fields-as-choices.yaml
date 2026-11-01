@@ -1,7 +1,5 @@
 # The Sort by and Filter field choices of a dataset's data page (its dataset_fields loader): none, then each field.
 when:
-  page: dataset-data
+  query: 'dataset-data#dataset_fields'
   params: { uri: "oxplow:oxplow/dataset?dataset=work_item" }
-expect:
-  loaders:
-    dataset_fields: { rows: { contains: [{ value: "", label: None }, { value: title, label: title }] } }
+expect: { rows: { contains: [{ value: "", label: None }, { value: title, label: title }] } }

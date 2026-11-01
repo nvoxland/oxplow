@@ -1,0 +1,10 @@
+# The states a transition may move a work item to, each with its plain name
+# (the work item page's work_item_states loader, which feeds its forms).
+when: { query: 'work-item#work_item_states' }
+expect:
+  rows:
+    - { value: todo, label: To Do }
+    - { value: in_progress, label: In Progress }
+    - { value: blocked, label: Blocked }
+    - { value: done, label: Done }
+    - { value: canceled, label: Canceled }

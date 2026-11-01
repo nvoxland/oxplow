@@ -3269,3 +3269,52 @@ async fn a_shipped_extension_is_reported_under_its_source_folder() {
         "{shown:#?}"
     );
 }
+
+/// `when: { query: <page>#<loader> }` runs one loader of any page file —
+/// a page's own option list, which its run skips — and compares its rows.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_pages_own_option_list_is_tested_as_a_query_of_its_loader() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write(
+        root,
+        ".oxplow/extensions/opts/extension.yaml",
+        "manifest: 2\nname: opts\nintent:\n  purpose: test\n",
+    );
+    write(
+        root,
+        ".oxplow/extensions/opts/pages/chooser.yaml",
+        "title: Chooser\nparams:\n  - { name: mode, type: choice, options_from: '#modes' }\nloaders:\n  modes: { rows: [{ value: a, label: A }, { value: b, label: B }] }\n  shown: { sql: \"SELECT :mode AS mode\" }\nview: { viz: table, from: shown }\n",
+    );
+    write(
+        root,
+        ".oxplow/extensions/opts/fixtures/modes.yaml",
+        "when: { query: 'chooser#modes' }\nexpect: { rows: [{ value: a, label: A }, { value: b, label: B }], columns: [value, label] }\n",
+    );
+    let report = test_extension(root, "opts", false).await.unwrap();
+    assert_eq!(report.error_lines(), Vec::<String>::new());
+
+    write(
+        root,
+        ".oxplow/extensions/opts/fixtures/modes.yaml",
+        "when: { query: 'chooser#modes' }\nexpect: { rows: 3 }\n",
+    );
+    let errors = test_extension(root, "opts", false)
+        .await
+        .unwrap()
+        .error_lines()
+        .join("\n");
+    assert!(errors.contains("`chooser#modes` returned"), "{errors}");
+
+    write(
+        root,
+        ".oxplow/extensions/opts/fixtures/modes.yaml",
+        "when: { query: chooser }\nexpect: { rows: 2 }\n",
+    );
+    let errors = test_extension(root, "opts", false)
+        .await
+        .unwrap()
+        .error_lines()
+        .join("\n");
+    assert!(errors.contains("`query: chooser` names a page"), "{errors}");
+}

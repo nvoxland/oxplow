@@ -19,14 +19,6 @@ expect:
     links: { rows: [{ outbound: 1 }] }
     comments: { rows: [{ body: A note. }] }
     activity: { rows: 0 }
-    # The states a transition may move it to, each with its plain name.
-    work_item_states:
-      rows:
-        - { value: todo, label: To Do }
-        - { value: in_progress, label: In Progress }
-        - { value: blocked, label: Blocked }
-        - { value: done, label: Done }
-        - { value: canceled, label: Canceled }
 steps:
   # The other end of the link shows it too, but can't unlink it.
   - params: { uri: $blocker.uri }

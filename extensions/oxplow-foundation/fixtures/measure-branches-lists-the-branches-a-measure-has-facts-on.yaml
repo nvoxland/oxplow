@@ -2,8 +2,6 @@
 given:
   - observe: { facts: { measure: oxplow.tokens, items: [{ value: 1 }] } }
 when:
-  page: measure-data
+  query: 'measure-data#measure_branches'
   params: { uri: "oxplow:oxplow/measure?measure=oxplow.tokens" }
-expect:
-  loaders:
-    measure_branches: { rows: { contains: [{ value: "", label: All branches }] } }
+expect: { rows: { contains: [{ value: "", label: All branches }] } }

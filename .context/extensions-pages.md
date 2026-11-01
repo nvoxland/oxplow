@@ -226,8 +226,9 @@ A param (`PageParam`) takes `name`, `label`, `default`, `options`,
   query can leave out what `start` is; the desktop's `OptionsSource.list`
   asks for the page and param and sends the page's values whole. A form's
   `choices` and field `from` resolve the same way (`source_rows`). A page's
-  own options loader still runs in the page's run (a small list; a fixture
-  tests it as `expect.loaders.<name>`). No `default` is needed and none is
+  own options loader does not run in the page's run (below, "Running
+  one"): only the rail's `page_options` and a form's open run it, and a
+  fixture tests it as `when: { query: <page>#<loader> }`, `expect: { rows }`. No `default` is needed and none is
   checked; a run takes any text, and the query says what an unknown value
   means. An agent's page tool (`agent_tools::params_schema`) emits no
   `enum` for it, only words saying which query or loader lists them. A param named
@@ -279,7 +280,13 @@ above. Loaders run in order. A loader that fails carries its `error` and
 the rest of the page still shows. Within one run, embeds included, a
 loader with the same definition and inputs (its `key`) runs once. A loader
 only a `switch`'s hidden children show does not run; one no node shows
-does (it feeds an embed, the badge or a later loader). A page whose
+does (it feeds an embed, the badge or a later loader), except a list
+only the page's own `options_from: '#x'`, a form's `choices` or a field's
+`from` names (`on_demand_loaders`): no node shows it, no loader reads it, it
+isn't the badge's, a `see_also` rows loader's, the alert's watched loader
+or a column an embed takes. Such a loader runs when the list is asked for
+(`page_options`, a form's open: `run_loader_chain`), so a slow list never
+re-runs with the page. A page whose
 `needs` are unmet runs no loader (`inactive`). A command loader runs as
 the viewer, `Actor::Page { page_id, on_behalf_of }` (the page's URI is the
 source of what it records). One run keeps at most 5 MiB of results

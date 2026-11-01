@@ -1,5 +1,3 @@
 # The kinds a provider form offers are the AI providers extensions declare.
-when: { page: settings, params: { area: ai } }
-expect:
-  loaders:
-    ai_provider_kinds: { rows: 12 }
+when: { query: 'settings#ai_provider_kinds', params: { area: ai } }
+expect: { rows: 12 }

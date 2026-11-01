@@ -1,7 +1,5 @@
 # The providers the forms offer as a choice are the configured ones.
 given:
   - { command: oxplow.ai.set_provider, input: { id: or, kind: openrouter, key: sk-secret-123 } }
-when: { page: settings, params: { area: ai } }
-expect:
-  loaders:
-    ai_provider_choices: { rows: [{ value: fixture }, { value: or }] }
+when: { query: 'settings#ai_provider_choices', params: { area: ai } }
+expect: { rows: [{ value: fixture }, { value: or }] }

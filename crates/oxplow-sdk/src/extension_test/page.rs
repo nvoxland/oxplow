@@ -170,7 +170,9 @@ pub(super) async fn query_example(
 ) {
     let shown = ex.shown;
     let (page, loader) = oxplow_app::pages::refs::split(query);
-    if !kind_matches(host, ext, ex, page, PageKind::Query, report) {
+    // A bare `query: <slug>` names a query; `<page>#<loader>` names a
+    // loader of any page file (a page's own option list, say).
+    if loader.is_none() && !kind_matches(host, ext, ex, page, PageKind::Query, report) {
         return;
     }
     let id = if page.contains('/') {
@@ -178,31 +180,29 @@ pub(super) async fn query_example(
     } else {
         format!("{}/{page}", ext.name)
     };
+    let found = ext
+        .page_files
+        .iter()
+        .find(|p| p.id == id)
+        .cloned()
+        .or_else(|| host.svc.extension_catalog.find_page(&host.root, &id).ok());
     let loader = match loader {
         Some(l) => l.to_string(),
-        None => {
-            let found = ext
-                .page_files
-                .iter()
-                .find(|p| p.id == id)
-                .cloned()
-                .or_else(|| host.svc.extension_catalog.find_page(&host.root, &id).ok());
-            match found.as_ref().and_then(|p| p.default_loader()) {
-                Some(l) => l.name.clone(),
-                None => {
-                    report.errors.push(
-                        error(
-                            shown,
-                            ex.line("when"),
-                            "fixture.unknown_page",
-                            format!("`query: {query}` isn't a query of this extension"),
-                        )
-                        .fix("name one of `queries/`, or `<ext>/<slug>` of another extension"),
-                    );
-                    return;
-                }
+        None => match found.as_ref().and_then(|p| p.default_loader()) {
+            Some(l) => l.name.clone(),
+            None => {
+                report.errors.push(
+                    error(
+                        shown,
+                        ex.line("when"),
+                        "fixture.unknown_page",
+                        format!("`query: {query}` isn't a query of this extension"),
+                    )
+                    .fix("name one of `queries/`, or `<ext>/<slug>` of another extension"),
+                );
+                return;
             }
-        }
+        },
     };
     let Some(ctx) = view_context(host, ex, report).await else {
         return;
@@ -213,17 +213,55 @@ pub(super) async fn query_example(
     {
         return;
     }
-    let params = ex.when.get("params").cloned().unwrap_or(Value::Null);
-    let at = PageAt {
-        ex,
-        host,
-        shown,
-        page,
-        target: oxplow_app::pages::runner::RunTarget::Page(id),
-        ctx: &ctx,
+    host.current().await;
+    // Only that loader's chain runs, as an option list or a form's open
+    // runs it: nothing else on the page.
+    let supplied = ex
+        .when
+        .get("params")
+        .and_then(Value::as_object)
+        .map(|o| {
+            o.iter()
+                .map(|(k, v)| (k.clone(), oxplow_db::SqlCell::from(v.clone())))
+                .collect()
+        })
+        .unwrap_or_default();
+    let want = match binds.substitute(&ex.expect) {
+        Ok(want) => want,
+        Err(e) => {
+            report
+                .errors
+                .push(error(shown, ex.line("expect"), "fixture.step", e));
+            return;
+        }
     };
-    let expect = json!({ "loaders": { loader: ex.expect } });
-    at.check(&params, &expect, &binds, "", report).await;
+    let result = match oxplow_app::pages::options::source_rows(
+        &host.svc,
+        &format!("{id}#{loader}"),
+        &supplied,
+        &ctx,
+        &oxplow_domain::Actor::Human,
+    )
+    .await
+    {
+        Ok(result) => result,
+        Err(e) => {
+            report.errors.push(
+                error(
+                    shown,
+                    None,
+                    "example.page_failed",
+                    format!("`{query}`: {e}"),
+                )
+                .fix("the query, or the example's `params` and `given`"),
+            );
+            return;
+        }
+    };
+    let got = result_got(&result, &want);
+    if let Some((path, want, got)) = compare(&want, &got) {
+        report.errors.push(error(shown, ex.line("expect"), "fixture.compare", format!("`{query}` returned {got} at `{path}`, the example expects {want}")).fix("the query, or the example's `expect` (`{ rows: n | $any | [..] | { contains: [..] }, columns? }`)").mismatch(path, want, got));
+    }
 }
 
 /// Open page `slug`'s form as a person would (`when: { form, node?,
@@ -308,6 +346,31 @@ pub(super) async fn page_form_start(
             .map_err(|e| e.to_string());
     host.svc.page_runs.close(&run_id);
     start
+}
+
+/// What a loader's result is, shaped as the example's `rows` (and
+/// `columns`) expect: each row as its columns by name — or its cells,
+/// where the example lists that row as a list; a count where it gives one.
+fn result_got(result: &oxplow_db::SqlQueryResult, want: &Value) -> Value {
+    let rows = &result.rows;
+    let listed = want.get("rows").and_then(Value::as_array);
+    let got_rows = match want.get("rows") {
+        Some(Value::Number(_)) => json!(rows.len()),
+        _ => Value::Array(
+            rows.iter()
+                .enumerate()
+                .map(|(i, row)| match listed.and_then(|l| l.get(i)) {
+                    Some(Value::Array(_)) => json!(row),
+                    _ => Value::Object(result.json_row(row)),
+                })
+                .collect(),
+        ),
+    };
+    let mut got = json!({ "rows": got_rows });
+    if want.get("columns").is_some() {
+        got["columns"] = json!(result.columns);
+    }
+    got
 }
 
 /// Loader `name` of a run: its own, or — `<embed>/<loader>` — one of the
@@ -896,29 +959,7 @@ impl PageAt<'_> {
                     );
                     continue;
                 };
-                let rows = &loader.result.rows;
-                // Each row as its columns by name — or its cells, where the
-                // example lists that row as a list; a count where it gives one.
-                let named = |row: &Vec<oxplow_db::SqlCell>| -> Value {
-                    Value::Object(loader.result.json_row(row))
-                };
-                let listed = want.get("rows").and_then(Value::as_array);
-                let got_rows = match want.get("rows") {
-                    Some(Value::Number(_)) => json!(rows.len()),
-                    _ => Value::Array(
-                        rows.iter()
-                            .enumerate()
-                            .map(|(i, row)| match listed.and_then(|l| l.get(i)) {
-                                Some(Value::Array(_)) => json!(row),
-                                _ => named(row),
-                            })
-                            .collect(),
-                    ),
-                };
-                let mut got = json!({ "rows": got_rows });
-                if want.get("columns").is_some() {
-                    got["columns"] = json!(loader.result.columns);
-                }
+                let got = result_got(&loader.result, want);
                 if let Some((path, want, got)) = compare(want, &got) {
                     report.errors.push(error(shown, self.ex.line("expect"), "fixture.compare", format!("{label}page `{page}` loader `{name}` returned {got} at `{path}`, the example expects {want}")).fix(format!("the page, or the example's `expect.loaders.{name}` (`{{ rows: n | $any | [..] | {{ contains: [..] }}, columns? }}`)")).mismatch(path, want, got));
                 }

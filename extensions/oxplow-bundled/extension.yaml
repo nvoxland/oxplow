@@ -295,6 +295,9 @@ intent:
     - name: work-item-page-reads-the-item-its-links-and-its-comments
       input: { page: work-item, params: { uri: "<the item's uri>", thread_id: 1 } }
       expect: the item, its gated buttons, its links from both ends, its comments
+    - name: work-item-states-name-where-a-transition-may-go
+      input: { query: 'work-item#work_item_states' }
+      expect: each state a transition may move an item to, with its plain name
     - name: backlog-lists-items-on-no-thread-with-epics-and-search
       input: { page: backlog, params: { q: "", thread_id: 1 } }
       expect: x

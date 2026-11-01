@@ -273,7 +273,7 @@ pub(super) const KINDS: &[Kind] = &[
     },
     Kind {
         key: "query",
-        when: "{ query: <slug | ext/slug>[#loader], params? }",
+        when: "{ query: <slug | ext/slug>, params? } or { query: <page>#<loader>, params? } (any page file's loader)",
         expect: "{ rows, columns? }",
     },
     Kind {

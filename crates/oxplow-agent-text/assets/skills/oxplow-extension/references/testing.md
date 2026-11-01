@@ -91,7 +91,7 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
 |---|---|---|
 | page | `{ page: <slug \| ext/slug>, params? }` | `{ loaders?, nodes?, text?, alert?, badge?, label?, inactive?, actions?, see_also? }` |
 | part | `{ part: <slug \| ext/slug>, params? }` | `{ loaders?, nodes?, text?, alert?, badge?, label?, inactive?, actions?, see_also? }` |
-| query | `{ query: <slug \| ext/slug>[#loader], params? }` | `{ rows, columns? }` |
+| query | `{ query: <slug \| ext/slug>, params? } or { query: <page>#<loader>, params? } (any page file's loader)` | `{ rows, columns? }` |
 | form | `{ form: <page \| part>, node?, params? }` | `{ values?, fixed?, fields? }` |
 | job | `{ job: <id>, intentKey, request, cancel?, setup?, rows? }` | `{ state, result?, text?, toolCalls?, output?, effects?, commands?, pages? }` |
 | component | `{ component: <id>, items?, invokes?: [{ command, input? }] }` | `{ invokes: [{ ok, result? } \| { ok: false, refused }] }` |
@@ -123,7 +123,10 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
    - a part: `when: { part: <slug | ext/slug>, params? }`, the same
      `expect` as a page's; a query: `when: { query: <slug | ext/slug>[#loader],
      params? }`, `expect: { rows, columns? }` — the rows of its last loader
-     (or the named one), compared as a `sql` example's are. `page:` on a
+     (or the named one), compared as a `sql` example's are. `<page>#<loader>`
+     names a loader of any page file, run alone as the app runs it for a
+     list (a page's own `options_from: '#x'` list does not run with the
+     page, so this is how it is tested). `page:` on a
      part or a query is a finding that says which key to write.
      `view: { stream: str1, thread: thr1 }` runs it from that stream and
      thread; with none, it runs from the project's first stream, so a page

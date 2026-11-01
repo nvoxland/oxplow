@@ -81,10 +81,10 @@ intent:
       input: { page: settings, params: { area: ai } }
       expect: a provider with its kind and a saved key (never the key), a role with its binding, a role bound to nothing with its fallback
     - name: ai-provider-kinds-offer-every-declared-kind
-      input: { page: settings, params: { area: ai } }
+      input: { query: 'settings#ai_provider_kinds', params: { area: ai } }
       expect: the declared AI provider kinds
     - name: ai-provider-choices-list-the-configured-providers
-      input: { page: settings, params: { area: ai } }
+      input: { query: 'settings#ai_provider_choices', params: { area: ai } }
       expect: the configured providers
     - name: changes-frames-an-effort-and-a-picked-range
       input: { page: diff-view, params: { uri: "oxplow:oxplow/effort?id=eff1", stream_id: 1 } }
@@ -366,13 +366,16 @@ intent:
       input: { page: dataset-data, params: { uri: "oxplow:oxplow/dataset?dataset=nothing_like_it" } }
       expect: no query is built and the page says it is not a dataset
     - name: the-changes-pickers-list-the-starts-and-ends
-      input: { page: diff-view, params: { stream_id: 1 } }
-      expect: the From choice offers the whole tree and the To choice offers the working tree
+      input: { query: 'diff-view#changes_starts', params: { stream_id: 1 } }
+      expect: the From choice offers the whole tree
+    - name: the-changes-picker-ends-at-the-working-tree
+      input: { query: 'diff-view#changes_ends', params: { stream_id: 1 } }
+      expect: the To choice offers the working tree
     - name: dataset-definition-names-a-datasets-fields
       input: { page: dataset-definition, params: { uri: "oxplow:oxplow/dataset?dataset=work_item" } }
       expect: a dataset's description, owner, kind and each field with its type and doc
     - name: dataset-fields-lists-a-datasets-fields-as-choices
-      input: { page: dataset-data, params: { uri: "oxplow:oxplow/dataset?dataset=work_item" } }
+      input: { query: 'dataset-data#dataset_fields', params: { uri: "oxplow:oxplow/dataset?dataset=work_item" } }
       expect: none, then each field of the dataset, as choices
     - name: data-catalog-links-each-dataset-to-its-definition
       input: { page: data-catalog, params: { dataset: work_item } }
@@ -381,7 +384,7 @@ intent:
       input: { page: measure-data, params: { uri: "oxplow:oxplow/measure?measure=oxplow.tokens" } }
       expect: a measure's facts newest first, narrowed, or grouped and folded
     - name: measure-branches-lists-the-branches-a-measure-has-facts-on
-      input: { page: measure-data, params: { uri: "oxplow:oxplow/measure?measure=oxplow.tokens" } }
+      input: { query: 'measure-data#measure_branches', params: { uri: "oxplow:oxplow/measure?measure=oxplow.tokens" } }
       expect: all branches, then those the measure's facts were taken on
     - name: dimension-data-counts-the-values-its-facts-carry
       input: { page: dimension-data, params: { uri: "oxplow:oxplow/dimension?dimension=oxplow.language" } }

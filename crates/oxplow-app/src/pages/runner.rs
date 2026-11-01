@@ -1333,11 +1333,16 @@ fn hidden_loaders(page: &Page, params: &BTreeMap<String, SqlCell>) -> Vec<String
         shown(root, &mut all);
         visible(root, params, &mut seen);
     }
+    // A loader only a choice's list names (`options_from: '#x'`, a form's
+    // `choices` or `from`) runs when that list is asked for, not with the
+    // page: the rail's `page_options` and a form's open run it.
+    let on_demand = on_demand_loaders(page, &all);
     // What a needed loader reads is needed too.
     let mut needed: Vec<String> = page
         .loaders
         .iter()
         .filter(|l| !all.contains(&l.name) || seen.contains(&l.name))
+        .filter(|l| !on_demand.contains(&l.name))
         .map(|l| l.name.clone())
         .chain(page.badge.iter().map(|b| b.loader.clone()))
         .collect();
@@ -1350,6 +1355,60 @@ fn hidden_loaders(page: &Page, params: &BTreeMap<String, SqlCell>) -> Vec<String
         .iter()
         .map(|l| l.name.clone())
         .filter(|n| !needed.contains(n))
+        .collect()
+}
+
+/// The loaders of `page` that only an option, choice or sub-field list
+/// of the page itself names: no node shows one, no other loader reads it,
+/// and it is not the one an alert watches, a see-also's, the badge's or a
+/// column an embed takes.
+fn on_demand_loaders(page: &Page, shown: &[String]) -> Vec<String> {
+    use super::refs::{refs, split, RefSite};
+    use super::schema::SeeAlsoDecl;
+    fn embed_columns(node: &Node, out: &mut Vec<String>) {
+        if let NodeKind::Embed { params, .. } = &node.kind {
+            for arg in params.values() {
+                if let ArgSource::Column { from } = arg {
+                    out.push(from.split('.').next().unwrap_or(from).to_string());
+                }
+            }
+        }
+        for c in node.children() {
+            embed_columns(c, out);
+        }
+    }
+    let mut named: Vec<String> = Vec::new();
+    for (site, target) in refs(page) {
+        let list = matches!(
+            site,
+            RefSite::OptionsFrom { .. } | RefSite::FormChoices { .. } | RefSite::FormFrom { .. }
+        );
+        if let (true, (id, Some(loader))) = (list, split(&target)) {
+            if id == page.id {
+                named.push(loader.to_string());
+            }
+        }
+    }
+    let mut pinned: Vec<String> = Vec::new();
+    // The alert watches the badge's loader, else the first.
+    if page.alert.is_some() {
+        pinned.extend(page.first_loader().map(|l| l.name.clone()));
+    }
+    pinned.extend(page.badge.iter().map(|b| b.loader.clone()));
+    for decl in &page.see_also {
+        if let SeeAlsoDecl::Rows { from } = decl {
+            pinned.push(from.clone());
+        }
+    }
+    for root in std::iter::once(&page.view).chain(page.rail.as_ref()) {
+        embed_columns(root, &mut pinned);
+    }
+    for l in &page.loaders {
+        pinned.extend(l.reads_loaders.iter().cloned());
+    }
+    named
+        .into_iter()
+        .filter(|n| !shown.contains(n) && !pinned.contains(n))
         .collect()
 }
 

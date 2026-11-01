@@ -1,0 +1,3 @@
+# The To choice of the Changes page (its changes_ends loader): the working tree to end at.
+when: { query: 'diff-view#changes_ends', params: { stream_id: 1 } }
+expect: { rows: { contains: [{ value: working, label: Working tree }] } }

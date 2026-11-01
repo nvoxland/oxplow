@@ -533,6 +533,11 @@ a `KINDS` entry and a `dispatch` arm. The forms:
   the app runs it on its `on:` (`advisories::for_thread`, over the
   thread's open effort), its text line by line, heading included; on an
   oxplow of its own, since it records what it said (`once_per`).
+- `when: { query: <slug | ext/slug>[#loader], params? }`, `expect: { rows,
+  columns? }` — a query's last loader, or `<page>#<loader>`: one loader of
+  any page file, run alone through `options::source_rows` as an option list
+  or a form's open runs it (a page's own `options_from: '#x'` loader does
+  not run with the page). A bare `query: <page>` of a page is a finding.
 - `when: { sql, params? }`, `expect: { rows, columns? }` — a read-only query
   over the published datasets, run as a page loader would (an inline page of
   one `sql` loader, `sql_example`) and compared as a loader's: a dataset, a

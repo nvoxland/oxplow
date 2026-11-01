@@ -104,6 +104,22 @@ async fn a_switch_runs_only_the_child_in_view() {
     );
 }
 
+/// A loader only a choice's `options_from` names feeds the rail's list
+/// and a form's open, on demand: a run of the page doesn't run it. One a
+/// node also shows still runs.
+#[tokio::test]
+async fn a_loader_only_a_choice_names_does_not_run_with_the_page() {
+    let (_dir, svc) = fixture().await;
+    let r = run(&svc, "acme/chooser", &[]).await;
+    assert!(r.loaders.contains_key("shown"));
+    assert!(
+        !r.loaders.contains_key("modes"),
+        "an option-list loader runs on demand only"
+    );
+    let r = run(&svc, "acme/chooser_shown", &[]).await;
+    assert!(r.loaders.contains_key("modes"), "a node shows it");
+}
+
 #[tokio::test]
 async fn a_command_loader_runs_a_read_command_and_refuses_any_other() {
     let (_dir, svc) = fixture().await;

@@ -74,6 +74,21 @@ view: { viz: table, from: shown }
 "#,
     ),
     (
+        "chooser_shown",
+        r#"
+title: Chooser shown
+params:
+  - { name: mode, type: choice, options_from: '#modes' }
+loaders:
+  modes: { rows: [{ value: a, label: A }] }
+  shown: { sql: "SELECT :mode AS mode" }
+view:
+  stack:
+    - { title: Shown, viz: table, from: shown }
+    - { title: Modes, viz: list, from: modes }
+"#,
+    ),
+    (
         "badchooser",
         r#"
 title: Bad chooser
