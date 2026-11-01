@@ -424,6 +424,9 @@ slots, so a request that needed a slot queued behind them. It isn't CPU
 (reads were fast), a generation pin or an asset lock. Found with a log of
 slow writes (`slow database write`, with the caller's file and line, the
 time it waited for the lock and the time it held it; either past 250 ms).
+A caller whose one line serves many things names what it wrote:
+`Database::transaction_labeled(label, …)` logs `caller=file:line (label)`;
+the search index's restate says `(search kind <kind>)`.
 
 **Fix.** `Database` knows which work a person waits on:
 `oxplow_db::interactive(…)` scopes a request (the daemon's `/ipc` handler

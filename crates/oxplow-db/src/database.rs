@@ -890,9 +890,41 @@ impl Database {
     {
         let caller = std::panic::Location::caller();
         async move {
-            self.write_transaction(caller, move |tx| f(tx).map_err(TxError::Storage), true)
-                .await
-                .map_err(TxError::<std::convert::Infallible>::into_storage)
+            self.write_transaction(
+                caller,
+                None,
+                move |tx| f(tx).map_err(TxError::Storage),
+                true,
+            )
+            .await
+            .map_err(TxError::<std::convert::Infallible>::into_storage)
+        }
+    }
+
+    /// [`Self::transaction`] that names what it writes in the slow-write
+    /// log (`caller=file:line (label)`), for a caller whose one line serves
+    /// many things.
+    #[track_caller]
+    pub fn transaction_labeled<R, F>(
+        &self,
+        label: impl Into<String>,
+        f: F,
+    ) -> impl std::future::Future<Output = Result<R, oxplow_domain::DomainError>> + '_
+    where
+        F: Fn(&rusqlite::Transaction<'_>) -> Result<R, oxplow_domain::DomainError> + Send + 'static,
+        R: Send + 'static,
+    {
+        let caller = std::panic::Location::caller();
+        let label = label.into();
+        async move {
+            self.write_transaction(
+                caller,
+                Some(label),
+                move |tx| f(tx).map_err(TxError::Storage),
+                true,
+            )
+            .await
+            .map_err(TxError::<std::convert::Infallible>::into_storage)
         }
     }
 
@@ -910,7 +942,7 @@ impl Database {
         R: Send + 'static,
         A: Send + 'static,
     {
-        self.write_transaction(std::panic::Location::caller(), f, true)
+        self.write_transaction(std::panic::Location::caller(), None, f, true)
     }
 
     /// Run a publication transaction on the database worker. Unlike
@@ -1029,9 +1061,14 @@ impl Database {
     {
         let caller = std::panic::Location::caller();
         async move {
-            self.write_transaction(caller, move |tx| f(tx).map_err(TxError::Storage), false)
-                .await
-                .map_err(TxError::<std::convert::Infallible>::into_storage)
+            self.write_transaction(
+                caller,
+                None,
+                move |tx| f(tx).map_err(TxError::Storage),
+                false,
+            )
+            .await
+            .map_err(TxError::<std::convert::Infallible>::into_storage)
         }
     }
 
@@ -1047,12 +1084,13 @@ impl Database {
         R: Send + 'static,
         A: Send + 'static,
     {
-        self.write_transaction(std::panic::Location::caller(), f, false)
+        self.write_transaction(std::panic::Location::caller(), None, f, false)
     }
 
     async fn write_transaction<R, A, F>(
         &self,
         caller: &'static std::panic::Location<'static>,
+        label: Option<String>,
         f: F,
         commit: bool,
     ) -> Result<R, TxError<A>>
@@ -1098,7 +1136,7 @@ impl Database {
                         } else {
                             tx.rollback().map_err(sql)?;
                         }
-                        note_write(caller, queued, locked);
+                        note_write(caller, label.as_deref(), queued, locked);
                         Ok(value)
                     });
                 match outcome {
@@ -1122,6 +1160,16 @@ impl Database {
     }
 }
 
+/// How the slow-write log names a writer: where it asked from, and, for a
+/// caller that serves many (a search index restating one kind among many),
+/// what it was writing: `file:line (label)`.
+pub fn write_caller(caller: &std::panic::Location<'_>, label: Option<&str>) -> String {
+    match label {
+        Some(label) => format!("{}:{} ({label})", caller.file(), caller.line()),
+        None => format!("{}:{}", caller.file(), caller.line()),
+    }
+}
+
 /// A write that waited, or held the write lock, past this is logged.
 const SLOW_WRITE: std::time::Duration = std::time::Duration::from_millis(250);
 
@@ -1130,6 +1178,7 @@ const SLOW_WRITE: std::time::Duration = std::time::Duration::from_millis(250);
 /// every request that writes (a stream switch), waits behind the holder.
 fn note_write(
     caller: &std::panic::Location<'_>,
+    label: Option<&str>,
     queued: std::time::Instant,
     locked: std::time::Instant,
 ) {
@@ -1137,7 +1186,7 @@ fn note_write(
     let waited = locked.saturating_duration_since(queued);
     if held >= SLOW_WRITE || waited >= SLOW_WRITE {
         tracing::warn!(
-            caller = %format_args!("{}:{}", caller.file(), caller.line()),
+            caller = %write_caller(caller, label),
             waited_ms = waited.as_millis() as u64,
             held_ms = held.as_millis() as u64,
             "slow database write"
@@ -1420,6 +1469,18 @@ pub(crate) fn with_foreign_keys_off(
 
 #[cfg(test)]
 mod tests {
+    /// The slow-write log names where a writer asked from, and what it was
+    /// writing when its line serves many things.
+    #[test]
+    fn the_slow_write_log_names_the_caller_and_its_label() {
+        let here = std::panic::Location::caller();
+        let plain = write_caller(here, None);
+        assert_eq!(plain, format!("{}:{}", here.file(), here.line()));
+        assert_eq!(
+            write_caller(here, Some("search kind work_item")),
+            format!("{plain} (search kind work_item)")
+        );
+    }
 
     /// A person's write (a stream switch) doesn't queue behind the
     /// background's: with one writer holding the lock and a crowd of

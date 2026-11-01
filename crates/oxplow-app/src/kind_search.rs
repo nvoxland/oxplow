@@ -120,7 +120,9 @@ impl Materializer for KindSearchIndex {
             let kind = self.kind.clone();
             let landed = self
                 .db
-                .transaction(move |tx| prepared.commit(tx, &kind))
+                .transaction_labeled(format!("search kind {kind}"), move |tx| {
+                    prepared.commit(tx, &kind)
+                })
                 .await?;
             if landed {
                 return Ok(Recomputed {

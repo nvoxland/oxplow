@@ -1784,7 +1784,10 @@ just carries a Help blurb pointing there.
   `v_metric_point` (pinned to the page's `metric`) and the definition
   models; its recordings and unchecked files are its Data view
   (`metric-data`, the other mode, in Open With and as "View as Metric
-  data" in See also). Range (a `date_range`, 7 days by default), branch
+  data" in See also; its unchecked-files loader reads its measure's facts
+  through `read_measure(…)`, as Measure data, Dimension data and Measure
+  branches do, so the page re-runs only when that measure's facts land: see
+  `semantic-layer.md`). Range (a `date_range`, 7 days by default), branch
   and **Slice by** are the page's filters, in its address (the Data view
   has range and branch).
   About (node `about`) is a `detail`: the metric's description as its lead, the

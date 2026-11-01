@@ -1,5 +1,9 @@
 # A metric's Data view is its recordings, newest first, and nothing of its
 # definition or trend: those are the metric's own page.
+# Facts of a measure the metric doesn't read (read_measure) leave the unchecked
+# list as it was: empty.
+given:
+  - observe: { facts: { measure: oxplow.tokens, items: [{ value: 1, path: a.rs }] } }
 when:
   page: oxplow-foundation/metric-data
   params: { uri: "oxplow:oxplow/metric?metric=agent.tokens.total", metric: agent.tokens.total }
@@ -8,3 +12,5 @@ expect:
   nodes:
     - { id: recordings, kind: viz, viz: table }
     - { id: unchecked, kind: viz, viz: list }
+  loaders:
+    unchecked: { rows: 0 }

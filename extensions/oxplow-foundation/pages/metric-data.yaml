@@ -46,7 +46,7 @@ loaders:
       FROM v_capture_exclusion e
       WHERE e.unchecked = 1 AND e.producer IN (
         SELECT DISTINCT c.producer FROM v_capture c JOIN v_fact f ON f.capture_id = c.id
-        WHERE f.measure_key = (SELECT source_measure FROM v_metric_spec WHERE key = :metric))
+        WHERE f.measure_key = read_measure((SELECT source_measure FROM v_metric_spec WHERE key = :metric)))
       ORDER BY e.path LIMIT 200
 view:
   stack:
