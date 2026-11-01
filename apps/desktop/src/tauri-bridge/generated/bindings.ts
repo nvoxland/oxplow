@@ -221,6 +221,11 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
+	pageOptions: (page: string, param: string, params: { [key in string]: SqlCell } | null, streamId: string | null) => typedError<SqlQueryResult, IpcError_Serialize>(__TAURI_INVOKE("page_options", { page, param, params, streamId })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	getPage: (id: string) => typedError<Page_Serialize, IpcError_Serialize>(__TAURI_INVOKE("get_page", { id })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the

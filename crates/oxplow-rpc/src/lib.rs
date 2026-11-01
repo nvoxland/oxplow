@@ -251,6 +251,7 @@ macro_rules! oxplow_command_table {
                 fetch_page_runs => $crate::commands::pages::fetch_page_runs { run_ids: Vec<String> } -> ::std::collections::BTreeMap<String, ::oxplow_app::pages::open_runs::RunSnapshot>,
                 run_page => $crate::commands::pages::run_page { page: Option<String>, spec_yaml: Option<String>, params: Option<::std::collections::BTreeMap<String, ::oxplow_db::SqlCell>>, stream_id: Option<String> } -> ::oxplow_app::pages::runner::PageRun,
                 page_text => $crate::commands::pages::page_text { run_id: String } -> String,
+                page_options => $crate::commands::pages::page_options { page: String, param: String, params: Option<::std::collections::BTreeMap<String, ::oxplow_db::SqlCell>>, stream_id: Option<String> } -> ::oxplow_db::SqlQueryResult,
                 get_page => $crate::commands::pages::get_page { id: String } -> ::oxplow_app::pages::schema::Page,
                 renderers_for => $crate::commands::pages::renderers_for { uri: String, stream_id: Option<String> } -> Vec<::oxplow_app::pages::renderers::Renderer>,
                 page_spec => $crate::commands::pages::page_spec { page: String } -> $crate::commands::pages::PageSpec,

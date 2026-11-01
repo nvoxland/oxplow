@@ -395,7 +395,7 @@ impl<'a> PageRunner<'a> {
     /// `content` loader already resolved, shared by every page asked about
     /// the same URI. Any loader's failure is the whole answer's, and each
     /// result is cut to [`ACCEPT_RESULT_BYTES`].
-    pub(super) async fn run_loader_chain(
+    pub(crate) async fn run_loader_chain(
         &self,
         page: &Page,
         target: &str,

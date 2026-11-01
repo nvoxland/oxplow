@@ -7,6 +7,7 @@ pub mod checks;
 pub mod content;
 pub mod label;
 pub mod open_runs;
+pub mod options;
 pub mod refs;
 pub mod renderers;
 pub mod runner;
@@ -22,6 +23,8 @@ mod content_tests;
 mod doc_examples_tests;
 #[cfg(test)]
 mod open_runs_tests;
+#[cfg(test)]
+mod options_tests;
 #[cfg(test)]
 mod renderers_tests;
 #[cfg(test)]

@@ -112,7 +112,7 @@ pub fn tools_of(
                 tools.push(AgentTool {
                     name: name.clone(),
                     description: page_description(page),
-                    input_schema: params_schema(&page.params),
+                    input_schema: params_schema(&page.id, &page.params),
                     // What a page tool returns depends on its `format`.
                     output_schema: None,
                     read_only: true,
@@ -150,7 +150,7 @@ fn page_description(page: &crate::pages::schema::Page) -> String {
 /// (its label, its choices, its default) and `format`. None is required:
 /// a param left out takes its default or what the caller's context binds
 /// (`thread_id`, `stream_id`).
-fn params_schema(params: &[crate::pages::spec::PageParam]) -> Value {
+fn params_schema(page_id: &str, params: &[crate::pages::spec::PageParam]) -> Value {
     let mut properties = Map::new();
     for param in params {
         let mut property = Map::new();
@@ -159,7 +159,12 @@ fn params_schema(params: &[crate::pages::spec::PageParam]) -> Value {
         let from = param
             .options_from
             .as_ref()
-            .map(|from| format!("one of the `value`s `{from}` lists (run it to see them)"));
+            .map(|from| match from.split_once('#') {
+                Some((_, loader)) if from.starts_with(&format!("{}#", page_id)) => {
+                    format!("one of the `value`s the page's loader `{loader}` lists (run the page to see them)")
+                }
+                _ => format!("one of the `value`s `{from}` lists (run it to see them)"),
+            });
         let description = match (&param.label, from) {
             (Some(label), Some(from)) => Some(format!("{label} — {from}")),
             (Some(label), None) => Some(label.clone()),

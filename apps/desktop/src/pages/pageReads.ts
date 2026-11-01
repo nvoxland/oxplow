@@ -1,9 +1,9 @@
 /// What a page node reads of *other* pages (`.context/pages-and-tabs.md`
-/// "The desktop host"): an `expand` column, a lazy tree and a param's
-/// `options_from` name a page — `<ext>/<page>` (its first loader) or
-/// `<ext>/<page>#<loader>` — whose declaration says which params it takes
-/// (the server refuses one it doesn't declare) and whose one-shot run
-/// gives a picker its options. Injected, so tests need no daemon.
+/// "The desktop host"): an `expand` column and a lazy tree name a page —
+/// `<ext>/<page>` (its default loader) or `<ext>/<page>#<loader>` — run
+/// once; a choice's `options_from` is resolved by the daemon
+/// (`page_options`: the query, or the page's own loader, with the params it
+/// declares). Injected, so tests need no daemon.
 import { createContext, useContext } from "react";
 
 import { unwrapResult } from "../api.js";
@@ -18,12 +18,16 @@ export interface PageReads {
   run(page: string, params: Record<string, SqlCell>, streamId: string | null): Promise<PageRun>;
   /** An open run as text, as an agent reads it (Copy). */
   text(runId: string): Promise<string>;
+  /** A choice param's options: what its `options_from` lists for the
+   *  page's current values (the daemon picks the ones the source declares). */
+  options(page: string, param: string, values: Record<string, SqlCell>, streamId: string | null): Promise<SqlQueryResult>;
 }
 
 export const daemonPageReads: PageReads = {
   page: async (id) => unwrapResult(await commands.getPage(id)) as Page,
   run: async (page, params, streamId) => unwrapResult(await commands.runPage(page, null, params, streamId)) as PageRun,
   text: async (runId) => unwrapResult(await commands.pageText(runId)),
+  options: async (page, param, values, streamId) => unwrapResult(await commands.pageOptions(page, param, values, streamId)) as SqlQueryResult,
 };
 
 export const PageReadsContext = createContext<PageReads>(daemonPageReads);
@@ -56,18 +60,11 @@ export function namedLoader(run: PageRun, loader: string | null): { name: string
   return { name, result: got.result ?? null, error: got.error ?? null };
 }
 
-/** A choice's `options_from` in a page file: the page it names, run once
- *  with the values it declares; its named loader's rows are the options
+/** A choice's `options_from` in a page file: the daemon resolves it (a
+ *  query, or the page's own loader) for the page's values
  *  (`kit/ParamControls.tsx` `OptionsSource`). */
 export function pageOptionsSource(reads: PageReads): OptionsSource {
   return {
-    params: async (ref) => (await reads.page(parsePageRef(ref).page)).params.map((p) => p.name),
-    list: async (ref, params, streamId) => {
-      const { page, loader } = parsePageRef(ref);
-      const named = namedLoader(await reads.run(page, params, streamId), loader);
-      if (!named) throw new Error(`${ref} has no loader ${loader ?? ""}`.trim());
-      if (named.error || !named.result) throw new Error(named.error ?? `${ref} listed nothing`);
-      return named.result;
-    },
+    list: (page, param, values, streamId) => reads.options(page, param, values, streamId),
   };
 }

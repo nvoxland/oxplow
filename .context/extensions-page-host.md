@@ -81,7 +81,8 @@ the user guide is `docs/guide/pages.md`.
   slot, is a warning on the mounting extension, and it shows nowhere.
 - **Surfaces.**
   - IPC: `open_page` (starts a run a window keeps open), `run_page`,
-    `get_page`, `page_text`, `page_form`, `submit_page_form`,
+    `get_page`, `page_text`, `page_options` (a choice's options, resolved
+    for the page and param), `page_form`, `submit_page_form`,
     `run_page_action`. MCP: `oxplow_run_page`,
     `oxplow_find_page`, `oxplow_show_page`, `oxplow_run_page_action`,
     `oxplow_validate_extension`; an agent reads a

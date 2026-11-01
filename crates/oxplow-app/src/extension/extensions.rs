@@ -2641,13 +2641,30 @@ fn page_ref_problem(
         .into_iter()
         .find_map(|(site, target)| {
             // Qualified at load (`qualify_page_refs`): `<extension>/<slug>`.
-            let (id, _) = crate::pages::refs::split(&target);
+            let (id, loader) = crate::pages::refs::split(&target);
             let (extension, slug) = id.split_once('/')?;
             if extension != page.extension {
                 return None;
             }
             if slug == page.slug {
-                return (!site.self_ok()).then(|| format!("{} names the page itself", site.what()));
+                // A form's own loader may list a field's choices; a param's
+                // options may be a loader of the page (`options_from: '#x'`).
+                let own_loader = loader.is_some()
+                    && matches!(site, crate::pages::refs::RefSite::OptionsFrom { .. });
+                if !(site.self_ok() || own_loader) {
+                    return Some(format!("{} names the page itself", site.what()));
+                }
+                return loader.filter(|l| page.loader(l).is_none()).map(|l| {
+                    format!(
+                        "{} names `#{l}`, which isn't a loader of the page (loaders: {})",
+                        site.what(),
+                        page.loaders
+                            .iter()
+                            .map(|d| d.name.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )
+                });
             }
             match pages.iter().find(|p| p.slug == slug) {
                 None => Some(format!(
@@ -3906,6 +3923,8 @@ async fn prepare(
     }
     check_collector_inputs(layer, ext, read).await;
     let pages = crate::pages::checks::dry_run_all(layer, ext).await;
+    // Another extension's page files a reference reads, dry-run once each.
+    let mut foreign: BTreeMap<String, crate::pages::checks::LoaderChecks> = BTreeMap::new();
     for page in ext.page_files.clone() {
         let Some(loaders) = pages.get(&page.slug) else {
             continue;
@@ -3981,6 +4000,59 @@ async fn prepare(
                 ext.errors.push(
                     Diagnostic::error("page.viz_column", format!("node `{node}`: {problem}"))
                         .at(relative_to(&ext.path, &page.origin.running), None),
+                );
+            }
+        }
+        // A reference that reads rows of a shape gets them: an option
+        // list's `value` and `label`, a field's sub-fields' `name`, `title`
+        // and `kind` (`pages::refs::Shape`), from the target's dry run.
+        let text = read(&page.file());
+        for (site, target) in crate::pages::refs::refs(&page) {
+            let shape = site.shape();
+            if shape == crate::pages::refs::Shape::None {
+                continue;
+            }
+            let (id, loader) = crate::pages::refs::split(&target);
+            let Some((target_ext, slug)) = id.split_once('/') else {
+                continue;
+            };
+            let columns = if target_ext == ext.name {
+                let Some(target_page) = ext.page_files.iter().find(|p| p.slug == slug) else {
+                    continue;
+                };
+                let name = loader
+                    .map(str::to_string)
+                    .or_else(|| target_page.default_loader().map(|l| l.name.clone()));
+                name.and_then(|n| pages.get(slug).and_then(|l| l.get(&n).cloned()))
+            } else {
+                let Ok(target_page) = catalog.find_page(root, id) else {
+                    continue;
+                };
+                let name = loader
+                    .map(str::to_string)
+                    .or_else(|| target_page.default_loader().map(|l| l.name.clone()));
+                if !foreign.contains_key(id) {
+                    let checks = crate::pages::checks::dry_run(layer, &target_page).await;
+                    foreign.insert(id.to_string(), checks);
+                }
+                name.and_then(|n| foreign.get(id).and_then(|l| l.get(&n).cloned()))
+            };
+            let Some(Ok(result)) = columns else {
+                continue;
+            };
+            if let Some(why) = shape.problem(&result.columns) {
+                let line = match &site {
+                    crate::pages::refs::RefSite::OptionsFrom { param } => text
+                        .as_deref()
+                        .and_then(|t| entry_line(t, "params", "name", param)),
+                    _ => None,
+                };
+                ext.errors.push(
+                    Diagnostic::error(
+                        "page.ref_shape",
+                        format!("{} names `{target}`: {why}", site.what()),
+                    )
+                    .at(relative_to(&ext.path, &page.origin.running), line),
                 );
             }
         }
@@ -6682,6 +6754,81 @@ commands:
             "{warns:?}"
         );
         assert!(x.warnings.iter().any(|w| w.code == "page.ref_not_loaded"));
+    }
+
+    /// A param's options may be a loader of the page itself: `options_from:
+    /// '#modes'` is qualified to the page's own id, and a loader the page
+    /// doesn't have is an error naming the ones it has.
+    #[test]
+    fn a_params_options_may_be_a_loader_of_its_own_page() {
+        let page = |from: &str| {
+            format!(
+                "title: T\nparams: [{{ name: mode, type: choice, options_from: '{from}' }}]\nloaders:\n  modes: {{ rows: [{{ value: a, label: A }}] }}\n  shown: {{ sql: 'SELECT :mode AS mode' }}\nview: {{ viz: table, from: shown }}\n"
+            )
+        };
+        let (_d, ext) = load_tree(&[
+            ("pages/own.yaml", &page("#modes")),
+            ("pages/gone.yaml", &page("#nope")),
+        ]);
+        let own = page_of(&ext, "own").unwrap_or_else(|| panic!("{}", shown_errors(&ext)));
+        assert_eq!(own.params[0].options_from.as_deref(), Some("x/own#modes"));
+        assert!(page_of(&ext, "gone").is_none());
+        let errs = shown_errors(&ext);
+        assert!(
+            errs.contains("param `mode`: `options_from` names `#nope`, which isn't a loader of the page (loaders: modes, shown)"),
+            "{errs}"
+        );
+    }
+
+    /// The dry run checks what a reference reads: a choice's source must
+    /// return `value` and `label`, a field's `from` source `name`, `title`
+    /// and `kind`; the error is at the param's line.
+    #[tokio::test]
+    async fn validate_checks_the_shape_of_what_a_reference_reads() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        write(
+            root,
+            ".oxplow/extensions/x/extension.yaml",
+            "manifest: 2\nname: x\nintent:\n  purpose: test\n",
+        );
+        write(
+            root,
+            ".oxplow/extensions/x/queries/good.yaml",
+            "title: G\nloaders:\n  rows: { sql: \"SELECT 1 AS value, 'a' AS label\" }\n",
+        );
+        write(
+            root,
+            ".oxplow/extensions/x/queries/plain.yaml",
+            "title: P\nloaders:\n  rows: { sql: 'SELECT 1 AS v' }\n",
+        );
+        write(
+            root,
+            ".oxplow/extensions/x/queries/fields.yaml",
+            "title: F\nloaders:\n  rows: { sql: \"SELECT 'k' AS name, 'K' AS title\" }\n",
+        );
+        write(
+            root,
+            ".oxplow/extensions/x/pages/p.yaml",
+            "title: T\nparams:\n  - { name: ok, type: choice, options_from: good }\n  - { name: bad, type: choice, options_from: plain }\n  - { name: own, type: choice, options_from: '#own' }\nloaders:\n  own: { sql: 'SELECT 1 AS nope' }\n  shown: { sql: 'SELECT :ok AS ok, :bad AS bad, :own AS own' }\nview:\n  stack:\n    - { id: t, title: T, viz: table, from: shown }\n    - { id: f, title: F, viz: form, form: { command: oxplow.work_item.create, fields: [{ name: native, from: fields }] } }\n",
+        );
+        let v = validate_extension(&layer().await, &cat(), root, "x", None)
+            .await
+            .unwrap();
+        let errs = shown_errors(&v);
+        assert!(
+            errs.contains("pages/p.yaml:4: param `bad`: `options_from` names `x/plain`: the rows lack `value`, `label` (columns: v)"),
+            "{errs}"
+        );
+        assert!(
+            errs.contains("pages/p.yaml:5: param `own`: `options_from` names `x/p#own`: the rows lack `value`, `label` (columns: nope)"),
+            "{errs}"
+        );
+        assert!(
+            errs.contains("form field `native`: `from` names `x/fields`: the rows lack `kind` (columns: name, title)"),
+            "{errs}"
+        );
+        assert!(!errs.contains("`options_from` names `x/good`"), "{errs}");
     }
 
     /// A viz node shows its loader's rows, so it names one (`from`) that

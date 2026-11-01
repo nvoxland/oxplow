@@ -118,8 +118,10 @@ caller's, else the viewer's context, else `default`. **`stream_id`,
 looking at.** Don't hardcode ids.
 
 - `type`: `text` (default), `choice` (`options: [{ value, label }]` with a
-  `default` that is one of them, or `options_from: <query>` or `<query>#<loader>`: a query of `queries/` whose rows are
-  `value`, `label`, optional `group`), `bool` (bound 1 or 0), `search`
+  `default` that is one of them, or `options_from`: a query of `queries/`
+  (`<query>`, its last loader, or `<query>#<loader>`) whose rows are
+  `value`, `label`, optional `group` — or `'#<loader>'`, a loader of this
+  page, for a list only this page uses), `bool` (bound 1 or 0), `search`
   (trimmed text, NULL when empty), `branch` (a branch, NULL for all),
   `date_range` (a preset `1d 2d 3d 7d 30d 90d all` or `<from>..<to>`;
   `presets:` picks the quick ones). A `date_range` named `range` gives the

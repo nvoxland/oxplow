@@ -89,7 +89,8 @@ name), and its **view** (a tree of nodes: `stack`, `grid`, `switch`, `viz`,
 
 A param has a `type`, which picks its control: `text` (the default),
 `choice` (`options: [{ value, label }]`, or `options_from:` a query whose rows
-are the choices), `bool`, `search` (applies as you type), `branch`, and
+are the choices — or `'#<loader>'`, a loader of the page itself, for a list
+only this page uses), `bool`, `search` (applies as you type), `branch`, and
 `date_range` (a preset `1d 2d 3d 7d 30d 90d all`, or `<from>..<to>`; it
 gives the query `:range_from` and `:range_to`).
 

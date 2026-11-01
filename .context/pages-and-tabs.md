@@ -702,11 +702,11 @@ undeclared param), the named loader's viz node drawn compact — and a lazy
 tree's open branch is a run of the node's own page with the lazy param
 set to the branch's id (`pages/pageBranches.ts`, `usePageRunsFor`), whose
 rows press on that run (`BranchRun.runner` / `forms`: the server only
-takes a row its run holds). A filter's `options_from` names a page
-(`pageOptionsSource`, `OptionsSourceContext`, the daemon's by default,
-`PageRail`'s over its `PageReads`): run once with the values it declares
-(`run_page`), its named loader's `value` / `label` / `group` the
-options. A live origin (Up and Down through a page node's link column,
+takes a row its run holds). A filter's `options_from` is resolved by the daemon
+(`pageOptionsSource` over `PageReads.options` → IPC `page_options`,
+`OptionsSourceContext`): the rail sends the page, the param and the run's
+values, and gets the query's (or the page's own loader's) `value` /
+`label` / `group` rows, re-read when what they read changes. A live origin (Up and Down through a page node's link column,
 `<page>#<node>`) holds the producing page's run (`LiveOriginResolver`
 over the window's runs) and reads that node's rows (`liveOriginNodeRun`). Other pages are read through `PageReadsContext`
 (`pages/pageReads.ts`), a test's fake in place of the daemon. New params keep the old run on screen

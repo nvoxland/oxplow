@@ -43,7 +43,7 @@ export function PageRail({ run, runId, onApply, picked = NO_PICKED, streamId = n
   // No role is a resource, as the server reads it.
   const sw = switchSections(run);
   const filters = run.page.params.filter((p) => p.role === "filter" && p.name !== sw?.param);
-  // A filter's `options_from` names a page here, not a query.
+  // A filter's `options_from` is resolved by the daemon for this page.
   const reads = usePageReads();
   const options = useMemo(() => pageOptionsSource(reads), [reads]);
   const selections = run.page.params.filter((p) => p.role === "selection");
@@ -77,7 +77,7 @@ export function PageRail({ run, runId, onApply, picked = NO_PICKED, streamId = n
       {filters.length > 0 ? (
         <RailGroup title="Filters" action={reset} testId="page-rail-filters">
           <OptionsSourceContext.Provider value={options}>
-            <ParamList params={filters} values={run.params} onApply={onApply} streamId={streamId} />
+            <ParamList params={filters} values={run.params} onApply={onApply} streamId={streamId} page={run.page.id} />
           </OptionsSourceContext.Provider>
         </RailGroup>
       ) : null}

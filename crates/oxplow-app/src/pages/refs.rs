@@ -56,6 +56,44 @@ pub enum Shape {
     Fields,
 }
 
+impl Shape {
+    /// The columns the shape needs.
+    pub fn columns(self) -> &'static [&'static str] {
+        match self {
+            Shape::None => &[],
+            Shape::Options => &["value", "label"],
+            Shape::Fields => &["name", "title", "kind"],
+        }
+    }
+
+    /// Why `columns` don't fit the shape: the ones it lacks, named.
+    pub fn problem(self, columns: &[String]) -> Option<String> {
+        let missing: Vec<String> = self
+            .columns()
+            .iter()
+            .filter(|c| !columns.iter().any(|have| have == *c))
+            .map(|c| format!("`{c}`"))
+            .collect();
+        if missing.is_empty() {
+            return None;
+        }
+        let what = match self {
+            Shape::None => return None,
+            Shape::Options => "a choice's options are rows of `value`, `label` and an optional `group`",
+            Shape::Fields => "a field's sub-fields are rows of `name`, `title`, `kind`, optional `values` and `read_only`",
+        };
+        Some(format!(
+            "the rows lack {} (columns: {}); {what}",
+            missing.join(", "),
+            if columns.is_empty() {
+                "none".to_string()
+            } else {
+                columns.join(", ")
+            }
+        ))
+    }
+}
+
 /// One place a page file is named from.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RefSite {

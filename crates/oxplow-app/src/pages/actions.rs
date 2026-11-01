@@ -236,54 +236,25 @@ pub async fn run_page_action(
     prepared.run(svc).await
 }
 
-/// The rows a form's choice or object field reads: page `source`
-/// (`<extension>/<slug>`, its first loader, or `…#<loader>`), run with the
-/// form's params that page declares.
+/// The rows a form's choice or object field reads: `source` is a page
+/// file (`<extension>/<slug>`, its default loader, `…#<loader>`, or the
+/// form's own page's loader), run with the form's params it declares
+/// (`pages::options::source_rows`: only that loader's chain).
 async fn page_rows(
     svc: &crate::Services,
     source: &str,
     params: &BTreeMap<String, SqlCell>,
     viewer: &Actor,
 ) -> Result<oxplow_db::SqlQueryResult, CommandError> {
-    let (page_id, loader) = match source.split_once('#') {
-        Some((p, l)) => (p, Some(l)),
-        None => (source, None),
-    };
-    let page = svc
-        .extension_catalog
-        .find_page(&svc.layout.project_dir, page_id)
-        .map_err(|_| invalid("/source", format!("no page `{page_id}`")))?;
-    let given = params
-        .iter()
-        .filter(|(k, _)| page.params.iter().any(|p| &p.name == *k))
-        .map(|(k, v)| (k.clone(), v.clone()))
-        .collect();
-    let name = match loader {
-        Some(l) => l.to_string(),
-        None => page
-            .first_loader()
-            .map(|l| l.name.clone())
-            .ok_or_else(|| invalid("/source", format!("page `{page_id}` has no loader")))?,
-    };
-    let run = super::runner::PageRunner::of(svc)
-        .run(super::runner::RunRequest {
-            target: super::runner::RunTarget::Spec(std::sync::Arc::new(page)),
-            params: given,
-            ctx: crate::pages::spec::ViewContext::default(),
-            viewer: viewer.clone(),
-        })
-        .await
-        .map_err(CommandError::from)?;
-    let l = run.loaders.get(&name).ok_or_else(|| {
-        invalid(
-            "/source",
-            format!("page `{page_id}` ran no loader `{name}`"),
-        )
-    })?;
-    match &l.error {
-        Some(e) => Err(invalid("/source", e.clone())),
-        None => Ok(l.result.clone()),
-    }
+    super::options::source_rows(
+        svc,
+        source,
+        params,
+        &crate::pages::spec::ViewContext::default(),
+        viewer,
+    )
+    .await
+    .map_err(|e| invalid("/source", e.to_string()))
 }
 
 /// Each choice field's choices and each object field's children, from the

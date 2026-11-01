@@ -64,15 +64,14 @@ test("a choice shows its option's label and applies the one picked", () => {
   expect(valueButton().textContent).toBe("Most visited");
 });
 
-// A choice whose options a page lists runs that page with the page's
-// values it declares, shows the option's label, groups them, and follows
-// the page's reads.
-test("a dynamic choice loads its options from its page with the page's params, grouped", async () => {
-  const runs: [string, Record<string, SqlCell>, string | null][] = [];
+// A choice with `options_from` asks the daemon for the param's options
+// with the page's values (the daemon keeps the ones the source declares),
+// shows the option's label, groups them, and follows what was read.
+test("a dynamic choice loads its options for its page and param with the page's values, grouped", async () => {
+  const runs: [string, string, Record<string, SqlCell>, string | null][] = [];
   const source = {
-    params: async () => ["start", "stream_id"],
-    list: async (id: string, params: Record<string, SqlCell>, streamId: string | null) => {
-      runs.push([id, params, streamId]);
+    list: async (page: string, param: string, values: Record<string, SqlCell>, streamId: string | null) => {
+      runs.push([page, param, values, streamId]);
       return {
         columns: ["value", "label", "group"],
         rows: [
@@ -86,10 +85,10 @@ test("a dynamic choice loads its options from its page with the page's params, g
   };
   const p = param({ name: "end", type: "choice", options_from: "x/ends" });
   const applied: [string, SqlCell][] = [];
-  const view = render(<ParamRow param={p} value="snap:2" values={{ start: "snap:1", end: "snap:2", other: 1 }} streamId="str1" onApply={(n, v) => applied.push([n, v])} optionsSource={source} />);
+  const view = render(<ParamRow param={p} value="snap:2" values={{ start: "snap:1", end: "snap:2", other: 1 }} streamId="str1" onApply={(n, v) => applied.push([n, v])} optionsSource={source} page="x/changes" />);
   const valueButton = () => view.getByTestId("page-param-end-value");
   await waitFor(() => expect(valueButton().textContent).toBe("Second"));
-  expect(runs).toEqual([["x/ends", { start: "snap:1" }, "str1"]]);
+  expect(runs).toEqual([["x/changes", "end", { start: "snap:1", end: "snap:2", other: 1 }, "str1"]]);
   fireEvent.click(valueButton());
   const edit = view.getByTestId("page-param-end-edit") as HTMLSelectElement;
   expect([...edit.querySelectorAll("optgroup")].map((g) => g.label)).toEqual(["Snapshots"]);

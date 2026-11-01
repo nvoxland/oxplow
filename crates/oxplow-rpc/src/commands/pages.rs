@@ -131,6 +131,27 @@ pub async fn run_page(
         .await?)
 }
 
+/// A choice param's options: what its `options_from` lists for the page's
+/// current values, run once — only that loader's chain
+/// (`pages::options::param_options`).
+pub async fn page_options(
+    svc: &Services,
+    page: String,
+    param: String,
+    params: Option<BTreeMap<String, SqlCell>>,
+    stream_id: Option<String>,
+) -> Result<oxplow_db::SqlQueryResult, IpcError> {
+    Ok(oxplow_app::pages::options::param_options(
+        svc,
+        &page,
+        &param,
+        &params.unwrap_or_default(),
+        &context(svc, stream_id.as_deref(), None).await,
+        &Actor::Human,
+    )
+    .await?)
+}
+
 /// An open run as an agent reads it (Copy, Add to Context).
 pub async fn page_text(svc: &Services, run_id: String) -> Result<String, IpcError> {
     let run = svc

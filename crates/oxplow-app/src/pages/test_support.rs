@@ -60,6 +60,31 @@ view:
 "#,
     ),
     (
+        "chooser",
+        r#"
+title: Chooser
+params:
+  - { name: start, default: 'snap:1' }
+  - { name: end, type: choice, options_from: ends }
+  - { name: mode, type: choice, options_from: '#modes' }
+loaders:
+  modes: { rows: [{ value: a, label: A }, { value: b, label: B }] }
+  shown: { sql: "SELECT :start AS start, :end AS end_, :mode AS mode" }
+view: { viz: table, from: shown }
+"#,
+    ),
+    (
+        "badchooser",
+        r#"
+title: Bad chooser
+params:
+  - { name: pick, type: choice, options_from: plain }
+loaders:
+  shown: { sql: "SELECT :pick AS pick" }
+view: { viz: table, from: shown }
+"#,
+    ),
+    (
         "sparse",
         r#"
 title: Sparse
@@ -360,6 +385,28 @@ view: { viz: table, from: w }
     ),
 ];
 
+/// The queries beside `PAGES`: what a choice's `options_from` names.
+pub(crate) const QUERIES: &[(&str, &str)] = &[
+    (
+        "ends",
+        r#"
+title: Ends
+params: [{ name: start }]
+loaders:
+  points: { rows: [{ value: 'snap:1', label: One }, { value: 'snap:2', label: Two }] }
+  after: { sql: "SELECT value, label FROM points WHERE value > :start" }
+"#,
+    ),
+    (
+        "plain",
+        r#"
+title: Plain
+loaders:
+  rows: { sql: "SELECT 1 AS v" }
+"#,
+    ),
+];
+
 pub(crate) async fn fixture() -> (tempfile::TempDir, Arc<crate::Services>) {
     let dir = tempfile::tempdir().unwrap();
     crate::test_fixtures::init_git_repo(dir.path());
@@ -372,6 +419,13 @@ pub(crate) async fn fixture() -> (tempfile::TempDir, Arc<crate::Services>) {
         write(
             dir.path(),
             &format!(".oxplow/extensions/acme/pages/{slug}.yaml"),
+            text,
+        );
+    }
+    for (slug, text) in QUERIES {
+        write(
+            dir.path(),
+            &format!(".oxplow/extensions/acme/queries/{slug}.yaml"),
             text,
         );
     }

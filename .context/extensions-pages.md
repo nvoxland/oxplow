@@ -212,14 +212,25 @@ A param (`PageParam`) takes `name`, `label`, `default`, `options`,
   person never edits it; a `for:` page may take one (`ParamRole::rides_view`
   is the one test for "rides the `#`"). A `filter`, `selection` or `view`
   param found in a `?` is refused.
-- **`options_from: <page>`** (a slug of the extension, or
-  `<extension>/<slug>`; `page_ref_problem` checks it exists and is not the
-  page itself) makes a choice whose options a page lists: its rows are
-  `value`, `label`, optional `group`. The rail runs that page with the
-  params it declares, so an `end` picker's page can leave out what `start`
-  is. No `default` is needed and none is checked; a run takes any text,
-  and the query says what an unknown value means. An agent's page tool
-  (`agent_tools::params_schema`) emits no `enum` for it. A param named
+- **`options_from`** makes a choice whose options rows list: `value`,
+  `label`, optional `group`. It names a **query** (`<slug>` of the
+  extension or `<extension>/<slug>`, its last loader; `…#<loader>` for
+  another), or **a loader of the page itself**, `'#<loader>'` (a list only
+  this page uses; qualified at load to `<page id>#<loader>`). Typed and
+  checked at load (`pages/refs.rs`: a part or a page is refused; a loader
+  the page lacks is named) and shaped by the dry run (`page.ref_shape`:
+  the rows must have `value` and `label`, the error at the param's line).
+  The daemon resolves it (`pages/options.rs::param_options`, IPC
+  `page_options { page, param, params, stream_id }`): only that loader's
+  chain runs, with the params the source declares, so an `end` picker's
+  query can leave out what `start` is; the desktop's `OptionsSource.list`
+  asks for the page and param and sends the page's values whole. A form's
+  `choices` and field `from` resolve the same way (`source_rows`). A page's
+  own options loader still runs in the page's run (a small list; a fixture
+  tests it as `expect.loaders.<name>`). No `default` is needed and none is
+  checked; a run takes any text, and the query says what an unknown value
+  means. An agent's page tool (`agent_tools::params_schema`) emits no
+  `enum` for it, only words saying which query or loader lists them. A param named
   `uri`, `effort_id`, `thread_id` or `stream_id` draws as a picker over
   the matching dataset, by title (`viz/vizParams.ts`); any other is typed.
 - **Implicit params.** A param named `stream_id` or `thread_id` is bound

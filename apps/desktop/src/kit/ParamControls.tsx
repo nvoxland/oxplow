@@ -20,14 +20,13 @@ const SHOWN_ROWS = 6;
 
 type Query = (sql: string) => Promise<SqlQueryResult>;
 
-/** What a choice's `options_from` is read with: which of the page's
- *  params what it names takes, and its rows for them. It names a page
- *  (`<ext>/<page>`, its first loader, or `<ext>/<page>#<loader>`), run
- *  once (`pages/pageReads.ts` `pageOptionsSource`: the daemon's, or
- *  `PageRail`'s over its page reads); a test gives another. */
+/** What a choice's `options_from` is read with: the options of `param` of
+ *  `page` for the page's current `values` (the daemon runs the query, or
+ *  the page's own loader, with the params it declares) as rows of `value`,
+ *  `label`, optional `group` (`pages/pageReads.ts` `pageOptionsSource`); a
+ *  test gives another. */
 export interface OptionsSource {
-  params(ref: string): Promise<string[]>;
-  list(ref: string, params: Record<string, SqlCell>, streamId: string | null): Promise<SqlQueryResult>;
+  list(page: string, param: string, values: Record<string, SqlCell>, streamId: string | null): Promise<SqlQueryResult>;
 }
 
 export const OptionsSourceContext = createContext<OptionsSource>(pageOptionsSource(daemonPageReads));
@@ -38,9 +37,11 @@ export interface ParamRowProps {
   onApply(name: string, value: SqlCell): void;
   /** Reads the options of a branch or id picker; `querySql` unless a test injects one. */
   query?: Query;
-  /** The page's current param values: what a choice's `options_from` page
+  /** The page's current param values: what a choice's `options_from` source
    *  is run with (the ones it declares). */
   values?: Record<string, SqlCell>;
+  /** The page the param is of: what `options_from` is resolved against. */
+  page?: string;
   /** The stream the page runs for: what that page runs for. */
   streamId?: string | null;
   /** Reads what `options_from` names; the context's (a page file's rail's, or a test's). */
@@ -54,14 +55,14 @@ export interface ParamRowProps {
  * Escape keeps the value from before the edit, and focus comes back to
  * the value. A bool has nothing to open: its value is the checkbox.
  */
-export function ParamRow({ param, value, onApply, query = querySql, values = {}, streamId = null, optionsSource }: ParamRowProps) {
+export function ParamRow({ param, value, onApply, query = querySql, values = {}, streamId = null, optionsSource, page = "" }: ParamRowProps) {
   const fromContext = useContext(OptionsSourceContext);
   const name = param.name;
   const label = param.label ?? humanize(name);
   const type = paramType(param);
   const kind = type === "text" ? paramKind(name) : null;
   const options = usePickerOptions(kind, query);
-  const listed = useListedOptions(type === "choice" ? (param.options_from ?? null) : null, values, streamId, optionsSource ?? fromContext);
+  const listed = useListedOptions(type === "choice" && param.options_from ? { page, param: name } : null, values, streamId, optionsSource ?? fromContext);
   // What it applied shows at once; the run's echo replaces it when it comes.
   const [shown, setShown] = useState<SqlCell>(value);
   useEffect(() => setShown(value), [value]);
@@ -146,20 +147,22 @@ export interface ParamListProps {
   values: Record<string, SqlCell>;
   onApply(name: string, value: SqlCell): void;
   query?: Query;
-  /** The stream the page runs for (a choice's `options_from` page runs for it). */
+  /** The stream the page runs for (a choice's `options_from` source runs for it). */
   streamId?: string | null;
+  /** The page the params are of: what a choice's `options_from` is resolved against. */
+  page?: string;
 }
 
 /** A page's params as rows, in their declared order: six, the rest behind
  *  More (N) — except one that is set, which always shows. */
-export function ParamList({ params, values, onApply, query, streamId = null }: ParamListProps) {
+export function ParamList({ params, values, onApply, query, streamId = null, page = "" }: ParamListProps) {
   const [all, setAll] = useHistoryState<boolean>("paramsMore", false);
   const shown = params.filter((p, i) => all || i < SHOWN_ROWS || !sameValue(paramType(p), values[p.name] ?? null, p.default ?? null));
   const folded = params.length - shown.length;
   return (
     <div className="ox-params">
       {shown.map((p) => (
-        <ParamRow key={p.name} param={p} value={values[p.name] ?? null} values={values} streamId={streamId} onApply={onApply} query={query} />
+        <ParamRow key={p.name} param={p} value={values[p.name] ?? null} values={values} streamId={streamId} onApply={onApply} query={query} page={page} />
       ))}
       {folded > 0 ? (
         <button type="button" className="ox-link ox-params-more" data-testid="page-params-more" onClick={() => setAll(true)}>
@@ -331,45 +334,32 @@ interface Option {
   group?: string | null;
 }
 
-/** The options of a choice whose `options_from` names a page:
- *  its rows for the page's stream with the page's values it declares,
- *  read again when what it read changes (the one place a param control
- *  follows data). Rows are `value`, `label`, optional `group`. */
-function useListedOptions(ref: string | null, values: Record<string, SqlCell>, streamId: string | null, source: OptionsSource): Option[] {
+/** The options of a choice with `options_from`: what the daemon lists for
+ *  the page's values (it picks the ones the source declares), for the
+ *  page's stream, read again when what it read changes (the one place a
+ *  param control follows data). Rows are `value`, `label`, optional
+ *  `group`. */
+function useListedOptions(at: { page: string; param: string } | null, values: Record<string, SqlCell>, streamId: string | null, source: OptionsSource): Option[] {
   const [options, setOptions] = useState<Option[]>([]);
   const [reads, setReads] = useState<Reads>(NO_READS);
-  const [declared, setDeclared] = useState<string[] | null>(null);
-  useEffect(() => {
-    setDeclared(null);
-    if (!ref) return;
-    let live = true;
-    source
-      .params(ref)
-      .then((names) => {
-        if (live) setDeclared(names);
-      })
-      .catch((e: unknown) => recordOpError({ label: `Read ${ref}`, message: e instanceof Error ? e.message : String(e) }));
-    return () => {
-      live = false;
-    };
-  }, [ref, source]);
-  const params = declared ? Object.fromEntries(declared.filter((n) => n in values).map((n) => [n, values[n] ?? null])) : null;
-  const paramsKey = JSON.stringify(params);
+  const page = at?.page ?? null;
+  const param = at?.param ?? null;
+  const valuesKey = JSON.stringify(values);
   const live = useRef(true);
   const load = useCallback(() => {
-    if (!ref || !params) return;
+    if (page === null || param === null) return;
     const started = live;
     source
-      .list(ref, params, streamId)
+      .list(page, param, values, streamId)
       .then((result) => {
         if (!started.current) return;
         setOptions(listedOptions(result));
         setReads(result.reads ?? NO_READS);
       })
-      .catch((e: unknown) => recordOpError({ label: `List ${ref}`, message: e instanceof Error ? e.message : String(e) }));
-    // `params` is `paramsKey`'s content.
+      .catch((e: unknown) => recordOpError({ label: `List ${page} ${param}`, message: e instanceof Error ? e.message : String(e) }));
+    // `values` is `valuesKey`'s content.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ref, paramsKey, streamId, source]);
+  }, [page, param, valuesKey, streamId, source]);
   useEffect(() => {
     live.current = true;
     load();

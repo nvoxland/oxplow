@@ -2,9 +2,9 @@ import { afterEach, expect, test } from "bun:test";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 
 import { PageRail } from "./PageRail.js";
-import { decl, fakePage, fakeRun, loader, node } from "./testing/fakeRun.js";
+import { fakePage, fakeRun, loader, node } from "./testing/fakeRun.js";
 import { PageReadsContext, type PageReads } from "./pageReads.js";
-import type { SqlCell } from "../tauri-bridge/generated/bindings.js";
+import type { SqlCell, SqlQueryResult } from "../tauri-bridge/generated/bindings.js";
 
 afterEach(cleanup);
 
@@ -65,33 +65,29 @@ test("the page's rail tree draws below its filters", () => {
   expect(legend?.textContent).toContain("key-1");
 });
 
-// A filter whose options another page lists: that page runs once, with
-// the run's values it declares, and its named loader's `value`, `label`
-// and `group` are the options.
-test("a filter's options_from runs the page it names once and lists its loader's rows", async () => {
-  const scopes = fakePage(node.viz("scopes", "scopes"), {
-    id: "acme/scopes",
-    params: [{ name: "stream_id", type: "text" } as never],
-    loaders: [decl("first"), decl("scopes")],
-  });
+// A filter whose options a query (or the page's own loader) lists: the
+// daemon resolves it for this page and param with the run's values, and
+// the rows' `value`, `label` and `group` are the options.
+test("a filter's options_from is resolved by the daemon for the page and param, listing its rows", async () => {
   const asked: unknown[][] = [];
   const reads: PageReads = {
-    page: async (id) => {
-      asked.push(["page", id]);
-      return scopes;
+    page: async () => {
+      throw new Error("not read");
     },
-    run: async (id, params, streamId) => {
-      asked.push(["run", id, params, streamId]);
-      return fakeRun(scopes, {
-        loaders: { first: loader(["value"], [["nope"]]), scopes: loader(["value", "label"], [["all", "All files"], ["mine", "Mine"]]) },
-      });
+    run: async () => {
+      throw new Error("not run");
     },
     text: async () => "",
+    options: async (page, param, values, streamId) => {
+      asked.push(["options", page, param, values, streamId]);
+      return loader(["value", "label"], [["all", "All files"], ["mine", "Mine"]]).result as SqlQueryResult;
+    },
   };
   const withScope = fakePage(node.viz("items", "items"), {
+    id: "acme/files",
     params: [
       { name: "stream_id", type: "text" } as never,
-      { name: "scope", role: "filter", type: "choice", options_from: "acme/scopes#scopes", default: "all", options: [] } as never,
+      { name: "scope", role: "filter", type: "choice", options_from: "acme/scopes", default: "all", options: [] } as never,
     ],
   });
   const run = fakeRun(withScope, { params: { stream_id: "str1", scope: "all" }, loaders: { items: loader([], []) } });
@@ -101,10 +97,7 @@ test("a filter's options_from runs the page it names once and lists its loader's
     </PageReadsContext.Provider>,
   );
   await waitFor(() => expect(getByTestId("page-param-scope-value").textContent).toBe("All files"));
-  expect(asked).toEqual([
-    ["page", "acme/scopes"],
-    ["run", "acme/scopes", { stream_id: "str1" }, "str1"],
-  ]);
+  expect(asked).toEqual([["options", "acme/files", "scope", { stream_id: "str1", scope: "all" }, "str1"]]);
   fireEvent.click(getByTestId("page-param-scope-value"));
   const edit = getByTestId("page-param-scope-edit") as HTMLSelectElement;
   expect([...edit.options].map((o) => o.textContent)).toEqual(["All files", "Mine"]);
