@@ -8,6 +8,8 @@ params:
   role: filter
   label: Find an earlier session
   type: search
+answers:
+- {"question":"Which agents does the project enable, and which is a new session's default?","params":{},"skill":"oxplow-extension"}
 loaders:
   start:
     sql: |
@@ -109,6 +111,12 @@ loaders:
                                         || coalesce(s.first_prompt, '') || ' ' || coalesce(s.last_prompt, '')
                                         || ' ' || coalesce(s.thread_title, '')), w.word) = 0)
       ORDER BY s.action = 'none', s.at DESC
+  new_session_harnesses:
+    sql: |
+      SELECT h.id AS value, h.title AS label
+      FROM v_agent_harness h
+      WHERE h.enabled = 1
+      ORDER BY h.position
 view:
   stack:
   - id: start
@@ -122,7 +130,7 @@ view:
       - harness
       - remember
       choices:
-        harness: oxplow-foundation/new-session-harnesses
+        harness: oxplow-foundation/new-session#new_session_harnesses
   - id: earlier
     title: Earlier sessions
     from: earlier

@@ -167,7 +167,7 @@ first thing the person typed; opencode's `session list --format json`;
 Codex's daemon's `thread/list`), read as `v_agent_conversation`. The
 agent session page's **Fork into New Session…**
 (offered `when` the harness declares `conversation_fork`) is a form whose conversation is a select from the
-`agent-session-conversations` page — title, else first prompt, else id,
+`agent-session` page's `agent_session_conversations` loader — title, else first prompt, else id,
 saying "this session's" and "open in another session" (from
 `v_agent_session_binding`) — and run
 `fork_conversation` (opens a NEW session

@@ -3,6 +3,9 @@ description: "The form for a new stream, which is its own worktree and its own t
 icon: plus
 needs:
 - vcs
+answers:
+- {"question":"Which branches exist, and which is the default?","params":{},"skill":"oxplow-codebase"}
+- {"question":"Which worktrees of this repository could a new stream adopt?","params":{},"skill":"oxplow-extension"}
 loaders:
   new_stream:
     sql: |
@@ -10,6 +13,19 @@ loaders:
              'existing' AS source,
              (SELECT name FROM v_branch WHERE kind = 'local' ORDER BY is_default DESC, name LIMIT 1) AS existing_branch,
              (SELECT name FROM v_branch WHERE kind = 'local' ORDER BY is_default DESC, name LIMIT 1) AS start_point
+  new_stream_branches:
+    sql: |
+      SELECT b.name AS value, b.name AS label, 'Branches' AS "group"
+      FROM v_branch b
+      WHERE b.kind = 'local'
+      ORDER BY b.is_default DESC, b.name
+  new_stream_worktrees:
+    sql: |
+      SELECT w.path AS value,
+             CASE WHEN w.branch IS NULL OR w.branch = '' THEN '[detached] ' ELSE '[' || w.branch || '] ' END || w.path AS label
+      FROM v_vcs_workspace w
+      WHERE w.is_main = 0 AND w.stream_id IS NULL
+      ORDER BY w.path
 view:
   from: new_stream
   viz: form
@@ -36,6 +52,6 @@ view:
         source:
         - worktree
     choices:
-      existing_branch: oxplow-foundation/new-stream-branches
-      start_point: oxplow-foundation/new-stream-branches
-      worktree: oxplow-foundation/new-stream-worktrees
+      existing_branch: oxplow-foundation/new-stream#new_stream_branches
+      start_point: oxplow-foundation/new-stream#new_stream_branches
+      worktree: oxplow-foundation/new-stream#new_stream_worktrees

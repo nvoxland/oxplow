@@ -661,7 +661,7 @@ stream on another host (no `HOME` passed), reads as unknown.
 
 What can be resumed is listed two ways, both reads of
 `AgentHarness::conversations` (`live_datasets::harness_conversations`):
-for an open session, the `agent-session-conversations` choices page over
+for an open session, the `agent-session` page's `agent_session_conversations` loader (a choice list) over
 `v_agent_conversation` (the page's Fork into New Session… form:
 "Forking a conversation" in terminal.md); for a thread with no session in hand, the
 `new-session-earlier` loader over `v_agent_conversation` (the New Session
@@ -1501,7 +1501,7 @@ agent's `oxplow.handoff.send` still works and there is no menu entry):
   `oxplow.handoff.send`), so it is on a thread's page and at the end of its Navigator menu. Its
   form is the `hand-off` page (`viz: form`, `from_thread` fixed to the
   thread), which picks the recipient and the item from lists (`choices`:
-  the `handoff-recipients` and `handoff-items` pages) and takes the body
+  the `hand-off` page's `handoff_recipients` and `handoff_items` loaders) and takes the body
   as Markdown.
 - The thread's Tasks page shows **Handoffs to This Thread** (Take,
   Decline… with a note) and **Handoffs From This Thread** (Withdraw) in

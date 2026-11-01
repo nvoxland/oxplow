@@ -82,6 +82,13 @@ loaders:
       SELECT p.title, p.uri, 'Its parent epic', 3
       FROM v_work_item w JOIN v_work_item p ON p.uri = w.parent_uri WHERE w.uri = :uri
       ORDER BY ord
+  work_item_states:
+    rows:
+    - { value: todo, label: To Do }
+    - { value: in_progress, label: In Progress }
+    - { value: blocked, label: Blocked }
+    - { value: done, label: Done }
+    - { value: canceled, label: Canceled }
 view:
   stack:
   - id: state
@@ -95,7 +102,7 @@ view:
       fields:
       - to
       choices:
-        to: oxplow-bundled/work-item-states
+        to: oxplow-bundled/work-item#work_item_states
   - id: fields
     title: Details
     from: fields

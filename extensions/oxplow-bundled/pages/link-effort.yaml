@@ -1,9 +1,17 @@
 title: Link Effort to Task
 description: Link an effort to one of the open work items, or take its link away.
 hidden: true
+needs:
+- work_items
 params:
 - name: uri
   label: Effort
+loaders:
+  changes_link_items:
+    sql: |
+      SELECT w.uri AS value, w.title AS label
+      FROM v_work_item w WHERE w.state NOT IN ('done', 'canceled')
+      ORDER BY w.updated_at DESC LIMIT 200
 view:
   viz: form
   form:
@@ -16,4 +24,4 @@ view:
     - effort
     - work_item
     choices:
-      work_item: oxplow-bundled/changes-link-items
+      work_item: oxplow-bundled/link-effort#changes_link_items

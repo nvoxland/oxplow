@@ -47,6 +47,20 @@ loaders:
       WHERE e.id IN (SELECT f.effort_id FROM v_effort_file f
                      WHERE f.agent_session_id = (SELECT s.id FROM v_agent_session s WHERE s.uri = :uri))
       ORDER BY ord, 1
+  agent_session_conversations:
+    sql: |
+      SELECT c.native_id AS value,
+             coalesce(nullif(c.title, ''), nullif(c.first_prompt, ''), c.native_id)
+               || CASE WHEN c.native_id = s.resume_session_id THEN ' — this session''s'
+                       WHEN o.session_uri IS NOT NULL THEN ' — open in another session'
+                       ELSE '' END AS label
+      FROM v_agent_session s
+      JOIN v_thread th ON th.id = s.thread_id
+      JOIN v_agent_conversation c ON c.stream_id = th.stream_id AND c.harness = s.harness
+      LEFT JOIN v_agent_session_binding o
+        ON o.native_id = c.native_id AND o.unbound_at IS NULL AND o.session_uri <> s.uri
+      WHERE s.uri = :uri AND c.problem IS NULL AND c.native_id IS NOT NULL
+      ORDER BY c.updated_at DESC
 view:
   stack:
   - id: agent-session-waiting
@@ -94,7 +108,7 @@ actions:
     label: Conversation
     help: The saved conversation the new session starts from. The one this session is on is marked.
   choices:
-    conversation: oxplow-foundation/agent-session-conversations
+    conversation: oxplow-foundation/agent-session#agent_session_conversations
   when: can_fork
 see_also:
   - { from: related }

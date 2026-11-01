@@ -271,6 +271,13 @@ loaders:
       WHERE at >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-7 days')
       GROUP BY role, caller
       ORDER BY last_at DESC
+  ai_provider_choices:
+    sql: |
+      SELECT id AS value, id AS label FROM v_ai_provider ORDER BY id
+  ai_provider_kinds:
+    sql: |
+      SELECT provider AS value, coalesce(title, provider) AS label
+      FROM v_capability_provider WHERE capability = 'ai_provider' ORDER BY provider
 view:
   switch:
     param: area
@@ -785,7 +792,7 @@ view:
           - name: key
             secret: true
           choices:
-            kind: oxplow-foundation/ai-provider-kinds
+            kind: oxplow-foundation/settings#ai_provider_kinds
       - id: ai-roles
         title: Roles
         from: ai_roles
@@ -816,7 +823,7 @@ view:
             model: '{{row.model}}'
             restrict: '{{row.restrict|json}}'
           choices:
-            provider: oxplow-foundation/ai-provider-choices
+            provider: oxplow-foundation/settings#ai_provider_choices
         - id: unassign
           label: Unassign
           command: oxplow.ai.set_role

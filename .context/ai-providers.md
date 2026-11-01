@@ -682,8 +682,8 @@ its source; with no model bound, the recorded ones are all there is.
 ## Settings → AI (current)
 
 The foundation's pages in `oxplow-foundation/settings-ai.sections` (`ai-providers`,
-`ai-provider-form`, `ai-roles`, `ai-calls`; `ai-provider-kinds` and
-`ai-provider-choices` are the choices the forms offer). They read the live
+`ai-provider-form`, `ai-roles`, `ai-calls`; the settings page's `ai_provider_kinds` and
+`ai_provider_choices` loaders are the choices the forms offer). They read the live
 models `v_ai_provider` and `v_ai_role` and write with commands
 (`commands/ai_settings.rs`), anyone's — a person's, their agent's, or a form page's: `oxplow.ai.set_provider { id, kind,
 base_url?, key? }` (scope `ai.settings`; `key` is a secret (`writeOnly`, commands.md "Secrets"), so a

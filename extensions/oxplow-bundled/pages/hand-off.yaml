@@ -4,6 +4,22 @@ hidden: true
 params:
 - name: uri
   label: From thread
+loaders:
+  handoff_recipients:
+    sql: |
+      SELECT uri_param(t.uri, 'id') AS value, t.title AS label, s.title AS "group"
+      FROM v_thread t
+      JOIN v_stream s ON s.id = t.stream_id
+      WHERE t.closed_at IS NULL AND t.archived_at IS NULL AND s.archived_at IS NULL
+        AND t.uri IS NOT :uri
+      ORDER BY s.kind <> 'primary', s.title, t.sort_index, t.id
+  handoff_items:
+    sql: |
+      SELECT w.uri AS value, w.title AS label
+      FROM v_work_item w
+      JOIN v_thread t ON t.id = w.thread_id
+      WHERE t.uri = :uri AND w.state NOT IN ('done', 'canceled')
+      ORDER BY w.rank, w.uri
 view:
   viz: form
   form:
@@ -18,5 +34,5 @@ view:
     - work_item
     - body
     choices:
-      to_thread: oxplow-foundation/handoff-recipients
-      work_item: oxplow-bundled/handoff-items
+      to_thread: oxplow-bundled/hand-off#handoff_recipients
+      work_item: oxplow-bundled/hand-off#handoff_items
