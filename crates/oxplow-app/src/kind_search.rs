@@ -97,37 +97,75 @@ impl Materializer for KindSearchIndex {
         )))
     }
 
+    /// Reads the feed and works out what changed on a read connection (no
+    /// write lock), then takes the write lock only to write the changes: an
+    /// index that is up to date writes nothing and never waits for a writer.
     async fn recompute(&self, _full: bool) -> Result<Recomputed, DomainError> {
-        let kind = self.kind.clone();
-        let spec = self.spec.clone();
-        let indexed = self
-            .db
-            .transaction(move |tx| {
-                let mut resources = oxplow_domain::uri::resources::ResourceRegistry::default();
-                resources
-                    .register(spec.decl.clone())
-                    .map_err(|e| DomainError::Invalid(format!("resource `{kind}`: {e}")))?;
-                let feed = Feed {
-                    tx,
-                    kind: &kind,
-                    spec: &spec,
-                    resources,
-                };
-                if spec.versioned {
-                    feed.restate_by_version()
-                } else {
-                    feed.restate_by_text()
-                }
-            })
-            .await?;
-        Ok(Recomputed {
-            row_count: Some(indexed as i64),
-            ..Recomputed::default()
-        })
+        // The plan is made against what was stored when it was read; the
+        // write re-plans (cheap: no feed) and starts over if that no longer
+        // fits the texts read.
+        for _ in 0..RESTATE_ATTEMPTS {
+            let (kind, spec) = (self.kind.clone(), self.spec.clone());
+            let prepared = self
+                .db
+                .read(move |tx| Feed::of(tx, &kind, &spec)?.prepare())
+                .await?;
+            let count = prepared.versions.len();
+            if prepared.plan.is_empty() {
+                return Ok(Recomputed {
+                    row_count: Some(count as i64),
+                    ..Recomputed::default()
+                });
+            }
+            let kind = self.kind.clone();
+            let landed = self
+                .db
+                .transaction(move |tx| prepared.commit(tx, &kind))
+                .await?;
+            if landed {
+                return Ok(Recomputed {
+                    row_count: Some(count as i64),
+                    ..Recomputed::default()
+                });
+            }
+        }
+        Err(DomainError::Storage(format!(
+            "search kind `{}`: its index kept changing while it was restated",
+            self.kind
+        )))
     }
 }
 
-/// One resource's feed, read in a recompute's transaction.
+/// How often a restate starts over because the stored entries moved
+/// between its read and its write.
+const RESTATE_ATTEMPTS: usize = 5;
+
+/// What a feed read says to write: every row's version, the plan against
+/// the stored entries, and the text of each row the plan writes.
+struct Prepared {
+    versions: BTreeMap<EntryKey, String>,
+    plan: oxplow_db::search_store::RestatePlan,
+    texts: BTreeMap<EntryKey, (String, String)>,
+}
+
+impl Prepared {
+    /// Write the plan in `tx`. False: the stored entries moved since it was
+    /// made and a text it needs was not read; read again.
+    fn commit(&self, tx: &rusqlite::Connection, kind: &str) -> Result<bool, DomainError> {
+        let plan = oxplow_db::search_store::plan_restate_tx(tx, kind, &self.versions)?;
+        if plan
+            .write
+            .iter()
+            .any(|(key, ..)| !self.texts.contains_key(key))
+        {
+            return Ok(false);
+        }
+        oxplow_db::search_store::apply_restate_tx(tx, kind, &plan, &self.texts)?;
+        Ok(true)
+    }
+}
+
+/// One resource's feed, read in a recompute's read transaction.
 struct Feed<'a> {
     tx: &'a rusqlite::Connection,
     /// The resource (`oxplow/effort`).
@@ -135,6 +173,33 @@ struct Feed<'a> {
     spec: &'a SearchableKind,
     /// A registry of the resource alone, which a row's URI must hold for.
     resources: oxplow_domain::uri::resources::ResourceRegistry,
+}
+
+impl<'a> Feed<'a> {
+    fn of(
+        tx: &'a rusqlite::Connection,
+        kind: &'a str,
+        spec: &'a SearchableKind,
+    ) -> Result<Self, DomainError> {
+        let mut resources = oxplow_domain::uri::resources::ResourceRegistry::default();
+        resources
+            .register(spec.decl.clone())
+            .map_err(|e| DomainError::Invalid(format!("resource `{kind}`: {e}")))?;
+        Ok(Self {
+            tx,
+            kind,
+            spec,
+            resources,
+        })
+    }
+
+    fn prepare(&self) -> Result<Prepared, DomainError> {
+        if self.spec.versioned {
+            self.prepare_by_version()
+        } else {
+            self.prepare_by_text()
+        }
+    }
 }
 
 impl Feed<'_> {
@@ -192,7 +257,7 @@ impl Feed<'_> {
     }
 
     /// Every row's text, compared by its hash.
-    fn restate_by_text(&self) -> Result<usize, DomainError> {
+    fn prepare_by_text(&self) -> Result<Prepared, DomainError> {
         let sql = format!(
             "SELECT CAST(uri AS TEXT), CAST(title AS TEXT), CAST(body AS TEXT), {} FROM {}{}",
             self.stream(),
@@ -223,12 +288,17 @@ impl Feed<'_> {
             }
         }
         self.warn_bounds(total, skipped);
-        oxplow_db::search_store::restate_kind_tx(self.tx, self.kind, &entries)?;
-        Ok(entries.len())
+        let versions = oxplow_db::search_store::entry_versions(&entries);
+        let plan = oxplow_db::search_store::plan_restate_tx(self.tx, self.kind, &versions)?;
+        Ok(Prepared {
+            versions,
+            plan,
+            texts: entries,
+        })
     }
 
     /// Every row's version, then the text of the changed rows only.
-    fn restate_by_version(&self) -> Result<usize, DomainError> {
+    fn prepare_by_version(&self) -> Result<Prepared, DomainError> {
         let sql = format!(
             "SELECT CAST(uri AS TEXT), {}, CAST(version AS TEXT) FROM {}{}",
             self.stream(),
@@ -286,8 +356,11 @@ impl Feed<'_> {
                 }
             }
         }
-        oxplow_db::search_store::apply_restate_tx(self.tx, self.kind, &plan, &texts)?;
-        Ok(versions.len())
+        Ok(Prepared {
+            versions,
+            plan,
+            texts,
+        })
     }
 
     fn bound(&self) -> usize {
@@ -1693,5 +1766,100 @@ mod core_tests {
                 );
             }
         }
+    }
+
+    /// The index of `kind`, built as `sync_search_kinds` builds it.
+    async fn index_of(svc: &Services, kind: &str) -> super::KindSearchIndex {
+        let spec = super::searchable_kinds(&svc.db)
+            .await
+            .unwrap()
+            .ready
+            .remove(kind)
+            .expect("a searchable kind");
+        super::KindSearchIndex {
+            db: svc.db.clone(),
+            asset: super::asset_name(kind),
+            kind: kind.to_string(),
+            spec,
+        }
+    }
+
+    /// Another writer holds the write lock until the sender fires. It is
+    /// an interactive one (a request a person waits on): background work
+    /// shares one connection slot with other background work, so a
+    /// background holder would block a recompute for that reason alone.
+    async fn hold_write_lock(
+        db: &oxplow_db::Database,
+    ) -> (
+        std::sync::mpsc::Sender<()>,
+        tokio::task::JoinHandle<Result<(), oxplow_domain::DomainError>>,
+    ) {
+        let (release, hold) = std::sync::mpsc::channel::<()>();
+        let (held_tx, mut held_rx) = tokio::sync::mpsc::unbounded_channel::<()>();
+        let hold = std::sync::Mutex::new(hold);
+        let db = db.clone();
+        let writer = tokio::spawn(oxplow_db::interactive(async move {
+            db.transaction(move |_tx| {
+                let _ = held_tx.send(());
+                let _ = hold.lock().unwrap().recv();
+                Ok(())
+            })
+            .await
+        }));
+        held_rx.recv().await.unwrap();
+        (release, writer)
+    }
+
+    /// A recompute reads the feed and works out what changed without the
+    /// write lock; it takes the lock only to write the entries that
+    /// changed. So while another writer holds the lock, a recompute of
+    /// an index that is up to date still finishes — it has nothing to
+    /// write — and one with a change waits for the lock (and no longer).
+    /// (One restate used to read its whole feed inside the write
+    /// transaction: 400 ms with every other writer waiting.)
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_recompute_takes_the_write_lock_only_to_write_a_change() {
+        use crate::assets::Materializer;
+        // A file database: a pool of one connection (the in-memory one)
+        // would make every read wait for the writer.
+        let dir = tempfile::tempdir().unwrap();
+        git2::Repository::init(dir.path()).unwrap();
+        let svc = Services::on_machine_with_database(
+            dir.path(),
+            dir.path().join(".oxplow/global-config"),
+            Arc::new(oxplow_ai::secrets::MemorySecrets::default()),
+            crate::providers::host::process_env(),
+            oxplow_db::Database::open(dir.path().join("state.sqlite")).unwrap(),
+        )
+        .await
+        .unwrap();
+        let stream = svc.streams.ensure_primary().await.unwrap();
+        let thread = crate::test_fixtures::new_thread(&svc, stream.id, "T").await;
+        task(&svc, thread.id, "Quux the sprocket").await;
+        let index = index_of(&svc, "oxplow/work_item").await;
+        index.recompute(true).await.unwrap();
+        assert_eq!(entries(&svc, "oxplow/work_item").await.len(), 1);
+
+        let (release, writer) = hold_write_lock(&svc.db).await;
+
+        let settled = tokio::time::timeout(Duration::from_secs(5), index.recompute(false)).await;
+        assert!(
+            settled.is_ok(),
+            "an up-to-date index must not wait for the write lock"
+        );
+        settled.unwrap().unwrap();
+
+        // A change needs the lock: it waits, then lands.
+        release.send(()).unwrap();
+        writer.await.unwrap().unwrap();
+        task(&svc, thread.id, "Another flange").await;
+        let (release, writer) = hold_write_lock(&svc.db).await;
+        let pending =
+            tokio::time::timeout(Duration::from_millis(300), index.recompute(false)).await;
+        assert!(pending.is_err(), "a change is written under the lock");
+        release.send(()).unwrap();
+        writer.await.unwrap().unwrap();
+        index.recompute(false).await.unwrap();
+        assert_eq!(entries(&svc, "oxplow/work_item").await.len(), 2);
     }
 }

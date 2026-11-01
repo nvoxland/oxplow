@@ -183,12 +183,27 @@ pub fn restate_kind_tx(
     kind: &str,
     entries: &std::collections::BTreeMap<EntryKey, (String, String)>,
 ) -> Result<Restated, DomainError> {
-    let versions = entries
-        .iter()
-        .map(|(key, (title, body))| (key.clone(), entry_hash(title, body)))
-        .collect();
+    let versions = entry_versions(entries);
     let plan = plan_restate_tx(conn, kind, &versions)?;
     apply_restate_tx(conn, kind, &plan, entries)
+}
+
+/// The version of each entry of a feed that declares none: its title and
+/// body's hash.
+pub fn entry_versions(
+    entries: &std::collections::BTreeMap<EntryKey, (String, String)>,
+) -> std::collections::BTreeMap<EntryKey, String> {
+    entries
+        .iter()
+        .map(|(key, (title, body))| (key.clone(), entry_hash(title, body)))
+        .collect()
+}
+
+impl RestatePlan {
+    /// Nothing to write or remove.
+    pub fn is_empty(&self) -> bool {
+        self.write.is_empty() && self.remove.is_empty()
+    }
 }
 
 /// What a restate wrote.

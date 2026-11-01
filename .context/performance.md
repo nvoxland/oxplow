@@ -479,6 +479,24 @@ dataset; the whole-tree walk is left to the queries that need the tree.
 `stat` per file, 16 at a time, at most 1000 files); the whole-tree walk
 leaves them NULL so Quick Open and the link index pay nothing for them.
 
+### A search index restate no longer holds the write lock to read (measured 2026-11-01)
+
+The daemon log showed `slow database write caller=crates/oxplow-app/src/kind_search.rs:105
+held_ms=380..935` (the 935 ms at startup), with other writers
+(`event_pump.rs`) waiting up to 1.1 s behind it. `KindSearchIndex::recompute`
+read the whole feed (a kind's view, text and all) and compared it inside
+one write transaction, so the lock was held for the read. Now the feed
+is read and the diff worked out in a read transaction (no write lock);
+the write transaction opens only when the plan has something to write,
+re-plans against the stored entries (no feed read) and writes. An index
+that is up to date takes no write lock. Pinned by
+`a_recompute_takes_the_write_lock_only_to_write_a_change` (a file
+database: the in-memory one has one connection, so every read waits).
+The figures above are from the log before the change; they were not
+re-measured live. Note for tests: background work shares all but two of
+the pool's connections, so a *background* writer holding the lock blocks
+a background read too; hold the lock as `oxplow_db::interactive`.
+
 ### Hidden tabs do not re-run (measured 2026-11-01)
 
 `CenterTabs` keeps every tab body mounted (`display: none`), so a tab
