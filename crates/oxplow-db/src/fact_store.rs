@@ -3288,9 +3288,13 @@ impl SqliteFactStore {
     /// alone — `rebuild_baseline` prunes on every boot, and wiping a healthy
     /// cube each start would turn tsk96's fix off for nothing.
     pub async fn prune_dominated_tree_captures(&self, stream_id: i64) -> Result<u64, DomainError> {
-        let n = self
+        // Working out what is dominated is a read, and most boots find
+        // nothing: the write lock is taken only to drop captures. A capture
+        // stays dominated once it is (a newer baseline only covers more),
+        // so the ids read here are still doomed when the write lands.
+        let doomed: Vec<i64> = self
             .db
-            .transaction(move |tx| {
+            .read(move |tx| {
                 let doomed: Vec<i64> = {
                     let mut stmt = tx
                         .prepare(
@@ -3354,6 +3358,15 @@ impl SqliteFactStore {
                         .map_err(map_sql_err)?;
                     rows
                 };
+                Ok(doomed)
+            })
+            .await?;
+        if doomed.is_empty() {
+            return Ok(0);
+        }
+        let n = self
+            .db
+            .transaction(move |tx| {
                 // The baseline holds facts the dominated scans stored (V43):
                 // they move up to it before those scans go.
                 crate::fact_chain::rehome(tx, &doomed).map_err(map_sql_err)?;
@@ -5739,6 +5752,63 @@ mod tests {
             .await
             .unwrap();
         assert_eq!((stats[0].runs, stats[0].failures), (1, 1));
+    }
+
+    /// The prune runs on every boot and mostly finds nothing: working that
+    /// out is a read, and an interactive writer holding the lock does not
+    /// stop it. (It used to read inside the write transaction: 1.5 s of the
+    /// lock on a large database, with every other writer queued.)
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_prune_that_finds_nothing_does_not_wait_for_the_write_lock() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Database::open(dir.path().join("state.sqlite")).unwrap();
+        let store = SqliteFactStore::new(db.clone());
+        let (release, hold) = std::sync::mpsc::channel::<()>();
+        let (held_tx, mut held_rx) = tokio::sync::mpsc::unbounded_channel::<()>();
+        let hold = std::sync::Mutex::new(hold);
+        let holder = {
+            let db = db.clone();
+            tokio::spawn(crate::interactive(async move {
+                db.transaction(move |_tx| {
+                    let _ = held_tx.send(());
+                    let _ = hold.lock().unwrap().recv();
+                    Ok(())
+                })
+                .await
+            }))
+        };
+        held_rx.recv().await.unwrap();
+        let pruned = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            store.prune_dominated_tree_captures(1),
+        )
+        .await;
+        release.send(()).unwrap();
+        holder.await.unwrap().unwrap();
+        assert_eq!(pruned.expect("it must not wait for the lock").unwrap(), 0);
+    }
+
+    /// The prune finds a stream's captures of one producer by an index on
+    /// both: with the stream alone, each of a stream's ~45 producers
+    /// scanned all of its ~100k captures (1.5 s).
+    #[test]
+    fn captures_are_indexed_by_stream_and_producer() {
+        let db = Database::in_memory();
+        let plan: Vec<String> = db
+            .with_conn(|conn| {
+                let mut stmt = conn.prepare(
+                    "EXPLAIN QUERY PLAN SELECT id FROM metric_capture
+                      WHERE stream_id = 1 AND producer = 'p'",
+                )?;
+                let rows = stmt.query_map([], |r| r.get::<_, String>(3))?;
+                rows.collect()
+            })
+            .unwrap();
+        assert!(
+            plan.iter()
+                .any(|l| l.contains("idx_metric_capture_stream_producer")),
+            "{plan:?}"
+        );
     }
 
     #[tokio::test]

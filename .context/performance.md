@@ -602,6 +602,25 @@ holders, and the per-asset start-up writes. Live effect is not measured: the
 acceptance is under 20 slow writes from these callers in five minutes of an
 active session after `run:dev`.
 
+### Boot write holders: the dominated-capture prune (measured 2026-11-01)
+
+After the checkpoint fix, the first minute of a boot still logged
+`fact_store.rs prune_dominated_tree_captures` holding the write lock 2.8 s
+with four writers queued behind it. Measured on a copy of the live database
+(1.96 GB, 131k captures; bundled SQLite): the prune deleted **nothing** (0
+captures doomed in every stream), the whole hold was working that out, inside
+the write transaction. Its cost was the join from each stream's newest full
+capture per producer (~45 of them) to that producer's captures, which had the
+stream's index alone: each producer scanned all of the stream's 103k
+captures (stream 1: 1.50 s, stream 2: 0.42 s). With an index on
+`(stream_id, producer, captured_at)` (a migration) the same read takes
+0.22 s / 0.03 s; and the read now runs on a read connection, taking the write
+lock only when something is doomed (a capture stays dominated once it is, so
+the ids read are still doomed when the write lands). Pinned by
+`a_prune_that_finds_nothing_does_not_wait_for_the_write_lock` and
+`captures_are_indexed_by_stream_and_producer`. The ~0.2 s that remains is the
+per-candidate fact probes (18.5k candidates in stream 1); it holds nothing.
+
 ### Opening a folder on the Files page (measured 2026-11-01)
 
 Expanding a folder runs the Directory page once for that folder (a lazy
