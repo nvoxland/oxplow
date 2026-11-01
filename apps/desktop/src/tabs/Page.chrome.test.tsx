@@ -47,6 +47,12 @@ test("a page with no rail has the same side padding as one with a rail", () => {
   expect(bare.getByTestId("page-body").style.padding).toBe(railPad);
 });
 
+// An editor, terminal or diff that fills its page with no rail runs edge to edge.
+test("a page that fills with no rail has no padding", () => {
+  const filled = render(<Page title="T" fill>body</Page>);
+  expect(filled.getByTestId("page-body").style.padding).toBe("");
+});
+
 // The page says what it can do; the bar draws it, in every layout.
 test("a page's actions are drawn in the nav bar, also beside a rail: the primary one a button, the rest in the ☰", async () => {
   const ran: string[] = [];

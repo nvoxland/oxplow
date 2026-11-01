@@ -321,7 +321,7 @@ export function Page({ title, titleIcon, chips: ownChips, actions, pin, seeAlso,
           {width === "reading" || rightRail != null ? (
             <RailBody width={width} fill={fill} rightRail={rightRail} rightRailTitle={rightRailTitle}>{children}</RailBody>
           ) : (
-            <div data-testid="page-body" style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: "auto", display: "flex", flexDirection: "column", padding: PAGE_GUTTER_PX }}>
+            <div data-testid="page-body" style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: "auto", display: "flex", flexDirection: "column", padding: fill ? undefined : PAGE_GUTTER_PX }}>
               {children}
             </div>
           )}
