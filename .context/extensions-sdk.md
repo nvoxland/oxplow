@@ -215,7 +215,11 @@ check already reported is not repeated.
   oxplow** (`throwaway::Host`) that is a real one: a temp project with a
   copy of the project's `.oxplow/extensions/` and of which it turned off
   (nothing else of its config — its provider instances would start its
-  programs), `Services::in_memory_on_machine` with an in-memory keychain,
+  programs — except the checkout's `enableBundledExtensions`, so a checkout
+  that runs oxplow's own extensions from their sources is tested that way,
+  with no "ignored" warning; the copied sources and the throwaway's
+  `.oxplow/` are in `.git/info/exclude`, so they are not untracked files
+  of the example's worktree), `Services::in_memory_on_machine` with an in-memory keychain,
   its own global config and the environment it is given, activated by
   `ExtensionActivation::initialize` as boot does (the declared entities
   are created empty there; see extensions-activation.md "Database generation candidates"). What

@@ -1549,6 +1549,13 @@ pub fn incremental_matches_full(
         return Ok(None);
     };
     let sql = sql.as_str();
+    // The fixture's rows are the tables' rows: what a running oxplow already
+    // wrote there (a deployment's own events, in a throwaway) would collide
+    // with them or join the dataset. This is a rehearsal; none of it stays.
+    for (table, _) in before.iter().chain(after) {
+        tx.execute(&format!("DELETE FROM {}", quote(table)), [])
+            .map_err(map_sql_err)?;
+    }
     write_fixture_rows(tx, before)?;
     let mut defs: Vec<String> = decl
         .fields

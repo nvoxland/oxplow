@@ -401,6 +401,17 @@ pub fn prepare_built_ins(
     PreparedEffortPolicies { providers: built }
 }
 
+/// Whether a `capability.switched` closes the open efforts: a switch of the
+/// effort policy does, except the first choice of the default. That one
+/// switches from nothing, so no policy opened anything before it; and its
+/// event may reach this consumer after the efforts a person or an agent has
+/// opened since boot, which it must not close.
+fn closes_open_efforts(switched: &CapabilitySwitchedV1) -> bool {
+    use oxplow_domain::capability::ChosenBy;
+    switched.capability == CAPABILITY
+        && !(switched.from == NONE && switched.chosen_by == ChosenBy::Default)
+}
+
 /// The dispatcher: offers the active effort policy each of [`EVENTS`] and
 /// runs what it composes; closes every open effort when the effort policy
 /// is switched.
@@ -468,7 +479,7 @@ impl AsyncEventConsumer for EffortPolicyConsumer {
         if event.envelope.event_type == CapabilitySwitched::TYPE {
             let switched: CapabilitySwitchedV1 =
                 serde_json::from_value(event.envelope.payload.clone()).map_err(storage)?;
-            if switched.capability != CAPABILITY {
+            if !closes_open_efforts(&switched) {
                 return Ok(());
             }
             let calls = close_open(
@@ -820,6 +831,39 @@ mod tests {
             )],
             "nothing opened, nothing else closed"
         );
+    }
+
+    /// The first choice of the default policy closes nothing, however late
+    /// its event is read; any other switch of the effort policy does.
+    #[test]
+    fn only_a_real_switch_closes_the_open_efforts() {
+        use oxplow_domain::capability::ChosenBy;
+        let switched = |capability: &str, from: &str, chosen_by| CapabilitySwitchedV1 {
+            capability: capability.into(),
+            from: from.into(),
+            to: "oxplow".into(),
+            chosen_by,
+        };
+        assert!(!closes_open_efforts(&switched(
+            CAPABILITY,
+            NONE,
+            ChosenBy::Default
+        )));
+        assert!(closes_open_efforts(&switched(
+            CAPABILITY,
+            NONE,
+            ChosenBy::Personal
+        )));
+        assert!(closes_open_efforts(&switched(
+            CAPABILITY,
+            "other",
+            ChosenBy::Default
+        )));
+        assert!(!closes_open_efforts(&switched(
+            "snapshots",
+            "a",
+            ChosenBy::Personal
+        )));
     }
 
     /// Switching the effort policy closes the open efforts (`switch`): the

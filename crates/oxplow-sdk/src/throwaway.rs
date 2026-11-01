@@ -146,10 +146,14 @@ impl Host {
         }
         let config = root.join(".oxplow/project.yaml");
         std::fs::create_dir_all(config.parent().expect("a folder")).map_err(|e| e.to_string())?;
-        let yaml = serde_yaml::to_string(
-            &serde_json::json!({ "extensions": on, "extensionSources": sources }),
-        )
-        .map_err(|e| e.to_string())?;
+        // The checkout's choice of where oxplow's own extensions run from
+        // (their built-in copies, or their sources) is the throwaway's too:
+        // otherwise each copied source would be ignored with a warning.
+        let mut project = serde_json::json!({ "extensions": on, "extensionSources": sources });
+        if let Some(requested) = settings.bundled_requested {
+            project["enableBundledExtensions"] = requested.into();
+        }
+        let yaml = serde_yaml::to_string(&project).map_err(|e| e.to_string())?;
         std::fs::write(config, yaml).map_err(|e| e.to_string())?;
         Self::boot(dir, root, checkout.to_path_buf(), on, copied, env, builds).await
     }
@@ -178,6 +182,7 @@ impl Host {
             .init_repository(&root)
             .await
             .map_err(|e| e.to_string())?;
+        hide_scaffolding(&root, &self.copied)?;
         // Off the runtime: forks side by side wait their turn for the
         // snapshot's one connection.
         let deployed = self.deployed.clone();
@@ -240,6 +245,7 @@ impl Host {
             .init_repository(&root)
             .await
             .map_err(|e| e.to_string())?;
+        hide_scaffolding(&root, &copied)?;
         let svc = oxplow_app::Services::in_memory_on_machine(
             &root,
             root.join(".oxplow/global-config"),
@@ -431,6 +437,28 @@ fn copy_all(from: &Path, to: &Path, store: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
+/// The throwaway's own scaffolding (its `.oxplow/` and the extension sources
+/// copied in) is not the example's worktree: git excludes it, so a working
+/// tree listing (changed files, untracked files) holds only what the
+/// example made. A checkout that runs its extensions from sources copies
+/// them into the throwaway; without this they would all show as untracked.
+fn hide_scaffolding(
+    root: &Path,
+    copied: &std::collections::BTreeMap<String, PathBuf>,
+) -> Result<(), String> {
+    let mut lines = vec!["/.oxplow/".to_string()];
+    lines.extend(copied.values().map(|rel| format!("/{}/", rel.display())));
+    let exclude = root.join(".git/info/exclude");
+    std::fs::create_dir_all(exclude.parent().expect("a folder")).map_err(|e| e.to_string())?;
+    let mut text = std::fs::read_to_string(&exclude).unwrap_or_default();
+    if !text.is_empty() && !text.ends_with('\n') {
+        text.push('\n');
+    }
+    text.push_str(&lines.join("\n"));
+    text.push('\n');
+    std::fs::write(exclude, text).map_err(|e| e.to_string())
+}
+
 fn copy_dir(from: &Path, to: &Path) -> std::io::Result<()> {
     let exclude = oxplow_app::extension::extension_store::Inputs::of(from).exclude;
     copy_tree(from, to, &exclude, "")
@@ -611,5 +639,42 @@ mod tests {
             "{:?}",
             report.warnings
         );
+    }
+
+    /// A throwaway keeps its checkout's `enableBundledExtensions`, and what
+    /// it copies in (its `.oxplow/`, the extension sources) is not part of
+    /// its worktree: nothing shows as untracked, so a working-tree listing
+    /// holds only what an example makes.
+    #[tokio::test]
+    async fn the_checkouts_bundled_choice_is_kept_and_its_scaffolding_is_not_untracked() {
+        let project = tempfile::tempdir().unwrap();
+        oxplow_app::vcs::GitProvider
+            .init_repository(project.path())
+            .await
+            .unwrap();
+        write(
+            project.path(),
+            ".oxplow/project.yaml",
+            "extensionSources: { acme: extensions/acme }\nenableBundledExtensions: false\n",
+        );
+        write(
+            project.path(),
+            "extensions/acme/extension.yaml",
+            "manifest: 2\nname: acme\nintent:\n  purpose: test\n",
+        );
+        let host = Host::start(project.path(), "acme", &[], Arc::new(|_: &str| None), false)
+            .await
+            .unwrap();
+        let config = std::fs::read_to_string(host.root.join(".oxplow/project.yaml")).unwrap();
+        assert!(
+            config.contains("enableBundledExtensions: false"),
+            "{config}"
+        );
+        assert!(host.root.join("extensions/acme").is_dir());
+        let status = host.svc.vcs.status(&host.root).await.unwrap();
+        assert!(status.entries.is_empty(), "{:?}", status.entries);
+        let fork = host.fork().await.unwrap();
+        let status = fork.svc.vcs.status(&fork.root).await.unwrap();
+        assert!(status.entries.is_empty(), "{:?}", status.entries);
     }
 }
