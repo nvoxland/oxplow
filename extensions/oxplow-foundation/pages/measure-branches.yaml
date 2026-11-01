@@ -10,7 +10,7 @@ loaders:
       UNION ALL
       SELECT value, label FROM (
         SELECT DISTINCT f.branch AS value, f.branch AS label
-        FROM v_fact f WHERE f.measure_key = uri_param(:uri, 'measure') AND f.branch IS NOT NULL
+        FROM v_fact f WHERE f.measure_key = read_measure(uri_param(:uri, 'measure')) AND f.branch IS NOT NULL
         ORDER BY 1)
 view:
   from: measure_branches

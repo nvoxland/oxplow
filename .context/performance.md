@@ -519,12 +519,14 @@ fact id (held facts keep old ids, so a window by capture is exact only
 ordered by capture). Pinned by the page's fixture (same rows); the
 timings above are not asserted.
 
-Not done: a page that reads `v_fact` re-runs when any measure's facts
-land, since reads are recorded per dataset and only `metric_grid()` reads
-name measures. A run of an unrelated measure's data page still
-re-runs on every token fact. Recording the constant `measure_key` a
-loader filters on would fix that; it needs the read recorder to see it.
-The hidden-tab pause (above) removes the cost of tabs not on screen.
+Done after: a page that reads `v_fact` re-ran when any measure's facts
+landed, since reads were recorded per dataset and only `metric_grid()` reads
+named measures. A loader now filters on `measure_key = read_measure(<key>)`
+(a SQL function that records the key, `sql_functions.rs`): the run is
+invalidated by facts landing for that measure only (`Reads.measure_scoped`;
+pinned by `a_run_reading_one_measures_facts_ignores_the_facts_of_others`).
+Used by measure-data, dimension-data and measure-branches; the metric
+data page is not converted. The hidden-tab pause (above) removes the cost of tabs not on screen.
 
 ### `v_dataset` no longer follows the assets (measured 2026-11-01)
 

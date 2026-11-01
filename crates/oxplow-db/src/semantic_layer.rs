@@ -116,6 +116,11 @@ pub struct Reads {
     /// Metric measures a `metric_grid()` read (P4.5), filled by the SQL
     /// gateway; sorted, distinct.
     pub measures: Vec<String>,
+    /// Datasets the query read only for the measures it named with
+    /// `read_measure()`: a change to one of them reaches the query only as
+    /// facts landing for one of its `measures`. Sorted, distinct.
+    #[serde(default)]
+    pub measure_scoped: Vec<String>,
 }
 
 impl Reads {
@@ -133,6 +138,7 @@ impl Reads {
             datasets: merge(|r| &r.datasets),
             tables: merge(|r| &r.tables),
             measures: merge(|r| &r.measures),
+            measure_scoped: merge(|r| &r.measure_scoped),
         }
     }
 }
@@ -828,6 +834,7 @@ impl<'c> ReadSession<'c> {
             datasets: datasets.into_iter().collect(),
             tables: tables.into_iter().collect(),
             measures: Vec::new(),
+            measure_scoped: Vec::new(),
         }
     }
 
@@ -1018,6 +1025,8 @@ fn run_read_only(
         Default::default()
     };
     let session = ReadSession::open(conn, access, &query.sql)?;
+    // `read_measure()` may run while the statement is prepared or run.
+    let _measure_reads = crate::sql_functions::MeasureReads::begin();
     let mut stmt = match conn.prepare(&query.sql) {
         Ok(stmt) => stmt,
         Err(e) => return Err(session.failed(conn, &query.sql, e)),
@@ -1075,6 +1084,25 @@ fn run_read_only(
     let _ = timer.join();
     drop(stmt);
     drop(session);
+    let result = result.map(|mut out| {
+        let mut named = _measure_reads.take();
+        // A literal key counts even when SQLite never evaluated the call
+        // (a table it filters was empty).
+        named.extend(crate::sql_functions::literal_measure_reads(&query.sql));
+        named.sort();
+        named.dedup();
+        if !named.is_empty() {
+            out.reads.measure_scoped = out
+                .reads
+                .datasets
+                .iter()
+                .filter(|d| crate::sql_functions::MEASURE_SCOPED.contains(&d.as_str()))
+                .cloned()
+                .collect();
+            out.reads.measures = named;
+        }
+        out
+    });
 
     result.map_err(|e| match e {
         rusqlite::Error::SqliteFailure(f, _)

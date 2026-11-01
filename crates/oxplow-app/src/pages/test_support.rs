@@ -288,6 +288,15 @@ view:
 "#,
     ),
     (
+        "one_measure",
+        r#"
+title: One measure
+loaders:
+  facts: { sql: "SELECT count(*) AS n, abs(random()) AS r FROM v_fact WHERE measure_key = read_measure('acme.size')" }
+view: { viz: table, from: facts }
+"#,
+    ),
+    (
         "mixed",
         r#"
 title: Mixed

@@ -272,7 +272,10 @@ impl SqlGateway {
         query.temp_views.extend(self.overlay.iter().cloned());
         query.temp_views.extend(views);
         let mut out = self.layer.run(query).await?;
-        out.reads.measures = measures;
+        // The metric functions' measures, and any a `read_measure()` named.
+        out.reads.measures.extend(measures);
+        out.reads.measures.sort();
+        out.reads.measures.dedup();
         if let Some(c) = &self.collection {
             out.coverage = c.feeds.coverage(&c.db, &out.reads.datasets).await?;
             out.generation = Some(

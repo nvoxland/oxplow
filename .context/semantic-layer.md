@@ -185,6 +185,17 @@ the URI lacks it or isn't one) and `uri_resource(uri)` its resource
 (`oxplow/work_item`). Other URIs are selected from their owning dataset's
 `uri` column (`.context/resources.md` "Using URIs").
 
+**`read_measure(key)`** returns `key` and records that the query reads the
+facts of that measure (`Reads.measures`, with `Reads.measure_scoped` naming
+`v_fact` and `v_capture` when read). A page loader that filters `v_fact` on
+`measure_key = read_measure(…)` is invalidated only when facts land for that
+measure (the capture listener's `MetricSamplesChanged`, which also covers
+unknown landings by re-running everything), not on every change to the fact
+tables. Use it for every read of `v_fact` and `v_capture` in the query. A
+literal key counts even if SQLite never evaluates the call. A prune that
+deletes facts announces no measure, so a run scoped this way shows them
+gone at its next re-run.
+
 A dataset, and each of its fields, may carry an `ai_context:` block
 (`oxplow_domain::AiContext`: `instructions`, `synonyms`, `examples`, all
 optional, unknown keys refused): guidance for an agent reading the catalog,

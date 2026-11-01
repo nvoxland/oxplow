@@ -5208,6 +5208,12 @@ export type Reads = {
 	 *  gateway; sorted, distinct.
 	 */
 	measures: string[],
+	/**
+	 *  Datasets the query read only for the measures it named with
+	 *  `read_measure()`: a change to one of them reaches the query only as
+	 *  facts landing for one of its `measures`. Sorted, distinct.
+	 */
+	measureScoped?: string[],
 };
 
 /**  A recent-projects row plus a freshness flag for the UI. */

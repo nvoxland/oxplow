@@ -1420,18 +1420,21 @@ pub fn unreached(
             let Some(r) = run.loaders.get(&decl.name) else {
                 continue;
             };
-            let reached = decl.reads.iter().any(|m| datasets.contains(m))
-                || decl.reads_params.iter().any(|p| {
-                    context_reads(&run.page, p)
+            let reached =
+                decl.reads.iter().any(|m| datasets.contains(m))
+                    || decl.reads_params.iter().any(|p| {
+                        context_reads(&run.page, p)
+                            .iter()
+                            .any(|m| datasets.iter().any(|x| x == m))
+                    })
+                    || r.result.reads.datasets.iter().any(|m| {
+                        datasets.contains(m) && !r.result.reads.measure_scoped.contains(m)
+                    })
+                    || r.result.reads.measures.iter().any(|m| measures.contains(m))
+                    || decl
+                        .reads_loaders
                         .iter()
-                        .any(|m| datasets.iter().any(|x| x == m))
-                })
-                || r.result.reads.datasets.iter().any(|m| datasets.contains(m))
-                || r.result.reads.measures.iter().any(|m| measures.contains(m))
-                || decl
-                    .reads_loaders
-                    .iter()
-                    .any(|l| dirty.contains(&l.as_str()));
+                        .any(|l| dirty.contains(&l.as_str()));
             if reached {
                 dirty.push(&decl.name);
             } else {

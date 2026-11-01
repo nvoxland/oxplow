@@ -19,7 +19,77 @@ pub(crate) fn register(c: &Connection) -> rusqlite::Result<()> {
     c.create_scalar_function("uri_param", 2, flags, uri_param)?;
     c.create_scalar_function("uri_resource", 1, flags, uri_resource)?;
     c.create_scalar_function("uri_key", 1, flags, uri_key)?;
-    c.create_scalar_function("uri_view", -1, flags, uri_view)
+    c.create_scalar_function("uri_view", -1, flags, uri_view)?;
+    c.create_scalar_function("read_measure", 1, flags, read_measure)
+}
+
+/// The datasets whose reads `read_measure()` scopes to a measure: the facts
+/// and the captures they came from.
+pub(crate) const MEASURE_SCOPED: &[&str] = &["v_fact", "v_capture"];
+
+thread_local! {
+    static MEASURE_READS: std::cell::RefCell<Option<std::collections::BTreeSet<String>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// The measures `read_measure()` named while one query ran on this thread.
+pub(crate) struct MeasureReads;
+
+impl MeasureReads {
+    pub(crate) fn begin() -> Self {
+        MEASURE_READS.with(|m| *m.borrow_mut() = Some(Default::default()));
+        Self
+    }
+
+    /// Sorted, distinct; none after the first call.
+    pub(crate) fn take(&self) -> Vec<String> {
+        MEASURE_READS.with(|m| {
+            m.borrow_mut()
+                .as_mut()
+                .map(|set| std::mem::take(set).into_iter().collect())
+                .unwrap_or_default()
+        })
+    }
+}
+
+impl Drop for MeasureReads {
+    fn drop(&mut self) {
+        MEASURE_READS.with(|m| *m.borrow_mut() = None);
+    }
+}
+
+/// The keys written as string literals in `read_measure('…')` calls of
+/// `sql`.
+pub(crate) fn literal_measure_reads(sql: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut rest = sql;
+    while let Some(at) = rest.find("read_measure(") {
+        rest = &rest[at + "read_measure(".len()..];
+        let arg = rest.trim_start();
+        if let Some(quoted) = arg.strip_prefix('\'') {
+            if let Some(end) = quoted.find('\'') {
+                out.push(quoted[..end].to_string());
+            }
+        }
+    }
+    out
+}
+
+/// `read_measure(key)`: `key`, and a note that the query reads the facts of
+/// that measure. A page that filters `v_fact` on `measure_key =
+/// read_measure(…)` is re-run only when facts land for that measure, not
+/// for every measure (`.context/performance.md`). Use it for every read of
+/// `v_fact` and `v_capture` in the query.
+fn read_measure(ctx: &Context<'_>) -> rusqlite::Result<Option<String>> {
+    let key = text(ctx, 0)?;
+    if let Some(key) = &key {
+        MEASURE_READS.with(|m| {
+            if let Some(set) = m.borrow_mut().as_mut() {
+                set.insert(key.clone());
+            }
+        });
+    }
+    Ok(key)
 }
 
 fn fail(message: &str) -> Error {

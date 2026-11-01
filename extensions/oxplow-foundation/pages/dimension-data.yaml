@@ -40,7 +40,7 @@ loaders:
       SELECT CAST(json_extract(f.dims_json, '$."' || (SELECT key FROM about) || '"') AS TEXT) AS value,
              count(*) AS facts, max(f.captured_at) AS latest
       FROM v_fact f
-      WHERE f.measure_key = (SELECT key FROM measure)
+      WHERE f.measure_key = read_measure((SELECT key FROM measure))
         AND json_extract(f.dims_json, '$."' || (SELECT key FROM about) || '"') IS NOT NULL
         AND (:range_from IS NULL OR f.captured_at >= :range_from)
         AND (:range_to IS NULL OR f.captured_at <= :range_to)

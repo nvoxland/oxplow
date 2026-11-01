@@ -528,7 +528,11 @@ fn reads_any(run: &PageRun, datasets: &[String], measures: &[String]) -> bool {
                     .any(|m| datasets.iter().any(|x| x == m))
             })
             || run.loaders.get(&decl.name).is_some_and(|r| {
-                r.result.reads.datasets.iter().any(|m| datasets.contains(m))
+                r.result
+                    .reads
+                    .datasets
+                    .iter()
+                    .any(|m| datasets.contains(m) && !r.result.reads.measure_scoped.contains(m))
                     || r.result.reads.measures.iter().any(|m| measures.contains(m))
             })
     });

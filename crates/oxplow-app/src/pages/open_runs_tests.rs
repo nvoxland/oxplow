@@ -475,3 +475,36 @@ async fn a_hidden_run_waits_for_its_tab_to_show_and_then_re_runs_once() {
     // Nothing changed since: showing it again runs nothing.
     assert!(!runs.set_visible(&svc, &id, true).await.unwrap());
 }
+
+/// A page that reads one measure's facts (`read_measure()`) is re-run when
+/// facts land for that measure, not when `v_fact` changes for another's.
+#[tokio::test]
+async fn a_run_reading_one_measures_facts_ignores_the_facts_of_others() {
+    let (_dir, svc) = fixture().await;
+    let runs = PageRuns::default();
+    let (id, before) = runs
+        .open(&svc, request("acme/one_measure", &[]), "w")
+        .await
+        .unwrap();
+    let reads = &before.loaders["facts"].result.reads;
+    assert_eq!(reads.measures, vec!["acme.size".to_string()]);
+    assert!(
+        reads.measure_scoped.contains(&"v_fact".to_string()),
+        "{reads:?}"
+    );
+    let value = |run: &super::runner::PageRun| run.loaders["facts"].result.rows.clone();
+
+    // The fact table moved (facts of some measure): not this run's.
+    runs.changed(&svc, &["v_fact".to_string()], &["acme.other".to_string()])
+        .await;
+    assert_eq!(
+        value(&before),
+        value(&runs.get(&id).unwrap()),
+        "it did not re-run"
+    );
+
+    // Facts landed for its measure.
+    runs.changed(&svc, &["v_fact".to_string()], &["acme.size".to_string()])
+        .await;
+    assert_ne!(value(&before), value(&runs.get(&id).unwrap()), "it re-ran");
+}

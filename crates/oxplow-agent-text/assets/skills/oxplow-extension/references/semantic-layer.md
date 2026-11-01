@@ -56,6 +56,10 @@ Carry URIs; never assemble or dissect them:
   `uri('oxplow/effort', 'id', json_extract(e.payload, '$.effort'))` (an event
   payload field named for one resource holds a bare id); to read a param back,
   `uri_param(uri, 'id')`. Never `'oxplow:…' || id`, `'eff' || id` or `substr(uri, …)`.
+- **A page of one measure's facts** filters `v_fact` with `f.measure_key =
+  read_measure(<key>)`: the page then re-runs only when facts land for that
+  measure, not for every measure. Use it on every `v_fact`/`v_capture` read
+  of the query.
 - **A field named for one resource is a bare id, not a URI**: a command
   input `thread` is `thr3`, `effort` is `eff12`, `claim` is the integer `7`.
   Select `uri_param(t.uri, 'id')` to feed one; `{{param.x.id}}` does the
