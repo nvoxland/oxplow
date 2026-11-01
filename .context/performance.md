@@ -632,6 +632,20 @@ cached statement and `page_ref_store::insert_new_sources_tx` (one cached
 insert, no deletes): 84 ms. `every_finding_of_a_finished_scan_gets_its_file_edge`
 pins that every finding keeps its edge.
 
+### Boot write holders: a snapshot take (measured 2026-11-01)
+
+`record_take` held the write lock 426 ms. Inside it, a take read the whole
+tree at its parent (latest row per path over all of the stream's snapshot
+rows: 46k rows for 2.7k files on this database, 134 ms for stream 1, 72 ms
+for stream 2; bundled SQLite) to hash the tree it was making. The tree is now
+read before the lock (`SqliteSnapshotStore::record_take`), and the write
+lays the take's rows over it (`overlay`); when another take landed between
+the read and the write the tree is read under the lock as before. The
+remaining hold is the row inserts, the hash of the tree and the event.
+`a_takes_stored_hash_is_the_hash_of_the_tree_it_stored` pins that the stored
+hash equals the hash of the tree as stored for the overlaid and the stale
+case, with a change, an addition and a deletion.
+
 ### Opening a folder on the Files page (measured 2026-11-01)
 
 Expanding a folder runs the Directory page once for that folder (a lazy

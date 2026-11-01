@@ -1118,10 +1118,45 @@ fn insert_op_tx(
     Ok(conn.last_insert_rowid())
 }
 
+/// The tree of the stream's current snapshot, read before the write lock is
+/// taken: the take only lays its own rows over it. (Reading it under the
+/// lock was 140 ms of the write on a 2.7k-file tree with 46k snapshot rows.)
+type ParentTree = Option<(i64, SnapshotTree)>;
+
+/// The tree `rows` make over `parent`'s: each row replaces its path's entry,
+/// a deleted one removes it. What [`tree_at_conn`] reads back once the rows
+/// are stored under a newer snapshot.
+fn overlay(mut tree: SnapshotTree, rows: &[FileSnapshot]) -> SnapshotTree {
+    for r in rows {
+        if r.storage == SnapshotStorage::Deleted {
+            tree.remove(&r.path);
+            continue;
+        }
+        // As `insert_rows_tx` stores it.
+        let content_hash = r.content_hash.clone().or_else(|| {
+            (r.storage == SnapshotStorage::Oxplow)
+                .then(|| r.blob_hash.clone())
+                .flatten()
+        });
+        tree.insert(
+            r.path.clone(),
+            TreeEntry {
+                address: r.blob_hash.clone(),
+                storage: r.storage,
+                size_bytes: r.size_bytes,
+                mtime_ms: r.mtime_ms,
+                content_hash,
+            },
+        );
+    }
+    tree
+}
+
 fn record_take_tx(
     tx: &rusqlite::Connection,
     vocabulary: &Vocabulary,
     take: &TakeRecord,
+    read_before: ParentTree,
 ) -> Result<Option<TakeOutcome>, DomainError> {
     use crate::database::map_sql_err;
     let parent = current_snapshot_tx(tx, take.stream_id).map_err(map_sql_err)?;
@@ -1153,7 +1188,13 @@ fn record_take_tx(
             })
             .collect();
         insert_rows_tx(tx, &rows).map_err(map_sql_err)?;
-        let hash = manifest_hash(&tree_at_conn(tx, sid).map_err(map_sql_err)?);
+        // The tree read before the lock holds when no take landed since;
+        // otherwise it is read here.
+        let tree = match read_before {
+            Some((read_at, tree)) if Some(read_at) == parent => overlay(tree, &rows),
+            _ => tree_at_conn(tx, sid).map_err(map_sql_err)?,
+        };
+        let hash = manifest_hash(&tree);
         let parent_hash: Option<String> = match parent {
             Some(p) => tx
                 .query_row(
@@ -1453,8 +1494,26 @@ impl SqliteSnapshotStore {
     /// at all yet and nothing to record.
     pub async fn record_take(&self, take: TakeRecord) -> Result<Option<TakeOutcome>, DomainError> {
         let vocabulary = self.vocabulary.clone();
+        let stream = take.stream_id;
+        let read_before: ParentTree = if take.rows.is_empty() {
+            None
+        } else {
+            self.db
+                .read(move |conn| {
+                    let Some(parent) =
+                        current_snapshot_tx(conn, stream).map_err(crate::database::map_sql_err)?
+                    else {
+                        return Ok(None);
+                    };
+                    let tree = tree_at_conn(conn, parent).map_err(crate::database::map_sql_err)?;
+                    Ok(Some((parent, tree)))
+                })
+                .await?
+        };
         self.db
-            .transaction(move |tx| record_take_tx(tx, &vocabulary.current(), &take))
+            .transaction(move |tx| {
+                record_take_tx(tx, &vocabulary.current(), &take, read_before.clone())
+            })
             .await
     }
 
@@ -2933,6 +2992,61 @@ mod tests {
             .unwrap()
             .map(|p| serde_json::from_str(&p.unwrap()).unwrap())
             .collect()
+    }
+
+    /// The tree hash a take stores is the hash of the tree as stored — whether
+    /// the tree was read before the write lock (laid over by the take's rows)
+    /// or, when a take landed in between, read under it.
+    #[tokio::test]
+    async fn a_takes_stored_hash_is_the_hash_of_the_tree_it_stored() {
+        let db = Database::in_memory();
+        seed_stream(&db, 1);
+        let store = SqliteSnapshotStore::new(db.clone());
+        let check = |db: &Database, id: i64| {
+            let conn = db.conn().unwrap();
+            let stored: String = conn
+                .query_row("SELECT tree_hash FROM snapshot WHERE id = ?1", [id], |r| {
+                    r.get(0)
+                })
+                .unwrap();
+            assert_eq!(stored, manifest_hash(&tree_at_conn(&conn, id).unwrap()));
+        };
+        let one = store
+            .record_take(take(
+                1,
+                vec![("a.txt", "a1"), ("b.txt", "b1")],
+                SnapshotTrigger::Startup,
+            ))
+            .await
+            .unwrap()
+            .unwrap();
+        check(&db, one.snapshot_id);
+        // A change, an addition and a deletion.
+        let mut second = take(
+            1,
+            vec![("a.txt", "a2"), ("c.txt", "c1")],
+            SnapshotTrigger::Manual,
+        );
+        let mut gone = second.rows[0].clone();
+        gone.path = "b.txt".into();
+        gone.blob_hash = None;
+        gone.storage = SnapshotStorage::Deleted;
+        second.rows.push(gone);
+        let two = store.record_take(second).await.unwrap().unwrap();
+        check(&db, two.snapshot_id);
+        // A tree read before a take that has since landed is not used.
+        let stale: ParentTree = Some((
+            one.snapshot_id,
+            tree_at_conn(&db.conn().unwrap(), one.snapshot_id).unwrap(),
+        ));
+        let vocabulary = VocabularyHandle::core();
+        let third = take(1, vec![("d.txt", "d1")], SnapshotTrigger::Manual);
+        let out = db
+            .transaction(move |tx| record_take_tx(tx, &vocabulary.current(), &third, stale.clone()))
+            .await
+            .unwrap()
+            .unwrap();
+        check(&db, out.snapshot_id);
     }
 
     /// A provider's take records the name it gave the marked state on the
