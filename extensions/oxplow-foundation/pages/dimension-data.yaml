@@ -11,7 +11,7 @@ params:
   type: choice
   role: filter
   label: Measure
-  options_from: oxplow-foundation/dimension-measures
+  options_from: '#chosen'
 - name: range
   type: date_range
   role: filter
@@ -25,12 +25,17 @@ loaders:
     sql: |
       SELECT d.key, d.label AS name, d.description, d.value_type
       FROM v_dimension d WHERE d.key = uri_param(:uri, 'dimension')
-  # One measure's facts at a time (every fact at once is too many to scan):
-  # the chosen one, else the first the Measure choice offers.
+  # The Measure choice's list, and one measure's facts at a time (every
+  # fact at once is too many to scan): the chosen one, else the first of
+  # this list. The measures about what the dimension describes first (its subject
+  # kind), then every other. Read from the declarations: scanning facts for
+  # which carry it is too slow on a real project.
   chosen:
-    page: oxplow-foundation/dimension-measures
-    loader: dimension_measures
-    params: { uri: { param: uri } }
+    sql: |
+      SELECT m.key AS value, m.title AS label
+      FROM v_measure m, v_dimension d
+      WHERE d.key = uri_param(:uri, 'dimension')
+      ORDER BY (d.subject_kind IS NOT NULL AND m.subject_kind = d.subject_kind) DESC, m.title
   measure:
     sql: |
       SELECT COALESCE(NULLIF(:measure, ''), (SELECT value FROM chosen LIMIT 1)) AS key,

@@ -525,7 +525,8 @@ named measures. A loader now filters on `measure_key = read_measure(<key>)`
 (a SQL function that records the key, `sql_functions.rs`): the run is
 invalidated by facts landing for that measure only (`Reads.measure_scoped`;
 pinned by `a_run_reading_one_measures_facts_ignores_the_facts_of_others`).
-Used by measure-data, dimension-data and measure-branches; the metric
+Used by measure-data (and its `measure_branches` loader) and
+dimension-data; the metric
 data page is not converted. The hidden-tab pause (above) removes the cost of tabs not on screen.
 
 ### `v_dataset` no longer follows the assets (measured 2026-11-01)

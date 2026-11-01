@@ -365,11 +365,14 @@ intent:
     - name: dataset-data-says-when-the-dataset-is-not-known
       input: { page: dataset-data, params: { uri: "oxplow:oxplow/dataset?dataset=nothing_like_it" } }
       expect: no query is built and the page says it is not a dataset
+    - name: the-changes-pickers-list-the-starts-and-ends
+      input: { page: diff-view, params: { stream_id: 1 } }
+      expect: the From choice offers the whole tree and the To choice offers the working tree
     - name: dataset-definition-names-a-datasets-fields
       input: { page: dataset-definition, params: { uri: "oxplow:oxplow/dataset?dataset=work_item" } }
       expect: a dataset's description, owner, kind and each field with its type and doc
     - name: dataset-fields-lists-a-datasets-fields-as-choices
-      input: { query: dataset-fields, params: { uri: "oxplow:oxplow/dataset?dataset=work_item" } }
+      input: { page: dataset-data, params: { uri: "oxplow:oxplow/dataset?dataset=work_item" } }
       expect: none, then each field of the dataset, as choices
     - name: data-catalog-links-each-dataset-to-its-definition
       input: { page: data-catalog, params: { dataset: work_item } }
@@ -378,13 +381,13 @@ intent:
       input: { page: measure-data, params: { uri: "oxplow:oxplow/measure?measure=oxplow.tokens" } }
       expect: a measure's facts newest first, narrowed, or grouped and folded
     - name: measure-branches-lists-the-branches-a-measure-has-facts-on
-      input: { query: measure-branches, params: { uri: "oxplow:oxplow/measure?measure=oxplow.tokens" } }
+      input: { page: measure-data, params: { uri: "oxplow:oxplow/measure?measure=oxplow.tokens" } }
       expect: all branches, then those the measure's facts were taken on
     - name: dimension-data-counts-the-values-its-facts-carry
       input: { page: dimension-data, params: { uri: "oxplow:oxplow/dimension?dimension=oxplow.language" } }
       expect: the values facts carry for the dimension with a count, most common first
     - name: dimension-measures-lists-the-measures-whose-facts-carry-a-dimension
-      input: { query: dimension-measures, params: { uri: "oxplow:oxplow/dimension?dimension=oxplow.language" } }
+      input: { page: dimension-data, params: { uri: "oxplow:oxplow/dimension?dimension=oxplow.language" } }
       expect: all measures, then each whose facts carry the dimension
     - name: command-data-lists-its-runs-newest-first
       input: { page: command-data, params: { uri: "oxplow:oxplow/command?command=oxplow.work_item.create" } }

@@ -18,7 +18,7 @@ params:
   type: choice
   role: filter
   label: Sort by
-  options_from: oxplow-foundation/dataset-fields
+  options_from: '#dataset_fields'
 - name: direction
   type: choice
   role: filter
@@ -29,7 +29,7 @@ params:
   type: choice
   role: filter
   label: Filter field
-  options_from: oxplow-foundation/dataset-fields
+  options_from: '#dataset_fields'
 - name: where_value
   role: filter
   label: Equals
@@ -42,6 +42,15 @@ loaders:
       FROM v_dataset d
       WHERE (d.owner = 'core' AND d.name = uri_param(:uri, 'dataset'))
          OR d.owner || '/' || d.name = uri_param(:uri, 'dataset')
+  dataset_fields:
+    sql: |
+      SELECT '' AS value, 'None' AS label, -1 AS position
+      UNION ALL
+      SELECT f.name, f.name, f.position
+      FROM v_dataset d JOIN v_field f ON f.view = d.view
+      WHERE (d.owner = 'core' AND d.name = uri_param(:uri, 'dataset'))
+         OR d.owner || '/' || d.name = uri_param(:uri, 'dataset')
+      ORDER BY 3
   # The one query the page runs. Only a view of v_dataset and fields of v_field
   # for that view reach its text, and a value is quoted: a param cannot inject SQL.
   q:

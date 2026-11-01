@@ -1,9 +1,10 @@
-# The Measure choices of a dimension's data page, from the declarations: the
+# The Measure choices of a dimension's data page (its chosen loader), from the declarations: the
 # measures about what the dimension describes (its subject kind) first, then
 # every other, by title. No "all measures": a dimension's values are counted
 # over one measure's facts at a time (Dimension data's default is the first).
 when:
-  query: oxplow-foundation/dimension-measures
+  page: dimension-data
   params: { uri: "oxplow:oxplow/dimension?dimension=oxplow.model" }
 expect:
-  rows: { contains: [{ value: oxplow.tokens, label: Agent tokens }, { value: oxplow.complexity }] }
+  loaders:
+    chosen: { rows: { contains: [{ value: oxplow.tokens, label: Agent tokens }, { value: oxplow.complexity }] } }

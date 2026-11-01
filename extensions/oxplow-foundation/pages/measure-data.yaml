@@ -17,7 +17,7 @@ params:
   type: choice
   role: filter
   label: Branch
-  options_from: oxplow-foundation/measure-branches
+  options_from: '#measure_branches'
 - name: subject
   type: search
   role: filter
@@ -35,6 +35,14 @@ loaders:
     sql: |
       SELECT m.key, m.title AS name, m.description, m.unit, m.fold, m.subject_kind
       FROM v_measure m WHERE m.key = uri_param(:uri, 'measure')
+  measure_branches:
+    sql: |
+      SELECT '' AS value, 'All branches' AS label
+      UNION ALL
+      SELECT value, label FROM (
+        SELECT DISTINCT f.branch AS value, f.branch AS label
+        FROM v_fact f WHERE f.measure_key = read_measure(uri_param(:uri, 'measure')) AND f.branch IS NOT NULL
+        ORDER BY 1)
   # The newest 500 facts, widening the window until it holds them: a
   # measure keeps a long history (tens of thousands of facts), and the fact
   # index is by capture, so a bound on `capture_id` reads only the recent
