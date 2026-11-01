@@ -729,7 +729,9 @@ the page files with a category (`launcherPages`, by
 other sections (`<page>: <section>` at `#<param>=<id>`).
 
 `App.tsx` `renderTab` draws a route through `routeTab`: its page file in
-`PageFileView`, `MissingPage` when no enabled extension has it, nothing
+`PageFileView`; `PartNotAPage` when the file is a part or a query (no tab
+of its own: the tab says what it is and, for a part, the pages, panels and
+slots that draw it — `hostsOf`, the daemon's `hosts_of`); `MissingPage` when no enabled extension has it, nothing
 while the extensions load. The one built-in is `builtInPages.resource`
 (`pages/builtInPages.tsx`), the fallback renderer; it is a
 `(ctx) => CenterTab | null` over `{ ref, params, nav }`, `nav` the slot's

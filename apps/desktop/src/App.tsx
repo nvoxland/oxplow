@@ -75,6 +75,7 @@ import { rollUpAgentStatus, threadStatuses } from "./agentStatusRollup.js";
 import { insertIntoAgent } from "./agent-input-bus.js";
 import { getPageDetailStore } from "./tabs/openPageDetail.js";
 import { MissingPage } from "./pages/MissingPage.js";
+import { PartNotAPage } from "./pages/PartNotAPage.js";
 import { kindForTabId } from "./pageKinds.js";
 import { useExtensions } from "./extensionsStore.js";
 import { foundationDown, foundationDownText } from "./foundationDown.js";
@@ -1652,6 +1653,9 @@ export function App() {
         };
       }
       const file = chooseRoute(extensions, page);
+      // A part or a query has no tab of its own: the tab says what it is
+      // and, for a part, where it is drawn.
+      if (file && file.kind !== "page") return { id: ref.id, label: file.title, closable: true, render: () => <PartNotAPage page={file} extensions={extensions} /> };
       if (file) return pageFileTab(file, ref, nav, page.params, null);
       return { id: ref.id, label: page.page, closable: true, render: () => <MissingPage page={page} /> };
     };

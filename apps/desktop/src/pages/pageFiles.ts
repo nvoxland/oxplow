@@ -114,6 +114,31 @@ export function chooseRoute(extensions: Extension[], route: PagePayload): Page |
   return pageFileOf(extensions, route) ?? null;
 }
 
+/** Where page file `id` is drawn: the pages that embed it or expand a row
+ *  into it, the panels that show it, and the slots it is mounted at — what
+ *  a part's tab names instead of drawing it (the daemon's `hosts_of`). */
+export function hostsOf(extensions: readonly Extension[], id: string): string[] {
+  const out: string[] = [];
+  const names = (node: Node): boolean => {
+    if (node.kind === "embed" && node.page === id) return true;
+    if (node.kind === "viz" && (node.config?.columns ?? []).some((c) => c.expand === id)) return true;
+    return (node.children ?? []).some(names);
+  };
+  for (const ext of extensions) {
+    if (!ext.enabled) continue;
+    for (const page of ext.pageFiles ?? []) {
+      if (names(page.view) || (page.rail ? names(page.rail) : false)) out.push(`page \`${page.id}\``);
+    }
+    for (const panel of ext.panels ?? []) {
+      if ([panel.body, panel.collapsed, panel.count, panel.badge].includes(id)) out.push(`panel \`${panel.id}\``);
+    }
+    for (const mount of ext.ui?.pageSlots ?? []) {
+      if (mount.page === id) out.push(`page \`${mount.host}\` (slot \`${mount.slot}\`)`);
+    }
+  }
+  return out;
+}
+
 /** The enabled page file with id `<extension>/<slug>`, or null. */
 export function pageFileById(extensions: readonly Extension[], id: string): Page | null {
   return enabledPageFiles(extensions).find((p) => p.id === id) ?? null;

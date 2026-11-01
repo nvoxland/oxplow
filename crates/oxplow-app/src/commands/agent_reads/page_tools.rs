@@ -218,6 +218,11 @@ async fn find_pages(
     let mut scored: Vec<(usize, Value)> = Vec::new();
     for ext in extensions.iter().filter(|e| e.enabled) {
         for page in &ext.page_files {
+            // A part is drawn inside its hosts and a query is rows other
+            // pages read: neither is a page to find and show.
+            if page.kind != PageKind::Page {
+                continue;
+            }
             // A resource page is a display mode of its resource: found
             // through `about`, never listed on its own.
             if about.is_none() && page.is_resource_page() {
@@ -497,6 +502,31 @@ fn show_op(services: ServicesSlot) -> Op {
                                 e.namespace == crate::extension::extensions::CORE_NAMESPACE
                             });
                         let named = if core { slug.to_string() } else { page.clone() };
+                        if let Ok(file) = svc
+                            .extension_catalog
+                            .find_page(&svc.layout.project_dir, page)
+                        {
+                            if file.kind != PageKind::Page {
+                                let extensions = svc.extension_catalog.unpinned(
+                                    &svc.layout.project_dir,
+                                    "an agent's show reads one snapshot",
+                                );
+                                let hosts =
+                                    crate::extension::extensions::hosts_of(&extensions, page);
+                                let open = if hosts.is_empty() {
+                                    String::new()
+                                } else {
+                                    format!(", or show one of: {}", hosts.join(", "))
+                                };
+                                return Err(invalid(
+                                    "/page",
+                                    format!(
+                                        "`{page}` is {}, not a page: it has no tab of its own. Read it with `oxplow_run_page`{open}",
+                                        file.kind.article()
+                                    ),
+                                ));
+                            }
+                        }
                         let values: Vec<(String, String)> = p
                             .params
                             .iter()
@@ -1322,6 +1352,103 @@ mod tests {
         let problems = crate::test_fixtures::activate_with_problems(&svc).await;
         assert!(problems.is_empty(), "{problems:?}");
         (dir, svc)
+    }
+
+    /// Extension `rank` with `files` at the given paths inside its folder.
+    async fn ranked_tree(
+        files: &[(&str, &str)],
+    ) -> (tempfile::TempDir, std::sync::Arc<crate::Services>) {
+        let dir = tempfile::tempdir().unwrap();
+        crate::test_fixtures::init_git_repo(dir.path());
+        crate::pages::test_support::write(
+            dir.path(),
+            ".oxplow/extensions/rank/extension.yaml",
+            "manifest: 2\nname: rank\nintent:\n  purpose: test\n",
+        );
+        for (rel, text) in files {
+            crate::pages::test_support::write(
+                dir.path(),
+                &format!(".oxplow/extensions/rank/{rel}"),
+                text,
+            );
+        }
+        let svc = crate::Services::in_memory(dir.path()).await.unwrap();
+        let problems = crate::test_fixtures::activate_with_problems(&svc).await;
+        assert!(problems.is_empty(), "{problems:?}");
+        (dir, svc)
+    }
+
+    /// A part and a query are not pages to find or show: `find` leaves them
+    /// out, `show` refuses one and names where it is drawn, and `run` still
+    /// reads either — a query as a table of its last loader's rows.
+    #[tokio::test]
+    async fn find_and_show_skip_parts_and_queries_but_run_reads_them() {
+        let (_dir, svc) = ranked_tree(&[
+            (
+                "pages/gadgets.yaml",
+                "title: Gadget list\nloaders:\n  a: { sql: \"SELECT 1 AS n\" }\nview:\n  stack:\n    - { id: t, title: T, viz: number, from: a }\n    - { id: more, title: More, embed: { page: gadget-section } }\n",
+            ),
+            ("parts/gadget-section.yaml", &format!("title: Gadget section\n{BODY}")),
+            (
+                "queries/gadget-kinds.yaml",
+                "title: Gadget kinds\nloaders:\n  all_kinds: { rows: [{ value: a, label: Alpha }] }\n  kinds: { sql: \"SELECT value, label FROM all_kinds\" }\n",
+            ),
+        ])
+        .await;
+        let found = run(&svc, "oxplow.page.find", json!({ "question": "gadget" })).await;
+        assert_eq!(ids(&found), ["rank/gadgets"], "{found}");
+        let refused = svc
+            .commands
+            .run(
+                &Actor::Human,
+                "oxplow.page.show",
+                json!({ "page": "rank/gadget-section" }),
+                false,
+            )
+            .await
+            .expect_err("a part has no tab");
+        let why = format!("{refused:?}");
+        assert!(
+            why.contains("`rank/gadget-section` is a part, not a page"),
+            "{why}"
+        );
+        assert!(why.contains("Read it with `oxplow_run_page`"), "{why}");
+        assert!(why.contains("show one of: page `rank/gadgets`"), "{why}");
+        let refused = svc
+            .commands
+            .run(
+                &Actor::Human,
+                "oxplow.page.show",
+                json!({ "page": "rank/gadget-kinds" }),
+                false,
+            )
+            .await
+            .expect_err("a query has no tab");
+        assert!(
+            format!("{refused:?}").contains("is a query, not a page"),
+            "{refused:?}"
+        );
+        let read = run(
+            &svc,
+            "oxplow.page.run",
+            json!({ "page": "rank/gadget-kinds" }),
+        )
+        .await;
+        let text = read["text"].as_str().unwrap_or_default();
+        assert!(text.contains("| a | Alpha |"), "{read}");
+        let part = run(
+            &svc,
+            "oxplow.page.run",
+            json!({ "page": "rank/gadget-section" }),
+        )
+        .await;
+        assert!(
+            part["text"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("Gadget section"),
+            "{part}"
+        );
     }
 
     /// The fixture's pages found, in order (the bundled pages are left out).

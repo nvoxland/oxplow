@@ -7,3 +7,10 @@ import type { LoaderDecl, Page } from "../tauri-bridge/generated/bindings.js";
 export function firstLoader(page: Pick<Page, "loaders">): LoaderDecl | undefined {
   return page.loaders.find((l) => l.loader.kind !== "content") ?? page.loaders[0];
 }
+
+/** The loader a reference to the page with no `#<loader>` means: a query's
+ *  last one (the rows it exists for), else the page's first. The daemon's
+ *  `Page::default_loader`. */
+export function defaultLoader(page: Pick<Page, "loaders" | "kind">): LoaderDecl | undefined {
+  return page.kind === "query" ? page.loaders[page.loaders.length - 1] : firstLoader(page);
+}

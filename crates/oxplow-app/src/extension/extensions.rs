@@ -972,6 +972,44 @@ fn warn_unplaced_mounts(out: &mut [Extension]) {
     }
 }
 
+/// Where page file `id` is drawn: the pages that embed it or expand a row
+/// into it, the panels that show it, and the slots it is mounted at — what
+/// to open instead of a part, which has no tab of its own.
+pub fn hosts_of(extensions: &[Extension], id: &str) -> Vec<String> {
+    use crate::pages::refs::{refs, split, RefSite};
+    let mut out = Vec::new();
+    for ext in extensions.iter().filter(|e| e.enabled) {
+        for page in &ext.page_files {
+            let hosts = refs(page).into_iter().any(|(site, target)| {
+                matches!(site, RefSite::Embed { .. } | RefSite::Expand { .. })
+                    && split(&target).0 == id
+            });
+            if hosts {
+                out.push(format!("page `{}`", page.id));
+            }
+        }
+        for panel in &ext.panels {
+            let parts = [
+                Some(&panel.body),
+                panel.collapsed.as_ref(),
+                panel.count.as_ref(),
+                panel.badge.as_ref(),
+            ];
+            if parts.into_iter().flatten().any(|p| p == id) {
+                out.push(format!("panel `{}`", panel.id));
+            }
+        }
+        for mount in &ext.ui.page_slots {
+            if mount.page == id {
+                out.push(format!("page `{}` (slot `{}`)", mount.host, mount.slot));
+            }
+        }
+    }
+    out.sort();
+    out.dedup();
+    out
+}
+
 /// What a page names in another extension, checked once every extension
 /// is loaded: one of the wrong kind for the place is an error on the
 /// page's extension and the page is dropped (`pages::refs::kind_problem`,
