@@ -1169,6 +1169,25 @@ async fn a_scaffolded_skill_checks_and_is_declared() {
     assert_eq!(ext.skills[0].file, "skills/house-style/SKILL.md");
 }
 
+/// A scaffolded query checks clean, its fixture runs it as a query, and it
+/// loads as one: rows only, no view of its own.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_scaffolded_query_checks_tests_and_loads_as_a_query() {
+    let dir = project().await;
+    scaffolded(dir.path(), "query", "item-states").await;
+    assert!(tested(dir.path(), "item-states")
+        .await
+        .contains(&"example basic".to_string()));
+    let svc = booted(dir.path()).await;
+    let ext = loaded(&svc, dir.path(), "item-states");
+    assert_eq!(ext.page_files.len(), 1);
+    assert_eq!(
+        ext.page_files[0].kind,
+        oxplow_app::pages::schema::PageKind::Query
+    );
+    assert_eq!(ext.page_files[0].file(), "queries/item-states.yaml");
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_scaffolded_panel_checks_tests_and_shows_its_page() {
     let dir = project().await;

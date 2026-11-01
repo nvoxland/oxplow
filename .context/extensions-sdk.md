@@ -72,6 +72,9 @@ check already reported is not repeated.
     a Start row action (`oxplow.work_item.transition`, a `uri` column it
     binds but doesn't show) and an `answers:` entry; its example is
     `{ page: <name>, params: { stream_id: 1 } }`;
+  - `query` — `queries/<name>.yaml`, a rows loader of work-item states as
+    `value` / `label`, for a choice's `options_from`; its example is
+    `{ query: <name> }` expecting a row;
   - `component` — a `custom_components:` entry (a bundle under
     `components/<name>/`) and a page whose `component` node it feeds;
     `panel` — a `panels:` entry whose `body` is a part (`parts/<name>.yaml`);

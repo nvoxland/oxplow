@@ -85,13 +85,16 @@ pub enum Kind {
     Skill,
     /// A left-nav panel showing one page compact.
     Panel,
+    /// A query: rows other pages read (a choice's options, a form's
+    /// choices) — `queries/<name>.yaml`, with no view.
+    Query,
     /// A cancellable model job: its prompt, `ask`/`status`/`cancel` commands,
     /// a page following its output, and an effect that publishes the answer.
     Job,
 }
 
 impl Kind {
-    pub const NAMES: &'static str = "`page`, `extension`, `provider`, `collector`, `metric`, `command`, `effect`, `component`, `policy`, `advisory`, `skill`, `panel` or `job`";
+    pub const NAMES: &'static str = "`page`, `extension`, `provider`, `collector`, `metric`, `command`, `effect`, `component`, `policy`, `advisory`, `skill`, `panel`, `job` or `query`";
 
     pub fn parse(s: &str) -> Option<Kind> {
         match s {
@@ -110,6 +113,7 @@ impl Kind {
             "page" => Some(Kind::Page),
             "panel" => Some(Kind::Panel),
             "job" => Some(Kind::Job),
+            "query" => Some(Kind::Query),
             _ => None,
         }
     }
@@ -294,6 +298,11 @@ pub fn scaffold_with(
             format!("{{ page: {name}, params: {{ stream_id: 1 }} }}"),
             "one row per open task in the stream, newest first",
             Some("{ loaders: { items: { rows: $any } } }".to_string()),
+        ),
+        Kind::Query => (
+            format!("{{ query: {name} }}"),
+            "one row per state a work item can be in, as value and label",
+            Some("{ rows: { contains: [{ value: todo, label: To do }] } }".to_string()),
         ),
         Kind::Panel => (
             format!("{{ part: {name}, params: {{ stream_id: 1 }} }}"),
@@ -496,7 +505,7 @@ pub fn scaffold_with(
                  \x20   needs: [jobs.read]\n"
             ));
         }
-        Kind::Page | Kind::Extension | Kind::Metric => {}
+        Kind::Page | Kind::Query | Kind::Extension | Kind::Metric => {}
     }
     write(&format!("{rel_dir}/extension.yaml"), manifest)?;
     if let Some(expect) = fixture_expect {
@@ -701,6 +710,20 @@ pub fn scaffold_with(
                 ),
             )?;
         }
+        Kind::Query => write(
+            &format!("{rel_dir}/queries/{name}.yaml"),
+            format!(
+                "title: {title}\n\
+                 description: \"TODO: what these rows are for (a choice's options: value, label, optional group).\"\n\
+                 loaders:\n\
+                 \x20 states:\n\
+                 \x20   rows:\n\
+                 \x20     - {{ value: todo, label: To do }}\n\
+                 \x20     - {{ value: in_progress, label: In progress }}\n\
+                 \x20     - {{ value: done, label: Done }}\n",
+                title = title_case(name)
+            ),
+        )?,
         Kind::Panel => write(
             &format!("{rel_dir}/parts/{name}.yaml"),
             format!(
@@ -1541,6 +1564,7 @@ mod tests {
             Kind::Page,
             Kind::Panel,
             Kind::Job,
+            Kind::Query,
         ] {
             let dir = tempfile::tempdir().unwrap();
             let made = scaffold(dir.path(), kind, "demo", None).unwrap();

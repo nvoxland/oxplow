@@ -18,6 +18,7 @@ failure after your edit is yours. `$OXPLOW_BIN extension add <kind>
 that exists (its files and its manifest entry, comments kept; an id or file
 that exists is refused):
 - `page` — a page over open tasks with a row action (Start);
+- `query` — `queries/<name>.yaml`, rows for a choice's `options_from` (`value`, `label`); no view;
 - `collector` — a Starlark collector of an entity, a dataset over it
   (`ref('item')`) and a page over the dataset;
 - `metric` — a code metric: a per-path measure, a Starlark collector

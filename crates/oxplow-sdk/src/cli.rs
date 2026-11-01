@@ -14,7 +14,7 @@ use oxplow_app::extension::extensions::EXTENSIONS_DIR;
 
 const USAGE: &str = "\
 usage:
-  oxplow extension new <page|extension|provider|collector|metric|command|effect|component|policy|advisory|skill|panel|job> <name> [--origin <ref>] [--capability <cap>] [--language <lang>] [--glob <glob>] [--root <dir>]
+  oxplow extension new <page|extension|provider|collector|metric|command|effect|component|policy|advisory|skill|panel|job|query> <name> [--origin <ref>] [--capability <cap>] [--language <lang>] [--glob <glob>] [--root <dir>]
       scaffold .oxplow/extensions/<name>/ with a v2 manifest, an intent
       (--origin = the effort/thread ref that asked for it), one example
       and its fixture, and the kind's starter: a page with a row action; a
@@ -29,7 +29,8 @@ usage:
       commands; an effect reacting to an event; a custom component with
       its page and bundle; an effort policy script; an advisory; a skill;
       a panel over a page; a job (a cancellable model call, with its
-      commands, page and an effect that publishes the reply). Each checks clean
+      commands, page and an effect that publishes the reply); a query (rows
+      other pages read, as a choice's options). Each checks clean
       and passes `test` as written
       (a provider once a real program replaces its stub)
   oxplow extension new --from <example> [<name>] [--root <dir>]
@@ -678,7 +679,7 @@ mod tests {
         assert_eq!(cli(&["migrate", "old", "--root", root]).0, 2);
         let (code, _, err) = cli(&["new", "widget", "x", "--root", root]);
         assert_eq!(code, 2);
-        assert!(err.contains("`panel` or `job`"), "{err}");
+        assert!(err.contains("`job` or `query`"), "{err}");
         let (code, _, err) = cli(&["check", "nope", "--root", root]);
         assert_eq!(code, 1);
         assert!(err.contains("no extension `nope`"), "{err}");
