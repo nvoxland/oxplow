@@ -56,6 +56,30 @@ pub fn track_tx(conn: &Connection, tables: &[String]) -> Result<(), DomainError>
     Ok(())
 }
 
+/// The ones of `tables` that exist and [`track_tx`] has yet to give their
+/// triggers: empty on every start after the first, so tracking them again
+/// needs no write.
+pub fn untracked_tx(conn: &Connection, tables: &[String]) -> Result<Vec<String>, DomainError> {
+    let gens = generations_tx(conn, tables)?;
+    let mut out = Vec::new();
+    for table in tables {
+        if table == "table_generation" || gens.get(table) != Some(&None) {
+            continue;
+        }
+        let exists: bool = conn
+            .query_row(
+                "SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
+                [table],
+                |r| r.get(0),
+            )
+            .map_err(map_sql_err)?;
+        if exists {
+            out.push(table.clone());
+        }
+    }
+    Ok(out)
+}
+
 /// Each of `tables`' generation: how many rows were written to it since it
 /// was first tracked (0 for none), or `None` when it isn't tracked — its
 /// changes can't be known.
@@ -117,6 +141,27 @@ pub fn build_identity() -> String {
 mod tests {
     use super::*;
     use crate::Database;
+
+    /// What is still to track is read, not written: a table with its triggers
+    /// is not listed, one without is, and a table that does not exist never is.
+    #[tokio::test]
+    async fn only_a_table_without_its_triggers_is_untracked() {
+        let db = Database::in_memory();
+        let tables: Vec<String> = ["scratch", "other", "missing"]
+            .into_iter()
+            .map(String::from)
+            .collect();
+        db.transaction(|tx| {
+            tx.execute_batch("CREATE TABLE scratch (x); CREATE TABLE other (x);")
+                .map_err(map_sql_err)?;
+            track_tx(tx, &["scratch".to_string()])
+        })
+        .await
+        .unwrap();
+        let t = tables.clone();
+        let untracked = db.read(move |tx| untracked_tx(tx, &t)).await.unwrap();
+        assert_eq!(untracked, vec!["other".to_string()]);
+    }
 
     /// A tracked table's generation moves with every written row, through a
     /// transaction or an autocommit statement; an untracked one is unknown.

@@ -203,8 +203,19 @@ async fn track(db: &Database, entry: &Entry) {
         .cloned()
         .chain(entry.materializer.outputs())
         .collect();
+    // After the first start every table is tracked: that is a read, and
+    // the write lock is taken only for a table that is not.
+    let wanted = tables.clone();
+    let todo = match db
+        .read(move |tx| oxplow_db::table_generations::untracked_tx(tx, &wanted))
+        .await
+    {
+        Ok(todo) if todo.is_empty() => return,
+        Ok(todo) => todo,
+        Err(_) => tables,
+    };
     if let Err(error) = db
-        .transaction(move |tx| oxplow_db::table_generations::track_tx(tx, &tables))
+        .transaction(move |tx| oxplow_db::table_generations::track_tx(tx, &todo))
         .await
     {
         tracing::warn!(asset = %entry.materializer.asset(), %error, "tracking an asset's tables failed");

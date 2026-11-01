@@ -646,6 +646,23 @@ remaining hold is the row inserts, the hash of the tree and the event.
 hash equals the hash of the tree as stored for the overlaid and the stale
 case, with a change, an addition and a deletion.
 
+### Boot write holders: the per-asset start-up writes (2026-11-01)
+
+The 32 `assets.rs:207` writes were `track`: one write transaction per asset
+at every start to make triggers that already exist (`CREATE TRIGGER IF NOT
+EXISTS`), each queued behind the other holders (held 0 ms, waited up to
+0.8 s). `track` now reads which tables lack their triggers
+(`table_generations::untracked_tx`) and writes only for those: none after the
+first start. The 32 `assets.rs:821` writes are the `asset_state` row an
+asset records after a recompute; an asset whose inputs, definition and build
+are unchanged skips both the recompute and that write (`is_current`), and the
+daemon log's 32 were a rebuilt binary (`build_identity` is part of what an
+asset is built from), so a dev restart after a rebuild recomputes them all.
+Those writes are left as they are: each follows work that changed something.
+Pinned by `only_a_table_without_its_triggers_is_untracked`. Live effect is not
+measured: the acceptance is five minutes of log after `run:dev` with at most
+one hold over 300 ms and no wait over 1 s.
+
 ### Opening a folder on the Files page (measured 2026-11-01)
 
 Expanding a folder runs the Directory page once for that folder (a lazy
