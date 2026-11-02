@@ -1328,7 +1328,10 @@ at once; it never waits for the run.
 A param a column `select`s is the page's **selection**, never an input.
 A page row whose column `select`s a param is a pick: it reads as
 clickable (`ox-clickable`), a click or Enter sets the param, and the row
-holding its value is drawn selected (`ox-selected`, `aria-selected`). The
+holding its value is drawn selected (`ox-selected`, `aria-selected`).
+`ox-clickable` is the one pointer rule for a row a click acts on, in a
+table, a list or a tree (a folder row that opens on click), so a folder's
+cursor matches the file link beside it. The
 rail's Selection shows the picked row as its facts, labelled as its
 columns are, with Clear; with the value but not the row (a reopened page)
 it shows the value; with none, "Click a row to select it." A link or

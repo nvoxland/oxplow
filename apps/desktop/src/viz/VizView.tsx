@@ -1838,11 +1838,11 @@ function ListViz({ rows, cols, cell, rowMenu, view }: RowsVizProps) {
                   key={i}
                   data-testid={`viz-row-${i}`}
                   data-cursor={view?.cursor.isCursor(row) ? "true" : undefined}
+                  className={look.picks ? "ox-clickable" : undefined}
                   onMouseEnter={() => view?.cursor.point(row)}
                   style={{
                     ...listRowStyle,
                     ...(look.emphasized || look.selected ? emphasisStyle : {}),
-                    ...(look.picks ? { cursor: "pointer" } : {}),
                     ...(look.indent ? { paddingLeft: look.indent } : {}),
                   }}
                   {...rowMenu(row)}

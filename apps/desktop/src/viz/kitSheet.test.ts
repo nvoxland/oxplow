@@ -43,6 +43,15 @@ test("striped rows give way to hover, selection, cursor and emphasis", () => {
   }
 });
 
+// A row a click acts on (`ox-clickable`: a table row that picks or opens, a
+// tree row that opens a folder) shows the pointer wherever it is drawn, so
+// a folder row's cursor matches the file link beside it.
+test("a clickable row shows the pointer in a table and in a tree", () => {
+  const sheet = readFileSync(SHEET, "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  expect(sheet).toMatch(/(^|[},]\s*)\.ox-clickable\s*\{[^}]*cursor:\s*pointer/);
+  expect(sheet).not.toMatch(/\.ox-table tr\.ox-clickable\s*\{[^}]*cursor/);
+});
+
 // Sections stack apart, but the first one starts at the top of its page:
 // a margin above it is a gap under the toolbar. A page's section is the
 // first child of its node's frame (`[data-node]`), so the first section is

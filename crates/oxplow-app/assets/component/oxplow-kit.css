@@ -128,7 +128,9 @@
 /* Every other row is quietly raised; hover, selection, the cursor and
    emphasis below come later and win. */
 .ox-table tr.ox-stripe { background: var(--surface-row-stripe); }
-.ox-table tr.ox-clickable { cursor: pointer; }
+/* A row a click acts on, wherever it is drawn: a table row that picks or
+   opens, a list row that picks, a tree row that opens its folder. */
+.ox-clickable { cursor: pointer; }
 .ox-table tr.ox-clickable:hover,
 .ox-table tr.ox-selected { background: var(--accent-soft-bg); }
 .ox-table:focus-within tr[data-cursor="true"],
