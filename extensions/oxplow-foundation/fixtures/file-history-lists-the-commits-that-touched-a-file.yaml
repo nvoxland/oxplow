@@ -1,5 +1,5 @@
 # The commits that touched a file, newest first, with the file's change in
-# each; a limit cuts it.
+# each as one phrase and the commit's short id; a limit cuts it.
 given:
   - observe: { commit: { sha: c1, at: "2026-01-01T00:00:00Z", author: ann, subject: first, files: [{ path: a.rs, status: A, additions: 1 }, { path: z.rs, status: A, additions: 1 }] } }
   - observe: { commit: { sha: c2, at: "2026-01-02T00:00:00Z", author: bob, subject: second, files: [{ path: a.rs, status: M, additions: 2, deletions: 1 }] } }
@@ -8,8 +8,8 @@ expect:
   loaders:
     file_history:
       rows:
-        - { sha: c2, status: M, additions: 2, deletions: 1 }
-        - { sha: c1, status: A, additions: 1, deletions: 0 }
+        - { sha: c2, short: c2, status: M, additions: 2, deletions: 1, changed: "M +2 −1" }
+        - { sha: c1, short: c1, status: A, additions: 1, deletions: 0, changed: "A +1 −0" }
 steps:
   - params: { limit: 1 }
     expect: { loaders: { file_history: { rows: [{ sha: c2 }] } } }

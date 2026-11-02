@@ -10,20 +10,26 @@ answers:
 loaders:
   recent_commits:
     sql: |
-      SELECT c.sha, c.committed_at, c.author, c.subject
+      SELECT c.sha, substr(c.sha, 1, 7) AS short, c.committed_at, c.author, c.subject
       FROM v_commit c
       ORDER BY c.committed_at DESC
       LIMIT :limit
+# A list, as the Git dashboard's Recent Commits: the subject headlined, the
+# rest on a line under it, so it reads in the page's column.
 view:
   from: recent_commits
-  viz: table
+  viz: list
   columns:
-  - key: sha
-    label: Commit
-  - key: committed_at
-    label: When
-  - key: author
-    label: Author
   - key: subject
     label: Subject
+    link:
+      kind: commit
+      from: sha
+  - key: short
+    label: Commit
+  - key: author
+    label: Who
+  - key: committed_at
+    label: When
+    format: datetime
   empty: No commits are indexed.
