@@ -175,6 +175,24 @@ test("an empty detail fact reads (none) and never links", () => {
   expect(fact?.querySelector("a")).toBeNull();
 });
 
+test("a detail fact with a when is left out while that column is falsy, and drawn when it is truthy", () => {
+  const columns = [{ key: "parent", label: "Parent" }, { key: "merged", label: "Merged", when: "merged" }];
+  const plain = render(
+    <VizView
+      run={{ ...run({ viz: "detail" }, ["parent", "merged"], [["abc", null as unknown as string]]), config: { ...base, viz: "detail", columns } as VizConfig }}
+      onOpenPage={() => {}}
+    />,
+  );
+  expect([...plain.container.querySelectorAll('[data-testid="viz-detail"] dt')].map((d) => d.textContent)).toEqual(["Parent"]);
+  const merge = render(
+    <VizView
+      run={{ ...run({ viz: "detail" }, ["parent", "merged"], [["abc", "def"]]), config: { ...base, viz: "detail", columns } as VizConfig }}
+      onOpenPage={() => {}}
+    />,
+  );
+  expect([...merge.container.querySelectorAll('[data-testid="viz-detail"] dt')].map((d) => d.textContent)).toEqual(["Parent", "Merged"]);
+});
+
 test("detail and steps viz nodes", () => {
   const detail = render(
     <VizView run={run({ viz: "detail" }, ["title", "state"], [["Fix it", "done"]])} onOpenPage={() => {}} />,

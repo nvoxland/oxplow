@@ -153,7 +153,7 @@ its right-click menu where `failing` is set. A "Problems" line is one more
 ## Columns
 
 `columns: [{ key, label?, width?, format?, link?, select?, highlight?,
-expand?, icon?, tone?, unit? }]` (a column the viz doesn't list still
+expand?, icon?, tone?, unit?, when? }]` (a column the viz doesn't list still
 exists for actions and links).
 
 - `width` is pixels; the rest share the space. `format`: `date`,
@@ -182,6 +182,9 @@ exists for actions and links).
 - `icon: <column>` draws an icon named by that column's value (a work-item
   state, a file status, `epic`, `wiki`, `file`, `folder`, `commit`, …);
   `tone: <column>`: `accent`, `success`, `warning`, `danger`, `muted`.
+  `when: <column>` (a `detail`): the fact is drawn only while that column
+  of the row is truthy, as an action's `when`; a fact that holds only
+  sometimes (a merge's second parent) rather than a section of its own.
   Unknown values draw nothing.
 
 Row styling on `list`/`table`: `group: { by: <column>, link?, labels? }` (`labels: { stored_value: Heading }` names a heading in plain words) puts rows

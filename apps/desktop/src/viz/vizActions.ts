@@ -55,7 +55,11 @@ export function rowRecord(columns: string[], row: SqlCell[]): Record<string, Sql
  *  `""` or false). The server refuses it on any other row too. */
 export function actionOffered(action: PageAction, row: Record<string, SqlCell>): boolean {
   if (!action.when) return true;
-  const v = row[action.when];
+  return truthyCell(row[action.when]);
+}
+
+/** A cell that counts as true for a `when`: not null, 0, `""` or false. */
+export function truthyCell(v: SqlCell | undefined): boolean {
   return v !== null && v !== undefined && v !== 0 && v !== "" && v !== false;
 }
 

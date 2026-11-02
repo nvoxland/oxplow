@@ -804,6 +804,11 @@ pub struct PageColumn {
     /// result drawn under the row.
     #[serde(default)]
     pub expand: Option<String>,
+    /// A column of the same row that must be truthy (not null, 0, `""` or
+    /// false) for a `detail` to draw this fact: a merge's second parent
+    /// only on a merge. The same word, with the same rule, as an action's.
+    #[serde(default)]
+    pub when: Option<String>,
 }
 
 /// How a column's value reads in the UI. An agent reads the raw value.

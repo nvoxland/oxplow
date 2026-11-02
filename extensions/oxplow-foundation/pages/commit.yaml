@@ -11,6 +11,19 @@ params:
 answers:
 - {"question":"What did this commit change?","about":"oxplow/commit","params":{"sha":"abc123","stream_id":1},"skill":"oxplow-codebase"}
 loaders:
+  # First, so the page's actions read it: whether the stream's branch
+  # carries the commit, by a walk over parents from the stream's head.
+  # Revert is offered when it does, Cherry-pick when it doesn't. Its own
+  # loader: `row` names the change plainly, which makes it on demand.
+  branch:
+    sql: |
+      WITH RECURSIVE reach(sha) AS (
+        SELECT head_sha FROM v_stream WHERE id = :stream_id
+        UNION
+        SELECT p.value FROM reach JOIN v_commit c ON c.sha = reach.sha, json_each(c.parents) p
+      )
+      SELECT EXISTS (SELECT 1 FROM reach WHERE sha = :sha) AS in_history,
+             NOT EXISTS (SELECT 1 FROM reach WHERE sha = :sha) AS not_in_history
   row:
     sql: |
       SELECT id AS change_id, base_revision, head_revision
@@ -21,15 +34,18 @@ loaders:
     - key: head_revision
   detail:
     sql: |
-      SELECT subject, body, author || CASE WHEN email = '' THEN '' ELSE ' <' || email || '>' END AS author,
-             committed_at, sha, parents
+      -- The message whole, subject first; the parents as facts: the first
+      -- is the line the commit sits on, the second (a merge's) what came in.
+      SELECT subject, CASE WHEN body = '' THEN subject ELSE subject || char(10, 10) || body END AS message,
+             author || CASE WHEN email = '' THEN '' ELSE ' <' || email || '>' END AS author,
+             committed_at, sha,
+             CASE WHEN :in_history THEN 'Yes' ELSE 'No' END AS on_branch,
+             first_parent, substr(first_parent, 1, 7) AS parent,
+             json_extract(parents, '$[1]') AS merged_sha, substr(json_extract(parents, '$[1]'), 1, 7) AS merged
       FROM v_commit WHERE sha = :sha
-  parent_commits:
-    sql: |
-      SELECT j.value AS sha, p.subject AS subject
-      FROM v_commit c, json_each(c.parents) j LEFT JOIN v_commit p ON p.sha = j.value
-      WHERE c.sha = :sha
-      ORDER BY j.key
+    params:
+      in_history:
+        from: branch.in_history
   files:
     sql: |
       WITH RECURSIVE f(path, status, additions, deletions) AS (
@@ -54,49 +70,51 @@ loaders:
         from: row.base_revision
       head_revision:
         from: row.head_revision
+# Page actions, in the nav bar's menu: each only where it makes sense on
+# the stream the page is open in (`when` reads the first loader's row).
+actions:
+- id: cherry-pick
+  label: Cherry-pick
+  command: oxplow.git.cherry_pick
+  when: not_in_history
+  input:
+    stream: str{{param.stream_id}}
+    rev: '{{param.sha}}'
+- id: revert
+  label: Revert
+  command: oxplow.git.revert
+  when: in_history
+  input:
+    stream: str{{param.stream_id}}
+    rev: '{{param.sha}}'
 view:
   stack:
   - id: detail
-    title: Commit
+    title: About
     from: detail
     viz: detail
-    lead: body
+    lead: message
     columns:
-    - key: subject
-      label: Subject
-    - key: author
-      label: Author
     - key: committed_at
       label: Date
+    - key: author
+      label: Author
     - key: sha
       label: Commit
-    empty: Commit not found.
-    actions:
-    - id: cherry-pick
-      label: Cherry-pick
-      command: oxplow.git.cherry_pick
-      input:
-        stream: str{{param.stream_id}}
-        rev: '{{param.sha}}'
-    - id: revert
-      label: Revert
-      command: oxplow.git.revert
-      input:
-        stream: str{{param.stream_id}}
-        rev: '{{param.sha}}'
-  - id: parents
-    title: Parents
-    from: parent_commits
-    viz: table
-    hide_empty: true
-    columns:
-    - key: sha
-      label: Commit
+    - key: on_branch
+      label: On this branch
+    - key: parent
+      label: Parent
       link:
         kind: commit
-        from: sha
-    - key: subject
-      label: Subject
+        from: first_parent
+    - key: merged
+      label: Merged
+      when: merged_sha
+      link:
+        kind: commit
+        from: merged_sha
+    empty: Commit not found.
   - id: files
     title: Files
     from: files

@@ -93,7 +93,7 @@ import { SectionsViz } from "./SectionsViz.js";
 import { Stat } from "../kit/Stat.js";
 import { recordOpError } from "../opErrors.js";
 import { showToast } from "../components/toastStore.js";
-import { actionDoes, actionOffered, offeredWholePage, openAfterAction, performVizAction, promptField, rowRecord, type ActionTarget } from "./vizActions.js";
+import { actionDoes, actionOffered, offeredWholePage, openAfterAction, performVizAction, promptField, rowRecord, truthyCell, type ActionTarget } from "./vizActions.js";
 import { useHistoryState } from "../tabs/useHistoryState.js";
 import {
   chainedDrops,
@@ -1449,7 +1449,7 @@ function treeLabelColumn(viz: VizRun["config"], cols: DisplayColumn[], resultCol
   const declared = cols.find((c) => c.key === key);
   if (declared) return declared;
   const index = resultColumns.indexOf(key);
-  return index === -1 ? null : { key, label: key, index, link: null, unitIndex: null, iconIndex: null, toneIndex: null, width: null, format: null, highlight: null };
+  return index === -1 ? null : { key, label: key, index, link: null, unitIndex: null, iconIndex: null, toneIndex: null, width: null, format: null, highlight: null, whenIndex: null };
 }
 
 interface TreeVizProps {
@@ -1616,10 +1616,12 @@ function TimelineViz({
 }
 
 /** `detail`: the first row as label/value pairs. An empty value reads
- *  "(none)", a word rather than a mark beside its label. */
+ *  "(none)", a word rather than a mark beside its label; a column with a
+ *  `when` is a fact only while that column of the row is truthy. */
 function DetailViz({ row, cols, cell, rowMenu }: { row: SqlCell[]; cols: DisplayColumn[]; cell: CellRenderer; rowMenu: RowMenu }) {
   const value = (c: DisplayColumn) => ((row[c.index] ?? null) === null ? <span className="ox-faint">(none)</span> : cell(row, c));
-  return <Facts testId="viz-detail" facts={cols.map((c) => ({ key: c.key, label: c.label, value: value(c) }))} {...rowMenu(row)} />;
+  const drawn = cols.filter((c) => c.whenIndex === null || truthyCell(row[c.whenIndex]));
+  return <Facts testId="viz-detail" facts={drawn.map((c) => ({ key: c.key, label: c.label, value: value(c) }))} {...rowMenu(row)} />;
 }
 
 const STEP_MARK: Record<StepStatus, { mark: string; color: string; label: string }> = {

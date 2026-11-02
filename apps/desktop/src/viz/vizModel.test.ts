@@ -33,8 +33,8 @@ const viz = (over: Partial<VizConfig> = {}): VizConfig => ({
 describe("displayColumns", () => {
   test("without declared columns shows every result column, its key in words", () => {
     expect(displayColumns(viz(), ["uri", "title"])).toEqual([
-      { key: "uri", label: "Uri", index: 0, link: null, unitIndex: null, iconIndex: null, toneIndex: null, width: null, format: null, highlight: null },
-      { key: "title", label: "Title", index: 1, link: null, unitIndex: null, iconIndex: null, toneIndex: null, width: null, format: null, highlight: null },
+      { key: "uri", label: "Uri", index: 0, link: null, unitIndex: null, iconIndex: null, toneIndex: null, width: null, format: null, highlight: null, whenIndex: null },
+      { key: "title", label: "Title", index: 1, link: null, unitIndex: null, iconIndex: null, toneIndex: null, width: null, format: null, highlight: null, whenIndex: null },
     ]);
   });
 
@@ -47,8 +47,8 @@ describe("displayColumns", () => {
       ],
     });
     expect(displayColumns(l, ["id", "title", "u"])).toEqual([
-      { key: "title", label: "Task", index: 1, link: { kind: "page", from: "id", line: null, base: null, head: null }, unitIndex: null, iconIndex: null, toneIndex: null, width: null, format: null, highlight: null },
-      { key: "id", label: "Id", index: 0, link: null, unitIndex: 2, iconIndex: null, toneIndex: null, width: null, format: null, highlight: null },
+      { key: "title", label: "Task", index: 1, link: { kind: "page", from: "id", line: null, base: null, head: null }, unitIndex: null, iconIndex: null, toneIndex: null, width: null, format: null, highlight: null, whenIndex: null },
+      { key: "id", label: "Id", index: 0, link: null, unitIndex: 2, iconIndex: null, toneIndex: null, width: null, format: null, highlight: null, whenIndex: null },
     ]);
   });
 
@@ -62,7 +62,7 @@ describe("displayColumns", () => {
       columns: [{ key: "title", label: null, link: null, unit: null, icon: "glyph", tone: "hue" }, { key: "bucket", label: null, link: null, unit: null }],
     });
     expect(displayColumns(styled, ["title", "bucket", "glyph", "hue"])).toEqual([
-      { key: "title", label: "Title", index: 0, link: null, unitIndex: null, iconIndex: 2, toneIndex: 3, width: null, format: null, highlight: null },
+      { key: "title", label: "Title", index: 0, link: null, unitIndex: null, iconIndex: 2, toneIndex: 3, width: null, format: null, highlight: null, whenIndex: null },
     ]);
     const auto = viz({ group: { by: "bucket", link: null }, emphasis: "on", depth: "d" });
     expect(displayColumns(auto, ["title", "bucket", "on", "d"]).map((c) => c.key)).toEqual(["title"]);

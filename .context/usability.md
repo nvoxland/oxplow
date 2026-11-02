@@ -690,6 +690,15 @@ not a pick and isn't in the address.
   is a dashboard tile's, not a page section's. Every section has a title
   (it is its Contents entry); a heading that would look wrong is hidden
   with `hide_title: true`, never left off.
+- **A page about one thing opens with "About"**: its first section is
+  the thing's own facts (a `detail`, its message or description as the
+  `lead` paragraph), titled About, never the thing's kind ("Commit",
+  "Task") — the nav bar already says what it is. A fact that is one of
+  the thing's own goes in that list as a row (a commit's parent), not in a
+  section of its own; one that holds only sometimes (a merge's second
+  parent) is a row with a `when`. A fact about the page as a whole, not
+  the thing (the branch a history is of), is the rail's, in a `rail:`
+  tree titled About.
 
 ## Proposals are drawn once
 

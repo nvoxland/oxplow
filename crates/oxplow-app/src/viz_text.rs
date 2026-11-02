@@ -651,13 +651,29 @@ fn timeline(run: &VizRun) -> String {
     capped_lines(entries.into_iter().map(|(_, l)| l).collect())
 }
 
-/// A detail: the first row's displayed columns as label/value lines.
+/// A detail: the first row's displayed columns as label/value lines. A
+/// column with a `when` is a fact only while that column of the row is
+/// truthy.
 fn detail(run: &VizRun) -> String {
     let Some(row) = run.result.rows.first() else {
         return String::new();
     };
+    let drawn = |i: usize| {
+        let key = &run.result.columns[i];
+        let when = run
+            .config
+            .columns
+            .iter()
+            .find(|c| &c.key == key)
+            .and_then(|c| c.when.as_ref());
+        match when.and_then(|w| run.result.columns.iter().position(|k| k == w)) {
+            Some(at) => row.get(at).is_some_and(truthy),
+            None => true,
+        }
+    };
     shown(run)
         .into_iter()
+        .filter(|(i, _)| drawn(*i))
         .map(|(i, l)| format!("**{l}**: {}", value(run, row, i)))
         .collect::<Vec<_>>()
         .join("\n")
@@ -1401,6 +1417,49 @@ mod tests {
         );
     }
 
+    /// A fact whose column has a `when` is left out while that column of
+    /// the row is falsy: a merge's second parent on a commit that isn't one.
+    #[test]
+    fn a_detail_leaves_out_a_fact_whose_when_column_is_falsy() {
+        let col = |key: &str, when: Option<&str>| crate::pages::spec::PageColumn {
+            key: key.into(),
+            label: None,
+            link: None,
+            unit: None,
+            icon: None,
+            tone: None,
+            width: None,
+            format: None,
+            highlight: None,
+            select: None,
+            expand: None,
+            when: when.map(str::to_string),
+        };
+        let one = with(
+            run(
+                Viz::Detail,
+                None,
+                &["parent", "merged"],
+                vec![vec![t("abc"), SqlCell::Null(())]],
+            ),
+            |l| l.columns = vec![col("parent", None), col("merged", Some("merged"))],
+        );
+        assert_eq!(render(&one, &Resolved::default()), "**parent**: abc");
+        let merge = with(
+            run(
+                Viz::Detail,
+                None,
+                &["parent", "merged"],
+                vec![vec![t("abc"), t("def")]],
+            ),
+            |l| l.columns = vec![col("parent", None), col("merged", Some("merged"))],
+        );
+        assert_eq!(
+            render(&merge, &Resolved::default()),
+            "**parent**: abc\n**merged**: def"
+        );
+    }
+
     /// Sections read as the person sees them: a heading per row (its link
     /// after it), its facts as label/value lines, then its markdown body;
     /// the role columns are not facts.
@@ -1448,6 +1507,7 @@ mod tests {
                     highlight: None,
                     select: None,
                     expand: None,
+                    when: None,
                 }];
             },
         );
@@ -1493,6 +1553,7 @@ mod tests {
                     highlight: None,
                     select: None,
                     expand: None,
+                    when: None,
                 }];
             },
         );
@@ -1527,6 +1588,7 @@ mod tests {
                     highlight: None,
                     select: None,
                     expand: None,
+                    when: None,
                 };
                 l.columns = vec![
                     col("perms", Some(crate::pages::spec::ColumnFormat::Items)),

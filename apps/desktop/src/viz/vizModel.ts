@@ -47,6 +47,9 @@ export interface DisplayColumn {
   highlight: string | null;
   /** The viz this column's cell opens under its row (`PageColumn.expand`). */
   expand?: string | null;
+  /** Position of the column that must be truthy for a detail to draw this
+   *  fact (`PageColumn.when`). */
+  whenIndex: number | null;
 }
 
 /** `text` split around each case-insensitive occurrence of `needle`, the
@@ -86,7 +89,7 @@ export function displayColumns(viz: VizConfig, resultColumns: string[]): Display
   };
   if (viz.columns.length === 0) {
     return resultColumns.flatMap((key, index) =>
-      styling.includes(key) ? [] : [{ key, label: humanize(key), index, link: null, unitIndex: null, iconIndex: null, toneIndex: null, width: null, format: null, highlight: null }],
+      styling.includes(key) ? [] : [{ key, label: humanize(key), index, link: null, unitIndex: null, iconIndex: null, toneIndex: null, width: null, format: null, highlight: null, whenIndex: null }],
     );
   }
   const out: DisplayColumn[] = [];
@@ -105,6 +108,7 @@ export function displayColumns(viz: VizConfig, resultColumns: string[]): Display
       format: c.format ?? null,
       highlight: c.highlight ?? null,
       ...(c.expand ? { expand: c.expand } : {}),
+      whenIndex: at(c.when),
     });
   }
   return out;

@@ -42,24 +42,24 @@ expect:
     loaders:
       rows:
         - { name: content, kind: content }
+        - { name: branch, kind: sql }
         - { name: row, kind: sql }
-        - { name: detail, kind: sql }
-        - { name: parent_commits, kind: sql }
+        - { name: detail, kind: sql, uses: branch }
         - { name: files, kind: sql, uses: row }
     nodes:
       rows:
         - { id: stack, kind: stack }
-        - { id: detail, kind: viz, viz: detail, loader: detail, columns: "subject (Subject), author (Author), committed_at (Date), sha (Commit)" }
+        - { id: detail, kind: viz, viz: detail, loader: detail, columns: "committed_at (Date), author (Author), sha (Commit), on_branch (On this branch), parent (Parent), merged (Merged)" }
         - { id: files, kind: viz, viz: tree, loader: files, columns: name (File) }
         - { id: sections, kind: slot, detail: "`oxplow-foundation/commit.sections`" }
     view:
       rows:
         - text: |-
             - Stack of sections
-              - **Commit**: Detail of `detail`
-                - columns: subject (Subject), author (Author), committed_at (Date), sha (Commit)
+              - **About**: Detail of `detail`
+                - columns: committed_at (Date), author (Author), sha (Commit), on_branch (On this branch), parent (Parent), merged (Merged)
                 - when empty: “Commit not found.”
-                - lead: `body`
+                - lead: `message`
               - **Files**: Tree of `files`
                 - columns: name (File)
                 - when empty: “The commit changed no files.”
@@ -69,5 +69,5 @@ expect:
               - Slot `oxplow-foundation/commit.sections`
     actions:
       rows:
-        - { label: Cherry-pick, command: oxplow.git.cherry_pick, on: detail }
-        - { label: Revert, command: oxplow.git.revert, on: detail }
+        - { label: Cherry-pick, command: oxplow.git.cherry_pick, on: page }
+        - { label: Revert, command: oxplow.git.revert, on: page }

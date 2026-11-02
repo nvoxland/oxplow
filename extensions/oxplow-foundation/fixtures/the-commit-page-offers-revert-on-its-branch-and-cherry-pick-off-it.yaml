@@ -1,0 +1,31 @@
+# A commit the stream's branch carries says so and offers Revert; one on
+# another branch says no and offers Cherry-pick. The page's first loader decides,
+# from a walk over parents from the stream's head. A merge names what it
+# merged as a fact; a plain commit has no such fact.
+given:
+  - observe: { commit: { sha: c1, at: "2026-01-01T00:00:00Z", author: ann, subject: first } }
+  - observe: { commit: { sha: c2, at: "2026-01-02T00:00:00Z", author: bob, subject: second, body: "says more", parents: [c1] } }
+  - observe: { commit: { sha: c3, at: "2026-01-03T00:00:00Z", author: cat, subject: elsewhere, parents: [c1] } }
+  - observe: { commit: { sha: m1, at: "2026-01-04T00:00:00Z", author: ann, subject: merge, parents: [c2, c3] } }
+  - observe:
+      refs:
+        branches: [{ name: main, head: c2, stream: 1 }, { name: side, head: m1 }]
+        heads: [{ stream: 1, sha: c2 }]
+when: { page: oxplow-foundation/commit, params: { stream_id: 1, sha: c2 } }
+expect:
+  loaders:
+    branch: { rows: [{ in_history: 1, not_in_history: 0 }] }
+    detail: { rows: [{ message: "second\n\nsays more", on_branch: "Yes", parent: c1, merged: null }] }
+  actions:
+    - { id: cherry-pick, when: not_in_history }
+    - { id: revert, when: in_history }
+steps:
+  - params: { stream_id: 1, sha: c3 }
+    expect:
+      loaders:
+        branch: { rows: [{ in_history: 0, not_in_history: 1 }] }
+        detail: { rows: [{ on_branch: "No" }] }
+  - params: { stream_id: 1, sha: m1 }
+    expect:
+      loaders:
+        detail: { rows: [{ parent: c2, merged: c3, merged_sha: c3 }] }

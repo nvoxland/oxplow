@@ -450,7 +450,12 @@ whose loader does not return one (`viz_column_problems`). An agent reads
   the branch a history is of. A row it picks sets the page's view param.
 
 **Columns** (`PageColumn`): `key`, `label`, `link`, `unit`, `icon`,
-`tone`, `width`, `format`, `highlight`, `select`, `expand`.
+`tone`, `width`, `format`, `highlight`, `select`, `expand`, `when`.
+
+- `when: <column>` on a `detail`'s column draws the fact only while that
+  column of the row is truthy (the same rule as an action's `when`): a
+  merge's second parent on a merge alone. A null value with no `when`
+  reads "(none)".
 
 - `link: { kind, from, line?, base?, head? }` makes a cell a link
   (kinds: `task`, `file`, `wiki`, `effort-diff`, `commit`, `metric`,

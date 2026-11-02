@@ -173,6 +173,9 @@ intent:
     - name: the-commit-page-reads-a-commit-its-change-and-its-files-as-a-tree
       input: { page: commit }
       expect: a commit page makes its change and lists the files as a tree
+    - name: the-commit-page-offers-revert-on-its-branch-and-cherry-pick-off-it
+      input: { page: commit }
+      expect: a commit on the stream's branch offers Revert, one off it Cherry-pick, and a merge names what it merged
     - name: the-uncommitted-page-lists-the-working-tree-with-untracked-marked
       input: { page: uncommitted-changes, params: { stream_id: 1 } }
       expect: the working tree's files as a tree, untracked ones marked, and the commit form

@@ -4697,6 +4697,12 @@ export type PageColumn = {
 	 *  result drawn under the row.
 	 */
 	expand?: string | null,
+	/**
+	 *  A column of the same row that must be truthy (not null, 0, `""` or
+	 *  false) for a `detail` to draw this fact: a merge's second parent
+	 *  only on a merge. The same word, with the same rule, as an action's.
+	 */
+	when?: string | null,
 };
 
 /**  A page that didn't run for want of a capability. */
