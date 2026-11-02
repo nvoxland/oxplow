@@ -83,7 +83,7 @@ test("a bad date is left out, and a filter holds across the host's re-run", asyn
 test("PR lifetimes is badged custom, syncs under its permissions and opens a bar's page", async ({ fresh }) => {
   const { page, daemon } = fresh;
   const frame = await openLifetimes(page, daemon);
-  await expect(page.getByTestId("custom-component-badge")).toHaveText("custom");
+  await expect(page.getByTestId("custom-component-badge")).toHaveText(/^by /);
 
   await frame.locator("#sync").click();
   await expect(frame.locator("#status")).toHaveText("Synced.");

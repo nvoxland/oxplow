@@ -57,10 +57,12 @@ export function Replaced({
     );
   }
   return (
-    <div data-testid={`replacement-${target}`} style={replacedStyle}>
-      <span data-testid="replacement-badge" style={badgeStyle} title={`${extension} replaces oxplow's ${label}; turn it off on Settings → Integrations`}>
-        replaced by {extension}
-      </span>
+    // Who drew it is for the curious, not a chip on the page.
+    <div
+      data-testid={`replacement-${target}`}
+      style={replacedStyle}
+      title={`${label} by ${extension}, in place of oxplow's own; turn it off on Settings → Integrations`}
+    >
       {/* Its components share the view its target's contract lists. */}
       <HostedViewContext.Provider value={view}>{children}</HostedViewContext.Provider>
     </div>
@@ -74,11 +76,3 @@ const sentence = (message: string) => (/[.!?]$/.test(message) ? message : `${mes
 
 const replacedStyle: CSSProperties = { display: "flex", flexDirection: "column", gap: 4, minHeight: 0, flex: 1, padding: "8px 12px", overflow: "auto" };
 const noteStyle: CSSProperties = { color: "var(--text-secondary)", fontSize: "var(--text-xs)", padding: "4px 12px" };
-const badgeStyle: CSSProperties = {
-  alignSelf: "flex-start",
-  fontSize: 10,
-  padding: "0 6px",
-  borderRadius: 999,
-  border: "1px solid var(--border-subtle)",
-  color: "var(--text-secondary)",
-};

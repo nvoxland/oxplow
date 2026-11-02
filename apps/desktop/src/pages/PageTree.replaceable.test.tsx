@@ -43,9 +43,10 @@ const lanes = fakeRun(fakePage(node.viz("lanes", "rows"), { id: "beta/lanes", ex
   loaders: { rows: loader(["lane"], [["Doing"]]) },
 });
 
-test("a node the run says another extension stands in for draws that run, badged", () => {
-  const { container, getByTestId } = render(<PageTree run={host({ replacedBy: "beta", embed: lanes })} runId="run-1" />);
-  expect(getByTestId("replacement-badge").textContent).toBe("replaced by beta");
+test("a node the run says another extension stands in for draws that run, saying so on hover and not in a chip", () => {
+  const { container, getByTestId, queryByTestId } = render(<PageTree run={host({ replacedBy: "beta", embed: lanes })} runId="run-1" />);
+  expect(queryByTestId("replacement-badge")).toBeNull();
+  expect(getByTestId("replacement-work_item.board").getAttribute("title")).toContain("beta");
   // Drawn as an embed: its nodes under the replaced node's id.
   expect(container.querySelector('[data-node="cards/lanes"]')!.textContent).toContain("Doing");
   expect(container.textContent).not.toContain("oxplow's own row");

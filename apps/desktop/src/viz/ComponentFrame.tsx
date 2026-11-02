@@ -102,11 +102,14 @@ export function useComponentBundle(componentKey: string | null, base: string | n
   return { loadKey, version, src, error: current?.error ?? null };
 }
 
-/** The "custom" mark: a component isn't oxplow's own. */
-export function CustomBadge({ extension }: { extension: string }) {
+/** Whose a component is, in plain words ("by github"): marked only for
+ *  an extension that isn't oxplow's own (`bundled`), since an
+ *  oxplow-shipped page needs no chip. */
+export function CustomBadge({ extension, bundled = false }: { extension: string; bundled?: boolean }) {
+  if (bundled) return null;
   return (
     <span data-testid="custom-component-badge" style={badgeStyle} title={`${extension}'s own component, sandboxed`}>
-      custom
+      by {extension}
     </span>
   );
 }

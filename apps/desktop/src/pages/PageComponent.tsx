@@ -76,7 +76,7 @@ export function ComponentNode({
   const src = bundle.src!;
   return (
     <div data-testid="custom-component" style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-      <CustomBadge extension={run.page.extension} />
+      <CustomBadge extension={run.page.extension} bundled={run.page.origin?.bundled === true} />
       <ComponentFrame
         key={src}
         src={src}
@@ -167,7 +167,7 @@ export function ComponentPage({
   const src = bundle.src!;
   return (
     <div data-testid="custom-component" style={{ ...pageStyle, overflowY: inline.shown ? "auto" : undefined }}>
-      <CustomBadge extension={run.page.extension} />
+      <CustomBadge extension={run.page.extension} bundled={run.page.origin?.bundled === true} />
       {/* Keyed by its URL: another version mounts a new frame. */}
       <ComponentFrame
         key={src}

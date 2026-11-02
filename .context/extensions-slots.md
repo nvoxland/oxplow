@@ -194,9 +194,9 @@ the enabled extensions' replacements of the target, only when one exists:
 
 **Drawn** (`components/Replaced.tsx`, chosen by `PageTree` when the node
 has `replaced_by`): the embed (kit vizzes, or `viz: custom` with its
-sandbox and "custom" badge, sharing the view its target's contract lists)
-under a **"replaced by <extension>"** badge (`replacement-<target>`,
-`replacement-badge`), kept fresh as any page run is. The page's own chrome
+sandbox and, for an extension that isn't oxplow's own, a "by <extension>" mark,
+sharing the view its target's contract lists) under a hover title naming
+the extension (`replacement-<target>`, no chip), kept fresh as any page run is. The page's own chrome
 (the Board's scope picker) stays oxplow's. A run with an `error` draws
 the core component under a line saying whose it was and why ("beads's
 board couldn't load: …. Showing oxplow's.", `replacement-fallback`),

@@ -33,7 +33,7 @@ test("a replaceable node shows the active replacement, and oxplow's own once it 
   });
   const replaced = host.getByTestId("replacement-work_item.list");
   await expect(replaced).toContainText("Wombat list for thread");
-  await expect(replaced.getByTestId("replacement-badge")).toContainText("replaced by e2e-replacement");
+  await expect(replaced).toHaveAttribute("title", /by e2e-replacement/);
   await expect(host.getByTestId("node-list")).not.toContainText("Wombat own list row");
 
   // Off, the page is oxplow's own again.

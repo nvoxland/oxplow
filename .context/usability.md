@@ -421,16 +421,19 @@ markdown itself, nor edits it in a `<textarea>`.
   for (`openForm`) is oxplow's tab modal, with Enter submitting and
   Escape closing as every form.
 
-## A replaced component is marked, and falls back to oxplow's
+## A replaced component is named on hover, and falls back to oxplow's
 
 - Where an extension's page stands in for a core component (the Board's
-  cards — `Replaced`, P9.A1), a small **replaced by <extension>**
-  badge says whose it is; the page's own chrome stays oxplow's. When the
+  cards — `Replaced`, P9.A1), the hover title says whose it is ("History
+  graph by oxplow-bundled, in place of oxplow's own"); there is no chip,
+  as it is jargon on a page. A custom component marks itself only when it
+  is not oxplow's own (`by <extension>`, `CustomBadge`); the page's own
+  chrome stays oxplow's. When the
   replacement can't load, oxplow's own component shows, under a muted
   line saying whose couldn't load and why — never an error instead of
   the page, and never the page's table. A person switches back for good
   with "Always use oxplow's own <component>" on Settings → Integrations.
-  Testids: `replacement-<target>`, `replacement-badge`,
+  Testids: `replacement-<target>` (its `title` is the hover),
   `replacement-fallback`, `integrations-replacement-<target>`,
   `integrations-replacement-off-<target>`.
 

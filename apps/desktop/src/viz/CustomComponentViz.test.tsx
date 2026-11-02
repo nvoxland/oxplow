@@ -54,7 +54,8 @@ test("the component's frame is sandboxed to scripts and forms, at its loaded bun
   expect(frame.getAttribute("sandbox")).toBe("allow-scripts allow-forms");
   expect(frame.getAttribute("src")).toBe("http://127.0.0.1:9/components/v/v-1/");
   expect(frame.getAttribute("referrerpolicy")).toBe("no-referrer");
-  expect(view.getByTestId("custom-component-badge").textContent).toBe("custom");
+  // A third party's component says whose it is, in plain words.
+  expect(view.getByTestId("custom-component-badge").textContent).toBe("by x");
   expect(view.queryByTestId("the-table")).toBeNull();
 });
 

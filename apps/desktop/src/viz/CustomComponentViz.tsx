@@ -95,7 +95,7 @@ export function CustomComponentViz({
   }
   return (
     <div data-testid="custom-component" style={{ display: "flex", flexDirection: "column", gap: 4, flex: 1, minHeight: 0 }}>
-      <CustomBadge extension={run.config.extension} />
+      <CustomBadge extension={run.config.extension} bundled={run.config.origin?.bundled === true} />
       {/* Keyed by its URL: another version (an edited bundle) mounts a new
           frame, whose first load is its own — never the old frame
           navigating away. */}
