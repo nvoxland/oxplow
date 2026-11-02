@@ -1,8 +1,15 @@
 title: File history
-description: The commits that touched a file, newest first, from the indexed history. For history past the index, use `oxplow_vcs_log`.
+description: The commits that touched a file, newest first, on the stream's own history; the scope widens to every indexed branch. For history past the index, use `oxplow_vcs_log`.
 params:
 - name: path
   label: File (a repository path)
+- name: stream_id
+- name: scope
+  type: choice
+  role: filter
+  label: Branches
+  options: [{ value: stream, label: This stream }, { value: all, label: Every indexed branch }]
+  default: stream
 - name: limit
   role: filter
   label: Commits
@@ -14,6 +21,12 @@ answers:
 loaders:
   file_history:
     sql: |
+      -- The stream's history: every commit reachable from its head.
+      WITH RECURSIVE reach(sha) AS (
+        SELECT head_sha FROM v_stream WHERE id = :stream_id
+        UNION
+        SELECT p.value FROM reach JOIN v_commit c ON c.sha = reach.sha, json_each(c.parents) p
+      )
       SELECT c.sha, substr(c.sha, 1, 7) AS short, c.committed_at, c.author, c.subject,
              f.status, f.additions, f.deletions,
              -- A modification is said by its counts alone.
@@ -22,6 +35,7 @@ loaders:
              'success' AS added_tone, 'danger' AS removed_tone
       FROM v_commit c JOIN v_commit_file f ON f.sha = c.sha
       WHERE f.path = :path
+        AND (:scope = 'all' OR c.sha IN (SELECT sha FROM reach))
       ORDER BY c.committed_at DESC
       LIMIT :limit
 # A list, as the Git dashboard's Recent Commits: the subject headlined, the
@@ -50,4 +64,4 @@ view:
   - key: removed
     label: Removed
     tone: removed_tone
-  empty: No indexed commit touched it.
+  empty: No commit in this history touched it.

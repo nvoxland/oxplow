@@ -1,8 +1,15 @@
-# The latest commits on the stream, newest first, cut to the limit.
+# The latest commits on the stream, newest first, cut to the limit. A commit
+# on another branch is left out until the scope is widened to every indexed
+# branch.
 given:
-  - observe: { commit: { sha: c1, at: "2026-01-01T00:00:00Z", author: ann, subject: first, files: [{ path: a.rs, status: A, additions: 1 }, { path: z.rs, status: A, additions: 1 }] } }
-  - observe: { commit: { sha: c2, at: "2026-01-02T00:00:00Z", author: bob, subject: second, files: [{ path: a.rs, status: M, additions: 2, deletions: 1 }] } }
-when: { page: oxplow-foundation/recent-commits, params: { limit: 5 } }
+  - observe: { commit: { sha: c1, at: "2026-01-01T00:00:00Z", author: ann, subject: first, files: [{ path: a.rs, status: added, additions: 1 }, { path: z.rs, status: added, additions: 1 }] } }
+  - observe: { commit: { sha: c2, at: "2026-01-02T00:00:00Z", author: bob, subject: second, parents: [c1], files: [{ path: a.rs, status: modified, additions: 2, deletions: 1 }] } }
+  - observe: { commit: { sha: c3, at: "2026-01-03T00:00:00Z", author: cat, subject: elsewhere, parents: [c1] } }
+  - observe:
+      refs:
+        branches: [{ name: main, head: c2, stream: 1 }, { name: side, head: c3 }]
+        heads: [{ stream: 1, sha: c2 }]
+when: { page: oxplow-foundation/recent-commits, params: { stream_id: 1, limit: 5 } }
 expect:
   loaders:
     recent_commits:
@@ -10,5 +17,7 @@ expect:
         - { sha: c2, short: c2, author: bob, subject: second }
         - { sha: c1, short: c1, author: ann, subject: first }
 steps:
-  - params: { limit: 1 }
+  - params: { stream_id: 1, limit: 1 }
     expect: { loaders: { recent_commits: { rows: [{ sha: c2 }] } } }
+  - params: { stream_id: 1, limit: 5, scope: all }
+    expect: { loaders: { recent_commits: { rows: [{ sha: c3 }, { sha: c2 }, { sha: c1 }] } } }

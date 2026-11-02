@@ -1,6 +1,13 @@
 title: Recent commits
-description: The newest commits in the indexed history. For another branch or history past the index, use `oxplow_vcs_log`.
+description: The newest commits on the stream's own history; the scope widens to every indexed branch. For history past the index, use `oxplow_vcs_log`.
 params:
+- name: stream_id
+- name: scope
+  type: choice
+  role: filter
+  label: Branches
+  options: [{ value: stream, label: This stream }, { value: all, label: Every indexed branch }]
+  default: stream
 - name: limit
   role: filter
   label: Commits
@@ -10,8 +17,15 @@ answers:
 loaders:
   recent_commits:
     sql: |
+      -- The stream's history: every commit reachable from its head.
+      WITH RECURSIVE reach(sha) AS (
+        SELECT head_sha FROM v_stream WHERE id = :stream_id
+        UNION
+        SELECT p.value FROM reach JOIN v_commit c ON c.sha = reach.sha, json_each(c.parents) p
+      )
       SELECT c.sha, substr(c.sha, 1, 7) AS short, c.committed_at, c.author, c.subject
       FROM v_commit c
+      WHERE :scope = 'all' OR c.sha IN (SELECT sha FROM reach)
       ORDER BY c.committed_at DESC
       LIMIT :limit
 # A list, as the Git dashboard's Recent Commits: the subject headlined, the
@@ -32,4 +46,4 @@ view:
   - key: committed_at
     label: When
     format: datetime
-  empty: No commits are indexed.
+  empty: No commit in this history.

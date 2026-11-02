@@ -3,8 +3,10 @@
 Quick answers about the repository's history, one page each, read with
 `oxplow_run_page { page, params }`:
 
-- `file-history { path, limit }` — the commits touching one file.
-- `recent-commits { limit }` — the latest of the indexed log.
+- `file-history { path, limit, scope? }` — the commits touching one file
+  on the stream's own history; `scope: all` widens to every indexed branch.
+- `recent-commits { limit, scope? }` — the latest on the stream's own
+  history; `scope: all` widens to every indexed branch.
 - `snapshots { stream?, limit }` — snapshots with parent, trigger and
   whether they went over their time budget (every stream's when none is named).
 
