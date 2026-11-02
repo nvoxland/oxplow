@@ -4,7 +4,8 @@
 /// showing the file; it tells its tab when it holds unsaved edits and how
 /// to save and find (`useTabEditing`: the ●, File → Save, the tab cap).
 /// Saving runs `oxplow.file.save`. The disk changing under unsaved edits
-/// asks: Reload from disk, or keep them.
+/// asks: Reload from disk, or keep them. A binary or too-large file is a
+/// line saying what it is, as the `code` viz shows one.
 import { useEffect, useRef, type CSSProperties } from "react";
 
 import { EditorPane } from "../components/EditorPane.js";
@@ -57,6 +58,13 @@ export function EditorViz({ row, onOpenPage }: { row: { path: string; filesystem
     return (
       <p className="ox-empty-line" data-testid="viz-editor-missing">
         <code>{path}</code> isn't a file in this stream's working tree.
+      </p>
+    );
+  }
+  if (buffer.state === "unshown") {
+    return (
+      <p className="ox-empty-line" data-testid="viz-editor-unshown">
+        <code>{path}</code> ({buffer.error})
       </p>
     );
   }

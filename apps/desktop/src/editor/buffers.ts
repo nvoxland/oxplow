@@ -23,9 +23,10 @@ export interface Buffer {
   saved: string;
   /** What the person has (the model's text). */
   draft: string;
-  /** `missing`: the path is no file of the working tree; `error`: the read
-   *  failed (`error` says why). */
-  state: "loading" | "ready" | "missing" | "error";
+  /** `missing`: the path is no file of the working tree; `unshown`: a file
+   *  the editor cannot show (binary, too large, a folder; `error` says what
+   *  it is) and so has no model; `error`: the read failed (`error` says why). */
+  state: "loading" | "ready" | "missing" | "unshown" | "error";
   error: string | null;
   saving: boolean;
   /** The disk changed under unsaved edits: its text, until Reload or Keep
@@ -55,10 +56,14 @@ export interface StreamServices {
   dispose(): void;
 }
 
+/** What a read of a working-tree file gives: its text, or why it is not
+ *  shown (`unshownReason`: binary, too large, a folder). */
+export type FileRead = { text: string } | { unshown: string };
+
 /** What the store needs from the world, injected so it tests alone. */
 export interface BufferIO {
-  /** The file's text in the working tree; null when it isn't a file. */
-  read(stream: string, path: string): Promise<string | null>;
+  /** The file in the working tree; null when it isn't there. */
+  read(stream: string, path: string): Promise<FileRead | null>;
   /** Write it (`oxplow.file.save`), for the agent's `call` when one asked. */
   save(stream: string, path: string, content: string, call: CallRef | null): Promise<void>;
   /** A model holding `text` for the file. */
@@ -210,18 +215,23 @@ export function createBufferStore(io: BufferIO): BufferStore {
     };
     held.set(key, h);
     notify();
-    let text: string | null;
+    let read: FileRead | null;
     try {
-      text = given ? given.saved : await io.read(stream.id, path);
+      read = given ? { text: given.saved } : await io.read(stream.id, path);
     } catch (e) {
       set(h, { state: "error", error: e instanceof Error ? e.message : String(e) });
       return h.buffer;
     }
     if (held.get(key) !== h) return h.buffer;
-    if (text === null) {
+    if (read === null) {
       set(h, { state: "missing" });
       return h.buffer;
     }
+    if ("unshown" in read) {
+      set(h, { state: "unshown", error: read.unshown });
+      return h.buffer;
+    }
+    const text = read.text;
     const draft = given ? given.draft : text;
     await attach(stream, h, draft);
     if (held.get(key) !== h) {
@@ -312,8 +322,10 @@ export function createBufferStore(io: BufferIO): BufferStore {
     async diskChanged(stream, path) {
       const h = held.get(keyOf(stream, path));
       if (!h || h.buffer.state !== "ready" || h.buffer.saving) return;
-      const disk = await io.read(stream, path);
-      if (disk === null || held.get(keyOf(stream, path)) !== h) return;
+      const read = await io.read(stream, path);
+      // Gone, or no longer text: the buffer keeps what it has.
+      if (read === null || "unshown" in read || held.get(keyOf(stream, path)) !== h) return;
+      const disk = read.text;
       const b = h.buffer;
       if (disk === b.saved) return;
       if (disk === b.draft) {

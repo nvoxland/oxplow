@@ -62,7 +62,7 @@ function fixture(servers: Set<string>) {
     debounceMs: 0,
   };
   const io: BufferIO = {
-    read: async (_s, path) => (path === "gone.rs" ? null : `text of ${path}`),
+    read: async (_s, path) => (path === "gone.rs" ? null : { text: `text of ${path}` }),
     save: async () => {},
     model: async (_s, path, text) => {
       const m = new Model(text);

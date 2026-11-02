@@ -335,6 +335,9 @@ intent:
     - name: a-resource-page-is-handed-the-file-its-uri-names
       input: { page: file-viewer, params: { uri: 'oxplow:oxplow/file?path=note.md&filesystem=oxplow:temp', path: note.md, filesystem: 'oxplow:temp' } }
       expect: the page's first loader, content, holds the file's path, filesystem, size and language, and the tab label names the filesystem
+    - name: the-editor-alone-draws-a-working-tree-file-and-the-file-viewer-a-past-revision
+      input: { command: oxplow.page.renderers, input: { uri: 'oxplow:oxplow/file?path=koala.txt' } }
+      expect: the Editor alone, as the default; at a past revision the File viewer alone
     - name: the-file-viewer-is-offered-for-a-temp-file-and-the-editor-is-not
       input: { command: oxplow.page.renderers, input: { uri: 'oxplow:oxplow/file?path=note.md&filesystem=oxplow:temp' } }
       expect: the File viewer, and no Editor

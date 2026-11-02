@@ -186,15 +186,20 @@ const CONTENT_PAGES: &[(&str, &str)] = &[
         "plain",
         "for: oxplow/file\naccepts: { path: '^plain\\.[a-z]+$' }\n",
     ),
-    // Listed first by name, but it narrows by content: after the page that
-    // takes any such file.
+    // Listed first by name, but it opens the file to decide: after the
+    // pages that take any such file, a check on the URI's params alone
+    // among them.
     (
         "a-checked",
-        "for: oxplow/file\naccepts: { path: '^ordered\\.[a-z]+$', content: some }\nloaders:\n  some: { rows: [{ n: 1 }] }\n",
+        "for: oxplow/file\naccepts: { path: '^ordered\\.[a-z]+$', content: is_text }\nloaders:\n  is_text: { sql: \"SELECT 1 AS n FROM content WHERE is_text\" }\n",
     ),
     (
         "b-general",
         "for: oxplow/file\naccepts: { path: '^ordered\\.[a-z]+$' }\n",
+    ),
+    (
+        "c-by-params",
+        "for: oxplow/file\naccepts: { path: '^ordered\\.[a-z]+$', content: named }\nloaders:\n  named: { sql: \"SELECT 1 AS n WHERE :uri LIKE '%ordered%'\" }\n",
     ),
     // A check that would count to ten million.
     (
@@ -331,11 +336,12 @@ async fn a_page_with_no_content_check_is_offered_for_its_params_alone() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_page_that_narrows_by_content_comes_after_one_that_takes_any_such_file() {
+async fn a_page_that_opens_the_file_to_decide_comes_after_the_ones_that_take_any_such_file() {
     let (_dir, svc) = project().await;
+    // A check on the URI's params alone is still a general view of the file.
     assert_eq!(
         acme_for(&svc, "ordered.txt").await,
-        ["acme/b-general", "acme/a-checked"]
+        ["acme/b-general", "acme/c-by-params", "acme/a-checked"]
     );
 }
 

@@ -1,7 +1,10 @@
 title: File Viewer
-description: "A file read-only, on any filesystem at any revision; a binary or very large one says what it is instead. Offered for every `file` URI."
+description: "A file read-only, at a past revision or on another filesystem; a binary or very large one says what it is instead. A working-tree file is the Editor's alone."
 label: '{{param.path|basename}}{{row.suffix}}'
 for: oxplow/file
+# `accepts` rules all hold together; "a revision or a filesystem" is a loader.
+accepts:
+  content: elsewhere
 comments: true
 params:
 - name: uri
@@ -44,6 +47,11 @@ loaders:
              , 2
       WHERE :path LIKE '%/%'
       ORDER BY ord
+  # Offered where there is nothing to edit: the Editor's URI (no `rev`, no
+  # `filesystem`) is not the viewer's.
+  elsewhere:
+    sql: |
+      SELECT 1 AS n WHERE :rev IS NOT NULL OR :filesystem IS NOT NULL
 actions:
 - { id: open-current, label: Open current version, open: current_uri, when: current_uri }
 view:

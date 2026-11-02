@@ -14,8 +14,9 @@
 //!    run (`sql`, `rows`, a read-only `command`, the system's `content`);
 //!    2 seconds, 1 MiB; a failure of any kind means not offered.
 //!
-//! The order is the extensions' (and each one's pages'), pages that
-//! narrow by content after those that don't; `default` is
+//! The order is the extensions' (and each one's pages'), pages that open
+//! the file to decide (their check reads `content`) after those that
+//! don't, a check on the URI's params alone among the latter; `default` is
 //! the page's own flag, and the caller picks: the URI's view
 //! (`#oxplow.renderer=`), else the default, else the first.
 
@@ -147,11 +148,12 @@ pub(crate) async fn renderers_in(
         .filter(|(_, offered)| *offered)
         .map(|(page, _)| page)
         .collect();
-    // A page that narrows by content is a special view of what the others
-    // draw whole: it follows them, so the first (when none is flagged
-    // `default`) is the general one. Stable: the extensions' order holds
-    // within each kind.
-    offered.sort_by_key(|page| page.accepts_content.is_some());
+    // A page that opens the file to decide is a special view of what the
+    // others draw whole: it follows them, so the first (when none is
+    // flagged `default`) is the general one. A check on the URI's params
+    // alone is general. Stable: the extensions' order holds within each
+    // kind.
+    offered.sort_by_key(|page| reads_content(page));
     offered
         .into_iter()
         .map(|page| Renderer {

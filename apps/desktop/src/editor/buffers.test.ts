@@ -34,13 +34,13 @@ class FakeModel implements ModelHandle {
   }
 }
 
-function fixture(files: Record<string, string | null> = { "a.rs": "fn a() {}" }) {
+function fixture(files: Record<string, string | null> = { "a.rs": "fn a() {}" }, unshown: Record<string, string> = {}) {
   const disk = { ...files };
   const saves: { path: string; content: string; call: unknown }[] = [];
   const models = new Map<string, FakeModel>();
   const services: string[] = [];
   const io: BufferIO = {
-    read: async (_s, path) => disk[path] ?? null,
+    read: async (_s, path) => (unshown[path] ? { unshown: unshown[path]! } : disk[path] == null ? null : { text: disk[path]! }),
     save: async (_s, path, content, call) => {
       saves.push({ path, content, call });
       disk[path] = content;
@@ -80,6 +80,17 @@ test("a file that isn't there opens as missing, with no model", async () => {
   const b = await store.open(stream, "gone.rs");
   expect(b.state).toBe("missing");
   expect(models.size).toBe(0);
+});
+
+// A file the editor cannot show (binary, too large, a folder) opens as
+// unshown, saying what it is, with no model to type into.
+test("a binary file opens as unshown, saying what it is, with no model", async () => {
+  const { store, models } = fixture({}, { "blob.bin": "binary file, 6 bytes" });
+  const b = await store.open(stream, "blob.bin");
+  expect(b.state).toBe("unshown");
+  expect(b.error).toBe("binary file, 6 bytes");
+  expect(models.size).toBe(0);
+  expect(isDirty(b)).toBe(false);
 });
 
 test("typing into the model is the draft; saving writes it and the buffer is clean again", async () => {

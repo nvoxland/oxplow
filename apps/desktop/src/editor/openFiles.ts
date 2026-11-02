@@ -3,13 +3,14 @@
 /// revision, saves through `oxplow.file.save`, a Monaco model per buffer
 /// at the file's URI, a stream's LSP mirror (`lspMirror.ts`), and the
 /// worktree followed (a change on disk, a rename, a delete).
-import { readAt, runCommand, runCommandForCall, subscribeWorkspaceEvents, type Stream } from "../api.js";
+import { readAt, runCommand, runCommandForCall, statFile, subscribeWorkspaceEvents, type Stream } from "../api.js";
 import { languageForPath } from "../editor-language.js";
 import { registerLspProviders } from "../components/editor-lsp-providers.js";
 import { LspClient, registerLspApplyEditHandler, streamFileUri } from "../lsp.js";
 import { normalizeWorkspaceEdit } from "../lsp-monaco-mapping.js";
 import { hasLspServer, refreshLspServers, subscribeLspServers } from "../lsp-servers-store.js";
 import { applyNormalizedWorkspaceEdit, workspaceEditIOForStream } from "../lsp-workspace-edit.js";
+import { unshownReason } from "../filesystem.js";
 import { WORKING } from "../revision.js";
 import { watchFileEvents } from "../watchFileEvents.js";
 import { createBufferStore, type ModelHandle } from "./buffers.js";
@@ -151,7 +152,15 @@ function watch(
 }
 
 export const buffers = createBufferStore({
-  read: (stream, path) => readAt(stream, path, { rev: WORKING }),
+  // `stat` first: a binary or too-large file is unshown, never read.
+  read: async (stream, path) => {
+    const stat = await statFile(stream, path, { rev: WORKING });
+    if (!stat) return null;
+    const unshown = unshownReason(stat);
+    if (unshown) return { unshown };
+    const text = await readAt(stream, path, { rev: WORKING });
+    return text === null ? null : { text };
+  },
   save: async (stream, path, content, call) => {
     // An audited write that logs `file.saved` (its content isn't kept in
     // the record); an agent's Save is written as the agent.

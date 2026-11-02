@@ -1,0 +1,20 @@
+# A working-tree file has one mode, the Editor: the File viewer adds
+# nothing a person needs there, so it is offered only where there is no
+# editing, a past revision or another filesystem.
+when:
+  command: oxplow.page.renderers
+  input: { uri: "oxplow:oxplow/file?path=koala.txt" }
+expect:
+  ok: true
+  result:
+    renderers:
+      - { page: oxplow-foundation/editor, default: true }
+steps:
+  - when:
+      command: oxplow.page.renderers
+      input: { uri: "oxplow:oxplow/file?path=koala.txt&rev=git:HEAD" }
+    expect:
+      ok: true
+      result:
+        renderers:
+          - { page: oxplow-foundation/file-viewer }

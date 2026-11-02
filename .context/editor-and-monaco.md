@@ -25,9 +25,11 @@ stay in the window), and an answer is never an editor (`spec_problem`).
 
 `apps/desktop/src/editor/buffers.ts` holds the working tree's open files,
 one **buffer** per (stream, path): the saved text, the draft, its state
-(`loading` / `ready` / `missing` / `error`), and a disk `conflict`.
-`editor/openFiles.ts` is the window's one store (`buffers`): it reads
-through `read_at` at the working revision, saves through
+(`loading` / `ready` / `missing` / `unshown` / `error`), and a disk `conflict`.
+`editor/openFiles.ts` is the window's one store (`buffers`): it `stat`s
+the file first and reads through `read_at` at the working revision (a
+binary, too-large or folder path is `unshown`, its reason in `error`, and
+gets no model: the viz shows the reason line the `code` viz shows), saves through
 `oxplow.file.save` (an agent's Save for its call), and makes a **Monaco
 model per buffer** at `streamFileUri(stream, path)`. The model *is* the
 draft: typing, and an LSP edit to a file no editor shows, are edits to
@@ -251,9 +253,14 @@ wiki block keeps the button.
 A `code` row names its file, optionally its `filesystem` and `revision`
 (none of either: the local working tree). The viz `stat`s the file before
 reading it, so a binary or over-5-MiB file shows a placeholder line, not
-its bytes. The `editor` viz edits only the local working tree: it takes
-an optional `filesystem` column and shows a refusal, not an editor, for
-any but `oxplow:local` (the Editor page accepts none anyway).
+its bytes (the buffer store does the same for the `editor` viz). The
+`editor` viz edits only the local working tree: it takes an optional
+`filesystem` column and shows a refusal, not an editor, for any but
+`oxplow:local` (the Editor page accepts none anyway). The two renderers
+of a file split by URI, never both: the Editor takes a URI with no `rev`
+and no `filesystem`; the File viewer's `accepts.content` loader takes one
+with either (a past revision, another filesystem), where there is nothing
+to edit. A working-tree file so has one mode and no Open With.
 The file-viewer and duplicate-block pages draw these vizes;
 `DiffPane` stays (it is the `hunks` viz's and `diff`'s).
 

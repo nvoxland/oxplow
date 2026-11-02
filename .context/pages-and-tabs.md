@@ -118,7 +118,8 @@ all ask it. A page is offered for a URI when, in this order,
    anything it reads may be a `page` loader), that loader yields at least
    one row.
 
-The list is in the order the enabled extensions list their pages. Step 3
+The list is in the order the enabled extensions list their pages, the
+pages whose step-3 chain reads `content` after the rest. Step 3
 runs only that loader's dependency chain (`Page::loader_chain`: `sql`,
 `rows`, a read-only `command`, and the system's `content`) as the viewer,
 for the stream the call names. Each check has 2 seconds and 1 MiB
@@ -353,9 +354,10 @@ defines what the person sees:
   params with this run's values, its loaders (what each runs and reads,
   its rows), its view as an outline (a node a line: its viz and loader,
   title, columns and settings; embeds and slot mounts included) and its
-  actions where they sit. The offered list puts a page that narrows by
-  `accepts.content` after the pages that take any such file, so the first
-  (when none is flagged `default`) is the general one.
+  actions where they sit. The offered list puts a page that opens the file
+  to decide (its `accepts.content` chain reads `content`) after the pages
+  that take any such file, a check on the URI's params alone among them,
+  so the first (when none is flagged `default`) is the general one.
   `v_page.running_uri` (and `PageProvenance.running_uri`, in the bindings) is the file URI of the copy that runs
   (`…&rev=<hash>&filesystem=oxplow:extensions`, NULL with no deployment):
   the link to open for "the page as it runs", pinned to that deployment.

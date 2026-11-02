@@ -6,9 +6,10 @@ import { run } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
 import { openFromLauncher } from "../../support/ui.js";
 
-// A file of a filesystem other than the working tree is the File viewer's:
-// read-only, no Save, and the Editor is never offered for it. A local file
-// is offered both, in Open With.
+// A file of a filesystem other than the working tree, or at a past
+// revision, is the File viewer's: read-only, no Save, and the Editor is
+// never offered for it. A working-tree file is the Editor's alone: Open
+// With has no other mode to offer.
 
 type Page = import("@playwright/test").Page;
 
@@ -46,24 +47,24 @@ test("a scratch file on oxplow:temp opens read-only in the File viewer", async (
   await expect(page.getByTestId("viz-editor")).toHaveCount(0);
 });
 
-test("a binary file shows what it is instead of its bytes", async ({ page, daemon }) => {
+test("a binary file shows what it is instead of its bytes, in the Editor and in the File viewer", async ({ page, daemon }) => {
   writeFileSync(join(daemon.project, "blob.bin"), Buffer.from([0, 1, 2, 3, 0, 255]));
   await ready(page);
+  await navigate(daemon, "oxplow:oxplow/file?path=blob.bin");
+  await expect(page.getByTestId("viz-editor-unshown").filter({ visible: true })).toContainText("binary file, 6 bytes");
+  await expect(page.getByTestId("monaco-host")).toHaveCount(0);
   await navigate(daemon, "oxplow:oxplow/file?path=blob.bin&rev=working");
   await expect(page.getByTestId("viz-code").filter({ visible: true })).toContainText("binary file, 6 bytes");
 });
 
-test("Open With on a local file offers the File viewer beside the Editor", async ({ page, daemon }) => {
+test("a working-tree file is the Editor's alone: Open With has no other mode", async ({ page, daemon }) => {
   writeFileSync(join(daemon.project, "koala.txt"), "koala\n");
   await ready(page);
   await navigate(daemon, "oxplow:oxplow/file?path=koala.txt");
   await expect(page.getByTestId("viz-editor").filter({ visible: true })).toBeVisible();
   await page.getByTestId("page-nav-menu").filter({ visible: true }).click();
-  await page.getByTestId("menu-item-page-open-with").click();
-  await expect(page.getByTestId("menu-item-page-open-with-oxplow-foundation/editor")).toContainText("✓");
-  await page.getByTestId("menu-item-page-open-with-oxplow-foundation/file-viewer").click();
-  await expect(page.getByTestId("viz-code").filter({ visible: true })).toContainText("koala");
-  await expect(page.getByTestId("viz-editor")).toHaveCount(0);
+  await expect(page.getByTestId("menu-item-action-page-about")).toBeVisible();
+  await expect(page.getByTestId("menu-item-page-open-with")).toHaveCount(0);
 });
 
 // The File viewer's body is the file, so its viz draws no Open file. A

@@ -29,8 +29,9 @@ class Model implements ModelHandle {
 const disk: Record<string, string> = { "src/a.rs": "fn a() {}" };
 const saves: { path: string; content: string }[] = [];
 const models = new Map<string, Model>();
+const unshown: Record<string, string> = { "blob.bin": "binary file, 6 bytes" };
 const store = createBufferStore({
-  read: async (_s, path) => disk[path] ?? null,
+  read: async (_s, path) => (unshown[path] ? { unshown: unshown[path]! } : disk[path] == null ? null : { text: disk[path]! }),
   save: async (_s, path, content) => {
     saves.push({ path, content });
     disk[path] = content;
@@ -112,6 +113,14 @@ test("a file of another filesystem is refused, not opened: the editor edits only
 test("a path that isn't a file says so", async () => {
   const v = view({ path: "nope.rs", line: null });
   await waitFor(() => expect(v.getByTestId("viz-editor-missing").textContent).toContain("nope.rs"));
+});
+
+test("a binary file says what it is instead of opening an editor", async () => {
+  const v = view({ path: "blob.bin", line: null });
+  await waitFor(() => expect(v.getByTestId("viz-editor-unshown").textContent).toContain("binary file, 6 bytes"));
+  expect(v.getByTestId("viz-editor-unshown").textContent).toContain("blob.bin");
+  expect(panes).toEqual([]);
+  expect(models.has("blob.bin")).toBe(false);
 });
 
 test("the disk changing under a draft asks; Reload takes the disk's text", async () => {
