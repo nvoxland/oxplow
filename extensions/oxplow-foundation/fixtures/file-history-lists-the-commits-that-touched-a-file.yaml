@@ -1,15 +1,17 @@
 # The commits that touched a file, newest first, with the file's change in
-# each as one phrase and the commit's short id; a limit cuts it.
+# each (the lines added in green and removed in red; created, deleted or
+# renamed said in a word, a modification by the counts alone) and the
+# commit's short id; a limit cuts it.
 given:
-  - observe: { commit: { sha: c1, at: "2026-01-01T00:00:00Z", author: ann, subject: first, files: [{ path: a.rs, status: A, additions: 1 }, { path: z.rs, status: A, additions: 1 }] } }
-  - observe: { commit: { sha: c2, at: "2026-01-02T00:00:00Z", author: bob, subject: second, files: [{ path: a.rs, status: M, additions: 2, deletions: 1 }] } }
+  - observe: { commit: { sha: c1, at: "2026-01-01T00:00:00Z", author: ann, subject: first, files: [{ path: a.rs, status: added, additions: 1 }, { path: z.rs, status: added, additions: 1 }] } }
+  - observe: { commit: { sha: c2, at: "2026-01-02T00:00:00Z", author: bob, subject: second, files: [{ path: a.rs, status: modified, additions: 2, deletions: 1 }] } }
 when: { page: oxplow-foundation/file-history, params: { path: a.rs, limit: 20 } }
 expect:
   loaders:
     file_history:
       rows:
-        - { sha: c2, short: c2, status: M, additions: 2, deletions: 1, changed: "M +2 −1" }
-        - { sha: c1, short: c1, status: A, additions: 1, deletions: 0, changed: "A +1 −0" }
+        - { sha: c2, short: c2, status: modified, change: null, additions: 2, deletions: 1, added: "+2", removed: "−1", added_tone: success, removed_tone: danger }
+        - { sha: c1, short: c1, status: added, change: created, additions: 1, deletions: 0, added: "+1", removed: "−0" }
 steps:
   - params: { limit: 1 }
     expect: { loaders: { file_history: { rows: [{ sha: c2 }] } } }

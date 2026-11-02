@@ -16,7 +16,10 @@ loaders:
     sql: |
       SELECT c.sha, substr(c.sha, 1, 7) AS short, c.committed_at, c.author, c.subject,
              f.status, f.additions, f.deletions,
-             f.status || ' +' || f.additions || ' −' || f.deletions AS changed
+             -- A modification is said by its counts alone.
+             CASE f.status WHEN 'added' THEN 'created' WHEN 'modified' THEN NULL ELSE f.status END AS change,
+             '+' || f.additions AS added, '−' || f.deletions AS removed,
+             'success' AS added_tone, 'danger' AS removed_tone
       FROM v_commit c JOIN v_commit_file f ON f.sha = c.sha
       WHERE f.path = :path
       ORDER BY c.committed_at DESC
@@ -39,6 +42,12 @@ view:
   - key: committed_at
     label: When
     format: datetime
-  - key: changed
+  - key: change
     label: Change
+  - key: added
+    label: Added
+    tone: added_tone
+  - key: removed
+    label: Removed
+    tone: removed_tone
   empty: No indexed commit touched it.
