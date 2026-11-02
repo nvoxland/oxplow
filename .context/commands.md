@@ -210,7 +210,10 @@ The window publishes its **context keys** (`CONTEXT_KEYS`, the one list):
 priority order; a command for one matches `enabledAgents =~
 /(^|,)claude(,|$)/`), `fileShown`, `pageDirty` (the page shown has unsaved edits: its Save would write them), `pageKind` (the kind of the page shown),
 `shellAvailable` (the app, not a browser window), `streamKind`
-(`primary` / `worktree`), `streamShown`, `threadShown`, `vcsEnabled`.
+(`primary` / `worktree`), `streamShown`, `threadShown`, `treeDirty` (the
+shown stream's working tree has uncommitted changes: the files the
+Uncommitted panel counts, `v_change_file` of its `working` change; the
+window reads it in `treeDirty.ts`), `vcsEnabled`.
 A command's `when` is checked where it registers — it parses, names only
 these keys, and compares each to a value of its kind (`true`/`false` for
 a boolean key; a string or a regular expression for a string key) — so a

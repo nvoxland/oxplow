@@ -1,3 +1,4 @@
+import { useTreeDirty } from "./treeDirty.js";
 import { useResourcesLoader } from "./resources.js";
 import { isWorkspaceDir } from "./workspaceFiles.js";
 import { useOpenHandoffs } from "./handoffs.js";
@@ -749,6 +750,7 @@ export function App() {
   const handleOpenPageRef = useRef<((ref: TabRef) => void) | null>(null);
   // The window's context keys: what a command's `when` reads
   // (`oxplow_domain::when::CONTEXT_KEYS`; `.context/commands.md`).
+  const treeDirty = useTreeDirty(stream?.id);
   const whenContext = useMemo<WhenContext>(
     () => ({
       streamShown: !!stream,
@@ -758,13 +760,14 @@ export function App() {
       pageDirty: !!centerActive && !!dirtyTabs[centerActive],
       pageKind: centerActive ? kindForTabId(centerActive) : "",
       vcsEnabled: !!workspaceContext.vcsEnabled,
+      treeDirty,
       shellAvailable: shellAvailable(),
       enabledAgents: harnesses
         .filter((h) => h.enabled)
         .map((h) => h.id)
         .join(","),
     }),
-    [centerActive, dirtyTabs, harnesses, selectedThread, shownFilePath, stream, workspaceContext.vcsEnabled],
+    [centerActive, dirtyTabs, harnesses, selectedThread, shownFilePath, stream, treeDirty, workspaceContext.vcsEnabled],
   );
   // Run a Git-menu mutation (pull/push) as a background task and surface
   // any failure the same way the Git Dashboard does: record an op-error

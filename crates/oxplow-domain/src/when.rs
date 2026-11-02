@@ -80,6 +80,11 @@ pub const CONTEXT_KEYS: &[ContextKey] = &[
         doc: "A thread is shown.",
     },
     ContextKey {
+        name: "treeDirty",
+        kind: KeyKind::Bool,
+        doc: "The working tree of the stream shown has uncommitted changes (the files the Uncommitted panel counts).",
+    },
+    ContextKey {
         name: "vcsEnabled",
         kind: KeyKind::Bool,
         doc: "The project is a git workspace.",
@@ -595,6 +600,16 @@ mod tests {
             let err = check(src).unwrap_err();
             assert!(err.contains(says), "{src}: {err}");
         }
+    }
+
+    /// `treeDirty` is a key (Commit Changes… is offered only on a tree with
+    /// changes), a boolean one; a misspelling of it is refused.
+    #[test]
+    fn tree_dirty_is_a_boolean_context_key() {
+        assert!(check("streamShown && vcsEnabled && treeDirty").is_ok());
+        assert!(check("treeDirty == true").is_ok());
+        assert!(check("treeDirty == 'yes'").is_err());
+        assert!(check("treeDirt").is_err());
     }
 
     #[test]

@@ -1811,7 +1811,7 @@ commands:
     summary: "Commit the stream's changes (untracked files too, unless `include_untracked: false`); returns the new revision."
     scope: vcs.write
     op: commit
-    ui: { label: "Commit Changes…", group: Git, form: "oxplow:oxplow/page?page=uncommitted-changes", when: "streamShown && vcsEnabled" }
+    ui: { label: "Commit Changes…", group: Git, form: "oxplow:oxplow/page?page=uncommitted-changes", when: "streamShown && vcsEnabled && treeDirty" }
     example: {"stream": "str1", "message": "fix: stop the login redirect loop"}
   - name: vcs.delete_branch
     summary: "Delete a branch (`force` even when unmerged)."
