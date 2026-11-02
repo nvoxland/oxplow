@@ -187,8 +187,24 @@ function NodeView(props: NodeViewProps) {
  * branch: terminals only start once their surface has a visible size. */
 function fillsNode(run: PageRun, at: RunNode): boolean {
   const def = nodeById(run.page, at.id);
-  if (def?.kind === "viz") return def.config.fills;
+  if (def?.kind === "viz") return def.config.fills || (FILLS_ALONE.has(def.config.viz) && isWholePage(run, at.id));
+  if (def?.kind === "stack" && at.children.length === 1) {
+    // A stack of one is its child's height.
+    return fillsNode(run, at.children[0]!);
+  }
   return (def?.kind === "stack" || def?.kind === "switch") && at.children.some((child) => fillsNode(run, child));
+}
+
+/** The vizzes that take the page's height when they are all of it: a
+ *  history list should not sit five rows tall in an empty page. */
+const FILLS_ALONE: ReadonlySet<string> = new Set(["table", "list", "tree", "custom"]);
+
+/** Whether node `id` is the whole of its page's body: its view, or the only
+ *  node of a view that is a stack. */
+function isWholePage(run: PageRun, id: string): boolean {
+  const view = run.page.view;
+  if (view.id === id) return true;
+  return view.kind === "stack" && view.children.length === 1 && view.children[0]!.id === id;
 }
 
 /** A node's root: where `#node=` lands. */

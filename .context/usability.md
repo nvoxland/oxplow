@@ -1355,3 +1355,8 @@ or opening a page from it hides it; widening the window resets it (`NarrowRail`)
 - **A list of things shows a name and one line, not the paragraph.** A catalog row (Explore Data's
   rail, Settings → Data's entities) says a thing's first sentence; the whole description is on the
   thing's own page (or in its expansion).
+
+- **A list, table, tree or custom component that is all of its page fills the page's height** (`PageTree`
+  `FILLS_ALONE`, `isWholePage`: the page's view, or the only node of a stack), as a file or a diff does
+  (`Viz::fills`). One among other nodes keeps its own height. Git History is the case: its commits fill
+  the page, replaced by the graph or not.
