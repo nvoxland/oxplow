@@ -9,7 +9,8 @@ params:
 loaders:
   explore_catalog:
     sql: |
-      SELECT view, owner, description, view = :dataset AS current
+      -- One line each: the first sentence. The whole paragraph is the dataset's own page.
+      SELECT view, owner, CASE WHEN instr(description, '. ') > 0 THEN substr(description, 1, instr(description, '. ')) ELSE description END AS description, view = :dataset AS current
       FROM v_dataset
       ORDER BY owner <> 'core', owner, view
 view:

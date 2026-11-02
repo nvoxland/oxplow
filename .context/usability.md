@@ -1348,3 +1348,7 @@ or opening a page from it hides it; widening the window resets it (`NarrowRail`)
 
 - A page body has the same 24 px gutter with a Details pane or without (`PAGE_GUTTER_PX` in `tabs/Page.tsx`).
 - A section keeps its gap above whatever came before it, including inside an embedded page that follows a table or tree. Only the page's first section starts flush (`oxplow-kit.css`, "Sections stack apart").
+
+- **A list of things shows a name and one line, not the paragraph.** A catalog row (Explore Data's
+  rail, Settings → Data's entities) says a thing's first sentence; the whole description is on the
+  thing's own page (or in its expansion).

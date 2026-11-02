@@ -163,7 +163,8 @@ loaders:
       ORDER BY s.extension, s.provider, s.name
   data_entities:
     sql: |
-      SELECT name, owner, kind, description FROM v_data_entity ORDER BY owner <> 'core', owner, name
+      -- One line each: the first sentence; the rest is the dataset's own page.
+      SELECT name, owner, kind, CASE WHEN instr(description, '. ') > 0 THEN substr(description, 1, instr(description, '. ')) ELSE description END AS description FROM v_data_entity ORDER BY owner <> 'core', owner, name
   data_sources:
     sql: |
       SELECT c.uri, c.extension || '/' || c.id AS collector, c.extension, c.id,

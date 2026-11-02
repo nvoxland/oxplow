@@ -1,0 +1,9 @@
+# The Explore Data rail names every dataset with one line, not its whole
+# paragraph; the paragraph is on the dataset's own page.
+when: { page: oxplow-bundled/explore-data, params: { dataset: v_dataset } }
+expect:
+  loaders:
+    explore_catalog:
+      rows:
+        contains:
+          - { view: v_dataset, description: "Datasets: every published view, as compiled at this open — core ones and each extension's." }
