@@ -105,6 +105,12 @@ describe("a declared page", () => {
     expect(pageKindIconComponent("gh/open-prs", extensions)).toBe(ICONS["git-merge"]!);
   });
 
+  test("a declared page that names no icon draws the page icon, so a list of pages has one for every row", () => {
+    expect(pageKindIconComponent("plain", extensions)).toBe(pageKindIconComponent("page"));
+    expect(pageKindIconComponent("gone", extensions)).toBeNull();
+    expect(pageKindIconComponent("off/x", extensions)).toBeNull();
+  });
+
   test("has no icon when it names none, isn't declared, or its extension is off", () => {
     expect(declaredPageIcon(extensions, "plain")).toBeNull();
     expect(declaredPageIcon(extensions, "gone")).toBeNull();

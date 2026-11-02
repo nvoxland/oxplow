@@ -98,7 +98,9 @@ export function pageKindIconComponent(kind: string, extensions: Extension[] | nu
     // An extension's resource (`resources:`) draws its declared icon.
     // A page draws the icon its page file names.
     default:
-      return resourceIcon(kind) ?? declaredPageIcon(extensions, kind);
+      // A declared page that names no icon draws the generic page's, so a
+      // list of pages (Go To, a bookmark list) has one for every row.
+      return resourceIcon(kind) ?? declaredPageIcon(extensions, kind) ?? (declaredPageOf(extensions, kind) ? Glasses : null);
   }
 }
 

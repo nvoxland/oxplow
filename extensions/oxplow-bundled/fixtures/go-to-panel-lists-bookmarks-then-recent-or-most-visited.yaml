@@ -1,5 +1,6 @@
 # The rail's Go To panel: the thread's bookmarks, then its recent (or most
-# visited) pages, each once; collapsed, the bookmarks alone.
+# visited) pages, each once and at most five; a most-visited page says how
+# often. Collapsed, the bookmarks alone.
 given:
   - { command: oxplow.bookmark.set, input: { uri: "oxplow:oxplow/page?page=git-dashboard", page_kind: git-dashboard, label: Git, scope: thread, thread: thr1 } }
   - { command: oxplow.bookmark.set, input: { uri: "oxplow:oxplow/file?path=a.rs", page_kind: file, label: a.rs, scope: project, thread: thr1 } }
@@ -8,6 +9,12 @@ given:
   - observe: { visit: { page: "oxplow:oxplow/file?path=DEV.md", kind: file, label: DEV.md, thread: thr1 } }
   - observe: { visit: { page: "oxplow:oxplow/page?page=settings", kind: settings, label: Settings, thread: thr1 } }
   - observe: { visit: { page: "oxplow:oxplow/agent_session?id=ses1", kind: agent_session, label: Claude, thread: thr1 } }
+  - observe: { visit: { page: "oxplow:oxplow/file?path=f0.rs", kind: file, label: f0.rs, thread: thr1 } }
+  - observe: { visit: { page: "oxplow:oxplow/file?path=f1.rs", kind: file, label: f1.rs, thread: thr1 } }
+  - observe: { visit: { page: "oxplow:oxplow/file?path=f2.rs", kind: file, label: f2.rs, thread: thr1 } }
+  - observe: { visit: { page: "oxplow:oxplow/file?path=f3.rs", kind: file, label: f3.rs, thread: thr1 } }
+  - observe: { visit: { page: "oxplow:oxplow/file?path=f4.rs", kind: file, label: f4.rs, thread: thr1 } }
+  - observe: { visit: { page: "oxplow:oxplow/file?path=f5.rs", kind: file, label: f5.rs, thread: thr1 } }
 when: { part: oxplow-bundled/go-to-panel, params: { thread_id: 1, mode: recent } }
 expect:
   loaders:
@@ -15,8 +22,11 @@ expect:
       rows:
         - { grp: Bookmarks, title: a.rs }
         - { grp: Bookmarks, title: Git }
-        - { grp: History, title: Settings }
-        - { grp: History, title: DEV.md }
+        - { grp: History, title: f5.rs }
+        - { grp: History, title: f4.rs }
+        - { grp: History, title: f3.rs }
+        - { grp: History, title: f2.rs }
+        - { grp: History, title: f1.rs }
 steps:
   - params: { thread_id: 1, mode: top }
     expect:
@@ -25,8 +35,11 @@ steps:
           rows:
             - { grp: Bookmarks }
             - { grp: Bookmarks }
-            - { grp: Most visited, title: DEV.md, visits: 3 }
-            - { grp: Most visited, title: Settings, visits: 1 }
+            - { grp: Most visited, title: "DEV.md · 3×" }
+            - { grp: Most visited }
+            - { grp: Most visited }
+            - { grp: Most visited }
+            - { grp: Most visited }
   - when: { part: oxplow-bundled/go-to-bookmarks, params: { thread_id: 1 } }
     expect:
       loaders:
