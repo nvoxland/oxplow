@@ -98,7 +98,9 @@ examples.
 - `badge: { loader, column? }`: a count on its nav entry from that loader's
   first row (else its row count; on a part a panel names as `count` or `badge`, the header count). `alert`: `{ min_rows: 1 }` or `{ column,
   below | above }`, with a `label`: marks the page as an alert while it fires.
-- `rail:` a second node tree drawn in the page's rail (`view-nodes.md`).
+- `rail:` a second node tree drawn first in the page's rail, under its
+  root's `title` as a group: a fact about the page as a whole, or a picker
+  (`view-nodes.md`).
 - `see_also:` related pages, drawn as "See also" in the page's rail after
   Contents: each entry is `{ page: <page id>, params? }` (a link titled with
   that page's title; `params` bind as an embed's) or `{ from: <loader> }` (a

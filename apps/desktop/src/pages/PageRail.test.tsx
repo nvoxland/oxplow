@@ -59,10 +59,23 @@ test("Reset puts a changed filter back to its default", () => {
   expect(applied).toEqual([["q", null]]);
 });
 
-test("the page's rail tree draws below its filters", () => {
+test("the page's rail tree draws first, under its title as a group, then its filters", () => {
+  const about = fakePage(node.viz("items", "items"), {
+    params: [{ name: "q", label: "Query", role: "filter", type: "text", default: null }],
+    rail: node.viz("about", "about", { columns: [{ key: "branch", label: "Branch" }] }, { title: "About" }),
+  });
+  const aboutRun = fakeRun(about, { params: { q: null }, loaders: { items: loader([], []), about: loader(["branch"], [["main"]]) } });
+  const { container } = render(<PageRail run={aboutRun} runId="run-1" onApply={() => {}} />);
+  const groups = [...container.querySelectorAll(".ox-rail-group")].map((g) => g.getAttribute("aria-label"));
+  expect(groups).toEqual(["About", "Filters"]);
+  expect(container.querySelector('[data-testid="page-rail-tree"] [data-node="about"]')?.textContent).toContain("main");
+});
+
+test("a rail tree without a title draws bare, with no group heading", () => {
   const { container } = render(<PageRail run={run} runId="run-1" onApply={() => {}} />);
   const legend = container.querySelector('[data-node="legend"]');
   expect(legend?.textContent).toContain("key-1");
+  expect([...container.querySelectorAll(".ox-rail-group")].map((g) => g.getAttribute("aria-label"))).toEqual(["Filters", "Selection"]);
 });
 
 // A filter whose options a query (or the page's own loader) lists: the

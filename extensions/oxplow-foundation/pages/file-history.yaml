@@ -37,43 +37,40 @@ loaders:
       WHERE f.path = :path AND c.sha IN (SELECT sha FROM reach)
       ORDER BY c.committed_at DESC
       LIMIT :limit
-# The branch named first, since the list is that branch's history alone; then
-# a list, as the Git dashboard's Recent Commits: the subject headlined, the
+# A list, as the Git dashboard's Recent Commits: the subject headlined, the
 # rest on a line under it, so it reads in the page's column.
 view:
-  stack:
-  - id: branch
-    title: Branch
-    hide_title: true
-    from: row
-    viz: detail
-    columns:
-    - key: branch
-      label: Branch
-  - id: commits
-    title: Commits
-    hide_title: true
-    from: file_history
-    viz: list
-    columns:
-    - key: subject
-      label: Subject
-      link:
-        kind: commit
-        from: sha
-    - key: short
-      label: Commit
-    - key: author
-      label: Who
-    - key: committed_at
-      label: When
-      format: datetime
-    - key: change
-      label: Change
-    - key: added
-      label: Added
-      tone: added_tone
-    - key: removed
-      label: Removed
-      tone: removed_tone
-    empty: No commit on this branch touched it.
+  from: file_history
+  viz: list
+  columns:
+  - key: subject
+    label: Subject
+    link:
+      kind: commit
+      from: sha
+  - key: short
+    label: Commit
+  - key: author
+    label: Who
+  - key: committed_at
+    label: When
+    format: datetime
+  - key: change
+    label: Change
+  - key: added
+    label: Added
+    tone: added_tone
+  - key: removed
+    label: Removed
+    tone: removed_tone
+  empty: No commit on this branch touched it.
+# The branch whose history this is, said in the rail: it is about the page,
+# not a section of it.
+rail:
+  id: about
+  title: About
+  from: row
+  viz: detail
+  columns:
+  - key: branch
+    label: Branch

@@ -1276,8 +1276,12 @@ no caller may bypass the bus to write to the terminal.
 A page has **one place for its controls: its rail** (`PageRail`). It
 has no toolbar, and where a control goes is not the author's to say. The
 rail stacks its groups in a fixed order, so nothing moves as values
-change: **Filters** (its filter params) and **Selection** (what a row click
-picked). **The rail is drawn only when something is in it.** A page has a
+change: the page's own **`rail:` tree** first (what the page is about, such
+as the branch a history is of, under its root's `title` as a group; bare
+without one), then **Filters** (its filter params) and **Selection** (what
+a row click picked). A fact about the page as a whole goes in the `rail:`
+tree, never in a section of the view: a section is a heading in Contents
+and a block above the body, which a one-line fact is not. **The rail is drawn only when something is in it.** A page has a
 "Details" card when it has a switch, a `filter` param, a `selection`
 param, a `rail:` node, the save-a-view form open, or a Contents of its
 own; with none, no card is drawn (a document page keeps its reading

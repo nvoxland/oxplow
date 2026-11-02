@@ -1,7 +1,9 @@
 # The `view:` tree
 
 `view:` is one node, usually a `stack`. An optional `rail:` is a second tree
-drawn in the page's rail. Every node has an `id`: unique in the page, by
+drawn first in the page's rail, under its root's `title` as a group (bare
+without one): a fact about the page as a whole (`title: About`, a `detail`
+of the branch a history is of) goes there, never in a section of `view:`. Every node has an `id`: unique in the page, by
 default its loader, embedded page, slot or component name, else `stack`,
 `stack-2`, … Give a node an `id` to point at it: `#node=<id>` in a link
 scrolls to it, and `oxplow_run_page` text prints each node under `[node

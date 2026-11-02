@@ -1,8 +1,9 @@
 /// A page file's rail, the one place its controls are
-/// (`.context/usability.md` "A page's controls are in its rail"): Filters
-/// (its filter params as kit rows, Reset when one is changed), the page's
-/// own `rail:` tree, drawn as its view is, Selection (what a row picked)
-/// and About this page (its source, and whether it is out of date).
+/// (`.context/usability.md` "A page's controls are in its rail"): the
+/// page's own `rail:` tree first (what the page is about, under its root's
+/// title as a group; bare without one), then Filters (its filter params as
+/// kit rows, Reset when one is changed), Selection (what a row picked) and
+/// About this page (its source, and whether it is out of date).
 import { useMemo } from "react";
 
 import { isDefault, OptionsSourceContext, ParamList } from "../kit/ParamControls.js";
@@ -52,8 +53,18 @@ export function PageRail({ run, runId, onApply, picked = NO_PICKED, streamId = n
     changed.length > 0
       ? { id: "page-rail-reset", label: "Reset", title: "Put every filter back to its default", run: () => changed.forEach((p) => onApply(p.name, p.default ?? null)) }
       : undefined;
+  const tree = run.rail ? <PageTree run={run} runId={runId} root={run.rail} streamId={streamId} onOpenPage={onOpenPage} onSetParam={onApply} /> : null;
   return (
     <>
+      {tree ? (
+        run.page.rail?.title ? (
+          <RailGroup title={run.page.rail.title} testId="page-rail-tree">
+            {tree}
+          </RailGroup>
+        ) : (
+          <div data-testid="page-rail-tree">{tree}</div>
+        )
+      ) : null}
       {sw ? (
         // The page's sections, each a link to it; the one in view marked.
         <RailGroup title={run.page.title} testId="page-sections">
@@ -81,7 +92,6 @@ export function PageRail({ run, runId, onApply, picked = NO_PICKED, streamId = n
           </OptionsSourceContext.Provider>
         </RailGroup>
       ) : null}
-      {run.rail ? <PageTree run={run} runId={runId} root={run.rail} streamId={streamId} onOpenPage={onOpenPage} onSetParam={onApply} /> : null}
       <RailSelection params={selections} values={run.params} picked={picked} onApply={onApply} testPrefix="page" />
     </>
   );

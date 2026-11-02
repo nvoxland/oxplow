@@ -445,8 +445,9 @@ whose loader does not return one (`viz_column_problems`). An agent reads
   declare is a load error (`component_problem`).
 - **A `slot` node** is a place other extensions mount pages at. See
   extensions-slots.md "Slots".
-- **A `rail:` tree** draws in the page's rail; a row it picks sets the
-  page's view param.
+- **A `rail:` tree** draws first in the page's rail, under its root's
+  `title` as a group (bare without one): what the page is about, such as
+  the branch a history is of. A row it picks sets the page's view param.
 
 **Columns** (`PageColumn`): `key`, `label`, `link`, `unit`, `icon`,
 `tone`, `width`, `format`, `highlight`, `select`, `expand`.
