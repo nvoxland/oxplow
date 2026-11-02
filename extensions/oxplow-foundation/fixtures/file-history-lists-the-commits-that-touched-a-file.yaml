@@ -1,9 +1,8 @@
 # The commits that touched a file, newest first, with the file's change in
 # each (the lines added in green and removed in red; created, deleted or
 # renamed said in a word, a modification by the counts alone) and the
-# commit's short id; a limit cuts it. By default only the stream's own
-# history: a commit on another branch is left out until the scope is
-# widened to every indexed branch.
+# commit's short id; a limit cuts it. Only the stream's own history, which
+# the page names by its branch: a commit on another branch is left out.
 given:
   - observe: { commit: { sha: c1, at: "2026-01-01T00:00:00Z", author: ann, subject: first, files: [{ path: a.rs, status: added, additions: 1 }, { path: z.rs, status: added, additions: 1 }] } }
   - observe: { commit: { sha: c2, at: "2026-01-02T00:00:00Z", author: bob, subject: second, parents: [c1], files: [{ path: a.rs, status: modified, additions: 2, deletions: 1 }] } }
@@ -15,6 +14,7 @@ given:
 when: { page: oxplow-foundation/file-history, params: { stream_id: 1, path: a.rs, limit: 20 } }
 expect:
   loaders:
+    row: { rows: [{ branch: main }] }
     file_history:
       rows:
         - { sha: c2, short: c2, status: modified, change: null, additions: 2, deletions: 1, added: "+2", removed: "−1", added_tone: success, removed_tone: danger }
@@ -22,5 +22,3 @@ expect:
 steps:
   - params: { stream_id: 1, path: a.rs, limit: 1 }
     expect: { loaders: { file_history: { rows: [{ sha: c2 }] } } }
-  - params: { stream_id: 1, path: a.rs, limit: 20, scope: all }
-    expect: { loaders: { file_history: { rows: [{ sha: c3 }, { sha: c2 }, { sha: c1 }] } } }

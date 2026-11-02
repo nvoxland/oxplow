@@ -1,6 +1,6 @@
-# The latest commits on the stream, newest first, cut to the limit. A commit
-# on another branch is left out until the scope is widened to every indexed
-# branch.
+# The latest commits on the stream, newest first, cut to the limit. Only the
+# stream's own history, which the page names by its branch: a commit on
+# another branch is left out.
 given:
   - observe: { commit: { sha: c1, at: "2026-01-01T00:00:00Z", author: ann, subject: first, files: [{ path: a.rs, status: added, additions: 1 }, { path: z.rs, status: added, additions: 1 }] } }
   - observe: { commit: { sha: c2, at: "2026-01-02T00:00:00Z", author: bob, subject: second, parents: [c1], files: [{ path: a.rs, status: modified, additions: 2, deletions: 1 }] } }
@@ -12,6 +12,7 @@ given:
 when: { page: oxplow-foundation/recent-commits, params: { stream_id: 1, limit: 5 } }
 expect:
   loaders:
+    row: { rows: [{ branch: main }] }
     recent_commits:
       rows:
         - { sha: c2, short: c2, author: bob, subject: second }
@@ -19,5 +20,3 @@ expect:
 steps:
   - params: { stream_id: 1, limit: 1 }
     expect: { loaders: { recent_commits: { rows: [{ sha: c2 }] } } }
-  - params: { stream_id: 1, limit: 5, scope: all }
-    expect: { loaders: { recent_commits: { rows: [{ sha: c3 }, { sha: c2 }, { sha: c1 }] } } }

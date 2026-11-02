@@ -1,15 +1,9 @@
 title: File history
-description: The commits that touched a file, newest first, on the stream's own history; the scope widens to every indexed branch. For history past the index, use `oxplow_vcs_log`.
+description: The commits that touched a file, newest first, on the stream's branch alone. For another branch or history past the index, use `oxplow_vcs_log`.
 params:
 - name: path
   label: File (a repository path)
 - name: stream_id
-- name: scope
-  type: choice
-  role: filter
-  label: Branches
-  options: [{ value: stream, label: This stream }, { value: all, label: Every indexed branch }]
-  default: stream
 - name: limit
   role: filter
   label: Commits
@@ -19,6 +13,12 @@ answers:
 - {"question":"What is the recent history of this file?","about":"oxplow/file","params":{"path":"src/lib.rs"},"skill":"oxplow-codebase"}
 - {"question":"Who has changed this file the most?","about":"oxplow/file","params":{"path":"src/lib.rs"},"skill":"oxplow-codebase"}
 loaders:
+  row:
+    sql: |
+      SELECT coalesce(s.branch, 'detached at ' || substr(s.head_sha, 1, 7)) AS branch
+      FROM v_stream s WHERE s.id = :stream_id
+    columns:
+    - key: branch
   file_history:
     sql: |
       -- The stream's history: every commit reachable from its head.
@@ -34,34 +34,46 @@ loaders:
              '+' || f.additions AS added, '−' || f.deletions AS removed,
              'success' AS added_tone, 'danger' AS removed_tone
       FROM v_commit c JOIN v_commit_file f ON f.sha = c.sha
-      WHERE f.path = :path
-        AND (:scope = 'all' OR c.sha IN (SELECT sha FROM reach))
+      WHERE f.path = :path AND c.sha IN (SELECT sha FROM reach)
       ORDER BY c.committed_at DESC
       LIMIT :limit
-# A list, as the Git dashboard's Recent Commits: the subject headlined, the
+# The branch named first, since the list is that branch's history alone; then
+# a list, as the Git dashboard's Recent Commits: the subject headlined, the
 # rest on a line under it, so it reads in the page's column.
 view:
-  from: file_history
-  viz: list
-  columns:
-  - key: subject
-    label: Subject
-    link:
-      kind: commit
-      from: sha
-  - key: short
-    label: Commit
-  - key: author
-    label: Who
-  - key: committed_at
-    label: When
-    format: datetime
-  - key: change
-    label: Change
-  - key: added
-    label: Added
-    tone: added_tone
-  - key: removed
-    label: Removed
-    tone: removed_tone
-  empty: No commit in this history touched it.
+  stack:
+  - id: branch
+    title: Branch
+    hide_title: true
+    from: row
+    viz: detail
+    columns:
+    - key: branch
+      label: Branch
+  - id: commits
+    title: Commits
+    hide_title: true
+    from: file_history
+    viz: list
+    columns:
+    - key: subject
+      label: Subject
+      link:
+        kind: commit
+        from: sha
+    - key: short
+      label: Commit
+    - key: author
+      label: Who
+    - key: committed_at
+      label: When
+      format: datetime
+    - key: change
+      label: Change
+    - key: added
+      label: Added
+      tone: added_tone
+    - key: removed
+      label: Removed
+      tone: removed_tone
+    empty: No commit on this branch touched it.

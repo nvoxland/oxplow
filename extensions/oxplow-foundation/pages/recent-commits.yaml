@@ -1,13 +1,7 @@
 title: Recent commits
-description: The newest commits on the stream's own history; the scope widens to every indexed branch. For history past the index, use `oxplow_vcs_log`.
+description: The newest commits on the stream's branch alone. For another branch or history past the index, use `oxplow_vcs_log`.
 params:
 - name: stream_id
-- name: scope
-  type: choice
-  role: filter
-  label: Branches
-  options: [{ value: stream, label: This stream }, { value: all, label: Every indexed branch }]
-  default: stream
 - name: limit
   role: filter
   label: Commits
@@ -15,6 +9,12 @@ params:
 answers:
 - {"question":"What were the latest commits on this stream?","params":{},"skill":"oxplow-codebase"}
 loaders:
+  row:
+    sql: |
+      SELECT coalesce(s.branch, 'detached at ' || substr(s.head_sha, 1, 7)) AS branch
+      FROM v_stream s WHERE s.id = :stream_id
+    columns:
+    - key: branch
   recent_commits:
     sql: |
       -- The stream's history: every commit reachable from its head.
@@ -25,25 +25,38 @@ loaders:
       )
       SELECT c.sha, substr(c.sha, 1, 7) AS short, c.committed_at, c.author, c.subject
       FROM v_commit c
-      WHERE :scope = 'all' OR c.sha IN (SELECT sha FROM reach)
+      WHERE c.sha IN (SELECT sha FROM reach)
       ORDER BY c.committed_at DESC
       LIMIT :limit
-# A list, as the Git dashboard's Recent Commits: the subject headlined, the
+# The branch named first, since the list is that branch's history alone; then
+# a list, as the Git dashboard's Recent Commits: the subject headlined, the
 # rest on a line under it, so it reads in the page's column.
 view:
-  from: recent_commits
-  viz: list
-  columns:
-  - key: subject
-    label: Subject
-    link:
-      kind: commit
-      from: sha
-  - key: short
-    label: Commit
-  - key: author
-    label: Who
-  - key: committed_at
-    label: When
-    format: datetime
-  empty: No commit in this history.
+  stack:
+  - id: branch
+    title: Branch
+    hide_title: true
+    from: row
+    viz: detail
+    columns:
+    - key: branch
+      label: Branch
+  - id: commits
+    title: Commits
+    hide_title: true
+    from: recent_commits
+    viz: list
+    columns:
+    - key: subject
+      label: Subject
+      link:
+        kind: commit
+        from: sha
+    - key: short
+      label: Commit
+    - key: author
+      label: Who
+    - key: committed_at
+      label: When
+      format: datetime
+    empty: No commit on this branch.
