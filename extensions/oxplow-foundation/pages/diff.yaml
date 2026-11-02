@@ -1,6 +1,6 @@
 title: Diff
 description: "One file between two revisions, filling the page: the diff, and what other extensions add under the header."
-label: '{{param.path}} ({{param.label}})'
+label: '{{param.path|basename}} ({{param.label}})'
 icon: git-compare
 params:
 - name: path

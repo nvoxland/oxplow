@@ -41,7 +41,7 @@ import { showToast } from "./components/toastStore.js";
 import { awaitGitOp, opErrorOf } from "./git-op.js";
 import { UndoToastStack } from "./components/UndoToast.js";
 import { identityOf, keyOf, pageUri, paramOf, parseUri, typeOf } from "./uri/uri.js";
-import { shellView, tabLabel } from "./pages/renderers.js";
+import { shellView, tabHint, tabLabel } from "./pages/renderers.js";
 import { chooseRenderer, chooseRoute } from "./pages/pageFiles.js";
 import { drawnByRenderer, renderersCache, useRenderers } from "./pages/useRenderers.js";
 import type { Extension } from "./tauri-bridge/generated/bindings.js";
@@ -1685,6 +1685,7 @@ export function App() {
     const pageFileTab = (file: PageFile, ref: TabRef, nav: SlotNav, resource: Record<string, SqlCell>, renders: string | null): CenterTab => ({
       id: ref.id,
       label: tabLabel(file, resource),
+      hint: tabHint(file, resource),
       closable: true,
       ...(file.pinned ? { pinned: true } : {}),
       render: () => (

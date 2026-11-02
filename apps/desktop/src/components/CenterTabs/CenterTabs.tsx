@@ -16,6 +16,9 @@ export interface CenterTab {
    *  whose params changed stays mounted); `id` otherwise. */
   key?: string;
   label: string;
+  /** What hovering the tab says, when it is more than the label (a file's
+   *  whole path, where the label is its name). */
+  hint?: string;
   closable: boolean;
   /** Pinned: it leads the strip, isn't dragged or dropped on, and the
    *  bulk closes ("Close Other Tabs") skip it (an agent session's tab). */
@@ -344,7 +347,7 @@ export function CenterTabs({ tabs, activeId, onActivate, onClose, header, onReor
                 />
               )}
               <span
-                title={tab.label}
+                title={tab.hint ?? tab.label}
                 style={{
                   maxWidth: 180,
                   overflow: "hidden",
@@ -555,7 +558,7 @@ function OverflowPanel({ tabs, activeId, anchorRef, onActivate, onClose, onDismi
             }}
           >
             {tab.agentStatus ? <AgentStatusDot status={tab.agentStatus} question={tab.question} /> : null}
-            <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={tab.label}>
+            <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={tab.hint ?? tab.label}>
               {tab.dirty ? "● " : ""}
               {tab.label}
             </span>

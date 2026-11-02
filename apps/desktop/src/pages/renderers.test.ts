@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import type { Page, Renderer } from "../tauri-bridge/generated/bindings.js";
 import { fakePage, node } from "./testing/fakeRun.js";
-import { RENDERER_VIEW_KEY, pageView, pickRenderer, shellView, tabLabel, withRenderedParams } from "./renderers.js";
+import { RENDERER_VIEW_KEY, pageView, pickRenderer, shellView, tabHint, tabLabel, withRenderedParams } from "./renderers.js";
 
 const page = (id: string, more: Partial<Page> = {}): Page =>
   fakePage(node.markdown("v", ""), { id, extension: "oxplow-foundation", slug: id, title: id, ...more });
@@ -93,4 +93,13 @@ test("labelRow is a page run's first loader's first row; a page file's label fil
   expect(tabLabel(pf, run.params, labelRow(run))).toBe("Fix it (abcdef1)");
   expect(labelRow({ ...run, loaders: { commit: loader(["subject"], []) } })).toBeNull();
   expect(labelRow({ ...run, page: { ...pf, loaders: [] } })).toBeNull();
+});
+
+// A tab named by a file's basename says the whole path on hover.
+test("a tab whose label is a path's basename hovers as the whole path", () => {
+  const diff = { label: "{{param.path|basename}} ({{param.label}})", title: "Diff" };
+  expect(tabHint(diff, { path: "crates/a/src/lib.rs", label: "Working tree" })).toBe("crates/a/src/lib.rs");
+  expect(tabHint(diff, {})).toBeUndefined();
+  expect(tabHint({ label: "{{param.path}}", title: "Raw" }, { path: "a/b.rs" })).toBeUndefined();
+  expect(tabHint({ label: null, title: "Plain" }, { path: "a/b.rs" })).toBeUndefined();
 });

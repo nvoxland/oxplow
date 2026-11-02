@@ -117,6 +117,8 @@ Where it lives, and what is loaded:
 - `label` is the tab's name: `{{param.x}}` and `{{row.col}}` (the first
   authored loader's first row, else `content`'s), filters `|short`, `|basename`, `|url`. Any other
   `{{…}}` is refused (`label_refs`).
+  A label that shortens a path with `{{param.x|basename}}` (Editor, Directory, Diff) is
+  also the tab's hover: the whole path (`tabHint`, `CenterTab.hint`).
   Check warns (`page.label_column`) when a `{{row.col}}` names a column the
   first loader's dry run doesn't return: a loader reads only the ones declared
   before it, so that loader can't move; it returns the column instead.

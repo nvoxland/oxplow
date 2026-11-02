@@ -127,6 +127,14 @@ export function tabLabel(
   return filled.trim() || page.title;
 }
 
+/** What a tab says on hover when its label shortens a path to the file's
+ *  name (`{{param.path|basename}}`): the whole path. */
+export function tabHint(page: Pick<Page, "label" | "title">, params: Record<string, unknown>): string | undefined {
+  const named = /\{\{\s*param\.([a-z0-9_]+)\s*\|\s*basename\s*\}\}/.exec(page.label ?? "");
+  const v = named ? params[named[1]!] : undefined;
+  return typeof v === "string" && v !== "" ? v : undefined;
+}
+
 /** The row a page file's `{{row.*}}` reads: its first declared loader's
  *  first row, by column; null before that loader has a row. */
 export function labelRow(run: PageRun): Record<string, SqlCell> | null {
