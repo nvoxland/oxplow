@@ -8,7 +8,7 @@ import { recordOpError } from "./opErrors.js";
 import { showToast } from "./components/toastStore.js";
 import { needsConfirmation } from "./ipc-error.js";
 import type { CommandOutcome } from "./tauri-bridge/generated/bindings.js";
-import { doneMessage, resultUri, undoneMessage } from "./commandToast.js";
+import { ranMessage, resultUri, undoneMessage } from "./commandToast.js";
 
 export interface PendingCommand {
   label: string;
@@ -37,10 +37,10 @@ export function createPersonCommands(deps: PersonCommandDeps) {
   /** The run's outcome — `null` when it failed, or waits for the
    *  person's confirmation (truthy exactly when it ran). */
   // Taking a toast's Undo: the run undone, as the person (tsk975).
-  const undo = async (label: string, auditId: number) => {
+  const undo = async (label: string, auditId: number, result?: unknown) => {
     try {
       await deps.undo(auditId);
-      deps.toast(undoneMessage(label));
+      deps.toast(undoneMessage(label, result));
     } catch (e) {
       deps.recordError(`Undo ${label}`, e instanceof Error ? e.message : String(e));
     }
@@ -53,8 +53,8 @@ export function createPersonCommands(deps: PersonCommandDeps) {
       const auditId = out.inverse && out.audit_id != null ? out.audit_id : null;
       const uri = resultUri(out.result);
       deps.toast(
-        doneMessage(p.label),
-        auditId === null ? undefined : () => void undo(p.label, auditId),
+        ranMessage(p.label, out.result),
+        auditId === null ? undefined : () => void undo(p.label, auditId, out.result),
         uri && deps.openPage ? () => deps.openPage?.(uri) : undefined,
       );
       return out;

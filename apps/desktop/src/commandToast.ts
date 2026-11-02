@@ -23,7 +23,27 @@ export function resultUri(result: unknown): string | null {
   return typeof uri === "string" && uri !== "" ? uri : null;
 }
 
-/** The toast for a command taken back with Undo. */
-export function undoneMessage(label: string): string {
-  return `Undone: ${plain(label)}`;
+/** The commit a command's result names (`rev`), when it made one. */
+function committedRev(result: unknown): string | null {
+  const rev = (result as { rev?: unknown } | null | undefined)?.rev;
+  return typeof rev === "string" && rev !== "" ? rev : null;
+}
+
+/** The toast for a commit: which one. */
+export function committedMessage(rev: string): string {
+  return `✓ Committed ${rev.slice(0, 7)}`;
+}
+
+/** The toast for a run, by its label; a run that made a commit names it. */
+export function ranMessage(label: string, result: unknown): string {
+  const rev = committedRev(result);
+  return rev === null ? doneMessage(label) : committedMessage(rev);
+}
+
+/** The toast for a command taken back with Undo; a commit's says where the
+ *  changes went. */
+export function undoneMessage(label: string, result?: unknown): string {
+  return committedRev(result) === null
+    ? `Undone: ${plain(label)}`
+    : "Commit undone: the changes are back in the working tree";
 }

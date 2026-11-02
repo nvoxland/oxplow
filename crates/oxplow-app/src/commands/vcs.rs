@@ -925,6 +925,40 @@ mod tests {
         );
     }
 
+    /// A commit made from a page's form (the Uncommitted page's, as the
+    /// page acting for the person) comes back undoable too, and the person
+    /// can undo it.
+    #[tokio::test]
+    async fn a_commit_a_page_makes_for_the_person_is_undoable() {
+        let f = services_with_effort().await;
+        let svc = &f.svc;
+        let root = svc.layout.project_dir.clone();
+        std::fs::write(root.join("a.txt"), "one\n").unwrap();
+        let base = commit_all(&root, "base");
+        let stream = svc.stream_store.list().await.unwrap()[0].id.to_string();
+        std::fs::write(root.join("a.txt"), "two\n").unwrap();
+        let page = Actor::Page {
+            page_id: "oxplow-foundation/uncommitted-changes#commit".into(),
+            on_behalf_of: Box::new(Actor::Human),
+        };
+        let out = svc
+            .commands
+            .run(
+                &page,
+                "oxplow.vcs.commit",
+                json!({ "stream": stream, "message": "work" }),
+                false,
+            )
+            .await
+            .unwrap();
+        assert!(out.inverse.is_some(), "a page's commit is undoable");
+        svc.commands
+            .undo(&Actor::Human, out.audit_id.unwrap(), true)
+            .await
+            .expect("the person undoes it");
+        assert_eq!(git(&root, &["rev-parse", "HEAD"]), base);
+    }
+
     #[tokio::test]
     async fn a_first_commit_has_no_inverse() {
         let f = services_with_effort().await;
@@ -948,7 +982,8 @@ mod tests {
     }
 
     /// Undo is refused, and changes nothing, once something is committed
-    /// on top, once a remote holds the commit, or mid-merge.
+    /// on top, once a remote holds the commit, when the tree has other
+    /// changes, or mid-merge.
     #[tokio::test]
     async fn undoing_a_commit_is_refused_when_it_moved_on_was_pushed_or_is_mid_merge() {
         let f = services_with_effort().await;
@@ -994,8 +1029,14 @@ mod tests {
         let sha = git(&root, &["rev-parse", "HEAD"]);
         git(&root, &["update-ref", "refs/remotes/origin/main", &sha]);
         refused(third, "was pushed").await;
-        // Mid-merge.
         git(&root, &["update-ref", "-d", "refs/remotes/origin/main"]);
+        // Changes in the tree since: a soft reset would mix them with the
+        // commit's own in the index.
+        let dirty = commit("four and a half\n").await;
+        std::fs::write(root.join("other.txt"), "mine\n").unwrap();
+        refused(dirty, "has changes").await;
+        std::fs::remove_file(root.join("other.txt")).unwrap();
+        // Mid-merge.
         let fourth = commit("five\n").await;
         let head = git(&root, &["rev-parse", "HEAD"]);
         std::fs::write(root.join(".git/MERGE_HEAD"), format!("{head}\n")).unwrap();

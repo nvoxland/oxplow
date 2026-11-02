@@ -100,7 +100,8 @@ pub fn commit(repo: &Path, message: &str, include_untracked: bool) -> std::io::R
 /// (index and working tree untouched). Refused, with nothing changed,
 /// when the head is no longer `sha`, `parent` isn't its parent, a remote
 /// branch holds the commit (it was pushed), or the repository is
-/// mid-merge, rebase, cherry-pick or revert.
+/// mid-merge, rebase, cherry-pick or revert, or the working tree has
+/// changes (they would be staged with the commit's).
 pub fn uncommit(repo: &Path, sha: &str, parent: &str) -> Result<(), String> {
     let io = |e: std::io::Error| e.to_string();
     if let Some(op) = crate::conflict::get_repo_conflict_state(repo).operation {
@@ -120,6 +121,15 @@ pub fn uncommit(repo: &Path, sha: &str, parent: &str) -> Result<(), String> {
     }
     if !remote.stdout.trim().is_empty() {
         return Err("the commit was pushed (a remote branch holds it); revert it instead".into());
+    }
+    // The commit's changes come back staged; any other change in the tree
+    // would be staged with them and could not be told apart.
+    let status = run(&["status", "--porcelain"], repo).map_err(io)?;
+    if !status.success {
+        return Err(status.stderr.trim().to_string());
+    }
+    if !status.stdout.trim().is_empty() {
+        return Err("the working tree has changes since; commit or discard them first".into());
     }
     let reset = run(&["reset", "--soft", parent], repo).map_err(io)?;
     if reset.success {

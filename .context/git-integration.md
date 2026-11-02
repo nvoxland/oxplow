@@ -468,7 +468,12 @@ invoked as a separate binary, never linked as a library.
   `include_untracked`) then `git commit -m`. Only the Files panel and the
   uncommitted-changes page run it; no MCP tool commits. Its result carries an
   inverse, `oxplow.vcs.uncommit` (soft reset to the prior head, changes stay
-  staged; refused once pushed, built on, or mid-merge), so the toast offers Undo.
+  staged; refused, nothing changed, once pushed, built on, mid-merge, or when
+  the working tree has other changes — they would be staged with the commit's),
+  so the toast offers Undo: "✓ Committed <sha7>" and, after the Undo, "Commit
+  undone: the changes are back in the working tree" (`commandToast.ts`
+  `ranMessage` / `undoneMessage`, used by a form, a page action and a menu
+  command alike; a form's Undo confirms like the others').
 - Push, pull, fetch, merge and rebase are long: the desktop runs each
   command inside a `BackgroundTaskStore` row (`runAsBackgroundTask` in
   `api.ts`) so the bottom-bar `BackgroundTaskIndicator` shows progress.

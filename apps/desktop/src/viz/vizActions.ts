@@ -6,7 +6,7 @@
 import { fieldsOf, secretFields, shownFields, type Field } from "../components/SchemaForm/schemaFormModel.js";
 import { IpcCallError, needsConfirmation } from "../ipc-error.js";
 import type { CommandOutcome, Drop, FormStart, PageAction, VizRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
-import { doneMessage, resultUri } from "../commandToast.js";
+import { ranMessage, resultUri } from "../commandToast.js";
 
 export interface VizActionDeps {
   /** Press it on the page run the viz is in. */
@@ -107,7 +107,7 @@ export async function performVizAction(
     const auditId = outcome.inverse && outcome.audit_id != null ? outcome.audit_id : null;
     const uri = resultUri(outcome.result);
     deps.toast(
-      doneMessage(action.label),
+      ranMessage(action.label, outcome.result),
       auditId === null ? undefined : () => void deps.undo(auditId).catch((e: unknown) => deps.recordError(`Undo ${action.label}`, e instanceof Error ? e.message : String(e))),
       uri === null ? undefined : () => deps.openPage(uri, false),
     );

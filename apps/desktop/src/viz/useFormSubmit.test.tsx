@@ -39,3 +39,16 @@ test("a run that can't be undone just says it's done", async () => {
   await act(() => result.current.submit({}, false));
   expect(toasts[0]?.onUndo).toBeUndefined();
 });
+
+test("a commit's toast names the commit; its Undo says the changes are back", async () => {
+  const commit = { result: { rev: "0123456789abcdef" }, audit_id: 9, event_id: null, inverse: {} } as unknown as CommandOutcome;
+  const { result } = renderHook(() => useFormSubmit("Commit", async () => commit, () => {}));
+  await act(() => result.current.submit({}, false));
+  expect(toasts[0]?.message).toBe("✓ Committed 0123456");
+  await act(async () => {
+    toasts[0]!.onUndo!();
+    await new Promise((r) => setTimeout(r, 0));
+  });
+  expect(undone).toEqual([9]);
+  expect(toasts.at(-1)?.message).toBe("Commit undone: the changes are back in the working tree");
+});

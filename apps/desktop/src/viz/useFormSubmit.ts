@@ -5,7 +5,7 @@ import { showToast } from "../components/toastStore.js";
 import { fieldErrors, needsConfirmation } from "../ipc-error.js";
 import { recordOpError } from "../opErrors.js";
 import { undoCommand } from "../api.js";
-import { doneMessage, resultUri } from "../commandToast.js";
+import { ranMessage, resultUri, undoneMessage } from "../commandToast.js";
 import { openPersonUri } from "../personCommands.js";
 
 /** A form submitted, as `FormViz` and `ActionForm` both submit one: the
@@ -30,7 +30,7 @@ export function useFormSubmit(
       // does (the person's click on Undo is their confirmation of it).
       const auditId = outcome.inverse && outcome.audit_id != null ? outcome.audit_id : null;
       showToast({
-        message: doneMessage(label),
+        message: ranMessage(label, outcome.result),
         ...(resultUri(outcome.result) === null
           ? {}
           : {
@@ -46,9 +46,11 @@ export function useFormSubmit(
           ? {}
           : {
               onUndo: () =>
-                void undoCommand(auditId, true).catch((e: unknown) =>
-                  recordOpError({ label: `Undo ${label}`, message: e instanceof Error ? e.message : String(e) }),
-                ),
+                void undoCommand(auditId, true)
+                  .then(() => showToast({ message: undoneMessage(label, outcome.result) }))
+                  .catch((e: unknown) =>
+                    recordOpError({ label: `Undo ${label}`, message: e instanceof Error ? e.message : String(e) }),
+                  ),
             }),
       });
       onDone(outcome);
