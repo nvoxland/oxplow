@@ -121,14 +121,14 @@ export function TerminalViz({ run, onSetParam }: { run: VizRun; onSetParam?(name
       ) : null}
       <div style={{ position: "relative", flex: 1, minWidth: 0, minHeight: 0 }}>
         {list.length === 0 ? (
-          <p className="ox-empty-line" data-testid="viz-terminal-empty">
-            {opening ? "Opening a terminal…" : "No terminal is open."}{" "}
+          <div data-testid="viz-terminal-empty">
+            <p className="ox-empty-line">{opening ? "Opening a terminal…" : "No terminal is open."}</p>
             {opening ? null : (
-              <button type="button" className="ox-link" data-testid="terminal-new" onClick={open}>
+              <button type="button" className="ox-button" style={{ marginTop: "var(--space-2)" }} data-testid="terminal-new" onClick={open}>
                 New Terminal
               </button>
             )}
-          </p>
+          </div>
         ) : null}
         {list.map((r) => (
           <div

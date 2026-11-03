@@ -1357,10 +1357,9 @@ Delete with `delete`. Rows show the list's editable enum fields (oxplow's
 priority). There's no Archived page: oxplow's archived tasks are done or
 canceled, as the interface states them.
 
-The pages reuse the shared `<Card>` + `cardLinkButton` from
-`apps/desktop/src/components/Card.tsx` for cross-page "View X →" affordances;
-GitDashboardPage uses the same shell so the dashboard vocabulary is
-consistent across IA.
+The pages reuse the shared `<Card>` from
+`apps/desktop/src/components/Card.tsx`; GitDashboardPage uses the same
+shell so the dashboard vocabulary is consistent across IA.
 
 Named ref helpers — `tasksRef()`, `doneWorkRef()`,
 `backlogRef()` — mirror the GitDashboard pattern

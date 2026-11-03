@@ -110,6 +110,18 @@ test("a stream with none opens one, once", async () => {
   expect(commands.length).toBe(1);
 });
 
+// With no terminal left, New Terminal is a button under the line (it
+// creates one), not a word in it.
+test("an empty page offers New Terminal as a button that opens one", async () => {
+  const v = view(runOf([]));
+  await waitFor(() => expect(commands.length).toBe(1));
+  const button = await waitFor(() => v.getByTestId("terminal-new"));
+  expect(button.className).toContain("ox-button");
+  fireEvent.click(button);
+  await waitFor(() => expect(commands.length).toBe(2));
+  expect(commands[1]).toEqual(["oxplow.terminal.open", { stream: "str1" }]);
+});
+
 test("the strip's Close runs the viz's close action on that row", async () => {
   const v = view(runOf([[A, "One", "trm1"], [B, "Two", "trm2"]]));
   fireEvent.click(v.getByTestId("terminal-tab-expand"));

@@ -230,6 +230,13 @@ markdown itself, nor edits it in a `<textarea>`.
   (`useAlertToasts`; what's there in the first seconds after the app opens
   counts as seen) and offers only **Review** — never Approve: consent is
   given where the preview is. A badge's Review opens the panel's page.
+- **A link goes somewhere; a button does something.** A control that
+  opens a page (Review, a fact's link, "Choose a model in Settings") is
+  drawn as a link (`ox-link`). One that changes something (Clear in the
+  dock panels and the rail's Selection, New Terminal on the empty
+  Terminal page) is the shared `ox-button`, never a link. Two quiet
+  exceptions: a disclosure ("More (n)", a row's fold) and a heading-corner
+  action (the Filters group's Reset) stay text.
 - **Async-op failures don't `alert`.** Record them:
   `recordOpError({ label, command?, stderr?, stdout?, exitCode?,
   message? })` (`opErrors.ts`) reports it to the daemon, fire-and-forget,

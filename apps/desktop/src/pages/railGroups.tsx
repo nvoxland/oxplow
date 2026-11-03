@@ -54,7 +54,7 @@ export function RailSelection({
         return (
           <div key={p.name} data-testid={`${testPrefix}-selection-${p.name}`}>
             <Facts facts={facts.map((f, i) => ({ key: String(i), label: f.label, value: f.text }))} />
-            <button type="button" className="ox-link ox-params-more" data-testid={`${testPrefix}-selection-${p.name}-clear`} onClick={() => onApply(p.name, null)}>
+            <button type="button" className="ox-button" style={{ marginTop: "var(--space-1)" }} data-testid={`${testPrefix}-selection-${p.name}-clear`} onClick={() => onApply(p.name, null)}>
               Clear
             </button>
           </div>

@@ -1,4 +1,4 @@
-import type { CSSProperties, ReactNode } from "react";
+import type { ReactNode } from "react";
 
 /**
  * Generic card shell — bordered, padded section with a header row that
@@ -39,18 +39,3 @@ export function Card({
     </section>
   );
 }
-
-/**
- * Inline link-style button, used for "View X →" cross-page navigation
- * in card headers and mini-cards. Shared by Git Dashboard, Plan Work,
- * Done Work, etc. so the cross-link affordance reads the same
- * everywhere.
- */
-export const cardLinkButton: CSSProperties = {
-  padding: 0,
-  background: "transparent",
-  border: "none",
-  color: "var(--text-link, #2563eb)",
-  fontSize: "var(--text-xs)",
-  cursor: "pointer",
-};

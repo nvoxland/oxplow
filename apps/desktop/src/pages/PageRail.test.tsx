@@ -78,6 +78,17 @@ test("a rail tree without a title draws bare, with no group heading", () => {
   expect([...container.querySelectorAll(".ox-rail-group")].map((g) => g.getAttribute("aria-label"))).toEqual(["Filters", "Selection"]);
 });
 
+// A picked row's Clear drops the value: it acts, so it is a button, not a link.
+test("the Selection group's Clear is a button that drops the pick", () => {
+  const applied: [string, SqlCell][] = [];
+  const pickedRun = fakeRun(page, { params: { uri: "x", picked: "row-1" }, loaders: { items: loader([], []), legend: loader(["k"], [["key-1"]]) } });
+  const view = render(<PageRail run={pickedRun} runId="run-2" onApply={(name, value) => applied.push([name, value])} />);
+  const clear = view.getByTestId("page-selection-picked-clear");
+  expect(clear.className).toContain("ox-button");
+  fireEvent.click(clear);
+  expect(applied).toEqual([["picked", null]]);
+});
+
 // A filter whose options a query (or the page's own loader) lists: the
 // daemon resolves it for this page and param with the run's values, and
 // the rows' `value`, `label` and `group` are the options.
