@@ -39,13 +39,14 @@ view:
     title: Notices
     description: 'Things oxplow noticed about the work and tells you rather than an agent, such as a hint it muted for an agent after it kept firing. Nothing to do but read: Dismiss one from its right-click, or Clear notices.'
     from: notices
-    viz: list
+    viz: table
     columns:
     - key: message
       label: Notice
       expand: oxplow-foundation/alerts-notice
     - key: thread
       label: Thread
+      width: 160
       link:
         kind: page
         from: thread_uri
