@@ -4541,6 +4541,36 @@ mod tests {
         assert!(err.contains("`when` is for a row action"), "{err}");
     }
 
+    /// `all: true` is a whole-viz action over every row the viz shows (a
+    /// Clear): the app offers it only while there are rows. A row, group,
+    /// drag or edit action acts on one row, so it can't be `all`.
+    #[test]
+    fn all_is_a_whole_viz_action_over_the_rows() {
+        let parse = |action: &str| {
+            parse_actions(
+                vec![serde_yaml::from_str(action).unwrap()],
+                &[],
+                true,
+                false,
+            )
+        };
+        let ok = parse("{ id: clear, label: Clear, command: x.y.z, all: true }").unwrap();
+        assert!(ok[0].all && !ok[0].row && !ok[0].one_row);
+        assert!(!parse("{ id: a, label: A, command: x.y.z }").unwrap()[0].all);
+        for action in [
+            "{ id: a, label: A, command: x.y.z, all: true, row: true }",
+            "{ id: a, label: A, command: x.y.z, all: true, group: x }",
+            "{ id: a, label: A, command: x.y.z, all: true, drag: true }",
+            "{ id: a, label: A, command: x.y.z, all: true, edit: true }",
+        ] {
+            let err = parse(action).unwrap_err();
+            assert!(
+                err.contains("`all` is for a whole-viz action"),
+                "{action}: {err}"
+            );
+        }
+    }
+
     /// A viz that holds one row (detail, form, markdown) — and a page's
     /// own actions, over its first loader's row — lets an action that isn't
     /// a row action name `when` and `{{row.*}}`: that one row. Derived at

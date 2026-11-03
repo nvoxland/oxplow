@@ -709,14 +709,18 @@ describe("foldEmpty", () => {
     expect(shown.map((r) => r.run!.config.viz)).toEqual(["form"]);
     expect(empty.map((r) => r.run!.config.viz)).toEqual(["table"]);
   });
-  test("an empty list with a button above it (an Add) is shown; one with only row actions folds", () => {
-    const withActions = (actions: Array<{ row: boolean; group: string | null }>) => ({
+  test("an empty list with a button under it (an Add) is shown; one with only row actions, or a button over all its rows (a Clear), folds", () => {
+    const withActions = (actions: Array<{ row: boolean; group: string | null; all?: boolean }>) => ({
       run: { config: { viz: "table", actions }, result: { rows: [] } } as unknown as import("../tauri-bridge/generated/bindings.js").VizRun,
       error: null,
     });
-    const { shown, empty } = foldEmpty([withActions([{ row: false, group: null }]), withActions([{ row: true, group: null }])]);
+    const { shown, empty } = foldEmpty([
+      withActions([{ row: false, group: null }]),
+      withActions([{ row: true, group: null }]),
+      withActions([{ row: true, group: null }, { row: false, group: null, all: true }]),
+    ]);
     expect(shown).toHaveLength(1);
-    expect(empty).toHaveLength(1);
+    expect(empty).toHaveLength(2);
   });
 });
 

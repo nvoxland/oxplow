@@ -1317,6 +1317,12 @@ pub struct PageAction {
     /// itself, and only while the viz has exactly one.
     #[serde(default)]
     pub one_row: bool,
+    /// A whole-viz action over every row the viz shows (a Clear, a Mark
+    /// all seen): the app offers it only while there are rows, and an
+    /// empty viz with no other button folds away. Declared (`all: true`),
+    /// never on a row, group, drag or edit action.
+    #[serde(default)]
+    pub all: bool,
 }
 
 /// The `{{param.x}}` / `{{row.x}}` placeholders in `input`, as
@@ -1404,6 +1410,10 @@ pub(crate) struct ActionFile {
     /// bound to `{{row.<the text column>}}`.
     #[serde(default)]
     edit: bool,
+    /// A whole-viz action over every row the viz shows: offered only
+    /// while there are rows.
+    #[serde(default)]
+    all: bool,
 }
 
 /// The keys a row list keeps for itself: an action can't take one.
@@ -1551,6 +1561,12 @@ pub(crate) fn parse_actions(
         if f.when.is_some() && !(f.row || f.drag || holds_one_row) {
             return Err(format!(
                 "actions: `{}`: `when` is for a row action (`row: true`), or a viz that holds one row (detail, form, markdown, a document's row)",
+                f.id
+            ));
+        }
+        if f.all && (f.row || f.drag || f.edit || f.group.is_some()) {
+            return Err(format!(
+                "actions: `{}`: `all` is for a whole-viz action over every row (no `row`, `group`, `drag` or `edit`)",
                 f.id
             ));
         }
@@ -1766,6 +1782,7 @@ pub(crate) fn parse_actions(
             edit: f.edit,
             edit_field,
             one_row,
+            all: f.all,
         });
     }
     Ok(out)

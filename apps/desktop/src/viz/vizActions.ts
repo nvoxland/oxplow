@@ -71,6 +71,7 @@ export function truthyCell(v: SqlCell | undefined): boolean {
  *  reads and checks the same row when it runs. */
 export function offeredWholePage(action: PageAction, result: Pick<VizRun["result"], "columns" | "rows">): boolean {
   if (action.row || action.group || action.edit) return false;
+  if (action.all) return result.rows.length > 0;
   if (!action.oneRow) return true;
   if (result.rows.length !== 1) return false;
   return actionOffered(action, rowRecord(result.columns, result.rows[0]!));

@@ -223,12 +223,17 @@ markdown itself, nor edits it in a `<textarea>`.
   (the `alerts` page, the foundation's): Needs your
   decision (each proposal's card, Approve / Decline), Notices (hints
   raised to the person: each by its first line, expanding into the whole
-  text, with its thread's work page as a link; Dismiss on the row's
-  right-click, Clear notices for all),
+  text, with its thread's work page as a link and when it was raised;
+  Dismiss on the row's right-click, Clear notices for all),
   Failed operations (each opening into how it ended), Undelivered events
-  and Failed reactions with Retry / Discard (`oxplow.delivery.*`,
-  `oxplow.effect.retry`, as page actions that ask first), and Extensions
-  with problems. A firing panel badge is the panel's own: it is not on the
+  (consumer, event type, tries, when, error: columns, not a sentence; the
+  event's own id stays out of sight, the row carries it for Retry) and
+  Failed reactions (effect, event type, tries, when, why) with Retry /
+  Discard (`oxplow.delivery.*`, `oxplow.effect.retry`, as page actions
+  that ask first), and Extensions with problems. Every table of things
+  that happened has a When column. A Clear… button is a button over all
+  the rows (`all: true`, extensions-pages.md): it is absent while there is
+  nothing to clear, as the dock's Clear is. A firing panel badge is the panel's own: it is not on the
   page and the bell does not count it. A toast announces each new item once
   (`useAlertToasts`; what's there in the first seconds after the app opens
   counts as seen) and offers only **Review** — never Approve: consent is

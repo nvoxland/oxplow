@@ -71,6 +71,7 @@ export function fakeAction(over: Partial<PageAction> & { id: string }): PageActi
     edit: false,
     editField: null,
     oneRow: false,
+    all: false,
     ...over,
   } as PageAction;
 }

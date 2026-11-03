@@ -23,9 +23,12 @@ The page YAML: metadata, params, loaders, view nodes, actions, checks, custom co
   found: Duplication, Co-change Surprises, …" (`foldEmpty` in
   `viz/vizModel.ts` and `emptySections` in `pages/PageTree.tsx`), so a
   page never ends in a run of headings over "No X." lines. A viz with a
-  whole-viz action (a Clear…) keeps its section: the action is there to
-  press. Those buttons close the section, under its rows, never over
-  them (`PartButtons`). The effort page opens with its
+  whole-viz button that needs no rows (an Add, a New…) keeps its section:
+  the button is there to press. One over every row it shows (`all:
+  true`: a Clear, a Mark all seen) is offered only while there are rows
+  (`offeredWholePage`), so an empty viz with only such buttons folds like
+  one with none. Those buttons close the section, under its rows, never
+  over them (`PartButtons`). The effort page opens with its
   **verdict** above the slots: the `effort.verdict` replacement target
   (extensions-slots.md "Replacements"), which core leaves empty — what counts as tested,
   covered or backed is a review policy's. oxplow-bundled's
@@ -541,7 +544,7 @@ usability.md "Keyboard").
 ### Actions
 
 `actions:` on a page or a viz node: `{ id, label, command | open, input, row?,
-group?, form?, fixed?, fields?, about?, choices?, then?, when?, primary?,
+group?, all?, form?, fixed?, fields?, about?, choices?, then?, when?, primary?,
 prominent?, submenu?, icon?, drag?, bulk?, key?, edit?, confirm? }` (`PageAction`).
 `input` binds `{{param.x}}` and, on a row action, `{{row.x}}`
 (`{{row.x|json}}`: the JSON a text cell holds, typed; the one filter,
@@ -550,6 +553,12 @@ reads the page's first loader's one row. A drag action also binds
 `{{before.x}}`, `{{after.x}}`, `{{onto.x}}`, `{{group.value}}`, and
 `{{order.x}}` (a list of column `x` in the new order).
 
+- **`all: true` is a whole-viz action over every row the viz shows** (a
+  Clear, an Enable All): the app offers its button only while the viz has
+  rows, and an empty viz with no other button folds away (above). It is
+  not a row, group, drag or edit action (`parse_actions` refuses the
+  mix); the server runs it as any whole-viz action, rows or none, so the
+  command must take an empty list (`unchanged`).
 - **`open: <column>` is an action that is not a command**: exactly one of
   `command` or `open` (`parse_actions` refuses both and neither). The column
   of the row the action is offered on (a whole-page action's first-loader

@@ -74,3 +74,4 @@ view:
     label: Start All Stopped
     command: oxplow.contribution.enable_all
     input: {}
+    all: true

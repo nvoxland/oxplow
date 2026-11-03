@@ -12,7 +12,8 @@ loaders:
       SELECT n.id,
              CASE WHEN instr(n.message, char(10)) > 0 THEN substr(n.message, 1, instr(n.message, char(10)) - 1) ELSE n.message END AS message,
              CASE WHEN th.title IS NULL THEN NULL ELSE 'Thread: ' || th.title END AS thread,
-             uri('oxplow/page', 'page', 'thread-work', 'thread', 'thr' || n.thread_id) AS thread_uri
+             uri('oxplow/page', 'page', 'thread-work', 'thread', 'thr' || n.thread_id) AS thread_uri,
+             n.created_at
       FROM v_agent_nudge n LEFT JOIN v_thread th ON th.id = n.thread_id
       WHERE n.audience = 'person' AND n.delivered_at IS NULL
       ORDER BY n.id DESC
@@ -50,6 +51,10 @@ view:
       link:
         kind: page
         from: thread_uri
+    - key: created_at
+      label: When
+      format: relative
+      width: 130
     empty: No notices.
     actions:
     - id: dismiss
@@ -62,6 +67,7 @@ view:
       label: Clear notices
       command: oxplow.hint.dismiss_all
       input: {}
+      all: true
   - id: operations
     title: Failed operations
     description: 'Something you started from the app failed. Each row opens into how it ended and its output; an agent can read the same record. Mark Seen keeps one without the red, Dismiss hides it.'
@@ -95,6 +101,7 @@ view:
       label: Clear failed operations
       command: oxplow.op_error.dismiss_all
       input: {}
+      all: true
   - id: deliveries
     title: Undelivered events
     description: "Oxplow's own plumbing: every change is an event, and a consumer that threw on one parks it here. Retry hands it over again; Discard drops it for good and asks first."

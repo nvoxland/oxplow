@@ -3,10 +3,9 @@ description: "Effects that failed on an event."
 loaders:
   alerts_reactions:
     sql: |
-      SELECT r.effect, r.event_id,
-             r.effect || ' failed on ' || coalesce(e.type, 'an event') || ' (event ' || r.event_seq || ')'
-               || CASE WHEN r.attempt > 1 THEN ', attempt ' || r.attempt ELSE '' END
-               || CASE WHEN r.retry_at IS NULL THEN '' ELSE '; sent again by itself shortly' END AS what,
+      SELECT r.effect, r.event_id, coalesce(e.type, 'an event') AS event_type,
+             r.attempt || CASE WHEN r.retry_at IS NULL THEN '' ELSE ', tries again by itself' END AS tries,
+             coalesce(r.finished_at, r.started_at) AS at,
              r.reason
       FROM v_effect_run r LEFT JOIN v_event e ON e.id = r.event_id
       WHERE r.latest = 1 AND r.state = 'failed' ORDER BY r.id DESC
@@ -14,8 +13,17 @@ view:
   from: alerts_reactions
   viz: table
   columns:
-  - key: what
+  - key: effect
     label: Reaction
+  - key: event_type
+    label: Event
+  - key: tries
+    label: Tries
+    width: 160
+  - key: at
+    label: When
+    format: relative
+    width: 130
   - key: reason
     label: Why
   empty: No reaction failed.

@@ -178,6 +178,9 @@ test("a whole-page action is offered as a button; one over the viz's one row onl
   // An ordinary button needs no rows.
   expect(offeredWholePage(plain, result([]))).toBe(true);
   expect(offeredWholePage(plain, result([["a", 1], ["b", 1]]))).toBe(true);
+  // One over all the rows (a Clear) needs some.
+  expect(offeredWholePage({ ...action, all: true }, result([]))).toBe(false);
+  expect(offeredWholePage({ ...action, all: true }, result([["a", 1]]))).toBe(true);
   // The one-row action needs exactly one row, with its `when` truthy.
   expect(offeredWholePage(oneRow, result([["a", 1]]))).toBe(true);
   expect(offeredWholePage(oneRow, result([["a", 0]]))).toBe(false);

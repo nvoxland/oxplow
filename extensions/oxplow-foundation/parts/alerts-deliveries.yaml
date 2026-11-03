@@ -3,16 +3,24 @@ description: "Events a consumer couldn't take, with the consumer of each."
 loaders:
   alerts_deliveries:
     sql: |
-      SELECT id, consumer || ' couldn''t take ' || event_type || ' (event ' || event_seq || '), '
-               || CASE attempts WHEN 1 THEN 'once' ELSE attempts || ' times' END AS what,
-             error
+      SELECT id, consumer, event_type, attempts, last_failed_at, error
       FROM v_event_dead_letter WHERE state = 'pending' ORDER BY id DESC
 view:
   from: alerts_deliveries
   viz: table
   columns:
-  - key: what
+  - key: consumer
+    label: Consumer
+  - key: event_type
     label: Event
+  - key: attempts
+    label: Tries
+    format: integer
+    width: 60
+  - key: last_failed_at
+    label: When
+    format: relative
+    width: 130
   - key: error
     label: Error
   empty: Every event was delivered.

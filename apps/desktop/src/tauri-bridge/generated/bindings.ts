@@ -4500,6 +4500,13 @@ export type PageAction_Deserialize = {
 	 *  itself, and only while the viz has exactly one.
 	 */
 	oneRow?: boolean,
+	/**
+	 *  A whole-viz action over every row the viz shows (a Clear, a Mark
+	 *  all seen): the app offers it only while there are rows, and an
+	 *  empty viz with no other button folds away. Declared (`all: true`),
+	 *  never on a row, group, drag or edit action.
+	 */
+	all?: boolean,
 };
 
 /**
@@ -4641,6 +4648,13 @@ export type PageAction_Serialize = {
 	 *  itself, and only while the viz has exactly one.
 	 */
 	oneRow: boolean,
+	/**
+	 *  A whole-viz action over every row the viz shows (a Clear, a Mark
+	 *  all seen): the app offers it only while there are rows, and an
+	 *  empty viz with no other button folds away. Declared (`all: true`),
+	 *  never on a row, group, drag or edit action.
+	 */
+	all: boolean,
 };
 
 /**

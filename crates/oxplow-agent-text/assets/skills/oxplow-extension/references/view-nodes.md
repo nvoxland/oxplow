@@ -202,9 +202,9 @@ is truthy; `depth: <column>` indents.
 
 ## Actions
 
-`actions: [{ id, label, command, input, row?, group?, when?, form?, confirm?,
-prominent?, icon?, submenu?, drag?, key?, edit? }]` on a viz node (a row
-action) or the page (`page-format.md`).
+`actions: [{ id, label, command, input, row?, group?, all?, when?, form?,
+confirm?, prominent?, icon?, submenu?, drag?, key?, edit? }]` on a viz node (a
+row action) or the page (`page-format.md`).
 
 - `input` is the command's input; `"{{param.x}}"` binds a page param and,
   with `row: true` (a row's right-click action), `"{{row.col}}"` binds that
@@ -212,6 +212,11 @@ action) or the page (`page-format.md`).
   show it. e.g. `{ id: finish, label: Finish, command:
   oxplow.work_item.transition, row: true, input: { uri: "{{row.uri}}", to:
   done } }`.
+- A viz node's action without `row` is a button under its rows. `all:
+  true` says it acts on every row shown (a Clear, a Mark all seen): the
+  button appears only while there are rows, and an empty viz with only
+  such buttons folds away with the other empty sections. Leave it off a
+  button that needs no rows (an Add, a New…), which keeps its section.
 - `form: true` opens the command's form instead of running it. `group:
   <value>` puts the button in that group's heading. `prominent: true` keeps
   one a button in the nav bar (only for what a person comes to do);
