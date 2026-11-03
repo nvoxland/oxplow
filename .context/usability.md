@@ -235,7 +235,11 @@ markdown itself, nor edits it in a `<textarea>`.
   `effect.retry_all`: a parked event is never sent again by itself, so
   after the cause is fixed one press hands them all over; Discard all is
   the way out for letters that will never deliver), and Extensions with
-  problems. Every section stays on the page, empty or not, over its own
+  problems: the Extension problems page itself, embedded, so Alerts and
+  that page never disagree on what a problem is (a contribution failing
+  or stopped, a permission waiting for approval, a load error; the bell
+  counts the same, `extensionProblems.ts` `PROBLEMS_SQL`). Every section
+  stays on the page, empty or not, over its own
   "No …" line (extensions-pages.md "A page keeps one shape"). Every table
   of things that happened has a When column. A Clear… or Retry all button
   is a button over all the rows (`all: true`): it is absent while there

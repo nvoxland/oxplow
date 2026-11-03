@@ -241,6 +241,55 @@ async fn an_extensions_warnings_are_on_its_row() {
     );
 }
 
+/// Permissions an extension waits on are a problem only while it is meant
+/// to run: one turned off stays off by choice, and must not hold the bell
+/// or the Extension problems page (which Alerts embeds) at "needs you"
+/// forever. The bell's own SQL (it has to work with foundation down, so it
+/// reads core's datasets, not the page) follows the same rule.
+#[tokio::test]
+async fn waiting_permissions_are_a_problem_only_for_an_extension_that_is_on() {
+    let bell = include_str!("../../../apps/desktop/src/extensionProblems.ts")
+        .split("PROBLEMS_SQL = `")
+        .nth(1)
+        .and_then(|s| s.split('`').next())
+        .expect("the bell's SQL");
+    let in_bell = format!("SELECT count(*) FROM ({bell}) WHERE name = 'acme'");
+    for (personal, problems) in [
+        ("enableExtensions: [acme]\n", 1),
+        ("disableExtensions: [acme]\n", 0),
+    ] {
+        let fx = services_with_effort().await;
+        let root = fx.svc.layout.project_dir.clone();
+        write(
+            &root,
+            "extension.yaml",
+            &format!("{MANIFEST}permissions: [ai.compute]\n"),
+        );
+        std::fs::write(root.join(".oxplow/personal.yaml"), personal).unwrap();
+        fx.svc.reload_config_from_disk().unwrap();
+        fx.svc
+            .extension_activation
+            .initialize(fx.svc.clone())
+            .await
+            .unwrap();
+        assert_eq!(
+            rows(&fx, &in_bell).await[0][0],
+            json!(problems),
+            "the bell, {personal}"
+        );
+        let page = crate::test_fixtures::run_as_page(
+            &fx.svc,
+            "oxplow-foundation/extension-problems",
+            &[(
+                "extension".to_string(),
+                oxplow_db::SqlCell::Text("acme".into()),
+            )],
+        )
+        .await;
+        assert_eq!(page.rows.len(), problems, "the page, {personal}");
+    }
+}
+
 /// `v_page_ref` is the edge list the backlinks tools returned, both ways.
 #[tokio::test]
 async fn page_ref_edges_are_a_dataset_in_both_directions() {

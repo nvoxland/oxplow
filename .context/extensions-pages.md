@@ -657,7 +657,6 @@ reads the page's first loader's one row. A drag action also binds
   | options of a `choice` | 12 — use a `search`, or a page that lists them |
   | a param no loader of the page reads (`:x` whole token, a date_range also `:x_from` / `:x_to`, an action's `{{param.x}}`, a column that `select`s or `highlight`s it, a form's defaults, the `label`); not checked on a page with an `embed`, `slot`, `component`, `replaceable` node or `viz: custom`, which pass the params on | none — remove it, or read it |
   | description of a listed page (one with a `category`) | 200 characters |
-  | children of the top `stack` | 8 |
   | declared `columns` of a `table` / `list` (not on a page with `tool:`, whose rows are for an agent) | 8 — put the rest in a node a row `select`s |
 
 - **`extension check` dry-runs pages** (`pages::checks::dry_run`): each

@@ -1,8 +1,6 @@
 # An extension that ships with oxplow, in words: the same facts as the
 # Extensions page (where it comes from, its version, its permissions, its
-# problems), every contribution it brings in one table grouped by kind, its
-# pages linking to their Definition, and its deployments. The page's actions
-# are the ones its row allows.
+# problems), its pages with a link to each Definition, a table per kind of its other contributions, and its deployments. The page's actions are the ones its row allows.
 when:
   page: oxplow-foundation/extension
   params:
@@ -14,13 +12,13 @@ expect:
     about_facts:
       rows:
         - { origin_text: Shipped with oxplow, origin_target: null, version_text: $any, permission_items: $any, manifest: Read its running extension.yaml }
-    contributions:
+    pages:
       rows:
         contains:
-          - { kind: Pages, title: Commit, description: $any, link: $any }
+          - { title: Commit, link: $any }
   nodes:
     - { id: about, kind: viz }
-    - { id: contributions, kind: viz, viz: table }
+    - { id: pages, kind: viz }
+    - { id: commands, kind: viz }
     - { id: deployments, kind: viz }
     - { id: runs, kind: slot }
-  text: { contains: ["Commit"] }

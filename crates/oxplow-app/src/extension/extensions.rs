@@ -760,12 +760,17 @@ pub fn load_deployed(
             let source = settings.source(project, name);
             if source.is_dir() {
                 let loaded = load_extension_at(&source, name);
-                let mut pending = loaded.permissions.added_over(&Permissions::default());
-                if let Some(build) = &loaded.build {
-                    pending.push(crate::extension::extension_deploy::build_line(
-                        &build.run,
-                        &shown(project, &source),
-                    ));
+                // One turned off waits on nobody: it stays off by choice, and
+                // its deploy still asks whatever it asks if it is turned on.
+                let mut pending = Vec::new();
+                if settings.is_enabled(name) || crate::bundled_extensions::is_required(name) {
+                    pending = loaded.permissions.added_over(&Permissions::default());
+                    if let Some(build) = &loaded.build {
+                        pending.push(crate::extension::extension_deploy::build_line(
+                            &build.run,
+                            &shown(project, &source),
+                        ));
+                    }
                 }
                 Some(Extension {
                     pending,
@@ -8074,25 +8079,6 @@ commands:
         );
         assert!(layout_of(&page(200, "category: Work\n")).0.is_empty());
         assert!(layout_of(&page(201, "")).0.is_empty());
-    }
-
-    #[test]
-    fn a_stack_of_more_than_eight_sections_warns() {
-        let stack = |n: usize| {
-            let nodes: Vec<String> = (0..n)
-                .map(|i| format!("    - {{ id: s{i}, title: S{i}, markdown: hi }}\n"))
-                .collect();
-            format!("title: P\nview:\n  stack:\n{}", nodes.concat())
-        };
-        let (warns, loaded) = layout_of(&stack(9));
-        assert!(loaded);
-        assert!(
-            warns
-                .iter()
-                .any(|w| w.ends_with("9 sections — a page reads best with 8 at most; split it")),
-            "{warns:?}"
-        );
-        assert!(layout_of(&stack(8)).0.is_empty());
     }
 
     #[test]

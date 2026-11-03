@@ -112,7 +112,10 @@ the Extension page) and each problem a subsection under it (titled `<kind>
 <contribution>`, `Did not load cleanly`, or `Needs your approval to run` with the
 waiting permissions as `format: items`), with Start Again,
 Repair with the Agent and Start All Stopped. A link from a one-line summary narrows it with the view param
-`#extension=<name>`; Alerts' failing-extension rows link the same way.
+`#extension=<name>`. The Alerts page embeds this page as its Extensions
+with problems section, and the bell counts the same three kinds of
+problem (`extensionProblems.ts` `PROBLEMS_SQL`), so there is one meaning
+of "an extension with a problem".
 
 What a contribution is, in words, is read from its kind's own dataset, which
 joins `v_contribution` on `uri`: `v_command` (summary, scope, confirmation),

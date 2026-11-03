@@ -1,9 +1,13 @@
 /**
- * Extensions that have problems: read from `v_extension` (`errors`, a JSON
- * array of diagnostics; each one's `shown` is the line a person reads). An extension with errors counts whether or not it is
- * enabled — a held one is listed with the reasons it is held, even
- * `oxplow-foundation`. Alerts lists each, with a way to Settings →
- * Extensions.
+ * Extensions that have problems, as the Extension problems page lists
+ * them (the one meaning of "a problem", `.context/extensions-permissions.md`):
+ * a contribution that failed or stopped after failing
+ * (`v_contribution_health`), permissions waiting for approval
+ * (`v_extension.pending`) and load errors (`v_extension.errors`). An
+ * extension with a problem counts whether or not it is enabled — a held
+ * one is listed with the reasons it is held, even `oxplow-foundation`.
+ * The bell counts each extension once; the Alerts page shows the same
+ * page, embedded.
  */
 import { useCallback, useEffect, useState } from "react";
 
@@ -18,19 +22,32 @@ export interface ExtensionProblem {
   errors: string[];
 }
 
-/** The lines `errors` holds: each diagnostic's `shown`. */
-function parseErrors(raw: unknown): string[] {
-  if (typeof raw !== "string" || raw === "") return [];
-  const v: unknown = JSON.parse(raw);
-  return Array.isArray(v) ? v.map((d) => String((d as { shown?: unknown }).shown ?? "")) : [];
+/** One row per problem (`name`, `problem`), in the page's order, gathered
+ *  per extension in the order each first appears. */
+export function problemsFromResult(result: SqlQueryResult): ExtensionProblem[] {
+  const name = result.columns.indexOf("name");
+  const problem = result.columns.indexOf("problem");
+  const out = new Map<string, ExtensionProblem>();
+  for (const row of result.rows) {
+    const n = String(row[name]);
+    const p = out.get(n) ?? { name: n, errors: [] };
+    p.errors.push(String(row[problem] ?? ""));
+    out.set(n, p);
+  }
+  return [...out.values()];
 }
 
-export function problemsFromResult(result: SqlQueryResult): ExtensionProblem[] {
-  return result.rows.map((row) => ({
-    name: String(row[result.columns.indexOf("name")]),
-    errors: parseErrors(row[result.columns.indexOf("errors")]),
-  }));
-}
+/** The problems, one row each, as the Extension problems page reads them. */
+export const PROBLEMS_SQL = `SELECT name, problem FROM (
+  SELECT h.extension AS name, 1 AS rank, h.kind || ' ' || h.contribution || ' ' ||
+         CASE h.state WHEN 'disabled' THEN 'stopped after ' || coalesce(h.reason, 'repeated failures')
+                      ELSE 'is failing, ' || h.consecutive_failures || ' in a row' END AS problem
+  FROM v_contribution_health h WHERE h.state <> 'ok'
+  UNION ALL
+  SELECT e.name, 2, json_extract(j.value, '$.shown') FROM v_extension e, json_each(e.errors) j
+  UNION ALL
+  SELECT e.name, 3, 'needs your approval to run' FROM v_extension e WHERE json_array_length(e.pending) > 0
+) ORDER BY name, rank`;
 
 /** What an Alerts row says. */
 export function extensionProblemLine(p: ExtensionProblem): string {
@@ -40,12 +57,7 @@ export function extensionProblemLine(p: ExtensionProblem): string {
 
 /** The extensions with errors, and what was read. */
 export async function readExtensionProblems(): Promise<{ problems: ExtensionProblem[]; reads: Reads }> {
-  const res = await querySql(
-    `SELECT name, enabled, errors, deployment FROM v_extension
-      WHERE json_array_length(errors) > 0 ORDER BY name`,
-    [],
-    200,
-  );
+  const res = await querySql(PROBLEMS_SQL, [], 200);
   return { problems: problemsFromResult(res), reads: res.reads };
 }
 

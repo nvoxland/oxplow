@@ -596,8 +596,7 @@ delete the YAML files in `lenses/`: they are what the loader refuses.
   viz names a component the extension declares in `custom_components:`.
   Layout problems are **warnings** (`pages::checks::layout_warnings`:
   more than 6 filters, a `choice` of more than 12 options, a description
-  over 200 characters, a `stack` of more than 8 sections, a table of
-  more than 8 columns, a param no loader reads);
+  over 200 characters, a table of more than 8 columns, a param no loader reads);
 - lifecycle: `engine`, when given, is `>=MAJOR.MINOR[.PATCH]`;
 - cross-references: a `ui.mounts` page is in `pages/` and its slot name
   has the shape `<extension>/<page>.<name>`; a slot mount whose host page

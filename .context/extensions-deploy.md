@@ -227,7 +227,8 @@ runs no build (the built source isn't deployed in its throwaway);
 is still in the store, and that is all boot runs. An extension that is on
 with no deployment here (a fresh clone, a just-pulled teammate's) is listed
 `undeployed`, its `pending` naming what its deploy will ask for, until a
-person deploys it. So what runs is only ever what someone deployed, never a
+person deploys it. One turned off lists no `pending`: it waits on nobody,
+so it is no problem on the Extension problems page or in the bell. So what runs is only ever what someone deployed, never a
 source caught half-edited. (Until 2026-10-24 boot deployed those sources
 itself; with a held deployment losing its record, that made a core change
 take two restarts and put whatever the source held live unasked.)

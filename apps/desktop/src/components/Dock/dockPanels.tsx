@@ -50,7 +50,7 @@ export interface DockPanelDef {
 /** Where a core panel sits in the bar. A closed list: it only shrinks
  *  (`dockPanels.test.ts` pins it against `corePanels.golden.json`) — a panel
  *  that isn't core's own is an extension's `panels:` entry with `dock: true`. */
-export const CORE_ORDER = ["assistant", "context", "alerts"];
+export const CORE_ORDER = ["alerts", "assistant", "context"];
 
 const core: DockPanelDef[] = [
   { id: "assistant", title: "Assistant", icon: "sparkles", useBadge: useAssistantBadge, Body: AssistantDockBody },

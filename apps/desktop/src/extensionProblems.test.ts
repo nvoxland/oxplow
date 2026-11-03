@@ -3,13 +3,12 @@ import { expect, test } from "bun:test";
 import { extensionProblemLine, problemsFromResult } from "./extensionProblems.js";
 
 const res = (rows: unknown[][]) =>
-  ({ columns: ["name", "enabled", "errors", "deployment"], rows, truncated: false, reads: { datasets: [], tables: [], measures: [] }, freshness: {} }) as never;
+  ({ columns: ["name", "problem"], rows, truncated: false, reads: { datasets: [], tables: [], measures: [] }, freshness: {} }) as never;
 
-test("rows become problems with each diagnostic's shown line", () => {
-  const errors = JSON.stringify([{ code: "manifest.parse", message: "bad", shown: "x" }, { code: "page.invalid", message: "worse", shown: "y" }]);
-  expect(problemsFromResult(res([["a", 0, errors, null], ["b", 1, "[]", null]]))).toEqual([
-    { name: "a", errors: ["x", "y"] },
-    { name: "b", errors: [] },
+test("a row per problem gathers into one problem per extension, in order", () => {
+  expect(problemsFromResult(res([["a", "collector x stopped after 3 failures"], ["a", "needs your approval to run"], ["b", "bad page"]]))).toEqual([
+    { name: "a", errors: ["collector x stopped after 3 failures", "needs your approval to run"] },
+    { name: "b", errors: ["bad page"] },
   ]);
 });
 

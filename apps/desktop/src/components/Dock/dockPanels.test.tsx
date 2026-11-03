@@ -10,7 +10,7 @@ test("core panels come first in the fixed order, extensions after by title", () 
     [def("alerts"), def("assistant"), def("context")],
     [def("ext:b", "Zed"), def("ext:a", "Alpha")],
   );
-  expect(ordered.map((p) => p.id)).toEqual(["assistant", "context", "alerts", "ext:a", "ext:b"]);
+  expect(ordered.map((p) => p.id)).toEqual(["alerts", "assistant", "context", "ext:a", "ext:b"]);
 });
 
 test("the core dock panels only shrink", () => {

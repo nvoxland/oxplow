@@ -1,14 +1,29 @@
-# The Extension page's contributions open a contribution's definition, not its data: a command, collector,
+# The Extension page's tables open a contribution's definition, not its data: a command, collector,
 # metric, measure, dimension and resource kind each link with the renderer pinned.
 when: { page: oxplow-foundation/extension, params: { uri: "oxplow:oxplow/extension?name=oxplow-foundation", name: oxplow-foundation } }
 expect:
   loaders:
-    contributions:
+    commands:
       rows:
         contains:
-          - { kind: Commands, link: "oxplow:oxplow/command?command=oxplow.agent.draft#oxplow.renderer=oxplow-foundation/command" }
-          - { kind: Collectors, link: "oxplow:oxplow/collector?collector=oxplow-foundation/oxplow.effort_test_outcome#oxplow.renderer=oxplow-foundation/collector" }
-          - { kind: Metrics, link: "oxplow:oxplow/metric?metric=agent.tokens.total" }
-          - { kind: Measures, link: "oxplow:oxplow/measure?measure=oxplow.tokens#oxplow.renderer=oxplow-foundation/measure" }
-          - { kind: Dimensions, link: "oxplow:oxplow/dimension?dimension=oxplow.language#oxplow.renderer=oxplow-foundation/dimension" }
-          - { kind: Resources, link: "oxplow:oxplow/resource?resource=oxplow-foundation/commit#oxplow.renderer=oxplow-foundation/resource" }
+          - { link: "oxplow:oxplow/command?command=oxplow.agent.draft#oxplow.renderer=oxplow-foundation/command" }
+    collectors:
+      rows:
+        contains:
+          - { link: "oxplow:oxplow/collector?collector=oxplow-foundation/oxplow.effort_test_outcome#oxplow.renderer=oxplow-foundation/collector" }
+    metrics:
+      rows:
+        contains:
+          - { link: "oxplow:oxplow/metric?metric=agent.tokens.total" }
+    measures:
+      rows:
+        contains:
+          - { link: "oxplow:oxplow/measure?measure=oxplow.tokens#oxplow.renderer=oxplow-foundation/measure" }
+    dimensions:
+      rows:
+        contains:
+          - { link: "oxplow:oxplow/dimension?dimension=oxplow.language#oxplow.renderer=oxplow-foundation/dimension" }
+    resources:
+      rows:
+        contains:
+          - { link: "oxplow:oxplow/resource?resource=oxplow-foundation/commit#oxplow.renderer=oxplow-foundation/resource" }

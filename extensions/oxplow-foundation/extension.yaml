@@ -131,6 +131,9 @@ intent:
     - name: the-implementation-page-says-whether-an-implementation-is-in-use
       input: { page: implementation, params: { uri: "oxplow:oxplow/implementation?implementation=oxplow-foundation/work_items.oxplow" } }
       expect: an implementation's capability, whether it is in use and what it can do
+    - name: a-command-row-of-an-extension-links-to-the-commands-page
+      input: { page: extension, params: { uri: "oxplow:oxplow/extension?name=oxplow-foundation", name: oxplow-foundation } }
+      expect: each command row of the Extension page links to its own command page
     - name: effort-files-lists-what-an-effort-claimed
       input: { page: effort-files }
       expect: the files an effort claimed, by path
@@ -206,9 +209,12 @@ intent:
     - name: extension-problems-collects-what-is-failing-or-turned-off
       input: { page: extension-problems, params: {} }
       expect: everything wrong with an extension under its name (stopped or failing contributions, permissions waiting for approval, load errors), with Start Again, Repair with the Agent and Start All Stopped
-    - name: extension-contributions-are-one-table-grouped-by-kind
+    - name: extension-pages-are-a-table-row-each-linking-to-its-definition
       input: { page: extension, params: { uri: 'oxplow:oxplow/extension?name=oxplow-foundation', name: oxplow-foundation } }
-      expect: everything it contributes in one table grouped by kind, a row per contribution with its name (a link where a page draws it, a page's to its Definition) and its description; the section stays, saying so, when there is nothing
+      expect: its pages as a table, each title linking to the Definition of its running file, with its description and what it shows
+    - name: extension-contributions-are-a-table-per-kind
+      input: { page: extension, params: { uri: 'oxplow:oxplow/extension?name=oxplow-foundation', name: oxplow-foundation } }
+      expect: each kind it contributes is a top-level table, parts and queries apart from its pages, a row per contribution with its name (a link where a page draws it), its description and the facts that matter for its kind; a kind it doesn't have keeps its table, saying so
     - name: an-extension-lists-its-permissions-as-scopes-with-a-hint-each
       input: { page: extension, params: { uri: 'oxplow:oxplow/extension?name=oxplow-foundation', name: oxplow-foundation } }
       expect: each scope as written with its explanation as a hover; nothing waits on approval for a running extension

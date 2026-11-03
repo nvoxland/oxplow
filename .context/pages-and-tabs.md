@@ -1227,7 +1227,7 @@ is the Alerts panel's icon.
   Context, an extension panel's `open` else its body page): the header
   draws the open arrow (`OpenPageLink`, "Open <title> page") after the
   title, as a section heading does, and no body draws its own link. Core panels call `registerDockPanel`. Their order is
-  `CORE_ORDER` (assistant, context, alerts). Extension panels with
+  `CORE_ORDER` (alerts, the leftmost icon, then assistant, context). Extension panels with
   `dock: true` follow, sorted by title. Their body is the panel's `body`
   page and their badge is its `badge` or `count` page. `useDockPanels()` returns the whole list.
 - **Layout:** the panel is absolute and anchored above the bar, inside the

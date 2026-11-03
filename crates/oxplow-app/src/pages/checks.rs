@@ -116,12 +116,11 @@ pub fn text(page: &Page, loaders: &LoaderChecks) -> Result<String, String> {
 }
 
 /// The most `filter` params a page draws, `choice` options a select
-/// lists, characters a description runs, sections a stack holds and
+/// lists, characters a description runs and
 /// columns a table shows before the layout warnings say so.
 const MAX_FILTERS: usize = 6;
 const MAX_CHOICE_OPTIONS: usize = 12;
 const MAX_DESCRIPTION: usize = 200;
-const MAX_SECTIONS: usize = 8;
 const MAX_COLUMNS: usize = 8;
 
 /// The params of a page shown in the launcher (it has a `category`) that
@@ -253,15 +252,6 @@ pub fn layout_warnings(page: &Page) -> Vec<String> {
         out.push(format!(
             "the description is {described} characters — keep it to a sentence or two; put the rest in a markdown node"
         ));
-    }
-    if let NodeKind::Stack { children } = &page.view.kind {
-        // Every section is always on the page, empty or not.
-        let always = children.len();
-        if always > MAX_SECTIONS {
-            out.push(format!(
-                "{always} sections — a page reads best with {MAX_SECTIONS} at most; split it"
-            ));
-        }
     }
     if page.tool.is_none() {
         for n in &nodes {

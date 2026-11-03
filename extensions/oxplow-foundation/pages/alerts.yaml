@@ -21,14 +21,6 @@ loaders:
     sql: |
       SELECT event_id, label, at, seen, (NOT seen) AS unseen, CASE WHEN seen THEN 'muted' ELSE 'danger' END AS tone
       FROM v_op_error WHERE dismissed = 0 ORDER BY at DESC
-  extensions:
-    sql: |
-      SELECT name,
-             '`' || name || '` isn''t running as it should: ' || coalesce(json_extract(errors, '$[0].shown'), 'unknown error')
-               || CASE WHEN json_array_length(errors) > 1 THEN ' (+' || (json_array_length(errors) - 1) || ' more)' ELSE '' END AS what,
-             'Open the problems' AS open,
-             uri('oxplow/page', 'page', 'extension-problems') || '#extension=' || name AS settings
-      FROM v_extension WHERE json_array_length(errors) > 0 ORDER BY name
 view:
   stack:
   - id: decisions
@@ -114,19 +106,9 @@ view:
       page: oxplow-foundation/alerts-reactions
   - id: extensions
     title: Extensions with problems
-    description: 'An extension that is held or not running as it should, with its first error. It leaves this list when the extension is fixed and deployed.'
-    from: extensions
-    viz: table
-    columns:
-    - key: what
-      label: Problem
-    - key: open
-      label: ''
-      width: 140
-      link:
-        kind: page
-        from: settings
-    empty: Every extension is running as it should.
+    description: "Everything wrong with an extension, under its name: a contribution that failed or stopped after failing (Start Again, or Repair with the Agent), permissions waiting for your approval (Deploy it on its page), and load errors. It leaves this list when the extension is fixed and deployed."
+    embed:
+      page: oxplow-foundation/extension-problems
 see_also:
   - { page: oxplow-foundation/extension-problems }
   - { page: oxplow-foundation/collectors }

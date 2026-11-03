@@ -231,7 +231,7 @@ view:
         from: item_ref
     - key: note
       label: Note
-    empty: ''
+    empty: No range picked.
   - id: description
     title: Description
     from: description
