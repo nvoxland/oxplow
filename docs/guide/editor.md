@@ -62,6 +62,11 @@ mermaid diagrams. It is read-only; Back returns to the editor.
 The same mode is offered for a markdown file at a past revision
 or inside an extension.
 
+Other files have a mode too, under **Open With** and **View as** in
+the rail. A CSV or TSV file has a **Table** mode. A JSON or YAML file
+has a **Data** mode, a tree of its values. A mermaid file (`.mmd` or
+`.mermaid`) has a **Diagram** mode.
+
 The chrome carries a per-snapshot history dropdown that lists
 every local snapshot of the open file, in descending order,
 labeled with the pinned commit (or `uncommitted`) and any

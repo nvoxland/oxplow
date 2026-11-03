@@ -1,0 +1,22 @@
+# A `.csv` file gets a second mode, Table: its rows drawn as a table.
+temp:
+  sheet.csv: "name,n\nant,1\n"
+when:
+  command: oxplow.page.renderers
+  input: { uri: "oxplow:oxplow/file?path=data.csv" }
+expect:
+  ok: true
+  result:
+    renderers:
+      - { page: oxplow-foundation/csv, default: false }
+      - { page: oxplow-foundation/editor, default: true }
+steps:
+  - when:
+      command: oxplow.page.renderers
+      input: { uri: "oxplow:oxplow/file?path=sheet.csv&filesystem=oxplow:temp" }
+    expect:
+      ok: true
+      result:
+        renderers:
+          - { page: oxplow-foundation/csv }
+          - { page: oxplow-foundation/file-viewer }

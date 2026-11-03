@@ -9,6 +9,7 @@ expect:
   ok: true
   result:
     renderers:
+      - { page: oxplow-foundation/data-file, default: false }
       - { page: oxplow-foundation/file-viewer, default: false }
       - { page: oxplow-foundation/definition, default: false }
 steps:
@@ -19,4 +20,5 @@ steps:
       ok: true
       result:
         renderers:
+          - { page: oxplow-foundation/data-file }
           - { page: oxplow-foundation/file-viewer }

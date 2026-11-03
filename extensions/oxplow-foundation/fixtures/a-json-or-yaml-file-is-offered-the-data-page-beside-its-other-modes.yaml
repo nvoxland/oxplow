@@ -1,0 +1,33 @@
+# A `.json`, `.yaml` or `.yml` file gets a mode, Data: its values as a tree.
+# A YAML file that is no page has no Definition, so the File viewer then Data.
+temp:
+  shape.yaml: "just: a list\nof: notes\n"
+  shape.json: "{\"a\": 1}"
+when:
+  command: oxplow.page.renderers
+  input: { uri: "oxplow:oxplow/file?path=package.json" }
+expect:
+  ok: true
+  result:
+    renderers:
+      - { page: oxplow-foundation/data-file, default: false }
+      - { page: oxplow-foundation/editor, default: true }
+steps:
+  - when:
+      command: oxplow.page.renderers
+      input: { uri: "oxplow:oxplow/file?path=shape.yaml&filesystem=oxplow:temp" }
+    expect:
+      ok: true
+      result:
+        renderers:
+          - { page: oxplow-foundation/data-file }
+          - { page: oxplow-foundation/file-viewer }
+  - when:
+      command: oxplow.page.renderers
+      input: { uri: "oxplow:oxplow/file?path=shape.json&filesystem=oxplow:temp" }
+    expect:
+      ok: true
+      result:
+        renderers:
+          - { page: oxplow-foundation/data-file }
+          - { page: oxplow-foundation/file-viewer }

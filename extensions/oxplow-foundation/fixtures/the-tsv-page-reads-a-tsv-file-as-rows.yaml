@@ -1,0 +1,29 @@
+# The TSV page parses the file's text as tab-separated values.
+temp:
+  sheet.tsv: "name\tn\nant\t1\nbee\t2\n"
+when:
+  page: oxplow-foundation/tsv
+  params:
+    uri: "oxplow:oxplow/file?path=sheet.tsv&filesystem=oxplow:temp"
+    path: sheet.tsv
+    filesystem: "oxplow:temp"
+expect:
+  label: sheet.tsv
+  loaders:
+    rows:
+      rows:
+        - { name: ant, n: "1" }
+        - { name: bee, n: "2" }
+  text:
+    contains: ["ant", "bee"]
+steps:
+  - params:
+      uri: "oxplow:oxplow/file?path=gone.tsv&filesystem=oxplow:temp"
+      path: gone.tsv
+      filesystem: "oxplow:temp"
+    expect:
+      loaders:
+        rows:
+          rows: 0
+      text:
+        contains: ["There is no such file, or it has no rows."]

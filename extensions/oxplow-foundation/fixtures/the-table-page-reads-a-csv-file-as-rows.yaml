@@ -1,0 +1,30 @@
+# The Table page parses the file's text as CSV: the first row names the
+# columns, every cell is text. A file that is not there has no rows.
+temp:
+  sheet.csv: "name,n\nant,1\nbee,2\n"
+when:
+  page: oxplow-foundation/csv
+  params:
+    uri: "oxplow:oxplow/file?path=sheet.csv&filesystem=oxplow:temp"
+    path: sheet.csv
+    filesystem: "oxplow:temp"
+expect:
+  label: sheet.csv
+  loaders:
+    rows:
+      rows:
+        - { name: ant, n: "1" }
+        - { name: bee, n: "2" }
+  text:
+    contains: ["ant", "bee"]
+steps:
+  - params:
+      uri: "oxplow:oxplow/file?path=gone.csv&filesystem=oxplow:temp"
+      path: gone.csv
+      filesystem: "oxplow:temp"
+    expect:
+      loaders:
+        rows:
+          rows: 0
+      text:
+        contains: ["There is no such file, or it has no rows."]

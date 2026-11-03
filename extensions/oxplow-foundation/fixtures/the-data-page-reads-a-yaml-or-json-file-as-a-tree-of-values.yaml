@@ -1,0 +1,39 @@
+# The Data page parses the file's text into one row per value: id (a JSON
+# pointer), parent, name, kind, value and count.
+temp:
+  shape.yaml: "name: ant\nlegs: 6\n"
+  shape.json: "{\"list\": [true]}"
+when:
+  page: oxplow-foundation/data-file
+  params:
+    uri: "oxplow:oxplow/file?path=shape.yaml&filesystem=oxplow:temp"
+    path: shape.yaml
+    filesystem: "oxplow:temp"
+expect:
+  label: shape.yaml
+  loaders:
+    doc:
+      rows:
+        - { id: /name, parent: null, name: name, kind: string, value: ant }
+        - { id: /legs, parent: null, name: legs, kind: number, value: "6" }
+  text:
+    contains: ["name", "legs"]
+steps:
+  - params:
+      uri: "oxplow:oxplow/file?path=shape.json&filesystem=oxplow:temp"
+      path: shape.json
+      filesystem: "oxplow:temp"
+    expect:
+      loaders:
+        doc:
+          rows:
+            - { id: /list, parent: null, name: list, kind: array, count: 1 }
+            - { id: /list/0, parent: /list, name: "0", kind: boolean, value: "true" }
+  - params:
+      uri: "oxplow:oxplow/file?path=gone.json&filesystem=oxplow:temp"
+      path: gone.json
+      filesystem: "oxplow:temp"
+    expect:
+      loaders:
+        doc:
+          rows: 0

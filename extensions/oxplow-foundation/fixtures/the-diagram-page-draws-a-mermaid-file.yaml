@@ -1,0 +1,25 @@
+# The Diagram page wraps the file's text in a mermaid fence and draws it
+# with the markdown viz.
+temp:
+  flow.mmd: "graph TD\n  A --> B\n"
+when:
+  page: oxplow-foundation/diagram
+  params:
+    uri: "oxplow:oxplow/file?path=flow.mmd&filesystem=oxplow:temp"
+    path: flow.mmd
+    filesystem: "oxplow:temp"
+expect:
+  label: flow.mmd
+  text:
+    contains: ["```mermaid", "A --> B"]
+steps:
+  - params:
+      uri: "oxplow:oxplow/file?path=gone.mmd&filesystem=oxplow:temp"
+      path: gone.mmd
+      filesystem: "oxplow:temp"
+    expect:
+      loaders:
+        document:
+          rows: 0
+      text:
+        contains: ["There is no such file."]

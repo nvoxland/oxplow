@@ -1,0 +1,35 @@
+title: Table
+description: "A CSV file read as a table, its first row the columns, on any filesystem and at any revision. A display mode of a `.csv` file beside the Editor and the File viewer."
+label: '{{param.path|basename}}'
+icon: columns-3
+for: oxplow/file
+accepts:
+  path: '^[\w./ -]+\.csv$'
+content: { text: true, max_bytes: 1048576 }
+params:
+- name: uri
+- name: path
+- name: filesystem
+- name: rev
+loaders:
+  rows: { parse: csv, text: { from: content.text } }
+  # Its history (the index has one for a local file only) and its folder, on
+  # the file's own filesystem and revision.
+  related:
+    sql: |
+      SELECT 'File history' AS title, uri('oxplow/page', 'page', 'file-history', 'path', :path) AS uri, 1 AS ord
+      WHERE COALESCE(:filesystem, 'oxplow:local') = 'oxplow:local'
+      UNION ALL
+      SELECT rtrim(rtrim(:path, replace(:path, '/', '')), '/'),
+             uri('oxplow/dir', 'filesystem', NULLIF(:filesystem, 'oxplow:local'),
+                 'path', rtrim(rtrim(:path, replace(:path, '/', '')), '/'),
+                 'rev', NULLIF(NULLIF(:rev, ''), 'working'))
+             , 2
+      WHERE :path LIKE '%/%'
+      ORDER BY ord
+view:
+  from: rows
+  viz: table
+  empty: "There is no such file, or it has no rows."
+see_also:
+  - { from: related }

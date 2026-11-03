@@ -1,0 +1,22 @@
+# A `.mmd` or `.mermaid` file gets a mode, Diagram: the diagram drawn.
+temp:
+  flow.mmd: "graph TD\n  A --> B\n"
+when:
+  command: oxplow.page.renderers
+  input: { uri: "oxplow:oxplow/file?path=docs/flow.mermaid" }
+expect:
+  ok: true
+  result:
+    renderers:
+      - { page: oxplow-foundation/diagram, default: false }
+      - { page: oxplow-foundation/editor, default: true }
+steps:
+  - when:
+      command: oxplow.page.renderers
+      input: { uri: "oxplow:oxplow/file?path=flow.mmd&filesystem=oxplow:temp" }
+    expect:
+      ok: true
+      result:
+        renderers:
+          - { page: oxplow-foundation/diagram }
+          - { page: oxplow-foundation/file-viewer }

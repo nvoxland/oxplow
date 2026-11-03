@@ -1,0 +1,49 @@
+title: Data
+description: "A JSON or YAML file read as a tree of its values, on any filesystem and at any revision. A display mode of a `.json`, `.yaml` or `.yml` file beside the Editor and the File viewer."
+label: '{{param.path|basename}}'
+icon: list-tree
+for: oxplow/file
+accepts:
+  content: is_data
+content: { text: true, max_bytes: 1048576 }
+params:
+- name: uri
+- name: path
+- name: filesystem
+- name: rev
+loaders:
+  is_data:
+    sql: |
+      SELECT 1 AS n
+      WHERE lower(:path) GLOB '*.json' OR lower(:path) GLOB '*.yaml' OR lower(:path) GLOB '*.yml'
+  parsed: { parse: yaml, text: { from: content.text } }
+  # A file with no text (not there) parses as one null; that is no values.
+  doc:
+    sql: |
+      SELECT * FROM parsed WHERE NOT (id = '/' AND kind = 'null')
+  # Its history (the index has one for a local file only) and its folder, on
+  # the file's own filesystem and revision.
+  related:
+    sql: |
+      SELECT 'File history' AS title, uri('oxplow/page', 'page', 'file-history', 'path', :path) AS uri, 1 AS ord
+      WHERE COALESCE(:filesystem, 'oxplow:local') = 'oxplow:local'
+      UNION ALL
+      SELECT rtrim(rtrim(:path, replace(:path, '/', '')), '/'),
+             uri('oxplow/dir', 'filesystem', NULLIF(:filesystem, 'oxplow:local'),
+                 'path', rtrim(rtrim(:path, replace(:path, '/', '')), '/'),
+                 'rev', NULLIF(NULLIF(:rev, ''), 'working'))
+             , 2
+      WHERE :path LIKE '%/%'
+      ORDER BY ord
+view:
+  from: doc
+  viz: tree
+  tree: { id: id, parent: parent, label: name }
+  columns:
+  - { key: name, label: Key }
+  - { key: value, label: Value }
+  - { key: kind, label: Kind }
+  - { key: count, label: Items }
+  empty: "There is no such file, or it has no values."
+see_also:
+  - { from: related }

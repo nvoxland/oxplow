@@ -1,0 +1,43 @@
+title: Diagram
+description: "A mermaid file drawn as its diagram, on any filesystem and at any revision. A display mode of a `.mmd` or `.mermaid` file beside the Editor and the File viewer."
+label: '{{param.path|basename}}'
+icon: git-compare
+for: oxplow/file
+accepts:
+  content: is_diagram
+content: { text: true, max_bytes: 1048576 }
+params:
+- name: uri
+- name: path
+- name: filesystem
+- name: rev
+loaders:
+  is_diagram:
+    sql: |
+      SELECT 1 AS n
+      WHERE lower(:path) GLOB '*.mmd' OR lower(:path) GLOB '*.mermaid'
+  document:
+    sql: |
+      SELECT '```mermaid' || char(10) || coalesce(text, '') || char(10) || '```' AS text FROM content
+  # Its history (the index has one for a local file only) and its folder, on
+  # the file's own filesystem and revision.
+  related:
+    sql: |
+      SELECT 'File history' AS title, uri('oxplow/page', 'page', 'file-history', 'path', :path) AS uri, 1 AS ord
+      WHERE COALESCE(:filesystem, 'oxplow:local') = 'oxplow:local'
+      UNION ALL
+      SELECT rtrim(rtrim(:path, replace(:path, '/', '')), '/'),
+             uri('oxplow/dir', 'filesystem', NULLIF(:filesystem, 'oxplow:local'),
+                 'path', rtrim(rtrim(:path, replace(:path, '/', '')), '/'),
+                 'rev', NULLIF(NULLIF(:rev, ''), 'working'))
+             , 2
+      WHERE :path LIKE '%/%'
+      ORDER BY ord
+view:
+  from: document
+  viz: markdown
+  markdown:
+    text: text
+  empty: There is no such file.
+see_also:
+  - { from: related }

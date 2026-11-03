@@ -7,4 +7,5 @@ expect:
   ok: true
   result:
     renderers:
+      - { page: oxplow-foundation/data-file }
       - { page: oxplow-foundation/file-viewer }
