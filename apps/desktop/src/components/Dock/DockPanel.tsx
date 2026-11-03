@@ -1,5 +1,7 @@
 /// The open dock panel: it rises from the bar over the page area (absolute,
-/// anchored above the bar, so the page does not reflow). A header with the
+/// anchored above the bar, so the page does not reflow), on the elevated
+/// tier with a strong top edge and a shadow, so it stands off a page of any
+/// darkness (a terminal's black). A header with the
 /// panel's icon (the one its bar button draws), its title, the arrow to
 /// its page when it has one (`DockPanelDef.page`) and ×, a drag
 /// handle on the top edge, Escape closes and returns focus to the panel's
@@ -92,9 +94,9 @@ export function DockPanel({ streamId, onOpenPage }: { streamId: string | null; o
         height: drawn,
         display: "flex",
         flexDirection: "column",
-        background: "var(--bg-1)",
+        background: "var(--surface-elevated)",
         borderTop: "1px solid var(--border-strong)",
-        boxShadow: "0 -6px 20px rgba(0, 0, 0, 0.35)",
+        boxShadow: "0 -1px 0 rgba(255, 255, 255, 0.06), 0 -10px 32px rgba(0, 0, 0, 0.6)",
         outline: "none",
         zIndex: 50,
       }}
@@ -107,7 +109,7 @@ export function DockPanel({ streamId, onOpenPage }: { streamId: string | null; o
         onPointerCancel={onHandleUp}
         style={{ position: "absolute", top: -3, left: 0, right: 0, height: 6, cursor: "row-resize", userSelect: "none" }}
       />
-      <div style={{ display: "flex", alignItems: "center", padding: "4px 12px", borderBottom: "1px solid var(--border-subtle)", flexShrink: 0 }}>
+      <div style={{ display: "flex", alignItems: "center", padding: "4px 12px", borderBottom: "1px solid var(--border-strong)", flexShrink: 0 }}>
         <span data-testid="dock-panel-icon" aria-hidden style={{ display: "inline-flex", marginRight: 6, color: "var(--text-secondary)" }}>
           <Icon size={14} />
         </span>

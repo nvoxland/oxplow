@@ -123,6 +123,21 @@ test("the dock's Alerts icon counts everything, red for a problem, and opens the
   expect(opened).toEqual([alertsRef()]);
 });
 
+// Each row leads with the open arrow (the icon that opens a thing's page,
+// here the item's), named Review; the message follows it.
+test("a row's Review is the open arrow at its left and opens the item's page", async () => {
+  const opened: unknown[] = [];
+  const view = render(withRuns(<Dock streamId={null} onOpenPage={(r) => opened.push(r)} />));
+  fireEvent.click(view.getByTestId("dock-alerts"));
+  const row = await waitFor(() => view.getAllByTestId("alerts-panel-item")[0]!);
+  const review = row.firstElementChild!;
+  expect(review.getAttribute("data-testid")).toBe("alerts-panel-review");
+  expect(review.getAttribute("aria-label")).toBe("Review");
+  expect(review.querySelector("svg")).not.toBeNull();
+  fireEvent.click(review);
+  expect(opened).toEqual([alertsRef()]);
+});
+
 // Clear is a button at the panel's foot. It puts away what a person can put
 // away: the hints and the failed operations. A decision is made, not
 // cleared, and an undelivered event is retried or discarded on the page.

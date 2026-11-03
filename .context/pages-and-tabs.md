@@ -1225,7 +1225,16 @@ is the Alerts panel's icon.
   page and their badge is its `badge` or `count` page. `useDockPanels()` returns the whole list.
 - **Layout:** the panel is absolute and anchored above the bar, inside the
   center column. The page does not reflow. Undo toasts sit above an open
-  panel.
+  panel. It is a popover, so it wears the elevated tier
+  (`--surface-elevated`), a strong top edge and a deep shadow: it stands
+  off a page of any darkness, a terminal's black included. A button in a
+  panel wears `dockButtonStyle` (`Dock/dockStyle.ts`, the card tier and the
+  primary text) over `ox-button`, since a transparent face would vanish
+  on the elevated tier.
+- **Alerts rows:** each row leads with Review, the open arrow (the same
+  icon as a heading's, `SquareArrowRightEnter`): it opens the item's own
+  page, else the Alerts page. The message follows it, as a context item's
+  title follows its ×.
 - **Rail:** a panel with `dock: true` is not in the rail.
 - **Test ids:** `dock-bar`, `dock-<id>`, `dock-<id>-badge`, `dock-panel`,
   `dock-panel-<id>`, `dock-panel-icon`, `dock-panel-title`,

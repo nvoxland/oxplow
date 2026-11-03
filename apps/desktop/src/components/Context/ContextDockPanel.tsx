@@ -7,6 +7,7 @@ import { FileText, Quote, X } from "lucide-react";
 
 import { clearContext, removeFromContext, useBasket, useSelectedThreadId, waiting, type BasketItem } from "../../contextBasket.js";
 import type { DockBadge, DockBodyProps } from "../Dock/dockPanels.js";
+import { dockButtonStyle } from "../Dock/dockStyle.js";
 
 export function useContextBadge(): DockBadge | null {
   const count = waiting(useBasket(useSelectedThreadId())).length;
@@ -45,7 +46,7 @@ export function ContextDockBody(_props: DockBodyProps) {
       )}
       {items.length > 0 && thread ? (
         <div style={{ display: "flex", marginTop: 2 }}>
-          <button type="button" className="ox-button" data-testid="context-panel-clear" title="Take everything out" onClick={() => void clearContext(thread)}>
+          <button type="button" className="ox-button" style={dockButtonStyle} data-testid="context-panel-clear" title="Take everything out" onClick={() => void clearContext(thread)}>
             Clear
           </button>
         </div>
