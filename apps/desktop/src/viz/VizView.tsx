@@ -1992,7 +1992,9 @@ const disclosureStyle: CSSProperties = {
   cursor: "pointer",
   font: "inherit",
 };
-const listRowStyle: CSSProperties = { padding: "8px 0", borderBottom: "1px solid var(--border-subtle)" };
+/** A list's rows stand apart: room above and below each, and a rule between
+ *  them, so two long rows never read as one block. */
+const listRowStyle: CSSProperties = { padding: "12px 0", borderBottom: "1px solid var(--border-subtle)" };
 /** An `emphasis` row: the soft accent wash an active row gets. */
 const emphasisStyle: CSSProperties = { background: "var(--accent-soft-bg)", fontWeight: 500 };
 /** A group's heading: the rail's sub-heading look. */

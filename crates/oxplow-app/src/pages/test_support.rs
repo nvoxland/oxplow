@@ -30,7 +30,7 @@ loaders:
   count: { sql: "SELECT count(*) AS total FROM big" }
 view:
   stack:
-    - { title: Big ones, viz: table, from: big }
+    - { title: Big ones, description: "Numbers at or above n.", viz: table, from: big }
     - { title: Total, hide_title: true, viz: number, from: count }
 "#,
     ),

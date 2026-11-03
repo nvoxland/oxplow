@@ -34,6 +34,25 @@ fn a_pages_loaders_are_under_loaders_and_data_is_refused_naming_it() {
     assert!(why.contains("unknown field `data`"), "{why}");
 }
 
+/// A section may say what it holds: `description` is a sentence the page
+/// shows on hover (the ⓘ after the heading) and an agent reads under it.
+/// It is text, nothing else.
+#[test]
+fn a_section_may_carry_a_description() {
+    let head = "title: T\nloaders:\n  q: { rows: [{ a: 1 }] }\n";
+    let page = page(&format!(
+        "{head}view:\n  stack:\n    - {{ id: facts, title: Facts, description: 'What is known.', viz: table, from: q }}\n    - {{ id: more, title: More, viz: table, from: q }}\n"
+    ))
+    .expect("loads");
+    let kids = page.view.children();
+    assert_eq!(kids[0].description.as_deref(), Some("What is known."));
+    assert_eq!(kids[1].description, None);
+    let why = refused(&format!(
+        "{head}view:\n  stack:\n    - {{ id: facts, title: Facts, description: [a], viz: table, from: q }}\n"
+    ));
+    assert!(why.contains("`description` is text"), "{why}");
+}
+
 /// A section — a child of a `stack`, `grid` or `switch`, in the view or the
 /// rail — needs a `title`; a missing one and `''` are refused naming the
 /// node and the fix. `hide_title` is how its heading is kept off the page.

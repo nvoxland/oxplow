@@ -769,7 +769,10 @@ resolve it to the page file's icon and title.
 
 oxplow's pages (`extensions/oxplow-foundation/pages/*.yaml`; a view is a
 `stack` of nodes drawn as sections unless noted; every section has a
-`title` (the page loader refuses one without, naming the node), and
+`title` (the page loader refuses one without, naming the node), a
+`description` is the ⓘ after the heading (the kit `Section`'s `help`: the
+sentence is its hover and accessible name, and the page text prints it
+under the heading; the Alerts sections each carry one), and
 `hide_title: true` keeps its heading out of sight — a `Section` whose
 heading is visually hidden (`ox-sr-only`) for Contents, screen readers and
 the agent text — while a hidden-title section that draws nothing takes no
@@ -1246,7 +1249,7 @@ is the Alerts panel's icon.
 - **Clear:** both core panels end in a Clear button (`ox-button`, never a
   link) while there is something to clear. The Context panel's takes every
   waiting item out (`oxplow.context.clear`). The Alerts panel's puts away
-  what a person can put away: the hints (`oxplow.hint.dismiss` each) and
+  what a person can put away: the notices (`oxplow.hint.dismiss` each) and
   the failed operations (`oxplow.op_error.dismiss_all`); `clearable` in
   `alertsModel.ts` says when it shows. A decision is made, not cleared; an
   undelivered event or failed reaction is retried or discarded on the

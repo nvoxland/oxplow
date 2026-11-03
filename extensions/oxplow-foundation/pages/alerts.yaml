@@ -7,11 +7,13 @@ loaders:
   decisions:
     sql: |
       SELECT 1
-  hints:
+  notices:
     sql: |
-      SELECT n.id, n.message,
-             (SELECT title FROM v_thread th WHERE th.id = n.thread_id) AS thread
-      FROM v_agent_nudge n
+      SELECT n.id,
+             CASE WHEN instr(n.message, char(10)) > 0 THEN substr(n.message, 1, instr(n.message, char(10)) - 1) ELSE n.message END AS message,
+             CASE WHEN th.title IS NULL THEN NULL ELSE 'Thread: ' || th.title END AS thread,
+             th.uri AS thread_uri
+      FROM v_agent_nudge n LEFT JOIN v_thread th ON th.id = n.thread_id
       WHERE n.audience = 'person' AND n.delivered_at IS NULL
       ORDER BY n.id DESC
   operations:
@@ -30,18 +32,24 @@ view:
   stack:
   - id: decisions
     title: Needs your decision
+    description: 'An agent asked to run a command its policy keeps for you, such as changing a setting. Approve or Decline each; nothing else clears it.'
     from: decisions
     viz: approvals
-  - id: hints
-    title: Hints for you
-    from: hints
+  - id: notices
+    title: Notices
+    description: 'Things oxplow noticed about the work and tells you rather than an agent, such as a hint it muted for an agent after it kept firing. Nothing to do but read and dismiss.'
+    from: notices
     viz: list
     columns:
     - key: message
-      label: Hint
+      label: Notice
+      expand: oxplow-foundation/alerts-notice
     - key: thread
       label: Thread
-    empty: No hints for you.
+      link:
+        kind: page
+        from: thread_uri
+    empty: No notices.
     actions:
     - id: dismiss
       label: Dismiss
@@ -51,6 +59,7 @@ view:
       row: true
   - id: operations
     title: Failed operations
+    description: 'Something you started from the app failed. Each row opens into how it ended and its output; an agent can read the same record. Mark Seen keeps one without the red, Dismiss hides it.'
     from: operations
     viz: table
     columns:
@@ -82,13 +91,16 @@ view:
       command: oxplow.op_error.dismiss_all
       input: {}
   - id: deliveries
+    description: "Oxplow's own plumbing: every change is an event, and a consumer that threw on one parks it here. Retry hands it over again; Discard drops it for good and asks first."
     embed:
       page: oxplow-foundation/alerts-deliveries
   - id: reactions
+    description: "An extension's effect that reacts to an event and failed on its last try, with why. Some try again by themselves; Retry runs one now."
     embed:
       page: oxplow-foundation/alerts-reactions
   - id: extensions
     title: Extensions with problems
+    description: 'An extension that is held or not running as it should, with its first error. It leaves this list when the extension is fixed and deployed.'
     from: extensions
     viz: table
     columns:

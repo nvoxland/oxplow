@@ -1,5 +1,5 @@
 /// The Alerts dock panel: what needs the person, each led by Review (the
-/// open arrow: it opens the item's page, else the Alerts page), and Clear at the foot for what a person can put away (the hints
+/// open arrow: it opens the item's page, else the Alerts page), and Clear at the foot for what a person can put away (the notices
 /// and the failed operations; `clearable`); the Alerts page is the panel
 /// header's arrow. The icon's badge is the same count the bell showed
 /// (`alertsSummary`).
@@ -51,7 +51,7 @@ export function AlertsDockBody({ onOpenPage }: DockBodyProps) {
       )}
       {clearable(items) ? (
         <div style={{ display: "flex", marginTop: 2 }}>
-          <button type="button" className="ox-button" style={dockButtonStyle} data-testid="alerts-panel-clear" title="Dismiss the hints and the failed operations" onClick={() => void clearAlerts(items)}>
+          <button type="button" className="ox-button" style={dockButtonStyle} data-testid="alerts-panel-clear" title="Dismiss the notices and the failed operations" onClick={() => void clearAlerts(items)}>
             Clear
           </button>
         </div>

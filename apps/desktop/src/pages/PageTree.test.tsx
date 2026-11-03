@@ -28,6 +28,24 @@ test("every node kind draws with its id; an embed's nodes are prefixed with the 
   expect(container.querySelector('[data-node="chart"] [data-testid="custom-component-fallback"]')).not.toBeNull();
 });
 
+// A section's `description` is the ⓘ after its heading: the sentence is
+// its hover and its accessible name, and the page stays quiet.
+test("a section's description is a ⓘ after its heading with the text as its hover", () => {
+  const page = fakePage(
+    node.stack("s", [
+      node.viz("items", "items", { columns: [{ key: "id" }] }, { title: "Items", description: "What is there." }),
+      node.viz("more", "items", { columns: [{ key: "id" }] }, { title: "More" }),
+    ]),
+  );
+  const run = fakeRun(page, { loaders: { items: loader(["id"], [["a"]]) } });
+  const { container } = render(<PageTree run={run} runId="run-1" />);
+  const help = container.querySelector('[data-node="items"] [data-testid="section-help"]')!;
+  expect(help.getAttribute("title")).toBe("What is there.");
+  expect(help.getAttribute("aria-label")).toBe("What is there.");
+  expect(help.closest(".ox-section-head")).not.toBeNull();
+  expect(container.querySelector('[data-node="more"] [data-testid="section-help"]')).toBeNull();
+});
+
 test("a switch draws only the child the server put in view", () => {
   const list = render(<PageTree run={switchPage("list")} runId="run-1" />);
   expect(nodeIds(list.container)).toEqual(["modes", "list"]);

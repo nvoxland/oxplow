@@ -81,6 +81,13 @@ fn write_tree<'r>(
         let id = format!("{prefix}{}", at.id);
         let hashes = "#".repeat(level.min(6));
         let heading = |title: &str| format!("\n{hashes} {title} [node {id}]\n\n");
+        // What the section holds, as the person reads it from the ⓘ.
+        let describe = |def: &Node, out: &mut String| {
+            if let Some(d) = &def.description {
+                out.push_str(d);
+                out.push_str("\n\n");
+            }
+        };
         let Some(def) = node(&run.page, &at.id) else {
             // A page another extension mounted at a slot: its own run.
             if let Some(child) = &at.embed {
@@ -94,6 +101,7 @@ fn write_tree<'r>(
             NodeKind::Stack { .. } | NodeKind::Grid { .. } | NodeKind::Switch { .. } => {
                 if let Some(t) = &def.title {
                     out.push_str(&heading(t));
+                    describe(def, out);
                 }
                 let deeper = if def.title.is_some() {
                     level + 1
@@ -106,6 +114,7 @@ fn write_tree<'r>(
             }
             NodeKind::Viz { from, config: cfg } => {
                 out.push_str(&heading(def.title.as_deref().unwrap_or(&cfg.title)));
+                describe(def, out);
                 let failed = from
                     .as_ref()
                     .and_then(|f| run.loaders.get(f))

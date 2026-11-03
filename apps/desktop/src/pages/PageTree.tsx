@@ -169,7 +169,7 @@ function NodeView(props: NodeViewProps) {
   return (
     <NodeFrame id={id} fill={fills}>
       {placement === "section" && title ? (
-        <Section id={id} title={title} hideTitle={hideTitle} fill={fills}>
+        <Section id={id} title={title} help={def?.description ?? undefined} hideTitle={hideTitle} fill={fills}>
           {body}
         </Section>
       ) : placement === "tile" ? (

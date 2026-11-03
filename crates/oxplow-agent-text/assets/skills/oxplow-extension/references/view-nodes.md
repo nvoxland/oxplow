@@ -42,6 +42,11 @@ view:
 
 - `stack: [nodes]`; `grid: [nodes]` (a child's `size`: `small` default,
   `wide`, `tall`, `full`).
+- `description: <sentence>` on any section: what it holds and what the
+  person does there. The page shows it as a ⓘ after the heading (the
+  sentence is its hover), and `oxplow_run_page` prints it under the
+  heading. Write one where the heading alone would leave a reader
+  guessing (an Alerts section: what lands there and how it leaves).
 - `switch: { param, children }` shows the one child whose `id` equals the
   param's value (else the first). The param is a filter, drawn in the rail.
   Loaders only hidden children show do not run. Children may be switches.

@@ -1,0 +1,13 @@
+title: The whole notice
+description: One notice's full text, as oxplow wrote it.
+params:
+- name: id
+loaders:
+  alerts_notice:
+    sql: |
+      SELECT message FROM v_agent_nudge WHERE id = :id
+view:
+  from: alerts_notice
+  viz: markdown
+  markdown:
+    text: message

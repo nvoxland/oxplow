@@ -443,6 +443,9 @@ pub struct Node {
     /// Unique in its page; `#node=<id>` points at it.
     pub id: String,
     pub title: Option<String>,
+    /// What the section holds, in a sentence: the ⓘ after its heading
+    /// says it on hover, and an agent reads it under the heading.
+    pub description: Option<String>,
     /// Its heading isn't drawn (it stays in the page for Contents, screen
     /// readers and agents).
     pub hide_title: bool,
@@ -1522,6 +1525,7 @@ fn parse_node(value: &serde_yaml::Value, ctx: &mut NodeCtx<'_>) -> Result<Node, 
     };
     let id = take_str(&mut map, "id")?;
     let title = take_str(&mut map, "title")?;
+    let description = take_str(&mut map, "description")?;
     let hide_title = match map.remove("hide_title") {
         None => false,
         Some(serde_yaml::Value::Bool(b)) => b,
@@ -1633,6 +1637,7 @@ fn parse_node(value: &serde_yaml::Value, ctx: &mut NodeCtx<'_>) -> Result<Node, 
     Ok(Node {
         id: id.unwrap_or(default_id),
         title,
+        description,
         hide_title,
         replaceable,
         size,

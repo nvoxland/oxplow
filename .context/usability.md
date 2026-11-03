@@ -221,7 +221,9 @@ markdown itself, nor edits it in a `<textarea>`.
   waits (it dismisses those, nothing that needs a decision or a
   retry). The panel's header arrow opens the **Alerts page**
   (the `alerts` page, the foundation's): Needs your
-  decision (each proposal's card, Approve / Decline), Hints for you,
+  decision (each proposal's card, Approve / Decline), Notices (hints
+  raised to the person: each by its first line, expanding into the whole
+  text, with its thread as a link),
   Failed operations (each opening into how it ended), Undelivered events
   and Failed reactions with Retry / Discard (`oxplow.delivery.*`,
   `oxplow.effect.retry`, as page actions that ask first), and Extensions

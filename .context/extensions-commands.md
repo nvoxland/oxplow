@@ -346,7 +346,7 @@ advisories:
   `:effort_id` in its key, as `threshold-crossed` does); `turn` whenever
   it has rows. Marks live in `once_mark`, per effort or thread.
 - **Audience.** `agent` hints go to the coding agent; `person` hints are
-  raised in Alerts ("Hints for you", `apps/desktop/src/hints.ts`) until
+  raised in Alerts ("Notices", `apps/desktop/src/hints.ts`) until
   the person dismisses one (`oxplow.hint.dismiss`).
 - **Delivery.** Every hit is recorded as a nudge (`v_agent_nudge`, kind
   `<extension>/<id>`, with its `audience`), undelivered. The thread's

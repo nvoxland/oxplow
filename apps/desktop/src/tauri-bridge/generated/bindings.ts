@@ -3862,6 +3862,11 @@ export type Node_Deserialize = {
 	id: string,
 	title: string | null,
 	/**
+	 *  What the section holds, in a sentence: the ⓘ after its heading
+	 *  says it on hover, and an agent reads it under the heading.
+	 */
+	description: string | null,
+	/**
 	 *  Its heading isn't drawn (it stays in the page for Contents, screen
 	 *  readers and agents).
 	 */
@@ -3880,6 +3885,11 @@ export type Node_Serialize = {
 	/**  Unique in its page; `#node=<id>` points at it. */
 	id: string,
 	title: string | null,
+	/**
+	 *  What the section holds, in a sentence: the ⓘ after its heading
+	 *  says it on hover, and an agent reads it under the heading.
+	 */
+	description: string | null,
 	/**
 	 *  Its heading isn't drawn (it stays in the page for Contents, screen
 	 *  readers and agents).

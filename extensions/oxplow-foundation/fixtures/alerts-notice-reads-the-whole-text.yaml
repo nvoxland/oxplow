@@ -1,0 +1,9 @@
+# The part a notice row expands into: the notice's whole text as markdown.
+given:
+  - observe: { nudge: { kind: x/muted, message: "Muted x for the agent. It said:\n# Deltas\n- a: 1", audience: person } }
+when: { part: alerts-notice, params: { id: 1 } }
+expect:
+  loaders:
+    alerts_notice:
+      rows:
+        - { message: "Muted x for the agent. It said:\n# Deltas\n- a: 1" }

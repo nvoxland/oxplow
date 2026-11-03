@@ -1,3 +1,4 @@
+import { CircleHelp } from "lucide-react";
 import { createContext, useContext, type CSSProperties, type ReactNode } from "react";
 
 import { useSectionCollapse } from "../components/CollapsibleSections.js";
@@ -29,6 +30,9 @@ export interface SectionProps {
    *  Contents and screen readers. */
   hideTitle?: boolean;
   description?: ReactNode;
+  /** What the section holds, in a sentence: a ⓘ after the heading's text
+   *  says it on hover (and to screen readers); the page stays quiet. */
+  help?: string;
   actions?: readonly PageAction[];
   /** The extension it comes from, when it isn't the page's own: said by
    *  the heading, so added content is never mistaken for the page's. */
@@ -57,6 +61,7 @@ export function Section({
   opens,
   hideTitle = false,
   description,
+  help,
   actions,
   source,
   testId,
@@ -104,6 +109,11 @@ export function Section({
               title
             )}
             {opens ? <OpenPageLink to={opens.to} name={opens.name} onNavigate={opens.onNavigate} /> : null}
+            {help ? (
+              <span data-testid="section-help" className="ox-section-help" role="img" aria-label={help} title={help}>
+                <CircleHelp size={14} aria-hidden />
+              </span>
+            ) : null}
           </Heading>
           {source ? (
             <span className="ox-badge" data-source={source} title={`Added by the ${source} extension`}>

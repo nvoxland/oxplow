@@ -1,0 +1,11 @@
+# A notice raised to the person lists by its first line, with the thread it
+# came from as a link; the row expands into the whole text.
+given:
+  - { command: oxplow.thread.create, input: { stream: str1, title: Helper }, bind: helper }
+  - observe: { nudge: { kind: x/muted, message: "Muted x for the agent. It said:\n# Deltas\n- a: 1", thread: $helper.id, audience: person } }
+when: { page: alerts }
+expect:
+  loaders:
+    notices:
+      rows:
+        - { message: "Muted x for the agent. It said:", thread: "Thread: Helper" }
