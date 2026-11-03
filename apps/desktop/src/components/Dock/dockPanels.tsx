@@ -8,8 +8,11 @@
 import type { ComponentType } from "react";
 import { useMemo } from "react";
 
-import type { ExtensionPanel } from "../../tauri-bridge/generated/bindings.js";
+import type { Extension, ExtensionPanel } from "../../tauri-bridge/generated/bindings.js";
 import type { TabRef } from "../../tabs/tabState.js";
+import { alertsRef, contextRef } from "../../tabs/pageRefs.js";
+import { useExtensions } from "../../extensionsStore.js";
+import { panelOpenRef } from "../Panels/panelLayout.js";
 import { AssistantDockBody, useAssistantBadge } from "../Assistant/AssistantDockPanel.js";
 import { ContextDockBody, useContextBadge } from "../Context/ContextDockPanel.js";
 import { AlertsDockBody, useAlertsBadge } from "../Alerts/AlertsDockPanel.js";
@@ -38,6 +41,10 @@ export interface DockPanelDef {
   useBadge(): DockBadge | null;
   /** The body; mounted only while the panel is open. */
   Body: ComponentType<DockBodyProps>;
+  /** The page the panel's things are on (the Alerts page, the Context
+   *  page, an extension panel's `open` or body page): the open arrow in
+   *  the panel's header, as a section heading's (`OpenPageLink`). */
+  page?: TabRef;
 }
 
 /** Where a core panel sits in the bar. A closed list: it only shrinks
@@ -47,8 +54,8 @@ export const CORE_ORDER = ["assistant", "context", "alerts"];
 
 const core: DockPanelDef[] = [
   { id: "assistant", title: "Assistant", icon: "sparkles", useBadge: useAssistantBadge, Body: AssistantDockBody },
-  { id: "context", title: "Context", icon: "at-sign", useBadge: useContextBadge, Body: ContextDockBody },
-  { id: "alerts", title: "Alerts", icon: "bell", useBadge: useAlertsBadge, Body: AlertsDockBody },
+  { id: "context", title: "Context", icon: "at-sign", useBadge: useContextBadge, Body: ContextDockBody, page: contextRef() },
+  { id: "alerts", title: "Alerts", icon: "bell", useBadge: useAlertsBadge, Body: AlertsDockBody, page: alertsRef() },
 ];
 
 /** Add (or replace) a core panel. */
@@ -70,12 +77,14 @@ export function orderDockPanels(corePanels: DockPanelDef[], extensions: DockPane
   ];
 }
 
-/** An extension panel as a dock panel: the body page, and the count as the badge. */
-export function extensionDockPanel(panel: ExtensionPanel): DockPanelDef {
+/** An extension panel as a dock panel: the body page, the count as the
+ *  badge, and its `open` (else body) page behind the header's arrow. */
+export function extensionDockPanel(panel: ExtensionPanel, extensions: Extension[] | null = null): DockPanelDef {
   return {
     id: `ext:${panel.id}`,
     title: panel.title,
     icon: panel.icon ?? "box",
+    page: panelOpenRef(panel, extensions),
     useBadge() {
       const runs = usePanelRuns().runs[panel.id];
       const count = runs?.count ?? badgeCount(runs?.badge ?? null);
@@ -97,8 +106,9 @@ export function extensionDockPanel(panel: ExtensionPanel): DockPanelDef {
 
 export function useDockPanels(): DockPanelDef[] {
   const { panels } = usePanelRuns();
+  const extensions = useExtensions();
   return useMemo(
-    () => orderDockPanels(core, panels.filter((p) => p.dock).map(extensionDockPanel)),
-    [panels],
+    () => orderDockPanels(core, panels.filter((p) => p.dock).map((p) => extensionDockPanel(p, extensions))),
+    [panels, extensions],
   );
 }

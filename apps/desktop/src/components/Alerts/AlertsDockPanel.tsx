@@ -1,6 +1,6 @@
 /// The Alerts dock panel: what needs the person, each with its Review
-/// action, and a link to the Alerts page. The icon's badge is the same
-/// count the bell showed (`alertsSummary`).
+/// action; the Alerts page is the panel header's arrow. The icon's badge
+/// is the same count the bell showed (`alertsSummary`).
 
 import { alertsRef, refFromTabId } from "../../tabs/pageRefs.js";
 import type { DockBadge, DockBodyProps } from "../Dock/dockPanels.js";
@@ -35,11 +35,6 @@ export function AlertsDockBody({ onOpenPage }: DockBodyProps) {
           </div>
         ))
       )}
-      <div>
-        <button type="button" data-testid="alerts-panel-open-page" onClick={() => onOpenPage(alertsRef())} style={linkButton}>
-          Open Alerts page
-        </button>
-      </div>
     </div>
   );
 }

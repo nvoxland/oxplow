@@ -1208,10 +1208,13 @@ is the Alerts panel's icon.
   clamped to 160px or more and kept in `shellStorage` under
   `oxplow.dock.height`. The panel also keeps it within the column height
   minus 80px.
-- **Registry:** a `DockPanelDef` is `{ id, title, icon, useBadge, Body }`.
+- **Registry:** a `DockPanelDef` is `{ id, title, icon, useBadge, Body, page? }`.
   `icon` is a name from `ICONS`. `useBadge` is a hook that returns a count
   and an optional `danger` tone, or null. `Body` is mounted only while the
-  panel is open. Core panels call `registerDockPanel`. Their order is
+  panel is open. `page` is the page the panel's things are on (Alerts,
+  Context, an extension panel's `open` else its body page): the header
+  draws the open arrow (`OpenPageLink`, "Open <title> page") after the
+  title, as a section heading does, and no body draws its own link. Core panels call `registerDockPanel`. Their order is
   `CORE_ORDER` (assistant, context, alerts). Extension panels with
   `dock: true` follow, sorted by title. Their body is the panel's `body`
   page and their badge is its `badge` or `count` page. `useDockPanels()` returns the whole list.
@@ -1220,9 +1223,11 @@ is the Alerts panel's icon.
   panel.
 - **Rail:** a panel with `dock: true` is not in the rail.
 - **Test ids:** `dock-bar`, `dock-<id>`, `dock-<id>-badge`, `dock-panel`,
-  `dock-panel-<id>`, `dock-panel-resize`, `dock-panel-close`. The Alerts
-  body has `alerts-panel`, `alerts-panel-item`, `alerts-panel-review`,
-  `alerts-panel-empty` and `alerts-panel-open-page`.
+  `dock-panel-<id>`, `dock-panel-icon`, `dock-panel-title`,
+  `dock-panel-open-page` (holding the `open-page-link`), `dock-panel-resize`,
+  `dock-panel-close`. The Alerts body has `alerts-panel`, `alerts-panel-item`,
+  `alerts-panel-review` and `alerts-panel-empty`. The Context body's rows
+  (`context-panel-item`) lead with their `context-panel-remove` ×.
 
 ## History: the IA redesign (complete)
 

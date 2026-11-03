@@ -15,7 +15,7 @@ test("an effect's destructive step waits in Alerts until a person approves it", 
   const bell = page.getByTestId("dock-alerts");
   await expect(page.getByTestId("dock-alerts-badge")).toHaveText("1");
   await bell.click();
-  await page.getByTestId("alerts-panel-open-page").click();
+  await page.getByTestId("dock-panel-open-page").getByTestId("open-page-link").click();
   const card = page.locator('[data-testid^="proposal-"]').filter({ hasText: "destructive" }).first();
   await expect(card).toBeVisible();
   const id = (await card.getAttribute("data-testid"))!.replace("proposal-", "");

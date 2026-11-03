@@ -1,6 +1,7 @@
 /// The open dock panel: it rises from the bar over the page area (absolute,
 /// anchored above the bar, so the page does not reflow). A header with the
-/// panel's icon (the one its bar button draws), its title and ×, a drag
+/// panel's icon (the one its bar button draws), its title, the arrow to
+/// its page when it has one (`DockPanelDef.page`) and ×, a drag
 /// handle on the top edge, Escape closes and returns focus to the panel's
 /// icon; a press outside the dock closes it too (`Dock.tsx`). Opening a
 /// page from the panel closes it (the page would be behind it). Only the
@@ -10,6 +11,7 @@ import { useEffect, useRef, useState } from "react";
 import type { KeyboardEvent, PointerEvent } from "react";
 
 import { ICONS } from "../../icons.js";
+import { OpenPageLink } from "../../kit/OpenPageLink.js";
 import type { TabRef } from "../../tabs/tabState.js";
 import { dockStore, DOCK_MAX_HEIGHT_MARGIN, DOCK_MIN_HEIGHT, useDockState } from "./dockStore.js";
 import { useDockPanels } from "./dockPanels.js";
@@ -109,7 +111,21 @@ export function DockPanel({ streamId, onOpenPage }: { streamId: string | null; o
         <span data-testid="dock-panel-icon" aria-hidden style={{ display: "inline-flex", marginRight: 6, color: "var(--text-secondary)" }}>
           <Icon size={14} />
         </span>
-        <strong data-testid="dock-panel-title" style={{ flex: 1, fontSize: "var(--text-xs)" }}>{panel.title}</strong>
+        <strong data-testid="dock-panel-title" style={{ fontSize: "var(--text-xs)" }}>{panel.title}</strong>
+        {panel.page ? (
+          <span data-testid="dock-panel-open-page" style={{ display: "inline-flex", marginLeft: 4 }}>
+            <OpenPageLink
+              to={panel.page}
+              name={`${panel.title} page`}
+              onNavigate={(ref) => {
+                // The page would sit behind the panel.
+                dockStore.close();
+                onOpenPage(ref);
+              }}
+            />
+          </span>
+        ) : null}
+        <span style={{ flex: 1 }} />
         <button
           type="button"
           data-testid="dock-panel-close"

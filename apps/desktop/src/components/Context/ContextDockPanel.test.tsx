@@ -46,8 +46,19 @@ test("it lists what waits, takes an item out and clears the lot", async () => {
   await waitFor(() => expect(ran).toContainEqual(["oxplow.context.remove", { item: 1 }]));
   fireEvent.click(view.getByTestId("context-panel-clear"));
   await waitFor(() => expect(ran).toContainEqual(["oxplow.context.clear", { thread: "thr7" }]));
-  fireEvent.click(view.getByTestId("context-panel-open-page"));
-  expect(opened).toEqual(["oxplow:oxplow/page?page=context"]);
+  // The Context page opens from the panel's header, not a link here.
+  expect(view.queryByTestId("context-panel-open-page")).toBeNull();
+  expect(opened).toEqual([]);
+});
+
+// The × that takes an item out leads its line, before the item's kind and
+// title, so every × lines up at the left.
+test("an item's × is at the left of its line", async () => {
+  setSelectedThread("thr7");
+  rows = [[1, "page", "oxplow:oxplow/commit?sha=abc1234", "abc1234", null, null]];
+  const view = render(<ContextDockBody streamId={null} onOpenPage={() => {}} />);
+  const item = await waitFor(() => view.getByTestId("context-panel-item"));
+  expect(item.firstElementChild?.getAttribute("data-testid")).toBe("context-panel-remove");
 });
 
 test("an empty basket says how things get in", async () => {

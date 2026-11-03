@@ -11,7 +11,7 @@ mock.module("../../api.js", () => ({
 const { Dock } = await import("./Dock.js");
 const { dockStore } = await import("./dockStore.js");
 const { PanelRunsProvider } = await import("../Panels/PanelRunsContext.js");
-const { alertsRef } = await import("../../tabs/pageRefs.js");
+const { alertsRef, contextRef } = await import("../../tabs/pageRefs.js");
 
 afterEach(() => {
   cleanup();
@@ -48,15 +48,23 @@ test("× closes the panel", () => {
   expect(view.queryByTestId("dock-panel")).toBeNull();
 });
 
-// A page opened from a panel would sit behind it: opening one closes the
-// panel, so the page is what the person sees.
-test("opening a page from a panel closes the panel", () => {
+// A panel whose things have a page of their own carries the open arrow in
+// its header, as a section heading does (`OpenPageLink`), not a link in
+// its body. A page opened from a panel would sit behind it: opening one
+// closes the panel, so the page is what the person sees.
+test("the panel's header arrow opens its page and closes the panel", () => {
   const opened: unknown[] = [];
   const view = mount((r) => opened.push(r));
   fireEvent.click(view.getByTestId("dock-alerts"));
-  fireEvent.click(view.getByTestId("alerts-panel-open-page"));
+  expect(view.queryByTestId("alerts-panel-open-page")).toBeNull();
+  const arrow = view.getByTestId("dock-panel-open-page").querySelector("[data-testid=open-page-link]")!;
+  expect(arrow.getAttribute("aria-label")).toBe("Open Alerts page");
+  fireEvent.click(arrow);
   expect(opened).toEqual([alertsRef()]);
   expect(view.queryByTestId("dock-panel")).toBeNull();
+  fireEvent.click(view.getByTestId("dock-context"));
+  fireEvent.click(view.getByTestId("dock-panel-open-page").querySelector("[data-testid=open-page-link]")!);
+  expect(opened).toEqual([alertsRef(), contextRef()]);
 });
 
 test("Escape closes the panel and focus returns to its icon", () => {

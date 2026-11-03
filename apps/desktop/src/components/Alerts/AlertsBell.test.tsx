@@ -115,7 +115,7 @@ test("the dock's Alerts icon counts everything, red for a problem, and opens the
   fireEvent.click(view.getByTestId("dock-alerts"));
   expect(view.getByTestId("dock-panel-alerts")).toBeTruthy();
   await waitFor(() => expect(view.getAllByTestId("alerts-panel-item").length).toBeGreaterThan(0));
-  fireEvent.click(view.getByTestId("alerts-panel-open-page"));
+  fireEvent.click(view.getByTestId("dock-panel-open-page").querySelector("[data-testid=open-page-link]")!);
   expect(opened).toEqual([alertsRef()]);
 });
 
