@@ -1,0 +1,30 @@
+# The Markdown page reads the file the system hands it and draws its text
+# as one document; its tab is the file's name. A file that is not there
+# draws nothing and says so.
+temp:
+  note.md: "# Hello\n"
+when:
+  page: oxplow-foundation/markdown
+  params:
+    uri: "oxplow:oxplow/file?path=note.md&filesystem=oxplow:temp"
+    path: note.md
+    filesystem: "oxplow:temp"
+expect:
+  label: note.md
+  loaders:
+    document:
+      rows:
+        - { text: "# Hello\n" }
+  text:
+    contains: ["# Hello"]
+steps:
+  - params:
+      uri: "oxplow:oxplow/file?path=gone.md&filesystem=oxplow:temp"
+      path: gone.md
+      filesystem: "oxplow:temp"
+    expect:
+      loaders:
+        document:
+          rows: 0
+      text:
+        contains: ["There is no such file."]

@@ -1,0 +1,32 @@
+# A `.md` file gets a second mode, Markdown: the document drawn. The Editor
+# stays the mode that opens a working-tree file, and the File viewer the one
+# that opens a file elsewhere; a file that is no markdown gets no such mode.
+temp:
+  note.md: "# Hello\n"
+when:
+  command: oxplow.page.renderers
+  input: { uri: "oxplow:oxplow/file?path=README.md" }
+expect:
+  ok: true
+  result:
+    renderers:
+      - { page: oxplow-foundation/editor, default: true }
+      - { page: oxplow-foundation/markdown, default: false }
+steps:
+  - when:
+      command: oxplow.page.renderers
+      input: { uri: "oxplow:oxplow/file?path=note.md&filesystem=oxplow:temp" }
+    expect:
+      ok: true
+      result:
+        renderers:
+          - { page: oxplow-foundation/file-viewer }
+          - { page: oxplow-foundation/markdown }
+  - when:
+      command: oxplow.page.renderers
+      input: { uri: "oxplow:oxplow/file?path=koala.txt" }
+    expect:
+      ok: true
+      result:
+        renderers:
+          - { page: oxplow-foundation/editor, default: true }

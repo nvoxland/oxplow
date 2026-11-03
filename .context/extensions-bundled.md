@@ -245,7 +245,7 @@ screens and oxplow-bundled's add the review and analysis:
   rules (`v_zone`, `v_zone_unmatched`); nothing links to it.
 - **The app's screens.** foundation's `alerts`,
   `catalog`, `changes-effort`, `comments`, `commit`,
-  `diff`, `directory`, `file-viewer`, `files` (the launcher's way into `directory`), `git-dashboard`,
+  `diff`, `directory`, `file-viewer`, `markdown` (a `.md` file drawn), `files` (the launcher's way into `directory`), `git-dashboard`,
   `settings` (an `area` param: overview, agents, lsp, extensions, data,
   integrations, ai), `uncommitted-changes`, and more. Metrics in [metrics.md](./metrics.md).
 - **Rail panels** (the `panels:` list of oxplow-bundled): Go To

@@ -171,7 +171,10 @@ otherwise. A tab's label and icon come from `recordedPageKind(ref)` /
 (`oxplow/file`), else a web page's scheme.
 
 Foundation's page files are oxplow's renderers (`agent-session`,
-`commit`, `directory`, `editor`, `file-viewer`, `wiki-page`, `work-item`,
+`commit`, `directory`, `editor`, `file-viewer`, `markdown` (a `.md` file
+drawn as a document, on any filesystem and revision: a mode beside the
+Editor and the File viewer, never the default; `embed` it with a `uri` to
+draw a markdown file inside another page), `wiki-page`, `work-item`,
 `diff-view` for `oxplow/snapshot`, `oxplow/effort` and `oxplow/turn`, and
 `external-url`, a page over the `embed` viz, for `https` and `http`). An agent
 session's tab follows its row (`reconcileSessionTabs`). There is no

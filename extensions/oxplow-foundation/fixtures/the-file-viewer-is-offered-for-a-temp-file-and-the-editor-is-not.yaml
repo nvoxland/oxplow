@@ -1,6 +1,6 @@
 # Which pages draw a file is the daemon's call. The File viewer takes any
-# file on any filesystem; the Editor writes the worktree, so a scratch file
-# is not offered to it.
+# file on any filesystem, and a markdown file is also drawn as a document;
+# the Editor writes the worktree, so a scratch file is not offered to it.
 temp:
   note.md: "# Hello\n"
 when:
@@ -11,3 +11,4 @@ expect:
   result:
     renderers:
       - { page: oxplow-foundation/file-viewer }
+      - { page: oxplow-foundation/markdown }

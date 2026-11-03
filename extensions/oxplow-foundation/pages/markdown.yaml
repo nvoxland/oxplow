@@ -1,0 +1,44 @@
+title: Markdown
+description: "A markdown file read as a document — headings, links, tables, images and diagrams drawn — on any filesystem and at any revision. A display mode of a `.md` file beside the Editor and the File viewer; embed it with a `uri` to draw a markdown file inside another page."
+label: '{{param.path|basename}}'
+icon: book-open
+for: oxplow/file
+accepts:
+  path: '^[\w./ -]+\.md$'
+content: { text: true, max_bytes: 1048576 }
+comments: true
+params:
+- name: uri
+- name: path
+- name: filesystem
+- name: rev
+loaders:
+  # The file's text, from what the system read; a file cut at the limit
+  # says so at its end.
+  document:
+    sql: |
+      SELECT coalesce(text, '')
+             || CASE WHEN truncated THEN char(10) || char(10) || '*Only the first 1 MiB is shown.*' ELSE '' END AS text
+      FROM content
+  # Its history (the index has one for a local file only) and its folder, on
+  # the file's own filesystem and revision.
+  related:
+    sql: |
+      SELECT 'File history' AS title, uri('oxplow/page', 'page', 'file-history', 'path', :path) AS uri, 1 AS ord
+      WHERE COALESCE(:filesystem, 'oxplow:local') = 'oxplow:local'
+      UNION ALL
+      SELECT rtrim(rtrim(:path, replace(:path, '/', '')), '/'),
+             uri('oxplow/dir', 'filesystem', NULLIF(:filesystem, 'oxplow:local'),
+                 'path', rtrim(rtrim(:path, replace(:path, '/', '')), '/'),
+                 'rev', NULLIF(NULLIF(:rev, ''), 'working'))
+             , 2
+      WHERE :path LIKE '%/%'
+      ORDER BY ord
+view:
+  from: document
+  viz: markdown
+  markdown:
+    text: text
+  empty: There is no such file.
+see_also:
+  - { from: related }
