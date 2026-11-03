@@ -49,6 +49,11 @@ async fn an_embed_reads_nested_with_its_ids_under_the_embeds() {
     let r = run(&svc, "acme/host", &[]).await;
     let text = page_text(&svc, &svc.layout.project_dir, &r).await.unwrap();
     assert!(text.contains("## Picked"), "{text}");
+    // Its `description` reads under the heading, as any section's does.
+    assert!(
+        text.contains("## Picked [node picked]\n\nWhat was picked.\n\n"),
+        "{text}"
+    );
     assert!(text.contains("[node picked/echo]"), "{text}");
 }
 

@@ -136,6 +136,7 @@ fn write_tree<'r>(
                 (Some(child), _) => {
                     let title = def.title.as_deref().unwrap_or(&child.page.title);
                     out.push_str(&heading(title));
+                    describe(def, out);
                     let nested = format!("{id}/");
                     write_tree(svc, root, child, &child.tree, &nested, level + 1, out).await?;
                 }

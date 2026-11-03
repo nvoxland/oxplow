@@ -54,7 +54,7 @@ loaders:
   colors: { rows: [{ state: failed }, { state: passed }] }
 view:
   stack:
-    - { embed: { page: acme/picked } }
+    - { embed: { page: acme/picked }, description: "What was picked." }
     - { title: Borrowed, viz: number, from: borrowed }
     - { title: Colors, viz: list, from: colors }
 "#,
