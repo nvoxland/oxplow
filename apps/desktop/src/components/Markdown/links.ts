@@ -28,9 +28,11 @@ export function openExternal(href: string, open: OpenRef, newTab = true): void {
 }
 
 /** Follow `href` as a click does. False when it isn't a link to follow
- *  (an in-page anchor, nothing): the caller lets the click through. */
-export function followLink(href: string, open: OpenRef, newTab: boolean): boolean {
-  const parsed = parseMarkdownLink(href);
+ *  (an in-page anchor, nothing): the caller lets the click through. `base`
+ *  is the URI of the file the markdown came from, which a relative link
+ *  resolves against. */
+export function followLink(href: string, open: OpenRef, newTab: boolean, base: string | null = null): boolean {
+  const parsed = parseMarkdownLink(href, base);
   if (parsed.kind === "anchor" || parsed.kind === "empty") return false;
   if (parsed.kind === "broken") return true;
   if (parsed.kind === "external") {
@@ -51,9 +53,9 @@ const copy = (id: string, label: string, text: string): MenuItem => ({
   },
 });
 
-/** The right-click menu of a link to `href`. */
-export function linkMenu(href: string, open: OpenRef): MenuItem[] {
-  const parsed = parseMarkdownLink(href);
+/** The right-click menu of a link to `href` (`base` as `followLink`'s). */
+export function linkMenu(href: string, open: OpenRef, base: string | null = null): MenuItem[] {
+  const parsed = parseMarkdownLink(href, base);
   if (parsed.kind === "external") {
     const items: MenuItem[] = [];
     if (open && classifyExternalUrl(href).ok) {

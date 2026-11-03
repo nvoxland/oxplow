@@ -67,7 +67,9 @@ sections a page always has.
 
 - `table`: rows. `list`: one line per row, headlined by the first column.
   `number`: the first cell, big. `markdown`: the first row's text
-  (`markdown: { text: <column> }`; an action with `edit: true` makes it an
+  (`markdown: { text: <column>, base?: <column> }`; `base` holds the URI of
+  the file the text came from, so its relative links and images are that
+  file's folder's; an action with `edit: true` makes it an
   editor, its Save that action: bind one input to `{{row.<text column>}}`
   and fix the rest with `fixed: [slug]`).
 - `bar`: `chart: { x, y }`. `line`: `chart: { x, y, series?, targets? }`

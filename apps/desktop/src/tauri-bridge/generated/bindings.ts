@@ -6592,10 +6592,13 @@ export type VizHunks = {
 /**
  *  `markdown` viz: which column of the first row is the text. Without
  *  it, the first column. A viz with an `edit` action names it: the text
- *  is what the editor saves.
+ *  is what the editor saves. `base` is a column holding the URI the text
+ *  came from (a file's): the desktop resolves the text's relative links
+ *  and images against that file's folder, on its filesystem and revision.
  */
 export type VizMarkdown = {
 	text?: string | null,
+	base?: string | null,
 };
 
 /**

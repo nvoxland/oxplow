@@ -1,6 +1,7 @@
 # The Markdown page reads the file the system hands it and draws its text
-# as one document; its tab is the file's name. A file that is not there
-# draws nothing and says so.
+# as one document whose relative links and images are the file's folder's
+# (the viz's `base` is the file's URI); its tab is the file's name. A file
+# that is not there draws nothing and says so.
 temp:
   note.md: "# Hello\n"
 when:
@@ -14,7 +15,7 @@ expect:
   loaders:
     document:
       rows:
-        - { text: "# Hello\n" }
+        - { text: "# Hello\n", uri: "oxplow:oxplow/file?filesystem=oxplow:temp&path=note.md" }
   text:
     contains: ["# Hello"]
 steps:

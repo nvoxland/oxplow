@@ -1162,6 +1162,7 @@ mod tests {
         );
         r.config.markdown = Some(crate::pages::spec::VizMarkdown {
             text: Some("body".into()),
+            base: None,
         });
         let out = render(&r, &Resolved::default());
         assert!(out.contains("# Hello") && !out.contains("\na\n"), "{out}");

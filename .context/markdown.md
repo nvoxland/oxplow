@@ -69,6 +69,16 @@ set**, and a surface never builds its own:
   viewer and `CodeBlockLowlight` (decorations, the text unchanged) in the
   editor. No language, or one lowlight doesn't know: plain.
 - **GFM tables**, images with the lightbox, `.oxplow-md` typography.
+- **A file's relative links and images** (`base`, the URI of the file the
+  markdown came from; the `markdown` viz's `markdown: { base: <column> }`,
+  foundation's Markdown page passes `content.uri`): `parseMarkdownLink(href,
+  base)` reads a relative href as a file in that file's folder
+  (`relativeFilePath`: `./`, `../`, `/` from the root), on its filesystem
+  and revision — `docs/guide.md` is a file, not a wiki slug, which it
+  stays with no base, as the wiki's own pages mean it. A relative image is
+  `FileImage`: `readBytesAt` on the viz's stream (`useVizStream`), drawn
+  from a blob URL given back when it goes; a missing one keeps its alt.
+  `followLink` and `linkMenu` take the same `base`.
 - **Headings** are `h2`/`h3` under `.oxplow-md`: a page's Contents rail
   lists them (either mode).
 - **Comments**: the editor's own layer (`comments` prop, below); the

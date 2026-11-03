@@ -1,7 +1,7 @@
 import { useEffect, useState, type CSSProperties } from "react";
 
 import { readBytesAt, statFile } from "../api.js";
-import { fsRevLabel } from "../filesystem.js";
+import { fsRevLabel, mediaType } from "../filesystem.js";
 import { WORKING, type Revision } from "../revision.js";
 import { useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
 import { fileRef } from "../tabs/pageRefs.js";
@@ -30,27 +30,6 @@ export function MediaViz({ rows, streamId, onOpenPage, isPage = false }: { rows:
 
 /** The largest file the viz shows: 32 MiB. */
 export const MAX_MEDIA_BYTES = 32 * 1024 * 1024;
-
-const IMAGE_TYPES: Record<string, string> = {
-  png: "image/png",
-  jpg: "image/jpeg",
-  jpeg: "image/jpeg",
-  gif: "image/gif",
-  webp: "image/webp",
-  svg: "image/svg+xml",
-  bmp: "image/bmp",
-  ico: "image/x-icon",
-  avif: "image/avif",
-};
-
-/** What the viz can show `path` as: an image or a PDF, by its extension;
- *  null for anything else. */
-export function mediaType(path: string): { kind: "image" | "pdf"; mime: string } | null {
-  const ext = /\.([a-z0-9]+)$/i.exec(path)?.[1]?.toLowerCase() ?? "";
-  if (ext === "pdf") return { kind: "pdf", mime: "application/pdf" };
-  const mime = IMAGE_TYPES[ext];
-  return mime ? { kind: "image", mime } : null;
-}
 
 /** `bytes` as a person reads a size: `2 KB`, `1.5 MB`. */
 export function sizeLabel(bytes: number): string {

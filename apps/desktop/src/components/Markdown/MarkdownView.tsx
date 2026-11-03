@@ -34,6 +34,9 @@ import { CopyCodeButton } from "./CopyCodeButton.js";
 import { rehypeHighlightCode } from "./codeHighlight.js";
 import { InlineView } from "./InlineView.js";
 import { followLink, linkMenu, type OpenRef } from "./links.js";
+import { readBytesAt } from "../../api.js";
+import { mediaType } from "../../filesystem.js";
+import { useVizStream } from "../../viz/VizStream.js";
 
 // Mermaid + svg-pan-zoom load lazily inside mermaidRender, so this module
 // stays safe to import in non-DOM test environments (parseMarkdownLink is
@@ -53,6 +56,9 @@ export type ParsedLink =
        *  host opens `WORKING` (the working tree). Non-null carries the
        *  author's intent exactly. */
       version: import("../../revision.js").Revision | null;
+      /** The filesystem the file is on (a relative link of a file drawn
+       *  from another filesystem); none: the local one. */
+      filesystem?: string | null;
     }
   | { kind: "directory"; path: string }
   | { kind: "commit"; sha: string }
@@ -114,7 +120,15 @@ export function parsedLinkIconKind(parsed: ParsedLink): string | null {
   }
 }
 
-export function parseMarkdownLink(rawHref: string): ParsedLink {
+/**
+ * What a markdown link's `href` names. `base` is the URI of the file the
+ * markdown came from (a `.md` drawn by the Markdown page): with one, a
+ * relative href is a file in that file's folder, on its filesystem and
+ * revision (`docs/guide.md`, `../img/x.png`, `/top.md` from the root), as a
+ * repo's README means it. With none, a relative `.md` link is a wiki slug,
+ * as the wiki's own pages mean it.
+ */
+export function parseMarkdownLink(rawHref: string, base: string | null = null): ParsedLink {
   if (!rawHref) return { kind: "empty" };
   if (rawHref.startsWith("#")) return { kind: "anchor" };
   if (/^https?:\/\//i.test(rawHref) || rawHref.startsWith("mailto:")) {
@@ -155,10 +169,46 @@ export function parseMarkdownLink(rawHref: string): ParsedLink {
       reason: `Broken link: “${target}” is not a recognized reference (use a work item's id, [[some-slug]] for a wiki page)`,
     };
   }
+  const relativeTo = base !== null && typeOf(base) === "oxplow/file" ? parseUri(base) : null;
+  if (relativeTo?.params.path && !/^[a-z][a-z0-9+.-]*:/i.test(rawHref)) {
+    const target = rawHref.split("#")[0]?.split("?")[0] ?? "";
+    if (!target) return { kind: "empty" };
+    const p = relativeTo.params;
+    return {
+      kind: "file",
+      path: relativeFilePath(p.path, safeDecode(target)),
+      version: p.rev ? revisionFromSlot(p.rev) : null,
+      filesystem: p.filesystem ?? null,
+    };
+  }
   let target = rawHref.replace(/^\.?\//, "");
   target = target.split("#")[0]?.split("?")[0] ?? "";
   if (target.endsWith(".md")) target = target.slice(0, -3);
   return target ? { kind: "internal", slug: target } : { kind: "empty" };
+}
+
+function safeDecode(text: string): string {
+  try {
+    return decodeURIComponent(text);
+  } catch {
+    return text;
+  }
+}
+
+/**
+ * `href`, a relative path as a markdown file at `basePath` means it: from
+ * the file's folder (`./` and `../` walked, never above the root), or from
+ * the root when it starts with `/`.
+ */
+export function relativeFilePath(basePath: string, href: string): string {
+  const folder = href.startsWith("/") ? [] : basePath.split("/").slice(0, -1);
+  const out = folder.filter(Boolean);
+  for (const part of href.split("/")) {
+    if (part === "" || part === ".") continue;
+    if (part === "..") out.pop();
+    else out.push(part);
+  }
+  return out.join("/");
 }
 
 /**
@@ -580,7 +630,7 @@ export function linkRef(parsed: ParsedLink): string | null {
       // Bare wikilinks (no `@version`) coerce to WORKING; explicit versions
       // flow through as authored. Load-bearing: a wikilink that pinned
       // `@HEAD` must NOT be silently substituted with the working tree.
-      return fileRef(parsed.path, parsed.version ?? WORKING).id;
+      return fileRef(parsed.path, parsed.version ?? WORKING, parsed.filesystem ?? null).id;
     case "directory":
       return directoryRef(parsed.path).id;
     case "commit":
@@ -593,6 +643,49 @@ export function linkRef(parsed: ParsedLink): string | null {
     default:
       return null;
   }
+}
+
+/**
+ * An image a markdown file names by a relative path: read from the file's
+ * filesystem at its revision (`readBytesAt`) and drawn from a blob URL,
+ * given back when the image goes. A file that isn't there, or isn't an
+ * image, keeps its alt text, as a browser shows a missing image.
+ */
+function FileImage({
+  path,
+  version,
+  filesystem,
+  alt,
+  zoom,
+}: {
+  path: string;
+  version: import("../../revision.js").Revision | null;
+  filesystem: string | null;
+  alt: string;
+  zoom: (shown: string) => { onClick: (e: React.MouseEvent) => void; style: CSSProperties };
+}) {
+  const stream = useVizStream();
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    let made: string | null = null;
+    setUrl(null);
+    const type = mediaType(path);
+    if (type?.kind !== "image") return;
+    void readBytesAt(stream?.id ?? "", path, { ...(filesystem ? { filesystem } : {}), ...(version && version !== WORKING ? { rev: version } : {}) })
+      .then((bytes) => {
+        if (cancelled || !bytes) return;
+        made = URL.createObjectURL(new Blob([bytes as BlobPart], { type: type.mime }));
+        setUrl(made);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+      if (made) URL.revokeObjectURL(made);
+    };
+  }, [stream?.id, path, version, filesystem]);
+  if (!url) return <img alt={alt} title={path} />;
+  return <img alt={alt} title={path} src={url} {...zoom(url)} />;
 }
 
 /**
@@ -618,6 +711,9 @@ function flattenChildrenText(children: React.ReactNode): string {
 
 export interface MarkdownViewProps {
   body: string;
+  /** The URI of the file the body came from: its relative links and
+   *  images are that file's folder's, on its filesystem and revision. */
+  base?: string | null;
   /** Apply max-height + internal scroll instead of growing unbounded. */
   maxHeight?: number | string;
   /** Extra style overrides for the outer wrapper. */
@@ -637,7 +733,7 @@ export interface MarkdownViewProps {
  * fences draw as diagrams (pan and zoom, the lightbox); other code blocks
  * carry a Copy button.
  */
-export function MarkdownView({ body, maxHeight, style, className }: MarkdownViewProps) {
+export function MarkdownView({ body, base = null, maxHeight, style, className }: MarkdownViewProps) {
   // Extensions' ref kinds change what a `[[…]]` names.
   const refKinds = useResources();
   // …and the active work list's ids do too.
@@ -660,10 +756,10 @@ export function MarkdownView({ body, maxHeight, style, className }: MarkdownView
     // Cmd/Ctrl-click and middle-click mean "open it over there, keep
     // what I'm reading" — the browser convention.
     const newTab = event.metaKey || event.ctrlKey || event.button === 1;
-    if (followLink(href, open, newTab)) event.preventDefault();
+    if (followLink(href, open, newTab, base)) event.preventDefault();
     // `open` is rebuilt per render from ctxNav.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ctxNav]);
+  }, [ctxNav, base]);
 
   // Mermaid rendering pass. Replaces
   // <pre><code class="language-mermaid">…</code></pre> blocks with SVG.
@@ -793,20 +889,23 @@ export function MarkdownView({ body, maxHeight, style, className }: MarkdownView
           img: ({ node, ...props }) => {
             const src = (props.src as string | undefined) ?? "";
             if (!src) return <img {...props} />;
-            return (
-              <img
-                {...props}
-                onClick={(e) => {
-                  e.preventDefault();
-                  setLightbox({ kind: "image", src, alt: (props.alt as string | undefined) ?? "" });
-                }}
-                style={{ ...(props.style as CSSProperties | undefined), cursor: "zoom-in", maxWidth: "100%" }}
-              />
-            );
+            const zoom = (shown: string) => ({
+              onClick: (e: React.MouseEvent) => {
+                e.preventDefault();
+                setLightbox({ kind: "image", src: shown, alt: (props.alt as string | undefined) ?? "" });
+              },
+              style: { ...(props.style as CSSProperties | undefined), cursor: "zoom-in", maxWidth: "100%" },
+            });
+            // A relative image of a file is read from that file's folder.
+            const inFile = parseMarkdownLink(src, base);
+            if (base && inFile.kind === "file") {
+              return <FileImage path={inFile.path} version={inFile.version} filesystem={inFile.filesystem ?? null} alt={(props.alt as string | undefined) ?? ""} zoom={zoom} />;
+            }
+            return <img {...props} {...zoom(src)} />;
           },
           a: ({ node, ...props }) => {
             const href = (props.href as string | undefined) ?? "";
-            const parsed = parseMarkdownLink(href);
+            const parsed = parseMarkdownLink(href, base);
             // Unrecognized-syntax targets (`[[#13]]`) render broken and
             // non-clickable, with the reason in a tooltip.
             if (parsed.kind === "broken") {
@@ -817,7 +916,7 @@ export function MarkdownView({ body, maxHeight, style, className }: MarkdownView
             if (parsed.kind === "anchor" || parsed.kind === "empty") {
               return <a {...props} onClick={handleLinkClick} onAuxClick={handleLinkClick} />;
             }
-            const items = linkMenu(href, open);
+            const items = linkMenu(href, open, base);
             const iconKind = parsedLinkIconKind(parsed);
             // For internal wiki links written as bare `[[slug]]` (no
             // `|label`), swap the rendered text from the slug to the

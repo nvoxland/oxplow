@@ -1,11 +1,5 @@
 import { expect, test } from "bun:test";
-import {
-  linkRef,
-  parseMarkdownLink,
-  postprocessWikilinks,
-  preprocessWikilinks,
-  refLinkOf,
-} from "./MarkdownView.js";
+import { linkRef, parseMarkdownLink, postprocessWikilinks, preprocessWikilinks, refLinkOf, relativeFilePath } from "./MarkdownView.js";
 import {
   directoryRef,
   fileRef,
@@ -463,4 +457,30 @@ test("refLinkOf: each kind saves as its bare wikilink", () => {
   expect(saved(item, "T", (id) => (id === "tsk42" ? item : null))).toBe("[[tsk42]]");
   expect(saved(item, "T", () => null)).toBe(`[[${item}]]`);
   expect(saved(resourceUri("acme/pr", { id: 12 }), "Fix the parser")).toBe(`[Fix the parser](${resourceUri("acme/pr", { id: 12 })})`);
+});
+
+// A markdown file's relative links and images are its folder's: given the
+// file's URI as `base`, `docs/guide.md` is that file (on the base's
+// filesystem and revision), not a wiki page; `../x.png` climbs; `/top.md`
+// is the root's. An anchor, a web link and an oxplow URI read as before,
+// and with no base a relative `.md` link is a wiki slug, as the wiki's are.
+test("parseMarkdownLink: a relative link resolves against the base file's folder", () => {
+  const readme = "oxplow:oxplow/file?path=README.md";
+  expect(parseMarkdownLink("docs/guide.md", readme)).toEqual({ kind: "file", path: "docs/guide.md", version: null, filesystem: null });
+  expect(parseMarkdownLink("./docs/guide.md#install", readme)).toEqual({ kind: "file", path: "docs/guide.md", version: null, filesystem: null });
+  const deep = "oxplow:oxplow/file?path=a/b/README.md&rev=git:abc1234&filesystem=oxplow:extensions";
+  expect(parseMarkdownLink("../x.png?raw=1", deep)).toEqual({ kind: "file", path: "a/x.png", version: "git:abc1234", filesystem: "oxplow:extensions" });
+  expect(parseMarkdownLink("/top.md", deep)).toEqual({ kind: "file", path: "top.md", version: "git:abc1234", filesystem: "oxplow:extensions" });
+  expect(parseMarkdownLink("sibling%20file.md", deep)).toEqual({ kind: "file", path: "a/b/sibling file.md", version: "git:abc1234", filesystem: "oxplow:extensions" });
+  expect(parseMarkdownLink("#install", readme)).toEqual({ kind: "anchor" });
+  expect(parseMarkdownLink("https://a.test/", readme)).toEqual({ kind: "external" });
+  expect(parseMarkdownLink("oxplow:oxplow/wiki?slug=notes", readme)).toEqual({ kind: "internal", slug: "notes" });
+  expect(parseMarkdownLink("docs/guide.md")).toEqual({ kind: "internal", slug: "docs/guide" });
+});
+
+test("relativeFilePath: joins and climbs under the base file's folder, never above the root", () => {
+  expect(relativeFilePath("a/b/README.md", "c.md")).toBe("a/b/c.md");
+  expect(relativeFilePath("a/b/README.md", "../../../c.md")).toBe("c.md");
+  expect(relativeFilePath("README.md", "./img/./logo.png")).toBe("img/logo.png");
+  expect(relativeFilePath("a/README.md", "/x/y.md")).toBe("x/y.md");
 });

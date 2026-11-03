@@ -1285,3 +1285,29 @@ fn a_parse_loader_needs_a_known_format_and_a_text() {
     );
     assert!(e.contains("exactly one of") && e.contains("`parse`"), "{e}");
 }
+
+/// `markdown: { text, base }`: `base` is a column holding the URI the text
+/// came from (a file's), so the desktop resolves the text's relative links
+/// and images against that file's folder. Both are role columns the dry
+/// run checks.
+#[test]
+fn a_markdown_viz_may_name_the_file_its_text_came_from() {
+    let p = page(
+        "title: T\nloaders:\n  d: { sql: \"SELECT 'hi' AS body, 'oxplow:oxplow/file?path=README.md' AS u\" }\nview: { viz: markdown, from: d, markdown: { text: body, base: u } }\n",
+    )
+    .expect("loads");
+    let crate::pages::schema::NodeKind::Viz { config, .. } = &p.view.kind else {
+        panic!("a viz")
+    };
+    let m = config.markdown.clone().unwrap();
+    assert_eq!(m.text.as_deref(), Some("body"));
+    assert_eq!(m.base.as_deref(), Some("u"));
+    assert_eq!(
+        config
+            .role_columns()
+            .iter()
+            .map(|(b, k)| format!("{b}:{k}"))
+            .collect::<Vec<_>>(),
+        ["markdown:body", "markdown:u"]
+    );
+}

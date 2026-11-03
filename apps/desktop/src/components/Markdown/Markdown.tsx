@@ -61,6 +61,9 @@ export interface MarkdownProps {
   comments?: MarkdownComments;
   /** `data-testid` on the editable surface, or the viewer's root. */
   testId?: string;
+  /** View: the URI of the file the markdown came from (a `.md` drawn as a
+   *  page): its relative links and images are that file's folder's. */
+  base?: string | null;
   /** View: a height past which it scrolls. */
   maxHeight?: number | string;
   className?: string;
@@ -69,7 +72,7 @@ export interface MarkdownProps {
 
 export function Markdown(props: MarkdownProps) {
   if (props.onChange || props.onCommit) return <MarkdownEditor {...props} />;
-  const view = <MarkdownView body={props.value} maxHeight={props.maxHeight} className={props.className} style={props.style} />;
+  const view = <MarkdownView body={props.value} base={props.base} maxHeight={props.maxHeight} className={props.className} style={props.style} />;
   return props.testId ? <div data-testid={props.testId}>{view}</div> : view;
 }
 

@@ -353,7 +353,9 @@ unique in the page. `#node=<id>` in a link lands on it. `title`,
 
 **Vizes** (`Viz`): `table`, `list`, `number`, `markdown` (the first row's
 `markdown: { text: <column> }`, else its first column, drawn by the one
-Markdown component, `.context/markdown.md`; with an `edit` action it is
+Markdown component, `.context/markdown.md`; `base: <column>` names the URI
+the text came from, a file whose folder its relative links and images
+resolve against; with an `edit` action it is
 that component's editor, saving through the action), `bar`, `line`,
 `treemap`, `tree`, `timeline`, `detail`, `sections` (a subsection per
 row: **`sections`**, below), `steps`, `hunks`, `board` (the

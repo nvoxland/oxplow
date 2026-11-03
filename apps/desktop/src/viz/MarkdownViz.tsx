@@ -33,10 +33,20 @@ export function markdownText(run: VizRun): string {
   return cell === null ? "" : String(cell);
 }
 
+/** The URI the text came from (`markdown: { base }`, the first row's), or
+ *  null: what its relative links and images resolve against. */
+export function markdownBase(run: VizRun): string | null {
+  const named = run.config.markdown?.base ?? null;
+  if (named === null) return null;
+  const at = run.result.columns.indexOf(named);
+  const cell = at < 0 ? null : run.result.rows[0]?.[at] ?? null;
+  return typeof cell === "string" && cell ? cell : null;
+}
+
 export function MarkdownViz({ run, streamId }: { run: VizRun; streamId: string | null }) {
   const edit = run.config.actions.find((a) => a.edit) ?? null;
   const text = markdownText(run);
-  if (!edit) return <Markdown value={text} testId="viz-markdown" />;
+  if (!edit) return <Markdown value={text} base={markdownBase(run)} testId="viz-markdown" />;
   return <MarkdownEditor run={run} streamId={streamId} action={edit} saved={text} />;
 }
 

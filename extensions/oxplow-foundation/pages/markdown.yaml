@@ -13,12 +13,14 @@ params:
 - name: filesystem
 - name: rev
 loaders:
-  # The file's text, from what the system read; a file cut at the limit
-  # says so at its end.
+  # The file's text, from what the system read, and the file it is, so its
+  # relative links and images are read from its folder; a file cut at the
+  # limit says so at its end.
   document:
     sql: |
       SELECT coalesce(text, '')
-             || CASE WHEN truncated THEN char(10) || char(10) || '*Only the first 1 MiB is shown.*' ELSE '' END AS text
+             || CASE WHEN truncated THEN char(10) || char(10) || '*Only the first 1 MiB is shown.*' ELSE '' END AS text,
+             uri
       FROM content
   # Its history (the index has one for a local file only) and its folder, on
   # the file's own filesystem and revision.
@@ -39,6 +41,7 @@ view:
   viz: markdown
   markdown:
     text: text
+    base: uri
   empty: There is no such file.
 see_also:
   - { from: related }

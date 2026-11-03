@@ -25,6 +25,28 @@ export function fsRevLabel(filesystem: string | null | undefined, rev: string | 
   return /^[0-9a-f]{13,64}$/i.test(rev) ? rev.slice(0, 7) : rev;
 }
 
+const IMAGE_TYPES: Record<string, string> = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  gif: "image/gif",
+  webp: "image/webp",
+  svg: "image/svg+xml",
+  bmp: "image/bmp",
+  ico: "image/x-icon",
+  avif: "image/avif",
+};
+
+/** What a viewer can show `path` as from its bytes: an image or a PDF, by
+ *  its extension; null for anything else. The `media` viz and a markdown
+ *  file's images read this. */
+export function mediaType(path: string): { kind: "image" | "pdf"; mime: string } | null {
+  const ext = /\.([a-z0-9]+)$/i.exec(path)?.[1]?.toLowerCase() ?? "";
+  if (ext === "pdf") return { kind: "pdf", mime: "application/pdf" };
+  const mime = IMAGE_TYPES[ext];
+  return mime ? { kind: "image", mime } : null;
+}
+
 /** The largest file a viewer loads into its editor: 5 MiB. A bigger one
  *  shows [`unshownReason`] instead. */
 export const MAX_SHOWN_BYTES = 5 * 1024 * 1024;
