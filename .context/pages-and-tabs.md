@@ -1231,8 +1231,17 @@ is the Alerts panel's icon.
   `dock-panel-<id>`, `dock-panel-icon`, `dock-panel-title`,
   `dock-panel-open-page` (holding the `open-page-link`), `dock-panel-resize`,
   `dock-panel-close`. The Alerts body has `alerts-panel`, `alerts-panel-item`,
-  `alerts-panel-review` and `alerts-panel-empty`. The Context body's rows
-  (`context-panel-item`) lead with their `context-panel-remove` ×.
+  `alerts-panel-review`, `alerts-panel-empty` and `alerts-panel-clear`. The
+  Context body's rows (`context-panel-item`) lead with their
+  `context-panel-remove` ×, and `context-panel-clear` is its Clear.
+- **Clear:** both core panels end in a Clear button (`ox-button`, never a
+  link) while there is something to clear. The Context panel's takes every
+  waiting item out (`oxplow.context.clear`). The Alerts panel's puts away
+  what a person can put away: the hints (`oxplow.hint.dismiss` each) and
+  the failed operations (`oxplow.op_error.dismiss_all`); `clearable` in
+  `alertsModel.ts` says when it shows. A decision is made, not cleared; an
+  undelivered event or failed reaction is retried or discarded on the
+  Alerts page (discarding asks first); an extension's problem is fixed.
 
 ## History: the IA redesign (complete)
 

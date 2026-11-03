@@ -33,6 +33,14 @@ export function alertsSummary(items: AlertItems): { count: number; tone: AlertTo
   return { count, tone: problems > 0 ? "danger" : count > 0 ? "accent" : "none" };
 }
 
+/** Whether Clear has anything to put away: a hint or a failed operation.
+ *  A decision is made, not cleared; an undelivered event or a failed
+ *  reaction is retried or discarded on the Alerts page (discarding asks
+ *  first); an extension's problem is fixed. */
+export function clearable(items: AlertItems): boolean {
+  return items.hints.length + items.opErrors.length > 0;
+}
+
 /** A key per item a toast announces: each proposal, op error, badge and hint,
  *  and delivery failing at all (not each failed event). */
 export function alertKeys(items: AlertItems): Set<string> {

@@ -12,6 +12,9 @@ const noRows = { columns: [], rows: [], truncated: false, reads: { datasets: [],
 let extensionRows: unknown[][] = [];
 /** The failed operations `v_op_error` answers with. */
 let opErrorRows: unknown[][] = [];
+const landedHint = [4, "oxplow-bundled/landed-in-progress", "“t” is still in progress, but a commit landed its work.", "Main"];
+/** The hints `v_agent_nudge` answers with. */
+let hintRows: unknown[][] = [landedHint];
 const pushFailed = ["e-push", "2026-10-22T10:00:00Z", "Push to origin", "git push", null, 1, null, 40, 12, 0];
 const saved: unknown[] = [];
 const ran: [string, unknown][] = [];
@@ -53,7 +56,7 @@ mock.module("../../api.js", () => ({
     if (sql.includes("FROM v_agent_nudge")) {
       return {
         columns: ["id", "kind", "message", "thread_title"],
-        rows: [[4, "oxplow-bundled/landed-in-progress", "“t” is still in progress, but a commit landed its work.", "Main"]],
+        rows: hintRows,
         truncated: false,
         reads: { datasets: ["v_agent_nudge"], tables: [], measures: [] },
         freshness: {},
@@ -101,6 +104,7 @@ afterEach(() => {
   saved.length = 0;
   ran.length = 0;
   opErrorRows = [];
+  hintRows = [landedHint];
   dockStore.close();
   cleanup();
 });
@@ -117,6 +121,29 @@ test("the dock's Alerts icon counts everything, red for a problem, and opens the
   await waitFor(() => expect(view.getAllByTestId("alerts-panel-item").length).toBeGreaterThan(0));
   fireEvent.click(view.getByTestId("dock-panel-open-page").querySelector("[data-testid=open-page-link]")!);
   expect(opened).toEqual([alertsRef()]);
+});
+
+// Clear is a button at the panel's foot. It puts away what a person can put
+// away: the hints and the failed operations. A decision is made, not
+// cleared, and an undelivered event is retried or discarded on the page.
+test("Clear dismisses the hints and failed operations and leaves the decisions", async () => {
+  opErrorRows = [pushFailed];
+  const view = render(withRuns(<Dock streamId={null} onOpenPage={() => {}} />));
+  fireEvent.click(view.getByTestId("dock-alerts"));
+  const clear = await waitFor(() => view.getByTestId("alerts-panel-clear"));
+  expect(clear.className).toContain("ox-button");
+  fireEvent.click(clear);
+  await waitFor(() => expect(ran).toContainEqual(["oxplow.op_error.dismiss_all", {}]));
+  expect(ran).toContainEqual(["oxplow.hint.dismiss", { nudge: 4 }]);
+  expect(ran.map(([name]) => name).sort()).toEqual(["oxplow.hint.dismiss", "oxplow.op_error.dismiss_all"]);
+});
+
+test("Clear is absent while only decisions and deliveries wait", async () => {
+  hintRows = [];
+  const view = render(withRuns(<Dock streamId={null} onOpenPage={() => {}} />));
+  fireEvent.click(view.getByTestId("dock-alerts"));
+  await waitFor(() => expect(view.getAllByTestId("alerts-panel-item").length).toBe(2));
+  expect(view.queryByTestId("alerts-panel-clear")).toBeNull();
 });
 
 test("a toast once per new item, after the start-up settle, offering only Review", () => {

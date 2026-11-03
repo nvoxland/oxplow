@@ -1,6 +1,6 @@
 /// The Context dock panel: what the person collected for the selected
 /// thread's agents and not yet sent, each led by a × to take it out, and
-/// Clear; the Context page is the panel header's arrow. The icon's badge
+/// Clear, a button at the foot as the Alerts panel's; the Context page is the panel header's arrow. The icon's badge
 /// is how many wait.
 
 import { FileText, Quote, X } from "lucide-react";
@@ -43,24 +43,23 @@ export function ContextDockBody(_props: DockBodyProps) {
           </div>
         ))
       )}
-      <div style={{ display: "flex", gap: 12 }}>
-        {items.length > 0 && thread ? (
-          <button type="button" data-testid="context-panel-clear" onClick={() => void clearContext(thread)} style={linkButton}>
+      {items.length > 0 && thread ? (
+        <div style={{ display: "flex", marginTop: 2 }}>
+          <button type="button" className="ox-button" data-testid="context-panel-clear" title="Take everything out" onClick={() => void clearContext(thread)}>
             Clear
           </button>
-        ) : null}
-      </div>
+        </div>
+      ) : null}
     </div>
   );
 }
 
-const linkButton = {
+const iconButton = {
   background: "none",
   border: "none",
   padding: 0,
-  color: "var(--accent)",
+  color: "var(--text-muted)",
   cursor: "pointer",
   fontSize: "inherit",
+  display: "inline-flex",
 } as const;
-
-const iconButton = { ...linkButton, color: "var(--text-muted)", display: "inline-flex" } as const;

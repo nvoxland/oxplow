@@ -1,16 +1,25 @@
 /// The Alerts dock panel: what needs the person, each with its Review
-/// action; the Alerts page is the panel header's arrow. The icon's badge
-/// is the same count the bell showed (`alertsSummary`).
+/// action, and Clear at the foot for what a person can put away (the hints
+/// and the failed operations; `clearable`); the Alerts page is the panel
+/// header's arrow. The icon's badge is the same count the bell showed
+/// (`alertsSummary`).
 
+import { dismissHint } from "../../hints.js";
+import { dismissAllOpErrors } from "../../opErrors.js";
 import { alertsRef, refFromTabId } from "../../tabs/pageRefs.js";
 import type { DockBadge, DockBodyProps } from "../Dock/dockPanels.js";
-import { alertsSummary, newAlerts } from "./alertsModel.js";
+import { alertsSummary, clearable, newAlerts, type AlertItems } from "./alertsModel.js";
 import { useAlerts } from "./useAlerts.js";
 
 export function useAlertsBadge(): DockBadge | null {
   const { items } = useAlerts();
   const { count, tone } = alertsSummary(items);
   return count > 0 ? { count, ...(tone === "danger" ? { tone } : {}) } : null;
+}
+
+/** Put away every hint and every failed operation at once. */
+async function clearAlerts(items: AlertItems): Promise<void> {
+  await Promise.all([...(items.opErrors.length > 0 ? [dismissAllOpErrors()] : []), ...items.hints.map((h) => dismissHint(h.id))]);
 }
 
 export function AlertsDockBody({ onOpenPage }: DockBodyProps) {
@@ -35,6 +44,13 @@ export function AlertsDockBody({ onOpenPage }: DockBodyProps) {
           </div>
         ))
       )}
+      {clearable(items) ? (
+        <div style={{ display: "flex", marginTop: 2 }}>
+          <button type="button" className="ox-button" data-testid="alerts-panel-clear" title="Dismiss the hints and the failed operations" onClick={() => void clearAlerts(items)}>
+            Clear
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }

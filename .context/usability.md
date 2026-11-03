@@ -213,10 +213,13 @@ markdown itself, nor edits it in a `<textarea>`.
   `CommandConfirm` (`PersonCommandConfirm`, mounted once in `App`). The
   task page's and wiki page's rail Delete use `InlineConfirm`; the wiki
   pane's right-click Delete uses `personCommands`.
-- **What needs the person isn't in the rail.** One status-bar
-  bell (`components/Alerts/AlertsIndicator.tsx`) counts everything that
+- **What needs the person isn't in the rail.** The dock's Alerts
+  icon (`components/Alerts/AlertsDockPanel.tsx`) counts everything that
   needs them — red while something failed, the accent while decisions or
-  notices wait, quiet otherwise — and opens the **Alerts page**
+  notices wait, quiet otherwise — and opens the Alerts panel: each item
+  with Review, and Clear at the foot while a hint or a failed operation
+  waits (it dismisses those, nothing that needs a decision or a
+  retry). The panel's header arrow opens the **Alerts page**
   (the `alerts` page, the foundation's): Needs your
   decision (each proposal's card, Approve / Decline), Hints for you,
   Failed operations (each opening into how it ended), Undelivered events

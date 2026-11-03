@@ -44,6 +44,8 @@ test("it lists what waits, takes an item out and clears the lot", async () => {
   expect(view.getByText("fn main() {}")).toBeTruthy();
   fireEvent.click(view.getAllByTestId("context-panel-remove")[0]!);
   await waitFor(() => expect(ran).toContainEqual(["oxplow.context.remove", { item: 1 }]));
+  // Clear is a button, as the Alerts panel's.
+  expect(view.getByTestId("context-panel-clear").className).toContain("ox-button");
   fireEvent.click(view.getByTestId("context-panel-clear"));
   await waitFor(() => expect(ran).toContainEqual(["oxplow.context.clear", { thread: "thr7" }]));
   // The Context page opens from the panel's header, not a link here.
