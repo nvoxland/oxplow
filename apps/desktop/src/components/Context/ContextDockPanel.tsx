@@ -25,7 +25,7 @@ export function ContextDockBody({ onOpenPage }: DockBodyProps) {
     <div data-testid="context-panel" style={{ display: "flex", flexDirection: "column", gap: 6, padding: "8px 12px", fontSize: "var(--text-xs)" }}>
       {items.length === 0 ? (
         <div data-testid="context-panel-empty" style={{ color: "var(--text-muted)" }}>
-          Nothing collected yet. Add a page from its ☰ and text from a selection's right-click; the next prompt to an agent in this thread carries it.
+          No context added yet
         </div>
       ) : (
         items.map((item) => (

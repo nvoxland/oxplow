@@ -54,6 +54,6 @@ test("an empty basket says how things get in", async () => {
   setSelectedThread("thr7");
   rows = [];
   const view = render(<ContextDockBody streamId={null} onOpenPage={() => {}} />);
-  await waitFor(() => expect(view.getByTestId("context-panel-empty").textContent).toContain("next prompt to an agent in this thread carries it"));
+  await waitFor(() => expect(view.getByTestId("context-panel-empty").textContent).toBe("No context added yet"));
   expect(view.queryByTestId("context-panel-clear")).toBeNull();
 });
