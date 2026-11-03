@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import type { Page, Renderer } from "../tauri-bridge/generated/bindings.js";
 import { fakePage, node } from "./testing/fakeRun.js";
-import { RENDERER_VIEW_KEY, pageView, pickRenderer, shellView, tabHint, tabLabel, withRenderedParams } from "./renderers.js";
+import { RENDERER_VIEW_KEY, nextMode, openWithOf, pageView, pickRenderer, shellView, tabHint, tabLabel, withRenderedParams } from "./renderers.js";
 
 const page = (id: string, more: Partial<Page> = {}): Page =>
   fakePage(node.markdown("v", ""), { id, extension: "oxplow-foundation", slug: id, title: id, ...more });
@@ -102,4 +102,21 @@ test("a tab whose label is a path's basename hovers as the whole path", () => {
   expect(tabHint(diff, {})).toBeUndefined();
   expect(tabHint({ label: "{{param.path}}", title: "Raw" }, { path: "a/b.rs" })).toBeUndefined();
   expect(tabHint({ label: null, title: "Plain" }, { path: "a/b.rs" })).toBeUndefined();
+});
+
+// Cycling a tab's modes (Cmd+Shift+V) goes to the renderer after the one
+// drawing, round to the first; with fewer than two there is nothing to
+// cycle.
+test("nextMode is the renderer after the current, round to the first", () => {
+  const renderers: Renderer[] = [
+    { page: "f/editor", title: "Editor", default: true },
+    { page: "f/markdown", title: "Markdown", default: false },
+    { page: "f/data", title: "Data", default: false },
+  ];
+  const patches: unknown[] = [];
+  const patch = (p: Record<string, unknown>) => patches.push(p);
+  expect(nextMode(openWithOf(renderers, {}, patch)!)).toBe("f/markdown");
+  expect(nextMode(openWithOf(renderers, { [RENDERER_VIEW_KEY]: "f/markdown" }, patch)!)).toBe("f/data");
+  expect(nextMode(openWithOf(renderers, { [RENDERER_VIEW_KEY]: "f/data" }, patch)!)).toBe("f/editor");
+  expect(openWithOf([renderers[0]!], {}, patch)).toBeUndefined();
 });

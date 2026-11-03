@@ -869,9 +869,17 @@ declaring *what it is* and mounting the generic layer.
   table.
 - **Moving through a tab is the browser's keys, not commands.** Cmd+[ and
   Cmd+] are Back and Forward; Alt+↑ and Alt+↓ are Up and Down the list the
-  page was opened from (`tabs/navigationKeys.ts`, the global handler in
+  page was opened from; Cmd+Shift+V is the next mode (`tabs/navigationKeys.ts`, the global handler in
   `App.tsx`). They don't fire while focus is in a field, a select, a
   contenteditable or Monaco.
+- **A URI's modes swap from the nav bar in one click.** When several pages
+  can draw it (a README's Editor and Markdown, a CSV's Table), the bar
+  draws them before the action buttons as a segmented control up to
+  three, the one drawing pressed, and as one button named for the
+  current mode that opens the list beyond that (`tabs/PageModes.tsx`):
+  short titles, never an icon per mode, since the modes are extensions'
+  pages with their own titles. The ☰'s Open With and the rail's View as
+  keep the same list.
 - **A page's view is its tab's, and Back follows what you did.** A
   filter change (a range, a search, a toggle) replaces the tab's entry:
   it adds nothing to Back, as a filter bar doesn't. Picking a row (a

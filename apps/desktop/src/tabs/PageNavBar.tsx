@@ -1,4 +1,5 @@
 import type { OpenWithProps } from "./pageMenuItems.js";
+import { PageModes } from "./PageModes.js";
 import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import type { AskTarget } from "../components/Prompts/askTarget.js";
@@ -87,7 +88,8 @@ export interface PageNavBarProps {
   /** The page's canonical ref (and stream): the Ask menu — Ask About
    *  This and the prompts about its kind (P6.D1/D2). Omitted, no Ask. */
   ask?: AskTarget;
-  /** The pages that render the URI shown, when there are several. */
+  /** The pages that render the URI shown, when there are several: the
+   *  bar's modes (`PageModes`) and the ☰'s Open With. */
   openWith?: OpenWithProps;
   /** The page's "See also" links, listed in the ☰. */
   seeAlso?: { links: ReadonlyArray<{ title: string; uri: string; description?: string | null }>; open(uri: string): void };
@@ -480,6 +482,7 @@ export function PageNavBar({
 
       {comments ?? null}
 
+      {openWith ? <PageModes openWith={openWith} buttonStyle={navButtonStyle(true)} /> : null}
       {barActions(actions).length > 0 ? <ActionButtons actions={barActions(actions)} buttonStyle={navButtonStyle(true)} /> : null}
       <PageMenu
         actions={actions}

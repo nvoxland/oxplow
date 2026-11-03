@@ -18,6 +18,13 @@ test("Cmd+[ and Cmd+] are Back and Forward; Alt+Up and Alt+Down step the origin"
   expect(navigationKey(press("ArrowDown", { altKey: true }), document.body)).toBe("down");
 });
 
+test("Cmd+Shift+V cycles the tab's mode", () => {
+  expect(navigationKey(press("v", { metaKey: true, shiftKey: true }), document.body)).toBe("mode");
+  expect(navigationKey(press("V", { metaKey: true, shiftKey: true }), document.body)).toBe("mode");
+  expect(navigationKey(press("v", { metaKey: true }), document.body)).toBeNull();
+  expect(navigationKey(press("v", { metaKey: true, shiftKey: true, altKey: true }), document.body)).toBeNull();
+});
+
 test("other chords and plain keys are not navigation", () => {
   expect(navigationKey(press("["), document.body)).toBeNull();
   expect(navigationKey(press("[", { metaKey: true, shiftKey: true }), document.body)).toBeNull();

@@ -1,11 +1,13 @@
 /**
- * The keys that move through a tab's history and origin, as a browser's
- * do: Cmd+[ and Cmd+] for Back and Forward, Alt+ArrowUp and Alt+ArrowDown
- * for Up and Down the collection the page was opened from. They are the
- * global handler's own (not commands): typing in a field, a select or a
- * contenteditable, or working in Monaco, keeps them.
+ * The keys that move through a tab's history, origin and modes, as a
+ * browser's do: Cmd+[ and Cmd+] for Back and Forward, Alt+ArrowUp and
+ * Alt+ArrowDown for Up and Down the collection the page was opened from,
+ * Cmd+Shift+V for the next of the pages that can draw the URI (the nav
+ * bar's modes). They are the global handler's own (not commands): typing
+ * in a field, a select or a contenteditable, or working in Monaco, keeps
+ * them.
  */
-export type NavKey = "back" | "forward" | "up" | "down";
+export type NavKey = "back" | "forward" | "up" | "down" | "mode";
 
 interface KeyLike {
   key: string;
@@ -34,5 +36,6 @@ export function navigationKey(event: KeyLike, target: EventTarget | null): NavKe
     if (event.key === "ArrowUp") return "up";
     if (event.key === "ArrowDown") return "down";
   }
+  if (event.metaKey && event.shiftKey && !event.altKey && !event.ctrlKey && event.key.toLowerCase() === "v") return "mode";
   return null;
 }

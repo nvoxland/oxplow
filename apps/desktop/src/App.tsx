@@ -41,7 +41,7 @@ import { showToast } from "./components/toastStore.js";
 import { awaitGitOp, opErrorOf } from "./git-op.js";
 import { UndoToastStack } from "./components/UndoToast.js";
 import { identityOf, keyOf, pageUri, paramOf, parseUri, typeOf } from "./uri/uri.js";
-import { shellView, tabHint, tabLabel } from "./pages/renderers.js";
+import { nextMode, openWithOf, shellView, tabHint, tabLabel } from "./pages/renderers.js";
 import { chooseRenderer, chooseRoute } from "./pages/pageFiles.js";
 import { drawnByRenderer, renderersCache, useRenderers } from "./pages/useRenderers.js";
 import type { Extension } from "./tauri-bridge/generated/bindings.js";
@@ -905,6 +905,7 @@ export function App() {
       event.preventDefault();
       if (key === "back") keys.back();
       else if (key === "forward") keys.forward();
+      else if (key === "mode") keys.mode();
       else keys.step(key === "up" ? -1 : 1);
     }
 
@@ -1384,11 +1385,12 @@ export function App() {
   // What the navigation keys do now: the active tab's Back, Forward and
   // step through its origin. Read at the key press, so the handler below
   // needn't rebind as tabs move.
-  const navKeysRef = useRef({ back: () => {}, forward: () => {}, step: (_by: number) => {} });
+  const navKeysRef = useRef({ back: () => {}, forward: () => {}, step: (_by: number) => {}, mode: () => {} });
   navKeysRef.current = (() => {
     const session = selectedThreadId ? sessions[selectedThreadId] : undefined;
     const tab = session?.tabs.find((t) => t.slot === session.active);
-    if (!tab) return { back: () => {}, forward: () => {}, step: () => {} };
+    if (!tab || !selectedThreadId) return { back: () => {}, forward: () => {}, step: () => {}, mode: () => {} };
+    const thread = selectedThreadId;
     const entry = currentEntry(tab);
     const origin = entry.from ? resolvedOrigin(entry.from, liveItemsOf(liveItems, tab.slot, entry.from), entry.ref) : null;
     return {
@@ -1396,6 +1398,23 @@ export function App() {
       forward: () => handleGoForward(tab.slot),
       step: (by: number) => {
         if (origin) handleStepOrigin(tab.slot, origin.index + by);
+      },
+      // The next of the pages that can draw the URI, the nav bar's pick.
+      mode: () => {
+        const ref = entry.ref;
+        const openWith = drawnByRenderer(ref.id)
+          ? openWithOf(renderersOf(ref.id), viewParamsOf(ref), (patch) =>
+              updateSession(thread, (s) =>
+                changeView(s, tab.slot, (now) => {
+                  const next: Record<string, SqlCell> = { ...now };
+                  for (const [k, v] of Object.entries(patch)) {
+                    if (v === undefined) delete next[k];
+                    else next[k] = v;
+                  }
+                  return next;
+                })))
+          : undefined;
+        if (openWith) openWith.pick(nextMode(openWith));
       },
     };
   })();

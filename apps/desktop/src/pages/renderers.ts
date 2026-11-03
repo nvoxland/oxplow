@@ -65,6 +65,13 @@ export function openWithOf(
   };
 }
 
+/** The mode after the one drawing (Cmd+Shift+V cycles), round to the
+ *  first: the name to `pick`. */
+export function nextMode(openWith: OpenWith): string {
+  const at = openWith.options.findIndex((o) => o.name === openWith.current);
+  return openWith.options[(at + 1) % openWith.options.length]!.name;
+}
+
 /** What a renderer's page is once its params change: the URI `uri` with
  *  each of `params` set (one set to nothing dropped; its page's own `uri`
  *  param is the page, not one of them) and `view` as its `#`. A URI that

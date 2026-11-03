@@ -55,17 +55,18 @@ The blame margin shows the commit and author that last touched
 each line; hover for the message and right-click the row to
 open that commit's page.
 
-A `.md` file has a second mode. **Open With → Markdown** in the
-tab's ☰ menu (or **View as Markdown** under See also in the rail)
-draws it as a document: headings, links, tables, images and
-mermaid diagrams. It is read-only; Back returns to the editor.
-The same mode is offered for a markdown file at a past revision
-or inside an extension.
+A `.md` file has a second mode, **Markdown**, that draws it as a
+document: headings, links, tables, images and mermaid diagrams. It
+is read-only; Back returns to the editor. The same mode is offered
+for a markdown file at a past revision or inside an extension.
 
-Other files have a mode too, under **Open With** and **View as** in
-the rail. A CSV or TSV file has a **Table** mode. A JSON or YAML file
-has a **Data** mode, a tree of its values. A mermaid file (`.mmd` or
-`.mermaid`) has a **Diagram** mode.
+A file's modes sit in the nav bar: two or three as buttons, the
+one shown pressed, and more as one button named for the current
+mode that opens the list. Cmd+Shift+V goes to the next mode. The
+same list is **Open With** in the tab's ☰ menu and **View as**
+under See also in the rail. A CSV or TSV file has a **Table** mode.
+A JSON or YAML file has a **Data** mode, a tree of its values. A
+mermaid file (`.mmd` or `.mermaid`) has a **Diagram** mode.
 
 The chrome carries a per-snapshot history dropdown that lists
 every local snapshot of the open file, in descending order,

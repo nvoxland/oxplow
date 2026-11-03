@@ -150,10 +150,17 @@ daemon's list:
 
 **See also** in the nav bar's ☰ (a submenu, `page-see-also`, right after the standard items beside About this page; each link's description is its hover, `MenuItem.hint`; none when the page has no links) lists the page's `see_also:` links on every page; a document page also draws them as the rail's group, a page that fills only here.
 
-**Open With** in the nav bar's ☰ (a submenu, `menu-item-page-open-with`,
+**Modes in the nav bar** (`tabs/PageModes.tsx`, before the action
+buttons) swap between the pages that draw the URI in one click when the
+daemon lists several (`PageNavigation.renderers`): two or three are a
+segmented control (`page-nav-mode-<extension>/<page>`, the one drawing
+`aria-pressed`), more are one button named for the current mode
+(`page-nav-modes`) that opens the list (`menu-item-page-mode-<…>`, the
+current checked). Cmd+Shift+V goes to the next (`nextMode`). The same
+list is **Open With** in the nav bar's ☰ (a submenu, `menu-item-page-open-with`,
 each renderer `menu-item-page-open-with-<extension>/<page>`, the one
-drawing it checked) lists the daemon's list (`PageNavigation.renderers`)
-when it has several. Picking one is a view change
+drawing it checked), which keyboard users and agents' text keep. All run
+the same pick (`openWithOf`). Picking one is a view change
 (Back returns to the first) **in this tab**: a tab that already shows the
 URI in the picked mode closes, so a page shows once per mode. Picking the
 default renderer drops the key rather than writing it, because an explicit
@@ -1083,7 +1090,8 @@ out and the ☰ itself hidden when it would be empty:
    is not listed — the menu asks the daemon, `ref_commands`, as it opens),
    and each submenu by its name (`menu-item-page-submenu-<name>`) that
    an action's explicit `submenu` makes, holding those actions sorted;
-3. **Open With** (when two or more pages render the URI);
+3. **Open With** (when two or more pages render the URI; the same list the
+   bar's modes control swaps in one click);
 4. **Backlinks (N)…**, **Outbound (N)…** and **Pin to Dashboard…**, which
    open their panel under the ☰ (`page-nav-backlinks-popover`,
    `page-nav-outbound-popover`, `page-pin-menu`) rather than a submenu.
@@ -1413,7 +1421,8 @@ modal, not a page, so they don't adopt.
 
 **Keys.** The global handler in `App.tsx` (`tabs/navigationKeys.ts`):
 Cmd+[ and Cmd+] are Back and Forward of the active tab, Alt+ArrowUp and
-Alt+ArrowDown step its origin (`stepOrigin`, history untouched). None
+Alt+ArrowDown step its origin (`stepOrigin`, history untouched), and
+Cmd+Shift+V picks the next of its modes (the nav bar's `PageModes`). None
 fires while focus is in an input, textarea, select, contenteditable or
 Monaco — those keys are the field's.
 
