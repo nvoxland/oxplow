@@ -1,4 +1,4 @@
-/// The dock's icon row, at the left of the bottom bar: one button per
+/// The dock's icon row, at the right of the bottom bar: one button per
 /// panel, the open one highlighted, a count pill when the panel has a badge.
 
 import { ICONS } from "../../icons.js";

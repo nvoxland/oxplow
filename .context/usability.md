@@ -132,7 +132,8 @@ markdown itself, nor edits it in a `<textarea>`.
   and custom components never draw a dialog: forms are declared in YAML
   and drawn by core.
   The documented kinds of dialog are three: the **tab modal** (anything
-  from a tab), the **dock panel** (the bottom bar's popups,
+  from a tab), the **dock panel** (the bottom bar's popups, closed by a
+  press outside the dock as a menu is,
   `components/Dock/`: `DockBar`, one `DockPanel` host, panels registered
   through `dockPanels.tsx`, extension panels with `dock: true`) and the
   **window-level** ones (branch picker, Quick Open, Navigator forms, the

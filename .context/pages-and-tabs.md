@@ -1193,9 +1193,11 @@ zone grouping); each appears only when it has content:
 
 ## The dock
 
-The dock is the row of panel icons at the left of the bottom bar. The
-background-task indicator stays at the right. An icon opens its panel
-above the bar. The Alerts bell is the Alerts panel's icon.
+The dock is the row of panel icons justified to the right of the bottom
+bar, as a tray's; the background-task indicator sits at the left. An icon
+opens its panel above the bar, headed by that icon and its title; a press
+outside the dock, Escape, × or the icon again closes it. The Alerts bell
+is the Alerts panel's icon.
 
 - **Code:** `apps/desktop/src/components/Dock/`. `Dock.tsx` is the bottom
   row plus the panel. `DockBar.tsx` draws the icons. `DockPanel.tsx` draws

@@ -80,3 +80,38 @@ test("the open state is in the store, so it survives the panel remounting", () =
   const again = mount();
   expect(again.getByTestId("dock-panel-alerts")).toBeTruthy();
 });
+
+// The icons are justified to the right of the bar, after the status
+// content, as a tray is.
+test("the dock's icons sit at the right of the bar, after the status content", () => {
+  const view = mount();
+  const status = view.getByTestId("status");
+  const bar = view.getByTestId("dock-bar");
+  expect(status.compareDocumentPosition(bar) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+});
+
+// A panel is a popup: a press anywhere outside it and its bar closes it,
+// as a menu closes; a press inside it, or on the bar's icons, does not
+// (the icon's own click toggles).
+test("a press outside the open panel closes it; one inside keeps it", () => {
+  const view = mount();
+  fireEvent.click(view.getByTestId("dock-alerts"));
+  fireEvent.pointerDown(view.getByTestId("dock-panel-alerts"));
+  expect(view.getByTestId("dock-panel")).toBeTruthy();
+  fireEvent.pointerDown(view.getByTestId("dock-bar"));
+  expect(view.getByTestId("dock-panel")).toBeTruthy();
+  fireEvent.pointerDown(document.body);
+  expect(view.queryByTestId("dock-panel")).toBeNull();
+});
+
+// The panel's header carries the icon its bar button has, so the panel
+// reads as that button's, opened.
+test("the open panel's header shows its icon before its title", () => {
+  const view = mount();
+  fireEvent.click(view.getByTestId("dock-alerts"));
+  const icon = view.getByTestId("dock-panel-icon");
+  const title = view.getByTestId("dock-panel-title");
+  expect(title.textContent).toBe("Alerts");
+  expect(icon.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(view.getByTestId("dock-alerts").querySelector("svg")?.innerHTML).toBe(icon.querySelector("svg")?.innerHTML);
+});
