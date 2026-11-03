@@ -1,21 +1,18 @@
 /// The terminal's surface (`.context/terminal.md` "The terminal viz and
 /// its host"): the one xterm.js host — the screen, the font it opens in,
 /// the keys and gestures oxplow adds (Cmd+V, Shift+Enter, Page Up/Down,
-/// Escape, paste, drag-drop "Add to agent context", file-path links) —
+/// Escape, paste, the agent input bus, file-path links) —
 /// and nothing about a session. What the person types comes out through
 /// `onData` / `onBinary`, a fit through `onResize`; `onOpened` hands the
 /// opened terminal to whoever writes to it (`useTerminalSession`).
-import { useEffect, useRef, useState, type DragEvent as ReactDragEvent } from "react";
+import { useEffect, useRef } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 
 import { desktopBridge } from "../api.js";
 import { logUi } from "../logger.js";
-import { WORK_ITEM_DRAG_MIME } from "../dragMimes.js";
 import { shouldHandleTerminalPageKey } from "../terminal-scroll.js";
 import { subscribeAgentInput } from "../agent-input-bus.js";
-import { decodeWorkItemDrag, dragHasContextRef, dragHasWorkItems, workItemDragRefs, readContextRef } from "../agent-context-dnd.js";
-import { formatContextMention } from "../agent-context-ref.js";
 import { installFilePathLinkProvider, type FilePathLinkActivation } from "../terminal-link-provider.js";
 
 /** The terminal's font size, px: its cells are measured in it. */
@@ -105,7 +102,7 @@ async function readClipboard(): Promise<string> {
 }
 
 export interface TerminalSurfaceProps {
-  /** On screen: it takes the keys and the "Add to agent context" bus. */
+  /** On screen: it takes the keys and the agent input bus. */
   shown: boolean;
   /** The terminal opened at a real size: write to it, and open the
    *  session at its `cols` × `rows`. */
@@ -143,7 +140,6 @@ export function TerminalSurface({
 }: TerminalSurfaceProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
-  const [dragHovering, setDragHovering] = useState(false);
   // Read at event time: the terminal is set up once.
   const props = useRef({ onOpened, onData, onBinary, onResize, onInterrupt, worktreePath, cwd, onOpenFile, isLinkablePath });
   props.current = { onOpened, onData, onBinary, onResize, onInterrupt, worktreePath, cwd, onOpenFile, isLinkablePath };
@@ -152,8 +148,9 @@ export function TerminalSurface({
     if (shown) termRef.current?.focus();
   }, [shown]);
 
-  // "Add to agent context" from anywhere targets the terminal on screen:
-  // `term.paste` writes through xterm's input, so `onData` sends it.
+  // The agent input bus (`agent_input.write`, Repair with the Agent) fills
+  // the terminal on screen: `term.paste` writes through xterm's input, so
+  // `onData` sends it.
   useEffect(() => {
     if (!shown) return;
     return subscribeAgentInput((text) => {
@@ -163,39 +160,6 @@ export function TerminalSurface({
       term.focus();
     });
   }, [shown]);
-
-  function handleDragOver(e: ReactDragEvent<HTMLDivElement>) {
-    if (!dragHasContextRef(e) && !dragHasWorkItems(e)) return;
-    e.preventDefault();
-    e.dataTransfer.dropEffect = "copy";
-    if (!dragHovering) setDragHovering(true);
-  }
-
-  function handleDragLeave(e: ReactDragEvent<HTMLDivElement>) {
-    if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
-    setDragHovering(false);
-  }
-
-  function handleDrop(e: ReactDragEvent<HTMLDivElement>) {
-    setDragHovering(false);
-    const term = termRef.current;
-    if (!term) return;
-    // Work items (a marked list row, a Board card): one mention each.
-    if (dragHasWorkItems(e)) {
-      const refs = workItemDragRefs(decodeWorkItemDrag(e.dataTransfer.getData(WORK_ITEM_DRAG_MIME)));
-      if (refs.length > 0) {
-        e.preventDefault();
-        term.paste(refs.map(formatContextMention).join(""));
-        term.focus();
-        return;
-      }
-    }
-    const ref = readContextRef(e);
-    if (!ref || (ref.kind === "file" && ref.path === "")) return;
-    e.preventDefault();
-    term.paste(formatContextMention(ref));
-    term.focus();
-  }
 
   useEffect(() => {
     const host = hostRef.current;
@@ -339,9 +303,6 @@ export function TerminalSurface({
   return (
     <div
       style={{ position: "relative", width: "100%", flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}
-      onDragOver={handleDragOver}
-      onDragLeave={handleDragLeave}
-      onDrop={handleDrop}
     >
       {/* The gutter is on this wrapper, never the mount: FitAddon measures
           the mount, and padding it makes the row count oscillate. */}
@@ -359,25 +320,6 @@ export function TerminalSurface({
       >
         <div ref={hostRef} data-testid="terminal-mount" style={{ flex: 1, minHeight: 0, minWidth: 0 }} />
       </div>
-      {dragHovering ? (
-        <div
-          style={{
-            position: "absolute",
-            inset: 0,
-            border: "2px dashed var(--accent)",
-            background: "var(--accent-soft-bg)",
-            pointerEvents: "none",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            color: "var(--text-primary)",
-            fontSize: 13,
-            zIndex: 5,
-          }}
-        >
-          Drop to add to agent context
-        </div>
-      ) : null}
     </div>
   );
 }

@@ -250,14 +250,16 @@ The surface owns:
   no longer configurable (it was Shift before the v6 upgrade).
 - A custom wheel handler that leaves a Ctrl/Cmd-wheel to the page.
   Scrollback is xterm's own; there is no tmux history mode (tsk1018).
-- Drag-drop "Add to agent context" support (see
-  `.context/usability.md` for the convention).
+- The agent input bus (`insertIntoAgent`: a page action's draft, Repair
+  with the Agent). Nothing drops onto the terminal: what an agent should
+  read goes in the context basket (`.context/usability.md` "Add to
+  Context").
 - The file-path link provider (see below).
 
 ## Paste path and input ordering
 
-All paste gestures (Cmd+V, the native `paste` event, drag-drop "Add to
-context") funnel through xterm's `term.paste(text)`. xterm's clipboard
+All paste gestures (Cmd+V, the native `paste` event, the agent input
+bus) funnel through xterm's `term.paste(text)`. xterm's clipboard
 helper does two things: normalizes `\r?\n` → `\r`, and — when the
 program has bracketed-paste mode on (`\x1b[?2004h`, tracked by xterm
 from the PTY output stream) — wraps the text in `\x1b[200~`…`\x1b[201~`.

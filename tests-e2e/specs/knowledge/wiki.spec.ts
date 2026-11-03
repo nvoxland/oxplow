@@ -121,10 +121,8 @@ test("[[ completes a link to a wiki page", async ({ page, daemon }) => {
   await expect(page.locator('[data-node="body"]:visible').locator(`[data-ref-title][href="${href}"]`)).toHaveText("Badger sett");
 });
 
-// A selection floats the format toolbar; a page dropped from elsewhere
-// goes in as its link.
-test("the editor formats a selection and takes a dropped page as a link", async ({ page, daemon }) => {
-  await run(daemon, "oxplow.knowledge.write_page", { slug: "heron-pond", title: "Heron pond", body: "# Heron pond\n" });
+// A selection floats the format toolbar.
+test("the editor formats a selection", async ({ page, daemon }) => {
   await run(daemon, "oxplow.knowledge.write_page", { slug: "heron-notes", title: "Heron notes", body: "# Heron notes\n\nStart here.\n" });
   await searchable(daemon, "heron", "wiki");
   await page.goto("/");
@@ -139,24 +137,9 @@ test("the editor formats a selection and takes a dropped page as a link", async 
   for (let i = 0; i < "Start here.".length; i++) await page.keyboard.press("Shift+ArrowLeft");
   await page.getByTestId("selection-toolbar-bold").click();
   await expect(body.locator(".ProseMirror p strong")).toHaveText("Start here.");
-  // A wiki page dragged in (as "Add to agent context" drags it).
-  const box = (await body.locator(".ProseMirror p", { hasText: "Start here." }).boundingBox())!;
-  await body.locator(".ProseMirror").evaluate(
-    (el, at) => {
-      const data = new DataTransfer();
-      data.setData("application/x-oxplow-context-ref", JSON.stringify({ kind: "wiki", slug: "heron-pond" }));
-      data.setData("text/plain", "@.oxplow/wiki/heron-pond.md");
-      for (const type of ["dragenter", "dragover", "drop"]) {
-        el.dispatchEvent(new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: data, clientX: at.x, clientY: at.y }));
-      }
-    },
-    { x: box.x + box.width - 2, y: box.y + box.height / 2 },
-  );
-  const href = "oxplow:oxplow/wiki?slug=heron-pond";
-  await expect(body.locator(`[data-ref-title][href="${href}"]`)).toHaveText("Heron pond");
   const save = body.getByRole("button", { name: "Save" });
   await save.click();
-  await expect.poll(() => readFileSync(join(daemon.project, ".oxplow", "wiki", "heron-notes.md"), "utf8")).toMatch(/\*\*Start here\.\*\*.*\[\[heron-pond\]\]/);
+  await expect.poll(() => readFileSync(join(daemon.project, ".oxplow", "wiki", "heron-notes.md"), "utf8")).toMatch(/\*\*Start here\.\*\*/);
   expect(readFileSync(join(daemon.project, ".oxplow", "wiki", "heron-notes.md"), "utf8")).toMatch(/^# Heron notes\n/);
 });
 

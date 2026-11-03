@@ -44,15 +44,10 @@ set**, and a surface never builds its own:
   read as a wikilink's target (`linkHref`: `local-snapshots`,
   `src/a.ts:12`, `tsk42`); Enter applies, an empty box removes the link,
   Escape leaves the text as it was.
-- **Drop and paste** (the editor, `refDrops.ts`): an "Add to agent
-  context" drag (`CONTEXT_REF_MIME`: a file, a wiki page, a page row's
-  ref, a work item) or a work-item drag (`WORK_ITEM_DRAG_MIME`, several
-  items) dropped on the field goes in where it lands as links
-  (`insertRefLinks`; at the caret when the point names no place —
-  `handleDOMEvents.drop`, ahead of ProseMirror's own drop, which gives up
-  there and lets the browser paste the drag's text), and the field shows the dashed drop highlight while
-  such a drag is over it. A pasted oxplow URI goes in as its link; a URI
-  or web URL pasted over a selection links it; other text pastes as text.
+- **Paste** (the editor, `refPaste.ts`): a pasted oxplow URI goes in as
+  its link (`insertRefLinks`); a URI or web URL pasted over a selection
+  links it; other text pastes as text. Nothing drops onto the field: no
+  drag in the app carries a ref (`.context/usability.md` "Add to Context").
 - **A Source view** (the editor, `Markdown.tsx`): the corner toggle
   (where the pencil was, revealed the same way) or Cmd/Ctrl+Shift+M shows
   the text as stored — `[[…]]` and all — in a plain monospace box, and
@@ -176,10 +171,8 @@ why).
   (`selectionToolbarVisible`) and the link box's reading (`linkHref`).
   The plain-DOM comment layer keeps its own one-button
   `SelectionCommentToolbar` (`components/Comments/`).
-- **`refDrops.ts`** — what a drop names and what a paste is (pure);
-  `RichTextField`'s drop handler and `handlePaste` act on them. A real drop
-  needs layout (`posAtCoords`), so it is covered in the browser suite
-  (`knowledge/wiki.spec.ts`), the rest in unit tests.
+- **`refPaste.ts`** — what a paste is (pure); `RichTextField`'s
+  `handlePaste` acts on it.
 - **`RefTitles.tsx`** — the title widget a bare ref link gets in the
   editor ("A ref link's title in the editor").
 - **`FencedBlock.tsx`** — extends Tiptap's `CodeBlock` (same node

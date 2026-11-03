@@ -1089,8 +1089,8 @@ declaring *what it is* and mounting the generic layer.
   Tauri v2 defaults `dragDropEnabled` to `true`, which registers an
   OS-level drag-drop handler that swallows `dragover`/`drop` before the
   webview DOM sees them — the drag ghost appears but no drop ever fires.
-  Every in-app drag here (center-tab reorder, thread/stream rails,
-  add-to-agent-context) is DOM drag-and-drop, so the `main` window in
+  Every in-app drag here (center-tab reorder, rail section reorder, a
+  page's rows to a drag action) is DOM drag-and-drop, so the `main` window in
   `apps/desktop/src-tauri/tauri.conf.json` sets `dragDropEnabled: false`.
   Don't re-enable it unless something starts needing Tauri's *native*
   file-drop events (and then reconcile both).
@@ -1098,11 +1098,14 @@ declaring *what it is* and mounting the generic layer.
   a compatible drag enters it. Clear the highlight on leave/drop.
 - **Use a custom MIME type** for internal drags so foreign drags
   (files, text) don't accidentally trigger app drops. **Every internal MIME
-  lives in `apps/desktop/src/dragMimes.ts`** — `WORK_ITEM_DRAG_MIME` (list
-  rows and Board cards: reorder, restate, multi-select moves),
-  `CONTEXT_REF_MIME` ("Add to agent
-  context"), `RAIL_SECTION_DRAG_MIME` (RailHud section reorder),
-  the row-drag MIME (a page's rows, to where a drag action runs). Add a new
+  lives in `apps/desktop/src/dragMimes.ts`** — `RAIL_SECTION_DRAG_MIME`
+  (RailHud section reorder) and `VIZ_ROW_DRAG_MIME` (a page's rows, to
+  where a drag action runs). **Nothing drags into an agent**: what the
+  person wants an agent to read goes in the thread's context basket from a
+  right-click or a ☰ ("Add to Context" below), never by a drop — the
+  agent's terminal is a center tab, so a page's rows never share a screen
+  with it, and a drag that can land nowhere only reads as a reorder that
+  failed. Add a new
   MIME there rather than overloading an existing one, and rather than
   declaring a `const` next to the component that introduced it: that was
   the old shape, and one task MIME ended up defined twice
@@ -1189,51 +1192,25 @@ declaring *what it is* and mounting the generic layer.
   out client-side. Preference is local state; no DB persistence
   today.
 
-## Add to agent context
+## Add to Context
 
-The agent terminal accepts dropped references AND a "Add to agent
-context" kebab/menu action; both share one path through
-`apps/desktop/src/agent-input-bus.ts` (`insertIntoAgent`) and
-`apps/desktop/src/agent-context-ref.ts` (`formatContextMention`).
-Inserting fills the agent's input and never sends it. The terminal
-pastes what the bus publishes, and xterm turns every line break into
-Enter, so `insertIntoAgent` collapses line breaks to spaces (`oneLine`)
-for every caller — a manifest's prompt, a selection, a row's text — and
-no caller may bypass the bus to write to the terminal.
+What the person wants an agent to read goes in the thread's **context
+basket** (`apps/desktop/src/contextBasket.ts`, `oxplow.context.add`; the
+model is `.context/agent-model.md` "The context basket"): the next prompt
+to any agent in the thread carries it. There is one way in, a menu entry,
+and it is offered wherever a thing is: a page, a row, a selection. A row
+of any kind is **never draggable for this** — the agent's terminal is a
+center tab, so nothing a row is drawn in shares a screen with it, and a
+drag with no target reads as a reorder that failed; rows drag only where
+a drag action runs (`VIZ_ROW_DRAG_MIME`).
 
-- **Sources** (anything the user might want to reference): drag rows
-  or pills from the Files tree, NotesPane, the WikiActivityBar, the
-  Backlinks panel on every Page, the rail HUD recent-files / active
-  item / up-next sections, and Code-quality file groups. Set the
-  payload with `setContextRefDrag(e, ref)` from
-  `apps/desktop/src/agent-context-dnd.ts`. Reuse the same helper and the same
-  MIME (`application/x-oxplow-context-ref`) for any new referenceable
-  surface — separate from `TASK_DRAG_MIME`, which carries the
-  reorder payload.
-- **Multi-row task drag** is a separate path. Plan-pane
-  `TaskGroupList` drag-start enriches the `TASK_DRAG_MIME`
-  payload with `items: [{id,title,status}, …]` so cross-pane drop
-  targets can decode resolved refs without their own task
-  lookup. The TerminalPane drop handler accepts both
-  `CONTEXT_REF_MIME` (single ref) and `TASK_DRAG_MIME`
-  (multi-id), iterates the latter, and pastes a space-separated
-  chain of mentions in one drop. Helpers:
-  `decodeTaskDragRefs` / `dragHasTaskRefs` in
-  `apps/desktop/src/agent-context-dnd.ts`.
-- **Sink**: `TerminalPane` is the only drop target. It writes through
-  `term.paste(text)`, so the same xterm input pipeline handles it.
-- **Mention shape** (`formatContextMention`):
-  - file → `@<workspace-relative path> ` (Claude reads the file
-    automatically on the next prompt).
-  - note → `@.oxplow/wiki/<slug>.md `.
-  - work item → `[oxplow oxplow:oxplow/work_item?id=<id>&provider=<provider>: "<title>" (<state>)] `
-    (plain-text reference; the agent reads it with `read`).
-  - any canonical URI → `[oxplow uri <uri>] ` (a drop into a terminal agent). The agent guide says how to read each kind.
-  - Always trailing space so the user can keep typing.
-- **Right-click parity**: every drag source should also offer "Add to
-  agent context" in its right-click menu — keyboard-first users
-  shouldn't have to drag. Funnel both paths through the same
-  `insertIntoAgent + formatContextMention` calls.
+The agent's input is filled directly only by `insertIntoAgent`
+(`apps/desktop/src/agent-input-bus.ts`), for the `agent_input.write`
+command (a page action's draft) and Repair with the Agent. It fills the
+input of the terminal on screen and never sends it; xterm turns every line
+break into Enter, so it collapses line breaks to spaces (`oneLine`), and no
+caller may bypass the bus to write to the terminal.
+
 - **Ask = the Assistant.** Every Ask entry opens the Assistant, the
   dock's on-the-spot agent (`components/Assistant/`), about what was asked
   about; nothing goes to a terminal agent. It's on:
@@ -1256,8 +1233,7 @@ no caller may bypass the bus to write to the terminal.
   Escape stops a running turn (and is not passed on, or the dock would close);
   a running turn leaves the box read-only, not disabled, so Escape still
   reaches it. States: no model (a link to Settings → AI), suggestions, running,
-  a permission card waiting (Allow / Decline), an error. `insertIntoAgent`
-  stays for drag-and-drop into a terminal agent.
+  a permission card waiting (Allow / Decline), an error.
 - **Add to Context** is the collect-then-ask form, and it is universal:
   the ☰ of any page with a canonical URI (`menu-item-page-add-to-context`,
   disabled with "Select a thread first" when none is selected), a
@@ -1272,11 +1248,7 @@ no caller may bypass the bus to write to the terminal.
   — read it first.` (`contributionHealth.ts` → `repairWithAgent`). The brief
   itself is the work item's body, not the inserted line — a one-line
   mention is all `insertIntoAgent` can carry.
-- **Visual feedback**: drop target shows a dashed accent border +
-  centered "Drop to add to agent context" overlay only while a
-  payload with our MIME is hovering. Foreign drags (text, OS files)
-  must not trigger the overlay.
-- **Don't fire `recordUsage`** for these gestures — adding to context
+- **Don't fire `recordUsage`** for Add to Context — adding to context
   isn't the same as opening the target; the recents list shouldn't
   reorder just because the user told the agent to look at something.
 

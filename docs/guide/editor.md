@@ -38,7 +38,7 @@ Right-click a row for:
 - Open to side
 - Local History
 - Reveal in OS file browser
-- Add to agent context
+- Add to Context
 
 Git decorations show file state with colored badges: **A**
 added, **M** modified, **D** deleted, **R** renamed, **C**

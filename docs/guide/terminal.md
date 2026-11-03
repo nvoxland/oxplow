@@ -25,9 +25,10 @@ Use the session's tab actions to rename or close it. Selecting terminal
 text copies it; paste uses the platform shortcut. See
 [Keybindings](../reference/keybindings.md).
 
-Dragging supported rows or references into the agent input lets you add
-context to your prompt. Send the prompt yourself; oxplow does not submit
-it automatically.
+To give the agent something to read, right-click a row, a backlink or a
+selection and choose **Add to Context**, or use a page's ☰ menu. It goes
+in the thread's context basket, and the next prompt you send to any agent
+in the thread carries it. Nothing is sent on its own.
 
 ## Shells
 

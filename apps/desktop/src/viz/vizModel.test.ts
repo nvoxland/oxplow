@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Extension, VizConfig, VizRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
-import { rowMention, markParts, treeNodes, lazyTreeNodes, lazyTreeProblem, drawnTreeRows, wantedBranches, timelineEntries, stepItems, sectionRows, sectionParts, itemList, hunkRows, codeRows, diffRow, editorRow, embedRow, parseLines, mergeDirectory, barRows, lineSeries, sparklineValues, numericRowId, treemapItems, cellLinkRef, changedParams, foldEmpty, foldedAway, displayColumns, formatCell, parseParamInput, limitRows, slugify, rowAssistantContext, effortRowId, isTimestamp, rowGroups, rowEmphasized, rowDepth, rowContextRef, columnWrap } from "./vizModel.js";
+import { rowMention, markParts, treeNodes, lazyTreeNodes, lazyTreeProblem, drawnTreeRows, wantedBranches, timelineEntries, stepItems, sectionRows, sectionParts, itemList, hunkRows, codeRows, diffRow, editorRow, embedRow, parseLines, mergeDirectory, barRows, lineSeries, sparklineValues, numericRowId, treemapItems, cellLinkRef, changedParams, foldEmpty, foldedAway, displayColumns, formatCell, parseParamInput, limitRows, slugify, rowAssistantContext, effortRowId, isTimestamp, rowGroups, rowEmphasized, rowDepth, columnWrap } from "./vizModel.js";
 import { formatMetricValue, formatShortDateTime } from "../components/format.js";
 import { diffSpecOf, duplicateBlockOf, isPage, lineOf, pagePayload } from "../tabs/pageRefs.js";
 import type { TabRef } from "../tabs/tabState.js";
@@ -121,16 +121,6 @@ describe("row groups and styling", () => {
     expect(rowEmphasized(viz(), cols, rows[1]!)).toBe(false);
     expect(rowDepth(viz({ depth: "title" }), cols, rows[0]!)).toBe(0);
     expect(rowEmphasized(viz({ emphasis: "title" }), cols, ["x", "false"])).toBe(false);
-  });
-
-  test("a row that links somewhere drags into the agent's context", () => {
-    const link = (kind: "wiki" | "file" | "page", from: string) => ({ kind, from, line: null, base: null, head: null });
-    const at = (kind: "wiki" | "file" | "page", value: string | number) =>
-      rowContextRef(viz({ columns: [{ key: "title", label: null, link: link(kind, "v"), unit: null }] }), ["title", "v"], ["T", value]);
-    expect(at("page", "oxplow:oxplow/page?page=comments")).toEqual({ kind: "ref", ref: "oxplow:oxplow/page?page=comments" });
-    expect(at("wiki", "auth-flow")).toEqual({ kind: "wiki", slug: "auth-flow" });
-    expect(at("file", "src/a.ts")).toEqual({ kind: "file", path: "src/a.ts" });
-    expect(rowContextRef(viz(), ["title"], ["T"])).toBeNull();
   });
 });
 

@@ -1,13 +1,14 @@
 /**
  * Renderer-side bus for "insert text into the active agent terminal".
  *
- * Drag-drop and right-click "Add to agent context" handlers anywhere in
- * the UI publish text via `insertIntoAgent`; the visible TerminalSurface
+ * The `agent_input.write` command (a page action's draft) and Repair with
+ * the Agent publish text via `insertIntoAgent`; the visible TerminalSurface
  * subscribes while mounted and writes the text into the agent's stdin
- * (`term.paste`).
- * This is still HUMAN input — a user gesture (drag/drop or "add to
- * context") is the only thing that publishes here; oxplow never
- * synthesizes agent input on its own (see .context/agent-model.md).
+ * (`term.paste`). What the person wants an agent to read goes in the
+ * thread's context basket instead (`contextBasket.ts`).
+ * This is still HUMAN input — a person's gesture is the only thing that
+ * publishes here; oxplow never synthesizes agent input on its own (see
+ * .context/agent-model.md).
  *
  * Multiple TerminalPanes may exist (one per stream/thread) but only the
  * one whose `visible` prop is true subscribes — so a publish naturally

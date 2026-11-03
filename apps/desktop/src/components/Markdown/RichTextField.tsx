@@ -31,7 +31,7 @@ import { ContextMenu } from "../ContextMenu.js";
 import type { MenuItem } from "../../menu.js";
 import { followLink, linkMenu, type OpenRef } from "./links.js";
 import { refLinkOf, type MentionRef } from "./MarkdownView.js";
-import { dragCarriesRefs, droppedRefs, pastedLink, type DroppedRef } from "./refDrops.js";
+import { pastedLink, type RefLink } from "./refPaste.js";
 import { linkTarget } from "../../uri/uri.js";
 import type { RefSearch } from "./refOptions.js";
 import { useOptionalPageNavigation } from "../../tabs/PageNavigationContext.js";
@@ -66,7 +66,7 @@ function buildAnchorJson(doc: PMNode, from: number, to: number, approx: boolean)
 
 /** Put `refs` in at `pos` as their links (`refLinkOf`), a space between
  *  them and before them when the text there doesn't end in one. */
-export function insertRefLinks(editor: Editor, pos: number, refs: readonly DroppedRef[], mentionRef: MentionRef): void {
+export function insertRefLinks(editor: Editor, pos: number, refs: readonly RefLink[], mentionRef: MentionRef): void {
   if (refs.length === 0) return;
   const before = pos > 0 ? editor.state.doc.textBetween(Math.max(0, pos - 1), pos, "\n", "\n") : "";
   const content: Array<{ type: "text"; text: string; marks?: Array<{ type: "link"; attrs: { href: string } }> }> = [];
@@ -212,7 +212,6 @@ export function RichTextField({
   // A mouse button is down in the field: the toolbar waits for the mouseup.
   const mouseDownRef = useRef(false);
   // A drag of refs is over the field: it shows it takes the drop.
-  const [dropping, setDropping] = useState(false);
   popoverOpenRef.current = pendingSel !== null || activeComment !== null || commentMenu !== null;
 
   const editor = useEditor({
@@ -277,22 +276,6 @@ export function RichTextField({
         if (link.kind !== "ref") return false;
         insertRefLinks(ed, from, [{ uri: link.uri, title: link.uri }], (id) => owner.current.mentionRef?.(id) ?? null);
         return true;
-      },
-      handleDOMEvents: {
-        // An "Add to agent context" or work-item drag goes in as links where
-        // it lands — at the caret when the point names no place (ProseMirror's
-        // own drop gives up there, and the browser would paste its text).
-        drop(view, event) {
-          setDropping(false);
-          const ed = editorRef.current;
-          if (!ed || !event.dataTransfer) return false;
-          const refs = droppedRefs(event.dataTransfer);
-          if (refs.length === 0) return false;
-          event.preventDefault();
-          const pos = view.posAtCoords({ left: event.clientX, top: event.clientY })?.pos ?? view.state.selection.from;
-          insertRefLinks(ed, pos, refs, (id) => owner.current.mentionRef?.(id) ?? null);
-          return true;
-        },
       },
     },
     onUpdate({ editor }) {
@@ -683,7 +666,6 @@ export function RichTextField({
     borderRadius: 6,
     transition: "background-color 120ms ease",
     ...style,
-    ...(dropping ? { outline: "2px dashed var(--accent)", background: "var(--accent-soft-bg)" } : {}),
   };
 
   // Plain-click on a wikilink / file: / dir: / commit: anchor inside
@@ -729,13 +711,6 @@ export function RichTextField({
       onMouseDown={() => {
         mouseDownRef.current = true;
       }}
-      onDragOver={(event) => {
-        if (dragCarriesRefs(Array.from(event.dataTransfer.types))) setDropping(true);
-      }}
-      onDragLeave={(event) => {
-        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropping(false);
-      }}
-      onDrop={() => setDropping(false)}
       onMouseUp={handleSelectionMouseUp}
       onContextMenu={handleContextMenu}
     >

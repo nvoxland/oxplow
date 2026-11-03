@@ -893,8 +893,8 @@ pages drawn compact by `PageTree`, the header count the count page's
 while it fires (else its `badge`), and the badge page's alert an Alerts
 row whose Review opens that page (`PanelAlert.open`, a URI); the header's
 ↗ opens the panel's `open` page, else its body page (`panelOpenRef`).
-A compact viz keeps its `group` headings and group actions, and its
-linked rows drag into the agent's context.
+A compact viz keeps its `group` headings and group actions; its rows
+offer Add to Context on right-click, as every page row does.
 The rail's panels are `oxplow-bundled`'s (`go-to`, `waiting`, `comments`,
 `uncommitted`, `work`): pages over the existing views and commands. One owner
 holds every panel's runs — `PanelRunsProvider`
@@ -1135,8 +1135,8 @@ zone grouping); each appears only when it has content:
    no longer browser-local). Status and kind show as row icons. Collapsed,
    the `work-line` part: the active item (with its epic), else the last
    finished. The header count (`work-count`) is in progress + ready, never
-   an alert. Rows link (Cmd-click opens a new tab) and drag into the
-   agent's context.
+   an alert. Rows link (Cmd-click opens a new tab) and offer Add to
+   Context on right-click.
 3. **Uncommitted** — an `oxplow-bundled` panel, stream-scoped,
    over the working change's stage-one file list (`v_change_file` /
    `v_change.conflicted` / `in_progress`, kept current by `change.analyze`

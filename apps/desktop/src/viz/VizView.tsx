@@ -47,7 +47,6 @@ import {
   lineSeries,
   rowAssistantContext,
   rowContext,
-  rowContextRef,
   rowDepth,
   foldedAway,
   rowEmphasized,
@@ -112,7 +111,6 @@ import {
 import { VIZ_ROW_DRAG_MIME } from "../dragMimes.js";
 import { VizIcon, vizIcon, toneColor } from "./vizIcons.js";
 import { useExtensions } from "../extensionsStore.js";
-import { setContextRefDrag } from "../agent-context-dnd.js";
 
 type CellRenderer = (row: SqlCell[], col: DisplayColumn) => ReactNode;
 
@@ -782,24 +780,20 @@ function RowsBody({
       },
     };
   };
-  // A list, table or tree row: dragged where a drag action runs, or into
-  // the agent's context when it links somewhere; marked; highlighted by
-  // `emphasis`, indented by `depth`.
+  // A list, table or tree row: dragged only where a drag action runs (the
+  // agent's context is fed by its menu's Add to Context, never a drop);
+  // marked; highlighted by `emphasis`, indented by `depth`.
   const rowLook: RowLook = (row) => {
-    const ref = rowContextRef(viz, result.columns, row);
     const emphasized = rowEmphasized(viz, result.columns, row);
     const drags = dragActions.some((a) => actionOffered(a, recordOf(row)));
     return {
       props: {
-        ...(ref || drags
+        ...(drags
           ? {
               draggable: true,
               onDragStart: (e: React.DragEvent) => {
-                if (ref) setContextRefDrag(e, ref);
-                if (drags) {
-                  e.dataTransfer.setData(VIZ_ROW_DRAG_MIME, JSON.stringify({ token: dragToken, keys: draggedWith(row).map(rowKey) }));
-                  e.dataTransfer.effectAllowed = ref ? "copyMove" : "move";
-                }
+                e.dataTransfer.setData(VIZ_ROW_DRAG_MIME, JSON.stringify({ token: dragToken, keys: draggedWith(row).map(rowKey) }));
+                e.dataTransfer.effectAllowed = "move";
               },
               onDragEnd: () => setDropHint(null),
             }

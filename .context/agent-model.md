@@ -55,8 +55,10 @@ Synthesizing input would be automating the agent CLI, which risks its
 - A chat-library prompt is built only by `chat/human_prompt.rs`
   `compose`, from a person's submit ("The chat machinery (library)");
   nothing in production submits one.
-- Drag-and-drop and "Add to agent context" (`agent-input-bus.ts`) are a
-  person's gesture: the visible pane pastes the text.
+- The agent input bus (`agent-input-bus.ts`: a page action's draft, Repair
+  with the Agent) carries a person's gesture: the visible pane pastes the
+  text. Nothing drags into an agent; what it should read goes in the
+  context basket.
 - Steering (session context, nudges) reaches the agent through hook
   answers its own harness injects, never through the terminal.
 

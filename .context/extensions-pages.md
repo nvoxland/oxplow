@@ -510,9 +510,9 @@ heading in plain words while the value stays what a drop binds
 `tree`) highlights rows with a truthy value; `depth` (`list` / `table`) is
 a whole number 0–8 that indents. They are never shown as cells.
 
-A `list`, `table` or `tree` row whose first linked column resolves is
-draggable into the agent's context (`CONTEXT_REF_MIME`); the row menu has
-Ask About This. A table or list is keyboard-driven (`useListNav`: ↑/↓,
+Every `list`, `table` or `tree` row's menu has Ask the Assistant and Add
+to Context (the first page it links to, else the row as text); a row drags
+only where a drag action runs. A table or list is keyboard-driven (`useListNav`: ↑/↓,
 Enter opens the cursor row's first link or runs its first row action;
 usability.md "Keyboard").
 

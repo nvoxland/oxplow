@@ -2,9 +2,8 @@ import { describe, expect, test } from "bun:test";
 
 import {
   ALL_DRAG_MIMES,
-  CONTEXT_REF_MIME,
   RAIL_SECTION_DRAG_MIME,
-  WORK_ITEM_DRAG_MIME,
+  VIZ_ROW_DRAG_MIME,
 } from "./dragMimes.js";
 
 describe("drag MIME registry", () => {
@@ -12,9 +11,8 @@ describe("drag MIME registry", () => {
     // Both ends of every drag live in this bundle, so these strings are
     // free to change — but a silent change breaks the source/sink pair
     // in a way nothing else would catch, so pin them.
-    expect(WORK_ITEM_DRAG_MIME).toBe("application/x-oxplow-work-item");
-    expect(CONTEXT_REF_MIME).toBe("application/x-oxplow-context-ref");
     expect(RAIL_SECTION_DRAG_MIME).toBe("application/x-oxplow-rail-section");
+    expect(VIZ_ROW_DRAG_MIME).toBe("application/x-oxplow-viz-rows");
   });
 
   test("every MIME is namespaced so foreign drags can't match", () => {

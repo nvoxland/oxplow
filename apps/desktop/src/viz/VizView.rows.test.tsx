@@ -4,11 +4,10 @@ import { cleanup, fireEvent, render as rtlRender, waitFor } from "@testing-libra
 import type { ReactElement, ReactNode } from "react";
 import type { VizConfig, ColumnLink, VizRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
 import { VizActionRunnerContext, type VizActionRunner } from "./vizActionRunner.js";
-import { CONTEXT_REF_MIME } from "../dragMimes.js";
 import { PageNavigationContext, type PageNavigation } from "../tabs/PageNavigationContext.js";
 
 // A viz node's rows can be grouped under headings (with actions there),
-// styled from their own columns, and dragged into the agent's context.
+// styled from their own columns, and dragged only where a drag action runs.
 
 const realApi = await import("../api.js");
 const actionRuns: { action: string; row: unknown }[] = [];
@@ -189,24 +188,18 @@ test("a grouped table puts heading rows between its rows", () => {
   expect([...table.querySelectorAll("thead th")].map((th) => th.textContent)).not.toContain("bucket");
 });
 
-function dragData(el: HTMLElement): Record<string, string> {
-  const data: Record<string, string> = {};
-  const dataTransfer = { setData: (k: string, v: string) => (data[k] = v), effectAllowed: "" };
-  fireEvent.dragStart(el, { dataTransfer });
-  return data;
-}
-
-test("a row that links somewhere drags into the agent's context; one that doesn't isn't draggable", () => {
+// A row drags only where a drag action runs (`VizView.drag.test.tsx`): a
+// link makes nothing draggable, since the agent's context is fed by the
+// row's "Add to Context", never a drop.
+test("a row that links somewhere isn't draggable, and offers Add to Context in its menu", async () => {
   const view = render(<VizView run={runOf(grouped)} compact onOpenPage={() => {}} />);
   const row = view.getByTestId("viz-row-2");
-  expect(row.getAttribute("draggable")).toBe("true");
-  expect(JSON.parse(dragData(row)[CONTEXT_REF_MIME]!)).toEqual({ kind: "ref", ref: "oxplow:oxplow/work_item?id=tsk3&provider=oxplow" });
-  cleanup();
-  const plain = render(<VizView run={runOf({})} onOpenPage={() => {}} />);
-  expect(plain.getByTestId("viz-row-0").getAttribute("draggable")).toBeNull();
+  expect(row.getAttribute("draggable")).toBeNull();
+  fireEvent.contextMenu(row);
+  expect((await waitFor(() => view.getByTestId("menu-item-add-row-to-context"))).textContent).toBe("Add to Context");
 });
 
-test("a tree's labels follow their column's link, and its rows drag", () => {
+test("a tree's labels follow their column's link", () => {
   // `d` names the parent: Child (d = 1) nests under Epic (id 1).
   const run = runOf({
     viz: "tree",
@@ -219,7 +212,7 @@ test("a tree's labels follow their column's link, and its rows drag", () => {
   // Its first button is the branch toggle; the label is the link.
   expect(nodes[0]!.querySelector("button:not([aria-expanded])")?.textContent).toContain("Epic");
   expect(nodes[0]!.querySelector("[data-testid=viz-icon]")).not.toBeNull();
-  expect(JSON.parse(dragData(nodes[0]!)[CONTEXT_REF_MIME]!)).toEqual({ kind: "ref", ref: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow" });
+  expect(nodes[0]!.getAttribute("draggable")).toBeNull();
   expect(nodes.some((n) => n.getAttribute("data-emphasis") === "true")).toBe(true);
 });
 

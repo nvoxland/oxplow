@@ -11,7 +11,7 @@
  * whichever component happened to introduce it. Declared beside their
  * components, they went wrong the predictable way: a task MIME ended up
  * declared twice — once in the (long-dead) `ThreadRail` component and once
- * in `agent-context-dnd.ts` so the decoder could avoid importing the React
+ * in the (equally dead) drag decoder so it could avoid importing the React
  * tree — with a unit test whose entire job was to assert the two copies
  * hadn't drifted apart. One home means there's nothing to drift (tsk271).
  *
@@ -19,17 +19,8 @@
  * component can all reach a MIME without dragging anything else along.
  */
 
-/** "Add to agent context" — a single typed reference (file, note, task)
- *  dropped onto the agent terminal. */
-export const CONTEXT_REF_MIME = "application/x-oxplow-context-ref";
-
 /** Rail HUD section reorder. */
 export const RAIL_SECTION_DRAG_MIME = "application/x-oxplow-rail-section";
-
-/** Work items — list rows and Board cards: reorder, restate, move, add to
- *  the agent. The payload is a `WorkItemDrag` (`agent-context-dnd.ts`):
- *  the refs carried and each one's title and state. */
-export const WORK_ITEM_DRAG_MIME = "application/x-oxplow-work-item";
 
 /** A page's rows, dragged to where a drag action (`drag: true`) runs: the
  *  payload is `{ token, keys }` — the page view's token (a drop is taken
@@ -39,8 +30,6 @@ export const VIZ_ROW_DRAG_MIME = "application/x-oxplow-viz-rows";
 
 /** Every MIME above, for invariant checks. Extend when adding one. */
 export const ALL_DRAG_MIMES = [
-  WORK_ITEM_DRAG_MIME,
-  CONTEXT_REF_MIME,
   RAIL_SECTION_DRAG_MIME,
   VIZ_ROW_DRAG_MIME,
 ] as const;

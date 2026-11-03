@@ -102,9 +102,8 @@ highlights as you drag. Drop highlighting is *the* signal that a
 drop will work — if you don't see a highlight, the drop isn't
 supported there.
 
-The agent terminal accepts drag-to-add-context from task rows,
-file rows, the rail's Work and Go To entries, and backlinks
-entries.
+Nothing drags into the agent terminal: to give an agent something to
+read, right-click the row and choose **Add to Context**.
 
 ## Why so few
 

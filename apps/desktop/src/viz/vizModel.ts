@@ -24,8 +24,7 @@ import { WORKING, parseRevision, shortRevisionLabel } from "../revision.js";
 import type { TabRef } from "../tabs/tabState.js";
 import type { DiffSpec } from "../components/Diff/DiffPane.js";
 import type { AssistantContext } from "../components/Assistant/assistantApi.js";
-import type { ContextRef } from "../agent-context-ref.js";
-import { idOf, parseUri, typeOf } from "../uri/uri.js";
+import { idOf, parseUri } from "../uri/uri.js";
 
 export interface DisplayColumn {
   key: string;
@@ -208,21 +207,6 @@ export function foldedAway(
     below = parents.has(row) && closed.has(idOf(row)) ? d : null;
   });
   return { hidden, parents };
-}
-
-/** What dragging the row onto the agent adds to its context: the page
- *  its first link opens (a working-tree file and a wiki page as their
- *  `@` mentions, anything else as its ref), or null when it links
- *  nowhere. */
-export function rowContextRef(viz: VizConfig, columns: string[], row: SqlCell[]): ContextRef | null {
-  const ref = rowRef(viz, columns, row);
-  if (!ref) return null;
-  const parsed = parseUri(ref);
-  if (typeOf(ref) === "oxplow/wiki" && parsed?.params.slug) return { kind: "wiki", slug: parsed.params.slug };
-  if (typeOf(ref) === "oxplow/file" && parsed?.params.path && !("rev" in parsed.params) && Object.keys(parsed.view).length === 0) {
-    return { kind: "file", path: parsed.params.path };
-  }
-  return { kind: "ref", ref };
 }
 
 /** Where a linked cell opens: a page built from the row (a file at a

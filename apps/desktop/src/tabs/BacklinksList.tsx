@@ -1,16 +1,14 @@
 import { EmptyState } from "../components/Prompts/EmptyState.js";
-import { workItemLabel } from "../workItemRef.js";
 import type { MouseEvent } from "react";
 import { useMemo } from "react";
 import type { MenuItem } from "../menu.js";
 import { useContextMenu } from "../components/useRowContextMenu.js";
 import type { BacklinkEntry } from "./backlinkTypes.js";
 import { kindForTabId, PageKindIcon } from "../pageKinds.js";
-import { commitUri, idOf, typeOf } from "../uri/uri.js";
+import { commitUri } from "../uri/uri.js";
 import { openRefInWindow } from "./openRef.js";
 import { refTargetNow } from "./refOpener.js";
-import { setContextRefDrag } from "../agent-context-dnd.js";
-import type { ContextRef } from "../agent-context-ref.js";
+import { addToContext } from "../contextBasket.js";
 import { useOptionalPageNavigation } from "./PageNavigationContext.js";
 import type { Origin } from "./session.js";
 
@@ -33,33 +31,12 @@ export interface BacklinksListProps {
   /** Optional commit-typed backlinks. Click opens the host's
    *  CommitDetailSlideover. */
   commitEntries?: CommitBacklinkEntry[];
-  /** Right-click actions for an entry (Unlink on a work item's link row).
-   *  Without them — or with none for a row — right-click opens the page in
-   *  a new tab. */
+  /** The host's right-click actions for an entry (Unlink on a work item's
+   *  link row), ahead of Add to Context, which every entry that opens a
+   *  page offers. */
   entryMenu?(entry: BacklinkEntry): MenuItem[];
   /** Required when `commitEntries` is provided. */
   onOpenCommit?(payload: { sha: string; subject?: string }): void;
-}
-
-/**
- * Translate a ref into a `ContextRef` so a backlink entry can be
- * dragged into the agent terminal as an @-mention. Files / notes /
- * tasks have direct mappings; finding refs land as a file ref to
- * the finding's path because the agent doesn't have its own
- * `@finding:<id>` syntax. Returns null for ref kinds the agent can't
- * use as context (index pages, settings, etc).
- *
- * Pure — exported for tests.
- */
-export function refToContextRef(ref: string): ContextRef | null {
-  const path = idOf(ref, "oxplow/file");
-  if (path !== null) return { kind: "file", path };
-  const slug = idOf(ref, "oxplow/wiki");
-  if (slug !== null) return { kind: "wiki", slug };
-  if (typeOf(ref) === "oxplow/work_item") {
-    return { kind: "work_item", ref, title: workItemLabel(ref), state: "" };
-  }
-  return null;
 }
 
 /**
@@ -126,10 +103,14 @@ export function BacklinksList({
       ))}
       {entries.map((entry, idx) => {
         const page = entry.open;
-        const items = entryMenu?.(entry) ?? [];
+        const items: MenuItem[] = [
+          ...(entryMenu?.(entry) ?? []),
+          // The page it opens goes in the selected thread's basket, as a
+          // page row's Add to Context does.
+          ...(page ? [{ id: "add-to-context", label: "Add to Context", enabled: true, run: () => void addToContext({ uri: page, label: entry.label }) }] : []),
+        ];
         const onContextMenu = (e: MouseEvent) => {
           if (items.length > 0) openMenu(e, items, entry.label);
-          else if (page) { e.preventDefault(); openRef(page, { newTab: true }); }
           else e.preventDefault();
         };
         if (!page) {
@@ -152,7 +133,6 @@ export function BacklinksList({
             </div>
           );
         }
-        const ctxRef = refToContextRef(page);
         return (
         <button
           key={page}
@@ -172,8 +152,6 @@ export function BacklinksList({
             if (e.button === 1) { e.preventDefault(); openRef(page, { newTab: true }); }
           }}
           onContextMenu={onContextMenu}
-          draggable={ctxRef !== null}
-          onDragStart={ctxRef !== null ? (e) => setContextRefDrag(e, ctxRef) : undefined}
           style={rowStyle}
         >
           <PageKindIcon kind={kindForTabId(page)} size={14} style={{ color: "var(--text-secondary)", flexShrink: 0 }} />
