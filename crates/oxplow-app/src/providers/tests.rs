@@ -5633,6 +5633,51 @@ async fn a_persons_retry_takes_the_place_of_a_scheduled_one() {
     assert_eq!(probe.titled("fake", "from effect").await.len(), 1);
 }
 
+/// A person's Retry all runs every reaction whose latest attempt failed,
+/// once each, and says how many came out right; with none failed it is
+/// unchanged.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_persons_retry_all_runs_every_failed_reaction_again() {
+    let fx = with_effect("lose-reply", FILE_ON_FAKE).await;
+    crate::effect_triggers::register(&fx.svc);
+    react(&fx).await;
+    assert_eq!(effect_runs(&fx).await, json!([[1, "live", "failed", 1]]));
+    let out = fx
+        .svc
+        .commands
+        .run(
+            &Actor::Human,
+            crate::commands::effect::RETRY_ALL,
+            json!({}),
+            true,
+        )
+        .await
+        .unwrap();
+    assert_eq!(out.result["retried"], json!(1), "{}", out.result);
+    assert_eq!(out.result["ok"], json!(1), "{}", out.result);
+    assert_eq!(
+        out.result["reactions"][0]["outcome"], "ok",
+        "{}",
+        out.result
+    );
+    let again = fx
+        .svc
+        .commands
+        .run(
+            &Actor::Human,
+            crate::commands::effect::RETRY_ALL,
+            json!({}),
+            true,
+        )
+        .await
+        .unwrap();
+    assert_eq!(again.result["retried"], json!(0), "{}", again.result);
+    let probe = ServicesProbe(&fx.svc);
+    assert_eq!(probe.sync("fake").await, Ok(true));
+    probe.settle().await;
+    assert_eq!(probe.titled("fake", "from effect").await.len(), 1);
+}
+
 /// tsk935: the loop `spawn_auto_retry` starts (after the first reconcile)
 /// sends a due retry by itself.
 #[tokio::test(flavor = "multi_thread")]

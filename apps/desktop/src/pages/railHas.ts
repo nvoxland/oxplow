@@ -4,12 +4,11 @@
 import { CONTENTS_FROM } from "../viz/Contents.js";
 import { nodeById } from "../viz/nodeRun.js";
 import type { Node, PageRun, RunNode } from "../tauri-bridge/generated/bindings.js";
-import { emptySections, mountEmpty } from "./PageTree.js";
 
 /** The titled sections a page draws that Contents would list: a stack's
  *  or slot's children with a title (a hidden heading counts: it stays in
- *  the page for Contents), less the ones folded away for having nothing.
- *  Mirrors `PageTree`'s drawing of `placement="section"`, and counts a
+ *  the page for Contents; an empty section stays too). Mirrors
+ *  `PageTree`'s drawing of `placement="section"`, and counts a
  *  `sections` viz's subsections, every row. */
 function sectionCount(run: PageRun): number {
   const walk = (run: PageRun, at: RunNode): number => {
@@ -26,8 +25,7 @@ function sectionCount(run: PageRun): number {
       }
     }
     if (def.kind === "stack" || def.kind === "slot") {
-      const folded = def.kind === "stack" ? emptySections(run, at) : [];
-      n += at.children.filter((c) => !folded.some((f) => f.id === c.id) && !(def.kind === "slot" && mountEmpty(c)) && titleOf(run, c)).length;
+      n += at.children.filter((c) => titleOf(run, c)).length;
     }
     for (const c of at.children) n += walk(run, c);
     if (def.kind === "embed" && at.embed) n += walk(at.embed, at.embed.tree);

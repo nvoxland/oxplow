@@ -37,3 +37,13 @@ view:
     input:
       id: '{{row.id}}'
     row: true
+  - id: retry_all
+    label: Retry all
+    command: oxplow.delivery.retry_all
+    input: {}
+    all: true
+  - id: discard_all
+    label: Discard all
+    command: oxplow.delivery.discard_all
+    input: {}
+    all: true

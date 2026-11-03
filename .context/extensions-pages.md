@@ -16,19 +16,19 @@ The page YAML: metadata, params, loaders, view nodes, actions, checks, custom co
   Both URIs carry their whole spec, so App's `handleOpenPage` and
   in-tab navigation register them directly.
 
-- **A page of sections leads with what matters.** In a `stack`, a
-  titled `viz` section with no rows (no error, not `replaceable`), and a
-  titled `embed` whose page has nothing to show (every viz in it empty,
-  as a mounted page is judged), folds into one closing line, "Nothing
-  found: Duplication, Co-change Surprises, …" (`foldEmpty` in
-  `viz/vizModel.ts` and `emptySections` in `pages/PageTree.tsx`), so a
-  page never ends in a run of headings over "No X." lines. A viz with a
-  whole-viz button that needs no rows (an Add, a New…) keeps its section:
-  the button is there to press. One over every row it shows (`all:
-  true`: a Clear, a Mark all seen) is offered only while there are rows
-  (`offeredWholePage`), so an empty viz with only such buttons folds like
-  one with none. Those buttons close the section, under its rows, never
-  over them (`PartButtons`). The effort page opens with its
+- **A page keeps one shape whatever its data holds.** In a `stack`, every
+  titled section stays, with or without rows: an empty viz draws its own
+  `empty:` line under its heading ("No notices.", `viz-empty`), an
+  embedded or mounted page the same under its title. Nothing folds into
+  a closing "Nothing found" line and no section is left out for being
+  empty, so the person finds each thing where it always is. Every titled
+  section therefore carries an `empty:` worth reading (`empty: ''` is
+  for a stand-in only: a hidden-title replaceable target). A whole-viz
+  button that needs no rows (an Add, a New…) is drawn either way; one
+  over every row it shows (`all: true`: a Clear, a Retry all) is offered
+  only while there are rows (`offeredWholePage`). Those buttons close the
+  section, under its rows, never over them (`PartButtons`).
+  The effort page opens with its
   **verdict** above the slots: the `effort.verdict` replacement target
   (extensions-slots.md "Replacements"), which core leaves empty — what counts as tested,
   covered or backed is a review policy's. oxplow-bundled's
@@ -346,10 +346,10 @@ unique in the page. `#node=<id>` in a link lands on it. `title`,
 - `viz` (+ `from: <loader>`, a role block, `columns`, row `actions`,
   `empty`): a `VizConfig` with no query of its own. A viz that reads no
   rows (`form`, `approvals`) has no `from`. The YAML only binds; logic is
-  SQL or a read command. `hide_empty: true` (never with `empty:`): when
-  its loader ran clean with no rows, the runner leaves the node out of the
-  run tree (`runner.rs` `left_out`), so the desktop, Contents and the
-  page's text all skip it; a failed loader still shows its error.
+  SQL or a read command. There is no way to leave a section out for
+  being empty (`hide_empty` is gone): it stays, over its `empty:` line,
+  as a `form` over a loader with no rows does too ("A page keeps one
+  shape"); a failed loader shows its error.
   `fold: true`: the rows start closed under a row count (a `<details>` the
   desktop draws around the viz); a click opens them. For a long list that is
   rarely read. A list row leaves out a cell with no value, not a dash.
@@ -554,8 +554,8 @@ reads the page's first loader's one row. A drag action also binds
 `{{order.x}}` (a list of column `x` in the new order).
 
 - **`all: true` is a whole-viz action over every row the viz shows** (a
-  Clear, an Enable All): the app offers its button only while the viz has
-  rows, and an empty viz with no other button folds away (above). It is
+  Clear, an Enable All, a Retry all): the app offers its button only while
+  the viz has rows (above). It is
   not a row, group, drag or edit action (`parse_actions` refuses the
   mix); the server runs it as any whole-viz action, rows or none, so the
   command must take an empty list (`unchanged`).

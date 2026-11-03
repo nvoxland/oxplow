@@ -194,7 +194,7 @@ view:
     title: Description
     viz: markdown
     from: description
-    empty: ''
+    empty: No description.
     markdown: { text: text }
   - id: usage
     title: How it's used

@@ -76,9 +76,9 @@ view:
     title: Pages that draw it
     viz: list
     from: pages
-    hide_empty: true
     columns:
     - { key: title, label: Page, link: { kind: page, from: definition } }
     - { key: description, label: What it is }
+    empty: No page draws it yet.
 see_also:
   - { from: related }

@@ -69,4 +69,4 @@ view:
     columns:
     - { key: path, label: File, link: { kind: file, from: path } }
     - { key: reason, label: Why }
-    empty: ''
+    empty: Every file in range was checked.

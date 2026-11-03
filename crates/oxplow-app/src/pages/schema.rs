@@ -636,8 +636,6 @@ struct VizFile {
     columns: Vec<PageColumn>,
     #[serde(default)]
     empty: Option<String>,
-    #[serde(default)]
-    hide_empty: bool,
     /// The rows start folded under a count; a click opens them.
     #[serde(default)]
     fold: bool,
@@ -724,6 +722,11 @@ pub fn parse_page(
     kind: PageKind,
 ) -> Result<Page, String> {
     let file: PageFile = serde_yaml::from_str(text).map_err(|e| {
+        if e.to_string().contains("unknown field `hide_empty`") {
+            return "`hide_empty` is no longer a key: every section stays on the page, an empty \
+                    one over its `empty:` line"
+                .to_string();
+        }
         if e.to_string().contains("unknown field `hidden`") {
             return "`hidden` is no longer a key: a page with no `category` isn't listed; a page \
                     drawn only inside another is a part (parts/); rows other pages read are a \
@@ -1659,12 +1662,6 @@ fn leaf_viz(
         holds_one_row(f.viz),
     )
     .map_err(|e| format!("node `{node_id}`: {e}"))?;
-    if f.hide_empty && f.empty.is_some() {
-        return Err(format!(
-            "node `{node_id}`: `hide_empty` leaves it out when it has no rows, so `empty:` would \
-             never show — fix: drop one of them"
-        ));
-    }
     let cfg = VizConfig {
         id: format!("{}#{node_id}", ctx.page_id),
         extension: ctx.extension.to_string(),
@@ -1674,7 +1671,6 @@ fn leaf_viz(
         params: ctx.params.to_vec(),
         columns: f.columns,
         empty: f.empty,
-        hide_empty: f.hide_empty,
         fold: f.fold,
         lead: f.lead,
         chart: f.chart,

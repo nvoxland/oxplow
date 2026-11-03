@@ -108,8 +108,8 @@ loaders:
   none: { sql: "SELECT 'x' AS a WHERE 0" }
 view:
   stack:
-    - { id: some, title: Some, viz: list, from: some, hide_empty: true }
-    - { id: none, title: None, viz: list, from: none, hide_empty: true }
+    - { id: some, title: Some, viz: list, from: some, empty: Nothing here. }
+    - { id: none, title: None, viz: list, from: none, empty: Nothing here. }
     - { id: shown, title: Shown, viz: list, from: none, empty: Nothing here. }
 "#,
     ),

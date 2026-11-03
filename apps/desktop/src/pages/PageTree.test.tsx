@@ -160,48 +160,27 @@ test("a focus on a node not drawn yet lands once it registers", () => {
   expect(scrolled).toEqual(["late"]);
 });
 
-// A stack's titled sections with nothing to show fold into one "Nothing
-// found" line, as a page document's parts do: no rows, no error, not a
-// form, nothing to press above its rows.
-test("a stack folds its empty titled sections into one Nothing found line", () => {
-  const page = fakePage(
-    node.stack("stack", [
-      node.viz("full", "full", { columns: [{ key: "id" }] }, { title: "Full" }),
-      node.viz("none", "none", { columns: [{ key: "id" }] }, { title: "Providers" }),
-      node.viz("also", "also", { columns: [{ key: "id" }] }, { title: "Roles" }),
-      node.viz("add", "none", { columns: [{ key: "id" }], actions: [fakeAction({ id: "add" })] }, { title: "With Add" }),
-      node.viz("form", null, { viz: "form" }, { title: "Form" }),
-    ]),
-  );
-  const run = fakeRun(page, { loaders: { full: loader(["id"], [["a"]]), none: loader(["id"], []), also: loader(["id"], []) } });
-  const { container, getByTestId } = render(<PageTree run={run} runId="run-1" />);
-  expect(nodeIds(container)).toEqual(["stack", "full", "add", "form"]);
-  expect(getByTestId("page-nothing-found").textContent).toBe("Nothing found: Providers, Roles.");
-});
-
-// An embedded page with nothing to show folds the same way, under the
-// title its node gives it (else its page's): a page never ends in a heading
-// over "No X." beside a "Nothing found" line.
-test("a stack folds an empty titled embed into the Nothing found line too", () => {
+// A page keeps one shape whatever its data holds: every titled section
+// stays, an empty one over its viz's own `empty` line, an empty embedded
+// page the same under its title. Nothing folds into a closing line.
+test("a stack keeps its empty titled sections and embeds, each over its own empty line", () => {
   const empty = fakeRun(
     fakePage(node.viz("rows", "rows", { columns: [{ key: "id" }], empty: "No reaction failed." }), { id: "acme/reactions", title: "Failed reactions" }),
     { loaders: { rows: loader(["id"], []) } },
   );
-  const full = fakeRun(
-    fakePage(node.viz("rows", "rows", { columns: [{ key: "id" }] }), { id: "acme/letters", title: "Letters" }),
-    { loaders: { rows: loader(["id"], [["x"]]) } },
-  );
   const page = fakePage(
     node.stack("stack", [
-      node.embed("letters", "acme/letters", { title: "Undelivered events" }),
+      node.viz("full", "full", { columns: [{ key: "id" }] }, { title: "Full" }),
+      node.viz("none", "none", { columns: [{ key: "id" }], empty: "No notices." }, { title: "Notices" }),
       node.embed("reactions", "acme/reactions", { title: "Failed reactions" }),
-      node.viz("none", "none", { columns: [{ key: "id" }] }, { title: "Extensions with problems" }),
+      node.viz("add", "none", { columns: [{ key: "id" }], actions: [fakeAction({ id: "add" })] }, { title: "With Add" }),
     ]),
   );
-  const run = fakeRun(page, { loaders: { none: loader(["id"], []) }, embeds: { letters: full, reactions: empty } });
-  const { container, getByTestId } = render(<PageTree run={run} runId="run-1" />);
-  expect(nodeIds(container)).toEqual(["stack", "letters", "letters/rows"]);
-  expect(getByTestId("page-nothing-found").textContent).toBe("Nothing found: Failed reactions, Extensions with problems.");
+  const run = fakeRun(page, { loaders: { full: loader(["id"], [["a"]]), none: loader(["id"], []) }, embeds: { reactions: empty } });
+  const { container, queryByTestId, getAllByTestId } = render(<PageTree run={run} runId="run-1" />);
+  expect(nodeIds(container)).toEqual(["stack", "full", "none", "reactions", "reactions/rows", "add"]);
+  expect(queryByTestId("page-nothing-found")).toBeNull();
+  expect(getAllByTestId("viz-empty").map((e) => e.textContent)).toEqual(["No notices.", "No reaction failed.", "No rows."]);
 });
 
 test("a page a slot mounted is a section titled by that page", () => {
@@ -222,7 +201,7 @@ test("a page a slot mounted is a section titled by that page", () => {
   expect(slot.textContent).toContain("look here");
 });
 
-test("a page a slot mounted with nothing to show is left out", () => {
+test("a page a slot mounted with nothing to show keeps its section, over its own empty line", () => {
   const run = stackPage();
   const mounted = fakeRun(
     fakePage(node.viz("review", "review", { columns: [{ key: "note" }] }), { id: "beta/review", title: "Change Analysis" }),
@@ -235,7 +214,9 @@ test("a page a slot mounted with nothing to show is left out", () => {
     ),
   };
   const { container } = render(<PageTree run={{ ...run, tree } as PageRun} runId="run-1" />);
-  expect(container.querySelector('[data-node="beta.review"]')).toBeNull();
+  const slot = container.querySelector('[data-node="beta.review"]');
+  expect(slot?.querySelector(".ox-section-title")?.textContent).toBe("Change Analysis");
+  expect(slot?.querySelector('[data-testid="viz-empty"]')?.textContent).toBe("No rows.");
 });
 
 test("an embedded page's own actions are buttons above it, pressed naming the embed's node", async () => {

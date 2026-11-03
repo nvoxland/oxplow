@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Extension, VizConfig, VizRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
-import { rowMention, markParts, treeNodes, lazyTreeNodes, lazyTreeProblem, drawnTreeRows, wantedBranches, timelineEntries, stepItems, sectionRows, sectionParts, itemList, hunkRows, codeRows, diffRow, editorRow, embedRow, parseLines, mergeDirectory, barRows, lineSeries, sparklineValues, numericRowId, treemapItems, cellLinkRef, changedParams, foldEmpty, foldedAway, displayColumns, formatCell, parseParamInput, limitRows, slugify, rowAssistantContext, effortRowId, isTimestamp, rowGroups, rowEmphasized, rowDepth, columnWrap } from "./vizModel.js";
+import { rowMention, markParts, treeNodes, lazyTreeNodes, lazyTreeProblem, drawnTreeRows, wantedBranches, timelineEntries, stepItems, sectionRows, sectionParts, itemList, hunkRows, codeRows, diffRow, editorRow, embedRow, parseLines, mergeDirectory, barRows, lineSeries, sparklineValues, numericRowId, treemapItems, cellLinkRef, changedParams, foldedAway, displayColumns, formatCell, parseParamInput, limitRows, slugify, rowAssistantContext, effortRowId, isTimestamp, rowGroups, rowEmphasized, rowDepth, columnWrap } from "./vizModel.js";
 import { formatMetricValue, formatShortDateTime } from "../components/format.js";
 import { diffSpecOf, duplicateBlockOf, isPage, lineOf, pagePayload } from "../tabs/pageRefs.js";
 import type { TabRef } from "../tabs/tabState.js";
@@ -702,28 +702,6 @@ describe("foldedAway", () => {
 test("a row that links nowhere is a mention of its page node's row", () => {
   expect(rowMention("acme/list#items", ["id", "n"], ["a", 2])).toBe('[oxplow page acme/list#items row: id="a", n=2] ');
 });
-describe("foldEmpty", () => {
-  const part = (viz: string) => ({ run: { config: { viz, actions: [] }, result: { rows: [] } } as unknown as import("../tauri-bridge/generated/bindings.js").VizRun, error: null });
-  test("a form part is shown with no rows; an empty table folds", () => {
-    const { shown, empty } = foldEmpty([part("form"), part("table")]);
-    expect(shown.map((r) => r.run!.config.viz)).toEqual(["form"]);
-    expect(empty.map((r) => r.run!.config.viz)).toEqual(["table"]);
-  });
-  test("an empty list with a button under it (an Add) is shown; one with only row actions, or a button over all its rows (a Clear), folds", () => {
-    const withActions = (actions: Array<{ row: boolean; group: string | null; all?: boolean }>) => ({
-      run: { config: { viz: "table", actions }, result: { rows: [] } } as unknown as import("../tauri-bridge/generated/bindings.js").VizRun,
-      error: null,
-    });
-    const { shown, empty } = foldEmpty([
-      withActions([{ row: false, group: null }]),
-      withActions([{ row: true, group: null }]),
-      withActions([{ row: true, group: null }, { row: false, group: null, all: true }]),
-    ]);
-    expect(shown).toHaveLength(1);
-    expect(empty).toHaveLength(2);
-  });
-});
-
 describe("itemList", () => {
   test("a JSON array of strings and { text, hint?, uri? } objects is items; anything else drops, and a non-array is null", () => {
     expect(itemList('["a",{"text":"b","hint":"why"},{"text":"c","uri":"oxplow:oxplow/page?page=x"},{"nope":1},3,{"text":"","hint":"h"}]')).toEqual([

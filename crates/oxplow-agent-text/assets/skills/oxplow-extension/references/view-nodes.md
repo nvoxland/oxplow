@@ -56,19 +56,17 @@ view:
 
 ## `viz`
 
-`{ viz: <kind>, from: <loader>, columns?, empty?, hide_empty?, lead?, actions?, <role block> }`.
+`{ viz: <kind>, from: <loader>, columns?, empty?, lead?, actions?, <role block> }`.
 Rows come from the loader (a viz has no query). A viz that reads no rows
-(`form`, `approvals`) has no `from`. `hide_empty: true` leaves the node
-out of the page when its loader has no rows (no heading, no Contents
-entry) — for a section about something the subject may not have, like
-one kind of an extension's contributions; it can't have `empty:` too.
+(`approvals`) has no `from`. A section is never left out for being
+empty: it stays over its `empty:` line, so write one worth reading
+("No commands.", "Nothing to commit."); a `form` over a loader with no
+rows draws its `empty:` line instead of its fields.
 `fold: true` starts the rows closed under a row count, for a long list
 nobody reads by default.
 `lead: <column>` puts that column's first-row text as a plain paragraph
 under the node's heading, above its viz: what a thing is, above its facts
 (null or blank draws nothing, no gap).
-It doesn't count toward a page's 8-section limit, which is on the
-sections a page always has.
 
 - `table`: rows. `list`: one line per row, headlined by the first column.
   `number`: the first cell, big. `markdown`: the first row's text
@@ -213,10 +211,11 @@ row action) or the page (`page-format.md`).
   oxplow.work_item.transition, row: true, input: { uri: "{{row.uri}}", to:
   done } }`.
 - A viz node's action without `row` is a button under its rows. `all:
-  true` says it acts on every row shown (a Clear, a Mark all seen): the
-  button appears only while there are rows, and an empty viz with only
-  such buttons folds away with the other empty sections. Leave it off a
-  button that needs no rows (an Add, a New…), which keeps its section.
+  true` says it acts on every row shown (a Clear, a Retry all): the
+  button appears only while there are rows. Leave it off a button that
+  needs no rows (an Add, a New…).
+- Every titled section stays on the page, empty or not, over its `empty:`
+  line: give each one worth reading ("No notices.", not "No rows.").
 - `form: true` opens the command's form instead of running it. `group:
   <value>` puts the button in that group's heading. `prominent: true` keeps
   one a button in the nav bar (only for what a person comes to do);

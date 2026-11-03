@@ -229,11 +229,17 @@ markdown itself, nor edits it in a `<textarea>`.
   (consumer, event type, tries, when, error: columns, not a sentence; the
   event's own id stays out of sight, the row carries it for Retry) and
   Failed reactions (effect, event type, tries, when, why) with Retry /
-  Discard (`oxplow.delivery.*`, `oxplow.effect.retry`, as page actions
-  that ask first), and Extensions with problems. Every table of things
-  that happened has a When column. A Clear… button is a button over all
-  the rows (`all: true`, extensions-pages.md): it is absent while there is
-  nothing to clear, as the dock's Clear is. A firing panel badge is the panel's own: it is not on the
+  Discard on the row (`oxplow.delivery.*`, `oxplow.effect.retry`; a
+  discard and an effect retry ask first) and Retry all / Discard all
+  under the rows (`delivery.retry_all`, `delivery.discard_all`,
+  `effect.retry_all`: a parked event is never sent again by itself, so
+  after the cause is fixed one press hands them all over; Discard all is
+  the way out for letters that will never deliver), and Extensions with
+  problems. Every section stays on the page, empty or not, over its own
+  "No …" line (extensions-pages.md "A page keeps one shape"). Every table
+  of things that happened has a When column. A Clear… or Retry all button
+  is a button over all the rows (`all: true`): it is absent while there
+  is nothing to act on, as the dock's Clear is. A firing panel badge is the panel's own: it is not on the
   page and the bell does not count it. A toast announces each new item once
   (`useAlertToasts`; what's there in the first seconds after the app opens
   counts as seen) and offers only **Review** — never Approve: consent is

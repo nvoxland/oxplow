@@ -1907,10 +1907,6 @@ pub struct VizConfig {
     pub params: Vec<PageParam>,
     pub columns: Vec<PageColumn>,
     pub empty: Option<String>,
-    /// Left out of the page when its loader has no rows: a section about
-    /// something the subject may not have (a kind of contribution).
-    #[serde(default)]
-    pub hide_empty: bool,
     /// The rows start folded under a count; a click opens them (a long
     /// list that is rarely read).
     #[serde(default)]

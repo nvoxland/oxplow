@@ -55,7 +55,6 @@ view:
     title: Facts it recorded
     viz: table
     from: recorded
-    hide_empty: true
     columns:
     - { key: captured_at, label: Captured, format: datetime }
     - { key: measure_key, label: Measure }
@@ -63,3 +62,4 @@ view:
     - { key: subject, label: Subject }
     - { key: path, label: Path }
     - { key: branch, label: Branch }
+    empty: 'Nothing recorded yet.'

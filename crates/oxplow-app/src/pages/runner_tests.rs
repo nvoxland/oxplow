@@ -79,14 +79,14 @@ async fn an_embed_takes_params_by_name_from_the_hosts_loaders() {
     assert_eq!(r.loaders["colors"].result.rows.len(), 2);
 }
 
-/// A viz node with `hide_empty` whose loader has no rows isn't in the run
-/// at all (no heading, no Contents entry); one with `empty:` still says so.
+/// Every section is in the run, rows or none: a page keeps one shape, and
+/// an empty section says so with its `empty:` line.
 #[tokio::test]
-async fn an_empty_section_that_hides_when_empty_is_left_out() {
+async fn an_empty_section_stays_in_the_run() {
     let (_dir, svc) = fixture().await;
     let r = run(&svc, "acme/sparse", &[]).await;
     let ids: Vec<&str> = r.tree.children.iter().map(|c| c.id.as_str()).collect();
-    assert_eq!(ids, ["some", "shown"]);
+    assert_eq!(ids, ["some", "none", "shown"]);
 }
 
 #[tokio::test]

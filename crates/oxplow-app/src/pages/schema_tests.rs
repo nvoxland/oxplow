@@ -1174,15 +1174,15 @@ fn a_sections_viz_can_group_its_rows() {
     assert_eq!(s.group_link.as_deref(), Some("ext_uri"));
 }
 
-/// `hide_empty` and `empty:` contradict each other: one says to leave the
-/// section out, the other what to say in it.
+/// `hide_empty` is gone: a page keeps one shape, every section on it with
+/// its `empty:` line; the error says so.
 #[test]
-fn hide_empty_with_an_empty_text_is_refused() {
+fn hide_empty_is_gone_and_the_error_says_what_replaces_it() {
     let err = page(
-        "title: P\nloaders:\n  l: { sql: \"SELECT 1 AS n\" }\nview: { id: v, viz: list, from: l, hide_empty: true, empty: None. }\n",
+        "title: P\nloaders:\n  l: { sql: \"SELECT 1 AS n\" }\nview: { id: v, viz: list, from: l, hide_empty: true }\n",
     )
     .unwrap_err();
-    assert!(err.contains("`hide_empty` leaves it out"), "{err}");
+    assert!(err.contains("`hide_empty` is no longer a key"), "{err}");
 }
 
 /// `fold: true` starts a viz's rows closed under their count.

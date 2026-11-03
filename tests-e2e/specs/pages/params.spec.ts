@@ -109,10 +109,9 @@ test("the rail's filters narrow a page, a row click shows the next section its p
   await expect(page.getByTestId("page-param-range-custom")).toHaveCount(0);
   await expect(filters.getByTestId("page-param-range-value")).toBeFocused();
 
-  // Merges only: none of these is one. A section with nothing to show
-  // folds into the page's closing line.
+  // Merges only: none of these is one. The section stays and says so.
   await filters.getByTestId("page-param-merges-edit").check();
-  await expect(body.getByTestId("page-nothing-found")).toContainText("Commits");
+  await expect(commits.getByTestId("viz-empty")).toBeVisible();
 });
 
 /// A filter is the page's view and replaces its entry; a pick is a step

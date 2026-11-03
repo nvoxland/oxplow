@@ -26,8 +26,8 @@ test("an effort's page names its effort, renames it, and the pickers turn it int
   const effort = page.locator('[data-node="effort"]');
   await expect(effort).toContainText("Open");
   await expect(page.locator('[data-node="header"]')).toContainText("working tree");
-  // Nothing was described, so the description folds into the closing line.
-  await expect(page.getByText(/Nothing found: Description/)).toBeVisible();
+  // Nothing was described: the section stays and says so.
+  await expect(page.locator('[data-node="description"]')).toContainText("No description");
 
   // Rename… asks for the title in a form.
   await effort.getByTestId("viz-action-rename").click();

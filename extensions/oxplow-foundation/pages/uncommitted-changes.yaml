@@ -63,12 +63,12 @@ view:
     viz: markdown
     markdown:
       text: message
-    hide_empty: true
+    empty: ''
   - id: commit
     title: Commit
     from: commit_form
-    hide_empty: true
     viz: form
+    empty: Nothing to commit.
     form:
       command: oxplow.vcs.commit
       fields:
@@ -91,5 +91,5 @@ view:
         from: file
         base: base_revision
         head: head_revision
-    hide_empty: true
+    empty: Nothing is uncommitted.
   - slot: sections

@@ -21,7 +21,6 @@ import { ActionForm, VizView, useVizActions } from "../viz/VizView.js";
 import { actionDoes, offeredWholePage } from "../viz/vizActions.js";
 import { CommandConfirm } from "../components/CommandConfirm.js";
 import { nodeById, nodeRunOf } from "../viz/nodeRun.js";
-import { foldEmpty } from "../viz/vizModel.js";
 import type { TabRef } from "../tabs/tabState.js";
 import type { Node, Page, PageRun, RunNode, SqlCell } from "../tauri-bridge/generated/bindings.js";
 import { PageActionContext, PageFormsContext, useNodeActions, useNodeForms } from "./useNodeActions.js";
@@ -222,24 +221,10 @@ function NodeBody(props: NodeViewProps & { def: Node; id: string }) {
   const { def, at, id } = props;
   const kids = (placement: Placement) => at.children.map((c) => <NodeView key={c.id} {...props} at={c} placement={placement} />);
   switch (def.kind) {
-    case "stack": {
-      // Titled sections with nothing to show fold into one line, as a page
-      // document's parts do (`foldEmpty`).
-      const folded = emptySections(props.run, at);
-      const shown = at.children.filter((c) => !folded.some((f) => f.id === c.id));
-      return (
-        <>
-          {shown.map((c) => (
-            <NodeView key={c.id} {...props} at={c} placement="section" />
-          ))}
-          {folded.length > 0 ? (
-            <p data-testid="page-nothing-found" className="ox-empty-line">
-              Nothing found: {folded.map((f) => f.title).join(", ")}.
-            </p>
-          ) : null}
-        </>
-      );
-    }
+    case "stack":
+      // Every section stays, an empty one with its viz's own `empty` line:
+      // a page keeps one shape whatever its data holds.
+      return <>{kids("section")}</>;
     case "grid":
       if (props.run.page.category === "Dashboards" && props.run.page.view.id === def.id && !props.run.page.origin.bundled) {
         return <DashboardGrid page={props.run.page.id} tiles={at.children.map((c) => ({
@@ -260,8 +245,8 @@ function NodeBody(props: NodeViewProps & { def: Node; id: string }) {
       return <>{kids("bare")}</>;
     case "slot":
       // What other extensions mounted here; none is nothing. A mounted page
-      // with nothing to show is left out, not drawn as a heading over "Nothing found".
-      return <>{at.children.filter((c) => !mountEmpty(c)).map((c) => <NodeView key={c.id} {...props} at={c} placement="section" />)}</>;
+      // with nothing to show keeps its section, as the host's own do.
+      return <>{kids("section")}</>;
     case "markdown":
       return <Markdown value={def.text} />;
     case "component":
@@ -379,45 +364,6 @@ export function leadOf(run: { config: { lead?: string | null }; result: { column
   return typeof cell === "string" && cell.trim() !== "" ? cell.trim() : null;
 }
 
-/** The children of stack `at` that fold away: titled, not replaceable
- *  viz nodes whose loader ran and has nothing for them (`foldEmpty`). */
-export function emptySections(run: PageRun, at: RunNode): { id: string; title: string }[] {
-  const candidates = at.children.flatMap((c) => {
-    const def = nodeById(run.page, c.id);
-    if (!def || !def.title || def.hideTitle || def.replaceable || c.error) return [];
-    // An embedded page with nothing to show folds under its title too.
-    if (def.kind === "embed") return mountEmpty(c) ? [{ id: c.id, title: def.title, run: null, error: null, empty: true }] : [];
-    if (def.kind !== "viz") return [];
-    const vizRun = nodeRunOf(run, def);
-    const loader = def.from !== null ? run.loaders[def.from] : undefined;
-    if (!vizRun || !loader) return [];
-    return [{ id: c.id, title: def.title, run: vizRun, error: loader.error, empty: false }];
-  });
-  const vizzes = candidates.filter((c) => !c.empty);
-  const folded = new Set([...foldEmpty(vizzes).empty, ...candidates.filter((c) => c.empty)].map((c) => c.id));
-  return candidates.filter((c) => folded.has(c.id)).map(({ id, title }) => ({ id, title }));
-}
-
-/** Whether a page another extension mounted (a slot's child) has nothing
- *  to show: its run is there, no error, and every viz in it has no rows
- *  (as `foldEmpty` counts it). A mount that failed or has not run is not empty. */
-export function mountEmpty(at: RunNode): boolean {
-  const run = at.embed;
-  if (!run || at.error) return false;
-  const walk = (n: RunNode): boolean => {
-    const def = nodeById(run.page, n.id);
-    if (!def || n.error) return false;
-    if (def.kind === "viz") {
-      const vizRun = nodeRunOf(run, def);
-      const loader = def.from !== null ? run.loaders[def.from] : undefined;
-      if (!vizRun || !loader) return false;
-      return foldEmpty([{ run: vizRun, error: loader.error }]).empty.length === 1;
-    }
-    if (def.kind === "stack" || def.kind === "grid") return n.children.length > 0 && n.children.every(walk);
-    return false;
-  };
-  return walk(run.tree);
-}
 
 /** What viz node `def` of `run` reads of pages: an `expand` column's
  *  page, its lazy branches' runs of its own page. */

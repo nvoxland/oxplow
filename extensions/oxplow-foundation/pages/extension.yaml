@@ -46,93 +46,70 @@ loaders:
   # where the rest of its definition is.
   drawn:
     sql: SELECT DISTINCT j.value AS resource FROM v_page p, json_each(p.renders) j
-  pages:
+  # Every contribution, whatever its kind, in one list: its name, what it
+  # is and, when a page draws its kind, a link to it.
+  contributions:
     sql: |
-      SELECT p.title, p.id, p.description,
-             CASE WHEN p.running_uri IS NOT NULL THEN p.running_uri || '#oxplow.renderer=oxplow-foundation/definition' END AS link
-      FROM about a JOIN v_page p ON p.extension = a.extension
-      ORDER BY p.title
-  # Each other kind: its name and what it is, from its kind's own dataset
-  # (v_contribution holds the rest's descriptions).
-  commands:
-    sql: |
-      SELECT m.id AS title, m.summary AS description,
-             CASE WHEN d.resource IS NOT NULL THEN m.uri || '#oxplow.renderer=oxplow-foundation/command' END AS link
-      FROM about a JOIN v_command m ON m.extension = a.extension
-           LEFT JOIN drawn d ON d.resource = 'oxplow/command'
-      ORDER BY m.id
-  skills:
-    sql: |
-      SELECT s.name AS title, s.description,
-             CASE WHEN d.resource IS NOT NULL THEN s.uri END AS link
-      FROM about a JOIN v_skill s ON s.extension = a.extension
-           LEFT JOIN drawn d ON d.resource = 'oxplow/skill'
-      ORDER BY s.name
-  components:
-    sql: |
-      SELECT k.title, k.description,
-             CASE WHEN d.resource IS NOT NULL THEN k.uri END AS link
-      FROM about a JOIN v_custom_component k ON k.extension = a.extension
-           LEFT JOIN drawn d ON d.resource = 'oxplow/custom_component'
-      ORDER BY k.title
-  slots:
-    sql: |
-      -- A slot is a page mounted on another: named by both.
-      SELECT COALESCE(mp.title, s.page) || ' on ' || COALESCE(hp.title, s.host) AS title,
-             mp.description,
-             CASE WHEN d.resource IS NOT NULL THEN s.uri END AS link
-      FROM about a JOIN v_slot s ON s.extension = a.extension
-           LEFT JOIN v_page mp ON mp.id = s.page
-           LEFT JOIN v_page hp ON hp.id = s.host
-           LEFT JOIN drawn d ON d.resource = 'oxplow/slot'
-      ORDER BY title
-  collectors:
-    sql: |
-      SELECT k.id AS title, k.description,
-             CASE WHEN d.resource IS NOT NULL THEN k.uri || '#oxplow.renderer=oxplow-foundation/collector' END AS link
-      FROM about a JOIN v_collector k ON k.extension = a.extension
-           LEFT JOIN drawn d ON d.resource = 'oxplow/collector'
-      ORDER BY k.id
-  metrics:
-    sql: |
-      SELECT m.title, m.description,
-             CASE WHEN d.resource IS NOT NULL THEN c.uri END AS link
-      FROM about a JOIN v_contribution c ON c.extension = a.extension AND c.kind = 'metric'
-           JOIN v_metric_spec m ON m.key = c.local
-           LEFT JOIN drawn d ON d.resource = 'oxplow/metric'
-      ORDER BY m.title
-  measures:
-    sql: |
-      SELECT m.title, m.description,
-             CASE WHEN d.resource IS NOT NULL THEN c.uri || '#oxplow.renderer=oxplow-foundation/measure' END AS link
-      FROM about a JOIN v_contribution c ON c.extension = a.extension AND c.kind = 'measure'
-           JOIN v_measure m ON m.key = c.local
-           LEFT JOIN drawn d ON d.resource = 'oxplow/measure'
-      ORDER BY m.title
-  dimensions:
-    sql: |
-      SELECT m.label AS title, m.description,
-             CASE WHEN d.resource IS NOT NULL THEN c.uri || '#oxplow.renderer=oxplow-foundation/dimension' END AS link
-      FROM about a JOIN v_contribution c ON c.extension = a.extension AND c.kind = 'dimension'
-           JOIN v_dimension m ON m.key = c.local
-           LEFT JOIN drawn d ON d.resource = 'oxplow/dimension'
-      ORDER BY m.label
-  resources:
-    sql: |
-      SELECT r.label AS title, r.description,
-             CASE WHEN d.resource IS NOT NULL THEN c.uri || '#oxplow.renderer=oxplow-foundation/resource' END AS link
-      FROM about a JOIN v_contribution c ON c.extension = a.extension AND c.kind = 'resource'
-           JOIN v_resource r ON r.resource = c.global_name
-           LEFT JOIN drawn d ON d.resource = 'oxplow/resource'
-      ORDER BY r.label
-  implementations:
-    sql: |
-      SELECT i.title, i.description,
-             CASE WHEN d.resource IS NOT NULL THEN c.uri END AS link
-      FROM about a JOIN v_contribution c ON c.extension = a.extension AND c.kind = 'implementation'
-           JOIN v_capability_provider i ON i.extension = c.extension AND i.capability || '.' || i.provider = c.local
-           LEFT JOIN drawn d ON d.resource = 'oxplow/implementation'
-      ORDER BY i.capability_title, i.title
+      SELECT kind, title, description, link FROM (
+        SELECT 1 AS rank, 'Pages' AS kind, p.title, p.description,
+               CASE WHEN p.running_uri IS NOT NULL THEN p.running_uri || '#oxplow.renderer=oxplow-foundation/definition' END AS link
+        FROM about a JOIN v_page p ON p.extension = a.extension
+        UNION ALL
+        SELECT 2, 'Commands', m.id, m.summary,
+               CASE WHEN d.resource IS NOT NULL THEN m.uri || '#oxplow.renderer=oxplow-foundation/command' END
+        FROM about a JOIN v_command m ON m.extension = a.extension
+             LEFT JOIN drawn d ON d.resource = 'oxplow/command'
+        UNION ALL
+        SELECT 3, 'Skills', s.name, s.description, CASE WHEN d.resource IS NOT NULL THEN s.uri END
+        FROM about a JOIN v_skill s ON s.extension = a.extension
+             LEFT JOIN drawn d ON d.resource = 'oxplow/skill'
+        UNION ALL
+        SELECT 4, 'Custom components', k.title, k.description, CASE WHEN d.resource IS NOT NULL THEN k.uri END
+        FROM about a JOIN v_custom_component k ON k.extension = a.extension
+             LEFT JOIN drawn d ON d.resource = 'oxplow/custom_component'
+        UNION ALL
+        -- A slot is a page mounted on another: named by both.
+        SELECT 5, 'Slots', COALESCE(mp.title, s.page) || ' on ' || COALESCE(hp.title, s.host), mp.description,
+               CASE WHEN d.resource IS NOT NULL THEN s.uri END
+        FROM about a JOIN v_slot s ON s.extension = a.extension
+             LEFT JOIN v_page mp ON mp.id = s.page
+             LEFT JOIN v_page hp ON hp.id = s.host
+             LEFT JOIN drawn d ON d.resource = 'oxplow/slot'
+        UNION ALL
+        SELECT 6, 'Collectors', k.id, k.description,
+               CASE WHEN d.resource IS NOT NULL THEN k.uri || '#oxplow.renderer=oxplow-foundation/collector' END
+        FROM about a JOIN v_collector k ON k.extension = a.extension
+             LEFT JOIN drawn d ON d.resource = 'oxplow/collector'
+        UNION ALL
+        SELECT 7, 'Metrics', m.title, m.description, CASE WHEN d.resource IS NOT NULL THEN c.uri END
+        FROM about a JOIN v_contribution c ON c.extension = a.extension AND c.kind = 'metric'
+             JOIN v_metric_spec m ON m.key = c.local
+             LEFT JOIN drawn d ON d.resource = 'oxplow/metric'
+        UNION ALL
+        SELECT 8, 'Measures', m.title, m.description,
+               CASE WHEN d.resource IS NOT NULL THEN c.uri || '#oxplow.renderer=oxplow-foundation/measure' END
+        FROM about a JOIN v_contribution c ON c.extension = a.extension AND c.kind = 'measure'
+             JOIN v_measure m ON m.key = c.local
+             LEFT JOIN drawn d ON d.resource = 'oxplow/measure'
+        UNION ALL
+        SELECT 9, 'Dimensions', m.label, m.description,
+               CASE WHEN d.resource IS NOT NULL THEN c.uri || '#oxplow.renderer=oxplow-foundation/dimension' END
+        FROM about a JOIN v_contribution c ON c.extension = a.extension AND c.kind = 'dimension'
+             JOIN v_dimension m ON m.key = c.local
+             LEFT JOIN drawn d ON d.resource = 'oxplow/dimension'
+        UNION ALL
+        SELECT 10, 'Resources', r.label, r.description,
+               CASE WHEN d.resource IS NOT NULL THEN c.uri || '#oxplow.renderer=oxplow-foundation/resource' END
+        FROM about a JOIN v_contribution c ON c.extension = a.extension AND c.kind = 'resource'
+             JOIN v_resource r ON r.resource = c.global_name
+             LEFT JOIN drawn d ON d.resource = 'oxplow/resource'
+        UNION ALL
+        SELECT 11, 'Implementations', i.title, i.description, CASE WHEN d.resource IS NOT NULL THEN c.uri END
+        FROM about a JOIN v_contribution c ON c.extension = a.extension AND c.kind = 'implementation'
+             JOIN v_capability_provider i ON i.extension = c.extension AND i.capability || '.' || i.provider = c.local
+             LEFT JOIN drawn d ON d.resource = 'oxplow/implementation'
+      )
+      ORDER BY rank, title
   deployments:
     sql: |
       -- Newest first: the top one is what runs (unless a roll back made an
@@ -158,94 +135,17 @@ view:
     - { key: problems_label, label: Problems, link: { kind: page, from: problems_target } }
     - { key: manifest, label: Manifest, link: { kind: page, from: manifest_target } }
     empty: This extension isn't known to the project.
-  - id: pages
-    title: Pages
+  - id: contributions
+    title: Contributions
+    description: 'Everything the extension brings, by kind: its pages, commands, skills, components, slots, collectors, metrics, measures, dimensions, resources and capability implementations. A name is a link when a page draws that kind.'
     viz: table
-    from: pages
-    hide_empty: true
+    from: contributions
+    group:
+      by: kind
     columns:
-    - { key: title, label: Page, link: { kind: page, from: link } }
+    - { key: title, label: Name, link: { kind: page, from: link } }
     - { key: description, label: What it is }
-  - id: commands
-    title: Commands
-    viz: table
-    from: commands
-    hide_empty: true
-    columns:
-    - { key: title, label: Command, link: { kind: page, from: link } }
-    - { key: description, label: What it is }
-  - id: skills
-    title: Skills
-    viz: table
-    from: skills
-    hide_empty: true
-    columns:
-    - { key: title, label: Skill, link: { kind: page, from: link } }
-    - { key: description, label: What it is }
-  - id: components
-    title: Custom components
-    viz: table
-    from: components
-    hide_empty: true
-    columns:
-    - { key: title, label: Component, link: { kind: page, from: link } }
-    - { key: description, label: What it is }
-  - id: slots
-    title: Slots
-    viz: table
-    from: slots
-    hide_empty: true
-    columns:
-    - { key: title, label: Slot, link: { kind: page, from: link } }
-    - { key: description, label: What it is }
-  - id: collectors
-    title: Collectors
-    viz: table
-    from: collectors
-    hide_empty: true
-    columns:
-    - { key: title, label: Collector, link: { kind: page, from: link } }
-    - { key: description, label: What it is }
-  - id: metrics
-    title: Metrics
-    viz: table
-    from: metrics
-    hide_empty: true
-    columns:
-    - { key: title, label: Metric, link: { kind: page, from: link } }
-    - { key: description, label: What it is }
-  - id: measures
-    title: Measures
-    viz: table
-    from: measures
-    hide_empty: true
-    columns:
-    - { key: title, label: Measure, link: { kind: page, from: link } }
-    - { key: description, label: What it is }
-  - id: dimensions
-    title: Dimensions
-    viz: table
-    from: dimensions
-    hide_empty: true
-    columns:
-    - { key: title, label: Dimension, link: { kind: page, from: link } }
-    - { key: description, label: What it is }
-  - id: resources
-    title: Resources
-    viz: table
-    from: resources
-    hide_empty: true
-    columns:
-    - { key: title, label: Resource, link: { kind: page, from: link } }
-    - { key: description, label: What it is }
-  - id: implementations
-    title: Implementations
-    viz: table
-    from: implementations
-    hide_empty: true
-    columns:
-    - { key: title, label: Implementation, link: { kind: page, from: link } }
-    - { key: description, label: What it is }
+    empty: No contributions.
   - id: deployments
     title: Deployments
     viz: table

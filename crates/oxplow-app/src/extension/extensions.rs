@@ -8095,26 +8095,6 @@ commands:
         assert!(layout_of(&stack(8)).0.is_empty());
     }
 
-    /// A `hide_empty` section shows only when its subject has rows for it
-    /// (one kind of an extension's contributions), so it isn't counted: the
-    /// limit is on the sections a page always has.
-    #[test]
-    fn a_section_that_hides_when_empty_is_not_counted() {
-        let mut nodes: Vec<String> = (0..8)
-            .map(|i| format!("    - {{ id: s{i}, title: S{i}, markdown: hi }}\n"))
-            .collect();
-        nodes.extend((0..4).map(|i| {
-            format!("    - {{ id: k{i}, title: K{i}, viz: list, from: l, hide_empty: true }}\n")
-        }));
-        let page = format!(
-            "title: P\nloaders:\n  l: {{ sql: \"SELECT 1 AS n\" }}\nview:\n  stack:\n{}",
-            nodes.concat()
-        );
-        let (warns, loaded) = layout_of(&page);
-        assert!(loaded);
-        assert!(warns.is_empty(), "{warns:?}");
-    }
-
     #[test]
     fn a_table_of_more_than_eight_columns_warns() {
         let table = |n: usize| {

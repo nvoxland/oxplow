@@ -27,7 +27,7 @@ view:
       from: item_ref
   - key: state
     label: State
-  empty: ''
+  empty: Not part of an effort.
   actions:
   - id: unlink
     label: Unlink

@@ -238,7 +238,7 @@ view:
     viz: markdown
     markdown:
       text: body
-    empty: ''
+    empty: No description.
   - id: verdict
     title: Verdict
     hide_title: true
@@ -258,6 +258,7 @@ view:
       link:
         kind: page
         from: ref
+    empty: 'No other effort was open at the same time.'
   - id: files
     title: Files Changed
     from: files
@@ -292,5 +293,5 @@ view:
       label: Pages
     - key: errors
       label: Problems
-    empty: ''
+    empty: No extension changed.
   - slot: sections

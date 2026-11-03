@@ -311,6 +311,24 @@ pub fn person_started_tx(conn: &Connection) -> Result<Vec<EffectRunKey>, DomainE
         .collect()
 }
 
+/// Every reaction whose latest attempt failed, as `(effect, event_id)`
+/// in the order the attempts were recorded: what a person's Retry all
+/// runs again.
+pub fn failed_latest_tx(conn: &Connection) -> Result<Vec<(String, String)>, DomainError> {
+    let mut st = conn
+        .prepare(
+            "SELECT effect, event_id FROM effect_run r
+              WHERE state = 'failed'
+                AND attempt = (SELECT max(l.attempt) FROM effect_run l
+                                WHERE l.effect = r.effect AND l.event_id = r.event_id)
+              ORDER BY id",
+        )
+        .map_err(map_sql_err)?;
+    st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+        .and_then(|rows| rows.collect::<rusqlite::Result<_>>())
+        .map_err(map_sql_err)
+}
+
 /// The state of `key`'s attempt, if it was made.
 pub fn state_tx(conn: &Connection, key: &EffectRunKey) -> Result<Option<RunState>, DomainError> {
     let state: Option<String> = conn

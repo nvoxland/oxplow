@@ -258,6 +258,17 @@ test("a form whose one field is a choice still opens the slideover", async () =>
   expect((view.getByTestId("viz-action-form-fields-title") as HTMLSelectElement).tagName).toBe("SELECT");
 });
 
+test("a form viz over a loader with no rows draws its empty line instead of its fields", () => {
+  const form: VizRun = {
+    config: { ...viz, viz: "form", empty: "Nothing to commit.", form: { command: "oxplow.work_item.update", defaults: null, fixed: ["uri"], fields: ["title"] }, actions: [] },
+    params: {},
+    result: { columns: [], rows: [], truncated: false },
+  } as unknown as VizRun;
+  const view = render(<VizView run={form} onOpenPage={() => {}} />);
+  expect(view.getByTestId("viz-empty").textContent).toBe("Nothing to commit.");
+  expect(view.queryByTestId("viz-form-fields")).toBeNull();
+});
+
 test("a form viz shows only its fields, keeps its fixed ones, and puts errors under the field", async () => {
   invalidField = "/title";
   const form: VizRun = {

@@ -401,6 +401,7 @@ view:
         columns:
         - key: label
           label: Start with
+        empty: No agent is set up yet.
         actions:
         - id: use
           label: Use This
@@ -809,6 +810,7 @@ view:
           label: Bound to
         - key: problem
           label: Problem
+        empty: No roles.
         actions:
         - id: assign
           label: Assign…

@@ -50,6 +50,7 @@ use crate::extension::extensions::Extension;
 use crate::Services;
 
 pub const RETRY: &str = "oxplow.effect.retry";
+pub const RETRY_ALL: &str = "oxplow.effect.retry_all";
 pub const BACKFILL: &str = "oxplow.effect.backfill";
 pub const BACKFILL_PLAN: &str = "oxplow.effect.backfill_plan";
 
@@ -353,6 +354,7 @@ pub async fn backfill(
 pub fn ops(services: ServicesSlot) -> Vec<Op> {
     vec![
         retry_op(services.clone()),
+        retry_all_op(services.clone()),
         backfill_op(services.clone()),
         backfill_plan_op(services),
     ]
@@ -439,6 +441,46 @@ pub fn backfill_plan_op(services: ServicesSlot) -> Op {
     )
 }
 
+/// One reaction run again for a person, as the pump would hand the event
+/// over: at its type's newest version. The result is `outcome`'s.
+async fn retry_one(
+    svc: &Arc<Services>,
+    invocation: &Invocation,
+    effect: &str,
+    event: &str,
+) -> Result<serde_json::Value, CommandError> {
+    let (ext, decl, health) = ready(svc, effect).await?;
+    let stored = svc
+        .event_log_store
+        .get(oxplow_domain::EventId(event.to_string()))
+        .await?
+        .ok_or_else(|| invalid("/event", format!("no event `{event}` in the log")))?;
+    let stored = oxplow_domain::events::at_latest(&svc.vocabulary.current(), &stored)?;
+    let started = std::time::Instant::now();
+    let reacted = run_reaction(
+        svc,
+        &ext,
+        &decl,
+        &stored,
+        ReactionOrigin::Retry,
+        Some(&invocation.run),
+    )
+    .await
+    .map_err(|e| match e {
+        DomainError::Invalid(message) => invalid("/event", message),
+        other => CommandError::from(other),
+    })?;
+    effect_triggers::count(&health, &decl, &reacted, started.elapsed()).await;
+    let attempt = {
+        let (effect, id) = (effect.to_string(), event.to_string());
+        svc.db
+            .read(move |tx| oxplow_db::effect_run_store::latest_tx(tx, &effect, &id))
+            .await?
+            .map_or(0, |latest| i64::from(latest.attempt))
+    };
+    Ok(outcome(effect, event, attempt, &reacted))
+}
+
 /// `oxplow.effect.retry { effect, event }`.
 pub fn retry_op(services: ServicesSlot) -> Op {
     Op::new(
@@ -451,39 +493,64 @@ pub fn retry_op(services: ServicesSlot) -> Op {
             Box::pin(async move {
                 let RetryInput { effect, event } = parse(input)?;
                 let svc = services.get()?;
-                let (ext, decl, health) = ready(&svc, &effect).await?;
-                let id = event.as_str();
-                let stored = svc
-                    .event_log_store
-                    .get(oxplow_domain::EventId(id.to_string()))
-                    .await?
-                    .ok_or_else(|| invalid("/event", format!("no event `{event}` in the log")))?;
-                // As the pump would hand it over: at its type's newest version.
-                let stored = oxplow_domain::events::at_latest(&svc.vocabulary.current(), &stored)?;
-                let started = std::time::Instant::now();
-                let reacted = run_reaction(
-                    &svc,
-                    &ext,
-                    &decl,
-                    &stored,
-                    ReactionOrigin::Retry,
-                    Some(&invocation.run),
-                )
-                .await
-                .map_err(|e| match e {
-                    DomainError::Invalid(message) => invalid("/event", message),
-                    other => CommandError::from(other),
-                })?;
-                effect_triggers::count(&health, &decl, &reacted, started.elapsed()).await;
-                let attempt = {
-                    let (effect, id) = (effect.clone(), id.to_string());
-                    svc.db
-                        .read(move |tx| oxplow_db::effect_run_store::latest_tx(tx, &effect, &id))
-                        .await?
-                        .map_or(0, |latest| i64::from(latest.attempt))
-                };
+                let result = retry_one(&svc, &invocation, &effect, &event).await?;
                 Ok(HandlerOutput {
-                    result: outcome(&effect, &event, attempt, &reacted),
+                    result,
+                    ..HandlerOutput::default()
+                })
+            })
+        })),
+    )
+    .confirm_at_least(Confirm::Always)
+}
+
+/// `oxplow.effect.retry_all {}`: every reaction whose latest attempt
+/// failed, run again one by one. A reaction that can't be retried (its
+/// effect disabled, its event gone) is reported as `refused` with why,
+/// and the rest still run.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RetryAllInput {}
+
+pub fn retry_all_op(services: ServicesSlot) -> Op {
+    Op::new(
+        "effects.run",
+        "retry_all",
+        schema::<RetryAllInput>(),
+        false,
+        Handler::External(Arc::new(move |invocation: Invocation, input| {
+            let services = services.clone();
+            Box::pin(async move {
+                let RetryAllInput {} = parse(input)?;
+                let svc = services.get()?;
+                let failed = svc
+                    .db
+                    .read(|tx| oxplow_db::effect_run_store::failed_latest_tx(tx))
+                    .await?;
+                let mut reactions = Vec::with_capacity(failed.len());
+                for (effect, event) in &failed {
+                    reactions.push(match retry_one(&svc, &invocation, effect, event).await {
+                        Ok(outcome) => outcome,
+                        Err(e) => json!({
+                            "effect": effect,
+                            "event": event,
+                            "outcome": "refused",
+                            "reason": e.to_string(),
+                        }),
+                    });
+                }
+                let ok = reactions
+                    .iter()
+                    .filter(|r| r["outcome"] == json!("ok"))
+                    .count();
+                Ok(HandlerOutput {
+                    result: json!({
+                        "retried": failed.len(),
+                        "ok": ok,
+                        "still_failing": failed.len() - ok,
+                        "reactions": reactions,
+                    }),
+                    unchanged: failed.is_empty(),
                     ..HandlerOutput::default()
                 })
             })

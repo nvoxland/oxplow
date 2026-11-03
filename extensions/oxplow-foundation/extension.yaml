@@ -131,9 +131,6 @@ intent:
     - name: the-implementation-page-says-whether-an-implementation-is-in-use
       input: { page: implementation, params: { uri: "oxplow:oxplow/implementation?implementation=oxplow-foundation/work_items.oxplow" } }
       expect: an implementation's capability, whether it is in use and what it can do
-    - name: a-command-row-of-an-extension-links-to-the-commands-page
-      input: { page: extension, params: { uri: "oxplow:oxplow/extension?name=oxplow-foundation", name: oxplow-foundation } }
-      expect: each command row of the Extension page links to its own command page
     - name: effort-files-lists-what-an-effort-claimed
       input: { page: effort-files }
       expect: the files an effort claimed, by path
@@ -209,12 +206,9 @@ intent:
     - name: extension-problems-collects-what-is-failing-or-turned-off
       input: { page: extension-problems, params: {} }
       expect: everything wrong with an extension under its name (stopped or failing contributions, permissions waiting for approval, load errors), with Start Again, Repair with the Agent and Start All Stopped
-    - name: extension-pages-are-a-table-row-each-linking-to-its-definition
+    - name: extension-contributions-are-one-table-grouped-by-kind
       input: { page: extension, params: { uri: 'oxplow:oxplow/extension?name=oxplow-foundation', name: oxplow-foundation } }
-      expect: its pages as a table, each title linking to the Definition of its running file, with its description and what it shows
-    - name: extension-contributions-are-a-table-per-kind
-      input: { page: extension, params: { uri: 'oxplow:oxplow/extension?name=oxplow-foundation', name: oxplow-foundation } }
-      expect: each kind it contributes is a top-level table, a row per contribution with its name (a link where a page draws it), its description and the facts that matter for its kind; a kind it doesn't have isn't shown
+      expect: everything it contributes in one table grouped by kind, a row per contribution with its name (a link where a page draws it, a page's to its Definition) and its description; the section stays, saying so, when there is nothing
     - name: an-extension-lists-its-permissions-as-scopes-with-a-hint-each
       input: { page: extension, params: { uri: 'oxplow:oxplow/extension?name=oxplow-foundation', name: oxplow-foundation } }
       expect: each scope as written with its explanation as a hover; nothing waits on approval for a running extension
@@ -1107,6 +1101,17 @@ commands:
     op: discard
     confirm: destructive
     example: {"id": 3}
+  - name: delivery.retry_all
+    summary: "Run every event a consumer couldn't take through its consumer again, now, as `delivery.retry` does one: for after the cause (a full disk, a consumer that was down) is fixed. Says how many were delivered and how many still wait."
+    scope: deliveries.write
+    op: retry_all
+    example: {}
+  - name: delivery.discard_all
+    summary: "Give up on every event a consumer couldn't take, as `delivery.discard` does one; each stays visible as `discarded`. For letters that will never deliver (an event at a version its consumer can't read). A person is asked first."
+    scope: deliveries.write
+    op: discard_all
+    confirm: destructive
+    example: {}
   - name: ui.report_error
     summary: "Record an operation that failed in front of the person in the app, as the app showed it, so the agent can read it in `v_op_error`. The app's own."
     scope: diagnostics.write
@@ -1229,6 +1234,12 @@ commands:
     op: retry
     confirm: always
     example: {"effect": "oxplow-bundled/infer-reasoning", "event": "ev1042"}
+  - name: effect.retry_all
+    summary: "Have every effect whose latest reaction failed react again to that event, one by one, as `effect.retry` does one. A reaction that can't run (its effect disabled, its event gone) is reported as refused and the rest still run. Says how many came out right."
+    scope: effects.run
+    op: retry_all
+    confirm: always
+    example: {}
   # jobs.manage
   - name: job_run.cancel
     summary: "Stop a running or queued job run (`<id>`), whichever extension started it (`v_job_run`). A queued one ends at once; a running one drops its model call and ends `cancelled` with what it had written."

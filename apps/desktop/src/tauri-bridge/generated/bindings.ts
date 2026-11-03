@@ -6402,11 +6402,6 @@ export type VizConfig_Deserialize = {
 	columns: PageColumn[],
 	empty: string | null,
 	/**
-	 *  Left out of the page when its loader has no rows: a section about
-	 *  something the subject may not have (a kind of contribution).
-	 */
-	hideEmpty?: boolean,
-	/**
 	 *  The rows start folded under a count; a click opens them (a long
 	 *  list that is rarely read).
 	 */
@@ -6470,11 +6465,6 @@ export type VizConfig_Serialize = {
 	params: PageParam[],
 	columns: PageColumn[],
 	empty: string | null,
-	/**
-	 *  Left out of the page when its loader has no rows: a section about
-	 *  something the subject may not have (a kind of contribution).
-	 */
-	hideEmpty: boolean,
 	/**
 	 *  The rows start folded under a count; a click opens them (a long
 	 *  list that is rarely read).

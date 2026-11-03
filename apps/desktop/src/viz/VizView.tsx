@@ -429,8 +429,23 @@ function PartButtons({ run, actions }: { run: VizRun; actions: VizActionsState }
 
 function VizBody(props: VizViewProps & { actions?: VizActionsState; marks?: Marks; tree?: LazyTree | null }) {
   const { run, streamId = null } = props;
-  if (run.config.viz === "form") return <FormViz run={run} streamId={streamId} />;
+  if (run.config.viz === "form") {
+    // A form over a loader with no rows (a Commit with nothing to commit)
+    // says so with its `empty:` line, as any viz does, instead of its fields.
+    if (run.config.empty !== null && run.result.rows.length === 0) return <EmptyLine text={run.config.empty} />;
+    return <FormViz run={run} streamId={streamId} />;
+  }
   return <RowsBody {...props} />;
+}
+
+/** A viz's `empty:` line; `""` is nothing to say (a hidden-title stand-in). */
+function EmptyLine({ text }: { text: string | null }) {
+  if (text === "") return null;
+  return (
+    <p data-testid="viz-empty" style={{ color: "var(--text-secondary)" }}>
+      {text ?? "No rows."}
+    </p>
+  );
 }
 
 function RowsBody({
@@ -490,16 +505,7 @@ function RowsBody({
   );
   const badges = useDecorations("row-badge", linkedRefs);
   // A terminal viz with none is its own empty state: it opens the first.
-  if (result.rows.length === 0 && viz.viz !== "terminal") {
-    // `empty: ""` is nothing to say (a part that only stands in for what an
-    // extension may bring).
-    if (viz.empty === "") return null;
-    return (
-      <p data-testid="viz-empty" style={{ color: "var(--text-secondary)" }}>
-        {viz.empty ?? "No rows."}
-      </p>
-    );
-  }
+  if (result.rows.length === 0 && viz.viz !== "terminal") return <EmptyLine text={viz.empty} />;
   const cols = displayColumns(viz, result.columns);
   // A link column's pages are one collection: Up and Down on the page a
   // row opens step through its siblings.

@@ -75,9 +75,9 @@ view:
     title: Metrics built on it
     viz: list
     from: metrics
-    hide_empty: true
     columns:
     - { key: title, label: Metric, link: { kind: page, from: uri } }
     - { key: description, label: What it is }
+    empty: No metric is built on it yet.
 see_also:
   - { from: related }

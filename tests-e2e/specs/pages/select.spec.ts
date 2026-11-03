@@ -36,9 +36,8 @@ test("a row click writes the page's param and a section that reads it fills", as
   const animals = host.locator('[data-node="animals"]');
   const facts = host.locator('[data-node="facts"]');
   await expect(animals).toContainText("Numbat");
-  // Nothing is picked: the empty section folds into the page's closing line.
-  await expect(host.getByTestId("page-nothing-found")).toContainText("Facts");
-  await expect(facts).toHaveCount(0);
+  // Nothing is picked: the section stays, with nothing in it yet.
+  await expect(facts.getByTestId("viz-empty")).toContainText("No rows");
   // A selection is never an input in the rail.
   await expect(host.getByTestId("page-rail").getByTestId("page-param-animal")).toHaveCount(0);
 

@@ -35,3 +35,8 @@ view:
       effect: '{{row.effect}}'
       event: '{{row.event_id}}'
     row: true
+  - id: retry_all
+    label: Retry all
+    command: oxplow.effect.retry_all
+    input: {}
+    all: true

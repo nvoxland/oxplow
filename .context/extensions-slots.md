@@ -19,8 +19,9 @@ Slots, replacements, commands in core menus and decorators: how an extension ext
     `path` in its `file-header` slot (bundled's co-change page mounts
     there). The host draws each mounted page as a section titled by its
     page.
-  - A `stack` folds titled sections that have nothing to show into one
-    closing line (see "A page of sections leads with what matters").
+  - A mounted page with nothing to show keeps its section, its own
+    `empty:` line under its title, as the host's sections do (see "A page
+    keeps one shape whatever its data holds").
 
 ## Slots
 

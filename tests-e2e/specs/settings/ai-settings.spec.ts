@@ -7,11 +7,11 @@ import { openFromLauncher } from "../../support/ui.js";
 test("a provider is added, a role bound to it, and the provider removed", async ({ page }) => {
   await page.goto("/");
   await openFromLauncher(page, "Settings: AI");
-  // With no provider the list has nothing to show: it folds into the "Nothing found" line.
+  // With no provider the list says so under its heading.
   const providers = page.locator('[data-node="ai-providers"]');
   const form = page.locator('[data-node="ai-provider-form"]');
   const roles = page.locator('[data-node="ai-roles"]');
-  await expect(page.getByTestId("page-nothing-found")).toContainText("AI providers");
+  await expect(providers.getByTestId("viz-empty")).toContainText("No AI providers yet");
 
   await form.getByTestId("viz-form-fields-id").fill("or");
   await form.getByTestId("viz-form-fields-kind").selectOption("openrouter");
@@ -39,5 +39,5 @@ test("a provider is added, a role bound to it, and the provider removed", async 
   await providers.getByRole("row", { name: /or\b/ }).click({ button: "right" });
   await page.getByTestId("menu-item-viz-action-remove").click();
   await page.getByTestId("viz-action-confirm-run").click();
-  await expect(page.getByTestId("page-nothing-found")).toContainText("AI providers");
+  await expect(providers.getByTestId("viz-empty")).toContainText("No AI providers yet");
 });

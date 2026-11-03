@@ -62,8 +62,8 @@ view:
     title: Commands it may run
     viz: detail
     from: commands
-    hide_empty: true
     columns:
     - { key: items, label: Commands, format: items }
+    empty: It runs no commands.
 see_also:
   - { from: related }

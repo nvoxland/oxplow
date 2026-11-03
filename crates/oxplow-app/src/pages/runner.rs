@@ -768,7 +768,7 @@ impl<'a> PageRunner<'a> {
                     let mut before: Vec<(String, RunNode)> = Vec::new();
                     let mut after: Vec<(String, RunNode)> = Vec::new();
                     let mut resolved: Vec<RunNode> = Vec::new();
-                    for c in children.iter().filter(|c| !left_out(c, loaders)) {
+                    for c in children.iter() {
                         let NodeKind::Slot { name } = &c.kind else {
                             let r = self
                                 .resolve(page, c, params, loaders, ctx, viewer, memo, budget, depth)
@@ -1303,22 +1303,6 @@ fn in_view<'n>(
     value
         .and_then(|v| children.iter().find(|c| c.id == v))
         .or_else(|| children.first())
-}
-
-/// A `hide_empty` viz node whose loader ran clean and has no rows: it is
-/// left out of the run (a failed loader still shows, with its error).
-fn left_out(node: &Node, loaders: &BTreeMap<String, LoaderRun>) -> bool {
-    let NodeKind::Viz {
-        from: Some(from),
-        config,
-    } = &node.kind
-    else {
-        return false;
-    };
-    config.hide_empty
-        && loaders
-            .get(from)
-            .is_some_and(|run| run.error.is_none() && run.result.rows.is_empty())
 }
 
 /// The loaders this run needn't run: the ones only nodes under a switch's

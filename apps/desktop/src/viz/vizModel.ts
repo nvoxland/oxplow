@@ -943,16 +943,3 @@ export function treemapItems(
 
 
 
-/** A page's sections split: the ones to show, and the ones with nothing to
- *  show — no rows, no error, not a form (which has no rows of its own) and
- *  not one with a button above its rows (an Add that works on an empty
- *  list) — folded into one "Nothing found" line. */
-export function foldEmpty<T extends { run: VizRun | null; error: string | null }>(
-  runs: T[],
-): { shown: T[]; empty: T[] } {
-  const isEmpty = (r: T) =>
-    r.error === null && r.run !== null && r.run.config.viz !== "form" &&
-    r.run.result.rows.length === 0 &&
-    !r.run.config.actions.some((a) => !a.row && a.group === null && !a.oneRow && !a.all);
-  return { shown: runs.filter((r) => !isEmpty(r)), empty: runs.filter(isEmpty) };
-}
