@@ -38,7 +38,10 @@ documents each column.
   compared, the commits between (`references/history.md`).
 
 Changing history (commit, merge, rebase, push, checkout): the
-`oxplow.vcs.*` commands (`list_commands`) or `git` in your terminal.
+`oxplow.vcs.*` commands (`list_commands`) or `git` in your terminal. One
+commit's worth of change, from the commit page: `oxplow.git.cherry_pick {
+stream, rev }` applies a commit the branch doesn't carry, `oxplow.git.revert
+{ stream, rev }` undoes one it does.
 
 ## Code (`v_symbol`, `v_diagnostic`, `v_lsp_server`, the `code_*` tools)
 
