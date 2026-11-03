@@ -825,6 +825,24 @@ export function codeRows(viz: VizConfig, result: SqlQueryResult): CodeRow[] {
 
 const nonEmpty = (v: SqlCell | undefined): string | null => (typeof v === "string" && v ? v : null);
 
+export type MediaRow = { path: string; filesystem: string | null; revision: string | null; row: SqlCell[] };
+
+/** `media` viz: each row's file, the filesystem and revision it is read at
+ *  (a column each, optional). Rows without a file are left out. */
+export function mediaRows(viz: VizConfig, result: SqlQueryResult): MediaRow[] {
+  const paths = columnValues(result, viz.media?.path);
+  if (!paths) return [];
+  const filesystems = columnValues(result, viz.media?.filesystem);
+  const revisions = columnValues(result, viz.media?.revision);
+  const out: MediaRow[] = [];
+  paths.forEach((p, i) => {
+    if (typeof p === "string" && p) {
+      out.push({ path: p, filesystem: nonEmpty(filesystems?.[i]), revision: nonEmpty(revisions?.[i]), row: result.rows[i] ?? [] });
+    }
+  });
+  return out;
+}
+
 /** `diff` viz: the first row's file between its two revisions, landing on
  *  its `lines`' start; null when the first row doesn't name them. */
 export function diffRow(viz: VizConfig, result: SqlQueryResult): DiffSpec | null {

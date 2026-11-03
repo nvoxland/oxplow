@@ -481,6 +481,11 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
+	readBytesAt: (streamId: string | null, path: string, filesystem: string | null, rev: string | null) => typedError<string | null, IpcError_Serialize>(__TAURI_INVOKE("read_bytes_at", { streamId, path, filesystem, rev })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	statFile: (streamId: string | null, path: string, filesystem: string | null, rev: string | null) => typedError<{
 	kind: FsKind,
 	/**  A file's byte length; none on a folder. */
@@ -6306,6 +6311,12 @@ export type Viz =
  */
 "embed" |
 /**
+ *  Per row, the file `media.path` on `media.filesystem` at
+ *  `media.revision`, shown as what it is — an image in the page, a PDF
+ *  in a frame — at full size, from the file's bytes.
+ */
+"media" |
+/**
  *  The extension's own web component (`custom.component`), in
  *  a sandboxed frame; its rows are what it shows and what an agent
  *  reads (as a table).
@@ -6390,6 +6401,7 @@ export type VizConfig_Deserialize = {
 	sections: VizSections | null,
 	hunks: VizHunks | null,
 	code: VizCode | null,
+	media: VizMedia | null,
 	diff: VizDiff | null,
 	editor: VizEditor | null,
 	embed: VizEmbed | null,
@@ -6458,6 +6470,7 @@ export type VizConfig_Serialize = {
 	sections: VizSections | null,
 	hunks: VizHunks | null,
 	code: VizCode | null,
+	media: VizMedia | null,
 	diff: VizDiff | null,
 	editor: VizEditor | null,
 	embed: VizEmbed | null,
@@ -6583,6 +6596,21 @@ export type VizHunks = {
  */
 export type VizMarkdown = {
 	text?: string | null,
+};
+
+/**
+ *  `media` viz: the file each row shows as what it is (an image, a PDF),
+ *  on a filesystem at a revision.
+ */
+export type VizMedia = {
+	path: string | null,
+	/**  A column holding the filesystem's id; none or empty, the local one. */
+	filesystem?: string | null,
+	/**
+	 *  A column holding the revision, the filesystem's own word; none or
+	 *  empty, its current content (the working tree locally).
+	 */
+	revision?: string | null,
 };
 
 /**

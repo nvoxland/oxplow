@@ -4980,6 +4980,7 @@ dependencies = [
 name = "oxplow-rpc"
 version = "0.7.0"
 dependencies = [
+ "base64 0.23.1",
  "oxplow-ai",
  "oxplow-app",
  "oxplow-code-deps",

@@ -69,6 +69,40 @@ pub async fn resolve_content(
     }
 }
 
+/// The columns a file's `content` row has (`text` and `truncated` only
+/// when asked for).
+fn file_columns(opts: ContentOpts) -> Vec<String> {
+    let mut columns: Vec<String> = [
+        "uri",
+        "path",
+        "filesystem",
+        "rev",
+        "kind",
+        "size",
+        "modified_at",
+        "is_text",
+        "language",
+    ]
+    .map(String::from)
+    .into();
+    if opts.text {
+        columns.extend(["text".to_string(), "truncated".to_string()]);
+    }
+    columns
+}
+
+/// `content` with nothing to look at (the page was opened with no URI):
+/// no row, but the columns the page's resource would have, so a loader
+/// that names one still runs. A page of files has a file's; any other,
+/// `uri` alone.
+pub fn empty_content(renders: &[String], opts: ContentOpts) -> SqlQueryResult {
+    if renders.iter().any(|r| r == r::FILE) {
+        table(file_columns(opts), Vec::new())
+    } else {
+        table(vec!["uri".into()], Vec::new())
+    }
+}
+
 fn uri_row(uri: &str) -> SqlQueryResult {
     table(vec!["uri".into()], vec![vec![SqlCell::Text(uri.into())]])
 }
@@ -103,23 +137,7 @@ async fn file_row(
     let cx = FsCx { stream };
     let rev = parsed.param("rev");
     let path = parsed.param("path").unwrap_or_default();
-    let mut columns: Vec<String> = [
-        "uri",
-        "path",
-        "filesystem",
-        "rev",
-        "kind",
-        "size",
-        "modified_at",
-        "is_text",
-        "language",
-    ]
-    .map(String::from)
-    .into();
-    if opts.text {
-        columns.extend(["text".to_string(), "truncated".to_string()]);
-    }
-    let mut out = table(columns, Vec::new());
+    let mut out = table(file_columns(opts), Vec::new());
     // A change to the files can change the row: the page runs again.
     out.reads.datasets = vec!["v_file".to_string()];
     let Some(stat) = fs.stat(&cx, rev, path).await.map_err(|e| e.to_string())? else {

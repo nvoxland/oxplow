@@ -186,11 +186,15 @@ const CONTENT_PAGES: &[(&str, &str)] = &[
         "plain",
         "for: oxplow/file\naccepts: { path: '^plain\\.[a-z]+$' }\n",
     ),
-    // Listed first by name, but it opens the file to decide: after the
-    // pages that take any such file, a check on the URI's params alone
-    // among them.
+    // Listed first by name, but it reads the file's text to decide: after
+    // the pages that take any such file, a check on the URI's params
+    // alone or on what the file is (its stat) among them.
     (
         "a-checked",
+        "for: oxplow/file\ncontent: { text: true, max_bytes: 8 }\naccepts: { path: '^ordered\\.[a-z]+$', content: has_text }\nloaders:\n  has_text: { sql: \"SELECT 1 AS n FROM content WHERE text IS NOT NULL\" }\n",
+    ),
+    (
+        "ab-by-stat",
         "for: oxplow/file\naccepts: { path: '^ordered\\.[a-z]+$', content: is_text }\nloaders:\n  is_text: { sql: \"SELECT 1 AS n FROM content WHERE is_text\" }\n",
     ),
     (
@@ -336,12 +340,18 @@ async fn a_page_with_no_content_check_is_offered_for_its_params_alone() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_page_that_opens_the_file_to_decide_comes_after_the_ones_that_take_any_such_file() {
+async fn a_page_that_reads_the_files_text_to_decide_comes_after_the_ones_that_take_any_such_file() {
     let (_dir, svc) = project().await;
-    // A check on the URI's params alone is still a general view of the file.
+    // A check on the URI's params alone, or on what the file is (its
+    // stat), is still a general view of the file.
     assert_eq!(
         acme_for(&svc, "ordered.txt").await,
-        ["acme/b-general", "acme/c-by-params", "acme/a-checked"]
+        [
+            "acme/ab-by-stat",
+            "acme/b-general",
+            "acme/c-by-params",
+            "acme/a-checked"
+        ]
     );
 }
 

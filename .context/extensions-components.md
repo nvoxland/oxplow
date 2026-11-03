@@ -83,7 +83,8 @@ script handles `submit` and runs a command with `invoke`) and no
 storage. The one way out is navigating itself. The page's `frame-src`
 (`http://127.0.0.1:*`, `http://localhost:*` — each loopback name the
 daemon serves a bundle to; not `[::1]`, which no CSP host source can
-name) bounds that to this machine. That is Tauri's CSP in the app, and a
+name; and `blob:`, the `media` viz's PDF frame, bytes the page itself
+holds) bounds that to this machine. That is Tauri's CSP in the app, and a
 one-directive meta CSP in `index.html` for a plain browser, where
 whatever serves `dist/` sends no header (`viz/frameBound.test.ts` keeps
 them one value; only `frame-src`, since a fuller policy would bound what

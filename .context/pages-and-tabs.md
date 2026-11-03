@@ -119,7 +119,9 @@ all ask it. A page is offered for a URI when, in this order,
    one row.
 
 The list is in the order the enabled extensions list their pages, the
-pages whose step-3 chain reads `content` after the rest. Step 3
+pages whose step-3 chain reads the content's text (their `content:` asks
+for it) after the rest; a check on the URI's params alone or on what the
+file is (its stat) keeps its place. Step 3
 runs only that loader's dependency chain (`Page::loader_chain`: `sql`,
 `rows`, a read-only `command`, and the system's `content`) as the viewer,
 for the stream the call names. Each check has 2 seconds and 1 MiB
@@ -135,7 +137,12 @@ daemon's list:
 
 1. The view key `#oxplow.renderer=<extension>/<page>` names one of them
    (a name not in the list is ignored).
-2. Else the page with `default: true`; else the first.
+2. Else the first page with `default: true`; else the first. Several
+   defaults of one resource are allowed when each decides by
+   `accepts.content` (`renderer_problem`): the Media page and the Editor
+   both open a file, one an image or a PDF, the other a text file, and for
+   a file both take (an SVG is text) the list's order decides, so the
+   Editor opens it and Media is its other mode.
 3. Else (an empty list) foundation's `resource` page (`pages/ResourcePage.tsx`): the
    resource's label and params, or the raw URI muted as a dead link when
    nothing declares the resource or its dataset has no row. Never an
@@ -174,7 +181,9 @@ Foundation's page files are oxplow's renderers (`agent-session`,
 `commit`, `directory`, `editor`, `file-viewer`, `markdown` (a `.md` file
 drawn as a document, on any filesystem and revision: a mode beside the
 Editor and the File viewer, never the default; `embed` it with a `uri` to
-draw a markdown file inside another page), `wiki-page`, `work-item`,
+draw a markdown file inside another page), `media` (an image or a PDF
+shown as itself, the default for one anywhere; the File viewer is its other
+mode), `wiki-page`, `work-item`,
 `diff-view` for `oxplow/snapshot`, `oxplow/effort` and `oxplow/turn`, and
 `external-url`, a page over the `embed` viz, for `https` and `http`). An agent
 session's tab follows its row (`reconcileSessionTabs`). There is no
@@ -280,7 +289,7 @@ record it renders. What `content` holds, by the resource of its `uri` param:
 
 | Resource | `content` |
 |---|---|
-| `oxplow/file` | one row from the filesystem's `stat`: `uri, path, filesystem, rev, kind, size, modified_at, is_text, language`; with `content: { text: true }` also `text` (NULL for a binary file) and `truncated`. No such file: no row. |
+| `oxplow/file` | one row from the filesystem's `stat`: `uri, path, filesystem, rev, kind, size, modified_at, is_text, language`; with `content: { text: true }` also `text` (NULL for a binary file) and `truncated`. No such file, or the page opened with no URI: no row, the same columns (`empty_content`), so a loader naming one still runs. |
 | A resource a dataset resolves (its `resolve:`: commit, work item, metric, …) | that dataset's row, every column (`SELECT * … WHERE uri = <identity>`). No row: no row. |
 | Any other (a folder, a web page) | one row `{ uri }` |
 
@@ -1713,8 +1722,9 @@ page file, with no desktop code:
    [resources.md](./resources.md)), so its URI has a type, params and a
    label.
 2. Add a page file with `for: <extension>/<name>`, optional
-   `accepts`, `default: true` (the extension's own resource, one page
-   per resource) and `pinned`. Such a page declares a `uri` param
+   `accepts`, `default: true` (the extension's own resource; one page
+   per resource, or several that each decide by `accepts.content`) and
+   `pinned`. Such a page declares a `uri` param
    and is run with the URI; its other params that the URI carries get
    their values from it. [extensions-pages.md](./extensions-pages.md) "Pages" has
    the rules.

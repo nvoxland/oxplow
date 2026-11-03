@@ -94,6 +94,10 @@ pub enum Viz {
     /// Browser and Copy URL — core's component for what an `http(s)` link
     /// opens.
     Embed,
+    /// Per row, the file `media.path` on `media.filesystem` at
+    /// `media.revision`, shown as what it is — an image in the page, a PDF
+    /// in a frame — at full size, from the file's bytes.
+    Media,
     /// The extension's own web component (`custom.component`), in
     /// a sandboxed frame; its rows are what it shows and what an agent
     /// reads (as a table).
@@ -106,7 +110,7 @@ impl Viz {
     pub fn fills(self) -> bool {
         matches!(
             self,
-            Viz::Code | Viz::Diff | Viz::Editor | Viz::Terminal | Viz::Embed
+            Viz::Code | Viz::Diff | Viz::Editor | Viz::Terminal | Viz::Embed | Viz::Media
         )
     }
 }
@@ -586,6 +590,23 @@ pub struct VizCode {
     /// Several rows' editors scroll together, each from its marked lines.
     #[serde(default)]
     pub sync: bool,
+}
+
+/// `media` viz: the file each row shows as what it is (an image, a PDF),
+/// on a filesystem at a revision.
+#[derive(
+    Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
+)]
+#[serde(deny_unknown_fields)]
+pub struct VizMedia {
+    pub path: Option<String>,
+    /// A column holding the filesystem's id; none or empty, the local one.
+    #[serde(default)]
+    pub filesystem: Option<String>,
+    /// A column holding the revision, the filesystem's own word; none or
+    /// empty, its current content (the working tree locally).
+    #[serde(default)]
+    pub revision: Option<String>,
 }
 
 /// `terminal` viz: the columns of each row's terminal.
@@ -1885,6 +1906,7 @@ pub struct VizConfig {
     pub sections: Option<VizSections>,
     pub hunks: Option<VizHunks>,
     pub code: Option<VizCode>,
+    pub media: Option<VizMedia>,
     pub diff: Option<VizDiff>,
     pub editor: Option<VizEditor>,
     pub embed: Option<VizEmbed>,
@@ -2005,6 +2027,14 @@ impl VizConfig {
                     .into_iter()
                     .flatten()
                     .map(|k| ("code", k)),
+            );
+        }
+        if let Some(m) = &self.media {
+            out.extend(
+                [&m.path, &m.filesystem, &m.revision]
+                    .into_iter()
+                    .flatten()
+                    .map(|k| ("media", k)),
             );
         }
         if let Some(t) = &self.terminal {

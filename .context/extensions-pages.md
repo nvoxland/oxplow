@@ -366,13 +366,15 @@ lines? }`; saved through `oxplow.file.save`; `useTabEditing`;
 `.context/editor-and-monaco.md` "The editor viz"), `embed` (a web page:
 `embed: { url }`, the first row's `http(s)` URL, in oxplow's sandboxed
 window; `.context/external-url-tabs.md`), `code` and `diff` (read-only:
-a file at a revision, or one file's diff; `.context/editor-and-monaco.md`
-"Read-only code and diff vizes"), `approvals` (core's consent component:
+a file at a revision, or one file's diff) and `media` (each row's file as
+an image or a PDF, from its bytes: `media: { path, filesystem?, revision?
+}`; `.context/editor-and-monaco.md` "Read-only code, diff and media
+vizes"), `approvals` (core's consent component:
 it reads `v_command_proposal` itself and decides through the approve and
 decline commands; params `thread` and `setting` narrow the list), `form`
 and `custom` (below). `terminal`, `editor`, `embed`, `form`, `approvals`
 and `custom` are refused in an inline page. A viz that fills its page
-(`code`, `diff`, `editor`, `terminal`, `embed`) draws no in-body title.
+(`code`, `diff`, `editor`, `terminal`, `embed`, `media`) draws no in-body title.
 
 **`sections`** (`viz: sections`; `VizSections`, `SectionsViz.tsx`,
 `sectionRows` in `vizModel.ts`) — a thing gets a section, not a row

@@ -1,10 +1,11 @@
 title: Editor
-description: "A file of the working tree, edited: unsaved edits shared with every tab showing it. The renderer of a `file` with no `rev` and no `filesystem`."
+description: "A text file of the working tree, edited: unsaved edits shared with every tab showing it. The renderer of a `file` with no `rev` and no `filesystem`; a binary file is viewed, not edited."
 label: '{{param.path|basename}}'
 for: oxplow/file
 accepts:
   rev: absent
   filesystem: absent
+  content: editable
 default: true
 comments: true
 params:
@@ -23,6 +24,10 @@ loaders:
       SELECT rtrim(rtrim(:path, replace(:path, '/', '')), '/') AS title,
              uri('oxplow/dir', 'path', rtrim(rtrim(:path, replace(:path, '/', '')), '/')) AS uri
       WHERE :path LIKE '%/%'
+  # Text, or not there yet: a binary file has nothing to edit.
+  editable:
+    sql: |
+      SELECT 1 AS n WHERE NOT EXISTS (SELECT 1 FROM content WHERE is_text = 0)
 view:
   from: editor
   viz: editor

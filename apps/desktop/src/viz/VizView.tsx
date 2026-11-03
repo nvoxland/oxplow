@@ -61,6 +61,7 @@ import {
   drawnTreeRows,
   treemapItems,
   codeRows,
+  mediaRows,
   diffRow, editorRow, embedRow,
   type BranchRun,
   type DisplayColumn,
@@ -82,6 +83,7 @@ import { EditorViz } from "./EditorViz.js";
 import { TerminalViz } from "./TerminalViz.js";
 import { EmbedViz } from "./EmbedViz.js";
 import { CodeViz } from "./CodeViz.js";
+import { MediaViz } from "./MediaViz.js";
 import { DiffViz } from "./DiffViz.js";
 import { DataTable, type DataColumn, type RowProps } from "../kit/DataTable.js";
 import { Facts } from "../kit/Facts.js";
@@ -1104,6 +1106,8 @@ function Viz({
       return <HunksViz rows={hunkRows(viz, result)} streamId={streamId} rowMenu={rowMenu} />;
     case "code":
       return <CodeViz rows={codeRows(viz, result)} streamId={streamId} sync={viz.code?.sync ?? false} onOpenPage={onOpenPage} isPage={isPage} />;
+    case "media":
+      return <MediaViz rows={mediaRows(viz, result)} streamId={streamId} onOpenPage={onOpenPage} isPage={isPage} />;
     case "diff":
       return <DiffViz spec={diffRow(viz, result)} streamId={streamId} onOpenPage={onOpenPage} />;
     case "editor":

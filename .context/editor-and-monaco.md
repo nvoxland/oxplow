@@ -223,9 +223,9 @@ regular editor pane and closes the diff tab. For literal-content diffs
 (e.g. Compare with Clipboard) this still opens the workspace file,
 which is the useful action.
 
-## Read-only code and diff vizes
+## Read-only code, diff and media vizes
 
-A page shows files through two kit vizes (`.context/extensions-page-host.md`
+A page shows files through three kit vizes (`.context/extensions-page-host.md`
 "Viz"):
 
 - **`code`** (`viz/CodeViz.tsx`): one read-only Monaco per row, side by
@@ -243,6 +243,15 @@ A page shows files through two kit vizes (`.context/extensions-page-host.md`
 - **`diff`** (`viz/DiffViz.tsx`): `DiffPane` at full size for the first
   row, its `lines` revealed on the modified side; Open file shows the
   working file.
+- **`media`** (`viz/MediaViz.tsx`): each row's file as what it is — an
+  image in an `<img>`, a PDF in an `<iframe>` — side by side, each with the
+  same strip (path, revision, size, Open file). It `stat`s first and reads
+  the bytes only of a file it will show (`readBytesAt`, base64 over IPC;
+  `MAX_MEDIA_BYTES`, 32 MiB); a missing, too-large or other file says so
+  in its strip. The bytes become a blob URL the viz revokes when it goes;
+  the shell's CSP allows `blob:` in `img-src` and `frame-src` for it. What
+  it shows is decided by extension (`mediaType`: png, jpg, jpeg, gif, webp,
+  svg, bmp, ico, avif; pdf). Foundation's Media page is its page.
 
 Open file navigates in the tab when there is one, else opens a page. A
 `code` viz that is the page's own view (the File viewer: the root of the
@@ -256,13 +265,17 @@ reading it, so a binary or over-5-MiB file shows a placeholder line, not
 its bytes (the buffer store does the same for the `editor` viz). The
 `editor` viz edits only the local working tree: it takes an optional
 `filesystem` column and shows a refusal, not an editor, for any but
-`oxplow:local` (the Editor page accepts none anyway). The two renderers
-of a file split by URI, never both: the Editor takes a URI with no `rev`
-and no `filesystem`; the File viewer's `accepts.content` loader takes one
-with either (a past revision, another filesystem), where there is nothing
-to edit. A working-tree file so has one mode and no Open With.
-The file-viewer and duplicate-block pages draw these vizes;
-`DiffPane` stays (it is the `hunks` viz's and `diff`'s).
+`oxplow:local` (the Editor page accepts none anyway). The renderers of a
+file split by URI and by what the file is: the Editor takes a URI with no
+`rev` and no `filesystem` whose file is text or not there yet
+(`accepts.content: editable`, a `stat`); the File viewer's `accepts.content`
+loader takes one with a `rev` or a `filesystem` (a past revision, another
+filesystem) or a binary file, where there is nothing to edit; the Media
+page (`accepts.content: is_media`, decided from the name alone) is the
+default for an image or a PDF anywhere, the File viewer its other mode. A
+working-tree text file so has one mode and no Open With, a `.md` file the
+Markdown mode too. The file-viewer, media and duplicate-block pages draw
+these vizes; `DiffPane` stays (it is the `hunks` viz's and `diff`'s).
 
 ## Comment overlay
 

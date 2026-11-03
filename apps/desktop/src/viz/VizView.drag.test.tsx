@@ -57,6 +57,7 @@ const base = {
   steps: null,
   hunks: null,
   code: null,
+  media: null,
   diff: null,
   markdown: null,
   form: null,

@@ -1,8 +1,9 @@
 title: File Viewer
-description: "A file read-only, at a past revision or on another filesystem; a binary or very large one says what it is instead. A working-tree file is the Editor's alone."
+description: "A file read-only, at a past revision or on another filesystem, or a binary file of the working tree; a binary or very large one says what it is instead. A working-tree text file is the Editor's alone."
 label: '{{param.path|basename}}{{row.suffix}}'
 for: oxplow/file
-# `accepts` rules all hold together; "a revision or a filesystem" is a loader.
+# `accepts` rules all hold together; "a revision, a filesystem or a binary
+# file" is a loader.
 accepts:
   content: elsewhere
 comments: true
@@ -47,11 +48,14 @@ loaders:
              , 2
       WHERE :path LIKE '%/%'
       ORDER BY ord
-  # Offered where there is nothing to edit: the Editor's URI (no `rev`, no
-  # `filesystem`) is not the viewer's.
+  # Offered where there is nothing to edit: a past revision, another
+  # filesystem, or a binary file (the Media page takes an image or a PDF
+  # from here as the one that opens).
   elsewhere:
     sql: |
-      SELECT 1 AS n WHERE :rev IS NOT NULL OR :filesystem IS NOT NULL
+      SELECT 1 AS n
+      WHERE :rev IS NOT NULL OR :filesystem IS NOT NULL
+         OR EXISTS (SELECT 1 FROM content WHERE is_text = 0)
 actions:
 - { id: open-current, label: Open current version, open: current_uri, when: current_uri }
 view:

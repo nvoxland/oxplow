@@ -435,7 +435,8 @@ the user guide is `docs/guide/pages.md`.
     pending) and `hunks` (each row's file diffed between `hunks.from` and
     `hunks.to` in the diff viewer, `DiffPane`, one expanded at a time).
     The full-height ones (`Viz::fills`) are `code`, `diff`, `editor`,
-    `terminal` and `embed`; `approvals` is core's consent list; `custom` is
+    `terminal`, `embed` and `media` (each row's file as an image or a PDF,
+    from its bytes); `approvals` is core's consent list; `custom` is
     an extension's sandboxed component. **`form`**: `form: { command,
     defaults? }` renders the command's `input_schema` as a `SchemaForm`, its
     fields starting from `defaults` (placeholders bound like an action's)

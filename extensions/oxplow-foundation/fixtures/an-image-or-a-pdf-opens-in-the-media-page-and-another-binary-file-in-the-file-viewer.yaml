@@ -1,0 +1,46 @@
+# A binary file is viewed, never edited: an image or a PDF opens in the
+# Media page, drawn as itself, with the File viewer as its other mode; a
+# binary file that is neither has the File viewer alone. A text file keeps
+# the Editor, and a markdown file its Markdown mode. The same holds on a
+# scratch filesystem, where the Editor is never offered.
+temp:
+  logo.png: "\0PNG"
+given:
+  - { command: oxplow.file.save, input: { stream: str1, path: logo.png, content: "\0PNG" } }
+  - { command: oxplow.file.save, input: { stream: str1, path: blob.bin, content: "\0\u0001\u0002" } }
+when:
+  command: oxplow.page.renderers
+  input: { uri: "oxplow:oxplow/file?path=logo.png" }
+expect:
+  ok: true
+  result:
+    renderers:
+      - { page: oxplow-foundation/file-viewer, default: false }
+      - { page: oxplow-foundation/media, default: true }
+steps:
+  - when:
+      command: oxplow.page.renderers
+      input: { uri: "oxplow:oxplow/file?path=blob.bin" }
+    expect:
+      ok: true
+      result:
+        renderers:
+          - { page: oxplow-foundation/file-viewer }
+  - when:
+      command: oxplow.page.renderers
+      input: { uri: "oxplow:oxplow/file?path=logo.png&filesystem=oxplow:temp" }
+    expect:
+      ok: true
+      result:
+        renderers:
+          - { page: oxplow-foundation/file-viewer }
+          - { page: oxplow-foundation/media, default: true }
+  - when:
+      command: oxplow.page.renderers
+      input: { uri: "oxplow:oxplow/file?path=report.pdf&rev=git:HEAD" }
+    expect:
+      ok: true
+      result:
+        renderers:
+          - { page: oxplow-foundation/file-viewer }
+          - { page: oxplow-foundation/media, default: true }

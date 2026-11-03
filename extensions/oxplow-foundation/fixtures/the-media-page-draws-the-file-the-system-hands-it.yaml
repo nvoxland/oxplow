@@ -1,0 +1,30 @@
+# The Media page reads nothing itself: the system hands it the file, and
+# the viz shows it as what it is from its bytes. Its tab is the file's
+# name; a file that is not there draws nothing and says so.
+temp:
+  logo.png: "\0PNG"
+when:
+  page: oxplow-foundation/media
+  params:
+    uri: "oxplow:oxplow/file?path=logo.png&filesystem=oxplow:temp"
+    path: logo.png
+    filesystem: "oxplow:temp"
+expect:
+  label: logo.png
+  loaders:
+    content:
+      rows:
+        - { path: logo.png, filesystem: "oxplow:temp", kind: file, is_text: false }
+  text:
+    contains: ["logo.png", "an image, shown in the app"]
+steps:
+  - params:
+      uri: "oxplow:oxplow/file?path=gone.png&filesystem=oxplow:temp"
+      path: gone.png
+      filesystem: "oxplow:temp"
+    expect:
+      loaders:
+        content:
+          rows: 0
+      text:
+        contains: ["There is no such file."]

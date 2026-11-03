@@ -326,6 +326,7 @@ pub fn render(run: &VizRun, resolved: &Resolved) -> String {
         Viz::Editor => editor(run, &resolved.files),
         Viz::Terminal => terminals(run),
         Viz::Embed => embed(run),
+        Viz::Media => media(run),
         Viz::Diff => one_diff(run, &resolved.diffs),
         Viz::Approvals => {
             if resolved.approvals.is_empty() {
@@ -893,6 +894,45 @@ fn embed(run: &VizRun) -> String {
     format!("[{url}]({url}) — a web page, opened in its own window")
 }
 
+/// Media is a line per file saying where it is and what it is: text can't
+/// show an image or a PDF, so the agent learns the file to read instead.
+fn media(run: &VizRun) -> String {
+    let m = run.config.media.clone().unwrap_or_default();
+    let Some(p) = column(run, m.path.as_ref()) else {
+        return table(run);
+    };
+    let (f, r) = (
+        column(run, m.filesystem.as_ref()),
+        column(run, m.revision.as_ref()),
+    );
+    run.result
+        .rows
+        .iter()
+        .map(|row| {
+            let at = |i: Option<usize>| i.and_then(|i| row.get(i)).map(cell).unwrap_or_default();
+            let path = at(Some(p));
+            let what = if is_pdf(&path) { "a PDF" } else { "an image" };
+            let fs = at(f);
+            let rev = at(r);
+            let where_ = match (fs.as_str(), rev.as_str()) {
+                ("" | "oxplow:local", "") => String::new(),
+                ("" | "oxplow:local", rev) => format!("@{rev}"),
+                (fs, "") => format!(" on {fs}"),
+                (fs, rev) => format!(" on {fs}@{rev}"),
+            };
+            format!("- {path}{where_} — {what}, shown in the app")
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn is_pdf(path: &str) -> bool {
+    std::path::Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("pdf"))
+}
+
 /// A fence's language for `path`: its extension, when it is one word.
 fn fence_of(path: &str) -> String {
     std::path::Path::new(path)
@@ -1147,6 +1187,7 @@ mod tests {
                 sections: None,
                 hunks: None,
                 code: None,
+                media: None,
                 diff: None,
                 editor: None,
                 embed: None,
@@ -1726,6 +1767,34 @@ mod tests {
         assert_eq!(parse_lines(" 40-12 "), Some((12, 40)));
         assert_eq!(parse_lines("0-3"), None);
         assert_eq!(parse_lines("x"), None);
+    }
+
+    /// Media is each row's file and revision, said as what it is: text
+    /// can't show an image or a PDF, so the line says where it is.
+    #[test]
+    fn media_says_what_each_file_is() {
+        let r = with(
+            run(
+                Viz::Media,
+                None,
+                &["path", "fs", "rev"],
+                vec![
+                    vec![t("img/logo.png"), SqlCell::Null(()), t("working")],
+                    vec![t("docs/spec.pdf"), t("oxplow:temp"), SqlCell::Null(())],
+                ],
+            ),
+            |l| {
+                l.media = Some(crate::pages::spec::VizMedia {
+                    path: Some("path".into()),
+                    filesystem: Some("fs".into()),
+                    revision: Some("rev".into()),
+                })
+            },
+        );
+        assert_eq!(
+            render(&r, &Resolved::default()),
+            "- img/logo.png@working — an image, shown in the app\n- docs/spec.pdf on oxplow:temp — a PDF, shown in the app"
+        );
     }
 
     /// A diff is the first row's file and revisions, then its diff.

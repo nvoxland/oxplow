@@ -162,7 +162,9 @@ most 4 MiB, default 64 KiB). No such file or row: `content` has no rows.
 standalone page can't read it. `accepts: {
 <param>: present | absent | <anchored pattern> }` limits it to URIs whose
 params fit; `default: true` (only for a resource your extension declares)
-makes it the page a plain open uses; `pinned: true` pins its tabs. Params
+makes it the page a plain open uses — one per resource, unless each default
+decides by `accepts: { content: … }` and so applies to different things;
+`pinned: true` pins its tabs. Params
 named like the URI's (`uri`, `sha`, `path`) are filled from it.
 
 A resource with both a data view and a definition view: make the data page

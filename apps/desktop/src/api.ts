@@ -1345,6 +1345,14 @@ export async function readAt(streamId: string, path: string, at: FileAt = {}): P
   return unwrap(await commands.readAt(streamId || null, path, at.filesystem ?? null, at.rev ?? null));
 }
 
+/** `path` on a filesystem at a revision, as its bytes (an image, a PDF);
+ *  null when it isn't there. `stat` first: the daemon hands back whatever
+ *  size is asked for. */
+export async function readBytesAt(streamId: string, path: string, at: FileAt = {}): Promise<Uint8Array | null> {
+  const encoded = unwrap(await commands.readBytesAt(streamId || null, path, at.filesystem ?? null, at.rev ?? null));
+  return encoded === null ? null : Uint8Array.from(atob(encoded), (c) => c.charCodeAt(0));
+}
+
 /** What `path` is on a filesystem at a revision (kind, size, whether it
  *  is text, language); null when it isn't there. */
 export async function statFile(streamId: string, path: string, at: FileAt = {}): Promise<FsStat | null> {

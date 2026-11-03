@@ -108,7 +108,9 @@ sections a page always has.
   revisions: `diff: { path, from, to, lines?, base? }` (several files:
   `hunks`). `editor`: edits the first row's working-tree file: `editor: {
   path, filesystem?, lines? }` (the person saves it; only the local
-  working tree).
+  working tree). `media`: each row's file shown as what it is, an image or
+  a PDF, from its bytes: `media: { path, filesystem?, revision? }` (a file
+  that is neither says so).
 - `embed`: the first row's web page (`http`/`https`) in a sandboxed window:
   `embed: { url: <column> }`. `terminal`: a terminal.
 - `form`: one command's input (`commands-and-forms.md`).

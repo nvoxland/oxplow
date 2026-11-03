@@ -25,7 +25,7 @@ use crate::pages::spec::{
     holds_one_row, parse_actions, typed, AlertFile, FormSpec, LauncherCategory, PageAction,
     PageAlert, PageColumn, PageParam, PageProvenance, ParamRole, ViewContext, Viz, VizChart,
     VizCode, VizConfig, VizCustom, VizDiff, VizEditor, VizEmbed, VizGroup, VizHunks, VizMarkdown,
-    VizSections, VizSteps, VizTerminal, VizTimeline, VizTree,
+    VizMedia, VizSections, VizSteps, VizTerminal, VizTimeline, VizTree,
 };
 
 /// What a page file is, by the folder it is in. The three kinds share one
@@ -655,6 +655,8 @@ struct VizFile {
     hunks: Option<VizHunks>,
     #[serde(default)]
     code: Option<VizCode>,
+    #[serde(default)]
+    media: Option<VizMedia>,
     #[serde(default)]
     diff: Option<VizDiff>,
     #[serde(default)]
@@ -1677,6 +1679,7 @@ fn leaf_viz(
         sections: f.sections,
         hunks: f.hunks,
         code: f.code,
+        media: f.media,
         diff: f.diff,
         editor: f.editor,
         embed: f.embed,

@@ -39,6 +39,25 @@ pub async fn read_at(
         .map(|b| String::from_utf8_lossy(&b).into_owned()))
 }
 
+/// `path` at `rev` on `filesystem` as its bytes, base64-encoded, for the
+/// window to show as what the file is (an image, a PDF); `None` when it
+/// isn't there. The window `stat`s first and asks only for a file it will
+/// show, so the size is the viewer's call.
+pub async fn read_bytes_at(
+    svc: &Services,
+    stream_id: Option<String>,
+    path: String,
+    filesystem: Option<String>,
+    rev: Option<String>,
+) -> Result<Option<String>, IpcError> {
+    use base64::Engine as _;
+    let fs = svc.filesystems.resolve(filesystem.as_deref())?;
+    Ok(fs
+        .read(&cx(stream_id.as_deref()), rev.as_deref(), &path, None)
+        .await?
+        .map(|b| base64::engine::general_purpose::STANDARD.encode(b)))
+}
+
 /// What `path` is at `rev` on `filesystem`: its kind, size, whether it is
 /// text, its language; `None` when it isn't there.
 pub async fn stat_file(
@@ -166,6 +185,27 @@ mod tests {
             files.as_array().unwrap().contains(&json!("a.txt")),
             "{files}"
         );
+    }
+
+    /// `read_bytes_at` hands a file's bytes as they are, base64-encoded, so
+    /// the window can show an image or a PDF; a missing file is null.
+    #[tokio::test]
+    async fn read_bytes_at_hands_a_files_bytes_encoded() {
+        let (svc, dir) = crate::test_support::services().await;
+        std::fs::write(dir.path().join("a.png"), [0x89, b'P', b'N', b'G', 0, 255]).unwrap();
+        let call = |path: &'static str| {
+            let svc = svc.clone();
+            async move {
+                crate::dispatch(
+                    "read_bytes_at",
+                    json!({ "streamId": null, "path": path, "filesystem": null, "rev": null }),
+                    &svc,
+                )
+                .await
+            }
+        };
+        assert_eq!(call("a.png").await.unwrap(), json!("iVBORwD/"));
+        assert_eq!(call("nope.png").await.unwrap(), json!(null));
     }
 
     /// The neutral reads reach the scratch files and the extensions' copies.

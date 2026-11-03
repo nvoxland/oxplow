@@ -626,7 +626,13 @@ impl<'a> PageRunner<'a> {
                     .await
                 }
                 // Nothing to look at: the page was opened with no URI.
-                _ => Ok(table(vec!["uri".into()], Vec::new())),
+                _ => Ok(super::content::empty_content(
+                    &page.renders,
+                    super::content::ContentOpts {
+                        text: *text,
+                        max_bytes: *max_bytes,
+                    },
+                )),
             },
         };
         // Bound each memo entry too, before it is cloned into the cache.

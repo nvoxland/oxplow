@@ -223,10 +223,27 @@ async fn a_resource_page_reads_its_content() {
     assert_eq!(r.loaders["shown"].error, None);
     assert!(r.loaders["shown"].result.rows.is_empty());
     assert_eq!(ints(&r, "bare"), [0]);
-    // Opened with no URI there is nothing to read.
+    // Opened with no URI there is nothing to read, but `content` keeps the
+    // columns a file's would have, so a loader naming one still runs.
     let r = run(&svc, "acme/file-look", &[]).await;
     assert_eq!(r.loaders["content"].error, None);
     assert!(r.loaders["content"].result.rows.is_empty());
+    assert!(
+        r.loaders["content"]
+            .result
+            .columns
+            .iter()
+            .any(|c| c == "is_text")
+            && r.loaders["content"]
+                .result
+                .columns
+                .iter()
+                .any(|c| c == "text"),
+        "{:?}",
+        r.loaders["content"].result.columns
+    );
+    assert_eq!(r.loaders["shown"].error, None);
+    assert_eq!(ints(&r, "bare"), [0]);
 }
 
 #[tokio::test]

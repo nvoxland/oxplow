@@ -1,0 +1,46 @@
+title: Media
+description: "An image or a PDF shown as itself — on any filesystem and at any revision — and the page that opens one. A binary file that is neither is the File viewer's; a text file the Editor's."
+label: '{{param.path|basename}}'
+icon: file-text
+for: oxplow/file
+# Decided from the name alone, so no file is read to offer it.
+accepts:
+  content: is_media
+default: true
+params:
+- name: uri
+- name: path
+- name: filesystem
+- name: rev
+loaders:
+  is_media:
+    sql: |
+      SELECT 1 AS n
+      WHERE lower(:path) GLOB '*.png' OR lower(:path) GLOB '*.jpg' OR lower(:path) GLOB '*.jpeg'
+         OR lower(:path) GLOB '*.gif' OR lower(:path) GLOB '*.webp' OR lower(:path) GLOB '*.svg'
+         OR lower(:path) GLOB '*.bmp' OR lower(:path) GLOB '*.ico' OR lower(:path) GLOB '*.avif'
+         OR lower(:path) GLOB '*.pdf'
+  # Its history (the index has one for a local file only) and its folder, on
+  # the file's own filesystem and revision.
+  related:
+    sql: |
+      SELECT 'File history' AS title, uri('oxplow/page', 'page', 'file-history', 'path', :path) AS uri, 1 AS ord
+      WHERE COALESCE(:filesystem, 'oxplow:local') = 'oxplow:local'
+      UNION ALL
+      SELECT rtrim(rtrim(:path, replace(:path, '/', '')), '/'),
+             uri('oxplow/dir', 'filesystem', NULLIF(:filesystem, 'oxplow:local'),
+                 'path', rtrim(rtrim(:path, replace(:path, '/', '')), '/'),
+                 'rev', NULLIF(NULLIF(:rev, ''), 'working'))
+             , 2
+      WHERE :path LIKE '%/%'
+      ORDER BY ord
+view:
+  from: content
+  viz: media
+  media:
+    path: path
+    filesystem: filesystem
+    revision: rev
+  empty: There is no such file.
+see_also:
+  - { from: related }

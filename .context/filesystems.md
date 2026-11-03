@@ -129,9 +129,11 @@ cap is refused.
 
 ## Using one
 
-- RPC `read_at { streamId, path, filesystem?, rev? }` and `stat_file`
-  (same inputs, returns `FsStat | null`); TS `readAt(stream, path, { filesystem?, rev? })`
-  and `statFile` in `apps/desktop/src/api.ts`.
+- RPC `read_at { streamId, path, filesystem?, rev? }` (text),
+  `read_bytes_at` (the same inputs; the bytes base64-encoded, for an image
+  or a PDF the window shows) and `stat_file` (same inputs, returns `FsStat
+  | null`); TS `readAt(stream, path, { filesystem?, rev? })`, `readBytesAt`
+  (a `Uint8Array`) and `statFile` in `apps/desktop/src/api.ts`.
 - MCP `read` of a file URI (`ref_read::file_text`): resolves the URI's
   `filesystem`, `stat`s it, answers "binary file, N bytes" for a binary
   file instead of lossy UTF-8, and reads a ranged first 64 KiB + 1 to set
@@ -148,8 +150,12 @@ cap is refused.
   optional columns (none: the local working tree). It `stat_file`s first
   and shows `(binary file, N bytes)` or `(too large to show, N bytes)`
   (`MAX_SHOWN_BYTES`, 5 MiB, `unshownReason` in `filesystem.ts`) instead of
-  loading the file. The Editor accepts only `rev: absent, filesystem: absent`;
-  `EditorViz` refuses a row naming another filesystem.
+  loading the file. The Media page (`media` viz, `viz/MediaViz.tsx`) shows
+  an image or a PDF from its bytes (`read_bytes_at`), on any filesystem at
+  any revision, and is the one that opens such a file. The Editor accepts
+  only `rev: absent, filesystem: absent` and a file that is text or not
+  there (`.context/editor-and-monaco.md` "Read-only code, diff and media
+  vizes"); `EditorViz` refuses a row naming another filesystem.
 - **Saving.** `oxplow.file.save { stream, path, content, filesystem? }`
   resolves the filesystem through the registry and refuses one without
   the `writable` feature, naming it ("the `oxplow:extensions` filesystem is

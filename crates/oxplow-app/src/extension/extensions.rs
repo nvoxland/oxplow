@@ -40,7 +40,7 @@ use crate::pages::spec::{
 use crate::pages::spec::{
     parse_actions, resolve_params, view_context, ActionThen, ColumnFormat, ColumnLink, FieldValue,
     FieldValues, LauncherCategory, LinkKind, ParamType, VizCode, VizEditor, VizEmbed, VizGroup,
-    VizTerminal,
+    VizMedia, VizTerminal,
 };
 use manifest_v2::{at, entry_line, item_lines, key_line, line_under, ManifestV2};
 pub use manifest_v2::{Intent, IntentExample};
@@ -2869,8 +2869,19 @@ fn renderer_problem(
                     "`default` is for a resource this extension declares; `{r}` is another's (a page of yours is one of its renderers to pick)"
                 ));
             }
-            if pages.iter().any(|q| q.default && q.renders.contains(r)) {
-                return Err(format!("`{r}` has another default renderer"));
+            // Two defaults may share a resource only when each decides
+            // by content (`accepts.content`): then one applies where the
+            // other doesn't (a text file's editor, an image's viewer),
+            // and the list's order picks between them where both do.
+            if let Some(other) = pages.iter().find(|q| {
+                q.default
+                    && q.renders.contains(r)
+                    && (q.accepts_content.is_none() || p.accepts_content.is_none())
+            }) {
+                return Err(format!(
+                    "`{r}` has another default renderer, `{}`: two defaults each decide by `accepts: {{ content: <loader> }}`, so one applies where the other doesn't",
+                    other.slug
+                ));
             }
         }
     }
@@ -3120,6 +3131,10 @@ pub(crate) fn shape_problem(cfg: &VizConfig, components: &[String]) -> Option<St
         Viz::Code => {
             let c = cfg.code.clone().unwrap_or_default();
             need("code", &[("path", &c.path), ("revision", &c.revision)])
+        }
+        Viz::Media => {
+            let m = cfg.media.clone().unwrap_or_default();
+            need("media", &[("path", &m.path)])
         }
         Viz::Editor => {
             let e = cfg.editor.clone().unwrap_or_default();
@@ -7217,6 +7232,40 @@ commands:
         assert!(errs.contains("`embed: { url: <column> }`"), "{errs}");
     }
 
+    /// `media` shows each row's file as what it is — an image or a PDF —
+    /// on a filesystem at a revision, filling the page; it needs the path's
+    /// column.
+    #[test]
+    fn a_media_node_names_its_file_and_fills() {
+        let (_d, ext) = load_x(
+            &[
+                (
+                    "m",
+                    &viz_page(
+                        "",
+                        "SELECT 'logo.png' AS p, 'oxplow:temp' AS f, 'working' AS r",
+                        "viz: media\nmedia: { path: p, filesystem: f, revision: r }\n",
+                    ),
+                ),
+                ("nomedia", &viz_page("", "SELECT 1", "viz: media\n")),
+            ],
+            "",
+        );
+        let m = node(&ext, "m").expect("m loads");
+        assert_eq!(
+            m.media,
+            Some(VizMedia {
+                path: Some("p".into()),
+                filesystem: Some("f".into()),
+                revision: Some("r".into()),
+            })
+        );
+        assert!(m.fills);
+        assert!(node(&ext, "nomedia").is_none());
+        let errs = shown_errors(&ext);
+        assert!(errs.contains("`media: { path: <column> }`"), "{errs}");
+    }
+
     /// `editor` edits the working tree's file its first row names (its
     /// `lines` revealed), filling the page; it needs the path's column,
     /// and an inline page never holds one (it would save as the person).
@@ -9590,6 +9639,29 @@ commands:
         );
         assert!(
             shown_errors(&ext).contains("another default renderer"),
+            "{:?}",
+            ext.errors
+        );
+        // Two defaults that each decide by content load: an image's
+        // viewer and a text file's editor are both "the one that opens".
+        let (_d, ext) = load_x(
+            &[
+                (
+                    "a",
+                    &pr("for: x/pr\ndefault: true\naccepts: { content: q }\n"),
+                ),
+                (
+                    "b",
+                    &pr("for: x/pr\ndefault: true\naccepts: { content: q }\n"),
+                ),
+                ("c", &pr("for: x/pr\ndefault: true\n")),
+            ],
+            resources,
+        );
+        assert!(page_of(&ext, "a").is_some() && page_of(&ext, "b").is_some());
+        assert!(page_of(&ext, "c").is_none(), "c decides by nothing");
+        assert!(
+            shown_errors(&ext).contains("another default renderer, `a`"),
             "{:?}",
             ext.errors
         );

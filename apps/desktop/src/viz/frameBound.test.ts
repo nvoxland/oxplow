@@ -34,7 +34,9 @@ test("the window frames only this machine, and the page says the same", () => {
     app: { security: { csp: string } };
   };
   const tauri = directives(conf.app.security.csp);
-  expect(tauri["frame-src"]).toEqual(["http://127.0.0.1:*", "http://localhost:*"]);
+  // `blob:` is the media viz's PDF frame, a file's bytes the page itself
+  // holds; the loopback names are the daemon's component bundles.
+  expect(tauri["frame-src"]).toEqual(["blob:", "http://127.0.0.1:*", "http://localhost:*"]);
   expect(tauri["default-src"]).toEqual(["'self'"]);
 
   const html = readFileSync(join(DESKTOP, "index.html"), "utf8");

@@ -33,6 +33,7 @@ export function fakeViz(over: Partial<VizConfig> = {}): VizConfig {
     steps: null,
     hunks: null,
     code: null,
+    media: null,
     diff: null,
     editor: null,
     embed: null,
