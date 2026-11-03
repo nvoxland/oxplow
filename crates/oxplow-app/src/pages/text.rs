@@ -21,7 +21,12 @@ pub async fn page_text(
     root: &Path,
     run: &PageRun,
 ) -> Result<String, DomainError> {
-    let mut out = format!("# {}\n", run.page.title);
+    // A page that is one viz is drawn bare, no heading of its own under the
+    // page's: its title line names its node.
+    let mut out = match root_viz(run) {
+        Some(_) => format!("# {} [node {}]\n", run.page.title, run.tree.id),
+        None => format!("# {}\n", run.page.title),
+    };
     write_tree(svc, root, run, &run.tree, "", 2, &mut out).await?;
     if let Some(rail) = &run.rail {
         out.push_str("\n## Rail\n");
@@ -67,6 +72,13 @@ pub fn node<'p>(page: &'p Page, id: &str) -> Option<&'p Node> {
     page.nodes().into_iter().find(|n| n.id == id)
 }
 
+/// The run's root node when it is a viz: the page is that one viz, drawn
+/// bare (no heading under the page's own, or under the node that embeds
+/// it), so the heading above it names this node.
+fn root_viz(run: &PageRun) -> Option<&Node> {
+    node(&run.page, &run.tree.id).filter(|n| matches!(n.kind, NodeKind::Viz { .. }))
+}
+
 #[allow(clippy::too_many_arguments)]
 fn write_tree<'r>(
     svc: &'r crate::Services,
@@ -88,11 +100,27 @@ fn write_tree<'r>(
                 out.push_str("\n\n");
             }
         };
+        // An embedded run under `title`: its heading, then its tree. One
+        // that is a single viz reads under that heading (named for the viz's
+        // node), not under a second one.
+        let embedded = |child: &'r PageRun, title: &str, def: Option<&Node>, out: &mut String| {
+            let nested = format!("{id}/");
+            match root_viz(child) {
+                Some(_) => out.push_str(&format!(
+                    "\n{hashes} {title} [node {nested}{}]\n\n",
+                    child.tree.id
+                )),
+                None => out.push_str(&heading(title)),
+            }
+            if let Some(def) = def {
+                describe(def, out);
+            }
+            nested
+        };
         let Some(def) = node(&run.page, &at.id) else {
             // A page another extension mounted at a slot: its own run.
             if let Some(child) = &at.embed {
-                out.push_str(&heading(&child.page.title));
-                let nested = format!("{id}/");
+                let nested = embedded(child, &child.page.title, None, out);
                 write_tree(svc, root, child, &child.tree, &nested, level + 1, out).await?;
             }
             return Ok(());
@@ -113,7 +141,11 @@ fn write_tree<'r>(
                 }
             }
             NodeKind::Viz { from, config: cfg } => {
-                out.push_str(&heading(def.title.as_deref().unwrap_or(&cfg.title)));
+                // The run's root viz reads under the heading already written
+                // for the page or the node that embeds it.
+                if !std::ptr::eq(at, &run.tree) {
+                    out.push_str(&heading(def.title.as_deref().unwrap_or(&cfg.title)));
+                }
                 describe(def, out);
                 let failed = from
                     .as_ref()
@@ -135,9 +167,7 @@ fn write_tree<'r>(
             NodeKind::Embed { .. } => match (&at.embed, &at.error) {
                 (Some(child), _) => {
                     let title = def.title.as_deref().unwrap_or(&child.page.title);
-                    out.push_str(&heading(title));
-                    describe(def, out);
-                    let nested = format!("{id}/");
+                    let nested = embedded(child, title, Some(def), out);
                     write_tree(svc, root, child, &child.tree, &nested, level + 1, out).await?;
                 }
                 (None, Some(e)) => {

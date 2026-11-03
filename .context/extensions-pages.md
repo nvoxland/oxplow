@@ -558,7 +558,7 @@ reads the page's first loader's one row. A drag action also binds
   the viz has rows (above). It is
   not a row, group, drag or edit action (`parse_actions` refuses the
   mix); the server runs it as any whole-viz action, rows or none, so the
-  command must take an empty list (`unchanged`).
+  command must take an empty list.
 - **`open: <column>` is an action that is not a command**: exactly one of
   `command` or `open` (`parse_actions` refuses both and neither). The column
   of the row the action is offered on (a whole-page action's first-loader

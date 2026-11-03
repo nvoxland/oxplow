@@ -48,13 +48,15 @@ async fn an_embed_reads_nested_with_its_ids_under_the_embeds() {
     let (_dir, svc) = fixture().await;
     let r = run(&svc, "acme/host", &[]).await;
     let text = page_text(&svc, &svc.layout.project_dir, &r).await.unwrap();
-    assert!(text.contains("## Picked"), "{text}");
-    // Its `description` reads under the heading, as any section's does.
+    // An embedded page that is one viz reads under one heading, named for
+    // the viz's node (what a person points at and an action names), not a
+    // heading over a second heading. Its `description` reads under it, as
+    // any section's does.
     assert!(
-        text.contains("## Picked [node picked]\n\nWhat was picked.\n\n"),
+        text.contains("## Picked [node picked/echo]\n\nWhat was picked.\n\n"),
         "{text}"
     );
-    assert!(text.contains("[node picked/echo]"), "{text}");
+    assert!(!text.contains("### Picked"), "{text}");
 }
 
 #[tokio::test]

@@ -2289,11 +2289,14 @@ mod tests {
                 // A consumer's handler runs again (the event pump owns the
                 // letter; the handler may reach outside oxplow).
                 "oxplow.delivery.discard",
+                "oxplow.delivery.discard_all",
                 "oxplow.delivery.retry",
+                "oxplow.delivery.retry_all",
                 // The worktree and the snapshot diff a report is checked
                 // against (P8.A7).
                 "oxplow.effect.backfill",
                 "oxplow.effect.retry",
+                "oxplow.effect.retry_all",
                 "oxplow.effort.report",
                 // Writes the store, the settings and `.oxplow/.gitignore`.
                 "oxplow.extension.deploy",

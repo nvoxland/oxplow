@@ -550,7 +550,6 @@ pub fn retry_all_op(services: ServicesSlot) -> Op {
                         "still_failing": failed.len() - ok,
                         "reactions": reactions,
                     }),
-                    unchanged: failed.is_empty(),
                     ..HandlerOutput::default()
                 })
             })

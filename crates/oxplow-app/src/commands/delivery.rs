@@ -137,7 +137,6 @@ fn op_all(name: &'static str, services: ServicesSlot, discard: bool) -> Op {
                 };
                 Ok(HandlerOutput {
                     result,
-                    unchanged: pending.is_empty(),
                     ..HandlerOutput::default()
                 })
             })

@@ -722,11 +722,6 @@ pub fn parse_page(
     kind: PageKind,
 ) -> Result<Page, String> {
     let file: PageFile = serde_yaml::from_str(text).map_err(|e| {
-        if e.to_string().contains("unknown field `hide_empty`") {
-            return "`hide_empty` is no longer a key: every section stays on the page, an empty \
-                    one over its `empty:` line"
-                .to_string();
-        }
         if e.to_string().contains("unknown field `hidden`") {
             return "`hidden` is no longer a key: a page with no `category` isn't listed; a page \
                     drawn only inside another is a part (parts/); rows other pages read are a \
@@ -1566,7 +1561,14 @@ fn parse_node(value: &serde_yaml::Value, ctx: &mut NodeCtx<'_>) -> Result<Node, 
     let (default_id, kind) = if map.contains_key("viz") {
         let from = take_str(&mut map, "from")?;
         let file: VizFile =
-            serde_yaml::from_value(serde_yaml::Value::Mapping(map)).map_err(|e| e.to_string())?;
+            serde_yaml::from_value(serde_yaml::Value::Mapping(map)).map_err(|e| {
+                if e.to_string().contains("unknown field `hide_empty`") {
+                    return "`hide_empty` is no longer a key: every section stays on the page, an \
+                            empty one over its `empty:` line"
+                        .to_string();
+                }
+                e.to_string()
+            })?;
         let node_id = id
             .clone()
             .or_else(|| from.clone())
