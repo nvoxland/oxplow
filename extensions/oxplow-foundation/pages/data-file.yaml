@@ -16,11 +16,8 @@ loaders:
     sql: |
       SELECT 1 AS n
       WHERE lower(:path) GLOB '*.json' OR lower(:path) GLOB '*.yaml' OR lower(:path) GLOB '*.yml'
-  parsed: { parse: yaml, text: { from: content.text } }
-  # A file with no text (not there) parses as one null; that is no values.
-  doc:
-    sql: |
-      SELECT * FROM parsed WHERE NOT (id = '/' AND kind = 'null')
+  # One row per value; a file that isn't there has no text, so no rows.
+  doc: { parse: yaml, text: { from: content.text } }
   # Its history (the index has one for a local file only) and its folder, on
   # the file's own filesystem and revision.
   related:

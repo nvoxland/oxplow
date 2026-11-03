@@ -10,7 +10,7 @@ expect:
   result:
     renderers:
       - { page: oxplow-foundation/data-file, default: false }
-      - { page: oxplow-foundation/file-viewer, default: false }
+      - { page: oxplow-foundation/file-viewer, default: true }
       - { page: oxplow-foundation/definition, default: false }
 steps:
   - when:

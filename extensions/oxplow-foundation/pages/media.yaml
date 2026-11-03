@@ -3,7 +3,9 @@ description: "An image or a PDF shown as itself — on any filesystem and at any
 label: '{{param.path|basename}}'
 icon: file-text
 for: oxplow/file
-# Decided from the name alone, so no file is read to offer it.
+# Decided from the name alone, so no file is read to offer it. The File
+# viewer's `elsewhere` lists the same names to stand aside: raw bytes are
+# no mode of an image.
 accepts:
   content: is_media
 default: true

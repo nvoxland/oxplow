@@ -635,4 +635,11 @@ async fn a_parse_loader_reads_json_or_yaml_as_a_tree() {
     assert_eq!(texts(&r, "scalar", "value"), [Some("7".into())]);
     let err = r.loaders["bad"].error.as_deref().unwrap_or_default();
     assert!(err.contains("isn't json"), "{err}");
+    // Nothing to read (a file that isn't there): no rows, no error, the
+    // tree's columns — never a null value at the root.
+    for name in ["blank_yaml", "blank_json"] {
+        assert_eq!(r.loaders[name].error, None, "{name}");
+        assert!(r.loaders[name].result.rows.is_empty(), "{name}");
+        assert_eq!(r.loaders[name].result.columns[0], "id", "{name}");
+    }
 }

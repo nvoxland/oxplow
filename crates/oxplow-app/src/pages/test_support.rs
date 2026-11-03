@@ -175,6 +175,12 @@ loaders:
   bad:
     parse: json
     text: "{"
+  blank_yaml:
+    parse: yaml
+    text: ""
+  blank_json:
+    parse: json
+    text: "  \n"
 view: { viz: tree, from: yaml, tree: { id: id, parent: parent, label: name } }
 "#,
     ),

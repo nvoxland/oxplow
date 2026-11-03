@@ -8,8 +8,9 @@ import { openFromLauncher } from "../../support/ui.js";
 
 // A file of a filesystem other than the working tree, or at a past
 // revision, is the File viewer's: read-only, no Save, and the Editor is
-// never offered for it. A working-tree file is the Editor's alone: Open
-// With has no other mode to offer.
+// never offered for it. A working-tree text file is the Editor's alone:
+// Open With has no other mode to offer. A binary file is viewed, never
+// edited: the File viewer's too (an image or a PDF: the Media page's).
 
 type Page = import("@playwright/test").Page;
 
@@ -47,12 +48,13 @@ test("a scratch file on oxplow:temp opens read-only in the File viewer", async (
   await expect(page.getByTestId("viz-editor")).toHaveCount(0);
 });
 
-test("a binary file shows what it is instead of its bytes, in the Editor and in the File viewer", async ({ page, daemon }) => {
+test("a binary file shows what it is instead of its bytes, in the File viewer and never the Editor", async ({ page, daemon }) => {
   writeFileSync(join(daemon.project, "blob.bin"), Buffer.from([0, 1, 2, 3, 0, 255]));
   await ready(page);
+  // A binary working-tree file has nothing to edit: the File viewer opens it.
   await navigate(daemon, "oxplow:oxplow/file?path=blob.bin");
-  await expect(page.getByTestId("viz-editor-unshown").filter({ visible: true })).toContainText("binary file, 6 bytes");
-  await expect(page.getByTestId("monaco-host")).toHaveCount(0);
+  await expect(page.getByTestId("viz-code").filter({ visible: true })).toContainText("binary file, 6 bytes");
+  await expect(page.getByTestId("viz-editor")).toHaveCount(0);
   await navigate(daemon, "oxplow:oxplow/file?path=blob.bin&rev=working");
   await expect(page.getByTestId("viz-code").filter({ visible: true })).toContainText("binary file, 6 bytes");
 });

@@ -182,8 +182,8 @@ Foundation's page files are oxplow's renderers (`agent-session`,
 drawn as a document, on any filesystem and revision: a mode beside the
 Editor and the File viewer, never the default; `embed` it with a `uri` to
 draw a markdown file inside another page), `media` (an image or a PDF
-shown as itself, the default for one anywhere; the File viewer is its other
-mode), `tsv` (a TSV file as a table), `wiki-page`, `work-item`,
+shown as itself, the default for one anywhere; the File viewer stands
+aside for it), `tsv` (a TSV file as a table), `wiki-page`, `work-item`,
 `diff-view` for `oxplow/snapshot`, `oxplow/effort` and `oxplow/turn`, and
 `external-url`, a page over the `embed` viz, for `https` and `http`). An agent
 session's tab follows its row (`reconcileSessionTabs`). There is no

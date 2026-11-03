@@ -14,11 +14,14 @@ use oxplow_db::{SqlCell, SqlQueryResult};
 use super::schema::ParseFormat;
 
 /// `text` as rows, read as `format`; a text that isn't the format is the
-/// loader's error.
+/// loader's error, and a blank text (a file that isn't there) is no rows.
 pub fn parse_text(format: ParseFormat, text: &str) -> Result<SqlQueryResult, String> {
     match format {
         ParseFormat::Csv => delimited(text, b','),
         ParseFormat::Tsv => delimited(text, b'\t'),
+        ParseFormat::Json | ParseFormat::Yaml if text.trim().is_empty() => {
+            Ok(table(TREE_COLUMNS.map(String::from).to_vec(), Vec::new()))
+        }
         ParseFormat::Json => {
             tree(serde_json::from_str(text).map_err(|e| format!("the text isn't json: {e}"))?)
         }

@@ -270,11 +270,15 @@ file split by URI and by what the file is: the Editor takes a URI with no
 `rev` and no `filesystem` whose file is text or not there yet
 (`accepts.content: editable`, a `stat`); the File viewer's `accepts.content`
 loader takes one with a `rev` or a `filesystem` (a past revision, another
-filesystem) or a binary file, where there is nothing to edit; the Media
-page (`accepts.content: is_media`, decided from the name alone) is the
-default for an image or a PDF anywhere, the File viewer its other mode. A
+filesystem) or a binary file, where there is nothing to edit, and is the
+default of that domain; the Media page (`accepts.content: is_media`,
+decided from the name alone) is the default for an image or a PDF
+anywhere, and the File viewer's `elsewhere` lists the same names to stand
+aside (raw bytes are no mode of an image). Three defaults of one
+resource, each deciding by content, as `renderer_problem` allows. A
 working-tree text file so has one mode and no Open With, a `.md` file the
-Markdown mode too. The file-viewer, media and duplicate-block pages draw
+Markdown mode too; the first default in the list opens a file several
+take. The file-viewer, media and duplicate-block pages draw
 these vizes; `DiffPane` stays (it is the `hunks` viz's and `diff`'s).
 
 ## Comment overlay

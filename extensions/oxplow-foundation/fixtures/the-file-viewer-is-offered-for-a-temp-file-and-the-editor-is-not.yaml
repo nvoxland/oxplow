@@ -10,5 +10,5 @@ expect:
   ok: true
   result:
     renderers:
-      - { page: oxplow-foundation/file-viewer }
-      - { page: oxplow-foundation/markdown }
+      - { page: oxplow-foundation/file-viewer, default: true }
+      - { page: oxplow-foundation/markdown, default: false }
