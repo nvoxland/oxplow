@@ -89,6 +89,7 @@ import { DataTable, type DataColumn, type RowProps } from "../kit/DataTable.js";
 import { Facts } from "../kit/Facts.js";
 import { DelayedLoading } from "../kit/useDelayed.js";
 import { ItemsCell } from "./ItemsCell.js";
+import { DisclosureGlyph } from "../kit/Disclosure.js";
 import { OpenPageLink } from "../kit/OpenPageLink.js";
 import { SectionsViz } from "./SectionsViz.js";
 import { Stat } from "../kit/Stat.js";
@@ -577,10 +578,12 @@ function RowsBody({
     );
     const opens = c.expand ? expanded.has(expansionKey(c, row)) : false;
     if (!tone && !icon && mine.length === 0 && !c.expand) return body;
+    // The expand glyph leads the cell and stays on its first line: the
+    // text wraps beside it, never under it.
     return (
       <span
         data-tone={tone ? String(toneName) : undefined}
-        style={{ display: "inline-flex", alignItems: "center", gap: 4, flexWrap: "wrap", color: tone ?? undefined }}
+        style={{ display: "inline-flex", alignItems: "flex-start", gap: 4, maxWidth: "100%", color: tone ?? undefined }}
       >
         {c.expand ? (
           <button
@@ -590,11 +593,11 @@ function RowsBody({
             onClick={() => expanded.toggle(expansionKey(c, row))}
             style={disclosureStyle}
           >
-            {opens ? "▾" : "▸"}
+            <DisclosureGlyph open={opens} />
           </button>
         ) : null}
         {icon ? <VizIcon spec={icon} tone={tone} /> : null}
-        {body}
+        <span style={{ minWidth: 0 }}>{body}</span>
         {mine.map((b, i) => (
           <RefBadge key={i} label={b.label} tone="label" color={safeColor(b.color) ?? undefined} title={`from ${b.extension}`} />
         ))}
@@ -975,7 +978,7 @@ function GroupHeading({
         onClick={onToggle}
         style={disclosureStyle}
       >
-        {open ? "▾" : "▸"}
+        <DisclosureGlyph open={open} />
       </button>
       <span>{group.label}</span>
       {ref ? <OpenPageLink to={ref} name={group.label} onNavigate={tabNavigate(ref, onOpenPage)} /> : null}
@@ -1523,7 +1526,7 @@ function TreeItem({ node, path, closed, lazyOpen, ...rest }: TreeVizProps & { no
             onClick={toggle}
             style={disclosureStyle}
           >
-            {open ? "▾" : "▸"}
+            <DisclosureGlyph open={open} />
           </button>
         ) : (
           <span style={{ display: "inline-block", width: 16 }} />
@@ -1671,7 +1674,7 @@ function HunksViz({ rows, streamId, rowMenu }: { rows: ReturnType<typeof hunkRow
             onClick={() => setOpen((o) => (o === i ? null : i))}
             style={{ ...disclosureStyle, width: "100%", textAlign: "left", padding: "6px 0", display: "flex", gap: 6 }}
           >
-            <span>{open === i ? "▾" : "▸"}</span>
+            <DisclosureGlyph open={open === i} />
             <span style={{ fontFamily: "var(--font-mono)" }}>{r.path}</span>
             <span style={{ color: "var(--text-secondary)" }}>
               {r.from} → {r.to}
@@ -1859,7 +1862,7 @@ function ListViz({ rows, cols, cell, rowMenu, view }: RowsVizProps) {
                         className="ox-link"
                         onClick={look.fold.toggle}
                       >
-                        {look.fold.open ? "▾" : "▸"}
+                        <DisclosureGlyph open={look.fold.open} />
                       </button>
                     ) : null}
                     {head ? cell(row, head) : null}
@@ -1987,7 +1990,11 @@ const disclosureStyle: CSSProperties = {
   background: "none",
   border: "none",
   padding: 0,
-  width: 16,
+  width: 18,
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  flexShrink: 0,
   color: "var(--text-secondary)",
   cursor: "pointer",
   font: "inherit",

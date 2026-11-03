@@ -347,7 +347,9 @@ advisories:
   it has rows. Marks live in `once_mark`, per effort or thread.
 - **Audience.** `agent` hints go to the coding agent; `person` hints are
   raised in Alerts ("Notices", `apps/desktop/src/hints.ts`) until
-  the person dismisses one (`oxplow.hint.dismiss`).
+  the person dismisses one (`oxplow.hint.dismiss`, the row's right-click)
+  or all (`oxplow.hint.dismiss_all`, Clear notices on the page and the
+  dock panel's Clear).
 - **Delivery.** Every hit is recorded as a nudge (`v_agent_nudge`, kind
   `<extension>/<id>`, with its `audience`), undelivered. The thread's
   next prompt (`AgentContext::prompt_context`) or tool call

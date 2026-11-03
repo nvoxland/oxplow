@@ -149,8 +149,8 @@ test("Clear dismisses the hints and failed operations and leaves the decisions",
   expect(clear.className).toContain("ox-button");
   fireEvent.click(clear);
   await waitFor(() => expect(ran).toContainEqual(["oxplow.op_error.dismiss_all", {}]));
-  expect(ran).toContainEqual(["oxplow.hint.dismiss", { nudge: 4 }]);
-  expect(ran.map(([name]) => name).sort()).toEqual(["oxplow.hint.dismiss", "oxplow.op_error.dismiss_all"]);
+  expect(ran).toContainEqual(["oxplow.hint.dismiss_all", {}]);
+  expect(ran.map(([name]) => name).sort()).toEqual(["oxplow.hint.dismiss_all", "oxplow.op_error.dismiss_all"]);
 });
 
 test("Clear is absent while only decisions and deliveries wait", async () => {

@@ -6,7 +6,7 @@
 
 import { SquareArrowRightEnter } from "lucide-react";
 
-import { dismissHint } from "../../hints.js";
+import { dismissAllHints } from "../../hints.js";
 import { dismissAllOpErrors } from "../../opErrors.js";
 import { alertsRef, refFromTabId } from "../../tabs/pageRefs.js";
 import type { DockBadge, DockBodyProps } from "../Dock/dockPanels.js";
@@ -20,9 +20,9 @@ export function useAlertsBadge(): DockBadge | null {
   return count > 0 ? { count, ...(tone === "danger" ? { tone } : {}) } : null;
 }
 
-/** Put away every hint and every failed operation at once. */
+/** Put away every notice and every failed operation at once. */
 async function clearAlerts(items: AlertItems): Promise<void> {
-  await Promise.all([...(items.opErrors.length > 0 ? [dismissAllOpErrors()] : []), ...items.hints.map((h) => dismissHint(h.id))]);
+  await Promise.all([...(items.opErrors.length > 0 ? [dismissAllOpErrors()] : []), ...(items.hints.length > 0 ? [dismissAllHints()] : [])]);
 }
 
 export function AlertsDockBody({ onOpenPage }: DockBodyProps) {

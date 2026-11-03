@@ -916,7 +916,11 @@ while it fires (else its `badge`), and the badge page's alert an Alerts
 row whose Review opens that page (`PanelAlert.open`, a URI); the header's
 ↗ opens the panel's `open` page, else its body page (`panelOpenRef`).
 A compact viz keeps its `group` headings and group actions; its rows
-offer Add to Context on right-click, as every page row does.
+offer Add to Context on right-click, as every page row does. Every
+disclosure (a row's `expand`, a group's fold, a tree's branch, a hunk, a
+collapsible section's toggle) draws the one `DisclosureGlyph`
+(`kit/Disclosure.tsx`, a 16px chevron), and a cell's expand glyph leads
+its first line with the text wrapping beside it, never under it.
 The rail's panels are `oxplow-bundled`'s (`go-to`, `waiting`, `comments`,
 `uncommitted`, `work`): pages over the existing views and commands. One owner
 holds every panel's runs — `PanelRunsProvider`
@@ -1249,7 +1253,7 @@ is the Alerts panel's icon.
 - **Clear:** both core panels end in a Clear button (`ox-button`, never a
   link) while there is something to clear. The Context panel's takes every
   waiting item out (`oxplow.context.clear`). The Alerts panel's puts away
-  what a person can put away: the notices (`oxplow.hint.dismiss` each) and
+  what a person can put away: the notices (`oxplow.hint.dismiss_all`) and
   the failed operations (`oxplow.op_error.dismiss_all`); `clearable` in
   `alertsModel.ts` says when it shows. A decision is made, not cleared; an
   undelivered event or failed reaction is retried or discarded on the

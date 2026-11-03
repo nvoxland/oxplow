@@ -1,4 +1,6 @@
 import { CircleHelp } from "lucide-react";
+
+import { DisclosureGlyph } from "./Disclosure.js";
 import { createContext, useContext, type CSSProperties, type ReactNode } from "react";
 
 import { useSectionCollapse } from "../components/CollapsibleSections.js";
@@ -101,7 +103,7 @@ export function Section({
                 onClick={collapse.toggle}
               >
                 <span aria-hidden className="ox-section-chevron">
-                  {collapse.expanded ? "▾" : "▸"}
+                  <DisclosureGlyph open={collapse.expanded} />
                 </span>
                 <span>{title}</span>
               </button>

@@ -67,3 +67,8 @@ export function usePersonHints(): PersonHint[] {
 export async function dismissHint(id: number): Promise<void> {
   await runCommand("oxplow.hint.dismiss", { nudge: id });
 }
+
+/** The person dismisses every hint raised to them: Clear notices. */
+export async function dismissAllHints(): Promise<void> {
+  await runCommand("oxplow.hint.dismiss_all", {});
+}

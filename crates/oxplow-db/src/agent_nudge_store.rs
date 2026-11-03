@@ -348,6 +348,16 @@ pub fn dismiss_tx(conn: &rusqlite::Connection, id: i64) -> Result<bool, DomainEr
     Ok(n == 1)
 }
 
+/// A person dismisses every hint still raised to them: how many went.
+pub fn dismiss_all_tx(conn: &rusqlite::Connection) -> Result<usize, DomainError> {
+    conn.execute(
+        "UPDATE agent_nudge SET delivered_at = ?1
+          WHERE audience = 'person' AND delivered_at IS NULL",
+        params![ts_to_string(Timestamp::now())],
+    )
+    .map_err(crate::database::map_sql_err)
+}
+
 /// Whether `id` is a hint raised to the person (dismissed or not).
 pub fn person_hint_tx(conn: &rusqlite::Connection, id: i64) -> Result<bool, DomainError> {
     conn.query_row(

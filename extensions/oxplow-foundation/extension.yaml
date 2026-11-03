@@ -1370,6 +1370,11 @@ commands:
     scope: hints.write
     op: dismiss
     example: {"nudge": 12}
+  - name: hint.dismiss_all
+    summary: "Dismiss every hint still raised to the person (Clear notices on the Alerts page); the result says how many."
+    scope: hints.write
+    op: dismiss_all
+    example: {}
   # knowledge.read
   - name: knowledge.comments
     summary: "List comments. Threaded annotations the user anchored to a text selection in a page (wiki body, code file line, task detail). `id` is a thread (`thr…`) or stream (`str…`) id; `scope` is inferred from its prefix, so usually pass only `id`. `status` filters: \"all\" (default), \"open\", or \"needs_response\" (open follow-ups whose latest message isn't yours — what the user wants you to act on). Each result carries the anchored `quote`, the message thread, and `intent` (note vs followup). Reply with `oxplow.knowledge.reply_comment { comment, body }`; resolve with `oxplow.knowledge.update_comment { comment, status: \"resolved\" }`."

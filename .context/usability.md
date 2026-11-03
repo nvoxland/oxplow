@@ -223,7 +223,8 @@ markdown itself, nor edits it in a `<textarea>`.
   (the `alerts` page, the foundation's): Needs your
   decision (each proposal's card, Approve / Decline), Notices (hints
   raised to the person: each by its first line, expanding into the whole
-  text, with its thread as a link),
+  text, with its thread's work page as a link; Dismiss on the row's
+  right-click, Clear notices for all),
   Failed operations (each opening into how it ended), Undelivered events
   and Failed reactions with Retry / Discard (`oxplow.delivery.*`,
   `oxplow.effect.retry`, as page actions that ask first), and Extensions
