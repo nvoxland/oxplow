@@ -1092,6 +1092,11 @@ out and the ☰ itself hidden when it would be empty:
    an action's explicit `submenu` makes, holding those actions sorted;
 3. **Open With** (when two or more pages render the URI; the same list the
    bar's modes control swaps in one click);
+
+A right-click on the page's body that no row, editor or selection takes
+opens this same menu at the pointer (`Page.tsx` `onBodyContextMenu` →
+`PageMenu`'s `openAtRef`), so Add to Context for the whole page is one
+click from anywhere on it; a child that owns its menu stops the event.
 4. **Backlinks (N)…**, **Outbound (N)…** and **Pin to Dashboard…**, which
    open their panel under the ☰ (`page-nav-backlinks-popover`,
    `page-nav-outbound-popover`, `page-pin-menu`) rather than a submenu.

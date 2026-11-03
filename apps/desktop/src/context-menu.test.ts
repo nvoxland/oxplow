@@ -33,7 +33,8 @@ describe("shouldSuppressContextMenu", () => {
 
   test("allows it inside Monaco and the terminal", () => {
     expect(shouldSuppressContextMenu([div(["view-line"]), div(["monaco-editor"])])).toBe(false);
-    expect(shouldSuppressContextMenu([div(["xterm-rows"]), div(["xterm"])])).toBe(false);
+    // The terminal's menu is oxplow's own (`terminal/terminalMenu.ts`).
+    expect(shouldSuppressContextMenu([div(["xterm-rows"]), div(["xterm"])])).toBe(true);
   });
 });
 

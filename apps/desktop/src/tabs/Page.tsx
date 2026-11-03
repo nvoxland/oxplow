@@ -1,4 +1,5 @@
 import type { CSSProperties, ReactNode } from "react";
+import type React from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { openWithOf } from "../pages/renderers.js";
 import { PageNavBar } from "./PageNavBar.js";
@@ -228,6 +229,16 @@ export function Page({ title, titleIcon, chips: ownChips, actions, pin, seeAlso,
     : undefined;
   const [modalHost, setModalHost] = useState<HTMLDivElement | null>(null);
   const navBarOwnsBacklinks = effectiveNavBar?.backlinks !== undefined;
+  // A right-click on the body that no row, editor or selection took opens
+  // the page's ☰ where the pointer is (usability.md "Add to Context").
+  const menuOpenAtRef = useRef<((position: { x: number; y: number }) => void) | null>(null);
+  const onBodyContextMenu = (event: React.MouseEvent) => {
+    const open = menuOpenAtRef.current;
+    if (!open || (window.getSelection()?.toString() ?? "") !== "") return;
+    event.preventDefault();
+    event.stopPropagation();
+    open({ x: event.clientX, y: event.clientY });
+  };
 
   return (
     <div
@@ -262,6 +273,7 @@ export function Page({ title, titleIcon, chips: ownChips, actions, pin, seeAlso,
           ask={effectiveNavBar.ask}
           openWith={effectiveNavBar.openWith}
           seeAlso={seeAlso}
+          menuOpenAtRef={menuOpenAtRef}
         />
       ) : null}
       {!effectiveNavBar ? (
@@ -316,7 +328,7 @@ export function Page({ title, titleIcon, chips: ownChips, actions, pin, seeAlso,
         </div>
       ) : null}
       {/* The area under the nav bar: the body, and where a tab's dialog docks. */}
-      <div style={{ flex: 1, minHeight: 0, minWidth: 0, display: "flex", flexDirection: "column", position: "relative" }}>
+      <div style={{ flex: 1, minHeight: 0, minWidth: 0, display: "flex", flexDirection: "column", position: "relative" }} onContextMenu={onBodyContextMenu}>
         <TabModalHostContext.Provider value={modalHost}>
           {width === "reading" || rightRail != null ? (
             <RailBody width={width} fill={fill} rightRail={rightRail} rightRailTitle={rightRailTitle}>{children}</RailBody>

@@ -42,6 +42,7 @@ export function TerminalView({ uri, agent, worktreePath, onOpenFile, isLinkableP
     <div ref={boxRef} data-testid="terminal-view" data-uri={uri} style={boxStyle}>
       <TerminalSurface
         shown={shown}
+        uri={uri}
         onOpened={(term) => {
           detach.current?.();
           detach.current = session.attach(term);

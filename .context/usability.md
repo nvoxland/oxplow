@@ -1246,9 +1246,17 @@ caller may bypass the bus to write to the terminal.
 - **Add to Context** is the collect-then-ask form, and it is universal:
   the ☰ of any page with a canonical URI (`menu-item-page-add-to-context`,
   disabled with "Select a thread first" when none is selected), a
-  selection in an editor or a diff's right side, a page row's menu, and the
-  floating toolbar on a commentable page's selection (**Add to Context**
-  beside Add comment). It puts the page or text in the selected thread's
+  right-click on the page's body that no row, editor or selection takes
+  (it opens the same ☰ at the pointer, `Page.tsx` → `PageMenu.openAtRef`),
+  the editor's menu (**Add Selection to Context** with a selection, else
+  **Add File to Context**, `editorContextEntry`), a diff's right side, a
+  page row's menu, a backlink's menu, the terminal's menu (**Add Selection
+  to Context**, else **Add to Context** for the session; `terminalMenu.ts`,
+  which also carries Copy and Paste — the OS menu is suppressed there now)
+  and the floating toolbar on a commentable page's selection (**Add to
+  Context** beside Add comment). Every entry wears the basket's `at-sign`
+  icon (`MenuItem.icon`), the dock's Context icon, so it reads the same
+  everywhere. It puts the page or text in the selected thread's
   basket (`oxplow.context.add`, toast with Undo); the next prompt to any
   agent in the thread carries it. The Context dock panel and page list it.
 - **Repair with the Agent** (on Extension problems, on a disabled

@@ -256,6 +256,17 @@ The surface owns:
   Context").
 - The file-path link provider (see below).
 
+## The right-click menu
+
+The terminal's menu is oxplow's own `ContextMenu` (`terminal/terminalMenu.ts`,
+opened by `TerminalSurface` on the surface's `contextmenu`; the global
+suppressor no longer exempts xterm, so the OS menu never shows): **Copy**
+(the selection; greyed without one), **Paste** (`readClipboard` →
+`term.paste`, the same path as Cmd+V) and **Add Selection to Context**
+(the selected text, with the terminal's URI as its source) — or, with
+nothing selected, **Add to Context** for the terminal's own page (the
+session). The entry wears the `at-sign` icon as every Add to Context does.
+
 ## Paste path and input ordering
 
 All paste gestures (Cmd+V, the native `paste` event, the agent input

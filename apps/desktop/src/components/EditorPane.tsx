@@ -17,7 +17,7 @@ import { useMonacoViewState } from "./useMonacoViewState.js";
 import type { MenuItem } from "../menu.js";
 import { ContextMenu } from "./ContextMenu.js";
 import { gitRevision } from "../revision.js";
-import { selectionUri } from "../agent-context-ref.js";
+import { editorContextEntry, selectionUri } from "../agent-context-ref.js";
 import { addToContext } from "../contextBasket.js";
 import { askAssistant } from "./Assistant/assistantSession.js";
 import { MonacoCommentLayer, type MonacoCommentHandle } from "./Comments/MonacoCommentLayer.js";
@@ -520,14 +520,16 @@ export function EditorPane({
     },
     {
       id: "editor.add-to-context",
-      label: "Add Selection to Context",
-      enabled: !!filePath && hasEditorSelection(editorRef.current),
+      // The selection's lines; with none, the whole file.
+      label: filePath ? editorContextEntry(filePath, editorRef.current?.getSelection?.() ?? null, null).label : "Add File to Context",
+      enabled: !!filePath,
+      icon: "at-sign",
       run: () => {
         const editor = editorRef.current;
-        const sel = editor?.getSelection?.();
+        const sel = editor?.getSelection?.() ?? null;
         const model = editor?.getModel();
-        if (!editor || !model || !sel || sel.isEmpty() || !filePath) return;
-        void addToContext({ uri: selectionUri(filePath, sel), text: model.getValueInRange(sel) });
+        if (!filePath) return;
+        void addToContext(editorContextEntry(filePath, sel, sel && model ? model.getValueInRange(sel) : null).what);
       },
     },
     {
@@ -565,8 +567,12 @@ export function EditorPane({
         style={{ position: "relative", flex: 1, minHeight: 0, width: "100%" }}
         // Belt-and-suspenders: kill the webview's native context menu in
         // the editor area so only our custom menu shows (Monaco's own
-        // onContextMenu preventDefault can miss depending on timing).
-        onContextMenu={(e) => e.preventDefault()}
+        // onContextMenu preventDefault can miss depending on timing); the
+        // page's own menu (a right-click on its body) stays closed here.
+        onContextMenu={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+        }}
       >
         <div ref={hostRef} data-testid="monaco-host" data-file-path={filePath ?? ""} style={{ width: "100%", height: "100%", minHeight: 0 }} />
         {monacoReady && ready ? (

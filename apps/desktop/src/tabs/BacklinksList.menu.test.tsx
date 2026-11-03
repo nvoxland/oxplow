@@ -41,6 +41,7 @@ test("an entry's menu offers Add to Context, which puts its page in the basket",
   const row = getByTestId(`backlinks-entry-${SETTINGS}`);
   expect(row.getAttribute("draggable")).toBeNull();
   fireEvent.contextMenu(row);
+  expect(getByTestId("menu-item-add-to-context").querySelector("[data-testid=menu-item-icon]")).not.toBeNull();
   fireEvent.click(getByTestId("menu-item-add-to-context"));
   await waitFor(() => expect(added).toEqual([{ uri: SETTINGS, label: "Triage todos" }]));
 });
@@ -49,7 +50,7 @@ test("the host's own entries lead the menu", () => {
   const unlink = { id: "unlink", label: "Unlink", enabled: true, run: () => {} };
   const { getByTestId, getAllByTestId } = inPage(<BacklinksList entries={[entry]} entryMenu={() => [unlink]} />);
   fireEvent.contextMenu(getByTestId(`backlinks-entry-${SETTINGS}`));
-  expect(getAllByTestId(/^menu-item-/).map((el) => el.getAttribute("data-testid"))).toEqual([
+  expect(getAllByTestId(/^menu-item-(?!icon)/).map((el) => el.getAttribute("data-testid"))).toEqual([
     "menu-item-unlink",
     "menu-item-add-to-context",
   ]);

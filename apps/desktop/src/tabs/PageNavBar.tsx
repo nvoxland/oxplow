@@ -1,6 +1,7 @@
 import type { OpenWithProps } from "./pageMenuItems.js";
+import type { MenuPosition } from "../menu.js";
 import { PageModes } from "./PageModes.js";
-import type { ReactNode } from "react";
+import type { MutableRefObject, ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import type { AskTarget } from "../components/Prompts/askTarget.js";
 import type { PagePin } from "../pages/PagePinMenu.js";
@@ -93,6 +94,8 @@ export interface PageNavBarProps {
   openWith?: OpenWithProps;
   /** The page's "See also" links, listed in the ☰. */
   seeAlso?: { links: ReadonlyArray<{ title: string; uri: string; description?: string | null }>; open(uri: string): void };
+  /** The ☰'s opener, for the chrome's right-click on the body (`PageMenu`). */
+  menuOpenAtRef?: MutableRefObject<((position: MenuPosition) => void) | null>;
 }
 
 /**
@@ -122,6 +125,7 @@ export function PageNavBar({
   ask,
   openWith,
   seeAlso,
+  menuOpenAtRef,
 }: PageNavBarProps) {
   const [scopeOpen, setScopeOpen] = useState(false);
   const [siblingListOpen, setSiblingListOpen] = useState(false);
@@ -493,6 +497,7 @@ export function PageNavBar({
         backlinks={backlinks}
         outbound={outbound}
         pin={pin}
+        openAtRef={menuOpenAtRef}
         // The ☰ is the bar's edge, not one more button: no box around it.
         buttonStyle={{ ...navButtonStyle(true), borderColor: "transparent" }}
       />

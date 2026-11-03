@@ -5,13 +5,16 @@
 /// and nothing about a session. What the person types comes out through
 /// `onData` / `onBinary`, a fit through `onResize`; `onOpened` hands the
 /// opened terminal to whoever writes to it (`useTerminalSession`).
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type MouseEvent } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 
 import { desktopBridge } from "../api.js";
 import { logUi } from "../logger.js";
 import { shouldHandleTerminalPageKey } from "../terminal-scroll.js";
+import { addToContext } from "../contextBasket.js";
+import { useContextMenu } from "../components/useRowContextMenu.js";
+import { terminalMenuItems } from "./terminalMenu.js";
 import { subscribeAgentInput } from "../agent-input-bus.js";
 import { installFilePathLinkProvider, type FilePathLinkActivation } from "../terminal-link-provider.js";
 
@@ -104,6 +107,8 @@ async function readClipboard(): Promise<string> {
 export interface TerminalSurfaceProps {
   /** On screen: it takes the keys and the agent input bus. */
   shown: boolean;
+  /** The terminal's URI: what its menu's Add to Context names. */
+  uri: string;
   /** The terminal opened at a real size: write to it, and open the
    *  session at its `cols` × `rows`. */
   onOpened(term: Terminal): void;
@@ -128,6 +133,7 @@ export interface TerminalSurfaceProps {
 
 export function TerminalSurface({
   shown,
+  uri,
   onOpened,
   onData,
   onBinary,
@@ -140,6 +146,26 @@ export function TerminalSurface({
 }: TerminalSurfaceProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
+  const menu = useContextMenu();
+  const openMenu = (event: MouseEvent) => {
+    const term = termRef.current;
+    if (!term) return;
+    menu.open(
+      event,
+      terminalMenuItems({
+        selection: term.getSelection(),
+        uri,
+        copy: (text) => void navigator.clipboard.writeText(text).catch(() => {}),
+        paste: () =>
+          void readClipboard()
+            .then((text) => {
+              if (text) term.paste(text);
+            })
+            .catch((error) => logUi("warn", "terminal paste: clipboard read failed", { error: String(error) })),
+        add: (what) => void addToContext(what),
+      }),
+    );
+  };
   // Read at event time: the terminal is set up once.
   const props = useRef({ onOpened, onData, onBinary, onResize, onInterrupt, worktreePath, cwd, onOpenFile, isLinkablePath });
   props.current = { onOpened, onData, onBinary, onResize, onInterrupt, worktreePath, cwd, onOpenFile, isLinkablePath };
@@ -303,7 +329,9 @@ export function TerminalSurface({
   return (
     <div
       style={{ position: "relative", width: "100%", flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}
+      onContextMenu={openMenu}
     >
+      {menu.menu}
       {/* The gutter is on this wrapper, never the mount: FitAddon measures
           the mount, and padding it makes the row count oscillate. */}
       <div

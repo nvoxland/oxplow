@@ -107,7 +107,7 @@ export function BacklinksList({
           ...(entryMenu?.(entry) ?? []),
           // The page it opens goes in the selected thread's basket, as a
           // page row's Add to Context does.
-          ...(page ? [{ id: "add-to-context", label: "Add to Context", enabled: true, run: () => void addToContext({ uri: page, label: entry.label }) }] : []),
+          ...(page ? [{ id: "add-to-context", label: "Add to Context", enabled: true, icon: "at-sign", run: () => void addToContext({ uri: page, label: entry.label }) }] : []),
         ];
         const onContextMenu = (e: MouseEvent) => {
           if (items.length > 0) openMenu(e, items, entry.label);

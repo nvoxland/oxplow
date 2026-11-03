@@ -622,6 +622,7 @@ function RowsBody({
       id: "add-row-to-context",
       label: "Add to Context",
       enabled: true,
+      icon: "at-sign",
       run: () => void addToContext(rowContext(viz, result.columns, row)),
     },
     ...rowActions

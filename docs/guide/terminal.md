@@ -21,14 +21,17 @@ around the agent's shell.
 
 ## Context and tab actions
 
-Use the session's tab actions to rename or close it. Selecting terminal
-text copies it; paste uses the platform shortcut. See
+Use the session's tab actions to rename or close it. Right-click in the
+terminal for **Copy**, **Paste** and **Add Selection to Context**; with
+nothing selected the last is **Add to Context** for the session itself.
+Paste also takes the platform shortcut. See
 [Keybindings](../reference/keybindings.md).
 
-To give the agent something to read, right-click a row, a backlink or a
-selection and choose **Add to Context**, or use a page's ☰ menu. It goes
-in the thread's context basket, and the next prompt you send to any agent
-in the thread carries it. Nothing is sent on its own.
+To give the agent something to read, right-click a row, a backlink, a
+selection, or anywhere on a page, and choose **Add to Context** (the @
+entry), or use the page's ☰ menu. It goes in the thread's context basket,
+and the next prompt you send to any agent in the thread carries it.
+Nothing is sent on its own.
 
 ## Shells
 

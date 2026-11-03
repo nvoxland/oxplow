@@ -196,7 +196,10 @@ test("a row that links somewhere isn't draggable, and offers Add to Context in i
   const row = view.getByTestId("viz-row-2");
   expect(row.getAttribute("draggable")).toBeNull();
   fireEvent.contextMenu(row);
-  expect((await waitFor(() => view.getByTestId("menu-item-add-row-to-context"))).textContent).toBe("Add to Context");
+  const add = await waitFor(() => view.getByTestId("menu-item-add-row-to-context"));
+  expect(add.textContent).toBe("Add to Context");
+  // Every Add to Context entry wears the basket's @.
+  expect(add.querySelector("[data-testid=menu-item-icon]")).not.toBeNull();
 });
 
 test("a tree's labels follow their column's link", () => {

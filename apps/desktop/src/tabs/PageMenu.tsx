@@ -2,7 +2,7 @@
 /// page can be acted on with (`pageMenuItems.ts` says what, in which order).
 /// Its items run, open a submenu, or open a panel under the button
 /// (Backlinks, Outbound, Pin to Dashboard). Hidden when it would be empty.
-import type { CSSProperties, ReactNode } from "react";
+import type { CSSProperties, MutableRefObject, ReactNode } from "react";
 import { useRef, useState } from "react";
 import { Menu } from "lucide-react";
 
@@ -31,12 +31,15 @@ export interface PageMenuProps {
   outbound?: { count: number; body: ReactNode };
   pin?: { tile: PagePin; onOpenPage(ref: TabRef): void; disabledReason?: string | null };
   buttonStyle: CSSProperties;
+  /** Where the page's chrome reaches the menu to open it elsewhere (a
+   *  right-click on the page's body opens it at the pointer). */
+  openAtRef?: MutableRefObject<((position: MenuPosition) => void) | null>;
 }
 
 /** The widest the menu is, px; it opens leftward from the button. */
 const MENU_WIDTH = 240;
 
-export function PageMenu({ actions, ask, label, openWith, seeAlso, backlinks, outbound, pin, buttonStyle }: PageMenuProps) {
+export function PageMenu({ actions, ask, label, openWith, seeAlso, backlinks, outbound, pin, buttonStyle, openAtRef }: PageMenuProps) {
   const offersFor = useRefOffers();
   const [at, setAt] = useState<MenuPosition | null>(null);
   // The commands about the page's ref that apply now: asked when the menu
@@ -61,6 +64,12 @@ export function PageMenu({ actions, ask, label, openWith, seeAlso, backlinks, ou
     pin: pin ? { disabledReason: pin.disabledReason } : undefined,
     openPanel: setPanel,
   });
+  const openAt = async (position: MenuPosition) => {
+    setPanel(null);
+    if (ask) setOffers(await offersFor(ask.ref));
+    setAt(position);
+  };
+  if (openAtRef) openAtRef.current = items.length === 0 ? null : (position) => void openAt(position);
   if (items.length === 0) return null;
 
   const toggle = async () => {
@@ -68,12 +77,9 @@ export function PageMenu({ actions, ask, label, openWith, seeAlso, backlinks, ou
       setAt(null);
       return;
     }
-    setPanel(null);
     const r = button.current?.getBoundingClientRect();
     if (!r) return;
-    const position = { x: Math.max(8, r.right - MENU_WIDTH), y: r.bottom + 4 };
-    if (ask) setOffers(await offersFor(ask.ref));
-    setAt(position);
+    await openAt({ x: Math.max(8, r.right - MENU_WIDTH), y: r.bottom + 4 });
   };
 
   return (

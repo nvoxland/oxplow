@@ -10,9 +10,10 @@
 // that have no row menu, it still cancels the OS menu so it never leaks.
 //
 // Exempted (the native/editor menu carries real editing affordances):
-// text inputs / textareas, contenteditable surfaces (Tiptap), the
-// Monaco editor (which manages its own menu), and the xterm terminal
-// (right-click copy/paste).
+// text inputs / textareas, contenteditable surfaces (Tiptap) and the
+// Monaco editor (which manages its own menu). The xterm terminal is not:
+// its menu is oxplow's own (`terminal/terminalMenu.ts`: Copy, Paste, Add
+// to Context).
 
 /// A minimal, DOM-free description of an element in the target's
 /// ancestor chain (closest-first). The listener builds this from the
@@ -35,7 +36,6 @@ export function shouldSuppressContextMenu(chain: ElementDescriptor[]): boolean {
     if (node.tag === "input" || node.tag === "textarea") return false;
     if (node.contentEditable === "true" || node.contentEditable === "") return false;
     if (node.classes.includes("monaco-editor")) return false;
-    if (node.classes.includes("xterm")) return false;
   }
   return true;
 }
