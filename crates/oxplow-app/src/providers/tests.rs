@@ -1871,17 +1871,39 @@ async fn a_read_streams_records_into_work_item_and_keeps_its_cursor() {
 /// and every reconcile — but the read still happens, in the background.
 #[tokio::test]
 async fn enabling_returns_before_the_first_read_finishes() {
-    // Under the in-memory 2 s call timeout, so the read itself succeeds.
-    let (fx, ext) = deployed("slow:1500").await;
-    let started = std::time::Instant::now();
-    enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
+    // The first read is held until the test releases it, so "enable came
+    // back first" doesn't depend on how long anything takes.
+    // (No commas or spaces: hooks are a comma-separated list.)
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let hold = std::env::temp_dir().join(format!(
+        "oxplow-release-read-{}-{nanos}",
+        std::process::id()
+    ));
+    let (fx, ext) = deployed(&format!("hold-read-file:{}", hold.display())).await;
+    // A guard against waiting for a read that is held for good (which is
+    // what enabling that waited for the read would do), not a time bound.
+    tokio::time::timeout(
+        std::time::Duration::from_secs(120),
+        enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })),
+    )
+    .await
+    .expect("enable waited for the first read");
+    // Enable has returned and the read has not: it is under way (or about to
+    // be) and cannot end.
+    let store = oxplow_db::SqliteProviderCollectorStore::new(fx.svc.db.clone());
+    let state = store.get(INSTANCE, "work_items").await.unwrap();
     assert!(
-        started.elapsed() < std::time::Duration::from_millis(1000),
-        "enable waited {:?} for the first read",
-        started.elapsed()
+        state.as_ref().is_none_or(|s| s.status == "reading"),
+        "enable returned only after the first read finished: {state:?}"
     );
+    // Released, the read still happens, in the background.
+    std::fs::write(&hold, b"go").unwrap();
     let read = first_read(&fx).await;
-    assert_eq!(read.status, "ok");
+    let _ = std::fs::remove_file(&hold);
+    assert_eq!(read.status, "ok", "{read:?}");
 }
 
 /// The instance's first read, once its background sync lands.
@@ -1895,7 +1917,10 @@ async fn first_read(fx: &EffortFixture) -> oxplow_db::CollectorState {
         }
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     }
-    panic!("the first read never landed");
+    panic!(
+        "the first read never landed: {:?}",
+        store.get(INSTANCE, "work_items").await.unwrap()
+    );
 }
 
 /// P7 review (tsk715): two syncs of one collector at once don't both read
