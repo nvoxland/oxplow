@@ -18,7 +18,9 @@ import { CommandConfirm } from "../components/CommandConfirm.js";
 import { Markdown } from "../components/Markdown/Markdown.js";
 import type { PageAction } from "../tauri-bridge/generated/bindings.js";
 import { useDraft } from "../tabs/useViewParam.js";
-import { useTabEditing } from "../tabs/PageNavigationContext.js";
+import { useOptionalPageNavigation, useTabEditing, type PageNavigation } from "../tabs/PageNavigationContext.js";
+import { RENDERER_VIEW_KEY, pickRenderer } from "../pages/renderers.js";
+import { identityOf, withUriView } from "../uri/uri.js";
 import { rowRecord } from "./vizActions.js";
 import { usePageComments } from "./pageComments.js";
 import { useFormSubmit } from "./useFormSubmit.js";
@@ -43,10 +45,22 @@ export function markdownBase(run: VizRun): string | null {
   return typeof cell === "string" && cell ? cell : null;
 }
 
+/** The base as the document's links read it: when the document is the
+ *  tab's own file (the Markdown page's), it carries the page drawing it
+ *  (`#oxplow.renderer=`, none for the default), so a link to a sibling
+ *  `.md` opens as a document too. A document shown inside another page
+ *  (a README on a commit page) carries nothing of that page. */
+export function baseAsRead(base: string | null, nav: PageNavigation | null): string | null {
+  if (base === null || !nav?.ref || !nav.renderers || identityOf(nav.ref.id) !== identityOf(base)) return base;
+  const drawn = pickRenderer(nav.renderers, nav.viewParams ?? {});
+  return withUriView(base, { [RENDERER_VIEW_KEY]: drawn && !drawn.default ? drawn.page : null });
+}
+
 export function MarkdownViz({ run, streamId }: { run: VizRun; streamId: string | null }) {
+  const nav = useOptionalPageNavigation();
   const edit = run.config.actions.find((a) => a.edit) ?? null;
   const text = markdownText(run);
-  if (!edit) return <Markdown value={text} base={markdownBase(run)} testId="viz-markdown" />;
+  if (!edit) return <Markdown value={text} base={baseAsRead(markdownBase(run), nav)} testId="viz-markdown" />;
   return <MarkdownEditor run={run} streamId={streamId} action={edit} saved={text} />;
 }
 

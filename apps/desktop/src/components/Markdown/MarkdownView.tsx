@@ -27,7 +27,8 @@ import { useWorkItemRef } from "../../workItemTitleCache.js";
 import { useWorkListProfile } from "../../useWorkListProfile.js";
 import { workItemRefOfMention } from "../../workItems.js";
 import { workItemId, workItemLabel } from "../../workItemRef.js";
-import { dirUri, fileLinesUri, fileUri, identityOf, isOxplowScheme, linkTarget, commitUri, parseUri, typeOf, wikiUri } from "../../uri/uri.js";
+import { dirUri, fileLinesUri, fileUri, identityOf, isOxplowScheme, linkTarget, commitUri, parseUri, typeOf, wikiUri, withUriView } from "../../uri/uri.js";
+import { RENDERER_VIEW_KEY } from "../../pages/renderers.js";
 import { extensionWikilinkRef, resourceInfo, useExtensionRefTitle, useResources } from "../../resources.js";
 import { attachPanZoom, loadMermaid } from "./mermaidRender.js";
 import { CopyCodeButton } from "./CopyCodeButton.js";
@@ -59,6 +60,9 @@ export type ParsedLink =
       /** The filesystem the file is on (a relative link of a file drawn
        *  from another filesystem); none: the local one. */
       filesystem?: string | null;
+      /** The page to draw it with (`#oxplow.renderer=`): a relative link
+       *  to a file of the base's kind opens as the base is read. */
+      renderer?: string;
     }
   | { kind: "directory"; path: string }
   | { kind: "commit"; sha: string }
@@ -125,8 +129,11 @@ export function parsedLinkIconKind(parsed: ParsedLink): string | null {
  * markdown came from (a `.md` drawn by the Markdown page): with one, a
  * relative href is a file in that file's folder, on its filesystem and
  * revision (`docs/guide.md`, `../img/x.png`, `/top.md` from the root), as a
- * repo's README means it. With none, a relative `.md` link is a wiki slug,
- * as the wiki's own pages mean it.
+ * repo's README means it. A link to a file of the base's kind (the same
+ * extension) opens with the page the base's view names
+ * (`#oxplow.renderer=`): a README read as a document links to `DEV.md` as
+ * a document, where `src/main.rs` opens as what it is. With no base, a
+ * relative `.md` link is a wiki slug, as the wiki's own pages mean it.
  */
 export function parseMarkdownLink(rawHref: string, base: string | null = null): ParsedLink {
   if (!rawHref) return { kind: "empty" };
@@ -174,17 +181,27 @@ export function parseMarkdownLink(rawHref: string, base: string | null = null): 
     const target = rawHref.split("#")[0]?.split("?")[0] ?? "";
     if (!target) return { kind: "empty" };
     const p = relativeTo.params;
+    const path = relativeFilePath(p.path, safeDecode(target));
+    const renderer = relativeTo.view[RENDERER_VIEW_KEY];
     return {
       kind: "file",
-      path: relativeFilePath(p.path, safeDecode(target)),
+      path,
       version: p.rev ? revisionFromSlot(p.rev) : null,
       filesystem: p.filesystem ?? null,
+      ...(renderer && extensionOf(path) === extensionOf(p.path) ? { renderer } : {}),
     };
   }
   let target = rawHref.replace(/^\.?\//, "");
   target = target.split("#")[0]?.split("?")[0] ?? "";
   if (target.endsWith(".md")) target = target.slice(0, -3);
   return target ? { kind: "internal", slug: target } : { kind: "empty" };
+}
+
+/** `path`'s extension, lowercased (`md`); empty with none. */
+function extensionOf(path: string): string {
+  const name = path.split("/").pop() ?? "";
+  const dot = name.lastIndexOf(".");
+  return dot > 0 ? name.slice(dot + 1).toLowerCase() : "";
 }
 
 function safeDecode(text: string): string {
@@ -630,7 +647,7 @@ export function linkRef(parsed: ParsedLink): string | null {
       // Bare wikilinks (no `@version`) coerce to WORKING; explicit versions
       // flow through as authored. Load-bearing: a wikilink that pinned
       // `@HEAD` must NOT be silently substituted with the working tree.
-      return fileRef(parsed.path, parsed.version ?? WORKING, parsed.filesystem ?? null).id;
+      return withUriView(fileRef(parsed.path, parsed.version ?? WORKING, parsed.filesystem ?? null).id, { [RENDERER_VIEW_KEY]: parsed.renderer ?? null });
     case "directory":
       return directoryRef(parsed.path).id;
     case "commit":

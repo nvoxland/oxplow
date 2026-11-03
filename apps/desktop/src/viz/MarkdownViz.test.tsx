@@ -203,3 +203,59 @@ test("a draft makes its tab dirty, and the tab's Save saves it", async () => {
   });
   await waitFor(() => expect(saves).toEqual([{ action: "save", row: { slug: "notes", body: "Old text." }, input: { body: "New. Old text." } }]));
 });
+
+// A document that is the page's own file links to its siblings the way it
+// is read: with the page that draws it, when that page was chosen (the
+// default is the absent key). A document shown inside another page (a
+// README on a commit page) carries nothing.
+const document = (base: string): VizRun =>
+  ({
+    config: {
+      id: "x/doc",
+      extension: "x",
+      slug: "doc",
+      title: "Doc",
+      viz: "markdown",
+      markdown: { text: "text", base: "uri" },
+      params: [],
+      columns: [],
+      actions: [],
+      parts: [],
+      origin: { extension: "", source: null, running: "", deployment: null, bundled: false },
+    },
+    params: {},
+    result: { columns: ["text", "uri"], rows: [["See [DEV](DEV.md) and [main](src/main.rs).", base] as SqlCell[]], truncated: false, reads: { datasets: [], tables: [], measures: [] } },
+  }) as unknown as VizRun;
+
+const renderers = [
+  { page: "oxplow-foundation/editor", title: "Editor", default: true },
+  { page: "oxplow-foundation/markdown", title: "Markdown", default: false },
+];
+
+function openedFrom(ref: string, viewParams: Record<string, SqlCell>, run: VizRun): string[] {
+  const opened: string[] = [];
+  const nav = { navigate: () => {}, openRef: (r: string) => opened.push(r), ref: { id: ref }, renderers, viewParams } as unknown as PageNavigation;
+  const view = render(
+    <PageNavigationContext.Provider value={nav}>
+      <VizView run={run} streamId="str1" />
+    </PageNavigationContext.Provider>,
+  );
+  fireEvent.click(view.container.querySelector('a[href="DEV.md"]')!);
+  fireEvent.click(view.container.querySelector('a[href="src/main.rs"]')!);
+  return opened;
+}
+
+test("a document's link to a sibling of its kind opens with the page that draws it", () => {
+  const readme = "oxplow:oxplow/file?path=README.md";
+  expect(openedFrom(`${readme}#oxplow.renderer=oxplow-foundation/markdown`, { "oxplow.renderer": "oxplow-foundation/markdown" }, document(readme))).toEqual([
+    "oxplow:oxplow/file?path=DEV.md#oxplow.renderer=oxplow-foundation/markdown",
+    "oxplow:oxplow/file?path=src/main.rs",
+  ]);
+  // Drawn by the default page: the link carries no key, as the tab's own address has none.
+  expect(openedFrom(readme, {}, document(readme))).toEqual(["oxplow:oxplow/file?path=DEV.md", "oxplow:oxplow/file?path=src/main.rs"]);
+  // The document is not the page's own file: its links carry nothing of the page.
+  expect(openedFrom("oxplow:oxplow/commit?sha=abc1234#oxplow.renderer=x/commit", { "oxplow.renderer": "x/commit" }, document(readme))).toEqual([
+    "oxplow:oxplow/file?path=DEV.md",
+    "oxplow:oxplow/file?path=src/main.rs",
+  ]);
+});

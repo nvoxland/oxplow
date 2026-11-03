@@ -478,6 +478,18 @@ test("parseMarkdownLink: a relative link resolves against the base file's folder
   expect(parseMarkdownLink("docs/guide.md")).toEqual({ kind: "internal", slug: "docs/guide" });
 });
 
+// A document drawn by a chosen page (its base's `#oxplow.renderer=`) links
+// to a sibling of the same kind as itself: `DEV.md` from a README read as
+// a document opens as a document, where `src/main.rs` opens as what it is.
+test("parseMarkdownLink: a link to a file of the base's kind carries the page that draws the base", () => {
+  const readme = "oxplow:oxplow/file?path=README.md&rev=git:abc1234#oxplow.renderer=oxplow-foundation/markdown";
+  expect(parseMarkdownLink("DEV.md", readme)).toEqual({ kind: "file", path: "DEV.md", version: "git:abc1234", filesystem: null, renderer: "oxplow-foundation/markdown" });
+  expect(parseMarkdownLink("docs/Guide.MD#top", readme)).toEqual({ kind: "file", path: "docs/Guide.MD", version: "git:abc1234", filesystem: null, renderer: "oxplow-foundation/markdown" });
+  expect(parseMarkdownLink("src/main.rs", readme)).toEqual({ kind: "file", path: "src/main.rs", version: "git:abc1234", filesystem: null });
+  expect(linkRef(parseMarkdownLink("DEV.md", readme))).toBe("oxplow:oxplow/file?path=DEV.md&rev=git:abc1234#oxplow.renderer=oxplow-foundation/markdown");
+  expect(linkRef(parseMarkdownLink("src/main.rs", readme))).toBe("oxplow:oxplow/file?path=src/main.rs&rev=git:abc1234");
+});
+
 test("relativeFilePath: joins and climbs under the base file's folder, never above the root", () => {
   expect(relativeFilePath("a/b/README.md", "c.md")).toBe("a/b/c.md");
   expect(relativeFilePath("a/b/README.md", "../../../c.md")).toBe("c.md");

@@ -78,7 +78,13 @@ set**, and a surface never builds its own:
   stays with no base, as the wiki's own pages mean it. A relative image is
   `FileImage`: `readBytesAt` on the viz's stream (`useVizStream`), drawn
   from a blob URL given back when it goes; a missing one keeps its alt.
-  `followLink` and `linkMenu` take the same `base`.
+  `followLink` and `linkMenu` take the same `base`. A link to a file of
+  the base's kind (the same extension) opens with the page the base's
+  view names (`#oxplow.renderer=`), so `DEV.md` from a README read as a
+  document opens as a document; `MarkdownViz` puts that key on the base
+  (`baseAsRead`) only when the document is the tab's own file and the
+  page drawing it isn't the default (the tab's address has no key then),
+  so a README shown inside a commit page carries nothing of that page.
 - **Headings** are `h2`/`h3` under `.oxplow-md`: a page's Contents rail
   lists them (either mode).
 - **Comments**: the editor's own layer (`comments` prop, below); the
