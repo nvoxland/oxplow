@@ -53,6 +53,7 @@ schemars = { workspace = true }
 # Extension configuration validates offline at runtime; also checks file schemas.
 jsonschema = { version = "0.58", default-features = false }
 serde_yaml = { workspace = true }
+csv = { workspace = true }
 sha2 = { workspace = true }
 hex = { workspace = true }
 specta = { workspace = true }

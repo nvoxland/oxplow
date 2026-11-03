@@ -374,6 +374,15 @@ pub enum Loader {
         columns: Vec<String>,
         rows: Vec<Vec<SqlCell>>,
     },
+    /// One text read as rows (`pages/parse.rs`): a CSV or TSV as a table
+    /// whose header names the columns, a JSON or YAML document as a tree
+    /// (a row per value: `id`, `parent`, `name`, `kind`, `value`,
+    /// `count`). The text comes from where an arg does: a param, an
+    /// earlier loader's first row (a file's `content.text`), a literal.
+    Parse {
+        format: ParseFormat,
+        text: ArgSource,
+    },
     /// What the system knows of the resource a `for:` page shows: the
     /// record its `uri` param names (`pages/content.rs`). Never declared by
     /// an author: it is the first loader of every resource page, named
@@ -384,6 +393,37 @@ pub enum Loader {
         /// The most bytes of a file's text read.
         max_bytes: u32,
     },
+}
+
+/// What a `parse` loader reads its text as.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum ParseFormat {
+    /// Comma-separated values, the first record the header.
+    Csv,
+    /// Tab-separated values, the first record the header.
+    Tsv,
+    /// A JSON document, as a tree.
+    Json,
+    /// A YAML document (JSON is one too), as a tree.
+    Yaml,
+}
+
+impl ParseFormat {
+    /// The formats, as `parse:` spells them.
+    pub const NAMES: &'static str = "csv, tsv, json or yaml";
+
+    pub fn parse(name: &str) -> Option<Self> {
+        Some(match name {
+            "csv" => Self::Csv,
+            "tsv" => Self::Tsv,
+            "json" => Self::Json,
+            "yaml" => Self::Yaml,
+            _ => return None,
+        })
+    }
 }
 
 /// The name of a resource page's first loader, which the system declares.
@@ -569,6 +609,10 @@ struct LoaderFile {
     params: BTreeMap<String, ArgSource>,
     #[serde(default)]
     rows: Option<Vec<serde_yaml::Mapping>>,
+    #[serde(default)]
+    parse: Option<String>,
+    #[serde(default)]
+    text: Option<ArgSource>,
     #[serde(default)]
     columns: Vec<PageColumn>,
     #[serde(default)]
@@ -1260,11 +1304,15 @@ fn parse_loaders(
             file.command.is_some(),
             file.page.is_some(),
             file.rows.is_some(),
+            file.parse.is_some(),
         ];
         if kinds.iter().filter(|k| **k).count() != 1 {
             return Err(format!(
-                "loader `{name}` needs exactly one of `sql`, `command`, `page` or `rows`"
+                "loader `{name}` needs exactly one of `sql`, `command`, `page`, `rows` or `parse`"
             ));
+        }
+        if file.text.is_some() && file.parse.is_none() {
+            return Err(format!("loader `{name}`: `text` is for a `parse` loader"));
         }
         if file.loader.is_some() && file.page.is_none() {
             return Err(format!("loader `{name}`: `loader` is for a `page` loader"));
@@ -1369,6 +1417,21 @@ fn parse_loaders(
                 loader,
                 params: file.params,
             }
+        } else if let Some(format) = file.parse {
+            let format = ParseFormat::parse(&format).ok_or_else(|| {
+                format!(
+                    "loader `{name}`: `parse: {format}` isn't a format: {}",
+                    ParseFormat::NAMES
+                )
+            })?;
+            let text = file.text.ok_or_else(|| {
+                format!(
+                    "loader `{name}`: a `parse` loader says where its `text` comes from (a param, \
+                     `{{ from: content.text }}`, or the text itself)"
+                )
+            })?;
+            check_arg(&text, &mut reads_loaders, &mut reads_params)?;
+            Loader::Parse { format, text }
         } else {
             let rows = file.rows.unwrap_or_default();
             let mut columns: Vec<String> = Vec::new();

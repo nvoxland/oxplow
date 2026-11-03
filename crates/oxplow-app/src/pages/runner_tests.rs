@@ -517,3 +517,105 @@ async fn a_loader_that_reads_one_with_no_columns_does_not_fail_in_sql() {
     );
     assert!(!err.contains("syntax"), "{err}");
 }
+
+fn texts(run: &PageRun, loader: &str, column: &str) -> Vec<Option<String>> {
+    let result = &run.loaders[loader].result;
+    let at = result
+        .columns
+        .iter()
+        .position(|c| c == column)
+        .unwrap_or_else(|| panic!("no column `{column}` in {:?}", result.columns));
+    result
+        .rows
+        .iter()
+        .map(|r| match &r[at] {
+            SqlCell::Null(()) => None,
+            SqlCell::Text(t) => Some(t.clone()),
+            SqlCell::Int(i) => Some(i.to_string()),
+            other => panic!("{other:?}"),
+        })
+        .collect()
+}
+
+/// A `parse` loader's rows: a CSV's header names the columns and every
+/// cell is text (a short row is padded with nulls, a blank or repeated
+/// header gets a name); a TSV reads the same way on tabs.
+#[tokio::test]
+async fn a_parse_loader_reads_a_csv_or_tsv_as_a_table() {
+    let (_dir, svc) = fixture().await;
+    let r = run(&svc, "acme/parsed_sheet", &[]).await;
+    assert_eq!(r.loaders["csv"].error, None);
+    assert_eq!(
+        r.loaders["csv"].result.columns,
+        ["name", "column_2", "n", "n_2"]
+    );
+    assert_eq!(
+        texts(&r, "csv", "name"),
+        [Some("ant".into()), Some("bee, the".into())]
+    );
+    assert_eq!(texts(&r, "csv", "n_2"), [Some("x".into()), None]);
+    assert_eq!(r.loaders["tsv"].result.columns, ["a", "b"]);
+    assert_eq!(texts(&r, "tsv", "b"), [Some("2".into()), Some("4".into())]);
+    // Nothing to read: no rows, no error.
+    assert_eq!(r.loaders["blank"].error, None);
+    assert!(r.loaders["blank"].result.rows.is_empty());
+}
+
+/// A JSON or YAML document is a tree: a row per value with its path as
+/// `id`, its parent's as `parent` (a top-level value has none), its key or
+/// index as `name`, its `kind`, a scalar's `value` and a container's
+/// `count` of children. A document that doesn't parse is the loader's error.
+#[tokio::test]
+async fn a_parse_loader_reads_json_or_yaml_as_a_tree() {
+    let (_dir, svc) = fixture().await;
+    let r = run(&svc, "acme/parsed_tree", &[]).await;
+    assert_eq!(r.loaders["yaml"].error, None);
+    assert_eq!(
+        r.loaders["yaml"].result.columns,
+        ["id", "parent", "name", "kind", "value", "count"]
+    );
+    assert_eq!(
+        texts(&r, "yaml", "id"),
+        ["/name", "/items", "/items/0", "/items/1", "/items/1/deep"].map(|s| Some(s.into()))
+    );
+    assert_eq!(
+        texts(&r, "yaml", "parent"),
+        [
+            None,
+            None,
+            Some("/items".into()),
+            Some("/items".into()),
+            Some("/items/1".into())
+        ]
+    );
+    assert_eq!(
+        texts(&r, "yaml", "name"),
+        ["name", "items", "0", "1", "deep"].map(|s| Some(s.into()))
+    );
+    assert_eq!(
+        texts(&r, "yaml", "kind"),
+        ["string", "array", "number", "object", "boolean"].map(|s| Some(s.into()))
+    );
+    assert_eq!(
+        texts(&r, "yaml", "value"),
+        [
+            Some("k".into()),
+            None,
+            Some("1".into()),
+            None,
+            Some("true".into())
+        ]
+    );
+    assert_eq!(
+        texts(&r, "yaml", "count"),
+        [None, Some("2".into()), None, Some("1".into()), None]
+    );
+    // JSON reads the same way; a scalar document is one unnamed row.
+    assert_eq!(
+        texts(&r, "json", "name"),
+        [Some("a".into()), Some("0".into())]
+    );
+    assert_eq!(texts(&r, "scalar", "value"), [Some("7".into())]);
+    let err = r.loaders["bad"].error.as_deref().unwrap_or_default();
+    assert!(err.contains("isn't json"), "{err}");
+}

@@ -3468,6 +3468,14 @@ items: string | null } |
 /**  Rows written inline. */
 { kind: "rows"; columns: string[]; rows: SqlCell[][] } |
 /**
+ *  One text read as rows (`pages/parse.rs`): a CSV or TSV as a table
+ *  whose header names the columns, a JSON or YAML document as a tree
+ *  (a row per value: `id`, `parent`, `name`, `kind`, `value`,
+ *  `count`). The text comes from where an arg does: a param, an
+ *  earlier loader's first row (a file's `content.text`), a literal.
+ */
+{ kind: "parse"; format: ParseFormat; text: ArgSource } |
+/**
  *  What the system knows of the resource a `for:` page shows: the
  *  record its `uri` param names (`pages/content.rs`). Never declared by
  *  an author: it is the first loader of every resource page, named
@@ -5090,6 +5098,17 @@ export type ParamType =
  *  you type.
  */
 "search";
+
+/**  What a `parse` loader reads its text as. */
+export type ParseFormat =
+/**  Comma-separated values, the first record the header. */
+"csv" |
+/**  Tab-separated values, the first record the header. */
+"tsv" |
+/**  A JSON document, as a tree. */
+"json" |
+/**  A YAML document (JSON is one too), as a tree. */
+"yaml";
 
 /**  How a permission request was answered. */
 export type PermissionAnswer = { type: "selected"; optionId: string } | { type: "cancelled" };

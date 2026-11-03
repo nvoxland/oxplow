@@ -754,6 +754,7 @@ fn loader_source(loader: &crate::pages::schema::Loader) -> (&'static str, Option
         Loader::Command { command, .. } => ("command", Some(command.clone())),
         Loader::Page { page, loader, .. } => ("page", Some(format!("{page}#{loader}"))),
         Loader::Rows { .. } => ("rows", None),
+        Loader::Parse { format, .. } => ("parse", Some(format!("{format:?}").to_lowercase())),
         Loader::Content { .. } => ("content", None),
     }
 }

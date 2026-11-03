@@ -597,6 +597,21 @@ impl<'a> PageRunner<'a> {
                 }
             }
             Loader::Rows { columns, rows } => Ok(table(columns.clone(), rows.clone())),
+            Loader::Parse { format, text } => {
+                let text = bind_args(
+                    &BTreeMap::from([("text".to_string(), text.clone())]),
+                    params,
+                    earlier,
+                )
+                .remove("text")
+                .unwrap_or(serde_json::Value::Null);
+                let text = match text {
+                    serde_json::Value::Null => String::new(),
+                    serde_json::Value::String(t) => t,
+                    other => other.to_string(),
+                };
+                super::parse::parse_text(*format, &text)
+            }
             Loader::Content { text, max_bytes } => match params.get("uri") {
                 Some(SqlCell::Text(uri)) => {
                     super::content::resolve_content(

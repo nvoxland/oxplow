@@ -142,6 +142,43 @@ view: { viz: table, from: q }
 "#,
     ),
     (
+        "parsed_sheet",
+        r#"
+title: Parsed sheet
+loaders:
+  csv:
+    parse: csv
+    text: "name,,n,n\nant,1,2,x\n\"bee, the\",3,4\n"
+  tsv:
+    parse: tsv
+    text: "a\tb\n1\t2\n3\t4\n"
+  blank:
+    parse: csv
+    text: ""
+view: { viz: table, from: csv }
+"#,
+    ),
+    (
+        "parsed_tree",
+        r#"
+title: Parsed tree
+loaders:
+  yaml:
+    parse: yaml
+    text: "name: k\nitems:\n  - 1\n  - deep: true\n"
+  json:
+    parse: json
+    text: '{"a": [null]}'
+  scalar:
+    parse: json
+    text: "7"
+  bad:
+    parse: json
+    text: "{"
+view: { viz: tree, from: yaml, tree: { id: id, parent: parent, label: name } }
+"#,
+    ),
+    (
         "listed",
         r#"
 title: Listed

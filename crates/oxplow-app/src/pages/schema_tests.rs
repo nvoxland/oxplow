@@ -1229,3 +1229,59 @@ fn a_viz_keeps_its_lead_column() {
         1
     );
 }
+
+// --- the parse loader ---------------------------------------------------
+
+/// `parse` turns one text into rows: a CSV or TSV as a table, a JSON or
+/// YAML document as a tree. It reads the text as an arg does, so it reads
+/// the loader it names.
+#[test]
+fn a_parse_loader_takes_a_format_and_a_text_source() {
+    let p = parse_page(
+        "acme",
+        "acme",
+        "sheet",
+        "extensions/acme/pages/sheet.yaml",
+        "title: T\nfor: oxplow/file\ncontent: { text: true }\nparams: [{ name: uri }]\nloaders:\n  rows: { parse: csv, text: { from: content.text } }\nview: { viz: table, from: rows }\n",
+        PageKind::Page,
+    )
+    .unwrap();
+    let decl = p.loader("rows").unwrap();
+    assert_eq!(
+        decl.loader,
+        Loader::Parse {
+            format: ParseFormat::Csv,
+            text: ArgSource::Column {
+                from: "content.text".into()
+            },
+        }
+    );
+    assert_eq!(decl.reads_loaders, ["content"]);
+    assert_eq!(p.loader_chain("rows"), ["content", "rows"]);
+    for format in ["tsv", "json", "yaml"] {
+        page(&format!(
+            "title: T\nloaders:\n  rows: {{ parse: {format}, text: \"a\" }}\nview: {{ viz: table, from: rows }}\n"
+        ))
+        .unwrap_or_else(|e| panic!("{format}: {e}"));
+    }
+}
+
+#[test]
+fn a_parse_loader_needs_a_known_format_and_a_text() {
+    let e = refused(
+        "title: T\nloaders:\n  rows: { parse: xml, text: \"a\" }\nview: { viz: table, from: rows }\n",
+    );
+    assert!(
+        e.contains("loader `rows`")
+            && e.contains("`parse: xml`")
+            && e.contains("csv, tsv, json or yaml"),
+        "{e}"
+    );
+    let e =
+        refused("title: T\nloaders:\n  rows: { parse: csv }\nview: { viz: table, from: rows }\n");
+    assert!(e.contains("loader `rows`") && e.contains("`text`"), "{e}");
+    let e = refused(
+        "title: T\nloaders:\n  rows: { parse: csv, text: \"a\", sql: SELECT 1 }\nview: { viz: table, from: rows }\n",
+    );
+    assert!(e.contains("exactly one of") && e.contains("`parse`"), "{e}");
+}

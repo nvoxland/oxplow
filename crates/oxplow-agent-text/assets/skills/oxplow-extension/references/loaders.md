@@ -12,7 +12,7 @@ one loader you never write: `content`, always first, the record its `uri`
 names. Read it like any earlier loader (`SELECT … FROM content`, `{ from:
 content.path }`); the name is reserved.
 
-A loader has exactly one of `sql`, `command`, `page` or `rows`, plus
+A loader has exactly one of `sql`, `command`, `page`, `rows` or `parse`, plus
 optional `columns` (keys, labels and formats its nodes default to) and
 `empty` (text when it has no rows).
 
@@ -105,6 +105,30 @@ loaders:
 
 Inline rows (columns are the first row's keys). Use for lookup tables, a
 snapshot of numbers you computed, and the `choices` of a form. A list two pages share is a query.
+
+## `parse`
+
+```yaml
+loaders:
+  rows: { parse: csv, text: { from: content.text } }
+  doc:  { parse: yaml, text: { param: spec } }
+```
+
+One text as rows: `parse` is `csv`, `tsv`, `json` or `yaml`; `text` is an
+arg (a resource page's `content.text`, a param, or the text itself).
+
+- A CSV or TSV is a table: the first record names the columns (a blank
+  header is `column_<n>`, a repeat `<name>_<k>`), every cell is text, a
+  short record is padded with nulls. Show it with `viz: table`.
+- A JSON or YAML document is a tree, one row per value: `id` (its JSON
+  pointer, `/items/0`), `parent` (none at the top), `name` (the key or
+  index), `kind` (`object`, `array`, `string`, `number`, `boolean`, `null`),
+  `value` (a scalar's text) and `count` (a container's children). Show it
+  with `viz: tree, tree: { id: id, parent: parent, label: name }` and the
+  `value` and `kind` columns; or query it as a table like any earlier
+  loader (`SELECT value FROM doc WHERE id = '/name'`).
+- A text that isn't the format is the loader's error, shown where the rows
+  would be; an empty text is no rows.
 
 ## Budgets
 

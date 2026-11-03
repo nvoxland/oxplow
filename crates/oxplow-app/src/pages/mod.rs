@@ -8,6 +8,7 @@ pub mod content;
 pub mod label;
 pub mod open_runs;
 pub mod options;
+pub mod parse;
 pub mod refs;
 pub mod renderers;
 pub mod runner;

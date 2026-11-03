@@ -254,7 +254,7 @@ A param (`PageParam`) takes `name`, `label`, `default`, `options`,
 
 Named loaders, run in order; a loader reads only the ones before it
 (naming a later one is an error). A loader has exactly one of `sql`,
-`command`, `page` or `rows`, plus optional `columns` (keys, labels and
+`command`, `page`, `rows` or `parse`, plus optional `columns` (keys, labels and
 formats its nodes default to) and `empty`. Its name is lowercase letters,
 digits and `_`, never a dataset's (`v_*`, `m_*`).
 
@@ -272,6 +272,19 @@ digits and `_`, never a dataset's (`v_*`, `m_*`).
 - `page`: another page's loader (`{ page, loader, params }`). Pages nest 8
   deep (`MAX_DEPTH`).
 - `rows`: inline rows, the first row's keys the columns.
+- `parse`: one text as rows (`pages/parse.rs`): `{ parse: csv | tsv | json
+  | yaml, text: <arg> }`, the text an arg (`{ from: content.text }` for the
+  file a resource page shows, a param, a literal). A CSV or TSV is a table
+  whose header names the columns (a blank header `column_<n>`, a repeat
+  `<name>_<k>`; every cell text, a short record padded with nulls, a long
+  one cut). A JSON or YAML document is a tree, a row per value in document
+  order: `id` (its JSON pointer), `parent` (none at the top), `name` (key or
+  index), `kind` (`object`, `array`, `string`, `number`, `boolean`,
+  `null`), `value` (a scalar's text), `count` (a container's children); a
+  scalar document is one row at `/`. A text that isn't the format is the
+  loader's error. It reads nothing but its text, so an `accepts.content`
+  chain may run it. Foundation's file pages over a CSV, a JSON or a YAML
+  file are its users.
 - `content` (never declared): a resource page's first loader, the record its
   `uri` names; read as `FROM content` / `{ from: content.<col> }`. The name
   is reserved: no loader or param is called `content`, and a standalone page
