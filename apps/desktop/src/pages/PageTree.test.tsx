@@ -179,6 +179,31 @@ test("a stack folds its empty titled sections into one Nothing found line", () =
   expect(getByTestId("page-nothing-found").textContent).toBe("Nothing found: Providers, Roles.");
 });
 
+// An embedded page with nothing to show folds the same way, under the
+// title its node gives it (else its page's): a page never ends in a heading
+// over "No X." beside a "Nothing found" line.
+test("a stack folds an empty titled embed into the Nothing found line too", () => {
+  const empty = fakeRun(
+    fakePage(node.viz("rows", "rows", { columns: [{ key: "id" }], empty: "No reaction failed." }), { id: "acme/reactions", title: "Failed reactions" }),
+    { loaders: { rows: loader(["id"], []) } },
+  );
+  const full = fakeRun(
+    fakePage(node.viz("rows", "rows", { columns: [{ key: "id" }] }), { id: "acme/letters", title: "Letters" }),
+    { loaders: { rows: loader(["id"], [["x"]]) } },
+  );
+  const page = fakePage(
+    node.stack("stack", [
+      node.embed("letters", "acme/letters", { title: "Undelivered events" }),
+      node.embed("reactions", "acme/reactions", { title: "Failed reactions" }),
+      node.viz("none", "none", { columns: [{ key: "id" }] }, { title: "Extensions with problems" }),
+    ]),
+  );
+  const run = fakeRun(page, { loaders: { none: loader(["id"], []) }, embeds: { letters: full, reactions: empty } });
+  const { container, getByTestId } = render(<PageTree run={run} runId="run-1" />);
+  expect(nodeIds(container)).toEqual(["stack", "letters", "letters/rows"]);
+  expect(getByTestId("page-nothing-found").textContent).toBe("Nothing found: Failed reactions, Extensions with problems.");
+});
+
 test("a page a slot mounted is a section titled by that page", () => {
   const run = stackPage();
   const mounted = fakeRun(

@@ -384,13 +384,18 @@ export function leadOf(run: { config: { lead?: string | null }; result: { column
 export function emptySections(run: PageRun, at: RunNode): { id: string; title: string }[] {
   const candidates = at.children.flatMap((c) => {
     const def = nodeById(run.page, c.id);
-    if (!def || def.kind !== "viz" || !def.title || def.hideTitle || def.replaceable || c.error) return [];
+    if (!def || !def.title || def.hideTitle || def.replaceable || c.error) return [];
+    // An embedded page with nothing to show folds under its title too.
+    if (def.kind === "embed") return mountEmpty(c) ? [{ id: c.id, title: def.title, run: null, error: null, empty: true }] : [];
+    if (def.kind !== "viz") return [];
     const vizRun = nodeRunOf(run, def);
     const loader = def.from !== null ? run.loaders[def.from] : undefined;
     if (!vizRun || !loader) return [];
-    return [{ id: c.id, title: def.title, run: vizRun, error: loader.error }];
+    return [{ id: c.id, title: def.title, run: vizRun, error: loader.error, empty: false }];
   });
-  return foldEmpty(candidates).empty.map(({ id, title }) => ({ id, title }));
+  const vizzes = candidates.filter((c) => !c.empty);
+  const folded = new Set([...foldEmpty(vizzes).empty, ...candidates.filter((c) => c.empty)].map((c) => c.id));
+  return candidates.filter((c) => folded.has(c.id)).map(({ id, title }) => ({ id, title }));
 }
 
 /** Whether a page another extension mounted (a slot's child) has nothing

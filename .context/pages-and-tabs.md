@@ -675,7 +675,7 @@ change announces (a keychain entry: a credential, an AI provider's key).
 An embedded page's own whole-page actions are buttons above its tree
 (`EmbeddedActions`, `viz-action-<id>`), pressed on the host's run naming
 the embed's node; an `expand`ed row's page keeps its vizzes' buttons
-(`partButtons`) though it is drawn compact. A page a slot mounted is a
+(`partButtons`, buttons under the rows, closing the section) though it is drawn compact. A page a slot mounted is a
 section titled by the mounted page's title. A `custom` viz shares the
 host's view (`HostedViewContext` from `PageHost`: its filter and selection
 params, `pageViewKeys`; a change is the rail's `onChange`), as a

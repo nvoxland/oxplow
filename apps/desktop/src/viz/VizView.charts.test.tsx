@@ -114,6 +114,10 @@ test("declared whole-viz actions are buttons, row actions aren't", () => {
   );
   expect(getByTestId("viz-action-finish").textContent).toBe("Finish");
   expect(queryByTestId("viz-action-row")).toBeNull();
+  // The buttons close the section: they sit under the rows, not over them.
+  const buttons = getByTestId("viz-part-actions");
+  const table = getByTestId("viz-table");
+  expect(table.compareDocumentPosition(buttons) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   // The page host owns Copy and Add to Context: a viz has neither.
   expect(queryByTestId("viz-copy")).toBeNull();
   expect(queryByTestId("viz-add-to-context")).toBeNull();

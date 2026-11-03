@@ -222,8 +222,8 @@ function VizViewBody(props: VizViewProps & { lazyOpen: CollapsedSet | null; bran
       {confirm}
       {form}
       {!compact ? <MarksBar run={shown} actions={actions} marks={marks} /> : null}
-      {props.partButtons ? <PartButtons run={shown} actions={actions} /> : null}
       <VizBody {...props} run={shown} tree={tree} actions={actions} marks={marks} />
+      {props.partButtons ? <PartButtons run={shown} actions={actions} /> : null}
     </>
   );
 }
@@ -311,8 +311,8 @@ interface VizViewProps {
    *  `select`s it, with the row it picked); without it, rows are no
    *  picks. */
   onSetParam?(name: string, value: SqlCell, row?: PickedRow): void;
-  /** Its whole-viz actions (an Add…) as buttons above its body: a
-   *  page's node does; a compact one has no room. */
+  /** Its whole-viz actions (an Add…, a Clear…) as buttons closing its
+   *  body, under the rows: a page's node does; a compact one has no room. */
   partButtons?: boolean;
   /** The viz is the page's own view (the whole of its body, not a snippet in
    *  another page, an embed or a row): what it shows is the page's resource,
@@ -417,7 +417,7 @@ function PartButtons({ run, actions }: { run: VizRun; actions: VizActionsState }
   const buttons = run.config.actions.filter((a) => offeredWholePage(a, run.result));
   if (buttons.length === 0) return null;
   return (
-    <div data-testid="viz-part-actions" style={{ display: "flex", gap: 6, marginBottom: 6 }}>
+    <div data-testid="viz-part-actions" style={{ display: "flex", gap: 6, marginTop: 8 }}>
       {buttons.map((a) => (
         <button key={a.id} type="button" data-testid={`viz-action-${a.id}`} disabled={actions.busy !== null} title={actionDoes(a)} onClick={() => actions.run(a, null)}>
           {actions.busy === a.id ? `${a.label}…` : a.label}

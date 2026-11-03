@@ -96,10 +96,12 @@ view:
       command: oxplow.op_error.dismiss_all
       input: {}
   - id: deliveries
+    title: Undelivered events
     description: "Oxplow's own plumbing: every change is an event, and a consumer that threw on one parks it here. Retry hands it over again; Discard drops it for good and asks first."
     embed:
       page: oxplow-foundation/alerts-deliveries
   - id: reactions
+    title: Failed reactions
     description: "An extension's effect that reacts to an event and failed on its last try, with why. Some try again by themselves; Retry runs one now."
     embed:
       page: oxplow-foundation/alerts-reactions

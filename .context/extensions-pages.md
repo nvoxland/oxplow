@@ -17,10 +17,15 @@ The page YAML: metadata, params, loaders, view nodes, actions, checks, custom co
   in-tab navigation register them directly.
 
 - **A page of sections leads with what matters.** In a `stack`, a
-  titled `viz` section with no rows (no error, not `replaceable`) folds
-  into one closing line, "Nothing found: Duplication, Co-change
-  Surprises, …" (`foldEmpty` in `viz/vizModel.ts`, used by
-  `pages/PageTree.tsx`). The effort page opens with its
+  titled `viz` section with no rows (no error, not `replaceable`), and a
+  titled `embed` whose page has nothing to show (every viz in it empty,
+  as a mounted page is judged), folds into one closing line, "Nothing
+  found: Duplication, Co-change Surprises, …" (`foldEmpty` in
+  `viz/vizModel.ts` and `emptySections` in `pages/PageTree.tsx`), so a
+  page never ends in a run of headings over "No X." lines. A viz with a
+  whole-viz action (a Clear…) keeps its section: the action is there to
+  press. Those buttons close the section, under its rows, never over
+  them (`PartButtons`). The effort page opens with its
   **verdict** above the slots: the `effort.verdict` replacement target
   (extensions-slots.md "Replacements"), which core leaves empty — what counts as tested,
   covered or backed is a review policy's. oxplow-bundled's
