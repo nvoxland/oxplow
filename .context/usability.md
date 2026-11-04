@@ -1190,7 +1190,7 @@ declaring *what it is* and mounting the generic layer.
   (`in`, `on`, `of`, `at`, `to`, `by`, `for`, `with`), and
   coordinating conjunctions (`and`, `but`, `or`, `nor`, `yet`,
   `so`).
-  - Right: `Git Dashboard`, `Hook Events`, `Recent Remote
+  - Right: `Git Status`, `Hook Events`, `Remote
     Branches`, `Ready in This Thread`, `Open in Browser`.
   - Wrong: `Git dashboard`, `Hook events`, `Open in browser`.
 - **Sentence-case is OK for inline UI copy** — descriptions,

@@ -258,3 +258,30 @@ test("a hidden-title section keeps its heading in the page, visually hidden", ()
   const more = container.querySelector('[data-node="more"] h2.ox-section-title')!;
   expect(more.className).not.toContain("ox-sr-only");
 });
+
+// A callout: its heading stays for Contents and screen readers, unseen; the
+// box says it stands apart.
+test("a callout section keeps its heading unseen and is marked a callout", () => {
+  const page = fakePage(node.stack("stack", [node.viz("facts", "items", { columns: [{ key: "id" }] }, { title: "Facts", callout: true })]));
+  const run = fakeRun(page, { loaders: { items: loader(["id"], [["a"]]) } });
+  const { container } = render(<PageTree run={run} runId="run-1" />);
+  const section = container.querySelector('[data-node="facts"] section.ox-section')!;
+  expect(section.getAttribute("data-callout")).toBe("true");
+  expect(section.querySelector("h2.ox-section-title")!.className).toContain("ox-sr-only");
+});
+
+// A collapsible section folds at its own heading; its link is the arrow
+// beside it, and the heading is not the link.
+test("a collapsible section folds at its heading and its link is an arrow beside it", () => {
+  const page = fakePage(node.stack("stack", [node.viz("list", "items", { columns: [{ key: "id" }] }, { title: "List", collapsible: true, link: "acme/history" })]));
+  const run = fakeRun(page, { loaders: { items: loader(["id"], [["a"]]) } });
+  const { container } = render(<PageTree run={run} runId="run-1" />);
+  const section = container.querySelector('[data-node="list"] section.ox-section')!;
+  const toggle = section.querySelector<HTMLButtonElement>("button.ox-section-toggle")!;
+  expect(toggle.getAttribute("aria-expanded")).toBe("true");
+  expect(section.querySelector('[aria-label="Open List"]')).not.toBeNull();
+  expect(section.textContent).toContain("a");
+  fireEvent.click(toggle);
+  expect(section.getAttribute("data-collapsed")).toBe("true");
+  expect(section.querySelector('[data-testid="viz-detail"], table, ul')).toBeNull();
+});

@@ -1275,6 +1275,10 @@ pub struct PageAction {
     /// A row action offered only on rows whose column of this name is
     /// truthy (not null, 0, `""` or false): an Enable on rows that are off.
     pub when: Option<String>,
+    /// A button over a viz's one row, shown but pressable only while this
+    /// column is truthy (a Push with nothing to push): `when` hides, this
+    /// disables.
+    pub enabled: Option<String>,
     /// The row action a click on the row (not on a link or control in it),
     /// or Enter on it, runs: the one a person most often wants. The first
     /// `primary` action a row is offered (`when`) is the one.
@@ -1392,6 +1396,8 @@ pub(crate) struct ActionFile {
     /// A row action's column: offered only on rows where it is truthy.
     #[serde(default)]
     when: Option<String>,
+    #[serde(default)]
+    enabled: Option<String>,
     /// The row action a click on the row runs.
     #[serde(default)]
     primary: bool,
@@ -1571,6 +1577,12 @@ pub(crate) fn parse_actions(
                 f.id
             ));
         }
+        if f.enabled.is_some() && (f.row || f.drag || f.edit || !holds_one_row) {
+            return Err(format!(
+                "actions: `{}`: `enabled` is for a button over a viz that holds one row (detail, form, number): a row action uses `when`",
+                f.id
+            ));
+        }
         if f.all && (f.row || f.drag || f.edit || f.group.is_some()) {
             return Err(format!(
                 "actions: `{}`: `all` is for a whole-viz action over every row (no `row`, `group`, `drag` or `edit`)",
@@ -1585,6 +1597,7 @@ pub(crate) fn parse_actions(
         let one_row = !row
             && holds_one_row
             && (f.when.is_some()
+                || f.enabled.is_some()
                 || f.open.is_some()
                 || action_templates(&input)
                     .iter()
@@ -1779,6 +1792,7 @@ pub(crate) fn parse_actions(
             choices: f.choices,
             then: f.then,
             when: f.when,
+            enabled: f.enabled,
             primary: f.primary,
             prominent: f.prominent,
             submenu: f.submenu.map(|n| n.trim().to_string()),

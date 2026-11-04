@@ -77,6 +77,15 @@ export function offeredWholePage(action: PageAction, result: Pick<VizRun["result
   return actionOffered(action, rowRecord(result.columns, result.rows[0]!));
 }
 
+/** Whether a button `offeredWholePage` can be pressed now: it has no
+ *  `enabled`, or that column of the viz's one row is truthy. The server
+ *  checks the same when it runs. */
+export function actionEnabled(action: Pick<PageAction, "enabled">, result: Pick<VizRun["result"], "columns" | "rows">): boolean {
+  if (!action.enabled) return true;
+  const only = result.rows.length === 1 ? result.rows[0] : undefined;
+  return only !== undefined && truthyCell(rowRecord(result.columns, only)[action.enabled]);
+}
+
 /** What an action is pressed on: the viz (only its id) and the params it
  *  ran with. A page file's whole-page actions are pressed on its page. */
 export interface ActionTarget {

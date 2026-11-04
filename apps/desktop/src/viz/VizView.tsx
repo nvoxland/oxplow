@@ -95,7 +95,7 @@ import { SectionsViz } from "./SectionsViz.js";
 import { Stat } from "../kit/Stat.js";
 import { recordOpError } from "../opErrors.js";
 import { showToast } from "../components/toastStore.js";
-import { actionDoes, actionOffered, offeredWholePage, openAfterAction, performVizAction, promptField, rowRecord, truthyCell, type ActionTarget } from "./vizActions.js";
+import { actionDoes, actionEnabled, actionOffered, offeredWholePage, openAfterAction, performVizAction, promptField, rowRecord, truthyCell, type ActionTarget } from "./vizActions.js";
 import { useHistoryState } from "../tabs/useHistoryState.js";
 import {
   chainedDrops,
@@ -417,9 +417,9 @@ function PartButtons({ run, actions }: { run: VizRun; actions: VizActionsState }
   const buttons = run.config.actions.filter((a) => offeredWholePage(a, run.result));
   if (buttons.length === 0) return null;
   return (
-    <div data-testid="viz-part-actions" style={{ display: "flex", gap: 6, marginTop: 8 }}>
+    <div data-testid="viz-part-actions" className="ox-part-actions">
       {buttons.map((a) => (
-        <button key={a.id} type="button" data-testid={`viz-action-${a.id}`} disabled={actions.busy !== null} title={actionDoes(a)} onClick={() => actions.run(a, null)}>
+        <button key={a.id} type="button" data-testid={`viz-action-${a.id}`} disabled={actions.busy !== null || !actionEnabled(a, run.result)} title={actionDoes(a)} onClick={() => actions.run(a, null)}>
           {actions.busy === a.id ? `${a.label}…` : a.label}
         </button>
       ))}

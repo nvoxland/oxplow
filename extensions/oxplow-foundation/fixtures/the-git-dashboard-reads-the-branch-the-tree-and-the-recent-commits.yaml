@@ -1,5 +1,5 @@
-# The Git Dashboard: the stream's branch with no upstream, the working tree,
-# the last commits; with no other stream or remote the rest is empty.
+# Git Status: the stream's branch with no upstream, the working tree, the
+# last commits; with no other stream the rest is empty.
 given:
   - observe: { turn: { prompt: new, write: { path: new.txt, body: "x\n" } } }
   - observe: { analyze: { kind: working } }
@@ -12,11 +12,9 @@ when: { page: oxplow-foundation/git-dashboard, params: { stream_id: 1 } }
 expect:
   loaders:
     row: { rows: [{ branch: main }] }
-    upstream: { rows: [{ branch: main, status: No upstream }] }
+    upstream: { rows: [{ branch: main, status: main · No upstream, can_push: 1 }] }
     recent: { rows: [{ subject: first, commit_ref: $any }] }
     streams: { rows: 0 }
-    readiness: { rows: 0 }
-    remotes: { rows: 0 }
     uncommitted: { rows: [{ changes: $any }] }
 steps:
   - when: { part: oxplow-foundation/git-dashboard-between, params: { base: main, head: main } }

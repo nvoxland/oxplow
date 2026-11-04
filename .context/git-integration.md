@@ -493,8 +493,8 @@ invoked as a separate binary, never linked as a library.
   `readiness` is `AlreadyIntegrated` (head has no commits beyond base),
   `Clean` (ahead, no overlap), or `Conflict` (ahead, overlap). Any lookup
   failure degrades to `AlreadyIntegrated` zeros so a bad row never
-  breaks the dashboard, whose "Merge readiness" card composes one row per
-  stream against the default branch (`v_branch.is_default`).
+  breaks a page: oxplow-bundled's Merge Readiness composes one row per
+  branch ahead (`v_branch_divergence`).
 - `tree_at_commit(repo, rev)` / `diff_commits(repo, a, b)`
   (`src/tree.rs`, behind `Vcs::files_at` / `diff`) — a libgit2 tree walk
   yielding `path -> blob oid`, run through the **shared**

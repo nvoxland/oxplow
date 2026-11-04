@@ -1,5 +1,5 @@
-title: Git
-description: The stream's branch against its upstream, the working tree, the recent commits, the other streams, which of them can merge cleanly, and the recent remote branches.
+title: Git Status
+description: The stream's branch against its upstream, the working tree, the recent commits and the other streams.
 icon: git-branch
 category: Git
 needs:
@@ -15,8 +15,9 @@ loaders:
   upstream:
     sql: |
       SELECT b.name AS branch,
-             CASE WHEN b.upstream IS NULL THEN 'No upstream'
-                  ELSE 'tracks ' || b.upstream || '   ↑' || b.ahead || ' ↓' || b.behind END AS status
+             CASE WHEN b.upstream IS NULL THEN b.name || ' · No upstream'
+                  ELSE b.name || ' → ' || b.upstream || '   ↑' || b.ahead || ' ↓' || b.behind END AS status,
+             (b.upstream IS NULL OR b.ahead > 0) AS can_push
       FROM v_branch b WHERE b.kind = 'local' AND b.name = :branch
     params:
       branch:
@@ -50,8 +51,7 @@ loaders:
                SELECT b.name FROM v_branch b WHERE b.head_sha = c.sha AND b.kind = 'local'
                UNION ALL SELECT t.name FROM v_tag t WHERE t.sha = c.sha)), '') AS refs,
              (SELECT '+' || coalesce(sum(f.additions), 0) || ' −' || coalesce(sum(f.deletions), 0) || ' · ' || count(*) || ' files'
-                FROM v_commit_file f WHERE f.sha = c.sha) AS stats,
-             'Recent commits' AS heading, uri('oxplow/page', 'page', 'git-history') AS history
+                FROM v_commit_file f WHERE f.sha = c.sha) AS stats
       FROM chain JOIN v_commit c ON c.sha = chain.sha
       ORDER BY chain.n
   streams:
@@ -73,52 +73,21 @@ loaders:
     params:
       branch:
         from: row.branch
-  readiness:
-    sql: |
-      SELECT coalesce(s.title, d.head) AS stream, d.head AS other, d.base,
-             '↑' || d.ahead || ' ↓' || d.behind AS apart,
-             CASE d.readiness WHEN 'clean' THEN 'Clean to merge' WHEN 'conflict' THEN 'Will conflict' ELSE 'Integrated' END AS readiness,
-             CASE d.readiness WHEN 'clean' THEN 'good' WHEN 'conflict' THEN 'warn' ELSE 'muted' END AS tone,
-             CASE WHEN d.readiness = 'conflict'
-                  THEN (SELECT group_concat(x.value, ', ') FROM (SELECT value FROM json_each(d.overlapping_files) LIMIT 8) x) END AS overlap,
-             (d.readiness = 'clean' AND :branch = d.base) AS can_merge
-      FROM v_branch_divergence d LEFT JOIN v_stream s ON s.branch = d.head AND s.archived_at IS NULL
-      WHERE d.ahead > 0 AND d.head <> d.base
-      ORDER BY d.head
-    params:
-      branch:
-        from: row.branch
-  remotes:
-    sql: |
-      WITH apart AS (
-        SELECT d.base AS short_name, d.ahead, d.behind FROM v_branch_divergence d WHERE d.head = :branch AND d.base LIKE '%/%'
-      )
-      SELECT b.remote || '/' || b.name AS short_name, b.remote, b.name AS remote_branch,
-             c.subject, c.committed_at,
-             coalesce((SELECT '↑' || a.ahead || ' ↓' || a.behind FROM apart a WHERE a.short_name = b.remote || '/' || b.name), '') AS apart,
-             coalesce((SELECT a.behind > 0 FROM apart a WHERE a.short_name = b.remote || '/' || b.name), 0) AS can_pull,
-             coalesce((SELECT a.ahead > 0 FROM apart a WHERE a.short_name = b.remote || '/' || b.name), 0) AS can_push
-      FROM v_branch b LEFT JOIN v_commit c ON c.sha = b.head_sha
-      WHERE b.kind = 'remote'
-      ORDER BY c.committed_at DESC LIMIT 20
-    params:
-      branch:
-        from: row.branch
 view:
   stack:
   - id: upstream
-    title: Upstream
+    title: Branch
+    callout: true
     from: upstream
     viz: detail
     columns:
-    - key: branch
-      label: Branch
     - key: status
-      label: Upstream
+      label: Branch
     empty: No branch is checked out.
     actions:
     - id: push
       label: Push
+      enabled: can_push
       command: oxplow.vcs.push
       input:
         stream: str{{param.stream_id}}
@@ -144,13 +113,10 @@ view:
         from: view
   - id: recent
     title: Recent Commits
+    collapsible: true
+    link: git-history
     from: recent
     viz: list
-    group:
-      by: heading
-      link:
-        kind: page
-        from: history
     columns:
     - key: subject
       label: Commit
@@ -171,6 +137,7 @@ view:
     empty: No commits yet. Commits on this branch show up here as they're made.
   - id: streams
     title: Streams
+    collapsible: true
     from: streams
     viz: list
     columns:
@@ -204,65 +171,3 @@ view:
       input:
         stream: str{{param.stream_id}}
         rev: '{{row.other}}'
-  - id: readiness
-    title: Merge readiness
-    from: readiness
-    viz: list
-    columns:
-    - key: stream
-      label: Stream
-    - key: other
-      label: Branch
-    - key: apart
-      label: Apart
-    - key: readiness
-      label: Readiness
-      tone: tone
-      format: badge
-    - key: overlap
-      label: Both changed
-    empty: Every branch is integrated with the default branch.
-    actions:
-    - id: merge
-      label: Merge into the default branch
-      command: oxplow.vcs.merge
-      row: true
-      when: can_merge
-      input:
-        stream: str{{param.stream_id}}
-        rev: '{{row.other}}'
-  - id: remotes
-    title: Recent Remote Branches
-    from: remotes
-    viz: list
-    columns:
-    - key: short_name
-      label: Branch
-    - key: subject
-      label: Last commit
-    - key: committed_at
-      label: When
-      format: relative
-      width: 110
-    - key: apart
-      label: Apart
-    empty: No remote branches.
-    actions:
-    - id: pull
-      label: Pull into current
-      command: oxplow.vcs.pull
-      row: true
-      when: can_pull
-      input:
-        stream: str{{param.stream_id}}
-        remote: '{{row.remote}}'
-        branch: '{{row.remote_branch}}'
-    - id: push
-      label: Push current to
-      command: oxplow.vcs.push
-      row: true
-      when: can_push
-      input:
-        stream: str{{param.stream_id}}
-        remote: '{{row.remote}}'
-        branch: '{{row.remote_branch}}'

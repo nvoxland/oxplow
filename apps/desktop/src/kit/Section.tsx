@@ -31,6 +31,9 @@ export interface SectionProps {
   /** The heading isn't drawn: it stays in the page, visually hidden, for
    *  Contents and screen readers. */
   hideTitle?: boolean;
+  /** It stands apart in a box, over the rest of the page; pass `hideTitle`
+   *  too, since the box says it needs no heading. */
+  callout?: boolean;
   description?: ReactNode;
   /** What the section holds, in a sentence: a ⓘ after the heading's text
    *  says it on hover (and to screen readers); the page stays quiet. */
@@ -62,6 +65,7 @@ export function Section({
   title,
   opens,
   hideTitle = false,
+  callout = false,
   description,
   help,
   actions,
@@ -85,6 +89,7 @@ export function Section({
         data-level={level}
         data-keep={keepEmpty ? "true" : undefined}
         data-title-hidden={hideTitle ? "true" : undefined}
+        data-callout={callout ? "true" : undefined}
         // Folded shut: its heading alone is all it shows, not an empty section.
         data-collapsed={open ? undefined : "true"}
         data-testid={testId ?? (collapse ? `${collapse.prefix}-group-${id}` : undefined)}

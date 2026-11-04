@@ -472,6 +472,13 @@ whose loader does not return one (`viz_column_problems`). An agent reads
   declare is a load error (`component_problem`).
 - **A `slot` node** is a place other extensions mount pages at. See
   extensions-slots.md "Slots".
+- **A section's `callout`, `collapsible` and `link`** (`Node`; `PageTree`,
+  `kit/Section`). `callout: true` draws a box with no visible heading, its
+  facts and buttons on one line (`.ox-section[data-callout]`); the heading
+  stays for Contents and agents. `collapsible: true` folds at the heading,
+  remembered in the tab's history state (`PageTree` is the outermost
+  `CollapsibleSections`). `link: <page id>` is the arrow beside the heading
+  (`RefSite::SectionLink`: it must name a page).
 - **A `rail:` tree** draws first in the page's rail, under its root's
   `title` as a group (bare without one): what the page is about, such as
   the branch a history is of. A row it picks sets the page's view param.
@@ -546,7 +553,7 @@ usability.md "Keyboard").
 ### Actions
 
 `actions:` on a page or a viz node: `{ id, label, command | open, input, row?,
-group?, all?, form?, fixed?, fields?, about?, choices?, then?, when?, primary?,
+group?, all?, form?, fixed?, fields?, about?, choices?, then?, when?, enabled?, primary?,
 prominent?, submenu?, icon?, drag?, bulk?, key?, edit?, confirm? }` (`PageAction`).
 `input` binds `{{param.x}}` and, on a row action, `{{row.x}}`
 (`{{row.x|json}}`: the JSON a text cell holds, typed; the one filter,

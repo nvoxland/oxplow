@@ -18,7 +18,9 @@ import type { PickedRow } from "./railGroups.js";
 import { FormSourceContext } from "../viz/formSource.js";
 import { VizActionRunnerContext } from "../viz/vizActionRunner.js";
 import { ActionForm, VizView, useVizActions } from "../viz/VizView.js";
-import { actionDoes, offeredWholePage } from "../viz/vizActions.js";
+import { CollapsibleSections } from "../components/CollapsibleSections.js";
+import { pageTabRef } from "../tabs/pageRefs.js";
+import { actionDoes, actionEnabled, offeredWholePage } from "../viz/vizActions.js";
 import { CommandConfirm } from "../components/CommandConfirm.js";
 import { nodeById, nodeRunOf } from "../viz/nodeRun.js";
 import type { TabRef } from "../tabs/tabState.js";
@@ -136,7 +138,9 @@ interface NodeViewProps extends Omit<PageTreeProps, "root"> {
 
 export function PageTree(props: PageTreeProps) {
   const { root = props.run.tree, ...rest } = props;
-  return <NodeView {...rest} at={root} placement="bare" />;
+  const tree = <NodeView {...rest} at={root} placement="bare" />;
+  // Outermost only: an embed's sections fold under the page they're on.
+  return props.prefix ? tree : <CollapsibleSections testIdPrefix="page">{tree}</CollapsibleSections>;
 }
 
 function NodeView(props: NodeViewProps) {
@@ -163,12 +167,22 @@ function NodeView(props: NodeViewProps) {
   // A page a slot mounted, or an embed with no title, is titled by its own
   // page: an embed's heading is not drawn.
   const title = def?.title || (def?.kind === "embed" || !def ? (at.embed?.page.title ?? null) : null);
-  const hideTitle = def ? def.hideTitle || (def.kind === "embed" && !def.title) : false;
+  const callout = def?.callout ?? false;
+  const hideTitle = def ? callout || def.hideTitle || (def.kind === "embed" && !def.title) : false;
   const fills = fillsNode(run, at);
   return (
     <NodeFrame id={id} fill={fills}>
       {placement === "section" && title ? (
-        <Section id={id} title={title} help={def?.description ?? undefined} hideTitle={hideTitle} fill={fills}>
+        <Section
+          id={id}
+          title={title}
+          help={def?.description ?? undefined}
+          hideTitle={hideTitle}
+          callout={callout}
+          collapsible={def?.collapsible ?? false}
+          opens={def?.link ? { to: pageTabRef(def.link), name: title } : undefined}
+          fill={fills}
+        >
           {body}
         </Section>
       ) : placement === "tile" ? (
@@ -298,7 +312,7 @@ function EmbeddedActions({ embed, node, runId, streamId }: { embed: PageRun; nod
       {offered.length > 0 ? (
         <div data-testid="viz-part-actions" className="ox-toolbar">
           {offered.map((a) => (
-            <button key={a.id} type="button" data-testid={`viz-action-${a.id}`} disabled={actions.busy !== null} title={actionDoes(a)} onClick={() => actions.run(a, null)}>
+            <button key={a.id} type="button" data-testid={`viz-action-${a.id}`} disabled={actions.busy !== null || !actionEnabled(a, firstResult)} title={actionDoes(a)} onClick={() => actions.run(a, null)}>
               {actions.busy === a.id ? `${a.label}…` : a.label}
             </button>
           ))}

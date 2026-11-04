@@ -187,6 +187,14 @@ pub(crate) fn prepare_resolved(
             ));
         }
     }
+    if let (Some(enabled), Some(row)) = (&action.enabled, &row) {
+        if !row.get(enabled).is_some_and(when_holds) {
+            return Err(invalid(
+                "/row",
+                format!("`{action_id}` is disabled now (`enabled: {enabled}`)"),
+            ));
+        }
+    }
     if let Some(column) = &action.open {
         if given.is_some() {
             return Err(invalid(
@@ -854,6 +862,7 @@ view:
   actions:
     - { id: make, label: Make, command: oxplow.work_item.create, when: open, input: { title: "{{row.title}}" } }
     - { id: plain, label: Plain, command: oxplow.work_item.create, input: { title: Plain } }
+    - { id: gated, label: Gated, command: oxplow.work_item.create, enabled: open, input: { title: Gated } }
     - { id: rename, label: Rename, command: oxplow.work_item.update, form: true, fixed: [uri], input: { uri: "{{param.item}}", title: "{{row.title}}" } }
 "#,
         )
@@ -1218,6 +1227,9 @@ view:
         // Not offered: its `when` column is false on the one row.
         let off = press("make", "3", None).await.unwrap_err().to_string();
         assert!(off.contains("isn't offered"), "{off}");
+        // Drawn but disabled: the server refuses it too.
+        let gated = press("gated", "3", None).await.unwrap_err().to_string();
+        assert!(gated.contains("is disabled now"), "{gated}");
         // Not one row.
         for (n, says) in [("0", "has 0 rows"), ("2", "has 2 rows")] {
             let err = press("make", n, None).await.unwrap_err().to_string();

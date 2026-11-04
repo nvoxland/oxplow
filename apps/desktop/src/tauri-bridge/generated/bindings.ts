@@ -3872,6 +3872,18 @@ export type Node_Deserialize = {
 	 */
 	hideTitle: boolean,
 	/**
+	 *  It stands apart, in a box over the rest, its heading not drawn: the
+	 *  state of what the page is about, and what to do about it.
+	 */
+	callout: boolean,
+	/**  Its heading folds it; the person's choice is the tab's. */
+	collapsible: boolean,
+	/**
+	 *  The page an arrow beside its heading opens (`<extension>/<slug>`; a
+	 *  bare slug is this extension's).
+	 */
+	link: string | null,
+	/**
 	 *  A contract another extension's active provider may take its place
 	 *  under (`work_item.board`).
 	 */
@@ -3895,6 +3907,18 @@ export type Node_Serialize = {
 	 *  readers and agents).
 	 */
 	hideTitle: boolean,
+	/**
+	 *  It stands apart, in a box over the rest, its heading not drawn: the
+	 *  state of what the page is about, and what to do about it.
+	 */
+	callout: boolean,
+	/**  Its heading folds it; the person's choice is the tab's. */
+	collapsible: boolean,
+	/**
+	 *  The page an arrow beside its heading opens (`<extension>/<slug>`; a
+	 *  bare slug is this extension's).
+	 */
+	link: string | null,
 	/**
 	 *  A contract another extension's active provider may take its place
 	 *  under (`work_item.board`).
@@ -4442,6 +4466,12 @@ export type PageAction_Deserialize = {
 	 */
 	when: string | null,
 	/**
+	 *  A button over a viz's one row, shown but pressable only while this
+	 *  column is truthy (a Push with nothing to push): `when` hides, this
+	 *  disables.
+	 */
+	enabled: string | null,
+	/**
 	 *  The row action a click on the row (not on a link or control in it),
 	 *  or Enter on it, runs: the one a person most often wants. The first
 	 *  `primary` action a row is offered (`when`) is the one.
@@ -4589,6 +4619,12 @@ export type PageAction_Serialize = {
 	 *  truthy (not null, 0, `""` or false): an Enable on rows that are off.
 	 */
 	when: string | null,
+	/**
+	 *  A button over a viz's one row, shown but pressable only while this
+	 *  column is truthy (a Push with nothing to push): `when` hides, this
+	 *  disables.
+	 */
+	enabled: string | null,
 	/**
 	 *  The row action a click on the row (not on a link or control in it),
 	 *  or Enter on it, runs: the one a person most often wants. The first

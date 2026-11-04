@@ -8,7 +8,16 @@ default its loader, embedded page, slot or component name, else `stack`,
 `stack-2`, … Give a node an `id` to point at it: `#node=<id>` in a link
 scrolls to it, and `oxplow_run_page` text prints each node under `[node
 <id>]`. Any node may have `title`, `hide_title`, `replaceable` (a contract
-another extension's page may take over) and `size`.
+another extension's page may take over) and `size`. A section may also have:
+
+- `callout: true`: a box over the rest of the page, with no heading drawn,
+  for the state of what the page is about and what to do about it (a branch
+  against its upstream, with Push and Pull). Its facts and buttons share one
+  line. Use it for one such thing on a page, not for ordinary content.
+- `collapsible: true`: its heading folds it; the choice is the tab's.
+- `link: <page id>`: an arrow beside its heading opens that page (a bare slug
+  is this extension's). Prefer it to a one-value `group` that only makes a
+  heading.
 
 **A section needs a `title`.** A section is a child of a `stack`, `grid` or
 `switch` (in `view:` or `rail:`). Its title says what it is: it is the
@@ -220,6 +229,11 @@ row action) or the page (`page-format.md`).
   needs no rows (an Add, a New…).
 - Every titled section stays on the page, empty or not, over its `empty:`
   line: give each one worth reading ("No notices.", not "No rows.").
+- `enabled: <column>` on a button over a viz that holds one row (`detail`,
+  `form`, `number`): the button is drawn but disabled unless that column of
+  the row is truthy, and the server refuses it then too. `when` hides a
+  button; use `enabled` when the button should stay in its place (a Push
+  with nothing to push).
 - `form: true` opens the command's form instead of running it. `group:
   <value>` puts the button in that group's heading. `prominent: true` keeps
   one a button in the nav bar (only for what a person comes to do);

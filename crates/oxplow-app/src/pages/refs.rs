@@ -97,6 +97,10 @@ impl Shape {
 /// One place a page file is named from.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RefSite {
+    /// A section's `link`: the page the arrow beside its heading opens.
+    SectionLink {
+        node: String,
+    },
     /// A choice param's `options_from` (the page's, or a viz node's).
     OptionsFrom {
         param: String,
@@ -144,7 +148,7 @@ impl RefSite {
             RefSite::OptionsFrom { .. }
             | RefSite::FormChoices { .. }
             | RefSite::FormFrom { .. } => RefKind::Query,
-            RefSite::SeeAlso => RefKind::Page,
+            RefSite::SeeAlso | RefSite::SectionLink { .. } => RefKind::Page,
             RefSite::PageLoader { .. } => RefKind::Any,
             RefSite::Expand { .. }
             | RefSite::Embed { .. }
@@ -177,6 +181,7 @@ impl RefSite {
         match self {
             RefSite::OptionsFrom { param } => format!("param `{param}`: `options_from`"),
             RefSite::SeeAlso => "see_also".to_string(),
+            RefSite::SectionLink { node } => format!("node `{node}`: `link`"),
             RefSite::Expand { node, column } => {
                 format!("node `{node}`: column `{column}`: `expand`")
             }
@@ -252,6 +257,9 @@ pub fn for_each_ref(page: &mut Page, mut f: impl FnMut(&RefSite, &mut String)) {
     }
     fn walk(node: &mut Node, f: &mut impl FnMut(&RefSite, &mut String)) {
         let id = node.id.clone();
+        if let Some(to) = &mut node.link {
+            f(&RefSite::SectionLink { node: id.clone() }, to);
+        }
         match &mut node.kind {
             NodeKind::Stack { children }
             | NodeKind::Grid { children }

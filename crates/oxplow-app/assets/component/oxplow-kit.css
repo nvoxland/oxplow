@@ -151,6 +151,18 @@
 .ox-title { margin: 0; font-size: var(--text-2xl); font-weight: var(--weight-bold); line-height: var(--leading-tight); color: var(--text-primary); }
 .ox-intro { margin: var(--space-2) 0 0; color: var(--text-secondary); }
 .ox-section { margin-top: var(--space-6); }
+/* A callout: what the page is about and what to do about it, in a box over
+   the rest. Its facts sit on one line, its buttons at the far end. */
+.ox-section[data-callout] {
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  background: var(--surface-card); border-left: 3px solid var(--accent); border-radius: var(--radius-md, 6px);
+}
+.ox-section[data-callout] > .ox-part-actions { margin: 0 0 0 auto; }
+.ox-section[data-callout] .ox-facts { display: flex; flex-wrap: wrap; gap: var(--space-4); }
+.ox-section[data-callout] .ox-fact { display: flex; gap: var(--space-3); }
+.ox-section[data-callout] .ox-fact dt, .ox-section[data-callout] .ox-fact dd { padding: 0; border-bottom: 0; }
+.ox-part-actions { display: flex; gap: 6px; margin-top: 8px; }
 /* A section that drew nothing under its heading (not one folded shut)
    takes no space; the rail's Contents skips it too. */
 .ox-section:empty,

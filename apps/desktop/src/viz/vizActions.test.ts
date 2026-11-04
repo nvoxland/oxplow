@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 
 import { IpcCallError } from "../ipc-error.js";
 import type { FormStart, PageAction, VizRun } from "../tauri-bridge/generated/bindings.js";
-import { actionDoes, actionOffered, offeredWholePage, openAfterAction, performVizAction, promptField, rowRecord, type VizActionDeps } from "./vizActions.js";
+import { actionDoes, actionEnabled, actionOffered, offeredWholePage, openAfterAction, performVizAction, promptField, rowRecord, type VizActionDeps } from "./vizActions.js";
 
 const run = { config: { id: "acme/prs" }, params: { repo: "x" } } as unknown as VizRun;
 const action: PageAction = { id: "finish", label: "Finish", command: "oxplow.work_item.transition", input: {}, row: false };
@@ -230,4 +230,12 @@ test("an action whose result names a thing offers an Open link to it", async () 
   };
   await performVizAction(action, run, null, "str1", false, d);
   expect(log).toEqual(["toast ✓ Finish with open", "open task:t1"]);
+});
+
+test("a button with `enabled` is enabled only while that column of the one row is truthy", () => {
+  const push = { enabled: "can_push" } as Parameters<typeof actionEnabled>[0];
+  const result = (v: number) => ({ columns: ["can_push"], rows: [[v]] });
+  expect(actionEnabled(push, result(1))).toBe(true);
+  expect(actionEnabled(push, result(0))).toBe(false);
+  expect(actionEnabled({ enabled: null } as Parameters<typeof actionEnabled>[0], result(0))).toBe(true);
 });

@@ -6680,6 +6680,8 @@ commands:
             ("", "view: { viz: table, from: q, columns: [{ key: a, expand: query }] }\n", Some("column `a`: `expand` names `x/query`")),
             ("see_also: [{ page: part }]\n", "", Some("see_also names `x/part`, a part (parts/part.yaml): it takes a page (pages/)")),
             ("see_also: [{ page: page }]\n", "", None),
+            ("", "view:\n  stack:\n    - { id: t, title: T, link: part, viz: table, from: q }\n", Some("node `t`: `link` names `x/part`")),
+            ("", "view:\n  stack:\n    - { id: t, title: T, link: page, viz: table, from: q }\n", None),
             ("loaders:\n  q: { page: part, loader: q }\n  b: { page: query, loader: rows }\n  c: { page: page, loader: q }\n", "view: { viz: table, from: q }\n", None),
         ];
         for (head, body, want) in cases {

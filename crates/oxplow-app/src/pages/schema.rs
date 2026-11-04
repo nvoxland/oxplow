@@ -449,6 +449,14 @@ pub struct Node {
     /// Its heading isn't drawn (it stays in the page for Contents, screen
     /// readers and agents).
     pub hide_title: bool,
+    /// It stands apart, in a box over the rest, its heading not drawn: the
+    /// state of what the page is about, and what to do about it.
+    pub callout: bool,
+    /// Its heading folds it; the person's choice is the tab's.
+    pub collapsible: bool,
+    /// The page an arrow beside its heading opens (`<extension>/<slug>`; a
+    /// bare slug is this extension's).
+    pub link: Option<String>,
     /// A contract another extension's active provider may take its place
     /// under (`work_item.board`).
     pub replaceable: Option<String>,
@@ -1532,6 +1540,14 @@ fn parse_node(value: &serde_yaml::Value, ctx: &mut NodeCtx<'_>) -> Result<Node, 
         Some(serde_yaml::Value::Bool(b)) => b,
         Some(other) => return Err(format!("`hide_title` is true or false, not {other:?}")),
     };
+    let flag = |map: &mut serde_yaml::Mapping, key: &str| match map.remove(key) {
+        None => Ok(false),
+        Some(serde_yaml::Value::Bool(b)) => Ok(b),
+        Some(other) => Err(format!("`{key}` is true or false, not {other:?}")),
+    };
+    let callout = flag(&mut map, "callout")?;
+    let collapsible = flag(&mut map, "collapsible")?;
+    let link = take_str(&mut map, "link")?;
     let replaceable = take_str(&mut map, "replaceable")?;
     let size = map
         .remove("size")
@@ -1647,6 +1663,9 @@ fn parse_node(value: &serde_yaml::Value, ctx: &mut NodeCtx<'_>) -> Result<Node, 
         title,
         description,
         hide_title,
+        callout,
+        collapsible,
+        link,
         replaceable,
         size,
         kind,

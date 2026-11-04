@@ -25,6 +25,12 @@ intent:
     - name: an effort that claimed passing tests without a run
       input: { part: unverified-claims, params: { effort_id: 1 } }
       expect: the claim listed with no verifying test run
+    - name: merge-readiness-lists-branches-ahead-of-the-stream
+      input: { page: merge-readiness, params: { stream_id: 1 } }
+      expect: nothing is ahead with one branch, so the list is empty
+    - name: remote-branches-lists-the-latest-first
+      input: { page: remote-branches, params: { stream_id: 1 } }
+      expect: the remote's branches newest first, and no local branch
     - name: a stream with blocked tasks and open follow-ups
       input: { page: waiting-on-me }
       expect: the blocked tasks and open follow-up comments, and the Waiting panel's badge firing

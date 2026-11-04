@@ -1344,3 +1344,24 @@ fn a_markdown_viz_may_name_the_file_its_text_came_from() {
         ["markdown:body", "markdown:u"]
     );
 }
+
+/// A section may be a callout, may fold, and may link its heading to a page.
+#[test]
+fn a_section_says_callout_collapsible_and_link() {
+    let head = "title: T\nloaders:\n  q: { sql: \"SELECT 1 AS id\" }\n";
+    let ok = page(&format!(
+        "{head}view:\n  stack:\n    - {{ id: a, title: A, callout: true, viz: detail, from: q }}\n    - {{ id: b, title: B, collapsible: true, link: other, viz: table, from: q }}\n"
+    ))
+    .expect("loads");
+    let nodes = ok.nodes();
+    let by_id = |id: &str| nodes.iter().find(|n| n.id == id).unwrap();
+    assert!(by_id("a").callout);
+    assert!(!by_id("a").collapsible);
+    assert!(by_id("b").collapsible);
+    assert_eq!(by_id("b").link.as_deref(), Some("other"));
+    let why = page(&format!(
+        "{head}view:\n  stack:\n    - {{ id: a, title: A, callout: yes please, viz: detail, from: q }}\n"
+    ))
+    .unwrap_err();
+    assert!(why.contains("`callout` is true or false"), "{why}");
+}

@@ -1,0 +1,64 @@
+title: Remote Branches
+description: The remote's branches, latest first, and how far each is from the stream's branch.
+icon: git-branch
+category: Git
+needs:
+- vcs
+params:
+- name: stream_id
+loaders:
+  row:
+    sql: |
+      SELECT s.branch AS branch FROM v_stream s WHERE s.id = :stream_id
+    columns:
+    - key: branch
+  remotes:
+    sql: |
+      WITH apart AS (
+        SELECT d.base AS short_name, d.ahead, d.behind FROM v_branch_divergence d WHERE d.head = :branch AND d.base LIKE '%/%'
+      )
+      SELECT b.remote || '/' || b.name AS short_name, b.remote, b.name AS remote_branch,
+             c.subject, c.committed_at,
+             coalesce((SELECT '↑' || a.ahead || ' ↓' || a.behind FROM apart a WHERE a.short_name = b.remote || '/' || b.name), '') AS apart,
+             coalesce((SELECT a.behind > 0 FROM apart a WHERE a.short_name = b.remote || '/' || b.name), 0) AS can_pull,
+             coalesce((SELECT a.ahead > 0 FROM apart a WHERE a.short_name = b.remote || '/' || b.name), 0) AS can_push
+      FROM v_branch b LEFT JOIN v_commit c ON c.sha = b.head_sha
+      WHERE b.kind = 'remote'
+      ORDER BY c.committed_at DESC LIMIT 20
+    params:
+      branch:
+        from: row.branch
+view:
+  from: remotes
+  viz: list
+  columns:
+  - key: short_name
+    label: Branch
+  - key: subject
+    label: Last commit
+  - key: committed_at
+    label: When
+    format: relative
+    width: 110
+  - key: apart
+    label: Apart
+  empty: No remote branches.
+  actions:
+  - id: pull
+    label: Pull into current
+    command: oxplow.vcs.pull
+    row: true
+    when: can_pull
+    input:
+      stream: str{{param.stream_id}}
+      remote: '{{row.remote}}'
+      branch: '{{row.remote_branch}}'
+  - id: push
+    label: Push current to
+    command: oxplow.vcs.push
+    row: true
+    when: can_push
+    input:
+      stream: str{{param.stream_id}}
+      remote: '{{row.remote}}'
+      branch: '{{row.remote_branch}}'
