@@ -193,7 +193,7 @@ test("a code viz shows each row's file at its revision, its lines marked, and op
   expect(navigated.map((r) => r.id)).toEqual(["oxplow:oxplow/file?path=src/a.rs"]);
 });
 
-// A code viz that is the page itself (the File viewer) draws no Open file;
+// A code viz that is the page itself (the Text view) draws no Open file;
 // a snippet in another page does.
 test("a code viz that is the page's own view has no Open file", async () => {
   const vizRun = run({ viz: "code", code: { path: "p", revision: "r", lines: null, sync: false } }, ["p", "r"], [["src/a.rs", "git:abc1234"]]);

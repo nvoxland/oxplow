@@ -1,6 +1,6 @@
 //! Which pages can draw a URI, decided here and nowhere else
 //! (`.context/pages-and-tabs.md` "Which page draws a URI"). The desktop
-//! host, Open With, an agent's `oxplow.page.renderers` and `find`'s
+//! host, View as, an agent's `oxplow.page.renderers` and `find`'s
 //! `about` all ask [`renderers_for`].
 //!
 //! A page is offered for a URI when

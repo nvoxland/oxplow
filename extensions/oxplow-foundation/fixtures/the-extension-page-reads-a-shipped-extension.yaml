@@ -12,7 +12,7 @@ expect:
     about_facts:
       rows:
         - { origin_text: Shipped with oxplow, origin_target: null, version_text: $any, permission_items: $any, manifest: Read its running extension.yaml }
-    pages:
+    resource_pages:
       rows:
         contains:
           - { title: Commit, link: $any }

@@ -1,5 +1,5 @@
 title: Media
-description: "An image or a PDF shown as itself — on any filesystem and at any revision — and the page that opens one. A binary file that is neither is the File viewer's; a text file the Editor's."
+description: "An image or a PDF shown as itself — on any filesystem and at any revision — and the page that opens one. A binary file that is neither is the Text view's; a text file the Editor's."
 label: '{{param.path|basename}}'
 icon: file-text
 for: oxplow/file

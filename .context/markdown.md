@@ -130,7 +130,7 @@ headings.
 Every markdown surface: the `markdown` viz and markdown nodes of a
 page's view, and `oxplow-page` fenced blocks (an inline page, read-only,
 drawn live in the wiki body), foundation's `markdown` page (a `.md` file
-read as a document, Open With → Markdown), effort summaries
+read as a document, View as → Markdown), effort summaries
 (`TaskDetail`, `DiffViewPage`), the wiki body (the wiki page's `markdown` viz), a work
 item's body (`TaskDetail`), comment messages (`CommentPopover`) and the
 comment composer (`CommentComposer`), a form's markdown field

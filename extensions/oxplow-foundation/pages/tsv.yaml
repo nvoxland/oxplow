@@ -1,5 +1,5 @@
 title: Table
-description: "A TSV file read as a table, its first row the columns, on any filesystem and at any revision. A display mode of a `.tsv` file beside the Editor and the File viewer."
+description: "A TSV file read as a table, its first row the columns, on any filesystem and at any revision. A display mode of a `.tsv` file beside the Editor and the Text view."
 label: '{{param.path|basename}}'
 icon: columns-3
 for: oxplow/file

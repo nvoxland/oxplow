@@ -1,4 +1,4 @@
-# The Data page parses the file's text into one row per value: id (a JSON
+# The Tree page parses the file's text into one row per value: id (a JSON
 # pointer), parent, name, kind, value and count.
 temp:
   shape.yaml: "name: ant\nlegs: 6\n"
@@ -17,7 +17,7 @@ expect:
         - { id: /name, parent: null, name: name, kind: string, value: ant }
         - { id: /legs, parent: null, name: legs, kind: number, value: "6" }
   text:
-    contains: ["name", "legs"]
+    contains: ["- name: ant", "- legs: 6"]
 steps:
   - params:
       uri: "oxplow:oxplow/file?path=shape.json&filesystem=oxplow:temp"

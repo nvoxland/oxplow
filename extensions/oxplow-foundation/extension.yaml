@@ -22,13 +22,13 @@ intent:
       expect: the page in v_bookmark at the thread's scope, undone by oxplow.bookmark.remove
     - name: definition-reads-a-pages-title-origin-and-nodes
       input: { page: definition, params: { uri: 'oxplow:oxplow/file?path=oxplow-foundation/pages/commit.yaml&filesystem=oxplow:extensions', path: oxplow-foundation/pages/commit.yaml } }
-      expect: the tab named for the file, then the page's source, the other pages that draw the file, its params, loaders, nodes and actions; no YAML (the File viewer shows that)
+      expect: the tab named for the file, then the page's source, the other pages that draw the file, its params, loaders, nodes and actions; no YAML (the Text view shows that)
     - name: definition-is-offered-for-a-page-yaml-beside-the-file-viewer
       input: { command: oxplow.page.renderers, input: { uri: 'oxplow:oxplow/file?path=oxplow-foundation/pages/commit.yaml&filesystem=oxplow:extensions' } }
-      expect: the File viewer and Definition for a running page's file, only the File viewer for a YAML file that is no page
+      expect: the Text view and Definition for a running page's file, only the Text view for a YAML file that is no page
     - name: definition-is-not-offered-for-a-yaml-that-is-not-a-page
       input: { command: oxplow.page.renderers, input: { uri: 'oxplow:oxplow/file?path=notes.yaml&filesystem=oxplow:temp' } }
-      expect: the File viewer alone, for YAML that holds no page or does not parse
+      expect: the Text view alone, for YAML that holds no page or does not parse
     - name: closed-threads-lists-closed-threads-with-their-work
       input: { page: closed-threads, params: { stream_id: 1 } }
       expect: the stream's closed threads only, each with a Reopen action
@@ -212,6 +212,9 @@ intent:
     - name: extension-pages-are-a-table-row-each-linking-to-its-definition
       input: { page: extension, params: { uri: 'oxplow:oxplow/extension?name=oxplow-foundation', name: oxplow-foundation } }
       expect: its pages as a table, each title linking to the Definition of its running file, with its description and what it shows
+    - name: extension-pages-to-go-to-sit-apart-from-pages-for-a-resource
+      input: { page: extension, params: { uri: 'oxplow:oxplow/extension?name=oxplow-foundation', name: oxplow-foundation } }
+      expect: the pages you go to directly in one section, and the pages that draw a kind of resource in another, each saying which
     - name: extension-contributions-are-a-table-per-kind
       input: { page: extension, params: { uri: 'oxplow:oxplow/extension?name=oxplow-foundation', name: oxplow-foundation } }
       expect: each kind it contributes is a top-level table, parts and queries apart from its pages, a row per contribution with its name (a link where a page draws it), its description and the facts that matter for its kind; a kind it doesn't have keeps its table, saying so
@@ -340,13 +343,13 @@ intent:
       expect: the page's first loader, content, holds the file's path, filesystem, size and language, and the tab label names the filesystem
     - name: the-editor-alone-draws-a-working-tree-file-and-the-file-viewer-a-past-revision
       input: { command: oxplow.page.renderers, input: { uri: 'oxplow:oxplow/file?path=koala.txt' } }
-      expect: the Editor alone, as the default; at a past revision the File viewer alone
+      expect: the Editor alone, as the default; at a past revision the Text view alone
     - name: the-file-viewer-is-offered-for-a-temp-file-and-the-editor-is-not
       input: { command: oxplow.page.renderers, input: { uri: 'oxplow:oxplow/file?path=note.md&filesystem=oxplow:temp' } }
-      expect: the File viewer, and no Editor
+      expect: the Text view, and no Editor
     - name: the-file-viewer-is-offered-for-a-running-extension-file-and-the-editor-is-not
       input: { command: oxplow.page.renderers, input: { uri: 'oxplow:oxplow/file?path=oxplow-foundation/extension.yaml&filesystem=oxplow:extensions' } }
-      expect: the File viewer, and no Editor
+      expect: the Text view, and no Editor
     - name: the-capabilities-area-lists-the-implementations-and-choosing-one-is-a-config-write
       input: { page: settings, params: { area: integrations } }
       expect: each capability's implementations and a default row; choosing writes the layer's choice
@@ -1559,7 +1562,7 @@ commands:
     op: describe
     example: {"uri": "oxplow:oxplow/file?path=oxplow-foundation/pages/commit.yaml&filesystem=oxplow:extensions", "params": {"sha": "abc1234"}}
   - name: page.renderers
-    summary: "The pages that can draw a uri, in the order Open With lists them: each `page` (`<extension>/<slug>`), its `title` and whether it is the `default`. A page is offered when its `for` names the uri's resource, its `accepts` hold for the uri's params, and — if it says `accepts: { content: <loader> }` — that loader of its own has a row (the daemon runs only that loader, 2 s at most; a failure is not offered). `oxplow_navigate` a uri with `#oxplow.renderer=<page>` to open it in one of them."
+    summary: "The pages that can draw a uri, in the order View as lists them: each `page` (`<extension>/<slug>`), its `title` and whether it is the `default`. A page is offered when its `for` names the uri's resource, its `accepts` hold for the uri's params, and — if it says `accepts: { content: <loader> }` — that loader of its own has a row (the daemon runs only that loader, 2 s at most; a failure is not offered). `oxplow_navigate` a uri with `#oxplow.renderer=<page>` to open it in one of them."
     scope: pages.read
     op: renderers
     example: {"uri": "oxplow:oxplow/file?path=src/main.rs"}

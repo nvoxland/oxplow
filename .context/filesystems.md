@@ -145,7 +145,7 @@ cap is refused.
 
 ## Viewing, saving and diffing
 
-- **Viewing.** The File viewer (`code` viz, `viz/CodeViz.tsx`) reads by
+- **Viewing.** The Text view (`code` viz, `viz/CodeViz.tsx`) reads by
   `{filesystem, rev}`; a `code` row's `filesystem` and `revision` are
   optional columns (none: the local working tree). It `stat_file`s first
   and shows `(binary file, N bytes)` or `(too large to show, N bytes)`

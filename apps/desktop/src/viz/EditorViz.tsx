@@ -48,7 +48,7 @@ export function EditorViz({ row, onOpenPage }: { row: { path: string; filesystem
   if (foreign) {
     return (
       <p className="ox-error" data-testid="viz-editor-filesystem">
-        <code>{row?.path}</code> is on the <code>{foreign}</code> filesystem; the editor edits only the working tree. Open it in the File viewer.
+        <code>{row?.path}</code> is on the <code>{foreign}</code> filesystem; the editor edits only the working tree. Open it in the Text view.
       </p>
     );
   }

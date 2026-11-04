@@ -46,7 +46,7 @@ test("the other views of the tab's item follow the declared links, the current o
   expect(getByText("View as Definition")).toBe(getByTestId("see-also-view-oxplow-foundation/definition"));
 });
 
-test("a view link picks that view as Open With does", () => {
+test("a view link picks that view as View as does", () => {
   const picked: string[] = [];
   const { getByTestId } = render(<RailSeeAlso run={run} onOpenPage={() => {}} openWith={{ ...views, pick: (n) => picked.push(n) }} />);
   fireEvent.click(getByTestId("see-also-view-oxplow-foundation/measure-data"));
@@ -58,7 +58,7 @@ test("view links alone make the group", () => {
   expect(getByTestId("see-also-view-oxplow-foundation/definition")).toBeTruthy();
 });
 
-test("no view links with one view, none without Open With", () => {
+test("no view links with one view, none without View as", () => {
   const one = { options: [views.options[0]!], current: views.options[0]!.name, pick: () => {} };
   const bare = fakeRun(page, { loaders: { items: loader([], []) } });
   expect(render(<RailSeeAlso run={bare} openWith={one} />).queryByTestId("page-rail-see-also")).toBeNull();

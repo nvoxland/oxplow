@@ -1783,7 +1783,7 @@ just carries a Help blurb pointing there.
   `oxplow/metric` — `metricUri(key)`) — About, then the Trend, over
   `v_metric_point` (pinned to the page's `metric`) and the definition
   models; its recordings and unchecked files are its Data view
-  (`metric-data`, the other mode, in Open With and as "View as Metric
+  (`metric-data`, the other mode, in View as and as "View as Metric
   data" in See also; its unchecked-files loader reads its measure's facts
   through `read_measure(…)`, as Measure data, Dimension data and Measure
   branches do, so the page re-runs only when that measure's facts land: see

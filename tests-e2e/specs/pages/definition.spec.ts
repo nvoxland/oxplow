@@ -3,8 +3,8 @@ import { expect, test } from "../../support/fixtures.js";
 import { openFromLauncher } from "../../support/ui.js";
 
 // Definition is a display mode of a page's YAML file: Definition in About this page opens
-// the page's running copy drawn as Definition, and the File viewer (the raw
-// YAML) is one Open With away.
+// the page's running copy drawn as Definition, and the Text view (the raw
+// YAML) is one View as away.
 
 const numbat = `title: Defined Numbat
 description: What the numbats are.
@@ -18,7 +18,7 @@ view:
   columns: [{ key: line, label: Line }]
 `;
 
-test("Definition in About this page opens the running copy drawn as Definition, and Open With lists the File viewer too", async ({ page, daemon }) => {
+test("Definition in About this page opens the running copy drawn as Definition, and View as lists the Text view too", async ({ page, daemon }) => {
   await installExtension(daemon, "e2e-defn", { files: { "pages/numbat.yaml": numbat } });
   await page.goto("/");
   await openFromLauncher(page, "Defined Numbat");
@@ -34,7 +34,7 @@ test("Definition in About this page opens the running copy drawn as Definition, 
   await expect(file.getByTestId("node-about")).toContainText("Defined Numbat");
   await expect(file.getByTestId("node-about")).toContainText("e2e-defn/numbat");
   await expect(file.getByTestId("node-description")).toContainText("What the numbats are.");
-  // The raw YAML is the File viewer's mode, not a section here.
+  // The raw YAML is the Text view's mode, not a section here.
   await expect(file.getByTestId("node-yaml")).toHaveCount(0);
   // Its Source opens the same running copy, raw.
   await expect(file.getByTestId("node-about")).toContainText("e2e-defn/pages/numbat.yaml");
@@ -80,7 +80,7 @@ test("Definition drawn again after another tab was shown still names its file an
   await expect(file.getByTestId("node-about")).toContainText("e2e-defn/numbat");
 });
 
-test("Definition of a page whose file is open in the File viewer is another tab: both stay", async ({ page, daemon }) => {
+test("Definition of a page whose file is open in the Text view is another tab: both stay", async ({ page, daemon }) => {
   await installExtension(daemon, "e2e-defn", { files: { "pages/numbat.yaml": numbat } });
   await page.goto("/");
   const openDefinition = async () => {
@@ -89,7 +89,7 @@ test("Definition of a page whose file is open in the File viewer is another tab:
     await page.getByTestId("menu-item-action-page-about").click();
     await page.getByTestId("page-about-definition").click();
   };
-  // Definition, then this tab to the File viewer by Open With: it switches in place.
+  // Definition, then this tab to the Text view by View as: it switches in place.
   await openDefinition();
   await expect(page.getByTestId("page-nav-title").filter({ visible: true })).toHaveText("Definition: numbat.yaml");
   await page.getByTestId("page-nav-menu").filter({ visible: true }).click();
@@ -101,7 +101,7 @@ test("Definition of a page whose file is open in the File viewer is another tab:
   await expect(fileTabs).toHaveCount(1);
   await expect(fileTabs.first()).toHaveAttribute("data-testid", /file-viewer/);
 
-  // The same page's Definition again: a Definition tab of its own, the File viewer tab stays.
+  // The same page's Definition again: a Definition tab of its own, the Text view tab stays.
   await openDefinition();
   await expect(page.getByTestId("page-nav-title").filter({ visible: true })).toHaveText("Definition: numbat.yaml");
   await expect(fileTabs).toHaveCount(2);

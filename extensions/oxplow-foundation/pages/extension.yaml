@@ -51,7 +51,19 @@ loaders:
       SELECT p.title, p.id, p.description,
              CASE WHEN p.running_uri IS NOT NULL THEN p.running_uri || '#oxplow.renderer=oxplow-foundation/definition' END AS link
       FROM about a JOIN v_page p ON p.extension = a.extension AND p.kind = 'page'
+      WHERE json_array_length(p.renders) = 0
       ORDER BY p.title
+  # A page that draws a kind of resource, and which: it opens from that
+  # resource, not on its own.
+  resource_pages:
+    sql: |
+      SELECT p.title, p.id, p.description,
+             (SELECT group_concat(coalesce(r.label, j.value), ', ')
+                FROM json_each(p.renders) j LEFT JOIN v_resource r ON r.resource = j.value) AS draws,
+             CASE WHEN p.running_uri IS NOT NULL THEN p.running_uri || '#oxplow.renderer=oxplow-foundation/definition' END AS link
+      FROM about a JOIN v_page p ON p.extension = a.extension AND p.kind = 'page'
+      WHERE json_array_length(p.renders) > 0
+      ORDER BY draws, p.title
   parts:
     sql: |
       SELECT p.title, p.id, p.description,
@@ -172,13 +184,23 @@ view:
     empty: This extension isn't known to the project.
   - id: pages
     title: Pages
+    description: 'The pages you go to directly. A page that draws a kind of resource is in the next section.'
     viz: table
     from: pages
     hide_header: true
     columns:
     - { key: title, label: Page, width: 300, link: { kind: page, from: link } }
     - { key: description, label: What it is }
-    empty: No pages.
+    empty: No pages to go to directly.
+  - id: resource_pages
+    title: Pages for a resource
+    viz: table
+    from: resource_pages
+    columns:
+    - { key: draws, label: Draws, width: 160 }
+    - { key: title, label: Page, width: 300, link: { kind: page, from: link } }
+    - { key: description, label: What it is }
+    empty: No pages for a resource.
   - id: parts
     title: Parts
     viz: table

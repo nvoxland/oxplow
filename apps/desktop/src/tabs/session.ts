@@ -107,7 +107,7 @@ export function identityOf(id: string): string {
  *  or "" when it names none (the default, which only the daemon's renderer
  *  list can resolve — kept out of here so the session stays synchronous). An
  *  explicit default and an absent one are different modes, so writers that
- *  know the default leave the key out (Open With does). */
+ *  know the default leave the key out (View as does). */
 export function modeOf(id: string): string {
   return viewOf(id, RENDERER_VIEW_KEY) ?? "";
 }
@@ -161,7 +161,7 @@ export function open(s: Session, entry: Entry, opts: { pinned?: boolean } = {}):
  *  current entry's) is that page further on: it keeps the page's state (open
  *  sections, a draft) and its origin, and its body stays mounted; replaced,
  *  it is the entry rewritten (`history.replaceState`: what was forward
- *  stays). A change of mode (Open With) is a new page in this tab: no state
+ *  stays). A change of mode (View as) is a new page in this tab: no state
  *  carries. Another tab showing the page in the mode it arrives in closes,
  *  so a page shows once per mode; one in a different mode stays. */
 export function navigate(s: Session, slot: string, entry: Entry, opts: { replace?: boolean } = {}): Session {

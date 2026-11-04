@@ -80,7 +80,9 @@ under the node's heading, above its viz: what a thing is, above its facts
 - `bar`: `chart: { x, y }`. `line`: `chart: { x, y, series?, targets? }`
   (`targets`: a target line from that column's last value). `treemap`:
   `chart: { label, size, group? }`; a tile click follows the first column's link.
-- `tree`: `tree: { id, parent, label }`. A level at a time: `lazy: <param>`
+- `tree`: `tree: { id, parent, label, value?, count? }`. `value` and `count`
+  name columns drawn beside the label (one line, the whole value on hover; `(n)`).
+  A level at a time: `lazy: <param>`
   (a param with a `default`, the top level) and `branch: <column>`, one
   level per param value (`WHERE parent = :folder`); a folder opens by
   setting the param to its `id`.

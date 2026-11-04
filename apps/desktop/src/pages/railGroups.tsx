@@ -67,7 +67,7 @@ export function RailSelection({
 /** The page's "See also" links (its `see_also:`), after Contents: related
  *  pages and the list a thing belongs to. A description is a link's hover.
  *  Below them, one "View as" link per other renderer of the tab's URI
- *  (`openWith`, what the nav bar's Open With lists): the same item, drawn
+ *  (`openWith`, what the nav bar's View as lists): the same item, drawn
  *  another way. */
 export function RailSeeAlso({ run, onOpenPage, openWith }: { run: PageRun; onOpenPage?(ref: TabRef): void; openWith?: OpenWith }) {
   const views = openWith ? openWith.options.filter((o) => o.name !== openWith.current) : [];

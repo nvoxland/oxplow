@@ -254,7 +254,7 @@ A page shows files through three kit vizes (`.context/extensions-page-host.md`
   svg, bmp, ico, avif; pdf). Foundation's Media page is its page.
 
 Open file navigates in the tab when there is one, else opens a page. A
-`code` viz that is the page's own view (the File viewer: the root of the
+`code` viz that is the page's own view (the Text view: the root of the
 page's tree at full size, not an embed's, a rail's, an expanded row's or a
 section of another page) draws no Open file: the file is the page's.
 `PageTree` gives the viz `isPage`; a snippet in a review, a finding or a
@@ -268,15 +268,15 @@ its bytes (the buffer store does the same for the `editor` viz). The
 `oxplow:local` (the Editor page accepts none anyway). The renderers of a
 file split by URI and by what the file is: the Editor takes a URI with no
 `rev` and no `filesystem` whose file is text or not there yet
-(`accepts.content: editable`, a `stat`); the File viewer's `accepts.content`
+(`accepts.content: editable`, a `stat`); the Text view's `accepts.content`
 loader takes one with a `rev` or a `filesystem` (a past revision, another
 filesystem) or a binary file, where there is nothing to edit, and is the
 default of that domain; the Media page (`accepts.content: is_media`,
 decided from the name alone) is the default for an image or a PDF
-anywhere, and the File viewer's `elsewhere` lists the same names to stand
+anywhere, and the Text view's `elsewhere` lists the same names to stand
 aside (raw bytes are no mode of an image). Three defaults of one
 resource, each deciding by content, as `renderer_problem` allows. A
-working-tree text file so has one mode and no Open With, a `.md` file the
+working-tree text file so has one mode and no View as, a `.md` file the
 Markdown mode too; the first default in the list opens a file several
 take. The file-viewer, media and duplicate-block pages draw
 these vizes; `DiffPane` stays (it is the `hunks` viz's and `diff`'s).

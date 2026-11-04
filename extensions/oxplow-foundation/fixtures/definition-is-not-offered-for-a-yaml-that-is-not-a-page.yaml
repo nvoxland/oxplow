@@ -1,5 +1,5 @@
 # Definition describes a page. A YAML file that is no page (or does not
-# parse) gets no Definition: Open With offers the File viewer alone. The
+# parse) gets no Definition: View as offers the Text view alone. The
 # daemon decides this from the file's content, not its name.
 temp:
   notes.yaml: "just: a list\nof: notes\n"

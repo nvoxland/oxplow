@@ -8,13 +8,13 @@ import { PageNavigationContext, type PageNavigation } from "./PageNavigationCont
 // A URI with several modes swaps between them from the nav bar in one
 // click: two or three renderers are a segmented control, the one drawing
 // pressed; more are one button labeled with the current mode that opens
-// the list. Both are the same pick as the ☰'s Open With (the default
+// the list. Both are the same pick as the ☰'s View as (the default
 // renderer drops the key). One renderer draws nothing.
 
 const renderer = (page: string, title: string, over: Partial<Renderer> = {}): Renderer => ({ page, title, default: false, ...over });
 const editor = renderer("oxplow-foundation/editor", "Editor", { default: true });
 const two = [editor, renderer("oxplow-foundation/markdown", "Markdown")];
-const four = [...two, renderer("oxplow-foundation/data-file", "Data"), renderer("oxplow-foundation/file-viewer", "File viewer")];
+const four = [...two, renderer("oxplow-foundation/data-file", "Tree"), renderer("oxplow-foundation/file-viewer", "Text view")];
 
 afterEach(cleanup);
 
@@ -49,7 +49,7 @@ test("two or three modes are a segmented control; the one drawing is pressed and
   await waitFor(() => expect(patches).toEqual([{ "oxplow.renderer": "oxplow-foundation/markdown" }]));
 });
 
-test("pressing the default mode drops the key, as Open With does", async () => {
+test("pressing the default mode drops the key, as View as does", async () => {
   const patches: unknown[] = [];
   const view = shown(two, patches, { "oxplow.renderer": "oxplow-foundation/markdown" });
   const markdown = await waitFor(() => view.getByTestId("page-nav-mode-oxplow-foundation/markdown"));
@@ -62,7 +62,7 @@ test("four or more modes are one button named for the current mode that lists th
   const patches: unknown[] = [];
   const view = shown(four, patches, { "oxplow.renderer": "oxplow-foundation/data-file" });
   const button = await waitFor(() => view.getByTestId("page-nav-modes"));
-  expect(button.textContent).toContain("Data");
+  expect(button.textContent).toContain("Tree");
   expect(view.queryByTestId("page-nav-mode-oxplow-foundation/editor")).toBeNull();
   fireEvent.click(button);
   const item = await waitFor(() => view.getByTestId("menu-item-page-mode-oxplow-foundation/markdown"));

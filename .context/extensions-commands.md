@@ -499,7 +499,7 @@ tool: open_work              # offered as <namespace>_open_work
   for something a person will look at. With `about`, a resource page is
   found when `pages/renderers.rs` offers it for that uri.
 - `oxplow.page.renderers { uri, stream_id? }` (through `run_command`): the
-  pages that can draw a uri, in Open With's order (`page`, `title`,
+  pages that can draw a uri, in View as's order (`page`, `title`,
   `default`), as the window's `renderers_for` lists them.
 - `oxplow_run_page { page | spec, params?, format?, loader?, draft? }`
   (`oxplow.page.run`): **what the UI shows** for those params, as the

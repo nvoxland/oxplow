@@ -1087,6 +1087,7 @@ function Viz({
           lazyOpen={tree!.open}
           problem={lazyTreeProblem(viz, result)}
           label={treeLabelColumn(viz, cols, result.columns)}
+          columns={treeValueColumns(viz, result.columns)}
           cell={cell}
           rowMenu={rowMenu}
           rowLook={rowsView.rowLook}
@@ -1460,8 +1461,18 @@ function treeLabelColumn(viz: VizRun["config"], cols: DisplayColumn[], resultCol
   return index === -1 ? null : { key, label: key, index, link: null, unitIndex: null, iconIndex: null, toneIndex: null, width: null, format: null, highlight: null, whenIndex: null };
 }
 
+function treeValueColumns(viz: VizRun["config"], resultColumns: string[]): TreeVizProps["columns"] {
+  const at = (key: string | null | undefined) => {
+    const i = key ? resultColumns.indexOf(key) : -1;
+    return i < 0 ? null : i;
+  };
+  return { value: at(viz.tree?.value), count: at(viz.tree?.count) };
+}
+
 interface TreeVizProps {
   label: DisplayColumn | null;
+  /** Where a row holds its `tree.value` and `tree.count`; null when the viz names none. */
+  columns: { value: number | null; count: number | null };
   cell: CellRenderer;
   rowMenu: RowMenu;
   rowLook: RowLook;
@@ -1537,7 +1548,8 @@ function TreeItem({ node, path, closed, lazyOpen, ...rest }: TreeVizProps & { no
         ) : (
           <span style={{ display: "inline-block", width: 16 }} />
         )}
-        <span>{label ? cell(node.row, label) : node.label}</span>
+        <span style={{ flexShrink: 0 }}>{label ? cell(node.row, label) : node.label}</span>
+        <TreeRowValue node={node} columns={rest.columns} />
       </div>
       {open && node.state === "loading" ? (
         <DelayedLoading>
@@ -1561,6 +1573,28 @@ function TreeItem({ node, path, closed, lazyOpen, ...rest }: TreeVizProps & { no
     </li>
   );
 }
+
+/** A tree row's `value` (its first line, the whole on hover) and `count`,
+ *  beside its label. */
+function TreeRowValue({ node, columns }: { node: TreeNode; columns: TreeVizProps["columns"] }) {
+  const read = (at: number | null) => (at === null ? null : (node.row[at] ?? null));
+  const value = read(columns.value);
+  const count = read(columns.count);
+  const whole = value === null ? "" : String(value);
+  const [first = "", ...rest] = whole.split("\n");
+  return (
+    <>
+      {whole !== "" ? (
+        <span data-testid="viz-tree-value" title={whole} style={treeValueStyle}>
+          : {rest.length > 0 ? `${first} …` : first}
+        </span>
+      ) : null}
+      {count !== null ? <span style={{ color: "var(--text-secondary)" }}>({String(count)})</span> : null}
+    </>
+  );
+}
+
+const treeValueStyle: CSSProperties = { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--text-secondary)" };
 
 const treeNoteStyle: CSSProperties = { paddingLeft: 36, color: "var(--text-secondary)", fontSize: "var(--text-xs)" };
 

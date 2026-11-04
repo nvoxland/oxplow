@@ -1,0 +1,20 @@
+# The Extension page splits its pages: the ones you go to directly, and the
+# ones that draw a kind of resource, each saying which.
+when:
+  page: oxplow-foundation/extension
+  params:
+    uri: "oxplow:oxplow/extension?name=oxplow-foundation"
+    name: oxplow-foundation
+expect:
+  nodes:
+    - { id: pages, kind: viz, viz: table }
+    - { id: resource_pages, kind: viz, viz: table }
+  loaders:
+    pages:
+      rows:
+        contains:
+          - { title: Alerts, id: oxplow-foundation/alerts }
+    resource_pages:
+      rows:
+        contains:
+          - { title: Text, id: oxplow-foundation/file-viewer, draws: File }

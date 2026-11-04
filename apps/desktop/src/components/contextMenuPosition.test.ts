@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import {
   MENU_MARGIN,
   clampMenuPosition,
+  submenuLeft,
   submenuTopOffset,
 } from "./contextMenuPosition.js";
 
@@ -65,5 +66,17 @@ describe("submenuTopOffset", () => {
         expect(resultingTop).toBeGreaterThanOrEqual(0);
       }
     }
+  });
+});
+
+describe("submenuLeft", () => {
+  const anchor = { left: 875, right: 1095 };
+  test("opens on the item's right when it fits, else its left", () => {
+    expect(submenuLeft({ left: 100, right: 300 }, 200, 1100)).toBe(302);
+    expect(submenuLeft(anchor, 300, 1100)).toBe(573);
+  });
+  test("wider than either side, it stays on screen against the right edge", () => {
+    expect(submenuLeft(anchor, 1000, 1100)).toBe(92);
+    expect(submenuLeft(anchor, 2000, 1100)).toBe(8);
   });
 });

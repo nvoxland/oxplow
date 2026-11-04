@@ -90,7 +90,7 @@ export interface PageNavBarProps {
    *  This and the prompts about its kind (P6.D1/D2). Omitted, no Ask. */
   ask?: AskTarget;
   /** The pages that render the URI shown, when there are several: the
-   *  bar's modes (`PageModes`) and the ☰'s Open With. */
+   *  bar's modes (`PageModes`) and the ☰'s View as. */
   openWith?: OpenWithProps;
   /** The page's "See also" links, listed in the ☰. */
   seeAlso?: { links: ReadonlyArray<{ title: string; uri: string; description?: string | null }>; open(uri: string): void };

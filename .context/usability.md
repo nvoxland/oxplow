@@ -419,7 +419,7 @@ markdown itself, nor edits it in a `<textarea>`.
   then the page's and its extensions' own sorted by label — an action, a
   **command about the page's resource at the top level beside them** (its
   `ui.group` makes no submenu in the ☰), or a submenu by its name that an
-  action's `submenu` makes — then Open With and the panels
+  action's `submenu` makes — then View as and the panels
   (`.context/pages-and-tabs.md` "The nav bar is core's"). Only the
   commands that apply to the ref are in a menu: one with an `about_when`
   its row fails (Reopen Session on an open session) is left out, not
@@ -907,7 +907,7 @@ declaring *what it is* and mounting the generic layer.
   three, the one drawing pressed, and as one button named for the
   current mode that opens the list beyond that (`tabs/PageModes.tsx`):
   short titles, never an icon per mode, since the modes are extensions'
-  pages with their own titles. The ☰'s Open With and the rail's View as
+  pages with their own titles. The ☰'s View as and the rail's View as
   keep the same list.
 - **A page's view is its tab's, and Back follows what you did.** A
   filter change (a range, a search, a toggle) replaces the tab's entry:
@@ -1328,7 +1328,7 @@ on its own when oxplow's data changes; Refresh is for one that reads
 outside oxplow) — are in the nav bar (its ☰, unless `prominent`), never
 in the rail or above the body (`PageHost` hands them to `Page`). A page
 action that goes to another page (`open: <column>`, no command) is one of
-them: the File viewer's Open current version, for a local file at a past
+them: the Text view's Open current version, for a local file at a past
 revision. A viz that is the whole page shows no inline link to its own
 resource (the code viz's Open file); one in a snippet does.
 

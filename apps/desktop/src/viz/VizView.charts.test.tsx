@@ -102,6 +102,28 @@ test("treemap viz nodes draw a tile per positive item and link through the viz's
   expect(opened).toEqual(["oxplow:oxplow/file?path=a.rs"]);
 });
 
+test("a tree row shows its `value` and `count` beside its label: one line, the whole value on hover", () => {
+  const { getAllByTestId } = render(
+    <VizView
+      run={run(
+        { viz: "tree", tree: { id: "i", parent: "p", label: "n", value: "v", count: "c" } },
+        ["i", "p", "n", "v", "c"],
+        [
+          ["a", "", "params", null, 2],
+          ["b", "a", "title", "Hello", null],
+          ["d", "a", "sql", "SELECT 1\nFROM t", null],
+        ],
+      )}
+      onOpenPage={() => {}}
+    />,
+  );
+  const rows = getAllByTestId("viz-tree-row");
+  expect(rows.map((r) => r.textContent)).toEqual(["params(2)", "title: Hello", "sql: SELECT 1 …"]);
+  const values = getAllByTestId("viz-tree-value");
+  expect(values[1]!.getAttribute("title")).toBe("SELECT 1\nFROM t");
+  cleanup();
+});
+
 test("a table with `hide_header` draws its rows and no header row", () => {
   const shown = render(<VizView run={run({ viz: "table" }, ["id"], [[1]])} onOpenPage={() => {}} />);
   expect(shown.queryAllByRole("columnheader")).toHaveLength(1);

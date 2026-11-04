@@ -6723,6 +6723,13 @@ export type VizTree = {
 	parent: string | null,
 	label: string | null,
 	/**
+	 *  The column a row's value reads from, beside its label: one line, the
+	 *  whole of it on hover.
+	 */
+	value?: string | null,
+	/**  The column of how many a row holds, drawn `(n)` beside its label. */
+	count?: string | null,
+	/**
 	 *  A lazy tree: the viz param a branch's children are read with. The
 	 *  run's rows are one level (the param's `default` is the top level);
 	 *  a branch opens by running the viz again with the param set to the

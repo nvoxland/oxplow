@@ -22,7 +22,7 @@ expect:
     - { id: resources, kind: viz, viz: table }
     - { id: implementations, kind: viz, viz: table }
   loaders:
-    pages:
+    resource_pages:
       rows:
         contains:
           - { title: Commit, description: $any, link: $any }

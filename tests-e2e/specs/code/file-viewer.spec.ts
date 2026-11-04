@@ -7,10 +7,10 @@ import { expect, test } from "../../support/fixtures.js";
 import { openFromLauncher } from "../../support/ui.js";
 
 // A file of a filesystem other than the working tree, or at a past
-// revision, is the File viewer's: read-only, no Save, and the Editor is
+// revision, is the Text view's: read-only, no Save, and the Editor is
 // never offered for it. A working-tree text file is the Editor's alone:
-// Open With has no other mode to offer. A binary file is viewed, never
-// edited: the File viewer's too (an image or a PDF: the Media page's).
+// View as has no other mode to offer. A binary file is viewed, never
+// edited: the Text view's too (an image or a PDF: the Media page's).
 
 type Page = import("@playwright/test").Page;
 
@@ -22,7 +22,7 @@ async function ready(page: Page) {
 
 const navigate = (daemon: Parameters<typeof run>[0], uri: string) => run(daemon, "oxplow.window.navigate", { uri });
 
-test("a file on the running extensions opens read-only in the File viewer", async ({ page, daemon }) => {
+test("a file on the running extensions opens read-only in the Text view", async ({ page, daemon }) => {
   await ready(page);
   const uri = "oxplow:oxplow/file?path=oxplow-foundation/extension.yaml&filesystem=oxplow:extensions";
   await navigate(daemon, uri);
@@ -38,7 +38,7 @@ test("a file on the running extensions opens read-only in the File viewer", asyn
   await expect(page.getByTestId("page-rail").filter({ visible: true })).toHaveCount(0);
 });
 
-test("a scratch file on oxplow:temp opens read-only in the File viewer", async ({ page, daemon }) => {
+test("a scratch file on oxplow:temp opens read-only in the Text view", async ({ page, daemon }) => {
   const temp = join(daemon.project, ".oxplow", "runtime", "temp");
   mkdirSync(temp, { recursive: true });
   writeFileSync(join(temp, "scratch.txt"), "scratch notes\n");
@@ -48,10 +48,10 @@ test("a scratch file on oxplow:temp opens read-only in the File viewer", async (
   await expect(page.getByTestId("viz-editor")).toHaveCount(0);
 });
 
-test("a binary file shows what it is instead of its bytes, in the File viewer and never the Editor", async ({ page, daemon }) => {
+test("a binary file shows what it is instead of its bytes, in the Text view and never the Editor", async ({ page, daemon }) => {
   writeFileSync(join(daemon.project, "blob.bin"), Buffer.from([0, 1, 2, 3, 0, 255]));
   await ready(page);
-  // A binary working-tree file has nothing to edit: the File viewer opens it.
+  // A binary working-tree file has nothing to edit: the Text view opens it.
   await navigate(daemon, "oxplow:oxplow/file?path=blob.bin");
   await expect(page.getByTestId("viz-code").filter({ visible: true })).toContainText("binary file, 6 bytes");
   await expect(page.getByTestId("viz-editor")).toHaveCount(0);
@@ -59,7 +59,7 @@ test("a binary file shows what it is instead of its bytes, in the File viewer an
   await expect(page.getByTestId("viz-code").filter({ visible: true })).toContainText("binary file, 6 bytes");
 });
 
-test("a working-tree file is the Editor's alone: Open With has no other mode", async ({ page, daemon }) => {
+test("a working-tree file is the Editor's alone: View as has no other mode", async ({ page, daemon }) => {
   writeFileSync(join(daemon.project, "koala.txt"), "koala\n");
   await ready(page);
   await navigate(daemon, "oxplow:oxplow/file?path=koala.txt");
@@ -69,7 +69,7 @@ test("a working-tree file is the Editor's alone: Open With has no other mode", a
   await expect(page.getByTestId("menu-item-page-open-with")).toHaveCount(0);
 });
 
-// The File viewer's body is the file, so its viz draws no Open file. A
+// The Text view's body is the file, so its viz draws no Open file. A
 // local file at a past revision has a working-tree version: the page's ☰
 // offers Open current version, which opens it in the Editor. An extension's
 // file has neither.

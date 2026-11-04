@@ -96,7 +96,7 @@ What a contribution is, in words, is in its kind's own dataset, joined on `uri`:
 `oxplow_read { uri: "oxplow:oxplow/page?page=<ext>/<slug>" }` gives one
 page's definition and deployment; **Definition** in a page's ☰ menu, About this page, is
 the same for the person (the running page file, drawn as Definition, a
-display mode of the file beside the File viewer's raw YAML). An extension that fails to load isn't in
+display mode of the file beside the Text view's raw YAML). An extension that fails to load isn't in
 `v_extension`: `oxplow_validate_extension` says why.
 
 ## When the person says "this page"

@@ -279,6 +279,13 @@ pub struct VizTree {
     pub id: Option<String>,
     pub parent: Option<String>,
     pub label: Option<String>,
+    /// The column a row's value reads from, beside its label: one line, the
+    /// whole of it on hover.
+    #[serde(default)]
+    pub value: Option<String>,
+    /// The column of how many a row holds, drawn `(n)` beside its label.
+    #[serde(default)]
+    pub count: Option<String>,
     /// A lazy tree: the viz param a branch's children are read with. The
     /// run's rows are one level (the param's `default` is the top level);
     /// a branch opens by running the viz again with the param set to the

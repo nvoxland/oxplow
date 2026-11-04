@@ -563,6 +563,8 @@ fn tree(run: &VizRun) -> String {
     struct Walk<'a> {
         rows: &'a [Vec<SqlCell>],
         label: usize,
+        value: Option<usize>,
+        count: Option<usize>,
         parent_of: &'a [Option<usize>],
         opens: &'a dyn Fn(usize) -> bool,
         seen: Vec<bool>,
@@ -574,8 +576,20 @@ fn tree(run: &VizRun) -> String {
                 return;
             }
             self.seen[at] = true;
+            let shown = |column: Option<usize>| {
+                column
+                    .and_then(|c| self.rows[at].get(c))
+                    .map(cell)
+                    .filter(|v| !v.is_empty())
+            };
+            let value = shown(self.value).map_or(String::new(), |v| {
+                let (first, rest) = v.split_once('\n').unwrap_or((&v, ""));
+                let more = if rest.is_empty() { "" } else { " …" };
+                format!(": {first}{more}")
+            });
+            let count = shown(self.count).map_or(String::new(), |n| format!(" ({n})"));
             self.lines.push(format!(
-                "{}- {}{}",
+                "{}- {}{}{value}{count}",
                 "  ".repeat(depth),
                 if (self.opens)(at) { "▸ " } else { "" },
                 self.rows[at].get(self.label).map(cell).unwrap_or_default()
@@ -590,6 +604,8 @@ fn tree(run: &VizRun) -> String {
     let mut w = Walk {
         rows,
         label,
+        value: column(run, t.value.as_ref()),
+        count: column(run, t.count.as_ref()),
         parent_of: &parent_of,
         opens: &opens,
         seen: vec![false; rows.len()],
@@ -1352,6 +1368,45 @@ mod tests {
         );
     }
 
+    /// A tree's `value` and `count` read beside the label, a long value by
+    /// its first line, as the app draws them.
+    #[test]
+    fn a_tree_reads_its_values_and_counts() {
+        let r = with(
+            run(
+                Viz::Tree,
+                None,
+                &["id", "parent", "name", "value", "count"],
+                vec![
+                    vec![
+                        t("a"),
+                        SqlCell::Null(()),
+                        t("params"),
+                        SqlCell::Null(()),
+                        SqlCell::Int(2),
+                    ],
+                    vec![t("b"), t("a"), t("title"), t("Hello"), SqlCell::Null(())],
+                    vec![
+                        t("c"),
+                        t("a"),
+                        t("sql"),
+                        t("SELECT 1\nFROM t"),
+                        SqlCell::Null(()),
+                    ],
+                ],
+            ),
+            |l| {
+                l.tree = Some(serde_json::from_value(serde_json::json!({
+                    "id": "id", "parent": "parent", "label": "name", "value": "value", "count": "count"
+                })).unwrap());
+            },
+        );
+        assert_eq!(
+            render(&r, &Resolved::default()),
+            "- params (2)\n  - title: Hello\n  - sql: SELECT 1 …"
+        );
+    }
+
     /// A tree nests each row under the row its parent names.
     #[test]
     fn a_tree_nests_rows_under_their_parents() {
@@ -1403,6 +1458,7 @@ mod tests {
                     label: Some("name".into()),
                     lazy: Some("folder".into()),
                     branch: Some("is_dir".into()),
+                    ..Default::default()
                 })
             },
         );

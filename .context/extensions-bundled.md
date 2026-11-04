@@ -184,7 +184,7 @@ screens and oxplow-bundled's add the review and analysis:
   `measure-data`, `dimension-data`, `command-data`, `collector-data`,
   `resource-data`), with `default: true`; the
   kind's definition page above (`dataset-definition` for a dataset) is the
-  alternate, in Open With. A metric is the other way round: `metric` (its
+  alternate, in View as. A metric is the other way round: `metric` (its
   definition, every fact about it, and its trend at the bottom) is the
   default, and `metric-data` (its recordings alone) the other mode. A data page is a title,
   the subject's name and one line, then the rows in a table with a few

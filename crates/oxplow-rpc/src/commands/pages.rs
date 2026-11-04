@@ -170,7 +170,7 @@ pub async fn get_page(svc: &Services, id: String) -> Result<Page, IpcError> {
 
 /// The pages that can draw `uri`, in the order the extensions list them
 /// (`oxplow_app::pages::renderers`): the window's one way to choose what
-/// draws a tab and what Open With lists.
+/// draws a tab and what View as lists.
 pub async fn renderers_for(
     svc: &Services,
     uri: String,

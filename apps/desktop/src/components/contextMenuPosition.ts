@@ -55,3 +55,24 @@ export function submenuTopOffset(
   if (overflowBottom <= 0) return 0;
   return Math.max(-overflowBottom, margin - rect.top);
 }
+
+/** Between an item and its submenu. */
+export const SUBMENU_GAP = 2;
+
+/**
+ * Where a submenu's left edge goes: on its item's right when it fits, else on
+ * its left, else (wider than either side) against the window's right edge and
+ * never past its left, so a wide one is always on screen.
+ */
+export function submenuLeft(
+  anchor: { left: number; right: number },
+  width: number,
+  viewportWidth: number,
+  margin = MENU_MARGIN,
+): number {
+  const right = anchor.right + SUBMENU_GAP;
+  if (right + width <= viewportWidth) return right;
+  const left = anchor.left - width - SUBMENU_GAP;
+  if (left >= 0) return left;
+  return Math.max(margin, viewportWidth - width - margin);
+}

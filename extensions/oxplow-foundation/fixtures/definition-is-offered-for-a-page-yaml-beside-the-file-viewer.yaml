@@ -1,4 +1,4 @@
-# A running page's YAML is a page: Open With offers the File viewer (the raw
+# A running page's YAML is a page: View as offers the Text view (the raw
 # YAML), first and so the one that opens, and Definition (what it is made
 # of), which narrows by content and so follows. The Editor is not offered,
 # the file being a running copy.

@@ -1,4 +1,4 @@
-title: File Viewer
+title: Text
 description: "A file read-only, at a past revision or on another filesystem, or a binary file of the working tree, and the page that opens one; a binary or very large one says what it is instead. A working-tree text file is the Editor's alone, an image or a PDF the Media page's."
 label: '{{param.path|basename}}{{row.suffix}}'
 for: oxplow/file

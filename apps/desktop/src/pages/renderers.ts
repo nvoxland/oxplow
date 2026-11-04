@@ -39,7 +39,7 @@ export function pickRenderer(renderers: readonly Renderer[], view: Record<string
   );
 }
 
-/** What Open With offers for a tab: the renderers to pick among, the one
+/** What View as offers for a tab: the renderers to pick among, the one
  *  drawing now and what picking one does (a view change in the tab; the
  *  default renderer is the absent key, so tabs match on it). Undefined
  *  with fewer than two renderers (a route has none). The nav bar's ☰ and

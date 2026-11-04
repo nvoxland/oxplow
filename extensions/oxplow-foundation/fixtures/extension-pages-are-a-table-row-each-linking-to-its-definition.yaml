@@ -9,7 +9,7 @@ expect:
   nodes:
     - { id: pages, kind: viz, viz: table }
   loaders:
-    pages:
+    resource_pages:
       rows:
         contains:
           - { title: Commit, id: oxplow-foundation/commit, link: $any }

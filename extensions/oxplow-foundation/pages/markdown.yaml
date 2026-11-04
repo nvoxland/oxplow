@@ -1,5 +1,5 @@
 title: Markdown
-description: "A markdown file read as a document — headings, links, tables, images and diagrams drawn — on any filesystem and at any revision. A display mode of a `.md` file beside the Editor and the File viewer; embed it with a `uri` to draw a markdown file inside another page."
+description: "A markdown file read as a document — headings, links, tables, images and diagrams drawn — on any filesystem and at any revision. A display mode of a `.md` file beside the Editor and the Text view; embed it with a `uri` to draw a markdown file inside another page."
 label: '{{param.path|basename}}'
 icon: book-open
 for: oxplow/file

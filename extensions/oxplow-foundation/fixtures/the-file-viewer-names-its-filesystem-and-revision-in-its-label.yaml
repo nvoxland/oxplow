@@ -1,4 +1,4 @@
-# The File viewer draws a file of any filesystem at any revision; its tab
+# The Text view draws a file of any filesystem at any revision; its tab
 # label carries the filesystem and revision only when they aren't the
 # working tree's: nothing for the working tree, the revision for the local
 # filesystem, the filesystem (and a deployment's hash cut to 7) for another.

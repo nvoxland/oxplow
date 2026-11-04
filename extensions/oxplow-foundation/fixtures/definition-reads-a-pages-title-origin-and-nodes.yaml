@@ -1,10 +1,10 @@
 # Definition is a display mode of a page's YAML file: the system reads the
 # file (`content`), `oxplow.page.describe` says what page it is, and the
 # page shows it part by part: where it comes from (its source
-# opens the same running copy in the File viewer, the raw YAML), what
+# opens the same running copy in the Text view, the raw YAML), what
 # it is for, how it is used (one line each), its params with this run's
 # values, its loaders, its nodes and its actions where they sit. The tab is
-# named for the file; the raw YAML is the File viewer's, one Open With away.
+# named for the file; the raw YAML is the Text view's, one View as away.
 when:
   page: oxplow-foundation/definition
   params:
@@ -28,7 +28,7 @@ expect:
     usage:
       rows:
         - { line: "It draws `oxplow/commit` and is the page that opens one." }
-        - { line: "It is a display mode of `oxplow/commit` (Open With)." }
+        - { line: "It is a display mode of `oxplow/commit` (View as)." }
         - { line: $any }
         - { line: "It runs again when its data changes." }
         - { line: "People can't comment on it." }

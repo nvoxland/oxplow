@@ -1,5 +1,5 @@
 # A page with `for:` is handed `content`, the record its `uri` names: for a
-# file, what its filesystem knows of it. The File viewer reads none of it
+# file, what its filesystem knows of it. The Text view reads none of it
 # (it draws the file from its path), but the system runs the loader first,
 # and a file that is not there is no row.
 temp:

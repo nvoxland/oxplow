@@ -181,7 +181,7 @@ describe("display modes: one tab per identity and mode", () => {
     expect(ids(s)).toEqual([asDefinition]);
   });
 
-  test("Open With: the tab switches mode in place and a tab already in that mode closes", () => {
+  test("View as: the tab switches mode in place and a tab already in that mode closes", () => {
     let s = open(open(open(emptySession(), e(f)), e(def)), e(a));
     const slot = slotOf(s, file);
     s = navigate(s, slot, e(def), { replace: true });

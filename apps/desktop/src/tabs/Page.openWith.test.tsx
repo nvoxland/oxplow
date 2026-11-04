@@ -34,7 +34,7 @@ function shown(id: string, renderers: Renderer[] | undefined, patches: unknown[]
   );
 }
 
-/** The Open With submenu's items, once the ☰ has it. */
+/** The View as submenu's items, once the ☰ has it. */
 async function openWith(view: ReturnType<typeof render>) {
   fireEvent.click(await waitFor(() => view.getByTestId("page-nav-menu")));
   fireEvent.click(await waitFor(() => view.getByTestId("menu-item-page-open-with")));

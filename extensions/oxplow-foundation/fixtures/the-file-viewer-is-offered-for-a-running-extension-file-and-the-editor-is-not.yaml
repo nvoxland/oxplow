@@ -1,4 +1,4 @@
-# A file of a running extension is read-only: the File viewer draws it, the
+# A file of a running extension is read-only: the Text view draws it, the
 # Editor is not offered.
 when:
   command: oxplow.page.renderers

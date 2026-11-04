@@ -1,4 +1,4 @@
-# Which pages draw a file is the daemon's call. The File viewer takes any
+# Which pages draw a file is the daemon's call. The Text view takes any
 # file on any filesystem, and a markdown file is also drawn as a document;
 # the Editor writes the worktree, so a scratch file is not offered to it.
 temp:

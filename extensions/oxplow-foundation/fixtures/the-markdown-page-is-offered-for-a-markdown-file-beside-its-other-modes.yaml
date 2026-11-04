@@ -1,5 +1,5 @@
 # A `.md` file gets a second mode, Markdown: the document drawn. The Editor
-# stays the mode that opens a working-tree file, and the File viewer the one
+# stays the mode that opens a working-tree file, and the Text view the one
 # that opens a file elsewhere; a file that is no markdown gets no such mode.
 temp:
   note.md: "# Hello\n"

@@ -1,5 +1,5 @@
-# A `.json`, `.yaml` or `.yml` file gets a mode, Data: its values as a tree.
-# A YAML file that is no page has no Definition, so the File viewer then Data.
+# A `.json`, `.yaml` or `.yml` file gets a mode, Tree: its values as a tree.
+# A YAML file that is no page has no Definition, so the Text view then Tree.
 temp:
   shape.yaml: "just: a list\nof: notes\n"
   shape.json: "{\"a\": 1}"

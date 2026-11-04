@@ -2,7 +2,7 @@
 /// one click (usability.md "Actions are data; core draws them": the mode
 /// is what a person comes to a README or a CSV to pick). Two or three are
 /// a segmented control, the one drawing pressed; more are one button named
-/// for the current mode that opens the list. Both are the ☰'s Open With
+/// for the current mode that opens the list. Both are the ☰'s View as
 /// pick (`openWithOf`): the default renderer drops the key. Cmd+Shift+V
 /// cycles them (`navigationKeys.ts`).
 import type { CSSProperties } from "react";

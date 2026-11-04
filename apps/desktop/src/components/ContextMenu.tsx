@@ -4,6 +4,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   MENU_MAX_HEIGHT,
   clampMenuPosition,
+  submenuLeft,
   submenuTopOffset,
 } from "./contextMenuPosition.js";
 
@@ -154,7 +155,7 @@ export function MenuList({ items, header, onAction, minWidth = 220, framed = tru
                 }
               }}
               disabled={!item.enabled}
-              title={item.hint}
+              title={item.hint ?? (typeof item.label === "string" ? item.label : undefined)}
               style={{
                 ...menuItemStyle,
                 opacity: item.enabled ? 1 : 0.45,
@@ -165,7 +166,7 @@ export function MenuList({ items, header, onAction, minWidth = 220, framed = tru
               <span style={checkStyle}>{item.checked ? "✓" : ""}</span>
               {item.swatch ? <span aria-hidden style={{ ...swatchStyle, background: item.swatch }} /> : null}
               {item.icon && ICONS[item.icon] ? <MenuIcon name={item.icon} /> : null}
-              <span style={{ flex: 1 }}>{item.label}</span>
+              <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{item.label}</span>
               <span style={shortcutStyle}>{hasSubmenu ? "▸" : item.shortcut ? formatShortcut(item.shortcut) : ""}</span>
             </button>
             {hasSubmenu && openSubmenuId === item.id ? (
@@ -213,11 +214,7 @@ function Submenu({
     if (!node || !anchor) return;
     const at = anchor.getBoundingClientRect();
     const own = node.getBoundingClientRect();
-    const right = at.right + SUBMENU_GAP;
-    const left =
-      right + own.width > window.innerWidth && at.left - own.width - SUBMENU_GAP >= 0
-        ? at.left - own.width - SUBMENU_GAP
-        : right;
+    const left = submenuLeft(at, own.width, window.innerWidth);
     const top = at.top + submenuTopOffset({ top: at.top, height: own.height }, window.innerHeight);
     setPlace({ left, top });
   }, [anchor, items, minWidth]);
@@ -234,6 +231,7 @@ function Submenu({
         // flashes in the window's corner.
         visibility: place ? "visible" : "hidden",
         zIndex: 2,
+        maxWidth: SUBMENU_MAX_WIDTH,
       }}
     >
       <MenuList items={items} header={header} onAction={onAction} minWidth={minWidth} />
@@ -241,8 +239,8 @@ function Submenu({
   );
 }
 
-/** Between an item and its submenu. */
-const SUBMENU_GAP = 2;
+/** The widest a submenu draws: a longer label is cut, whole on hover. */
+const SUBMENU_MAX_WIDTH = 480;
 
 /** A submenu's line of intent, atop its items: it wraps (a sentence, not
  *  a name) and stays as narrow as the menu. */

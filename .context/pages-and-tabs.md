@@ -157,7 +157,7 @@ segmented control (`page-nav-mode-<extension>/<page>`, the one drawing
 `aria-pressed`), more are one button named for the current mode
 (`page-nav-modes`) that opens the list (`menu-item-page-mode-<…>`, the
 current checked). Cmd+Shift+V goes to the next (`nextMode`). The same
-list is **Open With** in the nav bar's ☰ (a submenu, `menu-item-page-open-with`,
+list is **View as** in the nav bar's ☰ (a submenu, `menu-item-page-open-with`,
 each renderer `menu-item-page-open-with-<extension>/<page>`, the one
 drawing it checked), which keyboard users and agents' text keep. All run
 the same pick (`openWithOf`). Picking one is a view change
@@ -187,9 +187,9 @@ otherwise. A tab's label and icon come from `recordedPageKind(ref)` /
 Foundation's page files are oxplow's renderers (`agent-session`,
 `commit`, `csv` (a CSV file as a table, its first row the columns), `data-file` (a JSON or YAML file as a tree of its values), `diagram` (a mermaid file drawn), `directory`, `editor`, `file-viewer`, `markdown` (a `.md` file
 drawn as a document, on any filesystem and revision: a mode beside the
-Editor and the File viewer, never the default; `embed` it with a `uri` to
+Editor and the Text view, never the default; `embed` it with a `uri` to
 draw a markdown file inside another page), `media` (an image or a PDF
-shown as itself, the default for one anywhere; the File viewer stands
+shown as itself, the default for one anywhere; the Text view stands
 aside for it), `tsv` (a TSV file as a table), `wiki-page`, `work-item`,
 `diff-view` for `oxplow/snapshot`, `oxplow/effort` and `oxplow/turn`, and
 `external-url`, a page over the `embed` viz, for `https` and `http`). An agent
@@ -210,7 +210,7 @@ shows, the `#` how it shows it, and the identity is the id without its
 `#` (`identityOf`). A `[[…]]` link, a `page_ref` row, a backlink and a tab
 all agree on one string. **Tabs match on more than identity: a tab shows
 an identity in a display mode** (`modeOf`: the `#oxplow.renderer` value,
-`""` when the view names none — the default). The File viewer of a file and
+`""` when the view names none — the default). The Text view of a file and
 its Definition are two tabs; a page (with its mode) shows once. Things
 about the resource itself (bookmarks, comments, backlinks, the origin's
 position) stay on identity alone. Two shapes:
@@ -279,7 +279,7 @@ Every page is one of two kinds, told by `for:`.
 
 - A **resource page** (`for: <resource>`) is a *display mode* of the
   resources it names: a commit, a metric, a file. It is never opened on its
-  own and never listed. The resource is what search finds and what Open With
+  own and never listed. The resource is what search finds and what View as
   offers modes of. So it takes no `category`, `keywords` or `badge`
   (load errors), must declare a `uri` param (the URI it shows; the host
   gives it), and the launcher, `launcher_unfilled_params`, `launcherCounts`
@@ -358,14 +358,14 @@ defines what the person sees:
   page in the file), `content: { text: true }`. The view is
   `#oxplow.renderer=oxplow-foundation/definition&params=<the run's params
   as JSON>` (`viewActions.ts::definitionUri`); the tab reads
-  `Definition: <slug>.yaml`. Open With on any page file lists it beside the
-  File viewer, which stays the default and shows the raw YAML (Definition
+  `Definition: <slug>.yaml`. View as on any page file lists it beside the
+  Text view, which stays the default and shows the raw YAML (Definition
   has no YAML section). A page with no running copy (an
   extension that runs from its source) has no Definition row
   (`PageHost`); there is no menu action for it. Definition reads the file once (`oxplow.page.describe`
   over the file's `content.uri` and `content.text`) and shows: where the
   page comes from (its Source is that
-  same running copy, a link that opens it raw in the File viewer with the
+  same running copy, a link that opens it raw in the Text view with the
   `#oxplow.renderer=` key; never the editable worktree file), its
   description, how it is used (a line each: what it draws, that it is a
   display mode of a resource, its tab, updates, comments, how agents read
@@ -613,7 +613,7 @@ oxplow-bundled both have `namespace: oxplow` and share the core page
 names, so a slug one of them declares the other may not
 (`pages::schema::refuse_shared_core_pages`: the later in load order loses
 that page with a load error; bundled's panel bodies are
-`comments-panel` and `go-to-panel` for that reason). Open With lists the same daemon list. The tab body is `PageFileView`: its run's
+`comments-panel` and `go-to-panel` for that reason). View as lists the same daemon list. The tab body is `PageFileView`: its run's
 params are the entry's URI (`pageRunParams`: the `?` params — a
 renderer's `uri` and its resource's own — and the `#` params the page
 declares as a filter, a selection or a view param; a param with no role is a
@@ -629,7 +629,7 @@ run takes new params itself (`setParams`). `PageHost` takes a `PageKey`,
 holds its run (`usePageRunWith` over `usePageRunsStore()`: the
 `PageRunsContext`'s store, else the window's; `RunState` carries the
 `runId`, `rerun` is Refresh) and draws the `tabs/Page.tsx` chrome:
-the rail's groups, top to bottom: `PageRail` first (Filters, the `rail:` tree, Selection), then Contents and See also (the page's `see_also:` links, then one `View as <renderer title>` link per other renderer of the tab's URI, `RailSeeAlso`; the view links come from the same `openWithOf` list as the nav bar's Open With and run the same pick, so the default renderer drops the key; none for a route or a single renderer; not in the ☰ See also submenu, Open With is there); every group's body sits a little in from its heading, the same in each (`.ox-rail-group > :not(.ox-rail-group-head)`; the Contents active bar hangs in that indent)
+the rail's groups, top to bottom: `PageRail` first (Filters, the `rail:` tree, Selection), then Contents and See also (the page's `see_also:` links, then one `View as <renderer title>` link per other renderer of the tab's URI, `RailSeeAlso`; the view links come from the same `openWithOf` list as the nav bar's View as and run the same pick, so the default renderer drops the key; none for a route or a single renderer; not in the ☰ See also submenu, View as is there); every group's body sits a little in from its heading, the same in each (`.ox-rail-group > :not(.ox-rail-group-head)`; the Contents active bar hangs in that indent)
 in the
 rail (`pages/railGroups.tsx`), which `railHas` (`pages/railHas.ts`) decides
 from the run: with nothing in it (no switch, `filter` or `selection` param,
@@ -792,7 +792,7 @@ margin; an embed or a slot takes its title from the page it shows):
   never routes to it
   (`.context/editor-and-monaco.md` "The editor viz"). `file-viewer`
   (`for: oxplow/file`, no `accepts`, so it is offered for every file URI
-  and Open With lists it beside the Editor on a local file; params `uri`,
+  and View as lists it beside the Editor on a local file; params `uri`,
   `path`, `filesystem`, `rev`, `lines`; `comments: true`): a `code` viz of
   the file on that filesystem at that revision, `#lines=` marked, a
   binary or over-5-MiB file shown as a placeholder. Its label is computed
@@ -1097,7 +1097,7 @@ out and the ☰ itself hidden when it would be empty:
    is not listed — the menu asks the daemon, `ref_commands`, as it opens),
    and each submenu by its name (`menu-item-page-submenu-<name>`) that
    an action's explicit `submenu` makes, holding those actions sorted;
-3. **Open With** (when two or more pages render the URI; the same list the
+3. **View as** (when two or more pages render the URI; the same list the
    bar's modes control swaps in one click);
 
 A right-click on the page's body that no row, editor or selection takes
@@ -1126,7 +1126,7 @@ A page says **what** goes in the bar, as data:
   says so, a custom component's when its `setActions` does; only oxplow
   marks an action `standard`;
   a page action may `open: <column>` instead of running a command: pressing
-  it opens the URI that column of the page's row holds (the File viewer's
+  it opens the URI that column of the page's row holds (the Text view's
   Open current version, offered `when: current_uri`, a local file at a past
   revision); `PageTree` also tells a viz it is the page (`isPage`: the root
   of the run's own tree, full size) so a viz that links to its own resource
@@ -1402,7 +1402,7 @@ the bodies, Back/Forward, Up/Down, the star, Ask, what agents read.
 showing that **identity in that mode** (`showingOf`), else a new tab; active.
 The same page at another view — a diff at another line, Board with another
 filter — moves the tab showing it to that view; opening Definition of a file
-opens or focuses a Definition tab and leaves its File viewer tab alone), `navigate` (the one move: pushes and clears
+opens or focuses a Definition tab and leaves its Text view tab alone), `navigate` (the one move: pushes and clears
 forward; `{ replace: true }` takes the current entry's place. The same
 identity and mode in another view keeps the page: its state, origin and
 mounted body; a change of mode is a new page in this tab (no state carries). A same-page `replace` rewrites the entry in place and keeps forward

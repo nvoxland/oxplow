@@ -1,4 +1,4 @@
-# A working-tree file has one mode, the Editor: the File viewer adds
+# A working-tree file has one mode, the Editor: the Text view adds
 # nothing a person needs there, so it is offered only where there is no
 # editing, a past revision or another filesystem.
 when:

@@ -1,5 +1,5 @@
 title: Diagram
-description: "A mermaid file drawn as its diagram, on any filesystem and at any revision. A display mode of a `.mmd` or `.mermaid` file beside the Editor and the File viewer."
+description: "A mermaid file drawn as its diagram, on any filesystem and at any revision. A display mode of a `.mmd` or `.mermaid` file beside the Editor and the Text view."
 label: '{{param.path|basename}}'
 icon: git-compare
 for: oxplow/file

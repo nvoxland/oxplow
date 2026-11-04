@@ -1,4 +1,4 @@
-# "See also": the File viewer links to a local file's history (the index
+# "See also": the Text view links to a local file's history (the index
 # has none for another filesystem) and to its folder on its filesystem.
 when:
   page: oxplow-foundation/file-viewer

@@ -4,7 +4,7 @@
 /// and its extensions' own sorted by label (an action, a command about the
 /// page's resource — all at the top level, the command's `ui.group` is its
 /// palette heading and its row menu's grouping, not a submenu here — or a
-/// submenu an action's `submenu` names), then Open With, then the panels (Backlinks, Outbound, Pin to Dashboard) it opens
+/// submenu an action's `submenu` names), then View as, then the panels (Backlinks, Outbound, Pin to Dashboard) it opens
 /// under the button. The primary and prominent actions are buttons in the
 /// bar instead. A section with nothing in it is left out, and so is the
 /// menu.
@@ -12,7 +12,7 @@ import type { PageAction } from "../kit/actions.js";
 import type { MenuItem } from "../menu.js";
 import type { CommandEntry } from "../components/quickOpenResults.js";
 
-/// "Open With": the pages that render the shown URI, when there's more
+/// "View as": the pages that render the shown URI, when there's more
 /// than one, and which of them draws it now. Picking one writes the URI's
 /// view (`#oxplow.renderer=<extension>/<page>`), so the same URI stays in
 /// the tab and Back returns to how it was shown.
@@ -146,7 +146,7 @@ export function pageMenuItems(source: PageMenuSource): MenuItem[] {
       ? [
           {
             id: "page-open-with",
-            label: "Open With",
+            label: "View as",
             enabled: true,
             submenu: openWith.options.map((o) => ({
               id: `page-open-with-${o.name}`,

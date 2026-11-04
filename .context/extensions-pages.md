@@ -112,7 +112,7 @@ Where it lives, and what is loaded:
   file (`for: oxplow/file`, `accepts.content` over `oxplow.page.describe`):
   the page part by part (where it comes from, params, loaders, nodes,
   actions, answers), with its Source a link to the
-  same running copy in the File viewer (the raw YAML). A page with no running copy has no Definition row
+  same running copy in the Text view (the raw YAML). A page with no running copy has no Definition row
   (pages-and-tabs.md).
 - **An inline page** (`parse_inline_page`: a markdown ` ```oxplow-page `
   block) only reads: no `command` loaders, no actions, forms, terminals,
@@ -574,7 +574,7 @@ reads the page's first loader's one row. A drag action also binds
   The extension check names a column the loader lacks (`when` and `open`
   alike, for page and viz actions). `PageAction.command` is nullable in the
   bindings; `actionDoes` (vizActions.ts) is what an action's title says
-  (`opens <column>`). The File viewer's "Open current version" is one:
+  (`opens <column>`). The Text view's "Open current version" is one:
   `open: current_uri` over its loader's column.
 - An action runs as the page for whoever pressed it
   (`Actor::Page { page_id, on_behalf_of }`; `pages/actions.rs`,

@@ -1,5 +1,5 @@
 title: Definition
-description: What a page file is made of, part by part — a display mode of a page's YAML file, beside the File viewer's raw YAML.
+description: What a page file is made of, part by part — a display mode of a page's YAML file, beside the Text view's raw YAML.
 label: 'Definition: {{param.path|basename}}'
 icon: file-text
 for: oxplow/file
@@ -66,7 +66,7 @@ loaders:
                        WHEN "default" THEN 'It draws ' || kinds || ' and is the page that opens one.'
                        ELSE 'It draws ' || kinds || ', but another page is the one that opens.' END FROM p
         UNION ALL
-        SELECT 2, CASE WHEN draws > 0 THEN 'It is a display mode of ' || kinds || ' (Open With).'
+        SELECT 2, CASE WHEN draws > 0 THEN 'It is a display mode of ' || kinds || ' (View as).'
                        WHEN category IS NOT NULL THEN 'It is in the launcher, under ' || category || '.'
                        ELSE 'It isn''t in the launcher: links from other pages open it.' END FROM p
         UNION ALL

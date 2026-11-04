@@ -63,9 +63,9 @@ for a markdown file at a past revision or inside an extension.
 A file's modes sit in the nav bar: two or three as buttons, the
 one shown pressed, and more as one button named for the current
 mode that opens the list. Cmd+Shift+V goes to the next mode. The
-same list is **Open With** in the tab's ☰ menu and **View as**
+same list is **View as** in the tab's ☰ menu and **View as**
 under See also in the rail. A CSV or TSV file has a **Table** mode.
-A JSON or YAML file has a **Data** mode, a tree of its values. A
+A JSON or YAML file has a **Tree** mode, its keys and values as a tree. A
 mermaid file (`.mmd` or `.mermaid`) has a **Diagram** mode.
 
 The chrome carries a per-snapshot history dropdown that lists

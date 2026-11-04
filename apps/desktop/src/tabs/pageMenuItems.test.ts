@@ -6,7 +6,7 @@ import { barActions, pageMenuItems } from "./pageMenuItems.js";
 const ids = (items: MenuItem[]) => items.map((i) => (i.separator ? "—" : i.id));
 const noop = () => {};
 
-test("standard actions come first in their own order, then the custom ones sorted, then Open With and the panels", () => {
+test("standard actions come first in their own order, then the custom ones sorted, then View as and the panels", () => {
   const items = pageMenuItems({
     actions: [
       { id: "save", label: "Save", run: noop, primary: true },
@@ -88,7 +88,7 @@ test("the items run what they stand for", () => {
   expect(ran).toEqual(["ask", "command", "pick:a/c", "panel:backlinks", "panel:pin"]);
 });
 
-test("a page that offers nothing gets no menu, and Open With needs two renderers", () => {
+test("a page that offers nothing gets no menu, and View as needs two renderers", () => {
   expect(pageMenuItems({ openPanel: noop })).toEqual([]);
   expect(
     pageMenuItems({ openWith: { options: [{ name: "a/b", title: "B" }], current: "a/b", pick: noop }, openPanel: noop }),
