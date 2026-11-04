@@ -27,7 +27,7 @@ test("work handed off is seen on the other thread, and taking it moves its item"
   // the item from lists.
   await page.getByTestId(`navigator-strip-thread-${daemon.thread}`).click({ button: "right" });
   await page.getByTestId("menu-item-ref-commands-Threads").click();
-  await page.getByTestId("menu-item-ref-command-oxplow.handoff.send").click();
+  await page.getByTestId("menu-item-ref-command-oxplow.handoff.offer").click();
   await page.getByTestId("viz-form-fields-to_thread").selectOption({ label: "Docs" });
   await page.getByTestId("viz-form-fields-work_item").selectOption({ label: "Write the guide" });
   await page.getByTestId("viz-form-fields-body").fill("The outline is done; write the rest.");
@@ -37,7 +37,7 @@ test("work handed off is seen on the other thread, and taking it moves its item"
   // On the other thread its Tasks page shows it; Take moves the item there.
   await page.getByTestId(`navigator-strip-thread-${docsId}`).click();
   await openFromLauncher(page, "Tasks");
-  const inbound = page.locator('[data-testid="page-file"]:visible [data-node="oxplow-foundation.thread-handoffs-in"]');
+  const inbound = page.locator('[data-testid="page-file"]:visible [data-node="oxplow-bundled.thread-handoffs-in"]');
   await expect(inbound).toContainText("The outline is done");
   await inbound.getByText("The outline is done").click({ button: "right" });
   await page.getByTestId("menu-item-viz-action-take").click();
