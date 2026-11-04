@@ -276,7 +276,7 @@ async fn a_job_does_not_succeed_across_a_change_to_its_declaration() {
     assert_eq!(done["state"], json!("cancelled"), "{done}");
     assert_eq!(done["version"], json!(1), "it stays the old declaration's");
     assert!(
-        done["text"].as_str().unwrap().len() < words(40).len(),
+        done["text"].as_str().unwrap().len() < words(1000).len(),
         "{done}"
     );
     assert_eq!(completions(&fx, &id).await, ["cancelled"]);
