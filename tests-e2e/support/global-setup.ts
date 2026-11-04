@@ -40,6 +40,9 @@ export default function globalSetup(): void {
     ["build", "-p", "oxplow-daemon-sim", "-p", "oxplow-harness-fake", "-p", "oxplow-provider-fake", "--message-format=json"],
     { encoding: "utf8", maxBuffer: 256 * 1024 * 1024, stdio: ["ignore", "pipe", "inherit"] },
   );
+  // The daemon runs a page's or command's script in this worker, found next
+  // to its own binary; without it every spec that runs one fails.
+  execFileSync("cargo", ["build", "-p", "oxplow-script", "--bin", "oxplow-script-worker"], { stdio: ["ignore", "inherit", "inherit"] });
   process.env.OXPLOW_E2E_DAEMON = built(output, "oxplow-daemon-sim");
   process.env.OXPLOW_E2E_HARNESS_FAKE = built(output, "oxplow-harness-fake");
   process.env.OXPLOW_E2E_PROVIDER_FAKE = built(output, "oxplow-provider-fake");
