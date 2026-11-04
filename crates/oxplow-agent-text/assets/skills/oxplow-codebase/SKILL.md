@@ -23,8 +23,7 @@ documents each column.
   WHERE f.path = 'src/lib.rs' ORDER BY c.committed_at DESC LIMIT 20
   ```
 
-  Who changes a file most: the same join, `GROUP BY c.author`. Who last
-  changed each line: the `oxplow_vcs_blame { path, revision? }` tool (`working`,
+  Who last changed each line: the `oxplow_vcs_blame { path, revision? }` tool (`working`,
   `snap:<id>` or `git:<rev>`; an uncommitted line names no commit).
   Quick answers have a tool each (`references/history.md`); history past
   the index (any revision, one path, paged) is `oxplow_vcs_log`.
@@ -69,7 +68,4 @@ they get a red toast and a row on the Alerts page. Each is recorded, so
 - **The output itself** is `v_op_error_output` (`event_id`, `stderr`,
   `stdout`). A row with `output_size` NULL captured nothing; its
   `message` is all.
-- Rows keep 30 days, their output 14; an older row keeps its label, the
-  details NULL.
-- Commands *you* ran fail back to you (`run_command`); this is the
-  person's side.
+- How long they keep, and whose: `references/history.md`.

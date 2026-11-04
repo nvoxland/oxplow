@@ -40,3 +40,9 @@ compared with the default branch. A side is any revision git resolves
   a new stream can adopt.
 - `v_snapshot_op` — the log of snapshots a stream took (why each ran, its
   parent, how long it took): what the `snapshots` page reads.
+
+## Small answers
+
+- Who changes a file most: join `v_commit_file` to `v_commit` on `sha`, `GROUP BY c.author`.
+- `v_op_error` rows keep 30 days, their output 14; an older row keeps its label, the details NULL.
+- `v_op_error` is the person's side: commands *you* ran fail back to you (`run_command`).
