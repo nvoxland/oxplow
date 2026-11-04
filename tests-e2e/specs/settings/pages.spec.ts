@@ -91,8 +91,12 @@ test("a stream's prompt is edited and saved on its Settings page", async ({ page
 });
 
 // New Stream is the foundation's form over `oxplow.stream.create`: a source
-// shows only its own fields, and the page gives way to the stream made.
-test("New Stream forks a branch into a stream and gives way to it", async ({ page }) => {
+// shows only its own fields, and the page gives way to the stream made. On
+// a daemon of its own: a second stream is the window's stream afterwards, and
+// a spec after this one on the worker's daemon would list its worktree, not
+// the project's.
+test("New Stream forks a branch into a stream and gives way to it", async ({ fresh }) => {
+  const { page } = fresh;
   await page.goto("/");
   await openFromLauncher(page, "New Stream");
   const form = page.locator('[data-testid="viz-form"]:visible');

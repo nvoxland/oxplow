@@ -28,10 +28,10 @@ test("work handed off is seen on the other thread, and taking it moves its item"
   await page.getByTestId(`navigator-strip-thread-${daemon.thread}`).click({ button: "right" });
   await page.getByTestId("menu-item-ref-commands-Threads").click();
   await page.getByTestId("menu-item-ref-command-oxplow.handoff.offer").click();
-  await page.getByTestId("viz-form-fields-to_thread").selectOption({ label: "Docs" });
-  await page.getByTestId("viz-form-fields-work_item").selectOption({ label: "Write the guide" });
-  await page.getByTestId("viz-form-fields-body").fill("The outline is done; write the rest.");
-  await page.getByTestId("viz-form-fields-submit").click();
+  await page.getByTestId("viz-form-fields-to_thread").filter({ visible: true }).selectOption({ label: "Docs" });
+  await page.getByTestId("viz-form-fields-work_item").filter({ visible: true }).selectOption({ label: "Write the guide" });
+  await page.getByTestId("viz-form-fields-body").filter({ visible: true }).fill("The outline is done; write the rest.");
+  await page.getByTestId("viz-form-fields-submit").filter({ visible: true }).click();
   await until("the handoff to be recorded", 15_000, async () => (await value(daemon, "SELECT count(*) FROM v_handoff")) === 1);
 
   // On the other thread its Tasks page shows it; Take moves the item there.

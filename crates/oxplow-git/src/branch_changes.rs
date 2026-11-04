@@ -410,12 +410,18 @@ mod tests {
         assert!(!scopes.on_default_branch);
     }
 
-    /// tsk241: the branch context is read in-process; the one git process a
-    /// call spawns is the working tree's `status` (its untracked walk uses
-    /// git's own caches). nextest runs each test in its own process, so the
-    /// counting `git` on `PATH` is this test's alone.
+    /// The branch context is read in-process; the one git process a call
+    /// spawns is the working tree's `status` (its untracked walk uses git's
+    /// own caches). The counting `git` is put on `PATH` of a child run of
+    /// this test (its own process), so it neither counts nor breaks other
+    /// tests of this binary when they run as threads of one process.
     #[test]
     fn change_scopes_spawn_only_the_status() {
+        const CHILD: &str = "OXPLOW_TEST_SCOPES_DIR";
+        if let Ok(dir) = std::env::var(CHILD) {
+            get_change_scopes(&std::path::Path::new(&dir).join("work"));
+            return;
+        }
         let dir = tempdir().unwrap();
         repo_with_upstream(dir.path());
         let real = Cmd::new("sh")
@@ -444,9 +450,17 @@ mod tests {
             shim.display(),
             std::env::var("PATH").unwrap_or_default()
         );
-        // SAFETY: nextest runs this test alone in its process.
-        unsafe { std::env::set_var("PATH", path) };
-        get_change_scopes(&dir.path().join("work"));
+        let status = Cmd::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "branch_changes::tests::change_scopes_spawn_only_the_status",
+                "--test-threads=1",
+            ])
+            .env("PATH", path)
+            .env(CHILD, dir.path())
+            .status()
+            .unwrap();
+        assert!(status.success(), "the child run failed");
         let spawned = std::fs::read_to_string(&count).unwrap_or_default();
         assert_eq!(spawned.lines().collect::<Vec<_>>(), vec!["status"]);
     }
