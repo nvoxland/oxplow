@@ -164,6 +164,14 @@ impl FsWatcher {
         let mut watcher =
             notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
                 let Ok(event) = res else { return };
+                // A read changes nothing. inotify reports one (open, close
+                // after reading) for a file the watcher's own consumer is
+                // reading, and a consumer that reads on every event —
+                // the config reload — would otherwise hear itself: an
+                // endless loop that kept a daemon's boot from finishing.
+                if matches!(event.kind, notify::EventKind::Access(_)) {
+                    return;
+                }
                 let kind = classify(&event);
                 for path in event.paths.iter() {
                     if let Some(filter) = &filter {
@@ -931,6 +939,33 @@ mod tests {
         })
         .await
         .expect("an event for the new file");
+    }
+
+    /// Reading a file is not a change to it: no event, or a consumer that
+    /// reads in answer to an event hears its own read, forever (inotify
+    /// reports opens and reads; FSEvents does not).
+    #[tokio::test]
+    async fn reading_a_file_raises_no_event() {
+        let dir = tempdir().unwrap();
+        let target = dir.path().join("read.txt");
+        std::fs::write(&target, b"hello").unwrap();
+        let watcher = FsWatcher::watch(dir.path()).unwrap();
+        let mut rx = watcher.subscribe();
+        // The watch may still be settling: read until the window is over.
+        let heard = timeout(Duration::from_millis(600), async {
+            loop {
+                let _ = std::fs::read(&target).unwrap();
+                tokio::select! {
+                    evt = rx.recv() => break evt.ok(),
+                    _ = tokio::time::sleep(Duration::from_millis(50)) => {}
+                }
+            }
+        })
+        .await;
+        assert!(
+            !matches!(heard, Ok(Some(_))),
+            "a read was reported as a change: {heard:?}"
+        );
     }
 
     #[tokio::test]
