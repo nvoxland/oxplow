@@ -1453,7 +1453,7 @@ view:
         assert_eq!(items, vec![work_item_ref(fx.task)]);
     }
 
-    /// New Item is one form over `oxplow.work_item.create`: its `native`
+    /// New Item is one form over `oxplow.work_item.new` (the person's entry for `create`): its `native`
     /// field's children are the active list's own fields (read from a page,
     /// the read-only ones marked), and its state is picked from the two a
     /// new item may start in.
@@ -1463,7 +1463,7 @@ view:
         let start = form_of(&fx.svc, "oxplow-bundled/new-task", BTreeMap::new())
             .await
             .unwrap();
-        assert_eq!(start.command.id, "oxplow.work_item.create");
+        assert_eq!(start.command.id, "oxplow.work_item.new");
         assert_eq!(start.values["state"], json!("todo"));
         let priority = &start.subfields["native"]
             .iter()
