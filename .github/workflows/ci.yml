@@ -95,6 +95,9 @@ jobs:
         run: cargo fetch --locked
 
       - name: Cargo test
+        # A full run takes about an hour. A hung test would otherwise run to
+        # the job's six-hour limit, and its log can't be read until it ends.
+        timeout-minutes: 90
         # Every crate's failures in one run: each crate's tests take long
         # enough that finding them one at a time costs hours.
         run: xvfb-run -a cargo test --workspace --all-features --no-fail-fast
