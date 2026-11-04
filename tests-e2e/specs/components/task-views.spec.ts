@@ -61,10 +61,10 @@ async function swimlanes(page: Page, daemon: Workspace, scope: string) {
   await page.goto("/");
   await choose(page, "work_item.board", "task-views");
   await openFromLauncher(page, "Board");
-  await expect(page.getByTestId("replacement-work_item.board")).toContainText("replaced by task-views");
+  await expect(page.getByTestId("replacement-work_item.board")).toHaveAttribute("title", /by task-views/);
   await page.getByTestId("page-param-show-value").filter({ visible: true }).click();
   await page.getByTestId("page-param-show-edit").filter({ visible: true }).selectOption(scope);
-  await expect(page.getByTestId("replacement-work_item.board")).toContainText("replaced by task-views");
+  await expect(page.getByTestId("replacement-work_item.board")).toHaveAttribute("title", /by task-views/);
   // Settings may still be open in another tab: its Integrations frame is a second one.
   const frame = page.frameLocator('iframe[aria-label="Swimlanes"]');
   const card = frame.locator(".card", { hasText: "Card one" });
@@ -118,7 +118,7 @@ test("the editor, the list and oxplow's own, each chosen from Settings", async (
   // The item's page: the form in place of the description editor, the other parts still oxplow's.
   await openFromLauncher(page, "Item to edit");
   const detail = page.getByTestId("replacement-work_item.detail");
-  await expect(detail).toContainText("replaced by task-views");
+  await expect(detail).toHaveAttribute("title", /by task-views/);
   // Only the fields the form names are shown; the item's ref is fixed, not editable.
   await expect(detail.getByTestId("viz-form-fields-uri")).toHaveCount(0);
   await expect(detail.getByTestId("viz-form-fields-title")).toHaveValue("Item to edit");
@@ -143,7 +143,7 @@ test("the editor, the list and oxplow's own, each chosen from Settings", async (
   // The Tasks page: the compact list, its Edit… row action in a slideover.
   await openFromLauncher(page, "Tasks");
   const list = page.getByTestId("replacement-work_item.list");
-  await expect(list).toContainText("replaced by task-views");
+  await expect(list).toHaveAttribute("title", /by task-views/);
   await expect(list).toContainText("Item edited");
   // The title is a link; the row's menu is on its other cells.
   await list.getByRole("row").filter({ hasText: "Item edited" }).locator("td").nth(1).click({ button: "right" });

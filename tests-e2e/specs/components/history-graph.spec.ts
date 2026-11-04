@@ -32,7 +32,7 @@ test("the history graph replaces the list and opens a commit", async ({ fresh })
   history(daemon);
   await page.goto("/");
   await openFromLauncher(page, "Git History");
-  await expect(page.getByTestId("replacement-vcs.history.graph")).toContainText("replaced by oxplow-bundled");
+  await expect(page.getByTestId("replacement-vcs.history.graph")).toHaveAttribute("title", /by oxplow-bundled/);
   // The rows, the lanes and the filter are bundled's `ui` fixture's; the
   // app's part is the replacement and that a row opens its commit's page.
   const frame = page.frameLocator('[data-testid="custom-component-frame"]');
