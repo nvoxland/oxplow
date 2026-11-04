@@ -92,5 +92,6 @@ test("the Tasks page lists the thread's items by state, with epics that fold", a
   await list.locator('[data-testid^="viz-row-"]').filter({ hasText: "Standalone" }).click({ button: "right" });
   await page.getByTestId("menu-item-viz-action-to-blocked").click();
   await expect(page.locator('[data-node="summary"]')).toContainText("Blocked");
-  await expect(page.locator('[data-node="list"]')).toContainText("blocked");
+  // Rows sit under their state's heading and count: the item is now under Blocked.
+  await expect(page.locator('[data-node="list"]')).toContainText(/Blocked1\S*Standalone/);
 });

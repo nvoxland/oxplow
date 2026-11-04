@@ -29,7 +29,8 @@ test("a row's menu changes its state and a marked pair changes together", async 
 
   await rowOf(page, "First waiting").click({ button: "right" });
   await page.getByTestId("menu-item-viz-action-to-blocked").click();
-  await expect(page.locator('[data-node="items"]')).toContainText("blocked");
+  // Rows sit under their state's heading and count: the item is now under Blocked.
+  await expect(page.locator('[data-node="items"]')).toContainText(/Blocked1\S*First waiting/);
 
   await rowOf(page, "Second waiting").click({ modifiers: ["Meta"] });
   await rowOf(page, "Third waiting").click({ modifiers: ["Meta"] });
