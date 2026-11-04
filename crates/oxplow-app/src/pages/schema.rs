@@ -636,6 +636,9 @@ struct VizFile {
     columns: Vec<PageColumn>,
     #[serde(default)]
     empty: Option<String>,
+    /// A table leaves out its header row.
+    #[serde(default)]
+    hide_header: bool,
     /// The rows start folded under a count; a click opens them.
     #[serde(default)]
     fold: bool,
@@ -1673,6 +1676,7 @@ fn leaf_viz(
         params: ctx.params.to_vec(),
         columns: f.columns,
         empty: f.empty,
+        hide_header: f.hide_header,
         fold: f.fold,
         lead: f.lead,
         chart: f.chart,

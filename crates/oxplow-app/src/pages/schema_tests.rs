@@ -1174,6 +1174,20 @@ fn a_sections_viz_can_group_its_rows() {
     assert_eq!(s.group_link.as_deref(), Some("ext_uri"));
 }
 
+/// A table whose columns explain themselves can leave its header out.
+#[test]
+fn a_table_may_hide_its_header() {
+    let view = |extra: &str| {
+        let p = page(&format!(
+            "title: P\nloaders:\n  l: {{ sql: \"SELECT 1 AS n\" }}\nview: {{ id: v, viz: table, from: l{extra} }}\n"
+        ))
+        .expect("loads");
+        serde_json::to_string(&p.view).unwrap()
+    };
+    assert!(view(", hide_header: true").contains("\"hideHeader\":true"));
+    assert!(view("").contains("\"hideHeader\":false"));
+}
+
 /// `hide_empty` is gone: a page keeps one shape, every section on it with
 /// its `empty:` line; the error says so.
 #[test]

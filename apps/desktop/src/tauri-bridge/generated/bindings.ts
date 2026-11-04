@@ -6401,6 +6401,8 @@ export type VizConfig_Deserialize = {
 	params: PageParam[],
 	columns: PageColumn[],
 	empty: string | null,
+	/**  A table leaves out its header row: its columns explain themselves. */
+	hideHeader?: boolean,
 	/**
 	 *  The rows start folded under a count; a click opens them (a long
 	 *  list that is rarely read).
@@ -6465,6 +6467,8 @@ export type VizConfig_Serialize = {
 	params: PageParam[],
 	columns: PageColumn[],
 	empty: string | null,
+	/**  A table leaves out its header row: its columns explain themselves. */
+	hideHeader: boolean,
 	/**
 	 *  The rows start folded under a count; a click opens them (a long
 	 *  list that is rarely read).

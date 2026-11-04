@@ -346,7 +346,9 @@ unique in the page. `#node=<id>` in a link lands on it. `title`,
 - `viz` (+ `from: <loader>`, a role block, `columns`, row `actions`,
   `empty`): a `VizConfig` with no query of its own. A viz that reads no
   rows (`form`, `approvals`) has no `from`. The YAML only binds; logic is
-  SQL or a read command. There is no way to leave a section out for
+  SQL or a read command. `hide_header: true` leaves a table's header row
+  out, for columns that explain themselves (`DataTable`'s `header`).
+  There is no way to leave a section out for
   being empty (`hide_empty` is gone): it stays, over its `empty:` line,
   as a `form` over a loader with no rows does too ("A page keeps one
   shape"); a failed loader shows its error.

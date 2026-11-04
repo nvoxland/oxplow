@@ -1179,6 +1179,7 @@ mod tests {
                 params: Vec::new(),
                 columns: Vec::new(),
                 empty: None,
+                hide_header: false,
                 fold: false,
                 chart,
                 tree: None,

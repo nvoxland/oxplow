@@ -1145,7 +1145,7 @@ function Viz({
       );
     case "table":
     default:
-      return <TableViz rows={result.rows} cols={cols} cell={cell} rowMenu={rowMenu} view={rowsView} />;
+      return <TableViz rows={result.rows} cols={cols} cell={cell} rowMenu={rowMenu} view={rowsView} header={!viz.hideHeader} />;
   }
 }
 
@@ -1820,6 +1820,8 @@ interface RowsVizProps {
   rowMenu: RowMenu;
   /** Groups, emphasis, depth and dragging; absent, plain rows. */
   view?: RowsView;
+  /** A table's header row; on unless the viz says `hide_header`. */
+  header?: boolean;
 }
 
 /** The rows in drawing order, each with its index in the result (its
@@ -1943,7 +1945,7 @@ function BoardViz({ rows, cols, cell, rowMenu, view }: RowsVizProps) {
   );
 }
 
-function TableViz({ rows, cols, cell, rowMenu, view }: RowsVizProps) {
+function TableViz({ rows, cols, cell, rowMenu, view, header }: RowsVizProps) {
   // Each row with its index in the result: its test id.
   type Row = [SqlCell[], number];
   const columns: DataColumn<Row>[] = cols.map((c) => ({
@@ -1961,6 +1963,7 @@ function TableViz({ rows, cols, cell, rowMenu, view }: RowsVizProps) {
   return (
     <DataTable<Row>
       testId="viz-table"
+      header={header}
       tableProps={view?.cursor.listProps as React.HTMLAttributes<HTMLTableElement>}
       columns={columns}
       groups={parts.map(({ group, rows: inGroup }) => ({

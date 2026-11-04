@@ -1907,6 +1907,9 @@ pub struct VizConfig {
     pub params: Vec<PageParam>,
     pub columns: Vec<PageColumn>,
     pub empty: Option<String>,
+    /// A table leaves out its header row: its columns explain themselves.
+    #[serde(default)]
+    pub hide_header: bool,
     /// The rows start folded under a count; a click opens them (a long
     /// list that is rarely read).
     #[serde(default)]

@@ -102,6 +102,16 @@ test("treemap viz nodes draw a tile per positive item and link through the viz's
   expect(opened).toEqual(["oxplow:oxplow/file?path=a.rs"]);
 });
 
+test("a table with `hide_header` draws its rows and no header row", () => {
+  const shown = render(<VizView run={run({ viz: "table" }, ["id"], [[1]])} onOpenPage={() => {}} />);
+  expect(shown.queryAllByRole("columnheader")).toHaveLength(1);
+  cleanup();
+  const hidden = render(<VizView run={run({ viz: "table", hideHeader: true }, ["id"], [[1]])} onOpenPage={() => {}} />);
+  expect(hidden.queryAllByRole("columnheader")).toHaveLength(0);
+  expect(hidden.getByTestId("viz-table").textContent).toContain("1");
+  cleanup();
+});
+
 test("declared whole-viz actions are buttons, row actions aren't", () => {
   const finish = { id: "finish", label: "Finish", command: "oxplow.work_item.transition", input: {}, row: false };
   const perRow = { id: "row", label: "Per Row", command: "oxplow.work_item.transition", input: {}, row: true };

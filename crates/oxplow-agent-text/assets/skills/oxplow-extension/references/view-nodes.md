@@ -56,12 +56,14 @@ view:
 
 ## `viz`
 
-`{ viz: <kind>, from: <loader>, columns?, empty?, lead?, actions?, <role block> }`.
+`{ viz: <kind>, from: <loader>, columns?, empty?, hide_header?, lead?, actions?, <role block> }`.
 Rows come from the loader (a viz has no query). A viz that reads no rows
 (`approvals`) has no `from`. A section is never left out for being
 empty: it stays over its `empty:` line, so write one worth reading
 ("No commands.", "Nothing to commit."); a `form` over a loader with no
 rows draws its `empty:` line instead of its fields.
+`hide_header: true` leaves a table's header row out, for columns that explain
+themselves.
 `fold: true` starts the rows closed under a row count, for a long list
 nobody reads by default.
 `lead: <column>` puts that column's first-row text as a plain paragraph

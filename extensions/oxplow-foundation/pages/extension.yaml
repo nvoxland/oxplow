@@ -174,104 +174,117 @@ view:
     title: Pages
     viz: table
     from: pages
+    hide_header: true
     columns:
-    - { key: title, label: Page, link: { kind: page, from: link } }
+    - { key: title, label: Page, width: 300, link: { kind: page, from: link } }
     - { key: description, label: What it is }
     empty: No pages.
   - id: parts
     title: Parts
     viz: table
     from: parts
+    hide_header: true
     columns:
-    - { key: title, label: Part, link: { kind: page, from: link } }
+    - { key: title, label: Part, width: 300, link: { kind: page, from: link } }
     - { key: description, label: What it is }
     empty: No parts.
   - id: queries
     title: Queries
     viz: table
     from: queries
+    hide_header: true
     columns:
-    - { key: title, label: Query, link: { kind: page, from: link } }
+    - { key: title, label: Query, width: 300, link: { kind: page, from: link } }
     - { key: description, label: What it is }
     empty: No queries.
   - id: commands
     title: Commands
     viz: table
     from: commands
+    hide_header: true
     columns:
-    - { key: title, label: Command, link: { kind: page, from: link } }
+    - { key: title, label: Command, width: 300, link: { kind: page, from: link } }
     - { key: description, label: What it is }
     empty: No commands.
   - id: skills
     title: Skills
     viz: table
     from: skills
+    hide_header: true
     columns:
-    - { key: title, label: Skill, link: { kind: page, from: link } }
+    - { key: title, label: Skill, width: 300, link: { kind: page, from: link } }
     - { key: description, label: What it is }
     empty: No skills.
   - id: components
     title: Custom components
     viz: table
     from: components
+    hide_header: true
     columns:
-    - { key: title, label: Component, link: { kind: page, from: link } }
+    - { key: title, label: Component, width: 300, link: { kind: page, from: link } }
     - { key: description, label: What it is }
     empty: No custom components.
   - id: slots
     title: Slots
     viz: table
     from: slots
+    hide_header: true
     columns:
-    - { key: title, label: Slot, link: { kind: page, from: link } }
+    - { key: title, label: Slot, width: 300, link: { kind: page, from: link } }
     - { key: description, label: What it is }
     empty: Nothing mounted in another page.
   - id: collectors
     title: Collectors
     viz: table
     from: collectors
+    hide_header: true
     columns:
-    - { key: title, label: Collector, link: { kind: page, from: link } }
+    - { key: title, label: Collector, width: 300, link: { kind: page, from: link } }
     - { key: description, label: What it is }
     empty: No collectors.
   - id: metrics
     title: Metrics
     viz: table
     from: metrics
+    hide_header: true
     columns:
-    - { key: title, label: Metric, link: { kind: page, from: link } }
+    - { key: title, label: Metric, width: 300, link: { kind: page, from: link } }
     - { key: description, label: What it is }
     empty: No metrics.
   - id: measures
     title: Measures
     viz: table
     from: measures
+    hide_header: true
     columns:
-    - { key: title, label: Measure, link: { kind: page, from: link } }
+    - { key: title, label: Measure, width: 300, link: { kind: page, from: link } }
     - { key: description, label: What it is }
     empty: No measures.
   - id: dimensions
     title: Dimensions
     viz: table
     from: dimensions
+    hide_header: true
     columns:
-    - { key: title, label: Dimension, link: { kind: page, from: link } }
+    - { key: title, label: Dimension, width: 300, link: { kind: page, from: link } }
     - { key: description, label: What it is }
     empty: No dimensions.
   - id: resources
     title: Resources
     viz: table
     from: resources
+    hide_header: true
     columns:
-    - { key: title, label: Resource, link: { kind: page, from: link } }
+    - { key: title, label: Resource, width: 300, link: { kind: page, from: link } }
     - { key: description, label: What it is }
     empty: No resources.
   - id: implementations
     title: Implementations
     viz: table
     from: implementations
+    hide_header: true
     columns:
-    - { key: title, label: Implementation, link: { kind: page, from: link } }
+    - { key: title, label: Implementation, width: 300, link: { kind: page, from: link } }
     - { key: description, label: What it is }
     empty: No capability implementations.
   - id: deployments
