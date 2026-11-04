@@ -23,11 +23,15 @@ pub fn is_git_repo(path: impl AsRef<Path>) -> bool {
 /// Make `path` a new repository with one empty root commit on `main`
 /// (HEAD born, so a workspace can be opened over it). Always `main`, not
 /// the machine's `init.defaultBranch`: a fixture on a throwaway project
-/// reads the same on every machine.
+/// reads the same on every machine. Its own identity for the same reason:
+/// a commit made there has an author on a machine with none.
 pub fn init_repository(path: impl AsRef<Path>) -> Result<(), git2::Error> {
     let mut options = git2::RepositoryInitOptions::new();
     options.initial_head("main");
     let repo = git2::Repository::init_opts(path.as_ref(), &options)?;
+    let mut config = repo.config()?.open_level(git2::ConfigLevel::Local)?;
+    config.set_str("user.name", "oxplow")?;
+    config.set_str("user.email", "oxplow@localhost")?;
     let sig = git2::Signature::now("oxplow", "oxplow@localhost")?;
     let tree = repo.find_tree(repo.index()?.write_tree()?)?;
     repo.commit(
@@ -113,6 +117,22 @@ mod tests {
             super::detect_current_branch(dir.path()).as_deref(),
             Some("main")
         );
+    }
+
+    /// A commit made in a throwaway project has an author on a machine with
+    /// no git identity (a CI runner).
+    #[test]
+    fn a_new_repository_has_its_own_identity() {
+        let dir = tempfile::tempdir().unwrap();
+        super::init_repository(dir.path()).unwrap();
+        let repo = git2::Repository::open(dir.path()).unwrap();
+        let local = repo
+            .config()
+            .unwrap()
+            .open_level(git2::ConfigLevel::Local)
+            .unwrap();
+        assert_eq!(local.get_string("user.name").unwrap(), "oxplow");
+        assert_eq!(local.get_string("user.email").unwrap(), "oxplow@localhost");
     }
 
     use super::*;
