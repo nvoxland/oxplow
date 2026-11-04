@@ -942,8 +942,11 @@ mod tests {
     }
 
     /// Reading a file is not a change to it: no event, or a consumer that
-    /// reads in answer to an event hears its own read, forever (inotify
-    /// reports opens and reads; FSEvents does not).
+    /// reads in answer to an event hears its own read, forever. Linux only:
+    /// inotify reports opens and reads; FSEvents doesn't, and on macOS it
+    /// replays the temp dir's creation to a new watch, so any event there
+    /// proves nothing about a read.
+    #[cfg(target_os = "linux")]
     #[tokio::test]
     async fn reading_a_file_raises_no_event() {
         let dir = tempdir().unwrap();
