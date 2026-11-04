@@ -424,6 +424,10 @@ async fn spawn_one(
     let child_handle: Arc<std::sync::Mutex<Option<Box<dyn Child + Send + Sync>>>> =
         Arc::new(std::sync::Mutex::new(Some(child)));
 
+    // Subscribed before anything runs: what the program says first is heard.
+    let events = sender.subscribe();
+    let (reader_done, reader_finished) = std::sync::mpsc::channel::<()>();
+
     // Reader task: blocking read in a spawn_blocking, push to broadcast.
     {
         let sender = sender.clone();
@@ -448,6 +452,7 @@ async fn spawn_one(
                     }
                 }
             }
+            let _ = reader_done.send(());
         });
     }
 
@@ -463,11 +468,13 @@ async fn spawn_one(
                 None => return,
             };
             let exit_code = child.wait().ok().map(|s| s.exit_code() as i32);
+            // What it printed comes first, so a reader that stops at Exit
+            // misses nothing. Bounded: a background process that outlives
+            // the program keeps the terminal, and so the reader, open.
+            let _ = reader_finished.recv_timeout(READER_DRAIN);
             let _ = exit_sender.send(PaneEvent::Exit { exit_code });
         });
     }
-
-    let events = sender.subscribe();
 
     panes.insert(
         id.clone(),
@@ -482,6 +489,9 @@ async fn spawn_one(
 
     Ok(PaneHandle { id, events, pid })
 }
+
+/// How long a program's Exit waits for the reader to finish.
+const READER_DRAIN: std::time::Duration = std::time::Duration::from_millis(500);
 
 #[cfg(test)]
 mod tests {
@@ -598,6 +608,37 @@ mod tests {
         })
         .await;
         assert!(exit.is_ok(), "child should exit promptly after kill");
+    }
+
+    /// What a program prints before it exits comes before its Exit, every
+    /// time: a reader that stops at Exit misses nothing.
+    #[tokio::test]
+    async fn a_programs_last_output_comes_before_its_exit() {
+        let mgr = PtyManager::spawn();
+        for _ in 0..50 {
+            let req = SpawnRequest {
+                command: "sh".into(),
+                args: vec!["-c".into(), "echo last-words".into()],
+                cwd: tempdir().unwrap().keep(),
+                env: vec![],
+                env_remove: vec![],
+                cols: 80,
+                rows: 24,
+            };
+            let mut handle = mgr.spawn_pane(req).await.unwrap();
+            let out = timeout(Duration::from_secs(5), async {
+                let mut out = String::new();
+                loop {
+                    match handle.events.recv().await {
+                        Ok(PaneEvent::Output(b)) => out.push_str(&String::from_utf8_lossy(&b)),
+                        Ok(PaneEvent::Exit { .. }) | Err(_) => return out,
+                    }
+                }
+            })
+            .await
+            .unwrap();
+            assert!(out.contains("last-words"), "{out:?}");
+        }
     }
 
     /// tsk1032: a variable named in `env_remove` doesn't reach the child,
