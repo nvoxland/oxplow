@@ -39,10 +39,10 @@ test("an effort's page names its effort, renames it, and the pickers turn it int
   // Picking an end leaves the effort for a plain comparison.
   await page.getByTestId("page-param-end-value").filter({ visible: true }).click();
   await page.getByTestId("page-param-end-edit").filter({ visible: true }).selectOption("working");
-  // The effort part stays a node of the page, showing nothing: no effort,
-  // and none of its actions (they act on the effort's row). Only its title
-  // is left, hidden from sight but kept for Contents and agents.
-  await expect(effort).toHaveText("Effort");
+  // The effort part stays a node of the page, showing no effort and none of
+  // its actions (they act on the effort's row): its title, over a line that
+  // says there is none.
+  await expect(effort).toHaveText("EffortNot part of an effort.");
   await expect(effort.getByRole("button")).toHaveCount(0);
   await expect(page.locator('[data-node="header"]')).toContainText("Comparison");
   await expect(page.locator('[data-node="header"]')).toContainText("working tree");
