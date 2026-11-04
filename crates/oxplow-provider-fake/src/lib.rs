@@ -94,6 +94,10 @@
 //!   credential (a service that doesn't say which token it refused);
 //! - `lose-reply` — the next `invoke` lands but is never answered (a
 //!   reply lost on the way);
+//! - `hold-read-file:<path>` — a `read` waits, after `slow`, until `<path>`
+//!   exists (a test releases it by writing it), sending `$/progress` meanwhile:
+//!   a read that is under way for exactly as long as the test says, with no
+//!   clock;
 //! - `started-file:<path>` — each `invoke` writes `<path>` as it begins
 //!   (before `slow`), so a test knows a call is under way without timing
 //!   it;
@@ -257,6 +261,8 @@ pub struct Hooks {
     pub plain_writes: bool,
     /// `started-file:<path>`: each `invoke` writes `<path>` as it begins.
     pub started_file: Option<String>,
+    /// `hold-read-file:<path>`: a `read` waits until `<path>` exists.
+    pub hold_read_file: Option<String>,
     /// `host-read`: an `estimate` or an `update` first reads the host
     /// (`host/call` `sql.read`, `SELECT 7 AS n`, naming its key) and
     /// answers what it read beside its result (`read`): its own command's
@@ -306,6 +312,7 @@ impl Hooks {
                 Some(("rate-limit", ms)) => self.rate_limit_ms = ms.parse().ok(),
                 Some(("needs", name)) => self.needs = Some(name.to_string()),
                 Some(("started-file", path)) => self.started_file = Some(path.to_string()),
+                Some(("hold-read-file", path)) => self.hold_read_file = Some(path.to_string()),
                 Some(("shutdown-file", path)) => self.shutdown_file = Some(path.to_string()),
                 Some(("accepts", pair)) => {
                     self.accepts = pair
@@ -1007,6 +1014,18 @@ async fn handle(
                 });
             }
             slow(world).await;
+            if let Some(path) = world.lock().await.hooks.hold_read_file.clone() {
+                // Held, it still says it is alive, as a long read does, so a
+                // host's idle timeout is not what ends it.
+                while !std::path::Path::new(&path).exists() {
+                    peer.notify(
+                        notify::PROGRESS,
+                        json!({ "id": id, "message": "held", "fraction": 0.0 }),
+                    )
+                    .await?;
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                }
+            }
             let after = p
                 .state
                 .as_ref()
