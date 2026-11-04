@@ -1010,6 +1010,14 @@ mod tests {
         assert!(err.contains("`decide`"), "{err}");
     }
 
+    /// `process_group::stop_all` ends every program group of the process, so a
+    /// test that runs an `exec` program must not overlap the one that calls it
+    /// (tests of one binary run as threads of one process).
+    fn exec_alone() -> std::sync::MutexGuard<'static, ()> {
+        static EXEC: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        EXEC.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     /// tsk161: the deadlock. A streaming filter that echoes its input can't be
     /// fed a payload larger than the pipe buffer unless stdout is drained
     /// concurrently — the child blocks writing stdout, so it stops reading
@@ -1021,6 +1029,7 @@ mod tests {
     /// tripping a short timeout, which would pass for the wrong reason.
     #[test]
     fn exec_streams_a_payload_larger_than_the_pipe_buffer() {
+        let _alone = exec_alone();
         let budget = Budget::with_timeout(std::time::Duration::from_secs(60));
         // Multiple MB of JSON — ~50x the ~64 KB pipe buffer, in both directions.
         let big: Vec<i64> = (0..500_000).collect();
@@ -1039,6 +1048,7 @@ mod tests {
 
     #[test]
     fn exec_kills_a_child_that_exceeds_its_budget() {
+        let _alone = exec_alone();
         // Unlike the in-process tiers, which can only abandon an overrunning
         // script, a child process can be killed — so exec gets a real ceiling.
         let budget = Budget::with_timeout(std::time::Duration::from_millis(200));
@@ -1063,6 +1073,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn stop_all_ends_an_exec_program_and_what_it_started() {
+        let _alone = exec_alone();
         let dir = tempfile::tempdir().unwrap();
         let pidfile = dir.path().join("pid");
         let script = format!("sleep 300 & echo $! > {}; wait", pidfile.display());
@@ -1098,6 +1109,7 @@ mod tests {
 
     #[test]
     fn exec_surfaces_a_failing_child_with_its_stderr() {
+        let _alone = exec_alone();
         let budget = Budget::with_timeout(std::time::Duration::from_secs(10));
         let argv = vec![
             "sh".to_string(),
