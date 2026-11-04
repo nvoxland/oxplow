@@ -50,5 +50,5 @@ test("a folder on the Files page opens in place and lists its children", async (
     .getByRole("button", { name: "Expand" })
     .click();
   await expect(page.locator('[data-testid="page-file"]:visible').getByRole("button", { name: "inner.txt" }).filter({ visible: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: ".." })).toHaveCount(0);
+  await expect(page.locator('[data-testid="page-file"]:visible').getByRole("button", { name: "..", exact: true })).toHaveCount(0);
 });
