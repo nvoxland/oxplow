@@ -1,4 +1,4 @@
-import { afterEach, expect, mock, test } from "bun:test";
+import { afterAll, afterEach, expect, mock, test } from "bun:test";
 import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 
 import { PageNavigationContext, type PageNavigation } from "../tabs/PageNavigationContext.js";
@@ -8,8 +8,9 @@ import { PageNavigationContext, type PageNavigation } from "../tabs/PageNavigati
 // changed; a page whose view is one component node is that component,
 // filling the page, its title and actions drawn by core, its rail the
 // page's.
-const realApi = await import("../api.js");
-const realTransport = await import("../tauri-bridge/transport.js");
+// Copies: `mock.module` patches a loaded module in place.
+const realApi = { ...(await import("../api.js")) };
+const realTransport = { ...(await import("../tauri-bridge/transport.js")) };
 const loads: string[] = [];
 mock.module("../api.js", () => ({
   ...realApi,
@@ -21,6 +22,12 @@ mock.module("../api.js", () => ({
   subscribeOxplowEvents: () => () => {},
 }));
 mock.module("../tauri-bridge/transport.js", () => ({ ...realTransport, remoteBaseUrl: () => "http://127.0.0.1:9" }));
+// `mock.module` outlives this file: put the real ones back, or a later file
+// runs against a daemon that isn't there.
+afterAll(() => {
+  mock.module("../api.js", () => realApi);
+  mock.module("../tauri-bridge/transport.js", () => realTransport);
+});
 
 const { PageTree } = await import("./PageTree.js");
 const { PageHost } = await import("./PageHost.js");

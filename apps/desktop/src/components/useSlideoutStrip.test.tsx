@@ -8,7 +8,11 @@ import {
   useSlideoutStrip,
 } from "./useSlideoutStrip.js";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  // The panels below are appended by hand: `cleanup` only takes what it rendered.
+  document.body.replaceChildren();
+});
 
 /** The hook's pointer-leave grace (180ms) plus slack. */
 const settle = () => new Promise((r) => setTimeout(r, 260));

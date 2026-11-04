@@ -18,7 +18,8 @@ test("a load that ends before the delay never shows the text", async () => {
   const view = render(<DelayedLoading ms={60}><p>Loading…</p></DelayedLoading>);
   await wait(20);
   view.unmount();
-  expect(document.body.textContent).toBe("");
+  await wait(60);
+  expect(document.body.textContent).not.toContain("Loading…");
 });
 
 test("the default delay is about 300 ms", () => {
