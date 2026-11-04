@@ -30,9 +30,12 @@ use oxplow_tasks::TaskId;
 use oxplow_tasks::TaskStore as _;
 use oxplow_tasks::{Task, TaskActorKind, TaskAuthor, TaskPriority, TaskStatus};
 
-/// A git repo with one empty commit (stream setup refuses non-git dirs).
+/// A git repo with one empty commit on `main`, whatever the machine's
+/// `init.defaultBranch` (stream setup refuses non-git dirs).
 pub fn init_git_repo(dir: &Path) {
-    let repo = git2::Repository::init(dir).unwrap();
+    let mut options = git2::RepositoryInitOptions::new();
+    options.initial_head("main");
+    let repo = git2::Repository::init_opts(dir, &options).unwrap();
     let mut config = repo.config().unwrap();
     config.set_str("user.name", "test").unwrap();
     config.set_str("user.email", "test@example.com").unwrap();

@@ -88,6 +88,12 @@ jobs:
       - name: Build the app the component harness draws in
         run: bun run --cwd apps/desktop build && cargo build -p oxplow-desktop
 
+      # `cargo test` downloads only this platform's crates; the source guard
+      # that reads the whole resolved graph (`cargo metadata --offline`) needs
+      # every platform's.
+      - name: Fetch every platform's crates
+        run: cargo fetch --locked
+
       - name: Cargo test
         run: xvfb-run -a cargo test --workspace --all-features
 

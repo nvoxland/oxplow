@@ -218,7 +218,8 @@ async fn a_queued_job_is_rebound_across_a_redeploy_of_its_extension() {
 /// had isn't published as the new deployment's.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_running_job_stops_across_a_same_version_redeploy() {
-    let fx = fixture(MANIFEST, vec![slow(&words(40), 50)]).await;
+    // Far longer than a redeploy on a loaded machine; the cancel ends it early.
+    let fx = fixture(MANIFEST, vec![slow(&words(1000), 50)]).await;
     let id = ask(&fx, "same-version").await;
     streaming(&fx, &id).await;
 
@@ -230,20 +231,25 @@ async fn a_running_job_stops_across_a_same_version_redeploy() {
 }
 
 /// A running job holds no catalog: another extension's change activates
-/// while it streams, and the job goes on to succeed.
+/// while it streams, and the job goes on streaming. The job outlasts any
+/// activation, so the activation ending first is what shows it didn't
+/// wait, with no clock to miss on a loaded machine.
 #[tokio::test(flavor = "multi_thread")]
 async fn an_activation_does_not_wait_for_a_running_job() {
-    let fx = fixture(MANIFEST, vec![slow(&words(60), 50)]).await;
+    let fx = fixture(MANIFEST, vec![slow(&words(2000), 50)]).await;
     let id = ask(&fx, "unrelated").await;
     streaming(&fx, &id).await;
 
-    tokio::time::timeout(Duration::from_secs(2), change_another_extension(&fx))
-        .await
-        .expect("the activation doesn't wait for the job");
-    assert_eq!(state(&fx, &id).await["state"], json!("running"));
-    let done = until(&fx, &id, |s| s["state"] != json!("running")).await;
-    assert_eq!(done["state"], json!("succeeded"), "{done}");
-    assert_eq!(done["text"], json!(words(60)), "{done}");
+    change_another_extension(&fx).await;
+
+    let after = state(&fx, &id).await;
+    assert_eq!(after["state"], json!("running"), "{after}");
+    assert_eq!(after["cancellationRequested"], json!(false), "{after}");
+    let had = after["text"].as_str().unwrap_or_default().len();
+    until(&fx, &id, |s| {
+        s["text"].as_str().unwrap_or_default().len() > had
+    })
+    .await;
 }
 
 /// A declaration changed while the job streams: the
@@ -251,7 +257,8 @@ async fn an_activation_does_not_wait_for_a_running_job() {
 /// declaration's success.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_job_does_not_succeed_across_a_change_to_its_declaration() {
-    let fx = fixture(MANIFEST, vec![slow(&words(40), 50)]).await;
+    // Far longer than an activation on a loaded machine; the cancel ends it early.
+    let fx = fixture(MANIFEST, vec![slow(&words(1000), 50)]).await;
     let id = ask(&fx, "generation").await;
     streaming(&fx, &id).await;
 

@@ -123,8 +123,10 @@ async fn an_activation_does_not_wait_for_a_running_collector() {
         ".oxplow/extensions/other/extension.yaml",
         "manifest: 2\nname: other\nintent:\n  purpose: p\n",
     );
+    // The collector stays held until `release`, so this only runs out if the
+    // activation waits for it; a loaded machine just takes longer.
     tokio::time::timeout(
-        Duration::from_secs(5),
+        Duration::from_secs(60),
         crate::test_fixtures::activate_with_problems(&fx.svc),
     )
     .await

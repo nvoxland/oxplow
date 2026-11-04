@@ -20,10 +20,14 @@ pub fn is_git_repo(path: impl AsRef<Path>) -> bool {
     }
 }
 
-/// Make `path` a new repository with one empty root commit on its
-/// default branch (HEAD born, so a workspace can be opened over it).
+/// Make `path` a new repository with one empty root commit on `main`
+/// (HEAD born, so a workspace can be opened over it). Always `main`, not
+/// the machine's `init.defaultBranch`: a fixture on a throwaway project
+/// reads the same on every machine.
 pub fn init_repository(path: impl AsRef<Path>) -> Result<(), git2::Error> {
-    let repo = git2::Repository::init(path.as_ref())?;
+    let mut options = git2::RepositoryInitOptions::new();
+    options.initial_head("main");
+    let repo = git2::Repository::init_opts(path.as_ref(), &options)?;
     let sig = git2::Signature::now("oxplow", "oxplow@localhost")?;
     let tree = repo.find_tree(repo.index()?.write_tree()?)?;
     repo.commit(
@@ -99,6 +103,18 @@ pub fn merge_base(path: impl AsRef<Path>, a: &str, b: &str) -> Result<Option<Str
 
 #[cfg(test)]
 mod tests {
+    /// A throwaway project's branch doesn't follow the machine's
+    /// `init.defaultBranch`: what runs on it reads the same anywhere.
+    #[test]
+    fn a_new_repository_is_on_main_whatever_the_machine_says() {
+        let dir = tempfile::tempdir().unwrap();
+        super::init_repository(dir.path()).unwrap();
+        assert_eq!(
+            super::detect_current_branch(dir.path()).as_deref(),
+            Some("main")
+        );
+    }
+
     use super::*;
     use tempfile::tempdir;
 
