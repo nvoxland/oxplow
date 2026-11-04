@@ -38,7 +38,7 @@ view:
   from: new_task
   viz: form
   form:
-    command: oxplow.work_item.create
+    command: oxplow.work_item.new
     then: replace
     fields:
     - title
