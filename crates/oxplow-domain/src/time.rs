@@ -33,8 +33,14 @@ impl Timestamp {
     /// Length of the fixed-width text form.
     pub const TEXT_LEN: usize = 27;
 
+    /// Now, in the microseconds of the text form: a stored timestamp reads
+    /// back equal, on a clock with finer ticks (Linux's) too.
     pub fn now() -> Self {
-        Self(OffsetDateTime::now_utc())
+        let now = OffsetDateTime::now_utc();
+        Self(
+            now.replace_nanosecond(now.nanosecond() / 1_000 * 1_000)
+                .expect("a whole microsecond is a valid nanosecond"),
+        )
     }
 
     /// The instant `ms` milliseconds from the Unix epoch. The nanoseconds
@@ -125,6 +131,13 @@ pub fn parse_every(text: &str) -> Option<std::time::Duration> {
 
 #[cfg(test)]
 mod tests {
+    /// What goes into SQLite as text reads back the same instant.
+    #[test]
+    fn now_survives_its_text_form() {
+        let now = super::Timestamp::now();
+        assert_eq!(super::Timestamp::parse(&now.to_text()).unwrap(), now);
+    }
+
     use super::*;
 
     /// tsk935: a time from outside (an OTLP point) past what a timestamp

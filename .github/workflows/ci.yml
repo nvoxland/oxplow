@@ -95,7 +95,9 @@ jobs:
         run: cargo fetch --locked
 
       - name: Cargo test
-        run: xvfb-run -a cargo test --workspace --all-features
+        # Every crate's failures in one run: each crate's tests take long
+        # enough that finding them one at a time costs hours.
+        run: xvfb-run -a cargo test --workspace --all-features --no-fail-fast
 
       # Every extension with a source here — oxplow's own and the project's
       # — through its fixtures (check, examples, answers, `ui` steps), as an
