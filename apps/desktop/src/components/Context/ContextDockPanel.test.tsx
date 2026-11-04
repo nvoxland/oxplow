@@ -1,11 +1,11 @@
-import { afterEach, expect, mock, test } from "bun:test";
+import { afterAll, afterEach, expect, mock, test } from "bun:test";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 
 import type { SqlCell, SqlQueryResult } from "../../tauri-bridge/generated/bindings.js";
 
 const ran: Array<[string, unknown]> = [];
 let rows: SqlCell[][] = [];
-const realApi = await import("../../api.js");
+const realApi = { ...(await import("../../api.js")) }; // a copy: `mock.module` patches a loaded module in place
 mock.module("../../api.js", () => ({
   ...realApi,
   querySql: async () =>
@@ -69,4 +69,9 @@ test("an empty basket says how things get in", async () => {
   const view = render(<ContextDockBody streamId={null} onOpenPage={() => {}} />);
   await waitFor(() => expect(view.getByTestId("context-panel-empty").textContent).toBe("No context added yet"));
   expect(view.queryByTestId("context-panel-clear")).toBeNull();
+});
+
+// `mock.module` outlives this file: put the real modules back for the files that run after it.
+afterAll(() => {
+  mock.module("../../api.js", () => realApi);
 });

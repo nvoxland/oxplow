@@ -1,9 +1,9 @@
-import { afterEach, beforeEach, expect, mock, test } from "bun:test";
+import { afterAll, afterEach, beforeEach, expect, mock, test } from "bun:test";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 
 import type { AssistantBackend, AssistantItem, AssistantSnapshot } from "./assistantApi.js";
 
-const realApi = await import("../../api.js");
+const realApi = { ...(await import("../../api.js")) }; // a copy: `mock.module` patches a loaded module in place
 const undone: number[] = [];
 mock.module("../../api.js", () => ({
   ...realApi,
@@ -223,4 +223,9 @@ test("a flood of changes fetches at most one snapshot in flight and one after", 
   await waitFor(() => expect(view.getByTestId("assistant-item-2")).toBeTruthy());
   await new Promise((r) => setTimeout(r, 30));
   expect(snapshots - before).toBeLessThanOrEqual(2);
+});
+
+// `mock.module` outlives this file: put the real modules back for the files that run after it.
+afterAll(() => {
+  mock.module("../../api.js", () => realApi);
 });

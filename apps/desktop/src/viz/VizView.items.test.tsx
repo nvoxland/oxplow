@@ -1,4 +1,4 @@
-import { afterEach, expect, mock, test } from "bun:test";
+import { afterAll, afterEach, expect, mock, test } from "bun:test";
 import { cleanup, fireEvent, render as rtlRender } from "@testing-library/react";
 
 import type { VizConfig, VizRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
@@ -9,7 +9,7 @@ import { PageNavigationContext, type PageNavigation } from "../tabs/PageNavigati
 // a link. The same in a detail's facts, a sections viz's facts, a table's
 // cells and a list's.
 
-const realApi = await import("../api.js");
+const realApi = { ...(await import("../api.js")) }; // a copy: `mock.module` patches a loaded module in place
 mock.module("../api.js", () => ({
   ...realApi,
   listExtensions: async () => [],
@@ -102,4 +102,9 @@ test("a value that is not a list of items shows as it is; an empty list shows no
   cleanup();
   const empty = render(runOf("detail", {}, [["a", "Alpha", "[]"]]));
   expect(empty.container.querySelector("[data-testid=viz-item]")).toBeNull();
+});
+
+// `mock.module` outlives this file: put the real modules back for the files that run after it.
+afterAll(() => {
+  mock.module("../api.js", () => realApi);
 });

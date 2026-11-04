@@ -1,4 +1,4 @@
-import { afterEach, expect, mock, test } from "bun:test";
+import { afterAll, afterEach, expect, mock, test } from "bun:test";
 import { cleanup, fireEvent, render as rtlRender, waitFor } from "@testing-library/react";
 
 import type { ReactElement, ReactNode } from "react";
@@ -11,7 +11,7 @@ import { Section } from "../kit/Section.js";
 // names a page), the row's facts, its markdown body — each a real section
 // of the page, with the viz's row actions in its right-click menu.
 
-const realApi = await import("../api.js");
+const realApi = { ...(await import("../api.js")) }; // a copy: `mock.module` patches a loaded module in place
 const actionRuns: { action: string; row: unknown }[] = [];
 mock.module("../api.js", () => ({
   ...realApi,
@@ -224,4 +224,9 @@ test("grouped rows: a group section in order of first appearance, its rows one l
   expect(view.getByTestId("viz-group-Alpha").querySelector("[data-sections]")!.getAttribute("data-sections")).toBe("2");
   // Group columns are not facts.
   expect(view.getByTestId("viz-section-facts-p1").textContent).toBe("Kindx");
+});
+
+// `mock.module` outlives this file: put the real modules back for the files that run after it.
+afterAll(() => {
+  mock.module("../api.js", () => realApi);
 });

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, mock, test } from "bun:test";
+import { afterAll, afterEach, beforeEach, expect, mock, test } from "bun:test";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 
 import { personSpec, recordRefOffers } from "../components/refCommandsTestSupport.js";
@@ -18,7 +18,7 @@ const KINDS: Record<string, string[]> = {
   "oxplow:oxplow/agent_session": ["oxplow.agent_session.reopen"],
 };
 
-const realApi = await import("../api.js");
+const realApi = { ...(await import("../api.js")) }; // a copy: `mock.module` patches a loaded module in place
 mock.module("../api.js", () => ({
   ...realApi,
   refCommands: async (ref: string) => (KINDS[ref.split("?")[0]] ?? []).filter((id) => !notNow.has(id)),
@@ -124,4 +124,9 @@ test("Backlinks opens its list under the ☰, and Escape closes it", async () =>
   await waitFor(() => expect(view.getByTestId("page-nav-backlinks-popover").textContent).toBe("linked from A"));
   fireEvent.keyDown(window, { key: "Escape" });
   expect(view.queryByTestId("page-nav-backlinks-popover")).toBeNull();
+});
+
+// `mock.module` outlives this file: put the real modules back for the files that run after it.
+afterAll(() => {
+  mock.module("../api.js", () => realApi);
 });

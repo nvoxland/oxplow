@@ -1,4 +1,4 @@
-import { afterEach, expect, mock, test } from "bun:test";
+import { afterAll, afterEach, expect, mock, test } from "bun:test";
 
 // logger.ts calls desktopBridge().logUi(...) inside sendUiLog. Stub the
 // bridge so install/uninstall don't depend on a real Tauri runtime, and
@@ -6,6 +6,7 @@ import { afterEach, expect, mock, test } from "bun:test";
 // synchronously (no await before the push), so the record is populated by
 // the time the caller returns.
 const logged: Array<{ level: string; message: string; context?: Record<string, unknown> }> = [];
+const realApi = { ...(await import("./api.js")) }; // a copy: `mock.module` patches a loaded module in place
 mock.module("./api.js", () => ({
   desktopBridge: () => ({
     logUi: async (r: { level: string; message: string; context?: Record<string, unknown> }) => {
@@ -191,4 +192,9 @@ test("describeLoafScripts: maps script fields and rounds durations", () => {
     { src: "app.js", fn: "repaint", durMs: 913, invoker: "requestAnimationFrame" },
     { src: undefined, fn: undefined, durMs: 40, invoker: undefined },
   ]);
+});
+
+// `mock.module` outlives this file: put the real module back for the files that run after it.
+afterAll(() => {
+  mock.module("./api.js", () => realApi);
 });

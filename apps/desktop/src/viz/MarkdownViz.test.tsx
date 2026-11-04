@@ -1,4 +1,4 @@
-import { afterEach, expect, mock, test } from "bun:test";
+import { afterAll, afterEach, expect, mock, test } from "bun:test";
 import { act, cleanup, fireEvent, render as rtlRender, waitFor } from "@testing-library/react";
 import { useState, type ReactElement, type ReactNode } from "react";
 
@@ -11,7 +11,7 @@ import { PageCommentsContext } from "./pageComments.js";
 // action: the draft is the tab's, Save only when changed, Discard puts
 // the saved text back, a re-read never wipes a draft.
 
-const realApi = await import("../api.js");
+const realApi = { ...(await import("../api.js")) }; // a copy: `mock.module` patches a loaded module in place
 const saves: { action: string; row: unknown; input: unknown }[] = [];
 const targets: string[] = [];
 mock.module("../api.js", () => ({
@@ -258,4 +258,9 @@ test("a document's link to a sibling of its kind opens with the page that draws 
     "oxplow:oxplow/file?path=DEV.md",
     "oxplow:oxplow/file?path=src/main.rs",
   ]);
+});
+
+// `mock.module` outlives this file: put the real modules back for the files that run after it.
+afterAll(() => {
+  mock.module("../api.js", () => realApi);
 });

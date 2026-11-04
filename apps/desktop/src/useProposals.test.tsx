@@ -1,11 +1,11 @@
-import { afterEach, expect, mock, test } from "bun:test";
+import { afterAll, afterEach, expect, mock, test } from "bun:test";
 import { cleanup, renderHook, waitFor } from "@testing-library/react";
 
 // A pending-proposals read that fails says so (it is reported as a failed
 // operation), rather than leaving the Alerts panel's proposal cards
 // silently stale.
 
-const realApi = await import("./api.js");
+const realApi = { ...(await import("./api.js")) }; // a copy: `mock.module` patches a loaded module in place
 const realQuerySql = realApi.querySql;
 let failing = false;
 const reported: unknown[] = [];
@@ -34,4 +34,9 @@ test("a failed read of the pending proposals is reported", async () => {
   await waitFor(() =>
     expect(reported.map((r) => (r as { message?: string }).message)).toContain("no such table: v_command_proposal"),
   );
+});
+
+// `mock.module` outlives this file: put the real modules back for the files that run after it.
+afterAll(() => {
+  mock.module("./api.js", () => realApi);
 });

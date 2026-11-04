@@ -1,5 +1,5 @@
 import type { ReactElement } from "react";
-import { afterEach, expect, mock, test } from "bun:test";
+import { afterAll, afterEach, expect, mock, test } from "bun:test";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 
 import { collectorUri, pageUri } from "../uri/uri.js";
@@ -11,7 +11,7 @@ import { PageNavigationContext, type PageNavigation } from "./PageNavigationCont
 // the host's own entries (Unlink) come first.
 
 const added: unknown[] = [];
-const realBasket = await import("../contextBasket.js");
+const realBasket = { ...(await import("../contextBasket.js")) }; // a copy: `mock.module` patches a loaded module in place
 mock.module("../contextBasket.js", () => ({
   ...realBasket,
   addToContext: async (what: unknown) => {
@@ -54,4 +54,9 @@ test("the host's own entries lead the menu", () => {
     "menu-item-unlink",
     "menu-item-add-to-context",
   ]);
+});
+
+// `mock.module` outlives this file: put the real modules back for the files that run after it.
+afterAll(() => {
+  mock.module("../contextBasket.js", () => realBasket);
 });

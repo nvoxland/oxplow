@@ -1,4 +1,4 @@
-import { afterEach, expect, mock, test } from "bun:test";
+import { afterAll, afterEach, expect, mock, test } from "bun:test";
 import { act, cleanup, render } from "@testing-library/react";
 import { useState } from "react";
 
@@ -6,7 +6,7 @@ import { useState } from "react";
 // what it read, was dropped: the run may have read the old state, and
 // nothing told the host to run again.
 
-const realApi = await import("../api.js");
+const realApi = { ...(await import("../api.js")) }; // a copy: `mock.module` patches a loaded module in place
 const listeners: Array<(e: Record<string, unknown>) => void> = [];
 mock.module("../api.js", () => ({
   ...realApi,
@@ -64,4 +64,9 @@ test("a change to a dataset the run didn't read asks for nothing", async () => {
   await act(async () => report(["v_work_item"]));
   await pause(200);
   expect(runs).toBe(0);
+});
+
+// `mock.module` outlives this file: put the real modules back for the files that run after it.
+afterAll(() => {
+  mock.module("../api.js", () => realApi);
 });

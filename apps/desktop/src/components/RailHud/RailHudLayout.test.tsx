@@ -1,4 +1,4 @@
-import { afterEach, expect, mock, test } from "bun:test";
+import { afterAll, afterEach, expect, mock, test } from "bun:test";
 import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 
 // tsk972: the stored panel layout loads after the first render. A toggle
@@ -6,7 +6,7 @@ import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react
 // undo it, and doesn't lose the rest of what was stored either.
 
 type Placement = { panel: string; hidden: boolean; collapsed: boolean };
-const realApi = await import("../../api.js");
+const realApi = { ...(await import("../../api.js")) }; // a copy: `mock.module` patches a loaded module in place
 let deliverLayout: (layout: Placement[]) => void = () => {};
 const saved: Placement[][] = [];
 mock.module("../../api.js", () => ({
@@ -63,4 +63,9 @@ test("a toggle made before the stored layout loads survives it, and keeps what w
   const last = saved.at(-1)!;
   expect(last.find((p) => p.panel === "ext:x/v")).toMatchObject({ collapsed: true });
   expect(last.find((p) => p.panel === "ext:x/w")).toMatchObject({ hidden: true });
+});
+
+// `mock.module` outlives this file: put the real modules back for the files that run after it.
+afterAll(() => {
+  mock.module("../../api.js", () => realApi);
 });

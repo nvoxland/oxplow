@@ -1,4 +1,4 @@
-import { afterEach, expect, mock, test } from "bun:test";
+import { afterAll, afterEach, expect, mock, test } from "bun:test";
 import { cleanup, render, waitFor } from "@testing-library/react";
 
 import { peekPendingCommentReveal, clearCommentReveal } from "../comment-reveal-bus.js";
@@ -10,7 +10,7 @@ import { decl, fakePage, fakePageRuns, fakeRun, loader, node } from "./testing/f
 // to, `#comment=` revealed; its markdown headings are the rail's Contents.
 
 const targets: string[] = [];
-const realApi = await import("../api.js");
+const realApi = { ...(await import("../api.js")) }; // a copy: `mock.module` patches a loaded module in place
 mock.module("../api.js", () => ({
   ...realApi,
   listCommentsForTarget: async (target: string) => {
@@ -82,4 +82,9 @@ test("`#comment=` reveals that comment on a page that takes comments, and only t
   const not = render(page(false, { comment: "cmt2" }));
   await waitFor(() => expect(not.getByTestId("viz-markdown")).toBeTruthy());
   expect(peekPendingCommentReveal()).toBeNull();
+});
+
+// `mock.module` outlives this file: put the real modules back for the files that run after it.
+afterAll(() => {
+  mock.module("../api.js", () => realApi);
 });

@@ -1,4 +1,4 @@
-import { afterEach, expect, mock, test } from "bun:test";
+import { afterAll, afterEach, expect, mock, test } from "bun:test";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 
 import type { Stream } from "../api.js";
@@ -16,7 +16,7 @@ const KINDS: Array<[string, string]> = [
   ["dashboard", "dashboard"],
 ];
 
-const realApi = await import("../api.js");
+const realApi = { ...(await import("../api.js")) }; // a copy: `mock.module` patches a loaded module in place
 mock.module("../api.js", () => ({
   ...realApi,
   listExtensions: async () => [],
@@ -55,4 +55,9 @@ test("each hit row shows its kind's icon and label", async () => {
     expect(row.querySelector("svg"), `${kind} icon`).not.toBeNull();
     expect(row.textContent, kind).toContain(`found it${label}`);
   }
+});
+
+// `mock.module` outlives this file: put the real modules back for the files that run after it.
+afterAll(() => {
+  mock.module("../api.js", () => realApi);
 });

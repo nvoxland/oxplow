@@ -1,4 +1,4 @@
-import { afterEach, expect, mock, test } from "bun:test";
+import { afterAll, afterEach, expect, mock, test } from "bun:test";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { keyOf, proposalUri } from "../uri/uri.js";
 import type { VizConfig, VizRun } from "../tauri-bridge/generated/bindings.js";
@@ -8,7 +8,7 @@ import type { VizConfig, VizRun } from "../tauri-bridge/generated/bindings.js";
 // `setting` params narrow them, and Approve / Decline decide through the
 // person-only path.
 
-const realApi = await import("../api.js");
+const realApi = { ...(await import("../api.js")) }; // a copy: `mock.module` patches a loaded module in place
 const decided: [number, boolean][] = [];
 const columns = ["id", "uri", "created_at", "command", "input", "actor_kind", "actor_id", "thread_id", "thread_title", "key", "preview", "dry_run"];
 const row = (id: number, threadId: number, key: string) => [
@@ -85,4 +85,9 @@ test("its thread and setting params narrow the list", async () => {
   const bySetting = render(<VizView run={runWith({ setting: "agentPromptAppend" })} onOpenPage={() => {}} />);
   await waitFor(() => bySetting.getByTestId("proposal-7"));
   expect(bySetting.queryByTestId("proposal-8")).toBeNull();
+});
+
+// `mock.module` outlives this file: put the real modules back for the files that run after it.
+afterAll(() => {
+  mock.module("../api.js", () => realApi);
 });

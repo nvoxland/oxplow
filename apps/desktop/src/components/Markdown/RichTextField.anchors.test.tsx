@@ -1,12 +1,12 @@
 import { wikiUri } from "../../uri/uri.js";
-import { afterEach, expect, mock, test } from "bun:test";
+import { afterAll, afterEach, expect, mock, test } from "bun:test";
 import { act, cleanup, render } from "@testing-library/react";
 
 // tsk902: a comment's re-found anchor is stored when the document settles
 // — at once when nobody is typing, on blur when someone is — never per
 // typing pause, since each store is a command run on the person's behalf.
 
-const realApi = await import("../../api.js");
+const realApi = { ...(await import("../../api.js")) }; // a copy: `mock.module` patches a loaded module in place
 const relocated: Array<[string, boolean]> = [];
 const comment = {
   id: "cmt1",
@@ -69,4 +69,9 @@ test("while the person types, a moved anchor waits for blur", async () => {
   await settle();
   expect(whileTyping).toBe(0);
   expect(relocated).toEqual([["cmt1", false]]);
+});
+
+// `mock.module` outlives this file: put the real modules back for the files that run after it.
+afterAll(() => {
+  mock.module("../../api.js", () => realApi);
 });

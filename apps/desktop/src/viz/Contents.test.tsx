@@ -6,7 +6,14 @@ import { Contents, CONTENTS_SUBSECTIONS_MAX } from "./Contents.js";
 // A page's Contents lists its markdown headings, and its sections'
 // headings once it has two or more.
 
-afterEach(cleanup);
+// The bodies a test builds are appended to the document by hand, which RTL's
+// cleanup doesn't remove: take them out, or every later file sees their
+// `section`s.
+const bodies: HTMLElement[] = [];
+afterEach(() => {
+  cleanup();
+  for (const b of bodies.splice(0)) b.remove();
+});
 
 function body(sections: number, markdown = false): HTMLElement {
   const root = document.createElement("div");
@@ -15,6 +22,7 @@ function body(sections: number, markdown = false): HTMLElement {
     root.insertAdjacentHTML("beforeend", `<section data-section="s${i}"><h2 class="ox-section-title">Section ${i}</h2></section>`);
   }
   document.body.appendChild(root);
+  bodies.push(root);
   return root;
 }
 
@@ -80,6 +88,7 @@ function parentWith(subsections: number): HTMLElement {
     group.insertAdjacentHTML("beforeend", `<section class="ox-section" data-keep="true" data-level="3"><div class="ox-section-head"><h3 class="ox-section-title">Sub ${i}</h3></div></section>`);
   }
   document.body.appendChild(root);
+  bodies.push(root);
   return root;
 }
 
@@ -146,6 +155,7 @@ function grouped(groups: number[], extra = ""): HTMLElement {
     .join("");
   root.innerHTML = `<section><h2 class="ox-section-title">Problems</h2><div data-sections="${groups.length}">${inner}</div></section>${extra}`;
   document.body.appendChild(root);
+  bodies.push(root);
   return root;
 }
 const listing = (view: ReturnType<typeof render>) => Array.from(view.getByTestId("viz-rail-contents").querySelectorAll("button"));

@@ -1,4 +1,4 @@
-import { afterEach, expect, mock, test } from "bun:test";
+import { afterAll, afterEach, expect, mock, test } from "bun:test";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 
 import type { ExtensionPanel, PageRun } from "../../tauri-bridge/generated/bindings.js";
@@ -9,7 +9,7 @@ import { decl, fakePage, fakeRun, loader, node } from "../../pages/testing/fakeR
 // page drawn small, its header count the badge page's alert, and its
 // header opens the body page.
 
-const realApi = await import("../../api.js");
+const realApi = { ...(await import("../../api.js")) }; // a copy: `mock.module` patches a loaded module in place
 const panel: ExtensionPanel = {
   id: "z/w",
   extension: "z",
@@ -82,4 +82,9 @@ test("the body page drawn small, the badge page's alert as the count and an Aler
   expect(view.getByTestId("alerts").textContent).toBe("2 waiting@oxplow:oxplow/page?page=z/badge");
   fireEvent.click(view.getByTestId("rail-section-open-ext:z/w"));
   expect(openedPages).toEqual(["oxplow:oxplow/page?page=z/body"]);
+});
+
+// `mock.module` outlives this file: put the real modules back for the files that run after it.
+afterAll(() => {
+  mock.module("../../api.js", () => realApi);
 });

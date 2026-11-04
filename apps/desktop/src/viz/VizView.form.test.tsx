@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, mock, test } from "bun:test";
+import { afterAll, afterEach, beforeEach, expect, mock, test } from "bun:test";
 import { cleanup, fireEvent, render as rtlRender, waitFor } from "@testing-library/react";
 import { useState, type ReactElement, type ReactNode } from "react";
 import type { ActionThen, CommandSpec, VizConfig, VizRun } from "../tauri-bridge/generated/bindings.js";
@@ -15,7 +15,7 @@ import { PageNavigationContext, type PageNavigation } from "../tabs/PageNavigati
 // the viz instead. A form viz shows the same per-field errors, and after
 // a submit goes where its command says, as its `then` says.
 
-const realApi = await import("../api.js");
+const realApi = { ...(await import("../api.js")) }; // a copy: `mock.module` patches a loaded module in place
 const runs: Array<{ action: string; row: unknown; input: unknown; confirmed: boolean }> = [];
 let invalidField: string | null = null;
 const submits: unknown[] = [];
@@ -574,4 +574,9 @@ test("a row action without `about` has no subtitle, whatever page it is on", asy
   );
   await waitFor(() => view.getByTestId("viz-action-form"));
   expect(view.queryByTestId("viz-action-form-subtitle")).toBeNull();
+});
+
+// `mock.module` outlives this file: put the real modules back for the files that run after it.
+afterAll(() => {
+  mock.module("../api.js", () => realApi);
 });

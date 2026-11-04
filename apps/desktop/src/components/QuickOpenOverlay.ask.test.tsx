@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, mock, test } from "bun:test";
+import { afterAll, afterEach, beforeEach, expect, mock, test } from "bun:test";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 
 import type { Stream } from "../api.js";
@@ -6,7 +6,7 @@ import type { Stream } from "../api.js";
 // The launcher's Ask entry (P6.D1): typed text becomes "Ask the Assistant",
 // put in the Assistant's box. Nothing is ever sent.
 
-const realApi = await import("../api.js");
+const realApi = { ...(await import("../api.js")) }; // a copy: `mock.module` patches a loaded module in place
 const ran: Array<[string, unknown, boolean]> = [];
 mock.module("../api.js", () => ({
   ...realApi,
@@ -67,4 +67,9 @@ test("typed text offers Ask the Assistant, which fills its box", async () => {
   expect(getAssistant().draft?.text).toBe("why is it slow");
   expect(dockStore.get().open).toBe("assistant");
   expect(closed).toBe(1);
+});
+
+// `mock.module` outlives this file: put the real modules back for the files that run after it.
+afterAll(() => {
+  mock.module("../api.js", () => realApi);
 });

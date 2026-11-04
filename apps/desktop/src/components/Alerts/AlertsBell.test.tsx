@@ -1,10 +1,10 @@
-import { afterEach, expect, mock, test } from "bun:test";
+import { afterAll, afterEach, expect, mock, test } from "bun:test";
 import { cleanup, within, fireEvent, render, waitFor } from "@testing-library/react";
 
 // Everything that needs the person is counted by the dock's Alerts icon and
 // announced by a toast once; the Alerts page itself is a foundation page.
 
-const realApi = await import("../../api.js");
+const realApi = { ...(await import("../../api.js")) }; // a copy: `mock.module` patches a loaded module in place
 /** Any other read (the Go To section's wiki pages, …): no rows. Never the
  *  real call — with no Tauri host it throws, and the test would pass only
  *  where another file's mock answered first (tsk1012). */
@@ -178,4 +178,9 @@ test("a toast once per new item, after the start-up settle, offering only Review
   expect(toasts.map((t) => [t.message, t.actionLabel])).toEqual([["New one", "Review"]]);
   getToastStore().undo(toasts[0]!.id);
   expect(reviewed).toEqual([1]);
+});
+
+// `mock.module` outlives this file: put the real modules back for the files that run after it.
+afterAll(() => {
+  mock.module("../../api.js", () => realApi);
 });

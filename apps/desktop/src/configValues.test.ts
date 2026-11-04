@@ -1,6 +1,6 @@
-import { expect, mock, test } from "bun:test";
+import { afterAll, expect, mock, test } from "bun:test";
 
-const realApi = await import("./api.js");
+const realApi = { ...(await import("./api.js")) }; // a copy: `mock.module` patches a loaded module in place
 const asked: string[] = [];
 mock.module("./api.js", () => ({
   ...realApi,
@@ -36,4 +36,9 @@ test("every setting is read from v_config_value, its value and schema as JSON", 
     { key: "ai.roles.main", value: null, origin: "default", extension: null, doc: "The main role.", schema: null },
   ]);
   expect(reads.datasets).toEqual(["v_config_value"]);
+});
+
+// `mock.module` outlives this file: put the real modules back for the files that run after it.
+afterAll(() => {
+  mock.module("./api.js", () => realApi);
 });

@@ -1,4 +1,4 @@
-import { afterEach, expect, mock, test } from "bun:test";
+import { afterAll, afterEach, expect, mock, test } from "bun:test";
 import { cleanup, fireEvent, render as rtlRender, waitFor } from "@testing-library/react";
 
 import type { ReactElement, ReactNode } from "react";
@@ -9,7 +9,7 @@ import { PageNavigationContext, type PageNavigation } from "../tabs/PageNavigati
 // A viz node's rows can be grouped under headings (with actions there),
 // styled from their own columns, and dragged only where a drag action runs.
 
-const realApi = await import("../api.js");
+const realApi = { ...(await import("../api.js")) }; // a copy: `mock.module` patches a loaded module in place
 const actionRuns: { action: string; row: unknown }[] = [];
 mock.module("../api.js", () => ({
   ...realApi,
@@ -454,4 +454,9 @@ test("a list row leaves out its empty cells", () => {
   expect(view.getByTestId("viz-row-0").textContent).not.toContain("—");
   expect(view.getByTestId("viz-row-1").textContent).toContain("x");
   expect(view.getByTestId("viz-row-1").textContent).not.toContain("—");
+});
+
+// `mock.module` outlives this file: put the real modules back for the files that run after it.
+afterAll(() => {
+  mock.module("../api.js", () => realApi);
 });

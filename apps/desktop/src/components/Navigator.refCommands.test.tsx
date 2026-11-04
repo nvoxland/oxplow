@@ -1,4 +1,4 @@
-import { afterEach, expect, mock, test } from "bun:test";
+import { afterAll, afterEach, expect, mock, test } from "bun:test";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 
 import type { Stream, Thread, ThreadState } from "../api.js";
@@ -8,7 +8,7 @@ import { personSpec, recordRefOffers } from "./refCommandsTestSupport.js";
 // (usability.md "Menus a page or row gets from extensions"): Hand Off
 // Work… among them, bound to that thread.
 
-const realApi = await import("../api.js");
+const realApi = { ...(await import("../api.js")) }; // a copy: `mock.module` patches a loaded module in place
 mock.module("../api.js", () => ({
   ...realApi,
   refCommands: async (ref: string) => (ref.startsWith("oxplow:oxplow/thread") ? ["oxplow.handoff.send"] : []),
@@ -83,4 +83,9 @@ test("a thread's menu offers the commands about that thread", async () => {
       ["oxplow.handoff.send", { from_thread: "oxplow:oxplow/thread?id=thr2" }],
     ]),
   );
+});
+
+// `mock.module` outlives this file: put the real modules back for the files that run after it.
+afterAll(() => {
+  mock.module("../api.js", () => realApi);
 });

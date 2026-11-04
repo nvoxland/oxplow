@@ -1,4 +1,4 @@
-import { afterEach, expect, mock, test } from "bun:test";
+import { afterAll, afterEach, expect, mock, test } from "bun:test";
 import { cleanup, render } from "@testing-library/react";
 
 import type { VizConfig, VizRun, SourceCoverage, SqlCell } from "../tauri-bridge/generated/bindings.js";
@@ -6,7 +6,7 @@ import type { VizConfig, VizRun, SourceCoverage, SqlCell } from "../tauri-bridge
 // A result that is cut short, or fed by a collector that hasn't kept up,
 // says so above its rows, whatever the viz.
 
-const realApi = await import("../api.js");
+const realApi = { ...(await import("../api.js")) }; // a copy: `mock.module` patches a loaded module in place
 mock.module("../api.js", () => ({
   ...realApi,
   listExtensions: async () => [],
@@ -90,4 +90,9 @@ test("a whole, current result shows no line, and a strip shows none either", () 
   whole.unmount();
   const strip = render(<VizView run={run("number", { truncated: true })} compact />);
   expect(strip.queryByTestId("viz-completeness")).toBeNull();
+});
+
+// `mock.module` outlives this file: put the real modules back for the files that run after it.
+afterAll(() => {
+  mock.module("../api.js", () => realApi);
 });

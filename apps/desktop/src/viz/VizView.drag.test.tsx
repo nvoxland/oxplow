@@ -1,4 +1,4 @@
-import { afterEach, expect, mock, test } from "bun:test";
+import { afterAll, afterEach, expect, mock, test } from "bun:test";
 import { cleanup, createEvent, fireEvent, render as rtlRender, waitFor } from "@testing-library/react";
 
 import type { ReactElement, ReactNode } from "react";
@@ -10,7 +10,7 @@ import { PageNavigationContext, type PageNavigation } from "../tabs/PageNavigati
 // A viz's rows drag to where a drag action runs, mark for a bulk action,
 // and run a row action from its key; a board is columns of them.
 
-const realApi = await import("../api.js");
+const realApi = { ...(await import("../api.js")) }; // a copy: `mock.module` patches a loaded module in place
 const ran: { action: string; row: unknown; drop: unknown; confirmed: boolean }[] = [];
 mock.module("../api.js", () => ({
   ...realApi,
@@ -228,4 +228,9 @@ test("a right-click on a board card's title link opens the card's menu, not its 
   fireEvent.contextMenu(title);
   expect(await waitFor(() => view.getByTestId("menu-item-viz-action-finish"))).toBeTruthy();
   expect(opened).toEqual([]);
+});
+
+// `mock.module` outlives this file: put the real modules back for the files that run after it.
+afterAll(() => {
+  mock.module("../api.js", () => realApi);
 });

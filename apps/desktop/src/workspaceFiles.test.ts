@@ -1,10 +1,10 @@
-import { expect, mock, test } from "bun:test";
+import { afterAll, expect, mock, test } from "bun:test";
 
 // The stream's files are read from `v_file` (the local filesystem when no
 // `filesystem` is named): the whole tree for the index, one folder for a
 // directory check.
 
-const realApi = await import("./api.js");
+const realApi = { ...(await import("./api.js")) }; // a copy: `mock.module` patches a loaded module in place
 const asked: Array<{ sql: string; params: unknown[] }> = [];
 let rows: Array<Array<string | number | null>> = [];
 mock.module("./api.js", () => ({
@@ -38,4 +38,9 @@ test("a folder check reads that folder alone, by its parent", async () => {
   expect(await isWorkspaceDir("str3", "nowhere")).toBe(false);
   expect(asked.at(-1)?.params).toEqual([3, "", "nowhere"]);
   expect(await isWorkspaceDir("str3", "")).toBe(true);
+});
+
+// `mock.module` outlives this file: put the real modules back for the files that run after it.
+afterAll(() => {
+  mock.module("./api.js", () => realApi);
 });

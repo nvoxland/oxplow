@@ -1,4 +1,4 @@
-import { afterEach, expect, mock, test } from "bun:test";
+import { afterAll, afterEach, expect, mock, test } from "bun:test";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 
 import type { VizConfig, VizRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
@@ -51,6 +51,7 @@ function fakeEditor() {
   };
 }
 
+const realMonaco = { ...(await import("monaco-editor")) }; // a copy: `mock.module` patches a loaded module in place
 mock.module("monaco-editor", () => ({
   editor: {
     create: () => fakeEditor(),
@@ -67,7 +68,7 @@ mock.module("monaco-editor", () => ({
   },
 }));
 
-const realApi = await import("../api.js");
+const realApi = { ...(await import("../api.js")) }; // a copy: `mock.module` patches a loaded module in place
 mock.module("../api.js", () => ({
   ...realApi,
   statFile: async (_stream: string, path: string) => {
@@ -254,4 +255,10 @@ test("a code viz row names its filesystem; with no revision it reads that filesy
   await waitFor(() => expect(reads).toHaveLength(1));
   expect(reads).toEqual([{ path: "acme/page.yaml", revision: undefined, filesystem: "oxplow:extensions" }]);
   expect(view.getByTestId("viz-code-file").textContent).toContain("@oxplow:extensions");
+});
+
+// `mock.module` outlives this file: put the real modules back for the files that run after it.
+afterAll(() => {
+  mock.module("../api.js", () => realApi);
+  mock.module("monaco-editor", () => realMonaco);
 });

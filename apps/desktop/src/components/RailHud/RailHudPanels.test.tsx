@@ -1,4 +1,4 @@
-import { afterEach, expect, mock, test } from "bun:test";
+import { afterAll, afterEach, expect, mock, test } from "bun:test";
 import { createRememberedStore, panelScope, RememberedContext } from "../../prefs/remembered.js";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 
@@ -8,7 +8,7 @@ import { decl, fakePage, fakePageRunsBy, fakeRun, loader, node } from "../../pag
 // An extension panel can name a page its collapsed header shows
 // (a summary, compact) and a page whose row count is its header count.
 
-const realApi = await import("../../api.js");
+const realApi = { ...(await import("../../api.js")) }; // a copy: `mock.module` patches a loaded module in place
 // The body page has a choice param: the panel's header toggle.
 const MODE = {
   name: "mode",
@@ -106,4 +106,9 @@ test("a count of zero draws no badge in the header", async () => {
   } finally {
     rowsOf["x/n"] = saved!;
   }
+});
+
+// `mock.module` outlives this file: put the real modules back for the files that run after it.
+afterAll(() => {
+  mock.module("../../api.js", () => realApi);
 });

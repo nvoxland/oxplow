@@ -1,11 +1,11 @@
-import { afterEach, expect, mock, test } from "bun:test";
+import { afterAll, afterEach, expect, mock, test } from "bun:test";
 import { cleanup, renderHook, waitFor } from "@testing-library/react";
 
 // A thread's tabs follow `useThreadSessions`, so right after a switch it
 // must never hand back the previous thread's sessions: the tab strip would
 // drop the thread's own session tab and lead with the other thread's.
 
-const realApi = await import("./api.js");
+const realApi = { ...(await import("./api.js")) }; // a copy: `mock.module` patches a loaded module in place
 const resolvers: Array<() => void> = [];
 mock.module("./api.js", () => ({
   ...realApi,
@@ -46,4 +46,9 @@ test("switching threads never returns the previous thread's sessions", async () 
   expect(drawn.filter((d) => d.id === "thr2").every((d) => d.threadIds === null)).toBe(true);
   resolvers.shift()!();
   await waitFor(() => expect(result.current?.map((s) => s.threadId)).toEqual(["2"]));
+});
+
+// `mock.module` outlives this file: put the real modules back for the files that run after it.
+afterAll(() => {
+  mock.module("./api.js", () => realApi);
 });

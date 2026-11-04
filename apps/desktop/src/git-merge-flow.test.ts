@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterAll, afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import type { OpOutcome } from "./api.js";
 
 // End-to-end check of a UI-initiated background git op (the branch
@@ -31,8 +31,8 @@ interface BgRow {
   result_json: string | null;
 }
 
-const realTransport = await import("./tauri-bridge/transport.js");
-const realBindings = await import("./tauri-bridge/generated/bindings.js");
+const realTransport = { ...(await import("./tauri-bridge/transport.js")) }; // a copy: `mock.module` patches a loaded module in place
+const realBindings = { ...(await import("./tauri-bridge/generated/bindings.js")) }; // a copy: `mock.module` patches a loaded module in place
 
 describe("vcsMerge — UI-initiated background VCS op", () => {
   let handlers: Handler[];
@@ -160,4 +160,10 @@ describe("vcsMerge — UI-initiated background VCS op", () => {
     expect(result.success).toBe(false);
     expect(gitOpErrorMessage(result, "merge failed")).toContain("needs confirmation");
   });
+});
+
+// `mock.module` outlives this file: put the real modules back for the files that run after it.
+afterAll(() => {
+  mock.module("./tauri-bridge/transport.js", () => realTransport);
+  mock.module("./tauri-bridge/generated/bindings.js", () => realBindings);
 });

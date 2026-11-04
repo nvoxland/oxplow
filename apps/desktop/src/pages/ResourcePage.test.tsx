@@ -1,11 +1,11 @@
-import { afterEach, expect, mock, test } from "bun:test";
+import { afterAll, afterEach, expect, mock, test } from "bun:test";
 import { cleanup, render, waitFor } from "@testing-library/react";
 
 // The fallback renderer: what a URI no page renders opens on. A URI of an
 // undeclared resource, and one whose `resolve` dataset has no row, both show as
 // a dead link (the raw URI, muted); a resolvable one shows its params.
 
-const realApi = await import("../api.js");
+const realApi = { ...(await import("../api.js")) }; // a copy: `mock.module` patches a loaded module in place
 const realQuerySql = realApi.querySql;
 mock.module("../api.js", () => ({
   ...realApi,
@@ -70,4 +70,9 @@ test("a URI with a view (#part=output) resolves as the resource it names", async
   const view = render(<ResourcePage uri="oxplow:acme/pr?id=12#part=output" />);
   await waitFor(() => expect(view.getByTestId("resource-params").textContent).toContain("12"));
   expect(view.queryByTestId("resource-dead-link")).toBeNull();
+});
+
+// `mock.module` outlives this file: put the real modules back for the files that run after it.
+afterAll(() => {
+  mock.module("../api.js", () => realApi);
 });

@@ -1,7 +1,7 @@
-import { afterEach, expect, mock, test } from "bun:test";
+import { afterAll, afterEach, expect, mock, test } from "bun:test";
 import { act, cleanup, fireEvent, render } from "@testing-library/react";
 
-const realApi = await import("../../api.js");
+const realApi = { ...(await import("../../api.js")) }; // a copy: `mock.module` patches a loaded module in place
 mock.module("../../api.js", () => ({
   ...realApi,
   listExtensions: async () => [],
@@ -122,4 +122,9 @@ test("the open panel's header shows its icon before its title", () => {
   expect(title.textContent).toBe("Alerts");
   expect(icon.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(view.getByTestId("dock-alerts").querySelector("svg")?.innerHTML).toBe(icon.querySelector("svg")?.innerHTML);
+});
+
+// `mock.module` outlives this file: put the real modules back for the files that run after it.
+afterAll(() => {
+  mock.module("../../api.js", () => realApi);
 });

@@ -11,7 +11,12 @@ import { selectionToolbarVisible } from "./SelectionToolbar.js";
 // Link and the headings (not in a one-line field); Add comment only where
 // the text takes comments.
 
-afterEach(cleanup);
+// A selected editor leaves the window's selection behind: clear it, or a later
+// file's right-click lands on "selected text".
+afterEach(() => {
+  cleanup();
+  window.getSelection()?.removeAllRanges();
+});
 
 async function selectHello(view: ReturnType<typeof render>): Promise<Editor> {
   await act(async () => {

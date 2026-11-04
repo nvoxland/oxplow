@@ -1,4 +1,4 @@
-import { afterEach, expect, mock, test } from "bun:test";
+import { afterAll, afterEach, expect, mock, test } from "bun:test";
 import { cleanup, render, waitFor } from "@testing-library/react";
 import { fireEvent } from "@testing-library/react";
 
@@ -11,9 +11,9 @@ import { fireEvent } from "@testing-library/react";
 // reals are spread so sibling tests keep the full surface); `pickFolder` is
 // stubbed to answer with a fixed path instead of opening a native dialog.
 
-const realTransport = await import("../tauri-bridge/transport.js");
-const realBindings = await import("../tauri-bridge/generated/bindings.js");
-const realDialog = await import("../tauri-bridge/nativeDialog.js");
+const realTransport = { ...(await import("../tauri-bridge/transport.js")) }; // a copy: `mock.module` patches a loaded module in place
+const realBindings = { ...(await import("../tauri-bridge/generated/bindings.js")) }; // a copy: `mock.module` patches a loaded module in place
+const realDialog = { ...(await import("../tauri-bridge/nativeDialog.js")) }; // a copy: `mock.module` patches a loaded module in place
 
 const ok = <T,>(data: T) => ({ status: "ok" as const, data });
 
@@ -86,4 +86,11 @@ test("a cancelled folder picker is a no-op on both doors", async () => {
 
   await waitFor(() => expect(created).toEqual([]));
   expect(opened).toEqual([]);
+});
+
+// `mock.module` outlives this file: put the real modules back for the files that run after it.
+afterAll(() => {
+  mock.module("../tauri-bridge/transport.js", () => realTransport);
+  mock.module("../tauri-bridge/nativeDialog.js", () => realDialog);
+  mock.module("../tauri-bridge/generated/bindings.js", () => realBindings);
 });

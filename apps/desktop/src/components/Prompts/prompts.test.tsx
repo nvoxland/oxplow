@@ -1,4 +1,4 @@
-import { afterEach, expect, mock, test } from "bun:test";
+import { afterAll, afterEach, expect, mock, test } from "bun:test";
 import { cleanup, fireEvent, render } from "@testing-library/react";
 
 import { promptsAbout, type CatalogPrompt } from "./promptModel.js";
@@ -13,7 +13,7 @@ const catalog: CatalogPrompt[] = [
   { prompt: "Which PRs wait on me?", about: null, source: { kind: "extension", name: "gh" } },
 ];
 
-const realApi = await import("../../api.js");
+const realApi = { ...(await import("../../api.js")) }; // a copy: `mock.module` patches a loaded module in place
 // What `v_page_answer` answers, as rows.
 const rows = catalog.map((p) => [p.source.kind, p.source.name, p.prompt, p.about]);
 mock.module("../../api.js", () => ({
@@ -45,4 +45,9 @@ test("an empty state offers prompts; Ask puts it in the Assistant's box", () => 
   expect(view.getByTestId("x-empty").textContent).toContain("No dashboards yet");
   fireEvent.click(view.getByText("Build a dashboard of test health"));
   expect(getAssistant().draft?.text).toBe("Build a dashboard of test health");
+});
+
+// `mock.module` outlives this file: put the real modules back for the files that run after it.
+afterAll(() => {
+  mock.module("../../api.js", () => realApi);
 });

@@ -1,4 +1,4 @@
-import { afterEach, expect, mock, test } from "bun:test";
+import { afterAll, afterEach, expect, mock, test } from "bun:test";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 
 import { PageNavigationContext, type PageNavigation } from "./PageNavigationContext.js";
@@ -8,7 +8,7 @@ import { PageNavigationContext, type PageNavigation } from "./PageNavigationCont
 // whole page) and the rest are one click from anywhere on it. A child
 // that owns its menu stops the event; selected text is the selection's.
 
-const realApi = await import("../api.js");
+const realApi = { ...(await import("../api.js")) }; // a copy: `mock.module` patches a loaded module in place
 mock.module("../api.js", () => ({ ...realApi, refCommands: async () => [] }));
 const { Page } = await import("./Page.js");
 
@@ -60,4 +60,9 @@ test("a right-click on selected text is the selection's, not the page's", async 
   await new Promise((r) => setTimeout(r, 20));
   expect(view.queryByTestId("menu-item-page-add-to-context")).toBeNull();
   window.getSelection()?.removeAllRanges();
+});
+
+// `mock.module` outlives this file: put the real modules back for the files that run after it.
+afterAll(() => {
+  mock.module("../api.js", () => realApi);
 });
