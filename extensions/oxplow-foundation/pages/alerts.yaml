@@ -1,6 +1,7 @@
 title: Alerts
 description: 'Everything that needs you: decisions and hints waiting on you, failed operations, undelivered events and reactions, and extensions not running as they should.'
 icon: bell
+category: System
 answers:
 - {"question":"Which events couldn't be delivered to their consumer?","params":{},"skill":"oxplow-extension"}
 loaders:
