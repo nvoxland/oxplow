@@ -78,6 +78,23 @@ describe("pageRuns", () => {
     expect(f.calls.fetch).toEqual([["run-1"]]);
   });
 
+  test("a host opened on a paused run shows it again: the daemon is told, and the run fetched once", async () => {
+    const f = fake();
+    const runs = createPageRuns(f.transport);
+    const a = runs.open(key("p"));
+    await wait(0);
+    a.setVisible(false);
+    await wait(0);
+    expect(f.calls.visible).toEqual([["run-1", false]]);
+    f.missChange();
+    // The tab's page is drawn again by a new host (the old one went with its
+    // tab's content), on the run that is still open and paused.
+    runs.open(key("p"));
+    await wait(COALESCE_MS + 20);
+    expect(f.calls.visible).toEqual([["run-1", false], ["run-1", true]]);
+    expect(f.calls.fetch).toEqual([["run-1"]]);
+  });
+
   test("out-of-order fetch replies use their actual snapshot sequences, not their triggering notices", async () => {
     const f = fake();
     const replies: ((value: Record<string, { run: PageRun; seq: number }>) => void)[] = [];

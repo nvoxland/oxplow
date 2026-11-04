@@ -257,10 +257,14 @@ export function createPageRuns(transport: PageRunsTransport) {
   const open = (key: PageKey): RunHandle => {
     const k = keyOf(key);
     let entry = entries.get(k);
+    // A host that opens onto a run whose hosts were all hidden shows it
+    // again: the daemon (which stopped re-running it) is told below.
+    let wakes = false;
     if (entry) {
       if (entry.closeTimer) clearTimeout(entry.closeTimer);
       entry.closeTimer = null;
       entry.refs += 1;
+      wakes = entry.shown === 0;
       entry.shown += 1;
     } else {
       entry = {
@@ -293,6 +297,7 @@ export function createPageRuns(transport: PageRunsTransport) {
         }
       });
     };
+    if (wakes) tell(true);
     return {
       setVisible: (visible) => {
         if (closed || visible === shown) return;

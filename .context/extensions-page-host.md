@@ -180,7 +180,9 @@ the user guide is `docs/guide/pages.md`.
     `useTabVisible()` and tells the daemon (`set_page_visible`) when none
     of a run's hosts is on screen. A change then marks the run stale and
     re-runs nothing; shown again, a stale run re-runs once and the
-    window fetches it. Rail panels and the selected tab stay live.
+    window fetches it. A host that opens onto a paused run (a page drawn
+    again by a new host while its run stays open) tells the daemon too,
+    as a host shown again does. Rail panels and the selected tab stay live.
   - The Cmd+P launcher re-reads pages (the live set's) every time it
     opens and lists them under their `category` (a page with none, a part
     and a query are not listed), merged into the static directory by
