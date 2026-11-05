@@ -539,7 +539,7 @@ reconnect). A closed run's last rows are kept (`KEPT_RUNS`, the newest 32:
 about four streams' tabs): a page opened on the same key starts on them,
 marked `stale` with no run id (an action finds "The page isn't open yet"),
 until its new run answers, so coming back to a stream shows the page, not
-"Reading the page…". The window's run store publishes its whole live roster with
+its loading screen. The window's run store publishes its whole live roster with
 `runIds()` / `subscribeRunIds`, including panel and markdown subscriptions.
 `TabReport.runs` carries that roster, and its heartbeat reads the ids again
 instead of repeating a cached list. Reports use a single-flight writer:

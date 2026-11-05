@@ -380,6 +380,12 @@
 .ox-loading,
 .ox-empty-line { margin: var(--space-1) 0 0; color: var(--text-muted); font-size: var(--text-sm); }
 
+/* A whole page on its way: in the middle of it, not a line at its top. */
+.ox-loading-screen { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--space-3); min-height: 50vh; color: var(--text-muted); font-size: var(--text-sm); }
+.ox-spinner { width: 24px; height: 24px; border: 2px solid var(--border-strong); border-top-color: var(--accent); border-radius: 50%; animation: ox-spin 0.8s linear infinite; }
+@keyframes ox-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .ox-spinner { animation-duration: 4s; } }
+
 /* States */
 .ox-ok { color: var(--status-done); }
 .ox-waiting { color: var(--status-waiting); }

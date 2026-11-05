@@ -22,7 +22,7 @@ import { identityOf } from "../uri/uri.js";
 import { PageAbout, RailSeeAlso, useOutOfDate, type PickedRow } from "./railGroups.js";
 import { TabModal } from "../components/TabModal.js";
 import type { PageAction } from "../kit/actions.js";
-import { Loading } from "../kit/Loading.js";
+import { LoadingScreen } from "../kit/Loading.js";
 import { LOADING_AFTER_MS, useDelayed } from "../kit/useDelayed.js";
 import { ActionForm, useVizActions } from "../viz/VizView.js";
 import { FormSourceContext } from "../viz/formSource.js";
@@ -310,7 +310,7 @@ export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, re
               <PageTree run={run} runId={runId} streamId={streamId} onOpenPage={onOpenPage} onSetParam={apply} />
             </HostedViewContext.Provider>
           ) : reading ? (
-            <Loading what="the page" />
+            <LoadingScreen />
           ) : null}
         </div>
       </PageCommentsContext.Provider>
