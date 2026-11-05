@@ -134,7 +134,21 @@ test("the editor formats a selection", async ({ page, daemon }) => {
   await expect(body.locator(".ProseMirror")).toBeFocused();
   await page.keyboard.press("End");
   // A keyboard selection ("Home" is the document's start on macOS).
-  for (let i = 0; i < "Start here.".length; i++) await page.keyboard.press("Shift+ArrowLeft");
+  // The editor learns of the browser's selection from `selectionchange`, a
+  // task after the key. A key pressed before it has caught up with the last
+  // one finds the editor's older selection written back over the browser's
+  // (under load, two or more of the eleven presses were undone). So each
+  // press waits until the editor (Tiptap leaves it on the element) holds
+  // the selection the keys so far made, as a person's slower keys do.
+  const held = () =>
+    body.locator(".ProseMirror").evaluate((el) => {
+      const { from, to } = (el as unknown as { editor: { state: { selection: { from: number; to: number } } } }).editor.state.selection;
+      return to - from;
+    });
+  for (let i = 1; i <= "Start here.".length; i++) {
+    await page.keyboard.press("Shift+ArrowLeft");
+    await expect.poll(held).toBe(i);
+  }
   await page.getByTestId("selection-toolbar-bold").click();
   await expect(body.locator(".ProseMirror p strong")).toHaveText("Start here.");
   const save = body.getByRole("button", { name: "Save" });
