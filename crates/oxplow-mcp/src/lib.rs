@@ -1710,13 +1710,14 @@ mod tests {
         for says in [
             "proposal 7",
             "Alerts",
-            "in this thread",
+            "Tell the person",
             "don't run it again",
             "v_command_proposal",
             "replaces proposals 5",
         ] {
             assert!(message.contains(says), "{says}: {message}");
         }
+        assert!(!message.contains("thread"), "{message}");
     }
 
     /// A thread on `stream`, made as a person through `oxplow.thread.create`.
@@ -2303,21 +2304,5 @@ mod tests {
         .unwrap();
         let out: serde_json::Value = serde_json::from_str(&text_payload(out)).unwrap();
         assert_eq!(out["source"], "tree_sitter");
-    }
-}
-
-#[cfg(test)]
-mod proposed_message_tests {
-    use super::proposed_message;
-
-    /// An agent whose command waits for a person is told so, and where,
-    /// so it can tell them in case they miss the alert.
-    #[test]
-    fn a_blocked_agent_is_told_it_waits_and_to_say_so() {
-        let said = proposed_message("oxplow.extension.deploy", &7, &[]);
-        assert!(said.contains("needs a person's approval"), "{said}");
-        assert!(said.contains("Alerts"), "{said}");
-        assert!(said.contains("Tell the person"), "{said}");
-        assert!(!said.contains("thread"), "{said}");
     }
 }
