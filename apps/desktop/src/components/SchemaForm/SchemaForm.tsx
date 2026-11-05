@@ -13,7 +13,7 @@
 
 import type { CSSProperties } from "react";
 import { Markdown } from "../Markdown/Markdown.js";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import {
   draftsFrom,
@@ -104,6 +104,7 @@ export function SchemaForm({
   draft,
   onDraft,
 }: SchemaFormProps) {
+  const formRef = useRef<HTMLFormElement>(null);
   const label = submitLabel ?? (mode === "edit" ? "Save" : "Submit");
   // Keyed on content: a host re-reading its data passes fresh copies of
   // the same schema and starting value, and that mustn't throw away what
@@ -199,6 +200,12 @@ export function SchemaForm({
     : missing.length > 0
       ? `Fill in ${missing.map(labelOf).join(", ")} first`
       : `Fix ${Object.keys(errors).filter((k) => !fixedSet.has(k)).map((k) => labelOf(fields.find((f) => f.path === k) ?? ({ label: k } as Field))).join(", ")} first`;
+  const firstFocus = drawn[0] && onSubmit !== undefined && mode === "create" ? `${testIdPrefix}-${drawn[0].path}` : null;
+  useLayoutEffect(() => {
+    if (firstFocus !== null) focusFirst(formRef.current, firstFocus);
+    // Once, as the form opens (what `autoFocus` was).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const submit = () => {
     if (onSubmit && valid && !busy && (mode === "create" || dirty)) onSubmit(value);
   };
@@ -207,6 +214,7 @@ export function SchemaForm({
   };
   return (
     <form
+      ref={formRef}
       data-testid={testIdPrefix}
       style={{ display: "flex", flexDirection: "column", gap: 8 }}
       onSubmit={(e) => {
@@ -346,7 +354,7 @@ function FieldInput({
   );
   let input;
   if (choices) {
-    input = <ChoiceSelect id={id} value={raw} required={f.required} autoFocus={autoFocus} choices={choices} onChange={(v) => onEdit(f.path, v)} />;
+    input = <ChoiceSelect id={id} value={raw} required={f.required} choices={choices} onChange={(v) => onEdit(f.path, v)} />;
   } else switch (f.kind) {
     case "boolean":
       // The label to the right of the box, its help beneath the label.
@@ -357,7 +365,6 @@ function FieldInput({
             data-testid={id}
             type="checkbox"
             checked={raw === "true"}
-            autoFocus={autoFocus}
             onChange={(e) => onEdit(f.path, e.target.checked ? "true" : "false")}
             style={{ margin: 0 }}
           />
@@ -367,7 +374,7 @@ function FieldInput({
       );
     case "enum":
       input = (
-        <select id={id} data-testid={id} className="ox-select" value={raw} autoFocus={autoFocus} onChange={(e) => onEdit(f.path, e.target.value)}>
+        <select id={id} data-testid={id} className="ox-select" value={raw} onChange={(e) => onEdit(f.path, e.target.value)}>
           <option value="">{f.required ? "Choose…" : "—"}</option>
           {f.options.map((o) => (
             <option key={o} value={o}>
@@ -400,7 +407,6 @@ function FieldInput({
           data-testid={id}
           className="ox-textarea"
           value={raw}
-          autoFocus={autoFocus}
           rows={Math.min(8, Math.max(2, raw.split("\n").length))}
           placeholder={f.kind === "strings" ? "One per line" : "JSON"}
           onChange={(e) => onEdit(f.path, e.target.value)}
@@ -418,7 +424,6 @@ function FieldInput({
           autoComplete={secret ? "off" : undefined}
           step={f.kind === "integer" ? 1 : undefined}
           value={raw}
-          autoFocus={autoFocus}
           onChange={(e) => onEdit(f.path, e.target.value)}
           style={inputStyle}
         />
@@ -452,20 +457,35 @@ const fieldsetStyle: CSSProperties = {
   gap: 8,
 };
 
+/** Whether the keys go to a field of some other page or overlay: a text
+ *  field, a select or an editor that holds the focus outside `form`. */
+function typingElsewhere(form: HTMLElement): boolean {
+  const held = document.activeElement;
+  if (!(held instanceof HTMLElement) || held === document.body || form.contains(held)) return false;
+  return held.isContentEditable || held instanceof HTMLInputElement || held instanceof HTMLTextAreaElement || held instanceof HTMLSelectElement;
+}
+
+/** A form that opens takes the focus for its first field, unless the person
+ *  is typing somewhere else: one that opens by itself (a new thread's session
+ *  picker) while the launcher has the keys must not take them. */
+function focusFirst(form: HTMLElement | null, id: string): void {
+  if (!form || typingElsewhere(form)) return;
+  const field = form.querySelector(`[id="${id}"]`);
+  if (field instanceof HTMLInputElement || field instanceof HTMLSelectElement || field instanceof HTMLTextAreaElement) field.focus();
+}
+
 /** A field picked from a list: its choices, under their groups' headings
  *  in the order the groups first appear. */
 function ChoiceSelect({
   id,
   value,
   required,
-  autoFocus,
   choices,
   onChange,
 }: {
   id: string;
   value: string;
   required: boolean;
-  autoFocus: boolean;
   choices: FieldChoice[];
   onChange(value: string): void;
 }) {
@@ -482,7 +502,7 @@ function ChoiceSelect({
     </option>
   );
   return (
-    <select id={id} data-testid={id} className="ox-select" value={value} autoFocus={autoFocus} onChange={(e) => onChange(e.target.value)}>
+    <select id={id} data-testid={id} className="ox-select" value={value} onChange={(e) => onChange(e.target.value)}>
       <option value="">{required ? "Choose…" : "—"}</option>
       {groups.map((g, i) =>
         g.name === null ? (
