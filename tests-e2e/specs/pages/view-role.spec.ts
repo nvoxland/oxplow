@@ -26,6 +26,7 @@ test("Definition's rail has no Filters group: its params param is a view param",
 
   const file = page.getByTestId("page-file").filter({ visible: true });
   await expect(file.getByTestId("node-about")).toContainText("Viewed Numbat");
-  await expect(page.getByTestId("page-rail-filters")).toHaveCount(0);
-  await expect(page.getByTestId("page-param-params")).toHaveCount(0);
+  // The shown tab's rail: the New Session tab beside it keeps its own filters mounted.
+  await expect(page.getByTestId("page-rail-filters").filter({ visible: true })).toHaveCount(0);
+  await expect(page.getByTestId("page-param-params").filter({ visible: true })).toHaveCount(0);
 });
