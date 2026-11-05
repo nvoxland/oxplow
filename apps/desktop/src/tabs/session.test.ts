@@ -23,6 +23,7 @@ import {
   serializeSession,
   patchHistoryState,
   setHistoryState,
+  setTitle,
   slotShowing,
   stepOrigin,
   type Entry,
@@ -253,6 +254,19 @@ test("setHistoryState keeps an entry's memory with it", () => {
   s = setHistoryState(s, slot, { scroll: 120 });
   s = back(navigate(s, slot, e(b)), slot);
   expect(current(s.tabs[0]!).historyState).toEqual({ scroll: 120 });
+});
+
+test("setTitle keeps a page's title with its entry, through storage; the same title is no change", () => {
+  let s = open(emptySession(), e(a));
+  const slot = s.active!;
+  const titled = setTitle(s, slot, "Git Status");
+  expect(current(titled.tabs[0]!).title).toBe("Git Status");
+  expect(setTitle(titled, slot, "Git Status")).toBe(titled);
+  const stored = parseSession(serializeSession(titled))!;
+  expect(current(stored.tabs[0]!).title).toBe("Git Status");
+  // Another page in the tab is not titled by the old one.
+  s = navigate(titled, slot, e(b));
+  expect(current(s.tabs[0]!).title).toBeUndefined();
 });
 
 describe("origin: the collection a page was opened from", () => {

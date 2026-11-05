@@ -197,3 +197,27 @@ test("with no tab ready yet, the body says Loading…", () => {
   );
   expect(getByTestId("center-tabs-loading").textContent).toBe("Loading…");
 });
+
+test("only the shown tab is mounted; another mounts when first shown and stays mounted", () => {
+  const mounts: string[] = [];
+  const Probe = ({ name }: { name: string }) => {
+    useState(() => mounts.push(name));
+    return <span data-testid={`probe-${name}`} />;
+  };
+  const tabs: CenterTab[] = ["a", "b", "c"].map((name) => ({
+    id: `oxplow:oxplow/file?path=${name}.ts`,
+    label: name,
+    closable: true,
+    render: () => <Probe name={name} />,
+  }));
+  const idOf = (name: string) => `oxplow:oxplow/file?path=${name}.ts`;
+  const view = render(<CenterTabs tabs={tabs} activeId={idOf("a")} onActivate={() => {}} />);
+  expect(mounts).toEqual(["a"]);
+  view.rerender(<CenterTabs tabs={tabs} activeId={idOf("b")} onActivate={() => {}} />);
+  expect(mounts).toEqual(["a", "b"]);
+  // Back to a: it was kept, not mounted again; b is hidden, still mounted.
+  view.rerender(<CenterTabs tabs={tabs} activeId={idOf("a")} onActivate={() => {}} />);
+  expect(mounts).toEqual(["a", "b"]);
+  expect(view.queryByTestId("probe-b")).not.toBeNull();
+  expect(view.queryByTestId("probe-c")).toBeNull();
+});

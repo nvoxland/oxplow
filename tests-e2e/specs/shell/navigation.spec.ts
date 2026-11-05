@@ -161,3 +161,21 @@ test("a file opened at a line lands at its #lines view, and Back returns to the 
   await backButton(page).click();
   await expect(page.getByTestId("center-tab-oxplow:oxplow/file?path=lines.txt#lines=3-3")).toBeVisible();
 });
+
+// A tab mounts when it is first shown, so after a reload the tabs not shown
+// yet are named by the title their entry kept, not by their page's slug.
+test("after a reload, tabs not yet shown keep their titles and mount only when shown", async ({ page }) => {
+  await page.goto("/");
+  for (const query of ["Tasks", "Git", "Alerts"]) await openFromLauncher(page, query);
+  const strip = page.locator('[data-testid^="center-tab-oxplow"]');
+  const labels = () => strip.evaluateAll((els) => els.map((e) => (e.textContent ?? "").replace("×", "").trim()));
+  await expect.poll(labels).toContain("Git Status");
+  const before = await labels();
+  await page.reload();
+  await expect(strip.first()).toBeVisible();
+  await expect.poll(labels).toEqual(before);
+  // Only the shown tab has a body.
+  await expect(page.locator('[data-testid^="center-tab-body-"]')).toHaveCount(1);
+  await strip.filter({ hasText: "Git Status" }).click();
+  await expect(page.locator('[data-testid^="center-tab-body-"]')).toHaveCount(2);
+});

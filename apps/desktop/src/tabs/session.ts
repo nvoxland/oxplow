@@ -51,6 +51,9 @@ export interface Entry {
    *  browser's `history.state`; persisted when it is JSON. */
   historyState?: unknown;
   from?: Origin;
+  /** The title its page last registered, so the strip names the tab before
+   *  the page is mounted again (a tab mounts when first shown). */
+  title?: string;
 }
 
 export interface Tab {
@@ -197,6 +200,18 @@ export function setHistoryState(s: Session, slot: string, state: unknown): Sessi
   return withTab(s, slot, (t) => {
     const entries = [...t.entries];
     entries[t.at] = { ...entries[t.at]!, historyState: state };
+    return { ...t, entries };
+  });
+}
+
+/** Keep `title` as the title of `slot`'s current entry. The same title
+ *  returns `s` itself, so a page registering it again costs no render. */
+export function setTitle(s: Session, slot: string, title: string): Session {
+  return withTab(s, slot, (t) => {
+    const now = current(t);
+    if (now.title === title) return t;
+    const entries = [...t.entries];
+    entries[t.at] = { ...now, title };
     return { ...t, entries };
   });
 }

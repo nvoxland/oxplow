@@ -1601,7 +1601,13 @@ should only survive as the rail-side fallback.
 
 ## Live by default: a page is a function of its entry
 
-A tab keeps **one mounted body per page identity and mode** (`bodies(tab)`), so a
+`CenterTabs` mounts a body when its tab is first shown and keeps it mounted
+after (a window arriving on a stream draws one tab, not all of them: the others
+cost 200-400 ms of a stream switch), and is keyed by the stream, so a switch
+starts over with the selected tab. A tab not yet shown is named by the title
+its entry kept (`Entry.title`, written when the page registers it: the session
+is stored), else the fallback; its agent status dot and badge come from the
+window's session statuses, never from the body, so they update unmounted. A tab keeps **one mounted body per page identity and mode** (`bodies(tab)`), so a
 change of the `#` — a filter, a pick, Back or Forward between them —
 re-renders the page and never mounts it again: its state, its scroll and
 its loaded data stay. A page therefore reads its view from its props or

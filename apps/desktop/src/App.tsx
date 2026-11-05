@@ -109,6 +109,7 @@ import {
   MAX_PAGE_TABS,
   navigate as sessionNavigate,
   open as sessionOpen,
+  setTitle as sessionSetTitle,
   refsOf,
   reorder as sessionReorder,
   patchHistoryState as sessionPatchHistoryState,
@@ -1767,7 +1768,7 @@ export function App() {
       const innerRender = tab.render;
       const bookmarkScope = bookmarks.find((b) => b.ref.id === ref.id)?.scope ?? null;
       const elsewhere = bookmarkScope === null ? bookmarkedElsewhere(bookmarks, ref) : null;
-      const registeredTitle = pageTitles[tabId];
+      const registeredTitle = pageTitles[tabId] ?? (isCurrent ? currentEntry(sessionTab).title : undefined);
       const navValue: PageNavigation = {
         navigate: (newRef, opts) => {
           // A new tab with history state (a compare's two texts) is its
@@ -1794,7 +1795,11 @@ export function App() {
         pinned: !!tab.pinned,
         origin,
         stepOrigin: origin ? (index: number) => handleStepOrigin(slot, index) : undefined,
-        setTitle: (t: string) => setPageTitle(tabId, t),
+        setTitle: (t: string) => {
+          setPageTitle(tabId, t);
+          // Kept with the entry, for the strip before this page mounts again.
+          if (isCurrent && selectedThreadId) updateSession(selectedThreadId, (session) => sessionSetTitle(session, slot, t));
+        },
         title: registeredTitle,
         setEditing: isCurrent ? editingSetterFor(tabId) : undefined,
         setTabActions: isCurrent ? actionsSetterFor(tabId) : undefined,
@@ -2036,6 +2041,7 @@ export function App() {
         }}>
           {stream ? (
             <CenterTabs
+              key={stream.id}
               tabs={centerTabs}
               activeId={effectiveCenterActive}
               onActivate={(id) => setCenterActive(id)}

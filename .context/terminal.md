@@ -117,8 +117,12 @@ under `.oxplow/runtime/` by the session's harness (`oxplow-harnesses`: the Claud
 opencode prompt file per session); shell terminals skip that path
 entirely.
 
-**Restoring tabs starts nothing.** Every tab body stays mounted
-(`display:none`), so an agent session's session opens with
+**Restoring tabs starts nothing.** A tab body mounts when its tab is first
+shown (a stream's visit starts over with the selected tab) and then stays
+mounted (`display:none`). A tab not yet shown has no body, so its terminal does
+not attach, not even to an agent that runs, until it is first shown; its status
+dot and badge still update (they come from the window's session statuses). An
+agent session's session opens with
 `startOnActivate`: until its view is shown it opens no session — except
 that it attaches, through the spawn-free `lookup_terminal_session`, to an
 agent that already runs. The first time the tab is shown it opens the
