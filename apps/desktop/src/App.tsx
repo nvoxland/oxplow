@@ -1034,6 +1034,8 @@ export function App() {
     const timer = setTimeout(() => {
       const ctxAfter = visitContextRef.current;
       const label = tabLabelByIdRef.current[effectiveCenterActive] ?? ref.id;
+      // A visit that couldn't be recorded (the window reloading, the daemon
+      // away) is not worth an unhandled rejection.
       void recordPageVisit({
         refKind: recordedPageKind(ref),
         // A visit is of the page, whatever its view.
@@ -1041,7 +1043,7 @@ export function App() {
         label,
         streamId: ctxAfter.streamId,
         threadId: selectedThreadId,
-      });
+      }).catch(() => {});
     }, 250);
     return () => clearTimeout(timer);
   }, [effectiveCenterActive, selectedThreadId]);

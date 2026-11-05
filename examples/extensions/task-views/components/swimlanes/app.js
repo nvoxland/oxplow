@@ -51,6 +51,11 @@
     let ordering = hasOrdering(component.data.features);
     let editing = false;
     let dragRef = null;
+    // A card is being dragged: redrawing would remove it from under the
+    // pointer and the browser would drop the drag. An update that arrives
+    // meanwhile is drawn when the drag ends.
+    let dragging = false;
+    let stale = false;
 
     /** Run a command; on success the host runs the page again and sends the
      *  new rows to `onUpdate`. */
@@ -66,7 +71,8 @@
     component.onUpdate(({ data }) => {
       current = data.swimlanes;
       ordering = hasOrdering(data.features);
-      if (!editing) draw();
+      if (editing || dragging) stale = true;
+      else draw();
     });
     draw();
 
@@ -127,12 +133,18 @@
       el.draggable = true;
       el.addEventListener("dragstart", (e) => {
         dragRef = item.uri;
+        dragging = true;
         el.classList.add("ox-dragging");
         if (e.dataTransfer) e.dataTransfer.setData("text/plain", item.uri);
       });
       el.addEventListener("dragend", () => {
         el.classList.remove("ox-dragging");
         dragRef = null;
+        dragging = false;
+        if (stale && !editing) {
+          stale = false;
+          draw();
+        }
       });
       el.addEventListener("click", (e) => {
         if (e.target.closest(".title-form")) return;
