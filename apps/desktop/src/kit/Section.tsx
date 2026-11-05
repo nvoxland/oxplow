@@ -4,6 +4,8 @@ import { DisclosureGlyph } from "./Disclosure.js";
 import { createContext, useContext, type CSSProperties, type ReactNode } from "react";
 
 import { useSectionCollapse } from "../components/CollapsibleSections.js";
+import { ICONS } from "../icons.js";
+import { isIconName } from "../iconNames.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { ActionButtons } from "./ActionButtons.js";
 import { OpenPageLink } from "./OpenPageLink.js";
@@ -31,9 +33,10 @@ export interface SectionProps {
   /** The heading isn't drawn: it stays in the page, visually hidden, for
    *  Contents and screen readers. */
   hideTitle?: boolean;
-  /** It stands apart in a box, over the rest of the page; pass `hideTitle`
-   *  too, since the box says it needs no heading. */
+  /** It stands apart in a panel, over the rest of the page. */
   callout?: boolean;
+  /** An icon's name (`icons.ts`), drawn before the heading's text. */
+  icon?: string | null;
   description?: ReactNode;
   /** What the section holds, in a sentence: a ⓘ after the heading's text
    *  says it on hover (and to screen readers); the page stays quiet. */
@@ -66,6 +69,7 @@ export function Section({
   opens,
   hideTitle = false,
   callout = false,
+  icon = null,
   description,
   help,
   actions,
@@ -81,6 +85,7 @@ export function Section({
   const Heading = `h${level}` as "h2";
   const collapse = useSectionCollapse(id, collapsible, defaultCollapsed);
   const open = collapse ? collapse.expanded : true;
+  const Icon = icon && isIconName(icon) ? ICONS[icon] : undefined;
   return (
     <SectionLevelContext.Provider value={level}>
       <section
@@ -97,6 +102,7 @@ export function Section({
       >
         <div className={hideTitle && !actions && !source ? "ox-section-head ox-sr-only" : "ox-section-head"}>
           <Heading className={hideTitle ? "ox-section-title ox-sr-only" : "ox-section-title"}>
+            {Icon ? <Icon size={14} aria-hidden className="ox-section-icon" /> : null}
             {collapse ? (
               // The toggle sits INSIDE the heading: it stays a heading for the
               // outline, and a real button gets the keyboard for free.

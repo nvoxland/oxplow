@@ -151,17 +151,26 @@
 .ox-title { margin: 0; font-size: var(--text-2xl); font-weight: var(--weight-bold); line-height: var(--leading-tight); color: var(--text-primary); }
 .ox-intro { margin: var(--space-2) 0 0; color: var(--text-secondary); }
 .ox-section { margin-top: var(--space-6); }
-/* A callout: what the page is about and what to do about it, in a box over
-   the rest. Its facts sit on one line, its buttons at the far end. */
+/* A callout: what the page is about and what to do about it, in a panel over
+   the rest, the same panel as the details rail's card. Its title and buttons
+   share the first line, what it says the line under them. One fact needs no
+   label: the title says what it is. With its title hidden (a banner) it is
+   one line. */
 .ox-section[data-callout] {
-  display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-4);
+  display: grid; grid-template-columns: 1fr auto; align-items: center; gap: var(--space-2) var(--space-4);
   padding: var(--space-3) var(--space-4);
-  background: var(--surface-card); border-left: 3px solid var(--accent); border-radius: var(--radius-md, 6px);
+  background: var(--surface-chrome); border: 1px solid var(--border-subtle); border-radius: var(--radius-md, 6px);
 }
-.ox-section[data-callout] > .ox-part-actions { margin: 0 0 0 auto; }
+.ox-section[data-callout] > .ox-section-head { grid-column: 1; grid-row: 1; padding: 0; margin: 0; border: 0; }
+.ox-section[data-callout] > .ox-section-head > .ox-section-title { display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-md); }
+.ox-section[data-callout] > .ox-part-actions { grid-column: 2; grid-row: 1; margin: 0; }
+.ox-section[data-callout] > :not(.ox-section-head):not(.ox-part-actions) { grid-column: 1 / -1; grid-row: 2; }
+.ox-section[data-callout][data-title-hidden] > :not(.ox-section-head):not(.ox-part-actions) { grid-column: 1; grid-row: 1; }
 .ox-section[data-callout] .ox-facts { display: flex; flex-wrap: wrap; gap: var(--space-4); }
 .ox-section[data-callout] .ox-fact { display: flex; gap: var(--space-3); }
 .ox-section[data-callout] .ox-fact dt, .ox-section[data-callout] .ox-fact dd { padding: 0; border-bottom: 0; }
+.ox-section[data-callout] .ox-fact:only-child dt { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.ox-section-icon { flex: none; color: var(--text-secondary); }
 .ox-part-actions { display: flex; gap: 6px; margin-top: 8px; }
 /* A section that drew nothing under its heading (not one folded shut)
    takes no space; the rail's Contents skips it too. */
@@ -191,7 +200,7 @@
    frame keeps the gap above its section. */
 [data-node]:not(:first-child) [data-node] > .ox-section { margin-top: var(--space-6); }
 [data-node]:not(:first-child) [data-node] > .ox-section:not([data-level="2"]) { margin-top: var(--space-4); }
-.ox-section-toggle { display: flex; align-items: baseline; gap: var(--space-2); width: 100%; padding: 0; border: none; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.ox-section-toggle { display: inline-flex; align-items: baseline; gap: var(--space-2); padding: 0; border: none; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 /* The arrow after a heading whose thing has a page of its own: the one
    "open this page" mark, used for nothing else. */
 .ox-open-page {

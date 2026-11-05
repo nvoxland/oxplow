@@ -259,15 +259,25 @@ test("a hidden-title section keeps its heading in the page, visually hidden", ()
   expect(more.className).not.toContain("ox-sr-only");
 });
 
-// A callout: its heading stays for Contents and screen readers, unseen; the
-// box says it stands apart.
-test("a callout section keeps its heading unseen and is marked a callout", () => {
-  const page = fakePage(node.stack("stack", [node.viz("facts", "items", { columns: [{ key: "id" }] }, { title: "Facts", callout: true })]));
+// A callout draws its title, the one Contents lists, and its icon if it has
+// one; `hide_title` still keeps a banner's off the page.
+test("a callout section shows its title and icon, and hide_title still hides it", () => {
+  const page = fakePage(
+    node.stack("stack", [
+      node.viz("facts", "items", { columns: [{ key: "id" }] }, { title: "Facts", callout: true, icon: "git-branch" }),
+      node.viz("banner", "items", { columns: [{ key: "id" }] }, { title: "Banner", callout: true, hideTitle: true }),
+    ]),
+  );
   const run = fakeRun(page, { loaders: { items: loader(["id"], [["a"]]) } });
   const { container } = render(<PageTree run={run} runId="run-1" />);
   const section = container.querySelector('[data-node="facts"] section.ox-section')!;
   expect(section.getAttribute("data-callout")).toBe("true");
-  expect(section.querySelector("h2.ox-section-title")!.className).toContain("ox-sr-only");
+  const heading = section.querySelector("h2.ox-section-title")!;
+  expect(heading.textContent).toBe("Facts");
+  expect(heading.className).not.toContain("ox-sr-only");
+  expect(heading.querySelector("svg")).not.toBeNull();
+  const banner = container.querySelector('[data-node="banner"] h2.ox-section-title')!;
+  expect(banner.className).toContain("ox-sr-only");
 });
 
 // A collapsible section folds at its own heading; its link is the arrow

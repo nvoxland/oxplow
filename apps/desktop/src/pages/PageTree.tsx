@@ -168,7 +168,7 @@ function NodeView(props: NodeViewProps) {
   // page: an embed's heading is not drawn.
   const title = def?.title || (def?.kind === "embed" || !def ? (at.embed?.page.title ?? null) : null);
   const callout = def?.callout ?? false;
-  const hideTitle = def ? callout || def.hideTitle || (def.kind === "embed" && !def.title) : false;
+  const hideTitle = def ? def.hideTitle || (def.kind === "embed" && !def.title) : false;
   const fills = fillsNode(run, at);
   return (
     <NodeFrame id={id} fill={fills}>
@@ -179,6 +179,7 @@ function NodeView(props: NodeViewProps) {
           help={def?.description ?? undefined}
           hideTitle={hideTitle}
           callout={callout}
+          icon={def?.icon}
           collapsible={def?.collapsible ?? false}
           opens={def?.link ? { to: pageTabRef(def.link), name: title } : undefined}
           fill={fills}

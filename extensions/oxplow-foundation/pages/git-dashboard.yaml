@@ -78,6 +78,7 @@ view:
   - id: upstream
     title: Branch
     callout: true
+    icon: git-branch
     from: upstream
     viz: detail
     columns:

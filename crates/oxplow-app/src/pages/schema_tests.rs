@@ -1365,3 +1365,28 @@ fn a_section_says_callout_collapsible_and_link() {
     .unwrap_err();
     assert!(why.contains("`callout` is true or false"), "{why}");
 }
+
+/// A callout may name an icon oxplow draws; other sections don't take one.
+#[test]
+fn a_callout_may_have_an_icon() {
+    let head = "title: T\nloaders:\n  q: { sql: \"SELECT 1 AS id\" }\n";
+    let with = |node: &str| {
+        page(&format!(
+            "{head}view:\n  stack:\n    - {{ id: a, title: A, {node}viz: detail, from: q }}\n"
+        ))
+    };
+    let ok = with("callout: true, icon: git-branch, ").expect("loads");
+    assert_eq!(
+        ok.nodes()
+            .iter()
+            .find(|n| n.id == "a")
+            .unwrap()
+            .icon
+            .as_deref(),
+        Some("git-branch")
+    );
+    let why = with("callout: true, icon: no-such-icon, ").unwrap_err();
+    assert!(why.contains("no-such-icon"), "{why}");
+    let why = with("icon: git-branch, ").unwrap_err();
+    assert!(why.contains("`icon`") && why.contains("callout"), "{why}");
+}

@@ -3872,10 +3872,12 @@ export type Node_Deserialize = {
 	 */
 	hideTitle: boolean,
 	/**
-	 *  It stands apart, in a box over the rest, its heading not drawn: the
-	 *  state of what the page is about, and what to do about it.
+	 *  It stands apart, in a panel over the rest: the state of what the page
+	 *  is about, and what to do about it.
 	 */
 	callout: boolean,
+	/**  The icon beside a callout's title. */
+	icon: string | null,
 	/**  Its heading folds it; the person's choice is the tab's. */
 	collapsible: boolean,
 	/**
@@ -3908,10 +3910,12 @@ export type Node_Serialize = {
 	 */
 	hideTitle: boolean,
 	/**
-	 *  It stands apart, in a box over the rest, its heading not drawn: the
-	 *  state of what the page is about, and what to do about it.
+	 *  It stands apart, in a panel over the rest: the state of what the page
+	 *  is about, and what to do about it.
 	 */
 	callout: boolean,
+	/**  The icon beside a callout's title. */
+	icon: string | null,
 	/**  Its heading folds it; the person's choice is the tab's. */
 	collapsible: boolean,
 	/**

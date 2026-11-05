@@ -473,9 +473,10 @@ whose loader does not return one (`viz_column_problems`). An agent reads
 - **A `slot` node** is a place other extensions mount pages at. See
   extensions-slots.md "Slots".
 - **A section's `callout`, `collapsible` and `link`** (`Node`; `PageTree`,
-  `kit/Section`). `callout: true` draws a box with no visible heading, its
-  facts and buttons on one line (`.ox-section[data-callout]`); the heading
-  stays for Contents and agents. `collapsible: true` folds at the heading,
+  `kit/Section`). `callout: true` draws a panel, its title (with `icon:`, which only a
+  callout takes) and buttons on the first line and its facts under them
+  (`.ox-section[data-callout]`); one fact's label is left to the title, and
+  with `hide_title` it is one line. `collapsible: true` folds at the heading,
   remembered in the tab's history state (`PageTree` is the outermost
   `CollapsibleSections`). `link: <page id>` is the arrow beside the heading
   (`RefSite::SectionLink`: it must name a page).

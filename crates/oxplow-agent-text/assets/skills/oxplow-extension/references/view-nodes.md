@@ -10,10 +10,12 @@ scrolls to it, and `oxplow_run_page` text prints each node under `[node
 <id>]`. Any node may have `title`, `hide_title`, `replaceable` (a contract
 another extension's page may take over) and `size`. A section may also have:
 
-- `callout: true`: a box over the rest of the page, with no heading drawn,
-  for the state of what the page is about and what to do about it (a branch
-  against its upstream, with Push and Pull). Its facts and buttons share one
-  line. Use it for one such thing on a page, not for ordinary content.
+- `callout: true`: a panel over the rest of the page, for the state of what
+  the page is about and what to do about it (a branch against its upstream,
+  with Push and Pull). Its title and buttons share the first line, what it
+  says goes under them; `icon:` puts an icon by the title, and only a callout
+  takes one. With `hide_title` it is one line. Use it for one such thing on a
+  page, not for ordinary content.
 - `collapsible: true`: its heading folds it; the choice is the tab's.
 - `link: <page id>`: an arrow beside its heading opens that page (a bare slug
   is this extension's). Prefer it to a one-value `group` that only makes a

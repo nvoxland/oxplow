@@ -419,7 +419,7 @@ function PartButtons({ run, actions }: { run: VizRun; actions: VizActionsState }
   return (
     <div data-testid="viz-part-actions" className="ox-part-actions">
       {buttons.map((a) => (
-        <button key={a.id} type="button" data-testid={`viz-action-${a.id}`} disabled={actions.busy !== null || !actionEnabled(a, run.result)} title={actionDoes(a)} onClick={() => actions.run(a, null)}>
+        <button key={a.id} type="button" className="ox-button" data-testid={`viz-action-${a.id}`} disabled={actions.busy !== null || !actionEnabled(a, run.result)} title={actionDoes(a)} onClick={() => actions.run(a, null)}>
           {actions.busy === a.id ? `${a.label}…` : a.label}
         </button>
       ))}

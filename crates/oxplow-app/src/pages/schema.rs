@@ -449,9 +449,11 @@ pub struct Node {
     /// Its heading isn't drawn (it stays in the page for Contents, screen
     /// readers and agents).
     pub hide_title: bool,
-    /// It stands apart, in a box over the rest, its heading not drawn: the
-    /// state of what the page is about, and what to do about it.
+    /// It stands apart, in a panel over the rest: the state of what the page
+    /// is about, and what to do about it.
     pub callout: bool,
+    /// The icon beside a callout's title.
+    pub icon: Option<String>,
     /// Its heading folds it; the person's choice is the tab's.
     pub collapsible: bool,
     /// The page an arrow beside its heading opens (`<extension>/<slug>`; a
@@ -1546,6 +1548,18 @@ fn parse_node(value: &serde_yaml::Value, ctx: &mut NodeCtx<'_>) -> Result<Node, 
         Some(other) => Err(format!("`{key}` is true or false, not {other:?}")),
     };
     let callout = flag(&mut map, "callout")?;
+    let icon = take_str(&mut map, "icon")?;
+    if let Some(icon) = &icon {
+        if !callout {
+            return Err("`icon` is for a section with `callout: true`".to_string());
+        }
+        if !crate::extension::extension_resources::ICONS.contains(&icon.as_str()) {
+            return Err(format!(
+                "`icon: {icon}` isn't one oxplow draws; use one of {}",
+                crate::extension::extension_resources::ICONS.join(", ")
+            ));
+        }
+    }
     let collapsible = flag(&mut map, "collapsible")?;
     let link = take_str(&mut map, "link")?;
     let replaceable = take_str(&mut map, "replaceable")?;
@@ -1664,6 +1678,7 @@ fn parse_node(value: &serde_yaml::Value, ctx: &mut NodeCtx<'_>) -> Result<Node, 
         description,
         hide_title,
         callout,
+        icon,
         collapsible,
         link,
         replaceable,
