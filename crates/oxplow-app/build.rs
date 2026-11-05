@@ -96,8 +96,15 @@ fn read_manifest(dir: &Path) -> String {
 
 /// Run extension `name`'s build command `run` in its folder `dir`.
 fn run_build(dir: &Path, name: &str, run: &str) {
-    let status = std::process::Command::new("/bin/sh")
-        .arg("-c")
+    // A build command is one line for the platform's shell (`&&` means the
+    // same in both).
+    let (shell, flag) = if cfg!(windows) {
+        ("cmd", "/C")
+    } else {
+        ("/bin/sh", "-c")
+    };
+    let status = std::process::Command::new(shell)
+        .arg(flag)
         .arg(run)
         .current_dir(dir)
         .status()

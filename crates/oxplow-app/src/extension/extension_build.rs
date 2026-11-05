@@ -21,8 +21,15 @@ const TAIL: usize = 4 * 1024;
 /// (stdout and stderr together) is kept only for a failure's message.
 pub fn run(source: &Path, run: &str, env: &HostEnv, timeout: Duration) -> Result<(), String> {
     let (mut reader, writer) = std::io::pipe().map_err(|e| e.to_string())?;
-    let mut cmd = Command::new("/bin/sh");
-    cmd.arg("-c")
+    // A build command is one line for the platform's shell (`&&` means the
+    // same in both).
+    let (shell, flag) = if cfg!(windows) {
+        ("cmd", "/C")
+    } else {
+        ("/bin/sh", "-c")
+    };
+    let mut cmd = Command::new(shell);
+    cmd.arg(flag)
         .arg(run)
         .current_dir(source)
         .stdin(Stdio::null())
