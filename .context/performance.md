@@ -1279,8 +1279,7 @@ unrelated: `oxplow.coverage.branch_pct`, `repo.eval_usage`,
 ## `v_agent_session_status` starts from the open sessions
 
 It used to walk every `agent.status.changed` ever logged and, for each, the
-session's events: over 5 s on a real log (2 GB), past `query_sql`'s limit, and
-it held the one background database slot, so everything queued behind it.
+session's events: over 5 s on a real log (2 GB), past `query_sql`'s limit.
 Starting from the open sessions and taking each one's newest event takes 18 ms
 on the same data. A query plan test holds it (`agent_stores`). The
 `slow page loader` log line names a loader of 50 ms or more, and a page's
