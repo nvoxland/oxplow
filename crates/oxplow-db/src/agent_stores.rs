@@ -951,6 +951,26 @@ mod tests {
         assert_eq!(all, vec![(Some(a), S::Idle), (Some(b), S::AwaitingUser)]);
     }
 
+    /// A session's status is found from its own events, newest first, not by
+    /// walking every status change ever logged: the view backs what a person
+    /// waits on, and the log only grows.
+    #[test]
+    fn the_status_model_starts_from_the_open_sessions() {
+        let db = Database::in_memory();
+        let plan: Vec<String> = db
+            .with_conn(|conn| {
+                let mut stmt =
+                    conn.prepare("EXPLAIN QUERY PLAN SELECT * FROM v_agent_session_status")?;
+                let rows = stmt.query_map([], |r| r.get::<_, String>(3))?;
+                rows.collect()
+            })
+            .unwrap();
+        assert!(
+            !plan.iter().any(|step| step.contains("event_log_type_seq")),
+            "{plan:?}"
+        );
+    }
+
     /// `v_agent_status` rolls a thread's open sessions up by the same rule
     /// as `oxplow_domain::agent::roll_up_status`, for every pair of logged
     /// states (`stalled` is derived, never logged); `v_agent_session_status`
