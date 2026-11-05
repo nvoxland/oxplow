@@ -267,7 +267,7 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	reportTabs: (report: TabReport) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("report_tabs", { report })),
+	reportTabs: (report: TabReport) => typedError<TabReportAnswer, IpcError_Serialize>(__TAURI_INVOKE("report_tabs", { report })),
 	/**
 	 *  Listen on loopback for a sign-in's redirect — on `port` when the
 	 *  service has one registered, any free port otherwise.
@@ -5962,6 +5962,12 @@ export type TabReport = {
 	 *  markdown and hidden history bodies.
 	 */
 	runs?: string[],
+};
+
+/**  What a window's report is answered with. */
+export type TabReportAnswer = {
+	/**  The runs it reported that the daemon no longer holds for it. */
+	missingRuns: string[],
 };
 
 /**

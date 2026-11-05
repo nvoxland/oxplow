@@ -299,9 +299,12 @@ impl PageRuns {
 
     /// Reconcile an ordered report from one window. A new run whose
     /// response has not reached the renderer yet has never been reported
-    /// and must survive an older roster already in flight.
-    pub fn report_client_runs(&self, client: &str, ids: &[String]) {
-        self.runs.lock().retain(|id, run| {
+    /// and must survive an older roster already in flight. The answer is
+    /// the reported runs this window doesn't hold here: forgotten while it
+    /// was quiet (`reap_expired_clients`), so it opens them again.
+    pub fn report_client_runs(&self, client: &str, ids: &[String]) -> Vec<String> {
+        let mut runs = self.runs.lock();
+        runs.retain(|id, run| {
             if run.client != client {
                 return true;
             }
@@ -311,6 +314,10 @@ impl PageRuns {
             }
             !run.reported
         });
+        ids.iter()
+            .filter(|id| !runs.get(*id).is_some_and(|run| run.client == client))
+            .cloned()
+            .collect()
     }
 
     /// Forget runs of expired windows. Give never-reported new opens the

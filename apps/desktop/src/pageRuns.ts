@@ -241,17 +241,19 @@ export function createPageRuns(transport: PageRunsTransport) {
     scheduleFetch(change.runId, change.seq);
   });
 
+  /** Open `entry` again, keeping what is shown until the new run answers. */
+  const reopenEntry = (entry: Entry) => {
+    entry.seq = 0;
+    entry.state = { ...entry.state, runId: null, stale: true };
+    notify(entry);
+    start(entry);
+  };
+
   transport.onReconnect(() => {
-    // The daemon may have restarted and forgotten every run: open each
-    // again, keeping what is shown until the new run answers.
+    // The daemon may have restarted and forgotten every run.
     byRunId.clear();
     rosterChanged();
-    for (const entry of entries.values()) {
-      entry.seq = 0;
-      entry.state = { ...entry.state, runId: null, stale: true };
-      notify(entry);
-      start(entry);
-    }
+    for (const entry of entries.values()) reopenEntry(entry);
   });
 
   const open = (key: PageKey): RunHandle => {
@@ -344,6 +346,18 @@ export function createPageRuns(transport: PageRunsTransport) {
     /** The open runs' ids (the window's tab report names them, so the
      *  daemon drops a run no window holds). */
     runIds: () => [...byRunId.keys()],
+    /** The daemon says it no longer holds these (it forgot a window that went
+     *  quiet): open them again, or they would show their last rows for good.
+     *  An id this window has since let go of is nothing to reopen. */
+    reopen: (runIds: readonly string[]) => {
+      for (const runId of runIds) {
+        const entry = byRunId.get(runId);
+        if (!entry) continue;
+        byRunId.delete(runId);
+        reopenEntry(entry);
+      }
+      if (runIds.length > 0) rosterChanged();
+    },
     /** Add/remove/reconnect notices, including panels and markdown runs. */
     subscribeRunIds: (listener: () => void) => {
       rosterListeners.add(listener);

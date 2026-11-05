@@ -183,6 +183,11 @@ the user guide is `docs/guide/pages.md`.
     window fetches it. A host that opens onto a paused run (a page drawn
     again by a new host while its run stays open) tells the daemon too,
     as a host shown again does. Rail panels and the selected tab stay live.
+  - A window that goes quiet for `FORGET_AFTER_MS` (a background window's
+    timers can stop) has its runs forgotten (`reap_expired_clients`). Its next
+    `report_tabs` is answered with the `missingRuns` it still names, and it
+    opens those again (`pageRuns.reopen`), or they would show their last rows
+    for good.
   - The Cmd+P launcher re-reads pages (the live set's) every time it
     opens and lists them under their `category` (a page with none, a part
     and a query are not listed), merged into the static directory by

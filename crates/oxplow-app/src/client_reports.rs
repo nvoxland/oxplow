@@ -20,6 +20,14 @@ pub const FORGET_AFTER_MS: i64 = 5 * 60 * 1000;
 /// A report older than this is listed as stale.
 pub const STALE_AFTER_MS: i64 = 60 * 1000;
 
+/// What a window's report is answered with.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct TabReportAnswer {
+    /// The runs it reported that the daemon no longer holds for it.
+    pub missing_runs: Vec<String>,
+}
+
 /// One tab, as its window shows it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 pub struct ReportedTab {

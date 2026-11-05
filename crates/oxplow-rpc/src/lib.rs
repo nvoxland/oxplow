@@ -271,7 +271,7 @@ macro_rules! oxplow_command_table {
                 assistant_snapshot => $crate::commands::assistant::assistant_snapshot { id: String, since: u32 } -> ::oxplow_app::assistant::AssistantSnapshot,
                 assistant_handoff => $crate::commands::assistant::assistant_handoff { id: String, to_thread: String } -> ::oxplow_domain::Json,
                 assistant_close => $crate::commands::assistant::assistant_close { id: String } -> (),
-                report_tabs => $crate::commands::tabs::report_tabs { report: oxplow_app::client_reports::TabReport } -> (),
+                report_tabs => $crate::commands::tabs::report_tabs { report: oxplow_app::client_reports::TabReport } -> oxplow_app::client_reports::TabReportAnswer,
                 // comments
                 list_comments_for_target => $crate::commands::comments::list_comments_for_target { target: String } -> Vec<::oxplow_domain::CommentThread>,
                 list_comments_for_stream => $crate::commands::comments::list_comments_for_stream { stream_id: ::oxplow_domain::StreamId } -> Vec<::oxplow_domain::CommentThread>,

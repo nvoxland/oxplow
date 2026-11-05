@@ -4,18 +4,19 @@
 //! the person sees (`oxplow_list_tabs`, `oxplow_get_open_page`). Held in
 //! memory (`oxplow_app::client_reports`).
 
-use oxplow_app::client_reports::TabReport;
+use oxplow_app::client_reports::{TabReport, TabReportAnswer};
 use oxplow_app::Services;
 use oxplow_domain::Timestamp;
 
 use crate::error::IpcError;
 
 /// Take `report` as what its window shows now.
-pub async fn report_tabs(svc: &Services, report: TabReport) -> Result<(), IpcError> {
-    svc.page_runs
+pub async fn report_tabs(svc: &Services, report: TabReport) -> Result<TabReportAnswer, IpcError> {
+    let missing_runs = svc
+        .page_runs
         .report_client_runs(&report.client, &report.runs);
     svc.client_reports.report(report, Timestamp::now());
-    Ok(())
+    Ok(TabReportAnswer { missing_runs })
 }
 
 #[cfg(test)]

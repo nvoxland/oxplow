@@ -2,6 +2,7 @@ import { commands } from "./tauri-bridge/generated/bindings.js";
 import type {
   BackgroundTask,
   TabReport,
+  TabReportAnswer,
   HookEnvelope,
   OpOutcome,
   OxplowConfig,
@@ -487,8 +488,8 @@ export async function listServices(): Promise<ServiceListing[]> {
 
 /// Tell the backend what this window shows (`tabs/tabReport.ts`), for an
 /// agent's `list_tabs` / `get_open_page`.
-export async function reportTabs(report: TabReport): Promise<void> {
-  unwrap(await commands.reportTabs(report));
+export async function reportTabs(report: TabReport): Promise<TabReportAnswer> {
+  return unwrap(await commands.reportTabs(report));
 }
 
 /// Analyze a change (a commit, an effort, or a stream's working tree) if

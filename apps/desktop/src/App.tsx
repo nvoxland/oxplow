@@ -1076,7 +1076,10 @@ export function App() {
   // a window that stops reporting (`client_reports::FORGET_AFTER_MS`), and an
   // idle window with tabs open is still there.
   const lastTabReportRef = useRef<ReturnType<typeof buildTabReport> | null>(null);
-  const tabReporter = useMemo(() => createTabReporter(reportTabs), []);
+  const tabReporter = useMemo(
+    () => createTabReporter((report) => reportTabs(report).then((answer) => windowPageRuns().reopen(answer.missingRuns))),
+    [],
+  );
   useEffect(() => {
     const beat = setInterval(() => {
       if (lastTabReportRef.current) {

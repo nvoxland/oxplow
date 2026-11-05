@@ -522,3 +522,26 @@ async fn a_run_reading_one_measures_facts_ignores_the_facts_of_others() {
         .await;
     assert_ne!(value(&before), value(&runs.get(&id).unwrap()), "it re-ran");
 }
+
+/// A window is told which of the runs it reports the daemon no longer
+/// holds (its runs were forgotten while it was quiet), so it can open them
+/// again instead of showing their last rows for good.
+#[tokio::test]
+async fn a_roster_answers_which_runs_are_gone() {
+    let (_dir, svc) = fixture().await;
+    let runs = PageRuns::default();
+    let (held, _) = runs
+        .open(&svc, request("acme/numbers", &[]), "one")
+        .await
+        .unwrap();
+    let (theirs, _) = runs
+        .open(&svc, request("acme/numbers", &[]), "two")
+        .await
+        .unwrap();
+    let gone = runs.report_client_runs(
+        "one",
+        &[held.clone(), "forgotten".to_string(), theirs.clone()],
+    );
+    assert_eq!(gone, vec!["forgotten".to_string(), theirs]);
+    assert!(runs.get(&held).is_some());
+}

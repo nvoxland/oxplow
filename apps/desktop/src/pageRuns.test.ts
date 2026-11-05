@@ -59,6 +59,25 @@ function fake() {
 const key = (page: string) => ({ page, params: {}, streamId: null, threadId: null });
 
 describe("pageRuns", () => {
+  test("a run the daemon forgot is opened again, keeping what is shown until it answers", async () => {
+    const f = fake();
+    const runs = createPageRuns(f.transport);
+    const a = runs.open(key("p"));
+    await wait(0);
+    const forgotten = a.get().runId!;
+    expect(f.calls.open).toBe(1);
+    runs.reopen(["run-unknown"]);
+    expect(f.calls.open).toBe(1);
+    runs.reopen([forgotten]);
+    expect(a.get().run).not.toBeNull();
+    expect(a.get().stale).toBe(true);
+    await wait(0);
+    expect(f.calls.open).toBe(2);
+    expect(a.get().runId).not.toBe(forgotten);
+    expect(a.get().stale).toBe(false);
+    expect(runs.runIds()).toEqual([a.get().runId!]);
+  });
+
   test("a run whose hosts are all hidden is paused, and fetched once when one shows", async () => {
     const f = fake();
     const runs = createPageRuns(f.transport);
