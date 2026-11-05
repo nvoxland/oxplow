@@ -922,11 +922,6 @@ pub async fn run_as_page_in(
             "recordings",
         ),
         (
-            "oxplow-foundation/agent-session-waiting",
-            "agent-session",
-            "agent-session-waiting",
-        ),
-        (
             "oxplow-foundation/agent-session-terminal",
             "agent-session",
             "agent-session-terminal",

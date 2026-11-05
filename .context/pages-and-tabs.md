@@ -93,7 +93,7 @@ pages are THE shell.
 
 `PageTree` passes fill height through stack and selected switch containers
 when their visible descendants contain a filling viz. Keep that flex chain
-intact: the agent-session page stacks approvals above its terminal, and a
+intact: the agent-session page is a stack of its terminal, and a
 collapsed terminal cannot activate or resume its session (`useShown`). The
 browser regression checks usable terminal height before and after reload.
 
@@ -834,8 +834,8 @@ margin; an embed or a slot takes its title from the page it shows):
   then the `sections` slot.
   `work-item` (`for: oxplow/work_item`) has the `work_item.detail` and
   `work_item.detail.state` replaceables and a `sections` slot.
-  `agent-session` (`for: oxplow/agent_session`, pinned) stacks approvals
-  above a `terminal` viz. `external-url` (`for: https, http`): an `embed`
+  `agent-session` (`for: oxplow/agent_session`, pinned) is a `terminal`
+  viz. `external-url` (`for: https, http`): an `embed`
   viz of the URL, label `{{param.uri|url}}`. `resource` is the built-in
   fallback, not a page file.
 - **Routes with a diff or code viz.** `diff` (params `path`, `left`,

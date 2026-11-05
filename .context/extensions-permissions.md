@@ -65,6 +65,12 @@ permission changes nothing (no copy, no row, not turned on) and returns
 `DeployError::NeedsApproval { adds }`, one line per added permission
 (`Permissions::added_over`: "process — runs programs with your authority;
 oxplow does not confine them", "network — may reach api.github.com", …).
+**An extension someone turned off** (`turned_off`: on the person's disable
+list, or off with a deployment still chosen; a new one no layer has heard of
+isn't) always asks, even with nothing changed: `NeedsApproval { turns_on }`
+says "turned off. Deploy it and turn it on", and lists everything it would run
+with, since nothing of it runs now. A new version says "Deploy the new
+version" and lists only what it adds; a version that adds nothing doesn't ask.
 The command (`oxplow.extension.deploy`, `rollback`, `enable`) raises that
 as `NeedsConfirmation` with the lines in `Preview::details`: a person
 confirms inline (`CommandConfirm` lists them), an agent's call becomes a

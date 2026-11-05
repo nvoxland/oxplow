@@ -21,12 +21,6 @@ loaders:
     - key: display_name
     - key: uri
     - key: thread
-  agent_session_waiting:
-    sql: |
-      SELECT :thread AS thread
-    params:
-      thread:
-        from: row.thread
   agent_session_terminal:
     sql: |
       SELECT :uri AS uri, :thread AS thread, :conversation AS conversation
@@ -63,11 +57,6 @@ loaders:
       ORDER BY c.updated_at DESC
 view:
   stack:
-  - id: agent-session-waiting
-    title: Waiting on you
-    hide_title: true
-    from: agent_session_waiting
-    viz: approvals
   - id: agent-session-terminal
     title: Terminal
     hide_title: true

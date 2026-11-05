@@ -87,8 +87,8 @@ Two pages draw it:
   document: its `agent-session-terminal` section is a `terminal` viz of one
   row — the session's URI, `conversation` and `thread` — so the
   viz gives its `TerminalView` the `agent` parts (Start Fresh, the
-  Escape interrupt in the row's thread); its `agent-session-waiting`
-  section above is the thread's `approvals`. Its actions (Rename…, Switch
+  Escape interrupt in the row's thread). The page is just that terminal:
+  a proposal waits in Alerts, not here. Its actions (Rename…, Switch
   Conversation…, Fork into New Session…) are the nav bar's and the tab's
   right-click menu.
 

@@ -409,20 +409,10 @@ markdown itself, nor edits it in a `<textarea>`.
   `proposal-<id>`, `proposal-approve-<id>` (a destructive one's:
   `proposal-approve-<id>-trigger` / `-confirm`), `proposal-decline-<id>`,
   `proposal-error-<id>`, `rail-alert-proposals`.
-- **A proposal also waits where the conversation is** (P9.A3). Above an
-  agent session's terminal, the page's `approvals` section shows the
-  thread's pending proposals. A chat transcript
-  shows the card under the tool call that made the proposal
-  (`proposalOfTool`); once decided, a muted line stays there saying what
-  became of it — "Approved by you — it ran.", "Declined by you — nothing
-  ran.", "Replaced by a newer proposal." —
-  so the transcript keeps what the agent asked. An approved one says it
-  ran only once its run is recorded (`audit_id`): until then it says
-  "Approved by you — running…", since an External command is claimed
-  approved before it runs and goes back to waiting if the run fails
-  (tsk858). Only the thread's own
-  proposals show: a ref the transcript merely quotes shows nothing. The
-  Alerts page stays the cross-thread list (its proposal cards).
+- **A proposal waits in Alerts**, with a toast and the bell to say so, and
+  the agent's `run_command` result says it waits there, so the agent tells the
+  person too. An agent session's page is only its terminal: there may be many
+  sessions or none, so it is not where a decision lives.
 
 ## Menus a page or row gets from extensions
 

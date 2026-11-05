@@ -429,6 +429,9 @@ pub enum DeployError {
     NeedsApproval {
         name: String,
         adds: Vec<String>,
+        /// It's turned off, and deploying it turns it on: `adds` is then
+        /// everything it would run with, since nothing of it runs now.
+        turns_on: bool,
     },
     Failed(DomainError),
 }
@@ -442,7 +445,7 @@ impl From<DomainError> for DeployError {
 impl std::fmt::Display for DeployError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            DeployError::NeedsApproval { name, adds } => write!(
+            DeployError::NeedsApproval { name, adds, .. } => write!(
                 f,
                 "deploying `{name}` adds permissions a person approves first: {}",
                 adds.join("; ")
@@ -551,6 +554,7 @@ fn approved(
         Err(DeployError::NeedsApproval {
             name: name.to_string(),
             adds,
+            turns_on: false,
         })
     }
 }
@@ -780,6 +784,18 @@ pub async fn deploy(
         name,
         &loaded.requires,
     )?;
+    if !confirmed && turned_off(svc, name) {
+        let shown = crate::extension::extensions::shown(&project, &source);
+        let mut adds = loaded.permissions.added_over(&Permissions::default());
+        if let Some(build) = &loaded.build {
+            adds.push(build_line(&build.run, &shown));
+        }
+        return Err(DeployError::NeedsApproval {
+            name: name.to_string(),
+            adds,
+            turns_on: true,
+        });
+    }
     if !live_now {
         if !loaded.errors.is_empty() {
             return Err(invalid(format!(
@@ -1089,6 +1105,17 @@ fn write_personal(svc: &Services, settings: &ExtensionSettings) -> Result<(), Do
             .map_err(storage)?;
     }
     svc.reload_config_from_disk().map_err(storage)
+}
+
+/// `name` is off because someone turned it off, as opposed to a new one no
+/// layer has heard of yet: on the person's disable list, or off with a
+/// deployment still chosen for it.
+fn turned_off(svc: &Services, name: &str) -> bool {
+    let settings = oxplow_config::extension_settings(&svc.layout.project_dir);
+    !settings.is_enabled(name)
+        && !crate::bundled_extensions::is_required(name)
+        && (settings.personal.disable.iter().any(|n| n == name)
+            || svc.extension_catalog.live().contains_key(name))
 }
 
 /// Turn `name` on in the person's layer unless it is on already. True when
@@ -2033,6 +2060,44 @@ mod tests {
             provenance(svc, &project, &project.join("a.txt")).await,
             (Some(head), false)
         );
+    }
+
+    /// A new version asks only about what it adds to what runs.
+    #[tokio::test]
+    async fn a_new_version_asks_only_about_the_permissions_it_adds() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let svc = &fx.svc;
+        source_with(svc, "One", AI);
+        deploy(svc, "acme", true).await.unwrap();
+        source_with(svc, "Two", "permissions: [ai.compute, files.read]\n");
+        let lines = asked(deploy(svc, "acme", false).await);
+        assert_eq!(lines.len(), 1, "{lines:?}");
+        assert!(lines[0].starts_with("files"), "{lines:?}");
+    }
+
+    /// An extension turned off stays off until someone says so: deploying it
+    /// asks, says it turns it on, and lists everything it would run with,
+    /// though nothing changed in its source.
+    #[tokio::test]
+    async fn deploying_an_extension_that_is_off_asks_to_turn_it_on() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let svc = &fx.svc;
+        source_with(svc, "One", AI);
+        deploy(svc, "acme", true).await.unwrap();
+        set_enabled(svc, "acme", false, false).await.unwrap();
+        let is_on =
+            || oxplow_config::extension_settings(&svc.layout.project_dir).is_enabled("acme");
+        assert!(!is_on());
+        match deploy(svc, "acme", false).await {
+            Err(DeployError::NeedsApproval { adds, turns_on, .. }) => {
+                assert!(turns_on);
+                assert_eq!(adds, vec!["ai — may call your AI provider with your key"]);
+            }
+            other => panic!("expected it to ask, got {other:?}"),
+        }
+        assert!(!is_on(), "asking turned it on");
+        deploy(svc, "acme", true).await.unwrap();
+        assert!(is_on());
     }
 
     /// A deploy that adds a permission asks before anything changes: it

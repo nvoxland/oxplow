@@ -77,16 +77,34 @@ fn domain(e: oxplow_domain::DomainError) -> CommandError {
     }
 }
 
+/// What a person is asked: to turn an extension on, or to take a version of
+/// one that adds to what it runs with (`details` lists only what it adds).
+fn approval_summary(command: &str, name: &str, turns_on: bool) -> String {
+    if turns_on {
+        format!("`{name}` is turned off. Deploy it and turn it on, with:")
+    } else if command.ends_with(".rollback") {
+        format!("Roll `{name}` back? That version adds:")
+    } else if command.ends_with(".enable") {
+        format!("Turn on `{name}`, with:")
+    } else {
+        format!("Deploy the new version of `{name}`? It adds:")
+    }
+}
+
 /// A deploy, rollback or enable that adds permissions asks a person
 /// first: the bus asks them inline, or turns an agent's call into a
 /// proposal; their confirmed call runs it.
 fn deploy_error(command: &str, input: &serde_json::Value) -> impl Fn(DeployError) -> CommandError {
     let (command, input) = (command.to_string(), input.clone());
     move |e| match e {
-        DeployError::NeedsApproval { name, adds } => CommandError::NeedsConfirmation {
+        DeployError::NeedsApproval {
+            name,
+            adds,
+            turns_on,
+        } => CommandError::NeedsConfirmation {
             preview: Box::new(Preview {
+                summary: approval_summary(&command, &name, turns_on),
                 command: command.clone(),
-                summary: format!("`{name}` asks for more than it runs with now"),
                 input: input.clone(),
                 destructive: false,
                 details: adds,
@@ -478,5 +496,27 @@ mod tests {
         .await
         .unwrap_err();
         assert!(matches!(err, CommandError::Invalid { .. }), "{err:?}");
+    }
+}
+
+#[cfg(test)]
+mod approval_tests {
+    use super::approval_summary;
+
+    /// Turning an extension on and taking a new version are different
+    /// questions, and each says which it is.
+    #[test]
+    fn the_question_says_which_it_is() {
+        let new = approval_summary("oxplow.extension.deploy", "acme", false);
+        assert!(new.contains("new version"), "{new}");
+        let off = approval_summary("oxplow.extension.deploy", "acme", true);
+        assert!(
+            off.contains("turned off") && off.contains("turn it on"),
+            "{off}"
+        );
+        let back = approval_summary("oxplow.extension.rollback", "acme", false);
+        assert!(back.contains("Roll"), "{back}");
+        let on = approval_summary("oxplow.extension.enable", "acme", false);
+        assert!(on.contains("Turn on"), "{on}");
     }
 }
