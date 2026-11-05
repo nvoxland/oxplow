@@ -1433,7 +1433,10 @@ impl CommandBus {
                 summary: spec.summary.clone(),
                 input: input.clone(),
                 destructive: matches!(confirm, oxplow_domain::Confirm::Destructive),
-                details: acts_on(&input),
+                details: match &spec.confirm_says {
+                    Some(says) => vec![fill_says(says, &input)],
+                    None => acts_on(&input),
+                },
             };
             let prepared = Prepared {
                 command: &command,
@@ -1900,6 +1903,19 @@ mod tests;
 /// What a confirmation names beyond the command: the call's plain input
 /// values, one `name: value` line each (a long one cut), so the person sees
 /// which commit or page it acts on.
+/// A command's `confirm_says` with its `{{field}}`s filled from its input.
+fn fill_says(says: &str, input: &Value) -> String {
+    let mut out = says.to_string();
+    if let Some(fields) = input.as_object() {
+        for (name, value) in fields {
+            if let Value::String(text) = value {
+                out = out.replace(&format!("{{{{{name}}}}}"), text);
+            }
+        }
+    }
+    out
+}
+
 fn acts_on(input: &Value) -> Vec<String> {
     const SHOWN: usize = 80;
     let Some(fields) = input.as_object() else {

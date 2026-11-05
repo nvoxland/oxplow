@@ -160,6 +160,7 @@ fn probe_spec(id: &str, access: Access) -> CommandSpec {
         }),
         job: false,
         confirm: Confirm::Never,
+        confirm_says: None,
         undoable: true,
         lifecycle: Lifecycle::Stable,
         atomicity: Atomicity::Tx,

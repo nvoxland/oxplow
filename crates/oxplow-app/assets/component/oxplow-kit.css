@@ -166,12 +166,23 @@
 .ox-section[data-callout] > .ox-part-actions { grid-column: 2; grid-row: 1; margin: 0; }
 .ox-section[data-callout] > :not(.ox-section-head):not(.ox-part-actions) { grid-column: 1 / -1; grid-row: 2; }
 .ox-section[data-callout][data-title-hidden] > :not(.ox-section-head):not(.ox-part-actions) { grid-column: 1; grid-row: 1; }
-.ox-section[data-callout] .ox-facts { display: flex; flex-wrap: wrap; gap: var(--space-4); }
-.ox-section[data-callout] .ox-fact { display: flex; gap: var(--space-3); }
+.ox-section[data-callout] .ox-facts { display: flex; flex-direction: column; }
+/* A rule over each line, so the eye follows it across to its buttons. */
+.ox-section[data-callout] .ox-fact { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-2) 0; border-top: 1px solid var(--border-strong); }
+.ox-section[data-callout] .ox-fact:last-child { padding-bottom: 0; }
 .ox-section[data-callout] .ox-fact dt, .ox-section[data-callout] .ox-fact dd { padding: 0; border-bottom: 0; }
+.ox-section[data-callout] .ox-fact dt { flex: none; width: 7.5em; }
+.ox-section[data-callout] .ox-fact dd { flex: 1; display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); margin: 0; }
 .ox-section[data-callout] .ox-fact:only-child dt { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .ox-section-icon { flex: none; color: var(--text-secondary); }
 .ox-part-actions { display: flex; gap: 6px; margin-top: 8px; }
+/* A line's buttons are one control: joined, rounded only at the ends. */
+.ox-fact-actions { display: inline-flex; flex: none; margin-left: var(--space-3); }
+.ox-fact-actions .ox-button { border-radius: 0; }
+.ox-fact-actions .ox-button + .ox-button { margin-left: -1px; }
+.ox-fact-actions .ox-button:first-child { border-radius: var(--radius-sm) 0 0 var(--radius-sm); }
+.ox-fact-actions .ox-button:last-child { border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
+.ox-fact-actions .ox-button:only-child { border-radius: var(--radius-sm); }
 /* A section that drew nothing under its heading (not one folded shut)
    takes no space; the rail's Contents skips it too. */
 .ox-section:empty,

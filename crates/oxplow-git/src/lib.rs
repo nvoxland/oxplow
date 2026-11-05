@@ -56,8 +56,9 @@ pub use status::{
     GitCleanBaseline, GitFileStatus, WorktreeStatus,
 };
 pub use sync::{
-    add_path, checkout_branch, cherry_pick, commit, fetch, merge, pull, pull_remote_into_current,
-    push, push_current_to, rebase, revert, take_conflict_side, uncommit, GitOpResult,
+    add_path, checkout_branch, cherry_pick, commit, fetch, merge, publish, pull,
+    pull_remote_into_current, push, push_current_to, rebase, revert, take_conflict_side, uncommit,
+    GitOpResult,
 };
 pub use tree::{blob_at, git_blob_oid, tree_at_commit};
 pub use worktree::{

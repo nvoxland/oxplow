@@ -67,6 +67,8 @@ pub struct ExtensionCommand {
     /// What runs it.
     pub handler: CommandHandler,
     pub confirm: Confirm,
+    /// What a person is told when it asks (`CommandSpec::confirm_says`).
+    pub confirm_says: Option<String>,
     pub access: Access,
     /// A durable job's model may call it (`job: true`, a handler of the
     /// extension's own). Anyone else may run every command.
@@ -166,6 +168,8 @@ pub(crate) struct CommandFile {
     op: Option<String>,
     #[serde(default)]
     confirm: Option<String>,
+    #[serde(default)]
+    confirm_says: Option<String>,
     #[serde(default)]
     access: Option<String>,
     /// A durable job's model may call it.
@@ -670,6 +674,7 @@ fn command_of(
         input_schema,
         handler,
         confirm,
+        confirm_says: f.confirm_says,
         access,
         job: f.job,
         needs: f.needs,
@@ -1034,6 +1039,7 @@ pub fn extension_command(
         input_schema,
         job: decl.job,
         confirm: decl.confirm,
+        confirm_says: decl.confirm_says.clone(),
         undoable: true,
         lifecycle: if decl.stable {
             Lifecycle::Stable
@@ -2224,6 +2230,7 @@ mod tests {
                         input_schema: json!({ "type": "object" }),
                         job: false,
                         confirm: Confirm::Never,
+                        confirm_says: None,
                         undoable: false,
                         lifecycle: oxplow_domain::Lifecycle::Experimental,
                         atomicity: oxplow_domain::Atomicity::Tx,
@@ -2954,6 +2961,7 @@ mod tests {
                     input_schema: json!({ "type": "object" }),
                     job: false,
                     confirm: Confirm::Never,
+                    confirm_says: None,
                     undoable: false,
                     lifecycle: oxplow_domain::Lifecycle::Experimental,
                     atomicity: oxplow_domain::Atomicity::Tx,

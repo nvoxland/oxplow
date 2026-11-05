@@ -414,16 +414,20 @@ export type VizActionsState = ReturnType<typeof useVizActions>;
 /** A part's whole-page actions as buttons: no Copy, no marks. An editor's
  *  Save is the editor's own. */
 function PartButtons({ run, actions }: { run: VizRun; actions: VizActionsState }) {
-  const buttons = run.config.actions.filter((a) => offeredWholePage(a, run.result));
+  const buttons = run.config.actions.filter((a) => !a.fact && offeredWholePage(a, run.result));
   if (buttons.length === 0) return null;
   return (
     <div data-testid="viz-part-actions" className="ox-part-actions">
-      {buttons.map((a) => (
-        <button key={a.id} type="button" className="ox-button" data-testid={`viz-action-${a.id}`} disabled={actions.busy !== null || !actionEnabled(a, run.result)} title={actionDoes(a)} onClick={() => actions.run(a, null)}>
-          {actions.busy === a.id ? `${a.label}…` : a.label}
-        </button>
-      ))}
+      {buttons.map((a) => <PartButton key={a.id} action={a} run={run} actions={actions} />)}
     </div>
+  );
+}
+
+function PartButton({ action: a, run, actions }: { action: VizRun["config"]["actions"][number]; run: VizRun; actions: VizActionsState }) {
+  return (
+    <button type="button" className="ox-button" data-testid={`viz-action-${a.id}`} disabled={actions.busy !== null || !actionEnabled(a, run.result)} title={actionDoes(a)} onClick={() => actions.run(a, null)}>
+      {actions.busy === a.id ? `${a.label}…` : a.label}
+    </button>
   );
 }
 
@@ -463,6 +467,7 @@ function RowsBody({
   marks,
   tree = null,
   isPage = false,
+  partButtons = false,
 }: VizViewProps & { actions?: VizActionsState; marks?: Marks; tree?: LazyTree | null }) {
   const viz = run.config;
   const limited = limitRows(run.result, maxRows);
@@ -895,7 +900,13 @@ function RowsBody({
   return (
     <>
       {compact ? null : <ResultCompleteness result={result} />}
-      <Viz {...{ run, result, viz, cols, cell, first, compact, streamId, onOpenPage, rowMenu, rowsView, onCustomFailure, onCustomReady, componentView, fitCustom, onSetParam, isPage }} tree={treeNodesDrawn ? { nodes: treeNodesDrawn, open: tree?.open ?? null } : null} />
+      <Viz
+        factButtons={(key) => {
+          if (!actions || !partButtons) return null;
+          const own = viz.actions.filter((a) => a.fact === key && offeredWholePage(a, result));
+          return own.length > 0 ? own.map((a) => <PartButton key={a.id} action={a} run={run} actions={actions} />) : null;
+        }}
+        {...{ run, result, viz, cols, cell, first, compact, streamId, onOpenPage, rowMenu, rowsView, onCustomFailure, onCustomReady, componentView, fitCustom, onSetParam, isPage }} tree={treeNodesDrawn ? { nodes: treeNodesDrawn, open: tree?.open ?? null } : null} />
       {ctxMenu.menu}
     </>
   );
@@ -1041,8 +1052,11 @@ function Viz({
   tree,
   onSetParam,
   isPage,
+  factButtons,
 }: {
   run: VizRun;
+  /** The buttons that go on a `detail` fact's line. */
+  factButtons: (key: string) => ReactNode;
   result: VizRun["result"];
   viz: VizRun["config"];
   /** Set one of the page's params (a terminal picked). */
@@ -1096,7 +1110,15 @@ function Viz({
     case "timeline":
       return <TimelineViz entries={timelineEntries(viz, result)} onOpenPage={onOpenPage} rowMenu={rowMenu} />;
     case "detail":
-      return <DetailViz row={result.rows[0]!} cols={cols} cell={cell} rowMenu={rowMenu} />;
+      return (
+        <DetailViz
+          row={result.rows[0]!}
+          cols={cols}
+          cell={cell}
+          rowMenu={rowMenu}
+          buttons={factButtons}
+        />
+      );
     case "sections":
       return (
         <SectionsViz
@@ -1660,10 +1682,10 @@ function TimelineViz({
 /** `detail`: the first row as label/value pairs. An empty value reads
  *  "(none)", a word rather than a mark beside its label; a column with a
  *  `when` is a fact only while that column of the row is truthy. */
-function DetailViz({ row, cols, cell, rowMenu }: { row: SqlCell[]; cols: DisplayColumn[]; cell: CellRenderer; rowMenu: RowMenu }) {
+function DetailViz({ row, cols, cell, rowMenu, buttons }: { row: SqlCell[]; cols: DisplayColumn[]; cell: CellRenderer; rowMenu: RowMenu; buttons: (key: string) => ReactNode }) {
   const value = (c: DisplayColumn) => ((row[c.index] ?? null) === null ? <span className="ox-faint">(none)</span> : cell(row, c));
   const drawn = cols.filter((c) => c.whenIndex === null || truthyCell(row[c.whenIndex]));
-  return <Facts testId="viz-detail" facts={drawn.map((c) => ({ key: c.key, label: c.label, value: value(c) }))} {...rowMenu(row)} />;
+  return <Facts testId="viz-detail" facts={drawn.map((c) => ({ key: c.key, label: c.label, value: value(c), actions: buttons(c.key) }))} {...rowMenu(row)} />;
 }
 
 const STEP_MARK: Record<StepStatus, { mark: string; color: string; label: string }> = {

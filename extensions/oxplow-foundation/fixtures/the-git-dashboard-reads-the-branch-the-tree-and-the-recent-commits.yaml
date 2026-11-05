@@ -12,7 +12,7 @@ when: { page: oxplow-foundation/git-dashboard, params: { stream_id: 1 } }
 expect:
   loaders:
     row: { rows: [{ branch: main }] }
-    upstream: { rows: [{ branch: main, status: main · No upstream, can_push: 1 }] }
+    upstream: { rows: [{ branch: main, heading: Repository, remote: No remote, can_publish: 0, can_push: 0, has_upstream: 0, on_worktree: 0, compared: null }] }
     recent: { rows: [{ subject: first, commit_ref: $any }] }
     streams: { rows: 0 }
     uncommitted: { rows: [{ changes: $any }] }

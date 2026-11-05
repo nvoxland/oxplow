@@ -241,6 +241,7 @@ mod tests {
             input_schema: json!({}),
             job,
             confirm,
+            confirm_says: None,
             undoable: false,
             lifecycle: Lifecycle::Stable,
             atomicity: Atomicity::External,

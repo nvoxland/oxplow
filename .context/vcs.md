@@ -255,7 +255,7 @@ Every change to a repository is a bus command (`commands/vcs.rs`,
 table in [commands.md](./commands.md)): `oxplow.vcs.commit`, `oxplow.vcs.stage`,
 `oxplow.vcs.discard`, `oxplow.vcs.fetch`, `oxplow.vcs.pull`, `oxplow.vcs.push`, `oxplow.vcs.merge`,
 `oxplow.vcs.checkout_branch`, `oxplow.vcs.rename_branch`, `oxplow.vcs.delete_branch`,
-`oxplow.vcs.resolve_conflict`, `oxplow.vcs.uncommit`, and git's own `oxplow.git.rebase`, `oxplow.git.cherry_pick`,
+`oxplow.vcs.resolve_conflict`, `oxplow.vcs.uncommit`, and git's own `oxplow.git.publish`, `oxplow.git.rebase`, `oxplow.git.cherry_pick`,
 `oxplow.git.revert`, `oxplow.git.ignore` (inherent methods on `GitProvider`). They are
 `External` (the VCS isn't the bus's to roll back), a person's or an
 agent's — an agent's on its own stream only, as its terminal's `git`

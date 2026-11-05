@@ -166,7 +166,7 @@ function NodeView(props: NodeViewProps) {
     );
   // A page a slot mounted, or an embed with no title, is titled by its own
   // page: an embed's heading is not drawn.
-  const title = def?.title || (def?.kind === "embed" || !def ? (at.embed?.page.title ?? null) : null);
+  const title = titleFromRow(run, def) || def?.title || (def?.kind === "embed" || !def ? (at.embed?.page.title ?? null) : null);
   const callout = def?.callout ?? false;
   const hideTitle = def ? def.hideTitle || (def.kind === "embed" && !def.title) : false;
   const fills = fillsNode(run, at);
@@ -195,6 +195,15 @@ function NodeView(props: NodeViewProps) {
       )}
     </NodeFrame>
   );
+}
+
+/** A section's `title_from`: that column of its loader's first row. */
+function titleFromRow(run: PageRun, def: ReturnType<typeof nodeById>): string | null {
+  if (def?.kind !== "viz" || !def.titleFrom || def.from === null) return null;
+  const result = run.loaders[def.from]?.result;
+  const column = result?.columns.indexOf(def.titleFrom) ?? -1;
+  const value = column >= 0 ? result?.rows[0]?.[column] : null;
+  return typeof value === "string" ? value : null;
 }
 
 /** Keep the height chain intact through stacks and the selected switch

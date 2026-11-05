@@ -474,9 +474,11 @@ whose loader does not return one (`viz_column_problems`). An agent reads
   extensions-slots.md "Slots".
 - **A section's `callout`, `collapsible` and `link`** (`Node`; `PageTree`,
   `kit/Section`). `callout: true` draws a panel, its title (with `icon:`, which only a
-  callout takes) and buttons on the first line and its facts under them
+  callout takes) on the first line and its facts under it, a button that says
+  `fact: <column>` on that fact's line (any `detail`'s)
   (`.ox-section[data-callout]`); one fact's label is left to the title, and
-  with `hide_title` it is one line. `collapsible: true` folds at the heading,
+  with `hide_title` it is one line. `title_from: <column>` names it from its first row (`title` stands with
+  no row; agents' text reads `title`). `collapsible: true` folds at the heading,
   remembered in the tab's history state (`PageTree` is the outermost
   `CollapsibleSections`). `link: <page id>` is the arrow beside the heading
   (`RefSite::SectionLink`: it must name a page).
@@ -554,7 +556,7 @@ usability.md "Keyboard").
 ### Actions
 
 `actions:` on a page or a viz node: `{ id, label, command | open, input, row?,
-group?, all?, form?, fixed?, fields?, about?, choices?, then?, when?, enabled?, primary?,
+group?, all?, form?, fixed?, fields?, about?, choices?, then?, when?, enabled?, fact?, primary?,
 prominent?, submenu?, icon?, drag?, bulk?, key?, edit?, confirm? }` (`PageAction`).
 `input` binds `{{param.x}}` and, on a row action, `{{row.x}}`
 (`{{row.x|json}}`: the JSON a text cell holds, typed; the one filter,

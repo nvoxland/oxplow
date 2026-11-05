@@ -93,10 +93,10 @@ export interface ActionTarget {
   params: Record<string, SqlCell>;
 }
 
-/** What an action does, in a word for a title: the command it runs, or
- *  the column whose URI it opens. */
-export function actionDoes(action: Pick<PageAction, "command" | "open">): string {
-  return action.open ? `opens ${action.open}` : (action.command ?? "");
+/** What a button's hover says: its command's summary, in words. Nothing
+ *  when there is none (a command's id tells a person nothing). */
+export function actionDoes(action: Pick<PageAction, "does">): string {
+  return action.does ?? "";
 }
 
 export async function performVizAction(

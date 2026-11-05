@@ -1758,6 +1758,13 @@
           ],
           "default": null
         },
+        "confirm_says": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
         "access": {
           "type": [
             "string",

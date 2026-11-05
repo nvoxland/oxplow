@@ -132,6 +132,7 @@ pub fn sequence_spec() -> CommandSpec {
         job: false,
         // The children decide: one that asks makes the sequence ask.
         confirm: Confirm::Never,
+        confirm_says: None,
         undoable: true,
         lifecycle: Lifecycle::Stable,
         // In the transaction, or as steps outside it: its calls decide.

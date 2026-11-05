@@ -1390,3 +1390,57 @@ fn a_callout_may_have_an_icon() {
     let why = with("icon: git-branch, ").unwrap_err();
     assert!(why.contains("`icon`") && why.contains("callout"), "{why}");
 }
+
+/// A button may sit on one fact's line of a detail: the fact must be a
+/// column there, and a row action or a viz of many rows has no such line.
+#[test]
+fn a_button_may_name_the_fact_it_goes_with() {
+    let head = "title: T\nloaders:\n  q: { sql: \"SELECT 1 AS id\" }\n";
+    let with = |viz: &str, fact: &str| {
+        page(&format!(
+            "{head}view:\n  viz: {viz}\n  from: q\n  columns: [{{ key: id }}]\n  actions:\n    - {{ id: a, label: A, command: oxplow.work_item.create, fact: {fact} }}\n"
+        ))
+    };
+    assert!(with("detail", "id").is_ok());
+    let why = with("detail", "nope").unwrap_err();
+    assert!(why.contains("`fact: nope`"), "{why}");
+    let why = with("table", "id").unwrap_err();
+    assert!(why.contains("`fact`"), "{why}");
+}
+
+/// A button's hover is what its command does, for a page's actions and a
+/// viz's alike, and nothing for an action that runs no command.
+#[test]
+fn a_run_says_what_each_action_does() {
+    let head = "title: T\nloaders:\n  q: { sql: \"SELECT 1 AS id, 'x' AS uri\" }\n";
+    let mut p = page(&format!(
+        "{head}actions:\n  - {{ id: top, label: Top, command: oxplow.a.top }}\nview:\n  stack:\n    - {{ id: n, title: N, viz: detail, from: q, actions: [ {{ id: inner, label: Inner, command: oxplow.a.inner }}, {{ id: go, label: Go, open: uri }} ] }}\n"
+    ))
+    .expect("loads");
+    p.describe_actions(|command| Some(format!("says {command}")));
+    assert_eq!(p.actions[0].does.as_deref(), Some("says oxplow.a.top"));
+    let node = p.nodes().into_iter().find(|n| n.id == "n").unwrap().clone();
+    let NodeKind::Viz { config, .. } = &node.kind else {
+        panic!("a viz")
+    };
+    assert_eq!(
+        config.actions[0].does.as_deref(),
+        Some("says oxplow.a.inner")
+    );
+    assert_eq!(config.actions[1].does, None);
+}
+
+/// A section may take its title from a column of its row; the file's title
+/// stays, for when there is no row.
+#[test]
+fn a_section_may_take_its_title_from_its_row() {
+    let head = "title: T\nloaders:\n  q: { sql: \"SELECT 1 AS id, 'N' AS heading\" }\n";
+    let ok = page(&format!(
+        "{head}view:\n  stack:\n    - {{ id: a, title: A, title_from: heading, viz: detail, from: q }}\n"
+    ))
+    .expect("loads");
+    let nodes = ok.nodes();
+    let a = nodes.iter().find(|n| n.id == "a").unwrap();
+    assert_eq!(a.title_from.as_deref(), Some("heading"));
+    assert_eq!(a.title.as_deref(), Some("A"));
+}

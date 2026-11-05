@@ -152,6 +152,19 @@ pub struct Page {
 
 impl Page {
     /// Every node of its view and rail, depth first.
+    /// Say what each action does, from `summary` of its command: what a
+    /// button's hover reads.
+    pub fn describe_actions(&mut self, summary: impl Fn(&str) -> Option<String>) {
+        let mut describe = |a: &mut PageAction| {
+            a.does = a.command.as_deref().and_then(&summary);
+        };
+        self.actions.iter_mut().for_each(&mut describe);
+        self.view.for_each_action(&mut describe);
+        if let Some(rail) = &mut self.rail {
+            rail.for_each_action(&mut describe);
+        }
+    }
+
     pub fn nodes(&self) -> Vec<&Node> {
         let mut out = Vec::new();
         self.view.walk(&mut out);
@@ -452,6 +465,9 @@ pub struct Node {
     /// It stands apart, in a panel over the rest: the state of what the page
     /// is about, and what to do about it.
     pub callout: bool,
+    /// The column of its row that names it (a callout that is a worktree's
+    /// or a repository's); `title` stands when there is no row.
+    pub title_from: Option<String>,
     /// The icon beside a callout's title.
     pub icon: Option<String>,
     /// Its heading folds it; the person's choice is the tab's.
@@ -487,6 +503,21 @@ impl Node {
                     c.for_each_origin(f);
                 }
             }
+            _ => {}
+        }
+    }
+
+    /// Each viz's actions below it, `self` included.
+    fn for_each_action(&mut self, f: &mut impl FnMut(&mut PageAction)) {
+        match &mut self.kind {
+            NodeKind::Stack { children }
+            | NodeKind::Grid { children }
+            | NodeKind::Switch { children, .. } => {
+                for c in children {
+                    c.for_each_action(f);
+                }
+            }
+            NodeKind::Viz { config, .. } => config.actions.iter_mut().for_each(&mut *f),
             _ => {}
         }
     }
@@ -848,6 +879,12 @@ pub fn parse_page(
     // A whole-page action may read a row (`{{row.x}}`, `when:`): the first
     // loader's one row, as a document's row once was.
     let actions = parse_actions(file.actions, &params, false, true)?;
+    if let Some(a) = actions.iter().find(|a| a.fact.is_some()) {
+        return Err(format!(
+            "actions: `{}`: `fact` is for a button on a line of a `detail` node",
+            a.id
+        ));
+    }
     if let Some(a) = actions
         .iter()
         .find(|a| a.row || a.group.is_some() || a.drag)
@@ -1548,6 +1585,7 @@ fn parse_node(value: &serde_yaml::Value, ctx: &mut NodeCtx<'_>) -> Result<Node, 
         Some(other) => Err(format!("`{key}` is true or false, not {other:?}")),
     };
     let callout = flag(&mut map, "callout")?;
+    let title_from = take_str(&mut map, "title_from")?;
     let icon = take_str(&mut map, "icon")?;
     if let Some(icon) = &icon {
         if !callout {
@@ -1678,6 +1716,7 @@ fn parse_node(value: &serde_yaml::Value, ctx: &mut NodeCtx<'_>) -> Result<Node, 
         description,
         hide_title,
         callout,
+        title_from,
         icon,
         collapsible,
         link,
@@ -1701,6 +1740,16 @@ fn leaf_viz(
         holds_one_row(f.viz),
     )
     .map_err(|e| format!("node `{node_id}`: {e}"))?;
+    if let Some((id, fact)) = actions.iter().find_map(|a| {
+        a.fact
+            .as_ref()
+            .filter(|fact| f.viz != Viz::Detail || !f.columns.iter().any(|c| &c.key == *fact))
+            .map(|fact| (&a.id, fact))
+    }) {
+        return Err(format!(
+            "node `{node_id}`: actions: `{id}`: `fact: {fact}` isn't a column of this `detail`, and `fact` is for a line of one"
+        ));
+    }
     let cfg = VizConfig {
         id: format!("{}#{node_id}", ctx.page_id),
         extension: ctx.extension.to_string(),

@@ -12,16 +12,40 @@ loaders:
       SELECT s.branch AS branch FROM v_stream s WHERE s.id = :stream_id
     columns:
     - key: branch
+  # What a worktree's branch is compared with. Git doesn't record the branch
+  # one came from, so it is the default branch, for a worktree made anywhere.
+  base:
+    sql: |
+      SELECT b.name AS name FROM v_branch b WHERE b.kind = 'local' AND b.is_default = 1
   upstream:
     sql: |
       SELECT b.name AS branch,
-             CASE WHEN b.upstream IS NULL THEN b.name || ' · No upstream'
-                  ELSE b.name || ' → ' || b.upstream || '   ↑' || b.ahead || ' ↓' || b.behind END AS status,
-             (b.upstream IS NULL OR b.ahead > 0) AS can_push
-      FROM v_branch b WHERE b.kind = 'local' AND b.name = :branch
+             CASE WHEN w.id IS NOT NULL THEN 'Worktree' ELSE 'Repository' END AS heading,
+             (b.upstream IS NULL AND EXISTS (SELECT 1 FROM v_branch r WHERE r.kind = 'remote')) AS can_publish,
+             CASE WHEN b.upstream IS NULL AND NOT EXISTS (SELECT 1 FROM v_branch r WHERE r.kind = 'remote') THEN 'No remote'
+                  WHEN b.upstream IS NULL THEN 'Not pushed yet'
+                  WHEN b.ahead = 0 AND b.behind = 0 THEN 'In sync with ' || b.upstream
+                  WHEN b.behind = 0 THEN b.ahead || ' ahead of ' || b.upstream
+                  WHEN b.ahead = 0 THEN b.behind || ' behind ' || b.upstream
+                  ELSE b.ahead || ' ahead of, ' || b.behind || ' behind ' || b.upstream END AS remote,
+             (b.upstream IS NOT NULL AND b.ahead > 0) AS can_push,
+             b.upstream IS NOT NULL AS has_upstream,
+             w.id IS NOT NULL AS on_worktree,
+             :base AS base,
+             CASE WHEN d.ahead = 0 AND d.behind = 0 THEN 'Even with ' || :base
+                  WHEN d.behind = 0 THEN d.ahead || ' ahead of ' || :base
+                  WHEN d.ahead = 0 THEN d.behind || ' behind ' || :base
+                  ELSE d.ahead || ' ahead of, ' || d.behind || ' behind ' || :base END AS compared,
+             coalesce(d.behind > 0, 0) AS can_join
+      FROM v_branch b
+      LEFT JOIN v_stream w ON w.id = :stream_id AND w.kind = 'worktree' AND :base <> b.name
+      LEFT JOIN v_branch_divergence d ON w.id IS NOT NULL AND d.base = :base AND d.head = :branch
+      WHERE b.kind = 'local' AND b.name = :branch
     params:
       branch:
         from: row.branch
+      base:
+        from: base.name
   uncommitted:
     sql: |
       WITH w AS (
@@ -76,30 +100,67 @@ loaders:
 view:
   stack:
   - id: upstream
-    title: Branch
+    title: Repository
+    title_from: heading
     callout: true
     icon: git-branch
     from: upstream
     viz: detail
     columns:
-    - key: status
+    - key: branch
       label: Branch
+    - key: remote
+      label: Remote
+    - key: compared
+      label: Compared with
+      when: on_worktree
     empty: No branch is checked out.
     actions:
+    - id: merge-base
+      label: Merge
+      command: oxplow.vcs.merge
+      when: on_worktree
+      enabled: can_join
+      fact: compared
+      input:
+        stream: str{{param.stream_id}}
+        rev: '{{row.base}}'
+    - id: rebase-base
+      label: Rebase
+      command: oxplow.git.rebase
+      when: on_worktree
+      enabled: can_join
+      fact: compared
+      input:
+        stream: str{{param.stream_id}}
+        rev: '{{row.base}}'
+    - id: publish
+      label: Publish
+      when: can_publish
+      fact: remote
+      command: oxplow.git.publish
+      input:
+        stream: str{{param.stream_id}}
     - id: push
       label: Push
+      when: has_upstream
       enabled: can_push
+      fact: remote
       command: oxplow.vcs.push
       input:
         stream: str{{param.stream_id}}
     - id: pull
       label: Pull
       command: oxplow.vcs.pull
+      fact: remote
+      when: has_upstream
       input:
         stream: str{{param.stream_id}}
     - id: fetch
       label: Fetch
       command: oxplow.vcs.fetch
+      fact: remote
+      when: has_upstream
       input:
         stream: str{{param.stream_id}}
   - id: uncommitted

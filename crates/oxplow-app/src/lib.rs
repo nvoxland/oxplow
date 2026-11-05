@@ -2320,6 +2320,7 @@ mod tests {
                 "oxplow.file.save",
                 "oxplow.git.cherry_pick",
                 "oxplow.git.ignore",
+                "oxplow.git.publish",
                 "oxplow.git.rebase",
                 "oxplow.git.revert",
                 // The active knowledge store keeps the page (the wiki's file,
