@@ -399,6 +399,10 @@ jobs:
       # crates" note in .context/working-in-this-repo.md).
       - name: Coverage report (with floor)
         timeout-minutes: 150
+        # llvm-cov builds its tests in a target folder of its own, so they
+        # can't find the app beside them.
+        env:
+          OXPLOW_SHELL: ${{ github.workspace }}/target/debug/oxplow
         run: xvfb-run -a cargo llvm-cov --workspace --summary-only --fail-under-lines 62 --no-fail-fast
 
       # Per-crate floors so a regression in one crate (e.g. the IPC
