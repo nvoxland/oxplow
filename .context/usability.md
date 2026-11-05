@@ -345,8 +345,10 @@ markdown itself, nor edits it in a `<textarea>`.
   it with a single keystroke). A *page* that opens on its own (not from
   the person's own action) focuses its input only when nothing else has
   focus: one that mounts late — the New Session page as a thread loads —
-  must not take the keystrokes of a launcher the person already opened
-  (the New Session form doesn't take focus at all). The launcher starts a fresh query only when it opens, and
+  must not take the keystrokes of a launcher the person already opened.
+  A form (`SchemaForm`) does this itself: as it opens it focuses its first
+  field unless a text field, select or editor outside it has the focus.
+  The launcher starts a fresh query only when it opens, and
   takes the focus whenever it shows (on a fresh window that's once its
   stream has loaded, just after it opened): what a person typed is never
   wiped by data arriving. And it keeps the focus while it is open: when
@@ -355,8 +357,10 @@ markdown itself, nor edits it in a `<textarea>`.
   (`QuickOpenOverlay`'s `onBlur`); focus moving inside the launcher is left
   alone, and a click outside closes it first. If keystrokes are lost again
   after a reload, log `document.activeElement` in that `onBlur` to name the
-  element that took focus; the fix was made without seeing it in a failing
-  `settings/pages.spec.ts` run.
+  element that took focus. One that did: the New Session form's first
+  field (a select), mounting a moment after the launcher opened; the
+  Enter that opens the typed page went to that select and nothing opened
+  (`timeline.spec.ts` on a slow machine, "New Session" left as the title).
 - **"Save and Another"** for repetitive-entry flows (see the New Work
   Item form): a form page declares `again: { label, keep }`, a second
   button that files and restarts the form with the `keep` fields (state,

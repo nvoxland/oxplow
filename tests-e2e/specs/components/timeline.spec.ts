@@ -5,8 +5,7 @@ import { openFromLauncher } from "../../support/ui.js";
 // built with a library the kit doesn't have, filling its page under core's
 // nav bar. It reads with its own SQL, titles its page with the range and
 // puts Today and Fit in the bar, which core draws.
-test("the Timeline page draws the project's activity and titles itself", async ({ fresh }) => {
-  const { page } = fresh;
+test("the Timeline page draws the project's activity and titles itself", async ({ page }) => {
   await page.goto("/");
   await openFromLauncher(page, "Timeline");
   // A page file whose view is the component: the frame is the page.
@@ -22,8 +21,7 @@ test("the Timeline page draws the project's activity and titles itself", async (
 // Its window is its view params: Fit writes `from` and `to` into the tab's
 // address (a filter: it replaces the entry), and a reload shows the same
 // window.
-test("the Timeline's window is its tab's: Fit puts it in the address, a reload keeps it", async ({ fresh }) => {
-  const { page } = fresh;
+test("the Timeline's window is its tab's: Fit puts it in the address, a reload keeps it", async ({ page }) => {
   await page.goto("/");
   await openFromLauncher(page, "Timeline");
   await expect(page.getByTestId("page-nav-title").filter({ visible: true })).toContainText("Timeline:");

@@ -170,7 +170,9 @@ export async function startDaemon({ bin = process.env.OXPLOW_E2E_DAEMON, tmp = t
     });
     spawned.once("close", () => logFile.end());
     // Stdin stays open: it's the daemon's lifeline, and closing it stops
-    // the daemon (tsk1073).
+    // the daemon (tsk1073). A daemon that is already gone refuses the write
+    // (EPIPE): its exit is what reports that, below.
+    spawned.stdin?.on("error", () => {});
     spawned.stdin?.write(`${token}\n`);
     const base = await new Promise<string>((resolve, reject) => {
       const said = () => `${stderr.join("")}\n(log: ${log})`;

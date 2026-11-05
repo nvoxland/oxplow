@@ -30,8 +30,7 @@ async function notesOn(daemon: Daemon, title: string): Promise<number> {
   return Number(rows[0]?.[0]);
 }
 
-test("a failed reaction is in Delivery, and a person's Retry composes it afresh", async ({ fresh }) => {
-  const { page, daemon } = fresh;
+test("a failed reaction is in Delivery, and a person's Retry composes it afresh", async ({ page, daemon }) => {
   await page.goto("/");
   await openFromLauncher(page, "Settings: Data");
   await run(daemon, "oxplow.work_item.create", { title: "Plum [fail]", thread: daemon.thread });
@@ -47,8 +46,7 @@ test("a failed reaction is in Delivery, and a person's Retry composes it afresh"
   await expect.poll(() => notesOn(daemon, "Plum")).toBe(1);
 });
 
-test("a person's Backfill reaches what was logged before the effect was deployed", async ({ fresh }) => {
-  const { page, daemon } = fresh;
+test("a person's Backfill reaches what was logged before the effect was deployed", async ({ page, daemon }) => {
   // Logged first; then an extension whose effect comments on created
   // tasks is deployed: it starts after what was already logged.
   await run(daemon, "oxplow.work_item.create", { title: "Fig", thread: daemon.thread });

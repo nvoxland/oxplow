@@ -507,3 +507,19 @@ test("the submit is a primary button, disabled only for a missing required field
   expect(submit.disabled).toBe(false);
   expect(submit.title).toBe("");
 });
+
+test("a form that opens takes the focus only when no other field has it", () => {
+  const { getByTestId } = render(<SchemaForm schema={schema} onSubmit={() => {}} testIdPrefix="f" />);
+  expect(document.activeElement).toBe(getByTestId("f-title"));
+  cleanup();
+
+  // A form that mounts on its own (the session picker of a new thread)
+  // while the person types in the launcher must not take the keys.
+  const typing = document.createElement("input");
+  document.body.appendChild(typing);
+  typing.focus();
+  const later = render(<SchemaForm schema={schema} onSubmit={() => {}} testIdPrefix="g" />);
+  expect(document.activeElement).toBe(typing);
+  expect(later.getByTestId("g-title")).not.toBe(document.activeElement);
+  typing.remove();
+});

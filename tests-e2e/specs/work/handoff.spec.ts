@@ -11,8 +11,7 @@ async function value(daemon: Daemon, sql: string, params: unknown[] = []): Promi
 // Work handed from one thread to another (.context/agent-model.md
 // "Handoffs and native messaging"): sent from the thread's own menu, seen on
 // the other thread, taken there — and its item moves with it.
-test("work handed off is seen on the other thread, and taking it moves its item", async ({ fresh }) => {
-  const { page, daemon } = fresh;
+test("work handed off is seen on the other thread, and taking it moves its item", async ({ page, daemon }) => {
   const docs = await run<{ result: { id: string } }>(daemon, "oxplow.thread.create", {
     stream: daemon.stream,
     title: "Docs",

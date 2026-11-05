@@ -5,8 +5,7 @@ import { expect, test } from "../../support/fixtures.js";
 // destructive step oxplow never runs for an effect, so it waits as a
 // proposal for a person.
 
-test("an effect's destructive step waits in Alerts until a person approves it", async ({ fresh }) => {
-  const { page, daemon } = fresh;
+test("an effect's destructive step waits in Alerts until a person approves it", async ({ page, daemon }) => {
   await page.goto("/");
   await run(daemon, "oxplow.work_item.create", { title: "Pear [delete]", thread: daemon.thread });
   // The dock's Alerts icon counts it once the effect has run (it runs in the

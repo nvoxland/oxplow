@@ -1,6 +1,5 @@
-// The suite's fixtures: a daemon per worker, a page that talks to it, and a
-// guard that fails any spec whose page threw. A spec on `fresh` alone never
-// boots the worker's daemon: only `page` (through `storageState`) asks for it.
+// The suite's fixtures: a daemon per spec, a page that talks to it, and a
+// guard that fails any spec whose page threw.
 import { test as base, expect, type Page } from "@playwright/test";
 
 import { deploy, ipc, settle, startDaemon, until, type Daemon } from "./daemon.js";
@@ -86,33 +85,15 @@ export function connectedTo(baseURL: string, base: string, token: string) {
   };
 }
 
-export const test = base.extend<{ fresh: { daemon: Workspace; page: Page } }, { daemon: Workspace }>({
+export const test = base.extend<{ daemon: Workspace }>({
+  // A daemon of the spec's own, booted for it and stopped after it: no spec
+  // meets what another left in the project, the settings or the daemon's
+  // tabs and streams. A spec on `page` or `daemon` gets it.
   daemon: [
     async ({}, use) => {
       const daemon = await workspace();
       try {
         await use(daemon);
-      } finally {
-        await daemon.stop();
-      }
-    },
-    { scope: "worker", timeout: 180_000 },
-  ],
-  // A daemon of the spec's own, for one whose state no other spec may
-  // touch first (nothing approved yet, an empty project), and a page on it.
-  fresh: [
-    async ({ browser, baseURL }, use) => {
-      const daemon = await workspace();
-      try {
-        const context = await browser.newContext({ storageState: connectedTo(baseURL!, daemon.base, daemon.token) });
-        try {
-          const page = await context.newPage();
-          const check = guard(page);
-          await use({ daemon, page });
-          check();
-        } finally {
-          await context.close();
-        }
       } finally {
         await daemon.stop();
       }

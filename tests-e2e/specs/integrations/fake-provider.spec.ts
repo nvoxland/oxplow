@@ -14,8 +14,7 @@ function fakeState(project: string): string {
     .join("\n");
 }
 
-test("a person configures, checks and enables the fake tracker, and an item reaches it", async ({ fresh }) => {
-  const { page, daemon } = fresh;
+test("a person configures, checks and enables the fake tracker, and an item reaches it", async ({ page, daemon }) => {
   await page.goto("/");
   await openFromLauncher(page, "Settings: Integrations");
   // Integrations is oxplow-foundation's own component, in a frame; the

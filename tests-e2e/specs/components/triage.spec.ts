@@ -79,8 +79,7 @@ async function decisions(daemon: Daemon): Promise<Record<string, string>> {
   return decided;
 }
 
-test("TODOs are sorted by the model, and a decision from the list page survives a reload beside one made earlier", async ({ fresh }) => {
-  const { page, daemon } = fresh;
+test("TODOs are sorted by the model, and a decision from the list page survives a reload beside one made earlier", async ({ page, daemon }) => {
   const model = await jev();
   try {
     await install(daemon);

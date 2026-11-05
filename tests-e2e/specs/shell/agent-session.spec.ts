@@ -2,8 +2,7 @@ import { ipc, run } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
 import { newSessionPage, searchLauncher } from "../../support/ui.js";
 
-test("an agent terminal has usable height when opened and restored", async ({ fresh }) => {
-  const { page } = fresh;
+test("an agent terminal has usable height when opened and restored", async ({ page }) => {
   await page.goto("/");
   await newSessionPage(page).locator('[data-node="start"]').getByRole("button", { name: "Start a new session", exact: true }).click();
   const terminal = page.getByTestId("viz-terminal");
@@ -20,8 +19,7 @@ test("an agent terminal has usable height when opened and restored", async ({ fr
 /// rather than starting anything. On a fresh daemon: the picker is the home
 /// tab only while the thread has no session, which another spec on the
 /// shared daemon may have started.
-test("search offers a new agent session, which opens the picker", async ({ fresh }) => {
-  const { page } = fresh;
+test("search offers a new agent session, which opens the picker", async ({ page }) => {
   await page.goto("/");
   await expect(newSessionPage(page)).toBeVisible();
   await newSessionPage(page).locator('[data-node="start"]').getByRole("button", { name: "Start a new session", exact: true }).click();
@@ -39,8 +37,7 @@ test("search offers a new agent session, which opens the picker", async ({ fresh
 /// installed where the daemon looks — its PATH leaves out the person's own
 /// bin dirs — so its launch shell exits at once)
 /// shows "Session ended", and its tab still closes the session.
-test("an ended terminal session says so and its tab closes it", async ({ fresh }) => {
-  const { page, daemon } = fresh;
+test("an ended terminal session says so and its tab closes it", async ({ page, daemon }) => {
   await run(daemon, "oxplow.agent.set_agents", { agents: ["scripted", "claude"] });
   await page.goto("/");
   await expect(newSessionPage(page)).toBeVisible();
@@ -58,8 +55,7 @@ test("an ended terminal session says so and its tab closes it", async ({ fresh }
 /// A launch that fails before any process exists (Codex, which the daemon's
 /// PATH can't find) says why where "Session ended" shows, with a retry — not
 /// a blank pane.
-test("a session that can't launch shows why and offers a retry", async ({ fresh }) => {
-  const { page, daemon } = fresh;
+test("a session that can't launch shows why and offers a retry", async ({ page, daemon }) => {
   await run(daemon, "oxplow.agent.set_agents", { agents: ["scripted", "codex"] });
   await page.goto("/");
   await expect(newSessionPage(page)).toBeVisible();
@@ -74,8 +70,7 @@ test("a session that can't launch shows why and offers a retry", async ({ fresh 
 /// A session's tab is named by the view's one rule: the person's alias, else
 /// the harness's name for the conversation, else the harness and the day.
 /// Clearing the alias gives the fallback back.
-test("a session's tab shows its alias, and its fallback once the alias is cleared", async ({ fresh }) => {
-  const { page, daemon } = fresh;
+test("a session's tab shows its alias, and its fallback once the alias is cleared", async ({ page, daemon }) => {
   await run(daemon, "oxplow.agent.set_agents", { agents: ["scripted", "claude", "codex"] });
   await page.goto("/");
   await expect(newSessionPage(page)).toBeVisible();
@@ -135,8 +130,7 @@ test("a session's tab shows its alias, and its fallback once the alias is cleare
 
 /// Search offers a command per enabled agent that starts it directly — the
 /// project's agents decide which: Codex once enabled, never Claude here.
-test("search starts an enabled agent's session directly", async ({ fresh }) => {
-  const { page, daemon } = fresh;
+test("search starts an enabled agent's session directly", async ({ page, daemon }) => {
   await run(daemon, "oxplow.agent.set_agents", { agents: ["scripted", "codex"] });
   await page.goto("/");
   await expect(newSessionPage(page)).toBeVisible();
@@ -163,8 +157,7 @@ async function addThread(page: import("@playwright/test").Page, daemon: import("
 
 /// The picker is an ordinary tab: its × closes it for good (a reload
 /// doesn't bring it back).
-test("the picker closes, and stays closed", async ({ fresh }) => {
-  const { page, daemon } = fresh;
+test("the picker closes, and stays closed", async ({ page, daemon }) => {
   await page.goto("/");
   await expect(newSessionPage(page)).toBeVisible();
   await page.getByTestId(PICKER_CLOSE).click();
@@ -175,8 +168,7 @@ test("the picker closes, and stays closed", async ({ fresh }) => {
 });
 
 /// Remember This makes the agent chosen what new threads start with.
-test("a remembered choice is what new threads start with", async ({ fresh }) => {
-  const { page, daemon } = fresh;
+test("a remembered choice is what new threads start with", async ({ page, daemon }) => {
   await run(daemon, "oxplow.agent.set_agents", { agents: ["scripted", "claude"] });
   await page.goto("/");
   await expect(newSessionPage(page)).toBeVisible();

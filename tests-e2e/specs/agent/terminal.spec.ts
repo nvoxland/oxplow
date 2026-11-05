@@ -85,8 +85,7 @@ test("an exited shell says so, and Start Again opens a new one", async ({ page }
 
 // Terminals are rows: opening the page gives the stream its first, closing
 // it ends the shell and deletes the row, and the page then offers New.
-test("a terminal is a row: closed with its shell, and New opens another", async ({ fresh }) => {
-  const { page, daemon } = fresh;
+test("a terminal is a row: closed with its shell, and New opens another", async ({ page, daemon }) => {
   const rows = async () =>
     (await ipc<{ rows: unknown[][] }>(daemon, "query_sql", { sql: "SELECT id, uri, title FROM v_terminal" })).rows;
   await page.goto("/");
@@ -107,8 +106,7 @@ test("a terminal is a row: closed with its shell, and New opens another", async 
 
 // Several terminals: the strip picks one, its menu renames one through
 // the page's action and closes one after asking.
-test("a second terminal from the strip is picked, renamed and closed", async ({ fresh }) => {
-  const { page, daemon } = fresh;
+test("a second terminal from the strip is picked, renamed and closed", async ({ page, daemon }) => {
   const rows = async () =>
     (await ipc<{ rows: unknown[][] }>(daemon, "query_sql", { sql: "SELECT id, title FROM v_terminal ORDER BY position, id" })).rows;
   await page.goto("/");
