@@ -24,7 +24,9 @@ use tokio::time::Instant;
 
 use crate::{
     extension::extension_job_authority::{JobAuthorityError, JobAuthorityHost, JobExecution},
-    extension::extension_job_operations::{JobWork, JobWorkOutcome, RegisteredJobOperation},
+    extension::extension_job_operations::{
+        JobOperationError, JobWork, JobWorkOutcome, RegisteredJobOperation,
+    },
 };
 
 const CLAIM_LEASE_MS: i64 = 30_000;
@@ -318,7 +320,16 @@ impl ExtensionJobDispatcher {
         work: JobWork,
     ) -> Result<DispatchOutcome, DispatchError> {
         let _cancel_on_drop = CancelOnDrop(execution.run().cancel().clone());
-        let mut worker = Box::pin(registration.execute(work));
+        // The worker is a task of its own, so it keeps running while this
+        // loop waits on the store. Polled only from the `select!` below, it
+        // stood still for every `.await` after it, and a database slot the
+        // pool had handed it (a woken, unpolled `acquire`) stayed held by a
+        // future nobody polled: the loop's own store read then queued
+        // behind it for good, on a pool with one slot for background work.
+        let mut worker = AbortOnDrop(tokio::spawn({
+            let registration = registration.clone();
+            async move { registration.execute(work).await }
+        }));
         let started = Instant::now();
         let mut last_renewal = started;
         let mut cancellation_at: Option<Instant> = None;
@@ -326,8 +337,10 @@ impl ExtensionJobDispatcher {
 
         loop {
             tokio::select! {
-                result = &mut worker, if !worker_finished => {
+                result = &mut worker.0, if !worker_finished => {
                     worker_finished = true;
+                    // A worker that panicked is one that failed.
+                    let result = result.unwrap_or(Err(JobOperationError::Failed));
                     match result {
                         Ok(JobWorkOutcome::Completed { completion, result }) => {
                             return self.finish_completion(&id, token, execution, completion, result).await;
@@ -756,6 +769,15 @@ impl ExtensionJobDispatcher {
             }
         }
         Err(ExtensionJobStoreError::Conflict)
+    }
+}
+
+/// A spawned job worker, ended when its supervisor lets go of it (a
+/// dropped `JoinHandle` would leave it running).
+struct AbortOnDrop(tokio::task::JoinHandle<Result<JobWorkOutcome, JobOperationError>>);
+impl Drop for AbortOnDrop {
+    fn drop(&mut self) {
+        self.0.abort();
     }
 }
 

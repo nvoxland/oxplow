@@ -21,4 +21,4 @@ steps:
     expect: { rows: 1 }
 model:
   replies:
-    - { text: "The tests the agent ran cover the parser change, but the diff coverage leaves the error path untested.", chunkDelayMs: 100 }
+    - { text: "The tests the agent ran cover the parser change, but the diff coverage leaves the error path untested.", chunkDelayMs: 400 }
