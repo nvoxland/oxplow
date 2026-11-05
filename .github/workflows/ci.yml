@@ -333,7 +333,8 @@ jobs:
             libayatana-appindicator3-dev \
             librsvg2-dev \
             patchelf \
-            build-essential
+            build-essential \
+            xvfb
 
       - name: Cache Cargo registry + target
         uses: actions/cache@v6
@@ -355,6 +356,19 @@ jobs:
       - name: Stage the daemon sidecar
         run: bash apps/desktop/src-tauri/scripts/stage-sidecars.sh debug
 
+      # What the test job's run needs, for the same reasons: the app's
+      # `generate_context!` reads the built frontend, a fixture's `ui:` steps
+      # draw in the app under a display, and a source guard reads every
+      # platform's crates.
+      - name: Install JS deps
+        run: bun install --frozen-lockfile
+
+      - name: Build the app the component harness draws in
+        run: bun run --cwd apps/desktop build && cargo build -p oxplow-desktop
+
+      - name: Fetch every platform's crates
+        run: cargo fetch --locked
+
       # Surfaces line/region coverage per crate. Workspace floor is
       # set to 62% lines — current baseline ~65%. The thinnest
       # crates (oxplow-mcp, oxplow-tauri-ipc command adapters) drag
@@ -368,7 +382,8 @@ jobs:
       # catastrophe-catchers, not targets; see the "pass-through
       # crates" note in .context/working-in-this-repo.md).
       - name: Coverage report (with floor)
-        run: cargo llvm-cov --workspace --summary-only --fail-under-lines 62
+        timeout-minutes: 150
+        run: xvfb-run -a cargo llvm-cov --workspace --summary-only --fail-under-lines 62 --no-fail-fast
 
       # Per-crate floors so a regression in one crate (e.g. the IPC
       # command adapters going to 0% again) fails CI even if the
