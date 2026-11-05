@@ -539,7 +539,9 @@ fact-collector script is passed its run's), the worker is **killed and reaped** 
 `Cancelled`); a run whose live allocations pass its cap is ended by the
 worker's counting allocator (`worker::MemoryCap`, exit code 3,
 `CollectError::MemoryExceeded`); a worker whose host is gone exits on its
-own. At most `scripts.maxConcurrent` run at once (default `min(4,
+own (Unix: its parent changed; Windows: it waits on a handle to the
+host's pid, which the host passes as `--parent-pid`, and leaves at once
+without one). At most `scripts.maxConcurrent` run at once (default `min(4,
 available parallelism)`); one more waits for a slot (counted in its
 ceiling). `scripts.memoryMb` is the cap (default 512). Both are
 person-only keys, applied at boot and on change

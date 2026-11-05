@@ -34,11 +34,17 @@ jaq-core = { workspace = true }
 jaq-json = { workspace = true }
 jaq-std = { workspace = true }
 starlark = { workspace = true }
-# The script worker's memory cap and CPU accounting.
-libc = { workspace = true }
 # The parse results' content hashes.
 sha2 = { workspace = true }
 hex = { workspace = true }
+
+[target.'cfg(unix)'.dependencies]
+# The script worker's memory cap and CPU accounting; the tests' process groups.
+libc = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+# The same on Windows: process times, a handle wait on the host, a hard exit.
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Threading"] }
 
 [lints]
 workspace = true

@@ -22,7 +22,9 @@ use serde_json::Value;
 
 use crate::ai::AiOracle;
 use crate::runtime::RunClock;
-use crate::worker::{CallKind, Engine, FromWorker, Given, ToWorker, EXIT_MEMORY, MEMORY_ARG};
+use crate::worker::{
+    CallKind, Engine, FromWorker, Given, ToWorker, EXIT_MEMORY, MEMORY_ARG, PARENT_ARG,
+};
 use crate::CollectError;
 pub use oxplow_domain::run::{Budget, Cancel};
 
@@ -429,6 +431,8 @@ impl ScriptWorkers {
         let mut child = Command::new(&self.exe)
             .arg(MEMORY_ARG)
             .arg(memory_bytes.to_string())
+            .arg(PARENT_ARG)
+            .arg(std::process::id().to_string())
             .env_clear()
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
