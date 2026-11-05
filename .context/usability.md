@@ -122,6 +122,11 @@ markdown itself, nor edits it in a `<textarea>`.
   changed: then a click outside keeps it open, flashes its edge in the
   accent and says why ("You changed something here…"), so a stray click
   never loses a half-filled form. Focus goes into it and back on close.
+  That "changed" is a ref set in the input's capture phase, never state:
+  state set there renders before React has compared a controlled field's
+  value with what it last saw, takes a waiting page update with it, and
+  the render puts the draft back over the typed text (a fill that
+  vanished, about 1 run in 80 under load).
   It is the tab body's own state, and tab bodies stay mounted while
   another tab shows, so it is still open, typed values kept, when the
   person returns. Window-level dialogs that are not about one tab's

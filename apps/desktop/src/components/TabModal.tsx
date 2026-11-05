@@ -46,7 +46,13 @@ export function TabModal({
   const card = useRef<HTMLDivElement>(null);
   const host = useContext(TabModalHostContext);
   // Something in it was typed or changed: a click outside no longer closes it.
-  const [changed, setChanged] = useState(false);
+  // A ref, set in the input's capture phase: state set there renders at once,
+  // and that render takes with it whatever page update is waiting (a sync
+  // one, from the run store) before React has compared the field's value
+  // with what it last saw (the bubble phase). The render puts the draft back
+  // over the typed text and the keystroke is lost (a browser run found a
+  // fresh field empty a few ms after it was filled).
+  const changed = useRef(false);
   // A click outside it was refused (bumped to replay the flash).
   const [kept, setKept] = useState(0);
   useEffect(() => {
@@ -67,7 +73,7 @@ export function TabModal({
       style={backdropStyle}
       onMouseDown={(e) => {
         if (e.target !== e.currentTarget) return;
-        if (changed) setKept((n) => n + 1);
+        if (changed.current) setKept((n) => n + 1);
         else onClose();
       }}
     >
@@ -79,8 +85,12 @@ export function TabModal({
         tabIndex={-1}
         data-kept={kept > 0 ? "true" : undefined}
         style={{ ...cardStyle, width, ...(kept > 0 ? { animation: "oxplow-kept 0.6s ease-in-out" } : null) }}
-        onInputCapture={() => setChanged(true)}
-        onChangeCapture={() => setChanged(true)}
+        onInputCapture={() => {
+          changed.current = true;
+        }}
+        onChangeCapture={() => {
+          changed.current = true;
+        }}
         onKeyDown={(e) => {
           if (e.key === "Escape") {
             e.stopPropagation();
