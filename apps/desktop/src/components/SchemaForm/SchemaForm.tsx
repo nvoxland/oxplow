@@ -13,6 +13,7 @@
 
 import type { CSSProperties } from "react";
 import { Markdown } from "../Markdown/Markdown.js";
+import { typingElsewhere } from "../../typingElsewhere.js";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import {
@@ -456,14 +457,6 @@ const fieldsetStyle: CSSProperties = {
   flexDirection: "column",
   gap: 8,
 };
-
-/** Whether the keys go to a field of some other page or overlay: a text
- *  field, a select or an editor that holds the focus outside `form`. */
-function typingElsewhere(form: HTMLElement): boolean {
-  const held = document.activeElement;
-  if (!(held instanceof HTMLElement) || held === document.body || form.contains(held)) return false;
-  return held.isContentEditable || held instanceof HTMLInputElement || held instanceof HTMLTextAreaElement || held instanceof HTMLSelectElement;
-}
 
 /** A form that opens takes the focus for its first field, unless the person
  *  is typing somewhere else: one that opens by itself (a new thread's session

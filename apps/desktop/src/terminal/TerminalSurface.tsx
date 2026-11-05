@@ -17,6 +17,7 @@ import { useContextMenu } from "../components/useRowContextMenu.js";
 import { terminalMenuItems } from "./terminalMenu.js";
 import { subscribeAgentInput } from "../agent-input-bus.js";
 import { installFilePathLinkProvider, type FilePathLinkActivation } from "../terminal-link-provider.js";
+import { typingElsewhere } from "../typingElsewhere.js";
 
 /** The terminal's font size, px: its cells are measured in it. */
 const TERMINAL_FONT_SIZE = 13;
@@ -171,7 +172,10 @@ export function TerminalSurface({
   props.current = { onOpened, onData, onBinary, onResize, onInterrupt, worktreePath, cwd, onOpenFile, isLinkablePath };
 
   useEffect(() => {
-    if (shown) termRef.current?.focus();
+    // A terminal that starts while the person types in a field elsewhere (a
+    // new thread's title) leaves them the focus.
+    const host = hostRef.current;
+    if (shown && !(host && typingElsewhere(host))) termRef.current?.focus();
   }, [shown]);
 
   // The agent input bus (`agent_input.write`, Repair with the Agent) fills
