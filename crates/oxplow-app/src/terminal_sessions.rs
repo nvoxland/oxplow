@@ -40,6 +40,12 @@ use tracing::{debug, warn};
 /// not to balloon memory across many idle threads.
 const MAX_RING_BYTES: usize = 4 * 1024 * 1024;
 
+/// How many lines of the ring a re-attach replays. The pane's xterm keeps
+/// 5000 rows of scrollback (`TerminalSurface`), so older lines were never
+/// there to scroll to; the margin covers the screen itself and lines that
+/// wrapped over several rows (each counts once here, more there).
+const REPLAY_LINES: usize = 6000;
+
 #[derive(Debug, Error)]
 pub enum TerminalSessionError {
     #[error("session not found: {0}")]
@@ -117,6 +123,34 @@ impl RingBuffer {
         }
     }
 
+    /// What a re-attaching pane is sent: the ring's last [`REPLAY_LINES`]
+    /// lines, behind a preamble that sets the terminal modes the dropped
+    /// head had left on (bracketed paste, mouse reporting, …), so the
+    /// pane ends in the state a whole replay would leave. A full-screen
+    /// program's alternate screen can't be rebuilt from a tail, so while
+    /// one is up the whole ring goes.
+    fn replay(&self) -> Vec<u8> {
+        let all = self.snapshot();
+        let mut lines = 0;
+        let mut cut = None;
+        for (at, byte) in all.iter().enumerate().rev() {
+            if *byte == b'\n' {
+                lines += 1;
+                if lines > REPLAY_LINES {
+                    cut = Some(at + 1);
+                    break;
+                }
+            }
+        }
+        let Some(cut) = cut else { return all };
+        let Some(preamble) = modes_left_by(&all[..cut]) else {
+            return all;
+        };
+        let mut out = preamble;
+        out.extend_from_slice(&all[cut..]);
+        out
+    }
+
     fn snapshot(&self) -> Vec<u8> {
         let mut out = Vec::with_capacity(self.bytes);
         for chunk in &self.chunks {
@@ -124,6 +158,57 @@ impl RingBuffer {
         }
         out
     }
+}
+
+/// The `CSI ? n h` / `CSI ? n l` settings a stream of output left behind,
+/// as the sequences that set them again on a fresh terminal (the last word
+/// on each mode; a mode at its default is left out). `None` while an
+/// alternate screen is up: its contents live in what was cut.
+fn modes_left_by(head: &[u8]) -> Option<Vec<u8>> {
+    use std::collections::BTreeMap;
+    let mut modes: BTreeMap<u32, bool> = BTreeMap::new();
+    let mut i = 0;
+    while i + 3 < head.len() {
+        if head[i] == 0x1b && head[i + 1] == b'[' && head[i + 2] == b'?' {
+            let mut j = i + 3;
+            let mut params = Vec::new();
+            let mut n: Option<u32> = None;
+            while j < head.len() {
+                match head[j] {
+                    b'0'..=b'9' => {
+                        n = Some(
+                            n.unwrap_or(0)
+                                .saturating_mul(10)
+                                .saturating_add(u32::from(head[j] - b'0')),
+                        )
+                    }
+                    b';' => params.extend(n.take()),
+                    _ => break,
+                }
+                j += 1;
+            }
+            params.extend(n);
+            if j < head.len() && (head[j] == b'h' || head[j] == b'l') {
+                for mode in params {
+                    modes.insert(mode, head[j] == b'h');
+                }
+                i = j;
+            }
+        }
+        i += 1;
+    }
+    if [47, 1047, 1049].iter().any(|m| modes.get(m) == Some(&true)) {
+        return None;
+    }
+    let mut out = Vec::new();
+    for (mode, on) in modes {
+        // Autowrap (7) and a shown cursor (25) are on in a fresh terminal.
+        let default_on = mode == 7 || mode == 25;
+        if on != default_on && ![47, 1047, 1049].contains(&mode) {
+            out.extend_from_slice(format!("\x1b[?{mode}{}", if on { 'h' } else { 'l' }).as_bytes());
+        }
+    }
+    Some(out)
 }
 
 /// The registry key of agent session `session`'s PTY: one per session, so
@@ -342,7 +427,7 @@ impl TerminalSessionRegistry {
             let map = self.inner.lock().await;
             if let Some(entry) = map.get(&existing_id) {
                 self.pty.resize(&entry.pane_id, cols, rows).await?;
-                let replay = entry.ring.lock().await.snapshot();
+                let replay = entry.ring.lock().await.replay();
                 return Ok(Self::build_attach_result(existing_id, replay));
             }
             // Stale by_key entry (entry was killed); fall through and
@@ -681,6 +766,78 @@ fn read_process_cwd(pid: u32) -> Option<std::path::PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn ring_of(chunks: &[&[u8]]) -> RingBuffer {
+        let mut ring = RingBuffer::new();
+        for chunk in chunks {
+            ring.push(Bytes::copy_from_slice(chunk));
+        }
+        ring
+    }
+
+    fn lines(n: usize) -> Vec<u8> {
+        (0..n)
+            .flat_map(|i| format!("line {i}\r\n").into_bytes())
+            .collect()
+    }
+
+    #[test]
+    fn a_reattach_replays_the_last_lines_only() {
+        let ring = ring_of(&[&lines(20_000)]);
+        let replay = String::from_utf8(ring.replay()).unwrap();
+        assert!(
+            replay.starts_with(&format!("line {}\r\n", 20_000 - REPLAY_LINES)),
+            "{}",
+            &replay[..40]
+        );
+        assert!(replay.ends_with("line 19999\r\n"));
+        assert_eq!(replay.matches('\n').count(), REPLAY_LINES);
+    }
+
+    #[test]
+    fn a_short_ring_is_replayed_whole() {
+        let ring = ring_of(&[&lines(100)]);
+        assert_eq!(ring.replay(), ring.snapshot());
+    }
+
+    #[test]
+    fn the_modes_the_dropped_head_set_are_set_again() {
+        let mut out = b"\x1b[?2004h\x1b[?1000;1006h\x1b[?25l\x1b[?1000l".to_vec();
+        out.extend(lines(10_000));
+        let replay = ring_of(&[&out]).replay();
+        let text = String::from_utf8(replay).unwrap();
+        // Bracketed paste stays on, the mouse was turned off again, the
+        // cursor was hidden; the order is by mode number.
+        assert!(
+            text.starts_with("\x1b[?25l\x1b[?1006h\x1b[?2004hline "),
+            "{:?}",
+            &text[..40]
+        );
+    }
+
+    #[test]
+    fn a_mode_turned_off_again_is_not_sent() {
+        let mut out = b"\x1b[?2004h\x1b[?2004l".to_vec();
+        out.extend(lines(10_000));
+        let text = String::from_utf8(ring_of(&[&out]).replay()).unwrap();
+        assert!(text.starts_with("line "), "{:?}", &text[..20]);
+    }
+
+    #[test]
+    fn an_alternate_screen_left_up_is_replayed_whole() {
+        let mut out = b"\x1b[?1049h".to_vec();
+        out.extend(lines(10_000));
+        let ring = ring_of(&[&out]);
+        assert_eq!(ring.replay(), ring.snapshot());
+    }
+
+    #[test]
+    fn an_alternate_screen_that_was_left_does_not_stop_the_trim() {
+        let mut out = b"\x1b[?1049h\x1b[?1049l".to_vec();
+        out.extend(lines(10_000));
+        let replay = ring_of(&[&out]).replay();
+        assert!(replay.len() < out.len());
+    }
 
     /// Build an `{type:"input", bytes:<base64>}` message the way the
     /// renderer's `terminalInput` does for a paste.

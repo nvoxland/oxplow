@@ -131,6 +131,20 @@ restart kept the old window's size and drew its input and status lines
 past the pane's bottom, on top of each other, until the window was
 resized. Locked by `reattaching_resizes_the_live_session_to_the_new_pane`.
 
+**A reattach replays a tail, not the whole ring.** The daemon keeps up to
+4 MB of a pane's output, but `open_terminal_session` answers with the last
+`REPLAY_LINES` (6000) lines of it (`RingBuffer::replay`): the pane's xterm
+keeps 5000 rows of scrollback, so older lines were never there to scroll
+to. A 4 MB ring made the answer 5.6 MB of base64 JSON and the pane parsed
+all of it, so switching streams (which rebuilds the terminal) took 300 ms
+and more. The dropped head's terminal modes are not lost: the replay
+starts with the `CSI ? n h/l` sequences that put the last-set modes back
+(bracketed paste, mouse reporting, a hidden cursor; `modes_left_by`). A
+full-screen program's alternate screen (47, 1047, 1049) can't be rebuilt
+from a tail, so while one is up the whole ring is sent. What a person
+loses: only a line that wrapped over fewer rows than its count suggests
+can leave the oldest few rows of scrollback short; nothing else.
+
 **A session ends when its tab is closed.** There is no stop that keeps the
 slot: closing the tab (`oxplow.agent_session.close`) closes the session and
 stops its process, and **Earlier sessions** brings it back
