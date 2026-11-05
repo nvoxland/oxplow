@@ -129,7 +129,10 @@ test("a second terminal from the strip is picked, renamed and closed", async ({ 
   await name.press("Enter");
   await until("the rename", 15_000, async () => ((await rows())[1] as [number, string])[1] === "Builds");
 
-  // The panel stays open after a rename.
+  // The panel stays open after a rename. Close names the row as the page last
+  // drew it; the daemon refuses a row the page has since changed, so wait for
+  // the page to draw the new title.
+  await expect(page.getByTestId(`terminal-tab-row-${second}`)).toContainText("Builds");
   await page.getByTestId(`terminal-tab-row-${second}`).click({ button: "right" });
   await page.getByTestId("menu-item-terminal.close").click();
   await page.getByTestId("viz-action-confirm-run").click();

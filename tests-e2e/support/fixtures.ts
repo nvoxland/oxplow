@@ -62,7 +62,13 @@ async function workspace(): Promise<Workspace> {
  *  reports as failed fetches) is reported for its own error, not these. */
 function guard(page: Page): () => void {
   const errors: string[] = [];
-  page.on("pageerror", (e) => errors.push(String(e)));
+  // WebKit reports a request that a reload or the page's close cut short as
+  // "Fetch API cannot load … due to access control checks", though the app
+  // caught it (the page closing a run on its way out).
+  const cutShort = /^Fetch API cannot load .* due to access control checks\.$/;
+  page.on("pageerror", (e) => {
+    if (!cutShort.test(String(e))) errors.push(String(e));
+  });
   return () => {
     if (test.info().status !== test.info().expectedStatus) return;
     expect(errors, "the page threw").toEqual([]);
