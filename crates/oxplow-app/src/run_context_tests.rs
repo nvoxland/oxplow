@@ -244,6 +244,7 @@ async fn every_run_is_recorded_once_as_itself() {
 /// A run records what its authority decided for each thing it did: an
 /// approved program collector its program, the files it can touch, its
 /// credential and its host; a command's script its scope calls.
+#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn a_run_records_what_its_grant_decided() {
     use std::os::unix::fs::PermissionsExt;

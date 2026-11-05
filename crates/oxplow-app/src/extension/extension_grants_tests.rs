@@ -179,6 +179,7 @@ async fn errors_of(fx: &TaskEffortFixture, extension: &str) -> String {
     crate::test_fixtures::load_errors(&fx.svc, extension).await
 }
 
+#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn a_service_the_script_did_not_declare_is_refused() {
     let fx = services_with_task_effort().await;
@@ -240,6 +241,7 @@ async fn a_service_the_script_did_not_declare_is_refused() {
     );
 }
 
+#[cfg(unix)]
 mod program_collectors {
     use std::os::unix::fs::PermissionsExt;
 
@@ -257,6 +259,7 @@ mod program_collectors {
       - { name: seen, key: k, columns: { k: text, v: text } }
 ";
 
+    #[cfg(unix)]
     fn script(root: &Path, rel: &str, body: &str) {
         let path = root.join(".oxplow/extensions/acme").join(rel);
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -287,6 +290,7 @@ mod program_collectors {
 
     /// Disabling the extension revokes both its command and its program on
     /// their next call, with no restart.
+    #[cfg(unix)]
     #[tokio::test(flavor = "multi_thread")]
     async fn disabling_the_extension_stops_its_next_command_and_collector_run() {
         let fx = services_with_task_effort().await;
@@ -378,6 +382,7 @@ mod program_collectors {
         )
     }
 
+    #[cfg(unix)]
     #[tokio::test(flavor = "multi_thread")]
     async fn a_program_gets_a_scrubbed_environment() {
         let fx = services_with_task_effort().await;
@@ -442,6 +447,7 @@ mod program_collectors {
         assert!(extra.is_empty(), "unexpected variables: {extra:?}");
     }
 
+    #[cfg(unix)]
     #[tokio::test(flavor = "multi_thread")]
     async fn a_timeout_reaps_the_program_and_what_it_started() {
         let fx = services_with_task_effort().await;

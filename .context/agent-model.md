@@ -492,6 +492,15 @@ is named in the UI; "Implementations" in [extensions-commands.md](./extensions-c
 | opencode (`opencode`) | terminal, permission_prompts, resume, runtime_text, subagents, prompt_context, tool_context, conversation_list, conversation_fork |
 
 (`crates/oxplow-app/src/capabilities.rs`, the `harness(…)` built-ins.)
+
+**Codex is Unix-only for now.** Its app-server client talks over the daemon's
+unix control socket (`codex/app_server.rs`); a Windows transport (named
+pipes) is its own piece of work. On Windows `Codex::launch`, `conversations`
+and `AppServer::connect` answer "Codex sessions aren't available on Windows
+yet" (`app_server::unavailable`, the one place that says it): no fallback to
+anything else. The scripted-daemon tests (`app_server::fake`) and the Codex
+tests that use them are `cfg(unix)`. Claude Code and opencode run in a PTY
+and are not affected.
 `crates/oxplow-app/src/harness_conformance.rs` checks the floor every
 harness keeps, built-in or provider: answers render as objects and a deny
 or context reads differently from an ack; the bearer stays off the

@@ -10,7 +10,9 @@ use serde_json::json;
 
 use super::*;
 use crate::extension::extensions::Extension;
-use crate::test_fixtures::lifecycle::{fake_bin, write_extension, EXT};
+#[cfg(unix)]
+use crate::test_fixtures::lifecycle::write_extension;
+use crate::test_fixtures::lifecycle::{fake_bin, EXT};
 use crate::test_fixtures::{
     services_with_effort, services_with_task_effort, EffortFixture, TaskEffortFixture,
 };
@@ -54,6 +56,7 @@ async fn deploy(fx: &EffortFixture, _ext: &Extension) {
 
 /// The fixture with the tracker extension (running the fake with
 /// `hooks`) deployed on this machine.
+#[cfg(unix)]
 async fn deployed(hooks: &str) -> (EffortFixture, Extension) {
     let fx = services_with_effort().await;
     write_extension(&fx.svc.layout.project_dir, hooks);
@@ -173,6 +176,7 @@ async fn logged(fx: &EffortFixture, event_type: &str) -> Vec<serde_json::Value> 
         .collect()
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn a_provider_must_answer_with_its_approved_declarations() {
     let (fx, ext) = deployed("bad-declarations").await;
@@ -189,6 +193,7 @@ async fn a_provider_must_answer_with_its_approved_declarations() {
 
 /// P5.D4's red: an unconfigured instance can't be enabled — the check
 /// refuses it naming the config field, and nothing is written.
+#[cfg(unix)]
 #[tokio::test]
 async fn an_unconfigured_instance_cannot_be_enabled() {
     let (fx, _ext) = deployed("").await;
@@ -243,6 +248,7 @@ async fn an_unconfigured_instance_cannot_be_enabled() {
 /// P5.D4's red: three failures in a row disable the instance, logged
 /// with the reason; it stays off across reconciles until
 /// `oxplow.contribution.enable` runs, by a person or an agent.
+#[cfg(unix)]
 #[tokio::test]
 async fn three_failures_in_a_row_disable_an_instance_until_it_is_enabled() {
     let (fx, _ext) = deployed("fail-next:3").await;
@@ -320,6 +326,7 @@ async fn three_failures_in_a_row_disable_an_instance_until_it_is_enabled() {
 
 /// P7.A7: the suite reads the provider back after its writes — a read
 /// that doesn't restate what the writes recorded is a finding.
+#[cfg(unix)]
 #[tokio::test]
 async fn the_suite_finds_a_read_that_doesnt_restate_the_writes() {
     let (fx, ext) = deployed("stale-read").await;
@@ -348,6 +355,7 @@ async fn the_suite_finds_a_read_that_doesnt_restate_the_writes() {
 /// P10: a provider that declares `idempotent_writes` and doesn't keep
 /// it (the fake under `forget-keys`) fails the suite; one that doesn't
 /// declare it isn't asked.
+#[cfg(unix)]
 #[tokio::test]
 async fn the_suite_finds_a_provider_that_forgets_its_keys() {
     for (hooks, finds) in [("forget-keys", true), ("plain-writes", false)] {
@@ -373,6 +381,7 @@ async fn the_suite_finds_a_provider_that_forgets_its_keys() {
     }
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn the_work_items_suite_passes_through_the_host_over_the_fake() {
     let (fx, ext) = deployed("").await;
@@ -421,6 +430,7 @@ async fn the_work_items_suite_passes_through_the_host_over_the_fake() {
 /// The repair item goes to whichever work list is active: with another
 /// provider's tracker chosen, the bundled repair effect files it there
 /// through `oxplow.work_item.create`, and the health view finds it.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_repair_item_is_filed_on_the_active_alternate_provider() {
     let (fx, ext) = deployed("").await;
@@ -463,6 +473,7 @@ async fn a_repair_item_is_filed_on_the_active_alternate_provider() {
 /// item moves through its process as `oxplow.work_item.transition`, one audit
 /// row, its `work_item.recorded` caused by the run. The provider's verbs
 /// aren't commands of their own; its extra command is.
+#[cfg(unix)]
 #[tokio::test]
 async fn work_item_commands_write_another_providers_items_through_its_process() {
     let (fx, ext) = deployed("").await;
@@ -592,6 +603,7 @@ async fn work_item_commands_write_another_providers_items_through_its_process() 
 /// tsk1058: an outside tracker's item is filed on a thread like any
 /// other — the one a person names, else an agent's own — and the
 /// tracker never sees it: the thread is oxplow's record.
+#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn an_outside_item_is_filed_on_the_thread_named_or_the_agents() {
     let (fx, ext) = deployed("").await;
@@ -651,6 +663,7 @@ async fn an_outside_item_is_filed_on_the_thread_named_or_the_agents() {
     assert_eq!(thread_of(own).await, json!([[fx.thread.value()]]));
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn a_composite_writes_another_providers_item_as_steps() {
     let (fx, ext) = deployed("").await;
@@ -706,6 +719,7 @@ async fn a_composite_writes_another_providers_item_as_steps() {
 /// (its `native` fields included) before the process is called; another
 /// provider's parent or link target is refused at its field; an agent's
 /// delete runs without asking.
+#[cfg(unix)]
 #[tokio::test]
 async fn an_external_verb_input_is_checked_and_stays_on_its_provider() {
     let (fx, ext) = deployed("").await;
@@ -795,6 +809,7 @@ async fn an_external_verb_input_is_checked_and_stays_on_its_provider() {
 /// P6b.C2: a running instance's capability and features are a model row
 /// (as the host reads them); stopped, it's no longer available — still
 /// listed, as the project's choice, with `available = 0`.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_running_instance_publishes_its_features() {
     let (fx, ext) = deployed("").await;
@@ -828,6 +843,7 @@ async fn a_running_instance_publishes_its_features() {
 /// reads oxplow's models while it serves a command; the read is recorded
 /// with the run (its audit row's capabilities). One that doesn't need it
 /// is refused, and so is its command.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_provider_reads_the_host_through_what_it_needs() {
     for (needs, reads) in [(true, true), (false, false)] {
@@ -896,6 +912,7 @@ async fn a_provider_reads_the_host_through_what_it_needs() {
 /// (`extension_config.read`): the effective values and origins, with its
 /// project layer applied. One that doesn't list the scope in `needs` is
 /// refused at load, so it can't ask.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_provider_reads_its_extensions_configuration_through_host_call() {
     let fx = services_with_effort().await;
@@ -970,6 +987,7 @@ async fn a_provider_reads_its_extensions_configuration_through_host_call() {
 /// A capability verb's `host/call`s are recorded with the
 /// `work_item.<verb>` run that called it, as a provider's own command's
 /// are with its run.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_verbs_host_reads_are_recorded_with_its_run() {
     let fx = services_with_effort().await;
@@ -1027,6 +1045,7 @@ async fn a_verbs_host_reads_are_recorded_with_its_run() {
 /// operation's, with an optional `instance`; a capability verb, an
 /// operation it doesn't declare or a provider it doesn't have is refused
 /// at its line.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_provider_command_is_declared_over_an_operation_it_lists() {
     let fx = services_with_effort().await;
@@ -1091,6 +1110,7 @@ fn a_coverage_runs_profile_path_reaches_the_provider() {
 
 /// A provider's args are read where it runs (its extension folder), and
 /// an arg reaching outside the folder is refused.
+#[cfg(unix)]
 #[tokio::test]
 async fn provider_args_stay_inside_the_extension_folder() {
     let fx = services_with_effort().await;
@@ -1204,6 +1224,7 @@ async fn an_adapter_provider_names_its_server_mapping_and_tools_inside_the_folde
 
 /// A provider runs from its extension's deployment, not from the live
 /// tree.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_provider_runs_from_its_deployment() {
     let fx = services_with_effort().await;
@@ -1247,6 +1268,7 @@ async fn a_provider_runs_from_its_deployment() {
 /// tsk548: a provider may emit only its capability's event types — a
 /// declared `contribution.enabled` (which would clear another contribution's
 /// automatic disable) is refused when the manifest loads.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_provider_cannot_declare_another_core_event_type() {
     let fx = services_with_effort().await;
@@ -1333,6 +1355,7 @@ fn a_provider_event_names_only_its_own_refs() {
 
 /// tsk549: a provider whose `check` hangs times out — counted as a
 /// failure — and never blocks stopping it.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_hung_check_times_out_and_the_instance_can_still_stop() {
     let (fx, ext) = deployed("slow-check:30000").await;
@@ -1359,6 +1382,7 @@ async fn a_hung_check_times_out_and_the_instance_can_still_stop() {
 
 /// tsk549: a hung `invoke` times out (with `$/cancel`) and counts as a
 /// failure, instead of blocking the caller forever with health `ready`.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_hung_invoke_times_out_and_counts() {
     let (fx, ext) = deployed("").await;
@@ -1385,6 +1409,7 @@ async fn a_hung_invoke_times_out_and_counts() {
 
 /// tsk569: a disable while an instance is starting wins — the start
 /// doesn't bring back what was just disabled.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_disable_while_starting_keeps_the_instance_off() {
     let (fx, ext) = deployed("slow-check:400").await;
@@ -1409,6 +1434,7 @@ async fn a_disable_while_starting_keeps_the_instance_off() {
 
 /// tsk569: when whether an instance was disabled can't be read, a
 /// reconcile doesn't start it (it fails closed).
+#[cfg(unix)]
 #[tokio::test]
 async fn an_unreadable_disable_record_keeps_the_instance_off() {
     let (fx, _ext) = deployed("").await;
@@ -1434,6 +1460,7 @@ async fn an_unreadable_disable_record_keeps_the_instance_off() {
 
 /// Deploying an updated provider restarts a running instance on what was
 /// deployed.
+#[cfg(unix)]
 #[tokio::test]
 async fn deploying_updated_declarations_restarts_the_instance() {
     let (fx, _ext) = deployed("").await;
@@ -1476,6 +1503,7 @@ async fn deploying_updated_declarations_restarts_the_instance() {
 /// Declarations that don't parse fail the extension's load: the edit is
 /// held back naming the file, and the provider that was working goes on
 /// being described by its last working declarations.
+#[cfg(unix)]
 #[tokio::test]
 async fn unreadable_declarations_are_held_back_naming_the_file() {
     let (fx, _ext) = deployed("").await;
@@ -1496,6 +1524,7 @@ async fn unreadable_declarations_are_held_back_naming_the_file() {
 
 /// tsk569: enabling from Settings writes nothing when the enable itself
 /// fails — the config never says enabled for an instance that wasn't.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_failed_enable_writes_no_config() {
     let (fx, _ext) = deployed("").await;
@@ -1525,6 +1554,7 @@ async fn a_failed_enable_writes_no_config() {
 /// spec is what a person confirms), never on its own: it is
 /// `confirm: never` and `access: record`; a provider declaring `delete`
 /// must declare the verb.
+#[cfg(unix)]
 #[test]
 fn a_capability_verb_is_record_and_never_confirms() {
     let (spec, declared) = {
@@ -1564,6 +1594,7 @@ fn a_capability_verb_is_record_and_never_confirms() {
 }
 
 /// The fake's spec, as an effort policy.
+#[cfg(unix)]
 fn policy_spec() -> spec::ProviderSpec {
     let dir = tempfile::tempdir().unwrap();
     write_extension(dir.path(), "");
@@ -1576,6 +1607,7 @@ fn policy_spec() -> spec::ProviderSpec {
 /// policy declares `react`, and the contract's rules hold for it as for a
 /// work list — its verb is `confirm: never`, `access: record`, and it may
 /// emit nothing of core's.
+#[cfg(unix)]
 #[test]
 fn a_provider_may_implement_an_effort_policy_by_its_contract() {
     let spec = policy_spec();
@@ -1627,6 +1659,7 @@ fn harness_declarations(
 /// and `render`, each optional verb its feature asks for, and what it
 /// declares of itself (instruction files, environment markers, settings)
 /// as its capability's `data`, checked against the contract.
+#[cfg(unix)]
 #[test]
 fn a_provider_may_implement_an_agent_harness_by_its_contract() {
     let mut spec = policy_spec();
@@ -1677,6 +1710,7 @@ fn a_provider_may_implement_an_agent_harness_by_its_contract() {
 }
 
 /// A capability whose contract asks for nothing more takes no `data`.
+#[cfg(unix)]
 #[test]
 fn a_policy_declares_no_data() {
     let spec = policy_spec();
@@ -1797,6 +1831,7 @@ async fn recorded_for(fx: &EffortFixture, item: &str) -> usize {
 /// P7.A3: a read streams the provider's items into `work_item` and keeps
 /// its cursor; the next read resumes from it. Starting an instance reads
 /// it once.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_read_streams_records_into_work_item_and_keeps_its_cursor() {
     let (fx, ext) = deployed("").await;
@@ -1869,6 +1904,7 @@ async fn a_read_streams_records_into_work_item_and_keeps_its_cursor() {
 /// P7 review (tsk716): starting an instance doesn't wait for its first
 /// read — a team with thousands of issues would hold up the Enable button
 /// and every reconcile — but the read still happens, in the background.
+#[cfg(unix)]
 #[tokio::test]
 async fn enabling_returns_before_the_first_read_finishes() {
     // The first read is held until the test releases it, so "enable came
@@ -1926,6 +1962,7 @@ async fn first_read(fx: &EffortFixture) -> oxplow_db::CollectorState {
 /// P7 review (tsk715): two syncs of one collector at once don't both read
 /// from the same checkpoint — the second waits, then resumes after the
 /// first — so each item is recorded once and the cursor never goes back.
+#[cfg(unix)]
 #[tokio::test]
 async fn concurrent_syncs_of_one_collector_record_each_item_once() {
     let (fx, ext) = deployed("").await;
@@ -1964,6 +2001,7 @@ async fn concurrent_syncs_of_one_collector_record_each_item_once() {
 /// P7.A3: a read that fails midway keeps the records its last checkpoint
 /// covered (the next read resumes there), and the failure counts; a
 /// record of another provider's item fails the read and writes nothing.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_failed_read_keeps_what_its_checkpoints_covered() {
     let (fx, ext) = deployed("").await;
@@ -2020,6 +2058,7 @@ async fn a_failed_read_keeps_what_its_checkpoints_covered() {
 
 /// P7.A3: a read that sends nothing for the call timeout is cancelled
 /// and counts as a failure.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_silent_read_is_cancelled_and_counts() {
     let (fx, ext) = deployed("").await;
@@ -2052,6 +2091,7 @@ async fn a_silent_read_is_cancelled_and_counts() {
 /// P7.A3: the schedule reads each running instance's collectors that are
 /// due, as the system and audited; one read just now isn't due again; an
 /// instance set to `syncMinutes: 0` is read only on request.
+#[cfg(unix)]
 #[tokio::test]
 async fn scheduled_syncs_run_due_collectors_as_the_system() {
     let (fx, _ext) = deployed("").await;
@@ -2125,6 +2165,7 @@ async fn set_hooks(fx: &EffortFixture, hooks: &str) {
 /// tsk1001: a hooks notification replaces the last one — `set_hooks(fx,
 /// "")` clears a slow call — so a test that sets hooks and clears them
 /// runs on the fake it means to.
+#[cfg(unix)]
 #[tokio::test]
 async fn the_fakes_hooks_are_replaced_not_merged() {
     let (fx, _ext) = enabled_fake().await;
@@ -2152,6 +2193,7 @@ async fn create_on_fake(
         .await
 }
 
+#[cfg(unix)]
 async fn enabled_fake() -> (EffortFixture, Extension) {
     let (fx, ext) = deployed("").await;
     enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
@@ -2162,6 +2204,7 @@ async fn enabled_fake() -> (EffortFixture, Extension) {
 
 /// P7.A4: a short rate limit is waited out and the call retried once; it
 /// never counts as a failure.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_short_rate_limit_is_waited_out_and_doesnt_count() {
     let (fx, _ext) = enabled_fake().await;
@@ -2191,6 +2234,7 @@ async fn a_short_rate_limit_is_waited_out_and_doesnt_count() {
 
 /// P7.A4: a long rate limit fails the call honestly, without counting,
 /// and the schedule waits it out.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_long_rate_limit_fails_without_counting_and_defers_the_schedule() {
     let (fx, _ext) = enabled_fake().await;
@@ -2221,6 +2265,7 @@ async fn a_long_rate_limit_fails_without_counting_and_defers_the_schedule() {
 
 /// P7.A4: what a read in progress says shows on the instance while it
 /// runs, and goes when it ends.
+#[cfg(unix)]
 #[tokio::test]
 async fn progress_shows_on_the_instance_while_a_read_runs() {
     let (fx, _ext) = enabled_fake().await;
@@ -2256,6 +2301,7 @@ async fn progress_shows_on_the_instance_while_a_read_runs() {
 
 /// P7.A4: rate limits interleaved with failures neither count nor reset
 /// the count: three real failures still disable the instance.
+#[cfg(unix)]
 #[tokio::test]
 async fn three_failures_disable_it_with_rate_limits_interleaved() {
     let (fx, _ext) = enabled_fake().await;
@@ -2285,6 +2331,7 @@ async fn three_failures_disable_it_with_rate_limits_interleaved() {
 /// `work_item.recorded` is caused by the effect's run (the loop guard
 /// sees it); a read that brings back the same item records nothing new,
 /// so nothing echoes — sync after sync.
+#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn an_effect_doesnt_hear_its_own_external_write_echoed_by_a_read() {
     let fx = services_with_effort().await;
@@ -2441,6 +2488,7 @@ async fn instance_rows(fx: &EffortFixture) -> Vec<(String, String, i64, String)>
 /// instance is checked without being written, turned on with its config,
 /// another added and removed (a person confirms that), and a refusal names
 /// the field.
+#[cfg(unix)]
 #[tokio::test]
 async fn provider_instances_are_managed_by_commands_and_read_as_a_model() {
     let (fx, _ext) = deployed("").await;
@@ -2538,6 +2586,7 @@ async fn provider_instances_are_managed_by_commands_and_read_as_a_model() {
 /// instance added again under the id starts fresh) and its health row. An
 /// extension that no longer declares the provider has no credentials left
 /// to name.
+#[cfg(unix)]
 #[tokio::test]
 async fn removing_an_instance_leaves_nothing_behind() {
     let fx = services_with_effort().await;
@@ -2672,6 +2721,7 @@ async fn removing_an_instance_leaves_nothing_behind() {
 /// tsk840: an instance oxplow can't run as configured — its id is a
 /// command namespace something else already owns — says so on its row,
 /// rather than showing enabled and "Off" with no reason.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_refused_enable_says_why() {
     let (fx, _ext) = deployed("").await;
@@ -2708,6 +2758,7 @@ async fn a_refused_enable_says_why() {
 /// first still checks — both stand. Each write is a read-modify-write of
 /// the instances as they are when it writes, not as they were before its
 /// check.
+#[cfg(unix)]
 #[tokio::test]
 async fn enabling_two_instances_at_once_keeps_both() {
     let (fx, _ext) = deployed("slow-check:400").await;
@@ -2746,6 +2797,7 @@ async fn enabling_two_instances_at_once_keeps_both() {
 /// P9.B1: two instances of one provider run side by side — one approved
 /// program, two processes — each under its own id: its refs' segment, its
 /// commands' namespace, its `v_capability_provider` row, its health.
+#[cfg(unix)]
 #[tokio::test]
 async fn two_instances_of_one_provider_run_side_by_side() {
     let (fx, _ext) = deployed("").await;
@@ -2817,6 +2869,7 @@ async fn two_instances_of_one_provider_run_side_by_side() {
 
 /// P9.B1: a credential is an instance's — set for one, another instance
 /// of the same provider runs without it.
+#[cfg(unix)]
 #[tokio::test]
 async fn an_instance_credential_is_its_own() {
     let fx = services_with_effort().await;
@@ -2884,6 +2937,7 @@ async fn an_instance_credential_is_its_own() {
 
 /// P9.B1: an instance whose id isn't a provider's says which provider it
 /// is; one that doesn't is listed missing, with the fix.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_named_instance_says_which_provider_it_is() {
     let (fx, _ext) = deployed("").await;
@@ -2954,6 +3008,7 @@ async fn a_named_instance_says_which_provider_it_is() {
 /// database, the same global config dir and keychain. The tracker
 /// extension (running the fake with `hooks`) is installed and approved
 /// there unless `with_tracker` is false.
+#[cfg(unix)]
 async fn sibling_project(
     fx: &EffortFixture,
     hooks: &str,
@@ -3007,6 +3062,7 @@ fn declare_token(root: &Path) {
 /// project, so changing it in one restarts it in every other — on their
 /// next tick — not only here: a rotated token must never keep running on
 /// the old value elsewhere.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_global_credential_change_restarts_it_in_every_project() {
     let fx = services_with_effort().await;
@@ -3069,6 +3125,7 @@ async fn state_of(svc: &crate::Services, instance: &str) -> Option<InstanceState
 /// P9.B2: a global instance belongs to the person, not a project: it runs
 /// in every project of this machine that has its extension, and isn't
 /// listed where the extension isn't.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_global_instance_runs_in_every_project_with_the_extension() {
     let (fx, _ext) = deployed("").await;
@@ -3144,6 +3201,7 @@ async fn a_global_instance_runs_in_every_project_with_the_extension() {
 /// row: the project gets its own entry, off, with the global one's config
 /// — every other project keeps running it, and removing the entry brings
 /// the global one back here.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_global_instance_is_turned_off_in_one_project() {
     let (fx, _ext) = deployed("").await;
@@ -3195,6 +3253,7 @@ async fn a_global_instance_is_turned_off_in_one_project() {
 
 /// P9.B2: a project's entry of the same name replaces the global one
 /// there, whole — and only there.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_project_entry_overrides_a_global_instance_whole() {
     let (fx, _ext) = deployed("").await;
@@ -3248,6 +3307,7 @@ async fn a_project_entry_overrides_a_global_instance_whole() {
 /// same name. One appearing (added in another project) or going doesn't
 /// move this project's instance onto the global credentials, nor take its
 /// own away.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_project_instance_keeps_its_credentials_beside_a_global_one() {
     let fx = services_with_effort().await;
@@ -3334,6 +3394,7 @@ async fn a_project_instance_keeps_its_credentials_beside_a_global_one() {
 
 /// P9.B2: a global instance's credential is the person's, set once for
 /// every project; a project instance's stays that project's.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_global_instances_credential_is_shared_across_projects() {
     let fx = services_with_effort().await;
@@ -3411,6 +3472,7 @@ async fn a_global_instances_credential_is_shared_across_projects() {
 /// disabled, its config turned off) before the generation that says so is
 /// published. That exit is the host's doing: not a failure counted against
 /// the instance, and not restarted.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_process_the_host_ended_for_revoked_authority_counts_no_failure() {
     let (fx, _ext) = deployed("").await;
@@ -3442,6 +3504,7 @@ async fn a_process_the_host_ended_for_revoked_authority_counts_no_failure() {
 /// One that finishes after the instance was stopped — the first read an
 /// enable starts, say — changes nothing: not "Ready" for something that
 /// isn't running, not a failure counted against it.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_call_finishing_after_its_instance_stopped_changes_nothing() {
     let (fx, ext) = deployed("").await;
@@ -3495,6 +3558,7 @@ async fn a_call_finishing_after_its_instance_stopped_changes_nothing() {
 /// A stopped instance stays registered until a generation replaces it, so a
 /// call that finishes in between must not count against it: whether it is the
 /// running one is whether it was stopped, not only whether it is registered.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_call_finishing_after_a_plain_stop_changes_nothing() {
     let (fx, _ext) = deployed("").await;
@@ -3523,6 +3587,7 @@ async fn a_call_finishing_after_a_plain_stop_changes_nothing() {
 /// A generation restarts only the instances it changed: an unrelated
 /// extension's edit leaves a running provider's process alone, while an
 /// edit to its own program or its config restarts it.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_generation_restarts_only_the_instances_it_changed() {
     let (fx, ext) = deployed("").await;
@@ -3591,6 +3656,7 @@ async fn a_generation_restarts_only_the_instances_it_changed() {
 /// read meets is never the running successor's: here the extension's
 /// folder changed since its approval, which a restart of the old one
 /// would report as `unapproved` and stop the healthy successor for.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_late_read_on_a_stopped_instance_doesnt_touch_its_successor() {
     let (fx, _ext) = deployed("").await;
@@ -3622,6 +3688,7 @@ async fn a_late_read_on_a_stopped_instance_doesnt_touch_its_successor() {
 /// The tracker extension, its provider's credential `FAKE_TOKEN` obtained
 /// by signing in at `authorize` / `token` (P9.B3), plus `more` credential
 /// entries (YAML list items, indented six spaces).
+#[cfg(unix)]
 fn write_oauth_extension(project: &Path, hooks: &str, authorize: &str, token: &str, more: &str) {
     write_extension(project, hooks);
     let manifest = project
@@ -3650,6 +3717,7 @@ fn write_oauth_extension(project: &Path, hooks: &str, authorize: &str, token: &s
 
 /// P9.B3: a credential may be one the person signs in for. It is declared
 /// with its endpoints and checked at load.
+#[cfg(unix)]
 #[tokio::test]
 async fn an_oauth_credential_is_declared_and_checked() {
     let fx = services_with_effort().await;
@@ -3720,6 +3788,7 @@ async fn an_oauth_credential_is_declared_and_checked() {
 /// The fixture with the tracker extension approved, its `FAKE_TOKEN` one
 /// the person signs in for at a stand-in authorization server (`more`:
 /// further lines of the manifest, continuing the `oauth:` block).
+#[cfg(unix)]
 async fn signing_in(hooks: &str, more: &str) -> (EffortFixture, OAuthSim) {
     let fx = services_with_effort().await;
     let sim = OAuthSim::start().await;
@@ -3764,6 +3833,7 @@ async fn complete(
 /// the instance's entry changes under it — a global one turned off here,
 /// so the project's own entry replaces it — the redirect is refused and
 /// nothing is stored to the old account.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_sign_in_whose_account_changed_meanwhile_is_refused() {
     let (fx, sim) = signing_in("", "").await;
@@ -3864,6 +3934,7 @@ fn unconfigured_at(fx: &EffortFixture) -> (String, String) {
 /// P9.B3: a credential the person signs in for. Until they have, the
 /// instance is unconfigured naming it; signing in keeps the token in the
 /// keychain and starts the instance on the access token alone.
+#[cfg(unix)]
 #[tokio::test]
 async fn signing_in_starts_the_instance_on_the_access_token_alone() {
     // The fake's service takes the first access token the stand-in issues
@@ -3925,6 +3996,7 @@ async fn signing_in_starts_the_instance_on_the_access_token_alone() {
 }
 
 /// P9.B3: a token about to lapse is renewed before the process starts.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_lapsed_token_is_renewed_before_the_instance_starts() {
     // The service takes only the renewed token.
@@ -3946,6 +4018,7 @@ async fn a_lapsed_token_is_renewed_before_the_instance_starts() {
 /// P9.B3: a token its service refuses (`Auth`) although it looks good is
 /// renewed, the process restarted on the new one, and the call tried once
 /// more — none of which counts as a failure.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_refused_token_is_renewed_and_the_call_tried_once_more() {
     let (fx, sim) = signing_in("", "").await;
@@ -3992,6 +4065,7 @@ async fn a_refused_token_is_renewed_and_the_call_tried_once_more() {
 /// tsk907: a read that starts the process itself, and is refused, renews
 /// the token — the process it started began after the read did, which
 /// isn't "started since" the refusal.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_read_that_starts_the_process_renews_a_refused_token() {
     // Its service takes only the renewed token; its `check` doesn't look.
@@ -4016,6 +4090,7 @@ async fn a_read_that_starts_the_process_renews_a_refused_token() {
 
 /// Two credentials signed in at the stand-in, `FAKE_TOKEN` and
 /// `OTHER_TOKEN`, the instance ready on both.
+#[cfg(unix)]
 async fn signed_in_twice(hooks: &str) -> (EffortFixture, OAuthSim) {
     let fx = services_with_effort().await;
     let sim = OAuthSim::start().await;
@@ -4036,6 +4111,7 @@ async fn signed_in_twice(hooks: &str) -> (EffortFixture, OAuthSim) {
 
 /// tsk910: a slow token exchange holds up only its own credential's
 /// sign-in — another credential's begins meanwhile.
+#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn a_slow_exchange_holds_up_only_its_own_sign_in() {
     let fx = services_with_effort().await;
@@ -4086,6 +4162,7 @@ async fn a_slow_exchange_holds_up_only_its_own_sign_in() {
 /// its end even when its caller goes away mid-exchange (a dropped
 /// connection to a remote daemon): the token is kept and the renderer
 /// hears it, rather than the sign-in vanishing.
+#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn a_finish_runs_to_its_end_when_its_caller_goes_away() {
     let (fx, sim) = signing_in("", "").await;
@@ -4131,6 +4208,7 @@ async fn a_finish_runs_to_its_end_when_its_caller_goes_away() {
 
 /// tsk906: the browser hears how its sign-in went as soon as the token is
 /// kept — not after the instance has restarted on it (a slow `check`).
+#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn a_sign_in_answers_before_the_instance_restarts() {
     let (fx, _sim) = signing_in("slow-check:2000", "").await;
@@ -4180,6 +4258,7 @@ async fn next_news(
 /// says so, naming itself, so the row waiting on it stops waiting; and a
 /// person's cancel ends a sign-in at once — nothing of it kept — with its
 /// news saying so.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_replaced_or_cancelled_sign_in_is_announced_by_its_number() {
     let (fx, _sim) = signing_in("", "").await;
@@ -4225,6 +4304,7 @@ fn refreshes(sim: &OAuthSim) -> usize {
 /// tsk908: an `Auth` that names nothing, from a provider handed a pasted
 /// key beside its sign-in, could be about either: it renews nothing, and
 /// the sign-in stays good — the refusal is the call's failure.
+#[cfg(unix)]
 #[tokio::test]
 async fn an_unnamed_auth_beside_a_pasted_key_renews_nothing() {
     let (fx, sim) = signing_in("", "      - PLAIN\n").await;
@@ -4249,6 +4329,7 @@ async fn an_unnamed_auth_beside_a_pasted_key_renews_nothing() {
 }
 
 /// tsk821: an `Auth` that names its credential renews that one alone.
+#[cfg(unix)]
 #[tokio::test]
 async fn an_auth_renews_only_the_credential_it_names() {
     let (fx, sim) = signed_in_twice("").await;
@@ -4269,6 +4350,7 @@ async fn an_auth_renews_only_the_credential_it_names() {
 /// tsk821: renewing the credential an `Auth` named never touches another:
 /// when the service refuses the renewal for good, only the named one
 /// reads "sign in again".
+#[cfg(unix)]
 #[tokio::test]
 async fn an_auth_never_lapses_a_credential_it_didnt_name() {
     let (fx, sim) = signed_in_twice("").await;
@@ -4297,6 +4379,7 @@ async fn an_auth_never_lapses_a_credential_it_didnt_name() {
 /// tsk821: an `Auth` that names no credential renews one only when the
 /// instance signs in for exactly one — with two, it can't know which, so
 /// it renews none and the refusal is the call's failure.
+#[cfg(unix)]
 #[tokio::test]
 async fn an_unnamed_auth_with_two_sign_ins_renews_nothing() {
     let (fx, sim) = signed_in_twice("").await;
@@ -4307,6 +4390,7 @@ async fn an_unnamed_auth_with_two_sign_ins_renews_nothing() {
 }
 
 /// tsk821: with one signed-in credential, an unnamed `Auth` is its.
+#[cfg(unix)]
 #[tokio::test]
 async fn an_unnamed_auth_with_one_sign_in_renews_it() {
     let (fx, sim) = signing_in("", "").await;
@@ -4320,6 +4404,7 @@ async fn an_unnamed_auth_with_one_sign_in_renews_it() {
 
 /// P9.B3: renewed once, not for ever — a service that refuses the renewed
 /// token too is a failure like any other.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_token_refused_again_after_renewal_is_a_failure() {
     let (fx, sim) = signing_in("accepts:FAKE_TOKEN=never", "").await;
@@ -4339,6 +4424,7 @@ async fn a_token_refused_again_after_renewal_is_a_failure() {
 /// P9.B3: a sign-in the service revoked can't be renewed: the instance
 /// stops, unconfigured, saying to sign in again — never a silent failure,
 /// and the keychain's record stays so the row can say so.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_revoked_sign_in_stops_the_instance_and_says_sign_in_again() {
     let (fx, sim) = signing_in("", "").await;
@@ -4380,6 +4466,7 @@ async fn a_revoked_sign_in_stops_the_instance_and_says_sign_in_again() {
 
 /// P9.B3: a client secret is another credential's value, sent with the
 /// token requests by oxplow — the provider's process never holds it.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_client_secret_goes_to_the_token_endpoint_and_not_to_the_process() {
     // `needs`: the fake's `check` reports the credential if it lacks it.
@@ -4415,6 +4502,7 @@ async fn a_client_secret_goes_to_the_token_endpoint_and_not_to_the_process() {
 /// P9.B3: starting a sign-in again abandons the one under way — its
 /// redirect is no longer the sign-in's, and it stores nothing; removing
 /// the instance abandons it too.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_newer_sign_in_replaces_the_one_under_way() {
     let (fx, sim) = signing_in("", "").await;
@@ -4479,6 +4567,7 @@ async fn a_newer_sign_in_replaces_the_one_under_way() {
 /// P10: a redirect that isn't the sign-in's (another `state`: someone
 /// else's page sent the browser there) does nothing, and the sign-in
 /// waits on for the real one.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_redirect_with_another_state_is_refused_and_the_wait_goes_on() {
     let (fx, sim) = signing_in("", "").await;
@@ -4507,6 +4596,7 @@ async fn a_redirect_with_another_state_is_refused_and_the_wait_goes_on() {
 
 /// P10: a sign-in ends when it is completed: the same redirect again
 /// finds none under way, and its code is exchanged once.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_completed_sign_in_cannot_be_completed_again() {
     let (fx, sim) = signing_in("", "").await;
@@ -4532,6 +4622,7 @@ async fn a_completed_sign_in_cannot_be_completed_again() {
 
 /// P10: finishing re-checks the endpoints: a provider whose token
 /// endpoint changed since the sign-in began sends its code nowhere.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_sign_in_whose_endpoints_changed_meanwhile_sends_nothing() {
     let (fx, sim) = signing_in("", "").await;
@@ -4565,6 +4656,7 @@ async fn a_sign_in_whose_endpoints_changed_meanwhile_sends_nothing() {
 /// tsk935: two sign-ins under way at once — another instance's — each
 /// takes only its own redirect: one handed the other's is refused and
 /// waits on, and nothing is exchanged for the wrong one.
+#[cfg(unix)]
 #[tokio::test]
 async fn one_sign_ins_redirect_is_never_anothers() {
     let (fx, sim) = signing_in("", "").await;
@@ -4614,6 +4706,7 @@ async fn one_sign_ins_redirect_is_never_anothers() {
 /// meanwhile still sends its code nowhere: it began against the old ones,
 /// and only the comparison with the declaration it began with catches it
 /// (the approval check passes).
+#[cfg(unix)]
 #[tokio::test]
 async fn a_sign_in_whose_approved_endpoints_changed_meanwhile_sends_nothing() {
     let (fx, sim) = signing_in("", "").await;
@@ -4645,6 +4738,7 @@ async fn a_sign_in_whose_approved_endpoints_changed_meanwhile_sends_nothing() {
 
 /// P10: a sign-in never finished ends after its wait: the renderer hears
 /// why, and its redirect, coming late, finds none under way.
+#[cfg(unix)]
 #[tokio::test]
 async fn an_unfinished_sign_in_ends_after_its_wait() {
     let (fx, _sim) = signing_in("", "").await;
@@ -4792,6 +4886,7 @@ async fn an_adapter_server_by_url_is_declared_and_checked() {
 /// tsk826: two sign-ins for one credential started at once leave one
 /// under way — the later one — and the earlier one's redirect does
 /// nothing.
+#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn two_sign_ins_at_once_leave_one_under_way() {
     let (fx, sim) = signing_in("", "").await;
@@ -4821,6 +4916,7 @@ async fn two_sign_ins_at_once_leave_one_under_way() {
 
 /// tsk826: removing a project's replacement of a global instance ends a
 /// sign-in under way for it too.
+#[cfg(unix)]
 #[tokio::test]
 async fn removing_a_project_replacement_ends_its_sign_in() {
     let (fx, _sim) = signing_in("", "").await;
@@ -4850,6 +4946,7 @@ async fn removing_a_project_replacement_ends_its_sign_in() {
 
 /// tsk828: several calls refused at once renew the sign-in once, and each
 /// is tried again on the one renewed token.
+#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn calls_refused_together_renew_once() {
     let (fx, sim) = signing_in("", "").await;
@@ -4884,6 +4981,7 @@ async fn calls_refused_together_renew_once() {
 /// `idempotent_writes` (under the same key); toward any other the cut-off
 /// is the call's failure. A call its service refused (`Auth`) never
 /// landed, and is sent again either way.
+#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn a_call_cut_off_by_a_renewal_is_not_resent_without_a_key() {
     for (hooks, resent) in [("", true), ("plain-writes", false)] {
@@ -4925,6 +5023,7 @@ async fn a_call_cut_off_by_a_renewal_is_not_resent_without_a_key() {
 /// effect `file` that reacts to an oxplow task moved to done with the
 /// calls `script` composes (it may read with `sql.read`); both approved,
 /// the provider enabled.
+#[cfg(unix)]
 async fn with_effect(hooks: &str, script: &str) -> TaskEffortFixture {
     let fx = services_with_task_effort().await;
     let project = fx.svc.layout.project_dir.clone();
@@ -5026,6 +5125,7 @@ fn in_secs(secs: i64) -> oxplow_domain::Timestamp {
 /// sent again by itself — the reaction's every step goes to a provider
 /// that keeps `idempotent_writes` — under the same key, so it lands once.
 /// The attempt awaiting its retry isn't counted against the effect.
+#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn a_lost_reply_is_sent_again_and_lands_once() {
     let fx = with_effect("lose-reply", FILE_ON_FAKE).await;
@@ -5060,6 +5160,7 @@ async fn a_lost_reply_is_sent_again_and_lands_once() {
 /// composed — not a fresh composition — so a write that landed under the
 /// first attempt's key isn't made again when what the effect reads
 /// changed in between.
+#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn an_automatic_retry_sends_what_the_failed_attempt_composed() {
     // Reads something oxplow holds that can change between attempts: the
@@ -5113,6 +5214,7 @@ async fn an_automatic_retry_sends_what_the_failed_attempt_composed() {
 /// tsk887: a scheduled retry is sent only while every step it would send
 /// still goes to a provider keeping `idempotent_writes`: with the
 /// provider gone, it isn't sent, and the failure counts — a person's.
+#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn a_retry_whose_provider_went_away_is_not_sent() {
     let fx = with_effect("lose-reply", FILE_ON_FAKE).await;
@@ -5133,6 +5235,7 @@ async fn a_retry_whose_provider_went_away_is_not_sent() {
 /// keeping `idempotent_writes` is sent again by itself: toward a provider
 /// that doesn't declare it, or with a step inside oxplow beside it, the
 /// failure waits for a person's retry, and counts.
+#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn an_interrupted_attempt_retries_only_toward_a_declaring_provider() {
     let with_a_task_step = "def transform(x):\n    ref = x[\"event\"][\"payload\"][\"work_item\"]\n    return {\"commands\": [{\"name\": \"oxplow.work_item.update\", \"input\": {\"uri\": ref, \"title\": \"filed\"}}, {\"name\": \"oxplow.work_item.create\", \"input\": {\"title\": \"from effect\"}}]}\n";
@@ -5161,6 +5264,7 @@ async fn an_interrupted_attempt_retries_only_toward_a_declaring_provider() {
 /// tsk914: only a failure that may have been passing is sent again by
 /// itself. A later step's refused input (after an earlier one landed) and
 /// a refusal of credentials renewal can't fix wait for a person.
+#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn a_failure_that_wont_pass_isnt_retried() {
     let bad_second = "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.work_item.create\", \"input\": {\"title\": \"from effect\"}}, {\"name\": \"oxplow.work_item.create\", \"input\": {\"title\": \"second\", \"native_state\": \"Nonsense\"}}]}\n";
@@ -5178,6 +5282,7 @@ async fn a_failure_that_wont_pass_isnt_retried() {
 /// tsk914: a rate limit's own wait decides when the retry goes — no
 /// sooner — and one asking for longer than the most oxplow waits by
 /// itself is a person's.
+#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn a_rate_limited_reaction_waits_as_asked() {
     let fx = with_effect("", FILE_ON_FAKE).await;
@@ -5206,6 +5311,7 @@ async fn a_rate_limited_reaction_waits_as_asked() {
 /// tsk932: a backfill against a provider that keeps failing in a way that
 /// may pass stops after three failures in a row — those will be sent again
 /// by themselves, but the run doesn't press on into the outage.
+#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn a_backfill_stops_after_three_failures_even_while_they_retry() {
     let fx = with_effect("", FILE_ON_FAKE).await;
@@ -5238,6 +5344,7 @@ async fn a_backfill_stops_after_three_failures_even_while_they_retry() {
 
 /// tsk935: a backfill's attempt whose reply was lost is sent again by
 /// itself, as a live one is, and lands once.
+#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn a_backfill_attempt_whose_reply_was_lost_is_sent_again() {
     let fx = with_effect("", FILE_ON_FAKE).await;
@@ -5288,6 +5395,7 @@ async fn a_backfill_attempt_whose_reply_was_lost_is_sent_again() {
 /// tsk915: a retry overdue by more than an hour (oxplow was closed
 /// meanwhile) isn't sent by itself — what it would send is from another
 /// time — and the failure it waited on counts.
+#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn a_long_overdue_retry_is_a_persons() {
     let fx = with_effect("lose-reply", FILE_ON_FAKE).await;
@@ -5350,6 +5458,7 @@ async fn deliver(svc: std::sync::Arc<crate::Services>, ev: oxplow_domain::Stored
 /// to a provider keeping `idempotent_writes`, kept what it composed with
 /// its claim: found again (the pump's redelivery), it is failed and sent
 /// again by itself from when it started — and lands once.
+#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn an_attempt_cut_off_by_a_stop_is_sent_again_and_lands_once() {
     let fx = with_effect("", FILE_ON_FAKE).await;
@@ -5377,6 +5486,7 @@ async fn an_attempt_cut_off_by_a_stop_is_sent_again_and_lands_once() {
 /// tsk954: cut off toward a provider that doesn't keep `idempotent_writes`,
 /// nothing was kept to send again: the interrupted attempt is a person's,
 /// and counts.
+#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn a_cut_off_attempt_toward_a_plain_provider_waits_for_a_person() {
     let fx = with_effect("plain-writes", FILE_ON_FAKE).await;
@@ -5395,6 +5505,7 @@ async fn a_cut_off_attempt_toward_a_plain_provider_waits_for_a_person() {
 /// tsk954: a person's backfill cut off with its write under way is found
 /// at start (`recover_interrupted`) and sent again by itself, like a live
 /// attempt.
+#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn a_cut_off_backfill_is_sent_again_at_start() {
     let fx = with_effect("", FILE_ON_FAKE).await;
@@ -5440,6 +5551,7 @@ async fn a_cut_off_backfill_is_sent_again_at_start() {
 /// tsk1001: an automatic attempt cut off with its write under way is found
 /// at start and sent again by itself — the reaction's second automatic
 /// attempt, a minute after it started — and lands once.
+#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn a_cut_off_automatic_attempt_is_sent_again_at_start() {
     let fx = with_effect("lose-reply", FILE_ON_FAKE).await;
@@ -5479,6 +5591,7 @@ async fn a_cut_off_automatic_attempt_is_sent_again_at_start() {
 /// tsk954: a cut-off attempt's retry is due from when it started, so one
 /// found more than an hour later (oxplow was closed meanwhile) isn't sent
 /// by itself: it's a person's, and counts.
+#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn a_cut_off_attempt_found_an_hour_late_is_a_persons() {
     let fx = with_effect("", FILE_ON_FAKE).await;
@@ -5516,6 +5629,7 @@ async fn set_active(fx: &EffortFixture, provider: Option<&str>) {
 /// gone). Pointed at oxplow's own list meanwhile, which keeps no
 /// idempotent writes, the attempt isn't sent again by itself: it's a
 /// person's, and theirs files on oxplow.
+#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn a_retry_files_on_the_tracker_active_when_sent() {
     let unnamed = "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.work_item.create\", \"input\": {\"title\": \"from effect\"}}]}\n";
@@ -5552,6 +5666,7 @@ async fn a_retry_files_on_the_tracker_active_when_sent() {
 
 /// tsk999: an attempt cut off and found at start counts toward its
 /// effect's health, as one found by the pump does.
+#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn a_cut_off_found_at_start_counts_toward_health() {
     let fx = with_effect("plain-writes", FILE_ON_FAKE).await;
@@ -5582,6 +5697,7 @@ async fn a_cut_off_found_at_start_counts_toward_health() {
 
 /// tsk999: a cut-off attempt whose start time can't be read can't be
 /// timed against the lateness bound: it's a person's, not sent again.
+#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn a_cut_off_attempt_whose_start_cant_be_read_is_a_persons() {
     let fx = with_effect("", FILE_ON_FAKE).await;
@@ -5603,6 +5719,7 @@ async fn a_cut_off_attempt_whose_start_cant_be_read_is_a_persons() {
 /// tsk935: a reaction cut off midway — its first write landed, its reply
 /// lost, the second never sent — is sent again whole under the same keys:
 /// each write lands once.
+#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn a_reaction_cut_off_midway_lands_each_step_once() {
     let two = "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.work_item.create\", \"input\": {\"title\": \"first\"}}, {\"name\": \"oxplow.work_item.create\", \"input\": {\"title\": \"second\"}}]}\n";
@@ -5626,6 +5743,7 @@ async fn a_reaction_cut_off_midway_lands_each_step_once() {
 /// tsk935: a person's retry of a reaction whose automatic one is waiting
 /// takes its place: the reaction runs once more, and the scheduled retry
 /// sends nothing after it.
+#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn a_persons_retry_takes_the_place_of_a_scheduled_one() {
     let fx = with_effect("lose-reply", FILE_ON_FAKE).await;
@@ -5661,6 +5779,7 @@ async fn a_persons_retry_takes_the_place_of_a_scheduled_one() {
 /// A person's Retry all runs every reaction whose latest attempt failed,
 /// once each, and says how many came out right; with none failed it is
 /// unchanged.
+#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn a_persons_retry_all_runs_every_failed_reaction_again() {
     let fx = with_effect("lose-reply", FILE_ON_FAKE).await;
@@ -5705,6 +5824,7 @@ async fn a_persons_retry_all_runs_every_failed_reaction_again() {
 
 /// tsk935: the loop `spawn_auto_retry` starts (after the first reconcile)
 /// sends a due retry by itself.
+#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn the_retry_loop_sends_a_due_retry() {
     let fx = with_effect("lose-reply", FILE_ON_FAKE).await;
@@ -5749,6 +5869,7 @@ async fn the_retry_loop_sends_a_due_retry() {
 /// tsk935: every way a scheduled retry can't run drops it, so the failure
 /// is a person's: the effect disabled (its failure counts), or the effect
 /// gone from its extension (nothing left to count it on).
+#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn a_retry_that_cant_run_is_dropped() {
     let key = oxplow_db::ContributionKey {
@@ -5825,6 +5946,7 @@ async fn the_first_reconcile_is_waited_for() {
 
 /// P10: at most two automatic attempts, 10 s then 60 s after the failure
 /// before; the attempt that exhausts them counts as the one failure.
+#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn auto_retry_stops_after_two_and_counts_one_failure() {
     let fx = with_effect("", FILE_ON_FAKE).await;
@@ -5877,6 +5999,7 @@ async fn auto_retry_stops_after_two_and_counts_one_failure() {
 
 /// Stopping an instance asks its process to shut down — it finishes and
 /// persists what it was doing — rather than killing it outright.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_stop_shuts_the_process_down_gracefully() {
     let marker = tempfile::tempdir().unwrap();
@@ -5891,6 +6014,7 @@ async fn a_stop_shuts_the_process_down_gracefully() {
 
 /// A process that answers `shutdown` and keeps running is killed once its
 /// grace is up: a stop never hangs on it.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_process_that_wont_exit_is_killed_after_its_grace() {
     let (fx, _ext) = deployed("ignore-shutdown").await;
@@ -5924,6 +6048,7 @@ async fn syncs(fx: &EffortFixture) -> i64 {
 /// A provider says what it reads changed (`host/changed`): the host reads
 /// it now, through `oxplow.provider.sync` like the schedule, rather than at
 /// the next poll — and announcements close together are one read.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_change_the_provider_announces_is_read_now() {
     let (fx, _ext) = deployed("").await;
@@ -5954,6 +6079,7 @@ async fn a_change_the_provider_announces_is_read_now() {
 
 /// A process that exits on its own is noticed when it exits, not at the
 /// next call: the exit counts toward its health and it starts again.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_process_that_exits_is_restarted_and_counted() {
     let (fx, _ext) = deployed("").await;
@@ -5981,6 +6107,7 @@ async fn a_process_that_exits_is_restarted_and_counted() {
 /// A read keeps the records it streams only until its next `$/state`: one
 /// that streams more than `max_uncheckpointed` (100 in-memory) without a
 /// checkpoint fails rather than growing without end.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_read_must_checkpoint_within_its_limit() {
     let (fx, ext) = deployed("").await;
@@ -6010,6 +6137,7 @@ async fn a_read_must_checkpoint_within_its_limit() {
 
 /// Leaving (the daemon exits) shuts every running instance's process down
 /// the orderly way, all at once.
+#[cfg(unix)]
 #[tokio::test]
 async fn shutting_down_ends_every_process_gracefully() {
     let marker = tempfile::tempdir().unwrap();
@@ -6031,6 +6159,7 @@ async fn shutting_down_ends_every_process_gracefully() {
 /// A provider's `needs` are the scopes its `host/call`s reach — a
 /// script's — so one `host/call` can't serve is refused at load, the rule
 /// commands and effects meet.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_provider_needs_only_scopes_host_call_serves() {
     let root = tempfile::tempdir().unwrap();
@@ -6060,6 +6189,7 @@ const POLICY: &str = "steward/fake";
 
 /// A private extension whose provider runs the fake as an effort policy
 /// with `hooks` (its state, `reacts` included, kept beside the project).
+#[cfg(unix)]
 fn write_policy_extension(project: &Path, hooks: &str) {
     let dir = project.join(".oxplow/extensions/steward");
     std::fs::create_dir_all(dir.join("bin")).unwrap();
@@ -6090,6 +6220,7 @@ fn write_policy_extension(project: &Path, hooks: &str) {
 /// The fixture with the policy extension approved and its instance
 /// running; the fixture's own effort closed, so the policy's are the only
 /// ones open.
+#[cfg(unix)]
 async fn running_policy(hooks: &str) -> (EffortFixture, Extension) {
     let fx = services_with_effort().await;
     let project = fx.svc.layout.project_dir.clone();
@@ -6228,6 +6359,7 @@ fn reacts(fx: &EffortFixture) -> u64 {
 /// the capability while it runs; a task its thread's agent starts opens an
 /// effort linked to it, run as `effect:effort_policy:fake`, and finishing
 /// the task closes it — the close read through `host/call`.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_provider_is_the_projects_effort_policy() {
     let (fx, _ext) = running_policy("").await;
@@ -6280,6 +6412,7 @@ fn fake_policy_state(fx: &EffortFixture) -> serde_json::Value {
 /// A provider is told the run each call is part of: the policy's react
 /// runs as its effect actor, caused by the item's move, on the agent's
 /// thread.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_policy_provider_is_told_the_run_it_reacts_in() {
     let (fx, _ext) = running_policy("").await;
@@ -6302,6 +6435,7 @@ async fn a_policy_provider_is_told_the_run_it_reacts_in() {
 
 /// Only the chosen policy hears events: with `oxplow` or `none` active,
 /// the running provider is asked nothing.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_provider_policy_not_chosen_hears_nothing() {
     let (fx, _ext) = running_policy("").await;
@@ -6316,6 +6450,7 @@ async fn a_provider_policy_not_chosen_hears_nothing() {
 
 /// What a policy composes is checked before any of it runs: a command
 /// that doesn't exist runs nothing, and the task's state stands.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_provider_policy_composing_no_command_runs_nothing() {
     let (fx, _ext) = running_policy("bogus-react").await;
@@ -6343,6 +6478,7 @@ async fn a_provider_policy_composing_no_command_runs_nothing() {
 
 /// A stopped instance is no policy: the choice falls back to `none`, and
 /// starting a task opens nothing.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_stopped_provider_policy_resolves_to_none() {
     let (fx, _ext) = running_policy("").await;
@@ -6361,6 +6497,7 @@ const HARNESS: &str = "conductor/fake";
 
 /// A private extension whose provider runs the fake as an agent harness
 /// with `hooks`.
+#[cfg(unix)]
 fn write_harness_extension(project: &Path, hooks: &str) {
     let dir = project.join(".oxplow/extensions/conductor");
     std::fs::create_dir_all(dir.join("bin")).unwrap();
@@ -6390,6 +6527,7 @@ fn write_harness_extension(project: &Path, hooks: &str) {
 
 /// The fixture with the harness extension approved and its instance
 /// running.
+#[cfg(unix)]
 async fn running_harness(hooks: &str) -> (EffortFixture, Extension) {
     let fx = services_with_effort().await;
     let project = fx.svc.layout.project_dir.clone();
@@ -6408,6 +6546,7 @@ async fn running_harness(hooks: &str) -> (EffortFixture, Extension) {
 /// id, with what it declared — its instruction files, environment markers
 /// and settings — beside the built-ins; a catalog reload keeps it, and
 /// stopping it takes it out.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_harness_provider_is_a_registered_harness() {
     let (fx, _ext) = running_harness("").await;
@@ -6434,6 +6573,7 @@ async fn a_harness_provider_is_a_registered_harness() {
 /// its own shape, an export's records read in one call, and a launch
 /// answers the command its terminal runs — the bearer in its env only. A
 /// verb it doesn't declare (`turns`) answers none without a call.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_harness_providers_verbs_are_its_process() {
     use oxplow_domain::agent::observe::{AttrValue, Attrs, HookAnswer, OtlpRecord};
@@ -6487,6 +6627,7 @@ async fn a_harness_providers_verbs_are_its_process() {
 /// A harness provider keeps the floor the built-ins keep: the harness
 /// conformance suite over its process, its program found where the launch
 /// looks.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_harness_provider_passes_the_harness_suite() {
     let (fx, _ext) = running_harness("").await;
@@ -6514,6 +6655,7 @@ async fn a_harness_provider_passes_the_harness_suite() {
 /// The hook route waits on a harness's mapping and answer: a provider
 /// too slow to answer reads as no call and the empty answer, within the
 /// hook verbs' bound — the route's fail-open stance.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_slow_harness_provider_reads_as_none_on_the_hook_path() {
     use oxplow_domain::agent::observe::HookAnswer;
@@ -6567,6 +6709,7 @@ fn launch_input(
 
 /// A project extension `shutter` whose provider `shutter` is the fake as a
 /// snapshots provider, keeping contents when `contents`.
+#[cfg(unix)]
 fn write_snapshots_extension(project: &Path, contents: bool) {
     let dir = project.join(".oxplow/extensions/shutter");
     std::fs::create_dir_all(dir.join("bin")).unwrap();
@@ -6599,6 +6742,7 @@ fn write_snapshots_extension(project: &Path, contents: bool) {
 /// running and chosen as the project's snapshots, and the primary
 /// stream's capture service in place (its worktree is what the provider
 /// marks).
+#[cfg(unix)]
 async fn running_snapshots(
     contents: bool,
 ) -> (
@@ -6676,6 +6820,7 @@ async fn mark_turn(
 /// keeps the bytes it ships, an unchanged mark returns the snapshot it
 /// already has, and an edit is a change. Core's own capture idles
 /// meanwhile, and resumes when core's implementation is chosen again.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_snapshots_provider_marks_and_core_records_and_reads_it() {
     let (fx, stream, capture) = running_snapshots(true).await;
@@ -6742,6 +6887,7 @@ async fn a_snapshots_provider_marks_and_core_records_and_reads_it() {
 
 /// Without `contents` a provider's snapshots record what changed and no
 /// bytes: a read says the snapshot was taken without contents, by it.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_snapshots_provider_without_contents_records_identities_only() {
     let (fx, stream, _capture) = running_snapshots(false).await;
@@ -6774,6 +6920,7 @@ async fn a_snapshots_provider_without_contents_records_identities_only() {
 /// A project extension `shelf` whose provider `shelf` is the fake as a
 /// knowledge store, its pages kept in `state` (seeded by the caller, as a
 /// store holding pages written outside oxplow).
+#[cfg(unix)]
 fn write_knowledge_extension(project: &Path, state: &Path) {
     let dir = project.join(".oxplow/extensions/shelf");
     std::fs::create_dir_all(dir.join("bin")).unwrap();
@@ -6806,6 +6953,7 @@ fn write_knowledge_extension(project: &Path, state: &Path) {
 /// record (pinned, its links from the refs it states), a page written
 /// outside oxplow comes in on a sync, a delete takes a page out of both,
 /// and the wiki's files are never touched.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_knowledge_provider_keeps_pages_and_core_records_them() {
     let fx = services_with_effort().await;
@@ -6957,6 +7105,7 @@ async fn a_providers_host_read_reaches_the_metric_functions() {
 /// A project extension `shelf` (or `name`) whose provider `store` is the
 /// fake as a filesystem provider, holding `files` (path → content) and
 /// taking writes when `writable`.
+#[cfg(unix)]
 fn write_filesystem_extension(
     project: &Path,
     name: &str,
@@ -7003,6 +7152,7 @@ fn write_filesystem_extension(
 
 /// The fixture with the filesystem extension `name` approved and its
 /// instance `store` running.
+#[cfg(unix)]
 async fn running_filesystem(name: &str, writable: bool) -> EffortFixture {
     let fx = services_with_effort().await;
     let project = fx.svc.layout.project_dir.clone();
@@ -7024,6 +7174,7 @@ async fn running_filesystem(name: &str, writable: bool) -> EffortFixture {
 
 /// A filesystem provider's tree passes the filesystem conformance checks
 /// as `oxplow:local` does, through the host.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_filesystem_provider_passes_the_filesystem_conformance_checks() {
     use crate::filesystem_conformance as c;
@@ -7058,6 +7209,7 @@ async fn a_filesystem_provider_passes_the_filesystem_conformance_checks() {
 
 /// A provider that doesn't say `writable` is read-only, and its verbs
 /// carry no `write`.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_read_only_filesystem_provider_refuses_writes() {
     use crate::filesystem_conformance as c;
@@ -7074,6 +7226,7 @@ async fn a_read_only_filesystem_provider_refuses_writes() {
 
 /// A process that is gone makes the filesystem unavailable, not wrong:
 /// the reader is told so, and the next call may succeed.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_filesystem_provider_whose_process_dies_is_unavailable() {
     let fx = running_filesystem("shelf", false).await;
@@ -7092,6 +7245,7 @@ async fn a_filesystem_provider_whose_process_dies_is_unavailable() {
 
 /// Turning the instance off takes its filesystem out of the registry: a
 /// reader is refused with the registry's "no filesystem" message.
+#[cfg(unix)]
 #[tokio::test]
 async fn unregistering_a_filesystem_provider_removes_its_filesystem() {
     let fx = running_filesystem("shelf", false).await;
@@ -7110,6 +7264,7 @@ async fn unregistering_a_filesystem_provider_removes_its_filesystem() {
 }
 
 /// An extension can't take oxplow's namespace: `oxplow:` ids are core's.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_filesystem_provider_cannot_take_the_oxplow_namespace() {
     let fx = running_filesystem("oxplow", false).await;

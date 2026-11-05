@@ -800,6 +800,7 @@ fn harness_env() -> (oxplow_app::providers::host::HostEnv, tempfile::TempDir) {
 /// here the fake in harness mode — its launch looking for programs on the
 /// kit environment's PATH (where a stand-in for the fake harness's binary
 /// sits); `ran` shows it.
+#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn extension_test_runs_the_harness_suite_over_a_harness_provider() {
     let dir = project().await;
@@ -861,6 +862,7 @@ async fn extension_test_runs_the_harness_suite_over_a_harness_provider() {
 /// `extension test` runs the knowledge suite over a knowledge provider —
 /// here the fake in knowledge mode — made the throwaway project's knowledge
 /// store; `ran` shows it.
+#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn extension_test_runs_the_knowledge_suite_over_a_knowledge_provider() {
     let dir = project().await;
@@ -918,6 +920,7 @@ async fn extension_test_runs_the_knowledge_suite_over_a_knowledge_provider() {
 /// `extension test` runs the snapshot suite over a snapshots provider —
 /// here the fake in snapshots mode, keeping contents — made the throwaway
 /// project's snapshots; `ran` shows it.
+#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn extension_test_runs_the_snapshot_suite_over_a_snapshots_provider() {
     let dir = project().await;

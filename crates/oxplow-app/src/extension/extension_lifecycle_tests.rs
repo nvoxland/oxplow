@@ -18,10 +18,12 @@ use crate::extension::extension_job_stream_tests::{
     ask, completions, fixture_idle, reply, rows as job_rows, until, MANIFEST,
 };
 use crate::extension::extension_private_state_tests::{declare, write, write_state, CONFIGURATION};
+#[cfg(unix)]
+use crate::test_fixtures::lifecycle::write_extension;
+use crate::test_fixtures::lifecycle::EXT;
 use crate::test_fixtures::lifecycle::{
     booted, log_claim, page, problem, readable, CONFIGURATION_V2,
 };
-use crate::test_fixtures::lifecycle::{write_extension, EXT};
 use crate::test_fixtures::EffortFixture;
 
 const NAME: &str = "alpha";
@@ -677,6 +679,7 @@ async fn file_item(fx: &EffortFixture, title: &str) {
 /// Switching the work list from oxplow's own to a provider's and back
 /// shows each list's items on its side, and the first list's items are
 /// there again when it is chosen again.
+#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn switching_the_work_list_shows_each_providers_items_and_brings_the_other_back() {
     let fx = booted().await;

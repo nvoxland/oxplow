@@ -197,6 +197,7 @@ async fn the_fake_harness_session_is_recorded_canonically() {
 /// registered under its instance id. Its launch, every tool hook's mapping
 /// and every answer's rendering go through that process — and core records
 /// it canonically.
+#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_provider_launched_session_is_recorded_canonically() {
     let (cp, svc, root, _dir) = boot().await;

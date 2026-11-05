@@ -716,6 +716,7 @@ mod tests {
         clippy::disallowed_methods,
         reason = "test setup: reopening the database file is how a restart is simulated"
     )]
+    #[cfg(unix)]
     #[tokio::test]
     async fn a_codex_session_resumes_its_thread_after_a_backend_restart() {
         // A failure shows as a failure, not a hang.

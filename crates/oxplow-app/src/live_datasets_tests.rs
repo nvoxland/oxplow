@@ -474,6 +474,7 @@ async fn files_are_the_streams_worktrees() {
 /// parameter) reads that folder alone, and gets the rows the whole walk
 /// has for it: its files and folders the filter keeps, an empty folder too.
 /// A folder the walk can't enter elsewhere in the tree doesn't stop it.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_folder_listing_reads_that_folder_alone() {
     use std::os::unix::fs::PermissionsExt;
@@ -966,6 +967,7 @@ async fn agent_harnesses_are_the_registered_ones_enabled_ones_first() {
 
 /// A collector is readable as one `v_collector` row: declared, enabled and
 /// never run; then with its last run.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_collector_is_a_v_collector_row_with_its_standing() {
     let fx = services_with_effort().await;

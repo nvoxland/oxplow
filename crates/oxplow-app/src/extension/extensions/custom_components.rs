@@ -1005,6 +1005,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_broken_component_is_an_error_at_its_line() {
         for (entry, setup, says) in [

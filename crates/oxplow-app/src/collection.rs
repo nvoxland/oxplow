@@ -8355,6 +8355,7 @@ mod tests {
         /// tsk927: a report path or a parser entry that a symlink takes
         /// outside the checkout is refused before anything is read — a
         /// repo can't point a collector at a file of the person's.
+        #[cfg(unix)]
         #[tokio::test]
         async fn a_report_or_parser_outside_the_checkout_is_refused() {
             let h = build(None).await;

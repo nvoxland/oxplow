@@ -23,6 +23,7 @@ fn copy_dir(from: &Path, to: &Path) {
     }
 }
 
+#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn the_notes_extension_passes_extension_test_over_the_adapter() {
     let dir = tempfile::tempdir().unwrap();
