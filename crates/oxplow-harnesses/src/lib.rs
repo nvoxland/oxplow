@@ -97,9 +97,17 @@ mod test_launch {
     }
 
     /// Whether only its owner may read `path`.
+    #[cfg(unix)]
     pub fn owner_only(path: &Path) -> bool {
         use std::os::unix::fs::PermissionsExt as _;
         std::fs::metadata(path).unwrap().permissions().mode() & 0o077 == 0
+    }
+
+    /// Windows has no mode bits, and the code under test restricts nothing
+    /// there (`shared::owner_only`), so there is nothing to check.
+    #[cfg(not(unix))]
+    pub fn owner_only(_path: &Path) -> bool {
+        true
     }
 
     pub fn harness(entry: &str, id: &str) -> Arc<dyn AgentHarness> {

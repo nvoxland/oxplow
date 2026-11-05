@@ -434,6 +434,7 @@ impl ScriptWorkers {
             .arg(PARENT_ARG)
             .arg(std::process::id().to_string())
             .env_clear()
+            .envs(crate::system_env::system_env())
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())

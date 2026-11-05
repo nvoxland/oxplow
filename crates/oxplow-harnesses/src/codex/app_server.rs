@@ -495,6 +495,7 @@ mod tests {
 
     /// With nothing listening, the daemon is started with `program` and
     /// connected to once it is up.
+    #[cfg(unix)]
     #[tokio::test]
     async fn a_missing_daemon_is_started() {
         use std::os::unix::fs::PermissionsExt;

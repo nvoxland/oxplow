@@ -464,6 +464,7 @@ pub fn exec_collector(
     };
     cmd.current_dir(ext_dir)
         .env_clear()
+        .envs(oxplow_script::system_env::system_env())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

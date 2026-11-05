@@ -685,6 +685,7 @@ console.log(JSON.stringify({{ posts }}));
     }
 
     /// Through its CLI: a program that prints the list.
+    #[cfg(unix)]
     #[tokio::test]
     async fn its_conversations_come_from_its_cli() {
         use std::os::unix::fs::PermissionsExt;

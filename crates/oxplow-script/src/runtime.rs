@@ -636,6 +636,7 @@ pub fn run_exec_authorized_at(
     command
         .args(args)
         .env_clear()
+        .envs(crate::system_env::system_env())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());

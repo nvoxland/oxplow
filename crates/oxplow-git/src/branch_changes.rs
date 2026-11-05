@@ -415,6 +415,7 @@ mod tests {
     /// own caches). The counting `git` is put on `PATH` of a child run of
     /// this test (its own process), so it neither counts nor breaks other
     /// tests of this binary when they run as threads of one process.
+    #[cfg(unix)]
     #[test]
     fn change_scopes_spawn_only_the_status() {
         const CHILD: &str = "OXPLOW_TEST_SCOPES_DIR";

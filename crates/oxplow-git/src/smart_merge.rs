@@ -644,6 +644,7 @@ mod tests {
     }
 
     /// Commit a symlink at `link` pointing to `target`.
+    #[cfg(unix)]
     fn commit_symlink(p: &Path, link: &str, target: &str, msg: &str) {
         let lp = p.join(link);
         let _ = std::fs::remove_file(&lp);
@@ -657,6 +658,7 @@ mod tests {
     /// through `std::fs::write` then FOLLOWS the link and overwrites whatever it
     /// points at — an unrelated tracked file — while reporting the conflict
     /// cleanly resolved. Non-regular modes must be skipped outright.
+    #[cfg(unix)]
     #[test]
     fn auto_resolve_never_writes_through_a_symlink_conflict() {
         let dir = tempfile::tempdir().unwrap();
@@ -709,6 +711,7 @@ mod tests {
         assert_eq!(report.remaining, 1, "left for the user: {report:?}");
     }
 
+    #[cfg(unix)]
     const PRECIOUS: &str = "PRECIOUS VICTIM CONTENT\n";
 
     /// An unsupported extension gets no AST tier: an add/add conflict

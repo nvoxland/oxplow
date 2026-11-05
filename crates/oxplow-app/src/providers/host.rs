@@ -223,6 +223,7 @@ pub async fn spawn(launch: &Launch) -> Result<Spawned, HostError> {
     cmd.args(&args)
         .current_dir(&launch.ext_dir)
         .env_clear()
+        .envs(oxplow_script::system_env::system_env())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
