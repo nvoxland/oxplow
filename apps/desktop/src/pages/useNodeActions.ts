@@ -86,7 +86,9 @@ const notOpen = () => Promise.reject(new Error("The page isn't open yet; try aga
  *  which the server holds. A form node needs a node. */
 export function nodeFormSource(forms: PageForms, runId: string | null, node: string | null, after?: AfterPress): FormSource {
   return {
-    start: () => (runId && node ? forms.start(runId, node) : notOpen()),
+    // No run yet (its kept rows are drawn while the new one opens): it waits.
+    // This source is replaced when the run answers, which starts it for real.
+    start: () => (!runId ? new Promise<never>(() => {}) : node ? forms.start(runId, node) : notOpen()),
     submit: async (_t, input, _s, confirmed) => {
       if (!runId || !node) return notOpen();
       const outcome = await forms.submit(runId, node, input, confirmed);

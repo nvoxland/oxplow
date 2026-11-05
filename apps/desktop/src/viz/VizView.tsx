@@ -1216,6 +1216,7 @@ function FormViz({ run, streamId }: { run: VizRun; streamId: string | null }) {
   );
   useEffect(() => {
     let live = true;
+    setError(null);
     source
       .start(run, streamId)
       .then((s) => {
