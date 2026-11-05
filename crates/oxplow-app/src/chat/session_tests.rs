@@ -1194,6 +1194,7 @@ async fn a_write_completed_after_a_reject_is_flagged() {
 // A Codex thread on a scripted app-server daemon.
 // ---------------------------------------------------------------------
 
+#[cfg(unix)]
 mod codex {
     use super::*;
     use crate::chat::codex::CodexOpen;

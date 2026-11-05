@@ -6076,6 +6076,7 @@ def transform(input):
             .any(|d| d.key == "acme.status"));
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn a_project_exec_collector_runs_with_the_process_permission() {
         use std::os::unix::fs::PermissionsExt;

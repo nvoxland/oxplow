@@ -41,6 +41,9 @@ impl AgentHarness for Codex {
     }
 
     async fn launch(&self, input: &LaunchInput) -> Result<Launch, HarnessError> {
+        if let Some(why) = app_server::unavailable() {
+            return Err(HarnessError::Unavailable(why.into()));
+        }
         let home = input.home.as_deref().ok_or_else(|| {
             HarnessError::Unavailable(
                 "a Codex session runs on this machine's Codex app server, and this stream isn't on this machine".into(),
@@ -102,6 +105,9 @@ impl AgentHarness for Codex {
         &self,
         query: &ConversationQuery,
     ) -> Result<Vec<NativeConversation>, HarnessError> {
+        if let Some(why) = app_server::unavailable() {
+            return Err(HarnessError::Unavailable(why.into()));
+        }
         let home = query.home.as_deref().ok_or_else(|| {
             HarnessError::Unavailable("Codex's threads are on another machine".into())
         })?;
@@ -256,6 +262,7 @@ fn threads_of(listed: &serde_json::Value) -> Vec<NativeConversation> {
 }
 
 #[cfg(test)]
+#[cfg(unix)]
 mod tests {
     use std::fs;
 

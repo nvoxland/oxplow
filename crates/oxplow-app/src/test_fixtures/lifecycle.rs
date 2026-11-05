@@ -28,6 +28,7 @@ pub(crate) fn fake_bin() -> PathBuf {
 
 /// A private extension declaring the fake as its work-items provider,
 /// its entry a script running the fake with `hooks`.
+#[cfg(unix)]
 pub(crate) fn write_extension(project: &Path, hooks: &str) {
     let dir = project.join(".oxplow/extensions").join(EXT);
     std::fs::create_dir_all(dir.join("bin")).unwrap();

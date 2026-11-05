@@ -3,6 +3,9 @@
 //! the collector's own extension stops it publishing under the old
 //! declaration.
 
+// These run collector scripts (`sync.sh`): Unix-only.
+#![cfg(unix)]
+
 use std::{os::unix::fs::PermissionsExt, path::Path, time::Duration};
 
 use oxplow_domain::Actor;
@@ -34,11 +37,13 @@ fn write(root: &Path, rel: &str, body: &str) {
 }
 
 /// A program that says it started, waits to be released, then reports a row.
+#[cfg(unix)]
 async fn long_collector(fx: &TaskEffortFixture) {
     long_collector_at(fx, "1.0.0").await;
 }
 
 /// [`long_collector`] with the extension at `version` (none when empty).
+#[cfg(unix)]
 async fn long_collector_at(fx: &TaskEffortFixture, version: &str) {
     let root = fx.svc.layout.project_dir.clone();
     write(
@@ -107,6 +112,7 @@ async fn seen(fx: &TaskEffortFixture) -> serde_json::Value {
 
 /// An activation lands while a long collector (an External command) runs,
 /// and the collector goes on to record its rows.
+#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn an_activation_does_not_wait_for_a_running_collector() {
     let fx = services_with_task_effort().await;
@@ -139,6 +145,7 @@ async fn an_activation_does_not_wait_for_a_running_collector() {
 
 /// The collector's own extension changes while it runs: what it produced is
 /// not published under the old declaration.
+#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn a_collector_does_not_publish_across_a_change_to_its_extension() {
     let fx = services_with_task_effort().await;
@@ -163,6 +170,7 @@ async fn a_collector_does_not_publish_across_a_change_to_its_extension() {
 
 /// A redeploy that keeps the version is still another deployment: the run
 /// started under the old one doesn't publish under the new one.
+#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn a_collector_does_not_publish_across_a_same_version_redeploy() {
     let fx = services_with_task_effort().await;
@@ -186,6 +194,7 @@ async fn a_collector_does_not_publish_across_a_same_version_redeploy() {
 }
 
 /// An extension with no version is pinned by its deployment too.
+#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn a_collector_does_not_publish_across_an_unversioned_redeploy() {
     let fx = services_with_task_effort().await;
@@ -209,6 +218,7 @@ async fn a_collector_does_not_publish_across_an_unversioned_redeploy() {
 }
 
 /// Disabling the collector's extension mid-run stops it publishing.
+#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn a_collector_does_not_publish_after_its_extension_is_disabled() {
     let fx = services_with_task_effort().await;

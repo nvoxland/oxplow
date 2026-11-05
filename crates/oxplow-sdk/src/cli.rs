@@ -884,6 +884,7 @@ mod tests {
     /// `extension test` on a provider that is an effort policy: the kit
     /// runs the effort-policy suite against it, made the project's policy
     /// in a throwaway host — the fake in policy mode passes once blessed.
+    #[cfg(unix)]
     #[test]
     fn extension_test_runs_the_effort_policy_suite_against_a_policy_provider() {
         let dir = tempfile::tempdir().unwrap();

@@ -2223,6 +2223,7 @@ pub(crate) mod tests {
         s.into_iter().next().unwrap()
     }
 
+    #[cfg(unix)]
     fn script(dir: &Path, name: &str, body: &str) {
         use std::os::unix::fs::PermissionsExt;
         let p = dir.join(name);
@@ -2281,6 +2282,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn exec_passes_only_declared_env_and_parses_entities() {
         let ext = tempfile::tempdir().unwrap();
@@ -2308,6 +2310,7 @@ pub(crate) mod tests {
         assert_eq!(out.entities["pr"][0]["title"], json!("tok|"));
     }
 
+    #[cfg(unix)]
     #[test]
     fn exec_reports_failures_timeouts_and_bad_output() {
         let ext = tempfile::tempdir().unwrap();
@@ -2417,6 +2420,7 @@ pub(crate) mod tests {
         assert!(err.contains("object"), "{err}");
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn run_collector_stores_queryable_rows() {
         let root = tempfile::tempdir().unwrap();
@@ -2541,6 +2545,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg(unix)]
     #[test]
     fn exec_injects_credentials_as_env() {
         let ext = tempfile::tempdir().unwrap();
@@ -2566,6 +2571,7 @@ pub(crate) mod tests {
 
     /// Two extensions declaring the same credential name, each with a
     /// script that echoes it into a row.
+    #[cfg(unix)]
     fn two_extensions(root: &Path) {
         for name in ["one", "two"] {
             let ext = root.join(format!(".oxplow/extensions/{name}"));
@@ -2583,6 +2589,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn credentials_come_from_the_keychain_scoped_per_extension() {
         let root = tempfile::tempdir().unwrap();
@@ -3219,6 +3226,7 @@ pub(crate) mod tests {
     /// A preview runs the source as its worktree has it and returns the
     /// rows, storing nothing: source data is project-wide, so an agent in
     /// a worktree stream checks its source without overwriting it (tsk377).
+    #[cfg(unix)]
     #[tokio::test]
     async fn a_preview_returns_rows_and_stores_nothing() {
         let root = tempfile::tempdir().unwrap();
@@ -3282,6 +3290,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn upsert_sources_update_by_key_and_tombstone() {
         let root = tempfile::tempdir().unwrap();
@@ -3378,6 +3387,7 @@ pub(crate) mod tests {
         assert!(err.contains("sync: upsert"), "{err}");
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn a_sandboxed_source_reaches_only_its_declared_hosts() {
         if !crate::net_sandbox::enforced() {

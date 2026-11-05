@@ -34,6 +34,7 @@ fn copy_dir(from: &Path, to: &Path) {
 }
 
 /// A copy of the fixture with its server entry running the notes server.
+#[cfg(unix)]
 fn extension() -> tempfile::TempDir {
     let dir = tempfile::tempdir().unwrap();
     copy_dir(&fixture_dir(), dir.path());
@@ -163,6 +164,7 @@ async fn the_pinned_tools_are_the_servers() {
     assert_eq!(oxplow_provider_mcp::pin_difference(&pins, &live), None);
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn a_server_whose_tools_differ_from_the_pin_is_refused() {
     let ext = extension();
@@ -191,6 +193,7 @@ async fn a_server_whose_tools_differ_from_the_pin_is_refused() {
     );
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn the_mapping_turns_verbs_into_tool_calls_and_output_into_outcomes() {
     let ext = extension();
@@ -283,6 +286,7 @@ async fn the_mapping_turns_verbs_into_tool_calls_and_output_into_outcomes() {
 }
 
 /// A mapping changed to return `from` as `to`, in a fresh extension copy.
+#[cfg(unix)]
 async fn with_mapping(from: &str, to: &str) -> (tempfile::TempDir, Child, Peer, Handle) {
     let ext = extension();
     let mapping = ext.path().join("mcp/notes.star");
@@ -294,6 +298,7 @@ async fn with_mapping(from: &str, to: &str) -> (tempfile::TempDir, Child, Peer, 
     (ext, child, peer, handle)
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn a_mapping_may_not_return_an_undeclared_event_or_a_foreign_ref() {
     let (_ext, _child, peer, handle) = with_mapping(
@@ -338,6 +343,7 @@ async fn a_mapping_may_not_return_an_undeclared_event_or_a_foreign_ref() {
 
 /// P7 review (tsk719): a tool error the mapping doesn't refuse is still a
 /// refusal of the input — never a provider failure that counts.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_tool_error_the_mapping_passes_over_is_an_invalid_input() {
     let (_ext, _child, peer, handle) =
@@ -358,6 +364,7 @@ async fn a_tool_error_the_mapping_passes_over_is_an_invalid_input() {
 
 /// P7 review (tsk719): a read answer without a `state` is the mapping's
 /// error, never a `null` checkpoint that restarts every read.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_read_answer_without_a_state_is_refused() {
     let (_ext, _child, peer, handle) =
@@ -377,6 +384,7 @@ async fn a_read_answer_without_a_state_is_refused() {
 
 /// The pinned tools, changed by `edit`, in a fresh extension copy: the
 /// `check` problems.
+#[cfg(unix)]
 async fn check_with_pins(edit: impl FnOnce(&mut Vec<Value>)) -> Vec<Problem> {
     let ext = extension();
     let tools = ext.path().join("mcp/tools.json");
@@ -392,6 +400,7 @@ async fn check_with_pins(edit: impl FnOnce(&mut Vec<Value>)) -> Vec<Problem> {
 
 /// P7 review (tsk719): the pin is the whole tool — its annotations, title
 /// and output schema too — and a tool pinned twice is refused.
+#[cfg(unix)]
 #[tokio::test]
 async fn the_pin_covers_the_whole_tool_and_each_name_once() {
     let at = |pins: &Vec<Value>| {
@@ -422,6 +431,7 @@ async fn the_pin_covers_the_whole_tool_and_each_name_once() {
 
 /// A copy of the fixture whose server never answers MCP's `initialize`,
 /// writing its pid to `server.pid`.
+#[cfg(unix)]
 fn hanging_extension() -> tempfile::TempDir {
     let ext = extension();
     let server = ext.path().join("bin/notes-server");
@@ -431,6 +441,7 @@ fn hanging_extension() -> tempfile::TempDir {
 
 /// P7 review (tsk720): a server stuck starting holds nothing the adapter
 /// needs to answer `$/cancel`.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_check_is_cancelled_while_the_server_hangs_starting() {
     let ext = hanging_extension();
@@ -454,6 +465,7 @@ async fn a_check_is_cancelled_while_the_server_hangs_starting() {
 
 /// P7 review (tsk720): `shutdown` with a call in flight stops the call and
 /// the server, and the adapter exits.
+#[cfg(unix)]
 #[tokio::test]
 async fn shutdown_with_a_call_in_flight_stops_the_server() {
     let ext = hanging_extension();
@@ -580,6 +592,7 @@ async fn try_check(peer: &Peer) -> Result<CheckResult, ProtocolError> {
 /// P9.B4: an MCP server reached by url — over streamable HTTP, its bearer
 /// the credential the adapter is told the name of — is pinned and called
 /// like one it runs: the same check, the same mapping.
+#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn a_server_by_url_is_pinned_and_called() {
     let ext = extension();
@@ -661,6 +674,7 @@ fn is_notes_auth<T>(r: &Result<T, ProtocolError>) -> bool {
 /// server stops taking it. A `403` isn't: the server knows the token and
 /// refuses what it may do, which a renewed token (the same grant) won't
 /// change.
+#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn a_401_is_auth_however_it_is_worded() {
     let ext = extension();

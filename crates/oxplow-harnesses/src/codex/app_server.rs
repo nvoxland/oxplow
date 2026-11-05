@@ -8,8 +8,10 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+#[cfg(unix)]
 use std::time::Duration;
 
+#[cfg(unix)]
 use futures::{SinkExt, StreamExt};
 use serde_json::{json, Value};
 use tokio::sync::{mpsc, oneshot, watch};
@@ -18,10 +20,29 @@ use tokio_tungstenite::tungstenite::Message;
 /// The largest message the client reads. A resumed thread's answer
 /// carries its latest turns in full, tool output and patches included:
 /// tens of megabytes, past the websocket's default 16 MiB frame limit.
+#[cfg(unix)]
 const MAX_MESSAGE: usize = 256 << 20;
 
 /// How long `codex app-server daemon start` may take.
+#[cfg(unix)]
 const DAEMON_START: Duration = Duration::from_secs(30);
+
+/// What a Codex session says on a platform without unix sockets: the
+/// daemon's control socket is one, and a client of it isn't written for
+/// anything else yet (Windows would need a named-pipe transport). Said
+/// where a session starts, never worked around.
+const NOT_ON_WINDOWS: &str = "Codex sessions aren't available on Windows yet";
+
+/// Why Codex can't be reached on a platform with (`unix`) or without unix
+/// sockets; `None` where it can.
+fn unavailable_on(unix: bool) -> Option<&'static str> {
+    (!unix).then_some(NOT_ON_WINDOWS)
+}
+
+/// Why Codex can't be reached on this platform; `None` where it can.
+pub fn unavailable() -> Option<&'static str> {
+    unavailable_on(cfg!(unix))
+}
 
 /// The daemon's control socket under Codex's home: `$CODEX_HOME`, else
 /// `<home>/.codex`.
@@ -91,6 +112,16 @@ impl AppServer {
     /// app-server daemon start`) when nothing answers, and run the
     /// handshake. The receiver gets every notification and server request,
     /// in arrival order.
+    #[cfg(not(unix))]
+    pub async fn connect(
+        _socket: &Path,
+        _program: Option<&Path>,
+    ) -> Result<(Self, mpsc::UnboundedReceiver<ServerMessage>), String> {
+        Err(NOT_ON_WINDOWS.into())
+    }
+
+    /// See the unix `connect` above.
+    #[cfg(unix)]
     pub async fn connect(
         socket: &Path,
         program: Option<&Path>,
@@ -117,6 +148,7 @@ impl AppServer {
     }
 
     /// Run the client over an open stream to the daemon's socket.
+    #[cfg(unix)]
     async fn over(
         stream: tokio::net::UnixStream,
     ) -> Result<(Self, mpsc::UnboundedReceiver<ServerMessage>), String> {
@@ -221,6 +253,7 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 }
 
 /// An answer to its waiting request, anything else to `messages`.
+#[cfg(unix)]
 fn route(v: Value, answers: &Answers, messages: &mpsc::UnboundedSender<ServerMessage>) {
     let method = v.get("method").and_then(Value::as_str).map(str::to_string);
     let params = v.get("params").cloned().unwrap_or(Value::Null);
@@ -253,6 +286,7 @@ fn route(v: Value, answers: &Answers, messages: &mpsc::UnboundedSender<ServerMes
     }
 }
 
+#[cfg(unix)]
 async fn start_daemon(program: &Path) -> Result<(), String> {
     let run = tokio::process::Command::new(program)
         .args(["app-server", "daemon", "start"])
@@ -279,7 +313,7 @@ async fn start_daemon(program: &Path) -> Result<(), String> {
 /// crates (feature `fake-app-server`): it answers `initialize` and every
 /// other request with what `answer` says, records what clients send, and
 /// pushes notifications and requests to every connected client.
-#[cfg(any(test, feature = "fake-app-server"))]
+#[cfg(all(unix, any(test, feature = "fake-app-server")))]
 pub mod fake {
     use super::*;
     use tokio::sync::broadcast;
@@ -418,6 +452,19 @@ pub mod fake {
 }
 
 #[cfg(test)]
+mod platform_tests {
+    use super::*;
+
+    #[test]
+    fn windows_says_plainly_that_codex_sessions_are_not_available() {
+        let said = unavailable_on(false).expect("a message on a platform without unix sockets");
+        assert!(said.contains("aren't available on Windows yet"), "{said}");
+        assert_eq!(unavailable_on(true), None);
+    }
+}
+
+#[cfg(test)]
+#[cfg(unix)]
 mod tests {
     use super::fake::FakeAppServer;
     use super::*;

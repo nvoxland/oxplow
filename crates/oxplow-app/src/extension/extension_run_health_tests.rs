@@ -3,6 +3,9 @@
 //! succeeded, failed and was tried again, was cancelled, and was refused —
 //! without a secret value, a prompt or a path anywhere in the row.
 
+// These run collector scripts (`sync.sh`): Unix-only.
+#![cfg(unix)]
+
 use std::os::unix::fs::PermissionsExt;
 
 use oxplow_domain::run::{Mode, RunContext};
@@ -28,6 +31,7 @@ commands:
     entry: only.star
 ";
 
+#[cfg(unix)]
 fn write(root: &std::path::Path, rel: &str, body: &str) {
     let path = root.join(".oxplow/extensions/acme").join(rel);
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -38,6 +42,7 @@ fn write(root: &std::path::Path, rel: &str, body: &str) {
 }
 
 /// Install `acme` with the program `body` and set its credential.
+#[cfg(unix)]
 async fn install(fx: &TaskEffortFixture, body: &str) {
     let root = fx.svc.layout.project_dir.clone();
     write(&root, "extension.yaml", MANIFEST);
@@ -98,6 +103,7 @@ const RUNS: &str = "SELECT outcome, error, version, generation, actor, latest, m
 /// the extension's version, the actor and the failure; only the last is
 /// `latest`; the collector's own row names the last, and no secret or
 /// program output beyond the failure's reason is in any column.
+#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn a_failed_run_and_its_retry_are_two_rows_and_neither_leaks_a_credential() {
     let fx = services_with_task_effort().await;
@@ -156,6 +162,7 @@ async fn a_failed_run_and_its_retry_are_two_rows_and_neither_leaks_a_credential(
 
 /// A run cancelled mid-way is `cancelled`, not a failure that counts toward
 /// disabling the collector, and it records no rows.
+#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn a_cancelled_run_is_recorded_as_cancelled_and_publishes_nothing() {
     let fx = services_with_task_effort().await;
@@ -217,6 +224,7 @@ async fn a_cancelled_run_is_recorded_as_cancelled_and_publishes_nothing() {
 /// A job's model calling a command that isn't `job: true` is refused, and
 /// the refusal is a `denied` run of that command — not a failure — owned
 /// by the extension.
+#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn a_refused_caller_is_a_denied_run_not_a_failure() {
     let fx = services_with_task_effort().await;
@@ -248,6 +256,7 @@ async fn a_refused_caller_is_a_denied_run_not_a_failure() {
 /// A revocation reaches a Starlark collector that is computing with no host
 /// call to notice it by: the run ends within a moment, recorded `cancelled`,
 /// not when its timeout does.
+#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn disabling_an_extension_stops_a_collector_script_that_is_computing() {
     let fx = services_with_task_effort().await;
