@@ -712,6 +712,10 @@ mod tests {
             .expect("first sessionId")
             .to_string();
         // Its launch could no longer be worked out.
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "a test puts the row in a state no command would"
+        )]
         ctx.db
             .transaction(|tx| {
                 tx.execute("UPDATE agent_session SET harness = 'gone'", [])
