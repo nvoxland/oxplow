@@ -171,6 +171,15 @@ pub async fn open_terminal_session(
         // its stream — what the person has selected doesn't matter.
         Target::AgentSession(id) => id,
     };
+    // Already running: nothing about how to start it matters, and a switch
+    // back to its stream shouldn't wait on the database to work that out.
+    if let Some(attached) = ctx
+        .terminal_sessions
+        .reattach(&agent_pane_key(session_id), cols, rows)
+        .await?
+    {
+        return Ok(attached);
+    }
 
     let session = ctx
         .agent_session_store
@@ -687,6 +696,32 @@ mod tests {
 
         // Clean up the spawned PTY so the test doesn't leak a child.
         let _ = ctx.terminal_sessions.close(first_id).await;
+    }
+
+    /// Reattaching to a live agent reads nothing about how to start one: a
+    /// switch back to a stream shouldn't wait on the database or a harness.
+    #[tokio::test]
+    async fn a_live_agent_session_reattaches_without_its_launch() {
+        let (mut ctx, _dir) = services().await;
+        ctx.plugin_runtime = Some(runtime());
+        let session = first_session(&ctx).await;
+        let id = session.id.to_string();
+        let first = open(&ctx, &id).await.unwrap();
+        let first_id = first["sessionId"]
+            .as_str()
+            .expect("first sessionId")
+            .to_string();
+        // Its launch could no longer be worked out.
+        ctx.db
+            .transaction(|tx| {
+                tx.execute("UPDATE agent_session SET harness = 'gone'", [])
+                    .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        let second = open(&ctx, &id).await.expect("reattaches");
+        assert_eq!(second["sessionId"].as_str(), Some(first_id.as_str()));
+        let _ = ctx.terminal_sessions.close(&first_id).await;
     }
 
     /// The TUI runs its argv with the thread it attaches to last.

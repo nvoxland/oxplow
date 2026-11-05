@@ -420,22 +420,34 @@ impl TerminalSessionRegistry {
         rows: u16,
         make_request: impl FnOnce(u16, u16) -> SpawnRequest,
     ) -> Result<AttachResult, TerminalSessionError> {
-        // Fast path: existing session for this key — take the attaching
-        // pane's size (it may differ from the one the process last saw, e.g.
-        // after an app restart) and replay its buffer.
-        if let Some(existing_id) = self.by_key.lock().await.get(&key).cloned() {
-            let map = self.inner.lock().await;
-            if let Some(entry) = map.get(&existing_id) {
-                self.pty.resize(&entry.pane_id, cols, rows).await?;
-                let replay = entry.ring.lock().await.replay();
-                return Ok(Self::build_attach_result(existing_id, replay));
-            }
-            // Stale by_key entry (entry was killed); fall through and
-            // create a fresh session.
+        if let Some(attached) = self.reattach(&key, cols, rows).await? {
+            return Ok(attached);
         }
         let req = make_request(cols, rows);
         let session_id = self.spawn_with(req, key.clone(), agent).await?;
         Ok(Self::build_attach_result(session_id, Vec::new()))
+    }
+
+    /// The live session under `key`, if there is one: it takes the attaching
+    /// pane's size (it may differ from the one the process last saw, e.g.
+    /// after an app restart) and replays its buffer. A stale `by_key` entry
+    /// (its session was killed) is none.
+    pub async fn reattach(
+        &self,
+        key: &str,
+        cols: u16,
+        rows: u16,
+    ) -> Result<Option<AttachResult>, TerminalSessionError> {
+        let Some(existing_id) = self.by_key.lock().await.get(key).cloned() else {
+            return Ok(None);
+        };
+        let map = self.inner.lock().await;
+        let Some(entry) = map.get(&existing_id) else {
+            return Ok(None);
+        };
+        self.pty.resize(&entry.pane_id, cols, rows).await?;
+        let replay = entry.ring.lock().await.replay();
+        Ok(Some(Self::build_attach_result(existing_id, replay)))
     }
 
     /// Read-only: the live session id indexed under external `key`, or

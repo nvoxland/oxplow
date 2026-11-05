@@ -54,6 +54,9 @@ three pieces:
   links. It knows no session: what the person types comes out of
   `onData` / `onBinary`, a fit out of `onResize`, and `onOpened(term)`
   hands the opened terminal over.
+- **`open_terminal_session`** reattaches to a live agent PTY before anything
+  else (`TerminalSessions::reattach`): its launch (prompt, harness, surroundings)
+  is only worked out to start one, so a switch back to a stream waits on none of it.
 - **`useTerminalSession(uri, …)`** — the PTY its URI names, opened at the
   surface's size and replayed into it, followed (output, exit), and opened
   again when it must be. What the person types it encodes and writes at
