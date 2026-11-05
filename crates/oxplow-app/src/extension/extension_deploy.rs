@@ -519,6 +519,13 @@ pub(crate) fn build_line(run: &str, shown: &str) -> String {
     format!("build — runs `{run}` in {shown} with your authority, on every deploy")
 }
 
+/// The same, when it replaces a command: both, so a person sees what changed.
+fn changed_build_line(run: &str, was: &str, shown: &str) -> String {
+    format!(
+        "build — now runs `{run}` (was `{was}`) in {shown} with your authority, on every deploy"
+    )
+}
+
 /// What going from what `name` runs now to one declaring `declared` and
 /// built with `build` (from source `shown`) adds.
 fn approval_lines(
@@ -530,8 +537,10 @@ fn approval_lines(
 ) -> Vec<String> {
     let mut adds = declared.added_over(&active_permissions(svc, name));
     if let Some(run) = build {
-        if active_build(svc, name).as_deref() != Some(run) {
-            adds.push(build_line(run, shown));
+        match active_build(svc, name) {
+            Some(was) if was == run => {}
+            Some(was) => adds.push(changed_build_line(run, &was, shown)),
+            None => adds.push(build_line(run, shown)),
         }
     }
     adds
@@ -2289,12 +2298,16 @@ mod tests {
         source_built(svc, "Three", &changed);
         assert_eq!(
             asked(deploy(svc, "acme", false).await),
-            vec![build_line(&changed)]
+            vec![format!(
+                "build — now runs `{changed}` (was `{BUILD}`) in .oxplow/extensions/acme with your authority, on every deploy"
+            )]
         );
         deploy(svc, "acme", true).await.unwrap();
         assert_eq!(
             asked(rollback(svc, "acme", None, false).await),
-            vec![build_line(BUILD)]
+            vec![format!(
+                "build — now runs `{BUILD}` (was `{changed}`) in .oxplow/extensions/acme with your authority, on every deploy"
+            )]
         );
         rollback(svc, "acme", None, true).await.unwrap();
         assert_eq!(page_title(svc).as_deref(), Some("Two"));

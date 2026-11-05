@@ -205,9 +205,11 @@ the build didn't write) is refused (``extension `x` doesn't load once
 built``) and leaves nothing behind. A build that fails, or doesn't write
 `output`, refuses the deploy with ``building `x`: …``. A build runs with
 the person's authority and oxplow doesn't confine it, so its command is
-approved like a permission: a new or changed `run` adds ``build — runs
-`…` in <source> with your authority, on every deploy`` to what the deploy
-asks (`extension_deploy::build_line`); the same command never asks again.
+approved like a permission: a new `run` adds ``build — runs `…` in <source>
+with your authority, on every deploy`` to what the deploy asks
+(`extension_deploy::build_line`), a changed one ``build — now runs `…` (was
+`…`) in <source>…``, so a person sees what changed; the same command never
+asks again.
 The approval covers the command text only — what `npm run build` does is
 whatever `package.json` says. The recorded command
 (`extension_deployment.build_run`, `v_extension_deployment.build`) is what

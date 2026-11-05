@@ -83,11 +83,11 @@ fn approval_summary(command: &str, name: &str, turns_on: bool) -> String {
     if turns_on {
         format!("`{name}` is turned off. Deploy it and turn it on, with:")
     } else if command.ends_with(".rollback") {
-        format!("Roll `{name}` back? That version adds:")
+        format!("Roll `{name}` back? That version asks for:")
     } else if command.ends_with(".enable") {
         format!("Turn on `{name}`, with:")
     } else {
-        format!("Deploy the new version of `{name}`? It adds:")
+        format!("Deploy the new version of `{name}`? It asks for:")
     }
 }
 
