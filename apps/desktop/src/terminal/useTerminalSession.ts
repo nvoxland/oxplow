@@ -93,6 +93,7 @@ export function useTerminalSession(uri: string, opts: TerminalSessionOptions): T
 
   const attach = useCallback(
     (term: Terminal) => {
+      const mounted = performance.now();
       let disposed = false;
       // Output may arrive before the open answers (a replay sent from
       // inside it): held until the session id is known.
@@ -124,6 +125,8 @@ export function useTerminalSession(uri: string, opts: TerminalSessionOptions): T
         if (opening || disposed) return;
         opening = true;
         logUi("info", "opening terminal session", { uri, cols: term.cols, rows: term.rows, again });
+        // Where a switch back to a terminal spends its time, in the log.
+        const asked = performance.now();
         void desktopBridge()
           .openTerminalSession(uri, term.cols, term.rows)
           .then(({ sessionId, replayB64 }) => {
@@ -140,13 +143,23 @@ export function useTerminalSession(uri: string, opts: TerminalSessionOptions): T
             endedRef.current = false;
             launchFailedRef.current = false;
             setEnded(null);
+            const answered = performance.now();
+            const timing = (decoded: number) => ({
+              uri,
+              replayBytes: replayB64?.length ?? 0,
+              sinceMountMs: Math.round(answered - mounted),
+              answerMs: Math.round(answered - asked),
+              decodeMs: Math.round(decoded - answered),
+              drawnMs: Math.round(performance.now() - answered),
+            });
             // The ring buffer: the screen as it was left.
             if (replayB64) {
               try {
                 const bin = atob(replayB64);
                 const bytes = new Uint8Array(bin.length);
                 for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-                term.write(bytes);
+                const decoded = performance.now();
+                term.write(bytes, () => logUi("info", "terminal replay drawn", timing(decoded)));
               } catch {}
             }
             for (const event of pendingEvents) if (event.sessionId === sessionId) applyEvent(event);

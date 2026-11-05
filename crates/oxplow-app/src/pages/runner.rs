@@ -131,6 +131,10 @@ pub struct RunNode {
     pub replaced_by: Option<String>,
 }
 
+/// A loader that takes this long is named in the log: which part of a page
+/// a person waits on.
+const SLOW_LOADER: std::time::Duration = std::time::Duration::from_millis(50);
+
 /// Runs pages over one oxplow's data.
 pub struct PageRunner<'a> {
     /// The services a `content` loader reads files and resources through.
@@ -327,9 +331,19 @@ impl<'a> PageRunner<'a> {
                 if skipped.contains(&decl.name) {
                     continue;
                 }
+                let started = std::time::Instant::now();
                 let mut run = self
                     .run_loader(&page, decl, &params, &loaders, ctx, viewer, memo, depth)
                     .await;
+                let took = started.elapsed();
+                if took >= SLOW_LOADER {
+                    tracing::info!(
+                        page = %page.id,
+                        loader = %decl.name,
+                        took_ms = took.as_millis() as u64,
+                        "slow page loader"
+                    );
+                }
                 // Downstream SQL temp tables and flowing params only see
                 // admitted rows, never a result beyond this run's budget.
                 if budget.admit(&mut run.result)? {
