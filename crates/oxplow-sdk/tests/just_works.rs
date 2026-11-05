@@ -9,11 +9,48 @@
 
 mod common;
 
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
+use std::sync::mpsc;
+use std::time::Duration;
 
 use oxplow_app::extension::extension_catalog::ExtensionCatalog;
 use oxplow_sdk::extension_test::{test_extension, test_extension_in};
 use oxplow_sdk::{check, render_findings, scaffold, Format, Kind};
+
+/// One example has hung these tests on CI, now and then, with nothing in the
+/// log to say which. While this lives, an example that takes this long says
+/// its name and what is running, and ends the test binary: CI's step limit
+/// would end it anyway, saying nothing. Written straight to stderr, which a
+/// test's output capture would otherwise hold back.
+const HANG_LIMIT: Duration = Duration::from_secs(300);
+
+struct HangWatch {
+    _done: mpsc::Sender<()>,
+}
+
+impl HangWatch {
+    fn on(example: &'static str) -> Self {
+        let (done, wait) = mpsc::channel::<()>();
+        std::thread::spawn(move || {
+            if wait.recv_timeout(HANG_LIMIT) != Err(mpsc::RecvTimeoutError::Timeout) {
+                return;
+            }
+            let processes = std::process::Command::new("ps")
+                .args(["-eo", "pid,ppid,stat,etime,args"])
+                .output()
+                .map(|out| String::from_utf8_lossy(&out.stdout).into_owned())
+                .unwrap_or_default();
+            let mut err = std::io::stderr();
+            let _ = writeln!(
+                err,
+                "example `{example}` is still going after {HANG_LIMIT:?}; what is running:\n{processes}"
+            );
+            std::process::abort();
+        });
+        Self { _done: done }
+    }
+}
 
 async fn project() -> tempfile::TempDir {
     let dir = tempfile::tempdir().unwrap();
@@ -76,6 +113,7 @@ async fn every_example_scaffolds_checks_and_tests_clean() {
     let all = oxplow_sdk::examples::all();
     assert!(all.len() >= 9, "the examples are compiled in");
     for example in all {
+        let _watch = HangWatch::on(example.name);
         let dir = project().await;
         let needs: &[&str] = match example.name {
             "review-badges" => &["effort-review"],
@@ -144,6 +182,7 @@ async fn every_example_scaffolds_checks_and_tests_clean() {
 async fn every_example_renames_and_tests_clean() {
     let mut failures = Vec::new();
     for example in oxplow_sdk::examples::all() {
+        let _watch = HangWatch::on(example.name);
         let dir = project().await;
         // An example that builds on another comes with it, under its name.
         if example.name == "review-badges" {
