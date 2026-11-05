@@ -1063,7 +1063,7 @@ fn validate(
         },
         knows_event,
     )
-    .map_err(&ctx)?;
+    .map_err(ctx)?;
     if raw.records.is_some() {
         return validate_report_collector(declarer, id, raw, trigger);
     }
@@ -1339,7 +1339,7 @@ fn validate(
         ));
     }
     for need in &raw.needs {
-        oxplow_domain::service::check_declared(need).map_err(&ctx)?;
+        oxplow_domain::service::check_declared(need).map_err(ctx)?;
     }
     Ok(CollectorSpec {
         id,

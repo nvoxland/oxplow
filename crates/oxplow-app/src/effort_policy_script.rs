@@ -56,7 +56,7 @@ impl EffortPolicy for ScriptedPolicy {
                 .with_tree(crate::services::Trees::From(self.trees.clone())),
         )
         .await
-        .map_err(&failed)?
+        .map_err(failed)?
         {
             Reaction::Skip(_) => Ok(Vec::new()),
             Reaction::Run { events, .. } if !events.is_empty() => Err(failed(

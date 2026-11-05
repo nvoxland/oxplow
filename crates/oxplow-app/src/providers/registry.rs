@@ -1306,7 +1306,7 @@ impl Instance {
         }
         for subject in &draft.subject {
             check_subject(&self.spec.capability, &self.id, &self.ext.name, subject)
-                .map_err(&failed)?;
+                .map_err(failed)?;
         }
         // The thread an item was filed on anchors its record, so it keeps
         // that thread (tsk1041, tsk1058); otherwise an agent's thread
@@ -2382,9 +2382,8 @@ impl ProviderRegistry {
             field: Some("/instance".into()),
             message,
         };
-        let Resolved { ext, id, .. } = self
-            .resolve_as(instance, Some(provider))
-            .map_err(&invalid)?;
+        let Resolved { ext, id, .. } =
+            self.resolve_as(instance, Some(provider)).map_err(invalid)?;
         if id != provider && ext.providers.iter().any(|p| p.id == id) {
             return Err(invalid(format!(
                 "`{id}` is already the id of one of `{}`'s providers (its default instance)",

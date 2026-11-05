@@ -251,7 +251,7 @@ pub async fn spawn(launch: &Launch) -> Result<Spawned, HostError> {
         .as_ref()
         .and_then(|calls| calls.gate.lock().clone())
     {
-        gate().map_err(&failed)?;
+        gate().map_err(failed)?;
     }
     crate::external_process::ProcessGroup::prepare(cmd.as_std_mut());
     let mut child = cmd

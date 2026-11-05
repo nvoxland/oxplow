@@ -178,7 +178,7 @@ fn decl_of(
         _ => return Err(named("`on` lists the event types it reacts to".into())),
     };
     for need in &f.needs {
-        crate::scope_calls::check_script_need(need).map_err(&named)?;
+        crate::scope_calls::check_script_need(need).map_err(named)?;
     }
     let script = read(&f.entry)
         .ok_or_else(|| named(format!("entry `{}` isn't in the extension", f.entry)))?;
