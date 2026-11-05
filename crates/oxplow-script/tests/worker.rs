@@ -28,9 +28,30 @@ fn budget(ms: u64) -> Budget {
 }
 
 /// No process with `pid` is left (it was reaped, not just signalled).
+#[cfg(unix)]
 fn gone(pid: u32) -> bool {
     // SAFETY: signal 0 only checks the pid exists.
     unsafe { libc::kill(pid as i32, 0) == -1 }
+}
+
+/// No process with `pid` is left: it can't be opened, or it has ended.
+#[cfg(windows)]
+fn gone(pid: u32) -> bool {
+    use windows_sys::Win32::Foundation::{CloseHandle, WAIT_OBJECT_0};
+    use windows_sys::Win32::System::Threading::{
+        OpenProcess, WaitForSingleObject, PROCESS_SYNCHRONIZE,
+    };
+    // SAFETY: plain values in; the handle is checked, waited on without
+    // blocking, and closed.
+    unsafe {
+        let h = OpenProcess(PROCESS_SYNCHRONIZE, 0, pid);
+        if h.is_null() {
+            return true;
+        }
+        let ended = WaitForSingleObject(h, 0) == WAIT_OBJECT_0;
+        CloseHandle(h);
+        ended
+    }
 }
 
 const SPIN: &str = "def transform(x):\n    n = 0\n    for i in range(2000000000):\n        for j in range(2000000000):\n            n += 1\n    return n\n";

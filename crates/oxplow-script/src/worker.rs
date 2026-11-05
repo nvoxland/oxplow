@@ -36,6 +36,11 @@ pub const EXIT_MEMORY: i32 = 3;
 /// The argument the host passes the cap in bytes as: `--memory-bytes N`.
 pub const MEMORY_ARG: &str = "--memory-bytes";
 
+/// The argument the host passes its own process id as: `--parent-pid N`.
+/// Windows has no cheap "my parent changed" check, so the worker waits on
+/// a handle to this process; Unix workers ignore it.
+pub const PARENT_ARG: &str = "--parent-pid";
+
 /// Which engine runs the script.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "runtime")]
@@ -193,9 +198,7 @@ impl MemoryCap {
         let now = USED.fetch_add(size, Ordering::Relaxed) + size;
         if now > LIMIT.load(Ordering::Relaxed) {
             // Nothing may allocate from here on: leave at once.
-            // SAFETY: `_exit` ends the process without running anything
-            // that could allocate.
-            unsafe { libc::_exit(EXIT_MEMORY) }
+            exit_now(EXIT_MEMORY);
         }
         PEAK.fetch_max(now as u64, Ordering::Relaxed);
     }
@@ -375,14 +378,17 @@ impl crate::ai::AiOracle for RemoteOracle {
 /// read the run, run it, report. Never returns.
 pub fn main() -> ! {
     let mut args = std::env::args().skip(1);
+    let mut parent_pid = None;
     while let Some(arg) = args.next() {
         if arg == MEMORY_ARG {
             if let Some(n) = args.next().and_then(|n| n.parse::<usize>().ok()) {
                 MemoryCap::arm(n);
             }
+        } else if arg == PARENT_ARG {
+            parent_pid = args.next().and_then(|n| n.parse::<u32>().ok());
         }
     }
-    watch_parent();
+    watch_parent(parent_pid);
     let line = Arc::new(Mutex::new(Line {
         out: std::io::stdout(),
         input: std::io::stdin(),
@@ -448,7 +454,28 @@ fn run(
     run_starlark_inner(script, &func, input, &hosts)
 }
 
+/// End the process at once, running nothing that could allocate.
+fn exit_now(code: i32) -> ! {
+    #[cfg(unix)]
+    // SAFETY: `_exit` ends the process without running anything that
+    // could allocate.
+    unsafe {
+        libc::_exit(code)
+    }
+    #[cfg(windows)]
+    // SAFETY: `TerminateProcess` on the current process ends it at once.
+    unsafe {
+        windows_sys::Win32::System::Threading::TerminateProcess(
+            windows_sys::Win32::System::Threading::GetCurrentProcess(),
+            code as u32,
+        );
+        // Not reached: the process is gone.
+        loop {}
+    }
+}
+
 /// The process's CPU time (user + system) so far, in milliseconds.
+#[cfg(unix)]
 fn cpu_ms() -> u64 {
     // SAFETY: `getrusage` fills the zeroed struct it's given.
     let usage = unsafe {
@@ -460,9 +487,38 @@ fn cpu_ms() -> u64 {
     ms(usage.ru_utime) + ms(usage.ru_stime)
 }
 
+/// The process's CPU time (user + system) so far, in milliseconds.
+#[cfg(windows)]
+fn cpu_ms() -> u64 {
+    use windows_sys::Win32::Foundation::FILETIME;
+    use windows_sys::Win32::System::Threading::{GetCurrentProcess, GetProcessTimes};
+    let zero = FILETIME {
+        dwLowDateTime: 0,
+        dwHighDateTime: 0,
+    };
+    let (mut created, mut exited, mut kernel, mut user) = (zero, zero, zero, zero);
+    // SAFETY: `GetProcessTimes` fills the four structs it's given.
+    let ok = unsafe {
+        GetProcessTimes(
+            GetCurrentProcess(),
+            &mut created,
+            &mut exited,
+            &mut kernel,
+            &mut user,
+        )
+    };
+    if ok == 0 {
+        return 0;
+    }
+    // FILETIME counts 100 ns ticks.
+    let ticks = |t: FILETIME| (u64::from(t.dwHighDateTime) << 32) | u64::from(t.dwLowDateTime);
+    (ticks(kernel) + ticks(user)) / 10_000
+}
+
 /// Leave when the host process is gone (the worker re-parented to init),
 /// even mid-computation: nothing would ever read its answer.
-fn watch_parent() {
+#[cfg(unix)]
+fn watch_parent(_parent_pid: Option<u32>) {
     // SAFETY: `getppid` has no preconditions.
     let parent = unsafe { libc::getppid() };
     std::thread::spawn(move || loop {
@@ -472,4 +528,31 @@ fn watch_parent() {
             std::process::exit(0);
         }
     });
+}
+
+/// Leave when the host process is gone: wait on a handle to it (its pid is
+/// the host's `--parent-pid`), even mid-computation. Without the pid, or
+/// when the host can't be opened, the worker leaves at once rather than
+/// outlive a host it can't watch.
+#[cfg(windows)]
+fn watch_parent(parent_pid: Option<u32>) {
+    use windows_sys::Win32::Foundation::WAIT_OBJECT_0;
+    use windows_sys::Win32::System::Threading::{
+        OpenProcess, WaitForSingleObject, INFINITE, PROCESS_SYNCHRONIZE,
+    };
+    // SAFETY: `OpenProcess` takes plain values; a null handle is checked.
+    let handle = parent_pid.map(|pid| unsafe { OpenProcess(PROCESS_SYNCHRONIZE, 0, pid) });
+    match handle {
+        Some(h) if !h.is_null() => {
+            // Handles are plain pointers; move it as an integer.
+            let h = h as usize;
+            std::thread::spawn(move || {
+                // SAFETY: the handle stays open for the process's life.
+                if unsafe { WaitForSingleObject(h as _, INFINITE) } == WAIT_OBJECT_0 {
+                    std::process::exit(0);
+                }
+            });
+        }
+        _ => std::process::exit(0),
+    }
 }
