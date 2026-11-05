@@ -535,7 +535,11 @@ parameter/refresh operations fence fetch replies at both start and finish;
 an overlapping reply reconciles from a fresh snapshot instead of replacing
 newer state (`apps/desktop/src/pageRuns.ts`: runs shared by key, closed
 250 ms after the last host lets go, every run opened again after a
-reconnect). The window's run store publishes its whole live roster with
+reconnect). A closed run's last rows are kept (`KEPT_RUNS`, the newest 32:
+about four streams' tabs): a page opened on the same key starts on them,
+marked `stale` with no run id (an action finds "The page isn't open yet"),
+until its new run answers, so coming back to a stream shows the page, not
+"Reading the page…". The window's run store publishes its whole live roster with
 `runIds()` / `subscribeRunIds`, including panel and markdown subscriptions.
 `TabReport.runs` carries that roster, and its heartbeat reads the ids again
 instead of repeating a cached list. Reports use a single-flight writer:

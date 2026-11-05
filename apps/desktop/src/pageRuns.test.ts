@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { CLOSE_AFTER_MS, COALESCE_MS, createPageRuns, type PageRunsTransport, type RunChange } from "./pageRuns.js";
+import { CLOSE_AFTER_MS, COALESCE_MS, KEPT_RUNS, createPageRuns, type PageRunsTransport, type RunChange } from "./pageRuns.js";
 import type { PageRun } from "./tauri-bridge/generated/bindings.js";
 import type { PageKey } from "./pageRuns.js";
 
@@ -350,6 +350,41 @@ describe("pageRuns", () => {
     b.close();
     await wait(CLOSE_AFTER_MS + 20);
     expect(f.calls.close).toEqual(["run-1"]);
+  });
+
+  test("a page opened again after its last host let go starts on the rows it had, stale, until the new run answers", async () => {
+    const f = fake();
+    const runs = createPageRuns(f.transport);
+    const first = runs.open(key("p"));
+    await wait(0);
+    const firstRun = first.get().run;
+    expect(firstRun).not.toBeNull();
+    first.close();
+    await wait(CLOSE_AFTER_MS + 20);
+    const again = runs.open(key("p"));
+    // At once: the old rows, no run id (an action has nothing to press on).
+    expect(again.get().run).toBe(firstRun);
+    expect(again.get().stale).toBe(true);
+    expect(again.get().runId).toBeNull();
+    await wait(0);
+    expect(again.get().stale).toBe(false);
+    expect(again.get().runId).not.toBeNull();
+    expect(again.get().run).not.toBe(firstRun);
+    // A page never seen starts empty.
+    expect(runs.open(key("other")).get().run).toBeNull();
+  });
+
+  test("only the most recent KEPT_RUNS closed runs are kept", async () => {
+    const f = fake();
+    const runs = createPageRuns(f.transport);
+    for (let i = 0; i <= KEPT_RUNS; i++) {
+      const h = runs.open(key(`p${i}`));
+      await wait(0);
+      h.close();
+    }
+    await wait(CLOSE_AFTER_MS + 20);
+    expect(runs.open(key("p0")).get().run).toBeNull();
+    expect(runs.open(key(`p${KEPT_RUNS}`)).get().run).not.toBeNull();
   });
 
   test("changes in a burst are one fetch; an older change is dropped", async () => {

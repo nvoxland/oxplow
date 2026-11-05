@@ -98,6 +98,13 @@ export const COALESCE_MS = 50;
 /** A host that drops a key and takes it straight back keeps its run. */
 export const CLOSE_AFTER_MS = 250;
 
+/** How many closed runs' last rows the window keeps, newest last. A page
+ *  coming back onto a run it let go of (a stream switched back to) shows
+ *  those, marked stale, until the new run answers. The set is the tabs of a
+ *  few streams (about eight each); an older run falls out, and a page not
+ *  seen for that long loads as a new one. */
+export const KEPT_RUNS = 32;
+
 export function keyOf(key: PageKey): string {
   const params = Object.keys(key.params)
     .sort()
@@ -107,6 +114,7 @@ export function keyOf(key: PageKey): string {
 
 export function createPageRuns(transport: PageRunsTransport) {
   const entries = new Map<string, Entry>();
+  const kept = new Map<string, PageRun>();
   const byRunId = new Map<string, Entry>();
   const rosterListeners = new Set<() => void>();
   const rosterChanged = () => { for (const listener of rosterListeners) listener(); };
@@ -275,7 +283,9 @@ export function createPageRuns(transport: PageRunsTransport) {
         requestParams: { ...key.params },
         key,
         runId: Promise.resolve(null),
-        state: NO_RUN,
+        // Rows kept from the last run of this page: shown, marked stale
+        // with no run id (nothing can be pressed on them), until it answers.
+        state: kept.has(k) ? { runId: null, run: kept.get(k)!, error: null, stale: true } : NO_RUN,
         listeners: new Set(),
         refs: 1,
         shown: 1,
@@ -323,6 +333,11 @@ export function createPageRuns(transport: PageRunsTransport) {
         mine.closeTimer = setTimeout(() => {
           if (mine.refs > 0) return;
           entries.delete(k);
+          if (mine.state.run) {
+            kept.delete(k);
+            kept.set(k, mine.state.run);
+            if (kept.size > KEPT_RUNS) kept.delete(kept.keys().next().value!);
+          }
           ++mine.opening;
           if (mine.state.runId && byRunId.delete(mine.state.runId)) rosterChanged();
           void mine.runId.then((runId) => {
