@@ -1,5 +1,7 @@
 # Cancelled while the model writes: the job stops at once and keeps what
-# it had written.
+# it had written. The words come slowly (400 ms), so the cancel, which waits
+# for the job's next look at its own state, lands while it still streams on
+# a busy machine.
 when:
   job: summarize
   intentKey: summary-cancelled
@@ -14,4 +16,4 @@ expect:
   result: { stopped: cancelled }
 model:
   replies:
-    - { text: "One bug TODO in the parser, two cleanups in the tests, and a feature request for a faster index.", chunkDelayMs: 100 }
+    - { text: "One bug TODO in the parser, two cleanups in the tests, and a feature request for a faster index.", chunkDelayMs: 400 }

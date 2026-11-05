@@ -548,3 +548,44 @@ async fn a_restart_replays_an_idempotent_job_that_was_running() {
     // The cut-off round was never recorded, so it was asked again.
     assert_eq!(fx.model.asked_typed().len(), 1);
 }
+
+/// A job ends while other work keeps the database busy. The database lets
+/// background work through one at a time, in the order it asked, and hands a
+/// slot straight to the next in line: a job whose worker was only polled
+/// between its supervisor's store reads sat on a slot nobody polled, and
+/// that supervisor's own read then waited behind it for good.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_job_ends_while_other_work_keeps_the_database_busy() {
+    let fx = fixture(MANIFEST, vec![slow(&words(40), 20)]).await;
+    // Enough work in line that the worker's turn for the database takes
+    // longer than its supervisor's tick (250 ms).
+    let busy = Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let hogs: Vec<_> = (0..16)
+        .map(|_| {
+            let (db, busy) = (fx.svc.db.clone(), busy.clone());
+            tokio::spawn(async move {
+                while busy.load(std::sync::atomic::Ordering::SeqCst) {
+                    let _ = db
+                        .transaction(|_tx| {
+                            std::thread::sleep(Duration::from_millis(30));
+                            Ok(())
+                        })
+                        .await;
+                }
+            })
+        })
+        .collect();
+    // A deadlocked job leaves the reads below waiting for good: bound them.
+    let ended = tokio::time::timeout(Duration::from_secs(60), async {
+        let id = ask(&fx, "busy").await;
+        recorded(&fx, &id).await
+    })
+    .await;
+    busy.store(false, std::sync::atomic::Ordering::SeqCst);
+    let (state, text) = ended.expect("the job ended within a minute");
+    for hog in hogs {
+        let _ = hog.await;
+    }
+    assert_eq!(state, "succeeded");
+    assert_eq!(text, words(40));
+}

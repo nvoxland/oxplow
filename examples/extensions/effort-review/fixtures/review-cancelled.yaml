@@ -14,4 +14,4 @@ expect:
   result: { stopped: cancelled }
 model:
   replies:
-    - { text: "The tests the agent ran cover the parser change, but the diff coverage leaves the error path in src/parse.rs untested, and the riskiest change is parse_block.", chunkDelayMs: 100 }
+    - { text: "The tests the agent ran cover the parser change, but the diff coverage leaves the error path in src/parse.rs untested, and the riskiest change is parse_block.", chunkDelayMs: 400 }
