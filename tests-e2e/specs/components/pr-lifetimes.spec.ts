@@ -59,8 +59,7 @@ const pr = (number: number, opened_at: string) => ({
 // A date that can't be read leaves that pull request out — said,
 // not every bar blanked — and a selected filter holds when the host runs
 // the page again (its datasets changed), rather than redrawing everything.
-test("a bad date is left out, and a filter holds across the host's re-run", async ({ fresh }) => {
-  const { page, daemon } = fresh;
+test("a bad date is left out, and a filter holds across the host's re-run", async ({ page, daemon }) => {
   await addPrs(daemon, [pr(11, "not a date")]);
   const frame = await openLifetimes(page, daemon, 3, 2);
   for (const rect of await frame.locator(".bar rect").all()) {
@@ -80,8 +79,7 @@ test("a bad date is left out, and a filter holds across the host's re-run", asyn
 // fixture's. The app's part: the "custom" badge, the sync running under the
 // permissions the extension was deployed with, and opening the page a bar
 // names.
-test("PR lifetimes is badged custom, syncs under its permissions and opens a bar's page", async ({ fresh }) => {
-  const { page, daemon } = fresh;
+test("PR lifetimes is badged custom, syncs under its permissions and opens a bar's page", async ({ page, daemon }) => {
   const frame = await openLifetimes(page, daemon);
   await expect(page.getByTestId("custom-component-badge")).toHaveText(/^by /);
 
@@ -93,8 +91,7 @@ test("PR lifetimes is badged custom, syncs under its permissions and opens a bar
   await expect(page.getByText("#12 Fix the hover state").first()).toBeVisible();
 });
 
-test("a component's frame can't navigate itself off this machine", async ({ fresh }) => {
-  const { page, daemon } = fresh;
+test("a component's frame can't navigate itself off this machine", async ({ page, daemon }) => {
   await openLifetimes(page, daemon);
   const left: string[] = [];
   page.on("request", (r) => {

@@ -353,7 +353,7 @@ test reads or relies on the task.
 components, WebKit) against `oxplow-daemon-sim` over a throwaway git
 project — the real app, a real daemon, the fake terminal harness and the fake
 work-item provider; `tests-e2e/README.md` has the harness. It isn't part
-of `test:collect` (it builds the frontend and boots a daemon per worker,
+of `test:collect` (it builds the frontend and boots a daemon per spec,
 ~40 s); CI runs it as its own `e2e` job. **Run it when a change touches
 what a person sees or does in the app** — a page, a rail section, a
 command's UI path, a testid — and add or extend a spec under

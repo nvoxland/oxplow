@@ -46,8 +46,7 @@ async function openHistory(page: Page) {
 
 /// A page's filters are in its rail, narrowing what it shows; a row click
 /// picks the param the next section reads; the tab keeps both.
-test("the rail's filters narrow a page, a row click shows the next section its pick, and the tab keeps both", async ({ fresh }) => {
-  const { page, daemon } = fresh;
+test("the rail's filters narrow a page, a row click shows the next section its pick, and the tab keeps both", async ({ page, daemon }) => {
   // The window is up while the commits land, as a person's is.
   await page.goto("/");
   await twoCommits(daemon);
@@ -116,8 +115,7 @@ test("the rail's filters narrow a page, a row click shows the next section its p
 
 /// A filter is the page's view and replaces its entry; a pick is a step
 /// and pushes one. Neither remounts the page.
-test("a filter change keeps the page and replaces the entry; a pick pushes one Back undoes", async ({ fresh }) => {
-  const { page, daemon } = fresh;
+test("a filter change keeps the page and replaces the entry; a pick pushes one Back undoes", async ({ page, daemon }) => {
   // The window is up while the commits land, as a person's is.
   await page.goto("/");
   await twoCommits(daemon);

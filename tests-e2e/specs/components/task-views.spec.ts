@@ -75,14 +75,12 @@ async function swimlanes(page: Page, daemon: Workspace, scope: string) {
   expect(await stateOf(daemon, "Card one")).toBe("done");
 }
 
-test("the swimlanes replace the Board and move a card", async ({ fresh }) => {
-  const { page, daemon } = fresh;
+test("the swimlanes replace the Board and move a card", async ({ page, daemon }) => {
   await install(daemon);
   await swimlanes(page, daemon, "thread");
 });
 
-test("the swimlanes work over another work list too (e2e/fake active)", async ({ fresh }) => {
-  const { page, daemon } = fresh;
+test("the swimlanes work over another work list too (e2e/fake active)", async ({ page, daemon }) => {
   await install(daemon);
   // The fake tracker as the active work list, set up before any page is
   // open: Settings → Integrations does the same (see fake-provider.spec).
@@ -104,11 +102,10 @@ test("the swimlanes work over another work list too (e2e/fake active)", async ({
   await swimlanes(page, daemon, "all");
 });
 
-test("the editor, the list and oxplow's own, each chosen from Settings", async ({ fresh }) => {
+test("the editor, the list and oxplow's own, each chosen from Settings", async ({ page, daemon }) => {
   // Four Settings choices twice over and three pages: about a minute on a
   // quiet machine, so the default 60s leaves it no room.
   test.setTimeout(180_000);
-  const { page, daemon } = fresh;
   await install(daemon);
   await run(daemon, "oxplow.work_item.create", { title: "Item to edit", thread: daemon.thread });
   await searchable(daemon, "Item to edit", "work_item");

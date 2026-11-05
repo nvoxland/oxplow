@@ -4,8 +4,7 @@ import { expandRailSection, openFromLauncher, openNewTask } from "../../support/
 
 // On a daemon of their own: the rail's Up Next shows the thread's first ten
 // ready tasks, which other specs' tasks would otherwise fill.
-test("a task made in the UI is on the thread's list", async ({ fresh }) => {
-  const { page } = fresh;
+test("a task made in the UI is on the thread's list", async ({ page }) => {
   await page.goto("/");
   await openNewTask(page);
   const form = page.locator('[data-testid="viz-form"]:visible');
@@ -19,8 +18,7 @@ test("a task made in the UI is on the thread's list", async ({ fresh }) => {
 
 // The New Item form asks for the active list's own fields, and its second
 // submit files the item and starts the next with the list's fields kept.
-test("Save and Another keeps the state and the list's fields", async ({ fresh }) => {
-  const { page } = fresh;
+test("Save and Another keeps the state and the list's fields", async ({ page }) => {
   await page.goto("/");
   await openNewTask(page);
   const form = page.locator('[data-testid="viz-form"]:visible');
@@ -37,8 +35,7 @@ test("Save and Another keeps the state and the list's fields", async ({ fresh })
   await expect(work).toContainText("Second of two");
 });
 
-test("a task made elsewhere appears without a reload", async ({ fresh }) => {
-  const { page, daemon } = fresh;
+test("a task made elsewhere appears without a reload", async ({ page, daemon }) => {
   await page.goto("/");
   await expandRailSection(page, "ext:oxplow-bundled/work");
   await expect(page.getByTestId("rail-section-ext:oxplow-bundled/work")).toBeVisible();
@@ -51,8 +48,7 @@ test("a task made elsewhere appears without a reload", async ({ fresh }) => {
 // The Tasks page's scope is its view params: in its tab's id, so a reload
 // keeps it, and opening Tasks again while one tab shows another scope
 // focuses that tab at the default view.
-test("the Tasks page's scope is its tab's: it re-renders the page, a reload keeps it", async ({ fresh }) => {
-  const { page } = fresh;
+test("the Tasks page's scope is its tab's: it re-renders the page, a reload keeps it", async ({ page }) => {
   await page.goto("/");
   await openFromLauncher(page, "Tasks");
   const body = () => page.locator('[data-testid^="center-tab-body-oxplow:oxplow/page?"][data-testid*="page=tasks"]:visible');

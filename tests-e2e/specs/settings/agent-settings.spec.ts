@@ -8,8 +8,7 @@ import { openFromLauncher } from "../../support/ui.js";
 /// Settings → Agents shows each enabled harness's own settings, as the
 /// harness declares them: OpenCode's model once it's enabled, saved to
 /// `agentConfig.opencode.model`. Nothing names a harness in the page.
-test("an enabled harness's declared settings are offered and saved", async ({ fresh }) => {
-  const { page, daemon } = fresh;
+test("an enabled harness's declared settings are offered and saved", async ({ page, daemon }) => {
   await page.goto("/");
   await openFromLauncher(page, "Settings: Agents");
   await expect(page.getByText("OpenCode — Model")).toHaveCount(0);

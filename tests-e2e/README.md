@@ -52,7 +52,7 @@ CORS is permissive for exactly this (`.context/remote-daemon.md`).
   again and naming its last error on timeout. `ipc()` on a reply that
   isn't JSON names the call, the HTTP status and what came back.
 - **`support/fixtures.ts`** — `test` and `expect` for specs:
-  - `daemon`, one per worker. Its pages open on the stream's seeded
+  - `daemon`, one per spec. Its pages open on the stream's seeded
     thread, which runs the project's default agent — the fake terminal
     harness (`agents: [terminal]`) — so the suite never starts a real agent
     CLI. That harness is the extension's `terminal` provider (`bin/terminal`,
@@ -62,16 +62,13 @@ CORS is permissive for exactly this (`.context/remote-daemon.md`).
     no spec depends on another having approved it.
   - A workspace that fails while booting is stopped and removed; each
     fixture tears down in a `finally`.
-  - `daemon` is settled before any page opens — boot's background tasks
+  - `daemon` is a spec's own (booted for it, stopped after it), so no spec meets
+    what another left behind: work items, streams, settings, git commits. It is settled before any page opens — boot's background tasks
     done and the extensions' datasets published — and carries the `stream`
     and `thread` its pages open on.
   - `storageState` points the page at that daemon (`connectedTo()` builds one
     for a context of a spec's own, e.g. with another token).
   - `page` fails any spec whose page threw.
-  - `fresh` — a daemon and page of the spec's own, for a spec whose state
-    no other may touch first (nothing approved, an empty project). Its page
-    has the same guard, and a spec on `fresh` alone never boots the
-    worker's daemon.
 - **`support/pages.ts`** — `installExtension` writes an extension of the spec's
   own (manifest, pages, component files) into the project and deploys it.
 - **`support/ui.ts`** — a person's moves (`expandRailSection`, `openNewTask`,

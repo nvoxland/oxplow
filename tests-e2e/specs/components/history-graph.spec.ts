@@ -27,8 +27,7 @@ function history(daemon: Daemon) {
   git("merge", "-q", "--no-ff", "-m", "Merge side", "side");
 }
 
-test("the history graph replaces the list and opens a commit", async ({ fresh }) => {
-  const { page, daemon } = fresh;
+test("the history graph replaces the list and opens a commit", async ({ page, daemon }) => {
   history(daemon);
   await page.goto("/");
   await openFromLauncher(page, "Git History");
@@ -43,8 +42,7 @@ test("the history graph replaces the list and opens a commit", async ({ fresh })
 // The graph's filters are Git History's view params (its contract's
 // `view`): typing puts `q` in the tab's address as a filter (Back stays
 // where it was), a reload keeps it, and oxplow's own list reads the same.
-test("the history graph's filter is the page's: in the address and kept on a reload", async ({ fresh }) => {
-  const { page, daemon } = fresh;
+test("the history graph's filter is the page's: in the address and kept on a reload", async ({ page, daemon }) => {
   history(daemon);
   await page.goto("/");
   await openFromLauncher(page, "Git History");
@@ -71,8 +69,7 @@ test("the history graph's filter is the page's: in the address and kept on a rel
   await expect(page.getByTestId("page-param-q-value").filter({ visible: true })).toContainText("side");
 });
 
-test("without oxplow-bundled, Git History is oxplow's plain list", async ({ fresh }) => {
-  const { page, daemon } = fresh;
+test("without oxplow-bundled, Git History is oxplow's plain list", async ({ page, daemon }) => {
   history(daemon);
   await run(daemon, "oxplow.extension.disable", { name: "oxplow-bundled" });
   await page.goto("/");

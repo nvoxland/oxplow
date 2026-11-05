@@ -1,8 +1,7 @@
 import { expect, test } from "../../support/fixtures.js";
 import { openFromLauncher, searchLauncher } from "../../support/ui.js";
 
-test("an extension's page is offered, and turning the extension off takes it away", async ({ fresh }) => {
-  const { page } = fresh;
+test("an extension's page is offered, and turning the extension off takes it away", async ({ page }) => {
   await page.goto("/");
   // The test extension's `overview` page, in the launcher's Work pages.
   await searchLauncher(page, "Item");

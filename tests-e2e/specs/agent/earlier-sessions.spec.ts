@@ -8,8 +8,7 @@ interface Opened {
 
 /// A thread's closed session is listed on the New Session page as closed
 /// here; picking it brings the same session's tab back.
-test("a closed session is listed on the New Session page and picking it reopens it", async ({ fresh }) => {
-  const { page, daemon } = fresh;
+test("a closed session is listed on the New Session page and picking it reopens it", async ({ page, daemon }) => {
   // A session that has run (it is bound to a conversation), then closed.
   const opened = await run<Opened>(daemon, "oxplow.agent_session.open", {
     thread: daemon.thread,
@@ -35,8 +34,7 @@ test("a closed session is listed on the New Session page and picking it reopens 
 
 /// A closed session found by search opens its transcript, not nothing; the
 /// page's Reopen brings the session back.
-test("a closed session found by search opens its transcript, which can reopen it", async ({ fresh }) => {
-  const { page, daemon } = fresh;
+test("a closed session found by search opens its transcript, which can reopen it", async ({ page, daemon }) => {
   const opened = await run<Opened>(daemon, "oxplow.agent_session.open", {
     thread: daemon.thread,
     resume: "conv-found",
@@ -60,8 +58,7 @@ test("a closed session found by search opens its transcript, which can reopen it
 
 /// A session open in this thread is listed too; picking it shows its tab
 /// and leaves the New Session page open (only starting one closes it).
-test("picking a session open here shows it and keeps the New Session page", async ({ fresh }) => {
-  const { page, daemon } = fresh;
+test("picking a session open here shows it and keeps the New Session page", async ({ page, daemon }) => {
   const opened = await run<Opened>(daemon, "oxplow.agent_session.open", {
     thread: daemon.thread,
     resume: "conv-open",

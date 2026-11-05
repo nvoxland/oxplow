@@ -5,8 +5,7 @@ import { expandRailSection, openFromLauncher } from "../../support/ui.js";
 // The rail's Go To is oxplow-bundled's panel over `v_bookmark`
 // and `v_page_visit`: a page starred from its nav bar shows there, and a
 // page visited shows in its history.
-test("a starred page is in the rail's Go To", async ({ fresh }) => {
-  const { page } = fresh;
+test("a starred page is in the rail's Go To", async ({ page }) => {
   await page.goto("/");
   await openFromLauncher(page, "Metrics");
   // Every open page has a nav bar; the visible one is Metrics'.
@@ -21,8 +20,7 @@ test("a starred page is in the rail's Go To", async ({ fresh }) => {
 
 // Go To is the foundation's page: the starred page is a bookmark row
 // there, and Recently visited lists pages.
-test("the Go To page lists a starred page and the pages visited", async ({ fresh }) => {
-  const { page } = fresh;
+test("the Go To page lists a starred page and the pages visited", async ({ page }) => {
   await page.goto("/");
   await openFromLauncher(page, "Metrics");
   await page.locator('[data-testid="page-nav-bookmark"]:visible').click();
@@ -35,8 +33,7 @@ test("the Go To page lists a starred page and the pages visited", async ({ fresh
 
 // Local History is the foundation's document of two pages: its snapshots
 // recent, or by git commit (the `mode` param, in the address).
-test("the Local History page draws its snapshots and keeps its grouping in the address", async ({ fresh }) => {
-  const { page } = fresh;
+test("the Local History page draws its snapshots and keeps its grouping in the address", async ({ page }) => {
   await page.goto("/");
   await openFromLauncher(page, "Local History");
   const body = page.locator('[data-testid^="center-tab-body-oxplow:oxplow/page?"][data-testid$="page=local-history"]:visible');
@@ -49,8 +46,7 @@ test("the Local History page draws its snapshots and keeps its grouping in the a
 // A bookmark is of the page's whole address, view included. The same page at
 // another view shows the star as "bookmarked at other values", and its popover
 // moves that bookmark to the view on screen (one undoable command).
-test("the star offers to move a bookmark made at another filter value", async ({ fresh }) => {
-  const { page, daemon } = fresh;
+test("the star offers to move a bookmark made at another filter value", async ({ page, daemon }) => {
   const bookmarked = async () =>
     (await ipc<{ rows: string[][] }>(daemon, "query_sql", { sql: "SELECT uri FROM v_bookmark" })).rows.map((r) => String(r[0]));
   await page.goto("/");
