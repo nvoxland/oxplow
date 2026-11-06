@@ -827,7 +827,10 @@ appended, and every other line stays byte for byte as the person wrote it
 (flow style, comments, keys equal to their default such as
 `metricRetentionDays: 0`). The edit is checked to change that key and nothing
 else; a file whose YAML ties keys together (anchors) is refused, to be
-edited by hand. The whole-file re-render it replaced lost comments and
+edited by hand. The file is replaced atomically, as the person's own
+`write_personal_key` file is: a running collector asks many times a second
+whether its extension is on, and a truncated file read as "nothing is
+enabled" stops the run for good. The whole-file re-render it replaced lost comments and
 formatting and dropped default-valued keys. Adding a field
 to `RawConfig` makes it managed, documented and settable at once.
 
