@@ -1204,6 +1204,12 @@ Cleanup runs at runtime startup and again once every 24 hours via
 `runtime.runSnapshotCleanup` (wired in `initialize()`, cleared in
 `dispose()`).
 
+**A take costs what changed.** It reads the latest row of only the paths it
+looks at (`latest_stat_for_paths`), and a rescan of a directory only those under
+it (`latest_stat_under`), each a seek on `idx_file_snapshot_stream_path`. Only a
+stream's first sweep reads every path. `latest_stat_per_path` over all history
+took 15.8 s at 5 million rows.
+
 **Ignoring generated directories.** The fs-watcher and the snapshot
 seeder share one filter: `shouldIgnoreWorkspaceWatchPath` in
 `crates/oxplow-fs-watch/src/lib.rs`. It covers `.git/`, `.oxplow/logs/`,

@@ -73,6 +73,14 @@ impl ContentPolicy {
     }
 }
 
+/// `path` from the worktree root, as `file_snapshot` holds it.
+fn rel_of(project_dir: &Path, path: &Path) -> String {
+    path.strip_prefix(project_dir)
+        .unwrap_or(path)
+        .to_string_lossy()
+        .into_owned()
+}
+
 impl From<SnapshotTrigger> for TakeRequest {
     fn from(trigger: SnapshotTrigger) -> Self {
         TakeRequest {
@@ -968,10 +976,12 @@ impl SnapshotCaptureService {
     ) -> Result<usize, Box<dyn std::error::Error + Send + Sync>> {
         let sweep_started = Instant::now();
         let db_started = Instant::now();
+        // What was last recorded of what this pass looks at. A path elsewhere
+        // is not this pass's to call deleted.
         let mut latest = self
             .inner
             .store
-            .latest_stat_per_path(self.inner.stream_id)
+            .latest_stat_under(self.inner.stream_id, &under.to_string_lossy())
             .await?;
         let prior_rows = latest.len();
         let db_load_ms = db_started.elapsed().as_millis() as u64;
@@ -979,8 +989,6 @@ impl SnapshotCaptureService {
             prior_rows,
             db_load_ms, "snapshot startup sweep: loaded latest_stat_per_path",
         );
-        // A path elsewhere is not this pass's to call deleted.
-        latest.retain(|path, _| Path::new(path).starts_with(under));
         let walk_from = self.inner.project_dir.join(under);
         let project_dir = self.inner.project_dir.clone();
         let max_bytes = self.inner.max_file_bytes;
@@ -1411,16 +1419,6 @@ impl SnapshotCaptureService {
         }
         let capture_started = Instant::now();
         let drained_count = drained.len();
-        // Settle classification + "have we seen this path before?"
-        // depend on the current contents of `file_snapshot`. One
-        // query yields both lookups; staged sweep already uses the
-        // same call so the query plan is hot.
-        let latest: std::collections::HashMap<String, oxplow_db::analytics_stores::LatestStat> =
-            self.inner
-                .store
-                .latest_stat_per_path(self.inner.stream_id)
-                .await?;
-
         // Split into:
         //   - staged   — short-circuit straight to a row.
         //   - unstaged — parallel stat / read / hash / blob.write.
@@ -1436,6 +1434,19 @@ impl SnapshotCaptureService {
         }
         let staged_count = staged_paths.len() as u64;
         let unstaged_count = unstaged_entries.len() as u64;
+        // Settle classification + "have we seen this path before?" depend on
+        // the current contents of `file_snapshot`, of only the paths this take
+        // looks at: a take costs what changed, never the size of the tree or
+        // its history.
+        let looked_at: Vec<String> = unstaged_entries
+            .iter()
+            .map(|(path, _)| rel_of(&self.inner.project_dir, path))
+            .collect();
+        let latest = self
+            .inner
+            .store
+            .latest_stat_for_paths(self.inner.stream_id, &looked_at)
+            .await?;
 
         let project_dir = self.inner.project_dir.clone();
         let stream_id = self.inner.stream_id;
@@ -1457,13 +1468,6 @@ impl SnapshotCaptureService {
         let (rows, deferred): (Vec<FileSnapshot>, Vec<(PathBuf, DirtyEntry)>) =
             tokio::task::spawn_blocking(move || {
                 use rayon::prelude::*;
-
-                fn rel_of(project_dir: &Path, path: &Path) -> String {
-                    path.strip_prefix(project_dir)
-                        .unwrap_or(path)
-                        .to_string_lossy()
-                        .into_owned()
-                }
 
                 let now = Timestamp::now();
                 let mut rows: Vec<FileSnapshot> =
