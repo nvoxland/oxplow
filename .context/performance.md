@@ -694,7 +694,7 @@ machine):
 |---|---|---|
 | `row` loader: `v_branch_divergence d WHERE d.base = v.scope AND d.head = 'HEAD'` | 444 ms (a `compute_divergence`, merge simulation included, for each of 16 refs) | 0 (read only for a branch comparison, one pair) |
 | three libgit2 status scans (conflicted, staged, statuses) | 3 x 30 ms | 30 ms (`oxplow_git::worktree_status`) |
-| filter rebuilt by walking every folder for `.gitignore`s | 35-100 ms | about 1 ms (`WorkspaceFilter::for_folder`: root, the way to the folder, the folder) |
+| filter rebuilt by walking every folder for `.gitignore`s | 35-100 ms | about 1 ms (`WorkspaceFilter` reads only the rules on the way to what it judges) |
 
 Causes: `d.base = v.scope` compares to a column, so no pair is named and
 the dataset ranges over all branches (`LiveSources::branch_pairs`); the

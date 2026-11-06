@@ -182,6 +182,12 @@ remembered lookup, with no `stat` (`ignore_change`). Pinned by
 `filter::tests::*`, `each_stream_has_its_own_filter_and_all_follow_generated` and
 `a_gitignore_edit_applies_to_the_running_workspace_watcher`.
 
+**A watch registers as one batch** (`paths_mut`). On macOS `notify` stops and
+recreates the whole FSEvents stream on each `watch` call, and each stop also
+calls `fseventsd`. One call per top-level directory took about 7.5 s per
+watch on this repo and on metabase (measured under load 10; a batch takes 30 ms
+to 1 s), for every watch of every oxplow process on the machine.
+
 **This logic is tested with no OS.** `oxplow-fs-watch/src/router.rs` holds
 what happens to an event (`Router::handle`, on the OS callback thread) and
 what moves the watches (`Follower`, over the small `Registrar` trait), and

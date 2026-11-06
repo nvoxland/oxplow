@@ -152,9 +152,14 @@ impl FsWatcher {
         };
 
         let mut watcher = notify::recommended_watcher(move |res| router.handle(res))?;
+        // As one batch: on macOS each `watch` alone stops and restarts the
+        // whole FSEvents stream, which took seconds at boot and loaded
+        // `fseventsd` for every process on the machine.
+        let mut batch = watcher.paths_mut();
         for (p, mode) in paths {
-            watcher.watch(&p, mode)?;
+            batch.add(&p, mode)?;
         }
+        batch.commit()?;
 
         let watcher = Arc::new(Mutex::new(watcher));
         if let Some(follow) = follow {
