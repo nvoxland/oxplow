@@ -107,6 +107,7 @@ fn kv_spec(name: &str, confirm: Confirm) -> CommandSpec {
         }),
         job: false,
         confirm,
+        confirm_says: None,
         undoable: true,
         lifecycle: Lifecycle::Stable,
         atomicity: Atomicity::Tx,
@@ -1625,6 +1626,7 @@ async fn a_composites_own_events_land_with_its_steps_only_when_all_landed() {
         input_schema: json!({ "type": "object" }),
         job: false,
         confirm: Confirm::Never,
+        confirm_says: None,
         undoable: true,
         lifecycle: oxplow_domain::Lifecycle::Experimental,
         atomicity: oxplow_domain::Atomicity::Dispatch,
@@ -2396,4 +2398,49 @@ fn placing_an_agent_in_its_stream_keeps_its_session() {
         Some(oxplow_domain::AgentSessionId::new(5))
     );
     assert_eq!(placed.thread_id(), Some(ThreadId::new(7)));
+}
+
+/// A command may say in words what it does when it asks: the person reads
+/// that, with its input filled in, not the input's raw fields.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_command_says_what_it_does_when_it_asks() {
+    let (_db, bus) = bus();
+    let mut spec = kv_spec("oxplow.kv.set", Confirm::Always);
+    spec.confirm_says = Some("Set {{k}} to {{v}}.".into());
+    bus.register(Command::new(spec, kv_set()).unwrap()).unwrap();
+    let err = bus
+        .run(
+            &Actor::Human,
+            "oxplow.kv.set",
+            json!({"k": "a", "v": "1"}),
+            false,
+        )
+        .await
+        .unwrap_err();
+    let CommandError::NeedsConfirmation { preview } = err else {
+        panic!("{err:?}");
+    };
+    assert_eq!(preview.details, ["Set a to 1."]);
+}
+
+/// What foundation declares reaches the bus: a rebase and a merge say what
+/// they do, and neither is presented as destroying something.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_rebase_and_a_merge_say_what_they_do() {
+    let fx = crate::test_fixtures::services_with_effort().await;
+    for (name, words) in [
+        ("oxplow.git.rebase", "Replay"),
+        ("oxplow.vcs.merge", "Merge"),
+    ] {
+        let spec = fx.svc.commands.spec(name).expect(name);
+        assert_eq!(spec.confirm, Confirm::Always, "{name}");
+        assert!(
+            spec.confirm_says
+                .as_deref()
+                .unwrap_or_default()
+                .contains(words),
+            "{name}: {:?}",
+            spec.confirm_says
+        );
+    }
 }

@@ -15,7 +15,7 @@ export { OpenPageLink, type OpenPageLinkProps } from "./OpenPageLink.js";
 export { ParamList, ParamRow, type ParamListProps, type ParamRowProps } from "./ParamControls.js";
 export { Popover, type PopoverProps } from "./Popover.js";
 export { RailGroup, type RailGroupProps } from "./RailGroup.js";
-export { Loading } from "./Loading.js";
+export { Loading, LoadingScreen } from "./Loading.js";
 export { useSearchFilter, type SearchFilterOptions } from "./SearchFilter.js";
 export { Section, type SectionProps } from "./Section.js";
 export { Stat } from "./Stat.js";

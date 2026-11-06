@@ -71,6 +71,39 @@ test("a shell opens at the surface's size and its replay is written", async () =
   expect(calls).toEqual([`open ${SHELL} 80x24`]);
 });
 
+// A person typing a new thread's title while a session finishes opening keeps
+// the focus: losing it would close that entry, which cancels on blur.
+test("a session that finishes opening takes the focus, unless a field elsewhere has it", async () => {
+  const open = async () => {
+    let focused = 0;
+    const { term, written } = fakeTerm();
+    Object.assign(term, { element: document.createElement("div"), focus: () => void focused++ });
+    const { result } = renderHook(() => useTerminalSession(SHELL, { shown: true }));
+    act(() => void result.current.attach(term));
+    await waitFor(() => expect(written).toContain("hello"));
+    await waitFor(() => expect(calls.at(-1)).toBe(`open ${SHELL} 80x24`));
+    return () => focused;
+  };
+  const free = await open();
+  await waitFor(() => expect(free()).toBe(1));
+  cleanup();
+
+  const field = document.createElement("input");
+  document.body.append(field);
+  field.focus();
+  try {
+    const held = await open();
+    // The replay is written just before the focus would be taken.
+    await act(async () => {
+      await answer;
+    });
+    expect(held()).toBe(0);
+    expect(document.activeElement).toBe(field);
+  } finally {
+    field.remove();
+  }
+});
+
 test("an agent's hidden tab looks it up and opens only one that runs", async () => {
   const { result, rerender } = renderHook(({ shown }) => useTerminalSession(AGENT, { shown, startOnActivate: true }), {
     initialProps: { shown: false },

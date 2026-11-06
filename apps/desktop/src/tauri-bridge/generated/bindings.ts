@@ -1541,6 +1541,11 @@ export type CommandSpec = {
 	 */
 	job?: boolean,
 	confirm: Confirm,
+	/**
+	 *  What a person is told when it asks, in place of its input and, for a
+	 *  destructive one, the generic warning: `{{field}}` is that input.
+	 */
+	confirm_says?: string | null,
 	/**  The handler returns an inverse, so `commands.undo` can apply it. */
 	undoable: boolean,
 	lifecycle: Lifecycle,
@@ -2292,6 +2297,8 @@ export type ExtensionCommand = {
 	/**  What runs it. */
 	handler: CommandHandler,
 	confirm: Confirm,
+	/**  What a person is told when it asks (`CommandSpec::confirm_says`). */
+	confirmSays: string | null,
 	access: Access,
 	/**
 	 *  A durable job's model may call it (`job: true`, a handler of the
@@ -3876,6 +3883,11 @@ export type Node_Deserialize = {
 	 *  is about, and what to do about it.
 	 */
 	callout: boolean,
+	/**
+	 *  The column of its row that names it (a callout that is a worktree's
+	 *  or a repository's); `title` stands when there is no row.
+	 */
+	titleFrom: string | null,
 	/**  The icon beside a callout's title. */
 	icon: string | null,
 	/**  Its heading folds it; the person's choice is the tab's. */
@@ -3914,6 +3926,11 @@ export type Node_Serialize = {
 	 *  is about, and what to do about it.
 	 */
 	callout: boolean,
+	/**
+	 *  The column of its row that names it (a callout that is a worktree's
+	 *  or a repository's); `title` stands when there is no row.
+	 */
+	titleFrom: string | null,
 	/**  The icon beside a callout's title. */
 	icon: string | null,
 	/**  Its heading folds it; the person's choice is the tab's. */
@@ -4476,6 +4493,16 @@ export type PageAction_Deserialize = {
 	 */
 	enabled: string | null,
 	/**
+	 *  A button drawn on this column's line of a `detail`, beside what it
+	 *  acts on, instead of with the buttons under the section.
+	 */
+	fact: string | null,
+	/**
+	 *  What its command does, in words: its hover. From the command's
+	 *  summary when the page runs, never from the page's file.
+	 */
+	does?: string | null,
+	/**
 	 *  The row action a click on the row (not on a link or control in it),
 	 *  or Enter on it, runs: the one a person most often wants. The first
 	 *  `primary` action a row is offered (`when`) is the one.
@@ -4629,6 +4656,16 @@ export type PageAction_Serialize = {
 	 *  disables.
 	 */
 	enabled: string | null,
+	/**
+	 *  A button drawn on this column's line of a `detail`, beside what it
+	 *  acts on, instead of with the buttons under the section.
+	 */
+	fact: string | null,
+	/**
+	 *  What its command does, in words: its hover. From the command's
+	 *  summary when the page runs, never from the page's file.
+	 */
+	does: string | null,
 	/**
 	 *  The row action a click on the row (not on a link or control in it),
 	 *  or Enter on it, runs: the one a person most often wants. The first

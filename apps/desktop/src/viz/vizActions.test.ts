@@ -211,9 +211,10 @@ test("an `open` action opens the URI the press answered, with no toast, undo or 
   expect(await performVizAction(open, run, null, null, false, none)).toBe("failed");
 });
 
-test("actionDoes says the command an action runs, or the column it opens", () => {
-  expect(actionDoes(action)).toBe("oxplow.work_item.transition");
-  expect(actionDoes({ ...action, command: null, open: "current_uri" })).toBe("opens current_uri");
+test("actionDoes says what an action does in words, never its command's id", () => {
+  expect(actionDoes({ ...action, does: "Pull the stream's branch." })).toBe("Pull the stream's branch.");
+  expect(actionDoes({ ...action, does: null })).toBe("");
+  expect(actionDoes({ ...action, command: null, open: "current_uri" })).toBe("");
 });
 
 test("an action whose result names a thing offers an Open link to it", async () => {

@@ -121,3 +121,24 @@ test("a node's form action opens from page_action_form and submits through run_p
     false,
   ]);
 });
+
+// Coming back to a page draws its kept rows before its new run has answered:
+// the form waits for the run, and says nothing is wrong meanwhile.
+test("a form node drawn before its run is open waits for it, with no error", async () => {
+  const { calls, forms, press } = fakes();
+  const ui = (runId: string | null) => (
+    <PageActionContext.Provider value={press}>
+      <PageFormsContext.Provider value={forms}>
+        <PageTree run={formPage()} runId={runId as string} />
+      </PageFormsContext.Provider>
+    </PageActionContext.Provider>
+  );
+  const view = render(ui(null));
+  await new Promise((r) => setTimeout(r, 20));
+  expect(view.container.textContent).not.toContain("isn't open yet");
+  expect(calls).toEqual([]);
+  view.rerender(ui("run-1"));
+  const field = (await view.findByTestId("viz-form-fields-title")) as HTMLInputElement;
+  expect(field.value).toBe("Old");
+  expect(view.container.textContent).not.toContain("isn't open yet");
+});

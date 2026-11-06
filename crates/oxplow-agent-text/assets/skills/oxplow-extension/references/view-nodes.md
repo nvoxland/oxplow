@@ -12,10 +12,12 @@ another extension's page may take over) and `size`. A section may also have:
 
 - `callout: true`: a panel over the rest of the page, for the state of what
   the page is about and what to do about it (a branch against its upstream,
-  with Push and Pull). Its title and buttons share the first line, what it
-  says goes under them; `icon:` puts an icon by the title, and only a callout
+  with Push and Pull). Its title is the first line, its facts the lines under
+  it, each with the buttons that name it (`fact:`); `icon:` puts an icon by the title, and only a callout
   takes one. With `hide_title` it is one line. Use it for one such thing on a
   page, not for ordinary content.
+- `title_from: <column>`: that column of its first row names it, in its
+  heading and Contents; `title` stands when there is no row.
 - `collapsible: true`: its heading folds it; the choice is the tab's.
 - `link: <page id>`: an arrow beside its heading opens that page (a bare slug
   is this extension's). Prefer it to a one-value `group` that only makes a
@@ -236,6 +238,8 @@ row action) or the page (`page-format.md`).
   the row is truthy, and the server refuses it then too. `when` hides a
   button; use `enabled` when the button should stay in its place (a Push
   with nothing to push).
+- `fact: <column>` on a button over a `detail`: the button sits on that
+  column's line, beside what it acts on, instead of under the section.
 - `form: true` opens the command's form instead of running it. `group:
   <value>` puts the button in that group's heading. `prominent: true` keeps
   one a button in the nav bar (only for what a person comes to do);

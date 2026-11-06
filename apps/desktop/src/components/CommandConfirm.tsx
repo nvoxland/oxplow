@@ -59,7 +59,8 @@ export function ConfirmBox({
       live = false;
     };
   }, [command]);
-  const destructive = spec?.confirm === "destructive";
+  const told = confirmTold(spec, details);
+  const destructive = told.warn;
   return (
     <div
       data-testid={testIdPrefix}
@@ -75,27 +76,38 @@ export function ConfirmBox({
       }}
     >
       <div style={{ fontSize: "var(--text-sm)" }}>
-        <strong title={command}>{label}</strong>
-        {destructive ? <span style={{ color: "var(--severity-critical)" }}> — this removes or rewrites something</span> : null}.
+        <strong>{label}</strong>
+        {told.warn ? <span style={{ color: "var(--severity-critical)" }}> — this removes or rewrites something</span> : null}
       </div>
-      {spec ? <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>{spec.summary}</div> : null}
-      {details.length > 0 ? (
+      {told.sentence ? <div data-testid={`${testIdPrefix}-says`} style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>{told.sentence}</div> : null}
+      {told.list.length > 0 ? (
         <ul data-testid={`${testIdPrefix}-details`} style={detailsStyle}>
-          {details.map((line) => (
+          {told.list.map((line) => (
             <li key={line}>{line}</li>
           ))}
         </ul>
       ) : null}
-      <div style={{ display: "flex", gap: 6 }}>
-        <button type="button" data-testid={`${testIdPrefix}-run`} autoFocus onClick={onConfirm}>
-          Run {label}
-        </button>
-        <button type="button" data-testid={`${testIdPrefix}-cancel`} onClick={onCancel}>
+      <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+        <button type="button" className="ox-button" data-testid={`${testIdPrefix}-cancel`} onClick={onCancel}>
           Cancel
+        </button>
+        <button type="button" className="ox-button ox-primary" data-testid={`${testIdPrefix}-run`} autoFocus onClick={onConfirm}>
+          {label}
         </button>
       </div>
     </div>
   );
+}
+
+/** What the box tells the person: a command's own sentence (which the bus
+ *  sent as its one detail), or its summary, its input's lines, and the
+ *  generic warning when it is destructive. */
+export function confirmTold(
+  spec: Pick<CommandSpec, "summary" | "confirm" | "confirm_says"> | null,
+  details: readonly string[],
+): { warn: boolean; sentence: string | null; list: readonly string[] } {
+  if (spec?.confirm_says) return { warn: false, sentence: details[0] ?? spec.confirm_says, list: [] };
+  return { warn: spec?.confirm === "destructive", sentence: spec?.summary ?? null, list: details };
 }
 
 const detailsStyle: CSSProperties = {

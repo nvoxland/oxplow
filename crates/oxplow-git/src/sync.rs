@@ -61,6 +61,13 @@ pub fn pull_remote_into_current(
     run(&["pull", remote, branch], repo)
 }
 
+/// Push the current branch to `remote` under its own name and make that its
+/// upstream: what a branch with no upstream needs before a plain push works.
+pub fn publish(repo: &Path, remote: Option<&str>) -> std::io::Result<GitOpResult> {
+    let r = remote.unwrap_or("origin");
+    run(&["push", "--set-upstream", r, "HEAD"], repo)
+}
+
 pub fn push(repo: &Path) -> std::io::Result<GitOpResult> {
     run(&["push"], repo)
 }

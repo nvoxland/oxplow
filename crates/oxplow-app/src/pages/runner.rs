@@ -389,6 +389,8 @@ impl<'a> PageRunner<'a> {
                 Some(evaluate_alert(a, &loaders.get(watched)?.result))
             });
             let see_also = self.see_also(&page, &params, &loaders);
+            let mut page = page;
+            page.describe_actions(|command| self.commands.spec(command).map(|c| c.summary));
             Ok(PageRun {
                 inactive: None,
                 page,

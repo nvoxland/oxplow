@@ -1279,6 +1279,13 @@ pub struct PageAction {
     /// column is truthy (a Push with nothing to push): `when` hides, this
     /// disables.
     pub enabled: Option<String>,
+    /// A button drawn on this column's line of a `detail`, beside what it
+    /// acts on, instead of with the buttons under the section.
+    pub fact: Option<String>,
+    /// What its command does, in words: its hover. From the command's
+    /// summary when the page runs, never from the page's file.
+    #[serde(default)]
+    pub does: Option<String>,
     /// The row action a click on the row (not on a link or control in it),
     /// or Enter on it, runs: the one a person most often wants. The first
     /// `primary` action a row is offered (`when`) is the one.
@@ -1398,6 +1405,8 @@ pub(crate) struct ActionFile {
     when: Option<String>,
     #[serde(default)]
     enabled: Option<String>,
+    #[serde(default)]
+    fact: Option<String>,
     /// The row action a click on the row runs.
     #[serde(default)]
     primary: bool,
@@ -1580,6 +1589,12 @@ pub(crate) fn parse_actions(
         if f.enabled.is_some() && (f.row || f.drag || f.edit || !holds_one_row) {
             return Err(format!(
                 "actions: `{}`: `enabled` is for a button over a viz that holds one row (detail, form, number): a row action uses `when`",
+                f.id
+            ));
+        }
+        if f.fact.is_some() && (f.row || f.drag || f.edit || f.group.is_some() || !holds_one_row) {
+            return Err(format!(
+                "actions: `{}`: `fact` is for a button on a line of a `detail`",
                 f.id
             ));
         }
@@ -1793,6 +1808,8 @@ pub(crate) fn parse_actions(
             then: f.then,
             when: f.when,
             enabled: f.enabled,
+            fact: f.fact,
+            does: None,
             primary: f.primary,
             prominent: f.prominent,
             submenu: f.submenu.map(|n| n.trim().to_string()),

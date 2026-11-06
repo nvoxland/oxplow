@@ -1821,11 +1821,17 @@ commands:
     scope: vcs.write
     op: ignore
     example: {"stream": "str1", "entry": "target/"}
+  - name: git.publish
+    summary: "Push the stream's branch to a remote for the first time, and track it there."
+    scope: vcs.remote
+    op: publish
+    example: {"stream": "str1", "remote": "origin"}
   - name: git.rebase
     summary: "Rebase the stream's branch onto a revision (rewrites its commits)."
     scope: vcs.write
     op: rebase
-    confirm: destructive
+    confirm: always
+    confirm_says: "Replay this branch's own commits on top of {{rev}}. Commits you've already pushed get new ids, so they'd need a force-push."
     example: {"stream": "str1", "rev": "main"}
   - name: git.revert
     summary: "Commit the inverse of one commit onto the stream's branch."
@@ -1860,7 +1866,8 @@ commands:
     summary: "Merge a revision into the stream's branch; the result lists any conflicts left after oxplow's smart merge."
     scope: vcs.write
     op: merge
-    confirm: destructive
+    confirm: always
+    confirm_says: "Merge {{rev}} into this branch. Nothing is rewritten; any conflicts stop here for you to resolve."
     example: {"stream": "str1", "rev": "main"}
   - name: vcs.uncommit
     summary: "Take back the stream's last commit (`rev`, whose parent is `parent`): the head returns to `parent` and the commit's changes stay staged. Refused when the head moved on, a remote holds the commit, or a merge or rebase is in progress. This is what Undo on a commit runs."

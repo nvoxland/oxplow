@@ -59,6 +59,21 @@ impl GitProvider {
         .await
     }
 
+    /// Push the branch with no upstream and make the remote's its upstream.
+    pub async fn publish(&self, ws: &Path, remote: Option<&str>) -> Result<OpOutcome, VcsError> {
+        if let Some(remote) = remote {
+            not_an_option("remote", remote)?;
+        }
+        let (ws, remote) = (ws.to_path_buf(), remote.map(str::to_string));
+        blocking(move || {
+            repo_check(&ws)?;
+            let r = oxplow_git::publish(&ws, remote.as_deref())
+                .map_err(|e| VcsError::Failed(e.to_string()))?;
+            Ok(outcome(&ws, r))
+        })
+        .await
+    }
+
     pub async fn cherry_pick(&self, ws: &Path, rev: &str) -> Result<OpOutcome, VcsError> {
         not_an_option("revision", rev)?;
         let (ws, rev) = (ws.to_path_buf(), rev.to_string());
@@ -1044,6 +1059,44 @@ mod tests {
             .unwrap()
             .contains("<<<<<<<"));
         assert_eq!(conflicted(&wt), 1);
+    }
+
+    /// Publishing a branch with no upstream pushes it and makes the remote's
+    /// branch its upstream, so a plain push and pull work from then on.
+    #[tokio::test]
+    async fn publish_pushes_a_new_branch_and_sets_its_upstream() {
+        let dir = tempfile::tempdir().unwrap();
+        let git = |cwd: &std::path::Path, args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+                .args(args)
+                .current_dir(cwd)
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "{args:?}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            String::from_utf8_lossy(&out.stdout).trim().to_string()
+        };
+        let remote = dir.path().join("remote.git");
+        let work = dir.path().join("work");
+        std::fs::create_dir_all(&remote).unwrap();
+        std::fs::create_dir_all(&work).unwrap();
+        git(&remote, &["init", "-q", "--bare", "-b", "main"]);
+        git(&work, &["init", "-q", "-b", "side"]);
+        git(&work, &["commit", "-q", "--allow-empty", "-m", "one"]);
+        git(
+            &work,
+            &["remote", "add", "origin", remote.to_str().unwrap()],
+        );
+        let out = GitProvider.publish(&work, None).await.unwrap();
+        assert!(out.success, "{}", out.log);
+        assert_eq!(
+            git(&work, &["rev-parse", "--abbrev-ref", "@{upstream}"]),
+            "origin/side"
+        );
     }
 
     #[tokio::test]

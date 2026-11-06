@@ -498,7 +498,7 @@ pub fn ops(target: VcsTarget) -> Vec<Op> {
             "vcs.write",
             "merge",
             Touched::Refs,
-            Confirm::Destructive,
+            Confirm::Always,
             t,
             |t, ws, i: RevInput| async move {
                 outcome(t.vcs.merge(&ws, &i.rev).await.map_err(vcs_err)?)
@@ -561,10 +561,25 @@ pub fn ops(target: VcsTarget) -> Vec<Op> {
             },
         ),
         vcs_op(
+            "vcs.remote",
+            "publish",
+            Touched::Refs,
+            Confirm::Never,
+            t,
+            |t, ws, i: FetchInput| async move {
+                outcome(
+                    t.git
+                        .publish(&ws, i.remote.as_deref())
+                        .await
+                        .map_err(vcs_err)?,
+                )
+            },
+        ),
+        vcs_op(
             "vcs.write",
             "rebase",
             Touched::Refs,
-            Confirm::Destructive,
+            Confirm::Always,
             t,
             |t, ws, i: RevInput| async move {
                 outcome(t.git.rebase(&ws, &i.rev).await.map_err(vcs_err)?)

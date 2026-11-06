@@ -1116,6 +1116,7 @@ declaring *what it is* and mounting the generic layer.
 
 ## Feedback
 
+- **A whole page loading shows a spinner in its middle** (`kit/LoadingScreen`); a part of a page keeps one line (`kit/Loading`).
 - **Show loading state** for any operation that lasts past ~300 ms, and not before: loading text appears only after a delay (`kit/useDelayed.tsx`: `useDelayed`, `DelayedLoading`, `LOADING_AFTER_MS`), so a fast load never flashes "Loading…". A lazy tree branch that is re-opened keeps its previous rows while it re-runs (`keepPrevious` in `pages/pageBranches.ts`).
 - **Show counts** where relevant (e.g., "24 / 500 commits" in the
   history filter).

@@ -4,7 +4,7 @@ import { useState } from "react";
 
 import { ActionButtons } from "./ActionButtons.js";
 import { DataTable, type DataColumn } from "./DataTable.js";
-import { Loading } from "./Loading.js";
+import { Loading, LoadingScreen } from "./Loading.js";
 import { PageNavigationContext, type PageNavigation } from "../tabs/PageNavigationContext.js";
 import { Section } from "./Section.js";
 import { Stat } from "./Stat.js";
@@ -345,4 +345,12 @@ test("DataTable classes each cell by its column's wrap and stripes alternate row
   const cells = rows[1]!.querySelectorAll("td");
   expect(cells[0]!.className).toContain("ox-nowrap");
   expect(cells[1]!.className).toContain("ox-words");
+});
+
+test("a page's loading screen is a spinner that says so, and is announced", () => {
+  const { getByTestId } = render(<LoadingScreen />);
+  const screen = getByTestId("loading-screen");
+  expect(screen.getAttribute("role")).toBe("status");
+  expect(screen.textContent).toBe("Loading…");
+  expect(screen.querySelector(".ox-spinner")).not.toBeNull();
 });

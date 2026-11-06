@@ -154,6 +154,10 @@ pub struct CommandSpec {
     #[serde(default)]
     pub job: bool,
     pub confirm: Confirm,
+    /// What a person is told when it asks, in place of its input and, for a
+    /// destructive one, the generic warning: `{{field}}` is that input.
+    #[serde(default)]
+    pub confirm_says: Option<String>,
     /// The handler returns an inverse, so `commands.undo` can apply it.
     pub undoable: bool,
     pub lifecycle: Lifecycle,

@@ -238,7 +238,7 @@ test("a filter changed in the rail re-runs the page with it; the old rows stay u
   await wait(200);
   // Stale: still the old rows, no Loading.
   expect(view.getByTestId("viz-row-0").textContent).toContain("Alpha");
-  expect(view.container.querySelector(".ox-loading")).toBeNull();
+  expect(view.container.querySelector(".ox-loading-screen")).toBeNull();
   expect(view.getByTestId("page-file").getAttribute("data-stale")).toBe("true");
   await act(async () => answer({ ...base, params: { q: "be" }, loaders: { items: loader(["id", "title"], [["b", "Beta"]]) } }));
   await waitFor(() => expect(view.getByTestId("viz-row-0").textContent).toContain("Beta"));
@@ -265,9 +265,9 @@ test("Loading shows only after 300 ms without a run; an open that fails says why
     onReconnect: () => () => {},
   });
   const view = render(<PageHost pageKey={key} runs={runs} />);
-  expect(view.container.querySelector(".ox-loading")).toBeNull();
+  expect(view.container.querySelector(".ox-loading-screen")).toBeNull();
   await wait(350);
-  expect(view.container.querySelector(".ox-loading")).not.toBeNull();
+  expect(view.container.querySelector(".ox-loading-screen")).not.toBeNull();
   cleanup();
   const failing = createPageRuns({
     open: async () => Promise.reject(new Error("no page acme/page")),

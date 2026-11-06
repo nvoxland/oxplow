@@ -1500,7 +1500,7 @@ pub fn write_personal_key(
             if let Some(parent) = path.parent() {
                 std::fs::create_dir_all(parent)?;
             }
-            std::fs::write(&path, serde_yaml::to_string(&doc)?)?;
+            atomic::write_atomic(&path, serde_yaml::to_string(&doc)?.as_bytes())?;
         }
     }
     Ok(())
@@ -1579,7 +1579,7 @@ pub fn write_project_key(
              together, e.g. with anchors); edit the file by hand"
         )));
     }
-    std::fs::write(path, edited)?;
+    atomic::write_atomic(&path, edited.as_bytes())?;
     Ok(())
 }
 
@@ -1884,7 +1884,7 @@ pub fn write_global_metrics_file(path: &Path, entries: &[MetricEntry]) -> Result
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    std::fs::write(path, yaml)?;
+    atomic::write_atomic(path, yaml.as_bytes())?;
     Ok(())
 }
 
@@ -3790,6 +3790,40 @@ mod global_config_dir_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A running collector asks whether its extension is still on many times a
+    /// second. A write that truncates the file first looks to that reader like
+    /// "nothing is enabled", and the run is stopped for good.
+    #[test]
+    fn a_reader_never_sees_a_config_file_part_way_through_a_write() {
+        let dir = tempfile::tempdir().unwrap();
+        let on = |names: &[&str]| serde_json::json!(names);
+        write_personal_key(dir.path(), "enableExtensions", Some(&on(&["acme"]))).unwrap();
+        write_project_key(dir.path(), "extensions", Some(&on(&["team"]))).unwrap();
+        let done = std::sync::atomic::AtomicBool::new(false);
+        std::thread::scope(|scope| {
+            let reader = scope.spawn(|| {
+                let mut torn = 0;
+                while !done.load(std::sync::atomic::Ordering::Acquire) {
+                    let settings = extension_settings(dir.path());
+                    if !settings.personal.enable.iter().any(|name| name == "acme")
+                        || !settings.team.iter().any(|name| name == "team")
+                    {
+                        torn += 1;
+                    }
+                }
+                torn
+            });
+            for i in 0..300 {
+                let extra = format!("other{i}");
+                write_personal_key(dir.path(), "enableExtensions", Some(&on(&["acme", &extra])))
+                    .unwrap();
+                write_project_key(dir.path(), "extensions", Some(&on(&["team", &extra]))).unwrap();
+            }
+            done.store(true, std::sync::atomic::Ordering::Release);
+            assert_eq!(reader.join().unwrap(), 0, "reads saw a file mid-write");
+        });
+    }
 
     /// An instance's config is a `serde_json::Value`, and serde_json's
     /// `arbitrary_precision` makes a number a private struct when it's

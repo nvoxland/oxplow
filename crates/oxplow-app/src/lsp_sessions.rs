@@ -1059,6 +1059,13 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn shutdown_all_ends_every_server() {
+        let ps = |pid: i32, field: &str| {
+            std::process::Command::new("ps")
+                .args(["-o", field, "-p", &pid.to_string()])
+                .output()
+                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+                .unwrap_or_default()
+        };
         let mgr = manager_with_fake("fake");
         let mut pids = Vec::new();
         for stream in ["s-1", "s-2"] {
@@ -1066,7 +1073,8 @@ mod tests {
                 .ensure(stream, "fake", std::env::temp_dir())
                 .await
                 .expect("ensure");
-            pids.push(proxy.pid().expect("a pid") as i32);
+            let pid = proxy.pid().expect("a pid") as i32;
+            pids.push((pid, ps(pid, "lstart=")));
         }
         // A caller still holds one, as a request in flight would.
         let held = mgr
@@ -1078,20 +1086,19 @@ mod tests {
 
         assert!(!mgr.is_running("s-1", "fake").await);
         assert!(!mgr.is_running("s-2", "fake").await);
-        let deadline = std::time::Instant::now() + Duration::from_secs(3);
-        let gone = |pid: i32| {
-            // Reaped, or a zombie its holder hasn't reaped yet.
-            (unsafe { libc::kill(pid, 0) } != 0)
-                || std::process::Command::new("ps")
-                    .args(["-o", "stat=", "-p", &pid.to_string()])
-                    .output()
-                    .map(|o| String::from_utf8_lossy(&o.stdout).trim().starts_with('Z'))
-                    .unwrap_or(false)
+        // Soon, but a loaded machine just takes longer.
+        let deadline = std::time::Instant::now() + Duration::from_secs(30);
+        let gone = |(pid, started): &(i32, String)| {
+            // Reaped, a zombie its holder hasn't reaped yet, or its pid is
+            // another process's by now: every test in this binary spawns.
+            (unsafe { libc::kill(*pid, 0) } != 0)
+                || ps(*pid, "stat=").starts_with('Z')
+                || ps(*pid, "lstart=") != *started
         };
-        while !pids.iter().all(|p| gone(*p)) && std::time::Instant::now() < deadline {
+        while !pids.iter().all(&gone) && std::time::Instant::now() < deadline {
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
-        let left: Vec<_> = pids.into_iter().filter(|p| !gone(*p)).collect();
+        let left: Vec<_> = pids.iter().filter(|p| !gone(p)).collect();
         drop(held);
         assert!(left.is_empty(), "servers outlived shutdown_all: {left:?}");
     }

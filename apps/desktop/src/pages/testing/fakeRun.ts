@@ -63,6 +63,8 @@ export function fakeAction(over: Partial<PageAction> & { id: string }): PageActi
     choices: {},
     then: "stay",
     when: null,
+    fact: null,
+    does: null,
     primary: false,
     prominent: false,
     drag: false,
@@ -82,6 +84,7 @@ interface Common {
   hideTitle?: boolean;
   callout?: boolean;
   icon?: string | null;
+  titleFrom?: string | null;
   collapsible?: boolean;
   link?: string | null;
   size?: TileSize | null;
@@ -94,6 +97,7 @@ const common = (id: string, o: Common = {}) => ({
   hideTitle: o.hideTitle ?? false,
   callout: o.callout ?? false,
   icon: o.icon ?? null,
+  titleFrom: o.titleFrom ?? null,
   collapsible: o.collapsible ?? false,
   link: o.link ?? null,
   replaceable: null,

@@ -3609,6 +3609,7 @@ async fn a_generation_restarts_only_the_instances_it_changed() {
     let kept = fx.svc.config.read().unwrap().extension_instances.clone();
     let changes = crate::extension::extension_deploy::stage_sources(&fx.svc).await;
     fx.svc.config.write().unwrap().extension_instances = kept;
+    let authority = running.host_calls.authority_current();
     fx.svc
         .extension_activation
         .activate_live(fx.svc.clone(), &changes)
@@ -3617,7 +3618,17 @@ async fn a_generation_restarts_only_the_instances_it_changed() {
     let after = fx.svc.providers.get(INSTANCE).await.expect("still running");
     assert!(
         std::sync::Arc::ptr_eq(&running, &after),
-        "an unrelated edit restarted the provider"
+        "an unrelated edit restarted the provider: authority before the activation {authority}, \
+         same scope {}, config {}, spec {}, extension {}, declarations {}",
+        running.scope == after.scope,
+        running.config == after.config,
+        running.spec == after.spec,
+        {
+            let mut other = after.ext.clone();
+            other.public_contracts.activation_index = running.ext.public_contracts.activation_index;
+            running.ext == other
+        },
+        running.declared == after.declared,
     );
     assert_eq!(
         fx.svc.providers.health(INSTANCE).map(|h| h.state),

@@ -295,3 +295,47 @@ test("a collapsible section folds at its heading and its link is an arrow beside
   expect(section.getAttribute("data-collapsed")).toBe("true");
   expect(section.querySelector('[data-testid="viz-detail"], table, ul')).toBeNull();
 });
+
+// A button on a fact's line sits with what it acts on, not with the rest
+// under the section; a button with no fact stays where buttons go.
+test("a detail's action with a fact is drawn on that fact's line", () => {
+  const page = fakePage(
+    node.viz(
+      "facts",
+      "items",
+      {
+        viz: "detail",
+        columns: [{ key: "upstream" }, { key: "base" }] as never,
+        actions: [
+          fakeAction({ id: "push", label: "Push", oneRow: true, fact: "upstream" }),
+          fakeAction({ id: "merge", label: "Merge", oneRow: true, fact: "base" }),
+          fakeAction({ id: "other", label: "Other", oneRow: true }),
+        ],
+      },
+      { title: "Facts" },
+    ),
+  );
+  const run = fakeRun(page, { loaders: { items: loader(["upstream", "base"], [["u", "b"]]) } });
+  const { container, getByTestId } = render(<PageTree run={run} runId="run-1" />);
+  const lines = [...container.querySelectorAll(".ox-fact")];
+  expect(lines).toHaveLength(2);
+  expect(lines[0]!.contains(getByTestId("viz-action-push"))).toBe(true);
+  expect(lines[1]!.contains(getByTestId("viz-action-merge"))).toBe(true);
+  expect(getByTestId("viz-part-actions").contains(getByTestId("viz-action-other"))).toBe(true);
+  expect(getByTestId("viz-part-actions").contains(getByTestId("viz-action-push"))).toBe(false);
+});
+
+// A callout whose name depends on what it shows: the row says, and with no
+// row the file's title stands.
+test("a section's title_from names it from its row", () => {
+  const page = fakePage(
+    node.stack("stack", [
+      node.viz("named", "items", { viz: "detail", columns: [{ key: "id" }] as never }, { title: "Fallback", titleFrom: "heading" }),
+      node.viz("none", "empty", { viz: "detail", columns: [{ key: "id" }] as never }, { title: "Fallback", titleFrom: "heading" }),
+    ]),
+  );
+  const run = fakeRun(page, { loaders: { items: loader(["id", "heading"], [["a", "Worktree"]]), empty: loader(["id", "heading"], []) } });
+  const { container } = render(<PageTree run={run} runId="run-1" />);
+  expect(container.querySelector('[data-node="named"] .ox-section-title')!.textContent).toBe("Worktree");
+  expect(container.querySelector('[data-node="none"] .ox-section-title')!.textContent).toBe("Fallback");
+});

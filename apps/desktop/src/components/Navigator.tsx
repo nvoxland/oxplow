@@ -88,8 +88,9 @@ type RenameTarget = { kind: "stream" | "thread"; id: string };
  *     on its tab's top-left corner — not an accent outline, which reads as
  *     selected. The activity dot sits on the right end at half height,
  *     clear of it; both are in the same place in strip and overlay.
- *   - Selection treatment: accent-soft-bg row background + 3px accent
- *     left stripe.
+ *   - Selection treatment: a 3px accent bar in the dark gap right of the
+ *     tab, against it. The overlay draws the strip's tab and gap unchanged,
+ *     then the same again for the title, so it has a bar after each.
  *   - 8px gap separates the last thread of one stream from the next
  *     stream's row.
  */
@@ -445,7 +446,8 @@ export function Navigator({
             left: 0,
             height: "100%",
             width: STRIP_WIDTH + OVERLAY_WIDTH,
-            background: "var(--surface-chrome)",
+            // The strip's dark, so the gaps between its tabs look the same.
+            background: "var(--surface-app)",
             borderRight: "1px solid var(--border-strong)",
             boxShadow: "8px 0 24px rgba(0, 0, 0, 0.45)",
             display: "flex",
@@ -691,7 +693,7 @@ function StripRow({
         transition: "background 120ms ease",
       }}
     >
-      <IconColumn guide={guide}>
+      <IconColumn guide={guide} selected={selected}>
         <IconCell
           selected={selected}
           letter={letter}
@@ -780,7 +782,7 @@ function OverlayRow({
         transition: "background 120ms ease",
       }}
     >
-      <IconColumn guide={guide} wide>
+      <IconColumn guide={guide} selected={selected} wide>
         <IconCell
           selected={selected}
           letter={letter}
@@ -898,10 +900,13 @@ type Guide = "none" | "stream" | "mid" | "last";
  *  each thread's tab, ending at the last. */
 function IconColumn({
   guide,
+  selected = false,
   wide = false,
   children,
 }: {
   guide: Guide;
+  /** The selected thread: an accent bar down the right of its tab. */
+  selected?: boolean;
   /** The panel's row: the column runs the row's width, its tab with it. */
   wide?: boolean;
   children: ReactNode;
@@ -932,11 +937,31 @@ function IconColumn({
             ? line({ right: GUIDE_RIGHT, width: 2, top: ROW_HEIGHT, bottom: 0 })
             : null}
           {isThread ? line({ right: GUIDE_RIGHT, width: 2, top: 0, height: guide === "last" ? mid + 1 : height }) : null}
-          {isThread ? line({ right: GUIDE_RIGHT + 2, height: 2, top: mid - 1, width: THREAD_RIGHT - GUIDE_RIGHT - 2 }) : null}
+          {isThread ? line({ right: GUIDE_RIGHT + 2, height: 2, top: mid - 1, width: TAB_GAP }) : null}
         </span>
       ) : null}
+      {selected && isThread ? <SelectionBar right={THREAD_RIGHT - SELECTION_BAR} /> : null}
       {children}
     </span>
+  );
+}
+
+/** The selected thread's mark, in the dark gap against its tab: as thick as
+ *  a selected centre tab's underline, in the same colour. */
+function SelectionBar(position: { left: number } | { right: number }) {
+  return (
+    <span
+      aria-hidden
+      data-testid="navigator-selected-fill"
+      style={{
+        position: "absolute",
+        background: "var(--accent)",
+        width: SELECTION_BAR,
+        top: 0,
+        bottom: 0,
+        ...position,
+      }}
+    />
   );
 }
 
@@ -953,7 +978,8 @@ function IconCell({
 }: {
   letter: string;
   isStream: boolean;
-  /** The panel's title: the tab runs on across the row carrying it. */
+  /** The panel's title: for a thread a second tab across the row, after the
+   *  gap; for a stream, its one tab runs on across the row. */
   label?: ReactNode;
   /** The last of its stream's threads: its tab closes the stack. */
   isLast: boolean;
@@ -962,7 +988,8 @@ function IconCell({
   /** The person's colour for a thread's tab (`null` unmarked, and for a
    *  stream). */
   mark: ThreadMark | null;
-  /** The selected thread: its tab carries the accent bar down its left. */
+  /** The selected thread: in the panel, a bar in the gap after its
+   *  abbreviation (`IconColumn` draws the one at the row's end). */
   selected: boolean;
   status: AgentStatusDotState | undefined;
   question?: string;
@@ -972,9 +999,9 @@ function IconCell({
   // the right and butted up
   // against each other — each fills its row, drawing its top edge, and the
   // last one also the bottom.
-  // Rounded on the right only. In the panel a tab runs on across the row
-  // carrying the title, its glyph kept at the strip's width so the two
-  // line up.
+  // Rounded on the right only. In the panel a thread's abbreviation keeps
+  // the strip's tab, squared off, and a second tab of the same shape carries
+  // the title, after the gap; a stream's tab runs on across the row.
   const glyphWidth = ICON_COLUMN - (isStream ? STREAM_RIGHT : THREAD_RIGHT);
   const shape: CSSProperties = isStream
     ? {
@@ -1012,70 +1039,114 @@ function IconCell({
         fontSize: THREAD_LETTER_FONT,
         fontWeight: 600,
       };
-  return (
+  const tabBase: CSSProperties = {
+    position: "relative",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    boxSizing: "border-box",
+    lineHeight: 1,
+    ...shape,
+  };
+  // The agent's dot belongs to the thread's outermost tab, on its right end
+  // where the guide's tick meets it.
+  const dot = !isStream ? (
     <span
-      data-glyph={isStream ? "stream" : "thread"}
       style={{
-        position: "relative",
-        display: "inline-flex",
-        alignItems: "center",
-        justifyContent: "center",
-        boxSizing: "border-box",
-        lineHeight: 1,
-        ...shape,
-        // The selection bar is inside the tab, so every tab is flush with
-        // the window's edge; the letters sit clear of it.
-        boxShadow: selected ? "inset 3px 0 0 var(--accent)" : undefined,
-        paddingLeft: SELECTION_BAR,
-        ...(label !== undefined ? { width: undefined, flex: 1, minWidth: 0, justifyContent: "flex-start" } : {}),
+        position: "absolute",
+        top: "50%",
+        right: -5,
+        transform: "translateY(-50%)",
+        display: "flex",
       }}
     >
-      {label !== undefined ? (
-        <>
-          {/* The glyph keeps its strip width (less a thread tab's right edge). */}
-          {/* A divider after it runs through every row, and the title keeps its distance. */}
-          <span
-            data-testid="navigator-glyph-divider"
-            style={{
-              width: glyphWidth - SELECTION_BAR - (isStream ? 0 : 1),
-              flexShrink: 0,
-              alignSelf: "stretch",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              borderRightWidth: 1,
-              borderRightStyle: "solid",
-              borderRightColor: isStream ? "rgba(0, 0, 0, 0.3)" : "var(--border-strong)",
-            }}
-          >
-            {letter}
-          </span>
-          <span style={{ flex: 1, minWidth: 0, display: "flex", paddingLeft: 10 }}>{label}</span>
-        </>
-      ) : (
-        letter
-      )}
+      {/* Mirrors the fallback the Agent tab uses (App.tsx — `agentStatuses[id]
+          ?? "waiting"`) so a never-attached thread still reads as the same
+          red "waiting" dot here as it does on the tab. */}
+      <AgentStatusDot status={status ?? "waiting"} size={8} question={question} />
+    </span>
+  ) : null;
+  const tab = (
+    <span data-glyph={isStream ? "stream" : "thread"} style={tabBase}>
+      {letter}
       {/* At the window's edge, so the strip's and the panel's line up. */}
       {mark && !isStream ? <MarkFold mark={mark} /> : null}
-      {/* Threads always show the agent's activity indicator. Mirrors
-          the fallback the Agent tab uses (App.tsx — `agentStatuses[id]
-          ?? "waiting"`) so a never-attached thread still reads as the
-          same red "waiting" dot here as it does on the tab. Stream
-          rows omit the dot entirely. */}
-      {!isStream ? (
+      {dot}
+    </span>
+  );
+  if (label === undefined) return tab;
+  // A stream's row is one tab, its abbreviation kept at the strip's width.
+  if (isStream) {
+    return (
+      <span
+        data-glyph="stream"
+        data-testid="navigator-tab-title"
+        style={{ ...tabBase, width: undefined, flex: 1, minWidth: 0, justifyContent: "flex-start" }}
+      >
         <span
+          data-testid="navigator-stream-abbreviation"
+          style={{ width: glyphWidth, flexShrink: 0, textAlign: "center" }}
+        >
+          {letter}
+        </span>
+        {/* The thread rows' dark gap carried up through the header, thin. */}
+        <span
+          aria-hidden
+          data-testid="navigator-stream-divider"
           style={{
             position: "absolute",
-            // On the tab's right end, where the guide's tick meets it.
-            top: "50%",
-            right: -5,
-            transform: "translateY(-50%)",
-            display: "flex",
+            left: ICON_COLUMN - THREAD_RIGHT + (TAB_GAP - 1) / 2,
+            width: 1,
+            top: 0,
+            bottom: 0,
+            background: "var(--surface-app)",
           }}
-        >
-          <AgentStatusDot status={status ?? "waiting"} size={8} question={question} />
+        />
+        <span style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", paddingLeft: TITLE_LEFT - glyphWidth }}>
+          {label}
         </span>
-      ) : null}
+      </span>
+    );
+  }
+  return (
+    <span style={{ display: "flex", flex: 1, minWidth: 0, height: "100%", alignItems: "center" }}>
+      {/* Its curve is at the row's end, so this end is square. */}
+      <span data-glyph="thread" style={{ ...tabBase, borderRadius: 0 }}>
+        {letter}
+        {/* At the window's edge, so the strip's and the panel's line up. */}
+        {mark ? <MarkFold mark={mark} /> : null}
+      </span>
+      {/* The strip's dark gap, with its bar. Only the row's end has a guide. */}
+      <span
+        data-testid="navigator-tab-gap"
+        style={{
+          position: "relative",
+          width: TAB_GAP,
+          flexShrink: 0,
+          alignSelf: "stretch",
+          boxSizing: "border-box",
+          // The line between stacked tabs runs on through the gap.
+          ...(isLast
+            ? {}
+            : { borderBottomWidth: THREAD_DIVIDER, borderBottomStyle: "solid", borderBottomColor: "var(--text-muted)" }),
+        }}
+      >
+        {selected ? <SelectionBar left={0} /> : null}
+      </span>
+      <span
+        data-testid="navigator-tab-title"
+        style={{
+          ...tabBase,
+          width: undefined,
+          flex: 1,
+          minWidth: 0,
+          justifyContent: "flex-start",
+          paddingLeft: TITLE_LEFT - glyphWidth - TAB_GAP,
+        }}
+      >
+        {label}
+        {dot}
+      </span>
     </span>
   );
 }
@@ -1228,8 +1299,7 @@ const LETTER_FONT = 15;
 const THREAD_ROW_HEIGHT = 28;
 const THREAD_LETTER_FONT = 13;
 const STRIP_WIDTH = 40;
-// The icon column is the strip's width; a tab's selection bar sits inside
-// it, at its left.
+// The icon column is the strip's width.
 const ICON_COLUMN = STRIP_WIDTH;
 const SELECTION_BAR = 3;
 // The tabs come out of the window's left edge. The guide line runs down the
@@ -1238,6 +1308,12 @@ const SELECTION_BAR = 3;
 const STREAM_RIGHT = 2;
 const GUIDE_RIGHT = STREAM_RIGHT;
 const THREAD_RIGHT = 9;
+// The dark gap right of a thread's tab, up to the guide; the panel draws the
+// same gap between the abbreviation and the title.
+const TAB_GAP = THREAD_RIGHT - GUIDE_RIGHT - 2;
+// Where a title starts in the panel's rows, measured from the window's edge,
+// so stream and thread titles line up.
+const TITLE_LEFT = ICON_COLUMN + 13;
 // The divider drawn along a thread tab's bottom, between stacked tabs.
 const THREAD_DIVIDER = 1;
 const ROW_HEIGHT = 36;
