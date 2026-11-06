@@ -5,11 +5,13 @@
  * view) and stream and kept as a promise, so a tab that is drawn again, or
  * a link opened a moment earlier (`prefetch`), asks nothing more.
  *
- * The cache is dropped whenever the extensions reload (a deploy, a
+ * Every list is asked again whenever the extensions reload (a deploy, a
  * reconnect: the loaded `Extension[]` is a new array) because both the
- * pages and what they accept can have changed; it is not dropped when a
- * file's content changes, so a page whose `accepts.content` reads it is
- * judged on the content as of the first ask until the extensions reload.
+ * pages and what they accept can have changed. The old list stands until the
+ * new one arrives: "still asking" draws a tab's loading state, and that would
+ * unmount an open tab with its terminal and any open menu. A list is not asked
+ * again when a file's content changes, so a page whose `accepts.content` reads
+ * it is judged on the content as of the first ask until the extensions reload.
  *
  * Routing stays synchronous: `peek` answers from what has settled, and a
  * tab whose list is still being fetched draws a brief loading state
@@ -50,18 +52,17 @@ export function createRenderersCache(rpc: RenderersRpc): RenderersCache {
   let epoch: readonly Extension[] | null = null;
   let version = 0;
   let asks = new Map<string, Promise<Renderer[]>>();
-  let settled = new Map<string, Renderer[]>();
+  const settled = new Map<string, Renderer[]>();
   const listeners = new Set<() => void>();
   const notify = () => {
     version++;
     for (const l of listeners) l();
   };
-  /** The extensions reloaded: nothing asked before them stands. */
+  /** The extensions reloaded: ask again. What has settled stands until then. */
   const within = (extensions: readonly Extension[]) => {
     if (epoch === extensions) return;
     epoch = extensions;
     asks = new Map();
-    settled = new Map();
   };
   const keyOf = (uri: string, streamId: string | null) => `${streamId ?? ""}\n${identityOf(uri) ?? uri}`;
   return {
@@ -74,7 +75,7 @@ export function createRenderersCache(rpc: RenderersRpc): RenderersCache {
       const key = keyOf(uri, streamId);
       const have = asks.get(key);
       if (have) return have;
-      const mine = settled;
+      const mine = epoch;
       const ask = rpc(identityOf(uri) ?? uri, streamId)
         .catch((e: unknown) => {
           recordOpError({ label: "Find renderers", message: e instanceof Error ? e.message : String(e) });
@@ -82,7 +83,7 @@ export function createRenderersCache(rpc: RenderersRpc): RenderersCache {
         })
         .then((list) => {
           // Answered after the extensions reloaded: not this epoch's.
-          if (mine === settled) {
+          if (mine === epoch) {
             settled.set(key, list);
             notify();
           }

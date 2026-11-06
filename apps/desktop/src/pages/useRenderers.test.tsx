@@ -36,21 +36,23 @@ test("a list is asked once per identity and stream, however often or with whatev
   expect(rpc).toHaveBeenCalledTimes(2);
 });
 
-test("reloaded extensions drop every list: a deploy can change pages and what they accept", async () => {
+test("reloaded extensions ask every list again, and the old list stands until the new one arrives", async () => {
   const { rpc, calls } = stub();
   const cache = createRenderersCache(rpc);
   const first = extensions();
   const asked = cache.prefetch(first, FILE, null);
   calls[0]!.answer([r("editor")]);
   await asked;
-  expect(cache.peek(first, FILE, null)).toBeDefined();
   const second = extensions();
-  expect(cache.peek(second, FILE, null)).toBeUndefined();
+  // Nothing says the tab can't be drawn: dropping to "still asking" would
+  // unmount it, with its terminal and any open menu.
+  expect(cache.peek(second, FILE, null)?.map((x) => x.page)).toEqual(["editor"]);
   const again = cache.prefetch(second, FILE, null);
   expect(rpc).toHaveBeenCalledTimes(2);
+  expect(cache.peek(second, FILE, null)?.map((x) => x.page)).toEqual(["editor"]);
   calls[1]!.answer([r("editor"), r("blame")]);
   await again;
-  expect(cache.peek(second, FILE, null)?.length).toBe(2);
+  expect(cache.peek(second, FILE, null)?.map((x) => x.page)).toEqual(["editor", "blame"]);
 });
 
 test("an answer that arrives after the extensions reloaded is not kept", async () => {
@@ -63,6 +65,30 @@ test("an answer that arrives after the extensions reloaded is not kept", async (
   calls[0]!.answer([r("stale")]);
   await late;
   expect(cache.peek(second, FILE, null)).toBeUndefined();
+  // Nor over the new answer, when the old one is the slower.
+  const slow = cache.prefetch(second, FILE, null);
+  const third = extensions();
+  const fresh = cache.prefetch(third, FILE, null);
+  calls[2]!.answer([r("fresh")]);
+  await fresh;
+  calls[1]!.answer([r("stale")]);
+  await slow;
+  expect(cache.peek(third, FILE, null)?.map((x) => x.page)).toEqual(["fresh"]);
+});
+
+test("the hook keeps its answer through a reload of the extensions", async () => {
+  const { rpc, calls } = stub();
+  const cache = createRenderersCache(rpc);
+  const { result, rerender } = renderHook(({ e }: { e: Extension[] }) => useRenderers(e, [FILE], "s1", cache), {
+    initialProps: { e: extensions() },
+  });
+  await act(async () => {
+    calls[0]!.answer([r("editor")]);
+    await Promise.resolve();
+  });
+  rerender({ e: extensions() });
+  expect(result.current(FILE)?.map((x) => x.page)).toEqual(["editor"]);
+  expect(rpc).toHaveBeenCalledTimes(2);
 });
 
 test("a failed ask is an empty list, so the fallback page draws the URI", async () => {

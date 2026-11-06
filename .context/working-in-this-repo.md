@@ -384,6 +384,17 @@ of its own only for what only the app's shell does. Rules a spec keeps:
 A bug the suite finds is its own task, fixed with a unit test where one
 can pin it; the spec stays as the end-to-end check.
 
+### A test that acts on the whole process
+
+CI's `cargo test` runs the tests of one crate as threads of one process;
+`test:fast` (nextest) gives each test its own process. A test that calls
+something process-wide therefore passes locally and breaks other tests in CI.
+`process_group::stop_all` is the example: it ends every program group of the
+process, so a collector, provider or build of another test dies with it. Run
+such a test again, alone, in its own process
+(`stop_all_reaps_every_live_group` starts `current_exe()` with `--exact`). To
+check a suspect, run the test binary itself with `--test-threads=4`.
+
 ### Timing assertions flake under `cargo cov` (tsk175)
 
 `cargo cov` runs every test as its **own process, all concurrently, on an
