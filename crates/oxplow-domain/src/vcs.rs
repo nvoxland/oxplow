@@ -142,6 +142,9 @@ pub enum InProgressOp {
 pub struct WorkspaceStatus {
     /// Changed paths, sorted.
     pub entries: Vec<StatusEntry>,
+    /// The other ends of renames, sorted: paths that differ from the head
+    /// that `entries` holds under their other name.
+    pub moved: Vec<String>,
     /// The operation in progress, if one is.
     pub in_progress: Option<InProgressOp>,
 }

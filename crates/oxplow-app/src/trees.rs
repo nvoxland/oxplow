@@ -20,7 +20,7 @@ use std::sync::{Arc, RwLock};
 
 use oxplow_config::OxplowConfig;
 use oxplow_db::{SnapshotStorage, SnapshotTree, SqliteSnapshotStore};
-use oxplow_domain::vcs::{FileStatus, ObjectId, ObjectStore, Revision, Vcs};
+use oxplow_domain::vcs::{FileStatus, ObjectId, ObjectStore, Revision, Vcs, WorkspaceStatus};
 use oxplow_domain::{ChangeStatus, DomainError, FileChange};
 use oxplow_fs_watch::WorkspaceFilter;
 use serde::{Deserialize, Serialize};
@@ -50,6 +50,10 @@ pub struct ChangedPath {
     /// `added`, `modified` or `deleted`.
     pub status: FileStatus,
 }
+
+/// Past this many changed paths, looking each one up costs more than comparing
+/// the trees.
+const MAX_STATUS_PATHS: usize = 5_000;
 
 /// Where a path's bytes are.
 #[derive(Clone, Debug)]
@@ -284,6 +288,82 @@ impl Trees {
                         additions,
                         deletions,
                     }
+                })
+                .collect()
+        })
+        .await
+    }
+
+    /// [`Self::diff`] of the working tree against `from`, given what the VCS
+    /// just said of it. When `from` is the head, `status` already names every
+    /// path that can differ, so this looks at those alone, and costs what
+    /// changed rather than the size of the tree: this runs on every burst of
+    /// edits. It gives what [`Self::diff`] gives, which it falls back to when
+    /// `status` can't answer: another base, or a `generated.include`, which
+    /// keeps files the VCS ignores and so doesn't report.
+    pub async fn diff_from_status(
+        &self,
+        ws: &Path,
+        from: Option<&Revision>,
+        status: &WorkspaceStatus,
+    ) -> Result<Vec<DiffEntry>, DomainError> {
+        let working = Revision::Working;
+        let full = || self.diff(ws, from, &working);
+        let Some(Revision::Vcs { rev, .. }) = from else {
+            return full().await;
+        };
+        let at_head = self.vcs.head(ws).await.ok().and_then(|h| h.revision);
+        let includes = {
+            let cfg = self.config.read().unwrap_or_else(|e| e.into_inner());
+            !cfg.generated.include.is_empty()
+        };
+        let paths: BTreeSet<&String> = status
+            .entries
+            .iter()
+            .map(|e| &e.path)
+            .chain(&status.moved)
+            .collect();
+        if at_head.as_ref() != Some(rev) || includes || paths.len() > MAX_STATUS_PATHS {
+            return full().await;
+        }
+        let filter = self.filter(ws);
+        let mut heads = Vec::with_capacity(paths.len());
+        for path in paths {
+            if !filter.ignore_in_trees(Path::new(path), false) {
+                let id = self.vcs.object_at(ws, rev, path).await?;
+                heads.push((path.clone(), id));
+            }
+        }
+        let (root, objects) = (ws.to_path_buf(), self.vcs.object_store(ws));
+        blocking(move || {
+            heads
+                .into_iter()
+                .filter_map(|(path, head)| {
+                    let file = root.join(&path);
+                    // As a walk of the tree finds it: a regular file.
+                    let now = std::fs::symlink_metadata(&file)
+                        .is_ok_and(|m| m.is_file())
+                        .then(|| std::fs::read(&file).ok())
+                        .flatten();
+                    let status = match (&head, &now) {
+                        (None, None) => return None,
+                        (Some(head), Some(now)) => {
+                            if objects.id_of(now) == *head {
+                                return None;
+                            }
+                            FileStatus::Modified
+                        }
+                        (None, Some(_)) => FileStatus::Added,
+                        (Some(_), None) => FileStatus::Deleted,
+                    };
+                    let old = head.and_then(|id| objects.read(&id));
+                    let (additions, deletions) = count_lines(old.as_deref(), now.as_deref());
+                    Some(DiffEntry {
+                        status,
+                        path,
+                        additions,
+                        deletions,
+                    })
                 })
                 .collect()
         })
@@ -779,6 +859,97 @@ mod tests {
         let d = by_path(&d);
         assert_eq!(d.get("w.txt"), Some(&(FileStatus::Added, 3, 0)));
         assert!(!d.contains_key("tracked.txt"), "{d:?}");
+    }
+
+    /// Asking git what changed gives what comparing the whole trees gives:
+    /// every kind of change, a rename's two ends, an ignored file, a file
+    /// touched with the same bytes, a generated one and a binary one.
+    #[tokio::test]
+    async fn a_diff_from_status_is_what_a_full_diff_says() {
+        let f = services_with_effort().await;
+        let ws = f.svc.layout.project_dir.clone();
+        let write = |rel: &str, text: &[u8]| {
+            let path = ws.join(rel);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, text).unwrap();
+        };
+        write(".gitignore", b"ignored.txt\n");
+        for path in [
+            "edit.txt",
+            "gone.txt",
+            "same.txt",
+            "moved.txt",
+            "staged.txt",
+            "out/gen.txt",
+        ] {
+            write(path, b"one\ntwo\nthree\nfour\nfive\nsix\n");
+        }
+        write("bin.dat", b"a\0b");
+        let head = commit_all(&ws, "c1");
+        let rev = Revision::git(head);
+
+        write("edit.txt", b"one\ntwo\nthree\nfour\nfive\nchanged\n");
+        std::fs::remove_file(ws.join("gone.txt")).unwrap();
+        write("same.txt", b"one\ntwo\nthree\nfour\nfive\nsix\n");
+        write("new/deep/untracked.txt", b"new\n");
+        write("ignored.txt", b"ignored\n");
+        write("bin.dat", b"a\0c");
+        write("out/gen.txt", b"regenerated\n");
+        write("staged.txt", b"one\nstaged\n");
+        write("staged-new.txt", b"added\n");
+        std::fs::rename(ws.join("moved.txt"), ws.join("renamed.txt")).unwrap();
+        let repo = git2::Repository::open(&ws).unwrap();
+        let mut index = repo.index().unwrap();
+        for path in ["staged.txt", "staged-new.txt", "renamed.txt"] {
+            index.add_path(Path::new(path)).unwrap();
+        }
+        index.remove_path(Path::new("moved.txt")).unwrap();
+        index.write().unwrap();
+
+        let same = |fx: &EffortFixture, rev: Revision| {
+            let (trees, vcs, ws) = (fx.svc.trees.clone(), fx.svc.vcs.clone(), ws.clone());
+            async move {
+                let full = trees
+                    .diff(&ws, Some(&rev), &Revision::Working)
+                    .await
+                    .unwrap();
+                let status = vcs.status(&ws).await.unwrap();
+                let fast = trees
+                    .diff_from_status(&ws, Some(&rev), &status)
+                    .await
+                    .unwrap();
+                assert_eq!(fast, full);
+                fast
+            }
+        };
+        let d = same(&f, rev.clone()).await;
+        let d = by_path(&d);
+        assert_eq!(d.get("edit.txt"), Some(&(FileStatus::Modified, 1, 1)));
+        assert_eq!(d.get("gone.txt").map(|e| e.0), Some(FileStatus::Deleted));
+        assert_eq!(d.get("moved.txt").map(|e| e.0), Some(FileStatus::Deleted));
+        assert_eq!(d.get("renamed.txt").map(|e| e.0), Some(FileStatus::Added));
+        assert_eq!(
+            d.get("new/deep/untracked.txt"),
+            Some(&(FileStatus::Added, 1, 0))
+        );
+        assert_eq!(d.get("bin.dat"), Some(&(FileStatus::Modified, 0, 0)));
+        assert!(
+            !d.contains_key("same.txt") && !d.contains_key("ignored.txt"),
+            "{d:?}"
+        );
+
+        // What `generated` excludes is out of both.
+        f.svc.config.write().unwrap().generated.exclude = vec!["out".into()];
+        let d = same(&f, rev.clone()).await;
+        assert!(!by_path(&d).contains_key("out/gen.txt"));
+
+        // A `generated.include` keeps what git ignores: git can't say.
+        f.svc.config.write().unwrap().generated.include = vec!["ignored.txt".into()];
+        let d = same(&f, rev).await;
+        assert_eq!(
+            by_path(&d).get("ignored.txt").map(|e| e.0),
+            Some(FileStatus::Added)
+        );
     }
 
     /// `changes` is the paths-only diff: what changed and how, without

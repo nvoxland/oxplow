@@ -26,6 +26,8 @@ pub struct WorktreeStatus {
     pub staged: std::collections::HashSet<String>,
     /// Every path left unmerged, sorted.
     pub conflicted: Vec<String>,
+    /// Both ends of every rename. An entry names only one.
+    pub renamed: std::collections::HashSet<String>,
 }
 
 /// The statuses, the staged paths and the unmerged paths of `repo_path` in
@@ -63,6 +65,18 @@ pub fn worktree_status(repo_path: &Path) -> WorktreeStatus {
         }
         if s.intersects(in_index) {
             out.staged.insert(path.clone());
+        }
+        if s.intersects(git2::Status::INDEX_RENAMED | git2::Status::WT_RENAMED) {
+            for delta in [entry.head_to_index(), entry.index_to_workdir()]
+                .into_iter()
+                .flatten()
+            {
+                for file in [delta.old_file(), delta.new_file()] {
+                    if let Some(end) = file.path().and_then(Path::to_str) {
+                        out.renamed.insert(end.to_string());
+                    }
+                }
+            }
         }
         // Classify in priority order matching the TS contract.
         // Untracked vs Added: Untracked = worktree-only-new (no index

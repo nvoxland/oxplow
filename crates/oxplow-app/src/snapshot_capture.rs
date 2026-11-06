@@ -421,9 +421,15 @@ impl SnapshotCaptureService {
     /// The project's `generated` lists changed: they apply to the next
     /// fs-watch event and the next sweep, without an app restart.
     pub fn set_generated(&self, generated: &oxplow_config::GeneratedConfig) {
-        self.inner
+        // A reload of the config repeats them. Moving the watch for that would
+        // rescan the tree, whose rescan reloads the config: a loop.
+        if !self
+            .inner
             .workspace_filter
-            .set_user_entries(&generated.exclude, &generated.include);
+            .set_user_entries(&generated.exclude, &generated.include)
+        {
+            return;
+        }
         // The watch SET is derived from the filter (tsk206), not just the
         // per-event check — so it has to move, or a newly-included
         // directory would stay unwatched until restart.
@@ -2241,6 +2247,29 @@ mod tests {
         let latest = store.latest_stat_per_path(StreamId::new(1)).await.unwrap();
         assert_eq!(latest["a/f.txt"].size_bytes, 7);
         assert_eq!(latest["b/f.txt"].size_bytes, 1, "not rescanned");
+    }
+
+    /// A reload of the config repeats the lists: the watch doesn't move.
+    #[tokio::test]
+    async fn the_same_generated_lists_again_move_nothing() {
+        let project = tempdir().unwrap();
+        let (svc, _store) = svc_for(project.path()).await;
+        let generated = oxplow_config::GeneratedConfig {
+            exclude: vec!["build".into()],
+            ..Default::default()
+        };
+        svc.set_generated(&generated);
+        // The change's own signal.
+        tokio::time::timeout(Duration::from_secs(5), svc.inner.refilter.notified())
+            .await
+            .unwrap();
+        svc.set_generated(&generated);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), svc.inner.refilter.notified())
+                .await
+                .is_err(),
+            "nothing changed: no signal"
+        );
     }
 
     #[tokio::test]

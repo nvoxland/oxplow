@@ -591,6 +591,12 @@ impl Vcs for GitProvider {
             repo_check(&ws)?;
             let scan = oxplow_git::worktree_status(&ws);
             let (conflicted, staged) = (scan.conflicted, scan.staged);
+            let mut moved: Vec<String> = scan
+                .renamed
+                .into_iter()
+                .filter(|path| !scan.statuses.contains_key(path) && !conflicted.contains(path))
+                .collect();
+            moved.sort();
             let mut entries: Vec<StatusEntry> = scan
                 .statuses
                 .into_iter()
@@ -624,6 +630,7 @@ impl Vcs for GitProvider {
                     });
             Ok(WorkspaceStatus {
                 entries,
+                moved,
                 in_progress,
             })
         })

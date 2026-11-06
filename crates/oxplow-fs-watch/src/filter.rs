@@ -90,7 +90,7 @@ struct Shared {
 
 type Chain = Arc<Vec<Arc<Gitignore>>>;
 
-#[derive(Default)]
+#[derive(Default, PartialEq, Eq)]
 struct UserEntries {
     exclude: Vec<FilterEntry>,
     include: Vec<FilterEntry>,
@@ -115,7 +115,7 @@ fn write<T>(lock: &RwLock<T>) -> std::sync::RwLockWriteGuard<'_, T> {
     lock.write().unwrap_or_else(|e| e.into_inner())
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum FilterEntry {
     Segment(String),
     Path(PathBuf),
@@ -180,21 +180,29 @@ impl WorkspaceFilter {
         }
     }
 
-    /// The project's `generated` lists changed: every clone judges by the new
-    /// ones from now on, and reads the ignore files again.
-    pub fn set_user_entries<E, S, I, T>(&self, exclude: E, include: I)
+    /// The project's `generated` lists, as they are now: every clone judges by
+    /// them from now on. Whether they differ from before: if not, nothing moved
+    /// (a reload of the config repeats them).
+    pub fn set_user_entries<E, S, I, T>(&self, exclude: E, include: I) -> bool
     where
         E: IntoIterator<Item = S>,
         S: AsRef<str>,
         I: IntoIterator<Item = T>,
         T: AsRef<str>,
     {
-        *write(&self.shared.entries) = UserEntries {
+        let entries = UserEntries {
             exclude: parse_filter_entries(exclude),
             include: parse_filter_entries(include),
         };
-        write(&self.shared.rules).clear();
+        {
+            let mut current = write(&self.shared.entries);
+            if *current == entries {
+                return false;
+            }
+            *current = entries;
+        }
         self.forget_decisions();
+        true
     }
 
     /// An ignore file changed (`path` from the root, or an exclude file
@@ -856,8 +864,12 @@ mod tests {
         assert!(clone.ignore(Path::new("src/new"), false));
 
         assert!(!clone.ignore(Path::new("build/x"), false));
-        filter.set_user_entries(["build"], empty());
+        assert!(filter.set_user_entries(["build"], empty()));
         assert!(clone.ignore(Path::new("build/x"), false));
+        assert!(
+            !filter.set_user_entries(["build"], empty()),
+            "the same again"
+        );
     }
 
     /// A path a watch reports: under an ignored directory it is answered

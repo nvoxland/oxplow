@@ -168,6 +168,19 @@ its tests hand them made-up events. `Feed` does the same for a subscriber. Only
 OS: a write is heard, non-recursive holds, drop cancels, a new folder's file is
 found, an edit reaches the working-files listener.
 
+### The working-files list
+
+Every burst of edits relists the stream's working files
+(`change_reactor::watch_working_files`, one run at a time), so what a relist costs
+matters more than any watch. A full `Trees::diff(HEAD, Working)` lists the head's
+tree and walks and stats the whole tree: 42–57 s at 500,000 files. So
+`Trees::diff_from_status` looks only at the paths git status names (`entries`, and
+`moved` for a rename's other end), one `object_at` each. It gives what the full
+diff gives (`a_diff_from_status_is_what_a_full_diff_says`) and falls back to it for
+a base other than the head, a `generated.include` (it keeps files git ignores, so
+git doesn't report them), or more than 5,000 paths. A range headed at the working
+tree still takes the full diff.
+
 ### Version control appearing
 
 A `Scope` on the primary's watch: what is directly at the root

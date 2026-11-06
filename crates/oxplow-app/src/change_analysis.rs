@@ -521,13 +521,21 @@ pub async fn refresh_files(
         .into_local_path();
     let events_to = events_to(svc).await?;
     let only = own_files(svc, kind, &key).await?;
-    let entries = svc.trees.diff(&root, base.as_ref(), &head).await?;
     // A working tree is also asked what git says of it: which of its files
-    // are staged or untracked, how many conflict, what is in progress.
+    // are staged or untracked, how many conflict, what is in progress. That
+    // also says which files to look at.
     let status = if kind == "working" {
         Some(svc.vcs.status(&root).await?)
     } else {
         None
+    };
+    let entries = match &status {
+        Some(status) => {
+            svc.trees
+                .diff_from_status(&root, base.as_ref(), status)
+                .await?
+        }
+        None => svc.trees.diff(&root, base.as_ref(), &head).await?,
     };
     let flags: std::collections::HashMap<&str, (bool, bool)> = status
         .iter()
