@@ -1,0 +1,30 @@
+# The `todos` page's Decide… row action records the call for that row's TODO
+# (the row's path and line, the person's decision); the decisions read it back.
+# (The row menu and its slideover form are the app's.)
+given:
+  - observe:
+      facts:
+        measure: triage.todos
+        items:
+          - { path: src/lib.rs, line: 1, rule: bug }
+          - { path: src/lib.rs, line: 3, rule: cleanup }
+when: { page: todos }
+expect:
+  loaders:
+    todos:
+      rows:
+        - { path: src/lib.rs, line: 1, kind: bug }
+        - { path: src/lib.rs, line: 3, kind: cleanup }
+steps:
+  - press:
+      action: decide
+      node: todos
+      row: { path: src/lib.rs, line: 3 }
+      input: { decision: wontfix }
+    expect: { ok: true }
+  - when: { command: triage.todos.decisions, input: {} }
+    expect:
+      ok: true
+      result:
+        todos:
+          contains: [{ path: src/lib.rs, line: 3, decision: wontfix }]

@@ -3,9 +3,10 @@ import { expect, test } from "../../support/fixtures.js";
 import { openFromLauncher } from "../../support/ui.js";
 
 // The Changes page is the foundation's `changes` document, the renderer of
-// an effort's (and a snapshot's, a turn's) page: the effort's own title and
-// link, the range, the files, and the From/To pickers.
-test("an effort's page names its effort, renames it, and the pickers turn it into a range", async ({ page, daemon }) => {
+// an effort's (and a snapshot's, a turn's) page. What its parts say, and what
+// Rename… does, are the foundation's fixtures'; the app shows the effort's
+// page opened from its URI and the picker turning it into a range.
+test("an effort's page opens from its URI, and the pickers turn it into a range", async ({ page, daemon }) => {
   const created = await run<{ result: { uri: string } }>(daemon, "oxplow.work_item.create", {
     title: "Quail fix",
     state: "in_progress",
@@ -28,24 +29,11 @@ test("an effort's page names its effort, renames it, and the pickers turn it int
   const effort = page.locator('[data-node="effort"]');
   await expect(effort).toContainText("Open");
   await expect(page.locator('[data-node="header"]')).toContainText("working tree");
-  // Nothing was described: the section stays and says so.
-  await expect(page.locator('[data-node="description"]')).toContainText("No description");
-
-  // Rename… asks for the title in a form.
-  await effort.getByTestId("viz-action-rename").click();
-  const form = page.getByTestId("viz-action-form");
-  await form.getByTestId("viz-action-form-fields-title").fill("Quail fix, renamed");
-  await form.getByTestId("viz-action-form-fields-submit").click();
-  await expect(effort).toContainText("Quail fix, renamed");
-
   // Picking an end leaves the effort for a plain comparison.
   await page.getByTestId("page-param-end-value").filter({ visible: true }).click();
   await page.getByTestId("page-param-end-edit").filter({ visible: true }).selectOption("working");
   // The effort part stays a node of the page, showing no effort and none of
-  // its actions (they act on the effort's row): its title, over a line that
-  // says there is none.
-  await expect(effort).toHaveText("EffortNot part of an effort.");
+  // its actions (they act on the effort's row).
   await expect(effort.getByRole("button")).toHaveCount(0);
   await expect(page.locator('[data-node="header"]')).toContainText("Comparison");
-  await expect(page.locator('[data-node="header"]')).toContainText("working tree");
 });

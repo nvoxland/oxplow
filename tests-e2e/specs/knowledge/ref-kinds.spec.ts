@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -64,26 +63,4 @@ test("a URI nothing renders shows the fallback page, not an error", async ({ pag
   await expect(page.getByTestId("page-resource")).toBeVisible();
   await expect(page.getByTestId("resource-dead-link")).toBeVisible();
   await expect(page.getByTestId("undo-toast")).toHaveCount(0);
-});
-
-test("an https link opens a tab whose id is the URL", async ({ page, daemon }) => {
-  await ready(page);
-  await navigate(daemon, "https://example.com/docs");
-  await expect(page.getByTestId("center-tab-https://example.com/docs")).toBeVisible();
-  await expect(page.getByTestId("viz-embed")).toBeVisible();
-});
-
-test("a file URI with a rev opens the read-only viewer, and without one the editor", async ({ page, daemon }) => {
-  writeFileSync(join(daemon.project, "koala.txt"), "koala\n");
-  const git = (...args: string[]) =>
-    execFileSync("git", ["-c", "user.name=e2e", "-c", "user.email=e2e@example.com", ...args], { cwd: daemon.project });
-  git("add", "koala.txt");
-  git("commit", "-q", "-m", "Add koala");
-  await ready(page);
-  await navigate(daemon, "oxplow:oxplow/file?path=koala.txt&rev=git:HEAD");
-  // The foundation's `file-viewer` page: a `code` viz of the file at the revision.
-  await expect(page.getByTestId("viz-code")).toContainText("koala");
-  await navigate(daemon, "oxplow:oxplow/file?path=koala.txt");
-  await expect(page.getByTestId("viz-editor")).toBeVisible();
-  await expect(page.getByTestId("viz-editor").locator(".monaco-editor").first()).toBeVisible();
 });

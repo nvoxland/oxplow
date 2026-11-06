@@ -38,3 +38,19 @@ steps:
           rows: [{ value: ask, current: 0, can_ask: 1 }, { value: none, current: 1 }, { value: claude }, { value: opencode }]
   - given: [{ command: oxplow.agent.set_prompt_append, input: { text: Prefer TDD. } }]
   - expect: { loaders: { agents_prompt: { rows: [{ text: Prefer TDD. }] } } }
+  # An enabled harness's own settings are listed from what it declares, and
+  # Change… saves one: the row hands the command its agent and key.
+  - expect:
+      loaders:
+        agents_settings:
+          rows: { contains: [{ agent: opencode, key: model, setting: OpenCode — Model }] }
+  - press:
+      action: change
+      node: agents-settings
+      row: { agent: opencode, key: model }
+      input: { value: github-copilot/gpt-5 }
+    expect: { ok: true }
+  - expect:
+      loaders:
+        agents_settings:
+          rows: { contains: [{ agent: opencode, key: model, value: github-copilot/gpt-5 }] }

@@ -2,6 +2,7 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { run } from "../../support/daemon.js";
+import { installExtension } from "../../support/pages.js";
 import { expect, test } from "../../support/fixtures.js";
 import { openFromLauncher } from "../../support/ui.js";
 
@@ -49,11 +50,29 @@ test("the active tab and its history survive a reload", async ({ page, daemon })
   await expect(overviewTitle(page)).toHaveText("Item overview");
 });
 
+const fileTree = `title: Tree Heron
+category: Data
+loaders:
+  tree:
+    sql: |
+      SELECT 'aa.txt' AS id, NULL AS parent, 'aa.txt' AS name, 'oxplow:oxplow/file?path=aa.txt' AS target
+      UNION ALL SELECT 'bb.txt', NULL, 'bb.txt', 'oxplow:oxplow/file?path=bb.txt'
+view:
+  from: tree
+  viz: tree
+  tree: { id: id, parent: parent, label: name }
+  columns:
+  - key: name
+    label: Name
+    link: { kind: page, from: target }
+`;
+
 test("Alt+Down steps to the next file of the list it was opened from", async ({ page, daemon }) => {
   writeFileSync(join(daemon.project, "aa.txt"), "first\n");
   writeFileSync(join(daemon.project, "bb.txt"), "second\n");
+  await installExtension(daemon, "e2e-tree", { files: { "pages/heron.yaml": fileTree } });
   await page.goto("/");
-  await openFromLauncher(page, "Files");
+  await openFromLauncher(page, "Tree Heron");
   await page.locator('[data-testid="page-file"]:visible').getByRole("button", { name: "aa.txt" }).filter({ visible: true }).click();
   // The file has opened once its editor is up; focus then rests on the tab,
   // not in the editor (which keeps the keys for typing).

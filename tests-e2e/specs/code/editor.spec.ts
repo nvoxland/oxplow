@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
+import { installExtension } from "../../support/pages.js";
 import { expect, test } from "../../support/fixtures.js";
 import { openFromLauncher } from "../../support/ui.js";
 
@@ -10,8 +11,24 @@ import { openFromLauncher } from "../../support/ui.js";
 
 const TAB = "oxplow:oxplow/file?path=emu.txt";
 
-async function openEmu(page: import("@playwright/test").Page) {
-  await openFromLauncher(page, "Files");
+// A page of the suite's own that links to the file, as any list does.
+const list = `title: List Emu
+category: Data
+loaders:
+  files:
+    sql: SELECT 'emu.txt' AS name, 'oxplow:oxplow/file?path=emu.txt' AS target
+view:
+  from: files
+  viz: table
+  columns:
+  - key: name
+    label: Name
+    link: { kind: page, from: target }
+`;
+
+async function openEmu(page: import("@playwright/test").Page, daemon: Parameters<typeof installExtension>[0]) {
+  await installExtension(daemon, "e2e-emu", { files: { "pages/emu.yaml": list } });
+  await openFromLauncher(page, "List Emu");
   await page.locator('[data-testid="page-file"]:visible').getByRole("button", { name: "emu.txt" }).filter({ visible: true }).first().click();
   const editor = page.getByTestId("viz-editor").filter({ visible: true }).locator(".monaco-editor").first();
   await expect(editor).toBeVisible();
@@ -22,7 +39,7 @@ async function openEmu(page: import("@playwright/test").Page) {
 test("typing marks the tab dirty; Ctrl/Cmd+S writes the file and clears it", async ({ page, daemon }) => {
   writeFileSync(join(daemon.project, "emu.txt"), "emu\n");
   await page.goto("/");
-  const editor = await openEmu(page);
+  const editor = await openEmu(page, daemon);
   // The caret at the start of the first line.
   await editor.locator(".view-line").first().click();
   await page.keyboard.press("Home");
@@ -36,7 +53,7 @@ test("typing marks the tab dirty; Ctrl/Cmd+S writes the file and clears it", asy
 test("closing a dirty tab offers Undo, which brings the tab and its draft back", async ({ page, daemon }) => {
   writeFileSync(join(daemon.project, "emu.txt"), "emu\n");
   await page.goto("/");
-  const editor = await openEmu(page);
+  const editor = await openEmu(page, daemon);
   // The caret at the start of the first line.
   await editor.locator(".view-line").first().click();
   await page.keyboard.press("Home");

@@ -22,3 +22,43 @@ expect:
         - { role: decide }
         - { role: assistant }
     ai_calls: { rows: 0 }
+steps:
+  # A role is unbound from its row, then bound again through Assign…'s form.
+  - press: { action: unassign, node: ai-roles, row: { role: summarize } }
+    expect: { ok: true }
+  - expect:
+      loaders:
+        ai_roles:
+          rows:
+            contains: [{ role: summarize, bound: Not assigned, can_assign: 1, can_unassign: 0 }]
+  - press:
+      action: assign
+      node: ai-roles
+      row: { role: summarize }
+      input: { provider: or, model: openai/gpt-5-mini }
+    expect: { ok: true }
+  - expect:
+      loaders:
+        ai_roles:
+          rows:
+            contains: [{ role: summarize, bound: or · openai/gpt-5-mini, can_unassign: 1 }]
+  # A provider can't go while a role uses it; unbound, Remove takes it.
+  - press: { action: remove, node: ai-providers, row: { id: or } }
+    expect: { ok: false, refused: summarize }
+  - press: { action: unassign, node: ai-roles, row: { role: summarize } }
+    expect: { ok: true }
+  - press: { action: remove, node: ai-providers, row: { id: or } }
+    expect: { ok: true }
+  - expect:
+      loaders:
+        ai_providers:
+          rows: [{ id: fixture }]
+  # The add form: its key is kept, and no column of the list holds it.
+  - submit: { node: ai-provider-form, input: { id: or2, kind: openrouter, key: sk-e2e-secret } }
+    expect: { ok: true }
+  - expect:
+      loaders:
+        ai_providers:
+          columns: [id, kind, base_url, key, test_model]
+          rows:
+            contains: [{ id: or2, kind: OpenRouter, key: Key saved }]

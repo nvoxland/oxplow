@@ -7,8 +7,9 @@ import { openFromLauncher } from "../../support/ui.js";
 
 // The Comments inbox is the foundation's `comments` document page: threads
 // grouped by the page they are anchored to, the picked one's conversation
-// under them, and a row's actions run the comment commands.
-test("the Comments inbox lists a thread, shows its conversation, and resolves it", async ({ page, daemon }) => {
+// under them. What it lists, its conversation and what Resolve does are the
+// foundation's fixture's; the comment opened on its page is only seen here.
+test("the Comments inbox opens a thread on its page", async ({ page, daemon }) => {
   writeFileSync(join(daemon.project, "otters.md"), "# Otters\n\nThey hold hands.\n");
   const added = await run<{ result: { comment: { id: string } } }>(daemon, "oxplow.knowledge.add_comment", {
     stream: daemon.stream,
@@ -26,13 +27,6 @@ test("the Comments inbox lists a thread, shows its conversation, and resolves it
   const threads = inbox.getByTestId("viz-table");
   const row = threads.getByTestId("viz-row-0");
   await expect(row).toContainText("hold hands");
-  await expect(inbox.getByTestId("viz-group-heading")).toContainText("otters.md");
-
-  // Picking the row reads its messages, oldest first.
-  await row.click();
-  // The conversation section is the last place each message shows.
-  await expect(inbox.getByText("Is that true?").last()).toBeVisible();
-  await expect(inbox.getByText("Checking.").last()).toBeVisible();
 
   // Go to location opens the page at the comment: its address carries it.
   await row.getByText("Go to location").click();
@@ -48,9 +42,4 @@ test("the Comments inbox lists a thread, shows its conversation, and resolves it
   await expect(reply).toHaveCount(0);
   await page.keyboard.press("Meta+[");
   await expect(threads.getByTestId("viz-row-0")).toBeVisible();
-
-  // Resolving takes it out of the unresolved list.
-  await row.click({ button: "right" });
-  await page.getByTestId("menu-item-viz-action-resolve").click();
-  await expect(threads.getByTestId("viz-row-0")).toHaveCount(0);
 });

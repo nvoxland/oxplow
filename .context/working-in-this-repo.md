@@ -354,7 +354,8 @@ components, WebKit) against `oxplow-daemon-sim` over a throwaway git
 project — the real app, a real daemon, the fake terminal harness and the fake
 work-item provider; `tests-e2e/README.md` has the harness. It isn't part
 of `test:collect` (it builds the frontend and boots a daemon per spec,
-~40 s); CI runs it as its own `e2e` job. **Run it when a change touches
+~40 s); CI runs it as its own `e2e` job. Each checkout serves on a port of its
+own (`tests-e2e/support/port.ts`), so worktrees can run it side by side. **Run it when a change touches
 what a person sees or does in the app** — a page, a rail section, a
 command's UI path, a testid. What every page does (select, expand, switch,
 forms, slots, replacements, embeds, components, panels) is

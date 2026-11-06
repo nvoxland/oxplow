@@ -1,3 +1,4 @@
+import { previewPort } from "../../support/port.js";
 // The suite's own helpers (tsk995): a harness that hides a failure, hangs
 // or leaks makes every spec built on it lie.
 import { createServer } from "node:http";
@@ -91,4 +92,17 @@ test("the sleep ban sees a timer by any spelling", async () => {
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("each checkout gets its own port, the same one every run", () => {
+  const here = previewPort("/src/oxplow-stream-3", {});
+  expect(previewPort("/src/oxplow-stream-3", {})).toBe(here);
+  expect(previewPort("/src/oxplow-stream-4", {})).not.toBe(here);
+  for (const dir of ["/a", "/src/oxplow", "/Users/someone/src/oxplow-bugfixes"]) {
+    const port = previewPort(dir, {});
+    expect(port).toBeGreaterThanOrEqual(4200);
+    expect(port).toBeLessThan(5000);
+  }
+  // E2E_PORT, when it is set, is the one to use.
+  expect(previewPort("/src/oxplow-stream-3", { E2E_PORT: "4273" })).toBe(4273);
 });

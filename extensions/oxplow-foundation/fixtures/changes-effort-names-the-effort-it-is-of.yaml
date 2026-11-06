@@ -7,3 +7,16 @@ expect:
   loaders:
     changes_effort: { rows: [{ state: Open, effort: eff1 }] }
   actions: [{ id: rename, one_row: true }]
+steps:
+  # Rename… pressed with a new name, and the part reads it back.
+  - press: { action: rename, input: { title: "Quail fix, renamed" } }
+    expect: { ok: true }
+  - expect:
+      loaders:
+        changes_effort: { rows: [{ title: "Quail fix, renamed", state: Open }] }
+  # No effort: the part says so, and offers no row action.
+  - params: { effort_id: 999, effort: eff999 }
+    expect:
+      loaders:
+        changes_effort: { rows: 0 }
+      text: { contains: ["Not part of an effort."] }

@@ -1,0 +1,27 @@
+# A file row's Rename… and New File… run the file commands on the stream's
+# worktree: the renamed file is listed under its new name, and the new file
+# sits beside it, its answer naming the file to open. (The menu and the prompt strip are the app's: the actions
+# spec.)
+given:
+  - observe: { turn: { prompt: emu, write: { path: src/emu.txt, body: "emu\n" } } }
+when: { page: oxplow-foundation/directory, params: { stream_id: 1, path: src } }
+expect:
+  loaders:
+    tree:
+      rows:
+        contains: [{ name: emu.txt }]
+steps:
+  - press: { action: rename, node: tree, row: { name: emu.txt }, input: { to: src/owl.txt } }
+    expect: { ok: true }
+  - expect:
+      loaders:
+        tree:
+          rows:
+            contains: [{ name: owl.txt, target: "oxplow:oxplow/file?path=src/owl.txt" }]
+  - press: { action: new-file, node: tree, row: { name: owl.txt }, input: { path: src/kiwi.txt } }
+    expect: { ok: true, result: { path: src/kiwi.txt, uri: "oxplow:oxplow/file?path=src/kiwi.txt" } }
+  - expect:
+      loaders:
+        tree:
+          rows:
+            contains: [{ name: kiwi.txt }, { name: owl.txt }]

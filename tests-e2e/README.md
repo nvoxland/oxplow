@@ -10,7 +10,7 @@ CORS is permissive for exactly this (`.context/remote-daemon.md`).
 ## How a run is put together
 
 - **`playwright.config.ts`** (repo root). Its `webServer` builds the frontend
-  once (`vite build`) and serves it with `vite preview` on 127.0.0.1:4173, so a
+  once (`vite build`) and serves it with `vite preview` on 127.0.0.1, on a port of the checkout's own (from its path; `E2E_PORT` overrides it, should two collide), so a
   spec never meets a stale `dist/`.
 - **`support/global-setup.ts`** builds `oxplow-daemon-sim`,
   `oxplow-harness-fake` and `oxplow-provider-fake` and hands their paths to the

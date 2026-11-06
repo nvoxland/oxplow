@@ -7,3 +7,12 @@ expect:
     # The stream is titled by its folder, which differs per run.
     row: { rows: [{ title: $any }] }
     prompt: { rows: [{ stream: str1, prompt: "" }] }
+steps:
+  # Saving the form sets the prompt, and the form starts from it afterwards.
+  # (Save only when changed, and the rich text editor, are the app's: the
+  # edit-form spec.)
+  - submit: { node: prompt, input: { stream: str1, prompt: Always answer in rhyme. } }
+    expect: { ok: true }
+  - expect:
+      loaders:
+        prompt: { rows: [{ stream: str1, prompt: Always answer in rhyme. }] }
