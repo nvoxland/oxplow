@@ -10,11 +10,11 @@ use std::sync::mpsc;
 use std::sync::{Mutex, Weak};
 
 use notify::RecursiveMode;
-use tokio::sync::broadcast;
 
 use crate::filter::{is_ignore_file, WorkspaceFilter};
+use crate::pending::Subscribers;
 use crate::registrar::Registrar;
-use crate::{WatchEvent, WatchEventKind};
+use crate::WatchEventKind;
 
 /// What the watch callback tells the follower.
 pub(crate) enum FollowMsg {
@@ -38,19 +38,30 @@ pub(crate) struct Route {
 
 /// Decides what an OS event means.
 pub(crate) struct Router {
-    pub(crate) events: broadcast::Sender<WatchEvent>,
+    pub(crate) events: Subscribers,
     pub(crate) route: Option<Route>,
 }
 
 impl Router {
     pub(crate) fn handle(&self, res: notify::Result<notify::Event>) {
-        let Ok(event) = res else { return };
+        let event = match res {
+            Ok(event) => event,
+            Err(e) => {
+                tracing::warn!(error = %e, "file watch error: checking the disk");
+                self.lost(None);
+                return;
+            }
+        };
         // A read changes nothing. inotify reports one (open, close
         // after reading) for a file the watcher's own consumer is
         // reading, and a consumer that reads on every event —
         // the config reload — would otherwise hear itself: an
         // endless loop that kept a daemon's boot from finishing.
         if matches!(event.kind, notify::EventKind::Access(_)) {
+            return;
+        }
+        if event.need_rescan() {
+            self.lost(event.paths.first().map(PathBuf::as_path));
             return;
         }
         let kind = classify(&event);
@@ -69,14 +80,11 @@ impl Router {
                     // A build writing thousands of files under an ignored
                     // folder (inside a kept directory, where the OS watch
                     // still sees it) would overflow the channel and make
-                    // every consumer lag and rescan.
+                    // every consumer hold it and then rescan.
                     continue;
                 }
             }
-            let _ = self.events.send(WatchEvent {
-                path: path.clone(),
-                kind: kind.clone(),
-            });
+            self.events.change(path, &kind);
             if let Some(route) = &self.route {
                 if path
                     .parent()
@@ -85,6 +93,29 @@ impl Router {
                     let _ = route.follower.send(FollowMsg::Top(path.clone()));
                 }
             }
+        }
+    }
+}
+
+impl Router {
+    /// The OS lost changes (under `path`, when it says): subscribers check
+    /// the disk. Loss under an ignored folder (a build overflowing the OS's
+    /// queue) is no one's concern.
+    fn lost(&self, path: Option<&Path>) {
+        if let Some(route) = &self.route {
+            route.filter.forget_rules();
+        }
+        let Some(path) = path else {
+            self.events.rescan_all();
+            return;
+        };
+        match &self.route {
+            Some(route) => match route.relative(path) {
+                Some(rel) if route.filter.ignore_change(rel, || true) => {}
+                Some(_) => self.events.rescan(path),
+                None => self.events.rescan_all(),
+            },
+            None => self.events.rescan(path),
         }
     }
 }
@@ -107,7 +138,8 @@ fn classify(event: &notify::Event) -> WatchEventKind {
 }
 
 /// A workspace watch's follower: adds the recursive watch for each kept
-/// top-level directory that appears, and reports what's already in it.
+/// top-level directory that appears, and asks for a rescan of it: whatever was
+/// written before its watch landed, no watch saw.
 pub(crate) struct Follower {
     /// The root, as given and canonical.
     pub(crate) roots: Vec<PathBuf>,
@@ -115,7 +147,7 @@ pub(crate) struct Follower {
     pub(crate) filter: WorkspaceFilter,
     /// The top-level directories with a recursive watch, by name.
     pub(crate) followed: HashSet<OsString>,
-    pub(crate) events: broadcast::Sender<WatchEvent>,
+    pub(crate) events: Subscribers,
 }
 
 impl Follower {
@@ -165,13 +197,13 @@ impl Follower {
             return;
         }
         drop(w);
-        self.followed.insert(name.clone());
-        self.report_files(path, Path::new(&name));
+        self.followed.insert(name);
+        self.events.rescan(path);
     }
 
     /// An ignore file changed (the router has read the rules again): stop
     /// watching a top-level directory they now ignore, and watch (and
-    /// report) one they stopped ignoring.
+    /// rescan) one they stopped ignoring.
     fn refilter(&mut self, watcher: &Mutex<impl Registrar + ?Sized>) {
         let Some(root) = self.roots.first().cloned() else {
             return;
@@ -195,34 +227,8 @@ impl Follower {
                     continue;
                 }
                 drop(w);
-                self.followed.insert(name.clone());
-                self.report_files(&entry.path(), Path::new(&name));
-            }
-        }
-    }
-
-    /// Report every kept file under `dir` (`rel` from the root), as the
-    /// walks do.
-    fn report_files(&self, dir: &Path, rel: &Path) {
-        let Ok(entries) = std::fs::read_dir(dir) else {
-            return;
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            let Ok(file_type) = entry.file_type() else {
-                continue;
-            };
-            let rel = rel.join(entry.file_name());
-            if self.ignores(&rel, file_type.is_dir()) {
-                continue;
-            }
-            if file_type.is_dir() {
-                self.report_files(&path, &rel);
-            } else if file_type.is_file() {
-                let _ = self.events.send(WatchEvent {
-                    path,
-                    kind: WatchEventKind::Other,
-                });
+                self.followed.insert(name);
+                self.events.rescan(&entry.path());
             }
         }
     }
@@ -231,10 +237,10 @@ impl Follower {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use notify::event::{CreateKind, DataChange, ModifyKind};
+    use crate::pending::Subscription;
+    use notify::event::{CreateKind, DataChange, Flag, ModifyKind};
     use notify::{Event, EventKind};
     use tempfile::{tempdir, TempDir};
-    use tokio::sync::broadcast::error::TryRecvError;
 
     /// Records what the follower registers.
     #[derive(Default)]
@@ -262,7 +268,8 @@ mod tests {
         follower: Follower,
         messages: mpsc::Receiver<FollowMsg>,
         registrar: Mutex<FakeRegistrar>,
-        heard: broadcast::Receiver<WatchEvent>,
+        heard: Subscription,
+        rescans: Vec<String>,
     }
 
     impl Rig {
@@ -274,9 +281,8 @@ mod tests {
             prepare(&root);
             let filter =
                 WorkspaceFilter::build(&root, Vec::<String>::new(), Vec::<String>::new(), None);
-            // Room for the largest burst here: what these tests lose is
-            // what the router dropped, never what the channel did.
-            let (events, heard) = broadcast::channel(16_384);
+            let events = Subscribers::new(vec![root.clone()], vec![root.clone()]);
+            let heard = events.subscribe();
             let (follower_tx, messages) = mpsc::channel();
             Self {
                 router: Router {
@@ -296,6 +302,7 @@ mod tests {
                 messages,
                 registrar: Mutex::new(FakeRegistrar::default()),
                 heard,
+                rescans: Vec::new(),
                 dir,
             }
         }
@@ -320,23 +327,19 @@ mod tests {
             );
         }
 
-        /// The paths heard since the last call, from the root.
+        /// The paths heard since the last call, from the root. Rescans
+        /// asked for since then go to [`Self::rescans`].
         fn heard(&mut self) -> Vec<String> {
-            let mut out = Vec::new();
-            loop {
-                match self.heard.try_recv() {
-                    Ok(event) => out.push(
-                        event
-                            .path
-                            .strip_prefix(self.dir.path())
-                            .unwrap()
-                            .to_string_lossy()
-                            .into_owned(),
-                    ),
-                    Err(TryRecvError::Empty) => return out,
-                    Err(e) => panic!("{e}"),
-                }
-            }
+            let root = self.dir.path().to_path_buf();
+            let rel = |p: &Path| {
+                p.strip_prefix(&root)
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned()
+            };
+            let batch = self.heard.try_batch().unwrap_or_default();
+            self.rescans = batch.rescans.iter().map(|p| rel(p)).collect();
+            batch.paths.iter().map(|(p, _)| rel(p)).collect()
         }
 
         fn watched(&self) -> Vec<PathBuf> {
@@ -351,20 +354,17 @@ mod tests {
     }
 
     /// `mkdir d && write d/f` races the new watch, and no watch sees the gap:
-    /// a top-level directory that appears gets its watch, and the files already
-    /// in it are reported. What is written after is heard like anything else.
+    /// a top-level directory that appears gets its watch and a rescan. What is
+    /// written after is heard like anything else.
     #[test]
-    fn a_top_level_dir_created_later_is_followed_and_its_files_reported() {
+    fn a_top_level_dir_created_later_is_followed_and_rescanned() {
         let mut rig = Rig::new(|_| {}, &[]);
         write(rig.root(), "oxplow/extensions/mine/extension.yaml", "x");
         rig.event(EventKind::Create(CreateKind::Folder), "oxplow");
         let late = rig.root().join("oxplow");
         assert_eq!(rig.watched(), [late]);
-        let heard = rig.heard();
-        assert!(
-            heard.contains(&"oxplow/extensions/mine/extension.yaml".to_string()),
-            "{heard:?}"
-        );
+        rig.heard();
+        assert_eq!(rig.rescans, ["oxplow"]);
 
         rig.modified("oxplow/extensions/mine/page.yaml");
         assert_eq!(rig.heard(), ["oxplow/extensions/mine/page.yaml"]);
@@ -415,7 +415,7 @@ mod tests {
 
     /// A `.gitignore` edit takes effect at once: a file it starts ignoring
     /// goes quiet, one it stops ignoring is heard, and a top-level directory
-    /// it stops ignoring is watched from then on with its files reported.
+    /// it stops ignoring is watched from then on, and rescanned.
     #[test]
     fn a_gitignore_edit_takes_effect_without_a_restart() {
         let mut rig = Rig::new(
@@ -438,8 +438,8 @@ mod tests {
 
         write(rig.root(), ".gitignore", "");
         rig.modified(".gitignore");
-        let heard = rig.heard();
-        assert!(heard.contains(&"built/out.js".to_string()), "{heard:?}");
+        rig.heard();
+        assert_eq!(rig.rescans, ["built"]);
         assert_eq!(rig.watched(), [rig.root().join("built")]);
         rig.modified("src/a.txt");
         assert_eq!(rig.heard(), ["src/a.txt"], "kept again");
@@ -463,5 +463,63 @@ mod tests {
             "read.txt",
         );
         assert!(rig.heard().is_empty());
+    }
+
+    fn dropped_events(rel: Option<&Path>) -> Event {
+        let event = Event::new(EventKind::Other).set_flag(Flag::Rescan);
+        match rel {
+            Some(path) => event.add_path(path.to_path_buf()),
+            None => event,
+        }
+    }
+
+    /// The OS says it dropped events: subscribers check the disk there, and
+    /// an ignore file that changed unheard is read again.
+    #[test]
+    fn dropped_events_are_a_rescan_where_the_os_says() {
+        let mut rig = Rig::new(
+            |root| {
+                std::fs::create_dir(root.join("src")).unwrap();
+                write(root, "src/.gitignore", "old\n");
+            },
+            &["src"],
+        );
+        rig.modified("src/old");
+        assert!(rig.heard().is_empty(), "ignored");
+        write(rig.root(), "src/.gitignore", "");
+
+        let src = rig.root().join("src");
+        rig.router.handle(Ok(dropped_events(Some(&src))));
+        rig.heard();
+        assert_eq!(rig.rescans, ["src"]);
+        rig.modified("src/old");
+        assert_eq!(rig.heard(), ["src/old"], "the lost edit counts");
+    }
+
+    /// With no path, or one outside the watch (macOS may name a parent), it is
+    /// the whole root; so is a watch error.
+    #[test]
+    fn dropped_events_elsewhere_or_a_watch_error_rescan_the_root() {
+        let mut rig = Rig::new(|_| {}, &[]);
+        for res in [
+            Ok(dropped_events(None)),
+            Ok(dropped_events(Some(Path::new("/elsewhere")))),
+            Err(notify::Error::generic("gone")),
+        ] {
+            rig.router.handle(res);
+            rig.heard();
+            assert_eq!(rig.rescans, [""]);
+        }
+    }
+
+    /// A build overflowing the OS's queue under an ignored folder concerns
+    /// no one.
+    #[test]
+    fn dropped_events_under_an_ignored_folder_are_no_ones() {
+        let mut rig = Rig::new(|root| write(root, ".gitignore", "target/\n"), &[]);
+        let target = rig.root().join("target/deep");
+        rig.router.handle(Ok(dropped_events(Some(&target))));
+        rig.heard();
+        assert!(rig.rescans.is_empty());
     }
 }

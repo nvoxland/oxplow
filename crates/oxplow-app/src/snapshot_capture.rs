@@ -747,12 +747,11 @@ impl SnapshotCaptureService {
                     return;
                 }
             };
-        // Subscribe to the raw, un-debounced stream: the dirty set must
-        // be current the instant a snapshot is requested, so we mark
-        // paths dirty as soon as the OS reports them rather than after
-        // a debounce window. The general-purpose `WorkspaceChanged`
-        // feed (workspace_watch) is the one that debounces.
-        let mut rx = watcher.subscribe();
+        // At once, with no window: the dirty set must be current the instant
+        // a snapshot is requested, so we mark paths dirty as soon as the OS
+        // reports them. The general-purpose `WorkspaceChanged` feed
+        // (workspace_watch) is the one that waits for a burst to end.
+        let mut changes = watcher.subscribe();
         loop {
             tokio::select! {
                 _ = self.inner.shutdown.notified() => {
@@ -760,19 +759,46 @@ impl SnapshotCaptureService {
                     return;
                 }
                 _ = self.inner.refilter.notified() => watcher.refilter(),
-                ev = rx.recv() => match ev {
-                    // The watch judged it by this stream's filter.
-                    Ok(event) => {
-                        self.mark_dirty(event.path, event.kind);
-                        self.note_activity();
-                    }
-                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                        warn!(skipped = n, "snapshot capture: fs-watch lagged");
-                    }
-                    Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
+                batch = changes.next_batch() => match batch {
+                    Some(batch) => self.on_batch(batch).await,
+                    None => return,
                 },
             }
         }
+    }
+
+    /// What the watch heard (judged by this stream's filter). Where it says
+    /// changes were lost, the disk is checked against the last snapshot, so
+    /// they reach the next take anyway.
+    async fn on_batch(&self, batch: oxplow_fs_watch::Batch) {
+        let heard = !batch.paths.is_empty();
+        for (path, kind) in batch.paths {
+            self.mark_dirty(path, kind);
+        }
+        let mut found = 0;
+        for dir in batch.rescans {
+            let under = self.relative_dir(&dir);
+            match self.enqueue_tree_diff(&under).await {
+                Ok(n) => found += n,
+                Err(e) => warn!(error = %e, ?dir, "snapshot capture: rescan failed"),
+            }
+        }
+        if heard || found > 0 {
+            self.note_activity();
+        }
+    }
+
+    /// `dir` from the worktree root; the whole root for a directory outside
+    /// it. The OS may report the root's other spelling (macOS reports
+    /// `/private/var` for `/var`).
+    fn relative_dir(&self, dir: &Path) -> PathBuf {
+        let root = &self.inner.project_dir;
+        let canonical = root.canonicalize().ok();
+        dir.strip_prefix(root)
+            .ok()
+            .or_else(|| dir.strip_prefix(canonical.as_ref()?).ok())
+            .unwrap_or(Path::new(""))
+            .to_path_buf()
     }
 
     /// Add a path to the dirty set. The next `request_snapshot` will
@@ -937,10 +963,15 @@ impl SnapshotCaptureService {
         // run `scan_kind = 'full'` captures over the RECONSTRUCTED tree of an
         // ordinary snapshot, so nothing needs a fabricated full-tree snapshot
         // any more — and fabricating one polluted effort file-attribution.
-        self.enqueue_tree_diff().await
+        self.enqueue_tree_diff(Path::new("")).await
     }
 
-    async fn enqueue_tree_diff(&self) -> Result<usize, Box<dyn std::error::Error + Send + Sync>> {
+    /// [`Self::enqueue_startup_diff`] for what is under `under` (from the
+    /// worktree root; empty: all of it).
+    async fn enqueue_tree_diff(
+        &self,
+        under: &Path,
+    ) -> Result<usize, Box<dyn std::error::Error + Send + Sync>> {
         let sweep_started = Instant::now();
         let db_started = Instant::now();
         let mut latest = self
@@ -954,6 +985,9 @@ impl SnapshotCaptureService {
             prior_rows,
             db_load_ms, "snapshot startup sweep: loaded latest_stat_per_path",
         );
+        // A path elsewhere is not this pass's to call deleted.
+        latest.retain(|path, _| Path::new(path).starts_with(under));
+        let walk_from = self.inner.project_dir.join(under);
         let project_dir = self.inner.project_dir.clone();
         let max_bytes = self.inner.max_file_bytes;
         let blobs = self.inner.blobs.clone();
@@ -1020,7 +1054,7 @@ impl SnapshotCaptureService {
             let mut shortcircuit_hits: u64 = 0;
             let mut oversize_new: u64 = 0;
             let phase1_started = Instant::now();
-            for entry in walkdir::WalkDir::new(&project_dir)
+            for entry in walkdir::WalkDir::new(&walk_from)
                 .into_iter()
                 .filter_entry(|e| {
                     if e.depth() == 0 {
@@ -2106,6 +2140,65 @@ mod tests {
             joined.is_ok(),
             "watcher task did not exit within 5s of shutdown()",
         );
+    }
+
+    /// What the watch lost is found by a rescan: a change no event told of,
+    /// and a deletion, reach the next take.
+    #[tokio::test]
+    async fn a_rescan_finds_what_the_watch_missed() {
+        let project = tempdir().unwrap();
+        let root = project.path();
+        std::fs::create_dir(root.join("src")).unwrap();
+        std::fs::write(root.join("src/a.txt"), "1").unwrap();
+        std::fs::write(root.join("src/gone.txt"), "1").unwrap();
+        let (svc, store) = svc_for(root).await;
+        svc.enqueue_startup_diff().await.unwrap();
+        svc.request_snapshot(SnapshotTrigger::Startup)
+            .await
+            .unwrap();
+
+        std::fs::write(root.join("src/a.txt"), "changed").unwrap();
+        std::fs::remove_file(root.join("src/gone.txt")).unwrap();
+        svc.on_batch(oxplow_fs_watch::Batch {
+            paths: Vec::new(),
+            rescans: vec![root.to_path_buf()],
+        })
+        .await;
+        svc.request_snapshot(SnapshotTrigger::Quiet).await.unwrap();
+
+        let latest = store.latest_stat_per_path(StreamId::new(1)).await.unwrap();
+        assert_eq!(latest["src/a.txt"].size_bytes, 7);
+        assert!(latest["src/gone.txt"].storage.is_deleted());
+    }
+
+    /// A rescan of one directory looks only there: what is elsewhere is not
+    /// missing, and is not read.
+    #[tokio::test]
+    async fn a_rescan_of_a_directory_leaves_the_rest_alone() {
+        let project = tempdir().unwrap();
+        let root = project.path();
+        for dir in ["a", "b"] {
+            std::fs::create_dir(root.join(dir)).unwrap();
+            std::fs::write(root.join(dir).join("f.txt"), "1").unwrap();
+        }
+        let (svc, store) = svc_for(root).await;
+        svc.enqueue_startup_diff().await.unwrap();
+        svc.request_snapshot(SnapshotTrigger::Startup)
+            .await
+            .unwrap();
+
+        std::fs::write(root.join("a/f.txt"), "changed").unwrap();
+        std::fs::write(root.join("b/f.txt"), "changed").unwrap();
+        svc.on_batch(oxplow_fs_watch::Batch {
+            paths: Vec::new(),
+            rescans: vec![root.join("a")],
+        })
+        .await;
+        svc.request_snapshot(SnapshotTrigger::Quiet).await.unwrap();
+
+        let latest = store.latest_stat_per_path(StreamId::new(1)).await.unwrap();
+        assert_eq!(latest["a/f.txt"].size_bytes, 7);
+        assert_eq!(latest["b/f.txt"].size_bytes, 1, "not rescanned");
     }
 
     #[tokio::test]

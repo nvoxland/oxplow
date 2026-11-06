@@ -18,11 +18,12 @@
 //! Spawned once at boot from the host binary; the returned handle holds
 //! the `FsWatcher` for the process lifetime (drop cancels the watch).
 
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
 use oxplow_config::{OXPLOW_CONFIG_FILE, PERSONAL_CONFIG_FILE};
-use oxplow_fs_watch::{FsWatcher, RecursiveMode, WatchEvent};
+use oxplow_fs_watch::{Batch, FsWatcher, RecursiveMode};
 use tracing::{debug, warn};
 
 use crate::Services;
@@ -68,53 +69,106 @@ impl ConfigWatcher {
                 return None;
             }
         };
-        // Debounced: a save can fire create+modify; we only need to
-        // settle on the final content.
-        let mut rx = watcher.subscribe_debounced(Duration::from_millis(300));
+        // A save can fire create+modify; we only need to settle on the final
+        // content.
+        let mut changes = watcher.subscribe();
         tokio::spawn(async move {
-            loop {
-                match rx.recv().await {
-                    Ok(WatchEvent { path, .. }) => {
-                        if path.starts_with(&sources_dir) {
-                            if let Err(e) = services
-                                .extension_activation
-                                .restate_sources(services.clone())
-                                .await
-                            {
-                                warn!(error = %e, "failed to restate the extension listing");
-                            }
-                            continue;
-                        }
-                        let is_config = path
-                            .file_name()
-                            .map(|n| n == OXPLOW_CONFIG_FILE || n == PERSONAL_CONFIG_FILE)
-                            .unwrap_or(false);
-                        // A `.yaml`/`.yml` change under the global metrics dir
-                        // also triggers a reload — the runner re-reads the
-                        // global scope on the resulting `ConfigChanged`.
-                        let is_global_metric = global_metrics_dir
-                            .as_ref()
-                            .map(|dir| {
-                                path.starts_with(dir)
-                                    && matches!(
-                                        path.extension().and_then(|x| x.to_str()),
-                                        Some("yaml") | Some("yml")
-                                    )
-                            })
-                            .unwrap_or(false);
-                        if !is_config && !is_global_metric {
-                            continue;
-                        }
-                        match services.reload_config_from_disk() {
-                            Ok(()) => debug!("reloaded project.yaml after on-disk change"),
-                            Err(e) => warn!(error = %e, "failed to reload project.yaml"),
-                        }
+            while let Some(batch) = changes.next_batch_after(Duration::from_millis(300)).await {
+                let says = what_changed(&batch, &sources_dir, global_metrics_dir.as_deref());
+                if says.sources {
+                    if let Err(e) = services
+                        .extension_activation
+                        .restate_sources(services.clone())
+                        .await
+                    {
+                        warn!(error = %e, "failed to restate the extension listing");
                     }
-                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
-                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                }
+                if says.config {
+                    match services.reload_config_from_disk() {
+                        Ok(()) => debug!("reloaded project.yaml after on-disk change"),
+                        Err(e) => warn!(error = %e, "failed to reload project.yaml"),
+                    }
                 }
             }
         });
         Some(Self { _fs: watcher })
+    }
+}
+
+/// What a batch asks for.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct Says {
+    /// Restate the listing rows that follow an extension source.
+    sources: bool,
+    /// Read the config again.
+    config: bool,
+}
+
+/// Changes it lost could be any of them, so a rescan asks for both.
+fn what_changed(batch: &Batch, sources_dir: &Path, global_metrics: Option<&Path>) -> Says {
+    let mut says = Says {
+        sources: !batch.rescans.is_empty(),
+        config: !batch.rescans.is_empty(),
+    };
+    for (path, _) in &batch.paths {
+        if path.starts_with(sources_dir) {
+            says.sources = true;
+            continue;
+        }
+        let is_config = path
+            .file_name()
+            .is_some_and(|n| n == OXPLOW_CONFIG_FILE || n == PERSONAL_CONFIG_FILE);
+        // A `.yaml`/`.yml` change under the global metrics dir also triggers a
+        // reload — the runner re-reads the global scope on the resulting
+        // `ConfigChanged`.
+        let is_global_metric = global_metrics.is_some_and(|dir| {
+            path.starts_with(dir)
+                && matches!(
+                    path.extension().and_then(|x| x.to_str()),
+                    Some("yaml") | Some("yml")
+                )
+        });
+        says.config |= is_config || is_global_metric;
+    }
+    says
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use oxplow_fs_watch::WatchEventKind;
+    use std::path::PathBuf;
+
+    fn says(paths: &[&str], rescans: &[&str]) -> Says {
+        let batch = Batch {
+            paths: paths
+                .iter()
+                .map(|p| (PathBuf::from(p), WatchEventKind::Modified))
+                .collect(),
+            rescans: rescans.iter().map(PathBuf::from).collect(),
+        };
+        what_changed(
+            &batch,
+            Path::new("/p/.oxplow/extensions"),
+            Some(Path::new("/g/metrics")),
+        )
+    }
+
+    #[test]
+    fn a_batch_asks_for_what_its_paths_touch() {
+        assert_eq!(says(&["/p/.oxplow/local.sqlite"], &[]), Says::default());
+        assert!(says(&["/p/.oxplow/project.yaml"], &[]).config);
+        assert!(says(&["/g/metrics/a.yaml"], &[]).config);
+        assert!(!says(&["/g/metrics/a.txt"], &[]).config);
+        let sources = says(&["/p/.oxplow/extensions/x/page.yaml"], &[]);
+        assert!(sources.sources && !sources.config);
+    }
+
+    /// The lost change could be any of them.
+    #[test]
+    fn lost_changes_ask_for_everything() {
+        let lost = says(&[], &["/p/.oxplow"]);
+        assert!(lost.sources && lost.config);
     }
 }

@@ -22,7 +22,7 @@ use std::time::Duration;
 
 use oxplow_domain::vcs::Vcs;
 use oxplow_domain::{Stream, StreamKind};
-use oxplow_fs_watch::{FsWatcher, RecursiveMode, WatchEvent, WatchEventKind};
+use oxplow_fs_watch::{Batch, FsWatcher, RecursiveMode, WatchEventKind};
 use oxplow_session::StreamService;
 use tracing::{debug, warn};
 
@@ -140,6 +140,41 @@ struct Announce {
     ref_moves: crate::ref_moves::RefMoves,
 }
 
+/// How long a burst of file changes collects before it is announced.
+const ANNOUNCE_AFTER: Duration = Duration::from_millis(250);
+
+impl Announce {
+    /// What the watch heard (judged by the stream's filter). The working
+    /// tree's file list follows the edit itself, not the next snapshot take.
+    /// Changes it lost are announced with no path: everything is read again.
+    fn batch(&self, stream_id: oxplow_domain::StreamId, root: &Path, batch: Batch) {
+        let paths: Vec<_> = batch
+            .paths
+            .into_iter()
+            .filter(|(path, _)| !is_swap_file(path))
+            .collect();
+        if paths.is_empty() && batch.rescans.is_empty() {
+            return;
+        }
+        self.ref_moves.index_moved(stream_id);
+        for (path, kind) in paths {
+            let rel = path.strip_prefix(root).unwrap_or(&path);
+            self.events.emit(OxplowEvent::WorkspaceChanged {
+                stream_id,
+                change_kind: classify(&kind),
+                path: rel.to_string_lossy().into_owned(),
+            });
+        }
+        if !batch.rescans.is_empty() {
+            self.events.emit(OxplowEvent::WorkspaceChanged {
+                stream_id,
+                change_kind: WorkspaceChangeKind::Updated,
+                path: String::new(),
+            });
+        }
+    }
+}
+
 fn spawn_for_stream(
     stream_id: oxplow_domain::StreamId,
     worktree: PathBuf,
@@ -164,53 +199,31 @@ fn spawn_for_stream(
         }
     };
     {
-        // Debounced: a `git checkout` or save-storm should refresh the
-        // file tree / editor once, not once per touched file. (The
-        // snapshot dirty set listens to the raw stream separately.)
-        let mut rx = fs.subscribe_debounced(Duration::from_millis(250));
-        let bus = events.clone();
-        let id = stream_id;
+        // A burst as one batch: a `git checkout` or save-storm should refresh
+        // the file tree / editor once, not once per touched file. (The
+        // snapshot dirty set reads its own subscription at once.)
+        let mut changes = fs.subscribe();
         let root = worktree.clone();
-        let ref_moves = ref_moves.clone();
+        let announce = Announce {
+            events: events.clone(),
+            ref_moves: ref_moves.clone(),
+        };
         let mut on_orphan_slot = Some(on_orphan);
         tokio::spawn(async move {
-            loop {
-                match rx.recv().await {
-                    Ok(WatchEvent { path, kind }) => {
-                        // If the worktree root has vanished (user `rm
-                        // -rf`'d it, `git worktree remove` ran, etc.),
-                        // archive the stream + toast and exit — the
-                        // watcher is dead either way. We check on every
-                        // event, not just `Removed`: macOS FSEvents
-                        // surfaces a directory's own deletion as an
-                        // `Updated` of the parent, so keying on the
-                        // event kind is unreliable.
-                        if is_worktree && !root.exists() {
-                            if let Some(cb) = on_orphan_slot.take() {
-                                cb().await;
-                            }
-                            break;
-                        }
-                        // The watch judged it by this stream's filter.
-                        if is_swap_file(&path) {
-                            continue;
-                        }
-                        let rel_path = path.strip_prefix(&root).unwrap_or(&path);
-                        let rel = rel_path.to_string_lossy().into_owned();
-                        // The working tree's file list follows the edit
-                        // itself, not the next snapshot take.
-                        ref_moves.index_moved(id);
-                        bus.emit(OxplowEvent::WorkspaceChanged {
-                            stream_id: id,
-                            change_kind: classify(&kind),
-                            path: rel,
-                        });
+            while let Some(batch) = changes.next_batch_after(ANNOUNCE_AFTER).await {
+                // If the worktree root has vanished (user `rm -rf`'d it,
+                // `git worktree remove` ran, etc.), archive the stream + toast
+                // and exit — the watcher is dead either way. We check on every
+                // batch, not just a removal: macOS FSEvents surfaces a
+                // directory's own deletion as an `Updated` of the parent, so
+                // keying on the event kind is unreliable.
+                if is_worktree && !root.exists() {
+                    if let Some(cb) = on_orphan_slot.take() {
+                        cb().await;
                     }
-                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                        warn!(skipped = n, "workspace watcher lagged");
-                    }
-                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                    break;
                 }
+                announce.batch(stream_id, &root, batch);
             }
         });
     }
@@ -254,22 +267,20 @@ fn spawn_project_context(
                 return None;
             }
         };
-    // Debounced: an init or a removal churns the root briefly; we only
-    // need the settled state.
-    let mut rx = watcher.subscribe_debounced(Duration::from_millis(500));
+    // An init or a removal churns the root briefly; we only need the settled
+    // state.
+    let mut changes = watcher.subscribe();
     tokio::spawn(async move {
         let mut last_state = vcs.detect(&project_dir).await.is_some();
-        loop {
-            match rx.recv().await {
-                Ok(_) => {
-                    let now = vcs.detect(&project_dir).await.is_some();
-                    if now != last_state {
-                        last_state = now;
-                        events.emit(OxplowEvent::WorkspaceContextChanged { vcs_enabled: now });
-                    }
-                }
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+        while changes
+            .next_batch_after(Duration::from_millis(500))
+            .await
+            .is_some()
+        {
+            let now = vcs.detect(&project_dir).await.is_some();
+            if now != last_state {
+                last_state = now;
+                events.emit(OxplowEvent::WorkspaceContextChanged { vcs_enabled: now });
             }
         }
     });
@@ -338,6 +349,65 @@ mod tests {
             }
         }
         false
+    }
+
+    /// A burst tells the working-files listener once, however many paths it
+    /// holds; swap files alone say nothing; lost changes are announced with
+    /// no path, since everything has to be read again.
+    #[tokio::test]
+    async fn a_batch_is_announced_once_and_lost_changes_with_no_path() {
+        let bus = EventBus::new();
+        let mut ui = bus.subscribe_ui();
+        let ref_moves = crate::ref_moves::RefMoves::new(bus.clone());
+        let mut index = ref_moves.subscribe_index();
+        let announce = Announce {
+            events: bus.clone(),
+            ref_moves,
+        };
+        let stream = oxplow_domain::StreamId::new(4);
+        let root = Path::new("/r");
+        let modified = |p: &str| (PathBuf::from(p), WatchEventKind::Modified);
+
+        announce.batch(
+            stream,
+            root,
+            Batch {
+                paths: vec![modified("/r/a.swp")],
+                rescans: Vec::new(),
+            },
+        );
+        assert!(index.pending().is_empty(), "a swap file says nothing");
+
+        announce.batch(
+            stream,
+            root,
+            Batch {
+                paths: (0..50).map(|i| modified(&format!("/r/{i}"))).collect(),
+                rescans: Vec::new(),
+            },
+        );
+        assert_eq!(
+            index.pending(),
+            [crate::ref_moves::Moved::Stream(stream)],
+            "one signal, not one per path"
+        );
+
+        announce.batch(
+            stream,
+            root,
+            Batch {
+                paths: Vec::new(),
+                rescans: vec![PathBuf::from("/r")],
+            },
+        );
+        assert_eq!(index.pending(), [crate::ref_moves::Moved::Stream(stream)]);
+        let mut last = None;
+        while let Ok(event) = ui.try_recv() {
+            if let OxplowEvent::WorkspaceChanged { path, .. } = event {
+                last = Some(path);
+            }
+        }
+        assert_eq!(last.as_deref(), Some(""));
     }
 
     /// An edit made outside oxplow reaches the working-tree file list at

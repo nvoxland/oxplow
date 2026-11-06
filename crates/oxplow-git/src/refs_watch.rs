@@ -18,7 +18,7 @@ use specta::Type;
 use tokio::sync::broadcast;
 use tracing::debug;
 
-use oxplow_fs_watch::{FsWatchError, FsWatcher, WatchEvent};
+use oxplow_fs_watch::{FsWatchError, FsWatcher, Subscription};
 
 /// Domain-level event emitted to the UI. Currently only signals
 /// "something changed" since the watcher debounces; consumers
@@ -60,8 +60,8 @@ impl GitRefsWatcher {
         };
         // A single `git commit` writes several ref files in quick
         // succession; debounce so consumers re-query once per burst.
-        let events = watcher.as_ref().map(|w| w.subscribe_debounced(debounce));
-        let stop = spawn_checks(repo_path, events, CHECK_EVERY, sender.clone());
+        let events = watcher.as_ref().map(FsWatcher::subscribe);
+        let stop = spawn_checks(repo_path, events, debounce, CHECK_EVERY, sender.clone());
         Ok(Self {
             _inner: watcher,
             _stop: stop,
@@ -80,7 +80,8 @@ impl GitRefsWatcher {
 /// announced once.
 fn spawn_checks(
     repo_path: PathBuf,
-    mut events: Option<broadcast::Receiver<WatchEvent>>,
+    mut events: Option<Subscription>,
+    debounce: Duration,
     every: Duration,
     tx: broadcast::Sender<RefsChangeEvent>,
 ) -> tokio::sync::oneshot::Sender<()> {
@@ -100,20 +101,17 @@ fn spawn_checks(
         loop {
             let heard = tokio::select! {
                 _ = &mut stop => return,
-                ev = async {
+                batch = async {
                     match events.as_mut() {
-                        Some(rx) => rx.recv().await.map(|_| ()),
+                        Some(sub) => sub.next_batch_after(debounce).await,
                         None => std::future::pending().await,
                     }
-                } => match ev {
-                    Ok(()) | Err(broadcast::error::RecvError::Lagged(_)) => {
-                        last = state(dirs.clone()).await;
-                        true
-                    }
-                    Err(broadcast::error::RecvError::Closed) => {
-                        events = None;
-                        false
-                    }
+                } => if batch.is_some() {
+                    last = state(dirs.clone()).await;
+                    true
+                } else {
+                    events = None;
+                    false
                 },
                 _ = tick.tick() => {
                     let now = state(dirs.clone()).await;
@@ -246,6 +244,7 @@ mod tests {
         let _stop = spawn_checks(
             dir.path().to_path_buf(),
             None,
+            Duration::ZERO,
             Duration::from_millis(20),
             sender,
         );

@@ -210,6 +210,13 @@ impl WorkspaceFilter {
         self.forget_decisions();
     }
 
+    /// Changes were lost: an ignore file may be among them, so all of them
+    /// are read again when next needed.
+    pub fn forget_rules(&self) {
+        write(&self.shared.rules).clear();
+        self.forget_decisions();
+    }
+
     fn forget_decisions(&self) {
         write(&self.shared.chains).clear();
         write(&self.shared.dirs).clear();
