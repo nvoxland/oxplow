@@ -862,6 +862,57 @@ pub struct LatestStat {
     pub content_hash: Option<String>,
 }
 
+/// Paths bound per statement by [`SqliteSnapshotStore::latest_stat_for_paths`]
+/// (SQLite's variable limit is 999 in old builds, 32766 in new).
+const LATEST_STAT_BIND_CHUNK: usize = 500;
+
+/// The latest row (by id) of each path, for one stream (`?1`) and a
+/// condition on `s.path`. Both the outer row and the inner `MAX(id)` seek
+/// `idx_file_snapshot_stream_path`.
+const LATEST_STAT_SELECT: &str =
+    "SELECT s.path, s.blob_hash, s.size_bytes, s.mtime_ms, s.storage, s.content_hash
+     FROM file_snapshot s WHERE s.stream_id = ?1 AND";
+const LATEST_STAT_IS_LATEST: &str = "AND s.id = (SELECT MAX(i.id) FROM file_snapshot i
+       WHERE i.stream_id = s.stream_id AND i.path = s.path)";
+
+/// `?1` the stream, `?2..` the `n` paths.
+fn latest_stat_for_paths_sql(n: usize) -> String {
+    let marks = (0..n)
+        .map(|i| format!("?{}", i + 2))
+        .collect::<Vec<_>>()
+        .join(",");
+    format!("{LATEST_STAT_SELECT} s.path IN ({marks}) {LATEST_STAT_IS_LATEST}")
+}
+
+/// `?1` the stream, `?2` the first path, `?3` the first path past the range.
+const LATEST_STAT_UNDER_SQL: &str =
+    "SELECT s.path, s.blob_hash, s.size_bytes, s.mtime_ms, s.storage, s.content_hash
+     FROM file_snapshot s WHERE s.stream_id = ?1 AND s.path >= ?2 AND s.path < ?3
+       AND s.id = (SELECT MAX(i.id) FROM file_snapshot i
+         WHERE i.stream_id = s.stream_id AND i.path = s.path)";
+
+/// A [`LatestStat`] row, as the lookups above select it.
+fn latest_stat_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<(String, LatestStat)> {
+    let path: String = row.get(0)?;
+    let storage = SnapshotStorage::from_db_str(&row.get::<_, String>(4)?);
+    let blob_hash: Option<String> = row.get(1)?;
+    let content_hash: Option<String> = row.get::<_, Option<String>>(5)?.or_else(|| {
+        (storage == SnapshotStorage::Oxplow)
+            .then(|| blob_hash.clone())
+            .flatten()
+    });
+    Ok((
+        path,
+        LatestStat {
+            blob_hash,
+            size_bytes: row.get(2)?,
+            mtime_ms: row.get(3)?,
+            storage,
+            content_hash,
+        },
+    ))
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct FileSnapshot {
     #[specta(type = oxplow_domain::JsNumber)]
@@ -2267,6 +2318,67 @@ impl SqliteSnapshotStore {
             .await
     }
 
+    /// [`Self::latest_stat_per_path`] for only `paths` (those with no row
+    /// are absent). A capture of a few changed files asks for these and
+    /// no others, so its cost follows the change, not the history. The
+    /// bind list is chunked to stay under SQLite's variable limit.
+    pub async fn latest_stat_for_paths(
+        &self,
+        stream_id: StreamId,
+        paths: &[String],
+    ) -> Result<std::collections::HashMap<String, LatestStat>, DomainError> {
+        if paths.is_empty() {
+            return Ok(Default::default());
+        }
+        let paths = paths.to_vec();
+        self.db
+            .call(move |conn| {
+                let mut out = std::collections::HashMap::new();
+                for chunk in paths.chunks(LATEST_STAT_BIND_CHUNK) {
+                    let mut stmt = conn.prepare_cached(&latest_stat_for_paths_sql(chunk.len()))?;
+                    let args = std::iter::once(rusqlite::types::Value::Integer(stream_id.value()))
+                        .chain(
+                            chunk
+                                .iter()
+                                .map(|p| rusqlite::types::Value::Text(p.clone())),
+                        );
+                    let rows = stmt.query_map(rusqlite::params_from_iter(args), latest_stat_row)?;
+                    for row in rows {
+                        let (path, stat) = row?;
+                        out.insert(path, stat);
+                    }
+                }
+                Ok(out)
+            })
+            .await
+    }
+
+    /// [`Self::latest_stat_per_path`] for the paths under one directory
+    /// (`dir` from the worktree root, with or without a trailing `/`;
+    /// empty: all of them). A range on `path`, so it seeks the
+    /// `(stream_id, path)` index: `a/` and below, never `a-b/` or `a0/`.
+    pub async fn latest_stat_under(
+        &self,
+        stream_id: StreamId,
+        dir: &str,
+    ) -> Result<std::collections::HashMap<String, LatestStat>, DomainError> {
+        let dir = dir.trim_end_matches('/');
+        if dir.is_empty() {
+            return self.latest_stat_per_path(stream_id).await;
+        }
+        // Every path under `dir/` sorts from `dir/` up to, not including,
+        // `dir0` (`0` is the character after `/`).
+        let (low, high) = (format!("{dir}/"), format!("{dir}0"));
+        self.db
+            .call(move |conn| {
+                let mut stmt = conn.prepare_cached(LATEST_STAT_UNDER_SQL)?;
+                let rows =
+                    stmt.query_map(params![stream_id.value(), low, high], latest_stat_row)?;
+                rows.collect::<rusqlite::Result<std::collections::HashMap<_, _>>>()
+            })
+            .await
+    }
+
     /// Distinct non-null `blob_hash` values referenced by any row.
     /// Used by blob GC to decide which on-disk content is still live.
     /// Test-only: rewrite the oldest row for `path` to a given
@@ -2875,6 +2987,183 @@ mod tests {
         assert_eq!(s2["a.txt"].content_hash.as_deref(), Some("a2"));
         assert_eq!(s2["only2.txt"].storage, SnapshotStorage::Git);
         assert_eq!(s2["only2.txt"].content_hash, None);
+    }
+
+    /// Two streams, history on several paths, a deleted one, and directory
+    /// names that share a prefix (`a/`, `a-b/`, `a0/`, `ab/`).
+    async fn lookup_store() -> SqliteSnapshotStore {
+        let db = Database::in_memory();
+        seed_typed(
+            &db,
+            &[
+                seed(1, 1, "a/x.txt", "oxplow", Some("x1"), Some("x1")),
+                seed(1, 1, "a/sub/y.txt", "oxplow", Some("y1"), Some("y1")),
+                seed(1, 1, "a-b/x.txt", "oxplow", Some("ab1"), Some("ab1")),
+                seed(1, 1, "a0/x.txt", "oxplow", Some("a01"), Some("a01")),
+                seed(1, 1, "ab/x.txt", "oxplow", Some("abx1"), Some("abx1")),
+                seed(1, 1, "top.txt", "oxplow", Some("t1"), Some("t1")),
+                seed(1, 1, "gone.txt", "oxplow", Some("g1"), Some("g1")),
+                seed(2, 1, "a/x.txt", "oxplow", Some("x2"), Some("x2")),
+                seed(2, 1, "gone.txt", "deleted", None, None),
+                seed(3, 1, "a/x.txt", "oxplow", Some("x3"), Some("x3")),
+                seed(3, 2, "a/x.txt", "oxplow", Some("other"), Some("other")),
+                seed(
+                    3,
+                    2,
+                    "top.txt",
+                    "oxplow",
+                    Some("other-top"),
+                    Some("other-top"),
+                ),
+            ],
+        )
+        .await;
+        SqliteSnapshotStore::new(db)
+    }
+
+    fn sorted_keys(m: &std::collections::HashMap<String, LatestStat>) -> Vec<&str> {
+        let mut k: Vec<&str> = m.keys().map(String::as_str).collect();
+        k.sort();
+        k
+    }
+
+    #[tokio::test]
+    async fn latest_stat_for_paths_returns_the_latest_row_of_only_those_paths() {
+        let store = lookup_store().await;
+        let paths = ["a/x.txt", "gone.txt", "never-seen.txt"].map(String::from);
+        let got = store
+            .latest_stat_for_paths(StreamId::new(1), &paths)
+            .await
+            .unwrap();
+        assert_eq!(sorted_keys(&got), vec!["a/x.txt", "gone.txt"]);
+        assert_eq!(got["a/x.txt"].content_hash.as_deref(), Some("x3"));
+        // A deleted path comes back as its tombstone, like the whole-stream read.
+        assert_eq!(got["gone.txt"].storage, SnapshotStorage::Deleted);
+        // Another stream's rows never count.
+        let other = store
+            .latest_stat_for_paths(StreamId::new(2), &paths)
+            .await
+            .unwrap();
+        assert_eq!(sorted_keys(&other), vec!["a/x.txt"]);
+        assert_eq!(other["a/x.txt"].content_hash.as_deref(), Some("other"));
+        // No paths, no rows.
+        assert!(store
+            .latest_stat_for_paths(StreamId::new(1), &[])
+            .await
+            .unwrap()
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn latest_stat_for_paths_chunks_a_large_set_and_agrees_with_the_whole_read() {
+        let store = lookup_store().await;
+        let all = store.latest_stat_per_path(StreamId::new(1)).await.unwrap();
+        // Far more paths than one statement may bind; the real ones are at the ends.
+        let mut paths: Vec<String> = (0..70_000).map(|i| format!("missing/{i}")).collect();
+        paths.extend(all.keys().cloned());
+        let got = store
+            .latest_stat_for_paths(StreamId::new(1), &paths)
+            .await
+            .unwrap();
+        assert_eq!(got, all);
+    }
+
+    #[tokio::test]
+    async fn latest_stat_under_returns_one_directory_and_not_its_prefix_siblings() {
+        let store = lookup_store().await;
+        let got = store
+            .latest_stat_under(StreamId::new(1), "a")
+            .await
+            .unwrap();
+        // `a/` and below only: not `a-b/`, `a0/`, `ab/`, nor a root file.
+        assert_eq!(sorted_keys(&got), vec!["a/sub/y.txt", "a/x.txt"]);
+        assert_eq!(got["a/x.txt"].content_hash.as_deref(), Some("x3"));
+        // A trailing slash names the same directory.
+        let slash = store
+            .latest_stat_under(StreamId::new(1), "a/")
+            .await
+            .unwrap();
+        assert_eq!(slash, got);
+        // A nested directory.
+        let sub = store
+            .latest_stat_under(StreamId::new(1), "a/sub")
+            .await
+            .unwrap();
+        assert_eq!(sorted_keys(&sub), vec!["a/sub/y.txt"]);
+        // Scoped to its stream.
+        let other = store
+            .latest_stat_under(StreamId::new(2), "a")
+            .await
+            .unwrap();
+        assert_eq!(sorted_keys(&other), vec!["a/x.txt"]);
+        assert_eq!(other["a/x.txt"].content_hash.as_deref(), Some("other"));
+        // Nothing there.
+        assert!(store
+            .latest_stat_under(StreamId::new(1), "nope")
+            .await
+            .unwrap()
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn latest_stat_under_the_root_is_the_whole_stream_with_deleted_rows() {
+        let store = lookup_store().await;
+        let all = store.latest_stat_per_path(StreamId::new(1)).await.unwrap();
+        let root = store.latest_stat_under(StreamId::new(1), "").await.unwrap();
+        assert_eq!(root, all);
+        assert_eq!(root["gone.txt"].storage, SnapshotStorage::Deleted);
+    }
+
+    /// The plan text of `sql` with `args`, one line per step.
+    async fn plan(store: &SqliteSnapshotStore, sql: String, args: Vec<String>) -> Vec<String> {
+        store
+            .db
+            .call(move |conn| {
+                let mut stmt = conn.prepare(&format!("EXPLAIN QUERY PLAN {sql}"))?;
+                let rows = stmt.query_map(rusqlite::params_from_iter(args.iter()), |r| {
+                    r.get::<_, String>(3)
+                })?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()
+            })
+            .await
+            .unwrap()
+    }
+
+    fn assert_seeks(plan: &[String]) {
+        let text = plan.join("\n");
+        assert!(
+            plan.iter().any(|l| l.contains("SEARCH")),
+            "expected a SEARCH:\n{text}"
+        );
+        assert!(
+            text.contains("idx_file_snapshot_stream_path"),
+            "expected idx_file_snapshot_stream_path:\n{text}"
+        );
+        assert!(
+            !plan.iter().any(|l| l.starts_with("SCAN")),
+            "a whole-table SCAN:\n{text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_latest_stat_lookups_seek_the_stream_path_index() {
+        let store = lookup_store().await;
+        assert_seeks(
+            &plan(
+                &store,
+                latest_stat_for_paths_sql(3),
+                vec!["1".into(), "a/x.txt".into(), "b".into(), "c".into()],
+            )
+            .await,
+        );
+        assert_seeks(
+            &plan(
+                &store,
+                LATEST_STAT_UNDER_SQL.to_string(),
+                vec!["1".into(), "a/".into(), "a0".into()],
+            )
+            .await,
+        );
     }
 
     #[tokio::test]
