@@ -415,6 +415,16 @@ waits for them (`scripts/ci-passed.sh` waits for `test` and `e2e`), so they run
 at night and by `workflow_dispatch`. A coverage floor or an installer that breaks
 shows up the next morning.
 
+Measured when this was set up, on one push each, with a cold Cargo cache after:
+`test` job 119 min to 62 min (`Cargo test` step 65 to 32, extension tests 11 to
+6), browser suite 18-28 min to 10, a push until every job ends about 3.5 hours to
+about 1. Most of the `Cargo test` gain is `opt-level = 1` above. Locally a full
+`test:fast` went from 906 s to about 370 s, under different load.
+
+Tests that listen for real file changes run alone locally (`.config/nextest.toml`
+says why). That adds under a minute, and it's why a full run is no longer stopped
+by every watcher test timing out together.
+
 - Each Linux job shares one Cargo cache and only `test` saves it. When every job
   saved, the first to finish won, and one restored inside its own run had files
   newer than the checkout. Cargo then skipped `build.rs`, the gitignored

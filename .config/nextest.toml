@@ -5,3 +5,12 @@
 # the `collection:` block in oxplow.yaml).
 [profile.default.junit]
 path = "junit.xml"
+
+# A test that listens for real file changes runs with nothing beside it. Every
+# test that boots oxplow starts FSEvents streams, and while the oxplow-app tests
+# run, macOS delivers nothing to a new stream for over a minute (measured: no
+# event in 60 s during that run, 0.05 s right after it). Those boots would not run
+# any faster without their streams; the tests that need one are these.
+[[profile.default.overrides]]
+filter = "package(oxplow-fs-watch) | test(/^(wiki_pages_watch|workspace_watch)::/)"
+threads-required = "num-test-threads"

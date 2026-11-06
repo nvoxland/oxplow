@@ -919,10 +919,9 @@ mod tests {
     use tokio::time::timeout;
 
     /// How long a test waits to hear of a change it made. It only waits this
-    /// long if the change never comes. On macOS the news comes through
-    /// FSEvents, a system service that has fallen more than 20 s behind while
-    /// the rest of the suite runs.
-    const HEARD_WITHIN: Duration = Duration::from_secs(60);
+    /// long if the change never comes. `.config/nextest.toml` says why these
+    /// tests run alone.
+    const HEARD_WITHIN: Duration = Duration::from_secs(20);
 
     #[tokio::test]
     async fn detects_new_file() {
