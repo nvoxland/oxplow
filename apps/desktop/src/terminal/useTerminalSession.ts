@@ -14,6 +14,7 @@ import type { Terminal } from "@xterm/xterm";
 
 import { desktopBridge, onRemoteReconnect } from "../api.js";
 import { logUi } from "../logger.js";
+import { typingElsewhere } from "../typingElsewhere.js";
 import {
   type ExitOutcome,
   failedLaunch,
@@ -164,7 +165,8 @@ export function useTerminalSession(uri: string, opts: TerminalSessionOptions): T
             }
             for (const event of pendingEvents) if (event.sessionId === sessionId) applyEvent(event);
             pendingEvents.length = 0;
-            if (live.current.shown) term.focus();
+            // Not from a field the person is typing in elsewhere.
+            if (live.current.shown && !(term.element && typingElsewhere(term.element))) term.focus();
             logUi("info", "terminal session opened", { uri, sessionId, again });
           })
           .catch((error) => {

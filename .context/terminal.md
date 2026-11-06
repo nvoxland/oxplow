@@ -540,3 +540,10 @@ each scans the same line. Examples for the future:
   `components/useSlideoutStrip.ts` (shared with the `Navigator`), not
   here; update "Terminals are rows" only if the strip stops using it.
 
+
+## Focus
+
+A terminal takes the focus when it is shown and when its session finishes
+opening, and both ask `typingElsewhere` first: a person typing in a field
+elsewhere keeps the focus. Without that, the blur closes an entry that
+cancels on blur, such as a new thread's title in the Navigator.
