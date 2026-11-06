@@ -513,6 +513,14 @@ gitignored. On a fresh clone, your IDE will report
 - **Work items as durable records**: every Edit/Write to project
   files needs a tracked task. See AGENTS.md for filing rules.
 
+## Release
+
+Push a `v<version>` tag matching `Cargo.toml`'s workspace version, on a commit
+on main. `release.yml` waits for CI's `test` and `e2e` jobs on that commit
+(`scripts/ci-passed.sh`) instead of testing again, then builds on all three
+platforms, updates the Homebrew cask and publishes. If those jobs fail, re-run
+them, then re-run the release's `ci-passed` job.
+
 ## Smoke-test an installed build
 
 `scripts/installed-smoke.sh <Oxplow.app | folder holding oxplow and oxplow-daemon>`

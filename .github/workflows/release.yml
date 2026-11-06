@@ -13,7 +13,7 @@ name: Release
 # apps/desktop/package.json are private workspace shells with no
 # version field — nothing to keep in sync.
 #
-# To create a release:
+# To create a release (the commit must be on main, for CI to run on it):
 # 1. VERSION=vX.Y.Z && git tag ${VERSION} && git push origin ${VERSION}
 # 2. Bump Cargo.toml [workspace.package].version = "X.Y.Z"
 # 3. cargo check (to refresh Cargo.lock) + commit
@@ -65,44 +65,26 @@ jobs:
             exit 1
           fi
 
-  test:
+  # A release builds only a commit CI has passed, so this workflow has no test
+  # steps of its own to drift from CI's. CI runs on every push to main; this job
+  # waits for it, so a tag may be pushed right after its commit. CI's `package`
+  # job has built the same installers on all three platforms.
+  ci-passed:
     needs: check-tag
     runs-on: ubuntu-latest
+    timeout-minutes: 180
+    permissions:
+      actions: read
+      contents: read
     steps:
       - uses: actions/checkout@v7
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Install Linux Tauri deps
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            libwebkit2gtk-4.1-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
-            patchelf \
-            build-essential
-      - name: Cache Cargo registry + target
-        uses: actions/cache@v6
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-
-      - name: Install JS deps
-        run: bun install --frozen-lockfile
-      # Canonical entrypoint: runs the frontend suite from apps/desktop
-      # (so apps/desktop/bunfig.toml preloads the happy-dom harness —
-      # bare `bun test` from root leaves `document` undefined) plus
-      # `cargo test --workspace`. Mirrors how ci.yml gates.
-      - name: Test
-        run: bun run test
+      - name: CI's test and e2e passed on this commit
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: scripts/ci-passed.sh "$GITHUB_SHA"
 
   release:
-    needs: test
+    needs: ci-passed
     strategy:
       fail-fast: false
       matrix:
