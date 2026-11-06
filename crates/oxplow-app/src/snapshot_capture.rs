@@ -102,7 +102,8 @@ impl From<SnapshotTrigger> for TakeRequest {
 pub const DEFAULT_SETTLE_DURATION: Duration = Duration::from_millis(1000);
 
 /// How long [`SnapshotCaptureService::request_snapshot`] waits before
-/// draining the dirty set, giving the fs-watch debouncer (250 ms in
+/// draining the dirty set when no watch is running to send a marker through,
+/// giving the fs-watch debouncer (250 ms in
 /// `stream_watch`) time to deliver any in-flight events through
 /// the broadcast channel and into the dirty set. Without this, an
 /// edit followed almost immediately by the close (`oxplow.effort.report`) produces an
@@ -114,6 +115,15 @@ pub const DEFAULT_SETTLE_DURATION: Duration = Duration::from_millis(1000);
 /// hop + run_watcher loop. Tests override via
 /// [`SnapshotCaptureService::with_predrain_delay`].
 pub const DEFAULT_PREDRAIN_DELAY: Duration = Duration::from_millis(300);
+
+/// How long a take waits for its marker to come back through the watch.
+/// Everything written before the marker arrives first, so this bounds a
+/// watch that has stalled: past it, the take goes with what it has, and the
+/// late events reach the next take.
+pub const DEFAULT_MARKER_WAIT: Duration = Duration::from_secs(2);
+
+/// What a marker's file is called, in `.oxplow/`, before its number.
+const MARKER_NAME: &str = ".take-marker-";
 
 /// How long the worktree must stay still (no fs-watch change) before a
 /// `quiet` take records human edits made between agent turns (P2.4).
@@ -226,6 +236,14 @@ struct Inner {
     /// (`.git`, `.oxplow`, `target`, `node_modules`, …) are always
     /// in effect even with an empty user list.
     ///
+    /// Whether a watch is feeding this service, so a take can send a marker
+    /// through it.
+    watching: std::sync::atomic::AtomicBool,
+    /// How long a take waits for its marker.
+    marker_wait: Duration,
+    /// The markers on their way, by file name.
+    markers: Mutex<HashMap<String, tokio::sync::oneshot::Sender<()>>>,
+    next_marker: AtomicU64,
     /// What this stream's watch could not cover.
     uncovered: Mutex<oxplow_fs_watch::Uncovered>,
     /// A handle shared with this stream's watches: one filter, rooted at
@@ -330,6 +348,10 @@ impl SnapshotCaptureService {
                 stream_id,
                 max_file_bytes,
                 workspace_filter,
+                watching: std::sync::atomic::AtomicBool::new(false),
+                marker_wait: DEFAULT_MARKER_WAIT,
+                markers: Mutex::default(),
+                next_marker: AtomicU64::new(0),
                 uncovered: Mutex::default(),
                 content_policy: RwLock::new(ContentPolicy::default()),
                 provider: RwLock::new(None),
@@ -573,8 +595,20 @@ impl SnapshotCaptureService {
     pub fn spawn_watcher(&self, watch: Arc<FsWatcher>) -> tokio::task::JoinHandle<()> {
         self.set_uncovered(watch.uncovered());
         self.spawn_quiet_trigger();
+        // The markers come through this subscription, with everything else:
+        // when one is read, what was written before it has been read too.
+        let changes = watch.subscribe_to(
+            oxplow_fs_watch::Scope::default()
+                .all_kept()
+                .prefix(format!(".oxplow/{MARKER_NAME}")),
+        );
+        std::fs::create_dir_all(self.inner.project_dir.join(".oxplow")).ok();
+        self.inner.watching.store(true, Ordering::SeqCst);
         let this = self.clone();
-        tokio::spawn(async move { this.run_watcher(watch).await })
+        tokio::spawn(async move {
+            this.run_watcher(watch, changes).await;
+            this.inner.watching.store(false, Ordering::SeqCst);
+        })
     }
 
     /// Record that the worktree changed (fs-watch), arming the quiet
@@ -754,12 +788,15 @@ impl SnapshotCaptureService {
     }
 
     /// `watcher` is this stream's watch, which judges by this stream's filter.
-    async fn run_watcher(self, watcher: Arc<FsWatcher>) {
+    async fn run_watcher(
+        &self,
+        watcher: Arc<FsWatcher>,
+        mut changes: oxplow_fs_watch::Subscription,
+    ) {
         // At once, with no window: the dirty set must be current the instant
         // a snapshot is requested, so we mark paths dirty as soon as the OS
         // reports them. The general-purpose `WorkspaceChanged` feed
         // (stream_watch) is the one that waits for a burst to end.
-        let mut changes = watcher.subscribe();
         loop {
             tokio::select! {
                 _ = self.inner.shutdown.notified() => {
@@ -779,8 +816,13 @@ impl SnapshotCaptureService {
     /// changes were lost, the disk is checked against the last snapshot, so
     /// they reach the next take anyway.
     async fn on_batch(&self, batch: oxplow_fs_watch::Batch) {
-        let heard = !batch.paths.is_empty();
-        for (path, kind) in batch.paths {
+        let (markers, paths): (Vec<_>, Vec<_>) = batch.paths.into_iter().partition(|(path, _)| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with(MARKER_NAME))
+        });
+        let heard = !paths.is_empty();
+        for (path, kind) in paths {
             self.mark_dirty(path, kind);
         }
         let mut found = 0;
@@ -794,6 +836,59 @@ impl SnapshotCaptureService {
         if heard || found > 0 {
             self.note_activity();
         }
+        // Last: what the markers' takes wait for is all of the above.
+        for (path, _) in markers {
+            let name = path.file_name().and_then(|name| name.to_str());
+            let waiter = name.and_then(|name| {
+                self.inner
+                    .markers
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .remove(name)
+            });
+            if let Some(waiter) = waiter {
+                let _ = waiter.send(());
+            }
+        }
+    }
+
+    /// Send a marker through the watch and wait for it: the OS reports changes
+    /// in order, so once it is back, every change written before now is in the
+    /// dirty set. False when there is no watch to send it through, or it
+    /// couldn't be written.
+    async fn wait_for_marker(&self) -> bool {
+        if !self.inner.watching.load(Ordering::SeqCst) {
+            return false;
+        }
+        let number = self.inner.next_marker.fetch_add(1, Ordering::SeqCst);
+        let name = format!("{MARKER_NAME}{number}");
+        let file = self.inner.project_dir.join(".oxplow").join(&name);
+        let (heard, back) = tokio::sync::oneshot::channel();
+        self.inner
+            .markers
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(name.clone(), heard);
+        let written = {
+            let file = file.clone();
+            tokio::task::spawn_blocking(move || std::fs::write(file, b""))
+                .await
+                .is_ok_and(|res| res.is_ok())
+        };
+        if written
+            && tokio::time::timeout(self.inner.marker_wait, back)
+                .await
+                .is_err()
+        {
+            debug!("snapshot: a take's marker didn't come back in time");
+        }
+        self.inner
+            .markers
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&name);
+        let _ = tokio::task::spawn_blocking(move || std::fs::remove_file(file)).await;
+        written
     }
 
     /// `dir` from the worktree root; the whole root for a directory outside
@@ -1371,16 +1466,19 @@ impl SnapshotCaptureService {
         self.capture_inner(req, started).await
     }
 
-    /// Yield long enough for the fs-watch debouncer + broadcast hop +
-    /// `run_watcher` to drain in-flight events into the dirty set.
-    /// Without this, an edit that landed on disk less than 250 ms before
-    /// a take hasn't propagated yet and the take misses it — see
-    /// `DEFAULT_PREDRAIN_DELAY`. Done BEFORE taking the lock, so queued
-    /// takes wait for it in parallel rather than one after another.
+    /// Let in-flight events reach the dirty set. Without this, an edit that
+    /// landed on disk just before a take hasn't propagated yet and the take
+    /// misses it. A marker says exactly when they have ([`Self::wait_for_marker`]);
+    /// `DEFAULT_PREDRAIN_DELAY` is the wait with no watch. Done BEFORE taking the
+    /// lock, so queued takes wait for it in parallel rather than one after
+    /// another.
     async fn predrain(&self) {
-        let predrain = self.inner.predrain_delay;
-        if !predrain.is_zero() {
-            tokio::time::sleep(predrain).await;
+        // With no watch to ask, a fixed wait is all there is.
+        if !self.wait_for_marker().await {
+            let predrain = self.inner.predrain_delay;
+            if !predrain.is_zero() {
+                tokio::time::sleep(predrain).await;
+            }
         }
         // What the watch could not cover (the OS's limit on watches) told no
         // one of its changes: look. Slower, and correct.
@@ -2196,6 +2294,84 @@ mod tests {
         let latest = store.latest_stat_per_path(StreamId::new(1)).await.unwrap();
         assert_eq!(latest["src/a.txt"].size_bytes, 7);
         assert!(latest["src/gone.txt"].storage.is_deleted());
+    }
+
+    /// A take waits for its marker, and the marker comes behind what was written
+    /// before it: that is in the take, however late it arrives.
+    #[tokio::test]
+    async fn a_take_waits_for_its_marker_and_holds_what_came_before_it() {
+        let project = tempdir().unwrap();
+        let root = project.path().to_path_buf();
+        std::fs::create_dir(root.join(".oxplow")).unwrap();
+        std::fs::write(root.join("a.txt"), "1").unwrap();
+        let (svc, store) = svc_for(&root).await;
+        svc.inner.watching.store(true, Ordering::SeqCst);
+        std::fs::write(root.join("a.txt"), "changed").unwrap();
+
+        let take = {
+            let svc = svc.clone();
+            tokio::spawn(async move { svc.request_snapshot(SnapshotTrigger::Quiet).await })
+        };
+        let marker = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let waiting = svc.inner.markers.lock().unwrap().keys().next().cloned();
+                if let Some(name) = waiting {
+                    let file = root.join(".oxplow").join(&name);
+                    if file.exists() {
+                        return file;
+                    }
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("a marker on disk");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(!take.is_finished(), "it waits for the marker");
+
+        svc.on_batch(oxplow_fs_watch::Batch {
+            paths: vec![
+                (root.join("a.txt"), WatchEventKind::Modified),
+                (marker.clone(), WatchEventKind::Created),
+            ],
+            rescans: Vec::new(),
+        })
+        .await;
+        take.await.unwrap().unwrap();
+        let latest = store.latest_stat_per_path(StreamId::new(1)).await.unwrap();
+        assert_eq!(latest["a.txt"].size_bytes, 7);
+        assert!(!marker.exists(), "it cleans up");
+        assert!(
+            !latest.keys().any(|path| path.contains(MARKER_NAME)),
+            "a marker is no one's change"
+        );
+    }
+
+    /// A marker that never comes back (a stalled watch) doesn't hold a take.
+    #[tokio::test]
+    async fn a_take_goes_on_when_its_marker_never_comes_back() {
+        let project = tempdir().unwrap();
+        let root = project.path();
+        std::fs::create_dir(root.join(".oxplow")).unwrap();
+        let (mut svc, _store) = svc_for(root).await;
+        Arc::get_mut(&mut svc.inner).unwrap().marker_wait = Duration::from_millis(20);
+        svc.inner.watching.store(true, Ordering::SeqCst);
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            svc.request_snapshot(SnapshotTrigger::Quiet),
+        )
+        .await
+        .expect("the take goes on")
+        .unwrap();
+        assert!(svc.inner.markers.lock().unwrap().is_empty());
+        assert_eq!(
+            std::fs::read_dir(root.join(".oxplow"))
+                .unwrap()
+                .flatten()
+                .filter(|e| e.file_name().to_string_lossy().starts_with(MARKER_NAME))
+                .count(),
+            0
+        );
     }
 
     /// What the watch could not cover told no one of its changes: a take looks

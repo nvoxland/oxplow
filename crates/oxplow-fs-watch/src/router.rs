@@ -122,6 +122,10 @@ impl Router {
             self.events.change(path, kind, false);
             return;
         }
+        // In the root's own spelling, whichever the OS used: a subscriber
+        // matches what it hears against the root it knows.
+        let spelled = rel.and_then(|rel| route.roots.first().map(|root| root.join(rel)));
+        let path = spelled.as_deref().unwrap_or(path);
         self.events.change(path, kind, true);
         match os_kind {
             notify::EventKind::Create(_)
@@ -689,6 +693,26 @@ mod tests {
             [rig.root().join("src")]
         );
         assert!(rig.watched().is_empty());
+    }
+
+    /// The OS may report a path under another spelling of the root (macOS
+    /// reports `/private/var` for `/var`, and a symlink's target): a subscriber
+    /// hears it in the root's own.
+    #[test]
+    fn a_path_is_heard_in_the_roots_own_spelling() {
+        let mut rig = Rig::root_watch(|_| {});
+        let root = rig.root().to_path_buf();
+        rig.router
+            .route
+            .as_mut()
+            .unwrap()
+            .roots
+            .push(PathBuf::from("/other/spelling"));
+        rig.router
+            .handle(Ok(Event::new(EventKind::Create(CreateKind::File))
+                .add_path(PathBuf::from("/other/spelling/src/a.rs"))));
+        let batch = rig.heard.try_batch().unwrap();
+        assert_eq!(batch.paths[0].0, root.join("src/a.rs"));
     }
 
     /// A read changes nothing: no event, or a consumer that reads in answer to

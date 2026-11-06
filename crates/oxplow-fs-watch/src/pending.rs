@@ -124,7 +124,9 @@ impl Pending {
 pub struct Scope {
     files: Vec<PathBuf>,
     dirs: Vec<PathBuf>,
+    prefixes: Vec<String>,
     top_level: bool,
+    all_kept: bool,
 }
 
 impl Scope {
@@ -140,6 +142,19 @@ impl Scope {
         self
     }
 
+    /// Add each path from the root that starts with `prefix`.
+    pub fn prefix(mut self, prefix: impl Into<String>) -> Self {
+        self.prefixes.push(prefix.into());
+        self
+    }
+
+    /// Add every path the filter keeps, and every rescan: what a subscription
+    /// with no scope hears.
+    pub fn all_kept(mut self) -> Self {
+        self.all_kept = true;
+        self
+    }
+
     /// Add what is directly at the root.
     pub fn top_level(mut self) -> Self {
         self.top_level = true;
@@ -150,11 +165,16 @@ impl Scope {
         self.files.iter().any(|file| file == rel)
             || self.dirs.iter().any(|dir| rel.starts_with(dir))
             || (self.top_level && rel.components().count() == 1)
+            || self
+                .prefixes
+                .iter()
+                .any(|prefix| rel.to_string_lossy().starts_with(prefix.as_str()))
     }
 
     /// Whether changes lost under `dir` could be this scope's.
     fn overlaps(&self, dir: &Path) -> bool {
-        dir.as_os_str().is_empty()
+        self.all_kept
+            || dir.as_os_str().is_empty()
             || self.files.iter().any(|file| file.starts_with(dir))
             || self
                 .dirs
@@ -228,7 +248,10 @@ impl Subscribers {
         for listener in list.iter() {
             let hears = match &listener.scope {
                 None => kept,
-                Some(scope) => self.relative(path).is_some_and(|rel| scope.covers(rel)),
+                Some(scope) => {
+                    (kept && scope.all_kept)
+                        || self.relative(path).is_some_and(|rel| scope.covers(rel))
+                }
             };
             if hears {
                 if let Some(pending) = listener.pending.upgrade() {
@@ -525,6 +548,21 @@ mod tests {
         assert!(wiki.try_batch().is_some());
         all.rescan(Path::new("/r"));
         assert!(wiki.try_batch().is_some());
+    }
+
+    /// Every kept path and every rescan, and named paths the filter drops.
+    #[test]
+    fn a_scope_can_add_to_all_that_is_kept() {
+        let all = Subscribers::new(vec![PathBuf::from("/r")], vec![PathBuf::from("/r")]);
+        let mut sub = all.subscribe(Some(Scope::default().all_kept().prefix(".oxplow/.mark-")));
+        all.change(Path::new("/r/src/a.rs"), &MODIFIED, true);
+        assert!(sub.try_batch().is_some());
+        all.change(Path::new("/r/.oxplow/local.sqlite"), &MODIFIED, false);
+        assert!(sub.try_batch().is_none());
+        all.change(Path::new("/r/.oxplow/.mark-7"), &MODIFIED, false);
+        assert!(sub.try_batch().is_some());
+        all.rescan(Path::new("/r/src"));
+        assert!(sub.try_batch().is_some());
     }
 
     #[tokio::test(start_paused = true)]

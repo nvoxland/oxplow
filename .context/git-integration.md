@@ -125,6 +125,10 @@ One call per top-level directory took about 7.5 s per watch on this repo and on
 metabase (measured under load 10; a batch takes 30 ms to 1 s), for every watch of
 every oxplow process on the machine.
 
+**A subscriber hears a path in the root's own spelling.** The OS may use another
+(macOS reports `/private/var` for `/var`, and a symlink's target); the router
+rewrites it, so what a subscriber matches against its root matches.
+
 **Ignored paths are dropped at the watch.** The router judges each path by the
 filter before it passes it on (a file under an ignored directory is ignored with
 it, answered from a remembered lookup with no `stat`: `ignore_change`), so a
@@ -167,6 +171,19 @@ its tests hand them made-up events. `Feed` does the same for a subscriber. Only
 `oxplow-fs-watch`'s top-level `tests` and one `stream_watch` test touch the real
 OS: a write is heard, non-recursive holds, drop cancels, a new folder's file is
 found, an edit reaches the working-files listener.
+
+### A take's marker
+
+A snapshot take must hold every edit made before it. Events take from 10 ms on
+a calm machine to seconds under load, so no fixed wait is right. So a take writes
+a marker file (`.oxplow/.take-marker-<n>`) and waits for it to come back through
+the capture's own subscription (`wait_for_marker`): the OS reports changes in
+order, and a batch is handled whole with the marker last, so once it is back
+everything written before it is in the dirty set. It waits 2 s at most
+(`DEFAULT_MARKER_WAIT`): past that the watch has stalled, and what is late reaches
+the next take. With no watch running, a fixed 300 ms stands in
+(`DEFAULT_PREDRAIN_DELAY`). The filter ignores the marker, so it is in no snapshot
+and no announcement; a `Scope` names it for the capture alone.
 
 ### The working-files list
 

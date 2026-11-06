@@ -536,7 +536,33 @@ mod tests {
         assert_eq!(said(lost), (vec![(vec![], true)], 1));
     }
 
-    /// The one test here that needs the OS: an edit made outside oxplow reaches
+    /// Through a real watch: an edit made the instant before a take is in it,
+    /// which a fixed wait can't promise.
+    #[tokio::test]
+    async fn an_edit_on_disk_just_before_a_take_is_in_it() {
+        let rig = rig().await;
+        rig.registry.register_all().await;
+        let primary = rig.svc.list_streams().await.unwrap()[0].id;
+        let capture = rig.registry.inner.captures.get(&primary).unwrap();
+        std::fs::write(rig.project.join("edit.txt"), "1").unwrap();
+        capture.enqueue_startup_diff().await.unwrap();
+        capture
+            .request_snapshot(oxplow_domain::snapshot::SnapshotTrigger::Startup)
+            .await
+            .unwrap();
+        for n in 2..6 {
+            let text = "x".repeat(n);
+            std::fs::write(rig.project.join("edit.txt"), &text).unwrap();
+            capture
+                .request_snapshot(oxplow_domain::snapshot::SnapshotTrigger::Quiet)
+                .await
+                .unwrap();
+            let latest = capture.store().latest_stat_per_path(primary).await.unwrap();
+            assert_eq!(latest["edit.txt"].size_bytes as usize, n, "take {n}");
+        }
+    }
+
+    /// The other test here that needs the OS: an edit made outside oxplow reaches
     /// the working-tree file list at once, through a real watch.
     #[tokio::test]
     async fn an_edit_on_disk_tells_the_working_files_listener() {
