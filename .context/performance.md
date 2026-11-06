@@ -1351,6 +1351,41 @@ What the numbers say:
 - Not measured: x86, Linux and Windows watchers, and a machine with nothing
   else running (the load average above was 8 or more throughout).
 
+### The working-files relist from the status (measured 2026-11-06)
+
+`Trees::diff(HEAD, Working)` lists, hashes and counts every file of both
+trees. `Trees::diff_from_status` is given what `vcs.status` just said and looks
+at those paths alone. The example times three things in a row, three times each
+(cold, then warm), for the tree as the burst left it (5,001 changed files in a
+generated tree), and in a generated tree again after one edit only:
+`Trees::diff`, `vcs.status` alone, and `diff_from_status` (the status it was
+given is not counted in its time: add the `vcs.status` row for a relist).
+`from` is the head's id, as the caller passes it (`HEAD` as a name falls back to
+the whole diff, which the first try of this showed).
+
+| | metabase (8 changed, as it is) | 500k kept, 5,001 changed | 500k kept, one edit | 100k kept (1M ignored), 5,001 changed | 100k kept, one edit | Linux, 100k kept, 5,001 changed | Linux, one edit |
+|---|---|---|---|---|---|---|---|
+| `Trees::diff`, ms (cold, warm, warm) | 4,113, 1,785, 1,819 | 89,831, 88,631, 26,277 | 23,328, 31,851, 44,264 | 23,175, 16,806, 11,439 | 10,337, 9,893, 5,150 | 1,548, 1,216, 1,208 | 1,445, 1,350, 1,498 |
+| `vcs.status` alone, ms | 1,488, 1,499, 1,530 | 18,677, 19,133, 30,311 | 27,782, 26,975, 15,509 | 6,972, 6,511, 6,168 | 2,282, 2,214, 1,684 | 604, 600, 682 | 929, 951, 777 |
+| `diff_from_status`, ms | 21.6, 22.5, 20.3 | 24,207, 29,177, 54,315 | 4.1, 2.8, 32.5 | 14,523, 10,615, 11,335 | 1.5, 1.0, 1.4 | 1,130, 1,165, 1,297 | 1.3, 1.5, 0.8 |
+| Load average at start | 9.1 | 22.7 | 22.7 | 30.0 | 30.0 | 6.1 (in the container) | 6.1 |
+
+- **For a few edits the relist is now the status.** `diff_from_status` takes
+  1–32 ms for 1–8 paths at every size, so a relist costs `vcs.status` and
+  nothing else: 1.5 s on metabase, 1.7–2.3 s at 100k kept files, 15–28 s at
+  500k (under load; the walk of the same tree took 25 s here and 5 s on the
+  quiet run). The whole diff of the same trees took 1.8 s (metabase, warm),
+  5–10 s (100k kept) and 26–44 s (500k kept) with one edit.
+- **`vcs.status` is what is left**, and it follows the tree's size: `git
+  status` stats every kept file. Whether the watcher's batch (the paths it told)
+  could replace the status is not measured here.
+- **When 5,000 files changed, `diff_from_status` is no faster than the whole
+  diff** (the content of each is read either way): 10–54 s at 100k–500k kept.
+- **These runs were the noisiest of the day:** the load average was 20–40 on
+  the Mac for the generated trees (the 500k walk took 25 s against 5 s at load
+  8–13). Read the ratios, not the seconds; the warm numbers swing by 2–3x
+  inside one run. The Linux column ran in a quiet container.
+
 ### On Linux (measured 2026-11-06)
 
 Per-directory inotify watches. The same Mac, in an OrbStack Docker container
