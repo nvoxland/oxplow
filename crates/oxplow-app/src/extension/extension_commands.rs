@@ -2895,7 +2895,7 @@ mod tests {
         let fx = crate::test_fixtures::services_with_task_effort().await;
         with_finish(
             &fx,
-            "def transform(x):\n    n = 0\n    for i in range(400000000):\n        n += i\n    return {\"commands\": []}\n",
+            "def transform(x):\n    n = 0\n    for i in range(100000):\n        for j in range(100000):\n            n = j\n    return {\"commands\": []}\n",
         )
         .await;
         let r = oxplow_tasks::work_item_ref(fx.task);

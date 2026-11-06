@@ -2722,7 +2722,7 @@ mod tests {
         .unwrap();
         std::fs::write(
             dir.join("collectors/things.star"),
-            "def transform(input):\n    n = 0\n    for i in range(400000000):\n        n += i\n    return {\"entities\": {\"thing\": []}}\n",
+            "def transform(input):\n    n = 0\n    for i in range(100000):\n        for j in range(100000):\n            n = j\n    return {\"entities\": {\"thing\": []}}\n",
         )
         .unwrap();
         for f in ["one", "two"] {

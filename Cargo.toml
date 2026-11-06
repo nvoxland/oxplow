@@ -225,3 +225,7 @@ split-debuginfo = "off"
 
 [profile.dev.package."*"]
 debug = false
+# The tests and the debug app parse YAML, hash and run regexes on every start;
+# unoptimized, that was most of a simple test's time (826 s -> 495 s for
+# oxplow-app's tests). Clean builds pay for it once.
+opt-level = 1

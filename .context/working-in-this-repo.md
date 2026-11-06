@@ -395,6 +395,18 @@ such a test again, alone, in its own process
 (`stop_all_reaps_every_live_group` starts `current_exe()` with `--exact`). To
 check a suspect, run the test binary itself with `--test-threads=4`.
 
+### Dependencies are optimized in dev and test builds
+
+`[profile.dev.package."*"]` sets `opt-level = 1`. Unoptimized, parsing YAML,
+hashing and regexes took most of a simple test's time (`oxplow-app` in one
+process: 826 s to 495 s; a full local `test:fast`: 906 s to 339 s, under
+different load). A clean build pays for it once. The workspace's own crates stay
+at 0, so their rebuilds and backtraces don't change.
+
+So don't tune a test script to the interpreter's speed. A "runaway" script loops
+without allocating and can't finish: `n += i` over a large range hits the memory
+cap first, and a loop sized to outlast a sleep ends early on a faster build.
+
 ### Timing assertions flake under `cargo cov` (tsk175)
 
 `cargo cov` runs every test as its **own process, all concurrently, on an
