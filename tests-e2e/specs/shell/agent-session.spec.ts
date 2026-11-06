@@ -1,5 +1,6 @@
 import { ipc, run } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
+import { installExtension } from "../../support/pages.js";
 import { newSessionPage, searchLauncher } from "../../support/ui.js";
 
 test("an agent terminal has usable height when opened and restored", async ({ page }) => {
@@ -65,6 +66,31 @@ test("a session that can't launch shows why and offers a retry", async ({ page, 
   await expect(ended).toContainText("Couldn't start the session");
   await expect(ended).toContainText("codex");
   await expect(page.getByTestId("terminal-retry")).toBeVisible();
+});
+
+/// Extensions reloading (a deploy, here) says nothing against an open tab: its
+/// page and terminal stay mounted, so a menu open on it stays open.
+test("an open tab stays drawn while the extensions reload", async ({ page, daemon }) => {
+  await run(daemon, "oxplow.agent.set_agents", { agents: ["scripted", "claude", "codex"] });
+  await page.goto("/");
+  await expect(newSessionPage(page)).toBeVisible();
+  await newSessionPage(page).locator('[data-node="start"]').getByTestId("viz-form-fields-harness").selectOption("claude");
+  await newSessionPage(page).locator('[data-node="start"]').getByRole("button", { name: "Start a new session", exact: true }).click();
+  const tab = page.locator('[data-testid^="center-tab-oxplow:oxplow/agent_session?"]').first();
+  await expect(tab).toBeVisible();
+  const id = ((await tab.getAttribute("data-testid")) ?? "").slice("center-tab-".length);
+  const body = page.getByTestId(`center-tab-body-${id}`);
+  await body.getByTestId("page-nav-menu").click();
+  const rename = page.getByTestId("menu-item-action-page-action-rename");
+  await expect(rename).toBeVisible();
+
+  const askedAgain = page.waitForResponse((r) => r.url().endsWith("/ipc/renderers_for"));
+  await installExtension(daemon, "e2e-reload", {
+    manifest: "",
+    files: { "pages/e2e-reload.yaml": "title: Reload\nloaders:\n  n:\n    sql: SELECT 1 AS n\nview: { id: n, viz: number, from: n }\n" },
+  });
+  await askedAgain;
+  await expect(rename).toBeVisible();
 });
 
 /// A session's tab is named by the view's one rule: the person's alias, else

@@ -591,8 +591,10 @@ stream and keeps the promise (`createRenderersCache`, the window's
 `renderersCache`); a failed ask is an empty list (the fallback page draws
 the URI) and is recorded as an operation error. The cache is keyed with
 the extensions: whenever `useExtensions` loads a new array (a deploy, a
-reconnect) every list is dropped and asked again, and an answer that
-arrives after is discarded. A list is *not* refreshed when a file's
+reconnect) every list is asked again, and an answer from before the reload
+is discarded. The old list stands until the new one arrives: treating it as
+still pending would draw `TabLoading`, unmounting every open tab with its
+terminal session and any open menu. A list is *not* refreshed when a file's
 content changes, so a page with `accepts.content` is judged on the
 content as of the first ask until the extensions reload. Routing stays
 synchronous: `App.tsx` lists the URIs of the thread's tab bodies
