@@ -483,19 +483,17 @@ test("streams are inverted tiles and threads indented tabs, tied by a guide line
 
   // The panel draws the same, so its rows stay lined up with the strip's.
   openOverlay(getByTestId);
-  // There each tab runs on across its row, carrying the title: the
-  // stream's tile colour and a thread's tab flow into the label.
-  const streamTab = getByTestId("navigator-stream-row-str1").querySelector("[data-glyph]") as HTMLElement;
-  expect(streamTab.textContent).toContain("Main");
-  expect(streamTab.style.background).toBe("var(--text-muted)");
-  expect(streamTab.style.flexGrow).toBe("1");
-  const threadTab = getByTestId("navigator-thread-row-thr2").querySelector("[data-glyph]") as HTMLElement;
-  expect(threadTab.textContent).toContain("Research");
-  expect(threadTab.style.flexGrow).toBe("1");
-  // The abbreviation is set off from the title by a divider.
-  const divider = threadTab.querySelector('[data-testid="navigator-glyph-divider"]') as HTMLElement;
-  expect(divider.textContent).toBe("Re");
-  expect(divider.style.borderRightWidth).toBe("1px");
+  // There a second tab of the same colour carries the title.
+  const streamTitle = getByTestId("navigator-stream-row-str1").querySelector('[data-testid="navigator-tab-title"]') as HTMLElement;
+  expect(streamTitle.textContent).toContain("Main");
+  expect(streamTitle.style.background).toBe("var(--text-muted)");
+  expect(streamTitle.style.flexGrow).toBe("1");
+  const threadRow = getByTestId("navigator-thread-row-thr2");
+  const threadTitle = threadRow.querySelector('[data-testid="navigator-tab-title"]') as HTMLElement;
+  expect(threadTitle.textContent).toContain("Research");
+  expect(threadTitle.style.flexGrow).toBe("1");
+  // The abbreviation stays in its own tab, the strip's.
+  expect((threadRow.querySelector("[data-glyph]") as HTMLElement).textContent).toBe("Re");
   expect(guide("navigator-stream-row-str1")).toBe("stream");
   expect(guide("navigator-thread-row-thr2")).toBe("last");
   expect(
@@ -528,4 +526,70 @@ test("a thread's row counts its open handoffs, naming the newest sender", () => 
     "2 open handoffs; the newest from Writer",
   );
   expect(queryByTestId("navigator-thread-row-thr1-handoffs")).toBeNull();
+});
+
+// The panel draws what the strip draws, then the same thing again for the
+// title: the abbreviation's tab, the gap, the title's tab, the gap, the guide.
+test("the panel keeps the strip's tab, gap and bar, and repeats them after the title", () => {
+  const { container, getByTestId } = renderNavigator();
+  const strip = getByTestId("navigator-strip");
+  const fills = (root: Element) => root.querySelectorAll('[data-testid="navigator-selected-fill"]');
+  expect(fills(strip)).toHaveLength(1);
+  const stripTab = getByTestId("navigator-strip-thread-thr1").querySelector("[data-glyph]") as HTMLElement;
+  expect(stripTab.style.boxShadow).toBe("");
+
+  openOverlay(getByTestId);
+  const overlay = getByTestId("navigator-overlay");
+  // Behind the gaps, the same dark the strip has.
+  expect(overlay.style.background).toBe("var(--surface-app)");
+  // One bar beside the abbreviation, one beside the title.
+  expect(fills(overlay)).toHaveLength(2);
+  expect(container.querySelectorAll('[data-testid="navigator-selected-fill"]')).toHaveLength(3);
+
+  const row = getByTestId("navigator-thread-row-thr1");
+  const tab = row.querySelector("[data-glyph]") as HTMLElement;
+  const gap = row.querySelector('[data-testid="navigator-tab-gap"]') as HTMLElement;
+  const title = row.querySelector('[data-testid="navigator-tab-title"]') as HTMLElement;
+  // The abbreviation's tab is the strip's tab, the same width and no bar inside.
+  expect(tab.style.width).toBe(stripTab.style.width);
+  expect(tab.style.boxShadow).toBe("");
+  expect(tab.nextElementSibling).toBe(gap);
+  expect(gap.nextElementSibling).toBe(title);
+  expect(gap.style.width).toBe("5px");
+  expect(gap.querySelector('[data-testid="navigator-selected-fill"]')).not.toBeNull();
+  expect(title.style.backgroundColor).toBe(tab.style.backgroundColor);
+
+  // An unselected thread has the gap too, with no bar in it.
+  const lastRow = getByTestId("navigator-thread-row-thr2");
+  const other = lastRow.querySelector('[data-testid="navigator-tab-gap"]') as HTMLElement;
+  expect(other.style.width).toBe("5px");
+  expect(other.childElementCount).toBe(0);
+  // The last thread's corner curves at the row's end only, not on its abbreviation.
+  const lastStrip = getByTestId("navigator-strip-thread-thr2").querySelector("[data-glyph]") as HTMLElement;
+  expect(lastStrip.style.borderRadius).toContain("6px");
+  expect((lastRow.querySelector("[data-glyph]") as HTMLElement).style.borderRadius).not.toContain("6px");
+  expect((lastRow.querySelector('[data-testid="navigator-tab-title"]') as HTMLElement).style.borderRadius).toContain("6px");
+
+  // A stream's row is one tab, with no gap and a curve only at its end.
+  const stream = getByTestId("navigator-stream-row-str1");
+  expect(stream.querySelector('[data-testid="navigator-tab-gap"]')).toBeNull();
+  const streamTabs = stream.querySelectorAll("[data-glyph]");
+  expect(streamTabs).toHaveLength(1);
+  expect(streamTabs[0]!.textContent).toContain("Main");
+  expect((streamTabs[0] as HTMLElement).style.borderRadius).toContain("6px");
+  // A thin dark line carries the thread rows' gap up through the header, and
+  // the abbreviation stays at the strip's width, so it doesn't move.
+  const streamAbbreviation = stream.querySelector('[data-testid="navigator-stream-abbreviation"]') as HTMLElement;
+  const stripStream = getByTestId("navigator-strip-stream-str1").querySelector("[data-glyph]") as HTMLElement;
+  expect(streamAbbreviation.style.width).toBe(stripStream.style.width);
+  const headerLine = stream.querySelector('[data-testid="navigator-stream-divider"]') as HTMLElement;
+  expect(headerLine.style.left).toBe("33px");
+  expect(headerLine.style.width).toBe("1px");
+  expect(headerLine.style.background).toBe("var(--surface-app)");
+
+  // The line between stacked threads runs on through the gap; the last has none.
+  expect(gap.style.borderBottomWidth).toBe("1px");
+  expect(gap.style.borderBottomColor).toBe("var(--text-muted)");
+  expect(gap.style.boxSizing).toBe("border-box");
+  expect(other.style.borderBottomWidth).toBe("");
 });
