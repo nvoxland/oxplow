@@ -73,6 +73,14 @@ impl ContentPolicy {
     }
 }
 
+/// `path` from the worktree root, as `file_snapshot` holds it.
+fn rel_of(project_dir: &Path, path: &Path) -> String {
+    path.strip_prefix(project_dir)
+        .unwrap_or(path)
+        .to_string_lossy()
+        .into_owned()
+}
+
 impl From<SnapshotTrigger> for TakeRequest {
     fn from(trigger: SnapshotTrigger) -> Self {
         TakeRequest {
@@ -218,6 +226,8 @@ struct Inner {
     /// (`.git`, `.oxplow`, `target`, `node_modules`, …) are always
     /// in effect even with an empty user list.
     ///
+    /// What this stream's watch could not cover.
+    uncovered: Mutex<oxplow_fs_watch::Uncovered>,
     /// A handle shared with this stream's watches: one filter, rooted at
     /// this stream's worktree, which follows the `generated` lists
     /// ([`SnapshotCaptureService::set_generated`]) and ignore-file edits.
@@ -320,6 +330,7 @@ impl SnapshotCaptureService {
                 stream_id,
                 max_file_bytes,
                 workspace_filter,
+                uncovered: Mutex::default(),
                 content_policy: RwLock::new(ContentPolicy::default()),
                 provider: RwLock::new(None),
                 idle: std::sync::atomic::AtomicBool::new(false),
@@ -554,6 +565,7 @@ impl SnapshotCaptureService {
     /// Start the fs-watcher and, beside it, the quiet trigger (P2.4). The
     /// returned handle is the watcher's; both end on [`Self::shutdown`].
     pub fn spawn_watcher(&self, watch: Arc<FsWatcher>) -> tokio::task::JoinHandle<()> {
+        self.set_uncovered(watch.uncovered());
         self.spawn_quiet_trigger();
         let this = self.clone();
         tokio::spawn(async move { this.run_watcher(watch).await })
@@ -964,10 +976,12 @@ impl SnapshotCaptureService {
     ) -> Result<usize, Box<dyn std::error::Error + Send + Sync>> {
         let sweep_started = Instant::now();
         let db_started = Instant::now();
+        // What was last recorded of what this pass looks at. A path elsewhere
+        // is not this pass's to call deleted.
         let mut latest = self
             .inner
             .store
-            .latest_stat_per_path(self.inner.stream_id)
+            .latest_stat_under(self.inner.stream_id, &under.to_string_lossy())
             .await?;
         let prior_rows = latest.len();
         let db_load_ms = db_started.elapsed().as_millis() as u64;
@@ -975,8 +989,6 @@ impl SnapshotCaptureService {
             prior_rows,
             db_load_ms, "snapshot startup sweep: loaded latest_stat_per_path",
         );
-        // A path elsewhere is not this pass's to call deleted.
-        latest.retain(|path, _| Path::new(path).starts_with(under));
         let walk_from = self.inner.project_dir.join(under);
         let project_dir = self.inner.project_dir.clone();
         let max_bytes = self.inner.max_file_bytes;
@@ -1364,6 +1376,29 @@ impl SnapshotCaptureService {
         if !predrain.is_zero() {
             tokio::time::sleep(predrain).await;
         }
+        // What the watch could not cover (the OS's limit on watches) told no
+        // one of its changes: look. Slower, and correct.
+        let uncovered = self
+            .inner
+            .uncovered
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .list();
+        for dir in uncovered {
+            let under = self.relative_dir(&dir);
+            if let Err(e) = self.enqueue_tree_diff(&under).await {
+                warn!(error = %e, ?dir, "snapshot capture: checking an unwatched directory failed");
+            }
+        }
+    }
+
+    /// Where the watch reports what it could not cover.
+    fn set_uncovered(&self, uncovered: oxplow_fs_watch::Uncovered) {
+        *self
+            .inner
+            .uncovered
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = uncovered;
     }
 
     /// Body of `request_snapshot`: drain → classify / read / hash /
@@ -1384,16 +1419,6 @@ impl SnapshotCaptureService {
         }
         let capture_started = Instant::now();
         let drained_count = drained.len();
-        // Settle classification + "have we seen this path before?"
-        // depend on the current contents of `file_snapshot`. One
-        // query yields both lookups; staged sweep already uses the
-        // same call so the query plan is hot.
-        let latest: std::collections::HashMap<String, oxplow_db::analytics_stores::LatestStat> =
-            self.inner
-                .store
-                .latest_stat_per_path(self.inner.stream_id)
-                .await?;
-
         // Split into:
         //   - staged   — short-circuit straight to a row.
         //   - unstaged — parallel stat / read / hash / blob.write.
@@ -1409,6 +1434,19 @@ impl SnapshotCaptureService {
         }
         let staged_count = staged_paths.len() as u64;
         let unstaged_count = unstaged_entries.len() as u64;
+        // Settle classification + "have we seen this path before?" depend on
+        // the current contents of `file_snapshot`, of only the paths this take
+        // looks at: a take costs what changed, never the size of the tree or
+        // its history.
+        let looked_at: Vec<String> = unstaged_entries
+            .iter()
+            .map(|(path, _)| rel_of(&self.inner.project_dir, path))
+            .collect();
+        let latest = self
+            .inner
+            .store
+            .latest_stat_for_paths(self.inner.stream_id, &looked_at)
+            .await?;
 
         let project_dir = self.inner.project_dir.clone();
         let stream_id = self.inner.stream_id;
@@ -1430,13 +1468,6 @@ impl SnapshotCaptureService {
         let (rows, deferred): (Vec<FileSnapshot>, Vec<(PathBuf, DirtyEntry)>) =
             tokio::task::spawn_blocking(move || {
                 use rayon::prelude::*;
-
-                fn rel_of(project_dir: &Path, path: &Path) -> String {
-                    path.strip_prefix(project_dir)
-                        .unwrap_or(path)
-                        .to_string_lossy()
-                        .into_owned()
-                }
 
                 let now = Timestamp::now();
                 let mut rows: Vec<FileSnapshot> =
@@ -2159,6 +2190,27 @@ mod tests {
         let latest = store.latest_stat_per_path(StreamId::new(1)).await.unwrap();
         assert_eq!(latest["src/a.txt"].size_bytes, 7);
         assert!(latest["src/gone.txt"].storage.is_deleted());
+    }
+
+    /// What the watch could not cover told no one of its changes: a take looks
+    /// at the disk there.
+    #[tokio::test]
+    async fn a_take_checks_what_the_watch_could_not_cover() {
+        let project = tempdir().unwrap();
+        let root = project.path();
+        std::fs::create_dir(root.join("a")).unwrap();
+        std::fs::write(root.join("a/f.txt"), "1").unwrap();
+        let (svc, store) = svc_for(root).await;
+        svc.enqueue_startup_diff().await.unwrap();
+        svc.request_snapshot(SnapshotTrigger::Startup)
+            .await
+            .unwrap();
+
+        std::fs::write(root.join("a/f.txt"), "changed").unwrap();
+        svc.set_uncovered(oxplow_fs_watch::Uncovered::new([root.join("a")]));
+        svc.request_snapshot(SnapshotTrigger::Quiet).await.unwrap();
+        let latest = store.latest_stat_per_path(StreamId::new(1)).await.unwrap();
+        assert_eq!(latest["a/f.txt"].size_bytes, 7);
     }
 
     /// A rescan of one directory looks only there: what is elsewhere is not
