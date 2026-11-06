@@ -493,8 +493,11 @@ async fn cancel_mid_turn_ends_promptly_and_the_next_prompt_works() {
     fx.idle(&id).await;
     assert!(stopped.elapsed() < Duration::from_secs(5));
     fx.prompt(&id, "Are you there?").await;
-    let snap = fx.until(&id, |s| last_answer(s) == "Back.").await;
-    assert_eq!(snap.status, AssistantStatus::Idle);
+    // The answer shows while the turn is still closing: wait for both.
+    fx.until(&id, |s| {
+        last_answer(s) == "Back." && s.status == AssistantStatus::Idle
+    })
+    .await;
 }
 
 /// A second prompt carries the first exchange.
@@ -505,10 +508,11 @@ async fn a_second_prompt_carries_the_first_exchange() {
     fx.prompt(&id, "My name is Nathan.").await;
     fx.idle(&id).await;
     fx.prompt(&id, "What is my name?").await;
-    let snap = fx
-        .until(&id, |s| last_answer(s) == "Your name is Nathan.")
-        .await;
-    assert_eq!(snap.status, AssistantStatus::Idle);
+    // The answer shows while the turn is still closing: wait for both.
+    fx.until(&id, |s| {
+        last_answer(s) == "Your name is Nathan." && s.status == AssistantStatus::Idle
+    })
+    .await;
     let second = fx.request(1)["messages"].to_string();
     assert!(second.contains("My name is Nathan."), "{second}");
     assert!(second.contains("Hi Nathan."), "{second}");

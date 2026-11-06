@@ -1218,10 +1218,10 @@ appearing in future dirty sets.
 
 Toggling the list at runtime (the Directory page's Mark as Generated →
 `oxplow.file.mark_generated`) takes effect immediately, no restart: the
-command rebuilds the `WorkspaceFilter` and calls
-`SnapshotCaptureRegistry::set_workspace_filter`, which swaps the
-filter on every live per-stream `SnapshotCaptureService` (each holds
-it behind an `RwLock`) and on the copy used to build future ones.
+command calls `SnapshotCaptureRegistry::set_generated`, which gives the new
+lists to the filter of every live per-stream `SnapshotCaptureService` (each
+has its own, rooted at its worktree) and keeps them for the services
+registered later.
 
 ### `symbol` + `symbol_capture` — `SqliteSymbolStore` (`crates/oxplow-db/src/symbol_store.rs`, migration `V62__symbols_from_tree_sitter.sql`)
 

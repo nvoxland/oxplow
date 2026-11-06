@@ -179,14 +179,14 @@ const EMITTERS: &[(&str, &str)] = &[
     // An open page run's loaders re-ran: names only, the window fetches.
     ("PageRunChanged", "crates/oxplow-app/src/pages/open_runs.rs"),
     ("SnapshotTaken", "crates/oxplow-app/src/ui_push.rs"),
-    ("StreamOrphaned", "crates/oxplow-app/src/workspace_watch.rs"),
+    ("StreamOrphaned", "crates/oxplow-app/src/stream_watch.rs"),
     ("VcsRefsChanged", "crates/oxplow-app/src/ref_moves.rs"),
     // A restored file is on disk, in no dataset.
     ("WorkspaceChanged", "crates/oxplow-app/src/commands/snapshot.rs"),
     ("WorkspaceChanged", "crates/oxplow-app/src/commands/vcs.rs"),
     ("WorkspaceChanged", "crates/oxplow-app/src/workspace_files.rs"),
-    ("WorkspaceChanged", "crates/oxplow-app/src/workspace_watch.rs"),
-    ("WorkspaceContextChanged", "crates/oxplow-app/src/workspace_watch.rs"),
+    ("WorkspaceChanged", "crates/oxplow-app/src/stream_watch.rs"),
+    ("WorkspaceContextChanged", "crates/oxplow-app/src/stream_watch.rs"),
 ];
 
 /// P8.A1: each UI event has the sources pinned in [`EMITTERS`] — a new

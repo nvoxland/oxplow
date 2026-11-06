@@ -1,6 +1,6 @@
 # Git integration
 
-What this doc covers: the filesystem watchers that keep VCS state fresh
+What this doc covers: the file watching that keeps VCS state fresh
 in the UI, notes on the **git provider** (`oxplow_app::vcs::GitProvider`,
 the one place that touches git — `oxplow_git` or libgit2), and the rule
 that agents never call `git` directly. Core reaches version control only
@@ -8,29 +8,55 @@ through the VCS capability — see [vcs.md](./vcs.md). For the data side
 of commits and their work links, see [data-model.md](./data-model.md) and
 [agent-model.md](./agent-model.md).
 
-## Three watchers
+## One watch per stream
 
-The runtime keeps three independent `fs.watch`-based watchers running.
-Each cares about a different slice of the project state.
+Each stream has **one** `FsWatcher` on its worktree, owned by
+`StreamWatchRegistry` (`crates/oxplow-app/src/stream_watch.rs`), which starts it
+when the stream appears (boot, `oxplow.stream.create`) and ends it, and everything
+hung off it, when the stream goes (archive, orphan). Off it hang the snapshot
+capture, the workspace announcements and the VCS's refs watch. What follows a
+few paths of the primary worktree subscribes to that same watch with a `Scope`,
+which names paths the filter need not keep: the wiki (`.oxplow/wiki`), the config
+(`.oxplow/project.yaml`, the personal file, `.oxplow/extensions`) and version
+control appearing (what is directly at the root). The only other watch is the
+user-global metrics folder, outside every project.
 
-### Immediate vs. debounced (the `FsWatcher` contract)
+Boot starts the watches first. What reads the disk at boot (the startup sweep,
+the wiki scan) waits for them, so a change is in what it read or heard after.
 
-`oxplow_fs_watch::FsWatcher` fires events **immediately** — there is no
-built-in debounce anymore. Consumers pick the view they need:
+### Batches, and events as hints (the `FsWatcher` contract)
 
-- `subscribe()` — the raw, un-coalesced stream. Every OS-level event
-  flows through as it arrives. **Snapshot capture uses this** so its
+**OS events are hints, not the record.** They come late, and macOS drops them
+under load. So a subscriber of `oxplow_fs_watch::FsWatcher` reads a `Subscription`:
+a set of what changed (a path written a thousand times is one entry), read when
+it likes, that nothing can overflow. A `Batch` holds the changed `paths` and
+`rescans`: directories whose changes were not all heard. A subscriber answers
+a rescan by checking the disk there. A rescan comes from:
+
+- the OS saying it dropped events (`notify`'s rescan flag; an ignored folder's
+  is no one's concern), or a watch error;
+- more than 20,000 paths pending for one subscriber (they collapse into their
+  top-level directories, `pending.rs`);
+- a kept top-level directory appearing, or the rules stopping ignoring one.
+
+| Subscriber | A path | A rescan |
+|---|---|---|
+| Snapshot capture | dirty | `enqueue_tree_diff(under)`: the startup sweep, limited to a directory |
+| Workspace | `WorkspaceChanged`; one `index_moved` per batch | `WorkspaceChanged` with no path; `index_moved` |
+| Wiki | `sync_page` | `scan_and_sync_all` |
+| Config | reload, or restate sources | both |
+| Refs | re-read the state | same |
+
+Each picks when it reads, per consumer:
+
+- `next_batch()`: at once. **Snapshot capture uses this** so its
   in-memory dirty set is always current the instant a snapshot is
-  requested (the old 250ms debounce let an edit's watch event lag the
+  requested (a 250ms wait let an edit's watch event lag the
   effort-completion snapshot, so genuinely-edited files showed up as
   `claimed_but_not_changed` in the effort file-review).
-- `subscribe_debounced(window)` — a coalescing listener that batches a
-  burst into at most one event per `(path, kind)` pair per window. This
-  is what the general-purpose, UI-facing consumers watch (workspace,
-  wiki, git-context, git-refs) so a `git checkout` or save-storm fires
-  one round of notifications instead of one per touched file.
-
-So debounce is a per-consumer choice, not a property of the watcher.
+- `next_batch_after(window)`: a burst as one batch. This is what the
+  general-purpose, UI-facing consumers use, so a `git checkout` or save-storm
+  fires one round of notifications instead of one per touched file.
 
 **Backend debounce doesn't coalesce across streams, and doesn't bound
 concurrency.** Each watcher debounces its own stream, so a consumer
@@ -59,7 +85,7 @@ scans to one however slow the scan gets. Reach for it (rather than a bare
 `setTimeout` debounce) for any expensive refresh fed by more than one
 event stream.
 
-### 1. Workspace watcher
+### Workspace announcements
 
 Watcher tests wait for an observed probe from the watched directory before
 performing a one-shot deletion. Ignore-file changes are rewritten until
@@ -67,8 +93,7 @@ their event arrives, keeping their ignore semantics unchanged. A fixed
 settling sleep or one write followed by a wait can miss attachment on a
 loaded machine; increasing the final event timeout does not fix that race.
 
-`crates/oxplow-app/src/workspace_watch.rs` — `WorkspaceWatchRegistry`.
-One watcher per stream. Rather than registering a single recursive
+Rather than registering a single recursive
 watch on the worktree root (which would force `notify_debouncer_full`
 to walk every subtree — including `target/` and `node_modules/` — at
 boot to seed its cache), registration is **scoped**:
@@ -95,22 +120,28 @@ working tree, the Uncommitted panel). They differ only on
 `.oxplow/wiki/`, which is watched and snapshotted though git ignores it,
 so it is never reported as uncommitted.
 
-A per-event filter check still runs as defence-in-depth (and to drop
-swap/temp files) — it also catches *nested* ignores inside a watched
+The watch's own filter check also catches *nested* ignores inside a watched
 dir, which a top-level prune can't see. But the meaningful win is at
 registration: we never seed cache for dirs we never care about.
 
-Subscribes via the **debounced** view (`subscribe_debounced(250ms)`)
-and bridges each batch onto `OxplowEvent::WorkspaceChanged`. Consumed by:
+Reads batches after a burst (`next_batch_after(250ms)`) and bridges each onto
+one `OxplowEvent::WorkspaceChanged { paths, overflow }`: up to 200 paths, or
+`overflow` when they are more than that or changes were lost. Consumed by:
 
 - The Directory page's loaders (`v_file` follows `WorkspaceChanged`).
-- `EditorPane` for external-file-changed prompts.
+- `EditorPane` for external-file-changed prompts: each named path, or every
+  buffer it holds on `overflow`.
+
+**The last hop says when it lost something too.** The bus holds 256 events. A
+socket that falls behind it has lost frames, so the daemon sends a `resync`
+frame and the UI runs its reconnect handlers (`scheduleResync`, once for a
+burst).
 
 Source files mutate constantly; this watcher's job is to keep the
 file-tree current. Note that the snapshot dirty set is **not** fed from
-here — `SnapshotCaptureService` runs its own `FsWatcher` and subscribes
-to the *raw* (immediate) stream so the dirty set never lags a snapshot
-request (see the immediate-vs-debounced note above).
+here — `SnapshotCaptureService` runs its own `FsWatcher` and reads its
+batches at once so the dirty set never lags a snapshot request (see the
+contract above).
 
 **Both watchers register through one call: `FsWatcher::watch_workspace(root,
 filter)`** (`oxplow-fs-watch`, tsk1051) — the root non-recursively plus each
@@ -120,14 +151,12 @@ root and filter per delivered event, which meant every write under
 `target/` (345k files here) was delivered and thrown away — any `cargo`
 build flooded it (tsk206).
 
-The snapshot service's filter can be **swapped at runtime** by the
-`oxplow.file.mark_generated` command (and a hand edit of the `generated` key), whose documented contract is that include/exclude
-edits apply *without an app restart*. Since the watch set is derived from
-the filter, `set_workspace_filter` also fires a `refilter` notify and the
-watcher starts a new `watch_workspace` with the new filter — otherwise a
-`generated.include` that un-ignores a directory would stay unwatched until
-restart. Events in the rebuild gap are dropped; a config edit is a
-deliberate user action and the next sweep/event covers it.
+The `oxplow.file.mark_generated` command (and a hand edit of the `generated`
+key) changes what a stream's filter keeps, with the documented contract that
+include/exclude edits apply *without an app restart*. Since the watch set is
+derived from the filter, `set_generated` also tells the capture's watch to move
+(`FsWatcher::refilter`), or a `generated.include` that un-ignores a directory
+would stay unwatched until restart.
 
 **Deriving the watch set from a one-time listing has a second edge, and it
 cost real data (tsk227, tsk1051).** The root is non-recursive and the
@@ -145,10 +174,9 @@ the launcher.
 So `watch_workspace` **follows the tree**: the event of a kept directory
 appearing directly under the root goes to a follower thread (registering a
 watch from the OS callback thread can deadlock a backend), which adds its
-recursive watch and then reports every kept file already inside it, as
-`Other` events. The report is **not** optional — `mkdir d && write d/f`
-races the new watch and no watch sees the gap — so consumers get the
-files that motivated the fix. A directory that disappears is unwatched, so
+recursive watch and then asks for a rescan of it. The rescan is **not**
+optional — `mkdir d && write d/f` races the new watch and no watch sees the
+gap — so consumers get the files that motivated the fix. A directory that disappears is unwatched, so
 a later one of the same name is new again. Followed directories are keyed
 by name: the OS may report either spelling of the root (`/private/var`
 for `/var`).
@@ -156,61 +184,67 @@ for `/var`).
 **Ignored folders inside a kept directory are dropped at the watcher
 too.** Pruning top-level directories isn't enough: a build in a git-ignored
 folder under a kept one (`.claude/worktrees/<agent>/target`, ignored by
-`.git/info/exclude`) is inside a recursive watch, and thousands of writes
-overflowed the 1024-event channel. Every consumer then logged
-`workspace watcher lagged` / `snapshot capture: fs-watch lagged` and
-rescanned (a snapshot, line counts, the views' reads). So the watch
-callback judges each path by the filter before it sends it
-(`ignored_by`; a file under an ignored directory is ignored with it) and
+`.git/info/exclude`) is inside a recursive watch, and thousands of writes would be read and thrown
+away by every consumer. So the watch callback judges each path by the filter before it passes it on
+(a file under an ignored directory is ignored with it) and
 drops what git's rules ignore. The filter is the one source: `.gitignore`s,
 `.git/info/exclude`, the global excludes file and the `generated` lists.
 
-**An ignore-file edit takes effect.** The callback reads git's rules again
-when a `.gitignore` or `.git/info/exclude` changes (`WorkspaceFilter::
-refreshed`; the watch also registers `.git/info`, non-recursively, to hear
-the exclude file), so what is written next is judged by them. The follower
-then stops watching a top-level directory the rules now ignore and watches
-(and reports the files of) one they stopped ignoring. A consumer that keeps
-its own filter reads it again on an ignore-file event
-(`oxplow_fs_watch::is_ignore_file`, the snapshot service) or asks the
-watch's live filter per event (`FsWatcher::filter()`, the workspace
-watcher). Pinned by `a_burst_under_an_ignored_folder_never_reaches_the_
-stream`, `a_gitignore_edit_takes_effect_without_a_restart` and
-`a_gitignore_edit_applies_to_the_running_workspace_watcher`.
+**An ignore-file edit takes effect.** `WorkspaceFilter` is a handle: every
+clone is one filter, and it never walks the tree. A directory's `.gitignore`
+is read the first time a path in it is judged and kept until the watch notes
+an edit (`note_ignore_file`, which forgets that directory's rules), so what is
+written next is judged by the new ones. A filter costs what is judged, not the
+size of the tree. Git's exclude file counts too: a linked worktree reads its
+main checkout's (`exclude_file`). The follower then stops watching a
+top-level directory the rules now ignore and watches (and reports the files
+of) one they stopped ignoring. Each stream has its own filter, rooted at its
+own worktree; its capture and its watches hold the same one
+(`SnapshotCaptureRegistry::workspace_filter`), and a `generated` change reaches
+them all (`set_generated`, which moves the capture's watch with
+`FsWatcher::refilter`). A path under an ignored directory is answered from a
+remembered lookup, with no `stat` (`ignore_change`). Pinned by
+`router::tests::a_burst_under_an_ignored_folder_never_reaches_the_stream`,
+`router::tests::a_gitignore_edit_takes_effect_without_a_restart`,
+`filter::tests::*` and `each_stream_has_its_own_filter_and_all_follow_generated`.
+
+**A watch registers as one batch** (`paths_mut`). On macOS `notify` stops and
+recreates the whole FSEvents stream on each `watch` call, and each stop also
+calls `fseventsd`. One call per top-level directory took about 7.5 s per
+watch on this repo and on metabase (measured under load 10; a batch takes 30 ms
+to 1 s), for every watch of every oxplow process on the machine.
+
+**This logic is tested with no OS.** `oxplow-fs-watch/src/router.rs` holds
+what happens to an event (`Router::handle`, on the OS callback thread) and
+what moves the watches (`Follower`, over the small `Registrar` trait), and
+its tests hand them made-up events. Only `oxplow-fs-watch`'s top-level
+`tests` touch the real OS: a write is heard, non-recursive holds, drop
+cancels.
 
 A recursive root watch would make both edges disappear, and that is what
 this used to be. It is not worth it — see the 345k-file flood above. The
 cost of the scoped set is that *staleness must be handled explicitly*,
 once, in the watcher.
 
-### 2. Project root watcher
+### Version control appearing
 
-A non-recursive `FsWatcher` on `projectDir` itself
-(`workspace_watch::spawn_project_context`). Non-recursive is enough: a
-repository appears or goes at the root, and a recursive watch would
-re-walk its metadata on boot for nothing. It doesn't know what a
-repository looks like: after each settled (500 ms) change at the root it
-asks the VCS (`Vcs::detect`) whether the project is under version
-control, and when the answer changes it emits
-`WorkspaceContextChanged { vcs_enabled }`, so UI surfaces (the branch
-picker, the stream creation form) enable or disable themselves. The
+A `Scope` on the primary's watch: what is directly at the root
+(`stream_watch::follow_project_context`). It doesn't know what a repository looks
+like: after each settled (500 ms) change at the root it asks the VCS
+(`Vcs::detect`) whether the project is under version control, and when the
+answer changes it emits `WorkspaceContextChanged { vcs_enabled }`, so UI surfaces
+(the branch picker, the stream creation form) enable or disable themselves. The
 first paint reads `get_workspace_context` (`vcs_enabled`). Stream refs
-watchers are bound at boot per stream; a repository created after boot
+watchers are bound when a stream's watch starts; a repository created after boot
 is watched from the next start.
 
-This is the only watcher that lives at the project-root level rather
-than per-stream.
-
-### 3. Refs watcher
+### Refs watcher
 
 `Vcs::watch_refs(ws, on_change)` — the provider's; git's is
 `crates/oxplow-git/src/refs_watch.rs` (`GitRefsWatcher`), which
 `GitProvider::watch_refs` bridges to the callback until the returned
-guard drops. The per-stream registry lives in
-`crates/oxplow-app/src/workspace_watch.rs` (`WorkspaceWatchRegistry`),
-which starts one refs watch and one `FsWatcher` per stream at boot and
-turns them into `vcsRefsChanged` / `workspaceChanged` on the shared
-`EventBus`. Git's watcher debounces ~250ms (a single `git commit` fires a
+guard drops. `StreamWatchRegistry` starts one per stream, turned into
+`vcsRefsChanged` on the shared `EventBus`. Git's watcher debounces ~250ms (a single `git commit` fires a
 dozen events touching `HEAD`, `refs/*`, `logs/*`, `index`, `ORIG_HEAD`, …).
 
 File events are the fast path, not the guarantee: macOS FSEvents can
@@ -247,77 +281,44 @@ loading spinner) by:
 The recursive `fs.watch` falls back to per-subdir watching on platforms
 that don't support recursive mode.
 
-### 4. Notes watcher
+### Wiki
 
-`crates/oxplow-fs-watch/src/lib.rs` — not really a git watcher, but lives next
-to the others because it wraps `fs.watch` the same way. Watches
-`.oxplow/wiki/` for `.md` file create/change/delete, debounces
-~200ms per slug, and calls `syncNoteFromDisk` → `WikiPageStore.upsert`
-(or `deleteBySlug`). Captures current HEAD (`readWorktreeHeadSha`)
-and per-reference blob SHA-256 hashes as the freshness baseline.
+`crates/oxplow-app/src/wiki_pages_watch.rs`: a `Scope` on the primary's watch.
+Each batch of `.md` changes runs `wiki_pages::sync_page` per slug; a rescan runs
+`scan_and_sync_all`. Every write is treated identically — agent and user edits
+both re-baseline freshness — so this is the single sync path for `wiki_page`
+metadata. See `data-model.md` → `wiki_page`.
 
-Every write is treated identically — agent and user edits both
-re-baseline freshness — so the watcher is the single sync path for
-`wiki_page` metadata. See `data-model.md` → `wiki_page`.
+### Config
 
-### 5. Config watcher
-
-`crates/oxplow-app/src/config_watch.rs` — `ConfigWatcher`. A
-non-recursive `FsWatcher` on `projectDir`, spawned once at boot from
-`main.rs` (held via `Box::leak` for the process). On a debounced event
-whose basename is `.oxplow/project.yaml`, it calls
-`Services::reload_config_from_disk`, which re-runs
-`load_project_config`, swaps the in-memory `Arc<RwLock<OxplowConfig>>`,
-re-applies the snapshot `WorkspaceFilter` (as `oxplow.file.mark_generated` does),
-and emits `OxplowEvent::ConfigChanged`. Exists because config is
-otherwise read only once at boot — without it, an out-of-band edit
-(notably the agent running `/oxplow:configure`, which writes a
-`testing:` block and report collectors) wouldn't take effect until restart. The IPC
-setter `set_agent_prompt_append` still mutates the
-in-memory config directly; this watcher covers every other edit path.
+`crates/oxplow-app/src/config_watch.rs`: a `Scope` on the primary's watch. A change
+to `.oxplow/project.yaml` or the personal file calls
+`Services::reload_config_from_disk`, which re-runs `load_project_config`, swaps
+the in-memory `Arc<RwLock<OxplowConfig>>`, gives the `generated` lists to the
+stream filters (`set_generated`, as `oxplow.file.mark_generated` does), and emits
+`OxplowEvent::ConfigChanged`. Exists because config is otherwise read only once
+at boot — without it, an out-of-band edit (notably the agent running
+`/oxplow:configure`, which writes a `testing:` block and report collectors)
+wouldn't take effect until restart. The IPC setter `set_agent_prompt_append`
+still mutates the in-memory config directly; this covers every other edit path.
 
 ### Orphan detection (boot + runtime)
 
-`WorkspaceWatchRegistry::spawn` checks `worktree_path.exists()` before
-spawning a stream's watchers. If a non-primary stream's worktree was
-deleted out from under us while oxplow was offline (e.g. external
-`rm -rf`, `git worktree remove`), the registry calls
-`StreamService::archive_stream(id, false)` to take the row out of the
-rail and emits `OxplowEvent::StreamOrphaned { stream_id, title }` so
-the renderer can toast ("Stream X was closed: its worktree directory
-was deleted."). Primary streams are exempt — a missing project root
-is a different failure mode (the daemon shouldn't have booted).
+`StreamWatchRegistry::register_all` checks `worktree_path.exists()` before
+starting a stream's watch. If a non-primary stream's worktree was deleted out from
+under us while oxplow was offline (e.g. external `rm -rf`, `git worktree remove`),
+it calls `StreamService::archive_stream(id, false)` to take the row out of the
+rail and emits `OxplowEvent::StreamOrphaned { stream_id, title }` so the renderer
+can toast ("Stream X was closed: its worktree directory was deleted."). Primary
+streams are exempt — a missing project root is a different failure mode (the
+daemon shouldn't have booted).
 
-Ongoing detection works the same way: each per-stream fs watcher
-holds a one-shot `OnOrphan` callback, and on every event it cheaply
-re-checks `worktree_path.exists()`. If the root is gone, the callback
-runs the same archive + emit path and the watcher loop exits (it can't
-do anything useful anyway). The check is on every event, not just
-`Removed`, because macOS FSEvents surfaces a directory's own deletion
-as an `Updated` event of its parent — keying on the kind would miss
-the case the user actually cares about.
-
-### Why three
-
-They watch overlapping but disjoint things:
-
-- workspace = source files (excluding `.git`)
-- root watcher = appearance/disappearance of `.git`
-- refs watcher = mutations *inside* `.git`
-
-A single recursive watcher on the root would lump them together and
-either spam the UI on every internal git op or miss external changes
-that don't touch source files.
-
-### Boot is async
-
-`WorkspaceWatchRegistry::spawn` and `WikiPagesWatcher::spawn` run as
-background tasks reported through `BackgroundTaskStore` (kinds `Git`
-and `NotesResync`). The desktop boot path does not block on either —
-the renderer paints first, and the `BackgroundTaskIndicator` shows
-"Starting workspace watchers" / "Initial wiki pages scan" rows until
-each scan settles. Filesystem events start arriving once the cache
-walk completes.
+Ongoing detection works the same way: on every batch the announcer cheaply
+re-checks `worktree_path.exists()`. If the root is gone, it runs the same archive
++ emit path and the watch ends. The check is on every batch, not just a removal,
+because macOS FSEvents surfaces a directory's own deletion as an `Updated` event
+of its parent. An archive ends the stream's watch before its worktree is
+deleted, so it toasts nothing.
 
 ## The git provider
 

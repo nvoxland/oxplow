@@ -37,18 +37,6 @@ pub mod event_channels {
     pub const FRAMES: &[(&str, &str)] = &[("oxplow", OXPLOW), ("lsp", LSP), ("terminal", TERMINAL)];
 }
 
-/// fs-watch classification mirrored onto the wire so the renderer can
-/// distinguish create / modify / delete / rename without re-stating
-/// every variant of the upstream `notify` crate.
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
-#[serde(rename_all = "lowercase")]
-pub enum WorkspaceChangeKind {
-    Created,
-    Updated,
-    Deleted,
-    Renamed,
-}
-
 /// What changed. Variants are deliberately broad — the renderer
 /// refetches the affected bucket on receipt rather than trying to
 /// reconcile diffs from the payload.
@@ -159,13 +147,15 @@ pub enum OxplowEvent {
     /// "is this a git workspace" flipped. Renderer hides/restores the
     /// git-aware UI on receipt.
     WorkspaceContextChanged { vcs_enabled: bool },
-    /// A worktree file changed on disk. Renderer-wide: file tree, quick
-    /// open, project panel, git dashboard, uncommitted changes view all
-    /// refresh in response.
+    /// A stream's worktree changed on disk: one event for a burst. The live
+    /// datasets over its files refresh in response, and an open editor reads
+    /// `paths` (from the root, capped; none: a change with no path of its
+    /// own), or everything it holds when `overflow` says the list is not
+    /// whole.
     WorkspaceChanged {
         stream_id: StreamId,
-        change_kind: WorkspaceChangeKind,
-        path: String,
+        paths: Vec<String>,
+        overflow: bool,
     },
     /// A ref under `.git/refs/` changed. Drives history, branch list,
     /// and ahead/behind refreshes. Coarse per stream.

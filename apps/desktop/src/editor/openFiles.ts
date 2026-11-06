@@ -125,20 +125,27 @@ function answerApplyEdit(stream: Stream, status: (message: string | null) => voi
  *  path), renamed or deleted. */
 function watch(
   streamId: string,
-  on: { changed(path: string): void; renamed(from: string, to: string): void; deleted(path: string): void },
+  on: {
+    changed(path: string): void;
+    everythingChanged(): void;
+    renamed(from: string, to: string): void;
+    deleted(path: string): void;
+  },
 ): () => void {
   const timers = new Map<string, ReturnType<typeof setTimeout>>();
   const offDisk = subscribeWorkspaceEvents(streamId, (event) => {
-    if (event.kind === "deleted") return;
-    const t = timers.get(event.path);
-    if (t) clearTimeout(t);
-    timers.set(
-      event.path,
-      setTimeout(() => {
-        timers.delete(event.path);
-        on.changed(event.path);
-      }, 75),
-    );
+    if (event.overflow) on.everythingChanged();
+    for (const path of event.paths) {
+      const t = timers.get(path);
+      if (t) clearTimeout(t);
+      timers.set(
+        path,
+        setTimeout(() => {
+          timers.delete(path);
+          on.changed(path);
+        }, 75),
+      );
+    }
   });
   const offLog = watchFileEvents(streamId, (event) => {
     if (event.kind === "renamed") on.renamed(event.from, event.to);

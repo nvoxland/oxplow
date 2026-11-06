@@ -7,6 +7,7 @@ import {
   resolveBase,
   resolveToken,
   handleSocketOpen,
+  scheduleResync,
   parseRemoteInput,
   createLanes,
   BULK_IN_FLIGHT,
@@ -149,6 +150,20 @@ test("the first open of the socket fires the reconnect handlers, as a reconnect 
   expect(count).toBe(1);
   handleSocketOpen();
   expect(count).toBe(2);
+  off();
+});
+
+// The daemon's socket fell behind and lost frames: everything is read again,
+// once for a burst of those.
+test("lost frames re-hydrate as a reconnect does, once for a burst", async () => {
+  let count = 0;
+  const off = onRemoteReconnect(() => (count += 1));
+  scheduleResync();
+  scheduleResync();
+  scheduleResync();
+  expect(count).toBe(0);
+  await Bun.sleep(1100);
+  expect(count).toBe(1);
   off();
 });
 

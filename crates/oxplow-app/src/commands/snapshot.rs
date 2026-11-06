@@ -58,8 +58,8 @@ pub fn restore_file_op(files: SnapshotFiles, events: crate::events::EventBus) ->
                     after_commit: Some(Box::new(move || {
                         events.emit(crate::events::OxplowEvent::WorkspaceChanged {
                             stream_id: stream,
-                            change_kind: crate::events::WorkspaceChangeKind::Updated,
-                            path,
+                            paths: vec![path],
+                            overflow: false,
                         })
                     })),
                     ..HandlerOutput::default()

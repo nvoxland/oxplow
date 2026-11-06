@@ -18,7 +18,7 @@ use thiserror::Error;
 use oxplow_domain::vcs::{FileStatus, Vcs};
 use oxplow_domain::StreamId;
 
-use crate::events::{EventBus, OxplowEvent, WorkspaceChangeKind};
+use crate::events::{EventBus, OxplowEvent};
 use crate::worktrees::WorktreeRouter;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
@@ -92,8 +92,8 @@ impl WorkspaceFiles {
         if let Some(id) = stream_id.and_then(StreamId::try_from_str) {
             self.events.emit(OxplowEvent::WorkspaceChanged {
                 stream_id: id,
-                change_kind: WorkspaceChangeKind::Updated,
-                path: String::new(),
+                paths: Vec::new(),
+                overflow: false,
             });
         }
     }
@@ -152,17 +152,7 @@ impl WorkspaceFiles {
         folder: Option<String>,
     ) -> Result<Vec<WorkspacePath>, WorkspaceError> {
         let root = self.router.resolve(stream_id).await.into_local_path();
-        // One folder's rules are those on the way to it, not the whole
-        // tree's: reading them is not a walk.
-        let filter = match &folder {
-            Some(folder) => oxplow_fs_watch::WorkspaceFilter::for_folder(
-                &root,
-                &generated.exclude,
-                &generated.include,
-                folder,
-            ),
-            None => Self::filter_for(&root, generated),
-        };
+        let filter = Self::filter_for(&root, generated);
         let statuses = self.statuses(&root).await;
         Self::blocking(move || {
             let ignore = |path: &str, is_dir: bool| filter.ignore(Path::new(path), is_dir);

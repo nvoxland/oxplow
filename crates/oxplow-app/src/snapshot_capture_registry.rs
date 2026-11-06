@@ -37,7 +37,9 @@ pub struct SnapshotCaptureRegistryConfig {
     /// The VCS whose object store backs clean files.
     pub vcs: Arc<dyn oxplow_domain::vcs::Vcs>,
     pub max_file_bytes: u64,
-    pub workspace_filter: WorkspaceFilter,
+    /// The project's `generated` lists. Each service's filter is its own,
+    /// rooted at its stream's worktree.
+    pub generated: oxplow_config::GeneratedConfig,
     /// Lets each service's quiet trigger yield to an open agent turn.
     pub open_turn_probe: Option<crate::snapshot_capture::OpenTurnProbe>,
 }
@@ -52,11 +54,8 @@ pub struct SnapshotCaptureRegistry {
     /// service without already knowing its id — the wiki watcher, MCP
     /// file-ref-version resolver, and bootloader logs. Set once at boot.
     primary_id: Arc<RwLock<Option<StreamId>>>,
-    /// Live workspace filter, seeded from `config.workspace_filter`.
-    /// Kept separate (and behind a lock) so [`Self::set_workspace_filter`]
-    /// can update the filter handed to *future* `register()` calls when
-    /// the project's `generated` config changes at runtime.
-    workspace_filter: Arc<RwLock<WorkspaceFilter>>,
+    /// The `generated` lists now, for *future* `register()` calls.
+    generated: Arc<RwLock<oxplow_config::GeneratedConfig>>,
     /// Whether takes keep file bytes: every live service has it, and a
     /// service registered later starts with it.
     content_policy: Arc<RwLock<ContentPolicy>>,
@@ -76,7 +75,7 @@ impl SnapshotCaptureRegistry {
         Self {
             services: Arc::new(RwLock::new(HashMap::new())),
             primary_id: Arc::new(RwLock::new(None)),
-            workspace_filter: Arc::new(RwLock::new(config.workspace_filter.clone())),
+            generated: Arc::new(RwLock::new(config.generated.clone())),
             content_policy: Arc::new(RwLock::new(ContentPolicy::default())),
             provider: Arc::default(),
             serves: Arc::default(),
@@ -107,6 +106,10 @@ impl SnapshotCaptureRegistry {
                 return Some(existing.clone());
             }
         }
+        let filter = {
+            let generated = self.generated.read().unwrap_or_else(|e| e.into_inner());
+            WorkspaceFilter::for_project(&worktree, &generated.exclude, &generated.include)
+        };
         let mut svc = SnapshotCaptureService::new(
             self.config.snapshot_store.clone(),
             self.config.blobs.clone(),
@@ -114,10 +117,7 @@ impl SnapshotCaptureRegistry {
             self.config.vcs.clone(),
             stream.id,
             self.config.max_file_bytes,
-            self.workspace_filter
-                .read()
-                .unwrap_or_else(|e| e.into_inner())
-                .clone(),
+            filter,
         );
         if let Some(probe) = &self.config.open_turn_probe {
             svc = svc.with_open_turn_probe(probe.clone());
@@ -157,17 +157,13 @@ impl SnapshotCaptureRegistry {
         }
     }
 
-    /// Swap the workspace path filter for every live service AND the
-    /// copy used to build future ones. Called when the project's
-    /// `generated` config changes (via the `set_generated` IPC) so
-    /// snapshot include/exclude edits take effect without a restart.
-    pub fn set_workspace_filter(&self, filter: WorkspaceFilter) {
-        *self
-            .workspace_filter
-            .write()
-            .unwrap_or_else(|e| e.into_inner()) = filter.clone();
+    /// The project's `generated` lists changed, for every live service and
+    /// the ones registered later, so include/exclude edits take effect
+    /// without a restart.
+    pub fn set_generated(&self, generated: &oxplow_config::GeneratedConfig) {
+        generated.clone_into(&mut self.generated.write().unwrap_or_else(|e| e.into_inner()));
         for svc in self.list() {
-            svc.set_workspace_filter(filter.clone());
+            svc.set_generated(generated);
         }
     }
 
@@ -234,12 +230,9 @@ impl SnapshotCaptureRegistry {
             .unwrap_or_else(|e| e.into_inner())
     }
 
-    /// The filter every capture applies (and a newly registered one gets).
-    pub fn workspace_filter(&self) -> WorkspaceFilter {
-        self.workspace_filter
-            .read()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone()
+    /// `stream`'s filter, when it has a capture.
+    pub fn workspace_filter(&self, stream: &StreamId) -> Option<WorkspaceFilter> {
+        self.get(stream).map(|svc| svc.workspace_filter())
     }
 
     pub fn get(&self, id: &StreamId) -> Option<Arc<SnapshotCaptureService>> {
@@ -276,15 +269,6 @@ impl SnapshotCaptureRegistry {
         self.get(&id)
     }
 
-    /// Spawn the fs-watch listener for every currently-registered
-    /// service. Safe to call multiple times — each service
-    /// idempotently spawns at most one watcher per `Arc` (in practice
-    /// only main.rs calls this, once at boot).
-    pub fn spawn_all_watchers(&self) -> Vec<tokio::task::JoinHandle<()>> {
-        let services = self.services.read().unwrap_or_else(|e| e.into_inner());
-        services.values().map(|s| s.spawn_watcher()).collect()
-    }
-
     /// Test-only: insert a pre-built service under `id`, replacing any
     /// existing entry. Lets tests override the default builder (with
     /// custom settle / predrain durations, for example) without
@@ -309,7 +293,7 @@ mod tests {
             snapshot_store: Arc::new(SqliteSnapshotStore::new(db)),
             blobs: BlobStore::new(project.join(".oxplow/snapshots")),
             max_file_bytes: 1_000_000,
-            workspace_filter: WorkspaceFilter::default(),
+            generated: Default::default(),
             open_turn_probe: None,
         }
     }
@@ -341,8 +325,9 @@ mod tests {
         let reg = SnapshotCaptureRegistry::new(config_for(project.path()));
         let stream = stream_at(project.path());
         let svc = reg.register(&stream).expect("worktree exists");
-        let handle = svc.spawn_watcher();
-        // Let the watcher park on rx.recv().
+        let watch = Arc::new(oxplow_fs_watch::FsWatcher::watch(project.path()).unwrap());
+        let handle = svc.spawn_watcher(watch);
+        // Let the watcher park on its subscription.
         tokio::time::sleep(Duration::from_millis(50)).await;
 
         reg.unregister(&stream.id);
@@ -353,5 +338,39 @@ mod tests {
             joined.is_ok(),
             "unregister must shut the watcher down, but it stayed parked",
         );
+    }
+
+    /// Each stream is judged by its own worktree's ignore files, and a
+    /// `generated` change reaches every stream and one registered later.
+    #[tokio::test]
+    async fn each_stream_has_its_own_filter_and_all_follow_generated() {
+        let main = tempfile::tempdir().unwrap();
+        let tree = tempfile::tempdir().unwrap();
+        std::fs::write(main.path().join(".gitignore"), "only-in-main\n").unwrap();
+        std::fs::write(tree.path().join(".gitignore"), "only-in-tree\n").unwrap();
+        let reg = SnapshotCaptureRegistry::new(config_for(main.path()));
+        let of = |svc: &SnapshotCaptureService, path: &str| {
+            svc.workspace_filter()
+                .ignore(std::path::Path::new(path), false)
+        };
+        let primary = reg.register(&stream_at(main.path())).unwrap();
+        let mut second = stream_at(tree.path());
+        second.id = StreamId::new(2);
+        let worktree = reg.register(&second).unwrap();
+        assert!(of(&primary, "only-in-main"));
+        assert!(!of(&primary, "only-in-tree"));
+        assert!(of(&worktree, "only-in-tree"));
+        assert!(!of(&worktree, "only-in-main"), "not the primary's rules");
+
+        reg.set_generated(&oxplow_config::GeneratedConfig {
+            exclude: vec!["out".into()],
+            ..Default::default()
+        });
+        assert!(of(&primary, "out/a.js"));
+        assert!(of(&worktree, "out/a.js"));
+        let later = tempfile::tempdir().unwrap();
+        let mut third = stream_at(later.path());
+        third.id = StreamId::new(3);
+        assert!(of(&reg.register(&third).unwrap(), "out/a.js"));
     }
 }

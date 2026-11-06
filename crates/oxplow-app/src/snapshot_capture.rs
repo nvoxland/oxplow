@@ -95,7 +95,7 @@ pub const DEFAULT_SETTLE_DURATION: Duration = Duration::from_millis(1000);
 
 /// How long [`SnapshotCaptureService::request_snapshot`] waits before
 /// draining the dirty set, giving the fs-watch debouncer (250 ms in
-/// `workspace_watch`) time to deliver any in-flight events through
+/// `stream_watch`) time to deliver any in-flight events through
 /// the broadcast channel and into the dirty set. Without this, an
 /// edit followed almost immediately by the close (`oxplow.effort.report`) produces an
 /// empty bracket — the edit hasn't propagated yet, so
@@ -218,10 +218,10 @@ struct Inner {
     /// (`.git`, `.oxplow`, `target`, `node_modules`, …) are always
     /// in effect even with an empty user list.
     ///
-    /// Behind a lock so the UI's generated-paths toggle (`set_generated`
-    /// IPC) can swap it at runtime via [`SnapshotCaptureService::set_workspace_filter`]
-    /// without restarting the app.
-    workspace_filter: RwLock<WorkspaceFilter>,
+    /// A handle shared with this stream's watches: one filter, rooted at
+    /// this stream's worktree, which follows the `generated` lists
+    /// ([`SnapshotCaptureService::set_generated`]) and ignore-file edits.
+    workspace_filter: WorkspaceFilter,
     /// Whether takes keep file bytes; read at each take, set by the
     /// registry when the active snapshot implementation changes.
     content_policy: RwLock<ContentPolicy>,
@@ -284,8 +284,8 @@ struct Inner {
     /// permit when no waiter is parked yet, so a shutdown that races
     /// ahead of the watcher's first poll is not lost.
     shutdown: tokio::sync::Notify,
-    /// Signalled by [`SnapshotCaptureService::set_workspace_filter`] so the
-    /// watcher rebuilds its registered path set (tsk206). Without this,
+    /// Signalled by [`SnapshotCaptureService::set_generated`] so the
+    /// watch moves to match the filter (tsk206). Without this,
     /// registration-time pruning would freeze the watch set at boot and a
     /// `generated.include` that un-ignores a directory would never be watched
     /// until restart — breaking `set_generated`'s "without a restart" contract.
@@ -319,7 +319,7 @@ impl SnapshotCaptureService {
                 vcs,
                 stream_id,
                 max_file_bytes,
-                workspace_filter: RwLock::new(workspace_filter),
+                workspace_filter,
                 content_policy: RwLock::new(ContentPolicy::default()),
                 provider: RwLock::new(None),
                 idle: std::sync::atomic::AtomicBool::new(false),
@@ -407,20 +407,21 @@ impl SnapshotCaptureService {
             .unwrap_or_else(|e| e.into_inner())
     }
 
-    /// Swap the workspace path filter at runtime. Called when the
-    /// project's `generated` config changes (via the `set_generated`
-    /// IPC) so include/exclude edits take effect on the next fs-watch
-    /// event and the next startup sweep without an app restart.
-    pub fn set_workspace_filter(&self, filter: WorkspaceFilter) {
-        *self
-            .inner
+    /// The project's `generated` lists changed: they apply to the next
+    /// fs-watch event and the next sweep, without an app restart.
+    pub fn set_generated(&self, generated: &oxplow_config::GeneratedConfig) {
+        self.inner
             .workspace_filter
-            .write()
-            .unwrap_or_else(|e| e.into_inner()) = filter;
+            .set_user_entries(&generated.exclude, &generated.include);
         // The watch SET is derived from the filter (tsk206), not just the
-        // per-event check — so a swap has to re-register, or a newly-included
+        // per-event check — so it has to move, or a newly-included
         // directory would stay unwatched until restart.
         self.inner.refilter.notify_one();
+    }
+
+    /// This stream's filter: the one its watches judge by.
+    pub fn workspace_filter(&self) -> WorkspaceFilter {
+        self.inner.workspace_filter.clone()
     }
 
     /// Whether this stream's workspace filter excludes `rel` (a
@@ -430,11 +431,7 @@ impl SnapshotCaptureService {
     /// observe it as changed; effort attribution uses this to leave
     /// such paths out of a claim entirely (tsk249).
     pub fn excluded_from_capture(&self, rel: &Path) -> bool {
-        self.inner
-            .workspace_filter
-            .read()
-            .unwrap_or_else(|e| e.into_inner())
-            .ignore(rel, false)
+        self.inner.workspace_filter.ignore(rel, false)
     }
 
     /// Override the settle window (default [`DEFAULT_SETTLE_DURATION`]).
@@ -556,10 +553,10 @@ impl SnapshotCaptureService {
     /// the `JoinHandle` so callers can await teardown if needed.
     /// Start the fs-watcher and, beside it, the quiet trigger (P2.4). The
     /// returned handle is the watcher's; both end on [`Self::shutdown`].
-    pub fn spawn_watcher(&self) -> tokio::task::JoinHandle<()> {
+    pub fn spawn_watcher(&self, watch: Arc<FsWatcher>) -> tokio::task::JoinHandle<()> {
         self.spawn_quiet_trigger();
         let this = self.clone();
-        tokio::spawn(async move { this.run_watcher().await })
+        tokio::spawn(async move { this.run_watcher(watch).await })
     }
 
     /// Record that the worktree changed (fs-watch), arming the quiet
@@ -738,101 +735,60 @@ impl SnapshotCaptureService {
         Ok(Some(moved.snapshot_id))
     }
 
-    async fn run_watcher(self) {
-        // Park on the shutdown signal ONCE, outside the re-registration loop, so
-        // a `notify_one` that fires between iterations isn't missed (the pinned
-        // future is re-polled by each `select!`).
-        let shutdown = self.inner.shutdown.notified();
-        tokio::pin!(shutdown);
-        // Outer loop = one registration generation. A `generated` config edit
-        // swaps the filter and notifies, which rebuilds the watch set so a newly
-        // INCLUDED directory starts being watched without an app restart (the
-        // `set_generated` IPC's documented contract). Events arriving in the
-        // rebuild gap are dropped; a config edit is a deliberate user action and
-        // the next sweep/event covers it.
+    /// `watcher` is this stream's watch, which judges by this stream's filter.
+    async fn run_watcher(self, watcher: Arc<FsWatcher>) {
+        // At once, with no window: the dirty set must be current the instant
+        // a snapshot is requested, so we mark paths dirty as soon as the OS
+        // reports them. The general-purpose `WorkspaceChanged` feed
+        // (stream_watch) is the one that waits for a burst to end.
+        let mut changes = watcher.subscribe();
         loop {
-            // The root and each kept top-level directory, pruned at
-            // registration (tsk206) and following directories made later
-            // (tsk227, tsk1051) — `FsWatcher::watch_workspace`.
-            let filter = self
-                .inner
-                .workspace_filter
-                .read()
-                .unwrap_or_else(|e| e.into_inner())
-                .clone();
-            let watcher = match FsWatcher::watch_workspace(&self.inner.project_dir, filter) {
-                Ok(w) => w,
-                Err(e) => {
-                    warn!(error = %e, "snapshot capture: failed to start fs-watch");
+            tokio::select! {
+                _ = self.inner.shutdown.notified() => {
+                    debug!("snapshot capture: watcher shutting down");
                     return;
                 }
-            };
-            if self.watch_generation(&watcher, shutdown.as_mut()).await {
-                debug!("snapshot capture: watcher shutting down");
-                return;
+                _ = self.inner.refilter.notified() => watcher.refilter(),
+                batch = changes.next_batch() => match batch {
+                    Some(batch) => self.on_batch(batch).await,
+                    None => return,
+                },
             }
         }
     }
 
-    /// Drain one registration generation. Returns `true` when the service is
-    /// shutting down (stop for good), `false` when the watch set must be
-    /// rebuilt because the filter changed.
-    async fn watch_generation(
-        &self,
-        watcher: &FsWatcher,
-        mut shutdown: std::pin::Pin<&mut impl std::future::Future<Output = ()>>,
-    ) -> bool {
-        let refilter = self.inner.refilter.notified();
-        tokio::pin!(refilter);
-        // Subscribe to the raw, un-debounced stream: the dirty set must
-        // be current the instant a snapshot is requested, so we mark
-        // paths dirty as soon as the OS reports them rather than after
-        // a debounce window. The general-purpose `WorkspaceChanged`
-        // feed (workspace_watch) is the one that debounces.
-        let mut rx = watcher.subscribe();
-        loop {
-            tokio::select! {
-                _ = &mut shutdown => {
-                    return true;
-                }
-                _ = &mut refilter => {
-                    debug!("snapshot capture: generated filter changed, re-registering watches");
-                    return false;
-                }
-                ev = rx.recv() => match ev {
-                    Ok(event) => {
-                        let path = event.path;
-                        let rel = path.strip_prefix(&self.inner.project_dir).unwrap_or(&path);
-                        // An ignore file changed: read git's rules again, so
-                        // what is heard after it (and every sweep and claim)
-                        // is judged by them.
-                        if oxplow_fs_watch::is_ignore_file(&path) {
-                            let mut f = self
-                                .inner
-                                .workspace_filter
-                                .write()
-                                .unwrap_or_else(|e| e.into_inner());
-                            *f = f.refreshed();
-                        }
-                        if self
-                            .inner
-                            .workspace_filter
-                            .read()
-                            .unwrap_or_else(|e| e.into_inner())
-                            .ignore(rel, path.is_dir())
-                        {
-                            continue;
-                        }
-                        self.mark_dirty(path, event.kind);
-                        self.note_activity();
-                    }
-                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                        warn!(skipped = n, "snapshot capture: fs-watch lagged");
-                    }
-                    Err(tokio::sync::broadcast::error::RecvError::Closed) => return true,
-                },
+    /// What the watch heard (judged by this stream's filter). Where it says
+    /// changes were lost, the disk is checked against the last snapshot, so
+    /// they reach the next take anyway.
+    async fn on_batch(&self, batch: oxplow_fs_watch::Batch) {
+        let heard = !batch.paths.is_empty();
+        for (path, kind) in batch.paths {
+            self.mark_dirty(path, kind);
+        }
+        let mut found = 0;
+        for dir in batch.rescans {
+            let under = self.relative_dir(&dir);
+            match self.enqueue_tree_diff(&under).await {
+                Ok(n) => found += n,
+                Err(e) => warn!(error = %e, ?dir, "snapshot capture: rescan failed"),
             }
         }
+        if heard || found > 0 {
+            self.note_activity();
+        }
+    }
+
+    /// `dir` from the worktree root; the whole root for a directory outside
+    /// it. The OS may report the root's other spelling (macOS reports
+    /// `/private/var` for `/var`).
+    fn relative_dir(&self, dir: &Path) -> PathBuf {
+        let root = &self.inner.project_dir;
+        let canonical = root.canonicalize().ok();
+        dir.strip_prefix(root)
+            .ok()
+            .or_else(|| dir.strip_prefix(canonical.as_ref()?).ok())
+            .unwrap_or(Path::new(""))
+            .to_path_buf()
     }
 
     /// Add a path to the dirty set. The next `request_snapshot` will
@@ -997,10 +953,15 @@ impl SnapshotCaptureService {
         // run `scan_kind = 'full'` captures over the RECONSTRUCTED tree of an
         // ordinary snapshot, so nothing needs a fabricated full-tree snapshot
         // any more — and fabricating one polluted effort file-attribution.
-        self.enqueue_tree_diff().await
+        self.enqueue_tree_diff(Path::new("")).await
     }
 
-    async fn enqueue_tree_diff(&self) -> Result<usize, Box<dyn std::error::Error + Send + Sync>> {
+    /// [`Self::enqueue_startup_diff`] for what is under `under` (from the
+    /// worktree root; empty: all of it).
+    async fn enqueue_tree_diff(
+        &self,
+        under: &Path,
+    ) -> Result<usize, Box<dyn std::error::Error + Send + Sync>> {
         let sweep_started = Instant::now();
         let db_started = Instant::now();
         let mut latest = self
@@ -1014,18 +975,16 @@ impl SnapshotCaptureService {
             prior_rows,
             db_load_ms, "snapshot startup sweep: loaded latest_stat_per_path",
         );
+        // A path elsewhere is not this pass's to call deleted.
+        latest.retain(|path, _| Path::new(path).starts_with(under));
+        let walk_from = self.inner.project_dir.join(under);
         let project_dir = self.inner.project_dir.clone();
         let max_bytes = self.inner.max_file_bytes;
         let blobs = self.inner.blobs.clone();
         let keep_bytes = self.content_policy().keeps();
         let vcs = self.inner.vcs.clone();
         let objects = vcs.object_store(&project_dir);
-        let filter = self
-            .inner
-            .workspace_filter
-            .read()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone();
+        let filter = self.workspace_filter();
 
         // Walk + stat off the async runtime — it's all blocking I/O.
         // The walk + per-file stat-shortcircuit stays single-threaded
@@ -1085,7 +1044,7 @@ impl SnapshotCaptureService {
             let mut shortcircuit_hits: u64 = 0;
             let mut oversize_new: u64 = 0;
             let phase1_started = Instant::now();
-            for entry in walkdir::WalkDir::new(&project_dir)
+            for entry in walkdir::WalkDir::new(&walk_from)
                 .into_iter()
                 .filter_entry(|e| {
                     if e.depth() == 0 {
@@ -2147,21 +2106,22 @@ mod tests {
         // A waiter parked before the swap is released by it.
         let notified = svc.inner.refilter.notified();
         tokio::pin!(notified);
-        svc.set_workspace_filter(oxplow_fs_watch::WorkspaceFilter::with_user_entries([
-            "build",
-        ]));
+        svc.set_generated(&oxplow_config::GeneratedConfig {
+            exclude: vec!["build".into()],
+            ..Default::default()
+        });
         tokio::time::timeout(std::time::Duration::from_secs(5), notified)
             .await
-            .expect("set_workspace_filter must signal the watcher to re-register");
+            .expect("set_generated must signal the watch to move");
     }
 
     #[tokio::test]
     async fn shutdown_ends_the_spawned_watcher_task() {
         let project = tempdir().unwrap();
         let (svc, _store) = svc_for(project.path()).await;
-        let handle = svc.spawn_watcher();
-        // Give the watcher a moment to start its FsWatcher and park on
-        // `rx.recv()`. Without the shutdown signal it would stay parked
+        let watch = Arc::new(FsWatcher::watch(project.path()).unwrap());
+        let handle = svc.spawn_watcher(watch);
+        // Give the watcher a moment to park on its subscription. Without the shutdown signal it would stay parked
         // forever (no fs events arrive), so the handle would never join.
         tokio::time::sleep(Duration::from_millis(50)).await;
         svc.shutdown();
@@ -2172,26 +2132,86 @@ mod tests {
         );
     }
 
+    /// What the watch lost is found by a rescan: a change no event told of,
+    /// and a deletion, reach the next take.
     #[tokio::test]
-    async fn set_workspace_filter_swaps_the_effective_filter_at_runtime() {
+    async fn a_rescan_finds_what_the_watch_missed() {
+        let project = tempdir().unwrap();
+        let root = project.path();
+        std::fs::create_dir(root.join("src")).unwrap();
+        std::fs::write(root.join("src/a.txt"), "1").unwrap();
+        std::fs::write(root.join("src/gone.txt"), "1").unwrap();
+        let (svc, store) = svc_for(root).await;
+        svc.enqueue_startup_diff().await.unwrap();
+        svc.request_snapshot(SnapshotTrigger::Startup)
+            .await
+            .unwrap();
+
+        std::fs::write(root.join("src/a.txt"), "changed").unwrap();
+        std::fs::remove_file(root.join("src/gone.txt")).unwrap();
+        svc.on_batch(oxplow_fs_watch::Batch {
+            paths: Vec::new(),
+            rescans: vec![root.to_path_buf()],
+        })
+        .await;
+        svc.request_snapshot(SnapshotTrigger::Quiet).await.unwrap();
+
+        let latest = store.latest_stat_per_path(StreamId::new(1)).await.unwrap();
+        assert_eq!(latest["src/a.txt"].size_bytes, 7);
+        assert!(latest["src/gone.txt"].storage.is_deleted());
+    }
+
+    /// A rescan of one directory looks only there: what is elsewhere is not
+    /// missing, and is not read.
+    #[tokio::test]
+    async fn a_rescan_of_a_directory_leaves_the_rest_alone() {
+        let project = tempdir().unwrap();
+        let root = project.path();
+        for dir in ["a", "b"] {
+            std::fs::create_dir(root.join(dir)).unwrap();
+            std::fs::write(root.join(dir).join("f.txt"), "1").unwrap();
+        }
+        let (svc, store) = svc_for(root).await;
+        svc.enqueue_startup_diff().await.unwrap();
+        svc.request_snapshot(SnapshotTrigger::Startup)
+            .await
+            .unwrap();
+
+        std::fs::write(root.join("a/f.txt"), "changed").unwrap();
+        std::fs::write(root.join("b/f.txt"), "changed").unwrap();
+        svc.on_batch(oxplow_fs_watch::Batch {
+            paths: Vec::new(),
+            rescans: vec![root.join("a")],
+        })
+        .await;
+        svc.request_snapshot(SnapshotTrigger::Quiet).await.unwrap();
+
+        let latest = store.latest_stat_per_path(StreamId::new(1)).await.unwrap();
+        assert_eq!(latest["a/f.txt"].size_bytes, 7);
+        assert_eq!(latest["b/f.txt"].size_bytes, 1, "not rescanned");
+    }
+
+    #[tokio::test]
+    async fn set_generated_applies_at_runtime() {
         let project = tempdir().unwrap();
         let (svc, _store) = svc_for(project.path()).await;
         let rel = std::path::Path::new("build/out.js");
 
         // Default filter doesn't ignore a "build" dir.
         assert!(
-            !svc.inner.workspace_filter.read().unwrap().ignore(rel, true),
+            !svc.inner.workspace_filter.ignore(rel, true),
             "precondition: default filter should not ignore build/",
         );
 
         // Simulate the `set_generated` toggle adding "build" to the
         // generated list — the new filter must take effect immediately.
-        svc.set_workspace_filter(oxplow_fs_watch::WorkspaceFilter::with_user_entries([
-            "build",
-        ]));
+        svc.set_generated(&oxplow_config::GeneratedConfig {
+            exclude: vec!["build".into()],
+            ..Default::default()
+        });
         assert!(
-            svc.inner.workspace_filter.read().unwrap().ignore(rel, true),
-            "set_workspace_filter must swap the live filter without a restart",
+            svc.inner.workspace_filter.ignore(rel, true),
+            "set_generated must apply without a restart",
         );
     }
 
@@ -3402,7 +3422,7 @@ mod tests {
                 blobs: BlobStore::new(project.path().join(".oxplow/snapshots")),
                 vcs: std::sync::Arc::new(crate::vcs::GitProvider),
                 max_file_bytes: 1_000_000,
-                workspace_filter: oxplow_fs_watch::WorkspaceFilter::default(),
+                generated: Default::default(),
                 open_turn_probe: None,
             },
         );

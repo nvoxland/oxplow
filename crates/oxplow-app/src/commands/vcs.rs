@@ -27,7 +27,7 @@ use serde_json::{json, Value};
 
 use super::util::{bare_id, parse, schema};
 use super::{Handler, HandlerOutput, Invocation};
-use crate::events::{EventBus, OxplowEvent, WorkspaceChangeKind};
+use crate::events::{EventBus, OxplowEvent};
 use crate::vcs::GitProvider;
 use crate::worktrees::WorktreeRouter;
 
@@ -198,8 +198,8 @@ async fn announcement(
     move || {
         events.emit(OxplowEvent::WorkspaceChanged {
             stream_id: stream,
-            change_kind: WorkspaceChangeKind::Updated,
-            path: String::new(),
+            paths: Vec::new(),
+            overflow: false,
         });
         ref_moves.index_moved(stream);
         for id in moved {

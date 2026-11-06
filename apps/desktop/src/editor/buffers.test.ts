@@ -36,6 +36,7 @@ class FakeModel implements ModelHandle {
 
 function fixture(files: Record<string, string | null> = { "a.rs": "fn a() {}" }, unshown: Record<string, string> = {}) {
   const disk = { ...files };
+  const watching: { everythingChanged?: () => void } = {};
   const saves: { path: string; content: string; call: unknown }[] = [];
   const models = new Map<string, FakeModel>();
   const services: string[] = [];
@@ -61,7 +62,11 @@ function fixture(files: Record<string, string | null> = { "a.rs": "fn a() {}" },
       };
     },
   };
-  return { store: createBufferStore(io), disk, saves, models, services };
+  io.watch = (_s, on) => {
+    watching.everythingChanged = on.everythingChanged;
+    return () => {};
+  };
+  return { store: createBufferStore(io), disk, saves, models, services, watching };
 }
 
 test("opening reads the file once; the buffer is clean and its model holds the text", async () => {
@@ -156,6 +161,19 @@ test("a rename moves the buffers under it; a delete closes them", async () => {
   store.deleted("str1", "lib/b.rs");
   expect(store.get("str1", "lib/b.rs")).toBeUndefined();
   expect(store.get("str1", "c.rs")).toBeTruthy();
+});
+
+// A burst too big to name its paths: whatever is open may have changed.
+test("when the changes can't all be named, every open buffer of the stream reads the disk", async () => {
+  const { store, disk, watching } = fixture({ "a.rs": "A", "b.rs": "B" });
+  await store.open(stream, "a.rs");
+  await store.open(stream, "b.rs");
+  disk["a.rs"] = "A2";
+  disk["b.rs"] = "B2";
+  watching.everythingChanged!();
+  await Bun.sleep(0);
+  expect(store.get("str1", "a.rs")!.draft).toBe("A2");
+  expect(store.get("str1", "b.rs")!.draft).toBe("B2");
 });
 
 test("the disk changing under a clean buffer replaces it; under a draft it asks, and Reload or Keep Mine decides", async () => {

@@ -37,6 +37,7 @@ import { getUiClientId } from "../uiClientId.js";
 /// channel registry (see channels.ts) so the demux table can't drift
 /// from what the daemon frames.
 const REMOTE_CHANNELS: Record<string, string> = EVENT_CHANNELS;
+const RESYNC_AFTER_MS = 1000;
 
 /// Commands the desktop shell serves itself. Generated from
 /// `SHELL_ONLY_COMMANDS` in crates/oxplow-tauri-ipc, so this table
@@ -414,6 +415,17 @@ export function triggerRemoteResync(): void {
   for (const h of reconnectHandlers) h();
 }
 
+/// The daemon lost frames on their way here: read everything again, once for
+/// a burst of them. Exported for tests.
+let resyncTimer: ReturnType<typeof setTimeout> | null = null;
+export function scheduleResync(): void {
+  if (resyncTimer !== null) return;
+  resyncTimer = setTimeout(() => {
+    resyncTimer = null;
+    triggerRemoteResync();
+  }, RESYNC_AFTER_MS);
+}
+
 /// The socket opened. Every open re-hydrates the hosts that registered
 /// (`onRemoteReconnect`) — after a drop, for the events missed while it was
 /// down, and on the first connect too: a host mounted before the socket was
@@ -436,6 +448,10 @@ function ensureSocket(): void {
     try {
       frame = JSON.parse(String(msg.data));
     } catch {
+      return;
+    }
+    if (frame.channel === "resync") {
+      scheduleResync();
       return;
     }
     const local = frame.channel ? REMOTE_CHANNELS[frame.channel] : undefined;
