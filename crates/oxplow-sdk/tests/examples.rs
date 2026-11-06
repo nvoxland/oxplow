@@ -78,7 +78,7 @@ async fn review_project(with_producer: bool) -> tempfile::TempDir {
 }
 
 /// The review-badges example reads effort-review's exported `reviews`
-/// model, optionally: with the producer present its pages and slot load;
+/// model, optionally: with the producer present its page loads;
 /// with it disabled, exporting another version or missing, they are
 /// withheld, the import says why, and nothing errors.
 #[tokio::test(flavor = "multi_thread")]
@@ -103,29 +103,23 @@ async fn the_review_badges_example_consumes_effort_reviews_and_degrades_without_
         tested.imports,
         ["`reviews` → oxplow:oxplow/dataset?dataset=effort-review/reviews v2: available"]
     );
-    for id in [
-        "oxplow:oxplow/page?page=review-badges/review-verdicts",
-        "oxplow:oxplow/page?page=review-badges/item-review",
-    ] {
-        assert!(
-            tested.contributes.iter().any(|c| c == id),
-            "{id}: {:?}",
-            tested.contributes
-        );
-    }
-    for example in ["review-verdicts", "item-review"] {
-        assert!(
-            tested.ran.contains(&format!("example {example}")),
-            "{example}: {:?}",
-            tested.ran
-        );
-    }
+    let id = "oxplow:oxplow/page?page=review-badges/review-verdicts";
+    assert!(
+        tested.contributes.iter().any(|c| c == id),
+        "{id}: {:?}",
+        tested.contributes
+    );
+    assert!(
+        tested.ran.contains(&"example review-verdicts".to_string()),
+        "{:?}",
+        tested.ran
+    );
 
     // The producer missing.
     let dir = review_project(false).await;
     let root = dir.path();
     let tested = test_extension(root, "review-badges", false).await.unwrap();
-    // The pages and the slot are withheld, named in the one warning for
+    // The page is withheld, named in the one warning for
     // the import; the fixtures that test them are skipped, saying why.
     assert_eq!(
         tested.imports,
@@ -146,13 +140,8 @@ async fn the_review_badges_example_consumes_effort_reviews_and_degrades_without_
         ),
         "{warning}"
     );
-    for id in [
-        "`oxplow:oxplow/page?page=review-badges/item-review`",
-        "`oxplow:oxplow/page?page=review-badges/review-verdicts`",
-        "`oxplow:oxplow/slot?slot=review-badges/oxplow-bundled.work-item.sections-0`",
-    ] {
-        assert!(warning.contains(id), "{id}: {warning}");
-    }
+    let id = "`oxplow:oxplow/page?page=review-badges/review-verdicts`";
+    assert!(warning.contains(id), "{id}: {warning}");
     assert!(
         !tested
             .warning_lines()
@@ -162,20 +151,15 @@ async fn the_review_badges_example_consumes_effort_reviews_and_degrades_without_
         tested.warnings
     );
     assert_eq!(tested.error_lines(), Vec::<String>::new());
-    for (example, page) in [
-        ("review-verdicts", "review-verdicts"),
-        ("item-review", "item-review"),
-    ] {
-        assert!(
-            tested.skipped_lines().iter().any(|w| w.contains(&format!(
-                "fixtures/{example}.yaml: example `{example}` isn't run: \
-                 `oxplow:oxplow/page?page=review-badges/{page}` is withheld because import `reviews` is \
-                 unavailable (effort-review or its contribution isn't here)"
-            ))),
-            "{example}: {:?}",
-            tested.skipped
-        );
-    }
+    assert!(
+        tested.skipped_lines().iter().any(|w| w.contains(
+            "fixtures/review-verdicts.yaml: example `review-verdicts` isn't run: \
+             `oxplow:oxplow/page?page=review-badges/review-verdicts` is withheld because import `reviews` is \
+             unavailable (effort-review or its contribution isn't here)"
+        )),
+        "{:?}",
+        tested.skipped
+    );
     // A person who turned the producer off withholds what reads it in their
     // oxplow; a test still runs the project's extensions, the producer
     // among them.

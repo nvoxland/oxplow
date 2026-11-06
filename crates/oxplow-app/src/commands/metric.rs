@@ -545,31 +545,33 @@ mod tests {
     /// metric reads back exactly the asserted number.
     #[tokio::test]
     async fn a_recorded_value_reads_back_through_its_metric() {
-        let (svc, _dir) = services().await;
-        // A built-in gauge has a spec only while it's on (tsk1046).
+        let (svc, dir) = services().await;
+        crate::test_fixtures::install_code_metrics(dir.path());
+        crate::test_fixtures::activate(&svc).await;
+        // A gauge an extension declares has a spec only while it's on.
         let off = run(
             &svc,
             RECORD,
-            json!({ "key": "oxplow.rust.unsafe_blocks", "value": 42.0 }),
+            json!({ "key": "code_metrics.rust.unsafe_blocks", "value": 42.0 }),
         )
         .await
         .unwrap_err()
         .to_string();
         assert!(off.contains("is off in this project"), "{off}");
         svc.config.write().unwrap().metrics = vec![oxplow_config::MetricEntry {
-            use_key: Some("oxplow.rust.unsafe_blocks".into()),
+            use_key: Some("code_metrics.rust.unsafe_blocks".into()),
             ..Default::default()
         }];
         crate::test_fixtures::activate(&svc).await;
         run(
             &svc,
             RECORD,
-            json!({ "key": "oxplow.rust.unsafe_blocks", "value": 42.0 }),
+            json!({ "key": "code_metrics.rust.unsafe_blocks", "value": 42.0 }),
         )
         .await
         .unwrap();
         assert_eq!(
-            headline(&svc, "oxplow.rust.unsafe_blocks").await,
+            headline(&svc, "code_metrics.rust.unsafe_blocks").await,
             Some(42.0)
         );
         run(
@@ -586,7 +588,9 @@ mod tests {
     /// counts rows), a formula metric (no measure), another stream.
     #[tokio::test]
     async fn record_refuses_what_it_cannot_represent() {
-        let (svc, _dir) = services().await;
+        let (svc, dir) = services().await;
+        crate::test_fixtures::install_code_metrics(dir.path());
+        crate::test_fixtures::activate(&svc).await;
         let mut formula =
             oxplow_db::NewMetricSpec::base("ci.derived", "Derived", "oxplow.ast_hit", "last");
         formula.source_measure = None;
@@ -595,12 +599,12 @@ mod tests {
         for (input, says) in [
             (json!({ "key": "nope.unknown", "value": 1.0 }), "no metric"),
             (
-                json!({ "key": "oxplow.todos", "value": 42.0 }),
+                json!({ "key": "code_metrics.todos", "value": 42.0 }),
                 "counts fact rows",
             ),
             (json!({ "key": "ci.derived", "value": 1.0 }), "formula"),
             (
-                json!({ "key": "oxplow.rust.unsafe_blocks", "value": 1.0, "stream": "str2" }),
+                json!({ "key": "code_metrics.rust.unsafe_blocks", "value": 1.0, "stream": "str2" }),
                 "not the caller's stream",
             ),
         ] {

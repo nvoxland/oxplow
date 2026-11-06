@@ -3,7 +3,7 @@ import { join } from "node:path";
 
 import { ipc, run, until } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
-import { openFromLauncher, openNewTask } from "../../support/ui.js";
+import { openFromLauncher } from "../../support/ui.js";
 
 /** What the fake tracker's service holds (its state files), as text. */
 function fakeState(project: string): string {
@@ -12,6 +12,12 @@ function fakeState(project: string): string {
     .filter((f) => f.startsWith("fake-state-"))
     .map((f) => readFileSync(join(dir, f), "utf8"))
     .join("\n");
+}
+
+/** The titles of the work items in oxplow's datasets. */
+async function titles(daemon: Parameters<typeof run>[0]): Promise<string[]> {
+  const out = await ipc<{ rows: unknown[][] }>(daemon, "query_sql", { sql: "SELECT title FROM v_work_item" });
+  return out.rows.map((r) => String(r[0]));
 }
 
 test("a person configures, checks and enables the fake tracker, and an item reaches it", async ({ page, daemon }) => {
@@ -54,23 +60,12 @@ test("a person configures, checks and enables the fake tracker, and an item reac
   // An external item reaches oxplow's models through its collector's read.
   await integrations.getByTestId("integration-sync-e2e/fake-work_items").click();
   await expect(integrations.getByTestId("integration-collector-e2e/fake-work_items")).toContainText(/1 record/);
-  await openFromLauncher(page, "Board");
-  // A tracker's item is on no thread.
-  await page.getByTestId("page-param-show-value").filter({ visible: true }).click();
-  await page.getByTestId("page-param-show-edit").filter({ visible: true }).selectOption("all");
-  await expect(page.getByTestId("viz-board")).toContainText("Kiwi from oxplow");
-  // The New Task page files on the active tracker too, on this thread
-  // (tsk1059): it offers what any tracker takes, not oxplow's priority.
-  await openNewTask(page);
-  await expect(page.getByTestId("viz-form-fields-state")).toBeVisible();
-  await expect(page.getByTestId("viz-form-fields-native.priority")).toHaveCount(0);
-  await page.getByTestId("viz-form-fields-title").fill("Kiwi from the page");
-  await page.keyboard.press("Enter");
-  await expect.poll(() => fakeState(daemon.project)).toContain("Kiwi from the page");
+  // A tracker's item is on no thread: it is in the datasets all the same.
+  await expect.poll(() => titles(daemon)).toContain("Kiwi from oxplow");
+  // A second item, made with no provider named, reaches the tracker and,
+  // after the next sync, oxplow's datasets.
+  await run(daemon, "oxplow.work_item.create", { title: "Kiwi from the command" });
+  await expect.poll(() => fakeState(daemon.project)).toContain("Kiwi from the command");
   await run(daemon, "oxplow.provider.sync", { instance: "e2e/fake", collector: "work_items" });
-  // The Board at its default view is another page beside the filtered one.
-  await openFromLauncher(page, "Board");
-  await page.getByTestId("page-param-show-value").filter({ visible: true }).click();
-  await page.getByTestId("page-param-show-edit").filter({ visible: true }).selectOption("thread");
-  await expect(page.getByTestId("viz-board").filter({ visible: true })).toContainText("Kiwi from the page");
+  await expect.poll(() => titles(daemon)).toContain("Kiwi from the command");
 });

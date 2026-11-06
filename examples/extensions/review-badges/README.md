@@ -1,23 +1,19 @@
 # review-badges
 
 The latest model review of each work item, from
-[effort-review](../effort-review), as a list and on the task's own page.
+[effort-review](../effort-review), as a list.
 It reads effort-review's exported `reviews` dataset and writes nothing.
 
 | | |
 |---|---|
 | **Review Verdicts** (Work) | One row per work item: its latest review's effort, how it ended, when, and the first 120 characters. The work item links to its page. |
-| **Review** (the task page, among its sections) | That work item's latest review in full, if there is one. Mounted on the `oxplow-bundled/work-item.sections` slot, which passes the item's `uri`. |
 
 ```yaml
 imports:
   - { id: reviews, contribution: oxplow:oxplow/dataset?dataset=effort-review/reviews, version: 2, optional: true }
-ui:
-  mounts:
-    - { page: item-review, at: oxplow-bundled/work-item.sections }
 ```
 
-Both pages read `import_ref('reviews')`, which is how an extension reads
+The page reads `import_ref('reviews')`, which is how an extension reads
 another's exported dataset: only what effort-review published, by the
 version it declared.
 

@@ -142,7 +142,7 @@ A new way for config to start a program must go through the same gate.
 
 > **Status (epic tsk275, recorded 2026-09).** Analytics pages no longer
 > ship in core: they are pages in the bundled `oxplow-bundled`
-> extension (`extensions/oxplow-bundled/`, compiled in by
+> extension (`.oxplow/extensions/oxplow-bundled-todo/`, compiled in by
 > `crates/oxplow-app/src/bundled_extensions.rs`), and core works with it
 > disabled. The engine they read stays in core: the fact store, metrics
 > and fact collectors, the cube, collection ingest, snapshots, plus the basic

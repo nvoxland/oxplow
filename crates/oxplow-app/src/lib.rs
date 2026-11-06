@@ -2329,7 +2329,6 @@ mod tests {
                 "oxplow.knowledge.delete_page",
                 "oxplow.knowledge.drift",
                 "oxplow.knowledge.link",
-                "oxplow.knowledge.new_page",
                 "oxplow.knowledge.verify_files",
                 "oxplow.knowledge.write_page",
                 // A download into .oxplow/lsp/, a person's call (P8.A9).
@@ -2400,7 +2399,6 @@ mod tests {
                 "oxplow.work_item.delete",
                 "oxplow.work_item.link",
                 "oxplow.work_item.move",
-                "oxplow.work_item.new",
                 "oxplow.work_item.reorder",
                 "oxplow.work_item.transition",
                 "oxplow.work_item.unlink",
@@ -2423,7 +2421,6 @@ mod tests {
                 "oxplow.command.sequence",
                 // The bundled extension's script commands compose their
                 // calls per input.
-                "oxplow.effort.infer_reasoning",
                 // Taking a handoff moves its work item, then settles it.
                 "oxplow.handoff.resolve",
                 "oxplow.review.accept",

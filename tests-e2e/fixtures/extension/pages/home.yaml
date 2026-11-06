@@ -1,0 +1,16 @@
+title: Suite Home
+description: "The page the shell specs start from, a line of text and one filter, so a spec of the shell needs no real page."
+category: Work
+params:
+- name: mode
+  type: choice
+  role: filter
+  label: Mode
+  default: plain
+  options:
+  - { value: plain, label: Plain }
+  - { value: other, label: Other }
+loaders:
+  line:
+    sql: SELECT 'Suite home in ' || coalesce(:mode, 'plain') || ' mode' AS line
+view: { from: line, viz: table }

@@ -32,21 +32,21 @@ async function model(answer: string): Promise<{ url: string; close(): Promise<vo
 }
 
 test("ask the Assistant about a page and an answer appears in the panel", async ({ page, daemon }) => {
-  const stub = await model("The Alerts page lists what needs you.");
+  const stub = await model("Suite Home is a page of the test extension.");
   try {
     await run(daemon, "oxplow.ai.set_provider", { id: "stand-in", kind: "openai_compatible", base_url: stub.url, key: "sk-e2e" });
     await run(daemon, "oxplow.ai.set_role", { role: "assistant", provider: "stand-in", model: "m" });
     await page.goto("/");
-    await openFromLauncher(page, "Alerts");
+    await openFromLauncher(page, "Suite Home");
     await page.locator('[data-testid="page-nav-menu"]:visible').click();
     await page.getByTestId("menu-item-page-ask-assistant").click();
 
     await expect(page.getByTestId("assistant-panel")).toBeVisible();
-    await expect(page.getByTestId("assistant-about")).toContainText("Alerts");
+    await expect(page.getByTestId("assistant-about")).toContainText("Suite Home");
     await page.getByTestId("assistant-input").fill("What is this page for?");
     await page.getByTestId("assistant-input").press("Enter");
     await expect(page.getByTestId("assistant-transcript")).toContainText("What is this page for?");
-    await expect(page.getByTestId("assistant-transcript")).toContainText("The Alerts page lists what needs you.");
+    await expect(page.getByTestId("assistant-transcript")).toContainText("Suite Home is a page of the test extension.");
     await expect(page.getByTestId("assistant-panel")).toHaveAttribute("data-mode", "idle");
   } finally {
     await stub.close();

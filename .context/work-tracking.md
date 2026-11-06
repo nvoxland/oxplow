@@ -281,11 +281,12 @@ or operational limits, not a view of what good work is:
 
 **Knobs.** An extension's SQL reads its own configuration
 (`config('/pointer')`, `.context/extensions-manifest.md` "Configuration in SQL"),
-so oxplow-bundled's constants are settings, not forks: `changeInterest.*`
+so the constants are settings, not forks. oxplow-bundled has `changeInterest.*`
 (weights and the long-function cut-off), `coChange.*` (pair threshold,
-window, per-commit file cap, dormant days), `struggle.*`,
-`largeUncommitted.files` and `sharedFiles.windowMinutes`, with today's values as defaults; set them with
-`oxplow.review_policy.write`. A metric's `target` / `warnAt` / `failAt` stay
+window, per-commit file cap, dormant days) and `struggle.*`, set with
+`oxplow.review_policy.write`. The holder (`extensions-bundled.md`) has
+`largeUncommitted.files` and `sharedFiles.windowMinutes`, set with
+`oxplow.advisory_policy.write`. All default to today's values. A metric's `target` / `warnAt` / `failAt` stay
 tunable from `project.yaml`.
 
 **Gaps.** The complexity and length cut-offs of the metric specs, the

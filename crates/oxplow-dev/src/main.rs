@@ -278,6 +278,7 @@ async fn extension_test(project: &Path, args: &[String]) -> Result<String, Strin
         oxplow_app::extension::extensions::known_names(project, &settings)
             .into_iter()
             .filter(|n| settings.source(project, n).join("extension.yaml").is_file())
+            .filter(|n| !settings.turned_off(n))
             .collect()
     } else {
         args

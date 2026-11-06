@@ -1,6 +1,6 @@
-import { ipc, run, searchable, until } from "../../support/daemon.js";
+import { ipc, run, until } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
-import { searchLauncher } from "../../support/ui.js";
+import { openFromLauncher } from "../../support/ui.js";
 
 // oxplow-bundled decorates an effort with its latest verdict: a chip
 // in the effort page's header.
@@ -22,13 +22,11 @@ test("an accepted effort's page carries the review's verdict chip", async ({ pag
   });
   expect(effort).toMatch(/^oxplow:oxplow\/effort\?id=eff\d+$/);
   await run(daemon, "oxplow.review.accept", { effort: new URL(effort).searchParams.get("id") });
-  await searchable(daemon, "Wombat fix", "work_item");
   await page.goto("/");
-  await searchLauncher(page, "Wombat fix");
-  await page.getByTestId(`launcher-hit-${created.result.uri}`).click();
-  // The task's effort, its Review: the effort's own page.
-  await page.locator('[data-node="activity"]').locator("a, button").filter({ hasText: "Wombat fix" }).first().click();
+  // The window answers a navigate once its stream is shown: a page open is the sign.
+  await openFromLauncher(page, "Suite Home");
+  await expect(page.getByTestId("rail-hud")).toHaveAttribute("aria-busy", "false");
+  // The effort's own page.
+  await run(daemon, "oxplow.window.navigate", { uri: effort });
   await expect(page.getByTestId("page-chips")).toContainText("Accepted");
-  // It leads with oxplow-bundled's verdict: no tests ran in this effort.
-  await expect(page.getByTestId("replacement-effort.verdict")).toContainText("Tests: none ran");
 });

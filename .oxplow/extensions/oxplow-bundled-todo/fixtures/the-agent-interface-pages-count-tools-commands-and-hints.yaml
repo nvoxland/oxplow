@@ -1,0 +1,58 @@
+# The agent-interface pages over recorded usage: tool calls by tool and
+# harness, an agent's command runs with the share refused and the most common
+# errors, and the hints' counts.
+given:
+  - { command: oxplow.agent_session.open, input: { thread: thr1, harness: claude }, bind: claude }
+  - { command: oxplow.agent_session.open, input: { thread: thr1, harness: codex }, bind: codex }
+  - { command: oxplow.thread.create, input: { stream: str1, title: Beta }, bind: beta }
+  - observe:
+      turn:
+        session: $claude.id
+        prompt: one
+        tools:
+          - { name: mcp__oxplow__run_command, kind: mcp, ok: true }
+          - { name: mcp__oxplow__run_command, kind: mcp, ok: false }
+          - { name: Bash, kind: shell, command: ls, ok: true }
+  - observe:
+      turn:
+        session: $codex.id
+        prompt: two
+        tools:
+          - { name: mcp__oxplow__run_command, kind: mcp, ok: true }
+          - { name: mcp__other__thing, kind: mcp, ok: true }
+  - observe: { turn: { thread: $beta.id, prompt: three, tools: [{ name: mcp__oxplow__oxplow_query_sql, kind: mcp, ok: true }] } }
+  - { command: oxplow.work_item.create, input: { title: Task, thread: thr1 }, bind: item, as: agent }
+  - { command: oxplow.work_item.transition, input: { uri: $item.uri, to: in_progress }, as: agent }
+  - observe: { hint: { hint: x/never, evaluated: 120 } }
+  - observe: { hint: { hint: x/spoke, evaluated: 40 } }
+  - observe: { nudge: { kind: x/spoke, message: m, delivered: true } }
+when: { page: oxplow-bundled-todo/agent-interface }
+expect:
+  loaders:
+    interface_tool_calls:
+      rows:
+        - { tool: run_command, harness: claude, calls: 2, failed: 1 }
+        - { tool: oxplow_query_sql, harness: unknown, calls: 1, failed: 0 }
+        - { tool: run_command, harness: codex, calls: 1, failed: 0 }
+    # A hint that never spoke leads the list.
+    interface_hints:
+      rows:
+        - { hint: x/never, evaluated: 120, fired: 0, delivered: 0 }
+        - { hint: x/spoke, evaluated: 40, fired: 1, delivered: 1 }
+steps:
+  # An agent's refused commands count; a person's are not the agent's.
+  - when: { command: oxplow.work_item.transition, input: { uri: $item.uri, to: ready }, as: agent }
+    expect: { ok: false, refused: ready }
+  - when: { command: oxplow.work_item.transition, input: { uri: $item.uri, to: ready }, as: agent }
+    expect: { ok: false, refused: ready }
+  - when: { command: oxplow.work_item.create, input: { title: "" }, as: person }
+    expect: { ok: false, refused: title }
+  - when: { page: oxplow-bundled-todo/agent-interface }
+    expect:
+      loaders:
+        interface_commands:
+          rows:
+            - { command: oxplow.work_item.transition, runs: 3, invalid: 2 }
+            - { command: oxplow.work_item.create, runs: 1, invalid: 0 }
+  - when: { page: oxplow-bundled-todo/interface-command-errors, params: { command: oxplow.work_item.transition } }
+    expect: { loaders: { interface_command_errors: { rows: [{ outcome: invalid }] } } }

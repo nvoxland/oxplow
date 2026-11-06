@@ -331,51 +331,6 @@ async fn the_metric_points_are_the_series_for_every_metric_pinned_or_sliced() {
     assert_eq!(latest, [("engine".to_string(), 1), ("ui".to_string(), 4)]);
 }
 
-/// The Metrics page: each metric a row with its trend (the recent values,
-/// oldest first, as JSON), its latest value and its section; expanding a
-/// row gives its biggest groups under the dimension picked.
-#[tokio::test(flavor = "multi_thread")]
-async fn the_metrics_list_has_each_metrics_trend_and_its_groups_when_sliced() {
-    let (p, _) = project(|_| {}).await;
-    p.baseline().await;
-    let (plan, _) = rust(&[("calm", 0)]);
-    let (theme, _) = rust(&[("calm", 0), ("a", 11), ("b", 11), ("c", 13)]);
-    write(p.dir.path(), "engine/plan.rs", &plan);
-    write(p.dir.path(), "ui/theme.rs", &theme);
-    p.delta().await;
-
-    let rows = loader_rows(&p.svc, "oxplow-bundled/metrics-recorded", "metrics", vec![]).await;
-    let mine = rows
-        .iter()
-        .find(|r| r["key"] == SqlCell::Text(MEASURE.into()))
-        .unwrap_or_else(|| panic!("{rows:?}"));
-    assert_eq!(text_of(&mine["trend"]), "[4.0,5.0]");
-    assert_eq!(mine["latest"], SqlCell::Real(5.0));
-    assert!(!text_of(&mine["section"]).is_empty());
-    // Expanded under a slice: the latest value per area, biggest first.
-    let groups = loader_rows(
-        &p.svc,
-        "oxplow-bundled/metrics-slices",
-        "metrics_slices",
-        vec![
-            ("key", SqlCell::Text(MEASURE.into())),
-            ("slice", SqlCell::Text(AREA.into())),
-        ],
-    )
-    .await;
-    let groups: Vec<(String, SqlCell)> = groups
-        .iter()
-        .map(|r| (text_of(&r["title"]), r["latest"].clone()))
-        .collect();
-    assert_eq!(
-        groups,
-        [
-            ("ui".to_string(), SqlCell::Real(4.0)),
-            ("engine".to_string(), SqlCell::Real(1.0))
-        ]
-    );
-}
-
 /// Loader `loader` of foundation's page `page`, run as a person with
 /// `params`: its rows by column.
 async fn loader_rows(
@@ -425,13 +380,6 @@ async fn run_page(
         .run(page_request(page, params))
         .await
         .unwrap()
-}
-
-fn text_of(cell: &SqlCell) -> String {
-    match cell {
-        SqlCell::Text(t) => t.clone(),
-        other => panic!("not text: {other:?}"),
-    }
 }
 
 /// The metric page: its definition and headline, its trend (split by a

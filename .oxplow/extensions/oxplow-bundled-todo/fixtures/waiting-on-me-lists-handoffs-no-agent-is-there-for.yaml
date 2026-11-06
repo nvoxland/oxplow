@@ -1,0 +1,14 @@
+# Work handed to a thread with no agent session open there is the person's
+# move: Waiting on Me lists it until an agent is there.
+given:
+  - { command: oxplow.thread.create, input: { stream: str1, title: Docs }, bind: docs }
+  - { command: oxplow.handoff.send, input: { from_thread: thr1, to_thread: $docs.id, body: the docs half is yours } }
+when: { page: oxplow-bundled-todo/waiting-on-me }
+expect:
+  loaders:
+    waiting_on_me:
+      rows: [{ what: Handed to a thread with no agent, title: the docs half is yours, thread: Docs }]
+steps:
+  - given:
+      - { command: oxplow.agent_session.open, input: { thread: $docs.id, harness: claude } }
+  - expect: { loaders: { waiting_on_me: { rows: 0 } } }

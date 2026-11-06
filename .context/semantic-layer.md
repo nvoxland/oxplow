@@ -178,7 +178,7 @@ Every connection registers three scalar functions for URIs
 (`oxplow-db/src/sql_functions.rs`): `uri(resource, key1, value1, …)` builds
 a canonical URI — the params sorted and escaped, a NULL value left out —
 so a dataset or page links to another page
-(`uri('oxplow/page', 'page', 'oxplow-bundled/job-run-output', 'job_run', uri)`)
+(`uri('oxplow/page', 'page', 'oxplow-bundled-todo/job-run-output', 'job_run', uri)`)
 or builds a record's URI (`uri('oxplow/effort', 'id', json_extract(e.payload, '$.effort'))`) without
 concatenating a prefix; `uri_param(uri, key)` reads one param back (NULL when
 the URI lacks it or isn't one) and `uri_resource(uri)` its resource

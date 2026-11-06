@@ -1,0 +1,18 @@
+# A reply with only the claims list still runs both writers: the missing
+# decisions list clears the stale inferred decisions.
+given:
+  - { command: oxplow.effort.open, input: { thread: thr1 } }
+when:
+  job: reasoning
+  intentKey: "reasoning:eff1@2"
+  request:
+    schemaVersion: 1
+    role: reasoning
+    messages:
+      - { role: user, parts: [{ type: text, text: "Work item: Add CSV export" }] }
+expect:
+  state: succeeded
+  effects: [{ id: oxplow-bundled-todo/store-reasoning, state: ok }]
+  commands: [oxplow.effort.replace_inferred_decisions, oxplow.effort.replace_inferred_claims]
+model:
+  replies: ["{\"claims\": []}"]

@@ -89,7 +89,7 @@ something its model is restricted from.
   They show on the effort's review, next to the decisions the agent did
   record; you confirm or dismiss a decision, and verify or dismiss a
   claim. They're guesses, and your agent never sees them. The model is the
-  one you bind to `oxplow-bundled/reasoning` in Settings → AI, or your
+  one you bind to an extension's own role in Settings → AI, or your
   `main` model until you do. Nothing runs until one of them has a model,
   and its extension is deployed with the permissions it declares (Settings →
   Extensions). **Infer Again** on the list asks once more, say after you bind

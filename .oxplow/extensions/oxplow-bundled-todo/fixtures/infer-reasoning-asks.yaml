@@ -1,0 +1,11 @@
+# A model serves the reasoning profile (here, Main's): the finished
+# effort's decisions and claims are asked about.
+given:
+  - { command: oxplow.effort.open, input: { thread: thr1 } }
+when:
+  event:
+    type: effort.finished
+    payload: { effort: "eff1", end_snapshot: 3 }
+expect:
+  effects: [{ id: oxplow-bundled-todo/infer-reasoning, state: ok }]
+  commands: [oxplow.effort.infer_reasoning]

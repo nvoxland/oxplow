@@ -67,7 +67,7 @@ pub struct IntentFile {
 pub struct Mount {
     /// The page it places: a slug of this extension.
     pub page: String,
-    /// Where: a page's slot (`oxplow-bundled/work-item.sections`) or a
+    /// Where: a page's slot (`oxplow-foundation/commit.sections`) or a
     /// replaceable core component (`work_item.board`).
     pub at: String,
     /// At a parts slot: where among the page's parts — `start`, `end`,

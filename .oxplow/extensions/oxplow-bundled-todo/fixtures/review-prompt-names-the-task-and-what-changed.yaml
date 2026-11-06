@@ -1,0 +1,23 @@
+# A prompt for reviewing the effort with another harness, built from the
+# task, the files and the agent's claims; an effort on another provider's
+# work item names that item instead of coming back empty.
+given:
+  - { command: oxplow.work_item.create, input: { title: Fix the hover state, body: Buttons flicker on hover., thread: thr1 }, bind: item }
+  - { command: oxplow.work_item.transition, input: { uri: $item.uri, to: in_progress } }
+  - observe: { turn: { prompt: Fix it, tools: [{ name: Edit, kind: edit, paths: [src/ui/button.ts], ok: true }], write: { path: src/ui/button.ts, body: "export {};\n" } } }
+when: { part: oxplow-bundled-todo/review-prompt, params: { effort_id: 1 } }
+expect:
+  text:
+    contains:
+      - Fix the hover state
+      - Buttons flicker on hover.
+      - "- `src/ui/button.ts` ("
+      - No claims were found.
+      - No decisions were recorded.
+steps:
+  - given:
+      - { command: oxplow.effort.open, input: { thread: thr1, work_item: "oxplow:oxplow/work_item?id=ENG-1&provider=issues" } }
+  - when: { part: oxplow-bundled-todo/review-prompt, params: { effort_id: 2 } }
+    expect:
+      text:
+        contains: ["**oxplow:oxplow/work_item?id=ENG-1&provider=issues**"]

@@ -23,7 +23,7 @@ Every contribution that runs — an external provider instance, a collector, an 
 - **Repairing.** Core detects and reports (the health row,
   `contribution.disabled@1`, the Extensions page) with or without a work
   list. Filing the repair item is the bundled effect
-  `oxplow-bundled/repair-disabled` (`effects/repair_disabled.star`, on
+  `oxplow-bundled-todo/repair-disabled` (`effects/repair_disabled.star`, on
   `contribution.disabled`, `needs: [sql.read]`): it composes
   `oxplow.work_item.create` on the active work list — whichever provider
   that is, never a task table — titled `Repair <extension> <contribution>:

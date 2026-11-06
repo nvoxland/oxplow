@@ -6,17 +6,14 @@ import type { Page } from "@playwright/test";
 
 import { run, type Daemon } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
-import { openFromLauncher, searchLauncher } from "../../support/ui.js";
+import { openFromLauncher } from "../../support/ui.js";
 
 // Oxplow's own pages are complete with every enhancement off: with only
 // oxplow-foundation on, a page shows its own content, and nothing another
 // extension adds — no replacement standing in for a node, no node an
 // extension mounts, no decorator's chip or badge, no panel in the rail, no
-// command in the ☰. The pages that read oxplow's own work list (Board, Tasks)
-// read the list oxplow-foundation provides: a project that has no work items
-// yet shows their empty state, cleanly. The `ui`-less half of
-// this — what a page's run holds — is every foundation fixture's, which runs
-// with only foundation on.
+// command in the ☰. The `ui`-less half of this — what a page's run holds —
+// is every foundation fixture's, which runs with only foundation on.
 
 /** The other extensions that ship with, or are in, the e2e project. */
 const OTHERS = ["oxplow-bundled", "e2e", "github"];
@@ -71,14 +68,5 @@ test("oxplow's pages are complete with every enhancement off", async ({ page, da
 
   await openFromLauncher(page, "Uncommitted");
   await expect(host.getByText("dirty.txt").first()).toBeVisible();
-  await nothingAdded(page);
-
-  // The work list's pages are oxplow-bundled's: with it off, the launcher
-  // does not offer Board or Tasks.
-  for (const name of ["Board", "Tasks"]) {
-    await searchLauncher(page, name);
-    await expect(page.locator('[data-testid^="launcher-page-"]').filter({ hasText: new RegExp(`^\\s*${name}\\s*$`) })).toHaveCount(0);
-    await page.keyboard.press("Escape");
-  }
   await nothingAdded(page);
 });

@@ -113,10 +113,10 @@ async fn a_settings_change_republishes_the_datasets_that_read_it() {
     assert_eq!(struggles(&fx).await, json!([["src/warm.rs", 3]]));
 }
 
-/// An advisory reads the setting each time it runs: the large-uncommitted
-/// threshold lowered to one file fires on one.
+/// SQL an extension runs (a page's, an advisory's) reads the setting each
+/// time: lowering the threshold changes the query it gets.
 #[tokio::test(flavor = "multi_thread")]
-async fn a_page_and_an_advisory_read_the_current_setting() {
+async fn a_query_reads_the_current_setting() {
     let fx = services_with_effort().await;
     let bundled = fx
         .svc
@@ -126,51 +126,23 @@ async fn a_page_and_an_advisory_read_the_current_setting() {
         .find(|e| e.name == "oxplow-bundled")
         .cloned()
         .unwrap();
-    let advisory = bundled
-        .advisories
-        .iter()
-        .find(|a| a.id == "large-uncommitted")
-        .unwrap();
+    let query = "SELECT 1 WHERE 9 >= config('/struggle/repeatedEdits')";
     let before = fx
         .svc
         .sql
-        .with_extension_config(&bundled, &advisory.query)
+        .with_extension_config(&bundled, query)
         .await
         .unwrap();
-    assert!(before.contains(">= 15"), "{before}");
+    assert!(before.contains(">= 5"), "{before}");
 
-    let read = fx
-        .svc
-        .commands
-        .run(&Actor::Human, "oxplow.review_policy.read", json!({}), false)
-        .await
-        .unwrap();
-    fx.svc
-        .commands
-        .run(
-            &Actor::Human,
-            "oxplow.review_policy.write",
-            json!({
-                "schema_version": 1,
-                "project": {
-                    "expected": read.result["result"]["stamps"]["project"].clone(),
-                    "values": { "largeUncommitted": { "files": 1 } }
-                }
-            }),
-            false,
-        )
-        .await
-        .unwrap();
+    set_threshold(&fx, 1).await;
     let after = fx
         .svc
         .sql
-        .with_extension_config(&bundled, &advisory.query)
+        .with_extension_config(&bundled, query)
         .await
         .unwrap();
-    assert!(
-        after.contains(">= 1\n") || after.ends_with(">= 1"),
-        "{after}"
-    );
+    assert!(after.ends_with(">= 1"), "{after}");
 }
 
 fn write(root: &std::path::Path, rel: &str, body: &str) {

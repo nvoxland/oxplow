@@ -13,7 +13,7 @@ Custom components (the sandboxed frame, protocol, testing a component) and the E
   and the proof that an extension ships a data app: a **page with a
   component node** (`pages/explore-data.yaml`: `view: { component: { id:
   explore-data } }`, the component declared under `custom_components:`,
-  its source in `extensions/oxplow-bundled/src/explore-data/`, built
+  its source in `.oxplow/extensions/oxplow-bundled-todo/src/explore-data/`, built
   into `dist/` by bundled's `package.json` with `bun build`, no
   dependencies; the manifest's `build:` runs it). It is person-facing UI,
   so it is bundled's: foundation's dataset, measure, dimension and

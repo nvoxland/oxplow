@@ -21,7 +21,7 @@ Everything oxplow tracks is exposed as read-only SQL views: `v_work_item`
 **Explore Data** (launcher → Data) lists every view in its rail. Pick one to
 see its columns and sample rows, edit the SQL (++cmd+enter++ runs it), and
 **Save as Page** when it shows what you want. It is itself an extension's
-custom page: oxplow-bundled's.
+custom page.
 
 ## Writing one by hand
 
@@ -178,19 +178,15 @@ into a foundation page, list it under `ui.mounts` in `extension.yaml`:
 ```yaml
 ui:
   mounts:
-    - { page: item-tokens, at: oxplow-bundled/work-item.sections }
+    - { page: commit-tokens, at: oxplow-foundation/commit.sections }
 ```
 
 The mounted part gets the host's params by name, so it declares the ones it
-needs. The work item and Tasks pages are oxplow-bundled's: an extension that
-mounts there lists `requires: [oxplow-bundled]` in `extension.yaml`.
-
+needs. 
 
 | Slot | Page | Param |
 |---|---|---|
 | `oxplow-foundation/diff-view.sections` | an effort's or a range's diff | `effort_id`, `change_id` |
-| `oxplow-bundled/work-item.sections` | a work item's page | `uri` |
-| `oxplow-bundled/tasks.sections` | the Tasks page; `at: { before: list }` puts a strip above the list | `thread_id`, `stream_id` |
 | `oxplow-foundation/commit.sections` | a commit's page | `change_id` (the page's row) |
 | `oxplow-foundation/uncommitted-changes.sections` | Uncommitted Changes; `at: { before: commit }` puts a strip above everything | `change_id` (the page's row) |
 | `oxplow-foundation/new-session.sections` | the New Session page (sections `start`, `earlier`) | `thread_id` |
@@ -419,7 +415,7 @@ memory** (yours, in every tab of the component; JSON, 64 KB a value and
 `oxplow extension check` warns when a component's script uses
 `localStorage` or `sessionStorage`. A component written in
 TypeScript or with a library declares a `build:` ("Extensions" → "Builds"),
-so only its sources are committed. oxplow-bundled's Timeline page is a
+so only its sources are committed. A Timeline page is a
 working example: it reads
 its window from `from` and `to`, writes every change of it back with
 `setViewParams`, and follows `onViewParams` when Back or Forward moves the

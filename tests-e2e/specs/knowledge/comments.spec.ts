@@ -1,3 +1,6 @@
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
+
 import { run } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
 import { openFromLauncher } from "../../support/ui.js";
@@ -6,10 +9,10 @@ import { openFromLauncher } from "../../support/ui.js";
 // grouped by the page they are anchored to, the picked one's conversation
 // under them, and a row's actions run the comment commands.
 test("the Comments inbox lists a thread, shows its conversation, and resolves it", async ({ page, daemon }) => {
-  await run(daemon, "oxplow.knowledge.write_page", { slug: "otters", title: "Otters", body: "# Otters\n\nThey hold hands.\n" });
+  writeFileSync(join(daemon.project, "otters.md"), "# Otters\n\nThey hold hands.\n");
   const added = await run<{ result: { comment: { id: string } } }>(daemon, "oxplow.knowledge.add_comment", {
     stream: daemon.stream,
-    target: "oxplow:oxplow/wiki?slug=otters",
+    target: "oxplow:oxplow/file?path=otters.md",
     quote: "hold hands",
     intent: "followup",
     body: "Is that true?",
@@ -23,7 +26,7 @@ test("the Comments inbox lists a thread, shows its conversation, and resolves it
   const threads = inbox.getByTestId("viz-table");
   const row = threads.getByTestId("viz-row-0");
   await expect(row).toContainText("hold hands");
-  await expect(inbox.getByTestId("viz-group-heading")).toContainText("wiki/otters");
+  await expect(inbox.getByTestId("viz-group-heading")).toContainText("otters.md");
 
   // Picking the row reads its messages, oldest first.
   await row.click();
@@ -33,7 +36,7 @@ test("the Comments inbox lists a thread, shows its conversation, and resolves it
 
   // Go to location opens the page at the comment: its address carries it.
   await row.getByText("Go to location").click();
-  await expect(page.locator('[data-testid^="center-tab-body-oxplow:oxplow/wiki?slug=otters"]:visible')).toHaveAttribute(
+  await expect(page.locator('[data-testid^="center-tab-body-oxplow:oxplow/file?path=otters.md"]:visible')).toHaveAttribute(
     "data-testid",
     /#comment=cmt\d+/,
   );

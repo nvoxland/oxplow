@@ -921,6 +921,7 @@ mod tests {
             replacements: Default::default(),
             event_retention: Default::default(),
             ai_roles: Default::default(),
+            disable_extensions: Default::default(),
             extensions: oxplow_config::DEFAULT_EXTENSIONS
                 .iter()
                 .map(|s| s.to_string())

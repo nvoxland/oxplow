@@ -801,6 +801,11 @@ pub struct OxplowConfig {
     /// always on and never listed.
     #[serde(rename = "extensions")]
     pub extensions: Vec<String>,
+    /// Extensions off for the whole team (`disableExtensions: [...]`), even
+    /// one sitting in `.oxplow/extensions/`, which is otherwise on. Committed.
+    /// A person's `enableExtensions` turns one back on for them.
+    #[serde(rename = "disableExtensions")]
+    pub disable_extensions: Vec<String>,
     /// Where an extension's source is when it isn't
     /// `.oxplow/extensions/<name>/` (`extensionSources: { <name>: <folder> }`),
     /// relative to the checkout or absolute.
@@ -849,6 +854,8 @@ pub enum EnabledBy {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ExtensionSettings {
     pub team: Vec<String>,
+    /// Off for the team (`disableExtensions` in project.yaml).
+    pub team_disable: Vec<String>,
     pub team_sources: std::collections::BTreeMap<String, String>,
     pub personal: PersonalExtensions,
     pub personal_sources: std::collections::BTreeMap<String, String>,
@@ -881,6 +888,7 @@ impl ExtensionSettings {
     pub fn of(config: &OxplowConfig) -> Self {
         Self {
             team: config.extensions.clone(),
+            team_disable: config.disable_extensions.clone(),
             team_sources: config.extension_sources.clone(),
             personal: config.personal_extensions.clone(),
             personal_sources: config.personal_extension_sources.clone(),
@@ -902,8 +910,17 @@ impl ExtensionSettings {
         }
     }
 
-    /// The extensions on: (team ∪ personal enable) − personal disable, in
-    /// that order, each with the layer that turned it on.
+    /// Whether `name` was turned off on purpose: by this person, or by the
+    /// team unless this person turned it on.
+    pub fn turned_off(&self, name: &str) -> bool {
+        let listed = |names: &[String]| names.iter().any(|n| n == name);
+        listed(&self.personal.disable)
+            || (listed(&self.team_disable) && !listed(&self.personal.enable))
+    }
+
+    /// The extensions on: (team ∪ personal enable) − what's [turned
+    /// off](Self::turned_off), in that order, each with the layer that turned
+    /// it on.
     pub fn enabled(&self) -> Vec<(String, EnabledBy)> {
         let mut out: Vec<(String, EnabledBy)> = Vec::new();
         let layers = self.team.iter().map(|n| (n, EnabledBy::Team)).chain(
@@ -913,7 +930,7 @@ impl ExtensionSettings {
                 .map(|n| (n, EnabledBy::Personal)),
         );
         for (name, layer) in layers {
-            if !self.personal.disable.contains(name) && !out.iter().any(|(n, _)| n == name) {
+            if !self.turned_off(name) && !out.iter().any(|(n, _)| n == name) {
                 out.push((name.clone(), layer));
             }
         }
@@ -971,6 +988,7 @@ pub fn extension_settings(project_dir: impl AsRef<Path>) -> ExtensionSettings {
     let personal = read(&personal_path(dir));
     ExtensionSettings {
         team: team.extensions.unwrap_or_else(default_extensions),
+        team_disable: team.disable,
         team_sources: team.extension_sources,
         personal: PersonalExtensions {
             enable: personal.enable,
@@ -1175,6 +1193,9 @@ struct RawConfig {
     /// The extensions on for the whole team: `[names]`; absent, `[oxplow-bundled]`. Enables code. oxplow-foundation is always on and never listed; a person turns others on or off for themselves in `.oxplow/personal.yaml` (`enableExtensions`, `disableExtensions`).
     #[serde(default)]
     extensions: Option<Vec<String>>,
+    /// Extensions off for the whole team, even one sitting in `.oxplow/extensions/`: `[names]`. A person's `enableExtensions` turns one back on for them.
+    #[serde(rename = "disableExtensions", default)]
+    disable_extensions: Option<Vec<String>>,
     /// Where an extension's source is when it isn't `.oxplow/extensions/<name>/`: `{ <name>: <folder> }`, relative to the checkout or absolute (`~/` is the home folder). Enables code.
     #[serde(rename = "extensionSources", default)]
     extension_sources: Option<std::collections::BTreeMap<String, String>>,
@@ -1836,6 +1857,11 @@ pub fn config_entries(config: &OxplowConfig, fallback_name: &str) -> Vec<ConfigE
         config.extensions != default_extensions(),
     );
     put(
+        "disableExtensions",
+        to_yaml(&config.disable_extensions),
+        !config.disable_extensions.is_empty(),
+    );
+    put(
         "extensionSources",
         to_yaml(&config.extension_sources),
         !config.extension_sources.is_empty(),
@@ -1941,6 +1967,7 @@ fn default_config(project_name: String) -> OxplowConfig {
         event_retention: std::collections::BTreeMap::new(),
         ai_roles: Default::default(),
         extensions: default_extensions(),
+        disable_extensions: Default::default(),
         extension_sources: Default::default(),
         personal_extensions: Default::default(),
         personal_extension_sources: Default::default(),
@@ -2482,6 +2509,7 @@ fn validate(raw: RawConfig, fallback_name: &str) -> Result<OxplowConfig, ConfigE
         event_retention,
         ai_roles: validate_ai_roles(raw.ai)?,
         extensions: raw.extensions.unwrap_or_else(default_extensions),
+        disable_extensions: raw.disable_extensions.unwrap_or_default(),
         extension_sources: raw.extension_sources.unwrap_or_default(),
         personal_extensions: Default::default(),
         personal_extension_sources: Default::default(),
@@ -4892,10 +4920,13 @@ lsp:
             team_only.source(wt, "triage"),
             Path::new("/wt/tools/triage")
         );
-        // No list: the bundled extension is on; an empty one turns it off.
+        // No list: the default extensions are on; an empty one turns them off.
         assert_eq!(
             extension_settings(tempdir().unwrap().path()).enabled(),
-            vec![("oxplow-bundled".to_string(), EnabledBy::Team)]
+            DEFAULT_EXTENSIONS
+                .iter()
+                .map(|name| (name.to_string(), EnabledBy::Team))
+                .collect::<Vec<_>>()
         );
         let none = tempdir().unwrap();
         std::fs::write(cfg_path(none.path()), "extensions: []\n").unwrap();
@@ -5807,6 +5838,40 @@ metrics:
             ..Default::default()
         }];
         assert!(resolve_metrics(&[], &[], &[], &project).is_empty());
+    }
+
+    /// `disableExtensions` in project.yaml turns an extension off for the
+    /// team, even one in `.oxplow/extensions/`, and is committed with it. A
+    /// person can still turn it on for themselves, and off wins for them.
+    #[test]
+    fn the_team_can_turn_off_an_extension_a_person_may_turn_back_on() {
+        let dir = tempdir().unwrap();
+        std::fs::write(
+            cfg_path(dir.path()),
+            "extensions: [oxplow-bundled, kept]\ndisableExtensions: [kept, holder]\n",
+        )
+        .unwrap();
+        let settings = extension_settings(dir.path());
+        assert!(settings.turned_off("holder"));
+        assert!(settings.turned_off("kept"), "off beats the team's list");
+        assert!(!settings.is_enabled("kept"));
+        assert!(!settings.turned_off("oxplow-bundled"));
+
+        let cfg = load_project_config(dir.path()).unwrap();
+        assert_eq!(cfg.disable_extensions, vec!["kept", "holder"]);
+        write_rendered(dir.path(), &cfg);
+        assert!(extension_settings(dir.path()).turned_off("holder"));
+
+        std::fs::write(personal_path(dir.path()), "enableExtensions: [holder]\n").unwrap();
+        let mine = extension_settings(dir.path());
+        assert!(!mine.turned_off("holder"));
+        assert!(mine.is_enabled("holder"));
+        std::fs::write(
+            personal_path(dir.path()),
+            "enableExtensions: [holder]\ndisableExtensions: [holder]\n",
+        )
+        .unwrap();
+        assert!(extension_settings(dir.path()).turned_off("holder"));
     }
 
     #[test]

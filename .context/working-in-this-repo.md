@@ -356,13 +356,26 @@ work-item provider; `tests-e2e/README.md` has the harness. It isn't part
 of `test:collect` (it builds the frontend and boots a daemon per spec,
 ~40 s); CI runs it as its own `e2e` job. **Run it when a change touches
 what a person sees or does in the app** — a page, a rail section, a
-command's UI path, a testid — and add or extend a spec under
-`tests-e2e/specs/<area>/` for a new user path. What every page does
-(select, expand, switch, forms, slots, replacements, embeds, components,
-panels) is `tests-e2e/specs/pages/*`'s, each over a small extension of its
-own: a page or component that moves into an extension gets fixtures for
-its data and behavior (`ui:` steps for a component's own code) and a spec
-of its own only for what only the app's shell does. Rules a spec keeps:
+command's UI path, a testid. What every page does (select, expand, switch,
+forms, slots, replacements, embeds, components, panels) is
+`tests-e2e/specs/pages/*`'s, each over a small extension of its own.
+
+**What belongs here.** e2e is for what only the app can show, not for what a
+page says or a command does:
+
+- the shell: tabs, back and forward, reload, keyboard, the launcher;
+- how any page draws and acts, over a small test extension;
+- what a fixture can't see: dragging, the rich text editor, a live update
+  without a reload, the sandboxed frame;
+- a few smoke paths that a real extension works through the real shell.
+
+An extension's page, command, form or data is tested by a fixture in that
+extension (`ui:` steps for a component's own code), not by a spec: what a page
+lists or a form saves belongs there, and a page gets a spec of its own only for
+what only the shell does. A generic spec starts from a page in
+`tests-e2e/fixtures/extension`, never a real one, so it doesn't break when a real
+page changes or moves. Removing one extension shouldn't fail tests that aren't
+about it. Rules a spec keeps:
 
 - select by `data-testid` (a renamed testid breaks specs — grep
   `tests-e2e/` first);

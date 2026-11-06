@@ -1,0 +1,11 @@
+# No model is bound to the profile or to Main: nothing is asked, and the
+# skip says where to bind one.
+given:
+  - { command: oxplow.ai.set_role, input: { role: main } }
+when:
+  event:
+    type: effort.finished
+    payload: { effort: "eff1", end_snapshot: 3 }
+expect:
+  effects: [{ id: oxplow-bundled-todo/infer-reasoning, state: skipped }]
+  commands: []

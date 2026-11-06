@@ -856,7 +856,7 @@ margin; an embed or a slot takes its title from the page it shows):
   ranges marked.
 - **Lists and boards.** oxplow-bundled's `tasks` (params `show`, `priority`, `thread_id`,
   `stream_id`): `list` (the `work_item.list` replaceable), `summary`,
-  `backlog`, then a `sections` slot (`oxplow-bundled/tasks.sections`) where bundled mounts the thread's
+  `backlog`, then a `sections` slot (`oxplow-bundled-todo/tasks.sections`) where bundled mounts the thread's
   tokens, plan, shared work and the handoff pages. `backlog` (badge
   `backlog-count`; params `q`, `thread_id`): a quick-add `form` over
   `oxplow.work_item.create` and a state-grouped `list` of the items on no
@@ -1188,7 +1188,7 @@ zone grouping); each appears only when it has content:
    body part `comments-panel` over `v_comment` shows two open-comment count rows split
    by intent — "For me" (`note`) and "For the agent" (`followup`) — each
    row and the header (`open` is the `comments` page) opening the Comments inbox.
-5. **Go To** — an `oxplow-bundled` panel (`ext:oxplow-bundled/go-to`):
+5. **Go To** — an `oxplow-bundled` panel (`ext:oxplow-bundled-todo/go-to`):
    the thread-scoped body page `go-to-panel` lists the bookmarks the thread sees
    (`v_bookmark`), then its History — or, through the header's
    Recent / Most visited toggle (the page's `mode` choice param), its most

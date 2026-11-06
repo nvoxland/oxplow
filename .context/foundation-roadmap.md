@@ -631,14 +631,14 @@ Acceptance: Default behavior remains available when selected and configured; dis
 
 Validation: Run the current inference fixtures through the public extension path; test disabled/unconfigured/replaced policy, duplicate close events, cancellation and confirm/dismiss behavior.
 
-Starting points: `crates/oxplow-app/src/inferred_decisions.rs`, `crates/oxplow-app/src/effort_reactors.rs`, `crates/oxplow-app/src/commands/review.rs`, `extensions/oxplow-bundled/extension.yaml`.
+Starting points: `crates/oxplow-app/src/inferred_decisions.rs`, `crates/oxplow-app/src/effort_reactors.rs`, `crates/oxplow-app/src/commands/review.rs`, `.oxplow/extensions/oxplow-bundled-todo/extension.yaml`.
 
 Prerequisites: Provide durable cancellable extension jobs outside database transactions; Add extension AI profiles with compatible high-level helpers; Use one versioned event envelope across runtime and authoring.
 
 #### Extract work-item repair response from core contribution health
 
 Status: done. Core keeps detection and the health report; the bundled
-effect `oxplow-bundled/repair-disabled` files (or comments on) the repair
+effect `oxplow-bundled-todo/repair-disabled` files (or comments on) the repair
 item through `oxplow.work_item.create` / `comment` on the active work list,
 deduplicating by the open item's `Repair <extension> <contribution>:` title
 prefix (no stable work-item key exists yet). An
@@ -652,7 +652,7 @@ Acceptance: Core detects/report errors even when no work list or repair policy i
 
 Validation: Exercise healthy/failing contributions, repeated events, no work list, a fake alternate provider, disabled policy and recovered contribution. Verify audit and links.
 
-Starting points: `crates/oxplow-app/src/contribution_repair.rs`, `crates/oxplow-app/src/extension/extension_catalog.rs`, `extensions/oxplow-bundled/extension.yaml`, `crates/oxplow-app/src/commands`.
+Starting points: `crates/oxplow-app/src/contribution_repair.rs`, `crates/oxplow-app/src/extension/extension_catalog.rs`, `.oxplow/extensions/oxplow-bundled-todo/extension.yaml`, `crates/oxplow-app/src/commands`.
 
 Prerequisites: Use one versioned event envelope across runtime and authoring; Compose declared host services through the shared context.
 
@@ -675,7 +675,7 @@ Acceptance: At least one alternative review policy can combine test evidence, cu
 
 Validation: Compare default analysis results before/after extraction on a representative change; build an alternate domain-specific review and ensure it joins existing evidence with custom collected facts.
 
-Starting points: `crates/oxplow-app/src/change_reactor.rs`, `crates/oxplow-app/src/collector_runner.rs`, `crates/oxplow-db/datasets`, `extensions/oxplow-bundled/extension.yaml`.
+Starting points: `crates/oxplow-app/src/change_reactor.rs`, `crates/oxplow-app/src/collector_runner.rs`, `crates/oxplow-db/datasets`, `.oxplow/extensions/oxplow-bundled-todo/extension.yaml`.
 
 Prerequisites: Normalize contribution descriptors and public extension terminology; Compose declared host services through the shared context.
 

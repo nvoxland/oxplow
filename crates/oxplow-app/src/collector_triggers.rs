@@ -614,6 +614,7 @@ mod tests {
     async fn after_and_handles_follow_the_declarations() {
         let fx = crate::test_fixtures::services_with_effort().await;
         crate::effort_reactors::register(&fx.svc);
+        crate::test_fixtures::install_code_metrics(&fx.svc.layout.project_dir);
         extension(
             &fx.svc,
             &on_claims("").replace("    input:", "    after: [effort.evidence]\n    input:"),
@@ -634,7 +635,7 @@ mod tests {
             "every predecessor, for ordering"
         );
         assert!(consumer.handles("effort.claim_verified"));
-        // The default-on code gauges handle `snapshot.taken` (tsk1034); an
+        // The default-on code gauges (the test extension's) handle `snapshot.taken`; an
         // event no collector names isn't handled.
         assert!(consumer.handles("snapshot.taken"));
         assert!(!consumer.handles("work_item.created"));

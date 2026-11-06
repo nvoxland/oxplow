@@ -47,6 +47,21 @@ pub(crate) struct Host {
     stale: std::sync::atomic::AtomicBool,
 }
 
+/// What a shipped extension's manifest `requires:`.
+fn shipped_requires(shipped: &oxplow_app::bundled_extensions::BundledExtension) -> Vec<String> {
+    #[derive(serde::Deserialize)]
+    struct Manifest {
+        #[serde(default)]
+        requires: Vec<String>,
+    }
+    let manifest = shipped
+        .bytes("extension.yaml")
+        .unwrap_or_else(|| panic!("{} ships a manifest", shipped.name));
+    serde_yaml::from_slice::<Manifest>(manifest)
+        .unwrap_or_else(|e| panic!("{}'s manifest: {e}", shipped.name))
+        .requires
+}
+
 impl Host {
     /// A throwaway over the extensions in `checkout` (the project's main
     /// checkout, or a worktree holding drafts) with `testing` on too,
@@ -96,7 +111,10 @@ impl Host {
             // One with no source here and none shipped isn't here at all:
             // what needs it says so.
             if !source.is_dir() {
-                if oxplow_app::bundled_extensions::find(name).is_some() {
+                if let Some(shipped) = oxplow_app::bundled_extensions::find(name) {
+                    for need in shipped_requires(shipped) {
+                        visit(&need, checkout, settings, on, seen);
+                    }
                     on.push(name.to_string());
                 }
                 return;

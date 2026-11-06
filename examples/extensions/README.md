@@ -17,7 +17,7 @@ and runs its fixtures; `tests/examples.rs` adds only what the SDK reports about 
 | [schema-review](schema-review/) | A review policy of its own: a collector's facts about migrations, joined with oxplow's test, coverage and code-analysis evidence into the effort's verdict, in place of oxplow-bundled's. |
 | [session-history](session-history/) | Adding a section to a core page: earlier prompts from the current thread, mounted on New Session after its start form. |
 | [commit-history](commit-history/) | A page with no code: typed params in the toolbar (a date range, a search, a switch) narrow the commits, and clicking one fills the next section with its files. |
-| [review-badges](review-badges/) | Building on another extension: an optional import of effort-review's exported dataset, shown as a list and on the task page, withheld with a warning when effort-review isn't there. |
+| [review-badges](review-badges/) | Building on another extension: an optional import of effort-review's exported dataset, shown as a list, withheld with a warning when effort-review isn't there. |
 
 ## What the trials prove
 

@@ -17,7 +17,7 @@ view: { id: count, viz: number, from: count }
 async function show(page: Page, daemon: Daemon, spec: string) {
   await page.goto("/");
   // An open page and settled rail mean the window can answer a show call.
-  await openFromLauncher(page, "Tasks");
+  await openFromLauncher(page, "Suite Home");
   await expect(page.getByTestId("rail-hud")).toHaveAttribute("aria-busy", "false");
   const shown = await run<{ result: { uri: string; opened: boolean; why?: string } }>(daemon, "oxplow.page.show", { spec });
   expect(shown.result.opened, shown.result.why).toBe(true);
@@ -43,20 +43,6 @@ test("show_page opens a temp page (a file on oxplow:temp) whose live run survive
   await run(daemon, "oxplow.work_item.create", { title: "Shown Quoll evidence", thread: daemon.thread });
   await expect(body.locator('[data-node="count"]')).toContainText("1");
   await expect(page.getByTestId(`center-tab-${uri}`)).toBeVisible();
-});
-
-test("Save to wiki keeps a live oxplow-page block that renders again after reload", async ({ page, daemon }) => {
-  await show(page, daemon, source("Saved Bilby Count", "Saved Bilby "));
-  await action(page, "view-save-wiki");
-  const form = page.getByTestId("save-view-form").filter({ visible: true });
-  await form.getByTestId("save-view-title").fill("Saved Bilby View");
-  await form.getByTestId("save-view-title").press("Enter");
-  const inline = page.getByTestId("inline-page").filter({ visible: true });
-  await expect(inline.locator('[data-node="count"]')).toContainText("0");
-  await page.reload();
-  await expect(inline.locator('[data-node="count"]')).toContainText("0");
-  await run(daemon, "oxplow.work_item.create", { title: "Saved Bilby evidence", thread: daemon.thread });
-  await expect(inline.locator('[data-node="count"]')).toContainText("1");
 });
 
 test("Save as Page writes the view's file as a deployed page and opens it", async ({ page, daemon }) => {

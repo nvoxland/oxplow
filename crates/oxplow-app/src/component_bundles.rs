@@ -313,8 +313,8 @@ mod tests {
         let ext = snapshot
             .extensions()
             .iter()
-            .find(|e| e.name == "oxplow-bundled")
-            .expect("bundled")
+            .find(|e| e.name == "oxplow-foundation")
+            .expect("shipped")
             .clone();
         let component = CustomComponent {
             sql: None,
@@ -330,7 +330,7 @@ mod tests {
         assert!(reading.sql && !plain.sql);
     }
 
-    /// oxplow-bundled's history graph is a component like a project's:
+    /// foundation's Integrations area is a component like a project's:
     /// its bundle is read from its shipped deployment on disk, hashed by
     /// the one approval hash, staged by activation's preparation and served
     /// from that folder.
@@ -342,28 +342,26 @@ mod tests {
         let ext = snapshot
             .extensions()
             .iter()
-            .find(|e| e.name == "oxplow-bundled")
-            .expect("bundled")
+            .find(|e| e.name == "oxplow-foundation")
+            .expect("shipped")
             .clone();
         assert!(ext.errors.is_empty(), "{:?}", ext.errors);
         let component = ext
             .custom_components
             .iter()
-            .find(|c| c.id == "history-graph")
+            .find(|c| c.id == "integrations")
             .expect("declared")
             .clone();
 
         let bundle = build_snapshot(dir.path(), &ext, &component, None).expect("built");
-        let shipped = crate::bundled_extensions::find("oxplow-bundled").unwrap();
+        let shipped = crate::bundled_extensions::find("oxplow-foundation").unwrap();
         assert_eq!(
             bundle.file("").unwrap(),
-            shipped
-                .bytes("components/history-graph/index.html")
-                .unwrap()
+            shipped.bytes("components/integrations/index.html").unwrap()
         );
         assert_eq!(
             bundle.file("app.js").unwrap(),
-            shipped.bytes("components/history-graph/app.js").unwrap()
+            shipped.bytes("components/integrations/app.js").unwrap()
         );
 
         let prepared = PreparedComponentBundles::prepare(dir.path(), &snapshot).expect("staged");

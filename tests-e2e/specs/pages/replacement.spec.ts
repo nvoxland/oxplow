@@ -1,16 +1,22 @@
+import { execFileSync } from "node:child_process";
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
+
 import { run } from "../../support/daemon.js";
 import { installExtension } from "../../support/pages.js";
 import { expect, test } from "../../support/fixtures.js";
 import { openFromLauncher } from "../../support/ui.js";
 
-// A replacement takes the target's whole props contract.
-const lanes = `title: Wombat task list
+// A replacement takes the target's whole props contract: `vcs.history.graph`,
+// Git History's list of commits, is the foundation's replaceable node.
+const graph = `title: Wombat history
 params:
-- name: scope
-- name: thread_id
+- name: head_sha
+- name: reveal_sha
+- name: limit
 loaders:
   mine:
-    sql: SELECT 'Wombat list for ' || coalesce(:scope, 'nothing') AS line
+    sql: SELECT 'Wombat history of ' || coalesce(:limit, 'nothing') AS line
 view:
   id: mine
   viz: table
@@ -19,25 +25,29 @@ view:
 `;
 
 test("a replaceable node shows the active replacement, and oxplow's own once it is off", async ({ page, daemon }) => {
-  await run(daemon, "oxplow.work_item.create", { title: "Wombat own list row", thread: daemon.thread });
+  writeFileSync(join(daemon.project, "wombat.txt"), "wombat\n");
+  const git = (...args: string[]) =>
+    execFileSync("git", ["-c", "user.name=e2e", "-c", "user.email=e2e@example.com", ...args], { cwd: daemon.project });
+  git("add", "wombat.txt");
+  git("commit", "-q", "-m", "Wombat own history row");
   await page.goto("/");
-  await openFromLauncher(page, "Tasks");
+  await openFromLauncher(page, "Git History");
   const host = page.getByTestId("page-host").filter({ visible: true });
   // Nothing replaces the list yet: oxplow's own shows.
-  await expect(host.getByTestId("node-list")).toContainText("Wombat own list row");
-  await expect(page.getByTestId("replacement-work_item.list")).toHaveCount(0);
+  await expect(host.getByTestId("node-history")).toContainText("Wombat own history row");
+  await expect(page.getByTestId("replacement-vcs.history.graph")).toHaveCount(0);
 
   await installExtension(daemon, "e2e-replacement", {
-    manifest: "ui:\n  mounts:\n    - { page: wombat-list, at: work_item.list, version: 1 }\n",
-    files: { "parts/wombat-list.yaml": lanes },
+    manifest: "ui:\n  mounts:\n    - { page: wombat-history, at: vcs.history.graph, version: 2 }\n",
+    files: { "parts/wombat-history.yaml": graph },
   });
-  const replaced = host.getByTestId("replacement-work_item.list");
-  await expect(replaced).toContainText("Wombat list for thread");
+  const replaced = host.getByTestId("replacement-vcs.history.graph");
+  await expect(replaced).toContainText("Wombat history of");
   await expect(replaced).toHaveAttribute("title", /by e2e-replacement/);
-  await expect(host.getByTestId("node-list")).not.toContainText("Wombat own list row");
+  await expect(host.getByTestId("node-history")).not.toContainText("Wombat own history row");
 
   // Off, the page is oxplow's own again.
   await run(daemon, "oxplow.extension.disable", { name: "e2e-replacement" });
-  await expect(host.getByTestId("node-list")).toContainText("Wombat own list row");
+  await expect(host.getByTestId("node-history")).toContainText("Wombat own history row");
   await expect(replaced).toHaveCount(0);
 });

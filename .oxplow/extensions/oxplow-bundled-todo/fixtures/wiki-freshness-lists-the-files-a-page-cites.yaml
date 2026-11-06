@@ -1,0 +1,11 @@
+# The files a wiki page cites under a heading that counts the stale ones,
+# each with its pinned snapshot and whether it changed since.
+given:
+  - observe: { turn: { prompt: Build the holt, write: { path: src/holt.rs, body: "fn holt() {}\n" } } }
+  - { command: oxplow.knowledge.write_page, input: { slug: otters, title: Otters, body: "# Otters\n\nSee [[src/holt.rs]].\n" } }
+when: { page: oxplow-bundled-todo/wiki-freshness, params: { slug: otters } }
+expect:
+  loaders:
+    wiki_freshness:
+      rows:
+        - { slug: otters, heading: "otters — 0 of 1 stale", path: src/holt.rs, status: "✓ fresh" }

@@ -199,15 +199,6 @@ pub(super) async fn rows(fx: &Fixture, sql: &str, params: Vec<Value>) -> Vec<Vec
     serde_json::from_value(serde_json::to_value(out.rows).unwrap()).unwrap()
 }
 
-async fn page(fx: &Fixture, id: &str, params: Vec<(&str, oxplow_db::SqlCell)>) -> Value {
-    let params: Vec<(String, oxplow_db::SqlCell)> = params
-        .into_iter()
-        .map(|(k, v)| (k.to_string(), v))
-        .collect();
-    let run = crate::test_fixtures::run_as_page(&fx.svc, id, &params).await;
-    serde_json::to_value(&run.rows).unwrap()
-}
-
 pub(super) async fn completions(fx: &Fixture, id: &str) -> Vec<String> {
     rows(
         fx,
@@ -376,31 +367,6 @@ async fn a_tool_call_runs_the_extensions_command_and_answers_the_model() {
         json!(oxplow_domain::uri::build::job_run_uri(&id)),
         "the job run is the actor"
     );
-
-    // oxplow's own Job Runs page lists it, and its output page follows it.
-    let run_ref = oxplow_domain::uri::build::job_run_uri(&id);
-    let jobs = page(&fx, "oxplow-bundled/job-runs", vec![]).await;
-    assert_eq!(jobs[0][0], json!(run_ref), "{jobs}");
-    assert_eq!(jobs[0][2], json!("oxplow:oxplow/job?job=triage/review"));
-    assert_eq!(jobs[0][3], json!("tools"), "what it was about");
-    assert_eq!(jobs[0][4], json!("succeeded"));
-    let output = page(
-        &fx,
-        "oxplow-bundled/job-run-output",
-        vec![("job_run", oxplow_db::SqlCell::Text(id.to_string()))],
-    )
-    .await;
-    let content: Vec<_> = output
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|row| row[4].as_str().unwrap_or_default().to_string())
-        .collect();
-    assert_eq!(
-        content[0], r#"todos_lookup {"path":"src/lib.rs"}"#,
-        "{output}"
-    );
-    assert_eq!(content[3], "One parser TODO.");
 }
 
 /// A tool call the command refuses, one with input its schema doesn't

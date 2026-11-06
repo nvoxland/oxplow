@@ -1,0 +1,20 @@
+# Remote Branches: the remote's branches, most recently committed first; a
+# local branch is left out.
+given:
+  - observe: { commit: { sha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", at: "2023-11-14T22:13:20Z", author: Ada, subject: older } }
+  - observe: { commit: { sha: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", at: "2023-11-15T22:13:20Z", author: Ada, subject: newer } }
+  - observe:
+      refs:
+        branches:
+          - { name: main, head: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", stream: 1, default: true }
+          - { name: old, kind: remote, remote: origin, head: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }
+          - { name: new, kind: remote, remote: origin, head: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" }
+        heads: [{ stream: 1, sha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }]
+when: { page: oxplow-bundled-todo/remote-branches, params: { stream_id: 1 } }
+expect:
+  loaders:
+    row: { rows: [{ branch: main }] }
+    remotes:
+      rows:
+        - { short_name: origin/new, subject: newer }
+        - { short_name: origin/old, subject: older }

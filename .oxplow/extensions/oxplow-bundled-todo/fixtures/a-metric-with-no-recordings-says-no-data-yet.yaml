@@ -1,0 +1,9 @@
+# The Metrics list says "No data yet" for a metric nothing has recorded,
+# not a row of dashes: it has no trend and no latest value.
+when: { page: oxplow-bundled-todo/metrics-recorded, params: { show: all } }
+expect:
+  loaders:
+    metrics:
+      rows:
+        contains:
+          - { no_data: No data yet, latest: null, trend: null }

@@ -2973,8 +2973,10 @@ mod tests {
     async fn fixture() -> (Arc<crate::Services>, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
         crate::test_fixtures::init_git_repo(dir.path());
+        crate::test_fixtures::install_code_metrics(dir.path());
         let svc = crate::Services::in_memory(dir.path()).await.unwrap();
         svc.streams.ensure_primary().await.unwrap();
+        crate::test_fixtures::activate(&svc).await;
         (svc, dir)
     }
 
@@ -3066,12 +3068,12 @@ mod tests {
         let (svc, dir) = fixture().await;
         std::fs::write(
             project_ext_file(dir.path(), "once.star"),
-            "def transform(input):\n    return {\"facts\": [{\"measure\": \"oxplow.ast_hit\", \"value\": 1, \"rule\": \"once\", \"subject\": \"oxplow:oxplow/dir?path=.\"}]}\n",
+            "def transform(input):\n    return {\"facts\": [{\"measure\": \"code_metrics.ast_hit\", \"value\": 1, \"rule\": \"once\", \"subject\": \"oxplow:oxplow/dir?path=.\"}]}\n",
         )
         .unwrap();
         declare_project_collectors(
                 dir.path(),
-                "- { id: repo.once, runtime: starlark, entry: once.star, on: [snapshot.taken], facts: [oxplow.ast_hit] }",
+                "- { id: repo.once, runtime: starlark, entry: once.star, on: [snapshot.taken], facts: [code_metrics.ast_hit] }",
             );
         crate::test_fixtures::activate_with_problems(&svc).await;
         let snap =
@@ -3107,12 +3109,12 @@ mod tests {
         let (svc, dir) = fixture().await;
         std::fs::write(
             project_ext_file(dir.path(), "seen.star"),
-            "def transform(input):\n    return {\"facts\": [{\"measure\": \"oxplow.ast_hit\", \"value\": 1, \"rule\": json.encode(input[\"event\"]), \"subject\": \"oxplow:oxplow/dir?path=.\"}]}\n",
+            "def transform(input):\n    return {\"facts\": [{\"measure\": \"code_metrics.ast_hit\", \"value\": 1, \"rule\": json.encode(input[\"event\"]), \"subject\": \"oxplow:oxplow/dir?path=.\"}]}\n",
         )
         .unwrap();
         declare_project_collectors(
                 dir.path(),
-                "- { id: repo.seen, runtime: starlark, entry: seen.star, on: [snapshot.taken], facts: [oxplow.ast_hit] }",
+                "- { id: repo.seen, runtime: starlark, entry: seen.star, on: [snapshot.taken], facts: [code_metrics.ast_hit] }",
             );
         crate::test_fixtures::activate_with_problems(&svc).await;
         let snap =
@@ -3151,7 +3153,7 @@ mod tests {
         let (svc, dir) = fixture().await;
         std::fs::write(
             project_ext_file(dir.path(), "seen.star"),
-            "def transform(input):\n    return {\"facts\": [{\"measure\": \"oxplow.ast_hit\", \"value\": 1, \"rule\": \"seen\", \"subject\": uri.build(\"oxplow/file\", path = f[\"path\"]), \"path\": f[\"path\"]} for f in files(\"**\")]}\n",
+            "def transform(input):\n    return {\"facts\": [{\"measure\": \"code_metrics.ast_hit\", \"value\": 1, \"rule\": \"seen\", \"subject\": uri.build(\"oxplow/file\", path = f[\"path\"]), \"path\": f[\"path\"]} for f in files(\"**\")]}\n",
         )
         .unwrap();
         let root = dir.path().to_path_buf();
@@ -3161,7 +3163,7 @@ mod tests {
             let trigger = trigger.to_string();
             async move {
                 write_project_extension(&root, &format!(
-                    "permissions: [files.read]\ncollectors:\n  - {{ id: repo.seen, runtime: starlark, entry: seen.star, {trigger}, facts: [oxplow.ast_hit] }}\n"
+                    "permissions: [files.read]\ncollectors:\n  - {{ id: repo.seen, runtime: starlark, entry: seen.star, {trigger}, facts: [code_metrics.ast_hit] }}\n"
                 ));
                 crate::test_fixtures::activate_with_problems(&svc).await;
             }
@@ -3293,7 +3295,7 @@ mod tests {
     async fn a_burst_of_ref_moves_scans_duplicates_once_over_the_latest() {
         let (svc, _dir) = fixture().await;
         svc.config.write().unwrap().metrics.push(MetricEntry {
-            use_key: Some("oxplow.duplicate_lines".into()),
+            use_key: Some("code_metrics.duplicate_lines".into()),
             ..Default::default()
         });
         crate::test_fixtures::activate_with_problems(&svc).await;
@@ -3315,7 +3317,7 @@ mod tests {
                     let mut stmt = c
                         .prepare(
                             "SELECT snapshot_id FROM metric_capture
-                              WHERE producer = 'oxplow.duplicate_lines' ORDER BY id",
+                              WHERE producer = 'code_metrics.duplicate_lines' ORDER BY id",
                         )
                         .map_err(oxplow_db::map_sql_err)?;
                     let rows = stmt
@@ -3335,7 +3337,7 @@ mod tests {
         assert_eq!(scanned().await, vec![snaps[2]], "one scan, of the latest");
     }
 
-    /// `oxplow.duplicate_lines` is restated over the whole tree after a ref
+    /// `code_metrics.duplicate_lines` is restated over the whole tree after a ref
     /// move — a take that recorded nothing included — and a clean tree
     /// clears it.
     #[tokio::test]
@@ -3353,7 +3355,7 @@ mod tests {
             }\n";
         let (svc, _dir) = fixture().await;
         svc.config.write().unwrap().metrics.push(MetricEntry {
-            use_key: Some("oxplow.duplicate_lines".into()),
+            use_key: Some("code_metrics.duplicate_lines".into()),
             ..Default::default()
         });
         crate::test_fixtures::activate_with_problems(&svc).await;
@@ -3370,7 +3372,7 @@ mod tests {
         };
         let measure = svc
             .fact_store
-            .get_measure("oxplow.duplicate_lines")
+            .get_measure("code_metrics.duplicate_lines")
             .await
             .unwrap()
             .unwrap();
@@ -3390,7 +3392,7 @@ mod tests {
             svc.db
                 .read(|c| {
                     c.query_row(
-                        "SELECT count(*) FROM metric_capture WHERE producer = 'oxplow.duplicate_lines'",
+                        "SELECT count(*) FROM metric_capture WHERE producer = 'code_metrics.duplicate_lines'",
                         [],
                         |r| r.get::<_, i64>(0),
                     )
@@ -3502,12 +3504,12 @@ mod tests {
         let (svc, dir) = fixture().await;
         std::fs::write(
             project_ext_file(dir.path(), "once.star"),
-            "def transform(input):\n    return {\"facts\": [{\"measure\": \"oxplow.ast_hit\", \"value\": 1, \"rule\": \"once\", \"subject\": \"oxplow:oxplow/dir?path=.\"}]}\n",
+            "def transform(input):\n    return {\"facts\": [{\"measure\": \"code_metrics.ast_hit\", \"value\": 1, \"rule\": \"once\", \"subject\": \"oxplow:oxplow/dir?path=.\"}]}\n",
         )
         .unwrap();
         declare_project_collectors(
                 dir.path(),
-                "- { id: repo.once, runtime: starlark, entry: once.star, on: [snapshot.taken], facts: [oxplow.ast_hit] }",
+                "- { id: repo.once, runtime: starlark, entry: once.star, on: [snapshot.taken], facts: [code_metrics.ast_hit] }",
             );
         crate::test_fixtures::activate_with_problems(&svc).await;
         let snap =
@@ -3573,12 +3575,12 @@ mod tests {
         let (svc, dir) = fixture().await;
         std::fs::write(
             project_ext_file(dir.path(), "bare.star"),
-            "def transform(input):\n    return {\"facts\": [{\"measure\": \"oxplow.ast_hit\", \"value\": 1, \"rule\": \"bare\", \"subject\": \"oxplow:oxplow/dir?path=.\", \"dims\": {\"language\": \"rust\"}}]}\n",
+            "def transform(input):\n    return {\"facts\": [{\"measure\": \"code_metrics.ast_hit\", \"value\": 1, \"rule\": \"bare\", \"subject\": \"oxplow:oxplow/dir?path=.\", \"dims\": {\"language\": \"rust\"}}]}\n",
         )
         .unwrap();
         declare_project_collectors(
                 dir.path(),
-                "- { id: repo.bare, runtime: starlark, entry: bare.star, on: [snapshot.taken], facts: [oxplow.ast_hit] }",
+                "- { id: repo.bare, runtime: starlark, entry: bare.star, on: [snapshot.taken], facts: [code_metrics.ast_hit] }",
             );
         crate::test_fixtures::activate_with_problems(&svc).await;
         let snap =
@@ -3732,10 +3734,10 @@ mod tests {
                 .collect()
         };
         for key in [
-            "oxplow.todos",
-            "oxplow.fn_count",
-            "oxplow.long_functions",
-            "oxplow.high_complexity_fns",
+            "code_metrics.todos",
+            "code_metrics.fn_count",
+            "code_metrics.long_functions",
+            "code_metrics.high_complexity_fns",
         ] {
             assert!(
                 keys(&svc).iter().any(|k| k == key),
@@ -3744,13 +3746,13 @@ mod tests {
             );
         }
         svc.config.write().unwrap().metrics = vec![oxplow_config::MetricEntry {
-            use_key: Some("oxplow.todos".into()),
+            use_key: Some("code_metrics.todos".into()),
             enabled: Some(false),
             ..Default::default()
         }];
         crate::test_fixtures::activate_with_problems(&svc).await;
-        assert!(!keys(&svc).iter().any(|k| k == "oxplow.todos"));
-        assert!(keys(&svc).iter().any(|k| k == "oxplow.fn_count"));
+        assert!(!keys(&svc).iter().any(|k| k == "code_metrics.todos"));
+        assert!(keys(&svc).iter().any(|k| k == "code_metrics.fn_count"));
     }
 
     /// Seed the catalog with every foundation code metric `use:`d: a metric's
@@ -3796,7 +3798,7 @@ mod tests {
     #[tokio::test]
     async fn run_one_collector_records_facts_with_version_and_branch() {
         let (svc, dir) = fixture().await;
-        // A tree-derived collector emitting a per-file `oxplow.ast_hit` FACT.
+        // A tree-derived collector emitting a per-file `code_metrics.ast_hit` FACT.
         std::fs::write(
             project_ext_file(dir.path(), "metrics/unsafe.star"),
             r#"
@@ -3805,7 +3807,7 @@ def transform(input):
     for f in files("**/*.rs"):
         c = len(ast_query(f["text"], "rust", "(unsafe_block) @u"))
         if c > 0:
-            facts.append({"measure": "oxplow.ast_hit", "value": c, "rule": "unsafe_block", "subject": uri.build("oxplow/file", path = f["path"]), "path": f["path"], "dims": {"oxplow.language": "rust"}})
+            facts.append({"measure": "code_metrics.ast_hit", "value": c, "rule": "unsafe_block", "subject": uri.build("oxplow/file", path = f["path"]), "path": f["path"], "dims": {"oxplow.language": "rust"}})
     return {"facts": facts}
 "#,
         )
@@ -3813,7 +3815,7 @@ def transform(input):
         let metric = starlark_collector_emits(
             "repo.unsafe_blocks",
             "metrics/unsafe.star",
-            vec!["oxplow.ast_hit".into()],
+            vec!["code_metrics.ast_hit".into()],
         );
 
         let mut files = HashMap::new();
@@ -3846,10 +3848,10 @@ def transform(input):
 
         let measure = svc
             .fact_store
-            .get_measure("oxplow.ast_hit")
+            .get_measure("code_metrics.ast_hit")
             .await
             .unwrap()
-            .expect("oxplow.ast_hit seeded by migration");
+            .expect("code_metrics.ast_hit seeded by migration");
         let facts = svc.fact_store.facts_for_measure(measure.id).await.unwrap();
         assert_eq!(facts.len(), 1);
         assert_eq!(facts[0].value, 2.0, "two unsafe blocks in src/a.rs");
@@ -3887,7 +3889,7 @@ def transform(input):
         // needed.
         let (svc, _dir) = fixture().await;
         seed_with_every_builtin_on(&svc).await;
-        let collector = builtin_collector_fixture("oxplow.rust.unsafe_blocks");
+        let collector = builtin_collector_fixture("code_metrics.rust.unsafe_blocks");
         let ctx = |snapshot_id: i64| CollectorRunContext {
             excluded: Arc::default(),
             stream_val: 1,
@@ -3916,7 +3918,7 @@ def transform(input):
 
         let spec = svc
             .fact_store
-            .get_spec("oxplow.rust.unsafe_blocks")
+            .get_spec("code_metrics.rust.unsafe_blocks")
             .await
             .unwrap()
             .expect("ast spec seeded");
@@ -3971,14 +3973,14 @@ def transform(input):
         // THE test that would have caught all four metrics bugs (tsk47/48/49) without a
         // restart: real files on disk → full-tree snapshot → every collector → fold →
         // repo-wide headline, driven through the same `rebuild_baseline` boot
-        // uses. It runs TWO collectors sharing `oxplow.ast_hit` — the exact shape tsk49
+        // uses. It runs TWO collectors sharing `code_metrics.ast_hit` — the exact shape tsk49
         // hid in — so a single-collector unit test could not have found it.
         let (svc, dir) = fixture().await;
         enable(
             &svc,
             &[
-                "oxplow.rust.unsafe_blocks".into(),
-                "oxplow.ts.console_calls".into(),
+                "code_metrics.rust.unsafe_blocks".into(),
+                "code_metrics.ts.console_calls".into(),
             ],
             true,
         )
@@ -4009,7 +4011,7 @@ def transform(input):
         // (unsafe under semi-additive) / empty (console under the shared-measure bug).
         let unsafe_spec = svc
             .fact_store
-            .get_spec("oxplow.rust.unsafe_blocks")
+            .get_spec("code_metrics.rust.unsafe_blocks")
             .await
             .unwrap()
             .unwrap();
@@ -4023,7 +4025,7 @@ def transform(input):
         );
         let console_spec = svc
             .fact_store
-            .get_spec("oxplow.ts.console_calls")
+            .get_spec("code_metrics.ts.console_calls")
             .await
             .unwrap()
             .unwrap();
@@ -4057,12 +4059,12 @@ def transform(input):
     #[tokio::test]
     async fn collector_sync_sees_a_file_written_just_before_it() {
         let (svc, dir) = fixture().await;
-        enable(&svc, &["oxplow.rust.unsafe_blocks".into()], true).await;
+        enable(&svc, &["code_metrics.rust.unsafe_blocks".into()], true).await;
         let sync = || {
             svc.commands.run(
                 &oxplow_domain::Actor::Human,
                 crate::collector_runner::SYNC,
-                serde_json::json!({ "collector": "oxplow-bundled/oxplow.rust.unsafe_blocks" }),
+                serde_json::json!({ "collector": "code-metrics/code_metrics.rust.unsafe_blocks" }),
                 false,
             )
         };
@@ -4099,7 +4101,7 @@ def transform(input):
         // snapshot and scans the RECONSTRUCTED tree — so a rebuild over an
         // unchanged tree must not create any snapshot at all.
         let (svc, dir) = fixture().await;
-        enable(&svc, &["oxplow.rust.unsafe_blocks".into()], true).await;
+        enable(&svc, &["code_metrics.rust.unsafe_blocks".into()], true).await;
         std::fs::create_dir_all(dir.path().join("src")).unwrap();
         std::fs::write(dir.path().join("src/a.rs"), "fn a() { unsafe { x(); } }\n").unwrap();
 
@@ -4130,7 +4132,7 @@ def transform(input):
 
     #[tokio::test]
     async fn a_delta_only_collector_needs_a_baseline_even_if_a_sibling_filled_the_shared_measure() {
-        // tsk49, the exact live bug. `oxplow.ast_hit` is ONE measure shared by 10 idiom
+        // tsk49, the exact live bug. `code_metrics.ast_hit` is ONE measure shared by 10 idiom
         // collectors. `unsafe_blocks` (cheap) completed its full-tree scan, so the measure
         // has facts — but `console_calls` (heavy, timed out under the old budget) only
         // ever ran on small deltas. A measure-level "is it empty" check says "done" and
@@ -4141,8 +4143,8 @@ def transform(input):
         enable(
             &svc,
             &[
-                "oxplow.rust.unsafe_blocks".into(),
-                "oxplow.ts.console_calls".into(),
+                "code_metrics.rust.unsafe_blocks".into(),
+                "code_metrics.ts.console_calls".into(),
             ],
             true,
         )
@@ -4164,7 +4166,7 @@ def transform(input):
         let src = "pub fn f() {\n    unsafe { g(); }\n    console.log(x);\n}\n".to_string();
 
         // unsafe_blocks completes its BASELINE (a `scan_kind = 'full'` capture,
-        // tsk71). It shares oxplow.ast_hit with console_calls.
+        // tsk71). It shares code_metrics.ast_hit with console_calls.
         let big = snapshot_with_files(
             &svc,
             &(0..150)
@@ -4180,7 +4182,7 @@ def transform(input):
         full_ctx.scan_kind = "full";
         svc.metrics
             .run_one_collector(
-                &builtin_collector_fixture("oxplow.rust.unsafe_blocks"),
+                &builtin_collector_fixture("code_metrics.rust.unsafe_blocks"),
                 &full_ctx,
                 files,
             )
@@ -4191,7 +4193,7 @@ def transform(input):
             snapshot_with_files(&svc, &[("f0.tsx", oxplow_db::SnapshotStorage::Oxplow)]).await;
         svc.metrics
             .run_one_collector(
-                &builtin_collector_fixture("oxplow.ts.console_calls"),
+                &builtin_collector_fixture("code_metrics.ts.console_calls"),
                 &ctx(small),
                 Arc::new(HashMap::from([("f0.tsx".to_string(), "ok".to_string())])),
             )
@@ -4199,11 +4201,11 @@ def transform(input):
 
         let needing = svc.metrics.collectors_needing_baseline(1).await;
         assert!(
-            needing.contains(&"oxplow.ts.console_calls".to_string()),
+            needing.contains(&"code_metrics.ts.console_calls".to_string()),
             "the delta-only collector must still need a baseline; got {needing:?}"
         );
         assert!(
-            !needing.contains(&"oxplow.rust.unsafe_blocks".to_string()),
+            !needing.contains(&"code_metrics.rust.unsafe_blocks".to_string()),
             "the collector that scanned the full tree must NOT need one; got {needing:?}"
         );
     }
@@ -4215,7 +4217,7 @@ def transform(input):
         let (svc, dir) = fixture().await;
         std::fs::write(
             oxplow_config::config_path(dir.path()),
-            "metrics:\n  - use: oxplow.rust.unsafe_blocks\n",
+            "metrics:\n  - use: code_metrics.rust.unsafe_blocks\n",
         )
         .unwrap();
         svc.reload_config_from_disk().unwrap();
@@ -4239,8 +4241,8 @@ def transform(input):
         let err = svc
             .metrics
             .run_collector_by_key(
-                "oxplow-bundled",
-                "oxplow.rust.unsafe_blocks",
+                crate::test_fixtures::CODE_METRICS_EXT,
+                "code_metrics.rust.unsafe_blocks",
                 None,
                 &RunContext::core(Actor::Human, Mode::External),
             )
@@ -4255,7 +4257,7 @@ def transform(input):
         // "why is oxplow eating CPU?" had no answer, and when it went wrong I could
         // only find out by reading SQL by hand.
         let (svc, _dir) = fixture().await;
-        let collector = builtin_collector_fixture("oxplow.rust.unsafe_blocks");
+        let collector = builtin_collector_fixture("code_metrics.rust.unsafe_blocks");
 
         svc.metrics
             .run_collector_sweep(&[collector], &sweep_ctx(), big_corpus(120))
@@ -4278,7 +4280,7 @@ def transform(input):
     async fn an_ordinary_delta_sweep_is_not_tracked() {
         // A per-commit delta finishes in milliseconds — tracking it would be noise.
         let (svc, _dir) = fixture().await;
-        let collector = builtin_collector_fixture("oxplow.rust.unsafe_blocks");
+        let collector = builtin_collector_fixture("code_metrics.rust.unsafe_blocks");
 
         svc.metrics
             .run_collector_sweep(&[collector], &sweep_ctx(), big_corpus(3))
@@ -4306,7 +4308,7 @@ def transform(input):
         let collector = starlark_collector_emits(
             "acme.boom",
             "metrics/boom.star",
-            vec!["oxplow.todo".to_string()],
+            vec!["code_metrics.todo".to_string()],
         );
 
         svc.metrics
@@ -4347,11 +4349,14 @@ def transform(input):
         let write = |body: &str| std::fs::write(&script, body).unwrap();
         write(
             "def transform(input):\n    \
-             return {\"facts\": [{\"measure\": \"oxplow.todo\", \"value\": 1.0, \
+             return {\"facts\": [{\"measure\": \"code_metrics.todo\", \"value\": 1.0, \
              \"subject\": \"oxplow:oxplow/file?path=a.rs\", \"path\": \"a.rs\"}]}\n",
         );
-        let collector =
-            starlark_collector_emits("acme.g", "metrics/g.star", vec!["oxplow.todo".to_string()]);
+        let collector = starlark_collector_emits(
+            "acme.g",
+            "metrics/g.star",
+            vec!["code_metrics.todo".to_string()],
+        );
 
         let snap = snapshot_with_files(&svc, &[("a.rs", oxplow_db::SnapshotStorage::Oxplow)]).await;
         let ctx = CollectorRunContext {
@@ -4382,7 +4387,7 @@ def transform(input):
         // Now the author fixes the collector's logic (a different value).
         write(
             "def transform(input):\n    \
-             return {\"facts\": [{\"measure\": \"oxplow.todo\", \"value\": 5.0, \
+             return {\"facts\": [{\"measure\": \"code_metrics.todo\", \"value\": 5.0, \
              \"subject\": \"oxplow:oxplow/file?path=a.rs\", \"path\": \"a.rs\"}]}\n",
         );
         assert!(
@@ -4402,7 +4407,7 @@ def transform(input):
         // capture", which after the baseline is only ever a handful of changed files.
         let (svc, _dir) = fixture().await;
         seed_with_every_builtin_on(&svc).await;
-        let collector = builtin_collector_fixture("oxplow.rust.unsafe_blocks");
+        let collector = builtin_collector_fixture("code_metrics.rust.unsafe_blocks");
         let ctx = |snapshot_id: i64| CollectorRunContext {
             excluded: Arc::default(),
             stream_val: 1,
@@ -4443,7 +4448,7 @@ def transform(input):
 
         let spec = svc
             .fact_store
-            .get_spec("oxplow.rust.unsafe_blocks")
+            .get_spec("code_metrics.rust.unsafe_blocks")
             .await
             .unwrap()
             .expect("ast spec seeded");
@@ -4475,11 +4480,11 @@ def transform(input):
         // The other half of per-path (tsk41), and the exact bug we fixed: a delta
         // capture that restated NO paths must leave the metric alone. Under the old
         // semi-additive reading, this empty capture zero-filled the series and the
-        // headline read 0 — which is how `oxplow.rust.unsafe_blocks` reported 0 while
+        // headline read 0 — which is how `code_metrics.rust.unsafe_blocks` reported 0 while
         // the repo had 15 unsafe blocks.
         let (svc, _dir) = fixture().await;
         seed_with_every_builtin_on(&svc).await;
-        let collector = builtin_collector_fixture("oxplow.rust.unsafe_blocks");
+        let collector = builtin_collector_fixture("code_metrics.rust.unsafe_blocks");
         let ctx = |snapshot_id: i64| CollectorRunContext {
             excluded: Arc::default(),
             stream_val: 1,
@@ -4514,7 +4519,7 @@ def transform(input):
 
         let spec = svc
             .fact_store
-            .get_spec("oxplow.rust.unsafe_blocks")
+            .get_spec("code_metrics.rust.unsafe_blocks")
             .await
             .unwrap()
             .expect("ast spec seeded");
@@ -4569,14 +4574,14 @@ def transform(input):
             project_ext_file(dir.path(), "metrics/eff.star"),
             r#"
 def transform(input):
-    return {"facts": [{"measure": "oxplow.ast_hit", "value": 1, "rule": "eff", "subject": "oxplow:oxplow/dir?path=."}]}
+    return {"facts": [{"measure": "code_metrics.ast_hit", "value": 1, "rule": "eff", "subject": "oxplow:oxplow/dir?path=."}]}
 "#,
         )
         .unwrap();
         let metric = starlark_collector_emits(
             "acme.effcollector",
             "metrics/eff.star",
-            vec!["oxplow.ast_hit".into()],
+            vec!["code_metrics.ast_hit".into()],
         );
         let ctx = CollectorRunContext {
             excluded: Arc::default(),
@@ -4645,12 +4650,12 @@ def transform(input):
         crate::collector_triggers::register(&svc);
         std::fs::write(
             project_ext_file(dir.path(), "metrics/eff.star"),
-            "def transform(input):\n    return {\"facts\": [{\"measure\": \"oxplow.ast_hit\", \"value\": 1, \"rule\": \"eff\", \"subject\": \"oxplow:oxplow/dir?path=.\"}]}\n",
+            "def transform(input):\n    return {\"facts\": [{\"measure\": \"code_metrics.ast_hit\", \"value\": 1, \"rule\": \"eff\", \"subject\": \"oxplow:oxplow/dir?path=.\"}]}\n",
         )
         .unwrap();
         declare_project_collectors(
                 dir.path(),
-                "- { id: acme.effcollector, runtime: starlark, entry: metrics/eff.star, on: [effort.finished], facts: [oxplow.ast_hit] }",
+                "- { id: acme.effcollector, runtime: starlark, entry: metrics/eff.star, on: [effort.finished], facts: [code_metrics.ast_hit] }",
             );
         crate::test_fixtures::activate_with_problems(&svc).await;
         svc.effort_store
@@ -4740,38 +4745,34 @@ def transform(input):
         assert!(facts[0].value >= 3.0);
     }
 
-    /// oxplow-bundled' collectors, as its manifest declares them.
+    /// The test extension's code-metric collectors, as its manifest declares
+    /// them (`testdata/code-metrics/`).
     fn code_metric_collectors() -> Vec<FactCollector> {
-        let foundation = crate::bundled_extensions::find("oxplow-bundled").unwrap();
+        let ext = crate::test_fixtures::CODE_METRICS_EXT;
+        let dir = crate::test_fixtures::code_metrics_dir();
         let manifest: serde_yaml::Value =
-            serde_yaml::from_str(foundation.file("extension.yaml").unwrap()).unwrap();
+            serde_yaml::from_str(&std::fs::read_to_string(dir.join("extension.yaml")).unwrap())
+                .unwrap();
         let (specs, errors) = oxplow_config::collectors::parse_collectors(
-            &oxplow_config::collectors::Declarer::shared(
-                "oxplow-bundled",
-                oxplow_config::OXPLOW_NAMESPACE,
-            ),
+            &oxplow_config::collectors::Declarer::shared(ext, "code_metrics"),
             &manifest["collectors"],
             &|_| true,
         );
         assert_eq!(errors, Vec::<String>::new());
-        let path = crate::test_fixtures::shipped_extensions()
-            .into_iter()
-            .find(|e| e.name == "oxplow-bundled")
-            .unwrap()
-            .path;
+        let path = dir.to_string_lossy().into_owned();
         specs
             .iter()
-            .filter_map(|s| FactCollector::from_spec("oxplow-bundled", &path, s))
+            .filter_map(|s| FactCollector::from_spec(ext, &path, s))
             .collect()
     }
 
-    /// One of oxplow-bundled' code-metric collectors — `run_one_collector`
-    /// reads its script through the bundled extension.
+    /// One of the test extension's code-metric collectors — `run_one_collector`
+    /// reads its script from the extension's folder.
     fn builtin_collector_fixture(key: &str) -> FactCollector {
         code_metric_collectors()
             .into_iter()
             .find(|c| c.key == key)
-            .expect("a foundation collector")
+            .expect("a code-metrics collector")
     }
 
     /// A mixed-language corpus: a high-complexity + long Rust fn, a TS fn with a
@@ -4826,10 +4827,10 @@ def transform(input):
             run: RunContext::core(Actor::System, Mode::External),
         };
         for key in [
-            "oxplow.fn_count",
-            "oxplow.high_complexity_fns",
-            "oxplow.long_functions",
-            "oxplow.todos",
+            "code_metrics.fn_count",
+            "code_metrics.high_complexity_fns",
+            "code_metrics.long_functions",
+            "code_metrics.todos",
         ] {
             svc.metrics
                 .run_one_collector(&builtin_collector_fixture(key), &ctx, files.clone())
@@ -4838,10 +4839,10 @@ def transform(input):
 
         let engine = crate::metric_engine::MetricEngine::new((*svc.fact_store).clone());
         for (key, expected) in [
-            ("oxplow.fn_count", 4.0),
-            ("oxplow.high_complexity_fns", 1.0),
-            ("oxplow.long_functions", 1.0),
-            ("oxplow.todos", 2.0),
+            ("code_metrics.fn_count", 4.0),
+            ("code_metrics.high_complexity_fns", 1.0),
+            ("code_metrics.long_functions", 1.0),
+            ("code_metrics.todos", 2.0),
         ] {
             let spec = svc
                 .fact_store
@@ -5048,8 +5049,8 @@ def transform(input):
 
     #[tokio::test]
     async fn per_language_collector_facts_reaggregate_through_the_spec() {
-        // tsk30: the per-language idiom collectors emit per-file `oxplow.ast_hit`
-        // facts (rule-tagged); each metric is a Sum(oxplow.ast_hit) spec filtered
+        // tsk30: the per-language idiom collectors emit per-file `code_metrics.ast_hit`
+        // facts (rule-tagged); each metric is a Sum(code_metrics.ast_hit) spec filtered
         // by rule. Prove every emitted-fact stream re-aggregates through its spec
         // to a positive headline (the exact per-idiom counts are pinned by the
         // oxplow-script golden tests). One capture per collector; idioms share the
@@ -5101,16 +5102,16 @@ def transform(input):
         };
 
         let keys = [
-            "oxplow.rust.unsafe_blocks",
-            "oxplow.rust.unwrap_expect_calls",
-            "oxplow.rust.panic_macros",
-            "oxplow.ts.any_usage",
-            "oxplow.ts.non_null_assertions",
-            "oxplow.ts.console_calls",
-            "oxplow.ts.ts_ignore",
-            "oxplow.clojure.defn_count",
-            "oxplow.csharp.empty_catch",
-            "oxplow.csharp.blocking_async_calls",
+            "code_metrics.rust.unsafe_blocks",
+            "code_metrics.rust.unwrap_expect_calls",
+            "code_metrics.rust.panic_macros",
+            "code_metrics.ts.any_usage",
+            "code_metrics.ts.non_null_assertions",
+            "code_metrics.ts.console_calls",
+            "code_metrics.ts.ts_ignore",
+            "code_metrics.clojure.defn_count",
+            "code_metrics.csharp.empty_catch",
+            "code_metrics.csharp.blocking_async_calls",
         ];
         for key in keys {
             svc.metrics
@@ -5133,7 +5134,7 @@ def transform(input):
                 .unwrap_or(0.0);
             assert!(
                 engine_headline > 0.0,
-                "{key}: Sum(oxplow.ast_hit) filtered by rule re-aggregates the \
+                "{key}: Sum(code_metrics.ast_hit) filtered by rule re-aggregates the \
                  emitted facts to a positive headline",
             );
         }
@@ -5172,7 +5173,7 @@ def transform(input):
         };
         svc.metrics
             .run_one_collector(
-                &builtin_collector_fixture("oxplow.rust.unsafe_blocks"),
+                &builtin_collector_fixture("code_metrics.rust.unsafe_blocks"),
                 &ctx,
                 files.clone(),
             )
@@ -5181,7 +5182,7 @@ def transform(input):
         let engine = crate::metric_engine::MetricEngine::new((*svc.fact_store).clone());
         let spec = svc
             .fact_store
-            .get_spec("oxplow.rust.unsafe_blocks")
+            .get_spec("code_metrics.rust.unsafe_blocks")
             .await
             .unwrap()
             .unwrap();
@@ -5281,14 +5282,14 @@ def transform(input):
         let (svc, _dir) = fixture().await;
         seed_with_every_builtin_on(&svc).await;
         for (key, want) in [
-            ("oxplow.rust.unsafe_blocks", "rust"),
-            ("oxplow.rust.panic_macros", "rust"),
+            ("code_metrics.rust.unsafe_blocks", "rust"),
+            ("code_metrics.rust.panic_macros", "rust"),
             // The key segment is `ts`, but the language slug is `typescript` —
             // the collector is the authority, not the key.
-            ("oxplow.ts.any_usage", "typescript"),
-            ("oxplow.ts.console_calls", "typescript"),
-            ("oxplow.clojure.defn_count", "clojure"),
-            ("oxplow.csharp.empty_catch", "csharp"),
+            ("code_metrics.ts.any_usage", "typescript"),
+            ("code_metrics.ts.console_calls", "typescript"),
+            ("code_metrics.clojure.defn_count", "clojure"),
+            ("code_metrics.csharp.empty_catch", "csharp"),
         ] {
             let spec = svc
                 .fact_store
@@ -5300,7 +5301,7 @@ def transform(input):
         }
         // The language-agnostic code collectors declare `language: ""` and must stay
         // language-less (they sweep every source file) — "" is not a language.
-        for key in ["oxplow.high_complexity_fns", "oxplow.todos"] {
+        for key in ["code_metrics.high_complexity_fns", "code_metrics.todos"] {
             let spec = svc.fact_store.get_spec(key).await.unwrap();
             if let Some(spec) = spec {
                 assert_eq!(spec.language, None, "{key} is language-agnostic");
@@ -5314,13 +5315,13 @@ def transform(input):
         seed_with_every_builtin_on(&svc).await;
         let spec = svc
             .fact_store
-            .get_spec("oxplow.duplicate_lines")
+            .get_spec("code_metrics.duplicate_lines")
             .await
             .unwrap()
             .expect("seeded");
         assert_eq!(
             (spec.source_measure.as_deref(), spec.aggregation.as_str()),
-            (Some("oxplow.duplicate_lines"), "sum")
+            (Some("code_metrics.duplicate_lines"), "sum")
         );
         assert_eq!(spec.direction, "lower-better");
     }
@@ -5453,23 +5454,23 @@ def transform(input):
         let (svc, dir) = fixture().await;
         std::fs::write(
             oxplow_config::config_path(dir.path()),
-            "metrics:\n  - use: oxplow.todos\n    target: 5\n    warnAt: 8\n    failAt: 13\n",
+            "metrics:\n  - use: code_metrics.todos\n    target: 5\n    warnAt: 8\n    failAt: 13\n",
         )
         .unwrap();
         svc.reload_config_from_disk().unwrap();
         crate::test_fixtures::activate_with_problems(&svc).await;
         let spec = svc
             .fact_store
-            .get_spec("oxplow.todos")
+            .get_spec("code_metrics.todos")
             .await
             .unwrap()
             .expect("seeded");
-        assert_eq!(spec.scope, "oxplow:oxplow/extension?name=oxplow-bundled");
+        assert_eq!(spec.scope, "oxplow:oxplow/extension?name=code-metrics");
         assert_eq!(spec.target, Some(5.0));
         assert_eq!(spec.warn_at, Some(8.0));
         assert_eq!(spec.fail_at, Some(13.0));
         // The structural spec survives the override re-seed.
-        assert_eq!(spec.source_measure.as_deref(), Some("oxplow.todo"));
+        assert_eq!(spec.source_measure.as_deref(), Some("code_metrics.todo"));
         assert_eq!(spec.aggregation, "count");
     }
 
@@ -5643,7 +5644,7 @@ def transform(input):
         // A user enables a bundled built-in by `use:` — no project script.
         std::fs::write(
             oxplow_config::config_path(dir.path()),
-            "metrics:\n  - use: oxplow.rust.unsafe_blocks\n    target: 3\n",
+            "metrics:\n  - use: code_metrics.rust.unsafe_blocks\n    target: 3\n",
         )
         .unwrap();
         svc.reload_config_from_disk().unwrap();
@@ -5654,15 +5655,15 @@ def transform(input):
         // the catalog entry.
         let spec = svc
             .fact_store
-            .get_spec("oxplow.rust.unsafe_blocks")
+            .get_spec("code_metrics.rust.unsafe_blocks")
             .await
             .unwrap()
             .expect("seeded");
-        assert_eq!(spec.scope, "oxplow:oxplow/extension?name=oxplow-bundled");
+        assert_eq!(spec.scope, "oxplow:oxplow/extension?name=code-metrics");
         let cat = svc.metrics.catalog().await;
         let entry = cat
             .iter()
-            .find(|e| e.key == "oxplow.rust.unsafe_blocks")
+            .find(|e| e.key == "code_metrics.rust.unsafe_blocks")
             .expect("catalog entry");
         assert_eq!(entry.target, Some(3.0), "project override merged");
 
@@ -5672,8 +5673,8 @@ def transform(input):
         let count = svc
             .metrics
             .run_collector_by_key(
-                "oxplow-bundled",
-                "oxplow.rust.unsafe_blocks",
+                crate::test_fixtures::CODE_METRICS_EXT,
+                "code_metrics.rust.unsafe_blocks",
                 None,
                 &RunContext::core(Actor::Human, Mode::External),
             )
@@ -5723,33 +5724,6 @@ def transform(input):
             "oxplow:oxplow/extension?name=oxplow-foundation"
         );
         assert!(total.enabled && total.toggleable);
-    }
-
-    /// Every `use:` in this repo's own `.oxplow/project.yaml` names a metric
-    /// the catalog has — a producer's included, whose target the `use:`
-    /// sets — so loading it warns about none.
-    #[test]
-    fn this_repos_config_uses_only_metrics_the_catalog_has() {
-        let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let config = oxplow_config::load_project_config(&repo).expect("the repo's config loads");
-        let extensions = vec![
-            (
-                "oxplow-foundation".to_string(),
-                crate::test_fixtures::foundation_declarations().0,
-            ),
-            (
-                "oxplow-bundled".to_string(),
-                crate::test_fixtures::code_metrics_declarations(),
-            ),
-        ];
-        let unknown = oxplow_config::unknown_uses(&[], &[], &extensions, &config.metrics);
-        assert_eq!(unknown, Vec::<String>::new());
-        let resolved = resolve_metrics(&[], &[], &extensions, &config.metrics);
-        let failed = resolved
-            .iter()
-            .find(|s| s.key == "oxplow.tests.failed")
-            .expect("a producer metric resolves");
-        assert_eq!(failed.target, Some(0.0), "the use: target reaches it");
     }
 
     #[tokio::test]
@@ -5932,21 +5906,25 @@ def transform(input):
     }
 
     #[tokio::test]
-    async fn the_code_metrics_are_oxplow_bundleds_and_opt_in_ones_wait_for_a_use() {
+    async fn the_code_metrics_run_by_default_and_opt_in_ones_wait_for_a_use() {
         let (svc, dir) = fixture().await;
         crate::test_fixtures::activate(&svc).await;
         let running = svc.metrics.fact_collectors();
         let fn_count = running
             .iter()
-            .find(|c| c.key == "oxplow.fn_count")
+            .find(|c| c.key == "code_metrics.fn_count")
             .expect("on by default");
-        assert_eq!(fn_count.owner, "oxplow-bundled");
-        assert!(!running.iter().any(|c| c.key == "oxplow.rust.unsafe_blocks"));
-        assert!(!running.iter().any(|c| c.key == "oxplow.duplicate_lines"));
+        assert_eq!(fn_count.owner, crate::test_fixtures::CODE_METRICS_EXT);
+        assert!(!running
+            .iter()
+            .any(|c| c.key == "code_metrics.rust.unsafe_blocks"));
+        assert!(!running
+            .iter()
+            .any(|c| c.key == "code_metrics.duplicate_lines"));
 
         std::fs::write(
             dir.path().join(".oxplow/project.yaml"),
-            "metrics:\n  - use: oxplow.duplicate_lines\n",
+            "metrics:\n  - use: code_metrics.duplicate_lines\n",
         )
         .unwrap();
         svc.reload_config_from_disk().unwrap();
@@ -5955,18 +5933,18 @@ def transform(input):
             .metrics
             .fact_collectors()
             .into_iter()
-            .find(|c| c.key == "oxplow.duplicate_lines")
+            .find(|c| c.key == "code_metrics.duplicate_lines")
             .expect("used, so it runs");
         assert!(dup.whole_tree, "a slice of the tree can't restate it");
         assert!(matches!(&dup.trigger, Trigger::On { filter, .. }
             if filter.get("trigger").map(String::as_str) == Some("git_refs")));
         let spec = svc
             .fact_store
-            .get_spec("oxplow.duplicate_lines")
+            .get_spec("code_metrics.duplicate_lines")
             .await
             .unwrap()
             .expect("seeded once on");
-        assert_eq!(spec.scope, "oxplow:oxplow/extension?name=oxplow-bundled");
+        assert_eq!(spec.scope, "oxplow:oxplow/extension?name=code-metrics");
     }
 
     #[tokio::test]
@@ -6119,9 +6097,9 @@ def transform(input):
         assert!(!cat.is_empty(), "built-in catalog is non-empty");
         let entry = cat
             .iter()
-            .find(|e| e.key == "oxplow.rust.unsafe_blocks")
+            .find(|e| e.key == "code_metrics.rust.unsafe_blocks")
             .expect("built-in present");
-        assert_eq!(entry.scope, "oxplow:oxplow/extension?name=oxplow-bundled");
+        assert_eq!(entry.scope, "oxplow:oxplow/extension?name=code-metrics");
         assert!(!entry.enabled, "not enabled before use:");
         assert!(entry.toggleable, "code collectors are toggleable");
         // Matches the seeded spec's category (builtin_ast_specs), so the Catalog
@@ -6129,38 +6107,38 @@ def transform(input):
         assert_eq!(entry.category.as_deref(), Some("static-quality"));
 
         // Enable end-to-end: writes a `use:` into .oxplow/project.yaml + seeds the def.
-        enable(&svc, &["oxplow.rust.unsafe_blocks".into()], true).await;
+        enable(&svc, &["code_metrics.rust.unsafe_blocks".into()], true).await;
         assert!(
             svc.metrics
                 .catalog()
                 .await
                 .iter()
-                .find(|e| e.key == "oxplow.rust.unsafe_blocks")
+                .find(|e| e.key == "code_metrics.rust.unsafe_blocks")
                 .unwrap()
                 .enabled,
             "now enabled"
         );
         let spec = svc
             .fact_store
-            .get_spec("oxplow.rust.unsafe_blocks")
+            .get_spec("code_metrics.rust.unsafe_blocks")
             .await
             .unwrap()
             .expect("spec seeded on enable (T-E2)");
-        assert_eq!(spec.scope, "oxplow:oxplow/extension?name=oxplow-bundled");
+        assert_eq!(spec.scope, "oxplow:oxplow/extension?name=code-metrics");
         let yaml = std::fs::read_to_string(oxplow_config::config_path(dir.path())).unwrap();
         assert!(
-            yaml.contains("oxplow.rust.unsafe_blocks"),
+            yaml.contains("code_metrics.rust.unsafe_blocks"),
             "use: persisted to .oxplow/project.yaml; got:\n{yaml}"
         );
 
         // Disable removes it from config.
-        enable(&svc, &["oxplow.rust.unsafe_blocks".into()], false).await;
+        enable(&svc, &["code_metrics.rust.unsafe_blocks".into()], false).await;
         assert!(
             !svc.metrics
                 .catalog()
                 .await
                 .iter()
-                .find(|e| e.key == "oxplow.rust.unsafe_blocks")
+                .find(|e| e.key == "code_metrics.rust.unsafe_blocks")
                 .unwrap()
                 .enabled,
             "disabled again"
@@ -6197,7 +6175,7 @@ def transform(input):
         // Toggleable code collectors still coexist.
         assert!(
             by_key
-                .get("oxplow.rust.unsafe_blocks")
+                .get("code_metrics.rust.unsafe_blocks")
                 .is_some_and(|e| e.toggleable),
             "code collectors present + toggleable"
         );
@@ -6233,7 +6211,7 @@ def transform(input):
         // A toggleable code collector still coexists in the same listing.
         assert!(
             cat.iter()
-                .any(|e| e.key == "oxplow.rust.unsafe_blocks" && e.toggleable),
+                .any(|e| e.key == "code_metrics.rust.unsafe_blocks" && e.toggleable),
             "code collectors still present and toggleable"
         );
     }

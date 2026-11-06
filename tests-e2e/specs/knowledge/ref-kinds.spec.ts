@@ -2,28 +2,18 @@ import { execFileSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { run, searchable } from "../../support/daemon.js";
+import { run } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
-import { openFromLauncher, searchLauncher, workItemIdOf } from "../../support/ui.js";
+import { openFromLauncher, workItemIdOf } from "../../support/ui.js";
 
 test("an extension's ref renders as a link and opens its page", async ({ page, daemon }) => {
-  const created = await run<{ result: { uri: string } }>(daemon, "oxplow.work_item.create", {
-    title: "Platypus item",
-    thread: daemon.thread,
-  });
-  const n = workItemIdOf(created.result.uri).replace(/^tsk/, "");
+  const n = await createItem(daemon, "Platypus item");
   // `[[item:<n>]]` is the test extension's wikilink for `oxplow:e2e/item?id=%3Cn%3E`.
-  await run(daemon, "oxplow.knowledge.write_page", {
-    slug: "platypus-notes",
-    title: "Platypus notes",
-    body: `# Platypus notes\n\nThe item is [[item:${n}]].\n`,
-  });
-  await searchable(daemon, "platypus", "wiki");
-  await page.goto("/");
-  await searchLauncher(page, "platypus notes");
-  await page.getByTestId("launcher-hit-oxplow:oxplow/wiki?slug=platypus-notes").click();
-  await page.locator('[data-testid="page-file"]:visible').locator(`[data-ref-title][href="oxplow:e2e/item?id=${n}"]`).click();
-  // The extension's `item` page: a table over `v_e2e_item`.
+  writeFileSync(join(daemon.project, "platypus-notes.md"), `# Platypus notes\n\nThe item is [[item:${n}]].\n`);
+  await ready(page);
+  await navigate(daemon, "oxplow:oxplow/file?path=platypus-notes.md#oxplow.renderer=oxplow-foundation/markdown");
+  await page.locator('[data-testid="page-file"]:visible').locator(`a[href="oxplow:e2e/item?id=${n}"]`).click();
+  // The link shows the item's title; its page is a table over `v_e2e_item`.
   await expect(page.locator('[data-testid="page-file"]:visible').getByTestId("viz-row-0")).toContainText("Platypus item");
 });
 
@@ -40,7 +30,7 @@ async function createItem(daemon: Parameters<typeof run>[0] & { thread: string }
 /// The window answers a navigate once its stream is shown: a page open is the sign.
 async function ready(page: import("@playwright/test").Page) {
   await page.goto("/");
-  await openFromLauncher(page, "Tasks");
+  await openFromLauncher(page, "Suite Home");
   await expect(page.getByTestId("rail-hud")).toHaveAttribute("aria-busy", "false");
 }
 

@@ -152,6 +152,26 @@ async fn until_on(svc: &crate::Services, id: &str, done: impl Fn(&Value) -> bool
     }
 }
 
+/// An active extension's AI profile is a role, in `v_ai_role`.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_active_extensions_ai_profile_is_a_role() {
+    let fx = fixture().await;
+    let roles = fx
+        .svc
+        .sql
+        .query_sql(
+            "SELECT role, extension, fallback FROM v_ai_role WHERE extension IS NOT NULL",
+            vec![],
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        serde_json::to_value(&roles.rows).unwrap(),
+        serde_json::json!([["triage/sort", "triage", "summarize"]])
+    );
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_job_runs_and_its_result_is_read_back() {
     let fx = fixture().await;

@@ -761,12 +761,7 @@ mod tests {
             .flat_map(|e| e.page_files.iter().flat_map(|p| p.answers.iter()))
             .collect();
         assert!(answers.len() >= 40, "{}", answers.len());
-        for kind in [
-            "oxplow/file",
-            "oxplow/commit",
-            "oxplow/effort",
-            "oxplow/work_item",
-        ] {
+        for kind in ["oxplow/file", "oxplow/commit", "oxplow/effort"] {
             assert!(
                 answers.iter().any(|a| a.about.as_deref() == Some(kind)),
                 "no answer about `{kind}`"
@@ -854,7 +849,6 @@ mod tests {
         let command = |name: &str| svc.commands.spec(name).map(|s| s.input_schema);
         let tools = tool_schemas(&svc).await;
         let tool = |name: &str| tools.get(name).cloned();
-        let mut asked = 0;
         for b in oxplow_app::bundled_extensions::BUNDLED {
             let file_of = |name: &str| b.file(name).map(str::to_string);
             let Some(yaml) = file_of("questions.yaml") else {
@@ -862,7 +856,6 @@ mod tests {
             };
             let file = format!("{}/questions.yaml", b.name);
             let questions = parse(&yaml).unwrap_or_else(|e| panic!("{file}: {e}"));
-            asked += questions.len();
             let checked = check(
                 &file,
                 &questions,
@@ -877,7 +870,6 @@ mod tests {
             assert_eq!(checked.error_lines(), Vec::<String>::new());
             assert_eq!(checked.warning_lines(), Vec::<String>::new());
         }
-        assert!(asked >= 3, "{asked}");
     }
 
     /// The tools an agent is offered, by name, with their input schemas.

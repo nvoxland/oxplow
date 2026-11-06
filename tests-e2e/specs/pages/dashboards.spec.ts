@@ -26,30 +26,6 @@ async function pin(page: Page, title: string, dashboardId: string) {
   await expect(activeGrid(page)).toBeVisible();
 }
 
-test("Dashboards creates an empty page from its title form and opens it", async ({ page, daemon }) => {
-  await page.goto("/");
-  await openFromLauncher(page, "Dashboards");
-  await expect(activeHost(page)).toContainText("Dashboards");
-  await page.getByTestId("action-page-action-new").filter({ visible: true }).click();
-  const title = page.getByTestId("viz-action-form-fields-title").filter({ visible: true });
-  await title.fill("Quokka release dashboard");
-  await title.press("Enter");
-  await expect(page.getByTestId("dashboard-title-edit").filter({ visible: true })).toHaveText("Quokka release dashboard");
-  await expect(activeGrid(page).locator(':scope > [data-testid^="dashboard-tile-"]')).toHaveCount(0);
-  const id = "my-pages/quokka-release-dashboard";
-  await expect.poll(async () => (await dashboard(daemon, id)).view.children).toEqual([]);
-
-  // It is a normal page in the Dashboards index, including after reload.
-  await page.reload();
-  await openFromLauncher(page, "Dashboards");
-  // Other specs may have dashboards too, so find the linked row by its
-  // title rather than depending on its ordinal position in the index.
-  const linked = activeHost(page).locator('[data-testid^="viz-row-"]').filter({ hasText: "Quokka release dashboard" });
-  await expect(linked).toHaveCount(1);
-  await linked.getByText("Quokka release dashboard", { exact: true }).click();
-  await expect(page.getByTestId("dashboard-title-edit").filter({ visible: true })).toHaveText("Quokka release dashboard");
-});
-
 test("pinning, reordering, removing and renaming edit the dashboard page and survive reload", async ({ page, daemon }) => {
   const extension = "e2e-dashboard-pages";
   const id = `${extension}/dunnart-board`;

@@ -5,3 +5,8 @@
 extensions/*
 !extensions/project/
 !extensions/project/**
+# What hasn't moved into oxplow-bundled yet: off, and kept here to move from.
+!extensions/oxplow-bundled-todo/
+!extensions/oxplow-bundled-todo/**
+extensions/oxplow-bundled-todo/dist/
+extensions/oxplow-bundled-todo/node_modules/

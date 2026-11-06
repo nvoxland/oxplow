@@ -14,16 +14,17 @@ test("search finds a task and a wiki page, and opens them", async ({ page, daemo
   await searchable(daemon, "quokka", "work_item");
   await searchable(daemon, "quokka", "wiki");
   await page.goto("/");
+  // A hit opens the foundation's resource page for its URI.
   await searchLauncher(page, "quokka");
   await page.getByTestId(`launcher-hit-${created.result.uri}`).click();
-  await expect(page.locator('[data-node="state"]')).toBeVisible();
-  await expect(page.locator("body")).toContainText("Quokka migration");
+  await expect(page.getByTestId("page-nav-title").filter({ visible: true })).toContainText("Quokka migration");
   await searchLauncher(page, "quokka");
   await page.getByTestId("launcher-hit-oxplow:oxplow/wiki?slug=quokka-notes").click();
-  await expect(page.locator('[data-testid="page-file"]:visible')).toContainText("What we know.");
+  await expect(page.getByTestId("center-tab-oxplow:oxplow/wiki?slug=quokka-notes")).toBeVisible();
+  await expect(page.getByTestId("page-nav-title").filter({ visible: true })).toContainText("Quokka notes");
 });
 
-// tsk1030: an extension added while the page is open — the agent writes
+// An extension added while the page is open — the agent writes
 // one — shows in the launcher without a reload.
 test("a page added while the window is open is in the launcher", async ({ page, daemon }) => {
   await page.goto("/");

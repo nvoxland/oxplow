@@ -576,7 +576,7 @@ pub fn load_extensions_in(root: &Path, project: &Path) -> Vec<Extension> {
 }
 
 /// `settings` for a source load: every project source loaded is on unless
-/// the person turned it off (`disableExtensions`); for the extensions that
+/// it was turned off (`disableExtensions`, the team's or the person's); for the extensions that
 /// ship with oxplow, the lists decide as always.
 pub(crate) fn sources_on(
     mut settings: oxplow_config::ExtensionSettings,
@@ -584,10 +584,7 @@ pub(crate) fn sources_on(
 ) -> oxplow_config::ExtensionSettings {
     for ext in sources {
         let present = ext.origin == "project" && ext.deployment == Deployment::Source;
-        if present
-            && !settings.personal.disable.contains(&ext.name)
-            && !settings.is_enabled(&ext.name)
-        {
+        if present && !settings.turned_off(&ext.name) && !settings.is_enabled(&ext.name) {
             settings.personal.enable.push(ext.name.clone());
         }
     }
@@ -6132,19 +6129,25 @@ commands:
         assert!(misfit.is_empty(), "example doesn't fit: {misfit:#?}");
     }
 
-    /// Oxplow ships two extensions: `oxplow-foundation`, its own commands
-    /// over the scopes' operations; and `oxplow-bundled`: the review packet,
-    /// the analytics pages, the agent's advisories and the code metrics. They load clean and every page's SQL runs.
+    /// `oxplow-foundation` is oxplow's own commands over the scopes'
+    /// operations; `oxplow-bundled` is what's been reviewed so far. Everything
+    /// shipped loads clean and every page's SQL runs.
     #[tokio::test]
     async fn the_bundled_extensions_ship_and_load_clean() {
         let dir = tempfile::tempdir().unwrap();
         let exts = load_extensions(dir.path());
         let bundled: Vec<&Extension> = exts.iter().filter(|e| e.origin == "bundled").collect();
+        let mut shipped: Vec<&str> = crate::bundled_extensions::BUNDLED
+            .iter()
+            .map(|b| b.name)
+            .collect();
+        shipped.sort_unstable();
         assert_eq!(
             bundled.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(),
-            ["oxplow-bundled", "oxplow-foundation"]
+            shipped
         );
-        let foundation = bundled[1];
+        let ext = |name: &str| *bundled.iter().find(|e| e.name == name).unwrap();
+        let foundation = ext("oxplow-foundation");
         assert!(foundation.errors.is_empty(), "{:?}", foundation.errors);
         assert!(foundation.warnings.is_empty(), "{:?}", foundation.warnings);
         assert_eq!(foundation.namespace, "oxplow");
@@ -6180,69 +6183,22 @@ commands:
                 "typesafe"
             ]
         );
-        let b = bundled[0];
+        let b = ext("oxplow-bundled");
         assert!(b.errors.is_empty(), "{:?}", b.errors);
-        // The code metrics: 16 collectors beside its own churn one.
-        assert!(b.collectors.len() >= 17, "{}", b.collectors.len());
-        // Its manifest is v2, with an intent, and clean.
-        assert!(b.warnings.is_empty(), "{:?}", b.warnings);
-        assert_eq!(b.manifest_version, 2);
-        assert!(!b.intent.as_ref().unwrap().examples.is_empty());
-        // The review packet and the analytics pages, mounted together.
-        for (host, slot, page) in [
-            ("oxplow-foundation/diff-view", "sections", "decisions"),
-            (
-                "oxplow-foundation/diff-view",
-                "sections",
-                "inferred-decisions",
-            ),
-            ("oxplow-foundation/diff-view", "sections", "change-review"),
-            ("oxplow-foundation/diff-view", "sections", "effort-tests"),
-            ("oxplow-foundation/commit", "sections", "tests-weakened"),
-            ("oxplow-bundled/work-item", "sections", "task-tokens"),
-        ] {
-            assert!(
-                b.ui.page_slots.iter().any(|s| s.host == host
-                    && s.slot == slot
-                    && s.page == format!("oxplow-bundled/{page}")),
-                "{host}.{slot} {page}"
-            );
-        }
-        assert!(b.panels.iter().any(|p| p.id == "oxplow-bundled/waiting"));
+        assert_eq!(b.namespace, "oxplow");
         let commands: Vec<&str> = b.commands.iter().map(|c| c.name.as_str()).collect();
         assert_eq!(
             commands,
             [
                 "oxplow.review_policy.read",
                 "oxplow.review_policy.write",
-                "oxplow.reasoning.ask",
-                "oxplow.reasoning.status",
-                "oxplow.reasoning.cancel",
-                "oxplow.effort.infer_reasoning",
                 "oxplow.review.accept",
                 "oxplow.review.request_changes",
-                "oxplow.work.clear_finished",
-                "oxplow.work_item.new",
-                "oxplow.knowledge.new_page",
-                "oxplow.handoff.offer",
-                "oxplow.effort.link_to_task"
-            ]
-        );
-        let advisories: Vec<&str> = b.advisories.iter().map(|a| a.id.as_str()).collect();
-        assert_eq!(
-            advisories,
-            [
-                "large-uncommitted",
-                "landed-in-progress",
-                "metric-deltas",
-                "threshold-crossed",
-                "hint-never-fires",
-                "shared-files",
-                "shared-files-agent"
+                "oxplow.work.clear_finished"
             ]
         );
         let mut datasets: Vec<&str> = b.datasets.iter().map(|m| m.decl.name.as_str()).collect();
-        datasets.sort();
+        datasets.sort_unstable();
         assert_eq!(
             datasets,
             [
@@ -6258,50 +6214,28 @@ commands:
                 "verdicts"
             ]
         );
-        let effects: Vec<&str> = b.effects.iter().map(|e| e.id.as_str()).collect();
-        assert_eq!(
-            effects,
-            [
-                "verify-unchecked",
-                "repair-disabled",
-                "infer-reasoning",
-                "store-reasoning"
-            ]
-        );
-        assert!(b
-            .collectors
-            .iter()
-            .any(|c| c.id == "oxplow_bundled.effort_churn"));
         // Every shipped page's SQL and advisory runs against a real schema
         // (a running oxplow's, whose live views read its services) — its
         // own datasets compiled for the check, nothing published — and every
         // viz node's columns are its loader's.
         let svc = services(dir.path()).await;
-        for name in ["oxplow-bundled", "oxplow-foundation"] {
+        for name in shipped {
             let v = validate_extension(&svc.sql, &svc.extension_catalog, dir.path(), name, None)
                 .await
                 .unwrap();
             assert!(v.errors.is_empty(), "{name}: {:#?}", v.errors);
         }
-        assert_eq!(
-            cat()
-                .find_page(dir.path(), "oxplow-bundled/decisions")
-                .unwrap()
-                .title,
-            "Decisions Made"
-        );
     }
 
     /// The work list and the wiki are foundation's data and the agent's
-    /// tools; how a person sees and edits them is oxplow-bundled's. With
-    /// bundled off a work item or wiki link opens the generic resource
-    /// page, and no menu offers a form that isn't there.
+    /// tools, with no screens of its own: a work item or wiki link opens the
+    /// generic resource page, and no menu offers a form that isn't there.
     #[test]
     fn foundation_has_no_task_or_wiki_ui() {
         let dir = tempfile::tempdir().unwrap();
         let exts = load_extensions(dir.path());
         let ext = |name: &str| exts.iter().find(|e| e.name == name).unwrap();
-        let (foundation, bundled) = (ext("oxplow-foundation"), ext("oxplow-bundled"));
+        let foundation = ext("oxplow-foundation");
         for resource in ["oxplow/work_item", "oxplow/wiki"] {
             let renders = |e: &Extension| {
                 e.page_files
@@ -6311,7 +6245,6 @@ commands:
                     .collect::<Vec<_>>()
             };
             assert_eq!(renders(foundation), Vec::<String>::new(), "{resource}");
-            assert!(!renders(bundled).is_empty(), "{resource}");
         }
         let scope_of = |c: &crate::extension::extension_commands::ExtensionCommand| match &c.handler
         {
@@ -6335,16 +6268,6 @@ commands:
                 .collect::<Vec<_>>()
         };
         assert_eq!(person_facing(foundation), Vec::<String>::new());
-        let offered = person_facing(bundled);
-        for scope in ["work_items.write", "knowledge.write", "handoffs.write"] {
-            assert!(
-                bundled
-                    .commands
-                    .iter()
-                    .any(|c| c.ui.is_some() && scope_of(c) == scope),
-                "bundled offers no {scope} form: {offered:?}"
-            );
-        }
         for slug in [
             "tasks",
             "board",
@@ -6360,16 +6283,41 @@ commands:
         }
     }
 
+    /// An extension sitting in `.oxplow/extensions/` that the project turned
+    /// off loads empty, and what it declares (here, things it may not) stops
+    /// nothing else: it is listed so Settings can turn it on.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_source_the_project_turned_off_stays_off() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            ".oxplow/extensions/holder/extension.yaml",
+            "manifest: 2\nname: holder\nnamespace: oxplow\nintent:\n  purpose: test\n\
+             commands:\n  - { name: x.y, summary: A command., scope: nope.read, op: read }\n",
+        );
+        write(
+            dir.path(),
+            ".oxplow/project.yaml",
+            "disableExtensions: [holder]\n",
+        );
+        let exts = load_extensions(dir.path());
+        let holder = exts.iter().find(|e| e.name == "holder").unwrap();
+        assert!(!holder.enabled);
+        assert!(holder.commands.is_empty());
+        let svc = services(dir.path()).await;
+        crate::test_fixtures::activate(&svc).await;
+    }
+
     /// Foundation keeps data, resource views, the basic git screens and the
     /// agent's tools. Screens a person opens by choice (Zones, Dashboards,
-    /// Timeline) are oxplow-bundled's, and the only custom component
+    /// Timeline) aren't here, and the only custom component
     /// foundation keeps is the hand-written Integrations area.
     #[test]
     fn foundation_has_no_zones_dashboards_index_timeline_or_metrics_list() {
         let dir = tempfile::tempdir().unwrap();
         let exts = load_extensions(dir.path());
         let ext = |name: &str| exts.iter().find(|e| e.name == name).unwrap();
-        let (foundation, bundled) = (ext("oxplow-foundation"), ext("oxplow-bundled"));
+        let foundation = ext("oxplow-foundation");
         for slug in [
             "zones",
             "dashboards",
@@ -6381,10 +6329,6 @@ commands:
                 foundation.page_files.iter().all(|p| p.slug != slug),
                 "foundation still has {slug}"
             );
-            assert!(
-                bundled.page_files.iter().any(|p| p.slug == slug),
-                "bundled lacks {slug}"
-            );
         }
         let components: Vec<&str> = foundation
             .custom_components
@@ -6392,7 +6336,6 @@ commands:
             .map(|c| c.id.as_str())
             .collect();
         assert_eq!(components, ["integrations"]);
-        assert!(bundled.custom_components.iter().any(|c| c.id == "timeline"));
         // Making a dashboard is the bare product; the launcher lists them.
         assert!(foundation
             .commands
@@ -8163,7 +8106,7 @@ commands:
         let dir = tempfile::tempdir().unwrap();
         let exts = load_extensions(dir.path());
         let bundled: Vec<&Extension> = exts.iter().filter(|e| e.origin == "bundled").collect();
-        assert_eq!(bundled.len(), 2);
+        assert_eq!(bundled.len(), crate::bundled_extensions::BUNDLED.len());
         for e in bundled {
             let layout = layout_only(&e.warnings);
             assert!(layout.is_empty(), "{}: {layout:#?}", e.name);
@@ -9402,7 +9345,10 @@ commands:
         write(
             dir.path(),
             ".oxplow/personal.yaml",
-            "disableExtensions: [review, oxplow-bundled]\n",
+            &format!(
+                "disableExtensions: [review, {}]\n",
+                crate::test_fixtures::optional_shipped()
+            ),
         );
         let exts = load_extensions(dir.path());
         for name in ["review", "oxplow-bundled"] {

@@ -1,0 +1,12 @@
+# Waiting on Me lists blocked items from the active work list only.
+given:
+  - { command: oxplow.effort.open, input: { thread: thr1 } }
+  - { command: oxplow.work_item.create, input: { title: Next up, state: todo, thread: thr1 } }
+  - { command: oxplow.work_item.create, input: { title: Stuck, state: blocked, thread: thr1 } }
+  - { command: oxplow.work_item.create, input: { title: Someday } }
+when: { page: oxplow-bundled-todo/waiting-on-me }
+expect: { loaders: { waiting_on_me: { rows: [{ what: Blocked, title: Stuck }] } } }
+steps:
+  - given:
+      - { command: oxplow.capability.choose, input: { capability: work_items, provider: none }, confirmed: true }
+  - expect: { loaders: { waiting_on_me: { rows: 0 } } }

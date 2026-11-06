@@ -1,6 +1,6 @@
-import { ipc, run, searchable, until } from "../../support/daemon.js";
+import { ipc, run, until } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
-import { searchLauncher } from "../../support/ui.js";
+import { openFromLauncher } from "../../support/ui.js";
 
 // The Changes page is the foundation's `changes` document, the renderer of
 // an effort's (and a snapshot's, a turn's) page: the effort's own title and
@@ -11,17 +11,19 @@ test("an effort's page names its effort, renames it, and the pickers turn it int
     state: "in_progress",
     thread: daemon.thread,
   });
+  let effortUri = "";
   await until("the item's effort to open", 30_000, async () => {
     const out = await ipc<{ rows: unknown[][] }>(daemon, "query_sql", {
       sql: `SELECT uri FROM v_effort WHERE work_item = '${created.result.uri}'`,
     });
-    return out.rows.length > 0;
+    effortUri = (out.rows[0]?.[0] as string | undefined) ?? "";
+    return effortUri !== "";
   });
-  await searchable(daemon, "Quail fix", "work_item");
   await page.goto("/");
-  await searchLauncher(page, "Quail fix");
-  await page.getByTestId(`launcher-hit-${created.result.uri}`).click();
-  await page.locator('[data-node="activity"]').locator("a, button").filter({ hasText: "Quail fix" }).first().click();
+  // The window answers a navigate once its stream is shown: a page open is the sign.
+  await openFromLauncher(page, "Suite Home");
+  await expect(page.getByTestId("rail-hud")).toHaveAttribute("aria-busy", "false");
+  await run(daemon, "oxplow.window.navigate", { uri: effortUri });
 
   const effort = page.locator('[data-node="effort"]');
   await expect(effort).toContainText("Open");

@@ -16,7 +16,7 @@ type Page = import("@playwright/test").Page;
 
 async function ready(page: Page) {
   await page.goto("/");
-  await openFromLauncher(page, "Tasks");
+  await openFromLauncher(page, "Suite Home");
   await expect(page.getByTestId("rail-hud")).toHaveAttribute("aria-busy", "false");
 }
 
