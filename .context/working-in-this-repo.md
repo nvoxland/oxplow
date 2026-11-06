@@ -647,8 +647,8 @@ this checkout out of what it ships:
   shipped extensions' manifests, pages and scripts (not fixtures or
   `dist/`).
 - `bun run lint:docs` (`scripts/check-docs-portable.py`, CI): `docs/` and
-  `README.md` hold no dev-loop text. `DEV.md` "Run from source" is where
-  building and running from source go.
+  `README.md` hold no dev-loop text (a web link may name a repo path).
+  `DEV.md` "Run from source" is where building and running from source go.
 
 The shell's File ▸ "Install `oxplow` command line…" (`install_cli`,
 `crates/oxplow-tauri-ipc/src/commands/install_cli.rs`) links the running
