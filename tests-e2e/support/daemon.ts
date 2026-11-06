@@ -269,11 +269,12 @@ export async function until(what: string, ms: number, check: () => Promise<boole
   }
 }
 
-/** Wait until the daemon's boot work is done: no background task left. */
+/** Wait until the daemon's boot work is done: no background task running. A
+ *  finished one stays listed for 4 s, for the window's indicator to fade. */
 export async function settle(daemon: Daemon): Promise<void> {
   await until("background tasks to finish", 120_000, async () => {
-    const tasks = await ipc<unknown[]>(daemon, "list_background_tasks");
-    return tasks.length === 0;
+    const tasks = await ipc<Array<{ ended_at: number | null }>>(daemon, "list_background_tasks");
+    return tasks.every((t) => t.ended_at !== null);
   });
 }
 
