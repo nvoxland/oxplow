@@ -108,8 +108,31 @@ mod tests {
 
     /// The daemon's exit runs no destructors, so a group still owned by a
     /// task (a collector mid-run) is stopped by `stop_all` instead.
+    ///
+    /// `stop_all` ends every group of the process, and under `cargo test` the
+    /// tests of this crate are threads of one process: a collector or provider
+    /// of another test would die with this one. So the test runs again, alone,
+    /// in a process of its own.
     #[test]
     fn stop_all_reaps_every_live_group() {
+        const ALONE: &str = "OXPLOW_TEST_STOP_ALL_ALONE";
+        if std::env::var_os(ALONE).is_none() {
+            let output = Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "external_process::tests::stop_all_reaps_every_live_group",
+                ])
+                .env(ALONE, "1")
+                .output()
+                .expect("the test binary starts");
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            assert!(
+                output.status.success() && stdout.contains("1 passed"),
+                "{stdout}\n{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return;
+        }
         let dir = tempfile::tempdir().unwrap();
         let pidfile = dir.path().join("pid");
         let mut shell = shell_with_child(&pidfile);
