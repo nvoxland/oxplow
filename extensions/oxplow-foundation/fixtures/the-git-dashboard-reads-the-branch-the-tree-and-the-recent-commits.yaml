@@ -17,5 +17,5 @@ expect:
     streams: { rows: 0 }
     uncommitted: { rows: [{ changes: $any }] }
 steps:
-  - when: { part: oxplow-foundation/git-dashboard-between, params: { base: main, head: main } }
+  - when: { part: oxplow-foundation/git-dashboard-between, params: { base: main, head: main, stream_id: 1, target_stream: 1 } }
     expect: { loaders: { git_dashboard_between: { rows: 0 } } }

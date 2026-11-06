@@ -2386,6 +2386,7 @@ mod tests {
                 "oxplow.vcs.fetch",
                 "oxplow.vcs.log",
                 "oxplow.vcs.merge",
+                "oxplow.vcs.merge_out",
                 "oxplow.vcs.pull",
                 "oxplow.vcs.push",
                 "oxplow.vcs.rename_branch",

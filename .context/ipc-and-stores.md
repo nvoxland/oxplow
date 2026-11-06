@@ -398,11 +398,10 @@ The Git Dashboard is a foundation page over the datasets ([vcs.md](./vcs.md)); t
   returns only worktrees NOT yet tracked as oxplow streams (used by
   the new-stream adoption flow).
 
-The cross-worktree merge action is the `oxplow.vcs.merge` command (`vcsMerge`);
-nothing more is needed because merging only ever runs in
-the *current* stream's working dir. See
-[git-integration.md](./git-integration.md) for the rationale on why
-no symmetric "push commits into another worktree" IPC exists.
+The cross-worktree merge actions are the `oxplow.vcs.merge` command (`vcsMerge`)
+and `oxplow.vcs.merge_out`, the same operation run in the stream that receives
+the branch. See [git-integration.md](./git-integration.md) "Merging into
+another stream's branch".
 
 For commonly-filtered events there are scoped helpers in `apps/desktop/src/api.ts`:
 

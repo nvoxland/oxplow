@@ -1,0 +1,60 @@
+# A worktree on `feat`, one commit ahead of main and one behind: Git Status
+# says each on its own line, with the buttons that act on it, and the Streams
+# row's expansion says the same. Merge out lands the work on main's stream.
+given:
+  - observe: { turn: { prompt: base, write: { path: base.txt, body: "x\n" } } }
+  - { command: oxplow.vcs.stage, input: { stream: str1, paths: [base.txt] } }
+  - { command: oxplow.vcs.commit, input: { stream: str1, message: base } }
+  - { command: oxplow.vcs.checkout_branch, input: { stream: str1, name: feat, create: true } }
+  - observe: { turn: { prompt: feature, write: { path: feat.txt, body: "f\n" } } }
+  - { command: oxplow.vcs.stage, input: { stream: str1, paths: [feat.txt] } }
+  - { command: oxplow.vcs.commit, input: { stream: str1, message: feature }, bind: feature }
+  - { command: oxplow.vcs.checkout_branch, input: { stream: str1, name: main, create: false } }
+  - observe: { turn: { prompt: more, write: { path: main.txt, body: "m\n" } } }
+  - { command: oxplow.vcs.stage, input: { stream: str1, paths: [main.txt] } }
+  - { command: oxplow.vcs.commit, input: { stream: str1, message: more }, bind: more }
+  - { command: oxplow.stream.create, input: { title: Feat, source: existing, existing_branch: feat }, bind: feat }
+  - observe:
+      refs:
+        branches:
+          - { name: main, head: $more.rev, stream: 1, default: true }
+          - { name: feat, head: $feature.rev, stream: 2 }
+when: { page: oxplow-foundation/git-dashboard, params: { stream_id: 2 }, view: { stream: $feat.id } }
+expect:
+  loaders:
+    upstream:
+      rows:
+        - heading: Worktree
+          compared: null
+          ahead_says: 1 commit main lacks
+          behind_says: 1 commit from main
+          is_ahead: 1
+          is_behind: 1
+          can_merge_out: 1
+          target_stream: 1
+    streams:
+      rows:
+        - other: main
+          stream_id: 2
+          target_stream: 1
+          can_join: 1
+          can_merge_out: 1
+  nodes:
+    - { id: upstream, actions: [merge-out, merge-base, rebase-base, publish, push, pull, fetch] }
+steps:
+  - when:
+      part: oxplow-foundation/git-dashboard-between
+      params: { base: feat, head: main, stream_id: 2, target_stream: 1 }
+      view: { stream: $feat.id }
+    expect:
+      loaders:
+        apart: { rows: [{ ahead_says: 1 commit main lacks, behind_says: 1 commit from main, is_ahead: 1, is_behind: 1 }] }
+        git_dashboard_between: { rows: [{ subject: more }] }
+      nodes:
+        - { id: apart, actions: [merge-out, merge-in, rebase] }
+  - press: { action: merge-out, node: upstream }
+    expect: { ok: true }
+  - when: { page: oxplow-foundation/git-dashboard, params: { stream_id: 2 }, view: { stream: $feat.id } }
+    expect:
+      loaders:
+        upstream: { rows: [{ is_ahead: 0, is_behind: 1, can_merge_out: 0, ahead_says: null, behind_says: 2 commits from main }] }

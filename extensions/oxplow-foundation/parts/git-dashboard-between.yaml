@@ -1,26 +1,78 @@
 title: Commits in the stream's branch
-description: The commits in `head` that `base` lacks, newest first.
+description: How the current branch (`base`) and a stream's branch (`head`) differ, with the merges between them, and the commits in `head` that `base` lacks, newest first.
 params:
 - name: base
 - name: head
+- name: stream_id
+- name: target_stream
 loaders:
+  apart:
+    sql: |
+      SELECT :base AS base, :head AS head,
+             d.behind > 0 AS is_ahead,
+             d.ahead > 0 AS is_behind,
+             CASE WHEN d.behind > 0 THEN d.behind || CASE d.behind WHEN 1 THEN ' commit ' ELSE ' commits ' END || :head || ' lacks' END AS ahead_says,
+             CASE WHEN d.ahead > 0 THEN d.ahead || CASE d.ahead WHEN 1 THEN ' commit' ELSE ' commits' END || ' from ' || :head END AS behind_says
+      FROM v_branch_divergence d
+      WHERE d.base = :base AND d.head = :head AND (d.ahead > 0 OR d.behind > 0)
   git_dashboard_between:
     sql: |
       SELECT c.subject, uri('oxplow/commit', 'sha', c.sha) AS commit_ref, c.author, c.committed_at
       FROM v_commit_between c WHERE c.base = :base AND c.head = :head
 view:
-  from: git_dashboard_between
-  viz: list
-  columns:
-  - key: subject
-    label: Commit
-    link:
-      kind: page
-      from: commit_ref
-  - key: author
-    label: Who
-  - key: committed_at
-    label: When
-    format: relative
-    width: 110
-  empty: No commits ahead.
+  stack:
+  - id: apart
+    title: Compared
+    hide_title: true
+    from: apart
+    viz: detail
+    columns:
+    - key: ahead_says
+      label: Ahead
+      when: is_ahead
+    - key: behind_says
+      label: Behind
+      when: is_behind
+    actions:
+    - id: merge-out
+      label: Merge out
+      command: oxplow.vcs.merge_out
+      when: is_ahead
+      fact: ahead_says
+      input:
+        stream: str{{param.target_stream}}
+        rev: '{{row.base}}'
+    - id: merge-in
+      label: Merge in
+      command: oxplow.vcs.merge
+      when: is_behind
+      fact: behind_says
+      input:
+        stream: str{{param.stream_id}}
+        rev: '{{row.head}}'
+    - id: rebase
+      label: Rebase
+      command: oxplow.git.rebase
+      when: is_behind
+      fact: behind_says
+      input:
+        stream: str{{param.stream_id}}
+        rev: '{{row.head}}'
+  - id: commits
+    title: Commits
+    hide_title: true
+    from: git_dashboard_between
+    viz: list
+    columns:
+    - key: subject
+      label: Commit
+      link:
+        kind: page
+        from: commit_ref
+    - key: author
+      label: Who
+    - key: committed_at
+      label: When
+      format: relative
+      width: 110
+    empty: No commits to bring in.

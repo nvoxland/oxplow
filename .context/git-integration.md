@@ -516,26 +516,32 @@ invoked as a separate binary, never linked as a library.
   worktree) leaves a stale admin entry in `.git/worktrees/` that a later
   `worktree add` of the same path trips on, and prune clears it.
 
-### Cross-worktree push: deliberately unsupported
+### Merging into another stream's branch
 
-There is no helper that pushes the active stream's commits *into*
-another worktree's branch. Every available path mutates the other
-worktree:
+`oxplow.vcs.merge_out` sends a branch into another stream's branch. It is
+the `merge` operation run in the stream that receives the branch (`stream`
+is the receiver, `rev` the branch sent), so that stream's working files
+change and any conflicts stop in its checkout. An agent can't run it from
+another stream (`vcs_op` keeps an agent to its own stream), and a person
+confirms every run. Git Status offers it as **Merge out**, on the callout's
+Ahead line, in a Streams row's expansion and in the row's right-click menu
+("Merge current into this"). The target is the stream that has the branch
+checked out; with none, it isn't offered. Its confirmation can't name the
+target branch: the operation's input holds only `stream` and `rev`.
+
+It runs in the receiving worktree because the ways of moving the ref from
+outside leave that worktree wrong:
 
 - `git push <other-worktree-path> <branch>` is refused by default for
   the currently-checked-out branch (`receive.denyCurrentBranch`).
-- `git merge` / `git pull` inside the other worktree obviously
-  mutates its working dir.
 - `git update-ref` from our side advances the ref but leaves the
   other worktree's HEAD/index/working tree divergent — it then
   silently appears "dirty".
 
-The supported direction is the inverse: from the other stream, the
-Git Dashboard's worktrees card lists *our* branch with a
-"Merge into current" action so a human in that stream pulls our
-commits in safely. Tests pin this invariant: the gitMerge sibling-
-worktree test in `crates/oxplow-git/src/lib.rs` (`#[cfg(test)] mod tests`) asserts byte-equal HEAD,
-status, and file content on the sibling after merging *its* branch
+Pulling in stays available from the receiving stream ("Merge into current",
+**Merge in**). The gitMerge sibling-worktree test in
+`crates/oxplow-git/src/lib.rs` (`#[cfg(test)] mod tests`) asserts byte-equal
+HEAD, status, and file content on the sibling after merging *its* branch
 into the primary.
 
 The git provider's `detect` (over `oxplow_git::is_git_repo`) requires the

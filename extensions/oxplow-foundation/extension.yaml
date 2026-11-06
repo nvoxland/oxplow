@@ -1869,6 +1869,13 @@ commands:
     confirm: always
     confirm_says: "Merge {{rev}} into this branch. Nothing is rewritten; any conflicts stop here for you to resolve."
     example: {"stream": "str1", "rev": "main"}
+  - name: vcs.merge_out
+    summary: "Merge a branch out to another stream's branch: `stream` is the stream that receives it, `rev` the branch sent. The result lists any conflicts left after oxplow's smart merge."
+    scope: vcs.write
+    op: merge
+    confirm: always
+    confirm_says: "Merge {{rev}} out to the other stream's branch. Nothing is rewritten; any conflicts stop in that stream's checkout for you to resolve."
+    example: {"stream": "str1", "rev": "feature"}
   - name: vcs.uncommit
     summary: "Take back the stream's last commit (`rev`, whose parent is `parent`): the head returns to `parent` and the commit's changes stay staged. Refused when the head moved on, a remote holds the commit, or a merge or rebase is in progress. This is what Undo on a commit runs."
     scope: vcs.write
