@@ -364,8 +364,10 @@ advisories' queries — reads its own configuration with
   division applies to an integer setting (write `1.0 * config(...)` to divide
   as a real).
 
-oxplow-bundled uses it for its review-policy constants (README "Settings");
+oxplow-bundled uses it for its review-policy constants;
 `oxplow.review_policy.read` / `.write` are its commands over the scope above.
+The holder (`extensions-bundled.md`) keeps the advisories' settings and
+`oxplow.advisory_policy.read` / `.write`.
 Pinned by `extension_sql_config_tests.rs` and
 `datasets::tests::config_reads_become_the_owners_literals`.
 
@@ -460,7 +462,7 @@ over a database file); adversarial and concurrency coverage is still to do.
 >   - **slots** on pages (`oxplow-foundation/diff-view.sections`,
 >     `commit.sections`, `uncommitted-changes.sections`,
 >     `new-session.sections`, `diff.file-header`; oxplow-bundled's
->     `oxplow-bundled/work-item.sections` and `tasks.sections`), **advisories**, per-project **disabling**;
+>     `oxplow-bundled-todo/work-item.sections` and `tasks.sections`), **advisories**, per-project **disabling**;
 >   - page alerts, panels, and extension-declared measures, metrics,
 >     dimensions and fact collectors (see extensions-jobs.md "Contributing metrics");
 >   - whole-page and row actions;

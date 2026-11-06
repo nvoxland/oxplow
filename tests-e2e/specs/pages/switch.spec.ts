@@ -27,12 +27,18 @@ test("only the switched child shows, and changing the param switches it", async 
   await expect(host.getByTestId("node-coast")).toContainText("Dingoes of the coast.");
   await expect(host.getByTestId("node-desert")).toHaveCount(0);
 
+  // A mark on the page's own element: a section switch re-renders it, never mounts it again.
+  await host.getByTestId("page-file").evaluate((el) => el.setAttribute("data-mounted-once", "yes"));
+
   // The rail lists the sections; picking one switches the child.
   await expect(host.getByTestId("page-section-coast")).toHaveAttribute("aria-current", "page");
   await host.getByTestId("page-section-desert").click();
   await expect(host.getByTestId("node-desert")).toContainText("Dingoes of the desert.");
   await expect(host.getByTestId("node-coast")).toHaveCount(0);
   await expect(host.getByTestId("page-section-desert")).toHaveAttribute("aria-current", "page");
+  // The section is the tab's view: its id carries the param, and the page stays mounted.
+  await expect(page.locator('[data-testid^="center-tab-body-"][data-testid$="#area=desert"]:visible')).toHaveCount(1);
+  await expect(host.getByTestId("page-file")).toHaveAttribute("data-mounted-once", "yes");
 
   // A section pushes an entry: Back shows the first child again.
   await page.getByTestId("page-nav-back").filter({ visible: true }).click();

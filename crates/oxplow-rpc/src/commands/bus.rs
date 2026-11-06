@@ -302,10 +302,6 @@ mod tests {
         run("oxplow.agent_session.reopen", json!({ "session": session })).await;
         assert!(!offered(uri).await.contains(&reopen), "open again");
 
-        let thread_uri = oxplow_domain::uri::build::thread_uri(thread);
-        assert!(offered(thread_uri)
-            .await
-            .contains(&"oxplow.handoff.offer".to_string()));
         assert_eq!(
             offered("https://example.com".into()).await,
             Vec::<String>::new()
@@ -331,9 +327,6 @@ mod tests {
         assert_eq!(pull["ui"]["group"], "Git");
         assert_eq!(pull["ui"]["input"], json!({ "stream": "{{stream}}" }));
         assert_eq!(pull["ui"]["background"], true);
-        let new_task = by_id("oxplow.work_item.new").expect("New Task is offered");
-        assert_eq!(new_task["ui"]["form"], "oxplow:oxplow/page?page=new-task");
-        assert_eq!(new_task["ui"]["open_after"], "{{result.uri}}");
         let dashboard = by_id("oxplow.extension.new_dashboard").expect("New Dashboard is offered");
         assert_eq!(
             dashboard["ui"]["open_after"],

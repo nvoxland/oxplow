@@ -1,0 +1,25 @@
+# The rail's Uncommitted panel is a page over the working tree's file list: a
+# folder tree with A/M/D letters, collapsed to a one-line summary, counted by
+# files.
+given:
+  - observe:
+      change:
+        kind: working
+        target: ""
+        files:
+          - { path: src/ui/a.rs, status: modified, additions: 1 }
+          - { path: src/new.rs, status: added, additions: 1 }
+when: { part: oxplow-bundled-todo/uncommitted, params: { stream_id: 1 } }
+expect:
+  loaders:
+    uncommitted:
+      rows:
+        - { id: "d:src", parent: null, label: "src/  AM" }
+        - { id: "f:src/new.rs", parent: "d:src", label: "new.rs  A" }
+        - { id: "d:src/ui", parent: "d:src", label: "ui/  M" }
+        - { id: "f:src/ui/a.rs", parent: "d:src/ui", label: "a.rs  M" }
+steps:
+  - when: { part: oxplow-bundled-todo/uncommitted-line, params: { stream_id: 1 } }
+    expect: { loaders: { uncommitted_line: { rows: [{ label: "1A 1M  +2 −0" }] } } }
+  - when: { part: oxplow-bundled-todo/uncommitted-count, params: { stream_id: 1 } }
+    expect: { loaders: { uncommitted_count: { rows: [{ files: 2 }] } }, badge: 2 }

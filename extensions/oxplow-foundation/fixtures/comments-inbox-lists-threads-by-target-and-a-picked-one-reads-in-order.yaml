@@ -32,3 +32,8 @@ steps:
     expect: { loaders: { conversation: { rows: [{ body: first }, { body: second }] } } }
   - params: { comment: null }
     expect: { loaders: { conversation: { rows: 0 } } }
+  # The row's Resolve action, pressed, takes the thread out of the open list.
+  - press: { action: resolve, node: threads, row: { quote: two } }
+    expect: { ok: true }
+  - params: { days: "0", comment: null }
+    expect: { loaders: { threads: { rows: 0 } } }

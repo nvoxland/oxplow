@@ -1,7 +1,7 @@
 // Moves a person makes in the shell, shared by specs.
 import { expect, type Page } from "@playwright/test";
 
-/** Expand the rail section `id` (`ext:oxplow-bundled/go-to`, `ext:oxplow-bundled/work`) unless it already is — once
+/** Expand the rail section `id` (`ext:<extension>/<panel>`) unless it already is — once
  *  the rail shows the person's stored layout (it's `aria-busy` until then),
  *  so the state read is the one the click acts on. */
 export async function expandRailSection(page: Page, id: string): Promise<void> {
@@ -9,18 +9,6 @@ export async function expandRailSection(page: Page, id: string): Promise<void> {
   const toggle = page.getByTestId(`rail-section-toggle-${id}`);
   if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click();
   await expect(toggle).toHaveAttribute("aria-expanded", "true");
-}
-
-/** Open the New Task page the way a person does: ⇧⌘N, focus outside a
- *  text field. */
-export async function openNewTask(page: Page): Promise<void> {
-  // The page is a page form: it opens once the extensions have loaded, and
-  // a shortcut pressed before that goes nowhere, so press until it shows.
-  await expect(async () => {
-    await page.getByTestId("rail-hud").click({ position: { x: 4, y: 4 } });
-    await page.keyboard.press("ControlOrMeta+Shift+N");
-    await expect(page.getByTestId("viz-form-fields-title")).toBeVisible({ timeout: 2_000 });
-  }).toPass({ timeout: 20_000 });
 }
 
 /** Open the launcher and type `query` into it — once it has the focus: it

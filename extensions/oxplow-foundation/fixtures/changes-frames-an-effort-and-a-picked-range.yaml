@@ -8,9 +8,11 @@ expect:
   loaders:
     row: { rows: [{ subject: effort, end_rev: working, in_progress: 1, effort: eff1 }] }
     # The header reads the row's frame.
-    header: { rows: [{ from_label: "(initial)" }] }
+    header: { rows: [{ what: Effort, from_label: "(initial)" }] }
+  # A part nobody described says so.
+  text: { contains: ["No description."] }
 steps:
   - params: { start: "", end: working }
-    expect: { loaders: { row: { rows: [{ subject: range, effort_id: null }] } } }
+    expect: { loaders: { row: { rows: [{ subject: range, effort_id: null }] }, header: { rows: [{ what: Comparison }] } } }
   - params: { uri: null }
     expect: { loaders: { row: { rows: 0 } } }

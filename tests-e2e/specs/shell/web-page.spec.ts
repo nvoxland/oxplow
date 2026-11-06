@@ -7,7 +7,7 @@ import { openFromLauncher } from "../../support/ui.js";
 // the sandboxed window, so the tab is its status panel.
 test("an http link opens the Web Page tab, labelled by its host", async ({ page, daemon }) => {
   await page.goto("/");
-  await openFromLauncher(page, "Tasks");
+  await openFromLauncher(page, "Suite Home");
   await expect(page.getByTestId("rail-hud")).toHaveAttribute("aria-busy", "false");
   const url = "https://example.com/docs/start";
   await run(daemon, "oxplow.window.navigate", { uri: url, new_tab: true });

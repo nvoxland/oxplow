@@ -10,7 +10,7 @@ CORS is permissive for exactly this (`.context/remote-daemon.md`).
 ## How a run is put together
 
 - **`playwright.config.ts`** (repo root). Its `webServer` builds the frontend
-  once (`vite build`) and serves it with `vite preview` on 127.0.0.1:4173, so a
+  once (`vite build`) and serves it with `vite preview` on 127.0.0.1, on a port of the checkout's own (from its path; `E2E_PORT` overrides it, should two collide), so a
   spec never meets a stale `dist/`.
 - **`support/global-setup.ts`** builds `oxplow-daemon-sim`,
   `oxplow-harness-fake` and `oxplow-provider-fake` and hands their paths to the
@@ -71,7 +71,7 @@ CORS is permissive for exactly this (`.context/remote-daemon.md`).
   - `page` fails any spec whose page threw.
 - **`support/pages.ts`** — `installExtension` writes an extension of the spec's
   own (manifest, pages, component files) into the project and deploys it.
-- **`support/ui.ts`** — a person's moves (`expandRailSection`, `openNewTask`,
+- **`support/ui.ts`** — a person's moves (`expandRailSection`,
   `openFromLauncher` — which waits for the query's own row before Enter).
 - **`specs/<area>/*.spec.ts`** — the specs. Wait with web-first `expect`,
   `waitForModels` or `until`, never a sleep: global setup refuses a spec
@@ -90,17 +90,14 @@ CORS is permissive for exactly this (`.context/remote-daemon.md`).
 
 ## What the specs cover
 
-`shell/` boot and connecting with a token; `work/` tasks, the Board
-(transition, confirm, undo) and launcher search; `knowledge/` the wiki and
-an extension's resource; `code/` a commit's diff; `data/` Explore Data
-(Save as Page), dashboards, extension pages; `settings/`
+`shell/` boot and connecting with a token; `work/` Go To and launcher search; `knowledge/` the comments inbox and
+an extension's resource; `code/` a commit's diff; `data/` extension pages; `settings/`
 Programs approval and the settings pages; `integrations/` the fake tracker
 (configure, Check, Enable, active, Sync Now), Delivery (a failed reaction,
 a person's Retry, Backfill) and Approvals (an effect's destructive step);
-`review/` the verdict chip; `agent/` the Terminal shell; `components/` the github example's PR Lifetimes (frame,
+`review/` the effort page and its verdict chip; `agent/` the Terminal shell; `components/` the github example's PR Lifetimes (frame,
 filters, navigation, approval-gated `invoke`, and a self-navigation off
-this machine sending no request), the task-views example (replacing the
-Board, list and editor) and the triage example (its real `todos` collector
+this machine sending no request) and the triage example (its real `todos` collector
 over the `sorter` provider, decisions from the board and the `todos` page,
 surviving a reload).
 
@@ -149,3 +146,12 @@ expensive.
 
 Still unmeasured: interaction cost (typing, scrolling a large diff, metric
 pages against real data volume) and anything WKWebView-specific.
+
+## Specs that wait in a holder
+
+The specs of pages that live in the turned-off holder extension under
+`.oxplow/extensions/`
+(Tasks, Board, Backlog, the wiki, Timeline, Explore Data, the history
+graph, handoffs, the Dashboards index, the task-views example) are in its
+`e2e-specs/` folder, outside the suite. They come back with
+their page.

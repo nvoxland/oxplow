@@ -1,7 +1,14 @@
 title: Item overview
-description: Every item — the extension's own route page.
+description: Every item, each a link to its page — the extension's own route page. An item whose title starts with `[archived]` is left out.
 category: Work
 loaders:
   items:
-    sql: SELECT title FROM v_e2e_item ORDER BY title
-view: { from: items, viz: table, empty: No items. }
+    sql: SELECT uri, title FROM v_e2e_item WHERE title NOT LIKE '[archived]%' ORDER BY title
+view:
+  from: items
+  viz: table
+  empty: No items.
+  columns:
+  - key: title
+    label: Title
+    link: { kind: page, from: uri }

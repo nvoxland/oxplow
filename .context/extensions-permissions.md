@@ -204,12 +204,12 @@ its scope trace.
   started it. A person's `oxplow.effect.retry` / `backfill` links the
   reaction's run to theirs (`under`) without making it theirs: the
   effect still runs as itself.
-  **Reading it:** the bundled `runs` page (`oxplow-bundled/runs`, titled
+  **Reading it:** the bundled `runs` page (`oxplow-bundled-todo/runs`, titled
   "Extension runs", in the launcher under Activity) lists, per extension
   and for the last 7 days, its runs, failures, denials, mean `cpu_ms` and
   model calls, the ones needing attention first. The Extensions page
   shows each extension's worst current run (`v_extension_run`, `latest =
-  1`). Opening an extension's row (the `oxplow-bundled/extension-runs`
+  1`). Opening an extension's row (the `oxplow-bundled-todo/extension-runs`
   page, which has no category, param `extension`) lists its runs one by one for the same week:
   contribution, version, generation (blank for a run that holds none),
   actor, causing event, outcome, error, wall and CPU time, model calls — the

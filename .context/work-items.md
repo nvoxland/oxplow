@@ -169,7 +169,7 @@ or an item's description editor (`work_item.detail`) — with a
 page or component over `v_work_item` that changes items only through the
 interface commands, so it works with whichever list is active; the person
 picks whose shows (`replacements`, Settings → Integrations).
-[extensions-slots.md](./extensions-slots.md) "Replacements" has the contracts. The `oxplow-bundled/work-item.sections` slot gets
+[extensions-slots.md](./extensions-slots.md) "Replacements" has the contracts. The `oxplow-bundled-todo/work-item.sections` slot gets
 `{ uri }`. Link…'s link type is free text (default `relates_to`): the
 provider names its own types, and `about` fits any URI. Its target is
 **any URI** (a work item's, `oxplow:oxplow/effort?id=eff12`, `oxplow:oxplow/collector?collector=x/y`); a link row

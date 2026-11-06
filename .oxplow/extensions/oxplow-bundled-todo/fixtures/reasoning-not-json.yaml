@@ -1,0 +1,17 @@
+# The model wrote prose: nothing is stored, and the skip says why.
+given:
+  - { command: oxplow.effort.open, input: { thread: thr1 } }
+when:
+  job: reasoning
+  intentKey: "reasoning:eff1"
+  request:
+    schemaVersion: 1
+    role: reasoning
+    messages:
+      - { role: user, parts: [{ type: text, text: "Work item: Add CSV export" }] }
+expect:
+  state: succeeded
+  effects: [{ id: oxplow-bundled-todo/store-reasoning, state: skipped }]
+  commands: []
+model:
+  replies: ["The agent chose the csv crate."]

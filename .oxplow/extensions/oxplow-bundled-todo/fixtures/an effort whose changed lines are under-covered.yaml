@@ -1,0 +1,49 @@
+# The effort's diff coverage, the uncovered changed lines by file (files
+# with none left out, most first), the tests that failed in one of its runs
+# and where they ended, and its test runs.
+given:
+  - { command: oxplow.effort.open, input: { thread: thr1 } }
+  - observe:
+      evidence:
+        effort: eff1
+        observations:
+          - kind: test-run
+            payload:
+              command: bun test
+              passed: 1
+              failed: 1
+              suites:
+                - name: s
+                  cases:
+                    - { classname: a, name: red, status: failed }
+                    - { classname: a, name: ok, status: passed }
+          - kind: test-run
+            payload:
+              command: bun test
+              passed: 1
+              failed: 1
+              suites:
+                - name: s
+                  cases:
+                    - { classname: a, name: red, status: passed }
+                    - { classname: a, name: ok, status: passed }
+          - kind: diff-coverage
+            metric_value: 60.0
+            payload:
+              summaryPct: 60.0
+              changedLines: 10
+              coveredLines: 6
+              files:
+                - { path: src/a.rs, uncoveredChangedLines: [4, 9, 12] }
+                - { path: src/b.rs, uncoveredChangedLines: [] }
+                - { path: src/c.rs, uncoveredChangedLines: [2] }
+when: { part: oxplow-bundled-todo/effort-tests, params: { effort_id: 1 } }
+expect:
+  loaders:
+    effort_coverage: { rows: [{ summary: "**60%** of changed lines covered · 6/10" }] }
+    effort_untested_files:
+      rows:
+        - { path: src/a.rs, uncovered: 3, first_line: 4, lines: "4, 9, 12" }
+        - { path: src/c.rs, uncovered: 1, first_line: 2, lines: "2" }
+    effort_failed_tests: { rows: [{ suite: s, test: "a › red", failed_runs: 1, latest: passed }] }
+    effort_test_runs: { rows: 2 }

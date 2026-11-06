@@ -99,7 +99,7 @@ intent:
       input: { part: data-entity-rows, params: { name: v_work_item } }
       expect: the rows an open entity holds
     - name: data-effect-backfill-says-what-it-would-do
-      input: { part: data-effect-backfill, params: { effect: oxplow-bundled/store-reasoning } }
+      input: { part: data-effect-backfill, params: { effect: review/store-reasoning } }
       expect: a backfill plan for an enabled effect, none for one nothing declares
     - name: recent-commits-lists-the-latest-first
       input: { page: recent-commits }
@@ -1229,20 +1229,20 @@ commands:
     summary: "How many events an `oxplow.effect.backfill` would have an effect react to: the matching ones it never reacted to, the log positions they span (pass `to_seq` to the backfill to run on just these), and how many one run reacts to (`batch`)."
     scope: effects.read
     op: backfill_plan
-    example: {"effect": "oxplow-bundled/infer-reasoning", "since": "2026-10-01T00:00:00Z"}
+    example: {"effect": "review/infer-reasoning", "since": "2026-10-01T00:00:00Z"}
   # effects.run
   - name: effect.backfill
     summary: "Have an effect react to the matching events it never reacted to — those logged before its approval, or while it waited to be approved again — oldest first, once each. The effect may call outside oxplow for every one of them. It runs as it is now; `oxplow.effect.backfill_plan` says how many events that is."
     scope: effects.run
     op: backfill
     confirm: always
-    example: {"effect": "oxplow-bundled/infer-reasoning", "since": "2026-10-01T00:00:00Z"}
+    example: {"effect": "review/infer-reasoning", "since": "2026-10-01T00:00:00Z"}
   - name: effect.retry
     summary: "Have an effect react again to an event its reaction to failed, as its next attempt. If the failed attempt was interrupted with a step outside oxplow under way, that step may already have run: retrying sends it again. It runs the effect as it is now, composing afresh from the event."
     scope: effects.run
     op: retry
     confirm: always
-    example: {"effect": "oxplow-bundled/infer-reasoning", "event": "ev1042"}
+    example: {"effect": "review/infer-reasoning", "event": "ev1042"}
   - name: effect.retry_all
     summary: "Have every effect whose latest reaction failed react again to that event, one by one, as `effect.retry` does one. A reaction that can't run (its effect disabled, its event gone) is reported as refused and the rest still run. Says how many came out right."
     scope: effects.run
@@ -1321,13 +1321,13 @@ commands:
     scope: extensions.enable
     op: enable
     lifecycle: experimental
-    example: {"extension": "oxplow-bundled", "kind": "effect", "contribution": "infer-reasoning"}
+    example: {"extension": "review", "kind": "effect", "contribution": "infer-reasoning"}
   - name: contribution.enable_all
     summary: "Enable every extension contribution that stopped after repeated failures on this machine again — one extension's (`extension`) or all — each as `oxplow.contribution.enable` does it. Returns the rows it enabled."
     scope: extensions.enable
     op: enable_all
     lifecycle: experimental
-    example: {"extension": "oxplow-bundled"}
+    example: {"extension": "review"}
   # files.write
   - name: snapshot.restore_file
     summary: "Restore a captured file (a `file_snapshot` id) into its stream's worktree, overwriting what's at its path now. A person confirms it."

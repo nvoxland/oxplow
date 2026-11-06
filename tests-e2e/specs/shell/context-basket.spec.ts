@@ -6,7 +6,7 @@ import { openFromLauncher } from "../../support/ui.js";
 // × takes it out again.
 test("a page added from its ☰ is counted in the dock and removed from its panel", async ({ page }) => {
   await page.goto("/");
-  await openFromLauncher(page, "Alerts");
+  await openFromLauncher(page, "Suite Home");
   await page.locator('[data-testid="page-nav-menu"]:visible').click();
   await page.getByTestId("menu-item-page-add-to-context").click();
 

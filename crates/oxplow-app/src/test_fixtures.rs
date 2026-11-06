@@ -4,6 +4,17 @@
 
 pub(crate) mod lifecycle;
 
+/// Every shipped extension a project may turn off, for a test of what runs
+/// without them, as a YAML list's items.
+pub(crate) fn optional_shipped() -> String {
+    crate::bundled_extensions::BUNDLED
+        .iter()
+        .filter(|b| !b.required)
+        .map(|b| b.name)
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 /// An extension's errors as the lines a person reads.
 pub(crate) fn shown_errors(ext: &crate::extension::extensions::Extension) -> Vec<String> {
     ext.errors.iter().map(|d| ext.shown(d)).collect()
@@ -456,40 +467,6 @@ pub async fn start_effect(svc: &Arc<crate::Services>, id: &str) {
     crate::effects::start_at_head(&svc.db, id).await.unwrap();
 }
 
-/// Disable collector `extension`/`contribution` for `reason`, as three
-/// failures in a row do; the `contribution.disabled` it logged.
-pub async fn disable_collector(
-    svc: &Arc<crate::Services>,
-    extension: &str,
-    contribution: &str,
-    reason: &str,
-) -> oxplow_domain::StoredEvent {
-    let health = crate::contribution_health::ContributionHealth::new(
-        svc.db.clone(),
-        svc.event_log_store.vocabulary().clone(),
-    );
-    let key = crate::collector_runner::contribution_key(extension, contribution);
-    health.enable(&key, "human").await.unwrap();
-    health.disable(&key, reason).await.unwrap();
-    svc.event_log_store
-        .read_after(0, 10_000)
-        .await
-        .unwrap()
-        .into_iter()
-        .rev()
-        .find(|e| e.envelope.event_type == "contribution.disabled")
-        .expect("the disable is logged")
-}
-
-/// Deliver `event` to the effects, as the pump would.
-pub async fn deliver(svc: &Arc<crate::Services>, event: &oxplow_domain::StoredEvent) {
-    use crate::event_pump::AsyncEventConsumer as _;
-    crate::effect_triggers::EffectTriggers::new(Arc::downgrade(svc))
-        .handle(event)
-        .await
-        .unwrap();
-}
-
 /// The foundation's declared `metrics:` and `dimensions:`, parsed from the
 /// bundled manifest — for a test that seeds the specs the way an activation
 /// would, without a whole `Services`.
@@ -520,29 +497,37 @@ pub(crate) fn foundation_declarations() -> (
     (metrics, dimensions)
 }
 
-/// The code metrics oxplow-bundled declares (its `oxplow.*` metrics), parsed
-/// from the bundled manifest.
-pub(crate) fn code_metrics_declarations() -> Vec<oxplow_config::MetricEntry> {
-    let manifest: serde_yaml::Value = serde_yaml::from_str(include_str!(
-        "../../../extensions/oxplow-bundled/extension.yaml"
-    ))
-    .expect("the bundled manifest parses");
-    let entries: Vec<serde_yaml::Value> =
-        serde_yaml::from_value(manifest.get("metrics").cloned().expect("it declares them"))
-            .expect("metrics parse");
-    let own: Vec<serde_yaml::Value> = entries
-        .into_iter()
-        .filter(|e| {
-            e.get("key")
-                .and_then(|k| k.as_str())
-                .is_some_and(|k| k.starts_with("oxplow."))
-        })
-        .collect();
-    oxplow_config::validate_metrics(
-        Some(serde_yaml::from_value(serde_yaml::Value::Sequence(own)).expect("metrics parse")),
-        oxplow_config::CatalogLayer::Extension(oxplow_config::OXPLOW_NAMESPACE),
-    )
-    .expect("the code metrics validate")
+/// The test-only extension of code-metric collectors, measures and metrics
+/// (`testdata/code-metrics/`): real scripts for the tests of the collector
+/// machinery. It ships nowhere.
+pub(crate) const CODE_METRICS_EXT: &str = "code-metrics";
+
+/// Where [`CODE_METRICS_EXT`]'s source is.
+pub(crate) fn code_metrics_dir() -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/code-metrics")
+}
+
+/// Install [`CODE_METRICS_EXT`] in the project at `project_dir`
+/// (`.oxplow/extensions/code-metrics/`), for the next [`activate`].
+pub(crate) fn install_code_metrics(project_dir: &Path) {
+    fn copy(from: &Path, to: &Path) {
+        std::fs::create_dir_all(to).unwrap();
+        for entry in std::fs::read_dir(from).unwrap() {
+            let entry = entry.unwrap();
+            let target = to.join(entry.file_name());
+            if entry.file_type().unwrap().is_dir() {
+                copy(&entry.path(), &target);
+            } else {
+                std::fs::copy(entry.path(), target).unwrap();
+            }
+        }
+    }
+    copy(
+        &code_metrics_dir(),
+        &project_dir
+            .join(".oxplow/extensions")
+            .join(CODE_METRICS_EXT),
+    );
 }
 
 /// The specs the foundation's metrics resolve to, as an activation seeds them.
@@ -675,12 +660,6 @@ pub async fn run_as_page_in(
     // Pages the conversion inlined into a page as a part named otherwise,
     // or renamed (`pages convert` prints both).
     const NAMED: &[(&str, &str, &str)] = &[
-        ("oxplow-bundled/tasks-list", "tasks", "list"),
-        ("oxplow-bundled/tasks-summary", "tasks", "summary"),
-        ("oxplow-bundled/tasks-backlog", "tasks", "backlog"),
-        ("oxplow-bundled/backlog-add", "backlog", "add"),
-        ("oxplow-bundled/backlog-list", "backlog", "items"),
-        ("oxplow-bundled/board-cards", "board", "board"),
         ("oxplow-foundation/context-waiting", "context", "waiting"),
         (
             "oxplow-foundation/context-delivered",
@@ -751,8 +730,6 @@ pub async fn run_as_page_in(
             "comments",
             "conversation",
         ),
-        ("oxplow-bundled/wiki-visited", "wiki-index", "visited"),
-        ("oxplow-bundled/wiki-pages", "wiki-index", "pages"),
         (
             "oxplow-foundation/settings-overview",
             "settings",
@@ -893,20 +870,6 @@ pub async fn run_as_page_in(
             "diff-view",
             "extensions",
         ),
-        ("oxplow-bundled/wiki-page-body", "wiki-page", "body"),
-        ("oxplow-bundled/wiki-page-info", "wiki-page", "info"),
-        ("oxplow-bundled/wiki-page-refs", "wiki-page", "refs"),
-        ("oxplow-bundled/work-item-state", "work-item", "state"),
-        (
-            "oxplow-bundled/work-item-fields-form",
-            "work-item",
-            "fields",
-        ),
-        ("oxplow-bundled/work-item-body", "work-item", "body"),
-        ("oxplow-bundled/work-item-info", "work-item", "info"),
-        ("oxplow-bundled/work-item-links", "work-item", "links"),
-        ("oxplow-bundled/work-item-comments", "work-item", "comments"),
-        ("oxplow-bundled/work-item-activity", "work-item", "activity"),
         ("oxplow-foundation/commit-detail", "commit", "detail"),
         ("oxplow-foundation/commit-files", "commit", "files"),
         ("oxplow-foundation/metric-header", "metric", "about"),
@@ -926,121 +889,12 @@ pub async fn run_as_page_in(
             "agent-session",
             "agent-session-terminal",
         ),
-        (
-            "oxplow-bundled/interface-tool-calls",
-            "agent-interface",
-            "interface-tool-calls",
-        ),
-        (
-            "oxplow-bundled/interface-commands",
-            "agent-interface",
-            "interface-commands",
-        ),
-        (
-            "oxplow-bundled/interface-hints",
-            "agent-interface",
-            "interface-hints",
-        ),
-        (
-            "oxplow-bundled/change-summary",
-            "change-review",
-            "change-summary",
-        ),
-        (
-            "oxplow-bundled/change-look-here",
-            "change-review",
-            "change-look-here",
-        ),
-        (
-            "oxplow-bundled/change-treemap",
-            "change-review",
-            "change-treemap",
-        ),
-        (
-            "oxplow-bundled/change-functions",
-            "change-review",
-            "change-functions",
-        ),
-        (
-            "oxplow-bundled/change-test-files",
-            "change-review",
-            "change-test-files",
-        ),
-        (
-            "oxplow-bundled/change-co-change",
-            "change-review",
-            "change-co-change",
-        ),
-        (
-            "oxplow-bundled/change-duplicates",
-            "change-review",
-            "change-duplicates",
-        ),
-        (
-            "oxplow-bundled/change-cross-zone-imports",
-            "change-review",
-            "change-cross-zone-imports",
-        ),
-        (
-            "oxplow-bundled/effort-coverage",
-            "effort-tests",
-            "effort-coverage",
-        ),
-        (
-            "oxplow-bundled/effort-untested-files",
-            "effort-tests",
-            "effort-untested-files",
-        ),
-        (
-            "oxplow-bundled/effort-test-runs",
-            "effort-tests",
-            "effort-test-runs",
-        ),
-        (
-            "oxplow-bundled/effort-failed-tests",
-            "effort-tests",
-            "effort-failed-tests",
-        ),
-        (
-            "oxplow-bundled/effort-analysis-findings",
-            "effort-tests",
-            "effort-analysis-findings",
-        ),
-        ("oxplow-bundled/ready-tasks", "planning", "ready-tasks"),
-        ("oxplow-bundled/backlog-tasks", "planning", "backlog-tasks"),
-        ("oxplow-bundled/recent-notes", "planning", "recent-notes"),
-        (
-            "oxplow-bundled/duplicate-blocks",
-            "quality",
-            "duplicate-blocks",
-        ),
-        (
-            "oxplow-bundled/recent-snapshots",
-            "review",
-            "recent-snapshots",
-        ),
-        (
-            "oxplow-bundled/task-token-summary",
-            "task-tokens",
-            "task-token-summary",
-        ),
-        ("oxplow-bundled/task-turns", "task-tokens", "task-turns"),
-        ("oxplow-bundled/token-total", "usage", "token-total"),
-        ("oxplow-bundled/tokens-by-agent", "usage", "tokens-by-agent"),
-        ("oxplow-bundled/tokens-by-day", "usage", "tokens-by-day"),
-        (
-            "oxplow-bundled/page-visits-by-day",
-            "usage",
-            "page-visits-by-day",
-        ),
-        ("oxplow-bundled/top-pages", "usage", "top-pages"),
         ("oxplow-foundation/catalog", "data-catalog", ""),
         (
             "oxplow-foundation/uncommitted",
             "uncommitted-changes",
             "row",
         ),
-        ("oxplow-bundled/board", "board", "row"),
     ];
     let named = NAMED.iter().find(|(l, _, _)| *l == id);
     let (slug, loader_name) = match named {

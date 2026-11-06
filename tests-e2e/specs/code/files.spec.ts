@@ -1,29 +1,12 @@
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { expect, test } from "../../support/fixtures.js";
 import { openFromLauncher } from "../../support/ui.js";
 
-// The Files page is the Directory page at the worktree root: a folder at a time, with a file's
-// actions in its right-click menu (a one-field form is a prompt strip).
-test("the Files page lists the project and renames a file from its menu", async ({ page, daemon }) => {
-  writeFileSync(join(daemon.project, "emu.txt"), "emu\n");
-  await page.goto("/");
-  await openFromLauncher(page, "Files");
-  const row = page.locator('[data-testid="page-file"]:visible').getByRole("button", { name: "emu.txt" }).filter({ visible: true });
-  await expect(row).toBeVisible();
-  await row.click({ button: "right" });
-  await page.getByTestId("menu-item-viz-action-rename").click();
-  const field = page.getByTestId("viz-action-form-fields-to");
-  await field.fill("owl.txt");
-  await field.press("Enter");
-  await expect(page.locator('[data-testid="page-file"]:visible').getByRole("button", { name: "owl.txt" }).filter({ visible: true })).toBeVisible();
-  expect(existsSync(join(daemon.project, "owl.txt"))).toBe(true);
-  expect(existsSync(join(daemon.project, "emu.txt"))).toBe(false);
-});
-
-// New File… creates the file and opens it, as the command's open_after says.
-test("New File… from a file's menu creates the file and opens it", async ({ page, daemon }) => {
+// Which file New File… makes is the foundation's fixture's; that the app
+// opens it in the Editor (the command's open_after) is only seen here.
+test("New File… from a file's menu opens the new file in the Editor", async ({ page, daemon }) => {
   writeFileSync(join(daemon.project, "emu.txt"), "emu\n");
   await page.goto("/");
   await openFromLauncher(page, "Files");
@@ -33,7 +16,6 @@ test("New File… from a file's menu creates the file and opens it", async ({ pa
   await field.fill("kiwi.txt");
   await field.press("Enter");
   await expect(page.locator(".monaco-editor").first()).toBeVisible();
-  expect(existsSync(join(daemon.project, "kiwi.txt"))).toBe(true);
 });
 
 // A folder opens in place: its children are read when it opens, nested

@@ -1,14 +1,12 @@
 manifest: 2
 name: review-badges
-description: The latest model review of each work item, from effort-review, as a list and on the task page.
+description: The latest model review of each work item, from effort-review, as a list.
 engine: ">=0.7"
-requires: [oxplow-bundled]
 version: 0.1.0
 intent:
   purpose: >-
     Show what effort-review's model said about each work item — the latest
-    review, how it ended and when — in one list and on the task's own
-    page. It reads effort-review's exported `reviews` dataset and writes
+    review, how it ended and when — in one list. It reads effort-review's exported `reviews` dataset and writes
     nothing; without effort-review it shows nothing and says why in
     Settings → Extensions.
   origin: null
@@ -16,14 +14,8 @@ intent:
     - name: review-verdicts
       input: { page: review-verdicts }
       expect: no rows until effort-review has reviewed an effort
-    - name: item-review
-      input: { part: item-review, params: { uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow" } }
-      expect: nothing for an item that has no review yet
 # Optional: with effort-review missing, disabled or exporting another
-# version, the two pages below are withheld (a warning in Settings →
+# version, the page below is withheld (a warning in Settings →
 # Extensions) and nothing else changes.
 imports:
   - { id: reviews, contribution: oxplow:oxplow/dataset?dataset=effort-review/reviews, version: 2, optional: true }
-ui:
-  mounts:
-    - { page: item-review, at: oxplow-bundled/work-item.sections }

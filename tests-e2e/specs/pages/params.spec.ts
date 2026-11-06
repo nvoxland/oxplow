@@ -1,39 +1,68 @@
-import { execFileSync } from "node:child_process";
-import { writeFileSync } from "node:fs";
-import { join } from "node:path";
-
 import type { Page } from "@playwright/test";
 
-import { installExample, ipc, until, type Daemon } from "../../support/daemon.js";
+import type { Daemon } from "../../support/daemon.js";
+import { installExtension } from "../../support/pages.js";
 import { expect, test } from "../../support/fixtures.js";
-import { searchLauncher } from "../../support/ui.js";
+import { openFromLauncher } from "../../support/ui.js";
 
-/// Two commits for the commit-history example, indexed, and the example
-/// deployed: a page whose filters narrow its commits and whose rows pick
-/// the `commit` the next section reads.
-async function twoCommits(daemon: Daemon & { project: string }) {
-  const git = (...args: string[]) =>
-    execFileSync("git", ["-c", "user.name=E2E", "-c", "user.email=e2e@example.com", ...args], { cwd: daemon.project, stdio: "ignore" });
-  for (const [file, subject] of [
-    ["numbat.txt", "Add the numbat"],
-    ["wombat.txt", "Add the wombat"],
-  ] as const) {
-    writeFileSync(join(daemon.project, file), `${file}\n`);
-    git("add", file);
-    git("commit", "-q", "-m", subject);
-  }
-  await until("the commits are indexed", 30_000, async () => {
-    const out = await ipc<{ rows: unknown[][] }>(daemon, "query_sql", { sql: "SELECT count(*) FROM v_commit WHERE subject LIKE 'Add the %'" });
-    return out.rows[0]?.[0] === 2;
-  });
-  await installExample(daemon, "commit-history");
-}
+/// A page of the browser suite's own: its rows stand in for commits, and its
+/// filters are the kinds a page declares (a date range with a custom end, a
+/// search, a bool), with `commit` a row's pick that the next section reads.
+const history = `title: Params History
+category: Data
+params:
+- name: range
+  role: filter
+  label: When
+  type: date_range
+  default: 30d
+  presets: [7d, 30d, 90d, all]
+- name: q
+  role: filter
+  label: Search subjects
+  type: search
+- name: merges
+  role: filter
+  label: Merges only
+  type: bool
+  default: false
+- name: commit
+  label: Commit
+loaders:
+  commits:
+    sql: |
+      SELECT sha, subject, parents FROM (
+        SELECT 'c1' AS sha, 'Add the numbat' AS subject, 1 AS parents
+        UNION ALL SELECT 'c2', 'Add the wombat', 1)
+      WHERE (:q IS NULL OR subject LIKE '%' || :q || '%')
+        AND (:merges = 0 OR parents > 1)
+      ORDER BY sha
+  files:
+    sql: SELECT 'file of ' || :commit AS path WHERE :commit IS NOT NULL
+view:
+  stack:
+  - id: commits
+    title: Commits
+    from: commits
+    viz: table
+    columns:
+    - { key: sha, label: Commit, select: commit }
+    - { key: subject, label: Subject, highlight: q }
+    empty: No commits match.
+  - id: files
+    title: Files in the commit
+    from: files
+    viz: table
+    columns: [{ key: path, label: File }]
+    empty: Click a commit to see its files.
+`;
 
-const ROUTE = "oxplow:oxplow/page?page=commit-history/history";
+const ROUTE = "oxplow:oxplow/page?page=e2e-params/history";
 
-async function openHistory(page: Page) {
-  await searchLauncher(page, "Commit history");
-  await page.getByTestId(`launcher-page-${ROUTE}`).click();
+async function openHistory(page: Page, daemon: Daemon) {
+  await installExtension(daemon, "e2e-params", { files: { "pages/history.yaml": history } });
+  await page.goto("/");
+  await openFromLauncher(page, "Params History");
   const host = page.getByTestId("page-host").filter({ visible: true });
   return {
     host,
@@ -47,10 +76,7 @@ async function openHistory(page: Page) {
 /// A page's filters are in its rail, narrowing what it shows; a row click
 /// picks the param the next section reads; the tab keeps both.
 test("the rail's filters narrow a page, a row click shows the next section its pick, and the tab keeps both", async ({ page, daemon }) => {
-  // The window is up while the commits land, as a person's is.
-  await page.goto("/");
-  await twoCommits(daemon);
-  const { body, commits, rail, filters } = await openHistory(page);
+  const { commits, rail, filters } = await openHistory(page, daemon);
   // The rail is the page's one place for controls: its filters as rows
   // (a label beside its value), the selection, and where it comes from.
   await expect(filters.getByTestId("page-param-range-value")).toHaveText("Last 30 days");
@@ -63,8 +89,8 @@ test("the rail's filters narrow a page, a row click shows the next section its p
   await page.getByTestId("page-nav-menu").filter({ visible: true }).click();
   await expect(page.getByTestId("menu-item-action-page-copy")).toBeVisible();
   await page.getByTestId("menu-item-action-page-about").click();
-  await expect(page.getByTestId("page-about-definition")).toHaveText("commit-history/pages/history.yaml");
-  await expect(page.getByTestId("page-about-uri")).toContainText("oxplow:oxplow/page?page=commit-history/history");
+  await expect(page.getByTestId("page-about-definition")).toHaveText("e2e-params/pages/history.yaml");
+  await expect(page.getByTestId("page-about-uri")).toContainText("oxplow:oxplow/page?page=e2e-params/history");
   await page.keyboard.press("Escape");
   await expect(page.getByTestId("page-about-modal")).toHaveCount(0);
 
@@ -116,10 +142,7 @@ test("the rail's filters narrow a page, a row click shows the next section its p
 /// A filter is the page's view and replaces its entry; a pick is a step
 /// and pushes one. Neither remounts the page.
 test("a filter change keeps the page and replaces the entry; a pick pushes one Back undoes", async ({ page, daemon }) => {
-  // The window is up while the commits land, as a person's is.
-  await page.goto("/");
-  await twoCommits(daemon);
-  const { body, commits, filters } = await openHistory(page);
+  const { body, commits, filters } = await openHistory(page, daemon);
   const back = page.getByTestId("page-nav-back").filter({ visible: true });
   await expect(commits).toContainText("Add the wombat");
   await expect(back).toBeDisabled();

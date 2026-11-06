@@ -10,8 +10,8 @@ first, and why?" It shows up on three pages:
 
 Each of those pages shows the change's files. Below that sits the
 **Change Analysis** section, a grid of pages from
-`oxplow-bundled`, the extension that ships with oxplow. Turn the extension off and the pages
-keep just their file lists (see [Pages](pages.md)).
+an extension. It doesn't ship with oxplow right now, so the pages show just their
+file lists (see [Pages](pages.md)).
 
 ## What's in it
 

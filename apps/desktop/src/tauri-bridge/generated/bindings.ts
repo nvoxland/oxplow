@@ -4201,6 +4201,12 @@ export type OxplowConfig = {
 	 */
 	extensions: string[],
 	/**
+	 *  Extensions off for the whole team (`disableExtensions: [...]`), even
+	 *  one sitting in `.oxplow/extensions/`, which is otherwise on. Committed.
+	 *  A person's `enableExtensions` turns one back on for them.
+	 */
+	disableExtensions: string[],
+	/**
 	 *  Where an extension's source is when it isn't
 	 *  `.oxplow/extensions/<name>/` (`extensionSources: { <name>: <folder> }`),
 	 *  relative to the checkout or absolute.

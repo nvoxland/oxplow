@@ -1,0 +1,18 @@
+# Tests Weakened: deleted tests, removed assertions and new skips.
+given:
+  - observe: { turn: { prompt: base, write: { path: tests/it.rs, body: "#[test]\nfn a() {\n    assert_eq!(1, 1);\n    assert!(true);\n}\n\n#[test]\nfn b() {\n    assert!(true);\n}\n" } } }
+  - { command: oxplow.vcs.stage, input: { stream: str1, paths: [tests/it.rs] } }
+  - { command: oxplow.vcs.commit, input: { stream: str1, message: base } }
+  - observe: { turn: { prompt: weaken, write: { path: tests/it.rs, body: "#[test]\n#[ignore]\nfn a() {\n    assert_eq!(1, 1);\n}\n" } } }
+  - { command: oxplow.vcs.stage, input: { stream: str1, paths: [tests/it.rs] } }
+  - { command: oxplow.vcs.commit, input: { stream: str1, message: weaken }, bind: weaken }
+  - observe: { analyze: { kind: commit, sha: $weaken.rev } }
+# The analyzed commit is the first change this oxplow made.
+when: { part: oxplow-bundled-todo/tests-weakened, params: { change_id: 1 } }
+expect:
+  loaders:
+    tests_weakened:
+      rows:
+        - { what: Test deleted, path: tests/it.rs, detail: b }
+        - { what: Fewer assertions, path: tests/it.rs, detail: "3 → 1" }
+        - { what: Tests skipped, path: tests/it.rs, detail: "0 → 1 skip marker" }

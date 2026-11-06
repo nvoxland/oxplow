@@ -2051,15 +2051,15 @@ metrics:                              # the read SPEC (the chartable metric)
   each extension by key, with the project's `use:` layering thresholds
   (collectors' owner is always an extension name):
   - **oxplow's code metrics** live in the bundled extension
-    **oxplow-bundled** (`extensions/oxplow-bundled/extension.yaml`,
+    **oxplow-bundled** (`.oxplow/extensions/oxplow-bundled-todo/extension.yaml`,
     `collectors:` and `metrics:`; scripts under
-    `extensions/oxplow-bundled/collectors/<lang>/*.star`, `<lang>` being
+    `.oxplow/extensions/oxplow-bundled-todo/collectors/<lang>/*.star`, `<lang>` being
     rust, ts, clojure, csharp, or `code` for the language-agnostic ones,
     embedded through `bundled_extensions.rs` like any bundled extension file).
     Nothing is built in: oxplow's own are this extension's. Their scope is `extension:oxplow-bundled`, their collector refs
-    `collector:oxplow-bundled/<id>`. Each is authored through the **public**
+    `collector:oxplow-bundled-todo/<id>`. Each is authored through the **public**
     surface (`files()`/`ast_query()`) — no privileged Rust path — and verified by
-    fixtures in the extension (`extensions/oxplow-bundled/fixtures/`);
+    fixtures in the extension (`.oxplow/extensions/oxplow-bundled-todo/fixtures/`);
     `foundation_collectors_tests.rs` keeps the effort test-outcome collector's
     script (foundation's) honest. Each metric
     names its collector (`collector: <id>`) and the collector declares its

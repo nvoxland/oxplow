@@ -1,0 +1,13 @@
+# An inferred decision is confirmed or dismissed from its row.
+given:
+  - { command: oxplow.effort.open, input: { thread: thr1 } }
+  - command: oxplow.effort.replace_inferred_decisions
+    input: { effort: eff1, decisions: [{ question: Which store?, choice: SQLite }] }
+when: { part: oxplow-bundled-todo/inferred-decisions, params: { effort_id: 1 } }
+expect:
+  loaders: { inferred_decisions: { rows: [{ question: Which store?, choice: SQLite }] } }
+  nodes:
+    - id: inferred_decisions
+      actions:
+        - { label: Confirm, command: oxplow.effort.confirm_decision, row: true }
+        - { label: Dismiss, command: oxplow.effort.dismiss_decision, row: true }

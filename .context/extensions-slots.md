@@ -33,7 +33,7 @@ nothing. A mount is an entry in the mounting extension's manifest:
 ```yaml
 ui:
   mounts:
-    - { page: item-tokens, at: oxplow-bundled/work-item.sections, position: { before: links }, title: Tokens }
+    - { page: item-tokens, at: oxplow-bundled-todo/work-item.sections, position: { before: links }, title: Tokens }
 ```
 
 `slot` is the host's slot name; `page` is a slug of the mounting
@@ -66,8 +66,8 @@ loaders' first rows and params are what a mount can take):
 | Slot | Host page | Params a mount may take |
 |---|---|---|
 | `oxplow-foundation/diff-view.sections` | the Changes page (an effort's or a range's diff; nodes `effort`, `header`, `description`, `verdict`, `concurrent`, `files`, `extensions`) | `uri`, `start`, `end`, `stream_id`, and the page's row (`effort_id`, `change_id`, …) |
-| `oxplow-bundled/work-item.sections` | the Work Item page (nodes `state`, `fields`, `body`, `info`, `links`, `comments`, `activity`) | `uri`, `thread_id`, `stream_id` |
-| `oxplow-bundled/tasks.sections` | the Tasks page (nodes `list`, `summary`, `backlog`; `at: { before: list }` puts a strip above the list) | `show`, `priority`, `thread_id`, `stream_id` |
+| `oxplow-bundled-todo/work-item.sections` | the Work Item page (nodes `state`, `fields`, `body`, `info`, `links`, `comments`, `activity`) | `uri`, `thread_id`, `stream_id` |
+| `oxplow-bundled-todo/tasks.sections` | the Tasks page (nodes `list`, `summary`, `backlog`; `at: { before: list }` puts a strip above the list) | `show`, `priority`, `thread_id`, `stream_id` |
 | `oxplow-foundation/commit.sections` | a commit's page (nodes `detail`, `files`) | `uri`, `sha`, `stream_id`, and `change_id` (the page's row) |
 | `oxplow-foundation/uncommitted-changes.sections` | Uncommitted Changes (nodes `commit`, `files`; `at: { before: commit }` puts a strip above everything) | `stream_id`, and `change_id` (the page's row) |
 | `oxplow-foundation/new-session.sections` | the New Session page (nodes `start`, `earlier`) | `stream_id`, `thread_id`, `q` |

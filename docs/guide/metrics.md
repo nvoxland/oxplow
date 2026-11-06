@@ -175,8 +175,8 @@ that specific piece of work. Configure it once with
 `/oxplow:configure`, which wires each test stack in the project to
 emit reports oxplow can parse.
 
-An effort's tests, coverage, metric changes, and agent nudges show on
-its diff page, from `oxplow-bundled`, the extension that ships with oxplow.
+An effort's tests, coverage, metric changes, and agent nudges on its diff
+page come from an extension that doesn't ship with oxplow right now.
 
 The catch worth knowing: only test runs oxplow can see get recorded.
 If your project's configured command is `make test-report`, a

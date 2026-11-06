@@ -1,0 +1,15 @@
+# Each turn under the effort it fell in; the turns outside any effort
+# (questions, talk) under their own heading.
+given:
+  - { command: oxplow.effort.open, input: { thread: thr1 } }
+  - observe: { turn: { prompt: Build the parser } }
+  - { command: oxplow.effort.close, input: { effort: eff1 } }
+  - observe: { turn: { prompt: What does the lexer do? } }
+when: { page: oxplow-bundled-todo/thread-activity, params: { thread_id: 1 } }
+expect:
+  loaders:
+    thread_activity:
+      rows:
+        - { section: Between efforts, prompt: What does the lexer do? }
+        # Linked to nothing, the effort is titled by its first prompt.
+        - { section: Build the parser, prompt: Build the parser }

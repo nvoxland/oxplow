@@ -41,20 +41,6 @@ async fn ai_roles_and_providers_are_read_live_and_never_show_a_key() {
         ]
     );
 
-    // An active extension's AI profile is a role too, after the built-ins.
-    assert_eq!(
-        rows(
-            &fx,
-            "SELECT role, extension, fallback FROM v_ai_role WHERE extension IS NOT NULL"
-        )
-        .await,
-        vec![vec![
-            json!("oxplow-bundled/reasoning"),
-            json!("oxplow-bundled"),
-            json!("main")
-        ]]
-    );
-
     fx.svc
         .ai
         .save_provider(provider("ts"), Some("sk-very-secret".into()))

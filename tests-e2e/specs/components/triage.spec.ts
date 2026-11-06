@@ -11,9 +11,8 @@ import { expect, test } from "../../support/fixtures.js";
 import { openFromLauncher } from "../../support/ui.js";
 
 // The triage example (`examples/extensions/triage`): its `todos` collector
-// sorts the code's TODO comments with a model, and a TODO is decided from
-// the board's card form or from the `todos` page's `Decide…` row action —
-// in Chromium and WebKit. The model is a TypeSafe (`typesafe` kind)
+// sorts the code's TODO comments with a model, and the board draws the
+// decisions made on them, in Chromium and WebKit. The model is a TypeSafe (`typesafe` kind)
 // provider at a stand-in for Jev's API here, which decides offline.
 
 type JevQuestion = { type: string; criteria?: Record<string, null> };
@@ -79,7 +78,7 @@ async function decisions(daemon: Daemon): Promise<Record<string, string>> {
   return decided;
 }
 
-test("TODOs are sorted by the model, and a decision from the list page survives a reload beside one made earlier", async ({ page, daemon }) => {
+test("TODOs are sorted by the model, and the decisions made survive a reload on the board", async ({ page, daemon }) => {
   const model = await jev();
   try {
     await install(daemon);
@@ -113,20 +112,12 @@ test("TODOs are sorted by the model, and a decision from the list page survives 
     await expect(card(3)).toBeVisible();
     await expect(frame.locator("#status")).toHaveText("");
 
-    // A decision from the board's card form is the example's `ui` fixture's;
-    // here the first is made as the command, so the reload has both.
+    // Decisions from the board's card form, and from the `todos` page's
+    // `Decide…` row, are the example's fixtures'; here they are made as the
+    // command, so the reload has both.
     await run(daemon, "triage.todos.decide", { path: "src/lib.rs", line: 1, decision: "fix-now" });
-
-    // A decision from the `todos` page's `Decide…` row action, in its slideover.
-    await openFromLauncher(page, "TODOs");
-    const list = page.getByTestId("center-tab-body-oxplow:oxplow/page?page=triage/todos");
-    await list.getByRole("row").filter({ hasText: "cleanup" }).locator("td").first().click({ button: "right" });
-    await page.getByTestId("menu-item-viz-action-decide").click();
-    const form = page.getByTestId("viz-action-form");
-    await form.getByTestId("viz-action-form-fields-decision").selectOption("wontfix");
-    await form.getByTestId("viz-action-form-fields-submit").click();
-    await expect(form).toHaveCount(0);
-    await until("the page's decision to be stored", 15_000, async () => (await decisions(daemon))["src/lib.rs:3"] === "wontfix");
+    await run(daemon, "triage.todos.decide", { path: "src/lib.rs", line: 3, decision: "wontfix" });
+    await until("the decisions to be stored", 15_000, async () => (await decisions(daemon))["src/lib.rs:3"] === "wontfix");
 
     // Both survive a reload: the board shows them again.
     await reload(page);

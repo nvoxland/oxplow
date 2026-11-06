@@ -1,0 +1,53 @@
+# The verdict, the first line of an effort's page: did it test, how much of
+# the change ran (judged against the coverage metric's `warnAt`), and
+# what's left to check.
+given:
+  - { command: oxplow.effort.open, input: { thread: thr1 } }
+when: { part: oxplow-bundled-todo/effort-verdict, params: { effort_id: 1 } }
+expect:
+  loaders:
+    effort_verdict:
+      rows:
+        - { text: "Tests: none ran", tone: warning }
+        - { text: "Diff coverage: not measured", tone: null }
+        - { text: "Every claim is backed", tone: success }
+        - { text: "0 decisions made", tone: null }
+steps:
+  # The last run failed, and coverage is under the threshold (80).
+  - given:
+      - observe:
+          evidence:
+            effort: eff1
+            observations:
+              - { kind: test-run, payload: { passed: 4, failed: 0 } }
+              - { kind: test-run, payload: { passed: 3, failed: 1 } }
+              - { kind: diff-coverage, metric_value: 79.6, payload: { summaryPct: 79.6 } }
+      - command: oxplow.effort.replace_inferred_claims
+        input: { effort: eff1, claims: [{ statement: The tests pass., kind: tests_pass }] }
+      - command: oxplow.effort.replace_inferred_decisions
+        input: { effort: eff1, decisions: [{ question: q, choice: c }] }
+  - expect:
+      loaders:
+        effort_verdict:
+          rows:
+            - { text: "Tests: the last run failed (1 of 4)", tone: warning }
+            - { text: "Diff coverage: 80%", tone: warning }
+            - { text: "1 unverified claim", tone: warning }
+            - { text: "1 decision to confirm", tone: warning }
+  # Green, and exactly at the threshold: a threshold is crossed only past it.
+  - given:
+      - observe:
+          evidence:
+            effort: eff1
+            observations:
+              - { kind: test-run, payload: { passed: 3, failed: 1 } }
+              - { kind: test-run, payload: { passed: 4, failed: 0 } }
+              - { kind: diff-coverage, metric_value: 80.0, payload: { summaryPct: 80.0 } }
+  - expect:
+      loaders:
+        effort_verdict:
+          rows:
+            - { text: "Tests: the last of 2 runs passed (4)", tone: success }
+            - { text: "Diff coverage: 80%", tone: success }
+            - { text: "1 unverified claim", tone: warning }
+            - { text: "1 decision to confirm", tone: warning }

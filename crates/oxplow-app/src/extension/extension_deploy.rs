@@ -1123,8 +1123,7 @@ fn turned_off(svc: &Services, name: &str) -> bool {
     let settings = oxplow_config::extension_settings(&svc.layout.project_dir);
     !settings.is_enabled(name)
         && !crate::bundled_extensions::is_required(name)
-        && (settings.personal.disable.iter().any(|n| n == name)
-            || svc.extension_catalog.live().contains_key(name))
+        && (settings.turned_off(name) || svc.extension_catalog.live().contains_key(name))
 }
 
 /// Turn `name` on in the person's layer unless it is on already. True when
@@ -1591,7 +1590,7 @@ pub(crate) async fn stage_sources(svc: &Arc<Services>) -> LiveChanges {
     let mut turned_on = false;
     for name in crate::extension::extensions::known_names(&project, &settings) {
         let source = settings.source(&project, &name);
-        if !source.join("extension.yaml").is_file() || settings.personal.disable.contains(&name) {
+        if !source.join("extension.yaml").is_file() || settings.turned_off(&name) {
             continue;
         }
         let declared = crate::extension::extensions::load_extension_at(&source, &name).permissions;

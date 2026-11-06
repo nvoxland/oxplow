@@ -1,6 +1,4 @@
 # An effort without a work item has nowhere to put a review.
-# (Oxplow's own work list, effort policy and wiki are bundled's.)
-requires: [oxplow-bundled]
 given:
   - { command: oxplow.effort.open, input: { thread: thr1 } }
 when:
@@ -9,5 +7,4 @@ when:
     payload: { effort: "eff1" }
 expect:
   effects: { contains: [{ id: effort-review/review-on-finish, state: skipped }] }
-  # The default extension's own reaction to a finished effort; nothing of the review's.
-  commands: [oxplow.effort.infer_reasoning]
+  commands: []

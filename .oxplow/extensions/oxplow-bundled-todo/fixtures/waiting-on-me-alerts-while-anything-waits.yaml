@@ -1,0 +1,8 @@
+# Waiting on Me raises its alert while anything is waiting on the person: a
+# blocked work item is.
+when: { page: oxplow-bundled-todo/waiting-on-me }
+expect: { alert: { firing: false } }
+steps:
+  - given:
+      - { command: oxplow.work_item.create, input: { title: Stuck, state: blocked, thread: thr1 } }
+  - expect: { alert: { firing: true, message: "Waiting on you: 1" } }

@@ -802,10 +802,11 @@ async fn a_foundation_fixture_runs_without_bundled() {
 async fn a_fixture_requires_the_extensions_it_needs() {
     let dir = tempfile::tempdir().unwrap();
     crate::scaffold(dir.path(), crate::Kind::Command, "notes", None).unwrap();
+    crate::scaffold(dir.path(), crate::Kind::Page, "shelf", None).unwrap();
     let fixture = |requires: &str| {
         format!(
             "{requires}given:
-when: {{ sql: SELECT count(*) > 0 AS here FROM v_page WHERE extension = 'oxplow-bundled' }}
+when: {{ sql: SELECT count(*) > 0 AS here FROM v_page WHERE extension = 'shelf' }}
 expect: {{ rows: [{{ here: 1 }}] }}
 "
         )
@@ -813,7 +814,7 @@ expect: {{ rows: [{{ here: 1 }}] }}
     write(
         dir.path(),
         ".oxplow/extensions/notes/fixtures/basic.yaml",
-        &fixture("requires: [oxplow-bundled]\n"),
+        &fixture("requires: [shelf]\n"),
     );
     let report = test_extension(dir.path(), "notes", false).await.unwrap();
     assert_eq!(report.error_lines(), Vec::<String>::new());

@@ -3,7 +3,11 @@
 // memory — over a throwaway git project, one per worker.
 import { defineConfig, devices } from "@playwright/test";
 
-const PREVIEW = "http://127.0.0.1:4173";
+import { previewPort } from "./tests-e2e/support/port.js";
+
+// Each checkout's own, so worktrees' runs don't collide.
+const PORT = previewPort(process.cwd(), process.env);
+const PREVIEW = `http://127.0.0.1:${PORT}`;
 
 export default defineConfig({
   testDir: "tests-e2e/specs",
@@ -31,7 +35,7 @@ export default defineConfig({
   webServer: {
     // Built once per run, so a spec never meets a stale `dist/`.
     command:
-      "bun run --cwd apps/desktop build && bun run --cwd apps/desktop preview -- --host 127.0.0.1 --port 4173 --strictPort",
+      `bun run --cwd apps/desktop build && bun run --cwd apps/desktop preview -- --host 127.0.0.1 --port ${PORT} --strictPort`,
     url: PREVIEW,
     timeout: 300_000,
     reuseExistingServer: false,

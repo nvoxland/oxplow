@@ -1,0 +1,7 @@
+title: Suite Second
+description: A second page for specs that need two tabs of the shell.
+category: Work
+loaders:
+  line:
+    sql: SELECT 'Suite second' AS line
+view: { from: line, viz: table }

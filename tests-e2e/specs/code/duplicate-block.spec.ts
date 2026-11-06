@@ -12,7 +12,7 @@ test("a duplicate block opens its two files side by side with their ranges marke
   writeFileSync(join(daemon.project, "left.txt"), body);
   writeFileSync(join(daemon.project, "right.txt"), body);
   await page.goto("/");
-  await openFromLauncher(page, "Tasks");
+  await openFromLauncher(page, "Suite Home");
   await expect(page.getByTestId("rail-hud")).toHaveAttribute("aria-busy", "false");
 
   const uri =

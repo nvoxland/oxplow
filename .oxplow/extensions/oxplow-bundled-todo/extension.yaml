@@ -1,0 +1,755 @@
+manifest: 2
+name: oxplow-bundled-todo
+# Its commands are oxplow's own: `oxplow.<area>.<verb>`, like core's.
+namespace: oxplow
+# The datasets and event types it reads are oxplow-bundled's.
+requires: [oxplow-bundled]
+description: What comes with oxplow and hasn't been cleaned up yet; contributions move to oxplow-bundled one piece at a time, and this goes away when none are left. The effort review packet and its verdicts, metric and coverage guidance for the agent, and the usage, quality and change analysis pages.
+engine: ">=0.7"
+# What it reaches beyond the baseline: its effects and commands read with
+# their own SQL, its jobs and effects ask models, its churn collector reads
+# the project's files, and its advisories and skills speak to the agent.
+permissions: [sql.read, files.read, ai.compute, agent.write]
+# Its Explore Data and Timeline components are TypeScript (src/), built into
+# dist/ when oxplow is built and on every deploy; dist/ and node_modules/
+# aren't committed.
+build: { run: "bun install --frozen-lockfile && bun run build", output: dist, exclude: [node_modules] }
+intent:
+  purpose: >-
+    Show what a reviewer must check before accepting an agent's work — the
+    decisions it made, the claims it didn't verify, where it deviated or
+    struggled, the tests it weakened — and how the effort moved the code:
+    coverage and tests, metric deltas and thresholds, churn, duplication and
+    co-change. Steer the agent toward tests and thresholds while the effort
+    is open, and show what is waiting on the person.
+  origin: null
+  examples:
+    - name: an effort that claimed passing tests without a run
+      input: { part: unverified-claims, params: { effort_id: 1 } }
+      expect: the claim listed with no verifying test run
+    - name: settings-lists-a-replaced-component-and-choosing-one-is-a-config-write
+      input: { page: oxplow-foundation/settings, params: { area: integrations } }
+      expect: the history graph's replacement can be chosen
+    - name: merge-readiness-lists-branches-ahead-of-the-stream
+      input: { page: merge-readiness, params: { stream_id: 1 } }
+      expect: nothing is ahead with one branch, so the list is empty
+    - name: remote-branches-lists-the-latest-first
+      input: { page: remote-branches, params: { stream_id: 1 } }
+      expect: the remote's branches newest first, and no local branch
+    - name: a stream with blocked tasks and open follow-ups
+      input: { page: waiting-on-me }
+      expect: the blocked tasks and open follow-up comments, and the Waiting panel's badge firing
+    - name: an effort whose changed lines are under-covered
+      input: { part: effort-tests, params: { effort_id: 1 } }
+      expect: the effort's test runs, its diff coverage and the uncovered changed lines
+    - name: extension runs over the last week
+      input: { page: runs, params: {} }
+      expect: each extension's runs, failures, denials, mean CPU and model calls, the ones needing attention first
+    - name: a metric pushed past its warn threshold during an effort
+      input: { advisory: threshold-crossed }
+      expect: one "⚠ <metric> crossed its warn threshold" line, once per metric
+    - name: repair-files-an-item
+      input: { effect: repair-disabled, event: { type: contribution.disabled } }
+      expect: one repair item filed on the active work list for the disabled contribution
+    - name: repair-comments-on-the-open-item
+      input: { effect: repair-disabled, event: { type: contribution.disabled } }
+      expect: a comment on the contribution's open repair item, not a second item
+    - name: repair-skips-without-a-work-list
+      input: { effect: repair-disabled, event: { type: contribution.disabled } }
+      expect: nothing filed when no work list is running
+    - name: verify-unchecked-files-an-item
+      input: { effect: verify-unchecked, event: { type: oxplow_bundled.accepted, v: 1 } }
+      expect: an acceptance logged at v1, its effort a URI, is read as the current version and still files one follow-up about the effort
+    - name: infer-reasoning-asks
+      input: { effect: infer-reasoning, event: { type: effort.finished } }
+      expect: a finished effort's decisions and claims are asked about when a model serves the reasoning profile
+    - name: infer-reasoning-skips-unbound
+      input: { effect: infer-reasoning, event: { type: effort.finished } }
+      expect: no model bound, nothing is asked and the skip says where to bind one
+    - name: infer-reasoning-request
+      input: { command: oxplow.effort.infer_reasoning }
+      expect: the effort's conversation (each turn's final answer included), tool calls and recorded decisions become one reasoning job keyed by the effort
+    - name: infer-reasoning-nothing-to-read
+      input: { command: oxplow.effort.infer_reasoning }
+      expect: an effort with no turns or tool calls asks nothing
+    - name: reasoning-asked
+      input: { job: reasoning }
+      expect: the model's JSON proposals (decisions and claims) are the job's answer
+    - name: reasoning-stored
+      input: { effect: store-reasoning, event: { type: contribution.job.completed } }
+      expect: the job's proposals replace the effort's inferred decisions and its unreviewed claims
+    - name: reasoning-not-json
+      input: { effect: store-reasoning, event: { type: contribution.job.completed } }
+      expect: a reply in prose is skipped, saying so
+    - name: reasoning-only-claims
+      input: { effect: store-reasoning, event: { type: contribution.job.completed } }
+      expect: a reply with one list still runs both writers, clearing the other's stale proposals
+    - name: reasoning-no-lists
+      input: { effect: store-reasoning, event: { type: contribution.job.completed } }
+      expect: a JSON object with neither list is skipped, saying so
+    - name: waiting-on-me-lists-handoffs-no-agent-is-there-for
+      input: { page: oxplow-bundled-todo/waiting-on-me }
+      expect: a handoff to a thread with no agent session, gone once an agent session is open there
+    - name: comments-panel-counts-open-comments-by-who-acts
+      input: { part: oxplow-bundled-todo/comments-panel, params: { stream_id: 1 } }
+      expect: open notes for the person and followups for the agent, a resolved one not counted, none for another stream
+    - name: work-panel-groups-a-threads-work
+      input: { part: oxplow-bundled-todo/work, params: { thread_id: 1 } }
+      expect: in progress, ready and finished under headings; clearing hides the finished; an effort no item names shows
+    - name: work-count-counts-the-active-item-and-the-ready-ones
+      input: { part: oxplow-bundled-todo/work-count, params: { thread_id: 1 } }
+      expect: the active item and the ready ones, not the finished
+    - name: planning-shows-only-the-active-work-list
+      input: { page: oxplow-bundled-todo/planning }
+      expect: ready and backlog items gone once the work list is none
+    - name: work-shows-only-the-active-work-list
+      input: { part: oxplow-bundled-todo/work, params: { thread_id: 1 } }
+      expect: only the unlinked effort once the work list is none
+    - name: work-count-shows-only-the-active-work-list
+      input: { part: oxplow-bundled-todo/work-count, params: { thread_id: 1 } }
+      expect: the count follows the active work list
+    - name: waiting-on-me-shows-only-the-active-work-list
+      input: { page: oxplow-bundled-todo/waiting-on-me }
+      expect: a blocked item gone once the work list is none
+    - name: struggle-is-five-edits-of-a-file-or-three-failed-commands
+      input: { sql: v_oxplow_bundled_struggle }
+      expect: a file edited five times, or three failed shell commands, is struggle
+    - name: struggle-needs-five-edits-or-three-failures
+      input: { sql: v_oxplow_bundled_struggle }
+      expect: one fewer of each is no struggle
+    - name: a-claim-is-backed-by-evidence-or-its-efforts-latest-clean-run
+      input: { sql: v_oxplow_bundled_claim_status }
+      expect: a claim is backed by cited evidence, or by its effort's latest clean run
+    - name: claim-status-counts-verified-claims-and-leaves-out-dismissed-ones
+      input: { sql: v_oxplow_bundled_claim_status }
+      expect: a verified claim is backed; a dismissed one is not counted
+    - name: the-effort-verdict-says-what-a-reviewer-needs-first
+      input: { part: effort-verdict }
+      expect: the verdict says whether it tested, how much ran and what is left to check
+    - name: accept-refuses-unreviewed-work-unless-forced
+      input: { command: review.accept }
+      expect: accept-refuses-unreviewed-work-unless-forced
+    - name: accept-after-review-needs-no-force
+      input: { command: review.accept }
+      expect: accept-after-review-needs-no-force
+    - name: a-dismissed-claim-does-not-hold-up-accept-until-reopened
+      input: { command: review.accept }
+      expect: a-dismissed-claim-does-not-hold-up-accept-until-reopened
+    - name: an-agent-accepts-a-review-through-a-page-unasked
+      input: { command: review.accept }
+      expect: an-agent-accepts-a-review-through-a-page-unasked
+    - name: accept-asks-a-person-first
+      input: { command: review.accept }
+      expect: unconfirmed, accept runs nothing
+    - name: a-disabled-contribution-files-a-repair-item-and-a-repeat-comments
+      input: { event: contribution.disabled }
+      expect: one repair item while open, a comment on a repeat, a new item once closed
+    - name: a-claim-statement-stays-one-checklist-line
+      input: { command: review.accept }
+      expect: a claim cannot add items to the follow-up
+    - name: a-clean-acceptance-files-nothing
+      input: { command: review.accept }
+      expect: a clean acceptance files nothing
+    - name: request-changes-lists-what-to-fix-and-reopens-the-item
+      input: { command: review.request_changes }
+      expect: a checklist of what to fix, and the item back to ready
+    - name: the-accept-comment-holds-a-claim-as-inert-text
+      input: { command: review.accept }
+      expect: a claim is inert text in the review comment
+    - name: the-request-changes-comment-holds-a-claim-as-inert-text
+      input: { command: review.request_changes }
+      expect: a claim is inert text in the checklist
+    - name: the-review-pages-declare-their-row-actions
+      input: { part: unverified-claims }
+      expect: Mark Verified, Dismiss and Reopen on a claim row
+    - name: inferred-decisions-offer-confirm-and-dismiss
+      input: { part: inferred-decisions }
+      expect: Confirm and Dismiss on an inferred decision
+    - name: the-review-verbs-log-a-typed-verdict
+      input: { command: review.request_changes }
+      expect: each review verb logs its typed verdict, a refused one none
+    - name: the-interest-dataset-scores-a-change-like-the-old-formula
+      input: { sql: v_oxplow_bundled_change_interest }
+      expect: size, complexity spikes, parameter growth and long new functions multiply into a score and its reasons
+    - name: an-efforts-churn-is-a-fact-from-its-change
+      input: { sql: v_fact }
+      expect: a finished effort's churn is the lines its change added and deleted
+    - name: co-change-surprises-come-from-the-commit-index
+      input: { sql: v_oxplow_bundled_change_co_change }
+      expect: a file whose usual partners are missing, or that was dormant 90 days, is a surprise
+    - name: a-verdict-decorates-its-effort
+      input: { sql: v_oxplow_bundled_verdict }
+      expect: "the latest verdict is the effort's label and color — changes requested is red, a forced acceptance orange"
+    - name: the-history-graph-draws-lanes-filters-and-opens-a-commit
+      input: { page: oxplow-foundation/git-history }
+      expect: a row per commit, a lane for a merge's second parent, a filter that dims, a row that opens its commit
+    - name: explore-data-says-why-a-query-is-refused
+      input: { page: explore-data }
+      expect: a refused query shows its reason in the explorer and draws nothing
+    - name: the-component-page-links-its-commands-to-their-definitions
+      input: { page: oxplow-foundation/custom-component, params: { uri: "oxplow:oxplow/custom_component?custom_component=oxplow-bundled-todo/explore-data" } }
+      expect: a component's commands open each command's definition
+    - name: data-effect-backfill-says-what-bundled-effect-would-do
+      input: { part: oxplow-foundation/data-effect-backfill }
+      expect: a bundled effect's backfill says there is nothing to catch up on
+    - name: settings-data-area-lists-bundled-effects
+      input: { page: oxplow-foundation/settings, params: { area: data } }
+      expect: Settings → Data lists bundled's four effects
+    - name: settings-ai-area-lists-bundleds-role
+      input: { page: oxplow-foundation/settings, params: { area: ai } }
+      expect: Settings → AI lists bundled's reasoning role, bound to nothing
+    - name: waiting-on-me-lists-a-question-the-agent-asked
+      input: { page: waiting-on-me }
+      expect: a question the agent's last message asked is waiting on the person until a prompt moves it on
+    - name: what-deviated-lists-files-outside-the-tasks-stated-area
+      input: { part: what-deviated, params: { effort_id: 1 } }
+      expect: files outside the area the task names; none when it names no area
+    - name: review-prompt-names-the-task-and-what-changed
+      input: { part: review-prompt, params: { effort_id: 1 } }
+      expect: the prompt names the task, its files and claims; a foreign work item is named
+    - name: review-starters-read-the-viewers-streams-decisions-and-claims
+      input: { page: recent-decisions }
+      expect: the stream's decisions and unbacked claims, for the viewer's stream only
+    - name: thread-activity-lists-turns-by-effort
+      input: { page: thread-activity, params: { thread_id: 1 } }
+      expect: each turn under its effort; turns outside any effort under their own heading
+    - name: thread-activity-shows-the-context-fill-and-compactions
+      input: { page: thread-activity, params: { thread_id: 1 } }
+      expect: a turn's context fill, of its window when known, and how often it compacted
+    - name: go-to-panel-lists-bookmarks-then-recent-or-most-visited
+      input: { part: go-to-panel, params: { thread_id: 1 } }
+      expect: the thread's bookmarks, then its recent or most visited pages, each once; collapsed, the bookmarks alone
+    - name: uncommitted-panel-is-a-tree-over-the-working-files
+      input: { part: uncommitted, params: { stream_id: 1 } }
+      expect: a folder tree of the working files with A/M/D letters, a one-line summary and a count
+    - name: waiting-on-me-alerts-while-anything-waits
+      input: { page: waiting-on-me }
+      expect: the alert fires, with a count, while anything waits on the person
+    - name: a-forced-acceptance-files-one-verify-follow-up
+      input: { command: oxplow.review.accept, input: { effort: eff1, force: true } }
+      expect: a forced acceptance files one verify checklist item; a second files nothing
+    - name: tests-weakened-reports-deleted-tests-fewer-assertions-and-skips
+      input: { part: tests-weakened }
+      expect: deleted tests, fewer assertions and new skips in a change
+    - name: the-change-review-grid-reads-an-analyzed-commit
+      input: { part: change-review, params: { change_id: 1 } }
+      expect: the summary, the changed functions and the test files of an analyzed commit
+    - name: token-pages-sum-a-tasks-and-a-threads-turns
+      input: { part: task-tokens }
+      expect: a task's turns summed and listed, a thread's total, an idle thread nothing
+    - name: the-plan-pages-show-the-proposed-plans
+      input: { part: effort-plan, params: { effort_id: 1 } }
+      expect: the plans an agent proposed, newest first, under an effort and a thread
+    - name: the-shared-work-pages-show-what-two-threads-hold
+      input: { page: shared-work }
+      expect: items, files and epics shared between threads; the thread and item variants keep their own
+    - name: session-files-group-an-efforts-files-by-session
+      input: { part: session-files, params: { effort_id: 1 } }
+      expect: an effort's files grouped by the session that changed them, shared ones apart
+    - name: the-agent-interface-pages-count-tools-commands-and-hints
+      input: { page: agent-interface }
+      expect: tool calls by tool and harness, an agent's command runs and refusals, and the hints' counts
+    - name: rust-unsafe-blocks-are-counted-per-file-and-tagged-with-their-rule
+      input: { collector: oxplow.rust.unsafe_blocks }
+      expect: Rust — each file with unsafe blocks has one ast_hit fact tagged unsafe_block (src/a.rs has 2, src/b.rs none, the README is skipped)
+    - name: rust-unwrap-and-expect-calls-are-counted
+      input: { collector: oxplow.rust.unwrap_expect_calls }
+      expect: Rust — unwrap and expect calls are counted per file
+    - name: rust-panic-todo-and-path-qualified-panic-macros-are-counted
+      input: { collector: oxplow.rust.panic_macros }
+      expect: Rust — panic!, todo! and std — —panic! count (the scoped form too)
+    - name: ts-any-annotations-are-counted
+      input: { collector: oxplow.ts.any_usage }
+      expect: TypeScript — every `any` annotation counts
+    - name: ts-non-null-assertions-are-counted
+      input: { collector: oxplow.ts.non_null_assertions }
+      expect: TypeScript — non-null assertions count
+    - name: ts-console-calls-are-counted-including-namespaced-ones
+      input: { collector: oxplow.ts.console_calls }
+      expect: TypeScript — console calls count, window.console too
+    - name: ts-ignore-and-expect-error-comments-are-counted
+      input: { collector: oxplow.ts.ts_ignore }
+      expect: TypeScript — @ts-ignore and @ts-expect-error comments count
+    - name: doc-coverage-is-documented-public-over-public
+      input: { collector: oxplow.doc_coverage }
+      expect: one ratio fact per file — documented public functions over public ones
+    - name: clojure-defn-count-counts-heads-only
+      input: { collector: oxplow.clojure.defn_count }
+      expect: defn and defn- heads count; a local named defn does not
+    - name: every-function-gets-a-complexity-fact-across-languages
+      input: { collector: oxplow.high_complexity_fns }
+      expect: one complexity fact per function in every language
+    - name: every-function-gets-a-length-fact-across-languages
+      input: { collector: oxplow.long_functions }
+      expect: one length fact per function in every language
+    - name: every-function-gets-a-parameter-count-fact
+      input: { collector: oxplow.fn_count }
+      expect: one parameter-count fact per function
+    - name: todo-and-fixme-comments-are-counted-across-languages
+      input: { collector: oxplow.todos }
+      expect: one todo fact per marker comment; a README is not source
+    - name: csharp-empty-catch-blocks-are-counted
+      input: { collector: oxplow.csharp.empty_catch }
+      expect: C# — empty catch blocks count
+    - name: csharp-blocking-async-calls-are-counted
+      input: { collector: oxplow.csharp.blocking_async_calls }
+      expect: C# — .Result and invoked .Wait() count, a method-group reference does not
+    - name: duplicate-lines-restates-both-sides-of-every-duplicate-block
+      input: { collector: oxplow.duplicate_lines }
+      expect: both sides of a duplicate block are facts on their own block
+    - name: board-lists-work-items-by-scope
+      input: { page: board, params: { show: thread, thread_id: 1 } }
+      expect: the thread's cards, the backlog's or all of them by the scope; the row names the scope drawn
+    - name: wiki-page-reads-its-body-even-before-it-is-written
+      input: { page: wiki-page, params: { slug: otters } }
+      expect: the body of a written page and of a slug not written yet, freshness, no references
+    - name: work-item-page-reads-the-item-its-links-and-its-comments
+      input: { page: work-item, params: { uri: "<the item's uri>", thread_id: 1 } }
+      expect: the item, its gated buttons, its links from both ends, its comments
+    - name: work-item-states-name-where-a-transition-may-go
+      input: { query: 'work-item#work_item_states' }
+      expect: each state a transition may move an item to, with its plain name
+    - name: backlog-lists-items-on-no-thread-with-epics-and-search
+      input: { page: backlog, params: { q: "", thread_id: 1 } }
+      expect: x
+    - name: tasks-lists-its-scope-by-state-with-epics-and-a-summary
+      input: { page: tasks, params: { show: thread, priority: any, thread_id: 1, stream_id: 1 } }
+      expect: the scope's items by state with epics nested, the priority filter keeping an epic for its child, the last five done, the summary's counts
+    - name: the-slot-page-links-the-mounted-page-and-its-host
+      input: { page: slot, params: { uri: "oxplow:oxplow/slot?slot=oxplow-bundled-todo/oxplow-bundled-todo.tasks.sections-0" } }
+      expect: the page a slot mount shows, the page that hosts it and the slot
+    - name: done-work-lists-closed-items-latest-first
+      input: { page: done-work }
+      expect: the done-work page lists what its loaders read
+    - name: wiki-index-lists-pages-newest-change-first-and-searches
+      input: { page: wiki-index }
+      expect: the wiki-index page lists what its loaders read
+    - name: wiki-freshness-lists-the-files-a-page-cites
+      input: { page: wiki-freshness }
+      expect: the wiki-freshness page lists what its loaders read
+    - name: the-slot-page-links-to-its-extension
+      input: { page: slot, params: { uri: 'oxplow:oxplow/slot?slot=oxplow-bundled-todo/oxplow-bundled-todo.tasks.sections-0' } }
+      expect: its see-also links name the extension that declares it
+    - name: the-work-item-page-links-to-its-board-efforts-and-parent-epic
+      input: { page: work-item, params: { uri: 'oxplow:oxplow/work_item?id=tsk1&provider=oxplow' } }
+      expect: its see-also links open the board (or backlog), its efforts and its parent epic
+    - name: the-wiki-page-links-to-the-wiki-and-the-pages-that-link-to-it
+      input: { page: wiki-page, params: { uri: 'oxplow:oxplow/wiki?slug=otters', slug: otters } }
+      expect: its see-also links open the wiki and the work that links to it
+    - name: the-slot-page-says-what-it-is-in-a-paragraph-above-its-facts
+      input: { page: slot, params: {uri:"oxplow:oxplow/slot?slot=oxplow-bundled-todo/oxplow-bundled-todo.tasks.sections-0"} }
+      expect: its description is a paragraph above the facts
+    - name: dashboards-list-the-dashboard-pages
+      input: { page: dashboards }
+      expect: the dashboards index lists the page-file dashboards and offers a title form
+    - name: the-timeline-draws-the-projects-activity-and-titles-itself
+      input: { page: timeline }
+      expect: the timeline draws items, titles itself and offers Today and Fit; Fit writes from and to
+ui:
+  mounts:
+    - { page: thread-handoffs-in, at: oxplow-bundled-todo/tasks.sections, position: { before: list } }
+    - { page: thread-handoffs-out, at: oxplow-bundled-todo/tasks.sections, position: { before: list } }
+    - { page: extension-runs, at: oxplow-foundation/extension.runs }
+    - { page: change-review, at: oxplow-foundation/diff-view.sections }
+    - { page: change-review, at: oxplow-foundation/commit.sections }
+    - { page: change-review, at: oxplow-foundation/uncommitted-changes.sections }
+    - { page: effort-tests, at: oxplow-foundation/diff-view.sections }
+    - { page: effort-metric-deltas, at: oxplow-foundation/diff-view.sections }
+    - { page: effort-nudges, at: oxplow-foundation/diff-view.sections }
+    - { page: effort-plan, at: oxplow-foundation/diff-view.sections }
+    - { page: task-tokens, at: oxplow-bundled-todo/work-item.sections }
+    - { page: thread-tokens, at: oxplow-bundled-todo/tasks.sections, position: { before: list } }
+    - { page: thread-plan, at: oxplow-bundled-todo/tasks.sections, position: { before: list } }
+    - { page: thread-shared-work, at: oxplow-bundled-todo/tasks.sections, position: { before: list } }
+    - { page: item-shared-work, at: oxplow-bundled-todo/work-item.sections }
+    - { page: file-co-change, at: oxplow-foundation/diff.file-header }
+    - { page: decisions, at: oxplow-foundation/diff-view.sections }
+    - { page: inferred-decisions, at: oxplow-foundation/diff-view.sections }
+    - { page: unverified-claims, at: oxplow-foundation/diff-view.sections }
+    - { page: what-deviated, at: oxplow-foundation/diff-view.sections }
+    - { page: tests-weakened, at: oxplow-foundation/diff-view.sections }
+    - { page: tests-weakened, at: oxplow-foundation/commit.sections }
+    - { page: tests-weakened, at: oxplow-foundation/uncommitted-changes.sections }
+    - { page: struggled, at: oxplow-foundation/diff-view.sections }
+    - { page: session-files, at: oxplow-foundation/diff-view.sections }
+    - { page: context-read, at: oxplow-foundation/diff-view.sections }
+    - { page: review-prompt, at: oxplow-foundation/diff-view.sections }
+    # Git History's commits drawn as a graph, in place of oxplow's plain
+    # list (`vcs.history.graph`, a target no provider binds). It only shows
+    # and opens commits, so it isn't a program to approve.
+    - { page: history-graph, at: vcs.history.graph, version: 2 }
+    # The effort's verdict on its page (`effort.verdict`): core has none;
+    # this is oxplow's default review policy's, and another may replace it.
+    - { page: effort-verdict, at: effort.verdict, version: 1 }
+custom_components:
+  # Explore Data: an SQL box and a viz picker over the datasets; oxplow draws
+  # the result under it with its own components (`showView`: an inline page).
+  # Built from src/ into dist/ (bun build, no dependencies).
+  - { id: explore-data, title: Explore Data, bundle: dist/explore-data, sql: read, commands: [oxplow.page.draft_with_agent], description: "An SQL box and a viz picker over the datasets, to try a query and see its result drawn." }
+  # Efforts, sessions, threads and commits on a zoomable time axis
+  # (vis-timeline, which the kit has no viz for).
+  - { id: timeline, title: Timeline, bundle: dist/timeline, sql: read, description: "Efforts, sessions, threads and commits on a zoomable time axis." }
+  - { id: history-graph, title: History graph, description: "The commits of the project drawn as lanes by branch, with filters by message, author and branch." }
+panels:
+  - { id: go-to, title: Go To, icon: compass, scope: thread, body: go-to-panel, collapsed: go-to-bookmarks, open: 'oxplow:oxplow/page?page=go-to' }
+  - { id: waiting, title: Waiting on You, icon: bell, scope: project, body: waiting-on-me, badge: waiting-on-me }
+  - { id: comments, title: Comments, icon: message-square, scope: stream, body: comments-panel, open: 'oxplow:oxplow/page?page=comments' }
+  - { id: uncommitted, title: Uncommitted, icon: git-branch, scope: stream, body: uncommitted, collapsed: uncommitted-line, count: uncommitted-count, open: 'oxplow:oxplow/page?page=uncommitted-changes' }
+  - { id: work, title: Work, icon: list-checks, scope: thread, body: work, collapsed: work-line, count: work-count, open: 'oxplow:oxplow/page?page=tasks' }
+advisories:
+  # Work grown large with nothing committed: an open effort holding many
+  # files (a commit landing its work would have closed it). Once per effort,
+  # raised at a turn's end and heard at the next prompt.
+  - id: large-uncommitted
+    on: turn-end
+    once_per: effort
+    query: |
+      SELECT printf(
+               'This effort has changed %d files and none of it is committed. If part of it '
+               || 'is done, committing that part makes it reviewable; oxplow closes the effort '
+               || 'when a commit lands its work.', count(DISTINCT f.path)) AS message
+      FROM v_effort e JOIN v_effort_file f ON f.effort_id = e.id
+      WHERE e.id = :effort_id AND e.ended_at IS NULL
+      HAVING count(DISTINCT f.path) >= config('/largeUncommitted/files')
+  # An item still in progress though a commit landed its work (closing its
+  # effort), with nothing open on it now: the person may want to mark it
+  # done. Once per item; oxplow never marks anything done itself.
+  - id: landed-in-progress
+    on: turn-end
+    audience: person
+    once_per: row
+    query: |
+      SELECT w.uri AS key,
+             '“' || w.title || '” is still in progress, but a commit landed its work. '
+             || 'Mark it done if it is.' AS message
+      FROM v_effort e JOIN v_work_item w ON w.uri = e.work_item
+      WHERE e.thread_id = :thread_id AND e.closed_by = 'commit' AND w.state = 'in_progress'
+        AND NOT EXISTS (SELECT 1 FROM v_effort o WHERE o.work_item = w.uri AND o.ended_at IS NULL)
+      GROUP BY w.uri
+  # How code metrics moved this effort, every prompt while any moved.
+  # Operational metrics (tokens, cycle time, …) grow every turn and aren't
+  # code-health signals, so they're left out.
+  - id: metric-deltas
+    on: prompt
+    once_per: turn
+    heading: "# Metric deltas (this effort)"
+    query: |
+      WITH d AS (
+        SELECT key,
+               '- ' || title || ': '
+               || (CASE WHEN coalesce(baseline, current) = CAST(coalesce(baseline, current) AS INTEGER)
+                        THEN printf('%d', CAST(coalesce(baseline, current) AS INTEGER))
+                        ELSE printf('%.1f', coalesce(baseline, current)) END)
+               || ' → '
+               || (CASE WHEN current = CAST(current AS INTEGER) THEN printf('%d', CAST(current AS INTEGER))
+                        ELSE printf('%.1f', current) END)
+               || (CASE WHEN unit IS NULL OR unit = '' THEN '' WHEN unit = '%' THEN '%' ELSE ' ' || unit END)
+               || (CASE WHEN delta IS NULL THEN ''
+                        ELSE ' (Δ ' || (CASE WHEN delta < 0 THEN '-' ELSE '+' END)
+                             || (CASE WHEN abs(delta) = CAST(abs(delta) AS INTEGER)
+                                      THEN printf('%d', CAST(abs(delta) AS INTEGER))
+                                      ELSE printf('%.1f', abs(delta)) END) || ')' END) AS line
+        FROM v_effort_metric_delta
+        WHERE effort_id = :effort_id AND changed = 1 AND kind <> 'event'
+          AND key NOT LIKE 'agent.%' AND key NOT LIKE 'effort.%' AND key NOT LIKE 'task.%'
+      )
+      SELECT message FROM (
+        SELECT 0 AS o, key, line AS message FROM d
+        UNION ALL
+        SELECT 1, '', '(Advisory — for awareness, not gating.)' WHERE EXISTS (SELECT 1 FROM d)
+      )
+      ORDER BY o, key
+  # A metric this effort pushed past its warn/fail threshold, once per metric.
+  - id: threshold-crossed
+    on: prompt
+    once_per: row
+    heading: "# Metric thresholds"
+    query: |
+      SELECT :effort_id || ':' || key AS key,
+             '⚠ ' || title || ' crossed its ' || crossing || ' threshold'
+             || coalesce(' (' || (CASE WHEN t = CAST(t AS INTEGER) THEN printf('%d', CAST(t AS INTEGER))
+                                       ELSE printf('%.1f', t) END) || ')', '')
+             AS message
+      FROM (SELECT *, CASE WHEN crossing = 'fail' THEN fail_at ELSE warn_at END AS t
+            FROM v_effort_metric_delta)
+      WHERE effort_id = :effort_id AND crossing IS NOT NULL AND kind <> 'event'
+        AND key NOT LIKE 'agent.%' AND key NOT LIKE 'effort.%' AND key NOT LIKE 'task.%'
+      ORDER BY key
+  # A hint that ran a hundred times and never once spoke is dead weight, or
+  # watching for something that can't happen here. Once per hint; this one
+  # is left out of its own count.
+  - id: hint-never-fires
+    on: turn-end
+    audience: person
+    once_per: row
+    query: |
+      SELECT hint AS key,
+             'The hint ' || hint || ' has been evaluated ' || sum(evaluated)
+             || ' times and has never fired. Its condition may be one this project never meets; '
+             || 'see Agent Interface → Hints.' AS message
+      FROM v_hint_stat
+      WHERE hint <> 'oxplow-bundled-todo/hint-never-fires'
+      GROUP BY hint
+      HAVING sum(evaluated) >= 100 AND sum(fired) = 0
+  # Two open efforts on different threads that changed the same file within
+  # the window: duplicate or colliding work, shown to the person once per
+  # pair of threads. Either thread's turn end can raise it; the Alert that
+  # exists already (its text opens with the pair) silences the other. It
+  # never refuses anything: an item stays with its thread.
+  - id: shared-files
+    on: turn-end
+    audience: person
+    once_per: row
+    query: |
+      WITH recent AS (
+        SELECT c.thread_id, c.path
+        FROM v_tool_call c JOIN v_effort e ON e.id = c.effort_id AND e.ended_at IS NULL
+        WHERE c.kind = 'edit' AND c.path IS NOT NULL
+          AND julianday(c.at) >= julianday('now') - config('/sharedFiles/windowMinutes') / 1440.0
+        GROUP BY c.thread_id, c.path
+      ), shared AS (
+        SELECT min(a.thread_id, b.thread_id) AS lo, max(a.thread_id, b.thread_id) AS hi, a.path
+        FROM recent a JOIN recent b ON b.path = a.path AND b.thread_id <> a.thread_id
+        WHERE a.thread_id = :thread_id
+        GROUP BY 1, 2, 3
+      ), pairs AS (
+        SELECT lo, hi,
+               '“' || (SELECT title FROM v_thread WHERE id = lo) || '” and “'
+                   || (SELECT title FROM v_thread WHERE id = hi) || '” both changed ' AS lead,
+               (SELECT group_concat(path, ', ') FROM
+                 (SELECT path FROM shared s WHERE s.lo = p.lo AND s.hi = p.hi ORDER BY path LIMIT 5)) AS files
+        FROM (SELECT DISTINCT lo, hi FROM shared) p
+      )
+      SELECT lo || '-' || hi AS key,
+             lead || files || '. Two threads on the same files may duplicate or collide; '
+             || 'nothing stops either, and each item stays on its own thread.' AS message
+      FROM pairs
+      WHERE NOT EXISTS (SELECT 1 FROM v_agent_nudge n
+                         WHERE n.kind = 'oxplow-bundled-todo/shared-files'
+                           AND substr(n.message, 1, length(pairs.lead)) = pairs.lead)
+  # The same overlap, said to the agent once per thread: what to look at
+  # before duplicating the other thread's work.
+  - id: shared-files-agent
+    on: turn-end
+    once_per: thread
+    query: |
+      WITH recent AS (
+        SELECT c.thread_id, c.path
+        FROM v_tool_call c JOIN v_effort e ON e.id = c.effort_id AND e.ended_at IS NULL
+        WHERE c.kind = 'edit' AND c.path IS NOT NULL
+          AND julianday(c.at) >= julianday('now') - config('/sharedFiles/windowMinutes') / 1440.0
+        GROUP BY c.thread_id, c.path
+      ), shared AS (
+        SELECT b.thread_id AS other, a.path
+        FROM recent a JOIN recent b ON b.path = a.path AND b.thread_id <> a.thread_id
+        WHERE a.thread_id = :thread_id
+      )
+      SELECT 'Another thread’s open effort (“' || (SELECT title FROM v_thread WHERE id = other)
+             || '”) also changed ' || group_concat(path, ', ')
+             || '. Read the handoffs to or from that thread (v_handoff, thread_id = ' || other
+             || ') before duplicating its work. '
+             || 'oxplow.handoff.send hands the overlap over; the work item you are on stays with this thread until a handoff of it is taken.' AS message
+      FROM (SELECT other, path FROM shared ORDER BY path)
+      GROUP BY other
+measures:
+  - key: oxplow_bundled.effort_churn_lines
+    description: "Lines an effort added and removed."
+    unit: lines
+    subjectKind: effort
+    temporalSemantics: additive
+    fold: sum
+  - {"key": "oxplow.todo", "title": "TODO markers", "unit": "count", "subjectKind": "file", "temporalSemantics": "semi-additive", "fold": "last", "captureScope": "per-path", "description": "A TODO or FIXME marker in a file."}
+  - {"key": "oxplow.duplicate_lines", "title": "Duplicated lines", "unit": "lines", "subjectKind": "symbol", "temporalSemantics": "semi-additive", "fold": "last", "captureScope": "complete", "description": "Lines that the project's files repeat."}
+  - {"key": "oxplow.ast_hit", "title": "AST idiom hits", "unit": "count", "subjectKind": "file", "temporalSemantics": "semi-additive", "fold": "last", "captureScope": "per-path", "description": "A match of a rule that looks for an idiom in code, such as an `unwrap` call."}
+  - {"key": "oxplow.doc_coverage", "title": "Doc coverage", "unit": "%", "subjectKind": "file", "temporalSemantics": "semi-additive", "fold": "last", "captureScope": "per-path", "description": "Share of a file's items that have a doc comment."}
+metrics:
+  - key: oxplow_bundled.effort_churn_lines
+    title: Effort churn
+    measure: oxplow_bundled.effort_churn_lines
+    expression: "SUM(value)"
+    unit: lines
+    direction: neutral
+    displayKind: gauge
+    description: Lines each finished effort's change added and deleted.
+  - { key: oxplow.todos, title: "TODO / FIXME markers", measure: oxplow.todo, expression: "COUNT(*)", unit: "count", direction: lower-better, displayKind: gauge, category: static-quality, description: "TODO/FIXME/HACK/XXX/BUG markers in comments, across all languages.", sliceableDims: [oxplow.package, oxplow.language, oxplow.vcs_rev], collector: oxplow.todos }
+  - { key: oxplow.fn_count, title: "function count", measure: oxplow.parameter_count, expression: "COUNT(*)", unit: "count", direction: neutral, displayKind: gauge, category: static-quality, description: "Total functions / methods defined, across all languages.", sliceableDims: [oxplow.package, oxplow.language, oxplow.vcs_rev], collector: oxplow.fn_count }
+  - { key: oxplow.high_complexity_fns, title: "high-complexity functions", measure: oxplow.complexity, expression: "COUNT(*) FILTER (WHERE value >= 11)", unit: "count", direction: lower-better, displayKind: gauge, category: static-quality, description: "Functions whose cyclomatic complexity exceeds the threshold, across all languages.", sliceableDims: [oxplow.package, oxplow.language, oxplow.vcs_rev], collector: oxplow.high_complexity_fns }
+  - { key: oxplow.long_functions, title: "long functions (>60 lines)", measure: oxplow.fn_length, expression: "COUNT(*) FILTER (WHERE value >= 61)", unit: "count", direction: lower-better, displayKind: gauge, category: static-quality, description: "Functions longer than 60 lines, across all languages.", sliceableDims: [oxplow.package, oxplow.language, oxplow.vcs_rev], collector: oxplow.long_functions }
+  - { key: oxplow.doc_coverage, title: "Doc coverage", measure: oxplow.doc_coverage, expression: "RATIO(num, den)", unit: "%", direction: higher-better, displayKind: coverage, category: coverage, description: "% of public functions/methods carrying a doc comment (or docstring), across all languages.", sliceableDims: [oxplow.package, oxplow.language, oxplow.vcs_rev], collector: oxplow.doc_coverage, default: off }
+  - { key: oxplow.duplicate_lines, title: "Duplicated lines", measure: oxplow.duplicate_lines, expression: "SUM(value)", unit: "lines", direction: lower-better, displayKind: findings, category: static-quality, description: "Lines in blocks duplicated elsewhere in the tree, both sides of each copy.", sliceableDims: [oxplow.vcs_rev], collector: oxplow.duplicate_lines, default: off }
+  - { key: oxplow.rust.unsafe_blocks, title: "unsafe blocks", measure: oxplow.ast_hit, expression: "SUM(value) FILTER (WHERE dim('oxplow.rule') = 'unsafe_block')", unit: count, direction: lower-better, displayKind: gauge, category: static-quality, language: rust, description: "Count of `unsafe` blocks in the codebase.", sliceableDims: [oxplow.package, oxplow.language, oxplow.vcs_rev], target: 0.0, collector: oxplow.rust.unsafe_blocks, default: off }
+  - { key: oxplow.rust.unwrap_expect_calls, title: "unwrap / expect calls", measure: oxplow.ast_hit, expression: "SUM(value) FILTER (WHERE dim('oxplow.rule') = 'unwrap_expect')", unit: count, direction: lower-better, displayKind: gauge, category: static-quality, language: rust, description: "Calls to `.unwrap()` / `.expect()` that can panic at runtime.", sliceableDims: [oxplow.package, oxplow.language, oxplow.vcs_rev], collector: oxplow.rust.unwrap_expect_calls, default: off }
+  - { key: oxplow.rust.panic_macros, title: "panic-family macros", measure: oxplow.ast_hit, expression: "SUM(value) FILTER (WHERE dim('oxplow.rule') = 'panic_macro')", unit: count, direction: lower-better, displayKind: gauge, category: static-quality, language: rust, description: "Uses of `panic!` / `unreachable!` / `todo!` and similar panic macros.", sliceableDims: [oxplow.package, oxplow.language, oxplow.vcs_rev], collector: oxplow.rust.panic_macros, default: off }
+  - { key: oxplow.ts.any_usage, title: "any usage", measure: oxplow.ast_hit, expression: "SUM(value) FILTER (WHERE dim('oxplow.rule') = 'any_usage')", unit: count, direction: lower-better, displayKind: gauge, category: static-quality, language: typescript, description: "Uses of the `any` type.", sliceableDims: [oxplow.package, oxplow.language, oxplow.vcs_rev], collector: oxplow.ts.any_usage, default: off }
+  - { key: oxplow.ts.non_null_assertions, title: "non-null assertions", measure: oxplow.ast_hit, expression: "SUM(value) FILTER (WHERE dim('oxplow.rule') = 'non_null_assertion')", unit: count, direction: lower-better, displayKind: gauge, category: static-quality, language: typescript, description: "Non-null assertions (`!`).", sliceableDims: [oxplow.package, oxplow.language, oxplow.vcs_rev], collector: oxplow.ts.non_null_assertions, default: off }
+  - { key: oxplow.ts.console_calls, title: "console.* calls", measure: oxplow.ast_hit, expression: "SUM(value) FILTER (WHERE dim('oxplow.rule') = 'console_call')", unit: count, direction: lower-better, displayKind: gauge, category: static-quality, language: typescript, description: "Calls to `console.*`.", sliceableDims: [oxplow.package, oxplow.language, oxplow.vcs_rev], collector: oxplow.ts.console_calls, default: off }
+  - { key: oxplow.ts.ts_ignore, title: "ts-ignore / ts-expect-error", measure: oxplow.ast_hit, expression: "SUM(value) FILTER (WHERE dim('oxplow.rule') = 'ts_ignore')", unit: count, direction: lower-better, displayKind: gauge, category: static-quality, language: typescript, description: "`@ts-ignore` / `@ts-expect-error` suppressions.", sliceableDims: [oxplow.package, oxplow.language, oxplow.vcs_rev], collector: oxplow.ts.ts_ignore, default: off }
+  - { key: oxplow.clojure.defn_count, title: "defn count", measure: oxplow.ast_hit, expression: "SUM(value) FILTER (WHERE dim('oxplow.rule') = 'defn')", unit: count, direction: neutral, displayKind: gauge, category: static-quality, language: clojure, description: "Number of `defn` definitions.", sliceableDims: [oxplow.package, oxplow.language, oxplow.vcs_rev], collector: oxplow.clojure.defn_count, default: off }
+  - { key: oxplow.csharp.empty_catch, title: "empty catch blocks", measure: oxplow.ast_hit, expression: "SUM(value) FILTER (WHERE dim('oxplow.rule') = 'empty_catch')", unit: count, direction: lower-better, displayKind: gauge, category: static-quality, language: csharp, description: "Empty `catch` blocks that swallow exceptions.", sliceableDims: [oxplow.package, oxplow.language, oxplow.vcs_rev], collector: oxplow.csharp.empty_catch, default: off }
+  - { key: oxplow.csharp.blocking_async_calls, title: "blocking async calls (.Result / .Wait())", measure: oxplow.ast_hit, expression: "SUM(value) FILTER (WHERE dim('oxplow.rule') = 'blocking_async')", unit: count, direction: lower-better, displayKind: gauge, category: static-quality, language: csharp, description: "Blocking calls on async code (`.Result` / `.Wait()`).", sliceableDims: [oxplow.package, oxplow.language, oxplow.vcs_rev], collector: oxplow.csharp.blocking_async_calls, default: off }
+collectors:
+  - id: oxplow_bundled.effort_churn
+    doc: How many lines an effort added and removed in each file, recorded when it finishes.
+    runtime: starlark
+    entry: collectors/effort_churn.star
+    on: [effort.finished]
+    after: [change.analyze]
+    input: |
+      SELECT f.path, f.additions, f.deletions
+      FROM v_change c JOIN v_change_file f ON f.change_id = c.id
+      WHERE c.kind = 'effort' AND c.target = CAST(:effort_id AS TEXT)
+    facts: [oxplow_bundled.effort_churn_lines]
+  # Scripts over the snapshot's tree, through the same public surface
+  # (`source_files()`, `code_metrics()`, `ast_query()`) any collector has.
+  # Each one's metrics name it, so it runs only while one is on.
+  # A whole-tree scan is minutes of CPU on a large tree, and a commit or
+  # rebase moves several refs at once: one scan of the latest tree once
+  # they settle, on a uri move (`trigger: git_refs`) rather than every save.
+  - { id: oxplow.todos, doc: "Counts the TODO and FIXME markers in the project's files.", runtime: starlark, entry: collectors/code/todos.star, on: [snapshot.taken], facts: [oxplow.todo] }
+  - { id: oxplow.fn_count, doc: "Counts the functions in each file, and their parameters.", runtime: starlark, entry: collectors/code/fn_count.star, on: [snapshot.taken], facts: [oxplow.parameter_count] }
+  - { id: oxplow.high_complexity_fns, doc: "Finds the functions whose complexity is high.", runtime: starlark, entry: collectors/code/high_complexity_fns.star, on: [snapshot.taken], facts: [oxplow.complexity] }
+  - { id: oxplow.long_functions, doc: "Finds the functions longer than 60 lines.", runtime: starlark, entry: collectors/code/long_functions.star, on: [snapshot.taken], facts: [oxplow.fn_length] }
+  - { id: oxplow.doc_coverage, doc: "Measures how many items of the code have a doc comment.", runtime: starlark, entry: collectors/code/doc_coverage.star, on: [snapshot.taken], facts: [oxplow.doc_coverage] }
+  - { id: oxplow.duplicate_lines, doc: "Finds the lines that the project's files repeat.", runtime: starlark, entry: collectors/code/duplicate_lines.star, whole_tree: true, on: [snapshot.taken], where: { trigger: git_refs }, settle: 60s, at_most: 15m, facts: [oxplow.duplicate_lines] }
+  - { id: oxplow.rust.unsafe_blocks, doc: "Counts the `unsafe` blocks in Rust files.", runtime: starlark, entry: collectors/rust/unsafe_blocks.star, on: [snapshot.taken], facts: [oxplow.ast_hit] }
+  - { id: oxplow.rust.unwrap_expect_calls, doc: "Counts the `unwrap` and `expect` calls in Rust files.", runtime: starlark, entry: collectors/rust/unwrap_expect_calls.star, on: [snapshot.taken], facts: [oxplow.ast_hit] }
+  - { id: oxplow.rust.panic_macros, doc: "Counts the `panic!`, `todo!` and similar macros in Rust files.", runtime: starlark, entry: collectors/rust/panic_macros.star, on: [snapshot.taken], facts: [oxplow.ast_hit] }
+  - { id: oxplow.ts.any_usage, doc: "Counts the uses of the `any` type in TypeScript files.", runtime: starlark, entry: collectors/ts/any_usage.star, on: [snapshot.taken], facts: [oxplow.ast_hit] }
+  - { id: oxplow.ts.non_null_assertions, doc: "Counts the non-null assertions in TypeScript files.", runtime: starlark, entry: collectors/ts/non_null_assertions.star, on: [snapshot.taken], facts: [oxplow.ast_hit] }
+  - { id: oxplow.ts.console_calls, doc: "Counts the `console.*` calls in TypeScript files.", runtime: starlark, entry: collectors/ts/console_calls.star, on: [snapshot.taken], facts: [oxplow.ast_hit] }
+  - { id: oxplow.ts.ts_ignore, doc: "Counts the `@ts-ignore` and `@ts-expect-error` comments in TypeScript files.", runtime: starlark, entry: collectors/ts/ts_ignore.star, on: [snapshot.taken], facts: [oxplow.ast_hit] }
+  - { id: oxplow.clojure.defn_count, doc: "Counts the `defn` forms in Clojure files.", runtime: starlark, entry: collectors/clojure/defn_count.star, on: [snapshot.taken], facts: [oxplow.ast_hit] }
+  - { id: oxplow.csharp.empty_catch, doc: "Counts the empty `catch` blocks in C# files.", runtime: starlark, entry: collectors/csharp/empty_catch.star, on: [snapshot.taken], facts: [oxplow.ast_hit] }
+  - { id: oxplow.csharp.blocking_async_calls, doc: "Counts the blocking calls on async code (`.Result`, `.Wait()`) in C# files.", runtime: starlark, entry: collectors/csharp/blocking_async_calls.star, on: [snapshot.taken], facts: [oxplow.ast_hit] }
+configuration:
+  version: 1
+  schema:
+    type: object
+    additionalProperties: false
+    properties:
+      sharedFiles:
+        type: object
+        additionalProperties: false
+        description: The shared-files advisories.
+        properties:
+          windowMinutes: { type: integer, minimum: 1, description: How recent an edit is for two threads' work on the same file to count as overlapping. }
+      largeUncommitted:
+        type: object
+        additionalProperties: false
+        description: The large-uncommitted advisory.
+        properties:
+          files: { type: integer, minimum: 1, description: Files an open effort holds before the agent is told to commit. }
+  defaults:
+    largeUncommitted: { files: 15 }
+    sharedFiles: { windowMinutes: 60 }
+# Inferred reasoning: when an effort finishes, a model reads what the agent
+# did, in one call, and proposes the forks it resolved without recording
+# them and the claims its answers made about its work. They land as the
+# effort's inferred decisions and claims (core's
+# `oxplow.effort.replace_inferred_decisions` and `…replace_inferred_claims`),
+# for a person to confirm, verify or dismiss on the review page; the agent
+# never sees them. The model is the person's `oxplow-bundled-todo/reasoning`
+# binding, else their Main model.
+ai_profiles:
+  - id: reasoning
+    description: Finds the forks a coding agent resolved without recording them and the claims its answers made about its work.
+    fallback: main
+jobs:
+  - id: reasoning
+    description: Read what the agent did during one effort and propose the decisions it made without recording them and the claims its answers made.
+    version: 1
+    operation: ai.complete_typed
+    needs: [ai.compute]
+    timeout: 120
+# Effects are programs: a person approves each before it reacts, bundled
+# or not. `repair-disabled` files nothing until it is approved (and stops
+# when the approval is taken back); `verify-unchecked` likewise.
+effects:
+  - id: verify-unchecked
+    summary: After an acceptance that left claims unverified or decisions inferred, file one item to verify them.
+    on: [oxplow_bundled.accepted]
+    entry: effects/verify_unchecked.star
+    needs: [sql.read]
+  - id: repair-disabled
+    summary: When an extension's contribution is disabled after repeated failures, file one repair item on the active work list (comment on it while it is open).
+    on: [contribution.disabled]
+    entry: effects/repair_disabled.star
+    needs: [sql.read]
+  - id: infer-reasoning
+    summary: When an effort finishes, ask a model which decisions the agent made without recording them and which claims its answers made (skipped while no model serves the reasoning profile).
+    on: [effort.finished]
+    entry: effects/infer_reasoning.star
+    needs: [ai.discover]
+  - id: store-reasoning
+    summary: When a reasoning job ends, its proposals replace the effort's inferred decisions and its unreviewed claims.
+    on: [contribution.job.completed]
+    where: { job: "oxplow-bundled-todo/reasoning" }
+    entry: effects/store_reasoning.star
+    needs: [jobs.read]
+commands:
+  - name: advisory_policy.read
+    summary: The advisories' effective settings, where each came from, and the stamps a write needs.
+    scope: extension_config.read
+    op: snapshot
+    example: {}
+  - name: advisory_policy.write
+    summary: Set the advisories' project or personal settings (a compare-and-swap on the stamps `advisory_policy.read` returns).
+    scope: extension_config.write
+    op: compare_exchange
+    example: {"schema_version": 1, "project": {"expected": {"schema_version": 1, "revision": 2}, "values": {"largeUncommitted": {"files": 20}}}, "personal": null}
+  # The reasoning job's lifecycle, through the host's jobs scope.
+  - name: reasoning.ask
+    summary: Ask a model for one effort's unrecorded decisions and the claims its answers made; returns the job. The intent key `reasoning:<effort id>` makes it one job per effort.
+    scope: jobs.write
+    op: enqueue
+    example: {"job": "reasoning", "intentKey": "reasoning:eff3", "request": {"schemaVersion": 1, "role": "reasoning", "messages": [{"role": "user", "parts": [{"type": "text", "text": "Work item: Add CSV export"}]}]}}
+  - name: reasoning.status
+    summary: A reasoning job's state and, once it ends, its answer.
+    scope: jobs.read
+    op: snapshot
+    example: {"job_run": "7c1d2a9e-3b4f-4e6a-9d10-5f8a2b6c7e31"}
+  - name: reasoning.cancel
+    summary: Stop a reasoning job.
+    scope: jobs.write
+    op: cancel
+    example: {"job_run": "7c1d2a9e-3b4f-4e6a-9d10-5f8a2b6c7e31"}
+  - name: effort.infer_reasoning
+    summary: Ask a model which decisions the agent made during one effort without recording them, and which claims its answers made about its work; they appear under Decisions Oxplow Noticed and the effort's claims for review. One job per effort, unless `again`.
+    entry: handlers/infer_reasoning.star
+    needs: [sql.read]
+    access: record
+    input_schema:
+      type: object
+      required: [effort]
+      additionalProperties: false
+      properties:
+        effort: { type: string, description: "The effort (`eff<id>`)." }
+        again: { type: boolean, description: "Ask a new job even though one was asked for this effort (a changed binding or new activity answers afresh)." }
+    example: {"effort": "eff3"}
+  # The person's menu entries for foundation's work, wiki, handoff and
+  # effort commands. Foundation keeps the commands (an agent runs them);
+  # these add the labels, shortcuts and forms a person uses.
+  - name: work_item.new
+    summary: "The person's menu entry for `oxplow.work_item.create`: New Task… opens the new-task form and shows the task it files."
+    scope: work_items.write
+    op: create
+    ui: {"label": "New Task…", "group": "Tasks", "keywords": ["work item"], "form": "oxplow:oxplow/page?page=new-task", "shortcut": "Ctrl/Cmd+Shift+N", "open_after": "{{result.uri}}"}
+    example: {"title": "Fix the login redirect loop", "body": "Signing in from /settings bounces back to /login.", "state": "todo"}
+  - name: knowledge.new_page
+    summary: "The person's menu entry for `oxplow.knowledge.write_page`: New Wiki Page… opens the wiki and shows the page it writes."
+    scope: knowledge.write
+    op: write_page
+    ui: { label: "New Wiki Page…", group: Knowledge, keywords: [wiki, page, note, write], form: "oxplow:oxplow/page?page=wiki-index", open_after: "oxplow:oxplow/wiki?slug={{result.page}}" }
+    example: {"slug": "auth-flow", "title": "Auth flow", "body": "# Auth flow\n\nThe callback validates `next` before redirecting.", "verified_files": []}
+  - name: handoff.offer
+    summary: "The person's menu entry for `oxplow.handoff.send`: Hand Off Work… on a thread opens the hand-off form."
+    scope: handoffs.write
+    op: send
+    ui: { label: "Hand Off Work…", group: Threads, keywords: [handoff, delegate, give], about: oxplow/thread, form: "oxplow:oxplow/page?page=hand-off" }
+    example: {"to_thread": "thr4", "work_item": "oxplow:oxplow/work_item?id=tsk12&provider=oxplow", "body": "The parser fix is in; the remaining failure is the timezone case."}
+  - name: effort.link_to_task
+    summary: "The person's menu entry for `oxplow.effort.link`: Link to Task… on an effort opens a form to pick the task."
+    scope: efforts.write
+    op: link
+    ui: { label: "Link to Task…", group: Review, about: oxplow/effort, form: "oxplow:oxplow/page?page=link-effort" }
+    example: {"effort": "eff12", "work_item": "oxplow:oxplow/work_item?id=tsk42&provider=oxplow"}

@@ -1,0 +1,12 @@
+# Settings → AI lists a role an extension declares, bound to nothing, with
+# what it falls back to: bundled's reasoning role.
+when: { page: oxplow-foundation/settings, params: { area: ai } }
+expect:
+  loaders:
+    ai_roles:
+      rows:
+        - { role: main }
+        - { role: summarize }
+        - { role: decide }
+        - { role: assistant }
+        - { role: oxplow-bundled-todo/reasoning, bound: Falls back to main (fixture), can_unassign: 0 }

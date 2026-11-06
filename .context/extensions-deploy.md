@@ -41,6 +41,12 @@ An extension has a **source**, the files a person or their agent edits,
 and **deployments**, the immutable copies oxplow runs. Nothing runs a
 source directly: an edit changes nothing until it is deployed.
 
+- **On or off:** a source in `.oxplow/extensions/` is on just by being there, unless
+  it's listed in `disableExtensions`: the team's in `.oxplow/project.yaml`, or a
+  person's in `.oxplow/personal.yaml`. A person's `enableExtensions` beats the
+  team's off, and their own off beats everything
+  (`ExtensionSettings::turned_off`). Bare `oxplow-dev extension test` skips one
+  that's off; naming it still tests it.
 - **Source:** `.oxplow/extensions/<name>/` in a checkout, unless
   `extensionSources: { <name>: <folder> }` points the name elsewhere. The
   folder is relative to the checkout or absolute (`~/` is the home folder).

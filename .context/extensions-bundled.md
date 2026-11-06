@@ -4,7 +4,7 @@ The `oxplow-foundation` and `oxplow-bundled` extensions, the review packet, and 
 
 ## What works today: Bundled extensions and the review packet
 
-- **Bundled extensions.** There are two. `oxplow-foundation` is required: oxplow's own
+- **Bundled extensions.** There are two (see "The `oxplow-bundled` extension" for the split). `oxplow-foundation` is required: oxplow's own
   commands, AI providers and harness implementations, the default work list,
   effort policy, snapshots and wiki, and the
   measures, dimensions and metrics oxplow records itself (tokens, efforts, tests,
@@ -153,25 +153,43 @@ Each loads clean (`documented_examples_load_without_errors`):
 
 ## The `oxplow-bundled` extension
 
-**Two shipped extensions, on purpose** (decided 2026-10-28). oxplow ships
-`oxplow-foundation` (required) and `oxplow-bundled` (optional, on by
-default), both in the `oxplow` namespace so a contribution can move
-between them — or the two merge — without a rename. Foundation is kept
-as small as it can be while still useful: the host's pages, the default
-capability implementations (work items, effort policy, snapshots,
-knowledge) and the measures core's change analysis records. Everything
-optional — the review policy, analytics, the code metrics and their
-collectors — is bundled's, and turns off with it. Don't add a third
-shipped extension; bundled's contents are the next thing to sort out.
+**Two shipped extensions, and a holder that doesn't ship.** oxplow ships
+`oxplow-foundation` (required) and `oxplow-bundled` (optional, on by default), both
+in the `oxplow` namespace so a contribution can move between them without a rename.
+Foundation is kept as small as it can be while still useful: the host's pages, the
+default capability implementations (work items, effort policy, snapshots, knowledge)
+and the measures core's change analysis records. `oxplow-bundled` is what has been
+reviewed and kept.
 
-Everything oxplow ships that measures, visualizes or reviews is this one
-extension (`extensions/oxplow-bundled/`): its namespace is
-`oxplow_bundled` (commands, event types, measures, collectors) and its
-datasets publish as `v_oxplow_bundled_*`.
+`.oxplow/extensions/oxplow-bundled-todo` holds everything that used to be in
+`oxplow-bundled` and hasn't been reviewed: this repo's, off, and not part of oxplow.
+A contribution moves from it to `oxplow-bundled` one piece at a time, as it is
+accepted, and the holder goes away when it is empty. Add nothing new there.
+
+- **It's off, and can't run.** `disableExtensions` in `.oxplow/project.yaml` keeps it
+  off while it sits in `.oxplow/extensions/`, so nothing loads it or tests it. It
+  keeps `namespace: oxplow` so what moves needs no rename, and that namespace is
+  reserved for shipped extensions. Its fixtures stop running too,
+  so it may fall behind core: a piece gets its fixtures working when it moves.
+  `desktop-tests/` holds frontend tests of its components, and `e2e-specs/` the
+  browser specs of its pages. They are reference for that trip, not specs to restore:
+  what they check becomes fixtures, and only what fits "What belongs here"
+  ([working-in-this-repo.md](./working-in-this-repo.md) "The browser suite") goes back.
+- **Nothing may depend on it.** No test, example or doc names its contents. Core
+  machinery a test needs a collector or a component for has its own test data
+  (`crates/oxplow-app/testdata/`) or uses foundation's.
+- **What came first.** Names derived from an extension (`v_<ext>_*` datasets,
+  `<ext>.*` event types, `<ext>/<id>` contribution ids) are why the datasets, the
+  event types and the commands that emit those types moved first: a script may emit
+  only its own extension's event types, and a decorator reads only its own
+  extension's datasets. They publish as `v_oxplow_bundled_*` and `oxplow_bundled.*`.
+- **Other docs.** Where `.context/` describes a screen, an advisory or a metric as
+  `oxplow-bundled`'s (or `oxplow-bundled-todo/...`) and `extensions/oxplow-bundled/`
+  doesn't have it, it is in the holder and doesn't run today.
 
 What moved out of core, and what it is now. All of it is pages (files in
 `pages/`, read by `v_page`); oxplow-foundation's pages draw the app's own
-screens and oxplow-bundled's add the review and analysis:
+screens and the holder's add the review and analysis:
 
 - **A page for each kind of contribution.** Every contribution kind an
   extension declares (command, skill, custom component, slot, collector,

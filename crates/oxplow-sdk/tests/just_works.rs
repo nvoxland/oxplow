@@ -1244,25 +1244,6 @@ async fn a_scaffolded_panel_checks_tests_and_shows_its_page() {
     assert_eq!(ext.page_files.len(), 1);
 }
 
-/// A bundled extension's examples run too, from the fixtures embedded with
-/// it: `extension test oxplow-bundled` runs the `runs` page over a throwaway
-/// oxplow and passes.
-#[tokio::test(flavor = "multi_thread")]
-async fn the_bundled_extensions_runs_page_example_runs_and_passes() {
-    let dir = project().await;
-    let report = test_extension(dir.path(), "oxplow-bundled", false)
-        .await
-        .unwrap();
-    assert_eq!(report.error_lines(), Vec::<String>::new());
-    assert!(
-        report
-            .ran
-            .contains(&"example extension runs over the last week".to_string()),
-        "ran: {:?}",
-        report.ran
-    );
-}
-
 /// The shipped extensions pass `extension test`, their pages' answers run.
 #[tokio::test(flavor = "multi_thread")]
 async fn the_shipped_extensions_pass_their_own_test() {

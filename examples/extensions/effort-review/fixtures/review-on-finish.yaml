@@ -1,6 +1,4 @@
 # A finished effort with a work item asks for its review.
-# (Oxplow's own work list, effort policy and wiki are bundled's.)
-requires: [oxplow-bundled]
 given:
   - { command: oxplow.work_item.create, input: { title: Parse blocks }, bind: item }
   - { command: oxplow.effort.open, input: { thread: thr1, work_item: $item.uri } }
@@ -10,4 +8,4 @@ when:
     payload: { effort: "eff1", work_item: $item.uri, end_snapshot: 3 }
 expect:
   effects: { contains: [{ id: effort-review/review-on-finish, state: ok }] }
-  commands: { contains: [effort_review.effort.review, oxplow.effort.infer_reasoning] }
+  commands: { contains: [effort_review.effort.review] }

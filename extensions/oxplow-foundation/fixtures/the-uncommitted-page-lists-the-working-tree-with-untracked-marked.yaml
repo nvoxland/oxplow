@@ -18,3 +18,11 @@ expect:
           - { id: tracked.txt, icon: modified }
           - { id: loose.txt, icon: added }
     commit_form: { rows: [{ stream: str1 }] }
+steps:
+  # The commit form submits for real, and the commit is read back. (The page
+  # drawn again after it is the app's: the working change is analyzed again
+  # as the files are watched, which a throwaway oxplow does not do.)
+  - submit: { node: commit, input: { stream: str1, message: Add the loose file } }
+    expect: { ok: true }
+  - when: { command: oxplow.vcs.log, input: { stream_id: str1, limit: 1 } }
+    expect: { ok: true, result: { revisions: [{ subject: Add the loose file }] } }

@@ -1,0 +1,27 @@
+# A binary file of the working tree is the Text view's, never the Editor's:
+# its page is handed what the filesystem knows of it, not text, and the
+# viewer says "binary file, N bytes" from that size (the wording is the
+# app's: `unshownReason`'s unit test).
+given:
+  - { command: oxplow.file.save, input: { stream: str1, path: blob.bin, content: "\0\u0001\u0002" } }
+when:
+  page: oxplow-foundation/file-viewer
+  params:
+    uri: "oxplow:oxplow/file?path=blob.bin"
+    path: blob.bin
+expect:
+  label: blob.bin
+  loaders:
+    content:
+      rows:
+        - { path: blob.bin, kind: file, size: 3, is_text: false }
+steps:
+  - params:
+      uri: "oxplow:oxplow/file?path=blob.bin&rev=working"
+      path: blob.bin
+      rev: working
+    expect:
+      loaders:
+        content:
+          rows:
+            - { path: blob.bin, size: 3, is_text: false }

@@ -2004,7 +2004,7 @@ Columns: `id, thread_id (NOT NULL, FK threads ON DELETE CASCADE), effort_id
   effort FK cascades with its `effort` when present.
 - **`kind`** is open-ended (`report-less-run` | `<extension>/<advisory>` |
   `configure`, …) — adding a kind needs no migration. Retired kinds keep
-  their rows: `commit-hygiene` and `oxplow-bundled/coverage-target` no
+  their rows: `commit-hygiene` and `oxplow-bundled-todo/coverage-target` no
   longer fire but old rows still
   read back.
 - **`trigger`** is the bash command (or commit sha) that caused the nudge.
