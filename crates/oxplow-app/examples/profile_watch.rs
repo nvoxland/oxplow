@@ -29,7 +29,7 @@ use oxplow_app::blob_store::BlobStore;
 use oxplow_app::trees::Trees;
 use oxplow_app::vcs::GitProvider;
 use oxplow_db::{Database, FileSnapshot, SnapshotStorage, SqliteSnapshotStore};
-use oxplow_domain::vcs::Revision;
+use oxplow_domain::vcs::{Revision, Vcs};
 use oxplow_domain::{StreamId, Timestamp};
 use oxplow_fs_watch::{FsWatcher, Subscription, WorkspaceFilter};
 use rayon::prelude::*;
@@ -636,10 +636,12 @@ async fn main() {
         ),
     );
 
-    // 9. What a working-files relist costs: Trees::diff(HEAD, Working).
+    // 9. What a working-files relist costs: the whole-tree diff, and the
+    // VCS's status with the diff of the paths it names.
     if root.join(".git").exists() {
+        let vcs = Arc::new(GitProvider);
         let trees = Trees::new(
-            Arc::new(GitProvider),
+            vcs.clone(),
             store.clone(),
             BlobStore::new(work.path().join("blobs")),
             // Defaults, read from an empty folder (nothing in `root` is read).
@@ -650,34 +652,88 @@ async fn main() {
         if generated {
             std::fs::write(kept_dir(&root, 2).join("file0.txt"), "one more edit\n").unwrap();
         }
-        let head = Revision::git("HEAD");
-        let mut times = Vec::new();
-        let mut changed = 0;
-        for _ in 0..3 {
-            let t = Instant::now();
-            match trees.diff(&root, Some(&head), &Revision::Working).await {
-                Ok(d) => changed = d.len(),
-                Err(e) => {
-                    println!("  (diff failed: {e})");
-                    break;
-                }
-            }
-            times.push(t.elapsed());
+        // The head as its id: `diff_from_status` answers from the status only
+        // when `from` is the head itself.
+        let head = Revision::git(vcs.resolve(&root, "HEAD").await.unwrap());
+        // The tree as it is now (the burst's 5,000 files are in a generated
+        // one); then, in a generated tree, as one edit leaves it.
+        let mut phases = vec![if generated {
+            "after the burst and one edit"
+        } else {
+            "the tree as it is"
+        }];
+        if generated {
+            phases.push("after one edit only");
         }
-        if !times.is_empty() {
-            step(
-                9,
-                "Trees::diff(HEAD, Working)",
-                format!(
-                    "{} cold, then {} and {} ({changed} changed paths{})",
-                    ms(times[0]),
-                    times.get(1).map(|d| ms(*d)).unwrap_or_default(),
-                    times.get(2).map(|d| ms(*d)).unwrap_or_default(),
-                    if generated {
-                        ", after one edit"
-                    } else {
-                        ", the tree as it is"
+        for (i, phase) in phases.into_iter().enumerate() {
+            if i == 1 {
+                // The burst's folder removed and its edits undone, then one edit.
+                std::fs::remove_dir_all(kept_dir(&root, 1).join("burst")).unwrap();
+                git(&root, &["checkout", "-q", "--", "."]);
+                std::fs::write(kept_dir(&root, 2).join("file0.txt"), "a single edit\n").unwrap();
+            }
+            let mut full = Vec::new();
+            let mut changed = 0;
+            for _ in 0..3 {
+                let t = Instant::now();
+                match trees.diff(&root, Some(&head), &Revision::Working).await {
+                    Ok(d) => changed = d.len(),
+                    Err(e) => {
+                        println!("  (diff failed: {e})");
+                        break;
                     }
+                }
+                full.push(t.elapsed());
+            }
+            let mut status_times = Vec::new();
+            let mut from_status = Vec::new();
+            let (mut entries, mut changed_by_status) = (0, 0);
+            for _ in 0..3 {
+                let t = Instant::now();
+                let status = match vcs.status(&root).await {
+                    Ok(s) => s,
+                    Err(e) => {
+                        println!("  (status failed: {e})");
+                        break;
+                    }
+                };
+                status_times.push(t.elapsed());
+                entries = status.entries.len();
+                let t = Instant::now();
+                match trees.diff_from_status(&root, Some(&head), &status).await {
+                    Ok(d) => changed_by_status = d.len(),
+                    Err(e) => {
+                        println!("  (diff_from_status failed: {e})");
+                        break;
+                    }
+                }
+                from_status.push(t.elapsed());
+            }
+            let three = |t: &[Duration]| {
+                format!(
+                    "{} cold, then {} and {}",
+                    t.first().map(|d| ms(*d)).unwrap_or_default(),
+                    t.get(1).map(|d| ms(*d)).unwrap_or_default(),
+                    t.get(2).map(|d| ms(*d)).unwrap_or_default(),
+                )
+            };
+            let tag = if i == 0 { "9" } else { "9'" };
+            step(
+                format!("{tag}a"),
+                "Trees::diff(HEAD, Working)",
+                format!("{} ({changed} changed paths; {phase})", three(&full)),
+            );
+            step(
+                format!("{tag}b"),
+                "vcs.status alone",
+                format!("{} ({entries} entries; {phase})", three(&status_times)),
+            );
+            step(
+                format!("{tag}c"),
+                "Trees::diff_from_status",
+                format!(
+                    "{} ({changed_by_status} changed paths; {phase})",
+                    three(&from_status)
                 ),
             );
         }
