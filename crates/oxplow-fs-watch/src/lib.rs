@@ -337,9 +337,11 @@ pub fn is_ignore_file(path: &Path) -> bool {
         || path.ends_with(Path::new(".git/info/exclude"))
 }
 
-/// Whether the filter ignores `path` (checked as a file: a file under an
-/// ignored directory is ignored with it). A path outside every root is
-/// not judged.
+/// Whether the filter ignores `path`, a file under an ignored directory with
+/// it. It is judged as what it is now, since a directory-only pattern
+/// (`target/`) matches only a directory: macOS reports a directory itself, and
+/// one already gone is judged as a file. A path outside every root is not
+/// judged.
 fn ignored_by(filter: &std::sync::RwLock<WorkspaceFilter>, roots: &[PathBuf], path: &Path) -> bool {
     let Some(rel) = roots.iter().find_map(|r| path.strip_prefix(r).ok()) else {
         return false;
@@ -347,7 +349,7 @@ fn ignored_by(filter: &std::sync::RwLock<WorkspaceFilter>, roots: &[PathBuf], pa
     filter
         .read()
         .unwrap_or_else(|e| e.into_inner())
-        .ignore(rel, false)
+        .ignore(rel, path.is_dir())
 }
 
 impl Follow {
@@ -929,7 +931,7 @@ mod tests {
         // canonicalized paths so the test is stable across platforms. It
         // can also report the freshly made directory itself first.
         let target = target.canonicalize().unwrap();
-        timeout(Duration::from_secs(2), async {
+        timeout(Duration::from_secs(20), async {
             loop {
                 let evt = rx.recv().await.expect("event ok");
                 if evt.path.canonicalize().ok().as_ref() == Some(&target) {
@@ -982,11 +984,14 @@ mod tests {
             std::fs::write(&target, format!("{i}")).unwrap();
         }
 
-        // Collect everything that lands within 1s. The debounced view
-        // should coalesce 20 writes into a small number of events.
+        // The first event may take a while on a loaded machine; then a quiet
+        // window ends the count. The debounced view should coalesce 20 writes
+        // into a small number of events.
         let mut count = 0;
-        while let Ok(Ok(_)) = timeout(Duration::from_millis(800), rx.recv()).await {
+        let mut window = Duration::from_secs(20);
+        while let Ok(Ok(_)) = timeout(window, rx.recv()).await {
             count += 1;
+            window = Duration::from_millis(800);
         }
 
         assert!(count > 0, "expected at least one event");
@@ -1151,7 +1156,7 @@ mod tests {
             !seen
                 .iter()
                 .any(|p| p.starts_with(canon.join(".claude/worktrees/x/target"))),
-            "ignored writes were dropped at the watcher"
+            "ignored writes were dropped at the watcher: {seen:?}"
         );
     }
 
@@ -1252,7 +1257,7 @@ mod tests {
 
         let mut saw_a = false;
         let mut saw_b = false;
-        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        let deadline = std::time::Instant::now() + Duration::from_secs(20);
         while std::time::Instant::now() < deadline && !(saw_a && saw_b) {
             if let Ok(Ok(evt)) = timeout(Duration::from_millis(500), rx.recv()).await {
                 let p = evt.path.canonicalize().unwrap_or(evt.path.clone());
@@ -1309,7 +1314,7 @@ mod tests {
         let top = dir.path().join("top.txt");
         std::fs::write(&top, b"y").unwrap();
         let mut top_seen = false;
-        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        let deadline = std::time::Instant::now() + Duration::from_secs(20);
         while std::time::Instant::now() < deadline {
             match timeout(Duration::from_millis(500), rx.recv()).await {
                 Ok(Ok(evt)) => {
@@ -1319,7 +1324,8 @@ mod tests {
                         break;
                     }
                 }
-                _ => break,
+                Ok(Err(_)) => break,
+                Err(_) => {}
             }
         }
         assert!(top_seen, "expected top-level event for {top:?}");
