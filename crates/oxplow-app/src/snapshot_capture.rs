@@ -218,10 +218,10 @@ struct Inner {
     /// (`.git`, `.oxplow`, `target`, `node_modules`, …) are always
     /// in effect even with an empty user list.
     ///
-    /// Behind a lock so the UI's generated-paths toggle (`set_generated`
-    /// IPC) can swap it at runtime via [`SnapshotCaptureService::set_workspace_filter`]
-    /// without restarting the app.
-    workspace_filter: RwLock<WorkspaceFilter>,
+    /// A handle shared with this stream's watches: one filter, rooted at
+    /// this stream's worktree, which follows the `generated` lists
+    /// ([`SnapshotCaptureService::set_generated`]) and ignore-file edits.
+    workspace_filter: WorkspaceFilter,
     /// Whether takes keep file bytes; read at each take, set by the
     /// registry when the active snapshot implementation changes.
     content_policy: RwLock<ContentPolicy>,
@@ -284,8 +284,8 @@ struct Inner {
     /// permit when no waiter is parked yet, so a shutdown that races
     /// ahead of the watcher's first poll is not lost.
     shutdown: tokio::sync::Notify,
-    /// Signalled by [`SnapshotCaptureService::set_workspace_filter`] so the
-    /// watcher rebuilds its registered path set (tsk206). Without this,
+    /// Signalled by [`SnapshotCaptureService::set_generated`] so the
+    /// watch moves to match the filter (tsk206). Without this,
     /// registration-time pruning would freeze the watch set at boot and a
     /// `generated.include` that un-ignores a directory would never be watched
     /// until restart — breaking `set_generated`'s "without a restart" contract.
@@ -319,7 +319,7 @@ impl SnapshotCaptureService {
                 vcs,
                 stream_id,
                 max_file_bytes,
-                workspace_filter: RwLock::new(workspace_filter),
+                workspace_filter,
                 content_policy: RwLock::new(ContentPolicy::default()),
                 provider: RwLock::new(None),
                 idle: std::sync::atomic::AtomicBool::new(false),
@@ -407,20 +407,21 @@ impl SnapshotCaptureService {
             .unwrap_or_else(|e| e.into_inner())
     }
 
-    /// Swap the workspace path filter at runtime. Called when the
-    /// project's `generated` config changes (via the `set_generated`
-    /// IPC) so include/exclude edits take effect on the next fs-watch
-    /// event and the next startup sweep without an app restart.
-    pub fn set_workspace_filter(&self, filter: WorkspaceFilter) {
-        *self
-            .inner
+    /// The project's `generated` lists changed: they apply to the next
+    /// fs-watch event and the next sweep, without an app restart.
+    pub fn set_generated(&self, generated: &oxplow_config::GeneratedConfig) {
+        self.inner
             .workspace_filter
-            .write()
-            .unwrap_or_else(|e| e.into_inner()) = filter;
+            .set_user_entries(&generated.exclude, &generated.include);
         // The watch SET is derived from the filter (tsk206), not just the
-        // per-event check — so a swap has to re-register, or a newly-included
+        // per-event check — so it has to move, or a newly-included
         // directory would stay unwatched until restart.
         self.inner.refilter.notify_one();
+    }
+
+    /// This stream's filter: the one its watches judge by.
+    pub fn workspace_filter(&self) -> WorkspaceFilter {
+        self.inner.workspace_filter.clone()
     }
 
     /// Whether this stream's workspace filter excludes `rel` (a
@@ -430,11 +431,7 @@ impl SnapshotCaptureService {
     /// observe it as changed; effort attribution uses this to leave
     /// such paths out of a claim entirely (tsk249).
     pub fn excluded_from_capture(&self, rel: &Path) -> bool {
-        self.inner
-            .workspace_filter
-            .read()
-            .unwrap_or_else(|e| e.into_inner())
-            .ignore(rel, false)
+        self.inner.workspace_filter.ignore(rel, false)
     }
 
     /// Override the settle window (default [`DEFAULT_SETTLE_DURATION`]).
@@ -739,51 +736,17 @@ impl SnapshotCaptureService {
     }
 
     async fn run_watcher(self) {
-        // Park on the shutdown signal ONCE, outside the re-registration loop, so
-        // a `notify_one` that fires between iterations isn't missed (the pinned
-        // future is re-polled by each `select!`).
-        let shutdown = self.inner.shutdown.notified();
-        tokio::pin!(shutdown);
-        // Outer loop = one registration generation. A `generated` config edit
-        // swaps the filter and notifies, which rebuilds the watch set so a newly
-        // INCLUDED directory starts being watched without an app restart (the
-        // `set_generated` IPC's documented contract). Events arriving in the
-        // rebuild gap are dropped; a config edit is a deliberate user action and
-        // the next sweep/event covers it.
-        loop {
-            // The root and each kept top-level directory, pruned at
-            // registration (tsk206) and following directories made later
-            // (tsk227, tsk1051) — `FsWatcher::watch_workspace`.
-            let filter = self
-                .inner
-                .workspace_filter
-                .read()
-                .unwrap_or_else(|e| e.into_inner())
-                .clone();
-            let watcher = match FsWatcher::watch_workspace(&self.inner.project_dir, filter) {
+        // The root and each kept top-level directory, pruned at
+        // registration (tsk206) and following directories made later
+        // (tsk227, tsk1051) — `FsWatcher::watch_workspace`.
+        let watcher =
+            match FsWatcher::watch_workspace(&self.inner.project_dir, self.workspace_filter()) {
                 Ok(w) => w,
                 Err(e) => {
                     warn!(error = %e, "snapshot capture: failed to start fs-watch");
                     return;
                 }
             };
-            if self.watch_generation(&watcher, shutdown.as_mut()).await {
-                debug!("snapshot capture: watcher shutting down");
-                return;
-            }
-        }
-    }
-
-    /// Drain one registration generation. Returns `true` when the service is
-    /// shutting down (stop for good), `false` when the watch set must be
-    /// rebuilt because the filter changed.
-    async fn watch_generation(
-        &self,
-        watcher: &FsWatcher,
-        mut shutdown: std::pin::Pin<&mut impl std::future::Future<Output = ()>>,
-    ) -> bool {
-        let refilter = self.inner.refilter.notified();
-        tokio::pin!(refilter);
         // Subscribe to the raw, un-debounced stream: the dirty set must
         // be current the instant a snapshot is requested, so we mark
         // paths dirty as soon as the OS reports them rather than after
@@ -792,44 +755,21 @@ impl SnapshotCaptureService {
         let mut rx = watcher.subscribe();
         loop {
             tokio::select! {
-                _ = &mut shutdown => {
-                    return true;
+                _ = self.inner.shutdown.notified() => {
+                    debug!("snapshot capture: watcher shutting down");
+                    return;
                 }
-                _ = &mut refilter => {
-                    debug!("snapshot capture: generated filter changed, re-registering watches");
-                    return false;
-                }
+                _ = self.inner.refilter.notified() => watcher.refilter(),
                 ev = rx.recv() => match ev {
+                    // The watch judged it by this stream's filter.
                     Ok(event) => {
-                        let path = event.path;
-                        let rel = path.strip_prefix(&self.inner.project_dir).unwrap_or(&path);
-                        // An ignore file changed: read git's rules again, so
-                        // what is heard after it (and every sweep and claim)
-                        // is judged by them.
-                        if oxplow_fs_watch::is_ignore_file(&path) {
-                            let mut f = self
-                                .inner
-                                .workspace_filter
-                                .write()
-                                .unwrap_or_else(|e| e.into_inner());
-                            *f = f.refreshed();
-                        }
-                        if self
-                            .inner
-                            .workspace_filter
-                            .read()
-                            .unwrap_or_else(|e| e.into_inner())
-                            .ignore(rel, path.is_dir())
-                        {
-                            continue;
-                        }
-                        self.mark_dirty(path, event.kind);
+                        self.mark_dirty(event.path, event.kind);
                         self.note_activity();
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
                         warn!(skipped = n, "snapshot capture: fs-watch lagged");
                     }
-                    Err(tokio::sync::broadcast::error::RecvError::Closed) => return true,
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
                 },
             }
         }
@@ -1020,12 +960,7 @@ impl SnapshotCaptureService {
         let keep_bytes = self.content_policy().keeps();
         let vcs = self.inner.vcs.clone();
         let objects = vcs.object_store(&project_dir);
-        let filter = self
-            .inner
-            .workspace_filter
-            .read()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone();
+        let filter = self.workspace_filter();
 
         // Walk + stat off the async runtime — it's all blocking I/O.
         // The walk + per-file stat-shortcircuit stays single-threaded
@@ -2147,12 +2082,13 @@ mod tests {
         // A waiter parked before the swap is released by it.
         let notified = svc.inner.refilter.notified();
         tokio::pin!(notified);
-        svc.set_workspace_filter(oxplow_fs_watch::WorkspaceFilter::with_user_entries([
-            "build",
-        ]));
+        svc.set_generated(&oxplow_config::GeneratedConfig {
+            exclude: vec!["build".into()],
+            ..Default::default()
+        });
         tokio::time::timeout(std::time::Duration::from_secs(5), notified)
             .await
-            .expect("set_workspace_filter must signal the watcher to re-register");
+            .expect("set_generated must signal the watch to move");
     }
 
     #[tokio::test]
@@ -2173,25 +2109,26 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn set_workspace_filter_swaps_the_effective_filter_at_runtime() {
+    async fn set_generated_applies_at_runtime() {
         let project = tempdir().unwrap();
         let (svc, _store) = svc_for(project.path()).await;
         let rel = std::path::Path::new("build/out.js");
 
         // Default filter doesn't ignore a "build" dir.
         assert!(
-            !svc.inner.workspace_filter.read().unwrap().ignore(rel, true),
+            !svc.inner.workspace_filter.ignore(rel, true),
             "precondition: default filter should not ignore build/",
         );
 
         // Simulate the `set_generated` toggle adding "build" to the
         // generated list — the new filter must take effect immediately.
-        svc.set_workspace_filter(oxplow_fs_watch::WorkspaceFilter::with_user_entries([
-            "build",
-        ]));
+        svc.set_generated(&oxplow_config::GeneratedConfig {
+            exclude: vec!["build".into()],
+            ..Default::default()
+        });
         assert!(
-            svc.inner.workspace_filter.read().unwrap().ignore(rel, true),
-            "set_workspace_filter must swap the live filter without a restart",
+            svc.inner.workspace_filter.ignore(rel, true),
+            "set_generated must apply without a restart",
         );
     }
 
@@ -3402,7 +3339,7 @@ mod tests {
                 blobs: BlobStore::new(project.path().join(".oxplow/snapshots")),
                 vcs: std::sync::Arc::new(crate::vcs::GitProvider),
                 max_file_bytes: 1_000_000,
-                workspace_filter: oxplow_fs_watch::WorkspaceFilter::default(),
+                generated: Default::default(),
                 open_turn_probe: None,
             },
         );

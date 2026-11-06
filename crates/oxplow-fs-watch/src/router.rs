@@ -7,7 +7,7 @@ use std::collections::HashSet;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
-use std::sync::{Arc, Mutex, RwLock, Weak};
+use std::sync::{Mutex, Weak};
 
 use notify::RecursiveMode;
 use tokio::sync::broadcast;
@@ -30,7 +30,7 @@ pub(crate) struct Route {
     /// (macOS reports `/private/var` for `/var`).
     pub(crate) roots: Vec<PathBuf>,
     /// Shared with the follower, which swaps it when an ignore file changes.
-    pub(crate) filter: Arc<RwLock<WorkspaceFilter>>,
+    pub(crate) filter: WorkspaceFilter,
     /// Off the OS callback thread: registering a watch from it can deadlock
     /// a backend.
     pub(crate) follower: mpsc::Sender<FollowMsg>,
@@ -57,17 +57,15 @@ impl Router {
         for path in &event.paths {
             if let Some(route) = &self.route {
                 if is_ignore_file(path) {
-                    // Read git's rules again here, so what is
-                    // written next is judged by them; the follower
-                    // then moves the watches.
-                    let fresh = route
-                        .filter
-                        .read()
-                        .unwrap_or_else(|e| e.into_inner())
-                        .refreshed();
-                    *route.filter.write().unwrap_or_else(|e| e.into_inner()) = fresh;
+                    // What is written next is judged by the new rules; the
+                    // follower then moves the watches.
+                    let rel = route.relative(path).unwrap_or(path);
+                    route.filter.note_ignore_file(rel);
                     let _ = route.follower.send(FollowMsg::Refilter);
-                } else if ignored_by(&route.filter, &route.roots, path) {
+                } else if route
+                    .relative(path)
+                    .is_some_and(|rel| route.filter.ignore_change(rel, || path.is_dir()))
+                {
                     // A build writing thousands of files under an ignored
                     // folder (inside a kept directory, where the OS watch
                     // still sees it) would overflow the channel and make
@@ -91,19 +89,11 @@ impl Router {
     }
 }
 
-/// Whether the filter ignores `path`, a file under an ignored directory with
-/// it. It is judged as what it is now, since a directory-only pattern
-/// (`target/`) matches only a directory: macOS reports a directory itself, and
-/// one already gone is judged as a file. A path outside every root is not
-/// judged.
-fn ignored_by(filter: &RwLock<WorkspaceFilter>, roots: &[PathBuf], path: &Path) -> bool {
-    let Some(rel) = roots.iter().find_map(|r| path.strip_prefix(r).ok()) else {
-        return false;
-    };
-    filter
-        .read()
-        .unwrap_or_else(|e| e.into_inner())
-        .ignore(rel, path.is_dir())
+impl Route {
+    /// `path` from the root. A path outside every root is not judged.
+    fn relative<'p>(&self, path: &'p Path) -> Option<&'p Path> {
+        self.roots.iter().find_map(|r| path.strip_prefix(r).ok())
+    }
 }
 
 fn classify(event: &notify::Event) -> WatchEventKind {
@@ -122,7 +112,7 @@ pub(crate) struct Follower {
     /// The root, as given and canonical.
     pub(crate) roots: Vec<PathBuf>,
     /// Shared with the router.
-    pub(crate) filter: Arc<RwLock<WorkspaceFilter>>,
+    pub(crate) filter: WorkspaceFilter,
     /// The top-level directories with a recursive watch, by name.
     pub(crate) followed: HashSet<OsString>,
     pub(crate) events: broadcast::Sender<WatchEvent>,
@@ -152,10 +142,7 @@ impl Follower {
     }
 
     fn ignores(&self, rel: &Path, is_dir: bool) -> bool {
-        self.filter
-            .read()
-            .unwrap_or_else(|e| e.into_inner())
-            .ignore(rel, is_dir)
+        self.filter.ignore(rel, is_dir)
     }
 
     fn top_level_changed(&mut self, path: &Path, watcher: &Mutex<impl Registrar + ?Sized>) {
@@ -285,12 +272,8 @@ mod tests {
             let dir = tempdir().unwrap();
             let root = dir.path().to_path_buf();
             prepare(&root);
-            let filter = Arc::new(RwLock::new(WorkspaceFilter::build(
-                &root,
-                Vec::<String>::new(),
-                Vec::<String>::new(),
-                None,
-            )));
+            let filter =
+                WorkspaceFilter::build(&root, Vec::<String>::new(), Vec::<String>::new(), None);
             // Room for the largest burst here: what these tests lose is
             // what the router dropped, never what the channel did.
             let (events, heard) = broadcast::channel(16_384);

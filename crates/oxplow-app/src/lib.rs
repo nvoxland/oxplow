@@ -1174,23 +1174,14 @@ impl Services {
         // Snapshot capture singleton — owned here so anything in
         // Services can request snapshots. The fs-watcher, startup sweep, and
         // cleanup loop are spawned by the host binary (main.rs).
-        let (max_bytes, workspace_filter) = {
+        let (max_bytes, generated) = {
             let g = config_arc.read();
             let max_bytes = g
                 .as_ref()
                 .map(|c| c.snapshot_max_file_bytes)
                 .unwrap_or(5 * 1024 * 1024);
-            let filter = g
-                .as_ref()
-                .map(|c| {
-                    oxplow_fs_watch::WorkspaceFilter::for_project(
-                        &layout.project_dir,
-                        &c.generated.exclude,
-                        &c.generated.include,
-                    )
-                })
-                .unwrap_or_default();
-            (max_bytes, filter)
+            let generated = g.as_ref().map(|c| c.generated.clone()).unwrap_or_default();
+            (max_bytes, generated)
         };
         // Snapshot capture is per-stream: each worktree gets its own
         // service so fs-watch sees edits in the right tree. The
@@ -1203,7 +1194,7 @@ impl Services {
                 snapshot_store: snapshot_store.clone(),
                 blobs: blobs.clone(),
                 max_file_bytes: max_bytes,
-                workspace_filter,
+                generated,
                 open_turn_probe: Some({
                     let turns = agent_turn_store.clone();
                     Arc::new(move |stream| {
@@ -1833,7 +1824,6 @@ impl Services {
         // A `generated` change reaches the snapshot captures (tsk515).
         event_pump.register_async(Arc::new(config_reactors::WorkspaceFilterConsumer {
             captures: snapshot_captures.clone(),
-            project_dir: layout.project_dir.clone(),
         }));
         // An agent's telemetry export is counted once it is logged (P10.M2).
         event_pump.register_async(Arc::new(token_usage::OtlpTokensConsumer {
@@ -2107,16 +2097,11 @@ impl Services {
     /// plus defaults (the same thing boot computes).
     pub fn reload_config_from_disk(&self) -> Result<(), AppInitError> {
         let fresh = oxplow_config::load_project_config(&self.layout.project_dir)?;
-        let filter = oxplow_fs_watch::WorkspaceFilter::for_project(
-            &self.layout.project_dir,
-            &fresh.generated.exclude,
-            &fresh.generated.include,
-        );
+        self.snapshot_captures.set_generated(&fresh.generated);
         {
             let mut guard = self.config.write().unwrap_or_else(|e| e.into_inner());
             *guard = fresh;
         }
-        self.snapshot_captures.set_workspace_filter(filter);
         self.config_applied.notify_waiters();
         self.events.emit(OxplowEvent::ConfigChanged);
         Ok(())

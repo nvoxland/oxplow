@@ -300,13 +300,18 @@ pub async fn run_boot_orchestration(
         let watch_bus = event_bus.clone();
         let watch_moves = state.ref_moves.clone();
         let watch_project_dir = state.layout.project_dir.clone();
-        let watch_filter = {
-            let cfg = crate::config_service::read_config(&state.config);
-            oxplow_fs_watch::WorkspaceFilter::for_project(
-                &watch_project_dir,
-                &cfg.generated.exclude,
-                &cfg.generated.include,
-            )
+        // A stream's watches judge by one filter, its capture's.
+        let captures = state.snapshot_captures.clone();
+        let config = state.config.clone();
+        let watch_filter = move |stream: &oxplow_domain::Stream| {
+            captures.workspace_filter(&stream.id).unwrap_or_else(|| {
+                let cfg = crate::config_service::read_config(&config);
+                oxplow_fs_watch::WorkspaceFilter::for_project(
+                    std::path::Path::new(&stream.worktree_path),
+                    &cfg.generated.exclude,
+                    &cfg.generated.include,
+                )
+            })
         };
         let bts = state.background_tasks.clone();
         let task = bts.start(StartInput {

@@ -120,14 +120,12 @@ root and filter per delivered event, which meant every write under
 `target/` (345k files here) was delivered and thrown away — any `cargo`
 build flooded it (tsk206).
 
-The snapshot service's filter can be **swapped at runtime** by the
-`oxplow.file.mark_generated` command (and a hand edit of the `generated` key), whose documented contract is that include/exclude
-edits apply *without an app restart*. Since the watch set is derived from
-the filter, `set_workspace_filter` also fires a `refilter` notify and the
-watcher starts a new `watch_workspace` with the new filter — otherwise a
-`generated.include` that un-ignores a directory would stay unwatched until
-restart. Events in the rebuild gap are dropped; a config edit is a
-deliberate user action and the next sweep/event covers it.
+The `oxplow.file.mark_generated` command (and a hand edit of the `generated`
+key) changes what a stream's filter keeps, with the documented contract that
+include/exclude edits apply *without an app restart*. Since the watch set is
+derived from the filter, `set_generated` also tells the capture's watch to move
+(`FsWatcher::refilter`), or a `generated.include` that un-ignores a directory
+would stay unwatched until restart.
 
 **Deriving the watch set from a one-time listing has a second edge, and it
 cost real data (tsk227, tsk1051).** The root is non-recursive and the
@@ -165,18 +163,24 @@ callback judges each path by the filter before it sends it
 drops what git's rules ignore. The filter is the one source: `.gitignore`s,
 `.git/info/exclude`, the global excludes file and the `generated` lists.
 
-**An ignore-file edit takes effect.** The callback reads git's rules again
-when a `.gitignore` or `.git/info/exclude` changes (`WorkspaceFilter::
-refreshed`; the watch also registers `.git/info`, non-recursively, to hear
-the exclude file), so what is written next is judged by them. The follower
-then stops watching a top-level directory the rules now ignore and watches
-(and reports the files of) one they stopped ignoring. A consumer that keeps
-its own filter reads it again on an ignore-file event
-(`oxplow_fs_watch::is_ignore_file`, the snapshot service) or asks the
-watch's live filter per event (`FsWatcher::filter()`, the workspace
-watcher). Pinned by `router::tests::a_burst_under_an_ignored_folder_never_
-reaches_the_stream`, `router::tests::a_gitignore_edit_takes_effect_without_a_
-restart` and `a_gitignore_edit_applies_to_the_running_workspace_watcher`.
+**An ignore-file edit takes effect.** `WorkspaceFilter` is a handle: every
+clone is one filter, and it never walks the tree. A directory's `.gitignore`
+is read the first time a path in it is judged and kept until the watch notes
+an edit (`note_ignore_file`, which forgets that directory's rules), so what is
+written next is judged by the new ones. A filter costs what is judged, not the
+size of the tree. Git's exclude file counts too: a linked worktree reads its
+main checkout's (`exclude_file`). The follower then stops watching a
+top-level directory the rules now ignore and watches (and reports the files
+of) one they stopped ignoring. Each stream has its own filter, rooted at its
+own worktree; its capture and its watches hold the same one
+(`SnapshotCaptureRegistry::workspace_filter`), and a `generated` change reaches
+them all (`set_generated`, which moves the capture's watch with
+`FsWatcher::refilter`). A path under an ignored directory is answered from a
+remembered lookup, with no `stat` (`ignore_change`). Pinned by
+`router::tests::a_burst_under_an_ignored_folder_never_reaches_the_stream`,
+`router::tests::a_gitignore_edit_takes_effect_without_a_restart`,
+`filter::tests::*`, `each_stream_has_its_own_filter_and_all_follow_generated` and
+`a_gitignore_edit_applies_to_the_running_workspace_watcher`.
 
 **This logic is tested with no OS.** `oxplow-fs-watch/src/router.rs` holds
 what happens to an event (`Router::handle`, on the OS callback thread) and

@@ -57,7 +57,7 @@ impl WorkspaceWatchRegistry {
         events: EventBus,
         ref_moves: crate::ref_moves::RefMoves,
         project_dir: PathBuf,
-        filter: oxplow_fs_watch::WorkspaceFilter,
+        filter_of: impl Fn(&Stream) -> oxplow_fs_watch::WorkspaceFilter,
     ) -> Self {
         let stream_rows = streams.list_streams().await.unwrap_or_default();
         let mut watchers = Vec::new();
@@ -91,7 +91,7 @@ impl WorkspaceWatchRegistry {
                 },
                 is_worktree,
                 on_orphan,
-                filter.clone(),
+                filter_of(&s),
             ) {
                 watchers.push(w);
             }
@@ -156,7 +156,7 @@ fn spawn_for_stream(
     // The root and each kept top-level directory, following new ones
     // (`.git`/`.oxplow`, `.gitignore` and `generated.exclude` are never
     // registered — tsk206; a directory made later is watched — tsk1051).
-    let fs = match FsWatcher::watch_workspace(&worktree, filter.clone()) {
+    let fs = match FsWatcher::watch_workspace(&worktree, filter) {
         Ok(w) => w,
         Err(e) => {
             warn!(error = %e, %stream_id, ?worktree, "fs watcher failed to start");
@@ -168,9 +168,6 @@ fn spawn_for_stream(
         // file tree / editor once, not once per touched file. (The
         // snapshot dirty set listens to the raw stream separately.)
         let mut rx = fs.subscribe_debounced(Duration::from_millis(250));
-        // Git's rules as they are now: an edit to an ignore file applies to
-        // what is heard after it.
-        let live_filter = fs.filter();
         let bus = events.clone();
         let id = stream_id;
         let root = worktree.clone();
@@ -194,12 +191,11 @@ fn spawn_for_stream(
                             }
                             break;
                         }
-                        let rel_path = path.strip_prefix(&root).unwrap_or(&path);
-                        if live_filter.current().ignore(rel_path, path.is_dir())
-                            || is_swap_file(&path)
-                        {
+                        // The watch judged it by this stream's filter.
+                        if is_swap_file(&path) {
                             continue;
                         }
+                        let rel_path = path.strip_prefix(&root).unwrap_or(&path);
                         let rel = rel_path.to_string_lossy().into_owned();
                         // The working tree's file list follows the edit
                         // itself, not the next snapshot take.
@@ -580,7 +576,7 @@ mod tests {
             bus.clone(),
             crate::ref_moves::RefMoves::new(bus.clone()),
             project.clone(),
-            oxplow_fs_watch::WorkspaceFilter::default(),
+            |_| oxplow_fs_watch::WorkspaceFilter::default(),
         )
         .await;
 
@@ -670,7 +666,7 @@ mod tests {
             bus.clone(),
             crate::ref_moves::RefMoves::new(bus.clone()),
             project.clone(),
-            oxplow_fs_watch::WorkspaceFilter::default(),
+            |_| oxplow_fs_watch::WorkspaceFilter::default(),
         )
         .await;
 

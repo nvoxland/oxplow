@@ -26,10 +26,12 @@ mod router;
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-pub use filter::{is_ignore_file, should_ignore_workspace_watch_path, WorkspaceFilter};
+pub use filter::{
+    exclude_file, is_ignore_file, should_ignore_workspace_watch_path, WorkspaceFilter,
+};
 pub use notify::RecursiveMode;
 use notify::{RecommendedWatcher, Watcher};
 use router::{FollowMsg, Follower, Route, Router};
@@ -67,24 +69,8 @@ pub struct FsWatcher {
     // adds a watch for each top-level directory that appears.
     _watcher: Arc<Mutex<RecommendedWatcher>>,
     sender: broadcast::Sender<WatchEvent>,
-    /// A workspace watch's live filter (see [`FsWatcher::filter`]).
-    filter: LiveFilter,
-}
-
-/// A workspace watch's filter as it is now. Git's rules are read again when
-/// an ignore file changes, so a consumer that asks per event follows an
-/// edit. Empty (ignores only `.git` and `.oxplow`) for a watch with no
-/// filter.
-#[derive(Clone, Default)]
-pub struct LiveFilter(Option<Arc<RwLock<WorkspaceFilter>>>);
-
-impl LiveFilter {
-    pub fn current(&self) -> WorkspaceFilter {
-        self.0
-            .as_ref()
-            .map(|f| f.read().unwrap_or_else(|e| e.into_inner()).clone())
-            .unwrap_or_default()
-    }
+    /// A workspace watch's way to its follower.
+    follower: Option<std::sync::mpsc::Sender<FollowMsg>>,
 }
 
 impl FsWatcher {
@@ -115,11 +101,12 @@ impl FsWatcher {
     /// whatever was written before that watch landed no watch saw.
     pub fn watch_workspace(root: &Path, filter: WorkspaceFilter) -> Result<Self, FsWatchError> {
         let mut paths = workspace_watch_paths(root, &filter);
-        // `.git/info/exclude` is one of git's ignore files: an edit to it
-        // is heard (and nothing else in `.git`).
-        let info = root.join(".git").join("info");
-        if info.is_dir() {
-            paths.push((info, RecursiveMode::NonRecursive));
+        // The exclude file is one of git's ignore files: an edit to it is
+        // heard (and nothing else in the git dir).
+        if let Some(info) = exclude_file(root).as_deref().and_then(Path::parent) {
+            if info.is_dir() {
+                paths.push((info.to_path_buf(), RecursiveMode::NonRecursive));
+            }
         }
         let followed = paths
             .iter()
@@ -138,7 +125,7 @@ impl FsWatcher {
             paths,
             Some(Follow {
                 roots,
-                filter: Arc::new(RwLock::new(filter)),
+                filter,
                 followed,
             }),
         )
@@ -154,7 +141,7 @@ impl FsWatcher {
         // recover; they never block the watcher thread.
         let (tx, _) = broadcast::channel(1024);
         let (follower_tx, follower_rx) = std::sync::mpsc::channel::<FollowMsg>();
-        let filter = follow.as_ref().map(|f| f.filter.clone());
+        let follower = follow.as_ref().map(|_| follower_tx.clone());
         let router = Router {
             events: tx.clone(),
             route: follow.as_ref().map(|f| Route {
@@ -184,13 +171,16 @@ impl FsWatcher {
         Ok(Self {
             _watcher: watcher,
             sender: tx,
-            filter: LiveFilter(filter),
+            follower,
         })
     }
 
-    /// The filter this watch judges events by (see [`LiveFilter`]).
-    pub fn filter(&self) -> LiveFilter {
-        self.filter.clone()
+    /// The filter changed other than by an ignore file (the project's
+    /// `generated` lists): a workspace watch moves its watches to match.
+    pub fn refilter(&self) {
+        if let Some(follower) = &self.follower {
+            let _ = follower.send(FollowMsg::Refilter);
+        }
     }
 
     /// Subscribe to the raw, immediate event stream. Every OS-level
@@ -289,7 +279,7 @@ pub fn workspace_watch_paths(
 /// What a workspace watch's follower starts from.
 struct Follow {
     roots: Vec<PathBuf>,
-    filter: Arc<RwLock<WorkspaceFilter>>,
+    filter: WorkspaceFilter,
     followed: HashSet<std::ffi::OsString>,
 }
 
