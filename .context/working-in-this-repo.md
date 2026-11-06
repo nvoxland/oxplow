@@ -421,9 +421,12 @@ Measured when this was set up, on one push each, with a cold Cargo cache after:
 about 1. Most of the `Cargo test` gain is `opt-level = 1` above. Locally a full
 `test:fast` went from 906 s to about 370 s, under different load.
 
-Tests that listen for real file changes run alone locally (`.config/nextest.toml`
-says why). That adds under a minute, and it's why a full run is no longer stopped
-by every watcher test timing out together.
+On macOS the watcher tests can still fail locally, all together, with no event
+for 60 s. `fseventsd` is saturated (seen at 180% CPU) while any test run is going
+on the machine, another worktree's included. They run alone inside one nextest
+run (`.config/nextest.toml`), which doesn't help against another run. If they
+fail like that, run them again when the machine is quiet. CI (Linux, inotify)
+doesn't have this.
 
 - Each Linux job shares one Cargo cache and only `test` saves it. When every job
   saved, the first to finish won, and one restored inside its own run had files
