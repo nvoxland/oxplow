@@ -37,7 +37,7 @@ impl ConfigWatcher {
     /// Follow the config. What is in the project comes through the primary
     /// stream's watch. The user-global metric library
     /// (`<global_config_dir>/metrics/`), which hot-reloads the three-scope
-    /// catalog (epic tsk213, P3), has a watch of its own, when it exists:
+    /// catalog, has a watch of its own, when it exists:
     /// watching a missing dir errors on some platforms.
     pub fn spawn(services: Arc<Services>) -> Option<Self> {
         let layout = &services.layout;

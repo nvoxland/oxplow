@@ -116,8 +116,7 @@ impl StreamWatchRegistry {
             return;
         };
         let worktree = PathBuf::from(&stream.worktree_path);
-        // The root and each kept top-level directory, following new ones
-        // (tsk206, tsk1051).
+        // The way this OS watches a tree, following new directories.
         let fs = match FsWatcher::watch_workspace(&worktree, capture.workspace_filter()) {
             Ok(fs) => Arc::new(fs),
             Err(e) => {

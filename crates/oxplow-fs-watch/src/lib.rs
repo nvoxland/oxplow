@@ -18,7 +18,6 @@ mod pending;
 mod registrar;
 mod router;
 
-use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -29,7 +28,8 @@ pub use notify::RecursiveMode;
 use notify::{RecommendedWatcher, Watcher};
 use pending::Subscribers;
 pub use pending::{Batch, Feed, Scope, Subscription};
-use router::{FollowMsg, Follower, Route, Router};
+pub use router::Uncovered;
+use router::{FollowMsg, Follower, Registration, Route, Router};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -53,12 +53,18 @@ pub enum WatchEventKind {
 /// Hold this for as long as you want to watch. Drop it to cancel.
 pub struct FsWatcher {
     // Holding the watcher alive keeps it running. Drop releases all OS
-    // handles. Shared (weakly) with a workspace watch's follower, which
-    // adds a watch for each top-level directory that appears.
+    // handles. Shared (weakly) with a per-directory watch's follower.
     _watcher: Arc<Mutex<RecommendedWatcher>>,
     events: Subscribers,
-    /// A workspace watch's way to its follower.
+    /// A workspace watch's root and filter, and its way to its follower.
+    workspace: Option<Workspace>,
+}
+
+struct Workspace {
+    root: PathBuf,
+    filter: WorkspaceFilter,
     follower: Option<std::sync::mpsc::Sender<FollowMsg>>,
+    uncovered: Uncovered,
 }
 
 impl FsWatcher {
@@ -74,30 +80,26 @@ impl FsWatcher {
     /// OS-level watcher is shared across every entry, so an event on
     /// any registered path reaches the same subscribers.
     pub fn watch_paths(paths: Vec<(PathBuf, RecursiveMode)>) -> Result<Self, FsWatchError> {
-        Self::start(paths, None)
+        let events = Subscribers::new(
+            paths.iter().map(|(p, _)| p.clone()).collect(),
+            paths.iter().map(|(p, _)| p.clone()).collect(),
+        );
+        let router = Router {
+            events: events.clone(),
+            route: None,
+        };
+        let mut watcher = notify::recommended_watcher(move |res| router.handle(res))?;
+        register(&mut watcher, &paths)?;
+        Ok(Self {
+            _watcher: Arc::new(Mutex::new(watcher)),
+            events,
+            workspace: None,
+        })
     }
 
-    /// Watch a worktree: its root non-recursively and each top-level
-    /// directory `filter` keeps recursively ([`workspace_watch_paths`]) —
-    /// pruned at registration, so a gitignored `target/` never floods the
-    /// stream (tsk206). It **follows the tree** (tsk227, tsk1051): a kept
-    /// top-level directory that appears later gets its recursive watch and a
-    /// rescan, since whatever was written before that watch landed no watch
-    /// saw.
+    /// Watch a worktree, reporting only what `filter` keeps, the way this OS
+    /// watches a tree (see [`Registration`]).
     pub fn watch_workspace(root: &Path, filter: WorkspaceFilter) -> Result<Self, FsWatchError> {
-        let mut paths = workspace_watch_paths(root, &filter);
-        // The exclude file is one of git's ignore files: an edit to it is
-        // heard (and nothing else in the git dir).
-        if let Some(info) = exclude_file(root).as_deref().and_then(Path::parent) {
-            if info.is_dir() {
-                paths.push((info.to_path_buf(), RecursiveMode::NonRecursive));
-            }
-        }
-        let followed = paths
-            .iter()
-            .filter(|(_, mode)| matches!(mode, RecursiveMode::Recursive))
-            .filter_map(|(p, _)| p.file_name().map(|n| n.to_os_string()))
-            .collect();
         // The OS may report paths under either spelling of the root (macOS
         // reports `/private/var` for `/var`).
         let mut roots = vec![root.to_path_buf()];
@@ -106,75 +108,68 @@ impl FsWatcher {
                 roots.push(canonical);
             }
         }
-        Self::start(
-            paths,
-            Some(Follow {
-                roots,
-                filter,
-                followed,
-            }),
-        )
-    }
-
-    fn start(
-        paths: Vec<(PathBuf, RecursiveMode)>,
-        follow: Option<Follow>,
-    ) -> Result<Self, FsWatchError> {
-        let roots: Vec<PathBuf> = match &follow {
-            Some(follow) => follow.roots.clone(),
-            None => paths.iter().map(|(p, _)| p.clone()).collect(),
-        };
-        let whole: Vec<PathBuf> = match &follow {
-            Some(follow) => follow.roots.iter().take(1).cloned().collect(),
-            None => roots.clone(),
-        };
-        let events = Subscribers::new(roots, whole);
+        let registration = Registration::for_this_os();
+        let per_directory = registration == Registration::PerDirectory;
+        let events = Subscribers::new(roots.clone(), vec![root.to_path_buf()]);
         let (follower_tx, follower_rx) = std::sync::mpsc::channel::<FollowMsg>();
-        let follower = follow.as_ref().map(|_| follower_tx.clone());
+        let follower = per_directory.then_some(follower_tx);
         let router = Router {
             events: events.clone(),
-            route: follow.as_ref().map(|f| Route {
-                roots: f.roots.clone(),
-                filter: f.filter.clone(),
-                follower: follower_tx,
+            route: Some(Route {
+                roots,
+                filter: filter.clone(),
+                follower: follower.clone(),
             }),
         };
-
         let mut watcher = notify::recommended_watcher(move |res| router.handle(res))?;
-        // As one batch: on macOS each `watch` alone stops and restarts the
-        // whole FSEvents stream, which took seconds at boot and loaded
-        // `fseventsd` for every process on the machine.
-        let mut batch = watcher.paths_mut();
-        for (p, mode) in paths {
-            batch.add(&p, mode)?;
-        }
-        batch.commit()?;
+        register(&mut watcher, &workspace_watch_paths(root, registration))?;
 
         let watcher = Arc::new(Mutex::new(watcher));
-        if let Some(follow) = follow {
-            let weak = Arc::downgrade(&watcher);
-            let follower = Follower {
-                roots: follow.roots,
-                filter: follow.filter,
-                followed: follow.followed,
+        let uncovered = Uncovered::default();
+        if per_directory {
+            let mut follow = Follower {
+                root: root.to_path_buf(),
+                filter: filter.clone(),
+                watched: std::collections::HashSet::new(),
+                uncovered: uncovered.clone(),
                 events: events.clone(),
             };
-            std::thread::spawn(move || follower.run(&weak, &follower_rx));
+            follow.cover(root, &*watcher);
+            let weak = Arc::downgrade(&watcher);
+            std::thread::spawn(move || follow.run(&weak, &follower_rx));
         }
-
         Ok(Self {
             _watcher: watcher,
             events,
-            follower,
+            workspace: Some(Workspace {
+                root: root.to_path_buf(),
+                filter,
+                follower,
+                uncovered,
+            }),
         })
     }
 
     /// The filter changed other than by an ignore file (the project's
-    /// `generated` lists): a workspace watch moves its watches to match.
+    /// `generated` lists): what it stopped ignoring is looked for on the disk,
+    /// and a per-directory watch moves to match.
     pub fn refilter(&self) {
-        if let Some(follower) = &self.follower {
-            let _ = follower.send(FollowMsg::Refilter);
+        let Some(workspace) = &self.workspace else {
+            return;
+        };
+        workspace.filter.forget_rules();
+        self.events.rescan(&workspace.root);
+        if let Some(follower) = &workspace.follower {
+            let _ = follower.send(FollowMsg::Refilter(workspace.root.clone()));
         }
+    }
+
+    /// The directories this watch could not cover (the OS's limit on watches).
+    pub fn uncovered(&self) -> Uncovered {
+        self.workspace
+            .as_ref()
+            .map(|w| w.uncovered.clone())
+            .unwrap_or_default()
     }
 
     /// What changes from now on: read with [`Subscription::next_batch`] (at
@@ -198,37 +193,41 @@ impl Drop for FsWatcher {
     }
 }
 
-/// What a workspace watch registers: the root non-recursively (so a file
-/// at the root, or a top-level directory appearing, is still seen) and
-/// each top-level directory `filter` keeps, recursively. An unreadable
-/// root is watched whole rather than not at all.
-pub fn workspace_watch_paths(
-    root: &Path,
-    filter: &WorkspaceFilter,
-) -> Vec<(PathBuf, RecursiveMode)> {
-    let mut paths = vec![(root.to_path_buf(), RecursiveMode::NonRecursive)];
-    let entries = match std::fs::read_dir(root) {
-        Ok(entries) => entries,
-        Err(e) => {
-            tracing::warn!(error = %e, ?root, "cannot enumerate the workspace root; watching it whole");
-            return vec![(root.to_path_buf(), RecursiveMode::Recursive)];
-        }
-    };
-    for entry in entries.flatten() {
-        if entry.file_type().is_ok_and(|t| t.is_dir())
-            && !filter.ignore(Path::new(&entry.file_name()), true)
-        {
-            paths.push((entry.path(), RecursiveMode::Recursive));
+/// What a workspace watch registers up front. A per-directory watch's follower
+/// adds the rest as it walks.
+fn workspace_watch_paths(root: &Path, registration: Registration) -> Vec<(PathBuf, RecursiveMode)> {
+    let mut paths = Vec::new();
+    if registration == Registration::Root {
+        paths.push((root.to_path_buf(), RecursiveMode::Recursive));
+    }
+    // The exclude file is one of git's ignore files: an edit to it is heard
+    // (and nothing else in the git dir). A recursive root already covers its
+    // own.
+    if let Some(info) = exclude_file(root).as_deref().and_then(Path::parent) {
+        let covered = registration == Registration::Root && info.starts_with(root);
+        if info.is_dir() && !covered {
+            paths.push((info.to_path_buf(), RecursiveMode::NonRecursive));
         }
     }
     paths
 }
 
-/// What a workspace watch's follower starts from.
-struct Follow {
-    roots: Vec<PathBuf>,
-    filter: WorkspaceFilter,
-    followed: HashSet<std::ffi::OsString>,
+/// As one batch: on macOS each `watch` alone stops and restarts the whole
+/// FSEvents stream, which took seconds at boot and loaded `fseventsd` for every
+/// process on the machine.
+fn register(
+    watcher: &mut RecommendedWatcher,
+    paths: &[(PathBuf, RecursiveMode)],
+) -> Result<(), FsWatchError> {
+    if paths.is_empty() {
+        return Ok(());
+    }
+    let mut batch = watcher.paths_mut();
+    for (path, mode) in paths {
+        batch.add(path, *mode)?;
+    }
+    batch.commit()?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -281,41 +280,57 @@ mod tests {
         );
     }
 
-    /// tsk206: the registration set prunes what the filter drops — a
-    /// recursive watch on `target/` would hand over every build write —
-    /// and keeps the root non-recursive, or the prune buys nothing.
+    /// What a workspace registers up front: on this OS's kind of recursive
+    /// watch the root alone, however many folders it has; per directory, nothing
+    /// yet (the follower walks). A non-git worktree has no exclude file to hear.
     #[test]
-    fn a_workspace_registers_its_kept_top_level_dirs() {
+    fn a_workspace_registers_one_root_or_leaves_it_to_the_follower() {
         let project = tempdir().unwrap();
         for d in ["src", "build", "node_modules"] {
             std::fs::create_dir(project.path().join(d)).unwrap();
         }
-        std::fs::write(project.path().join("README.md"), b"x").unwrap();
-        let names = |paths: &[(PathBuf, RecursiveMode)]| {
-            paths
-                .iter()
-                .filter_map(|(p, _)| p.file_name()?.to_str().map(str::to_string))
-                .collect::<Vec<_>>()
-        };
-        // Nothing is hardcoded: by default `build` is an ordinary dir.
-        let all = workspace_watch_paths(project.path(), &WorkspaceFilter::default());
-        assert!(names(&all).contains(&"build".to_string()));
-        let pruned = workspace_watch_paths(
-            project.path(),
-            &WorkspaceFilter::with_user_entries(["build", "node_modules"]),
-        );
-        let got = names(&pruned);
-        assert!(
-            !got.contains(&"build".to_string()),
-            "filtered dir not registered"
-        );
-        assert!(!got.contains(&"node_modules".to_string()));
-        assert!(got.contains(&"src".to_string()));
-        let root = pruned
-            .iter()
-            .find(|(p, _)| p == project.path())
-            .expect("the root is registered");
-        assert!(matches!(root.1, RecursiveMode::NonRecursive));
+        let root = project.path();
+        let paths = workspace_watch_paths(root, Registration::Root);
+        assert_eq!(paths.len(), 1);
+        assert!(matches!(paths[0].1, RecursiveMode::Recursive));
+        assert!(workspace_watch_paths(root, Registration::PerDirectory).is_empty());
+
+        // A linked worktree hears its main checkout's exclude file.
+        std::fs::create_dir_all(root.join("main/.git/info")).unwrap();
+        std::fs::write(
+            root.join("src/.git"),
+            format!("gitdir: {}\n", root.join("main/.git").display()),
+        )
+        .unwrap();
+        let paths = workspace_watch_paths(&root.join("src"), Registration::Root);
+        assert_eq!(paths.len(), 2, "{paths:?}");
+        assert_eq!(paths[1].0, root.join("main/.git/info"));
+    }
+
+    /// A folder made after the watch started: what is in it is heard, or the
+    /// watch asks for it to be looked for.
+    #[tokio::test]
+    async fn a_new_folders_files_reach_a_workspace_subscriber() {
+        let project = tempdir().unwrap();
+        let root = project.path().canonicalize().unwrap();
+        let watcher = FsWatcher::watch_workspace(&root, WorkspaceFilter::default()).unwrap();
+        let mut sub = watcher.subscribe();
+        std::fs::create_dir_all(root.join("new/deep")).unwrap();
+        let file = root.join("new/deep/f.txt");
+        std::fs::write(&file, b"x").unwrap();
+        let found = timeout(HEARD_WITHIN, async {
+            while let Some(batch) = sub.next_batch().await {
+                if batch.paths.iter().any(|(p, _)| p == &file)
+                    || batch.rescans.iter().any(|dir| file.starts_with(dir))
+                {
+                    return true;
+                }
+            }
+            false
+        })
+        .await
+        .unwrap_or(false);
+        assert!(found, "the file in the new folder");
     }
 
     #[tokio::test]

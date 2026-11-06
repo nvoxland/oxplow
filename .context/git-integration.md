@@ -85,32 +85,15 @@ scans to one however slow the scan gets. Reach for it (rather than a bare
 `setTimeout` debounce) for any expensive refresh fed by more than one
 event stream.
 
-### Workspace announcements
-
-Watcher tests wait for an observed probe from the watched directory before
-performing a one-shot deletion. Ignore-file changes are rewritten until
-their event arrives, keeping their ignore semantics unchanged. A fixed
-settling sleep or one write followed by a wait can miss attachment on a
-loaded machine; increasing the final event timeout does not fix that race.
-
-Rather than registering a single recursive
-watch on the worktree root (which would force `notify_debouncer_full`
-to walk every subtree — including `target/` and `node_modules/` — at
-boot to seed its cache), registration is **scoped**:
-
-- A non-recursive watch on the worktree root, so top-level file
-  changes and the appearance/disappearance of top-level dirs still
-  fire.
-- One recursive watch per top-level directory the **`WorkspaceFilter`**
-  doesn't ignore (`filter.ignore(name, true)`).
+### How a watch sits on the OS
 
 **Nothing here is a hardcoded path list.** `WorkspaceFilter`
 (`crates/oxplow-fs-watch`) is the single source of truth and layers, in
 order: `.git` (the only hardcoded segment — `DEFAULT_IGNORED_SEGMENTS`)
 and `.oxplow` defaults → `generated.include` (forces a path back in) →
 `generated.exclude` → **`.gitignore`**, root + nested, with full
-hierarchical semantics, under `.git/info/exclude` and git's global
-excludes file (`core.excludesFile`, found as git finds it — tsk1083).
+hierarchical semantics, under the exclude file and git's global
+excludes file (`core.excludesFile`, found as git finds it).
 `target/` and `node_modules/` are skipped
 because a Rust/JS repo gitignores them, not because we name them.
 
@@ -120,9 +103,49 @@ working tree, the Uncommitted panel). They differ only on
 `.oxplow/wiki/`, which is watched and snapshotted though git ignores it,
 so it is never reported as uncommitted.
 
-The watch's own filter check also catches *nested* ignores inside a watched
-dir, which a top-level prune can't see. But the meaningful win is at
-registration: we never seed cache for dirs we never care about.
+`FsWatcher::watch_workspace` registers the way the OS works (`Registration`):
+
+- **One recursive watch on the root** (macOS, Windows). FSEvents reports
+  everything under a path it is given, so pruning at registration saves nothing
+  (a non-recursive root in the list still delivered all of `target/`, thrown
+  away per event), and a folder that appears needs nothing from us.
+- **One watch per kept directory, at any depth** (Linux). inotify has no recursive
+  watch and a limit on how many it holds, so what is ignored costs nothing. A
+  follower thread (registering from the OS callback thread can deadlock a
+  backend) covers a kept directory that appears, or that a rule change stops
+  ignoring. `mkdir d && write d/f` races the new watch and no watch sees the gap,
+  so each such directory also gets a rescan, which is **not** optional: without
+  one, a folder created after boot went unsnapshotted until restart. Past the kernel's limit, what is left is listed
+  (`FsWatcher::uncovered`, with the `sysctl` to raise it in the log) and each
+  snapshot take looks at the disk there. Slower, and correct.
+
+Registering is one batch (`paths_mut`). On macOS `notify` stops and recreates the
+whole FSEvents stream on each `watch` call, and each stop also calls `fseventsd`.
+One call per top-level directory took about 7.5 s per watch on this repo and on
+metabase (measured under load 10; a batch takes 30 ms to 1 s), for every watch of
+every oxplow process on the machine.
+
+**Ignored paths are dropped at the watch.** The router judges each path by the
+filter before it passes it on (a file under an ignored directory is ignored with
+it, answered from a remembered lookup with no `stat`: `ignore_change`), so a
+build writing thousands of files costs next to nothing. Only a `Scope` naming a
+path hears it anyway.
+
+**An ignore-file edit takes effect.** `WorkspaceFilter` is a handle: every
+clone is one filter, and it never walks the tree. A directory's `.gitignore`
+is read the first time a path in it is judged and kept until the watch notes
+an edit (`note_ignore_file`, which forgets that directory's rules), so what is
+written next is judged by the new ones. A filter costs what is judged, not the
+size of the tree. Git's exclude file counts too: a linked worktree reads its
+main checkout's (`exclude_file`). What an edit stopped ignoring no one has heard
+of, so it also asks for a rescan of the directory it rules (a nested `.gitignore`
+its own; the root's or the exclude file, the root). An ignore file inside an
+ignored folder (`target/.gitignore`) rules nothing. Each stream has its own
+filter, rooted at its own worktree; its capture and its watch hold the same one,
+and a `generated` change reaches them all (`set_generated`, then
+`FsWatcher::refilter`, which rescans the root).
+
+### Workspace announcements
 
 Reads batches after a burst (`next_batch_after(250ms)`) and bridges each onto
 one `OxplowEvent::WorkspaceChanged { paths, overflow }`: up to 200 paths, or
@@ -137,94 +160,13 @@ socket that falls behind it has lost frames, so the daemon sends a `resync`
 frame and the UI runs its reconnect handlers (`scheduleResync`, once for a
 burst).
 
-Source files mutate constantly; this watcher's job is to keep the
-file-tree current. Note that the snapshot dirty set is **not** fed from
-here — `SnapshotCaptureService` runs its own `FsWatcher` and reads its
-batches at once so the dirty set never lags a snapshot request (see the
-contract above).
-
-**Both watchers register through one call: `FsWatcher::watch_workspace(root,
-filter)`** (`oxplow-fs-watch`, tsk1051) — the root non-recursively plus each
-top-level directory the filter keeps, recursively (`workspace_watch_paths`).
-The snapshot service used to register ONE recursive watch on the project
-root and filter per delivered event, which meant every write under
-`target/` (345k files here) was delivered and thrown away — any `cargo`
-build flooded it (tsk206).
-
-The `oxplow.file.mark_generated` command (and a hand edit of the `generated`
-key) changes what a stream's filter keeps, with the documented contract that
-include/exclude edits apply *without an app restart*. Since the watch set is
-derived from the filter, `set_generated` also tells the capture's watch to move
-(`FsWatcher::refilter`), or a `generated.include` that un-ignores a directory
-would stay unwatched until restart.
-
-**Deriving the watch set from a one-time listing has a second edge, and it
-cost real data (tsk227, tsk1051).** The root is non-recursive and the
-subdir listing happens once, so a top-level directory created *afterwards*
-is covered by nothing: the root reports the `mkdir` itself and then never
-reports a single write inside it. Everything under it went unsnapshotted
-until restart — absent from Local History, unrecoverable by
-`oxplow.snapshot.restore_file`, invisible to effort attribution (this repo's own
-`tests-e2e/` had **0** `file_snapshot` rows while every pre-existing
-directory had hundreds). And the workspace watcher, which had no fix of
-its own, never saw a project's first `oxplow/` — the extension catalog
-never signalled, so the first saved page or new extension stayed out of
-the launcher.
-
-So `watch_workspace` **follows the tree**: the event of a kept directory
-appearing directly under the root goes to a follower thread (registering a
-watch from the OS callback thread can deadlock a backend), which adds its
-recursive watch and then asks for a rescan of it. The rescan is **not**
-optional — `mkdir d && write d/f` races the new watch and no watch sees the
-gap — so consumers get the files that motivated the fix. A directory that disappears is unwatched, so
-a later one of the same name is new again. Followed directories are keyed
-by name: the OS may report either spelling of the root (`/private/var`
-for `/var`).
-
-**Ignored folders inside a kept directory are dropped at the watcher
-too.** Pruning top-level directories isn't enough: a build in a git-ignored
-folder under a kept one (`.claude/worktrees/<agent>/target`, ignored by
-`.git/info/exclude`) is inside a recursive watch, and thousands of writes would be read and thrown
-away by every consumer. So the watch callback judges each path by the filter before it passes it on
-(a file under an ignored directory is ignored with it) and
-drops what git's rules ignore. The filter is the one source: `.gitignore`s,
-`.git/info/exclude`, the global excludes file and the `generated` lists.
-
-**An ignore-file edit takes effect.** `WorkspaceFilter` is a handle: every
-clone is one filter, and it never walks the tree. A directory's `.gitignore`
-is read the first time a path in it is judged and kept until the watch notes
-an edit (`note_ignore_file`, which forgets that directory's rules), so what is
-written next is judged by the new ones. A filter costs what is judged, not the
-size of the tree. Git's exclude file counts too: a linked worktree reads its
-main checkout's (`exclude_file`). The follower then stops watching a
-top-level directory the rules now ignore and watches (and reports the files
-of) one they stopped ignoring. Each stream has its own filter, rooted at its
-own worktree; its capture and its watches hold the same one
-(`SnapshotCaptureRegistry::workspace_filter`), and a `generated` change reaches
-them all (`set_generated`, which moves the capture's watch with
-`FsWatcher::refilter`). A path under an ignored directory is answered from a
-remembered lookup, with no `stat` (`ignore_change`). Pinned by
-`router::tests::a_burst_under_an_ignored_folder_never_reaches_the_stream`,
-`router::tests::a_gitignore_edit_takes_effect_without_a_restart`,
-`filter::tests::*` and `each_stream_has_its_own_filter_and_all_follow_generated`.
-
-**A watch registers as one batch** (`paths_mut`). On macOS `notify` stops and
-recreates the whole FSEvents stream on each `watch` call, and each stop also
-calls `fseventsd`. One call per top-level directory took about 7.5 s per
-watch on this repo and on metabase (measured under load 10; a batch takes 30 ms
-to 1 s), for every watch of every oxplow process on the machine.
-
 **This logic is tested with no OS.** `oxplow-fs-watch/src/router.rs` holds
 what happens to an event (`Router::handle`, on the OS callback thread) and
 what moves the watches (`Follower`, over the small `Registrar` trait), and
-its tests hand them made-up events. Only `oxplow-fs-watch`'s top-level
-`tests` touch the real OS: a write is heard, non-recursive holds, drop
-cancels.
-
-A recursive root watch would make both edges disappear, and that is what
-this used to be. It is not worth it — see the 345k-file flood above. The
-cost of the scoped set is that *staleness must be handled explicitly*,
-once, in the watcher.
+its tests hand them made-up events. `Feed` does the same for a subscriber. Only
+`oxplow-fs-watch`'s top-level `tests` and one `stream_watch` test touch the real
+OS: a write is heard, non-recursive holds, drop cancels, a new folder's file is
+found, an edit reaches the working-files listener.
 
 ### Version control appearing
 
