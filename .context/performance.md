@@ -1350,3 +1350,46 @@ What the numbers say:
   history.
 - Not measured: x86, Linux and Windows watchers, and a machine with nothing
   else running (the load average above was 8 or more throughout).
+
+### On Linux (measured 2026-11-06)
+
+Per-directory inotify watches. The same Mac, in an OrbStack Docker container
+(aarch64, kernel 7.2.12, 14 CPUs, 15.7 GB), on a Linux-local volume (btrfs, not
+a bind mount from macOS, which doesn't deliver inotify the same way), with
+the container itself quiet (load average 0.2–2.5 inside it; the Mac's load
+was not recorded). `fs.inotify.max_user_watches` was 1,048,576 unless noted.
+`cargo test -p oxplow-fs-watch`: 53 of 53 pass; `stream_watch::tests::
+an_edit_on_disk_tells_the_working_files_listener` passes (the real inotify
+path).
+
+| Step | 100k kept, 1M ignored | 100k kept, 10k ignored, `max_user_watches` 5,000 |
+|---|---|---|
+| 1 `for_project` / 2 `note_ignore_file` + judged path | 1.7 ms / 0.3 + 0.8 ms | 0.0 ms / 0.3 + 0.8 ms |
+| 3 walk with `filter.ignore` | 170 ms (100,061 files, 20,121 dirs) | 178 ms |
+| 4 `watch_workspace` | 397 ms | 132 ms |
+| inotify watches held (`/proc/<pid>/fdinfo`) | 20,123 (for 20,121 kept directories; the other 2 are not identified) | 4,986 |
+| Directories left uncovered (`FsWatcher::uncovered()`) | 0 | 61, and one warning each, with the `sysctl` advice |
+| 5 storm: 20,000 files under an ignored folder | 0 paths, 0 batches | 0 paths, 0 batches |
+| 6 burst, 5,000 files in a new folder, at once | 6,421 paths and 1 rescan in 2,440 batches, last batch 6.5 ms after the last write | nothing (the folder is uncovered) |
+| 6 burst, `next_batch_after(250ms)` | 0 paths, 1 rescan in 1 batch, 174 ms | nothing |
+| 7 one write to its batch (20 writes) | 0.2 / 0.2 / 0.4 ms, 0 missed | nothing: an uncovered folder tells no one |
+| 8 `latest_stat_per_path` (1.05M rows) | 131 ms | 142 ms |
+| 8 `latest_stat_for_paths`, 10 paths / `latest_stat_under`, 1,000 files | 6.0 / 6.0 ms | 6.8 / 5.9 ms |
+| 9 `Trees::diff(HEAD, Working)`, cold, then warm | 1,217 ms, then 1,138 and 1,145 (5,001 changed) | 1,264 ms, then 1,090 and 1,118 |
+
+- The kernel needs one watch per directory, and the watch held that many: 20,123
+  for 20,121 kept directories (two more than the walk counted; I did not
+  find out which). Ignored directories cost none (1,000,000 ignored
+  files, no watch under them).
+- A burst in a new folder is told as a rescan of that folder plus the files the
+  watch caught before it landed, not as 5,000 paths: a consumer that reads
+  `rescans` sees the whole change.
+- Under the limit the watch starts and warns once for each directory it could
+  not cover, and lists them (`uncovered()`); nothing is told about writes there,
+  as designed. `snapshot_capture::tests::a_take_checks_what_the_watch_could_not_cover`
+  passes with the limit at 5,000: a take looks at the disk in those folders and
+  finds the edit.
+- The limit is the machine's (`sysctl` in the Linux VM changes it for every
+  container, so it was set back to 1,048,576 after the run).
+- Not measured: a plain Linux host (not a VM on a Mac), ext4, other kernels,
+  and `fs.inotify.max_queued_events` overflow.

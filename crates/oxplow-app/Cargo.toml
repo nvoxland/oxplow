@@ -98,6 +98,9 @@ proptest = "1"
 # write.
 syn = { version = "2", features = ["full", "visit"] }
 
+# The profile_watch example logs the watch's own warnings.
+tracing-subscriber = { workspace = true }
+
 [lints]
 workspace = true
 

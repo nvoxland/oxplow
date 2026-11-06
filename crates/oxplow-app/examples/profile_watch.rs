@@ -299,6 +299,14 @@ fn folder_near(paths: &[String], target: usize) -> (String, usize) {
 }
 
 fn load_average() -> String {
+    // Linux has it in /proc, macOS in sysctl.
+    if let Ok(text) = std::fs::read_to_string("/proc/loadavg") {
+        return text
+            .split_whitespace()
+            .take(3)
+            .collect::<Vec<_>>()
+            .join(" ");
+    }
     let out = Command::new("sysctl").args(["-n", "vm.loadavg"]).output();
     out.map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
         .unwrap_or_default()
@@ -307,6 +315,10 @@ fn load_average() -> String {
 /// `fseventsd`'s CPU % and resident MB, now (what a watch costs every
 /// process on the machine). Stops the run above 2 GB.
 fn fseventsd(label: &str) {
+    // Only macOS has one.
+    if !cfg!(target_os = "macos") {
+        return;
+    }
     let out = Command::new("sh")
         .arg("-c")
         .arg("ps -o %cpu=,rss= -p $(pgrep -x fseventsd | head -1)")
@@ -325,6 +337,11 @@ fn fseventsd(label: &str) {
 
 #[tokio::main(flavor = "multi_thread")]
 async fn main() {
+    // The watch's own warnings (the OS's limit on watches) go to stderr.
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter("warn")
+        .with_writer(std::io::stderr)
+        .try_init();
     let source = parse_args();
     let (root, generated, temp) = match source {
         Source::Existing(p) => (p.canonicalize().expect("--root exists"), false, None),
@@ -397,6 +414,19 @@ async fn main() {
     let watcher = FsWatcher::watch_workspace(&root, filter.clone()).unwrap();
     step(4, "FsWatcher::watch_workspace", ms(t.elapsed()));
     fseventsd("after the watch started");
+    let uncovered = watcher.uncovered().list();
+    step(
+        "4b",
+        "directories the OS left uncovered",
+        format!(
+            "{}{}",
+            uncovered.len(),
+            uncovered
+                .first()
+                .map(|d| format!(" (first: {})", d.display()))
+                .unwrap_or_default()
+        ),
+    );
     // Let FSEvents settle; the numbers below are for a quiet tree.
     let raw0 = Counter::spawn(watcher.subscribe(), Duration::ZERO, epoch);
     until_quiet(
