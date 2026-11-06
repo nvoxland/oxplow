@@ -1284,3 +1284,69 @@ Starting from the open sessions and taking each one's newest event takes 18 ms
 on the same data. A query plan test holds it (`agent_stores`). The
 `slow page loader` log line names a loader of 50 ms or more, and a page's
 `spec` run through `oxplow_run_page` times a query in place.
+
+## File watching at scale (measured 2026-11-06)
+
+`cargo run --example profile_watch --release -p oxplow-app -- --root <dir>`
+(an existing tree, read-only: the steps that write are skipped) or
+`-- --kept N --ignored M` (a generated tree: N kept files, 5 to a directory,
+a few nested `.gitignore`s, M ignored files in `node_modules`- and
+`target`-like folders at the top level and nested, one `git` commit; removed
+at the end). One line per step. It also prints the load average and
+`fseventsd`'s CPU and memory around the watching: macOS delivers file events
+late, or not at all, while the machine is busy or `fseventsd` is, so read
+every number with the load average in mind.
+
+Machine: Apple M4 Max, 14 cores, 36 GB, macOS (Darwin 27.0.0), warm disk
+cache, other sessions building and testing at the same time (load average
+8–19 during these runs). Code: the watching of `crates/oxplow-fs-watch` with
+`Subscription` batches, a filter that reads its rules lazily, and the bounded
+latest-stat lookups. Times are one run each, in milliseconds.
+
+| Step | oxplow repo (2.8k files) | metabase (23k files) | 500k kept, 100k ignored | 100k kept, 1M ignored |
+|---|---|---|---|---|
+| 1 `WorkspaceFilter::for_project` | 0.3 | 3.4 | 0.4 | 3.8 |
+| 2 `note_ignore_file` + one judged path | 0.0 + 0.3 | 0.2 + 1.2 | 1.5 + 0.2 | 0.2 + 0.2 |
+| 3 walk with `filter.ignore` (the startup sweep) | 16 | 493 | 5,230 | 993 |
+| 4 `FsWatcher::watch_workspace` | 2.3 | 4.5 | 7.8 | 3.4 |
+| 5 storm: 20,000 files under an ignored folder | skipped | skipped | 0 paths, 0 batches | 0 paths, 0 batches |
+| 6 burst: 5,000 kept files, `next_batch` | skipped | skipped | 7,086 paths in 2,797 batches, last batch 6 ms after the last write | 7,197 paths in 1,721 batches, 1.5 ms |
+| 6 burst, `next_batch_after(250ms)` | skipped | skipped | 5,006 paths in 2 batches, 36 ms | 5,001 paths in 2 batches, 11 ms |
+| 6 rescans | – | – | 0 | 0 |
+| 7 one write to its batch: min / median / max (20 writes, 500 ms apart) | skipped | skipped | 10.5 / 11.4 / 11.5 (0 missed) | 10.7 / 11.1 / 11.6 (0 missed) |
+| 8 `latest_stat_per_path` (10 history rows per path) | 3.3 (2.8k rows) | 36 (23k) | 634 (505k of 5.05M stored) | 136 (105k of 1.05M) |
+| 8 `latest_stat_for_paths`, 10 paths | 0.1 | 0.2 | 0.3 | 0.3 |
+| 8 `latest_stat_under`, one folder of about 1,000 files | 6.9 (1,213 files) | 6.0 (931) | 6.8 (1,000) | 6.5 (1,000) |
+| 9 `Trees::diff(HEAD, Working)`, cold, then warm | 85, then 77–83 (12 changed) | 3,853, then 1,783–1,888 (8 changed) | 82,090, then 73,981 and 24,909 (5,001 changed, after one edit) | 6,152, then 5,877 and 5,067 (5,001 changed) |
+| Load average at start / end | 8.6 / 8.6 | 8.3 / 8.6 | 9.5 / 8.0 | 13.7 / 12.5 |
+| `fseventsd` CPU, RSS before / after the watch started / at the end | 0.4% 6 MB / 0.2% 6 MB / 0.0% 6 MB | 0.0% 4 MB / 0.1% 5 MB / 0.4% 6 MB | 18.8% 6 MB / 0.1% 6 MB / 0.0% 5 MB | 44.4% 7 MB / 0.1% 7 MB / 0.8% 6 MB |
+
+What the numbers say:
+
+- **Watching is cheap now.** Starting a watch takes 2–8 ms at every size
+  (before the change it took 7.5 s on any tree, 2–69 s on a big one: each
+  `watch` restarted the FSEvents stream). `fseventsd` stays at 4–7 MB; the
+  44% before the last run is its own work on the tree the harness had just
+  written, and it is back to 0.1% once the watch is up.
+- **An ignored folder costs nothing.** 20,000 writes under an ignored folder
+  reach no subscriber, with 1,000,000 ignored files in the tree.
+- **A burst is a few batches, never a lost one.** 5,000 kept files arrive as
+  5,000–5,006 paths in 2 batches through `next_batch_after(250ms)` and no
+  rescans. Read at once (`next_batch`) the same burst is 1,700–2,800 small
+  batches: use the window for anything but the snapshot singleton.
+- **One write is heard in about 11 ms** and every one of 20 was heard, so a
+  fixed 300 ms wait before a snapshot is far longer than the watch needs on a
+  quiet machine. Under load an earlier build of this harness saw medians of
+  0.7–3.3 s and missed writes; that was the stalled event stream, not the
+  code. Do not shorten any wait from this table without measuring under load.
+- **The walk follows the kept file count**, not the ignored one (100k kept
+  with 1M ignored: 1 s; 500k kept: 5.2 s).
+- **The costs left are `Trees::diff` and a full `latest_stat_per_path`.** A
+  working-files relist at 500k kept files takes 25–82 s (it lists, hashes and
+  counts lines of every changed file; the burst left 5,001 changed). The
+  stats read of the whole stream takes 0.6 s at 5M rows; the two bounded
+  lookups take 0.3 ms for 10 paths and 6–7 ms for a folder of 1,000 files at
+  every size, so a snapshot take that asks for what changed stops depending on
+  history.
+- Not measured: x86, Linux and Windows watchers, and a machine with nothing
+  else running (the load average above was 8 or more throughout).
