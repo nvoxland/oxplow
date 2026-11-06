@@ -174,9 +174,16 @@ then stops watching a top-level directory the rules now ignore and watches
 its own filter reads it again on an ignore-file event
 (`oxplow_fs_watch::is_ignore_file`, the snapshot service) or asks the
 watch's live filter per event (`FsWatcher::filter()`, the workspace
-watcher). Pinned by `a_burst_under_an_ignored_folder_never_reaches_the_
-stream`, `a_gitignore_edit_takes_effect_without_a_restart` and
-`a_gitignore_edit_applies_to_the_running_workspace_watcher`.
+watcher). Pinned by `router::tests::a_burst_under_an_ignored_folder_never_
+reaches_the_stream`, `router::tests::a_gitignore_edit_takes_effect_without_a_
+restart` and `a_gitignore_edit_applies_to_the_running_workspace_watcher`.
+
+**This logic is tested with no OS.** `oxplow-fs-watch/src/router.rs` holds
+what happens to an event (`Router::handle`, on the OS callback thread) and
+what moves the watches (`Follower`, over the small `Registrar` trait), and
+its tests hand them made-up events. Only `oxplow-fs-watch`'s top-level
+`tests` touch the real OS: a write is heard, non-recursive holds, drop
+cancels.
 
 A recursive root watch would make both edges disappear, and that is what
 this used to be. It is not worth it — see the 345k-file flood above. The
